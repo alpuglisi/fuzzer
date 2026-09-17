@@ -1,0 +1,90 @@
+# Ryder's Puppy Fort Factory
+
+A small e-commerce web app for a fictional puppy-fort company, built as a
+**deliberately vulnerable test target** for local security testing. It pairs
+with the blind SQL injection fuzzer in the parent repo.
+
+> ⚠️ **Do not deploy this on a public or shared network.** It contains
+> intentional SQL injection and XSS flaws and stores passwords as unsalted MD5.
+> Run it only on a machine you control, ideally isolated from the internet.
+
+See [`VULNERABILITIES.md`](VULNERABILITIES.md) for the full page-by-page map of
+which pages are vulnerable and which are secure.
+
+## Stack
+
+- PHP 7.4+ or 8.x with the `mysqli` extension
+- MySQL 5.7+ / MariaDB 10+
+- Apache (or PHP's built-in server for quick tests)
+
+## Setup
+
+### 1. Get the code under a web root
+
+Copy `puppy-fort-factory/` under your Apache `DocumentRoot`, e.g.
+`/var/www/html/puppy-fort-factory`, or use the built-in PHP server (below).
+
+### 2. Create the database
+
+```bash
+mysql -u root -p < sql/schema.sql
+```
+
+This creates the `puppy_fort` database with `users`, `products`, and
+`cart_items` tables and seed data.
+
+### 3. Configure the DB connection
+
+Edit `config/config.php`, or set environment variables:
+
+```bash
+export PFF_DB_HOST=127.0.0.1
+export PFF_DB_USER=root
+export PFF_DB_PASS=yourpassword
+export PFF_DB_NAME=puppy_fort
+```
+
+### 4. Run it
+
+With Apache, browse to `http://localhost/puppy-fort-factory/`.
+
+Or with PHP's built-in server (from inside `puppy-fort-factory/`):
+
+```bash
+php -S localhost:8080
+```
+
+Then open `http://localhost:8080/`.
+
+## Test accounts
+
+| Username | Password |
+| --- | --- |
+| `admin` | `admin123` |
+| `alice` | `password1` |
+| `bob`   | `letmein` |
+
+## Pointing the fuzzer at it
+
+The main SQLi target is `product.php?id=`:
+
+```bash
+python ../blind_sqli_fuzzer.py \
+  --url http://localhost:8080/product.php \
+  --param id \
+  --authorized
+```
+
+Expect the time-based payloads to be flagged against `product.php` and
+`search.php` (`q`), and the secure pages to stay clean.
+
+## Feature overview
+
+- User registration and login, session-based auth, logout
+- Product listing with a category filter, product detail pages
+- Add to cart, view/remove cart items, checkout
+- View and edit user profile
+- Contact form
+
+Which of these are vulnerable and which are secure is documented in
+[`VULNERABILITIES.md`](VULNERABILITIES.md).
