@@ -1,0 +1,5 @@
+requests>=2.25
+beautifulsoup4>=4.10
+# For JavaScript rendering in spider.py (headless Chromium).
+# After installing, run:  playwright install chromium
+playwright>=1.40
