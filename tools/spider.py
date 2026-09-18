@@ -184,8 +184,21 @@ class LocalSpider:
         return resp.status_code, ct, title, text, links, []
 
     def _fetch_rendered(self, url):
-        """Renders with headless Chromium, then reads links and text from the live DOM."""
+        """Renders with headless Chromium, then reads links and text from the live DOM.
+
+        Chromium refuses to navigate to some responses (downloads,
+        application/octet-stream). Those URLs still belong in the map, so the
+        crawler falls back to a plain request rather than dropping them.
+        """
         self._xhr_urls = []   # collected by _on_request during this navigation
+        try:
+            return self._goto_and_parse(url)
+        except Exception as e:
+            logging.info(f"Browser could not render {url} ({str(e).splitlines()[0][:80]}); "
+                         f"falling back to a static request")
+            return self._fetch_static(url)
+
+    def _goto_and_parse(self, url):
         response = self._page.goto(url, wait_until="domcontentloaded", timeout=self.timeout_ms)
         status = response.status if response else 0
         ct = (response.headers or {}).get('content-type', '') if response else ''
