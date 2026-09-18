@@ -85,6 +85,8 @@ Expect the time-based payloads to be flagged against `product.php` and
 - Add to cart, view/remove cart items, checkout
 - View and edit user profile
 - Contact form
+- JavaScript-rendered pages (`deals.php`, `reviews.php`) whose content and nav
+  links are built client-side, so a basic HTML-only spider cannot see them
 
 Which of these are vulnerable and which are secure is documented in
 [`VULNERABILITIES.md`](VULNERABILITIES.md).

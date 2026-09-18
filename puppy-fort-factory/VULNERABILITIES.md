@@ -32,8 +32,16 @@ checkout.php       Order summary + place order        (secure)
 profile.php        View own profile                   VULNERABLE  — stored XSS (bio)
 edit_profile.php   Edit own profile                   (secure SQLi; input point for the stored XSS)
 contact.php        Contact form                       (secure)
+deals.php          Deals (JS-rendered)                (secure)     — content built by JS from api/products.php
+reviews.php        Reviews (JS-rendered)              VULNERABLE   — DOM-based XSS (URL fragment)
+api/products.php   JSON product feed for deals.php    (secure)     — data source, not an HTML page
 includes/, config/, assets/, sql/   support files
 ```
+
+About 2 of the ~15 pages (~13%) are rendered client-side (`deals.php`,
+`reviews.php`). Their content, and the nav links that reach them, are produced
+by JavaScript, so a basic HTML-only spider (such as `tools/spider.py`) never
+discovers them. See "JavaScript-rendered pages" below.
 
 ## Summary table
 
@@ -52,6 +60,9 @@ includes/, config/, assets/, sql/   support files
 | `profile.php` | View profile | none (reads stored `bio`) | No | **Yes (stored)** | `bio` rendered unescaped |
 | `edit_profile.php` | Edit profile | `full_name`,`email`,`address`,`bio` (POST) | No | No* | Prepared update; *stores raw `bio` (stored-XSS source) |
 | `contact.php` | Contact | `name`,`message` (POST) | No | No | Input reflected through `htmlspecialchars` |
+| `deals.php` | Deals (JS-rendered) | none | No | No | Content fetched from `api/products.php` and built in JS; output escaped |
+| `reviews.php` | Reviews (JS-rendered) | `#author=` (URL fragment) | No | **Yes (DOM-based)** | Fragment written via `innerHTML`; never reaches the server |
+| `api/products.php` | JSON feed | `category` (GET) | No | n/a | Prepared statement; returns JSON, not HTML |
 
 ## Vulnerable pages in detail
 
@@ -116,13 +127,55 @@ Steps:
 3. Load `profile.php` — the payload runs. It also runs for anyone who views that
    stored profile.
 
+### 5. `reviews.php` — DOM-based XSS (URL fragment)
+
+`reviews.php` is rendered entirely in the browser. A personalised greeting is
+read from the URL fragment and written with `innerHTML` without sanitisation:
+
+```js
+var m = location.hash.match(/author=([^&]*)/);
+document.getElementById('greeting').innerHTML =
+    '<p class="notice ok">Thanks for your review, ' + decodeURIComponent(m[1]) + '!</p>';
+```
+
+Payload:
+
+```
+reviews.php#author=<img src=x onerror=alert(document.cookie)>
+```
+
+Because the payload lives in the fragment (`#...`), it is never sent to the
+server. A server-side scanner and the raw HTML both miss it, and only a
+JavaScript-executing client triggers it. This makes it a good test for
+DOM-aware tooling.
+
+## JavaScript-rendered pages (crawler visibility)
+
+`deals.php` and `reviews.php` build their content in the browser, and the nav
+links that lead to them are injected by `assets/js/site.js` at runtime. Nothing
+about them appears in the static HTML:
+
+- `deals.php` fetches `api/products.php` and builds the product cards and their
+  `product.php?id=` links in JavaScript. The raw HTML is an empty shell.
+- `reviews.php` renders its reviews from an inline JSON data island and adds the
+  DOM-based XSS greeting described above.
+- The "Deals" and "Reviews" nav links exist only in `site.js`, so they are not
+  present as `<a href>` tags anywhere in the served markup.
+
+A basic spider that parses only static HTML (like `tools/spider.py`, which uses
+BeautifulSoup and follows `<a href>` links) will not discover these pages, will
+not extract the JS-built `product.php` links from `deals.php`, and strips URL
+fragments, so it never sees the DOM-XSS vector. A headless browser that executes
+JavaScript is required to reach and test them.
+
 ## Secure pages (expected true negatives)
 
 `index.php`, `products.php`, `register.php`, `add_to_cart.php`, `cart.php`,
-`checkout.php`, `edit_profile.php`, and `contact.php` use prepared statements
-and/or integer casts for all database access and escape all output with the
-`e()` helper. Point your scanner at these to confirm it does not raise false
-positives.
+`checkout.php`, `edit_profile.php`, `contact.php`, `deals.php`, and
+`api/products.php` use prepared statements and/or integer casts for all database
+access and escape all output. Point your scanner at these to confirm it does not
+raise false positives. (`deals.php` is secure but JS-rendered, so a static
+crawler will not reach it in the first place.)
 
 ## Test accounts
 

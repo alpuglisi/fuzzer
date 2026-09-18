@@ -8,6 +8,7 @@ require_once __DIR__ . '/functions.php';
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><?= isset($page_title) ? e($page_title) . ' · ' : '' ?><?= e(SITE_NAME) ?></title>
   <link rel="stylesheet" href="assets/css/style.css">
+  <script src="assets/js/site.js" defer></script>
 </head>
 <body>
   <header class="site-header">
@@ -20,6 +21,8 @@ require_once __DIR__ . '/functions.php';
         <a href="products.php">Shop</a>
         <a href="contact.php">Contact</a>
         <a href="cart.php">Cart</a>
+        <!-- JavaScript injects Deals/Reviews links here; not visible to a basic spider -->
+        <span id="js-nav" class="js-nav"></span>
         <?php if (is_logged_in()): ?>
           <a href="profile.php">Profile</a>
           <a href="logout.php">Logout</a>
