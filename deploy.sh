@@ -2,28 +2,32 @@
 #
 # deploy.sh - copy the Puppy Fort Factory web app into the Apache web root.
 #
+# By default the app is deployed to the web root so it is served at
+# http://localhost/ (not a subdirectory).
+#
 # Usage:
 #   ./deploy.sh [SOURCE_DIR]
 #
 # Defaults:
 #   SOURCE_DIR : the puppy-fort-factory/ folder next to this script
-#   destination: /var/www/html/puppy-fort-factory
+#   destination: /var/www/html   (served at http://localhost/)
 #
 # Override with environment variables:
-#   DEST_ROOT=/var/www/html     # web root to deploy under
-#   DEST=/var/www/html/pff      # exact destination (overrides DEST_ROOT)
+#   DEST_ROOT=/var/www/html     # web root to deploy into (http://localhost/)
+#   DEST=/var/www/html/pff      # exact destination (subdir -> http://localhost/pff/)
 #   WWW_USER=www-data           # owner user  for the deployed files
 #   WWW_GROUP=www-data          # owner group for the deployed files
 #   CLEAN=1                     # delete files at the destination that are
 #                               #   not in the source (mirror the source)
+#   ASSUME_YES=1                # skip the CLEAN confirmation prompt
 #   FORCE_CONFIG=1              # overwrite an existing config/config.php
 #                               #   (by default it is preserved)
 #
 # Examples:
-#   ./deploy.sh
-#   DEST=/var/www/html ./deploy.sh              # deploy at the web root
-#   CLEAN=1 ./deploy.sh                         # mirror (prune stale files)
-#   ./deploy.sh ~/fuzzer/puppy-fort-factory     # explicit source
+#   ./deploy.sh                                        # serve at http://localhost/
+#   DEST=/var/www/html/puppy-fort-factory ./deploy.sh  # serve in a subdirectory
+#   CLEAN=1 ./deploy.sh                                # mirror (prune stale files)
+#   ./deploy.sh ~/fuzzer/puppy-fort-factory            # explicit source
 
 set -euo pipefail
 
@@ -37,7 +41,7 @@ fi
 
 SRC="${1:-$SCRIPT_DIR/$APP_NAME}"
 DEST_ROOT="${DEST_ROOT:-/var/www/html}"
-DEST="${DEST:-$DEST_ROOT/$APP_NAME}"
+DEST="${DEST:-$DEST_ROOT}"
 WWW_USER="${WWW_USER:-www-data}"
 WWW_GROUP="${WWW_GROUP:-www-data}"
 
@@ -66,6 +70,24 @@ echo "Source     : $SRC"
 echo "Destination: $DEST"
 echo "Owner      : $WWW_USER:$WWW_GROUP"
 echo
+
+# CLEAN mirrors the source and prunes anything else at the destination. Since
+# the default destination is the web root, guard it behind a confirmation.
+if [ "${CLEAN:-0}" = "1" ]; then
+    echo "WARNING: CLEAN=1 will DELETE everything in $DEST that is not part of the app."
+    if [ "${ASSUME_YES:-0}" != "1" ]; then
+        if [ -t 0 ]; then
+            read -r -p "Proceed? [y/N] " ans
+            case "$ans" in
+                y|Y|yes|YES) ;;
+                *) echo "Aborted."; exit 1 ;;
+            esac
+        else
+            echo "Refusing to CLEAN non-interactively without ASSUME_YES=1." >&2
+            exit 1
+        fi
+    fi
+fi
 
 $SUDO mkdir -p "$DEST"
 
@@ -105,13 +127,20 @@ fi
 $SUDO find "$DEST" -type d -exec chmod 755 {} +
 $SUDO find "$DEST" -type f -exec chmod 644 {} +
 
+# Work out the URL to show.
+if [ "$DEST" = "$DEST_ROOT" ]; then
+    URL="http://localhost/"
+else
+    URL="http://localhost/$(basename "$DEST")/"
+fi
+
 echo
 echo "Done. Deployed to $DEST"
 echo
 echo "Next steps:"
 echo "  1. Import the database (first time only):"
-echo "       mysql -u root -p < \"$SRC/sql/schema.sql\""
+echo "       sudo mysql < \"$SRC/sql/schema.sql\""
 echo "  2. Set your DB credentials in:"
 echo "       $DEST/config/config.php"
 echo "  3. Browse to:"
-echo "       http://localhost/$(basename "$DEST")/"
+echo "       $URL"
