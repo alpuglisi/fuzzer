@@ -47,8 +47,27 @@ body {
 .main-nav { display: flex; gap: 14px; }
 .main-nav a { color: #fff; text-decoration: none; font-weight: 600; }
 .main-nav a:hover { text-decoration: underline; }
-/* Let JS-injected nav links share the nav's flex spacing. */
-.js-nav { display: contents; }
+/* JS-built "Discover" sub-navigation. Hidden until JS fills it. */
+.subnav:empty { display: none; }
+.subnav {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 8px 16px;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+  background: var(--tan);
+  border-bottom: 1px solid var(--line);
+}
+.subnav-label { color: var(--muted); font-size: 0.85rem; font-weight: 700; }
+.subnav a { color: var(--accent-dark); text-decoration: none; font-weight: 600; font-size: 0.9rem; }
+.subnav a:hover { text-decoration: underline; }
+
+/* Footer navigation (static links -> discoverable by a basic spider). */
+.footer-nav { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+.footer-nav a { color: var(--accent-dark); text-decoration: none; font-weight: 600; }
+.footer-nav a:hover { text-decoration: underline; }
 
 /* Page */
 .page { padding: 24px 16px 48px; }

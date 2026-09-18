@@ -9,6 +9,7 @@ CREATE DATABASE IF NOT EXISTS puppy_fort CHARACTER SET utf8mb4 COLLATE utf8mb4_u
 USE puppy_fort;
 
 DROP TABLE IF EXISTS cart_items;
+DROP TABLE IF EXISTS posts;
 DROP TABLE IF EXISTS products;
 DROP TABLE IF EXISTS users;
 
@@ -41,6 +42,14 @@ CREATE TABLE cart_items (
   UNIQUE KEY uq_user_product (user_id, product_id)
 );
 
+CREATE TABLE posts (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  title        VARCHAR(160) NOT NULL,
+  author       VARCHAR(80)  NOT NULL DEFAULT 'Ryder',
+  body         TEXT,
+  published_at DATE         NOT NULL
+);
+
 -- Seed users (password shown in the comment).
 INSERT INTO users (username, email, password, full_name, bio, address) VALUES
 ('admin', 'admin@puppyfort.test', MD5('admin123'),  'Ryder Ryderson', 'Chief Fort Architect and head of biscuit security.', '1 Kennel Lane'),
@@ -59,3 +68,10 @@ INSERT INTO products (name, description, price, category, stock) VALUES
 ('Peanut Butter Fort Bricks','Edible bricks. Structural for about four minutes.',                     14.99,  'treats',      100),
 ('Bacon Battlements',        'Crunchy bacon-flavoured battlements for the fort skyline.',             12.99,  'treats',      100),
 ('Glow-in-the-Dark Flags',   'Light up the ramparts for night patrol.',                              9.99,   'accessories', 80);
+
+-- Seed blog posts (used by blog.php and blog_post.php).
+INSERT INTO posts (title, author, body, published_at) VALUES
+('Five signs your puppy has outgrown their fort', 'Ryder', 'When the drawbridge no longer intimidates the mailman, it may be time to upgrade. Here are five tell-tale signs, starting with the classic full-body flop over the ramparts.', '2026-08-01'),
+('The engineering behind chew-proof walls',       'Alice', 'Our walls survive determined teething thanks to a three-layer laminate and a lot of testing by very motivated volunteers. We explain the science, and the snacks.', '2026-08-14'),
+('A brief history of the squeaky drawbridge',     'Bob',   'It began as a bug and became our most requested feature. This is the story of the squeak that launched a thousand zoomies.', '2026-09-02'),
+('How to defend a fort against a determined cat', 'Ryder', 'Cats respect no borders. We cover moat placement, watchtower staffing, and the strategic deployment of treats as a deterrent.', '2026-09-15');

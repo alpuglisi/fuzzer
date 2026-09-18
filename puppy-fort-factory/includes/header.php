@@ -19,10 +19,10 @@ require_once __DIR__ . '/functions.php';
       </form>
       <nav class="main-nav">
         <a href="products.php">Shop</a>
+        <a href="blog.php">Blog</a>
+        <a href="about.php">About</a>
         <a href="contact.php">Contact</a>
         <a href="cart.php">Cart</a>
-        <!-- JavaScript injects Deals/Reviews links here; not visible to a basic spider -->
-        <span id="js-nav" class="js-nav"></span>
         <?php if (is_logged_in()): ?>
           <a href="profile.php">Profile</a>
           <a href="logout.php">Logout</a>
@@ -33,4 +33,6 @@ require_once __DIR__ . '/functions.php';
       </nav>
     </div>
   </header>
+  <!-- JS injects the "Discover" links here (empty for a basic spider). -->
+  <div id="js-discover" class="subnav"></div>
   <main class="wrap page">

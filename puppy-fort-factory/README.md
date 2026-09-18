@@ -80,13 +80,29 @@ Expect the time-based payloads to be flagged against `product.php` and
 
 ## Feature overview
 
+The site has **30 pages, 10 of them rendered with JavaScript**.
+
 - User registration and login, session-based auth, logout
-- Product listing with a category filter, product detail pages
+- Product listing with a category filter, product detail pages, search
 - Add to cart, view/remove cart items, checkout
 - View and edit user profile
-- Contact form
-- JavaScript-rendered pages (`deals.php`, `reviews.php`) whose content and nav
-  links are built client-side, so a basic HTML-only spider cannot see them
+- Contact form, about, FAQ, careers, newsletter, order tracking
+- A blog (index + posts) backed by a `posts` table
+- **10 JavaScript-rendered pages** (deals, new arrivals, bestsellers,
+  recommendations, reviews, gallery, store locations, support, wishlist,
+  feedback). Their content and the "Discover" nav links that reach them are
+  built client-side, so a basic HTML-only spider cannot see them; a headless
+  browser is required.
 
-Which of these are vulnerable and which are secure is documented in
+The 20 server-rendered pages are linked from the header and footer and are fully
+crawlable. Which pages are vulnerable and which are secure is documented in
 [`VULNERABILITIES.md`](VULNERABILITIES.md).
+
+## Blog table
+
+The blog needs a `posts` table. A fresh `sql/schema.sql` import creates it. On an
+existing database, add it without losing data:
+
+```bash
+sudo mysql puppy_fort < sql/002_blog.sql
+```
