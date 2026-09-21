@@ -13,6 +13,15 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Planning: decided the primary UI is a **local web application** (control panel +
+  dashboard on localhost), not a `textual` TUI (new decision D11) — results and
+  output are far easier to review in a browser and it composes with the planned
+  Datasette. The no-auto-run launcher now lives on the web page; a plain CLI entry
+  point per tool is kept for headless use; the web app binds to loopback only and
+  is served separately from the vulnerable target. Reflected in
+  `docs/DECISIONS_AND_ROADMAP.md` (D11, Phase 6 UI, deferred list),
+  `docs/ARCHITECTURE.md` (component map + component #12), `docs/PHASE_0_PLAN.md`
+  (T0.9), and the component #12 spec + change-control log (CC-UI-0003).
 - Planning: added a **no-auto-run** requirement — bring-up presents a launcher
   offering automatic vs manual operation and never starts tools against the
   container on its own. Recorded in `docs/PHASE_0_PLAN.md` (Goal, T0.7, new T0.9,

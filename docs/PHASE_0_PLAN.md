@@ -91,18 +91,22 @@ writes attempts and findings. Tools remain standalone-runnable.
   `attempt`, and `finding`.
 
 ### T0.9 — Launcher with run-mode selection (no auto-run)
-After the container is up, present a user interface that offers the two run modes
-and does nothing to the target until the user chooses. In Phase 0 this is a
-minimal launcher (a clear menu / prompt); the full `textual` TUI is component #12,
-elaborated later.
+After the container is up, open a **local web control panel** (localhost-only,
+D11) that offers the two run modes and does nothing to the target until the user
+acts. Phase 0 ships a minimal panel; the full web dashboard is component #12,
+elaborated later. A plain CLI entry point exists alongside it for headless use.
 - **Automatic:** run the discovery → fuzz pipeline and the integration harness
-  (T0.7) against the lab.
+  (T0.7) against the lab, and show results.
 - **Manual:** leave the lab running and make the tools available for hand-driven
-  use — print ready-to-run commands (and/or drop into an interactive shell) for
-  each tool with the right target/store already wired — and send nothing to the
-  container until the user runs a tool.
+  use — from the panel (and/or as ready-to-run commands with the right
+  target/store already wired) — and send nothing to the container until the user
+  runs a tool.
+- **Safety:** the panel binds to loopback only, is never exposed, and is served
+  separately from the vulnerable target (different origin/port; never in the
+  target's web root).
 - **Accept:** bringing up the environment stops at the launcher; no request
-  reaches the lab until the user selects automatic mode or manually runs a tool.
+  reaches the lab until the user selects automatic mode or manually runs a tool;
+  the panel is reachable only on localhost.
 
 ## Exit criterion
 

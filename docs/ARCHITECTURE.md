@@ -35,7 +35,7 @@ automatic mode or invokes a tool by hand.
 
 ```
                      ┌───────────────────────── Diagnostics / UI ─────────────────────────┐
-                     │   TUI (textual)   ·   Datasette over the store   ·   metrics/logs    │
+                     │  local web control panel + dashboard · Datasette over store · logs   │
                      └───────────────────────────────▲─────────────────────────────────────┘
                                                      │ reads
    ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────────────┐  ┌───────────┐
@@ -197,15 +197,21 @@ tracked in the requirements files, not here.
   history, but timing-sensitive traffic does not (D5).
 
 ### 12. Diagnostics and UI `[planned]`
-- **Subcomponents:** a **launcher with run-mode selection** (automatic vs manual;
-  no auto-run — nothing is sent to the target until the user chooses); a `textual`
-  TUI for live interception and runs; Datasette over the store for exploration; a
-  `run_metrics` table; structured audit and debug logs; a `--dry-run` mode.
+- **Subcomponents:** a **local web application** (D11) — a control panel that hosts
+  the **launcher with run-mode selection** (automatic vs manual; no auto-run —
+  nothing is sent to the target until the user chooses) and a dashboard for live
+  runs, interception, and results; Datasette over the store for deep exploration; a
+  `run_metrics` table; structured audit and debug logs; a `--dry-run` mode; and a
+  plain CLI entry point per tool for headless/automation use.
 - **Depends on (components):** `core/` (store and logging); in automatic mode the
-  launcher invokes the tools (crawler, auditor, fuzzer, harness).
-- **Purpose:** the research-platform diagnostics from decision D2, to verify
-  functionality and locate bugs; and to keep the user in control of when the tools
-  touch the target (the no-auto-run principle).
+  web app invokes the tools (crawler, auditor, fuzzer, harness).
+- **Purpose:** the research-platform diagnostics from decision D2, made easy to
+  review in a browser (D11), to verify functionality and locate bugs; and to keep
+  the user in control of when the tools touch the target (the no-auto-run
+  principle).
+- **Safety:** the web app is bound to loopback, never exposed, and strictly
+  separated from the vulnerable target (different origin/port; never in the
+  target's web root), so the control plane is never itself an attack surface.
 
 ### 13. Plugin system `[planned]` (Phase 10)
 - **Subcomponents:** `importlib.metadata` entry points; a hook registry

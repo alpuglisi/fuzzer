@@ -133,6 +133,30 @@ the ZAP team maintains; Juice Shop for the realism tier).
   by cell/transform," and the deferred second-target decision is partly satisfied
   by these external validation targets.
 
+### D11 — UI: a local web application, not a terminal TUI
+
+The primary interface is a **local web application** — a control panel to launch
+and steer runs and a dashboard to review output and results — served on localhost
+only. It replaces the `textual` TUI as the primary UI. This is also where the
+no-auto-run launcher lives: bring-up opens the web page with the automatic/manual
+choice and touches the target only when the user acts.
+
+- **Why:** output and results are far easier to review in a browser than in a
+  terminal, and this composes with the already-planned Datasette (itself a web
+  view over the store) rather than duplicating it in a TUI.
+- **Safety (non-negotiable):** the web app is bound to loopback, never exposed,
+  and strictly separated from the vulnerable target — a different origin/port, and
+  never deployed into the target's web root — so the control plane is never itself
+  an attack surface nor confused with the system under test.
+- **Keep a headless path:** each tool retains a plain CLI entry point for
+  automation, scripting, and power use; the web app orchestrates, but the tools
+  still write their own results to the store.
+- **Consequences:** supersedes the TUI in component #12 and in Phase 6's "TUI +
+  Datasette"; the earlier "no full web UI before a TUI" deferral is replaced by
+  "a lean localhost-only web app now; a heavyweight or multi-user web platform
+  stays deferred." Stack (e.g. FastAPI or Flask + a light frontend, Datasette
+  embedded/linked) is a to-confirm-during-build detail.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **WAF in the lab** — decide before the mutation engine (Phase 8); without one,
@@ -256,7 +280,8 @@ Goal: browse the lab through it and inspect exact bytes on the wire.
 - History in the shared store with FTS5 and batched writes.
 - Repeater with DB-persisted tabs and connection-reuse control.
 - Match-and-replace and scope rule engines.
-- TUI (`textual`) plus Datasette for exploration.
+- Local web control panel and dashboard (D11), with Datasette for deep store
+  exploration.
 - Session manager as a proxy addon.
 - Property-test the parser with `hypothesis`.
 - **Exit:** browse the lab, hand-edit a request with a duplicate
@@ -293,7 +318,8 @@ Phase 0 (lean foundations), then Phase 1 (session manager).
 
 ### Explicitly deferred indefinitely
 Autonomous LLM agent loops, deep reinforcement learning, HTTP/3, deep-learning
-anomaly detection, any distributed architecture, and a full web UI before a TUI.
+anomaly detection, any distributed architecture, and a heavyweight or multi-user
+web platform (the near-term UI is a lean, localhost-only web app — D11).
 
 ## Lab track (parallel to the toolkit roadmap)
 
