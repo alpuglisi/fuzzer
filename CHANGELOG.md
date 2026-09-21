@@ -15,6 +15,12 @@ Format per entry: `- <area>: <what changed> — <why>` (commit `<hash>`).
   (lean foundations, then the session manager).
 - Planning: committed the two research prompts under `docs/` and stripped their
   human-facing preambles so each `.md` is a raw prompt fed directly to an agent.
+- Planning: after reviewing the lab-scaling research, recorded decisions D8–D10
+  (manifest-driven lab generator as a track sequenced after the toolkit; a
+  machine-readable out-of-band label contract now; the lab serving both detection
+  and ML with cell/transform splits and a blind holdout), added env pinning to
+  D7, added a parallel Lab track to the roadmap, and updated the ground-truth
+  component and evaluation principle in the architecture and roadmap docs.
 
 ## 2026-09-20
 

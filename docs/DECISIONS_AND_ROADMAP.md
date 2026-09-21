@@ -89,7 +89,49 @@ between iterations.
   causal signal instead of noisy timing. The store schema reserves a place for
   coverage data. This overlaps the app-scaling work, since both touch how the lab
   is built and reset. It does not have to be built first, but it is a first-class
-  workstream.
+  workstream. The lab environment (PHP/Apache/MySQL/libxml) is pinned in a
+  container and asserted at runtime, because several labels depend on it (for
+  example, error-based versus blind SQLi depends on `display_errors`).
+
+### D8 — Lab scaling via a manifest-driven generator, sequenced after the toolkit
+
+Adopt the "lab as a compiler" model from the scaling research: one manifest plus
+a versioned safety matrix plus a seed and an environment profile, run through a
+pure generator, emits the app (one file per case), the labels, the docs, and the
+oracle tests. The vulnerable/secure verdict is **derived** from
+`(transform, sink context)`, never hand-asserted. Run it as a **parallel lab
+track that starts after the toolkit foundations**, not before.
+
+- **Consequences:** stop hand-adding pages to the lab in the meantime;
+  `VULNERABILITIES.md` becomes a generated artifact (see D9); the lab gains, over
+  time, two tiers (a dense "range" tier for detection measurement and the
+  realistic "shop" tier) and build profiles (annotated / blind / all-secure).
+
+### D9 — Machine-readable, out-of-band ground-truth labels, starting now
+
+Introduce a machine-readable label contract now: `labels.json` (rich: flow,
+transform, sink context), a Benchmark-style `expectedresults.csv`, and a separate
+`injection-points.json` (parameter-discovery ground truth, distinct from
+vulnerability labels). Hand-author it for the current pages and have the tools and
+the test harness consume it **out-of-band** (read from disk, never served by the
+target). Use opaque case IDs; no class name in any URL, filename, or parameter a
+tool can see.
+
+- **Consequences:** the integration harness and tools consume the label files,
+  not the prose doc; `VULNERABILITIES.md` stays human-facing and later becomes
+  generated.
+
+### D10 — The lab serves both detection benchmarking and ML training, with discipline
+
+Use the lab for both purposes, but keep measurement honest: split by generator
+cell and by transform (not by page), keep a permanent blind holdout never used
+for tuning, report Matthews correlation and precision at fixed recall, and
+validate periodically against an external target we did not build (WAVSEP, which
+the ZAP team maintains; Juice Shop for the realism tier).
+
+- **Consequences:** this upgrades the earlier "group by endpoint" rule to "group
+  by cell/transform," and the deferred second-target decision is partly satisfied
+  by these external validation targets.
 
 ### Deferred decisions (revisit at the noted point)
 
@@ -113,9 +155,11 @@ between iterations.
 - **Differential-timing confirmation.** Confirm time-based findings by probing an
   endpoint at several requested delays and requiring latency to rise with the
   delay, not by trusting one slow response.
-- **Evaluation honesty.** Group by endpoint (GroupKFold), report PR-AUC and
-  precision at fixed recall, always compare against a dumb baseline (fixed
-  threshold and mean + k·σ), and hold out a whole target configuration.
+- **Evaluation honesty.** Split by generator cell and by transform (not by
+  page/endpoint), keep a permanent blind holdout never used for tuning, report
+  Matthews correlation and precision at fixed recall (plus PR-AUC), always compare
+  against a dumb baseline (fixed threshold and mean + k·σ), and validate
+  periodically against an external target we did not build.
 - **Request budget is a first-class resource.** Every component checks requests
   out of a shared budget; timing measurements run at concurrency 1 per host,
   enforced by the budget manager rather than by convention.
@@ -245,6 +289,36 @@ Phase 0 (lean foundations), then Phase 1 (session manager).
 ### Explicitly deferred indefinitely
 Autonomous LLM agent loops, deep reinforcement learning, HTTP/3, deep-learning
 anomaly detection, any distributed architecture, and a full web UI before a TUI.
+
+## Lab track (parallel to the toolkit roadmap)
+
+Per D8, the lab grows via a manifest-driven generator, as its own track that
+starts after the toolkit foundations (Phases 0–1 above). High-level phases,
+adapted from the scaling research:
+
+- **Lab Phase 0 — Schema and import (no new pages).** JSON Schema for the
+  manifest and an initial safety matrix covering only the transforms and sink
+  contexts the current pages use; write manifest entries for the existing pages;
+  make the generator reproduce today's app; diff generated docs against the
+  hand-written map and explain every discrepancy; pin the environment.
+- **Lab Phase 1 — Oracles and label pipeline (still no new pages).** Positive,
+  negative (paired-secure), and contamination oracles; a Psalm taint backstop;
+  environment assertions; a byte-identical regeneration gate; emit
+  `labels.json`, `expectedresults.csv`, `injection-points.json`, `sitemap.xml`;
+  a loopback-only database reset.
+- **Lab Phase 2 — Scale within known classes.** Expand cells for SQLi and XSS
+  with hard caps per cell and surface-feature variation; add difficulty tiers;
+  generate the benign corpus (including apostrophe-rich, safely-reflected, and
+  slow-but-benign true negatives); add the `blind` and `all-secure` build
+  profiles.
+- **Lab Phase 3 — Realism.** Auth states and roles; IDOR/BOLA; multi-step, stored,
+  and second-order cases; a REST surface with generated OpenAPI.
+- **Lab Phase 4+ — Class breadth (cheapest oracle first).** Open redirect, path
+  traversal/LFI, SSTI, CSRF, XXE, then SSRF (loopback canary only); command
+  injection and deserialization last, behind a disabled-by-default profile.
+
+The two tracks share the label contract (D9) and the pinned environment, so the
+toolkit can consume lab labels from the first lab phase onward.
 
 ## Already built (starting point)
 

@@ -67,9 +67,13 @@ tracked in the requirements files, not here.
 ### 1. Target lab and ground truth `[built app; planned instrumentation]`
 - **Puppy Fort Factory** `[built]`: PHP/MySQL/Apache app; ~30 pages, ~10
   JavaScript-rendered; documented mix of vulnerable and secure pages.
-- **Ground-truth manifest** `[partial]`: `VULNERABILITIES.md` today; to become a
-  machine-readable label source that tools can join against (overlaps the
-  app-scaling work).
+- **Ground-truth labels** `[partial]`: a machine-readable, out-of-band contract
+  (`labels.json`, `expectedresults.csv`, and a separate `injection-points.json`),
+  read from disk by the tools and the harness, never served by the target, with
+  opaque case IDs (D9). Hand-authored initially; later emitted by the
+  manifest-driven lab generator (D8), at which point `VULNERABILITIES.md` becomes
+  a generated, human-facing artifact. The lab grows into two tiers (dense "range",
+  realistic "shop") with annotated / blind / all-secure build profiles.
 - **Grey-box instrumentation** `[planned]` (D7): line coverage (Xdebug/pcov), a
   database error hook, and snapshot/restore for state reset.
 - **Depends on (components):** none (it is the system under test).
