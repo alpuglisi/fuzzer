@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Docs: expanded `docs/ON_HOST_RUNBOOK.md` — rewrote **Part E** (Phase 3 grey-box) into a
+  concrete, followable implementation guide (pcov + coverage shim snippets, the reader
+  seams to back, reset, M10 wiring, the exit query), and added **Parts F–L** for the
+  Phase 4–10 exits that were missing: bandit-beats-fixed-order (F), detection classifier
+  vs baselines (G), ranker + active learning (H), live-TLS proxy (I), mutation-vs-WAF (J),
+  protocol depth (K), and plugins/anomaly/report/transfer (L). Each part is tagged `[run]`
+  (built — run + read `run_metrics`) or `[build+run]` (needs an on-host last mile), with
+  exact commands, expected results, and verify queries grounded in the real flags/keys.
 - Fix (BUG-0007, on-host): credentials are now keyed by the **bare hostname** regardless
   of whether they were saved as `127.0.0.1`, `127.0.0.1:8080`, or a full URL
   (`core/credentials.py::_norm_host`), matching how the session layer looks them up
