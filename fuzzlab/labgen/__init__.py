@@ -1,14 +1,17 @@
 """Lab-generator support code (LAB component, generator-build-time tooling).
 
-Two independently-developed pieces of work landed here concurrently: the
-manifest schema / verdict engine / build gates (Phase 0 foundation, D20 —
-``schema``, ``verdict``, ``subseed``, ``gates``, ``denylist``) and the
-sqlmap/commix oracle wrapper (``oracle_wrapper``, generator-build-time
-security-assertion tooling, unrelated to and never imported by
-``fuzzlab.oracle``). Neither depends on the other. This re-exports both.
+Several independently-developed pieces of work landed here: the manifest
+schema / verdict engine / build gates / covering-array resolver (Phase 0
+foundation, D20 — ``schema``, ``verdict``, ``subseed``, ``gates``,
+``denylist``, ``resolver``), the module-composition emitter interface and
+first (``php_current``) emitter (T-LAB0.4 — ``emitter``, ``modules``,
+``emitters``), and the sqlmap/commix/SSTImap oracle wrapper
+(``oracle_wrapper``, generator-build-time security-assertion tooling,
+unrelated to and never imported by ``fuzzlab.oracle``). None of these
+depends on any other. This re-exports all of them.
 """
 
-from . import denylist, gates, resolver, schema, subseed, verdict
+from . import denylist, emitter, emitters, gates, modules, resolver, schema, subseed, verdict
 from .oracle_wrapper import (
     CommandInjectionOracleRequest,
     OracleRunResult,
@@ -31,7 +34,10 @@ from .oracle_wrapper import (
 
 __all__ = [
     "denylist",
+    "emitter",
+    "emitters",
     "gates",
+    "modules",
     "resolver",
     "schema",
     "subseed",

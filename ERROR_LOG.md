@@ -18,6 +18,25 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — `test_web_repeater.py` flakes with a cross-thread SQLite error
+
+- **Symptom:** found incidentally while verifying an unrelated lab-generator lane's full-suite
+  run: `tests/test_web_repeater.py::test_routes_list_create_and_send_gate` and
+  `::test_route_send_reaches_upstream_when_authorized` intermittently fail with
+  `sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that same
+  thread` (a different one of the two failing each time). Reproduced twice independently
+  (each time with different specific test(s) failing, consistent with a genuine race rather
+  than one bad test); not reliably reproducible on demand afterward — order/timing-dependent.
+- **Root cause:** not yet investigated. The error itself points at `fuzzlab/proxy/repeater.py`
+  (or its `SocketSender`/store-adapter path) obtaining a SQLite connection/cursor on one
+  thread and using it from another — Python's `sqlite3` module rejects this by default. Full
+  RCA not yet done.
+- **Remediation:** not yet fixed. Unrelated to the lab-generator (LAB component) work in
+  progress this session; owned by PROXY/UI. Tracked as follow-up work (a full
+  `docs/bugs/BUG-NNNN` investigation + fix is still owed per this log's own scope note —
+  logging the finding now, in the turn it was found, rather than only once it's fixed).
+- **Status:** Open.
+
 ## 2026-09-21 — sqlmap/commix exit non-zero on a legitimate negative finding, not only on a crash
 
 - **Symptom:** while building `fuzzlab/labgen/oracle_wrapper.py` (`CC-LAB-0015`), an initial

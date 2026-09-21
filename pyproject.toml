@@ -30,6 +30,11 @@ dependencies = [
     # version bump as a manifest_version bump (docs/LAB_PHASE_0_PLAN.md
     # T-LAB0.3) rather than something that should float in silently.
     "covertable==3.2.0",
+    # Module-composition emitter templates (T-LAB0.4, fuzzlab/labgen/modules/,
+    # fuzzlab/labgen/emitters/php_current/): each source/transform/sink/complexity
+    # fragment is a small Jinja2 template, imported directly (PA-0005) rather than
+    # only via the `web` extra it was previously declared under.
+    "jinja2>=3.1,<4",
     # Credential store (D12): OS keyring + encrypted-file headless fallback.
     # The headless encrypted-file backend is implemented on `cryptography`
     # (Fernet), not PyCrypto; declared explicitly since we import it directly.
@@ -67,6 +72,7 @@ include = ["fuzzlab*"]
 "fuzzlab.labels" = ["schemas/*.json"]
 "fuzzlab.audit.rules_data" = ["*.json"]
 "fuzzlab.web" = ["templates/*.html", "static/*"]
+"fuzzlab.labgen.modules" = ["sources/*.j2", "transforms/*.j2", "sinks/*.j2", "complexities/*.j2"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

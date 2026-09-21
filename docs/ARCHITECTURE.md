@@ -151,7 +151,7 @@ tracked in the requirements files, not here.
   `generalizes` verdict — the generalization evidence. The live run against an external
   validation lab is on-host; the manifest-generated second target plugs in as a
   `TargetSpec`.
-- **Manifest-driven generator** `[Phase 0 foundation built; rest planned]` (D8, target shape pinned by **D20**/
+- **Manifest-driven generator** `[Phase 0 foundation + first emitter built; real app reproduction planned]` (D8, target shape pinned by **D20**/
   `CR-LAB-0001`): the "lab as a compiler" — one manifest plus a safety matrix,
   seed, and env-profile generate the app, labels, docs, and oracle tests, with a
   **binary** verdict derived from `(transform, sink context)` (a partially
@@ -168,8 +168,13 @@ tracked in the requirements files, not here.
   covering-array resolver (`fuzzlab/labgen/resolver.py`, over `covertable`
   3.2.0, pairwise/mixed-strength/constrained) is also built (`CC-LAB-0018`)
   but not yet wired into manifest loading. The per-stack module-composition
-  emitter and a manifest reproducing today's PHP app byte-identically remain
-  planned.
+  emitter interface is built (`CC-LAB-0019`): `fuzzlab/labgen/emitter.py` (the
+  `Emitter` ABC, `EmittedFiles` forward-compatible with multi-file/routed
+  output), a composable `fuzzlab/labgen/modules/` Jinja2-template inventory
+  (Addendum C), and the first (`php_current`) emitter — proven end to end for
+  one illustrative vulnerable/secure SQLi pair via a real, byte-deterministic,
+  `php -l`-checked render. A manifest reproducing today's real ~30-page PHP
+  app byte-identically (the actual Phase 0 exit criterion) remains planned.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, et al. — see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not
   hand-authored exploit code, for every class with a mature oracle; the three

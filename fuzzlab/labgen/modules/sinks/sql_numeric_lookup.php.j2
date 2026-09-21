@@ -1,0 +1,9 @@
+{% if bound %}
+$stmt = $pdo->prepare("SELECT * FROM {{ table }} WHERE {{ column }} = ?");
+$stmt->execute([{{ value_expr }}]);
+$row = $stmt->fetch(PDO::FETCH_ASSOC);
+{% else %}
+$sql = "SELECT * FROM {{ table }} WHERE {{ column }} = " . {{ value_expr }};
+$result = $pdo->query($sql);
+$row = $result ? $result->fetch(PDO::FETCH_ASSOC) : null;
+{% endif %}

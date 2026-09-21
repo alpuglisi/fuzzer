@@ -3,6 +3,71 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0019 — T-LAB0.4: emitter interface + module-composition + `php_current` emitter (2026-09-21)
+*(This lane's worktree diverged onto an unrelated, stale UI-redesign branch lineage from
+before the Phase 0 foundation landed anywhere — a harness/environment quirk, not something
+the lane did wrong. It manually re-imported the foundation files verbatim via `git show`
+to unblock itself and recorded that import as its own change-control entries; those
+duplicate-import entries are **not** carried into this log, since nothing was actually
+imported into this branch — the foundation already exists here via the real `CC-LAB-0016`/
+`CC-LAB-0018` entries. Only this lane's genuinely new work (the files listed below) was
+merged in, verified independently, and given this fresh entry number.)*
+- Change: added `fuzzlab/labgen/emitter.py` (the `Emitter` ABC — `render(cell) ->
+  EmittedFiles`, `supports(vuln_class, sink_context) -> bool`; `EmittedFiles` is a tuple of
+  `EmittedFile{path, content, role}`, deliberately not a single-file pair, so a future
+  routed, multi-file emitter — Laravel/Express, `CR-LAB-0001` Addendum D — isn't structurally
+  precluded even though `php_current` only ever returns one file today); `fuzzlab/labgen/
+  modules/{sources,transforms,sinks,complexities}/` (the composable Jinja2-template
+  inventory Addendum C's architecture correction requires instead of one monolithic
+  template per cell — `get_param` source, `identity`/`param_bind` transforms, a
+  `sql_numeric_lookup` sink that branches on a `bound` flag a transform publishes so one
+  sink fragment serves both twins of a minimal pair, and a `single_statement` complexity
+  wrapper; every `jinja2.Environment` sets `trim_blocks=True, lstrip_blocks=True,
+  keep_trailing_newline=True` explicitly, never Jinja2's defaults); and
+  `fuzzlab/labgen/emitters/php_current/` (the first, reproduction emitter, assembling those
+  modules into one illustrative raw-concat-numeric-lookup vulnerable/secure SQLi pair —
+  matching `lab/manifests/example_phase0_scaffold.yaml`'s `LABGEN-EX-0001`/`0002` cells).
+  `render()` fails loud (raises) on an unsupported `(vuln_class, sink_context)` pair or an
+  op it has no transform module for, rather than guessing — same "fail loud on an authoring
+  gap" discipline `fuzzlab.labgen.verdict.verdict()` already uses. Added `jinja2>=3.1,<4` to
+  `pyproject.toml`'s main dependencies (previously declared only under the `web` extra; now
+  imported directly and unconditionally by `fuzzlab/labgen/modules/__init__.py`, PA-0005)
+  plus package-data for the `.j2` template files.
+- Impact (other components / project): the module-composition inventory + `php_current`
+  prove the emitter architecture end to end for one cell shape; reproducing all ~30 of
+  today's real `puppy-fort-factory/` pages is explicitly separate, later work (tracked as
+  task #9 in this session's backlog / `docs/LAB_PHASE_0_PLAN.md` T-LAB0.7/Phase 3), not
+  attempted here. No other component's contracts change; `fuzzlab/oracle/`,
+  `fuzzlab/harness/`, `fuzzlab/web/`, `oracle_wrapper.py`, `nuclei_oracle.py` (if it exists
+  by the time this lands), and `resolver.py` are all untouched.
+- Risk (level; mitigation): low — new, self-contained code with no live-lab dependency; a
+  defect here affects only the not-yet-used generator path, not anything currently served.
+  Mitigated by: `render()`'s fail-loud discipline; 20 new tests (the `Emitter` ABC contract
+  and `EmittedFiles`' multi-file shape; each module fragment rendering correctly in
+  isolation; an end-to-end `php_current` render that is byte-deterministic across two calls
+  and whose vulnerable/secure diff is confined to the transform/sink region — the minimal-
+  pair property; a real `php -l` syntax-check of the generated output, since PHP 8.4 is
+  available in this environment).
+- Deliverables:
+  - [x] `fuzzlab/labgen/emitter.py` (the `Emitter` ABC + `EmittedFile`/`EmittedFiles`) — done.
+  - [x] `fuzzlab/labgen/modules/{sources,transforms,sinks,complexities}/` inventory — done
+        (small, illustrative set; not exhaustive — Phase 1/3 work).
+  - [x] `fuzzlab/labgen/emitters/php_current/` — done (one illustrative vulnerable/secure
+        pair, not the full ~30-page migration).
+  - [x] 20 new tests incl. a real `php -l` syntax-check — done, all pass.
+  - [ ] Reproducing today's real ~30 PHP pages byte-identically (the actual Phase 0 exit
+        criterion) — not started, tracked as a separate, later task.
+  - [ ] T-LAB0.7's tiered conformance suite — not started, blocked on this entry landing
+        (now unblocked).
+- Effectiveness (assessed 2026-09-21): met this delivery's own bar — 20 new tests pass; full
+  suite 642 passed / 5 skipped / 2 pre-existing unrelated `test_mutation_operators.py`
+  failures (unaffected). Also surfaced, incidentally (unrelated to this change, logged
+  separately): a genuine, reproducible-but-intermittent cross-thread SQLite race in
+  `tests/test_web_repeater.py` (PROXY/UI component) — see `ERROR_LOG.md`, tracked as
+  follow-up, not caused by or fixed in this entry. Not yet assessable: whether
+  `php_current`'s module set is rich enough to reproduce the real app without rework — that
+  is the next task's real test.
+
 ### CC-LAB-0017 — SSTImap oracle support: Spike 003 + wrapper extension (2026-09-21)
 *(Numbered `CC-LAB-0017` rather than `CC-LAB-0016` at merge time — this lane's worktree
 was based on a commit that predated `CC-LAB-0016` (Phase 0 foundation) landing, so it

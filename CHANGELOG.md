@@ -14,6 +14,20 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (LAB, `CC-LAB-0019`, T-LAB0.4): `fuzzlab/labgen/emitter.py` (the `Emitter` ABC —
+  `render(cell) -> EmittedFiles`, `supports()`; `EmittedFiles` a tuple, never assumed
+  single-file, for future routed/multi-file stacks per `CR-LAB-0001` Addendum D), a
+  composable Jinja2-template module inventory under `fuzzlab/labgen/modules/`
+  (source/transform/sink/complexity fragments, per Addendum C's module-composition
+  correction — never one monolithic template per cell), and the first (`php_current`)
+  emitter assembling them into one real, byte-deterministic, `php -l`-checked
+  vulnerable/secure SQLi pair. `jinja2` moved to main dependencies (previously `web`-extra
+  only). This lane's worktree diverged onto a stale, unrelated branch lineage before
+  starting (an environment quirk); only its genuinely new files were merged in after
+  independent verification, discarding its duplicate re-import of already-merged Phase 0
+  foundation content. 20 new tests, full suite 642 passed / 5 skipped / 2 pre-existing
+  unrelated failures. Also surfaced (unrelated, logged separately) a real, intermittent
+  cross-thread SQLite race in `tests/test_web_repeater.py` — see `ERROR_LOG.md`.
 - Feature (LAB, `CC-LAB-0017`): validated SSTImap as a third independent tool-oracle
   (`docs/spikes/SPIKE-003-sstimap-vs-ssti-flask-hacking-playground.md` — real Jinja2 SSTI
   app, GPL-3.0/Apache-2.0 licenses read directly, manual curl confirmation before ever
