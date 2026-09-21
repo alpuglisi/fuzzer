@@ -135,9 +135,9 @@
   <div class="card">
     <h2>Proxy workbench</h2>
     <p class="muted" id="proxy-status">Proxy: checking…</p>
-    <p class="muted">History (recorded flows) is live below. Live intercept
-      (edit / drop / forward), repeater, and scope / match-replace arrive in the next
-      Phase 2 increment (the in-process serve seam from Phase 0.4 is ready).</p>
+    <p class="muted">History (recorded flows) and live Intercept (pause / edit / drop /
+      forward) are live below. Repeater and scope / match-replace arrive in the next
+      Phase 2 increments.</p>
   </div>
 
   <div class="card">
@@ -162,10 +162,39 @@
     </div>
   </div>
 
+  <div class="card" id="intercept-card">
+    <h2>Intercept</h2>
+    <p class="muted" id="intercept-unavailable" hidden>Not running in-process. Start with
+      <code>fuzzlab web --with-proxy --authorized</code> to pause, edit, drop, and forward
+      live traffic.</p>
+    <div id="intercept-controls" hidden>
+      <div class="field">
+        <label class="cat"><input type="checkbox" id="intercept-on"> Intercept requests</label>
+        <label class="cat"><input type="checkbox" id="intercept-resp"> and responses</label>
+        <span class="muted" id="intercept-count"></span>
+      </div>
+      <table id="pending-table">
+        <thead><tr><th>#</th><th>dir</th><th>method</th><th>target</th><th>host</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="muted" id="pending-empty" hidden>No flows held. Toggle intercept on and
+        drive traffic through the proxy.</p>
+      <div id="pending-detail" hidden>
+        <h3>Editing held flow <span id="pending-id"></span>
+          <span class="muted">— edit the raw bytes, then Forward (or Drop)</span></h3>
+        <textarea id="pending-raw" class="pending-raw" rows="12" spellcheck="false"></textarea>
+        <div class="actions">
+          <button type="button" id="pending-forward">Forward</button>
+          <button type="button" id="pending-drop">Drop</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="card">
-    <h2>Intercept · Repeater · Scope</h2>
-    <p class="muted">Live pause / edit / drop / forward, replay tabs, and scope /
-      match-replace controls arrive in the next Phase 2 increment.</p>
+    <h2>Repeater · Scope</h2>
+    <p class="muted">Replay tabs and scope / match-replace controls arrive in the next
+      Phase 2 increments.</p>
   </div>
 </section>
 

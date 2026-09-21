@@ -177,4 +177,81 @@ function initProxy() {
   load();
 }
 
-document.addEventListener("DOMContentLoaded", () => { initTabs(); initLaunchForms(); initProxy(); });
+// --- Proxy tab: live interception (pause / edit / drop / forward) ---
+function initIntercept() {
+  const card = document.getElementById("intercept-card");
+  if (!card) return;
+  const unavailable = document.getElementById("intercept-unavailable");
+  const controls = document.getElementById("intercept-controls");
+  const onBox = document.getElementById("intercept-on");
+  const respBox = document.getElementById("intercept-resp");
+  const count = document.getElementById("intercept-count");
+  const tbody = document.querySelector("#pending-table tbody");
+  const empty = document.getElementById("pending-empty");
+  const detail = document.getElementById("pending-detail");
+  const rawArea = document.getElementById("pending-raw");
+  const idSpan = document.getElementById("pending-id");
+  let selectedId = null;
+
+  async function applyToggle() {
+    await postJSON("/api/proxy/intercept",
+      { on: onBox.checked, responses: respBox.checked });
+    poll();
+  }
+  onBox.addEventListener("change", applyToggle);
+  respBox.addEventListener("change", applyToggle);
+
+  function selectFlow(f) {
+    selectedId = f.id;
+    idSpan.textContent = "#" + f.id + " (" + f.direction + ")";
+    rawArea.value = f.raw;
+    detail.hidden = false;
+  }
+
+  async function poll() {
+    const r = await fetch("/api/proxy/intercept/pending");
+    if (!r.ok) return;
+    const pending = (await r.json()).pending || [];
+    tbody.replaceChildren();
+    for (const f of pending) {
+      const tr = document.createElement("tr");
+      tr.className = "flow-row";
+      for (const v of [f.id, f.direction, f.method, f.target, f.host]) {
+        const td = document.createElement("td");
+        td.textContent = v == null ? "" : String(v);
+        tr.appendChild(td);
+      }
+      tr.addEventListener("click", () => selectFlow(f));
+      tbody.appendChild(tr);
+    }
+    empty.hidden = pending.length > 0;
+    count.textContent = pending.length ? `· ${pending.length} held` : "";
+    if (selectedId != null && !pending.some((f) => f.id === selectedId)) {
+      detail.hidden = true; selectedId = null;   // it was forwarded/dropped elsewhere
+    }
+  }
+
+  document.getElementById("pending-forward").addEventListener("click", async () => {
+    if (selectedId == null) return;
+    await postJSON(`/api/proxy/intercept/${selectedId}/forward`, { raw: rawArea.value });
+    detail.hidden = true; selectedId = null; poll();
+  });
+  document.getElementById("pending-drop").addEventListener("click", async () => {
+    if (selectedId == null) return;
+    await postJSON(`/api/proxy/intercept/${selectedId}/drop`, {});
+    detail.hidden = true; selectedId = null; poll();
+  });
+
+  fetch("/api/proxy/status").then((r) => r.json()).then((s) => {
+    if (!s.configured) { unavailable.hidden = false; return; }
+    controls.hidden = false;
+    onBox.checked = !!s.intercept;
+    respBox.checked = !!s.intercept_responses;
+    poll();
+    setInterval(poll, 1200);
+  }).catch(() => {});
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  initTabs(); initLaunchForms(); initProxy(); initIntercept();
+});

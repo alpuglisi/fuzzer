@@ -97,3 +97,11 @@ nav.tabs a.active { background: #8882; border-color: #8884; font-weight: 600; }
   white-space: pre-wrap; overflow-wrap: anywhere; max-height: 20rem; overflow: auto;
   font-size: .82rem;
 }
+
+/* intercept */
+#pending-table tbody tr.flow-row { cursor: pointer; }
+#pending-table tbody tr.flow-row:hover { background: #8881; }
+.pending-raw {
+  width: 100%; font-family: ui-monospace, monospace; font-size: .82rem;
+  padding: .5rem; border: 1px solid #8886; border-radius: 8px; background: #8881;
+}

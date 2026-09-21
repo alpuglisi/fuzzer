@@ -3,6 +3,30 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0015 — Optional response interception (engine hook + Interceptor flag) (2026-09-21)
+- Change: `ProxyEngine.handle_request` now runs an **awaited response-intercept hook** after
+  the byte-exact forward: if the interceptor opts in, the response is wrapped as a
+  `RawMessage`, held for a forward/edit/drop decision, and its `.raw` returned (a dropped
+  response sends nothing). `Interceptor` gained `intercept_responses` (default **off**) and
+  `set_intercept_responses(on)` (turning it off releases any held responses). The engine
+  gates the hook on that flag, so the default path is unchanged and **byte-exact** (the
+  wrap + `.raw` round-trips the exact bytes); request interception is unchanged.
+- Impact (other components / project): completes the Burp-style intercept model — requests
+  were already pausable; responses are now optionally pausable/editable — which the Phase-2.2
+  web Intercept UI drives (CC-UI-0017). No schema change; no change to the record/forward
+  path when response interception is off.
+- Risk (level; mitigation): low — additive and gated. Mitigated by
+  `tests/test_proxy_response_intercept.py` (request edit/forward, request drop sends
+  nothing, response NOT held by default incl. byte-exact passthrough, response edit, response
+  drop) and `tests/test_proxy_intercept_live.py` (a real request through `AsyncProxyServer`
+  is paused, edited, forwarded, and reaches a threaded upstream with the edit). Existing
+  proxy intercept/server/live suites still pass. Suite 484 passed / 6 skipped.
+- Deliverables:
+  - [x] Gated response hook in `ProxyEngine`; `Interceptor.intercept_responses` + setter — done.
+  - [x] Engine + over-socket integration tests — done.
+- Effectiveness (assessed 2026-09-21): effective — responses can be held/edited/dropped when
+  enabled, and the default request-only path stays byte-exact; verified over real sockets.
+
 ### CC-PROXY-0014 — Expose `build_parser()` for the command-spec registry (2026-09-21)
 - Change: `fuzzlab/proxy/cli.py` now factors its argparse setup into `build_parser()`;
   `main()` keeps the `p` reference (so `p.error(...)` on `--export-ca`/`--authorized` still

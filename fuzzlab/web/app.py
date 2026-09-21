@@ -313,14 +313,44 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
             return JSONResponse({"error": f"flow {flow_id} not found"}, status_code=404)
         return detail
 
+    def _need_proxy():
+        return JSONResponse(
+            {"error": "no in-process proxy (start with `fuzzlab web --with-proxy`)"},
+            status_code=409)
+
     @app.post("/api/proxy/intercept")
     async def proxy_intercept(request: Request):
         if proxy is None:
-            return JSONResponse({"error": "no in-process proxy "
-                                 "(start with `fuzzlab web --with-proxy`)"},
-                                status_code=409)
+            return _need_proxy()
         body = await request.json()
-        return {"intercept": proxy.set_intercept(bool(body.get("on")))}
+        if "on" in body:
+            proxy.set_intercept(bool(body["on"]))
+        if "responses" in body:
+            proxy.set_intercept_responses(bool(body["responses"]))
+        return proxy.status()
+
+    @app.get("/api/proxy/intercept/pending")
+    def proxy_pending():
+        if proxy is None:
+            return _need_proxy()
+        return {"pending": proxy.pending_view()}
+
+    @app.post("/api/proxy/intercept/{flow_id}/forward")
+    async def proxy_forward(flow_id: int, request: Request):
+        if proxy is None:
+            return _need_proxy()
+        raw = None
+        try:                                    # body optional: {"raw": "..."} to edit
+            raw = (await request.json()).get("raw")
+        except Exception:  # noqa: BLE001 - empty/non-JSON body → forward unedited
+            pass
+        return {"forwarded": proxy.forward(flow_id, raw)}
+
+    @app.post("/api/proxy/intercept/{flow_id}/drop")
+    def proxy_drop(flow_id: int):
+        if proxy is None:
+            return _need_proxy()
+        return {"dropped": proxy.drop(flow_id)}
 
     return app
 

@@ -108,6 +108,8 @@ class ProxyController:
             "host": self.config.host,
             "port": self.server.port if (self.server and self._running) else self.config.port,
             "intercept": bool(self.interceptor.enabled) if self.interceptor else False,
+            "intercept_responses": bool(getattr(self.interceptor, "intercept_responses",
+                                                False)) if self.interceptor else False,
             "pending": len(self.interceptor.pending()) if self.interceptor else 0,
             "scope_hosts": list(self.config.scope_hosts),
             "tls": bool(self.config.ca_dir),
@@ -118,3 +120,41 @@ class ProxyController:
             return False
         self.interceptor.set_enabled(on)
         return self.interceptor.enabled
+
+    def set_intercept_responses(self, on: bool) -> bool:
+        if self.interceptor is None:
+            return False
+        self.interceptor.set_intercept_responses(on)
+        return self.interceptor.intercept_responses
+
+    def pending_view(self) -> list[dict[str, Any]]:
+        """JSON-safe view of held flows: id/direction/host + the raw message text."""
+        if self.interceptor is None:
+            return []
+        out = []
+        for flow in self.interceptor.pending():
+            msg = flow.message
+            out.append({
+                "id": flow.id,
+                "direction": flow.direction,
+                "host": flow.host,
+                "method": msg.method.decode("latin-1", "replace") if flow.direction == "request" else "",
+                "target": msg.target.decode("latin-1", "replace") if flow.direction == "request" else "",
+                "raw": msg.raw.decode("latin-1", "replace"),
+            })
+        return out
+
+    def forward(self, flow_id: int, raw_text: str | None = None) -> bool:
+        """Release a held flow, optionally with an edited raw message (latin-1 bytes)."""
+        if self.interceptor is None or self.interceptor.get(flow_id) is None:
+            return False
+        from fuzzlab.proxy.message import RawMessage
+        msg = RawMessage.from_bytes(raw_text.encode("latin-1")) if raw_text else None
+        self.interceptor.forward(flow_id, msg)
+        return True
+
+    def drop(self, flow_id: int) -> bool:
+        if self.interceptor is None or self.interceptor.get(flow_id) is None:
+            return False
+        self.interceptor.drop(flow_id)
+        return True

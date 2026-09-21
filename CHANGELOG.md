@@ -14,6 +14,18 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (UI + proxy, Phase 2.2): live Intercept — pause / edit / drop / forward. Added a
+  gated **response-intercept hook** to `ProxyEngine` + `Interceptor.intercept_responses`
+  (default off, so the default path stays byte-exact); request interception unchanged
+  (CC-PROXY-0015). `ProxyController` gained `pending_view` / `forward` / `drop` /
+  `set_intercept_responses`, with routes `GET /api/proxy/intercept/pending`, `POST
+  /api/proxy/intercept/{id}/forward|drop`, and the toggle extended for responses (409
+  without an in-process proxy). The Proxy tab's Intercept card renders request/response
+  toggles, a polled pending table, and an editable raw-bytes textarea with Forward / Drop
+  (rows DOM-built from untrusted traffic). Verified in a real browser holding an in-flight
+  request and over real sockets (an edited request reaches the upstream). New tests:
+  `test_proxy_response_intercept.py`, `test_proxy_intercept_live.py`, `test_web_intercept.py`.
+  Suite 484 passed / 6 skipped. See CC-PROXY-0015, CC-UI-0017.
 - Feature (UI, Phase 2.1): Proxy tab flow History (read-only). Added `fuzzlab/web/proxyview.py`
   (store-backed `list_flows` + `flow_detail` over `flow`/`body`/`flow_fts`; newest-first, FTS
   search, redacted raw request/response) and routes `GET /api/proxy/flows[?q=]` +

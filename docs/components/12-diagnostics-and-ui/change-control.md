@@ -3,6 +3,37 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0017 — Proxy tab: live Intercept (pause/edit/drop/forward) (Phase 2.2) (2026-09-21)
+- Change: added the intercept control surface. `ProxyController` gained `pending_view()`
+  (JSON-safe held flows: id/direction/host/method/target + raw text), `forward(id, raw?)`
+  (edit via `RawMessage.from_bytes(raw.encode('latin-1'))`), `drop(id)`, and
+  `set_intercept_responses(on)` (status now carries `intercept_responses`). Routes:
+  `POST /api/proxy/intercept` extended to toggle `on`/`responses`, `GET
+  /api/proxy/intercept/pending`, `POST /api/proxy/intercept/{id}/forward` (optional
+  `{"raw"}`), `POST /api/proxy/intercept/{id}/drop` — all 409 without an in-process proxy.
+  The Proxy tab's **Intercept** card renders the request/response toggles, a polled pending
+  table, and an editable raw-bytes textarea with Forward / Drop. Pending rows come from
+  traffic (untrusted) so they're DOM-built with `textContent`.
+- Impact (other components / project): realizes live pause/edit/drop/forward in the browser,
+  backed by the in-process proxy (Phase 0.4) and the CC-PROXY-0015 response hook. Available
+  only under `fuzzlab web --with-proxy` (else the card shows a start hint). No schema change;
+  the UI writes no results.
+- Risk (level; mitigation): low–medium — the panel can now alter live traffic. Mitigated by
+  the proxy being opt-in + `--authorized`-gated, DOM-safe rendering, and tests:
+  `tests/test_web_intercept.py` (controller pending_view/forward round-trip against a real
+  paused flow, unknown-id benign, responses toggle; routes 409 without proxy and
+  pending/forward/drop with a pre-built proxy) plus the engine + over-socket integration
+  tests under CC-PROXY-0015. Suite 484 passed / 6 skipped.
+- Deliverables:
+  - [x] Controller pending_view/forward/drop/set_intercept_responses — done.
+  - [x] Intercept routes; Intercept UI (toggles, polled pending, edit + Forward/Drop) — done.
+  - [x] Tests (controller + routes); live over-socket + engine tests — done.
+  - [ ] Repeater (Phase 2.3); scope / match-replace (Phase 2.4) — next.
+- Effectiveness (assessed 2026-09-21): effective — verified in a real browser holding a real
+  in-flight request ("intercept ON · 1 pending"), with the raw bytes editable and
+  Forward/Drop; and over real sockets an edited request reaches the upstream. Screenshot
+  captured.
+
 ### CC-UI-0016 — Proxy tab: read-only flow History (Phase 2.1) (2026-09-21)
 - Change: added `fuzzlab/web/proxyview.py` (pure, store-backed `list_flows` + `flow_detail`
   over `flow`/`body`/`flow_fts`; newest-first, FTS search, and raw request/response decoded

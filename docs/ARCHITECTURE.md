@@ -347,6 +347,8 @@ tracked in the requirements files, not here.
   CAPTCHA, multi-step). For **live** interception the engine is hosted in the web app's
   event loop by `web/proxycontrol.py` (D19), since the intercept futures are not
   cross-process; the standalone `fuzzlab proxy` remains for record-and-forward.
+  **Responses** are now optionally intercepted too (an awaited engine hook gated by
+  `Interceptor.intercept_responses`, default off so the path stays byte-exact).
 - **Flow engine + CONNECT/TLS** `[partial]`: `server.py::ProxyEngine` is the sans-I/O
   pipeline (scope → match-replace → intercept → byte-exact forward → history) and
   `AsyncProxyServer` the asyncio socket layer (plain-HTTP path tested offline over
@@ -379,8 +381,9 @@ tracked in the requirements files, not here.
   command spec, a dry-run preview, gated Run with live SSE output + Stop, a D14 category
   picker, and a plugins panel (verified end-to-end in a real browser). Phase 2.1 added the
   **Proxy tab's read-only flow History** (`web/proxyview.py`; `/api/proxy/flows[/{id}]`;
-  cross-process store reads, DOM-safe rendering of untrusted flow fields). **Pending:** the
-  proxy
+  cross-process store reads, DOM-safe rendering of untrusted flow fields). Phase 2.2 added
+  **live Intercept** — request/response toggles, a polled pending queue, and edit / forward
+  / drop over the in-process proxy (verified over real sockets). **Pending:** the proxy
   workbench (Phase 2), the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
   `metric_series` time-series table (Phase 4), Datasette-style store exploration, a
   `--dry-run` mode, and a plain CLI entry point per tool for headless use
