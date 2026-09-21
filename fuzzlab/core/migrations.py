@@ -265,6 +265,16 @@ CREATE TABLE repeater_tab (
 );
 """
 
+# --- migration 7: candidate ranker scores (Phase 7 T7.2) ---------------------
+# The candidate ranker (A.2) writes an ADVISORY ranking score + uncertainty per
+# candidate, kept separate from the Phase-5 detection classifier's `candidate.score`
+# so both models can coexist (the ranker orders at zero request cost; the classifier
+# screens attempts). Advisory only — never a label.
+_M0007 = """
+ALTER TABLE candidate ADD COLUMN rank_score REAL;
+ALTER TABLE candidate ADD COLUMN rank_uncertainty REAL;
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -273,6 +283,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (4, _M0004),
     (5, _M0005),
     (6, _M0006),
+    (7, _M0007),
 ]
 
 

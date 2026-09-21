@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 7 (T7.2): implemented the **pointwise candidate ranker**. `ml/ranker.py::Ranker`
+  augments the structural features with char n-gram TF-IDF and fits a logistic pointwise
+  scorer with per-candidate explanations; `ml/rank_train.py::train_and_rank` runs OOF
+  GroupKFold, reports NDCG@k/Precision@k vs a random-order baseline, writes advisory
+  `candidate.rank_score`/`rank_uncertainty` (migration 7 — head → 7), persists a model +
+  metrics, and falls back on thin data. Wired as `fuzzlab auto --rank`. Advisory-only
+  (writes no findings); rank columns are separate from the Phase-5 `candidate.score`.
+  +7 tests (266 passed / 3 skipped). Change-control: CC-ML-0006, CC-CORE-0013.
 - Phase 7 (T7.1): started the **candidate ranker** (ML component A.2).
   `fuzzlab/ml/ranking.py` adds per-page ranking metrics (`ndcg_at_k`, `precision_at_k`,
   and grouped means over pages with a positive; ties break to input order so a constant

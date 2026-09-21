@@ -3,6 +3,36 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0006 — Pointwise candidate ranker + train/rank/persist (T7.2) (2026-09-21)
+- Change: implemented the candidate ranker (A.2). `fuzzlab/ml/ranker.py::Ranker`
+  augments the Phase-5 structural feature vector with char n-gram TF-IDF over the
+  candidate text and fits a **pointwise** scorer (the pure-Python logistic model reused),
+  exposing per-candidate **explanations** (top signed feature contributions).
+  `fuzzlab/ml/rank_train.py::train_and_rank` runs OOF GroupKFold, scores it with
+  NDCG@k/Precision@k against a **random-order baseline**, writes advisory
+  `candidate.rank_score` + `candidate.rank_uncertainty` (migration 7; uncertainty peaks
+  at the 0.5 boundary), persists a `model` row + the metrics to `run_metrics`, and falls
+  back to a constant order on thin data. Wired as `fuzzlab auto --rank`.
+- Impact (other components / project): the auditor's candidates can now be **ordered at
+  zero request cost** so real vulnerabilities surface first — the ranker half of Phase 7.
+  Kept in its own `rank_score`/`rank_uncertainty` columns so it coexists with the Phase-5
+  detection classifier's `candidate.score`. Advisory only; the oracle stays the sole
+  labeler (train_and_rank writes no findings). No new dependency.
+- Risk (level; mitigation): low — pure logic, advisory-only writes, honest OOF eval vs a
+  random control. Mitigated by 7 tests (`tests/test_ml_ranker.py`): migration-7 schema;
+  ranker scores a positive above a negative; explanations are named; train_and_rank beats
+  the random baseline on NDCG@k, ranks every candidate, persists a model + metrics, and
+  writes no findings; uncertainty peaks at the boundary; thin-data fallback. Suite 266
+  passed / 3 skipped.
+- Deliverables:
+  - [x] `Ranker` (structural + TF-IDF, pointwise, explanations) — done.
+  - [x] `train_and_rank` (OOF NDCG@k/P@k vs random, advisory ranks, persist, fallback) — done.
+  - [x] `fuzzlab auto --rank` wiring — done.
+  - [ ] Active learning (T7.3); held-out exit on real lab data (T7.4) — next/on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — the ranker beats a random
+  order on held-out pages and ranks candidates advisory-only; the real-lab held-out exit
+  is on-host.
+
 ### CC-ML-0005 — Phase 7 groundwork: ranking metrics + char n-gram TF-IDF (T7.1) (2026-09-21)
 - Change: started the candidate ranker (A.2). `fuzzlab/ml/ranking.py` adds per-page
   ranking metrics — `ndcg_at_k`, `precision_at_k`, and grouped `mean_ndcg_at_k`/

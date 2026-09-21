@@ -3,6 +3,20 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0013 — Migration 7: candidate ranker scores (Phase 7 T7.2) (2026-09-21)
+- Change: migration 7 adds advisory `rank_score` and `rank_uncertainty` columns to
+  `candidate` (append-only registry; head → 7), kept separate from the Phase-5
+  `candidate.score` so the ranker and the detection classifier coexist.
+- Impact (other components / project): gives the ML ranker (A.2) its store columns
+  without touching existing rows. Version-pinning tests derive the head from
+  `migrations.MIGRATIONS` (PA-0001), so nothing hardcodes a number.
+- Risk (level; mitigation): low — additive nullable columns. Mitigated by
+  `tests/test_ml_ranker.py::test_migration_7_adds_rank_columns`. Suite 266 passed / 3 skipped.
+- Deliverables:
+  - [x] Migration 7 (`candidate.rank_score`, `candidate.rank_uncertainty`) — done.
+- Effectiveness (assessed 2026-09-21): effective — the ranker writes advisory ranks into
+  the new columns.
+
 ### CC-CORE-0012 — Migration 6: proxy flow history (Phase 6 T6.3) (2026-09-21)
 - Change: migration 6 extends `flow` with `host`, `in_scope`, and byte-exact
   `req_raw_sha`/`resp_raw_sha` (raw wire bytes content-addressed via `body`), adds the

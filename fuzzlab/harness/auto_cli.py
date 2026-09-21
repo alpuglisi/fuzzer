@@ -51,6 +51,9 @@ def main(argv: list[str]) -> int:
     p.add_argument("--score", action="store_true",
                    help="After the run, train the detection classifier and write advisory "
                         "candidate scores (Phase 5; never labels)")
+    p.add_argument("--rank", action="store_true",
+                   help="After the run, train the candidate ranker and write advisory "
+                        "rank scores + NDCG@k/Precision@k vs random (Phase 7; never labels)")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
     args = p.parse_args(argv)
@@ -94,11 +97,16 @@ def main(argv: list[str]) -> int:
             # advisory scores + model (best of logistic/GBT by out-of-fold PR-AUC);
             # never labels.
             ml = train_and_score(store, run_id, model_kind="auto")
-        _print_summary(args, counts, result, ml)
+        rank = None
+        if args.rank:
+            from fuzzlab.ml.rank_train import train_and_rank
+            # advisory rank scores + NDCG@k/Precision@k vs random; never labels.
+            rank = train_and_rank(store, run_id)
+        _print_summary(args, counts, result, ml, rank)
     return 0
 
 
-def _print_summary(args, counts, result, ml=None) -> None:
+def _print_summary(args, counts, result, ml=None, rank=None) -> None:
     plan = result.plan
     m = result.metrics
     print(f"\nauto run ({plan.mode}, {'scored' if plan.scored else 'unscored'}; "
@@ -130,4 +138,12 @@ def _print_summary(args, counts, result, ml=None) -> None:
         if not ml.get("fallback"):
             line += (f"; PR-AUC={ml.get('pr_auc')} vs prevalence "
                      f"{ml.get('baseline_prevalence')} / sigma {ml.get('baseline_sigma')}")
+        print(line + "  (advisory — never labels)")
+    if rank is not None:
+        line = f"  ranker ({rank['model']}): ranked {rank.get('ranked', 0)} candidate(s)"
+        if not rank.get("fallback"):
+            line += (f"; NDCG@{rank.get('at_k')}={rank.get('ndcg')} "
+                     f"(random {rank.get('baseline_ndcg')}), "
+                     f"P@{rank.get('at_k')}={rank.get('precision')} "
+                     f"(random {rank.get('baseline_precision')})")
         print(line + "  (advisory — never labels)")

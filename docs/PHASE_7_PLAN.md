@@ -41,7 +41,7 @@ per confirmation than a random budget — all advisory, oracle still the sole la
   (`ndcg_at_k`, `precision_at_k`, and per-group `mean_ndcg_at_k`/`mean_precision_at_k`).
   `fuzzlab/ml/text_features.py::CharNgramVectorizer` (pure-Python char n-gram TF-IDF,
   L2-normalized, deterministic vocab) + `candidate_text` (param/path/category/method).
-- **T7.2 — Pointwise ranker + train/score/persist `[planned]`.**
+- **T7.2 — Pointwise ranker + train/score/persist `[done, offline]`.**
   `fuzzlab/ml/ranker.py::Ranker` augments the structural feature vector with char n-gram
   TF-IDF and fits a pointwise logistic scorer, exposing per-candidate **explanations**
   (top contributing features). `fuzzlab/ml/rank_train.py::train_and_rank` runs OOF
