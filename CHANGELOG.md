@@ -14,6 +14,24 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (LAB, `CC-LAB-0020`, T-LAB0.4 extension): expanded `php_current`'s module
+  inventory and per-page profile registry to render a small **real** sample of four
+  actual `puppy-fort-factory/` pages — `product.php`, `blog_post.php` (same
+  `sql_numeric_literal` shape as `product.php`, proving module reuse across real pages,
+  not just within one illustrative pair), `login.php` (`sql_string_literal`, POST-sourced),
+  and `profile.php` (stored XSS, `html_body`, sourced from a stored field rather than a
+  request parameter) — spanning two vulnerability classes and three sink-context families,
+  matching `puppy-fort-factory/VULNERABILITIES.md` and `lab/ground-truth/labels.json`'s
+  `PFF-0001`/`PFF-0004`/`PFF-0005`/`PFF-0006`. New modules: `post_param`/`read_stored_field`
+  sources, `html_entity_escape` transform, `sql_string_literal_lookup`/`html_body_echo`
+  sinks, `render_only` complexity. New manifest `lab/manifests/phase0_real_pages_sample.yaml`
+  (8 cells, 4 vulnerable/secure pairs), kept separate from the original illustrative
+  `example_phase0_scaffold.yaml`. Every cell's derived verdict (`fuzzlab.labgen.verdict`)
+  matches the real page's documented status; every rendered cell is byte-deterministic and
+  `php -l`-valid. Does not reproduce the remaining ~26 real pages (separate, later,
+  larger task) or model `blog_post.php`'s error-suppression nuance (noted, not silently
+  dropped, in the emitter's own docstring). 47 new tests; full suite 689 passed / 5 skipped
+  / 2 pre-existing unrelated `test_mutation_operators.py` failures.
 - Feature (LAB, `CC-LAB-0019`, T-LAB0.4): `fuzzlab/labgen/emitter.py` (the `Emitter` ABC —
   `render(cell) -> EmittedFiles`, `supports()`; `EmittedFiles` a tuple, never assumed
   single-file, for future routed/multi-file stacks per `CR-LAB-0001` Addendum D), a

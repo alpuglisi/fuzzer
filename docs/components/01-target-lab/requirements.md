@@ -141,9 +141,14 @@ and measured. Authorized, lab-only.
   (`fuzzlab.labgen.modules`) assembled per cell — never one monolithic
   template per `(class, sink_context)`, per `CR-LAB-0001` Addendum C. The
   first emitter, `php_current`, proves this end to end for one illustrative
-  vulnerable/secure SQLi pair; reproducing today's real PHP app is separate,
-  later scope. (`CR-LAB-0001` §3/Addenda C/D, `docs/LAB_PHASE_0_PLAN.md`
-  T-LAB0.4, `CC-LAB-0019`)
+  vulnerable/secure SQLi pair and generalizes to a small real sample of four
+  actual `puppy-fort-factory/` pages (`product.php`, `blog_post.php`,
+  `login.php`, `profile.php` — two vulnerability classes, three sink-context
+  families: `sql_numeric_literal`, `sql_string_literal`, `html_body`),
+  matching `lab/ground-truth/labels.json`'s `PFF-0001`/`PFF-0004`/`PFF-0005`/
+  `PFF-0006`; reproducing the remaining ~26 real pages is separate, later
+  scope. (`CR-LAB-0001` §3/Addenda C/D, `docs/LAB_PHASE_0_PLAN.md` T-LAB0.4,
+  `CC-LAB-0019`, `CC-LAB-0020`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
