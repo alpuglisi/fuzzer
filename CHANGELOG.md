@@ -14,6 +14,21 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Docs: added `docs/LAB_IMPLEMENTATION_PLAN.md` — a task-level implementation plan
+  for the lab generator's remaining work, covering Phase 0's two open tasks
+  (T-LAB0.9, flagged for a FUZZ-consumer review before the ground-truth schema
+  change; T-LAB0.10, unblocked on review — the existing `fuzzlab/cli.py` dispatch
+  pattern already confirms the proposed subcommand shape) and Phases 1-4 per
+  `CR-LAB-0001` §8, at full task granularity for Phase 1 and milestone granularity
+  for Phases 2-4 (deliberately not detailed further out, since Phase 1's own
+  results should inform Phase 3's pacing decision). Explicitly marks every open
+  research/decision item (leakage-probe threshold, identifier/alias/connector-
+  position SQLi oracle coverage, `authz_expectations` placement, Phase 3 pacing,
+  the FastAPI route-accumulator question, the complexity-as-file-count-multiplier
+  interaction) rather than building through them speculatively, consolidated in
+  a numbered list at the end for quick reference. A process/planning document,
+  not a component code change — no `CC-LAB-NNNN` entry, per this project's own
+  governance-doc convention (matching `docs/LAB_PHASE_0_PLAN.md`'s own precedent).
 - Feature (LAB, `CC-LAB-0028`, Addendum E, Spike 004): added
   `fuzzlab/labgen/nuclei_oracle.py`, a second, independent tool-oracle wrapper
   extending the validated-oracle set from {sqlmap, commix, SSTImap, ZAP} to include
