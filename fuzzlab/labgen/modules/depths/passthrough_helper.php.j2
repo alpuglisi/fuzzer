@@ -1,0 +1,7 @@
+function {{ helper_name }}(${{ var_name }}) {
+    // Context-depth hop ({{ context_depth }}): the tainted value travels
+    // through this helper on its way to the sink. A pure pass-through by
+    // design -- depth is a flow-shape axis, never a neutralization, so it
+    // must not change the cell's derived verdict.
+    return ${{ var_name }};
+}

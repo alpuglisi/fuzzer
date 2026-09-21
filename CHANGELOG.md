@@ -37,6 +37,17 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   clearly distinct from the χ²-balance *gate* (`fingerprint_gate.py`) it sits alongside
   (`CC-LAB-0041`, `FR-LAB-39`, renumbered from a concurrently-claimed
   `CC-LAB-0040`/`FR-LAB-38` which collided with lane L-P3.4).
+- LAB: added the `context_depth` axis to the manifest/`Cell` IR (`direct`,
+  `same_file_helper`, `cross_file`, `stored_second_order`) — the generator-input
+  counterpart of the ground-truth `Case.flow_variant` field, so a manifest can *declare*
+  how far a cell's tainted value travels to its sink instead of only recording it after
+  the fact; kept biconditionally consistent with `sink_endpoint` (a `stored_second_order`
+  cell is exactly one whose payload executes on a different endpoint), wired as a
+  covering-array axis, rendered by `php_current` via a new `depth` module category, with
+  `schema.flow_variant_for()` as the one shared depth→ground-truth-label mapping and
+  Addendum B's unreachable `cross_service` level failing loud rather than rendering
+  something meaningless (`CC-LAB-0042`, `FR-LAB-40`, renumbered from a concurrently-claimed
+  `CC-LAB-0040`/`FR-LAB-38` which collided with lanes L-P3.4/L-P1.4, lane L-P2.5).
 - LAB: built T-LAB0.9, the regression/additive-only build gate
   (`fuzzlab.labgen.regression_gate.check_no_regression`) that diffs a candidate
   ground-truth snapshot against the hand-authored `lab/ground-truth/` by case ID and
