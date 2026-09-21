@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 10 (T10.2): wired the plugin hooks into the pipeline (all no-ops with zero
+  plugins). `HttpClient` fires `on_request` (folded, may edit the request) + `on_response`
+  (observe); `audit.evaluate` gains `register_rules` + `on_candidate`; `Oracle` gains
+  `register_oracle` (the only plugin path to a finding-writer) + `on_finding`. `plugins`
+  threads through `run_pipeline`/`run_auto`, which records the active set on the run;
+  `fuzzlab auto --plugins` discovers entry-point plugins. The oracle/advisory split holds
+  at the boundary (observation returns ignored). +7 tests (367 passed / 4 skipped).
+  Change-control: CC-PLUG-0003.
 - Phase 10 (T10.1): built the **plugin system** (`fuzzlab/plugins/`, D6). A `HookRegistry`
   with the seven FR-PLUG-2 hooks (mutation `on_request`; observation
   `on_response`/`on_candidate`/`on_finding`; registration `register_rules`/

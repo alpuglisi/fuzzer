@@ -61,7 +61,7 @@ class HttpClient:
     def __init__(self, budget: RequestBudget, scope_hosts: list[str],
                  session: Any | None = None, store: Any | None = None,
                  run_id: int | None = None, transport: Transport | None = None,
-                 timeout: float = 15.0):
+                 timeout: float = 15.0, plugins: Any | None = None):
         self._budget = budget
         self._scope = set(scope_hosts)
         self._session = session
@@ -69,6 +69,7 @@ class HttpClient:
         self._run_id = run_id
         self._transport = transport or _requests_transport
         self._timeout = timeout
+        self._plugins = plugins       # optional PluginManager (on_request/on_response)
 
     def _check_scope(self, url: str) -> str:
         host = urlparse(url).hostname or ""
@@ -81,6 +82,9 @@ class HttpClient:
         self._budget.checkout(request.component, 1)
         if self._session is not None:
             self._session.prepare(request, request.identity)
+        if self._plugins is not None:                      # on_request: plugins may edit
+            request = self._plugins.on_request(request)
+            host = self._check_scope(request.url)          # re-check if a plugin retargeted
 
         def _do() -> Response:
             start = time.perf_counter()
@@ -96,6 +100,8 @@ class HttpClient:
         else:
             response = _do()
 
+        if self._plugins is not None:                      # on_response: observe only
+            self._plugins.on_response(request, response)
         self._record(request, response)
         if self._session is not None:
             self._session.observe(request, response, request.identity)

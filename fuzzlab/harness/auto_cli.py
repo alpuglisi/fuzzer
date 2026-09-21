@@ -54,6 +54,9 @@ def main(argv: list[str]) -> int:
     p.add_argument("--rank", action="store_true",
                    help="After the run, train the candidate ranker and write advisory "
                         "rank scores + NDCG@k/Precision@k vs random (Phase 7; never labels)")
+    p.add_argument("--plugins", action="store_true",
+                   help="Discover and attach entry-point plugins (Phase 10); the active "
+                        "set is recorded on the run. Default off (runs with no plugins).")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
     args = p.parse_args(argv)
@@ -81,11 +84,15 @@ def main(argv: list[str]) -> int:
             scheduler = ThompsonBandit(priors=arm_priors(default_strategies()),
                                        cost_normalized=True, backoff=True)
             scheduler.load(store)                # resume posteriors + costs from prior runs
+        plugins = None
+        if args.plugins:
+            from fuzzlab.plugins import PluginManager
+            plugins = PluginManager.from_entry_points()   # entry-point discovery (Phase 10)
         try:
             result = run_auto(base_url=args.base_url, store=store, run_id=run_id,
                               sender=sender, mode=args.mode, ground_truth=ground_truth,
                               selected_categories=selected, points_source=args.points,
-                              browser=browser, scheduler=scheduler)
+                              browser=browser, scheduler=scheduler, plugins=plugins)
         except RunModeError as exc:
             p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
 

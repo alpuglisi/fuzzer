@@ -111,7 +111,7 @@ class _CountingSender:
 def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automatic",
              ground_truth=None, selected_categories=None, points_source: str = "auto",
              pages_html: dict[str, str] | None = None, browser=None,
-             scheduler=None) -> PipelineResult:
+             scheduler=None, plugins=None) -> PipelineResult:
     """Resolve the plan (D14/D15) and run the Phase 2 pipeline.
 
     ``points_source``: ``"ground-truth"`` audits the enumerated contract points (a
@@ -142,10 +142,13 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
                        selected_categories=selected_categories,
                        all_categories=known_categories())
 
+    if plugins is not None:
+        plugins.record(store, run_id)          # NFR-PLUG-reproducible: pin the active set
     counting = _CountingSender(sender)
     result = run_pipeline(points, store, run_id, counting, plan,
                           ground_truth=ground_truth, pages_html=pages_html,
-                          budget=counting, browser=browser, scheduler=scheduler)
+                          budget=counting, browser=browser, scheduler=scheduler,
+                          plugins=plugins)
     result.metrics["points_source"] = source
     result.metrics["skipped_points"] = skipped
     return result

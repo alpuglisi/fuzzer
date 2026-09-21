@@ -3,6 +3,37 @@
 Component code: **PLUG**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PLUG-0003 — Hooks wired into the pipeline (T10.2) (2026-09-21)
+- Change: attached the hooks at their real seams, all no-ops with zero plugins (D6).
+  `core/http.py::HttpClient` takes an optional `plugins` and fires **on_request** (folded,
+  may edit the outgoing request — re-checked against scope) and **on_response** (observe).
+  `audit/engine.py::evaluate` gains `plugins`: **register_rules** contributes extra rules
+  and **on_candidate** is notified per emitted candidate. `oracle/oracle.py::Oracle` gains
+  `plugins`: **register_oracle** appends plugin confirmers (the only plugin path to a
+  finding-writer) and **on_finding** is notified per confirmed finding. `plugins` is
+  threaded through `run_pipeline`/`run_auto`, which also `record()`s the active set onto
+  the run; `fuzzlab auto --plugins` discovers entry-point plugins (default off).
+- Impact (other components / project): ML models, extra rules, and custom oracles can now
+  extend a real run without core edits. The oracle/advisory split holds at the boundary:
+  observation-hook returns are ignored, so an `on_finding`/`on_candidate` observer cannot
+  write a label — only a `register_oracle` confirmer can. `register_payload_source` is
+  collectable via `PluginManager.payload_sources()`; its consumer (a central payload pool
+  in the fuzz/mutation layer) is a documented follow-up, so no dead wiring is added.
+- Risk (level; mitigation): low — every attachment is behind an optional `plugins` param
+  defaulting to None (zero behavior change without plugins). Mitigated by 7 tests
+  (`tests/test_plugins_wiring.py`): on_request reaches the wire + on_response observes +
+  no-plugins unchanged; register_rules fires a candidate + on_candidate sees it; a plugin
+  oracle writes a finding + on_finding observes; an observer alone writes nothing; and
+  run_auto records the active plugin set. Suite 367 passed / 4 skipped.
+- Deliverables:
+  - [x] on_request/on_response at the HTTP seam — done.
+  - [x] register_rules/on_candidate in the auditor — done.
+  - [x] register_oracle/on_finding in the oracle; `run_auto` records + `--plugins` — done.
+  - [ ] register_payload_source consumer (fuzz/mutation payload pool) — follow-up.
+- Effectiveness (assessed 2026-09-21): effective in tests — plugins observe/mutate at the
+  right points, only oracles reach the writer, and zero-plugin runs are unchanged; a live
+  sample-plugin-extends-without-core-change demonstration is the T10.6 exit.
+
 ### CC-PLUG-0002 — Plugin registry, hooks, discovery, isolation (T10.1) (2026-09-21)
 - Change: implemented the plugin system. `fuzzlab/plugins/` — `hooks.py` (the seven
   FR-PLUG-2 hooks classified as mutation/observation/registration), `registry.py`

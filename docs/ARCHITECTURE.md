@@ -363,7 +363,7 @@ tracked in the requirements files, not here.
   separated from the vulnerable target (different origin/port; never in the
   target's web root), so the control plane is never itself an attack surface.
 
-### 13. Plugin system `[partial — registry built; pipeline wiring pending]` (Phase 10)
+### 13. Plugin system `[built; register_payload_source consumer pending]` (Phase 10)
 - **Registry + hooks** `[built]` (`fuzzlab/plugins/`): `importlib.metadata` entry-point
   discovery, a `HookRegistry` with the seven hooks (`on_request`, `on_response`,
   `on_candidate`, `on_finding`, `register_rules`, `register_payload_source`,
@@ -371,8 +371,11 @@ tracked in the requirements files, not here.
   and the oracle/advisory-split guard (observation returns ignored; only `register_oracle`
   reaches the finding-writer). `PluginManager` records the active set to `run_plugin`
   (migration 10). Zero plugins is a full no-op (D6).
-- **Pipeline attachment** `[planned — T10.2]`: wiring the hooks into the HTTP seam,
-  auditor, oracle, and scheduler.
+- **Pipeline attachment** `[built]` (T10.2): `on_request`/`on_response` at the HTTP seam
+  (`core/http.py`), `register_rules`/`on_candidate` in the auditor, `register_oracle`/
+  `on_finding` in the oracle; `plugins` threads through `run_pipeline`/`run_auto`
+  (`fuzzlab auto --plugins`). `register_payload_source` is collectable; its fuzz/mutation
+  payload-pool consumer is a follow-up.
 - **Depends on (components):** `core/`.
 - **Consumed by:** ML components, extra rules, and custom oracles.
 
@@ -524,8 +527,9 @@ Suite: 360 passed / 4 skipped (the skips need a native build unavailable in the 
     and the opt-in h2→h1 desync lab front-end remain.
   - **Plugin system (Phase 10):** the `HookRegistry` (7 hooks, priority, contain-log-
     disable isolation, oracle/advisory-split guard), entry-point discovery, `PluginManager`,
-    and `run_plugin` recording (migration 10) are built; wiring the hooks into the pipeline
-    (T10.2), the anomaly detector (T10.3), the reproducible report (T10.4), and the
+    `run_plugin` recording (migration 10), and the pipeline wiring (T10.2 — HTTP seam,
+    auditor, oracle; `fuzzlab auto --plugins`) are built; a `register_payload_source`
+    consumer, the anomaly detector (T10.3), the reproducible report (T10.4), and the
     multi-target transfer test (T10.5) remain.
   - **Oracle mechanisms:** M8 (out-of-band) and M10 (grey-box) still to build.
   - **Intercepting proxy (Phase 6):** the full offline stack is built — byte-exact

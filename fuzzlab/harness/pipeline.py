@@ -57,7 +57,7 @@ def _dedup(points: list[InjectionPoint], pages_html: dict[str, str]) -> list[Inj
 def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                  plan: RunPlan, ground_truth=None,
                  pages_html: dict[str, str] | None = None, budget=None,
-                 browser=None, scheduler=None) -> PipelineResult:
+                 browser=None, scheduler=None, plugins=None) -> PipelineResult:
     if pages_html:
         points = _dedup(points, pages_html)
 
@@ -75,10 +75,11 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
         store.conn.commit()
 
     # Audit: rules-as-data, scoped to the plan's categories (T2.3 / D14 / D15).
-    counts = evaluate(points, store, run_id, categories=plan.categories)
+    counts = evaluate(points, store, run_id, categories=plan.categories, plugins=plugins)
 
     # Confirm each candidate with the oracle (sole finding-writer).
-    oracle = Oracle(store=store, run_id=run_id, browser=browser, scheduler=scheduler)
+    oracle = Oracle(store=store, run_id=run_id, browser=browser, scheduler=scheduler,
+                    plugins=plugins)
     rows = store.conn.execute(
         "SELECT evidence FROM candidate WHERE run_id=?", (run_id,)).fetchall()
     for row in rows:

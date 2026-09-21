@@ -35,9 +35,13 @@ class _CostCounter:
 
 class Oracle:
     def __init__(self, strategies: list[ConfirmationStrategy] | None = None,
-                 store=None, run_id: int | None = None, browser=None, scheduler=None):
+                 store=None, run_id: int | None = None, browser=None, scheduler=None,
+                 plugins=None):
         self.strategies = (list(strategies) if strategies is not None
                            else default_strategies(browser=browser))
+        if plugins is not None:                          # register_oracle: plugin-supplied
+            self.strategies += list(plugins.oracles())   # confirmers (the only writer path)
+        self.plugins = plugins
         self.store = store
         self.run_id = run_id
         # Optional bandit that orders the applicable mechanisms per context (Phase 4
@@ -67,6 +71,11 @@ class Oracle:
                                       cost=max(1, probe.count))
             if confirmed:
                 self._write_finding(candidate, verdict)
+                if self.plugins is not None:             # on_finding: observe (never writes)
+                    self.plugins.on_finding({
+                        "vuln_class": verdict.vuln_class, "url": to_path(candidate.url),
+                        "method": candidate.method, "param": candidate.param,
+                        "mechanism": verdict.mechanism})
                 return verdict
         return None
 

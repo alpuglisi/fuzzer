@@ -28,13 +28,16 @@ class InjectionPoint:
 
 def evaluate(points: list[InjectionPoint], store, run_id: int,
              rules: list[Rule] | None = None,
-             categories: list[str] | None = None) -> dict[str, int]:
+             categories: list[str] | None = None, plugins=None) -> dict[str, int]:
     """Evaluate every rule against every point; record all evaluations + candidates.
 
     ``categories`` (None = all) scopes the active rules — the hook for D14/T2.9
-    category selection.
+    category selection. An optional ``plugins`` (PluginManager) contributes extra rules
+    (``register_rules``) and is notified of each emitted candidate (``on_candidate``).
     """
     rules = load_rules() if rules is None else rules
+    if plugins is not None:
+        rules = list(rules) + list(plugins.rules())        # register_rules
     active = [r for r in rules if categories is None or r.category in categories]
     counts = {"evaluation": 0, "candidate": 0, "negative": 0}
 
@@ -64,6 +67,8 @@ def evaluate(points: list[InjectionPoint], store, run_id: int,
                      point.sink_context),
                 )
                 counts["candidate"] += 1
+                if plugins is not None:
+                    plugins.on_candidate(dict(evidence))     # observation (return ignored)
             else:
                 counts["negative"] += 1
 

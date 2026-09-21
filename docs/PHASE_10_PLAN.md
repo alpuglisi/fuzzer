@@ -72,7 +72,7 @@ metrics deterministically; and the toolkit produces results on a second lab targ
   entry-point discovery (`importlib.metadata`), a `HookRegistry` with the seven hooks,
   per-plugin priority, contain-log-disable isolation, and the oracle/advisory-split guard
   on `register_oracle`/finding writes. Migration 10's `run_plugin` records the active set.
-- **T10.2 — Hook attachment points `[planned]`.** Wire the hooks into the pipeline —
+- **T10.2 — Hook attachment points `[done, offline]`.** Wire the hooks into the pipeline —
   `on_request`/`on_response` at the HTTP seam, `on_candidate`/`register_rules` in the
   auditor, `on_finding`/`register_oracle` in the oracle, `register_payload_source` in the
   scheduler — all no-ops with zero plugins (D6). Offline-tested with a sample plugin.
