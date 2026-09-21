@@ -3,6 +3,36 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0007 — Oracle wired in as the sole finding-writer (Phase 2) (2026-09-21)
+- Change: routed confirmation through the oracle. Added `fuzzlab/tools/probesender.py`
+  (`SeamProbeSender` authenticated / `RequestsProbeSender` standalone; `make_probe_sender`)
+  adapting tool HTTP to the oracle's `Sender` (full `Probe`: text/headers/elapsed).
+  The fuzzer's `--store` path now, after recording attempts, calls
+  `Oracle.confirm` on its target candidate — the oracle writes the `finding`.
+  `store_adapter.import_fuzz_csv` no longer writes findings (attempts only); the
+  earlier provisional `timing-only` finding path is removed. The attempt `reward`
+  still records the fuzzer's timing screening.
+- Impact (other components / project): findings are now deterministic oracle
+  verdicts, not timing-only; the integration harness scores oracle findings. Closes
+  the screen→confirm loop for the fuzzer (before the scheduler/classifier exist).
+  Store schema unchanged.
+- Risk (level; mitigation): medium — the oracle sends its own confirmation probes
+  (extra requests) and is now the label source. Mitigated by the oracle's
+  fail-closed design (CC-FUZZ-0006), reusing the scope/budget/auth seam for the
+  authenticated sender, and tests: probe-sender adaptation (auth + full response)
+  and an oracle→store→harness end-to-end (findings scored, confidence is the
+  mechanism, not `timing-only`). Updated the store-adapter tests to attempts-only.
+- Deliverables:
+  - [x] Probe senders + `make_probe_sender` — done.
+  - [x] Fuzzer `--store` confirms via the oracle; adapter attempts-only — done.
+  - [x] Tests (probe senders; oracle→harness; adapter attempts-only) — done.
+  - [ ] Same wiring in the generalized harness / automatic pipeline — todo (as the
+    harness is generalized).
+- Effectiveness (assessed 2026-09-21): effective in tests — the oracle's findings
+  are read back and scored by the harness (confidence = mechanism, not
+  timing-only); the adapter writes attempts only. Live confirmation pending a lab.
+  Suite 84/84.
+
 ### CC-FUZZ-0006 — Deterministic oracle implemented (Phase 2 T2.1/T2.2/T2.4) (2026-09-21)
 - Change: built the `fuzzlab/oracle/` package — a class-pluggable deterministic
   confirmer and sole finding-writer. `baseline.py` (median/MAD robust baselines,

@@ -136,12 +136,16 @@ def import_audit(audit_db: str | Path, store: Store, run_id: int) -> dict[str, i
 
 
 def import_fuzz_csv(csv_path: str | Path, store: Store, run_id: int) -> dict[str, int]:
-    """Import fuzzer observations -> attempt rows (+ finding rows for timing hits)."""
-    counts = {"attempt": 0, "finding": 0}
+    """Import fuzzer observations -> `attempt` rows only.
+
+    Findings are no longer written here: the deterministic oracle
+    (`fuzzlab/oracle/`) is the sole writer of `finding` labels, replacing the
+    earlier provisional timing-only findings. The attempt's `reward` still records
+    the fuzzer's timing detection (screening signal) for later ML.
+    """
+    counts = {"attempt": 0}
     with open(csv_path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
-            path = _path(row["target_url"])
-            param = row.get("target_param")
             detected = str(row.get("time_delay_detected", "0")).strip() in ("1", "true", "True")
             features = {
                 "server_response_status": _to_int(row.get("server_response_status")),
@@ -151,23 +155,13 @@ def import_fuzz_csv(csv_path: str | Path, store: Store, run_id: int) -> dict[str
                 "size_delta_bytes": _to_int(row.get("size_delta_bytes")),
                 "repeats": _to_int(row.get("repeats")),
             }
-            cur = store.conn.execute(
+            store.conn.execute(
                 "INSERT INTO attempt (run_id, payload_family, features_json, reward) "
                 "VALUES (?,?,?,?)",
                 (run_id, row.get("payload_family"), json.dumps(features),
                  1.0 if detected else 0.0),
             )
             counts["attempt"] += 1
-            if detected:
-                store.conn.execute(
-                    "INSERT INTO finding (run_id, attempt_id, vuln_class, label, "
-                    "confidence, evidence, url, method, param) "
-                    "VALUES (?,?,?,?,?,?,?,?,?)",
-                    (run_id, int(cur.lastrowid), "sqli", 1, "timing-only",
-                     json.dumps({"latency_delta_seconds": features["latency_delta_seconds"]}),
-                     path, "GET", param),
-                )
-                counts["finding"] += 1
     store.conn.commit()
     return counts
 

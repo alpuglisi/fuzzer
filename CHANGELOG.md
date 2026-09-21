@@ -13,6 +13,13 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 2 build (T2.1 wiring): the **oracle is now the sole finding-writer**. Added
+  `fuzzlab/tools/probesender.py` (authenticated + standalone probe senders adapting
+  tool HTTP to the oracle's `Sender`); the fuzzer's `--store` path confirms its
+  target via the oracle, which writes the `finding`. `store_adapter.import_fuzz_csv`
+  writes attempts only — the provisional timing-only finding path is removed. Added
+  an oracle→store→harness end-to-end test (findings scored; confidence is the
+  mechanism, not `timing-only`). Suite 84/84 green. Change-control: CC-FUZZ-0007.
 - Phase 2 build (T2.1/T2.2/T2.4): implemented the **deterministic oracle** —
   `fuzzlab/oracle/`: a class-pluggable `Oracle` + `ConfirmationStrategy` registry
   (sole finding-writer, fail-closed) with the current lab's mechanisms — M1

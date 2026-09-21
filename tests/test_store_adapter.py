@@ -1,16 +1,15 @@
-"""T0.8: tool outputs consolidate into the unified store; harness scores it.
+"""T0.8: tool outputs consolidate into the unified store.
 
 Builds synthetic native outputs in the exact schemas the tools write, imports
 them via the adapter, and asserts a full run populates page/endpoint/parameter/
-candidate/attempt/finding — then scores the result with the integration harness.
-No live lab needed: the tools' native formats are the contract under test here.
+candidate/attempt. Findings are written by the oracle, not the adapter
+(see test_oracle_harness.py). No live lab needed.
 """
 
 import csv
 import sqlite3
 
 from fuzzlab.core.store import Store
-from fuzzlab.harness import integration
 from fuzzlab.tools import store_adapter
 
 
@@ -99,31 +98,27 @@ def test_full_consolidation_populates_all_tables(tmp_path):
         assert sp["parameter"] == 4          # id, q, id, category
         assert au["candidate"] == 2
         assert fz["attempt"] == 3
-        assert fz["finding"] == 2            # two timing hits
+        assert "finding" not in fz            # findings come from the oracle now
 
         def count(table):
             return store.conn.execute(f"SELECT COUNT(*) c FROM {table}").fetchone()["c"]
 
-        for table in ("page", "endpoint", "parameter", "candidate", "attempt", "finding"):
+        # The adapter populates discovery/candidate/attempt tables; findings are
+        # written by the oracle (see test_oracle_harness.py), not here.
+        for table in ("page", "endpoint", "parameter", "candidate", "attempt"):
             assert count(table) > 0, f"{table} should be populated"
-
-        # The consolidated findings score against the ground truth (both are
-        # real GET SQLi cases -> true positives, no false alarms from these).
-        detections = integration.detections_from_store(store, run_id)
-        keys = {(d.url, d.param, d.vuln_class) for d in detections}
-        assert ("/product.php", "id", "sqli") in keys
-        assert ("/blog_post.php", "id", "sqli") in keys
+        assert count("finding") == 0
 
 
-def test_finding_only_for_detected_hits(tmp_path):
+def test_attempts_recorded_with_detection_reward(tmp_path):
     fuzz_csv = tmp_path / "fuzz.csv"
     _make_fuzz_csv(fuzz_csv)
     with Store(tmp_path / "u.db") as store:
         run_id = store.start_run("fuzzer", "h")
         store_adapter.import_fuzz_csv(fuzz_csv, store, run_id)
-        # 3 attempts, but only the 2 with time_delay_detected=1 become findings.
-        assert store.conn.execute("SELECT COUNT(*) c FROM attempt").fetchone()["c"] == 3
-        findings = store.conn.execute(
-            "SELECT confidence FROM finding").fetchall()
-        assert len(findings) == 2
-        assert all(f["confidence"] == "timing-only" for f in findings)
+        # 3 attempts; the 2 timing hits carry reward 1.0, the benign one 0.0.
+        rewards = [r["reward"] for r in store.conn.execute(
+            "SELECT reward FROM attempt ORDER BY id").fetchall()]
+        assert sorted(rewards) == [0.0, 1.0, 1.0]
+        # The adapter writes no findings (oracle is the sole finding-writer).
+        assert store.conn.execute("SELECT COUNT(*) c FROM finding").fetchone()["c"] == 0

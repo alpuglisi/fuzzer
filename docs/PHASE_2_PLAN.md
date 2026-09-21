@@ -26,10 +26,15 @@ Build started. Done so far:
 - **T2.2** — median/MAD robust baselines.
 - **T2.4** — sink-context typing + break-out signatures.
 
-Next: route the fuzzer/harness confirmation through the oracle (replace timing-only
-findings); then T2.5 fingerprint, T2.6 MinHash dedup, T2.3 rules-as-data +
-negatives, T2.7 hybrid crawl, T2.9 category selection, T2.10 fail-safe, T2.8
-request-efficiency measurement (live). 81/81 tests green.
+- **T2.1** (wiring) — the oracle is now the **sole finding-writer**: the fuzzer's
+  `--store` path confirms its target via the oracle (probe senders in
+  `fuzzlab/tools/probesender.py`); `store_adapter.import_fuzz_csv` writes attempts
+  only; the provisional timing-only finding path is removed. An oracle→harness test
+  scores oracle findings.
+
+Next: T2.5 fingerprint, T2.6 MinHash dedup, T2.3 rules-as-data + negatives, T2.7
+hybrid crawl, T2.9 category selection, T2.10 fail-safe, T2.8 request-efficiency
+measurement (live). 84/84 tests green.
 
 ## Principles (this phase)
 

@@ -255,11 +255,22 @@ def main(argv=None):
         if args.store:
             from fuzzlab.core.config import load_config
             from fuzzlab.core.store import Store
+            from fuzzlab.oracle import Candidate, Oracle
             from fuzzlab.tools import store_adapter
+            from fuzzlab.tools.probesender import make_probe_sender
             with Store(args.store) as store:
                 run_id = store.start_run("fuzzer", load_config().hash())
                 counts = store_adapter.import_fuzz_csv(args.output, store, run_id)
-            get_logger("fuzzer").info("consolidated into store", extra=counts)
+                # Deterministic confirmation: the oracle is the sole finding-writer,
+                # replacing the fuzzer's provisional timing-only findings.
+                probe = make_probe_sender(args.url, args.identity, args.timeout)
+                oracle = Oracle(store=store, run_id=run_id)
+                verdict = oracle.confirm(
+                    Candidate(url=args.url, param=args.param, vuln_class="sqli"), probe)
+            get_logger("fuzzer").info(
+                "consolidated into store",
+                extra={**counts, "confirmed": bool(verdict),
+                       "mechanism": verdict.mechanism if verdict else None})
     except KeyboardInterrupt:
         print("\n[-] Interrupted by user.")
     except Exception as exc:  # noqa: BLE001 - top-level guard
