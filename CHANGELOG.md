@@ -14,6 +14,12 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Fix (BUG-0019, tooling/process): PA-0019 (BUG-0018's fix) was an advisory rule with no
+  enforcement path independent of remembering to apply it — the same recall failure it was
+  meant to prevent. Added a Claude Code Stop hook, `.claude/hooks/check-error-log-bookkeeping.sh`
+  (wired via `.claude/settings.json`), that inspects this turn's not-yet-pushed changes and
+  blocks the session from ending when they look incident-shaped but `ERROR_LOG.md` wasn't
+  touched. New rule PA-0020, superseding PA-0019's enforcement; see `docs/bugs/BUG-0019-*`.
 - Fix (BUG-0018, process): the sqlmap/commix oracle-spike findings (below) were fully
   written up in their spike documents but not added to `ERROR_LOG.md` until the user asked
   for it. RCA found reliance on a finding's narrative framing to decide whether the

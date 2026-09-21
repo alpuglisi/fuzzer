@@ -18,6 +18,27 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — PA-0019 was advisory-only, not mechanically enforced (BUG-0019)
+
+- **Symptom:** asked to make PA-0019 (BUG-0018's fix) actually prevent recurrence rather
+  than just document the expectation, inspection showed PA-0019 has no enforcement path
+  other than my own end-of-turn recall of `docs/PREVENTIVE_ACTIONS.md` — the same recall
+  step BUG-0018 showed already fails silently.
+- **Root cause:** a preventive action whose root cause is my own missed/inconsistent
+  self-check cannot be fixed by a written rule addressed to that same self-check; it needs
+  an enforcement path independent of my remembering to apply it. Full RCA in
+  `docs/bugs/BUG-0019-*`.
+- **Remediation:** added `.claude/hooks/check-error-log-bookkeeping.sh`, wired as a Stop
+  hook in `.claude/settings.json`. It inspects this turn's not-yet-pushed changes (working
+  tree + unpushed commits) and blocks the session from stopping (once per stop cycle, via
+  the same `stop_hook_active` recursion guard as `~/.claude/stop-hook-git-check.sh`) when
+  they look incident-shaped (a new/modified `docs/spikes/`/`docs/bugs/` doc, or `fail`/
+  `hang`/`workaround`/`killed`/`timed out`/`crash`/`broken`/`regress` added to the diff) but
+  this log wasn't touched. Pipe-tested against four synthetic scenarios; committed to the
+  repo so it applies in future sessions/clones, not just this container. Added PA-0020
+  (strengthens/supersedes PA-0019).
+- **Status:** Fixed
+
 ## 2026-09-21 — oracle-spike break/fix findings not logged to ERROR_LOG until prompted (BUG-0018)
 
 - **Symptom:** the sqlmap 401/403-handling finding (Spike 001) and the commix ambient-

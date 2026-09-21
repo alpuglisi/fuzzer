@@ -141,3 +141,15 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   hitting unexpected behavior, re-read the relevant bookkeeping artifacts' own scope lines
   as a checklist item, not as background context absorbed once at session start. (from
   BUG-0018)
+- **PA-0020** — When a preventive action's root cause is my own missed or inconsistent
+  self-check (rather than a defect in project code, tests, or a process document), a
+  written rule alone does not count as prevention — it must also have an enforcement path
+  that runs independent of my remembering to apply it (in this project, a Claude Code hook
+  under `.claude/settings.json`/`.claude/hooks/` that inspects actual session state and
+  blocks or warns mechanically). This strengthens/supersedes PA-0019, which was itself an
+  instance of the gap it named: an advisory rule addressed to the same fallible process it
+  targets. Concretely, `.claude/hooks/check-error-log-bookkeeping.sh` now runs as a Stop
+  hook and blocks the session from ending when this turn's not-yet-pushed changes look
+  incident-shaped (a new/modified `docs/spikes/` or `docs/bugs/` doc, or `fail`/`hang`/
+  `workaround`/`killed`/`timed out`/`crash`/`broken`/`regress` added to the diff) but
+  `ERROR_LOG.md` was not touched. (from BUG-0019)
