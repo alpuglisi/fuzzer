@@ -1,0 +1,63 @@
+# Example Phase-0 manifest — scaffold only.
+#
+# Proves the manifest schema (lab/schemas/manifest.schema.json) and the
+# verdict engine (fuzzlab/labgen/verdict.py) against shapes sanity-checked
+# from Ryder's Puppy Fort Factory's real pages
+# (puppy-fort-factory/VULNERABILITIES.md). This is NOT a migration of the
+# real app: cell IDs are prefixed LABGEN-EX- to keep them out of the real
+# PFF- ground-truth namespace, and this manifest is not wired to any build
+# that touches puppy-fort-factory/. Writing the real Phase-0 manifest (one
+# manifest describing the current ~30 PHP pages, byte-identical
+# reproduction) is a separate, larger follow-up task — see
+# docs/LAB_PHASE_0_PLAN.md's own Phase-0 scope note.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Mirrors product.php's ?id= (VULNERABILITIES.md): raw concatenation into
+  # a SQL numeric literal position. No transform at all -> VULNERABLE.
+  - cell_id: LABGEN-EX-0001
+    class: sqli
+    stack_profile: php_current
+    route: { method: GET, path: /example/product.php }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  # The secure twin of the cell above: the only difference is the
+  # transform region (param_bind instead of raw_concat) — the minimal-pair
+  # invariant CR-LAB-0001 §3 wants mechanically enforced from Phase 1 on;
+  # Phase 0 just needs the shape to be expressible.
+  - cell_id: LABGEN-EX-0002
+    class: sqli
+    stack_profile: php_current
+    route: { method: GET, path: /example/product.php }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
+
+  # Mirrors profile.php's stored bio field, but with the escaping-context
+  # mismatch CR-LAB-0001 flags as the highest value/hour Phase-1 item: an
+  # HTML-entity-escaping transform applied to an *unquoted attribute* sink
+  # rather than an HTML-body sink -> still VULNERABLE (D20 binary verdict),
+  # surfaced via a `difficulty` tier instead of a third verdict value.
+  - cell_id: LABGEN-EX-0003
+    class: xss
+    stack_profile: php_current
+    route: { method: GET, path: /example/profile.php }
+    sink_context:
+      family: html_attribute_unquoted
+      required_neutralizations: [html_tag_break]
+    transform: [html_entity_escape]
+
+  # The same escaping op is fully sufficient once the sink is an HTML body
+  # position instead -> SECURE.
+  - cell_id: LABGEN-EX-0004
+    class: xss
+    stack_profile: php_current
+    route: { method: GET, path: /example/profile.php }
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: [html_entity_escape]

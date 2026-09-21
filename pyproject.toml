@@ -18,6 +18,11 @@ dependencies = [
     "requests>=2.31,<3",
     "beautifulsoup4>=4.12,<5",
     "jsonschema>=4.20,<5",
+    # Lab-generator foundation (component LAB, `fuzzlab/labgen/`): manifests
+    # and the safety matrix are hand-authored YAML for readability; PyYAML is
+    # imported directly by fuzzlab/labgen/schema.py and verdict.py (PA-0005 —
+    # every runtime-imported library must be a declared dependency).
+    "PyYAML>=6.0,<7",
     # Credential store (D12): OS keyring + encrypted-file headless fallback.
     # The headless encrypted-file backend is implemented on `cryptography`
     # (Fernet), not PyCrypto; declared explicitly since we import it directly.

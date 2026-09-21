@@ -1,0 +1,100 @@
+# fuzzlab lab-generator safety matrix — v1
+#
+# Append-only, like this project's change-control logs (see
+# docs/PREVENTIVE_ACTIONS.md's own convention): add a new entry and bump
+# `version` for a breaking change to an *existing* (op, sink_family) pair;
+# a brand-new op or sink_family is just a new entry under the same version.
+# Validated against lab/schemas/safety_matrix.schema.json by
+# fuzzlab.labgen.verdict.load_safety_matrix().
+#
+# This is a Phase 0 scaffold: the handful of entries below is deliberately
+# small, sanity-checked against a couple of Ryder's Puppy Fort Factory's real
+# pages (puppy-fort-factory/VULNERABILITIES.md) to prove the shape is
+# expressive enough for that lab's actual vulnerability shapes — it is NOT a
+# migration of those pages (that is explicitly out of scope for this change;
+# see the LAB change-control entry for this delivery).
+#
+# Concern-ID vocabulary used below (informative, not schema-enforced yet):
+#   sql_syntax_break — attacker input can terminate/alter SQL syntax
+#   html_tag_break    — attacker input can open a new HTML tag/context
+#   error_based_disclosure — a pipeline leaks raw query/error text on failure
+version: 1
+entries:
+  # --- SQL sinks -----------------------------------------------------
+  # Raw string concatenation: no transform at all. This is the baseline
+  # vulnerable shape behind product.php's ?id= (VULNERABILITIES.md).
+  - op: raw_concat
+    sink_family: sql_string_literal
+    effect: no_effect
+  - op: raw_concat
+    sink_family: sql_numeric_literal
+    effect: no_effect
+
+  # Parameterized query / prepared statement: fully neutralizes syntax
+  # breakout in either a quoted-string or unquoted-numeric SQL position.
+  - op: param_bind
+    sink_family: sql_string_literal
+    effect: neutralises
+    neutralizes: [sql_syntax_break]
+  - op: param_bind
+    sink_family: sql_numeric_literal
+    effect: neutralises
+    neutralizes: [sql_syntax_break]
+
+  # A naive quote-stripping filter (removes literal ' only): reduces but
+  # does not fully close the string-literal escape (e.g. a backslash- or
+  # encoding-based bypass survives it) — the D20 "partial" case: this stays
+  # VULNERABLE, just harder, never a third verdict value.
+  - op: strip_quotes_naive
+    sink_family: sql_string_literal
+    effect: partial
+    neutralizes: [sql_syntax_break]
+
+  # A verbose error handler that echoes the raw failing query on exception:
+  # even layered after a safe param_bind pipeline, this reintroduces a new
+  # concern (error-based disclosure) — the "introduces" mechanic.
+  - op: verbose_error_leak
+    sink_family: sql_string_literal
+    effect: introduces
+    introduces: [error_based_disclosure]
+
+  # --- HTML sinks ------------------------------------------------------
+  # No escaping: the baseline vulnerable shape behind profile.php's stored
+  # bio field (VULNERABILITIES.md).
+  - op: raw_concat
+    sink_family: html_body
+    effect: no_effect
+  - op: raw_concat
+    sink_family: html_attribute_unquoted
+    effect: no_effect
+
+  # htmlspecialchars() in an HTML body context: fully neutralizes tag
+  # breakout.
+  - op: html_entity_escape
+    sink_family: html_body
+    effect: neutralises
+    neutralizes: [html_tag_break]
+
+  # The same escaping function, but the sink is an *unquoted* HTML
+  # attribute: htmlspecialchars() does not escape spaces/backticks, so the
+  # attribute boundary can still be broken — an escaping-context mismatch
+  # (CR-LAB-0001's "escaping-context-mismatch XSS", the highest value/hour
+  # item flagged for Phase 1). This is a "partial" entry: still VULNERABLE,
+  # just harder — exactly the D20 binary-verdict shape.
+  - op: html_entity_escape
+    sink_family: html_attribute_unquoted
+    effect: partial
+    neutralizes: [html_tag_break]
+
+  # The same escaping function is fully sufficient once the attribute is
+  # quoted.
+  - op: html_entity_escape
+    sink_family: html_attribute_quoted
+    effect: neutralises
+    neutralizes: [html_tag_break]
+
+  # Applying an SQL-oriented op at an HTML sink does nothing for HTML —
+  # exercises the "wrong transform for this family" no_effect case.
+  - op: param_bind
+    sink_family: html_body
+    effect: no_effect

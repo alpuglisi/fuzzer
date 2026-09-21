@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fuzzlab.local/schemas/manifest.schema.json",
+  "title": "fuzzlab lab-generator manifest (Phase 0 foundation)",
+  "description": "Per CR-LAB-0001 §3/§6 and D20: `transform` is an ordered pipeline of ops (never a single enum), and `sink_context` is a structured object (a family plus the set of neutralizations a transform must satisfy to be SECURE for that family) rather than a bare string. The verdict itself is never asserted here — it is derived by fuzzlab.labgen.verdict.verdict() from a cell's (transform, sink_context) against a versioned safety matrix. Phase 0's manifest lists cells explicitly (one axis level each); covering-array expansion (CR-LAB-0001 §3, T-LAB0.3) is later work and out of this schema's scope.",
+  "type": "object",
+  "required": ["manifest_version", "safety_matrix_version", "cells"],
+  "additionalProperties": false,
+  "properties": {
+    "manifest_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Version of this manifest schema/shape. Independent of safety_matrix_version so an old manifest keeps meaning what it meant (CR-LAB-0001 §5 risk mitigation)."
+    },
+    "safety_matrix_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Which safety-matrix version this manifest's cells must be derived against. A verdict() caller pins this so old corpora stay re-derivable under old rules if the matrix changes later."
+    },
+    "cells": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/cell" }
+    }
+  },
+  "$defs": {
+    "sink_context": {
+      "type": "object",
+      "required": ["family", "required_neutralizations"],
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The structural context the tainted value reaches, e.g. sql_string_literal, sql_numeric_literal, html_body, html_attribute_quoted, html_attribute_unquoted. Never a vulnerability-class name (that lives in the cell's `class` field, which is generator-input only and is never emitted into served artifacts)."
+        },
+        "required_neutralizations": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "description": "Concern IDs (e.g. sql_syntax_break, html_tag_break) that a pipeline must fully neutralize for this sink_context to be SECURE."
+        }
+      }
+    },
+    "pipeline": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Ordered transform ops applied to the tainted value before it reaches the sink (CR-LAB-0001 §3: transform is a pipeline, not a single enum). Empty array = raw/unmediated value (the baseline vulnerable case)."
+    },
+    "route": {
+      "type": "object",
+      "required": ["method", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+        "path": { "type": "string", "minLength": 1 }
+      }
+    },
+    "cell": {
+      "type": "object",
+      "required": ["cell_id", "class", "stack_profile", "route", "sink_context", "transform"],
+      "additionalProperties": false,
+      "properties": {
+        "cell_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable identifier for this cell within the manifest. Generator-internal; the emitted/served artifact's own IDs (labels.json case_id, etc.) stay the opaque contract FR-LAB-2 already requires — this schema does not weaken that."
+        },
+        "class": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Vulnerability class this cell demonstrates (generator-input only, e.g. for the safety matrix / pattern-corpus bookkeeping and for gates like the fingerprint-independence checks in later phases). Never leaked into a served URL/filename/parameter name — enforced by the name-leak scanner build gate (NFR-LAB-no-leak), which runs against the *generated* artifact tree, not this manifest."
+        },
+        "stack_profile": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Which stack/emitter this cell targets, e.g. php_current (Phase 0's only emitter)."
+        },
+        "route": { "$ref": "#/$defs/route" },
+        "sink_context": { "$ref": "#/$defs/sink_context" },
+        "transform": { "$ref": "#/$defs/pipeline" },
+        "nuisance": {
+          "type": "object",
+          "description": "Opaque bag of nuisance-axis values (naming, whitespace, comment style, etc.) that must not affect the derived verdict. Reserved for the covering-array/nuisance-independence work in later phases; unused by Phase 0's verdict derivation."
+        }
+      }
+    }
+  }
+}

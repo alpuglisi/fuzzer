@@ -1,0 +1,58 @@
+{
+  "html_entity_escape_body": {
+    "difficulty": null,
+    "missing": [],
+    "safety_matrix_version": 1,
+    "satisfied": [
+      "html_tag_break"
+    ],
+    "verdict": "SECURE"
+  },
+  "html_entity_escape_unquoted_attr": {
+    "difficulty": "easy",
+    "missing": [
+      "html_tag_break"
+    ],
+    "safety_matrix_version": 1,
+    "satisfied": [],
+    "verdict": "VULNERABLE"
+  },
+  "no_transform_sql": {
+    "difficulty": "trivial",
+    "missing": [
+      "sql_syntax_break"
+    ],
+    "safety_matrix_version": 1,
+    "satisfied": [],
+    "verdict": "VULNERABLE"
+  },
+  "param_bind_sql": {
+    "difficulty": null,
+    "missing": [],
+    "safety_matrix_version": 1,
+    "satisfied": [
+      "sql_syntax_break"
+    ],
+    "verdict": "SECURE"
+  },
+  "param_bind_then_verbose_error_leak": {
+    "difficulty": "easy",
+    "missing": [
+      "error_based_disclosure"
+    ],
+    "safety_matrix_version": 1,
+    "satisfied": [
+      "sql_syntax_break"
+    ],
+    "verdict": "VULNERABLE"
+  },
+  "strip_quotes_naive_sql": {
+    "difficulty": "easy",
+    "missing": [
+      "sql_syntax_break"
+    ],
+    "safety_matrix_version": 1,
+    "satisfied": [],
+    "verdict": "VULNERABLE"
+  }
+}

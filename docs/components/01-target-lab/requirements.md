@@ -1,6 +1,6 @@
 # Target Lab and Ground Truth — Requirement Specification
 
-Component code: **LAB** · Status: `[built app; planned instrumentation + generator]`
+Component code: **LAB** · Status: `[built app; generator Phase 0 foundation built (schema, verdict engine, determinism/name-leak gates, patterns/ scaffold); rest planned]`
 · Last updated: 2026-09-21
 
 Related: `ARCHITECTURE.md` #1; `DECISIONS_AND_ROADMAP.md` (D7, D8, D9, D10);
@@ -69,6 +69,42 @@ and measured. Authorized, lab-only.
   `NFR-LAB-label-accuracy`'s "labels derived, not hand-asserted" and this
   project's existing `fuzzlab.oracle` philosophy of never inferring a
   positive from the absence of a negative signal, PA-0007).
+- **FR-LAB-12** (Lab track, Phase 0) The manifest schema represents a cell's
+  `transform` as an ordered pipeline of ops (never a single enum) and its
+  `sink_context` as a structured object — a family plus the set of concerns a
+  pipeline must fully neutralize — never a bare string. Validated against
+  `lab/schemas/manifest.schema.json`. (`CR-LAB-0001` §3, `CC-LAB-0016`)
+- **FR-LAB-13** (Lab track, Phase 0) `fuzzlab.labgen.verdict.verdict()` is a
+  pure function of `(pipeline, sink_context, safety_matrix)` implementing the
+  D20 binary verdict: VULNERABLE or SECURE only, with a `partial` effect
+  raising a `difficulty` tier rather than a third verdict value. The safety
+  matrix (`lab/safety_matrix.yaml`) is an open, versioned, append-only
+  registry of `(op, sink_family) -> effect` entries; a caller pins
+  `safety_matrix_version` so a corpus generated under an older matrix stays
+  re-derivable under that matrix's rules after later, additive changes.
+  Verdict output for a fixed matrix version is snapshot-tested and must not
+  silently drift. (D20, `CR-LAB-0001` §3/§5, `CC-LAB-0016`)
+- **FR-LAB-14** (Lab track, Phase 0) A per-cell sub-seed is derived
+  deterministically from `(root_seed, cell_id, transform, sink_context,
+  stack_profile)`; canonical serialization of generated/label-contract-style
+  output is byte-identical across repeated calls with equal input (no floats,
+  sorted keys, no third-party formatter). A regenerate-and-diff build gate
+  runs the generator twice from the same manifest+seed and fails the build on
+  any byte difference. (NFR-LAB-reproducible, `CR-LAB-0001` §3, `CC-LAB-0016`)
+- **FR-LAB-15** (Lab track, Phase 0) A name-leak scanner build gate fails the
+  build if any generated artifact's URL, filename, or parameter name contains
+  a vulnerability-class name, validated against a should-flag/should-not-flag
+  fixture set (including known word-boundary collisions) so the scanner's
+  no-false-negative property is established by testing, not code review; the
+  scanner also fails the build on a crash, not just a hit. (NFR-LAB-no-leak,
+  `CC-LAB-0016`)
+- **FR-LAB-16** (Lab track) The `patterns/` provenance corpus
+  (`lab/patterns/`) is a one-directional index (`cell_id -> [card_id, ...]`
+  in `provenance.yaml`); a manifest cell never carries a card reference, and
+  no card ID or `pattern://`-style string may appear in a manifest or in the
+  verdict module's source — mechanically enforced. Each card validates
+  against `lab/schemas/pattern_card.schema.json` and its `class` must exist
+  in the versioned taxonomy. (`CR-LAB-0001` Addendum A, `CC-LAB-0016`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
@@ -104,6 +140,12 @@ None (it is the system under test).
 - Runtime env self-check passes against the env-profile.
 - (Lab track) generate-twice-and-diff is empty; the contamination sweep finds
   nothing undeclared.
+- (Lab track, Phase 0 foundation — met) manifest and safety-matrix files
+  validate against their JSON Schemas; `verdict()` matches its snapshot;
+  `fuzzlab.labgen.gates.regenerate_and_diff()` passes for the example
+  manifest; the name-leak scanner passes its should-flag/should-not-flag
+  fixture set; every `patterns/` card validates and every `provenance.yaml`
+  reference resolves. See `tests/test_labgen_*.py`.
 
 ## 8. Open questions
 - Database isolation strategy (per-run schema, dump reload, or rollback).

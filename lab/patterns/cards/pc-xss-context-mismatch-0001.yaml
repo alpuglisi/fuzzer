@@ -1,0 +1,20 @@
+schema_version: 1
+id: pc-xss-context-mismatch-0001
+class: xss_context_mismatch
+sink_family: html_attribute_unquoted
+stack: php
+root_cause: >
+  A template helper HTML-entity-escaped a user-controlled value before
+  writing it into an attribute position, which looked correct in review.
+  The attribute itself was rendered without surrounding quotes by an older
+  part of the template, so entity escaping (which protects against `<`,
+  `>`, and `&`) never covered the whitespace/backtick characters that
+  actually terminate an unquoted attribute, leaving the context
+  exploitable despite the escaping call being present and "correct" in
+  isolation.
+source_url: https://github.com/advisories/GHSA-4444-4444-4444
+published_date: "2025-01-20"
+confidence: observed
+notes: >
+  Illustrative placeholder source_url (Phase 0 scaffold card, not yet
+  triaged against a real OSV/GHSA advisory).

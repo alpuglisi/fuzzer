@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fuzzlab.local/schemas/safety_matrix.schema.json",
+  "title": "fuzzlab lab-generator safety matrix (CR-LAB-0001 §3/§6, D20 binary verdict)",
+  "description": "An open, versioned registry of (op, sink_family) -> effect entries. Adding a transform op, a sink family, or a vulnerability class is appending an entry and bumping `version` — never editing an existing entry in place (append-only, like this project's change-control logs). `effect: partial` is the D20 binary-verdict mechanism: a partially-neutralized case stays VULNERABLE (never a third verdict value) and instead feeds a difficulty tier.",
+  "type": "object",
+  "required": ["version", "entries"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "required": ["op", "sink_family", "effect"],
+      "additionalProperties": false,
+      "properties": {
+        "op": { "type": "string", "minLength": 1 },
+        "sink_family": { "type": "string", "minLength": 1 },
+        "effect": {
+          "enum": ["neutralises", "partial", "no_effect", "introduces"],
+          "description": "neutralises: fully satisfies the listed concerns for this sink_family. partial: reduces but does not fully satisfy them (feeds the VULNERABLE difficulty tier, never a third verdict value — D20). no_effect: this op does nothing for this sink_family (e.g. an HTML-escaping op against a SQL sink). introduces: this op adds new required-neutralization concerns not previously required (e.g. a debug/error-leak op reintroducing exposure after an otherwise-safe pipeline)."
+        },
+        "neutralizes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "description": "Concern IDs this op addresses for this sink_family. Required (non-empty) when effect is neutralises or partial; ignored otherwise."
+        },
+        "introduces": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true,
+          "description": "Concern IDs newly required because of this op. Required (non-empty) when effect is introduces; ignored otherwise."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "effect": { "const": "neutralises" } } },
+          "then": { "required": ["neutralizes"], "properties": { "neutralizes": { "minItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "effect": { "const": "partial" } } },
+          "then": { "required": ["neutralizes"], "properties": { "neutralizes": { "minItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "effect": { "const": "introduces" } } },
+          "then": { "required": ["introduces"], "properties": { "introduces": { "minItems": 1 } } }
+        }
+      ]
+    }
+  }
+}

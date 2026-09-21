@@ -1,11 +1,15 @@
 """Lab-generator support code (LAB component, generator-build-time tooling).
 
-Kept minimal: re-exports only ``oracle_wrapper``'s own public API. Other
-modules under this package (e.g. the manifest schema/verdict/gates being
-built concurrently) publish their own public names here independently.
+Two independently-developed pieces of work landed here concurrently: the
+manifest schema / verdict engine / build gates (Phase 0 foundation, D20 —
+``schema``, ``verdict``, ``subseed``, ``gates``, ``denylist``) and the
+sqlmap/commix oracle wrapper (``oracle_wrapper``, generator-build-time
+security-assertion tooling, unrelated to and never imported by
+``fuzzlab.oracle``). Neither depends on the other. This re-exports both.
 """
 
-from fuzzlab.labgen.oracle_wrapper import (
+from . import denylist, gates, schema, subseed, verdict
+from .oracle_wrapper import (
     CommandInjectionOracleRequest,
     OracleRunResult,
     OracleSafetyError,
@@ -13,7 +17,7 @@ from fuzzlab.labgen.oracle_wrapper import (
     ParamLocation,
     SqlInjectionOracleRequest,
     ToolNotFoundError,
-    Verdict,
+    Verdict as OracleVerdictOutcome,
     VulnClass,
     assert_loopback,
     default_runner,
@@ -24,6 +28,11 @@ from fuzzlab.labgen.oracle_wrapper import (
 )
 
 __all__ = [
+    "denylist",
+    "gates",
+    "schema",
+    "subseed",
+    "verdict",
     "CommandInjectionOracleRequest",
     "OracleRunResult",
     "OracleSafetyError",
@@ -31,7 +40,7 @@ __all__ = [
     "ParamLocation",
     "SqlInjectionOracleRequest",
     "ToolNotFoundError",
-    "Verdict",
+    "OracleVerdictOutcome",
     "VulnClass",
     "assert_loopback",
     "default_runner",
