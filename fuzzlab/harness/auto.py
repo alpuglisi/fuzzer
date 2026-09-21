@@ -45,6 +45,21 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
         else:
             skipped.append((path, gp.method, gp.param,
                             "client-only/DOM (needs browser execution, M6)"))
+
+    # Stored XSS lives in the *cases* (observe url + source_url store endpoint), not the
+    # enumerated points. Audit it only with a browser (M6): plant at source_url, observe.
+    for case in ground_truth.cases:
+        if case.vuln_class != "xss-stored" or not case.source_url:
+            continue
+        opath = case.url if case.url.startswith("/") else "/" + case.url
+        spath = case.source_url if case.source_url.startswith("/") else "/" + case.source_url
+        if browser_available:
+            points.append(InjectionPoint(
+                url=base + opath, param=case.param, method=case.method,
+                location=case.location, store_url=base + spath, store_param=case.param))
+        else:
+            skipped.append((opath, case.method, case.param,
+                            "stored XSS (needs browser execution, M6)"))
     return points, skipped
 
 

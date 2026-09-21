@@ -21,6 +21,9 @@ class InjectionPoint:
     method: str = "GET"
     location: str = "query"
     sink_context: str | None = None
+    # Stored-XSS: where the payload is planted before it renders on `url` (M6).
+    store_url: str | None = None
+    store_param: str | None = None
 
 
 def evaluate(points: list[InjectionPoint], store, run_id: int,
@@ -48,13 +51,16 @@ def evaluate(points: list[InjectionPoint], store, run_id: int,
             )
             counts["evaluation"] += 1
             if fired:
+                evidence = {"rule_id": rule.id, "category": rule.category,
+                            "url": point.url, "param": point.param,
+                            "method": point.method, "location": point.location}
+                if point.store_url:                      # stored-XSS store endpoint (M6)
+                    evidence["store_url"] = point.store_url
+                    evidence["store_param"] = point.store_param or point.param
                 store.conn.execute(
                     "INSERT INTO candidate (run_id, rule, evidence, sink_context) "
                     "VALUES (?,?,?,?)",
-                    (run_id, rule.transaction_type,
-                     json.dumps({"rule_id": rule.id, "category": rule.category,
-                                 "url": point.url, "param": point.param,
-                                 "method": point.method, "location": point.location}),
+                    (run_id, rule.transaction_type, json.dumps(evidence),
                      point.sink_context),
                 )
                 counts["candidate"] += 1

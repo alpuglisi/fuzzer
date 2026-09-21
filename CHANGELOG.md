@@ -13,6 +13,13 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Stored-XSS auto-wiring: `auto` now emits the stored-XSS observe point from the
+  ground-truth *cases* (the enumerated points file lacks `source_url`), carrying the
+  store endpoint via `InjectionPoint.store_url`/`store_param` (new) into the candidate;
+  `StoredXssStrategy` plants at the store endpoint and observes the render page. With
+  `--browser`, `profile.php` stored XSS (via `edit_profile.php`) is confirmed as
+  `xss-stored` — closing the last DOM/stored detection gap. +2 tests (162 passed / 2
+  skipped). Change-control: CC-FUZZ-0014, CC-AUD-0013.
 - Web control panel (D11): built out `fuzzlab web` into a real dashboard. Added
   `fuzzlab/web/results.py` (store-backed `list_runs`/`run_detail`) and expanded the
   app with a **runs table**, **run-detail** views (`/runs/{id}` HTML + `/api/runs[/{id}]`)

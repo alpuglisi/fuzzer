@@ -156,6 +156,38 @@ def test_run_auto_with_browser_confirms_dom_points(tmp_path):
         assert "xss-dom" in classes                       # M6 confirmed the DOM XSS
 
 
+def test_run_auto_stored_xss_with_browser(tmp_path):
+    from fuzzlab.oracle.browser import FakeBrowserExecutor
+    gt = contract.load(GT_DIR)
+    # Fire only for the stored flow: a store step, observed on the render page.
+    browser = FakeBrowserExecutor(
+        vulnerable=lambda req: req.store is not None and "/profile.php" in req.url)
+    with Store(tmp_path / "u.db") as store:
+        run_id = store.start_run("auto", "h")
+        _seed_crawl(store, run_id)
+        result = run_auto(base_url="http://localhost", store=store, run_id=run_id,
+                          sender=AutoSender(), mode="automatic", ground_truth=gt,
+                          points_source="ground-truth", browser=browser)
+        row = store.conn.execute(
+            "SELECT url, param, method FROM finding "
+            "WHERE vuln_class='xss-stored' AND run_id=?", (run_id,)).fetchone()
+        assert row is not None                            # stored XSS auto-wired + confirmed
+        assert row["url"] == "/profile.php" and row["param"] == "bio"
+        assert result.report is not None and result.report.fp == 0
+
+
+def test_points_from_ground_truth_stored_needs_browser():
+    gt = contract.load(GT_DIR)
+    # No browser: the stored observe point is reported as a skipped gap, not audited.
+    points, skipped = points_from_ground_truth(gt, "http://h", browser_available=False)
+    assert ("/profile.php", "bio") in {(p, pm) for p, _m, pm, _r in skipped}
+    assert not any(p.url.endswith("/profile.php") for p in points)
+    # With a browser: it is audited (a point carrying the store endpoint).
+    points, _ = points_from_ground_truth(gt, "http://h", browser_available=True)
+    stored = [p for p in points if p.url.endswith("/profile.php")]
+    assert stored and stored[0].store_url == "http://h/edit_profile.php"
+
+
 def test_run_auto_no_ground_truth_requires_categories(tmp_path):
     with Store(tmp_path / "u.db") as store:
         run_id = store.start_run("auto", "h")

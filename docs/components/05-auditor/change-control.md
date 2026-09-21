@@ -3,6 +3,19 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0013 — InjectionPoint carries stored-XSS store endpoint (2026-09-21)
+- Change: `audit.InjectionPoint` gained optional `store_url`/`store_param`, and the
+  engine writes them into the candidate evidence when set, so a stored-XSS observe
+  point can carry the endpoint where its payload is planted (supports CC-FUZZ-0014).
+- Impact (other components / project): lets the pipeline build a stored-XSS
+  `Candidate`; no schema change (evidence is JSON), GET/query behavior unchanged.
+- Risk (level; mitigation): low — additive fields. Covered by the auto stored-XSS
+  tests. Suite 162 passed / 2 skipped.
+- Deliverables:
+  - [x] `store_url`/`store_param` on InjectionPoint + evidence — done.
+- Effectiveness (assessed 2026-09-21): effective — the pipeline reconstructs the store
+  endpoint and the oracle plants there.
+
 ### CC-AUD-0012 — R-XSS-REFLECT also nominates on `fragment` (DOM XSS) (2026-09-21)
 - Change: added `fragment` to `R-XSS-REFLECT`'s `location_in`, so URL-fragment
   parameters (client-side DOM sinks, e.g. `reviews.php#author`) get an XSS candidate

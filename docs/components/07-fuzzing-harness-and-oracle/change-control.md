@@ -3,6 +3,31 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0014 — Stored-XSS auto-wiring (source_url → store endpoint) (2026-09-21)
+- Change: `auto`'s ground-truth sourcing now also emits **stored-XSS** observe points,
+  taken from the ground-truth *cases* (`vuln_class=xss-stored` with a `source_url`),
+  which the enumerated *points* file does not carry. Each becomes an `InjectionPoint`
+  on the render URL with `store_url`/`store_param` set to the case's `source_url`
+  (CC-AUD-0013 added those fields + their candidate-evidence); the pipeline threads
+  them into the `Candidate`, and `StoredXssStrategy` plants the payload at the store
+  endpoint and observes the render page (M6). Audited only with a browser; without one
+  the stored point is reported as a skipped gap.
+- Impact (other components / project): closes the last DOM/stored detection gap in
+  `auto` — with `--browser`, `profile.php` stored XSS (planted via `edit_profile.php`)
+  is confirmed as `xss-stored` and scores against PFF-0005. No effect without a browser.
+- Risk (level; mitigation): low/medium — stored probing writes to the store endpoint
+  (state-changing; reset the lab). Oracle stays fail-closed (no FP). Live stored XSS on
+  an auth-gated store endpoint needs the browser executor to carry the session — an
+  on-host wiring detail (pass `--identity`'s header to the executor). Mitigated by tests
+  (`tests/test_auto.py`: stored confirmed with a store-scoped fake, fp=0; store point
+  present only with a browser, carrying the store endpoint). Suite 162 passed / 2 skipped.
+- Deliverables:
+  - [x] Stored-XSS observe points from cases; `InjectionPoint` store fields + evidence — done.
+  - [x] Tests (stored confirmed via browser; browser-gated point) — done.
+  - [ ] Live: pass the authenticated session to the browser executor for the store step — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — the stored point is wired
+  from the contract and confirmed as `xss-stored`; live run needs the browser + session.
+
 ### CC-FUZZ-0013 — M6 browser execution: stored + DOM XSS (2026-09-21)
 - Change: added the browser-execution mechanism (M6). New `fuzzlab/oracle/browser.py`
   seam — `BrowserExecutor` protocol, `ExecRequest`/`StoreStep`/`ExecObservation`, a

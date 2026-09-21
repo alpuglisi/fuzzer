@@ -49,9 +49,10 @@ it can't yet confirm. These are scoped capabilities, not bugs:
   behind an injected `BrowserExecutor`, offline-tested. Live pieces remain:
   - [ ] Run `fuzzlab auto --browser` on the host (drives the live
     `PlaywrightBrowserExecutor`) to confirm `reviews.php#author` + `feedback.php?ref`.
-  - [ ] **Stored-XSS auto-wiring:** map ground-truth points→cases to fill the
-    candidate's `store_url`/`store_param` (source_url), so `profile.php` stored XSS is
-    confirmed (the strategy already works given the store endpoint).
+  - [x] **Stored-XSS auto-wiring:** done (CC-FUZZ-0014) — `auto` emits the stored
+    observe point from the ground-truth cases with `store_url` from `source_url`.
+    Live remainder: pass the authenticated session to the browser executor so the
+    (auth-gated) store step at `edit_profile.php` succeeds under `--identity`.
 
 ## Phase 3 — grey-box live sources + validation
 
