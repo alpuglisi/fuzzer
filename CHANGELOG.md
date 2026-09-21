@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 6 (T6.1/T6.2): started the **intercepting proxy** (`fuzzlab/proxy/`) with the
+  offline-testable dual-path core (D4). `RawMessage` is a **byte-exact** container that
+  round-trips received bytes and edits by byte surgery (untouched lines stay verbatim);
+  `parser.py` is the `h11` parsed path; `scope.py` is a default-deny scope engine;
+  `matchreplace.py` applies ordered byte-level rewrites. Proves the exit in miniature:
+  a hand-edited duplicate/conflicting `Content-Length` is forwarded byte-for-byte on
+  the raw path while the parsed path rejects it. Wrote `docs/PHASE_6_PLAN.md`. +21
+  tests (217 passed / 2 skipped). Change-control: CC-PROXY-0003.
 - Docs: refreshed `docs/ARCHITECTURE.md` to reflect the true build status — `core/`,
   the session manager, the fuzzing harness + oracle (M1–M7, M9), the bandit scheduler,
   the detection classifier (logistic + GBT + conformal, advisory), and the web control

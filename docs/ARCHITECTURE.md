@@ -31,7 +31,9 @@ out inline and tracked in `docs/ON_HOST_TASKS.md`.
 manager, deterministic wins). Phase 3 (grey-box) has its offline consumer layer
 built; its live coverage/DB-fault sources are on-host. Phase 4 (bandit) and Phase 5
 (detection classifier) have their learning cores built offline; their
-beats-the-control exits run on the lab. Next up is Phase 6 (the intercepting proxy);
+beats-the-control exits run on the lab. Phase 6 (the intercepting proxy) is in
+progress — its byte-exact dual-path core, scope engine, and match-and-replace are
+built; history, repeater, interception, session capture, and live TLS serving remain.
 Phases 7–10 (ranker/active-learning, mutation engine, protocol depth, plugin system)
 are planned.
 
@@ -270,15 +272,24 @@ tracked in the requirements files, not here.
   the classifier, proxy/flows for the anomaly detector).
 - **Attach as:** plugins on `core/` hooks. Shipping without ML is a config change.
 
-### 11. Intercepting proxy `[planned]` (Phase 6)
-- **Subcomponents:** asyncio core; parsed path (`h11`/`h2`/`wsproto`) and a raw
-  byte path (byte-exact, single-use connections); CONNECT + TLS interception with
-  a local CA and cached leaf certs; history (FTS5, batched writes, content-
-  addressed bodies); repeater (DB-persisted tabs); match-and-replace; scope
-  engine; interception-as-awaited-future workflow; manual-login **session
-  capture** (hand the session established by a human browser login to the session
-  manager to adopt — FR-PROXY-9 — the escape hatch for logins detection can't
+### 11. Intercepting proxy `[partial — dual-path core built; live serving on-host]` (Phase 6)
+- **Dual-path core** `[built]` (D4, `fuzzlab/proxy/`): the **raw byte path**
+  (`message.py::RawMessage`) — byte-exact, round-trips received bytes and edits by byte
+  surgery so untouched lines stay verbatim (NFR-PROXY-byte-exact) — and the **parsed
+  path** over `h11` (`parser.py`). The exit criterion holds in miniature: a hand-edited
+  conflicting duplicate `Content-Length` forwards byte-for-byte on the raw path while
+  the parsed path rejects it. `h2`/`wsproto` in the raw path are Phase 9.
+- **Scope + match-and-replace** `[built]`: a default-deny scope engine (`scope.py`,
+  host + optional path regex) and ordered byte-level rewrites (`matchreplace.py`).
+- **History, repeater, interception, session capture** `[planned — this phase]`:
+  `flow` history (FTS5, batched writes, content-addressed bodies + raw bytes; migration
+  6); repeater (DB-persisted tabs); interception-as-awaited-future; manual-login
+  **session capture** (hand the session a human browser login establishes to the
+  session manager to adopt — FR-PROXY-9 — the escape hatch for logins detection can't
   crack: MFA, CAPTCHA, multi-step).
+- **CONNECT + TLS interception** `[planned — live on-host]`: a local CA with cached
+  leaf certs and the async socket server; the flow wiring is offline-testable via an
+  injected transport seam, but live TLS serving and browser trust run on-host.
 - **Depends on (components):** `core/`, session manager (attached as an addon).
 - **Role:** optional observer; other tools may route through it for unified
   history, but timing-sensitive traffic does not (D5).
@@ -440,11 +451,15 @@ offline-complete unless an on-host item is named.
     shaped reward, reset call points) built; **live sources on-host** (Xdebug/pcov,
     DB error hook, snapshot/restore).
   - **Oracle mechanisms:** M8 (out-of-band) and M10 (grey-box) still to build.
+  - **Intercepting proxy (Phase 6):** the byte-exact dual-path core (`RawMessage` +
+    `h11`), scope engine, and match-and-replace are built; history (migration 6),
+    repeater, interception, and session capture remain, and live TLS serving is
+    on-host.
 - `[on-host]` (offline pieces done; the exit/validation runs on the live lab):
   Phase 3 live capture; Phase 4 beats-uniform exit (T4.6); Phase 5 held-out exit
-  (T5.5); live `--browser`/`--bandit`/`--score` runs and stored-XSS
-  session-to-browser wiring — all tracked in `docs/ON_HOST_TASKS.md`.
-- `[planned]`: the intercepting proxy (Phase 6, next), candidate ranker + active
-  learning (Phase 7), mutation engine (Phase 8), protocol depth (Phase 9), anomaly
-  detector + plugin system + a second target (Phase 10), and the manifest-driven lab
-  generator (Lab track).
+  (T5.5); Phase 6 live CONNECT/TLS serving + browser trust; live
+  `--browser`/`--bandit`/`--score` runs and stored-XSS session-to-browser wiring —
+  all tracked in `docs/ON_HOST_TASKS.md`.
+- `[planned]`: candidate ranker + active learning (Phase 7), mutation engine
+  (Phase 8), protocol depth (Phase 9), anomaly detector + plugin system + a second
+  target (Phase 10), and the manifest-driven lab generator (Lab track).

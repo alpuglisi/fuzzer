@@ -3,6 +3,40 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0003 — Dual-path core: message model, parsers, scope, match-and-replace (T6.1/T6.2) (2026-09-21)
+- Change: began Phase 6 with the offline-testable heart of the proxy — the **dual
+  path** (D4). `fuzzlab/proxy/message.py::RawMessage` is a byte-exact container: it
+  round-trips received bytes unchanged, exposes head/body and duplicate-preserving
+  header views, and edits by **byte surgery** (`with_appended_header`, `with_header`,
+  `without_header`, `with_request_line`, `with_body`) that leave untouched lines
+  verbatim (NFR-PROXY-byte-exact). `fuzzlab/proxy/parser.py` is the parsed path over
+  `h11` (`parse_request`/`parse_response`/`is_valid_request`) that validates and
+  normalizes. `fuzzlab/proxy/scope.py::Scope` is a **default-deny** include/exclude
+  engine (host + optional path regex; subdomain-suffix and port-less matching).
+  `fuzzlab/proxy/matchreplace.py` applies ordered byte-level rewrites to the
+  request/status line, a named header, or the body. Wrote `docs/PHASE_6_PLAN.md`.
+- Impact (other components / project): delivers the phase's exit criterion in
+  miniature — a hand-edited request with a conflicting duplicate `Content-Length` is
+  forwarded byte-for-byte on the raw path while the parsed path rejects the ambiguous
+  framing — establishing the byte-exact substrate the history, repeater, interception,
+  and session-capture tasks build on. No store change yet (that is T6.3, migration 6).
+  `h11` is a declared dependency (already installed); no new runtime dep this task.
+- Risk (level; mitigation): low — pure, dependency-light byte logic; the proxy is
+  optional (D5) and untouched by the core pipeline. Mitigated by 21 tests
+  (`tests/test_proxy_message.py`): byte-exact round-trip, LF-only preservation,
+  duplicate-header order, the duplicate-`Content-Length` raw-exact-but-parsed-rejects
+  case (+ CL/TE smuggling primitive), all edit helpers, parser happy paths, and the
+  scope + match-and-replace engines. Suite 217 passed / 2 skipped.
+- Deliverables:
+  - [x] `RawMessage` byte-exact model + edits (T6.1) — done.
+  - [x] `h11` parsed path (T6.1) — done.
+  - [x] Scope engine + match-and-replace (T6.2) — done.
+  - [ ] Flow history + migration 6 (T6.3); interception + repeater (T6.4); session
+        capture (T6.5); CA + async server wiring (T6.6, live on-host) — next.
+- Effectiveness (assessed 2026-09-21): effective in tests — the raw path preserves
+  malformed framing the parsed path rejects, which is the crux of the dual-path design;
+  the live browse-and-forward exit is on-host.
+
 ### CC-PROXY-0002 — Planned: manual-login session capture (spec) (2026-09-21)
 - Change: added FR-PROXY-9 — capture the authenticated session (cookies/tokens)
   from a **manual browser login** performed through the proxy and hand it to the
