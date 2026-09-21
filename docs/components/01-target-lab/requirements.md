@@ -144,6 +144,27 @@ and measured. Authorized, lab-only.
   vulnerable/secure SQLi pair; reproducing today's real PHP app is separate,
   later scope. (`CR-LAB-0001` §3/Addenda C/D, `docs/LAB_PHASE_0_PLAN.md`
   T-LAB0.4, `CC-LAB-0019`)
+- **FR-LAB-19** (Lab track, Phase 0) A secret-scanner build gate, separate
+  from and complementary to the FR-LAB-15 name-leak gate, runs **Gitleaks**
+  (MIT, `--no-git`) against the generated lab output tree via
+  `fuzzlab.labgen.secret_scanner.scan_tree_for_secrets`, using a project
+  `.gitleaks.toml` (repo root) that extends Gitleaks' default ruleset with
+  one allowlist for seeded fake/example credentials the generator may
+  legitimately emit as vulnerable-code content (e.g. a hardcoded fake DB
+  password demonstrating CWE-798) — such values must carry an explicit
+  case-insensitive marker (`FAKE`/`EXAMPLE`/`PLACEHOLDER`/`NOTREAL`/
+  `CHANGEME`) to be allowlisted; an unmarked secret is still caught. Not
+  TruffleHog: its live-credential-verification differentiator is noise
+  against seeded fake credentials and an unwanted outbound call from a
+  loopback-only project's build. Validated against a should-flag/
+  should-not-flag fixture corpus (real-shaped AWS/Stripe/PEM-key secrets vs.
+  marked-fake and clean content) run against the real binary
+  (skip-guarded to when it's on PATH, per PA-0005), plus injected-runner
+  tests proving the gate fails the build on a scanner crash (an unexpected
+  exit code, an exit-1-with-empty-report inconsistency, or a malformed
+  report) — never silently treated as a clean pass, matching FR-LAB-15's own
+  fail-on-crash rule. (NFR-LAB-no-secret-leak, `docs/LAB_PHASE_0_PLAN.md`
+  T-LAB0.6, `CC-LAB-0020`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
@@ -152,6 +173,9 @@ and measured. Authorized, lab-only.
   default; no outbound route.
 - **NFR-LAB-no-leak** No vulnerability class name in any URL, filename, or
   parameter a tool can see.
+- **NFR-LAB-no-secret-leak** No real credential/secret material in any
+  generated artifact; a seeded fake/example credential is permitted only
+  when it carries an explicit, recognizable fake-value marker.
 - **NFR-LAB-label-accuracy** Labels derived, not hand-asserted; env settings that
   affect labels (e.g. `display_errors`, libxml entity handling, `open_basedir`)
   pinned and asserted.

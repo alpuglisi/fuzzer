@@ -18,6 +18,31 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — LAB lane worktree created from a stale/unrelated branch lineage
+
+- **Symptom:** on session start for the T-LAB0.6 (Gitleaks secret-scanner) lane,
+  `git log --oneline -5` showed only unrelated UI-redesign commits (a master-detail
+  Launch view rebuild, app-shell/design tokens, Proxy Scope/Match-Replace) with no
+  mention of "LAB"/"CC-LAB-00"/"labgen"/"D20", and `fuzzlab/labgen/` did not exist
+  anywhere in the checkout at all (no `denylist.py`, `gates.py`, `resolver.py`, etc.).
+  A sibling lane (`CC-LAB-0019`) hit the identical symptom independently.
+- **Root cause:** a worktree-creation quirk in this session's harness — the worktree
+  was materialized from a stale/unrelated branch lineage instead of the actual current
+  trunk, even though the correct branch (holding the merged Phase 0 LAB lanes) was
+  fully present in the shared git object store the whole time. Not a missing-history
+  problem and not something either lane did wrong.
+- **Remediation:** stopped and reported the discrepancy instead of working around it
+  (e.g. manually re-importing files), per this project's explicit guidance for this
+  exact failure mode. Confirmed via a fresh worktree that `claude/trusting-noether-heon0n`
+  was reachable as a local branch and `git reset --hard claude/trusting-noether-heon0n`
+  (working tree was clean, so no destructive-command safeguard was overridden) recovered
+  the correct tree in one step — `git log` then showed the expected LAB merge-lane
+  history and `fuzzlab/labgen/` existed with all expected modules.
+- **Status:** Environment (fixed outside the repo — no repo-level change needed; the
+  underlying worktree-provisioning quirk is a harness/session-infrastructure issue, not
+  a defect in this codebase). See `docs/components/01-target-lab/change-control.md`
+  `CC-LAB-0019`'s and `CC-LAB-0020`'s notes for the per-lane detail.
+
 ## 2026-09-21 — `test_web_repeater.py` flakes with a cross-thread SQLite error
 
 - **Symptom:** found incidentally while verifying an unrelated lab-generator lane's full-suite

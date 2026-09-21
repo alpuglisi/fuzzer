@@ -3,6 +3,79 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0020 — T-LAB0.6: Gitleaks secret-scanner build gate (2026-09-21)
+*(This lane's worktree also hit the stale-worktree-lineage environment quirk noted in
+CC-LAB-0019 — its initial `git log`/checkout showed an unrelated UI-redesign branch with no
+`fuzzlab/labgen/` at all. Confirmed as a worktree-creation artifact, not a missing-history
+problem: `git reset --hard claude/trusting-noether-heon0n` (the branch holding the merged
+Phase 0 lanes, verified present in the shared object store) recovered the correct tree
+before any of this entry's work began. No files were manually re-imported.)*
+- Change: added the T-LAB0.6 **secret-scanner** build gate, separate from and
+  complementary to the existing name-leak scanner (`fuzzlab/labgen/gates.py` +
+  `denylist.py`, untouched by this change): (1) `.gitleaks.toml` at the repo root
+  (the first root-level external-tool config file in this repo) extending
+  Gitleaks' default ruleset via `[extend] useDefault = true`, with one
+  `[allowlist]` regex (`(?i)(FAKE|EXAMPLE|PLACEHOLDER|NOTREAL|CHANGEME)`) so a
+  seeded fake credential the generator legitimately emits as vulnerable-code
+  content (e.g. a hardcoded fake DB password demonstrating CWE-798) does not
+  false-positive the build, while an unmarked real-shaped secret still does —
+  verified empirically against the installed binary (an unmarked AWS-shaped key
+  is still flagged; AWS's own `AKIAIOSFODNN7EXAMPLE` docs example and a
+  `FAKE`/`PLACEHOLDER`-marked value are both suppressed); (2)
+  `fuzzlab/labgen/secret_scanner.py`, a thin wrapper mirroring
+  `oracle_wrapper.py`'s established external-tool-wrapping pattern (PA-0005): a
+  dependency-injected `Runner`, a typed `ToolNotFoundError` instead of a raw
+  `FileNotFoundError`, and a structured `SecretScanResult`/`SecretLeak`. Runs
+  `gitleaks detect --no-git -s <tree> -c .gitleaks.toml -f json -r <report>
+  --exit-code 1` against a tree written to a temp directory. Fails loud
+  (`SecretScanError`) on: an exit code other than 0/1, an exit-1 with an empty
+  report (a scanner-malfunction shape, not a clean pass), a report that isn't
+  valid JSON, or a report entry missing an expected field — per the plan's own
+  rule that the gate must fail the build on a scanner *crash*, not just a hit;
+  (3) `tests/test_labgen_secret_scanner.py`: a should-flag/should-not-flag
+  fixture corpus (real-shaped AWS/Stripe/PEM-key secrets vs. `FAKE`/`EXAMPLE`/
+  `PLACEHOLDER`-marked and ordinary-clean content) run against the real
+  `gitleaks` binary (skip-guarded to when it's on PATH, satisfying PA-0005's
+  "at least one test exercising the real implementation"), plus
+  injected-fake-runner tests proving every crash path above actually raises.
+  Verified Gitleaks is installable in this sandbox: `apt-get install -y
+  gitleaks` succeeds (Ubuntu noble-updates universe package, 8.16.0), so no
+  environment-blocked fallback was needed — the real binary is used both in
+  ad hoc verification and in the test suite's real-binary-path tests.
+- Impact (other components / project): none outside LAB. This gate is not yet
+  wired into a CI/pre-commit invocation (T-LAB0.10's `fuzzlab lab-generate
+  --check` CLI, still `[planned]`) — today it is exercised as a pytest test
+  module, the same convention `gates.py`'s name-leak scanner already uses per
+  `tests/test_labgen_gates.py`'s own docstring ("the same way this repo
+  already treats reproducibility/schema checks as part of the test suite
+  rather than a separate ad hoc script").
+- Risk (level; mitigation or accepted-risk justification): low. The allowlist
+  regex is a plain substring match on the flagged secret's own text, verified
+  both to suppress marked-fake values and to still catch an unmarked
+  real-shaped one (see the fixture corpus); a real secret with no marker is
+  never suppressed by this config. Accepted risk: the allowlist is a
+  convention (generator authors must remember to mark seeded fake secrets),
+  not currently enforced at generation time — acceptable for Phase 0's single,
+  hand-authored example emitter; worth revisiting if/when the emitter corpus
+  grows and starts emitting such content non-trivially.
+- Deliverables:
+  - [x] `.gitleaks.toml` (repo root) extending the default ruleset with a
+    fake/example-secret allowlist — done
+  - [x] `fuzzlab/labgen/secret_scanner.py` wrapper (structured result,
+    injected runner, fail-closed on crash) — done
+  - [x] `tests/test_labgen_secret_scanner.py` should-flag/should-not-flag
+    fixture corpus + crash-handling tests — done (23 tests, all passing with
+    the real `gitleaks` binary present)
+  - [x] `requirements.md` — new `FR-LAB-19` + `NFR-LAB-no-secret-leak` — done
+  - [ ] Wire into `fuzzlab lab-generate --check` (T-LAB0.10) — todo, blocked
+    on that CLI existing
+- Effectiveness (assessed 2026-09-21): met its intent — the gate correctly
+  flags unmarked real-shaped secrets and passes marked-fake/clean content in
+  the fixture corpus, and every injected-crash path raises rather than
+  passing silently. Full suite: 665 passed, 2 pre-existing unrelated
+  `test_mutation_operators.py` failures, 5 skipped (baseline before this
+  change: 642 passed, same 2 failures, 5 skipped).
+
 ### CC-LAB-0019 — T-LAB0.4: emitter interface + module-composition + `php_current` emitter (2026-09-21)
 *(This lane's worktree diverged onto an unrelated, stale UI-redesign branch lineage from
 before the Phase 0 foundation landed anywhere — a harness/environment quirk, not something
