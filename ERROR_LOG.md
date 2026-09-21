@@ -18,6 +18,25 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — Proxy on-host: leaf cert rejected (BUG-0010) + shutdown hang (BUG-0011)
+
+- **Symptom (1):** on the host, `pytest ...test_connect_tls_tunnel_forwards_byte_exact`
+  failed the TLS handshake with `ssl.SSLCertVerificationError: ... Missing Authority Key
+  Identifier`. **Symptom (2):** `scripts/proxy_e2e.sh` hung at 5/6 (stopping the proxy).
+- **Root cause (1):** `LocalCA` minted CA/leaf certs without SKI/AKI (and KeyUsage/EKU, and
+  a DNSName SAN for IP hosts); strict OpenSSL (Fedora, Py 3.13) rejects a leaf with no AKI.
+  **Root cause (2):** `AsyncProxyServer.stop()` awaited `Server.wait_closed()` unbounded,
+  which on Python 3.12+ waits for active connections — a lingering connection blocked
+  shutdown forever, so the proxy never exited and the script's `wait` hung.
+- **Remediation (1):** `_mint_ca` adds SKI + keyCertSign KeyUsage; `_mint_leaf` adds SKI, an
+  AKI from the CA public key, serverAuth EKU, a leaf KeyUsage, and an IPAddress SAN for IP
+  hosts; dropped deprecated `utcnow()`. Added a skip-guarded extension-assertion test.
+  **Remediation (2):** `AsyncProxyServer` tracks + cancels connection tasks and bounds
+  `wait_closed()` with a 3s timeout; the proxy CLI persists flow history per-record
+  (`batch_size=1`, WAL); `proxy_e2e.sh` bounds its `kill -INT` wait with a `-KILL` fallback.
+- **Status:** Fixed (this commit). Full RCAs in `docs/bugs/BUG-0010-*` and `BUG-0011-*`;
+  rules PA-0011, PA-0012. See CC-PROXY-0012. Suite 415 passed / 6 skipped.
+
 ## 2026-09-21 — Grey-box self-test: coverage file written but empty (pcov not collecting)
 
 - **Symptom:** `scripts/greybox_e2e.sh` step 3 failed with "benign request recorded no

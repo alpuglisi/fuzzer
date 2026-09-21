@@ -91,8 +91,12 @@ s.sendall(req); s.recv(65536); s.close()
 print("  sent a request carrying two Content-Length headers through the proxy")
 PY
 
-# stop the proxy so its flow history flushes, then read the recorded bytes back
+# stop the proxy, then read the recorded bytes back. Flows are persisted per-record
+# (batch_size=1), so shutdown timing never loses them; the wait is bounded so a stubborn
+# process can't hang the script.
 kill -INT "${PROXY_PID}" 2>/dev/null || true
+for _ in $(seq 1 20); do kill -0 "${PROXY_PID}" 2>/dev/null || break; sleep 0.5; done
+kill -0 "${PROXY_PID}" 2>/dev/null && kill -KILL "${PROXY_PID}" 2>/dev/null || true
 wait "${PROXY_PID}" 2>/dev/null || true
 PROXY_PID=""
 

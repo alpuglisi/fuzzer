@@ -72,7 +72,9 @@ def main(argv: list[str]) -> int:
         from fuzzlab.proxy.history import HistoryWriter
         store = Store(args.store)
         run_id = store.start_run("proxy", args.host)
-        history = HistoryWriter(store, run_id)
+        # batch_size=1: persist each flow immediately (WAL), so a reader can see flows
+        # while the proxy runs and shutdown timing never loses records.
+        history = HistoryWriter(store, run_id, batch_size=1)
 
     engine = ProxyEngine(scope=scope, sender=sender, history=history,
                          identity=args.identity)

@@ -152,6 +152,7 @@ class AsyncProxyServer:
         self.port = port
         self.ca = ca
         self._server: asyncio.AbstractServer | None = None
+        self._conns: set[asyncio.Task] = set()
 
     async def start(self) -> "AsyncProxyServer":
         self._server = await asyncio.start_server(self._on_client, self.host, self.port)
@@ -159,13 +160,24 @@ class AsyncProxyServer:
         return self
 
     async def stop(self) -> None:
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
-            self._server = None
+        if self._server is None:
+            return
+        self._server.close()
+        # Cancel in-flight connections; otherwise wait_closed() blocks on keep-alive
+        # sockets (Python 3.12+ waits for active connections), hanging shutdown.
+        for task in list(self._conns):
+            task.cancel()
+        try:
+            await asyncio.wait_for(self._server.wait_closed(), timeout=3.0)
+        except (asyncio.TimeoutError, Exception):  # noqa: BLE001 - shutdown is best-effort
+            pass
+        self._server = None
 
     async def _on_client(self, reader: asyncio.StreamReader,
                          writer: asyncio.StreamWriter) -> None:
+        task = asyncio.current_task()
+        if task is not None:
+            self._conns.add(task)
         try:
             raw = await _read_http_message(reader)
             if not raw:
@@ -186,8 +198,15 @@ class AsyncProxyServer:
             if resp is not None:
                 writer.write(resp)
                 await writer.drain()
+        except asyncio.CancelledError:
+            pass                                     # shutting down; drop this connection
         finally:
-            writer.close()
+            try:
+                writer.close()
+            except OSError:
+                pass
+            if task is not None:
+                self._conns.discard(task)
 
     async def _handle_connect(self, reader: asyncio.StreamReader,
                               writer: asyncio.StreamWriter,

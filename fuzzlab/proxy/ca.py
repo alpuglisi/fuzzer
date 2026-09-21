@@ -15,8 +15,14 @@ the real X.509 work is exercised on the host.
 from __future__ import annotations
 
 import datetime
+import ipaddress
 from pathlib import Path
 from typing import Callable
+
+
+def _utcnow() -> datetime.datetime:
+    """Naive UTC now (compatible with all `cryptography` versions; no `utcnow()`)."""
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
 # minter: host -> (cert_pem, key_pem)
 Minter = Callable[[str], "tuple[bytes, bytes]"]
@@ -109,7 +115,7 @@ class LocalCA:
         x509, hashes, serialization, rsa, NameOID = self._crypto()
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "fuzzlab local CA")])
-        now = datetime.datetime.utcnow()
+        now = _utcnow()
         cert = (x509.CertificateBuilder()
                 .subject_name(name).issuer_name(name)
                 .public_key(key.public_key())
@@ -117,6 +123,15 @@ class LocalCA:
                 .not_valid_before(now - datetime.timedelta(days=1))
                 .not_valid_after(now + datetime.timedelta(days=3650))
                 .add_extension(x509.BasicConstraints(ca=True, path_length=None), True)
+                # KeyUsage + SubjectKeyIdentifier: modern OpenSSL verifiers require a
+                # proper CA (keyCertSign) and an SKI the leaf's AKI can chain to.
+                .add_extension(x509.KeyUsage(
+                    digital_signature=False, content_commitment=False,
+                    key_encipherment=False, data_encipherment=False,
+                    key_agreement=False, key_cert_sign=True, crl_sign=True,
+                    encipher_only=False, decipher_only=False), critical=True)
+                .add_extension(
+                    x509.SubjectKeyIdentifier.from_public_key(key.public_key()), False)
                 .sign(key, hashes.SHA256()))
         key_pem = key.private_bytes(
             serialization.Encoding.PEM,
@@ -126,12 +141,18 @@ class LocalCA:
 
     def _mint_leaf(self, host: str) -> tuple[bytes, bytes]:
         x509, hashes, serialization, rsa, NameOID = self._crypto()
+        from cryptography.x509.oid import ExtendedKeyUsageOID
         ca_cert_pem, ca_key_pem = self.ensure_ca()
         ca_cert = x509.load_pem_x509_certificate(ca_cert_pem)
         ca_key = serialization.load_pem_private_key(ca_key_pem, password=None)
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        now = datetime.datetime.utcnow()
-        san = x509.SubjectAlternativeName([x509.DNSName(host)])
+        now = _utcnow()
+        # An IP literal needs an IPAddress SAN (not DNSName) to verify by hostname.
+        try:
+            san_entry = x509.IPAddress(ipaddress.ip_address(host))
+        except ValueError:
+            san_entry = x509.DNSName(host)
+        san = x509.SubjectAlternativeName([san_entry])
         cert = (x509.CertificateBuilder()
                 .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, host)]))
                 .issuer_name(ca_cert.subject)
@@ -141,6 +162,21 @@ class LocalCA:
                 .not_valid_after(now + datetime.timedelta(days=self._valid_days))
                 .add_extension(san, critical=False)
                 .add_extension(x509.BasicConstraints(ca=False, path_length=None), True)
+                # SKI + AKI so the leaf chains to the CA under strict verifiers (the
+                # "Missing Authority Key Identifier" failure), + serverAuth EKU for
+                # browsers, + a leaf KeyUsage.
+                .add_extension(
+                    x509.SubjectKeyIdentifier.from_public_key(key.public_key()), False)
+                .add_extension(
+                    x509.AuthorityKeyIdentifier.from_issuer_public_key(
+                        ca_cert.public_key()), False)
+                .add_extension(x509.ExtendedKeyUsage(
+                    [ExtendedKeyUsageOID.SERVER_AUTH]), False)
+                .add_extension(x509.KeyUsage(
+                    digital_signature=True, content_commitment=False,
+                    key_encipherment=True, data_encipherment=False,
+                    key_agreement=False, key_cert_sign=False, crl_sign=False,
+                    encipher_only=False, decipher_only=False), critical=False)
                 .sign(ca_key, hashes.SHA256()))
         key_pem = key.private_bytes(
             serialization.Encoding.PEM,

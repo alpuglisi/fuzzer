@@ -71,3 +71,16 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   produced **signal** end to end, not just that the dependency is present: "loads ≠
   works" — a self-test that inspects the real output catches what a presence check
   cannot. (from BUG-0009)
+- **PA-0011** — X.509 certificates generated for TLS must carry the extensions strict
+  verifiers (modern OpenSSL, browsers) require: a CA with a Subject Key Identifier and a
+  keyCertSign KeyUsage; a leaf with a Subject Key Identifier, an Authority Key Identifier
+  that references the issuer, a serverAuth Extended Key Usage, and a SAN of the correct
+  type (IPAddress for IP hosts, DNSName otherwise). Assert the generated cert's extensions
+  and verify it against a real chain check in a test — even one skip-guarded to the
+  environment that has a working crypto backend. (from BUG-0010)
+- **PA-0012** — Tearing down an `asyncio` server must be bounded and must not assume
+  `wait_closed()` returns once the listener closes: on Python 3.12+ it also waits for
+  active connections, which for a long-lived server may never end. Track and cancel
+  in-flight connection tasks on stop and wrap the final wait in a timeout. Persist
+  important state as it is produced (not only on graceful shutdown), so a forced/abrupt
+  stop loses nothing. (from BUG-0011)

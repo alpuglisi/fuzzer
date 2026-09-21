@@ -3,6 +3,33 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0012 — Fix (BUG-0010/BUG-0011): leaf-cert AKI/SKI + bounded async shutdown (2026-09-21)
+- Change: fixed two on-host proxy defects found running Part I. (BUG-0010) `LocalCA` now
+  mints certs strict verifiers accept — CA with SKI + keyCertSign KeyUsage; leaf with SKI,
+  an AKI referencing the CA, serverAuth EKU, a leaf KeyUsage, and an IPAddress SAN for IP
+  hosts; dropped deprecated `datetime.utcnow()`. (BUG-0011) `AsyncProxyServer` tracks and
+  cancels its per-connection tasks and bounds `wait_closed()` with a 3s timeout so stop()
+  can't hang on live connections (a Python 3.12+ behavior); the proxy CLI persists flow
+  history per-record (`batch_size=1`, WAL) and `scripts/proxy_e2e.sh` bounds its shutdown
+  with a `-KILL` fallback.
+- Impact (other components / project): HTTPS interception now actually works on-host (the
+  minted leaf verifies and a browser will trust it), and `fuzzlab proxy` /
+  `scripts/proxy_e2e.sh` exit cleanly instead of hanging. No interface change; the flow
+  store is written incrementally now (WAL-safe concurrent reads).
+- Risk (level; mitigation): low — additive cert extensions + a more careful teardown.
+  Mitigated by a skip-guarded extension-assertion test (leaf AKI matches CA SKI, serverAuth
+  EKU, IP SAN) plus the existing on-host tunnel test that reproduced BUG-0010 and now
+  passes; the offline connection tests still pass with the new stop(). Suite 415 passed /
+  6 skipped.
+- Deliverables:
+  - [x] SKI/AKI/EKU/KeyUsage + IP SAN in `LocalCA`; non-deprecated UTC (BUG-0010) — done.
+  - [x] Tracked+cancelled conns and bounded `wait_closed()`; per-record history; bounded
+        script shutdown (BUG-0011) — done.
+  - [x] RCAs `docs/bugs/BUG-0010-*`, `BUG-0011-*`; PA-0011/PA-0012; ERROR_LOG — done.
+- Effectiveness (assessed 2026-09-21): offline suite green; the on-host CONNECT/TLS tunnel
+  test that failed with "Missing Authority Key Identifier" now has the extensions it needs,
+  and shutdown is bounded so the Part I script can no longer hang.
+
 ### CC-PROXY-0011 — Live h2c socket transport for the raw HTTP/2 client (Phase 9 on-host, T9.x) (2026-09-21)
 - Change: built the Phase 9 on-host last mile so runbook Part K is a one-command flow. New
   `fuzzlab/proxy/h2transport.py::H2Transport` is the socket send/receive around the

@@ -14,6 +14,15 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Fix (BUG-0010/BUG-0011, on-host proxy): HTTPS interception failed on-host with "Missing
+  Authority Key Identifier" and `scripts/proxy_e2e.sh` hung on shutdown. `LocalCA` now
+  mints certs strict OpenSSL/browsers accept (CA SKI + keyCertSign; leaf SKI, AKI→CA,
+  serverAuth EKU, IPAddress SAN for IP hosts; no deprecated `utcnow()`), and
+  `AsyncProxyServer.stop()` cancels in-flight connection tasks + bounds `wait_closed()`
+  (Python 3.12+ waits on live connections) so the proxy exits cleanly; the proxy CLI
+  persists flows per-record (WAL) and the script bounds its shutdown. RCAs
+  `docs/bugs/BUG-0010-*`, `BUG-0011-*`; rules PA-0011/PA-0012; see CC-PROXY-0012.
+  Suite 415 passed / 6 skipped.
 - Feature (Phase 8 mutation-vs-WAF on-host last mile): runbook Part J is now a one-command
   flow. Built `fuzzlab/mutation/livefilter.py::HttpFilter` (the mutation `Filter` seam
   backed by live WAF round-trips: 403 -> caught, with rule-id parsing) and

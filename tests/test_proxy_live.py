@@ -91,6 +91,32 @@ def test_async_server_forwards_duplicate_content_length_byte_exact(tmp_path):
     assert parser.is_valid_request(fwd) is False       # parsed path would have rejected it
 
 
+def test_leaf_cert_chains_to_ca_with_aki_ski(tmp_path):
+    """On-host: the minted leaf carries SKI + an AKI matching the CA's SKI (strict
+    OpenSSL rejects a leaf with 'Missing Authority Key Identifier'), serverAuth EKU, and
+    an IPAddress SAN for an IP host."""
+    try:
+        from cryptography import x509
+        from cryptography.fernet import Fernet
+        Fernet(Fernet.generate_key()).encrypt(b"probe")
+    except BaseException as exc:  # noqa: BLE001
+        pytest.skip(f"cryptography unavailable/broken: {exc}")
+    import ipaddress
+
+    ca = LocalCA(tmp_path / "ca")
+    cert_pem, _ = ca.leaf_cert("127.0.0.1")
+    leaf = x509.load_pem_x509_certificate(cert_pem)
+    ca_cert = x509.load_pem_x509_certificate(ca.ca_cert_path.read_bytes())
+
+    aki = leaf.extensions.get_extension_for_class(x509.AuthorityKeyIdentifier).value
+    ca_ski = ca_cert.extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+    assert aki.key_identifier == ca_ski.digest          # leaf AKI -> CA SKI
+    leaf.extensions.get_extension_for_class(x509.SubjectKeyIdentifier)
+    leaf.extensions.get_extension_for_class(x509.ExtendedKeyUsage)  # serverAuth
+    san = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    assert ipaddress.ip_address("127.0.0.1") in san.get_values_for_type(x509.IPAddress)
+
+
 def test_connect_tls_tunnel_forwards_byte_exact(tmp_path):
     """On-host: CONNECT → 200 → TLS-terminate with a CA-minted leaf → forward the
     tunnelled request to the (TLS) upstream, byte-exact."""
