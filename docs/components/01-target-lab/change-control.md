@@ -3,6 +3,75 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0029 — T-LAB2.1: wire the covering-array resolver into manifest loading (2026-09-21)
+- Change: `fuzzlab.labgen.resolver.expand()` (T-LAB0.3, previously built but "dormant" —
+  never called outside its own tests) is now reachable from a manifest. Extended
+  `lab/schemas/manifest.schema.json` with an optional `axis_ranges` array, additive
+  alongside the existing explicit `cells` array (top-level `anyOf` now requires at
+  least one of the two, instead of always requiring `cells`). Each `axis_range` block's
+  `factors`/`strength`/`sub_models`/`constraints` map straight onto
+  `resolver.expand()`'s own accepted shape (deliberately — this task read the
+  resolver's actual function signature first rather than inventing a new shape it
+  can't consume); its recognized factor axis names are `class`, `stack_profile`,
+  `sink_context_family`, `transform`, `route_method`, `route_path`, each placed into
+  the matching `Cell` field, with any non-factor field required as the block's own
+  fixed value (fail-closed `ManifestError`, never a silent default) —
+  `sink_context_family` additionally requires a `sink_context_neutralizations`
+  family->required_neutralizations map, since that field is a function of family, not
+  an independent covering-array axis. `fuzzlab.labgen.schema.Manifest.from_dict()`
+  expands every `axis_ranges` block (in order) and appends the generated cells after
+  any explicit `cells`, before the existing duplicate-`cell_id` check runs over the
+  combined list — the emitter and verdict engine downstream are unchanged, since both
+  paths produce the identical `Cell` IR.
+  While implementing this, found and fixed **BUG-0024**: `resolver.validate_covering_array_config()`
+  did not reject a `strength` exceeding the number of factors (nor a `sub_models`
+  entry's own `strength` exceeding its own field count) — `covertable.make()` silently
+  returns `[]` for that shape rather than raising, which a single-axis `axis_ranges`
+  block at the schema's own documented default (`strength: 2`, per `CR-LAB-0001`) would
+  have hit silently. Both cardinalities are now checked before `covertable.make()` is
+  ever called. See `docs/bugs/BUG-0024-covering-array-strength-exceeds-factor-count.md`
+  and `docs/PREVENTIVE_ACTIONS.md` `PA-0026` (supersedes `PA-0010`).
+- Impact (other components / project): unblocks Phase 1/2's remaining tasks that
+  depend on real cell-count variation (2.2's harder SQLi/XSS shapes, 2.3's χ²/leakage
+  build gates, 2.4's stratified splits — `docs/LAB_IMPLEMENTATION_PLAN.md` §2.1's own
+  "Depends on" note). No change to `fuzzlab.labgen.emitter`/`emitters/php_current`,
+  `fuzzlab.labgen.verdict`, or any other downstream consumer of `Cell` — they see the
+  same IR regardless of which manifest path produced it. No change to
+  `fuzzlab.labgen.verdict`'s derivation logic itself (out of this task's scope by
+  design).
+- Risk (level; mitigation): medium — a wrong axis-name mapping or a missing
+  fixed-value/neutralization-lookup entry would silently mis-place a Cell field or
+  (per BUG-0024) silently produce too few/zero cells. Mitigated by: (a) every
+  axis-name-to-Cell-field placement failing closed with `ManifestError` rather than
+  defaulting when neither a factor nor a fixed value is present; (b) a test
+  (`test_axis_range_factor_names_match_schema_allowlist`) asserting the loader's
+  `AXIS_RANGE_FACTOR_NAMES` allowlist and the JSON Schema's own
+  `axis_range.factors.properties` keys can never drift apart (PA-0010); (c) the
+  BUG-0024 fix closing the specific silent-empty-array path found while building this;
+  (d) a byte-for-byte regression requirement on both existing Phase 0 example
+  manifests (`example_phase0_scaffold.yaml`, `phase0_real_pages_sample.yaml`), each
+  re-asserted by an explicit end-to-end test.
+- Deliverables:
+  - [x] `lab/schemas/manifest.schema.json`: `axis_ranges` top-level property + new
+    `$defs/axis_range` shape — done.
+  - [x] `fuzzlab.labgen.schema._expand_axis_range`/`_expand_axis_ranges`, wired into
+    `Manifest.from_dict` — done.
+  - [x] `fuzzlab.labgen.resolver`: BUG-0024 fix (strength-vs-cardinality checks) — done.
+  - [x] Tests: axis-range expansion (cell count, pairwise coverage, fixed-field
+    propagation, cell-id generation, determinism, append-after-explicit-cells,
+    duplicate-id-across-both-sources, each fail-closed error path, schema-allowlist
+    drift guard) in `tests/test_labgen_schema.py`; BUG-0024 regression tests in
+    `tests/test_labgen_resolver.py` — done, all passing.
+  - [x] Regression: both existing Phase 0 manifests re-verified to load identically
+    (`test_load_example_manifest_end_to_end`, new
+    `test_load_real_pages_sample_manifest_end_to_end_regression`) — done.
+  - [ ] 2.2's actual harder-shape manifest authoring using `axis_ranges` — a separate,
+    later lane per §2.1's own scope note.
+- Effectiveness (assessed 2026-09-21): effective — full suite green (886 passed, 8
+  skipped, plus 2 pre-existing unrelated failures in `tests/test_mutation_operators.py`
+  confirmed present on the clean pre-change tree and untouched by this change); new
+  axis-range tests pass; both existing manifests' cell counts/IDs unchanged.
+
 ### CC-LAB-0028 — Nuclei path-traversal/LFI oracle wrapper (Addendum E, Spike 004) (2026-09-21)
 *(Numbered `CC-LAB-0028` rather than `CC-LAB-0017` at merge time — this lane's worktree
 diverged onto a stale, unrelated branch lineage before starting, self-diagnosed and

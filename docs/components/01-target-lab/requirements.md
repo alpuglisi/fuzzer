@@ -126,10 +126,13 @@ and measured. Authorized, lab-only.
   option raises rather than being silently ignored (`covertable.make()`'s
   own `**params` behavior), and its sorter is always pinned to
   `covertable.sorters.hash` rather than relying on the library's default.
-  Deterministic across processes and `PYTHONHASHSEED` values. Not yet wired
-  into manifest loading — the Phase 0 manifest still lists cells explicitly,
-  one axis level each. (`CR-LAB-0001` §3, `docs/LAB_PHASE_0_PLAN.md` T-LAB0.3,
-  `CC-LAB-0018`)
+  Deterministic across processes and `PYTHONHASHSEED` values. Also rejects a
+  `strength` (top-level or per-`sub_models`-entry) exceeding the number of
+  factors/fields it covers, since `covertable.make()` silently returns an
+  empty array for that shape rather than raising (`BUG-0024`). Wired into
+  manifest loading as of `FR-LAB-27`/`CC-LAB-0029` — superseded the "not yet
+  wired" note below. (`CR-LAB-0001` §3, `docs/LAB_PHASE_0_PLAN.md` T-LAB0.3,
+  `CC-LAB-0018`, `CC-LAB-0029`)
 - **FR-LAB-18** (Lab track, Phase 0) An `Emitter` interface
   (`fuzzlab.labgen.emitter.Emitter`) turns a resolved `Cell` into one or more
   output files (`EmittedFiles`, never assumed to be exactly one — forward-
@@ -314,6 +317,31 @@ and measured. Authorized, lab-only.
   signal). XXE, open redirect, and known-CVE templates remain unintegrated — a separate,
   larger undertaking. (`CR-LAB-0001` tool-mapping table,
   `docs/spikes/SPIKE-004-nuclei-vs-dvwa.md`, `CC-LAB-0028`)
+- **FR-LAB-27** (Lab track, T-LAB2.1) A manifest may declare an `axis_ranges` array
+  (`lab/schemas/manifest.schema.json`'s `axis_range` shape) alongside, never instead of,
+  its explicit `cells` array. Each block's `factors`/`strength`/`sub_models`/
+  `constraints` are passed straight through to `fuzzlab.labgen.resolver.expand()`
+  (FR-LAB-17); its `factors` keys are limited to a fixed, recognized axis-name set —
+  `class`, `stack_profile`, `sink_context_family`, `transform`, `route_method`,
+  `route_path` (`fuzzlab.labgen.schema.AXIS_RANGE_FACTOR_NAMES`, asserted in tests to
+  match the schema's own allowlist one-for-one) — each placed into the matching `Cell`
+  field of every generated row. Any `Cell` field not varied by a factor in a given block
+  must be supplied as that block's own fixed value (`class`/`stack_profile`/`route`/
+  `transform`/`sink_context`); a field with neither raises `ManifestError` rather than
+  being silently defaulted. `sink_context_family`, when used as a factor, additionally
+  requires the block's own `sink_context_neutralizations` map (family ->
+  `required_neutralizations`), since that field is a function of the family, not an
+  independent covering-array axis. Generated `cell_id`s are `<cell_id_prefix><4-digit
+  1-based index>` in the resolver's own deterministic row order. `fuzzlab.labgen.schema.Manifest.from_dict()`
+  expands every block (manifest order) and appends the results after any explicit
+  `cells`, before the existing duplicate-`cell_id` check runs over the combined list. A
+  manifest with no `axis_ranges` (today's format) loads byte-for-byte identically to
+  before this requirement existed — regression-tested against both
+  `lab/manifests/example_phase0_scaffold.yaml` and
+  `lab/manifests/phase0_real_pages_sample.yaml`. No change to
+  `fuzzlab.labgen.emitter`/`verdict` — both consume the same `Cell` IR regardless of
+  which manifest path produced it. (`docs/LAB_IMPLEMENTATION_PLAN.md` §2.1, T-LAB2.1,
+  `CC-LAB-0029`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
@@ -352,8 +380,10 @@ whole-app, no-single-parameter shape doesn't fit that module's per-parameter
 request contract; also unrelated to and never imported by `fuzzlab.oracle`.
 (Lab track, generator-build-time) `fuzzlab.labgen.resolver.expand(raw_config)`
 takes a `{factors, strength?, sub_models?, constraints?}` mapping and returns
-a list of `{axis_name: level_value}` rows — see FR-LAB-17. Not yet called
-from `fuzzlab.labgen.schema`'s manifest loading.
+a list of `{axis_name: level_value}` rows — see FR-LAB-17. Called from
+`fuzzlab.labgen.schema.Manifest.from_dict()` (via `_expand_axis_range`/
+`_expand_axis_ranges`) whenever a manifest's `axis_ranges` block is present —
+see FR-LAB-27.
 (Lab track, dev tooling, not runtime) `fuzzlab.tools.pattern_corpus_sourcing`
 exposes `run_refresh()` (also `python -m fuzzlab.tools.pattern_corpus_sourcing
 refresh`) which reads/writes only `lab/patterns/sourcing/` and

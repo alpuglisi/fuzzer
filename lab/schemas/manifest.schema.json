@@ -2,10 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://fuzzlab.local/schemas/manifest.schema.json",
   "title": "fuzzlab lab-generator manifest (Phase 0 foundation)",
-  "description": "Per CR-LAB-0001 §3/§6 and D20: `transform` is an ordered pipeline of ops (never a single enum), and `sink_context` is a structured object (a family plus the set of neutralizations a transform must satisfy to be SECURE for that family) rather than a bare string. The verdict itself is never asserted here — it is derived by fuzzlab.labgen.verdict.verdict() from a cell's (transform, sink_context) against a versioned safety matrix. Phase 0's manifest lists cells explicitly (one axis level each); covering-array expansion (CR-LAB-0001 §3, T-LAB0.3) is later work and out of this schema's scope.",
+  "description": "Per CR-LAB-0001 §3/§6 and D20: `transform` is an ordered pipeline of ops (never a single enum), and `sink_context` is a structured object (a family plus the set of neutralizations a transform must satisfy to be SECURE for that family) rather than a bare string. The verdict itself is never asserted here — it is derived by fuzzlab.labgen.verdict.verdict() from a cell's (transform, sink_context) against a versioned safety matrix. Phase 0's manifest lists cells explicitly (one axis level each). Phase 1 (T-LAB2.1) adds `axis_ranges`, alongside (not replacing) explicit `cells`: each block is expanded by fuzzlab.labgen.resolver's covertable-backed covering-array engine into concrete cells before fuzzlab.labgen.schema's loader ever builds the Cell IR.",
   "type": "object",
-  "required": ["manifest_version", "safety_matrix_version", "cells"],
+  "required": ["manifest_version", "safety_matrix_version"],
   "additionalProperties": false,
+  "anyOf": [
+    { "required": ["cells"] },
+    { "required": ["axis_ranges"] }
+  ],
   "properties": {
     "manifest_version": {
       "type": "integer",
@@ -20,6 +24,11 @@
     "cells": {
       "type": "array",
       "items": { "$ref": "#/$defs/cell" }
+    },
+    "axis_ranges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/axis_range" },
+      "description": "Covering-array axis-range blocks (T-LAB2.1). Each block expands, via fuzzlab.labgen.resolver.expand(), into concrete cells that are appended after any explicit `cells` (same Cell IR, same dupe-checked cell_id namespace). Absent or empty: manifest loading is byte-for-byte identical to the explicit-cells-only format."
     }
   },
   "$defs": {
@@ -81,6 +90,81 @@
         "nuisance": {
           "type": "object",
           "description": "Opaque bag of nuisance-axis values (naming, whitespace, comment style, etc.) that must not affect the derived verdict. Reserved for the covering-array/nuisance-independence work in later phases; unused by Phase 0's verdict derivation."
+        }
+      }
+    },
+    "axis_range": {
+      "type": "object",
+      "required": ["cell_id_prefix", "factors"],
+      "additionalProperties": false,
+      "description": "One covering-array request. `factors` maps a fixed set of recognized axis names to their level lists and is passed straight through to fuzzlab.labgen.resolver.expand() (its 'factors' key) alongside strength/sub_models/constraints, so this shape matches what the resolver already accepts rather than inventing a new one. Any Cell field not varied by an axis here must be supplied as this block's own fixed value (class/stack_profile/route/transform/sink_context), or expansion fails closed with a clear error -- never a silently-defaulted field.",
+      "properties": {
+        "cell_id_prefix": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Prefix for generated cell_ids: '<prefix><4-digit 1-based index>' (e.g. 'LABGEN-CA-0001'), in the resolver's own row order (deterministic — see resolver.expand()'s pinned-sorter guarantee)."
+        },
+        "strength": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Covering-array strength t. Default 2 (pairwise), per CR-LAB-0001's default and fuzzlab.labgen.resolver's own default."
+        },
+        "sub_models": {
+          "type": "array",
+          "items": { "type": "object" },
+          "description": "Forwarded verbatim to resolver.expand()'s 'sub_models' -- a stronger covering requirement over a subset of these factors."
+        },
+        "constraints": {
+          "type": "array",
+          "items": { "type": "object" },
+          "description": "Forwarded verbatim to resolver.expand()'s 'constraints' -- declarative row exclusions."
+        },
+        "factors": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": false,
+          "description": "Axis name -> level list. Only these axis names are recognized (each maps to a Cell field the loader knows how to place); an unrecognized key is a schema error rather than being silently passed through and ignored (PA-0010).",
+          "properties": {
+            "class": {
+              "type": "array", "minItems": 1,
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "stack_profile": {
+              "type": "array", "minItems": 1,
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "sink_context_family": {
+              "type": "array", "minItems": 1,
+              "items": { "type": "string", "minLength": 1 },
+              "description": "Varies sink_context.family. Requires this block's `sink_context_neutralizations` to map every level here to its required_neutralizations list."
+            },
+            "transform": {
+              "type": "array", "minItems": 1,
+              "items": { "$ref": "#/$defs/pipeline" }
+            },
+            "route_method": {
+              "type": "array", "minItems": 1,
+              "items": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] }
+            },
+            "route_path": {
+              "type": "array", "minItems": 1,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "class": { "type": "string", "minLength": 1, "description": "Fixed value used when 'class' is not a factor." },
+        "stack_profile": { "type": "string", "minLength": 1, "description": "Fixed value used when 'stack_profile' is not a factor." },
+        "route": { "allOf": [{ "$ref": "#/$defs/route" }], "description": "Fixed value used for any of method/path not covered by the route_method/route_path factors." },
+        "transform": { "allOf": [{ "$ref": "#/$defs/pipeline" }], "description": "Fixed value used when 'transform' is not a factor." },
+        "sink_context": { "allOf": [{ "$ref": "#/$defs/sink_context" }], "description": "Fixed value used when 'sink_context_family' is not a factor." },
+        "sink_context_neutralizations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
+          "description": "Required, and must have an entry for every 'sink_context_family' factor level, when that axis is present: maps each family value to the required_neutralizations list the generated sink_context carries for that family (this is a function of family, not an independent covering-array axis)."
         }
       }
     }
