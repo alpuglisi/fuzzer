@@ -14,6 +14,15 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Fix (BUG-0015, on-host): `scripts/waf_evasion_e2e.sh` exited silently after step 1 because
+  `labctl.sh up` returned non-zero on success when no profile was set — its `up)` case ended
+  with `[ -n "$PFF_PROFILE" ] && echo ...`, a trailing `A && B` that fails (and, as the last
+  command, sets the exit status) when the profile is empty, aborting the `set -e` caller. Now
+  an `if`. Parts I and K passed on-host; this unblocks Part J. Recurrence review: shipped
+  because on-host scripts can't be executed in the build sandbox (recurrence of BUG-0014),
+  and a fail-loud self-test can't catch an abort before it runs — captured as PA-0016
+  (static/shellcheck + exit-code checks on both branches; verify the script's own harness,
+  strengthening PA-0015). RCA `docs/bugs/BUG-0015-*`; see CC-LAB-0012.
 - Docs (BUG-0014): investigated and fixed the systemic inadequacy of the initial
   `docs/ON_HOST_RUNBOOK.md` — its `[build+run]` parts (E/I/J/K) documented unbuilt,
   unverified, and in places incorrect steps as followable (the WAF-disabling double

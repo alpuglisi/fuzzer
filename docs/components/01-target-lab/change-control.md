@@ -3,6 +3,25 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0012 — Fix (BUG-0015): `labctl.sh up` exit status 0 on success without a profile (2026-09-21)
+- Change: the `up)` case's profile notice was `[ -n "${PFF_PROFILE:-}" ] && echo ...`, a
+  trailing `A && B` that returns non-zero when no profile is set — making `labctl.sh up`
+  exit 1 on success and aborting `set -e` callers (e.g. `scripts/waf_evasion_e2e.sh` stopped
+  silently after step 1). Now an `if [ -n ... ]; then echo ...; fi`, which returns 0 either
+  way. Introduced by CC-LAB-0010's profile support.
+- Impact (other components / project): unblocks Part J — `waf_evasion_e2e.sh` (no profile)
+  now proceeds past enabling the WAF. The with-profile path (h2 desync) was already fine.
+- Risk (level; mitigation): low — a one-line control-flow fix. Verified with
+  `bash -c 'set -e; ...'` that the no-profile tail exits 0; swept the other `&&` sites
+  (`labctl.sh:42`, `greybox_e2e.sh:128` — both exempt from set -e). New rule PA-0016
+  (static exit-code checks for on-host scripts, since the sandbox can't run them).
+- Deliverables:
+  - [x] `if`-form profile notice; exit-code verification; `&&`-site sweep — done.
+  - [x] RCA `docs/bugs/BUG-0015-*` (recurrence of BUG-0014 + prior-PA-0015 analysis); PA-0016 — done.
+- Effectiveness (assessed 2026-09-21): `up` returns 0 on the no-profile success path; Part J
+  can proceed. Confirmed indirectly on-host: Parts I/K passed; J stopped exactly at this
+  exit-status boundary and is now fixed.
+
 ### CC-LAB-0011 — Fix (BUG-0013): self-healing `labctl.sh up` under podman-compose (2026-09-21)
 - Change: `lab/labctl.sh` `up` is now self-healing. podman-compose cannot recreate a
   running stack in place when env/profile change (it errors on existing container names /

@@ -18,6 +18,23 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — `labctl.sh up` exits non-zero on success without a profile (BUG-0015)
+
+- **Symptom:** `scripts/waf_evasion_e2e.sh` printed step 1 "lab up" then exited silently
+  with no steps 2–5 (its EXIT trap quietly turned the WAF back off). `h2_desync_e2e.sh`
+  (which sets `PFF_PROFILE=desync`) was unaffected.
+- **Root cause:** the `up)` case ended with `[ -n "${PFF_PROFILE:-}" ] && echo ...`; with no
+  profile, `[ -n "" ]` returns 1 and — being the last command — `labctl.sh up` exits 1
+  despite success, so the caller under `set -e` aborts. A shell trailing-`A && B` exit-status
+  pitfall introduced by the profile support (CC-LAB-0010). It shipped because the on-host
+  scripts can't be executed in the build sandbox (recurrence of BUG-0014's root cause), and a
+  fail-loud self-test can't catch an abort that precedes it.
+- **Remediation:** the profile notice now uses an `if` (returns 0 with or without a profile);
+  verified `up`'s no-profile tail exits 0. Swept the other `&&` sites (safe). Full RCA +
+  recurrence + prior-PA-failure analysis in `docs/bugs/BUG-0015-*`; rule PA-0016. See
+  CC-LAB-0012.
+- **Status:** Fixed (this commit). Parts I and K passed on-host; Part J unblocked.
+
 ## 2026-09-21 — ON_HOST_RUNBOOK documented unbuilt/unverified steps as followable (BUG-0014)
 
 - **Symptom:** the initial runbook's `[build+run]` parts (E, I, J, K) could not be followed —

@@ -105,3 +105,13 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   ones actually produced, and any step that changes host state or sends traffic ships with
   such a script. If the build environment cannot execute the steps (no lab/host), say so and
   keep them `[design]` until validated on the host. (from BUG-0014)
+- **PA-0016** — Shell scripts under `set -e` must never end a function/case/script (or any
+  branch whose status becomes the script's exit status) with a bare `A && B`: it returns
+  non-zero when `A` is false (`B` is skipped), so the script exits non-zero on success and
+  aborts `set -e` callers. Use an `if`, or append `|| true`. Because the build environment
+  cannot run the on-host scripts, verify them statically: `shellcheck`, plus a targeted
+  `bash -c` exit-code check on **both** relevant branches (e.g. an optional var set and
+  unset), and assert the success path exits 0. This strengthens PA-0015 — a `[run]`
+  script's own harness (control flow, exit codes on every path) must be verified, not just
+  its exit assertion, since a fail-loud self-test cannot catch an abort that happens before
+  it runs. (from BUG-0015)

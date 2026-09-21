@@ -61,7 +61,10 @@ case "${1:-}" in
       "${COMPOSE[@]}" "${PROFILE_ARGS[@]}" up -d --build
     fi
     echo "lab up: http://127.0.0.1:${PORT}/  (loopback only)"
-    [ -n "${PFF_PROFILE:-}" ] && echo "profile '${PFF_PROFILE}' enabled"
+    # Use an `if` (not `[ -n ] && echo`): a trailing `A && B` as the case's last command
+    # returns non-zero when A is false (empty profile), making `labctl.sh up` exit 1 on
+    # success and aborting callers under `set -e`. An `if` with no else always returns 0.
+    if [ -n "${PFF_PROFILE:-}" ]; then echo "profile '${PFF_PROFILE}' enabled"; fi
     ;;
   down)
     "${COMPOSE[@]}" down
