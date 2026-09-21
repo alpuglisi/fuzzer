@@ -314,6 +314,26 @@ and measured. Authorized, lab-only.
   signal). XXE, open redirect, and known-CVE templates remain unintegrated — a separate,
   larger undertaking. (`CR-LAB-0001` tool-mapping table,
   `docs/spikes/SPIKE-004-nuclei-vs-dvwa.md`, `CC-LAB-0028`)
+- **FR-LAB-27** (Lab track, L-P2.3) `fuzzlab.labgen.schema.Cell` carries an optional
+  `sink_endpoint: Route | None = None`, distinct from `route` (the injection point),
+  naming where a stored/second-order cell's payload actually reaches its sink and
+  executes — e.g. a profile-bio write endpoint (`route`) whose payload executes on a
+  separate profile-view page (`sink_endpoint`). `None` (the default) means
+  same-endpoint, matching every cell in today's corpus unchanged. This is
+  render/tracking metadata only, the same category as `identity.py`'s data —
+  `fuzzlab.labgen.verdict.verdict()`'s derivation never reads it, and a cell's
+  verdict depends only on `(transform, sink_context, safety_matrix)` as before
+  (D20). `fuzzlab.labgen.emitters.php_current.PhpCurrentEmitter.render()` resolves
+  its page profile (and its `// Real page:` comment) from `sink_endpoint` when set,
+  falling back to `route` otherwise, since this emitter renders the sink side of a
+  cell (the existing `read_stored_field` source module, FR-LAB-18 / `CC-LAB-0022`,
+  already documented this "sink side only" scope before `sink_endpoint` existed to
+  express it). Declaring `sink_endpoint` in an actual YAML manifest still requires a
+  follow-up to `lab/schemas/manifest.schema.json` (deliberately left untouched by
+  this task per its scope discipline — see `CC-LAB-0029`); this requirement covers
+  the `Cell`/emitter contract, which is exercised directly against
+  `Cell.from_dict`/`Manifest.from_dict(..., validate=False)`.
+  (`docs/LAB_IMPLEMENTATION_PLAN.md` §3.3, `CC-LAB-0029`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

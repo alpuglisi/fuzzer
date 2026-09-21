@@ -14,6 +14,16 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Lab (L-P2.3): added `Cell.sink_endpoint: Route | None = None` (default `None` =
+  same-endpoint, unchanged behavior for the entire existing corpus) so a stored/
+  second-order cell can name a sink page distinct from its injection-point `route`
+  (e.g. a profile-bio write endpoint whose payload executes on a separate view page).
+  `verdict.py` untouched — it is render/tracking metadata, not a verdict input.
+  Composing this with `php_current`'s existing `read_stored_field` source
+  (CC-LAB-0022) surfaced one genuine gap: `render()` resolved its page profile from
+  `cell.route` unconditionally, so it raised for a cell whose injection route has no
+  page profile of its own; fixed by resolving the page profile from `sink_endpoint`
+  when set, falling back to `route` otherwise (CC-LAB-0029).
 - Docs: fleshed `docs/LAB_IMPLEMENTATION_PLAN.md`'s Phase 2 (§3) and Phase 3 (§4)
   from milestone-level bullets into full task breakdowns matching Phase 0/1's
   granularity, and added a new §7 lane/dependency map covering every Phase 0-3

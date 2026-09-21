@@ -123,9 +123,19 @@ class Cell:
     route: Route
     sink_context: SinkContext
     transform: Pipeline
+    sink_endpoint: Route | None = None
+    """Where the tainted value actually reaches the sink and executes, if
+    different from ``route`` (the injection point). ``None`` (the default)
+    means same-endpoint -- today's entire corpus, and every existing manifest
+    is unaffected by this field. Populated only for stored/second-order
+    cells (e.g. a profile-bio write endpoint whose payload executes on a
+    separate profile-view page). Render/tracking metadata only, like
+    ``identity.py``'s data -- ``fuzzlab.labgen.verdict`` never reads it (see
+    docs/LAB_IMPLEMENTATION_PLAN.md §3.3 / CC-LAB-0029)."""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Cell":
+        sink_endpoint_data = data.get("sink_endpoint")
         return cls(
             cell_id=data["cell_id"],
             vuln_class=data["class"],
@@ -133,6 +143,7 @@ class Cell:
             route=Route.from_dict(data["route"]),
             sink_context=SinkContext.from_dict(data["sink_context"]),
             transform=Pipeline.from_list(data.get("transform", [])),
+            sink_endpoint=Route.from_dict(sink_endpoint_data) if sink_endpoint_data else None,
         )
 
 
