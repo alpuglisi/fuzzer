@@ -21,7 +21,11 @@ interfaces requiring on-host resources), and a second, independent tool
 oracle for Nuclei (``nuclei_oracle``, path traversal/LFI only — a separate
 module from ``oracle_wrapper`` since Nuclei has no auto-detection against a
 declared parameter the way sqlmap/commix/SSTImap do; it matches
-hand-authored templates instead) — all generator-build-time
+hand-authored templates instead), and a small LAB-owned session helper
+(``identity_session`` — one cookie jar per known, generator-controlled test
+identity, for build-time oracle confirmation of stored/second-order cells;
+deliberately not the toolkit's own separate Session-manager component) —
+all generator-build-time
 security-assertion tooling, unrelated to and never imported by
 ``fuzzlab.oracle``. None of these depends on any other. This re-exports all
 of them. ``fingerprint_gate`` imports ``scipy`` lazily inside its chi-square
@@ -42,6 +46,13 @@ from . import (
     schema,
     subseed,
     verdict,
+)
+from .identity_session import (
+    DuplicateIdentityError,
+    IdentityLike,
+    IdentitySessionStore,
+    Session as IdentitySession,
+    UnknownIdentityError,
 )
 from .oracle_wrapper import (
     CommandInjectionOracleRequest,
@@ -90,6 +101,11 @@ __all__ = [
     "schema",
     "subseed",
     "verdict",
+    "DuplicateIdentityError",
+    "IdentityLike",
+    "IdentitySessionStore",
+    "IdentitySession",
+    "UnknownIdentityError",
     "CommandInjectionOracleRequest",
     "OracleRunResult",
     "OracleSafetyError",

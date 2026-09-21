@@ -3,6 +3,71 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0029 — LAB-owned session helper for build-time oracle confirmation (lane L-P2.2, §3.2) (2026-09-21)
+- Change: added `fuzzlab/labgen/identity_session.py`. Some manifest cells (stored
+  cross-site-scripting and other second-order sinks) need build-time oracle
+  confirmation (`oracle_wrapper.py`) to submit a payload as one known,
+  generator-controlled test identity and observe the sink under another (or the
+  same) identity — this module is the narrow session-holder that makes that
+  possible: `IdentitySessionStore` holds one cookie jar per identity id it was
+  constructed with, `login(identity_id) -> Session` logs in (or re-logs-in,
+  replacing rather than duplicating that identity's jar entry) and returns the
+  resulting session, and `refresh_session_for(identity_id)` returns a
+  zero-argument callable of exactly `oracle_wrapper.SessionRefresh`'s shape
+  (`Callable[[], Mapping[str, str]]`) so it slots directly into any
+  `*OracleRequest.refresh_session` field with no adapter. Cookie extraction
+  (splitting a `Set-Cookie`/`Cookie` response-header key's leading `name=value`
+  pair out, passing every other header through) mirrors, rather than reinvents,
+  the convention `oracle_wrapper._resolve_session` already uses on the consumer
+  side. `fuzzlab.labgen.identity.Identity` (lane L-P2.1, concurrent, not yet
+  merged into this worktree) is imported opportunistically with a fallback: if
+  unavailable, a local `IdentityLike` `Protocol` (an `id: str` field) is used
+  instead, so this module can be built and tested independently of that lane —
+  the module docstring notes swapping to the real import once L-P2.1 merges,
+  which should need no other change since `Identity` already satisfies the
+  Protocol structurally. Explicitly out of scope, and left out on purpose (see
+  module docstring): re-auth on expiry, JWT handling, auto-exclusion of auth
+  endpoints, and anything defending against an unknown/adversarial target —
+  those are the toolkit's own, separate Session-manager component's concerns,
+  not this helper's; this helper only ever talks to identities the generator
+  itself declared (an unknown identity id raises `UnknownIdentityError`, and a
+  duplicate identity id at construction raises `DuplicateIdentityError`, fail
+  loud rather than silently coexisting). Re-exported from
+  `fuzzlab/labgen/__init__.py` (`IdentitySessionStore`, `IdentitySession` (the
+  module's `Session`, aliased to avoid a name clash with any future `Session`
+  export), `IdentityLike`, `UnknownIdentityError`, `DuplicateIdentityError`).
+- Impact (other components / project): none outside LAB. Read-only against
+  `oracle_wrapper`'s `SessionRefresh` type/shape and `_resolve_session`
+  convention (imported directly only in this module's own test suite, to prove
+  composition); `oracle_wrapper.py` itself is untouched. No `fuzzlab.oracle`
+  (runtime detection oracle) involvement, matching every other `labgen`
+  build-time module. Depends structurally (duck-typed, not by hard import) on
+  lane L-P2.1's future `Identity` shape (an `id: str` field) — no other
+  coupling.
+- Risk (level; mitigation): low. This is a narrow, offline, fully
+  fake-transport-tested helper with no network or subprocess access of its own
+  (it delegates the actual login call to an injected `LoginTransport`, the same
+  dependency-injection convention `oracle_wrapper.py` uses for its `Runner`).
+  The one real risk — silently drifting from `oracle_wrapper.SessionRefresh`'s
+  contract — is mitigated by a dedicated test
+  (`test_composes_with_oracle_wrapper_resolve_session_convention`) that feeds
+  this module's output straight through `oracle_wrapper._resolve_session` and
+  asserts the split comes out identically to a hand-built `Cookie`/headers pair.
+- Deliverables:
+  - [x] `fuzzlab/labgen/identity_session.py` — done
+  - [x] `tests/test_labgen_identity_session.py` (11 cases: cookie-splitting,
+    other-header passthrough, two-identity isolation, refresh-not-duplicate on
+    a second `login()`, unknown/duplicate-identity errors, and the
+    `oracle_wrapper`-composition check) — done, all passing
+  - [x] `fuzzlab/labgen/__init__.py` exports — done
+  - [x] `CHANGELOG.md` line, this change-control entry, `FR-LAB-27` — done
+- Effectiveness (assessed 2026-09-21): met intent — `python -m pytest -q`
+  (full suite) passes 880/880 non-skipped tests including all 11 new ones (8
+  pre-existing skips, unrelated to this change); two pre-existing failures in
+  `tests/test_mutation_operators.py` were confirmed present before this change
+  too (reproduced on a clean stash of this worktree's diff) and are unrelated
+  to LAB/`identity_session` — out of this lane's scope to fix.
+
 ### CC-LAB-0028 — Nuclei path-traversal/LFI oracle wrapper (Addendum E, Spike 004) (2026-09-21)
 *(Numbered `CC-LAB-0028` rather than `CC-LAB-0017` at merge time — this lane's worktree
 diverged onto a stale, unrelated branch lineage before starting, self-diagnosed and

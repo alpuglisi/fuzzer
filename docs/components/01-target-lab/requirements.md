@@ -314,6 +314,24 @@ and measured. Authorized, lab-only.
   signal). XXE, open redirect, and known-CVE templates remain unintegrated — a separate,
   larger undertaking. (`CR-LAB-0001` tool-mapping table,
   `docs/spikes/SPIKE-004-nuclei-vs-dvwa.md`, `CC-LAB-0028`)
+- **FR-LAB-27** (Lab track, §3.2, lane L-P2.2) A small LAB-owned session helper,
+  `fuzzlab.labgen.identity_session.IdentitySessionStore`, holds one cookie jar per
+  named test identity (from `identities.yaml` / `fuzzlab.labgen.identity`, FR-LAB-9's
+  sibling identity-and-ownership schema — accepted duck-typed via a local
+  `IdentityLike` fallback until that lane merges) so build-time oracle confirmation of
+  stored/second-order cells (§3.3's `sink_endpoint`, a concurrent, not-yet-landed
+lane) can submit a payload as
+  one known identity and observe the sink under another. `login(identity_id) ->
+  Session` logs in (replacing, never duplicating, that identity's jar entry on a
+  second call); `refresh_session_for(identity_id)` returns a callable of exactly
+  FR-LAB-11's `SessionRefresh` shape (`Callable[[], Mapping[str, str]]`), so it slots
+  directly into any `oracle_wrapper.*OracleRequest.refresh_session` field, mirroring
+  that convention rather than inventing a new one. Deliberately **not** the toolkit's
+  separate Session-manager component (a different roadmap track built for adversarial
+  tools against an unknown target, with re-auth-on-expiry, JWT handling, and
+  auto-exclusion of auth endpoints): this helper only ever talks to identities the
+  generator itself declared, and none of re-auth/JWT/auto-exclusion/unknown-target
+  defenses are in scope here. (`CC-LAB-0029`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
