@@ -14,6 +14,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (Phase 9 protocol on-host last mile): runbook Part K is now a one-command flow.
+  Built `fuzzlab/proxy/h2transport.py::H2Transport` — the live h2c socket send/receive
+  around the from-scratch `H2RawClient`: `request(...)` (well-behaved: preface+SETTINGS+
+  HEADERS, ACK, read to END_STREAM, decode `:status`/body) and `send_raw(...)` (byte-exact
+  malformed/length-desync/CRLF-in-header primitives). `labctl.sh` gained `PFF_PROFILE`
+  (top-level `--profile`) so `PFF_PROFILE=desync ./labctl.sh up` starts the downgrade
+  front-end. `scripts/h2_desync_e2e.sh` self-tests a normal request through the downgrade
+  and emits the desync primitives. See CC-PROXY-0011, CC-LAB-0010. Suite 411 passed / 5 skipped.
 - Feature (Phase 6 proxy on-host last mile): runbook Part I is now a one-command flow.
   Built `fuzzlab/proxy/socketsender.py::SocketSender` (real upstream `Sender`: byte-exact
   TCP/TLS forward + full HTTP/1 response read), CONNECT/TLS termination in

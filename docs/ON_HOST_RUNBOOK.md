@@ -434,25 +434,54 @@ cleanly on-host: `pip install "sqlglot>=20,<30"`.
    first (its shim/side channel), then compare `attempt` coverage/reward for a blocked
    base payload vs. its accepted variant.
 
-## Part K — Phase 9: protocol depth `[build+run]`
+## Part K — Phase 9: protocol depth `[run]`
 
-The WebSocket codec, HTTP/2 frame layer + minimal HPACK, and the raw-frame client are
-built (`fuzzlab/proxy/ws.py`, `h2frames.py`, `hpack.py`, `h2client.py`). On-host:
+The WebSocket codec, HTTP/2 frame layer + minimal HPACK, and the raw-frame client were
+already built (`fuzzlab/proxy/ws.py`, `h2frames.py`, `hpack.py`, `h2client.py`). The
+missing socket send/receive now ships as `fuzzlab/proxy/h2transport.py::H2Transport`, so
+this part is one command.
+
+### K.1 One command
+
 ```bash
-pip install "wsproto>=1.2,<2" "h2>=4,<5"     # the parsed-path libraries
-pytest tests/test_proxy_h2.py                 # all pass on-host (incl. the h2/HPACK paths)
+scripts/h2_desync_e2e.sh
 ```
-1. **Bring up the h2→h1 desync front-end** (D17, opt-in):
-   ```bash
-   ( cd lab && docker compose --profile desync up -d )   # nginx h2c on 127.0.0.1:8081
-   ```
-2. **Send a raw HTTP/2 request** with the `H2RawClient` over an h2c socket to
-   `127.0.0.1:8081` (the client builds the bytes; the socket send is the last-mile).
-   Confirm a normal request is served through the downgrade, and a **byte-exact/arbitrary**
-   request (e.g. a header value with CRLF, or a length-desync frame) goes on the wire as
-   built.
-3. **Exit:** demonstrate an h2→h1 desync primitive against the front-end — lab-only, on
-   your own infrastructure.
+
+It brings up the opt-in h2→h1 downgrade front-end (compose `desync` profile), waits for
+the h2c listener, then: sends a **real HTTP/2 request over an h2c socket** with the raw
+client and confirms the front-end serves a response through the downgrade (the self-test:
+a HEADERS frame + non-empty body on our stream); and emits the **desync primitives**
+byte-exact — a CRLF-in-header-value request and a length-desync frame — reporting how the
+front-end handles them.
+
+### K.2 What was built
+
+- **Live h2c transport** — `H2Transport` opens a plaintext TCP socket to the front-end
+  (nginx `http2 on;` accepts the HTTP/2 preface with **prior knowledge** — no TLS/ALPN, no
+  Upgrade dance). `request(...)` runs a well-behaved exchange (send preface+SETTINGS+HEADERS,
+  ACK the server SETTINGS, read to END_STREAM, decode the response — `:status` decodes when
+  static-indexed; the body is never HPACK-compressed). `send_raw(...)` writes **exactly**
+  the bytes from `H2RawClient.build_raw(...)` for full-control / malformed frames.
+- **labctl profile** — `PFF_PROFILE=desync ./labctl.sh up` now brings up the front-end
+  (the `--profile` flag is a top-level compose flag, so it is passed before the subcommand).
+
+### K.3 The parsed convenience path (optional, on-host)
+
+The from-scratch modules need no third-party libs and their tests always run. The optional
+`h2`/`wsproto` parsed path is separate:
+
+```bash
+pip install "wsproto>=1.2,<2" "h2>=4,<5"
+pytest tests/test_proxy_h2.py tests/test_proxy_h2_transport.py
+```
+
+### K.4 Exit (h2→h1 desync primitive)
+
+The raw client emits the desync primitives on the wire byte-exact (step 4). A **patched
+nginx (1.27) correctly rejects** CRLF-in-header-value and length-desync frames — that is
+the right defensive behavior, so the demonstration is the *emission* of the primitive and
+observing the front-end's handling, not a successful smuggle against a hardened target.
+Everything stays loopback, on infrastructure you own.
 
 ## Part L — Phase 10: plugins, anomaly, report, transfer `[run]`
 

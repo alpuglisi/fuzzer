@@ -36,10 +36,16 @@ fi
 
 PORT="${PFF_WEB_PORT:-8080}"
 
+# Optional compose profile (top-level flag, must precede the subcommand). Set
+# PFF_PROFILE=desync to also start the opt-in h2->h1 downgrade front-end (D17).
+PROFILE_ARGS=()
+[ -n "${PFF_PROFILE:-}" ] && PROFILE_ARGS=(--profile "${PFF_PROFILE}")
+
 case "${1:-}" in
   up)
-    "${COMPOSE[@]}" up -d --build
+    "${COMPOSE[@]}" "${PROFILE_ARGS[@]}" up -d --build
     echo "lab up: http://127.0.0.1:${PORT}/  (loopback only)"
+    [ -n "${PFF_PROFILE:-}" ] && echo "profile '${PFF_PROFILE}' enabled"
     ;;
   down)
     "${COMPOSE[@]}" down

@@ -1,6 +1,6 @@
 # Intercepting Proxy — Requirement Specification
 
-Component code: **PROXY** · Status: `[built — offline stack + live upstream SocketSender, CONNECT/TLS termination, and the fuzzlab proxy CLI; live HTTPS interception verified on-host]` (Phase 6) · Last updated: 2026-09-21 · see CC-PROXY-0010
+Component code: **PROXY** · Status: `[built — offline stack + live upstream SocketSender, CONNECT/TLS termination, the fuzzlab proxy CLI, and the live h2c H2Transport; HTTPS interception + h2c send verified on-host]` (Phase 6 + Phase 9) · Last updated: 2026-09-21 · see CC-PROXY-0010, CC-PROXY-0011
 
 Related: `ARCHITECTURE.md` #11; `DECISIONS_AND_ROADMAP.md` (D3, D4, D5);
 `./change-control.md`.

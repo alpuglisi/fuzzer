@@ -3,6 +3,36 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0011 — Live h2c socket transport for the raw HTTP/2 client (Phase 9 on-host, T9.x) (2026-09-21)
+- Change: built the Phase 9 on-host last mile so runbook Part K is a one-command flow. New
+  `fuzzlab/proxy/h2transport.py::H2Transport` is the socket send/receive around the
+  already-built `H2RawClient`/`h2frames`/`hpack`: `request(...)` opens a plaintext TCP
+  socket to an h2c (prior-knowledge) endpoint, sends preface+SETTINGS+HEADERS, ACKs the
+  server SETTINGS, reads to END_STREAM, and decodes an `H2Response` (`:status` when
+  static-indexed; reassembled DATA body); `send_raw(...)` writes exactly the bytes from
+  `build_raw(...)` for malformed/length-desync/CRLF-in-header primitives. Orchestration
+  `scripts/h2_desync_e2e.sh`.
+- Impact (other components / project): the from-scratch HTTP/2 client can now talk to the
+  lab's opt-in h2→h1 downgrade front-end over a real socket — no TLS/ALPN/Upgrade needed
+  (nginx `http2 on;` prior knowledge). Depends on the LAB desync profile (CC-LAB-0010 adds
+  `PFF_PROFILE` to `labctl.sh`). No change to the byte-building modules. Dual-use protocol
+  tooling; loopback + opt-in profile only.
+- Risk (level; mitigation): low–medium — a real socket to a smuggling research target.
+  Mitigated by: loopback-only, the front-end being opt-in (`desync` profile, default off),
+  the transport reading with bounded timeouts, and tests (`tests/test_proxy_h2_transport.py`)
+  that exercise the real socket path against a one-shot loopback server: a normal request
+  decodes `:status`/body, `send_raw` puts a length-desync frame on the wire byte-exact, and
+  a CRLF-in-header value is carried verbatim. The desync exit is framed as emitting the
+  primitive (a patched nginx correctly rejects it), not a successful smuggle. Suite 411
+  passed / 5 skipped.
+- Deliverables:
+  - [x] `H2Transport.request` / `send_raw` (live h2c socket) + tests — done.
+  - [x] `scripts/h2_desync_e2e.sh`; runbook Part K rewritten to one command — done.
+  - [ ] Live smuggle against a deliberately-mishandling front-end — out of scope (nginx is patched).
+- Effectiveness (assessed 2026-09-21): effective offline — the transport round-trips a real
+  h2 response and emits both desync primitives byte-exact over a socket. The live front-end
+  exchange is driven by `scripts/h2_desync_e2e.sh`.
+
 ### CC-PROXY-0010 — Live upstream SocketSender + CONNECT/TLS termination + `fuzzlab proxy` CLI (Phase 6 on-host, T6.x) (2026-09-21)
 - Change: built the Phase 6 on-host last mile so runbook Part I is a one-command flow.
   New `fuzzlab/proxy/socketsender.py::SocketSender` is a real upstream `Sender`

@@ -3,6 +3,23 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0010 — `labctl.sh` compose-profile support (h2→h1 desync front-end) (Phase 9 on-host) (2026-09-21)
+- Change: `lab/labctl.sh` now honors `PFF_PROFILE` and passes `--profile <name>` as a
+  **top-level** compose flag (before the subcommand) on `up`, so
+  `PFF_PROFILE=desync ./labctl.sh up` brings up the opt-in h2→h1 downgrade front-end
+  (D17). Fixed the `compose.yaml` comment that suggested the (non-working)
+  `./labctl.sh up --profile desync` form. Used by `scripts/h2_desync_e2e.sh` (Part K).
+- Impact (other components / project): unblocks the Phase 9 protocol last mile
+  (CC-PROXY-0011) — the raw h2c client needs the front-end running. Default behavior is
+  unchanged (no profile → the front-end stays off, as before).
+- Risk (level; mitigation): low — additive; the desync front-end remains opt-in and
+  loopback-only. `tests/test_lab_downgrade.py` already asserts the profile gating and
+  loopback binding; the change only affects how the profile is passed.
+- Deliverables:
+  - [x] `PFF_PROFILE` → top-level `--profile` on `up`; corrected compose comment — done.
+- Effectiveness (assessed 2026-09-21): effective — `PFF_PROFILE=desync ./labctl.sh up`
+  starts web+db+frontend; `scripts/h2_desync_e2e.sh` drives the live front-end.
+
 ### CC-LAB-0009 — Grey-box instrumentation: pcov + cov.php shim, prepend chain, DB snapshot (Phase 3 T3.1/T3.5) (2026-09-21)
 - Change: instrumented the lab image for grey-box runs. `lab/web.Dockerfile` installs pcov
   (`pcov.enabled=1`, `pcov.directory=/var/www/html`). New `puppy-fort-factory/includes/
