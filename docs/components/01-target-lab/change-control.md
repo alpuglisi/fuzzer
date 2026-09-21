@@ -68,6 +68,117 @@ merged in, verified independently, and given this fresh entry number.)*
   `php_current`'s module set is rich enough to reproduce the real app without rework — that
   is the next task's real test.
 
+### CC-LAB-0021 — ZAP whole-app safety-net oracle: Spike 005 + new wrapper module (2026-09-21)
+*(Numbered `CC-LAB-0021` rather than `CC-LAB-0019` at merge time — this lane's worktree
+was based on a commit that predated `CC-LAB-0019`/`CC-LAB-0020` (the emitter and the
+OSV/GHSA sourcing tool) landing, so it independently claimed `0019` too. No content
+changed; purely a numbering fix.)*
+- Change: two parts, completing this project's four-tool integration list
+  (`LAB_SEED_AUTHORING_PLAYBOOK.md`'s "SSTImap/Nuclei/ZAP remain unintegrated" line,
+  `CR-LAB-0001`'s tool-mapping table — Nuclei is a separate, concurrent lane's work, not
+  touched here). (1) `docs/spikes/SPIKE-005-zap-vs-ssti-flask-hacking-playground.md` —
+  downloaded the official `zaproxy/zaproxy` v2.16.1 Linux release tarball (Apache-2.0,
+  ~234MB, reachable through this environment's proxy even though Docker Hub is not) into
+  the session scratchpad, reused Spike 003's already-validated vulnerable/secure Flask
+  twin pair (permission explicitly given to reuse an existing spike target rather than
+  clone a new app), and ran ZAP's own "Automation Framework"
+  (`zap.sh -cmd -autorun <plan.yaml>`, a single headless invocation that crawls, scans,
+  and exits on its own — no daemon or API-polling loop needed) against both. Correct
+  positive: a dedicated **"Server Side Template Injection"** active-scan rule fired at
+  High risk/High confidence on the vulnerable endpoint, plus (incidentally, validating
+  `CR-LAB-0001`'s separately-listed "ZAP active scan ... for reflected/stored XSS" path
+  for free) a **"Cross Site Scripting (Reflected)"** alert on the same parameter. Correct
+  negative: neither alert on the secure twin — only routine header/info-disclosure noise
+  present on almost any target (missing CSP header, missing anti-clickjacking header,
+  version-disclosure header, etc.), which is itself the spike's central design finding:
+  an *unscoped* "any ZAP alert" verdict would flag every target, secure ones included, on
+  noise unrelated to the class under test. Also found and designed around (no code defect,
+  no `ERROR_LOG.md` entry needed): ZAP's own process exit code reflects its own opaque,
+  whole-app policy, not the one class a caller declares, so the wrapper never adds an
+  `exitStatus` job or inspects the exit code for its verdict — it always parses the
+  Automation Framework's own JSON report; a stale process squatting on ZAP's port (an
+  unrelated leftover Flask instance from earlier in the same session) causes a fast, clean
+  `BindException` failure, not a hang, but the general port-collision/stale-state risk is
+  real for a heavier daemon than the other three tools spawn, mitigated by giving every
+  invocation its own fresh, temporary ZAP home directory; Firefox is absent in this
+  environment (harmless — only affects the AJAX/client spider, which this wrapper doesn't
+  use) and ZAP's telemetry "call home" step is blocked by the egress proxy and logs an
+  `ERROR`-level line on every run (harmless and non-blocking — confirms the wrapper must
+  never treat "any ERROR in stderr" as a failure signal by itself).
+  (2) Added `fuzzlab/labgen/zap_oracle.py` (a **new, separate module** — deliberately not
+  merged into `oracle_wrapper.py`, which other lanes own and which is shaped for
+  per-parameter tools; ZAP is a whole-app scanner with no single declared parameter).
+  `ZapWholeAppScanRequest` (target_url, optional `alert_name_pattern`, `risk_threshold`,
+  crawl/scan duration caps, timeout, `max_attempts`, `tool_path`, isolable
+  `zap_home_dir`/`report_dir`) and `run_zap_whole_app_scan()` build a YAML Automation plan
+  via `yaml.safe_dump` (PyYAML — already a declared project dependency per Lane B's
+  `schema.py`/`verdict.py`), invoke it as one bounded subprocess call through the same
+  `Runner` protocol `oracle_wrapper` defines (imported, not duplicated), and classify the
+  result by parsing the JSON report against the caller's declared scope. Reuses
+  `oracle_wrapper`'s `assert_loopback`, `locate_tool`, `Verdict`, `OracleRunResult`,
+  `ToolNotFoundError`, `OracleSafetyError`, and `default_runner` directly (imported, not
+  reimplemented) — only the request/verdict *shape* differs from the other three tools
+  (`ZapScanVerdict` instead of `OracleVerdict`: a `checked_for` scope description and a
+  *list* of matching/all alerts instead of one raw-output string), because ZAP's job is
+  structurally a list-producing whole-app scan, not a single parameter's pass/fail.
+- Impact (other components / project): completes `LAB_SEED_AUTHORING_PLAYBOOK.md`'s named
+  four-tool set (sqlmap, commix, SSTImap, ZAP) with Nuclei tracked separately by a
+  concurrent lane; the playbook's "SSTImap/Nuclei/ZAP remain unintegrated" line now reads
+  "SSTImap and ZAP integrated; Nuclei remains unintegrated." New `requirements.md`
+  FR-LAB-20 (FR-LAB-11 covers the per-parameter contract; this is a structurally different
+  whole-app contract, so a new stable ID rather than an amendment). No other component's
+  contracts change; `fuzzlab/oracle/`, `fuzzlab/harness/`, `fuzzlab/web/` untouched;
+  `oracle_wrapper.py`, `resolver.py`, `schema.py`, `verdict.py`, `subseed.py`, `gates.py`,
+  `denylist.py`, and any `nuclei_oracle.py` are untouched (other lanes' files) —
+  `fuzzlab/labgen/__init__.py` gains only additive re-exports for the two new symbols.
+- Risk (level; mitigation): medium (same class as `CC-LAB-0016`/`CC-LAB-0017`: a defect
+  here could make a generated cell's ground-truth label wrong). Mitigated by: the manual
+  curl+ZAP validation of both twins before any test was written (both directions, through
+  the wrapper itself, before the offline suite existed); parsing the tool's own detailed,
+  structured report rather than trusting its opaque exit code (the same discipline already
+  applied to sqlmap/commix, generalized here to a fourth, differently-shaped tool);
+  deleting any pre-existing report file before each attempt so a crash can never be
+  misclassified from stale data left by an earlier run; per-invocation isolated temp
+  directories (never a shared/reused ZAP home or report path unless the caller explicitly
+  opts in) so no invocation can inherit another's state; 22 new offline tests (loopback
+  refusal, missing-binary, plan construction incl. include-paths/report-template/no-
+  exitStatus-job/`-dir` isolation, scoped and unscoped verdict classification, risk-
+  threshold filtering and case-insensitivity, bounded timeout/retry exhaustion and early
+  stop, crash-with-no-report, malformed-report-JSON, the stale-report-not-classified case,
+  and temp-dir ownership/cleanup for both the wrapper-owned and caller-supplied cases) plus
+  1 new real, skip-guarded integration test (PA-0005) that shells out to the real
+  downloaded ZAP against a genuinely non-vulnerable static-HTML endpoint. ZAP is not a
+  declared project dependency (a ~230MB JVM app, heavier than the other three CLI tools);
+  the integration test skips cleanly, not fails, when it isn't reachable (`PATH` or
+  `FUZZLAB_ZAP_PATH`).
+- Deliverables:
+  - [x] `docs/spikes/SPIKE-005-zap-vs-ssti-flask-hacking-playground.md` — done.
+  - [x] `fuzzlab/labgen/zap_oracle.py` (`ZapWholeAppScanRequest`, `ZapScanVerdict`,
+        `run_zap_whole_app_scan`) — done.
+  - [x] Scoped (`alert_name_pattern`) and unscoped (whole-app safety-net) verdict modes,
+        risk-threshold filtering — done.
+  - [x] Never trusts ZAP's own exit code; always parses the JSON report; per-invocation
+        isolated temp dirs; stale-report protection — done.
+  - [x] 22 new offline tests + 1 new skip-guarded real-binary integration test — done (all
+        pass; also verified manually end to end against the real vulnerable/secure Flask
+        apps through the wrapper before the test suite was written).
+  - [x] `docs/LAB_SEED_AUTHORING_PLAYBOOK.md` "SSTImap/Nuclei/ZAP remain unintegrated"
+        line updated — done.
+  - [x] `requirements.md` FR-LAB-20 added — done.
+  - [ ] An original Tier-A seed whose security assertion actually calls this wrapper (or
+        the sqlmap/commix/SSTImap one) — not started, tracked in the playbook (unchanged
+        from `CC-LAB-0016`/`CC-LAB-0017`).
+- Effectiveness (assessed 2026-09-21): effective against its own test suite — full suite
+  644 passed / 6 skipped (6 of the skips are this and prior lanes' real-binary integration
+  tests skipping cleanly without the real tools on `PATH`; the baseline before this change
+  was 622 passed / 5 skipped), plus the 2 known pre-existing, unrelated
+  `test_mutation_operators.py` failures (untouched, out of scope). All 23 zap_oracle tests
+  (22 offline + 1 integration) pass with the real ZAP binary wired in via
+  `FUZZLAB_ZAP_PATH`. Full effectiveness (a real seed's label correctly confirmed by this
+  wrapper against a real vulnerable/secure twin pair, or as a genuine supplementary
+  safety-net check across a generated app) is assessed once the playbook's own next step is
+  attempted, same as the prior three tool-oracle entries.
+
 ### CC-LAB-0017 — SSTImap oracle support: Spike 003 + wrapper extension (2026-09-21)
 *(Numbered `CC-LAB-0017` rather than `CC-LAB-0016` at merge time — this lane's worktree
 was based on a commit that predated `CC-LAB-0016` (Phase 0 foundation) landing, so it
