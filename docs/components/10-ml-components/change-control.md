@@ -3,6 +3,32 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0005 — Phase 7 groundwork: ranking metrics + char n-gram TF-IDF (T7.1) (2026-09-21)
+- Change: started the candidate ranker (A.2). `fuzzlab/ml/ranking.py` adds per-page
+  ranking metrics — `ndcg_at_k`, `precision_at_k`, and grouped `mean_ndcg_at_k`/
+  `mean_precision_at_k` (averaged over pages that have a positive; ties break to input
+  order so a constant scorer can't win). `fuzzlab/ml/text_features.py::CharNgramVectorizer`
+  is a bounded, deterministic, L2-normalized pure-Python char n-gram TF-IDF (no
+  numpy/sklearn), with `candidate_text` (param/path/category/method) as the source text.
+  Wrote `docs/PHASE_7_PLAN.md`.
+- Impact (other components / project): gives Phase 7 its ordering-quality yardstick
+  (NDCG@k/Precision@k) and the weak-signal text features (param/path names) the pointwise
+  ranker (T7.2) augments the structural vector with. Advisory-only; no store change yet
+  (rank columns are T7.2's migration 7). Builds on Phase 5's `metrics`/`dataset`.
+- Risk (level; mitigation): low — pure, dependency-light logic; no writes. Mitigated by
+  11 tests (`tests/test_ml_ranking.py`): NDCG perfect/worst/zero-positive and a
+  hand-computed value; Precision@k; tie-break to input order; per-page means skip
+  positive-less pages; vectorizer determinism/bounding/L2-norm, similar-name proximity,
+  and short/unseen text. Suite 259 passed / 3 skipped.
+- Deliverables:
+  - [x] Ranking metrics (NDCG@k, Precision@k, per-page) — done.
+  - [x] Char n-gram TF-IDF vectorizer + `candidate_text` — done.
+  - [ ] Pointwise ranker + `candidate.rank_score` (T7.2); active learning (T7.3);
+        held-out exit (T7.4) — next.
+- Effectiveness (assessed 2026-09-21): effective in tests — the metrics rank a good order
+  above a bad one and the vectorizer places similar param names closer; the real ordering
+  lift is measured in T7.2/T7.4.
+
 ### CC-ML-0004 — Gradient-boosted trees + model auto-selection (T5.4) (2026-09-21)
 - Change: added `fuzzlab/ml/gbt.py::GradientBoostedTrees` — a pure-Python logistic-loss
   gradient-boosting model over shallow **weighted** regression trees (class-balanced,

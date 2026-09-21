@@ -13,6 +13,13 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 7 (T7.1): started the **candidate ranker** (ML component A.2).
+  `fuzzlab/ml/ranking.py` adds per-page ranking metrics (`ndcg_at_k`, `precision_at_k`,
+  and grouped means over pages with a positive; ties break to input order so a constant
+  scorer can't win); `fuzzlab/ml/text_features.py::CharNgramVectorizer` is a bounded,
+  deterministic, L2-normalized pure-Python char n-gram TF-IDF with `candidate_text`
+  (param/path/category/method). Wrote `docs/PHASE_7_PLAN.md`. Advisory-only; no store
+  change yet. +11 tests (259 passed / 3 skipped). Change-control: CC-ML-0005.
 - Phase 6 (T6.6): tied the proxy together. `server.py::ProxyEngine` is the sans-I/O
   flow pipeline (scope → match-and-replace → interception → byte-exact forward →
   history; out-of-scope traffic bypasses untouched/unrecorded); `parse_connect` +
