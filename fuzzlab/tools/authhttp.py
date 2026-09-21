@@ -22,11 +22,11 @@ def with_query_param(url: str, name: str, value) -> str:
     return urlunparse(parts._replace(query=urlencode(query)))
 
 
-def make_authenticated_client(target_url: str, identity: str, timeout: float = 15.0):
-    """Build a `core/` HttpClient with the session manager attached for a target.
+def _build(target_url: str, timeout: float):
+    """Build the session manager + an HttpClient sharing it, scoped to the target.
 
-    The target host is added to scope (the tool's `--authorized`/`--url` is the
-    authorization). Credentials come from the per-host credential store (D12).
+    The target host is added to scope (the tool's `--authorized`/`--url`/`--base-url`
+    is the authorization). Credentials come from the per-host credential store (D12).
     """
     from fuzzlab.core.budget import RequestBudget
     from fuzzlab.core.config import load_config
@@ -42,4 +42,21 @@ def make_authenticated_client(target_url: str, identity: str, timeout: float = 1
     creds = CredentialStore.open(cfg)
     manager = SessionManager(creds, scope_hosts=scope)
     budget = RequestBudget(int(cfg.get("budget_total", 5000)))
-    return HttpClient(budget, scope, session=manager, timeout=timeout)
+    client = HttpClient(budget, scope, session=manager, timeout=timeout)
+    return manager, client
+
+
+def make_authenticated_client(target_url: str, identity: str, timeout: float = 15.0):
+    """A `core/` HttpClient with the session manager attached (for requests-path tools)."""
+    return _build(target_url, timeout)[1]
+
+
+def make_auth(target_url: str, timeout: float = 15.0):
+    """Return ``(session_manager, http_client)`` for a target — the manager is used
+    for Playwright cookie injection, the client for the requests/static path."""
+    return _build(target_url, timeout)
+
+
+def make_session_manager(target_url: str, timeout: float = 15.0):
+    """Just the session manager for a target (Playwright cookie injection)."""
+    return _build(target_url, timeout)[0]

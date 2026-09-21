@@ -281,14 +281,18 @@ class ContentFetcher:
             status, content_type, html, xhr = fetcher.fetch(url)
     """
 
-    def __init__(self, engine="auto", timeout_ms=10000, identity=None, seam_client=None):
+    def __init__(self, engine="auto", timeout_ms=10000, identity=None, seam_client=None,
+                 session_manager=None, auth_base_url=None):
         self.timeout_ms = timeout_ms
         self.session = requests.Session()
         # When an identity + seam client are given, the static-fetch path routes
         # through the core HTTP seam so pages are fetched authenticated (Option A).
-        # The Playwright (browser) path is migrated separately (cookie injection).
+        # The Playwright (browser) path authenticates by injecting the session
+        # (cookies / bearer header) into the browser context (session_manager).
         self._identity = identity
         self._seam = seam_client
+        self._session_manager = session_manager
+        self._auth_base_url = auth_base_url
 
         if engine == "auto":
             engine = "playwright" if _PLAYWRIGHT_AVAILABLE else "requests"
@@ -319,6 +323,13 @@ class ContentFetcher:
             self._browser = self._pw.chromium.launch(**launch_kwargs)
             self._page = self._browser.new_page()
             self._page.on("request", self._on_request)
+            if self._session_manager and self._identity and self._auth_base_url:
+                from fuzzlab.tools import browserauth
+                cookies, headers = browserauth.playwright_auth(
+                    self._session_manager, self._identity, self._auth_base_url)
+                browserauth.apply_to_context(self._page.context, cookies, headers)
+                logging.info(f"Auditor authenticated as {self._identity} "
+                             f"({len(cookies)} cookie(s))")
         logging.info(f"Auditor engine: {self.engine}")
         return self
 
@@ -824,12 +835,12 @@ if __name__ == "__main__":
     log.info("auditor starting", extra={"indicator_db": args.indicator_db,
                                         "spider_db": args.spider_db})
     seam = None
+    session_manager = None
     if args.identity:
         if not args.base_url:
             sys.exit("--identity requires --base-url (the target base URL for login).")
-        from fuzzlab.tools.authhttp import make_authenticated_client
-        seam = make_authenticated_client(args.base_url, args.identity,
-                                         timeout=args.timeout / 1000)
+        from fuzzlab.tools.authhttp import make_auth
+        session_manager, seam = make_auth(args.base_url, timeout=args.timeout / 1000)
         log.info("auditing authenticated", extra={"identity": args.identity})
 
     targets = load_urls(args.spider_db)
@@ -843,7 +854,9 @@ if __name__ == "__main__":
         unhandled = set()
         results_db = setup_results_db(args.out, append=args.append)
         with ContentFetcher(engine=args.engine, timeout_ms=args.timeout,
-                            identity=args.identity, seam_client=seam) as fetcher:
+                            identity=args.identity, seam_client=seam,
+                            session_manager=session_manager,
+                            auth_base_url=args.base_url) as fetcher:
             for target, source in targets:
                 audit_page(target, source, fetcher, rules, results_db, unhandled,
                            verbose=not args.quiet)

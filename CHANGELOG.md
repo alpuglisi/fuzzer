@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 1 build (T1.10, part): **authenticated the Playwright/browser path** for
+  the crawler and auditor. Added `fuzzlab/tools/browserauth.py`, which shapes a
+  session into Playwright cookies / an extra bearer header and applies it to the
+  browser context. The crawler gained `--identity` (injects at browser start); the
+  auditor's browser path injects too (built via `make_auth`). With this, every tool
+  code path (requests + browser) authenticates via the session manager; only the
+  live two-lab run remains. +2 tests (67/67 green). Change-control: CC-CRAWL-0004,
+  CC-AUD-0005.
 - Phase 1 build (T1.10, part): migrated the **requests-based tools onto the auth
   seam** so they authenticate via the session manager. Added
   `fuzzlab/tools/authhttp.py` (build an authenticated `HttpClient` for a target +

@@ -3,6 +3,28 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0004 — Authenticated Playwright crawl (cookie injection) (2026-09-21)
+- Change: the crawler's Playwright engine now authenticates by injecting the
+  session into the browser context. `LocalSpider` gained `session_manager`/
+  `identity`; `_start_browser` ensures the session and injects cookies
+  (`add_cookies`) or a bearer header (`set_extra_http_headers`) via a shared
+  `fuzzlab/tools/browserauth.py`. Added a `--identity` flag (base URL derived from
+  `--start`). Anonymous crawl unchanged. Completes the crawler side of Phase 0/1
+  Option A (both static and browser paths now authenticate).
+- Impact (other components / project): JS-rendered pages and the Discover-nav
+  links are now crawled as an identity, so authenticated-only surface is
+  discovered; depends on the session manager (#3) and credential store.
+- Risk (level; mitigation): low–medium — injection runs once at browser start; a
+  failed login fails loud through `ensure`. `browserauth` is Playwright-free and
+  unit-tested (cookie → add_cookies, bearer → extra header); the live browser wiring
+  is thin glue validated on a host with a browser + lab.
+- Deliverables:
+  - [x] `browserauth` helper; `_start_browser` injection; `--identity` — done.
+  - [x] Unit tests for cookie/bearer injection — done.
+  - [ ] Live authenticated crawl against the lab (T1.10) — todo (needs a browser + lab).
+- Effectiveness (assessed 2026-09-21): effective in unit tests — the session is
+  shaped and applied to a (fake) context for both schemes. Live crawl pending.
+
 ### CC-CRAWL-0003 — Consolidates into the unified store (2026-09-21)
 - Change: added `--store PATH` to the crawler; after a crawl it consolidates its
   native `discovered_pages` output into the unified store via

@@ -24,17 +24,16 @@ Phase 1 is **built and unit-tested** (session package 17 tests; suite 60 green).
 - **T1.8** auth-endpoint exclusion — done.
 - **T1.9** standalone `fuzzlab session` (set-credential / print) — done.
 - **T1.10** migrate tool HTTP onto the seam + **live two-lab validation** — in
-  progress: the **requests-based tools are migrated** — the fuzzer (`--identity`,
-  `SeamSender`) and the auditor's static fetch (`--identity`/`--base-url`) now
-  authenticate through the seam (shared `fuzzlab/tools/authhttp.py`), with
-  standalone behavior preserved and unit tests. Remaining: the **crawler +
-  Playwright** path (cookie injection into the browser context) and the **live
-  two-lab run** (needs a runnable container daemon / network to an external lab;
-  the cookie and JWT paths are covered by unit tests with scripted fetchers).
+  progress: **all tool code paths are migrated.** The fuzzer (`--identity`,
+  `SeamSender`) and the auditor's static fetch authenticate through the seam; the
+  **crawler and auditor Playwright paths** now inject the session into the browser
+  context (`fuzzlab/tools/browserauth.py`, `--identity`). Standalone behavior
+  preserved; cookie and bearer paths unit-tested with scripted fetchers. Remaining:
+  the **live two-lab run** (per-identity crawl→audit→fuzz against the containerized
+  lab and an external JWT lab — needs a container daemon / network / browser).
 
-Remaining to close Phase 1 end-to-end: migrate the crawler / Playwright path
-(browser cookie injection); run per-identity against the containerized lab and an
-external JWT lab; wire non-secret session-state persistence for crash-resume.
+Remaining to close Phase 1 end-to-end: the live two-lab per-identity run; wire
+non-secret session-state persistence for crash-resume (T1.7).
 
 ## Goal
 

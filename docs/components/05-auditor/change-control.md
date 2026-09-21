@@ -3,6 +3,25 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0005 — Authenticated Playwright audit (cookie injection) (2026-09-21)
+- Change: the auditor's Playwright engine now authenticates too — `ContentFetcher`
+  gained `session_manager`/`auth_base_url`, and `__enter__` injects the session
+  (cookies / bearer header) into the browser context via `browserauth`. `main`
+  builds the manager + seam client together (`make_auth`) and passes both. With
+  this, both auditor paths (static via the seam, browser via injection) audit
+  authenticated. Completes the auditor side of Option A.
+- Impact (other components / project): JS-rendered pages are audited as an identity;
+  depends on the session manager (#3) and credential store. No rule/output change.
+- Risk (level; mitigation): low–medium — injection runs once at browser start;
+  failed login fails loud. Covered by the `browserauth` unit tests; live browser
+  wiring validated on a host with a browser + lab.
+- Deliverables:
+  - [x] `session_manager`/`auth_base_url` on ContentFetcher; `__enter__` injection — done.
+  - [x] `main` builds manager + client via `make_auth` — done.
+  - [ ] Live authenticated audit (browser) against the lab (T1.10) — todo.
+- Effectiveness (assessed 2026-09-21): effective in unit tests (shared with the
+  crawler's browser-auth path); live browser audit pending.
+
 ### CC-AUD-0004 — Auditor static fetch migrated onto the auth seam (2026-09-21)
 - Change: `ContentFetcher` gained `identity`/`seam_client`; its static
   (non-browser) fetch now routes through the `core/` HTTP seam + session manager

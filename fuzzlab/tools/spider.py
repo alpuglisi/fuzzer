@@ -88,12 +88,20 @@ class LocalSpider:
     """Crawls a local site, optionally rendering JavaScript with a headless browser."""
 
     def __init__(self, start_url, max_depth=3, db_name="spider_results.db",
-                 engine="auto", timeout_ms=10000, resume=False):
+                 engine="auto", timeout_ms=10000, resume=False,
+                 session_manager=None, identity=None):
         self.start_url = start_url
         self.max_depth = max_depth
         self.storage = StorageManager(db_name)
         self.timeout_ms = timeout_ms
         self.resume = resume
+        # Optional authentication for the Playwright engine: inject the session
+        # (cookies / bearer header) into the browser context so JS-rendered pages
+        # are crawled authenticated (Option A, browser path).
+        self._session_manager = session_manager
+        self._identity = identity
+        parts = urlparse(start_url)
+        self._auth_base_url = f"{parts.scheme}://{parts.netloc}"
 
         # A crawl normally rebuilds the whole map. Without this, a second run
         # against an existing database finds every URL already "visited" and
@@ -143,6 +151,13 @@ class LocalSpider:
             launch_kwargs["executable_path"] = exe
         self._browser = self._pw.chromium.launch(**launch_kwargs)
         self._page = self._browser.new_page()
+        if self._session_manager and self._identity:
+            from fuzzlab.tools import browserauth
+            cookies, headers = browserauth.playwright_auth(
+                self._session_manager, self._identity, self._auth_base_url)
+            browserauth.apply_to_context(self._page.context, cookies, headers)
+            logging.info(f"Crawler authenticated as {self._identity} "
+                         f"({len(cookies)} cookie(s))")
         # Record fetch()/XMLHttpRequest targets. These endpoints are where a
         # JavaScript-rendered page actually gets its data, and they never appear
         # as <a href> anywhere, so link-following alone can never reach them.
@@ -313,13 +328,21 @@ def parse_args():
     )
     p.add_argument("--store", default=None,
                    help="Also consolidate results into the unified fuzzlab store at this path.")
+    p.add_argument("--identity", default=None,
+                   help="Crawl authenticated as this identity via the session manager "
+                        "(needs saved credentials; Playwright engine). Omit to crawl anonymously.")
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
     get_logger("crawler").info("crawler starting",
-                               extra={"start": args.start, "engine": args.engine})
+                               extra={"start": args.start, "engine": args.engine,
+                                      "identity": args.identity})
+    session_manager = None
+    if args.identity:
+        from fuzzlab.tools.authhttp import make_session_manager
+        session_manager = make_session_manager(args.start)
     spider = LocalSpider(
         args.start,
         max_depth=args.max_depth,
@@ -327,6 +350,8 @@ if __name__ == "__main__":
         engine=args.engine,
         timeout_ms=args.timeout,
         resume=args.resume,
+        session_manager=session_manager,
+        identity=args.identity,
     )
     spider.crawl()
     if args.store:
