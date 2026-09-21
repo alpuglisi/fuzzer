@@ -3,6 +3,25 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0007 — Adopt proxy-captured manual sessions (FR-SESS-11) (Phase 6 T6.5) (2026-09-21)
+- Change: implemented `SessionManager.adopt(state)` — the session manager can now take
+  a `SessionState` captured by the proxy from a **manual browser login**
+  (`fuzzlab/proxy/session_capture.py`, FR-PROXY-9) and adopt it: mark it valid, bring
+  its host into scope, cache it for `prepare`/`apply`, and persist only NON-SECRET
+  metadata. Realizes the CC-SESS-0004 spec.
+- Impact (other components / project): the escape hatch for logins the detector cannot
+  parse (MFA, CAPTCHA, multi-step, exotic SPA), with no per-host config file — the
+  toolkit stays authenticated on hosts Phase-1 detection can't crack. Secrets remain
+  in memory only (D12); the store contract is unchanged.
+- Risk (level; mitigation): low — reuses the existing non-secret persistence path;
+  adds no new store columns. Mitigated by `tests/test_proxy_session_capture.py`
+  (adoption authenticates `prepare` without a login handshake; only non-secret metadata
+  is persisted). Suite 237 passed / 2 skipped.
+- Deliverables:
+  - [x] `SessionManager.adopt` (FR-SESS-11) — done.
+- Effectiveness (assessed 2026-09-21): effective in tests — an adopted session
+  authenticates requests with no login handshake and leaks no secret to the store.
+
 ### CC-SESS-0006 — Non-secret session-state persistence (T1.7) (2026-09-21)
 - Change: the `SessionManager` now accepts a `store` and persists **non-secret**
   session state (via `SessionState.non_secret_state()`) on login success and on

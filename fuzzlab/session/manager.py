@@ -108,6 +108,24 @@ class SessionManager:
         if self._store is not None:
             self._store.upsert_session_state(state.non_secret_state())
 
+    def adopt(self, state: SessionState) -> SessionState:
+        """Adopt an externally-captured session (FR-SESS-11).
+
+        The escape hatch for logins detection can't parse (MFA, CAPTCHA, multi-step,
+        exotic SPA): the proxy captures the session a human established with a manual
+        browser login (FR-PROXY-9) and hands the resulting :class:`SessionState` here.
+        We mark it valid, bring its host into scope, cache it for ``prepare``/``apply``,
+        and persist only the NON-SECRET metadata (secrets stay in memory, like a
+        normal login). No per-host config file is needed.
+        """
+        state.valid = True
+        self._scope.add(state.host)
+        self._state[(state.host, state.identity)] = state
+        self._persist(state)
+        if self._log:
+            self._log.info("adopted captured session", extra=state.redacted())
+        return state
+
     # -- addon interface used by the HTTP seam ----------------------------
     def prepare(self, request, identity: str) -> None:
         host = urlparse(request.url).hostname or ""

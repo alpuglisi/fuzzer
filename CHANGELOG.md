@@ -13,6 +13,16 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 6 (T6.4/T6.5): added the proxy's interactive tooling and the manual-login
+  escape hatch. `intercept.py::Interceptor` models interception as an awaited
+  `asyncio.Future` (hold → edit → release/drop; off = transparent pass-through);
+  `repeater.py::Repeater` persists tabs to `repeater_tab` and replays byte-exact
+  requests through an injected sender seam (optionally recording to history);
+  `session_capture.py::SessionCapture` captures the session a human establishes with a
+  **manual browser login** and `SessionManager.adopt` (new, FR-SESS-11) adopts it —
+  the escape hatch for logins detection can't parse (MFA/CAPTCHA/multi-step/SPA), with
+  secrets kept in memory only. +14 tests (237 passed / 2 skipped). Change-control:
+  CC-PROXY-0005, CC-PROXY-0006, CC-SESS-0007.
 - Phase 6 (T6.3): the proxy now records **flow history**. Migration 6 extends `flow`
   with `host`/`in_scope`/byte-exact raw request+response bytes (content-addressed via
   `body`), adds a `flow_fts` FTS5 index and a `repeater_tab` table (head → 6).

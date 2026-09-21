@@ -3,6 +3,56 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0006 — Manual-login session capture + manager adoption (T6.5) (2026-09-21)
+- Change: implemented FR-PROXY-9. `fuzzlab/proxy/session_capture.py::SessionCapture`
+  watches the flows of a **manual browser login** through the proxy
+  (`observe_request`/`observe_response`), accumulates the established cookies (from
+  Set-Cookie and the browser's Cookie header) and any bearer token (with JWT `exp`,
+  reusing `session/detect.py`), and builds a `SessionState`; `adopt_into(manager)` hands
+  it to the session manager. Added `SessionManager.adopt(state)` (FR-SESS-11): marks the
+  session valid, brings its host into scope, caches it for `prepare`/`apply`, and
+  persists only NON-SECRET metadata. No per-host config file.
+- Impact (other components / project): gives the session manager (#3) a way to stay
+  authenticated on logins detection can't parse (MFA/CAPTCHA/multi-step/SPA) — the
+  escape hatch D13 promised. Secrets live only in memory and are never written to the
+  store (the `session_state` table has no secret columns), consistent with the D12
+  secret model. Realizes CC-SESS-0004's spec (see CC-SESS-0007).
+- Risk (level; mitigation): low — pure observation + in-memory handoff; adoption reuses
+  the existing persistence path (non-secret only). Mitigated by 5 tests
+  (`tests/test_proxy_session_capture.py`): cookie capture, bearer+exp capture, adoption
+  authenticating `prepare` with no login handshake, and non-secret-only persistence.
+  Suite 237 passed / 2 skipped.
+- Deliverables:
+  - [x] `SessionCapture` (cookie/token capture from flows) — done.
+  - [x] `SessionManager.adopt` (FR-SESS-11) — done.
+  - [ ] Live capture while browsing the lab through the running proxy — on-host (T6.6).
+- Effectiveness (assessed 2026-09-21): effective in tests — a captured session
+  authenticates the manager without a login handshake and no secret is persisted; the
+  live browser capture is on-host.
+
+### CC-PROXY-0005 — Interception (awaited future) + repeater (T6.4) (2026-09-21)
+- Change: `fuzzlab/proxy/intercept.py::Interceptor` models interactive interception as
+  an `asyncio.Future` (FR-PROXY-6): when enabled, the data path `await`s a per-message
+  decision; `pending()`/`forward(id, edited?)`/`drop(id)` release it (edited via
+  `RawMessage`), and disabling releases everything unedited — off means transparent
+  pass-through (D5). `fuzzlab/proxy/repeater.py::Repeater` (FR-PROXY-4) persists tabs to
+  `repeater_tab` (a saved raw request + target) and replays them through an injected
+  **sender seam**, sending the exact bytes (raw path) and optionally recording the
+  exchange to history.
+- Impact (other components / project): the manual-testing surface — hold/edit/release
+  and edit/replay — over the byte-exact core. The sender seam keeps it offline-testable
+  (fake sender) while the on-host server supplies a real socket sender (T6.6).
+- Risk (level; mitigation): low — sans-I/O logic behind seams; optional (D5). Mitigated
+  by 9 tests (`tests/test_proxy_intercept.py`): disabled pass-through, forward-with-edit,
+  forward-unedited, drop→None, disable-releases-held; tab persistence, byte-exact send,
+  edited-raw replay persisting + sending exact bytes, and history recording.
+- Deliverables:
+  - [x] `Interceptor` awaited-future model (T6.4) — done.
+  - [x] `Repeater` DB-persisted tabs + raw-path replay (T6.4) — done.
+  - [ ] Wire both into the async server (T6.6) — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — held flows release edited or
+  dropped, and the repeater replays byte-exact requests through the seam.
+
 ### CC-PROXY-0004 — Flow history: migration 6 + batched writer + FTS5 (T6.3) (2026-09-21)
 - Change: added the proxy's shared history. **Migration 6** extends `flow` with a
   `host`, an `in_scope` flag, and byte-exact `req_raw_sha`/`resp_raw_sha` (raw wire
