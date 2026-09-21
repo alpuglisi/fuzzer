@@ -13,6 +13,15 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 3 build (offline scaffolding): added `fuzzlab/greybox/` — the grey-box
+  **consumer** layer behind injected-source seams, fully testable without a lab:
+  `CoverageSource`/frontier + `app_lines` filtering, `DbFaultSource`, a multi-tier
+  `shaped_reward` (screening / coverage-novelty / db_fault), a `LabControl` reset
+  seam, the pure M10 confirmation decision, and `record_attempt_signals` filling the
+  schema's already-reserved `attempt.coverage`/`attempt.db_fault`. +17 tests
+  (125/125 green), including the "new code scores higher" exit property end-to-end.
+  Remaining Phase 3 work is the live pcov/DB-fault/reset sources + M10 oracle wiring
+  + exit measurement (on-host, `docs/ON_HOST_TASKS.md`). Change-control: CC-CORE-0009.
 - Docs: added `docs/PHASE_3_PLAN.md` — the Phase 3 (grey-box instrumentation) plan:
   per-request pcov line coverage (app-filtered), a DB-fault signal, deterministic
   lab reset between iterations, coverage-novelty folded into `attempt.reward`, and

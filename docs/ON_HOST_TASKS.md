@@ -37,6 +37,25 @@ measurement/validation remains.
   `evaluation`/`candidate`/`attempt` tables hold negatives.
   (Phase 2 plan T2.8 exit criterion.)
 
+## Phase 3 — grey-box live sources + validation
+
+The consumer layer (`fuzzlab/greybox/`) is **built and unit-tested offline** behind
+injected-source seams (17 tests). What remains needs the instrumented lab:
+
+- [ ] **Instrument the image (T3.1).** Add pcov to `web.Dockerfile` + a request-scoped
+  coverage shim writing app-filtered covered lines to a loopback side channel keyed by
+  a per-request correlation id.
+- [ ] **Live coverage reader** backing `CoverageSource` (reads the T3.1 side channel).
+- [ ] **Live DB-fault reader** backing `DbFaultSource` (tails MariaDB error/general log
+  or a DB-proxy error hook).
+- [ ] **`labctl.sh` snapshot/restore (T3.5)** backing `LabControl`, and the harness
+  reset sequencing between iterations.
+- [ ] **Wire M10 into `Oracle.confirm` + the pipeline (T3.6/T3.7)** with the sources
+  injected and the sink's file/line known.
+- [ ] **Exit measurement:** on the running lab, a request reaching new application code
+  produces a distinguishable (higher) reward; error-based SQLi separates from benign
+  traffic via `db_fault`.
+
 ## How to pick these up
 
 1. Bring up the containerized lab on the host (see `docs/components/01-target-lab/`).

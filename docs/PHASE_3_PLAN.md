@@ -24,11 +24,30 @@ sole-finding-writer posture.
 
 ## Status (2026-09-21)
 
-`[planned]`. Phases 0–2 are built and unit-tested offline; the schema already
-**reserves** `attempt.coverage` and `attempt.db_fault` (migration 1) and the lab's
-`labctl.sh` already exposes `reset`, so Phase 3 fills reserved columns and extends
-the image — it should not need a core-schema migration for the coarse signals (a new
-migration is added only if we choose to store normalized per-line coverage).
+`[in progress — offline scaffolding built]`. Phases 0–2 are built and unit-tested
+offline; the schema already **reserves** `attempt.coverage` and `attempt.db_fault`
+(migration 1) and the lab's `labctl.sh` already exposes `reset`, so Phase 3 fills
+reserved columns and extends the image — it should not need a core-schema migration
+for the coarse signals (a new migration is added only if we choose to store
+normalized per-line coverage).
+
+**Built so far (offline, `fuzzlab/greybox/`, 17 tests):** the consumer layer behind
+injected-source seams —
+- `coverage.py`: `CoverageSource` protocol + `InMemoryCoverageSource` fake, `app_lines`
+  filter, `CoverageFrontier` (novelty/add/observe), coverage encode/decode for
+  `attempt.coverage`;
+- `dbfault.py`: `DbFaultSource` protocol + fake;
+- `reward.py`: `GreyboxSignal` + `shaped_reward` (screening / coverage-novelty /
+  db_fault tiers, ordering-tested);
+- `reset.py`: `LabControl` protocol + `FakeLabControl`;
+- `confirm.py`: the pure M10 decision (`greybox_confirms`, `m10_evidence`);
+- `recorder.py`: `record_attempt_signals` writing the reserved `attempt` columns.
+
+**Remaining = the live sources + validation (on-host, `docs/ON_HOST_TASKS.md`):** the
+pcov shim/side channel (T3.1), the live coverage + DB-fault readers backing the
+protocols, the `labctl.sh` snapshot/restore behind `LabControl` (T3.5), the M10 path
+wired into `Oracle.confirm` and the pipeline (T3.6/T3.7), and the distinguishable-
+reward exit measurement.
 
 **On-host by nature.** Unlike Phases 0–2, most of Phase 3 must run against the
 *live instrumented lab* — reading real coverage from PHP and manipulating the lab's
@@ -86,6 +105,8 @@ normalized (file→line-set) and app-filtered. Injected/faked in tests via a sma
 - **Deliverable:** `CoverageSource` protocol + a live reader + an in-memory fake.
 - **Accept (offline):** given a recorded/synthetic coverage fixture, the reader
   returns the expected covered-line set and drops non-app files (unit-tested).
+- **Status:** offline seam **built** — `CoverageSource` + `InMemoryCoverageSource` +
+  `app_lines` (`fuzzlab/greybox/coverage.py`); live reader is on-host.
 
 ### T3.3 — Coverage novelty → `attempt.reward`
 Maintain a per-run **coverage frontier** (the union of app lines seen so far) and
@@ -99,6 +120,9 @@ Phase 2 timing/error screening signal.
   lines yields a strictly higher reward than one covering only already-seen lines,
   and the coverage is recorded in `attempt.coverage` (unit-tested; frontier logic
   and reward ordering derived from code, not magic literals).
+- **Status:** **built** — `CoverageFrontier`, `shaped_reward`/`GreyboxSignal`
+  (`reward.py`), `encode_coverage`, and `record_attempt_signals` (`recorder.py`),
+  with the new-code-scores-higher property tested end-to-end offline.
 
 ### T3.4 — Database fault signal
 Add a DB error/fault hook: tail MariaDB's general/error log (or a thin DB-proxy/error
@@ -109,6 +133,8 @@ with an injected `DbFaultSource` fake. Write `attempt.db_fault`.
 - **Accept:** offline — given a fault-log fixture, a request that caused a SQL error
   sets `db_fault=1` and a benign one `0`; on-host — a real error-based SQLi payload
   is distinguishable from a benign request on the live lab.
+- **Status:** offline seam **built** — `DbFaultSource` + `InMemoryDbFaultSource` +
+  `DbFault` (`fuzzlab/greybox/dbfault.py`); live log/hook reader is on-host.
 
 ### T3.5 — Deterministic lab reset between iterations
 Extend `labctl.sh` (and a harness-callable `reset()` hook) with a **fast DB
@@ -120,6 +146,9 @@ between iterations for state-changing payload families.
 - **Accept:** offline — the harness calls `reset()` at the right points (unit-tested
   with a fake); on-host — after a state-changing payload, a restore returns the DB to
   the pinned baseline and two consecutive runs see identical initial state.
+- **Status:** offline seam **built** — `LabControl` protocol + `FakeLabControl`
+  (`fuzzlab/greybox/reset.py`); the `labctl.sh` snapshot/restore and harness
+  sequencing are on-host.
 
 ### T3.6 — Grey-box confirmation mechanism (M10) into the oracle
 Add the grey-box `ConfirmationStrategy` input (M10 in
@@ -132,6 +161,9 @@ records the mechanism in the finding's confidence.
 - **Accept:** offline — a fixture case the black-box oracle abstains on is confirmed
   via M10 with grey-box evidence, and controls stay unconfirmed (no false positive);
   on-host — reproduced against the live lab.
+- **Status:** the pure M10 **decision** is built (`greybox_confirms`, `m10_evidence`
+  in `fuzzlab/greybox/confirm.py`, unit-tested per class); wiring it into
+  `Oracle.confirm` with injected sources and the sink's file/line is the live step.
 
 ### T3.7 — Wire into the run + exit measurement (on-host)
 Feed the coverage/fault readers and the `reset()` hook into `run_pipeline` and the

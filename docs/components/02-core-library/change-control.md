@@ -3,6 +3,35 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0009 — Grey-box consumer layer (offline scaffolding, Phase 3) (2026-09-21)
+- Change: added `fuzzlab/greybox/` — the consumer side of Phase 3 grey-box
+  instrumentation, built behind injected-source protocols so it is fully testable
+  without a lab: `coverage.py` (`CoverageSource` + `InMemoryCoverageSource` fake,
+  `app_lines` filter, `CoverageFrontier` novelty tracking, coverage encode/decode),
+  `dbfault.py` (`DbFaultSource` + fake), `reward.py` (`GreyboxSignal` + `shaped_reward`
+  multi-tier: screening / coverage-novelty / db_fault), `reset.py` (`LabControl`
+  protocol + `FakeLabControl`), `confirm.py` (the pure M10 decision), and
+  `recorder.py` (`record_attempt_signals` filling the reserved `attempt.coverage`
+  /`attempt.db_fault`/`reward` columns). No schema change (columns were reserved in
+  migration 1).
+- Impact (other components / project): gives Phase 3 turnkey seams — the on-host work
+  is reduced to backing the protocols with live pcov/DB-fault/reset sources
+  (`docs/ON_HOST_TASKS.md`) and wiring M10 into the oracle/pipeline (FUZZ). The
+  shaped reward is the input the Phase 4 bandit will consume. Safety unchanged
+  (live readers bind loopback-only; grey-box corroborates, oracle stays sole
+  finding-writer).
+- Risk (level; mitigation): low — pure, dependency-light logic with no live I/O in
+  this layer. Mitigated by 17 offline tests (app-line filtering, frontier novelty +
+  saturation, reward ordering incl. the new-code-scores-higher exit property, M10 per
+  class, recorder writing the reserved columns end-to-end). Full suite 125/125.
+- Deliverables:
+  - [x] `fuzzlab/greybox/` package (coverage/dbfault/reward/reset/confirm/recorder) — done.
+  - [x] `tests/test_greybox.py` (17 tests) — done.
+  - [ ] Live sources + M10 oracle/pipeline wiring + exit measurement — on-host (T3.1/3.5/3.6/3.7).
+- Effectiveness (assessed 2026-09-21): effective offline — the reward math, frontier,
+  filtering, M10 decision, and column persistence are verified with fakes; live
+  confirmation pending the instrumented lab.
+
 ### CC-CORE-0008 — Single home for URL path-normalization (`urls.to_path`) (2026-09-21)
 - Change: added `fuzzlab/core/urls.py::to_path(url)` — the one shared function that
   normalizes a result URL to path form (`/product.php`), the convention every
