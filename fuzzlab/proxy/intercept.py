@@ -31,8 +31,11 @@ class PendingFlow:
 class Interceptor:
     """Holds messages pending a forward/drop decision when enabled."""
 
-    def __init__(self, enabled: bool = True):
+    def __init__(self, enabled: bool = True, intercept_responses: bool = False):
         self.enabled = enabled
+        # Whether to also hold responses (the engine consults this before its response
+        # hook); default off, so enabling interception pauses requests only.
+        self.intercept_responses = intercept_responses
         self._ids = itertools.count(1)
         self._pending: dict[int, PendingFlow] = {}
 
@@ -42,6 +45,14 @@ class Interceptor:
         if not on:
             for flow in list(self._pending.values()):
                 self.forward(flow.id)
+
+    def set_intercept_responses(self, on: bool) -> None:
+        """Toggle holding responses too. Turning it off releases any held responses."""
+        self.intercept_responses = on
+        if not on:
+            for flow in list(self._pending.values()):
+                if flow.direction == "response":
+                    self.forward(flow.id)
 
     async def handle(self, message: RawMessage, direction: str = "request",
                      host: str = "") -> RawMessage | None:

@@ -108,6 +108,8 @@ class ProxyController:
             "host": self.config.host,
             "port": self.server.port if (self.server and self._running) else self.config.port,
             "intercept": bool(self.interceptor.enabled) if self.interceptor else False,
+            "intercept_responses": bool(getattr(self.interceptor, "intercept_responses",
+                                                False)) if self.interceptor else False,
             "pending": len(self.interceptor.pending()) if self.interceptor else 0,
             "scope_hosts": list(self.config.scope_hosts),
             "tls": bool(self.config.ca_dir),
@@ -118,3 +120,203 @@ class ProxyController:
             return False
         self.interceptor.set_enabled(on)
         return self.interceptor.enabled
+
+    def set_intercept_responses(self, on: bool) -> bool:
+        if self.interceptor is None:
+            return False
+        self.interceptor.set_intercept_responses(on)
+        return self.interceptor.intercept_responses
+
+    def pending_view(self) -> list[dict[str, Any]]:
+        """JSON-safe view of held flows: id/direction/host + the raw message text."""
+        if self.interceptor is None:
+            return []
+        out = []
+        for flow in self.interceptor.pending():
+            msg = flow.message
+            out.append({
+                "id": flow.id,
+                "direction": flow.direction,
+                "host": flow.host,
+                "method": msg.method.decode("latin-1", "replace") if flow.direction == "request" else "",
+                "target": msg.target.decode("latin-1", "replace") if flow.direction == "request" else "",
+                "raw": msg.raw.decode("latin-1", "replace"),
+            })
+        return out
+
+    def forward(self, flow_id: int, raw_text: str | None = None) -> bool:
+        """Release a held flow, optionally with an edited raw message (latin-1 bytes)."""
+        if self.interceptor is None or self.interceptor.get(flow_id) is None:
+            return False
+        from fuzzlab.proxy.message import RawMessage
+        msg = RawMessage.from_bytes(raw_text.encode("latin-1")) if raw_text else None
+        self.interceptor.forward(flow_id, msg)
+        return True
+
+    def drop(self, flow_id: int) -> bool:
+        if self.interceptor is None or self.interceptor.get(flow_id) is None:
+            return False
+        self.interceptor.drop(flow_id)
+        return True
+
+    # --- scope (which hosts are intercepted vs transparently bypassed) --------
+    def scope_view(self) -> list[dict[str, Any]]:
+        if self.engine is None:
+            return []
+        return [{"index": i, "host": r.host, "path_regex": r.path_regex,
+                 "exclude": r.exclude} for i, r in enumerate(self.engine.scope.rules)]
+
+    def scope_add(self, host: str, path_regex: str | None = None,
+                  exclude: bool = False) -> bool:
+        if self.engine is None:
+            return False
+        if exclude:
+            self.engine.scope.exclude(host, path_regex or None)
+        else:
+            self.engine.scope.include(host, path_regex or None)
+        return True
+
+    def scope_remove(self, index: int) -> bool:
+        if self.engine is None or not (0 <= index < len(self.engine.scope.rules)):
+            return False
+        del self.engine.scope.rules[index]
+        return True
+
+    # --- match-replace (ordered byte rewrites) -------------------------------
+    @staticmethod
+    def _text(v) -> str:
+        return v.decode("latin-1", "replace") if isinstance(v, (bytes, bytearray)) else str(v)
+
+    def matchreplace_view(self) -> list[dict[str, Any]]:
+        if self.engine is None or self.engine.matchreplace is None:
+            return []
+        out = []
+        for i, r in enumerate(self.engine.matchreplace.rules):
+            out.append({"index": i, "target": r.target, "match": self._text(r.match),
+                        "replace": self._text(r.replace), "header_name": r.header_name,
+                        "is_regex": r.is_regex, "enabled": r.enabled})
+        return out
+
+    def matchreplace_add(self, target: str, match: str, replace: str = "",
+                         header_name: str | None = None, is_regex: bool = False) -> bool:
+        """Append a rule. Raises ValueError on a bad target / missing header_name."""
+        if self.engine is None or self.engine.matchreplace is None:
+            return False
+        from fuzzlab.proxy.matchreplace import MatchReplaceRule
+        self.engine.matchreplace.add(MatchReplaceRule(
+            target=target, match=match, replace=replace,
+            header_name=header_name or None, is_regex=bool(is_regex)))
+        return True
+
+    def matchreplace_remove(self, index: int) -> bool:
+        mr = self.engine.matchreplace if self.engine else None
+        if mr is None or not (0 <= index < len(mr.rules)):
+            return False
+        del mr.rules[index]
+        return True
+
+    def matchreplace_toggle(self, index: int, enabled: bool) -> bool:
+        mr = self.engine.matchreplace if self.engine else None
+        if mr is None or not (0 <= index < len(mr.rules)):
+            return False
+        mr.rules[index].enabled = bool(enabled)
+        return True
+
+
+class RepeaterController:
+    """Replay tabs for the Repeater sub-tab (Phase 2.3).
+
+    Independent of the in-process proxy: a saved raw request can be replayed against a
+    target from the panel whether or not interception is running. Tabs persist in
+    ``repeater_tab``; listing reads every tab (cross-session), while creating/sending
+    open a persistent store + one ``repeater`` run on first write (creating the store
+    file only on that explicit user action). Sending forwards to a real upstream, so the
+    caller gates it on ``authorized``. A ``sender`` may be injected for tests.
+    """
+
+    def __init__(self, cfg, sender=None) -> None:
+        self.cfg = cfg
+        self._sender = sender
+        self._store = None
+        self._rep = None
+
+    def _path(self) -> str:
+        return self.cfg.get("store_path", "fuzzlab.db")
+
+    def _writer(self):
+        """Persistent store + Repeater, created lazily on first write."""
+        if self._rep is None:
+            from fuzzlab.core.store import Store
+            from fuzzlab.proxy.history import HistoryWriter
+            from fuzzlab.proxy.repeater import Repeater
+            sender = self._sender
+            if sender is None:
+                from fuzzlab.proxy.socketsender import SocketSender
+                sender = SocketSender(verify_tls=False)
+            self._store = Store(self._path())
+            run_id = self._store.start_run("repeater", self.cfg.get("target_base_url", ""))
+            self._rep = Repeater(self._store, run_id, sender,
+                                 history=HistoryWriter(self._store, run_id, batch_size=1))
+        return self._rep
+
+    @staticmethod
+    def _tab_dict(row) -> dict[str, Any]:
+        return {
+            "id": row["id"], "name": row["name"], "host": row["host"],
+            "port": row["port"], "use_tls": bool(row["use_tls"]),
+            "raw": bytes(row["raw_request"]).decode("latin-1", "replace"),
+        }
+
+    def list_tabs(self) -> list[dict[str, Any]]:
+        """All saved tabs, newest first. Read-only; never creates the store."""
+        from fuzzlab.web import results
+        if self._store is None and not results.store_exists(self._path()):
+            return []
+        from fuzzlab.core.store import Store
+        own = self._store or Store(self._path())
+        try:
+            rows = own.conn.execute(
+                "SELECT id, name, host, port, use_tls, raw_request FROM repeater_tab "
+                "ORDER BY id DESC").fetchall()
+            return [self._tab_dict(r) for r in rows]
+        finally:
+            if own is not self._store:
+                own.close()
+
+    def create_tab(self, name: str, host: str, port: int, raw: str,
+                   use_tls: bool = False) -> dict[str, Any]:
+        tab = self._writer().create_tab(name or "tab", host, int(port),
+                                        raw.encode("latin-1"), use_tls=bool(use_tls))
+        return {"id": tab.id, "name": tab.name, "host": tab.host, "port": tab.port,
+                "use_tls": tab.use_tls, "raw": tab.raw_request.decode("latin-1", "replace")}
+
+    def create_from_flow(self, flow_id: int) -> dict[str, Any] | None:
+        """Seed a tab from a recorded flow's request (redacted bytes; edit to re-add auth)."""
+        from fuzzlab.web import results
+        if self._store is None and not results.store_exists(self._path()):
+            return None
+        from fuzzlab.core.store import Store
+        own = self._store or Store(self._path())
+        try:
+            row = own.conn.execute(
+                "SELECT url, host, req_raw_sha FROM flow WHERE id=?", (flow_id,)).fetchone()
+            if row is None:
+                return None
+            raw = own.get_body(row["req_raw_sha"]) if row["req_raw_sha"] else b""
+        finally:
+            if own is not self._store:
+                own.close()
+        host, _, port_s = (row["host"] or "").partition(":")
+        use_tls = str(row["url"] or "").startswith("https")
+        port = int(port_s) if port_s.isdigit() else (443 if use_tls else 80)
+        name = f"flow #{flow_id}"
+        return self.create_tab(name, host or "127.0.0.1", port,
+                               raw.decode("latin-1", "replace"), use_tls=use_tls)
+
+    def send(self, tab_id: int, raw: str | None = None) -> dict[str, Any] | None:
+        """Replay a tab (optionally edited); returns the raw response as text."""
+        rep = self._writer()
+        if rep.get_tab(tab_id) is None:
+            return None
+        resp = rep.send(tab_id, raw.encode("latin-1") if raw is not None else None)
+        return {"response": resp.decode("latin-1", "replace")}

@@ -4,10 +4,56 @@
   <meta charset="utf-8">
   <title>{% block title %}fuzzlab control panel{% endblock %}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>
+    /* No-FOUC: apply the persisted theme/density before first paint. Wrapped in
+       try/catch so a blocked/absent localStorage never stops the page rendering. */
+    try {
+      var t = localStorage.getItem("fl-theme");
+      if (t) document.documentElement.setAttribute("data-theme", t);
+      var d = localStorage.getItem("fl-density");
+      if (d) document.documentElement.setAttribute("data-density", d);
+      if (localStorage.getItem("fl-collapsed") === "1")
+        document.documentElement.setAttribute("data-collapsed", "1");
+    } catch (e) { /* no storage — render with defaults */ }
+  </script>
+  <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-{% block body %}{% endblock %}
+<aside class="sidebar">
+  <div class="brand"><span class="dot"></span><span>fuzzlab</span></div>
+  <nav class="tabs" aria-label="Primary">
+    <div class="side-sep"><span>Workbench</span></div>
+    <a href="/#launcher" data-tab="launcher"><span class="ic">▸</span><span>Launcher</span></a>
+    <a href="/#proxy" data-tab="proxy"><span class="ic">⇄</span><span>Proxy</span></a>
+    <a href="/#results" data-tab="results"><span class="ic">▤</span><span>Results</span></a>
+    <div class="side-sep"><span>Analysis</span></div>
+    <a href="/#ml" data-tab="ml"><span class="ic">◈</span><span>ML</span></a>
+    <a href="/#diagnostics" data-tab="diagnostics"><span class="ic">◍</span><span>Diagnostics</span></a>
+  </nav>
+  <div class="side-foot"><span>lab-only · loopback</span></div>
+</aside>
+
+<header class="topbar">
+  <button type="button" class="hamb" id="sidebar-toggle" title="Collapse sidebar"
+          aria-label="Collapse sidebar">☰</button>
+  <span class="crumb">{% block crumb %}Control panel{% endblock %}</span>
+  <div class="ctx">
+    <span class="chip">target <b>{{ target or '—' }}</b></span>
+    {% if scope %}<span class="chip">scope <b>{{ scope }}</b></span>{% endif %}
+    <span class="chip">
+      <span class="led {{ 'on' if authorized else 'warn' }}"></span>
+      {{ 'authorized' if authorized else 'not authorized' }}</span>
+    <span class="chip" id="proxy-chip"><span class="led off"></span>proxy</span>
+  </div>
+  <span class="spacer"></span>
+  <button type="button" class="tbtn" id="theme-toggle" title="Toggle light / dark / system">◐ Theme</button>
+  <button type="button" class="tbtn" id="density-toggle" title="Toggle comfortable / compact">▤ Density</button>
+</header>
+
+<main class="content">
+{% block content %}{% endblock %}
+</main>
 <script type="module" src="/static/app.js"></script>
 </body>
 </html>

@@ -32,6 +32,7 @@ from fastapi.templating import Jinja2Templates
 
 from fuzzlab.core.config import Config, load_config
 from fuzzlab.web import commandspec, results
+from fuzzlab.web.proxycontrol import RepeaterController
 from fuzzlab.web.runner import Runner, build_argv, display_command
 from fuzzlab.web.sse import sse_response
 
@@ -99,10 +100,30 @@ def _read_detail(cfg: Config, run_id: int) -> dict | None:
         return results.run_detail(store, run_id)
 
 
+def _read_flows(cfg: Config, query: str | None = None) -> list[dict]:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return []
+    from fuzzlab.core.store import Store
+    from fuzzlab.web import proxyview
+    with Store(path) as store:
+        return proxyview.list_flows(store, query=query)
+
+
+def _read_flow(cfg: Config, flow_id: int) -> dict | None:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return None
+    from fuzzlab.core.store import Store
+    from fuzzlab.web import proxyview
+    with Store(path) as store:
+        return proxyview.flow_detail(store, flow_id)
+
+
 # --- template context builders (rendering lives in templates/, via jinja2) ----
 
 def _activities() -> list[dict]:
-    """Every launchable activity's spec, for the Launcher preview. Read-only."""
+    """Every launchable activity's spec, for the Launcher forms."""
     try:
         from fuzzlab.web.commandspec import all_specs
         return [s.to_dict() for s in all_specs()]
@@ -110,15 +131,35 @@ def _activities() -> list[dict]:
         return []
 
 
-def _index_context(cfg: Config, state: LauncherState, runs: list[dict]) -> dict[str, Any]:
+def _active_plugins() -> list[dict]:
+    """The entry-point plugins that a run with ``--plugins`` would attach."""
+    try:
+        from fuzzlab.plugins.manager import PluginManager
+        return [{"name": p.name, "version": p.version, "priority": p.priority}
+                for p in PluginManager.from_entry_points().active()]
+    except Exception:  # noqa: BLE001 - discovery must never break the panel
+        return []
+
+
+def _shell_context(cfg: Config) -> dict[str, Any]:
+    """Chrome shared by every page (sidebar + top context bar): the target, scope, and
+    authorization state the topbar chips render. Merged into each TemplateResponse so the
+    shell is identical on the index, a run detail, and the not-found page."""
     return {
         "target": cfg.get("target_base_url", ""),
         "scope": ", ".join(cfg.get("scope_hosts", [])),
-        "mode": state.mode,
         "authorized": bool(cfg.get("authorized", False)),
+    }
+
+
+def _index_context(cfg: Config, state: LauncherState, runs: list[dict]) -> dict[str, Any]:
+    return {
+        **_shell_context(cfg),
+        "mode": state.mode,
         "categories": _known_categories(),
         "commands": _tool_commands(cfg),
         "activities": _activities(),
+        "plugins": _active_plugins(),
         "runs": runs,
         "last_result": None if state.last_result is None else str(state.last_result),
     }
@@ -135,6 +176,7 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     cfg = cfg or load_config()
     state = LauncherState()
     runner = Runner()
+    repeater_ctl = RepeaterController(cfg)
 
     @asynccontextmanager
     async def _lifespan(_app):
@@ -211,8 +253,10 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         detail = _read_detail(cfg, run_id)
         if detail is None:
             return templates.TemplateResponse(
-                request, "not_found.html", {"run_id": run_id}, status_code=404)
-        return templates.TemplateResponse(request, "run.html", {"detail": detail})
+                request, "not_found.html",
+                {"run_id": run_id, **_shell_context(cfg)}, status_code=404)
+        return templates.TemplateResponse(
+            request, "run.html", {"detail": detail, **_shell_context(cfg)})
 
     # --- launcher: dry-run preview, gated execution, live output (Phase 0.3) ---
 
@@ -259,6 +303,10 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     async def launch_stop(token: str):
         return {"stopped": runner.stop(token)}
 
+    @app.get("/api/plugins")
+    def plugins():
+        return {"plugins": _active_plugins()}
+
     # --- in-process proxy status/control (Phase 0.4; full workbench in Phase 2) ---
 
     @app.get("/api/proxy/status")
@@ -267,14 +315,152 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
             return {"configured": False, "running": False}
         return proxy.status()
 
+    @app.get("/api/proxy/flows")
+    def proxy_flows(q: str | None = None):
+        return {"flows": _read_flows(cfg, query=q or None)}
+
+    @app.get("/api/proxy/flows/{flow_id}")
+    def proxy_flow(flow_id: int):
+        detail = _read_flow(cfg, flow_id)
+        if detail is None:
+            return JSONResponse({"error": f"flow {flow_id} not found"}, status_code=404)
+        return detail
+
+    def _need_proxy():
+        return JSONResponse(
+            {"error": "no in-process proxy (start with `fuzzlab web --with-proxy`)"},
+            status_code=409)
+
     @app.post("/api/proxy/intercept")
     async def proxy_intercept(request: Request):
         if proxy is None:
-            return JSONResponse({"error": "no in-process proxy "
-                                 "(start with `fuzzlab web --with-proxy`)"},
-                                status_code=409)
+            return _need_proxy()
         body = await request.json()
-        return {"intercept": proxy.set_intercept(bool(body.get("on")))}
+        if "on" in body:
+            proxy.set_intercept(bool(body["on"]))
+        if "responses" in body:
+            proxy.set_intercept_responses(bool(body["responses"]))
+        return proxy.status()
+
+    @app.get("/api/proxy/intercept/pending")
+    def proxy_pending():
+        if proxy is None:
+            return _need_proxy()
+        return {"pending": proxy.pending_view()}
+
+    @app.post("/api/proxy/intercept/{flow_id}/forward")
+    async def proxy_forward(flow_id: int, request: Request):
+        if proxy is None:
+            return _need_proxy()
+        raw = None
+        try:                                    # body optional: {"raw": "..."} to edit
+            raw = (await request.json()).get("raw")
+        except Exception:  # noqa: BLE001 - empty/non-JSON body → forward unedited
+            pass
+        return {"forwarded": proxy.forward(flow_id, raw)}
+
+    @app.post("/api/proxy/intercept/{flow_id}/drop")
+    def proxy_drop(flow_id: int):
+        if proxy is None:
+            return _need_proxy()
+        return {"dropped": proxy.drop(flow_id)}
+
+    # --- scope + match-replace (in-process proxy only) ------------------------
+
+    @app.get("/api/proxy/scope")
+    def scope_list():
+        if proxy is None:
+            return _need_proxy()
+        return {"scope": proxy.scope_view()}
+
+    @app.post("/api/proxy/scope")
+    async def scope_add(request: Request):
+        if proxy is None:
+            return _need_proxy()
+        b = await request.json()
+        if not b.get("host"):
+            return JSONResponse({"error": "host required"}, status_code=400)
+        proxy.scope_add(b["host"], b.get("path_regex") or None, bool(b.get("exclude")))
+        return {"scope": proxy.scope_view()}
+
+    @app.delete("/api/proxy/scope/{index}")
+    def scope_remove(index: int):
+        if proxy is None:
+            return _need_proxy()
+        return {"removed": proxy.scope_remove(index), "scope": proxy.scope_view()}
+
+    @app.get("/api/proxy/matchreplace")
+    def mr_list():
+        if proxy is None:
+            return _need_proxy()
+        return {"rules": proxy.matchreplace_view()}
+
+    @app.post("/api/proxy/matchreplace")
+    async def mr_add(request: Request):
+        if proxy is None:
+            return _need_proxy()
+        b = await request.json()
+        try:
+            proxy.matchreplace_add(b.get("target", ""), b.get("match", ""),
+                                   b.get("replace", ""), b.get("header_name") or None,
+                                   bool(b.get("is_regex")))
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return {"rules": proxy.matchreplace_view()}
+
+    @app.delete("/api/proxy/matchreplace/{index}")
+    def mr_remove(index: int):
+        if proxy is None:
+            return _need_proxy()
+        return {"removed": proxy.matchreplace_remove(index),
+                "rules": proxy.matchreplace_view()}
+
+    @app.post("/api/proxy/matchreplace/{index}/toggle")
+    async def mr_toggle(index: int, request: Request):
+        if proxy is None:
+            return _need_proxy()
+        b = await request.json()
+        return {"toggled": proxy.matchreplace_toggle(index, bool(b.get("enabled"))),
+                "rules": proxy.matchreplace_view()}
+
+    # --- repeater (replay tabs; independent of the in-process proxy) -----------
+
+    # These handlers are async so they run on the event-loop thread; the controller
+    # holds a persistent SQLite connection, which must be touched from one thread only
+    # (sync handlers would run in Starlette's threadpool).
+    @app.get("/api/proxy/repeater/tabs")
+    async def repeater_tabs():
+        return {"tabs": repeater_ctl.list_tabs()}
+
+    @app.post("/api/proxy/repeater/tabs")
+    async def repeater_create(request: Request):
+        b = await request.json()
+        return repeater_ctl.create_tab(b.get("name", ""), b.get("host", "127.0.0.1"),
+                                       b.get("port", 80), b.get("raw", ""),
+                                       bool(b.get("use_tls")))
+
+    @app.post("/api/proxy/repeater/from-flow/{flow_id}")
+    async def repeater_from_flow(flow_id: int):
+        tab = repeater_ctl.create_from_flow(flow_id)
+        if tab is None:
+            return JSONResponse({"error": f"flow {flow_id} not found"}, status_code=404)
+        return tab
+
+    @app.post("/api/proxy/repeater/tabs/{tab_id}/send")
+    async def repeater_send(tab_id: int, request: Request):
+        if not cfg.get("authorized"):     # replay sends traffic to the target
+            return JSONResponse(
+                {"error": "not authorized; set authorized:true (lab-only)"},
+                status_code=403)
+        raw = None
+        try:
+            raw = (await request.json()).get("raw")
+        except Exception:  # noqa: BLE001 - empty/non-JSON body → send the saved request
+            pass
+        out = repeater_ctl.send(tab_id, raw)
+        if out is None:
+            return JSONResponse({"error": f"tab {tab_id} not found"}, status_code=404)
+        return out
 
     return app
 

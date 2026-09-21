@@ -1,0 +1,74 @@
+/* fuzzlab design tokens (R0) — one source of truth for color, elevation, density.
+ *
+ * Theme resolution:
+ *   - default            → light
+ *   - system preference  → dark, unless the user forced light (data-theme="light")
+ *   - explicit override  → data-theme="light" | "dark" (persisted in localStorage)
+ *   - density override   → data-density="compact" (persisted in localStorage)
+ * Components consume only these variables, never raw hex, so a retheme is one edit here.
+ */
+:root {
+  color-scheme: light dark;
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface2: #f0f2f5;
+  --text: #1a1d21;
+  --muted: #6b7280;
+  --border: #e3e6ea;
+  --accent: #2563eb;
+  --accent-weak: #dbe4ff;
+  --crit: #b91c1c;
+  --high: #d9480f;
+  --med: #b7791f;
+  --low: #2f855a;
+  --info: #64748b;
+  --ok: #15803d;
+  --warn: #b45309;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --row: 34px;
+  --shadow: 0 1px 3px rgba(16, 24, 40, .08), 0 1px 2px rgba(16, 24, 40, .04);
+}
+
+/* Follow the OS when the user has not forced light. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1116;
+    --surface: #161b22;
+    --surface2: #1c2230;
+    --text: #e6e8eb;
+    --muted: #9aa4b2;
+    --border: #272e39;
+    --accent: #4f8cff;
+    --accent-weak: #1e2b45;
+    --crit: #f87171;
+    --high: #fb923c;
+    --med: #fbbf24;
+    --low: #4ade80;
+    --info: #94a3b8;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .45);
+  }
+}
+
+/* Explicit dark override wins over the system preference. */
+:root[data-theme="dark"] {
+  --bg: #0e1116;
+  --surface: #161b22;
+  --surface2: #1c2230;
+  --text: #e6e8eb;
+  --muted: #9aa4b2;
+  --border: #272e39;
+  --accent: #4f8cff;
+  --accent-weak: #1e2b45;
+  --crit: #f87171;
+  --high: #fb923c;
+  --med: #fbbf24;
+  --low: #4ade80;
+  --info: #94a3b8;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .45);
+}
+
+:root[data-density="compact"] { --row: 27px; }

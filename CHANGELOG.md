@@ -52,6 +52,77 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   design requirements per its own scope note, not a full `BUG-NNNN`/`PA-NNNN` — both are
   cross-referenced to `docs/spikes/SPIKE-001-*`/`SPIKE-002-*` and the fix requirement
   already tracked in `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`.
+- Feature (UI, layout redesign R0): reframed the web panel in a persistent **app shell** — a
+  left-sidebar nav (grouped Workbench / Analysis) + a top context bar (target / scope /
+  authorized / proxy chips) — over a new **design-token** stylesheet (`web/static/tokens.css`:
+  light / dark / system theme + compact density, persisted per-viewer, applied before first
+  paint). Rewrote `base.html`, retokenized `app.css` as a CSS-grid shell (every component
+  class preserved), added `initShell()` for theme/density/collapse + the proxy chip, and merged
+  a shared `_shell_context` into every page — because the top hash-tab masthead did not scale
+  and the UI needed one retheme point to build R1–R3 on. **Chrome only:** hash-based section
+  switching and all launcher/proxy/results behavior are unchanged; the no-auto-run / loopback /
+  authorized / read-only / redaction invariants are untouched. Full suite green (499 passed /
+  6 skipped) + real-browser screenshot verification (light + dark). D-UI-shell, CC-UI-0021,
+  FR-UI-8.
+- Docs (UI): added `docs/UI_LAYOUT_REDESIGN.md`, a design record for reworking the panel's
+  layout/IA — grounded in a cross-tool UX review (Rapid7, Tenable, Qualys VMDR,
+  Greenbone/OpenVAS, NodeWare, Burp Suite, OWASP ZAP). Proposes an app shell (left sidebar +
+  top context bar) over a deep-linkable multi-page app with a shared design system (tokens +
+  light/dark/density, one DataTable with faceted filters + saved views, one proxy message
+  editor, list→detail, command palette + send-to), an Overview dashboard, a Findings
+  workbench, and a rebuilt Proxy workbench, with an incremental R0–R3 migration that keeps
+  the safety invariants. Design only; see CC-UI-0020.
+- Feature (UI, Phase 2.4): Proxy Scope + Match-Replace — completes the Proxy workbench.
+  `ProxyController` gained live scope (default-deny include/exclude) and ordered
+  match-replace (byte rewrites) management, exposed via `GET|POST /api/proxy/scope`, `DELETE
+  /api/proxy/scope/{index}`, `GET|POST /api/proxy/matchreplace`, `DELETE
+  /api/proxy/matchreplace/{index}`, `POST /api/proxy/matchreplace/{index}/toggle` (409
+  without the in-process proxy; bad target / missing header_name → 400). The Proxy tab's
+  Scope · Match-Replace card lists/adds/removes both rule kinds (with a match-replace enable
+  toggle). With History + Intercept + Repeater, the Proxy workbench (revamp ask #2) is now
+  complete. Tests: `test_web_scope.py` (controller effects incl. a real rewrite via
+  `engine.matchreplace.apply`; routes + validation). Suite 496 passed / 6 skipped. See
+  CC-UI-0019.
+- Feature (UI, Phase 2.3): Proxy Repeater — persisted replay tabs. Added a `RepeaterController`
+  over the existing `Repeater` backend (own SocketSender + lazily-opened store; list/create/
+  from-flow/send) and routes `GET|POST /api/proxy/repeater/tabs`, `POST
+  /api/proxy/repeater/from-flow/{id}`, `POST /api/proxy/repeater/tabs/{id}/send` (byte-exact
+  replay, `authorized`-gated). The Proxy tab's Repeater card has a tabs dropdown, new-tab form,
+  editable raw request, Send, and a response viewer; a History flow gains "→ Repeater". Fixed
+  a CRLF bug: a `<textarea>` normalizes newlines to LF (breaking HTTP framing) — the client now
+  restores CRLF (`toWire`) for edited requests in both repeater and intercept-forward; the API
+  stays byte-exact. Tests: `test_web_repeater.py` (controller + routes incl. a real over-socket
+  send) and a real-browser regression `test_web_repeater_browser.py`. Suite 490 passed /
+  6 skipped. See CC-UI-0018.
+- Feature (UI + proxy, Phase 2.2): live Intercept — pause / edit / drop / forward. Added a
+  gated **response-intercept hook** to `ProxyEngine` + `Interceptor.intercept_responses`
+  (default off, so the default path stays byte-exact); request interception unchanged
+  (CC-PROXY-0015). `ProxyController` gained `pending_view` / `forward` / `drop` /
+  `set_intercept_responses`, with routes `GET /api/proxy/intercept/pending`, `POST
+  /api/proxy/intercept/{id}/forward|drop`, and the toggle extended for responses (409
+  without an in-process proxy). The Proxy tab's Intercept card renders request/response
+  toggles, a polled pending table, and an editable raw-bytes textarea with Forward / Drop
+  (rows DOM-built from untrusted traffic). Verified in a real browser holding an in-flight
+  request and over real sockets (an edited request reaches the upstream). New tests:
+  `test_proxy_response_intercept.py`, `test_proxy_intercept_live.py`, `test_web_intercept.py`.
+  Suite 484 passed / 6 skipped. See CC-PROXY-0015, CC-UI-0017.
+- Feature (UI, Phase 2.1): Proxy tab flow History (read-only). Added `fuzzlab/web/proxyview.py`
+  (store-backed `list_flows` + `flow_detail` over `flow`/`body`/`flow_fts`; newest-first, FTS
+  search, redacted raw request/response) and routes `GET /api/proxy/flows[?q=]` +
+  `/api/proxy/flows/{id}`. The Proxy tab renders a History sub-panel (search, flows table,
+  req/resp viewer) and a live proxy-status line; rows come from recorded traffic so they're
+  built with DOM `textContent` (no stored-XSS). Read-only, cross-process, never creates the
+  store. Tests: `test_web_proxy_history.py` (7) + the browser smoke extended to the Proxy tab.
+  Suite 474 passed / 6 skipped. See CC-UI-0016.
+- Feature (UI, Phase 1): Activity Launcher. The read-only preview is now an interactive
+  launcher — a form per activity rendered server-side from each command spec (widget per
+  flag type, keyed by argparse dest), with **Dry-run** (previews the exact command, sends
+  nothing), gated **Run** streaming the child's output live over SSE, and **Stop**. Traffic
+  tools' Run is disabled unless `authorized` (and `--authorized` is pre-checked when the
+  panel is authorized). Adds a D14 **category picker** (`--categories` as checkboxes from the
+  known categories) and a **Plugins** panel + `GET /api/plugins`. Verified end-to-end in a
+  real browser (`test_web_launcher_browser.py`: dry-run preview + a run streaming to
+  `[exit …]`), plus extended frontend tests. Suite 467 passed / 6 skipped. See CC-UI-0015.
 - Feature (UI, Phase 0.4): unified serve mode with an in-process proxy — completes the
   Phase-0 foundations. Added `fuzzlab/web/proxycontrol.py` (`ProxyConfig`/`ProxyController`)
   that builds the proxy engine (Scope + MatchReplace + Interceptor + SocketSender + optional

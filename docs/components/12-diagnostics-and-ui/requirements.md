@@ -61,15 +61,31 @@ bugs — the research-platform diagnostics of decision D2.
   tool's own `argparse` parser** (single source of truth — never hand-mirrored), so a new
   tool flag appears in the UI automatically. Launching still sends nothing until the user
   acts and stays behind the `authorized` gate (no-auto-run, NFR-UI-no-auto-run).
-  *(Realized incrementally: Phase 0.1 adds the command-spec registry that introspects the
-  parsers; the launcher UI and runner follow.)*
+  *(Realized: Phase 0.1 the command-spec registry, Phase 0.3 the dry-run/gated-run/SSE
+  runner, Phase 1 the launcher UI — per-tool forms, dry-run preview, live output, the D14
+  category picker, and the plugins panel.)*
 - **FR-UI-7** The panel is organized as a **tabbed shell**: **Launcher** (run controls),
   **Proxy** (traffic review/edit/drop/forward/repeat), **Results** (runs dashboard),
   **ML** (classifier/ranker/conformal/anomaly/active-learning/bandit/mutation — kept
   **separate** from the primary panel), and **Diagnostics** (a TensorBoard-like view for
   performance review and deep troubleshooting). Panels render server-side and degrade
   without JavaScript. *(Realized incrementally: Phase 0.2 builds the shell + Results;
-  Proxy/ML/Diagnostics fill in Phases 2–4.)*
+  Proxy/ML/Diagnostics fill in Phases 2–4. Re-housed in the FR-UI-8 app shell at R0:
+  the five sections became a persistent left-sidebar nav, still switching the same
+  server-rendered `.panel` sections by hash — see D-UI-shell and CC-UI-0021.)*
+- **FR-UI-8** The panel is framed by an **app shell**: a persistent **left-sidebar
+  navigation** (grouped Workbench / Analysis sections) and a **top context bar** showing
+  the current target, scope, authorization state, and proxy status. The shell is shared by
+  every page (index, run detail, not-found) via one base template. A **design-token
+  stylesheet** (`tokens.css`) is the single source of truth for color, elevation, and
+  density; it supports **light / dark / system** theme (system by default, with an explicit
+  override) and a **compact density**, both persisted per-viewer in `localStorage` and
+  applied before first paint (no flash). The shell is chrome only: it changes no launcher /
+  proxy / results behavior and touches none of the NFR-UI invariants.
+  *(Realized: R0 of the layout redesign — `base.html` shell, `tokens.css`, retokenized
+  `app.css`, and `initShell()` for theme/density/collapse persistence + the proxy chip.
+  Deep-linkable per-section routes and the Overview / Findings / Proxy rebuilds follow in
+  R1–R3, per `docs/UI_LAYOUT_REDESIGN.md`.)*
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

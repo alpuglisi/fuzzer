@@ -347,6 +347,8 @@ tracked in the requirements files, not here.
   CAPTCHA, multi-step). For **live** interception the engine is hosted in the web app's
   event loop by `web/proxycontrol.py` (D19), since the intercept futures are not
   cross-process; the standalone `fuzzlab proxy` remains for record-and-forward.
+  **Responses** are now optionally intercepted too (an awaited engine hook gated by
+  `Interceptor.intercept_responses`, default off so the path stays byte-exact).
 - **Flow engine + CONNECT/TLS** `[partial]`: `server.py::ProxyEngine` is the sans-I/O
   pipeline (scope → match-replace → intercept → byte-exact forward → history) and
   `AsyncProxyServer` the asyncio socket layer (plain-HTTP path tested offline over
@@ -375,8 +377,25 @@ tracked in the requirements files, not here.
   argv, no shell), and a **unified serve mode** (`web/proxycontrol.py`, `fuzzlab web
   --with-proxy`) that runs the intercepting proxy in the panel's own event loop so live
   interception's futures work (D19; opt-in, `--authorized`-gated, loopback-only, separate
-  port). **Pending:** the launcher run controls (Phase 1), the proxy
-  workbench (Phase 2), the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
+  port). Phase 1 built the **Activity Launcher UI**: per-tool forms rendered from each
+  command spec, a dry-run preview, gated Run with live SSE output + Stop, a D14 category
+  picker, and a plugins panel (verified end-to-end in a real browser). Phase 2.1 added the
+  **Proxy tab's read-only flow History** (`web/proxyview.py`; `/api/proxy/flows[/{id}]`;
+  cross-process store reads, DOM-safe rendering of untrusted flow fields). Phase 2.2 added
+  **live Intercept** — request/response toggles, a polled pending queue, and edit / forward
+  / drop over the in-process proxy (verified over real sockets). Phase 2.3 added the
+  **Repeater** (`RepeaterController`; `/api/proxy/repeater/*`) — persisted replay tabs,
+  byte-exact send (authorized-gated), and "→ Repeater" from a History flow. Phase 2.4 added
+  **Scope + Match-Replace** management (`/api/proxy/scope`, `/api/proxy/matchreplace`),
+  **completing the Proxy workbench** (History · Intercept · Repeater · Scope/Match-Replace).
+- **Layout redesign (`docs/UI_LAYOUT_REDESIGN.md`, D-UI-shell):** the panel's five sections
+  now live in a persistent **app shell** — a left-sidebar nav + a top context bar (target /
+  scope / authorized / proxy chips) — over a **design-token** system (`web/static/tokens.css`:
+  light / dark / system theme + compact density, persisted per-viewer, no-FOUC). Delivered as
+  **R0** (`base.html` shell, retokenized `app.css`, `initShell()`; chrome-only, no behavior
+  change, hash-based section switching preserved; CC-UI-0021, FR-UI-8). R1 adds deep-linkable
+  per-section routes + an Overview dashboard, R2 a Findings workbench, R3 a Proxy rebuild.
+  **Pending:** the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
   `metric_series` time-series table (Phase 4), Datasette-style store exploration, a
   `--dry-run` mode, and a plain CLI entry point per tool for headless use
   (`fuzzlab auto` exists today).

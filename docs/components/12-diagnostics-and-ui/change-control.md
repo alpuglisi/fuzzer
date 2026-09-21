@@ -3,6 +3,243 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0021 — App shell + design tokens (layout redesign R0) (2026-09-21)
+- Change: implemented **R0** of the layout redesign (`docs/UI_LAYOUT_REDESIGN.md`,
+  CC-UI-0020): replaced the top hash-tab masthead with a persistent **app shell** and a
+  **design-token** system, with **no behavior change** to the launcher / proxy / results.
+  Realizes new requirement **FR-UI-8**.
+  - New `fuzzlab/web/static/tokens.css` — the single source of truth for color, elevation,
+    and density: light default, dark under `@media (prefers-color-scheme: dark)` guarded by
+    `:root:not([data-theme="light"])`, an explicit `:root[data-theme="dark"]` override, and
+    `:root[data-density="compact"]`.
+  - `base.html` rewritten into the shell: a left **sidebar** (`<nav class="tabs">`, grouped
+    Workbench / Analysis) + a **top context bar** with target / scope / authorized / proxy
+    chips and theme / density / collapse controls, over a scrolling `<main class="content">`
+    (`{% block content %}`). A no-FOUC `<head>` script applies persisted theme / density /
+    collapse to `<html>` before first paint (wrapped in try/catch — blocked storage never
+    breaks rendering). `tokens.css` is linked before `app.css`.
+  - `index.html` / `run.html` / `not_found.html` moved from `{% block body %}` to
+    `{% block content %}` (the masthead + top-tabs were dropped from index; the five
+    `.panel` sections and every launcher form are byte-for-byte unchanged). Each adds a
+    `{% block crumb %}`.
+  - `app.css` rewritten as a CSS-grid shell (`grid-template-areas: "side top" "side main"`)
+    with **retokenized** components — every existing class preserved (`.card`, `nav.tabs`,
+    `.panel`/`.hidden`, `.field`, `.launch-form`/`.catgroup`/`.cat`/`.actions`/
+    `.launch-preview`/`.launch-output`, `#flow-table`/`.flow-raw`, `#pending-table`/
+    `.pending-raw`, `.pill`/`.result`, tables) now consuming tokens instead of raw hex.
+  - `app.js`: added `initShell()` (theme cycle system→light→dark, density toggle, sidebar
+    collapse — all persisted in `localStorage` behind try/catch — plus the topbar proxy
+    chip from `/api/proxy/status`); `initTabs()` now no-ops on pages without `.panel`
+    sections (run detail / not-found) so no tab is falsely highlighted. Selectors,
+    `subscribe`, and all proxy/launcher init unchanged.
+  - `app.py`: added `_shell_context(cfg)` (target / scope / authorized) and merged it into
+    the index, run-detail, and not-found `TemplateResponse`s so every page carries identical
+    shell chrome; `_index_context` now spreads it.
+- Impact (other components / project): UI only; no schema, contract, or CLI change. No route
+  added or changed. Supersedes the Phase-0.2 top-tab shell (CC-UI-0012) as the layout, while
+  keeping its hash-based section switching. New static asset `/static/tokens.css`. Adds
+  decision **D-UI-shell** (left-nav app shell + design tokens) to the roadmap.
+- Risk (level; mitigation): low. Chrome-only rewrite; the invariant-bearing markup (launcher
+  forms, gate pills, proxy cards, result tables) is unchanged, so the no-auto-run / loopback /
+  authorized / read-only / redaction invariants are untouched. Mitigation: full suite green
+  (499 passed / 6 skipped) — existing shell tests pass unchanged because `nav.tabs` / `.card`
+  / `initTabs` / `subscribe` were preserved — plus new asset/shell tests, and a real-browser
+  (Playwright) screenshot check of launcher + proxy in light and dark.
+- Deliverables:
+  - [x] `tokens.css` (light / dark / system + density) — done.
+  - [x] `base.html` app shell (sidebar + top context bar + no-FOUC) — done.
+  - [x] `index.html` / `run.html` / `not_found.html` → `{% block content %}` + crumb — done.
+  - [x] `app.css` grid shell + retokenized components (all classes preserved) — done.
+  - [x] `app.js` `initShell()` + `initTabs()` guard — done.
+  - [x] `app.py` `_shell_context()` merged into every page — done.
+  - [x] Tests: tokens served, shell renders, shell context on run/not-found — done.
+  - [x] Full suite + real-browser visual verification — done.
+  - [ ] R1 (routes + Overview), R2 (Findings), R3 (Proxy rebuild) — pending.
+- Effectiveness (assessed 2026-09-21): effective. The shell renders professionally in both
+  themes (verified by screenshots), section switching and all launcher/proxy controls behave
+  exactly as before, and the full suite is green with the design system now centralized in
+  `tokens.css` for R1–R3 to build on.
+
+### CC-UI-0020 — Web UI layout redesign (design record) (2026-09-21)
+- Change: added `docs/UI_LAYOUT_REDESIGN.md` — a design record for reworking the panel's
+  **layout / information architecture** (distinct from the feature revamp in
+  `UI_REVAMP_PLAN.md`). Grounded in researched UI/UX patterns from Rapid7 InsightVM, Tenable
+  (Nessus / VM / .sc), Qualys VMDR, Greenbone/OpenVAS (GSA), NodeWare, Burp Suite, and OWASP
+  ZAP. Proposes replacing the single-page top hash-tab layout with an **app shell** (persistent
+  left sidebar + top context bar) over a **deep-linkable multi-page app** (jinja `shell.html` +
+  per-section routes, still dependency-light — no SPA/build), a shared design system (tokens
+  with light/dark + density, one DataTable with faceted filters + saved views, one reusable
+  proxy message editor, list→detail with breadcrumbs, command palette + "send to" chaining),
+  an Overview dashboard, a Findings workbench, and a rebuilt Proxy workbench; plus an
+  incremental migration path (R0 shell/tokens → R1 routes+Overview → R2 Findings → R3 Proxy
+  rebuild) that preserves the no-auto-run / loopback / authorized / read-only / redaction
+  invariants and folds Phases 3–4 in as sections.
+- Impact (other components / project): design only — no code, no schema change. Supersedes the
+  Phase-0.2 top-tab shell (CC-UI-0012) once adopted; will add a decision (UI shell = left-nav
+  MPA) and FR-UI entries at that point.
+- Risk (level; mitigation): none (documentation). The doc scopes each migration step as
+  independently testable with invariants preserved.
+- Deliverables:
+  - [x] `docs/UI_LAYOUT_REDESIGN.md` (research synthesis + IA + design system + migration) — done.
+  - [ ] Visual mockup of the shell for review — in progress.
+  - [ ] R0–R3 implementation — pending user direction.
+- Effectiveness (assessed 2026-09-21): effective as a design record — grounded in a
+  cross-tool UX review; awaiting direction before implementation.
+
+### CC-UI-0019 — Proxy tab: Scope + Match-Replace (Phase 2.4; completes the workbench) (2026-09-21)
+- Change: `ProxyController` gained live `scope_view` / `scope_add(host, path_regex?, exclude)`
+  / `scope_remove(index)` over the engine's default-deny `Scope`, and `matchreplace_view` /
+  `matchreplace_add(target, match, replace, header_name?, is_regex)` / `matchreplace_remove` /
+  `matchreplace_toggle` over the ordered `MatchReplaceEngine`. Routes: `GET|POST
+  /api/proxy/scope`, `DELETE /api/proxy/scope/{index}`, `GET|POST /api/proxy/matchreplace`,
+  `DELETE /api/proxy/matchreplace/{index}`, `POST /api/proxy/matchreplace/{index}/toggle`
+  (all 409 without the in-process proxy; a bad match-replace target / missing header_name →
+  400). The Proxy tab's **Scope · Match-Replace** card lists/add/removes scope rules
+  (host + optional path-regex, include/exclude) and match-replace rules (target, header,
+  match→replace, regex, enable toggle); rows are DOM-built. Changes apply to subsequent
+  proxied requests on the same event loop.
+- Impact (other components / project): **completes the Proxy workbench** (History,
+  Intercept, Repeater, Scope/Match-Replace) — realizing ask #2 of the revamp. Consumes the
+  proxy `Scope`/`MatchReplaceEngine` unchanged; no schema change. Available only under
+  `fuzzlab web --with-proxy` (else the card shows a start hint).
+- Risk (level; mitigation): low — edits an opt-in, loopback, authorized proxy's config.
+  Mitigated by tests: `tests/test_web_scope.py` (controller scope add/remove + in_scope
+  effect; match-replace add/view/toggle/remove + a real rewrite via `engine.matchreplace.apply`;
+  add-validation raises; routes 409 without proxy, scope add/remove + host-required 400,
+  match-replace add/toggle/remove + bad-target 400). Suite 496 passed / 6 skipped.
+- Deliverables:
+  - [x] Controller scope + match-replace methods; routes — done.
+  - [x] Scope / Match-Replace UI (list/add/remove/toggle) — done.
+  - [x] Tests (controller effects + routes) — done; verified in a real browser (screenshot).
+- Effectiveness (assessed 2026-09-21): effective — scope include/exclude and ordered byte
+  rewrites are manageable live and take effect on the engine; the Proxy workbench is complete.
+
+### CC-UI-0018 — Proxy tab: Repeater (replay tabs) (Phase 2.3) (2026-09-21)
+- Change: added a `RepeaterController` (web) over the existing `Repeater` backend — its own
+  `SocketSender` + lazily-opened store (created only on first write), `list_tabs` (all tabs,
+  newest first, read-only), `create_tab`, `create_from_flow`, and `send` (byte-exact replay,
+  `authorized`-gated by the route). Routes: `GET /api/proxy/repeater/tabs`, `POST
+  /api/proxy/repeater/tabs`, `POST /api/proxy/repeater/from-flow/{flow_id}` (seed a tab from
+  a History flow), `POST /api/proxy/repeater/tabs/{id}/send` (403 unless authorized; 404 for
+  an unknown tab). These handlers are async so the controller's persistent SQLite connection
+  is only touched from the event-loop thread. The Proxy tab's **Repeater** card renders a
+  tabs dropdown, a new-tab form, an editable raw request, Send, and a response viewer; a
+  History flow gains a "→ Repeater" button. **Bug fixed:** a `<textarea>` normalizes
+  newlines to LF, which breaks HTTP framing — the client now restores CRLF (`toWire`) before
+  sending an edited request (repeater **and** intercept-forward); the API stays byte-exact.
+- Impact (other components / project): replay is available whenever authorized, independent
+  of the in-process proxy; tabs persist in `repeater_tab` across sessions. Consumes the proxy
+  `Repeater`/`SocketSender` unchanged; no schema change. Sending is the only traffic path and
+  is gated.
+- Risk (level; mitigation): low–medium — replay sends traffic. Mitigated by the authorized
+  gate, and tests: `tests/test_web_repeater.py` (controller create/list/send-with-injected-
+  sender/from-flow; routes list/create, send 403 gate + a real over-socket send to a threaded
+  upstream + 404, from-flow 404) and a real-browser regression `tests/test_web_repeater_browser.py`
+  (create + edit in a textarea + Send → the upstream echoes the edited target, proving the
+  CRLF fix). Suite 490 passed / 6 skipped.
+- Deliverables:
+  - [x] `RepeaterController` + routes (tabs/create/from-flow/send) — done.
+  - [x] Repeater UI (tabs, new-tab, editor, Send, response) + History "→ Repeater" — done.
+  - [x] CRLF (`toWire`) fix for textarea-edited raw (repeater + intercept) — done.
+  - [x] Controller/route tests + real-browser regression — done.
+  - [ ] Scope / match-replace (Phase 2.4) — next.
+- Effectiveness (assessed 2026-09-21): effective — verified in a real browser: create a tab,
+  edit the raw request, Send, and see the upstream's response; and a flow seeds a tab via
+  "→ Repeater". Screenshot captured.
+
+### CC-UI-0017 — Proxy tab: live Intercept (pause/edit/drop/forward) (Phase 2.2) (2026-09-21)
+- Change: added the intercept control surface. `ProxyController` gained `pending_view()`
+  (JSON-safe held flows: id/direction/host/method/target + raw text), `forward(id, raw?)`
+  (edit via `RawMessage.from_bytes(raw.encode('latin-1'))`), `drop(id)`, and
+  `set_intercept_responses(on)` (status now carries `intercept_responses`). Routes:
+  `POST /api/proxy/intercept` extended to toggle `on`/`responses`, `GET
+  /api/proxy/intercept/pending`, `POST /api/proxy/intercept/{id}/forward` (optional
+  `{"raw"}`), `POST /api/proxy/intercept/{id}/drop` — all 409 without an in-process proxy.
+  The Proxy tab's **Intercept** card renders the request/response toggles, a polled pending
+  table, and an editable raw-bytes textarea with Forward / Drop. Pending rows come from
+  traffic (untrusted) so they're DOM-built with `textContent`.
+- Impact (other components / project): realizes live pause/edit/drop/forward in the browser,
+  backed by the in-process proxy (Phase 0.4) and the CC-PROXY-0015 response hook. Available
+  only under `fuzzlab web --with-proxy` (else the card shows a start hint). No schema change;
+  the UI writes no results.
+- Risk (level; mitigation): low–medium — the panel can now alter live traffic. Mitigated by
+  the proxy being opt-in + `--authorized`-gated, DOM-safe rendering, and tests:
+  `tests/test_web_intercept.py` (controller pending_view/forward round-trip against a real
+  paused flow, unknown-id benign, responses toggle; routes 409 without proxy and
+  pending/forward/drop with a pre-built proxy) plus the engine + over-socket integration
+  tests under CC-PROXY-0015. Suite 484 passed / 6 skipped.
+- Deliverables:
+  - [x] Controller pending_view/forward/drop/set_intercept_responses — done.
+  - [x] Intercept routes; Intercept UI (toggles, polled pending, edit + Forward/Drop) — done.
+  - [x] Tests (controller + routes); live over-socket + engine tests — done.
+  - [ ] Repeater (Phase 2.3); scope / match-replace (Phase 2.4) — next.
+- Effectiveness (assessed 2026-09-21): effective — verified in a real browser holding a real
+  in-flight request ("intercept ON · 1 pending"), with the raw bytes editable and
+  Forward/Drop; and over real sockets an edited request reaches the upstream. Screenshot
+  captured.
+
+### CC-UI-0016 — Proxy tab: read-only flow History (Phase 2.1) (2026-09-21)
+- Change: added `fuzzlab/web/proxyview.py` (pure, store-backed `list_flows` + `flow_detail`
+  over `flow`/`body`/`flow_fts`; newest-first, FTS search, and raw request/response decoded
+  for display) and read routes `GET /api/proxy/flows[?q=]` and `GET /api/proxy/flows/{id}`
+  (404 for a missing flow). The Proxy tab now renders a **History** sub-panel — a search
+  box, a flows table (method/url/host/status/ms/protocol), and a req/resp viewer — plus a
+  live proxy-status line. Flow url/host/head come from recorded traffic (untrusted), so the
+  rows are built with DOM APIs + `textContent`, never interpolated HTML.
+- Impact (other components / project): surfaces the proxy component's flow history in the
+  panel; works cross-process (reads the store a running `fuzzlab proxy` / `web --with-proxy`
+  writes). Read-only — never creates the store, sends no traffic, writes no results. No
+  schema change; the proxy component is consumed unchanged.
+- Risk (level; mitigation): low — read-only store reads and DOM-safe rendering (redacted
+  bytes on write; `textContent` blocks stored-XSS from flow fields). Mitigated by
+  `tests/test_web_proxy_history.py` (7: list newest-first, FTS query hit/miss, detail decode
+  + 404, API list/search, API detail/404, missing-store empty + no-create, tab renders) and
+  the real-browser smoke extended to switch to the Proxy tab, see a seeded flow, and open
+  its detail. Suite 474 passed / 6 skipped.
+- Deliverables:
+  - [x] `web/proxyview.py` (list_flows / flow_detail) — done.
+  - [x] `/api/proxy/flows[/{id}]` routes; Proxy-tab History UI + status line — done.
+  - [x] Tests (view + routes + read-only invariant) + browser smoke — done.
+  - [ ] Live intercept (edit/drop/forward), repeater, scope/match-replace (Phase 2.2+) — next.
+- Effectiveness (assessed 2026-09-21): effective — recorded flows list and are searchable,
+  and a flow's redacted raw request/response render; verified in a real browser.
+
+### CC-UI-0015 — Activity Launcher UI: forms + dry-run + live output (Phase 1) (2026-09-21)
+- Change: turned the read-only activity preview into an interactive **launcher**. The
+  Launcher tab now renders a form per non-subcommand activity, server-side from each
+  command spec — a widget per flag by type (text / number / `<select>` for choices /
+  checkbox for bools / textarea for repeatables), keyed by argparse `dest`. `app.js` gained
+  `collectValues` + `initLaunchForms`: **Dry-run** (`POST /api/launch/dry-run`) shows the
+  exact command and sends nothing; **Run** (`POST /api/launch`) streams the child's output
+  live via a named-event `EventSource` (`output`/`done`), with **Stop**. Traffic tools' Run
+  is disabled unless `authorized`, and `--authorized` is pre-checked when the panel is
+  authorized. Added a **D14 category picker** — the `--categories` flag renders as
+  checkboxes from `known_categories()`, joined to a comma value. Added a **Plugins** panel +
+  `GET /api/plugins` (the active entry-point set that `--plugins` would attach). Session
+  (subparsers) renders as a CLI note, not a form.
+- Impact (other components / project): realizes FR-UI-6 (launcher) and FR-UI-5 (dry-run) in
+  the browser, and the D14 manual category selection. Consumes the Phase-0 endpoints and the
+  command spec; no backend behavior/schema change beyond the read-only `/api/plugins`. The
+  no-auto-run / loopback / authorized / read-only invariants hold (launch is explicit and
+  gated; the UI writes no results).
+- Risk (level; mitigation): low–medium — new client JS driving real launches. Mitigated by
+  the gate (traffic Run disabled/refused without `authorized`), the declared-flags-only +
+  no-shell runner (CC-UI-0013), and tests: `tests/test_web_frontend.py` extended (form per
+  activity, dest-keyed fields, Run-button gating by authorization, category picker, plugins
+  panel/endpoint, session-as-note) and a real-browser end-to-end smoke
+  `tests/test_web_launcher_browser.py` (Chromium + uvicorn: fills the report form, asserts
+  the dry-run preview `fuzzlab report --store x.db`, then Runs and sees output stream to
+  `[exit …]` over SSE — skip-guarded when no browser). Suite 467 passed / 6 skipped.
+- Deliverables:
+  - [x] Per-activity forms (server-rendered from specs) + dry-run/run/stop wiring — done.
+  - [x] Live SSE output in the browser; Run gated by authorization — done.
+  - [x] D14 category picker; Plugins panel + `/api/plugins` — done.
+  - [x] Frontend tests + real-browser end-to-end smoke — done.
+  - [ ] Phase 2 proxy workbench; Phase 3 ML tab; Phase 4 diagnostics — next.
+- Effectiveness (assessed 2026-09-21): effective — verified in real Chromium: the launcher
+  builds each command from its parser, previews it on dry-run without traffic, and streams a
+  gated run's output to completion. Screenshot captured for review.
+
 ### CC-UI-0014 — Unified serve mode: in-process proxy controller (Phase 0.4; D19) (2026-09-21)
 - Change: added `fuzzlab/web/proxycontrol.py` (`ProxyConfig` + `ProxyController`) — it
   builds the proxy engine (Scope + `MatchReplaceEngine` + `Interceptor` + `SocketSender` +

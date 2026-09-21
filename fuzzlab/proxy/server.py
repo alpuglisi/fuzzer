@@ -113,6 +113,16 @@ class ProxyEngine:
             msg = decided
 
         resp = self.sender(host, port, use_tls, msg.raw)     # byte-exact forward
+        # Optional response interception (Burp-style "intercept responses"): only when
+        # the interceptor opts in, so the default path stays byte-exact (the wrap+`.raw`
+        # round-trips the exact bytes). A dropped response sends nothing to the client.
+        if self.interceptor is not None and getattr(self.interceptor,
+                                                    "intercept_responses", False):
+            decided = await self.interceptor.handle(
+                RawMessage.from_bytes(resp), "response", host)
+            if decided is None:
+                return None
+            resp = decided.raw
         if self.history is not None:
             self._record(msg, resp, host, port, use_tls)
         return resp

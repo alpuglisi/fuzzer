@@ -1,18 +1,6 @@
 {% extends "base.html" %}
-{% block body %}
-<header class="masthead">
-  <h1>fuzzlab &mdash; control panel</h1>
-  <p class="muted">Local, lab-only. Nothing is sent to the target until you act
-    (no auto-run). This panel reads results the tools wrote.</p>
-  <nav class="tabs">
-    <a href="#launcher" data-tab="launcher">Launcher</a>
-    <a href="#proxy" data-tab="proxy">Proxy</a>
-    <a href="#results" data-tab="results">Results</a>
-    <a href="#ml" data-tab="ml">ML</a>
-    <a href="#diagnostics" data-tab="diagnostics">Diagnostics</a>
-  </nav>
-</header>
-
+{% block crumb %}Control panel{% endblock %}
+{% block content %}
 <section class="panel" id="tab-launcher">
   <div class="card">
     <div>Target: <code>{{ target }}</code></div>
@@ -48,9 +36,25 @@
 
   <div class="card">
     <h2>Activities</h2>
-    <p class="muted">Every launchable tool and its flags, read from the tool's own
-      parser. Run controls (forms, dry-run, live output) arrive in Phase 1; this is a
-      read-only preview.</p>
+    <p class="muted">Launch any tool: fill the flags, <b>Dry-run</b> to preview the exact
+      command (sends nothing), then <b>Run</b> — gated by <code>authorized</code> for
+      traffic tools — and watch the output stream live. Fields come straight from each
+      tool's own parser.</p>
+
+    <div class="card">
+      <h3>Plugins</h3>
+      {% if plugins %}
+      <ul class="spec-flags">
+        {% for p in plugins %}
+        <li><code>{{ p.name }}</code> v{{ p.version }} <span class="muted">(priority {{ p.priority }})</span></li>
+        {% endfor %}
+      </ul>
+      <p class="muted">Attach these with the <code>--plugins</code> flag on <code>auto</code>.</p>
+      {% else %}
+      <p class="muted">No entry-point plugins installed; runs use no plugins by default.</p>
+      {% endif %}
+    </div>
+
     {% for a in activities %}
     <div class="card">
       <h3>{{ a.name }}
@@ -59,23 +63,52 @@
         {% if a.destructive_gate %}<span class="pill destructive">--allow-destructive</span>{% endif %}
       </h3>
       <p class="muted">{{ a.summary }}</p>
-      {% if a.options %}
-      <ul class="spec-flags">
-        {% for o in a.options %}
-        <li><code>{{ o.name }}</code>
-          <span class="muted">{{ o.type }}{% if o.required %}, required{% endif %}{% if o.choices %} [{{ o.choices | join('|') }}]{% endif %}{% if o.default is not none and not o.required %} (default {{ o.default }}){% endif %}</span>
-          {% if o.help %}&mdash; {{ o.help }}{% endif %}
-        </li>
-        {% endfor %}
-      </ul>
-      {% elif a.subcommands %}
-      <ul class="spec-flags">
-        {% for sub, opts in a.subcommands.items() %}
-        <li><code>{{ sub }}</code>: {{ opts | map(attribute='name') | join(', ') }}</li>
-        {% endfor %}
-      </ul>
+
+      {% if a.subcommands %}
+      <p class="muted">Subcommands
+        {% for sub in a.subcommands %}<code>{{ sub }}</code> {% endfor %}&mdash; run from the
+        CLI (<code>fuzzlab {{ a.name }} &lt;sub&gt;</code>); its interactive prompts aren't
+        launched from the panel.</p>
       {% else %}
-      <p class="muted">No flags.</p>
+      <form class="launch-form" data-command="{{ a.name }}">
+        {% for o in a.options %}
+        <div class="field">
+          <label for="f-{{ a.name }}-{{ o.dest }}">{{ o.name }}{% if o.required %} *{% endif %}</label>
+          {% if o.dest == 'categories' and categories %}
+          <span class="catgroup" data-catgroup="{{ o.dest }}">
+            {% for c in categories %}
+            <label class="cat"><input type="checkbox" value="{{ c }}"> {{ c }}</label>
+            {% endfor %}
+          </span>
+          {% elif o.type == 'bool' %}
+          <input type="checkbox" id="f-{{ a.name }}-{{ o.dest }}" data-dest="{{ o.dest }}"
+                 data-type="bool"{% if (o.dest == 'authorized' and authorized) or o.default %} checked{% endif %}>
+          {% elif o.type == 'choice' %}
+          <select id="f-{{ a.name }}-{{ o.dest }}" data-dest="{{ o.dest }}" data-type="choice">
+            {% for c in o.choices %}<option{% if c == (o.default|string) %} selected{% endif %}>{{ c }}</option>{% endfor %}
+          </select>
+          {% elif o.multiple %}
+          <textarea id="f-{{ a.name }}-{{ o.dest }}" data-dest="{{ o.dest }}" data-type="{{ o.type }}"
+                    data-multiple="true" rows="2" placeholder="one per line"></textarea>
+          {% elif o.type in ('int', 'float') %}
+          <input type="number" id="f-{{ a.name }}-{{ o.dest }}" data-dest="{{ o.dest }}"
+                 data-type="{{ o.type }}"{% if o.default is not none %} placeholder="{{ o.default }}"{% endif %}>
+          {% else %}
+          <input type="text" id="f-{{ a.name }}-{{ o.dest }}" data-dest="{{ o.dest }}"
+                 data-type="str"{% if o.default is not none %} placeholder="{{ o.default }}"{% endif %}>
+          {% endif %}
+          {% if o.help %}<span class="muted"> {{ o.help }}</span>{% endif %}
+        </div>
+        {% endfor %}
+        <div class="actions">
+          <button type="button" data-action="dry-run">Dry-run</button>
+          <button type="button" data-action="run"
+            {% if a.sends_traffic and not authorized %}disabled title="set authorized:true to run traffic tools"{% endif %}>Run</button>
+          <button type="button" data-action="stop" disabled>Stop</button>
+        </div>
+        <pre class="launch-preview" hidden></pre>
+        <pre class="launch-output" hidden></pre>
+      </form>
       {% endif %}
     </div>
     {% endfor %}
@@ -89,9 +122,138 @@
 <section class="panel" id="tab-proxy">
   <div class="card">
     <h2>Proxy workbench</h2>
-    <p class="muted">History, live intercept (edit / drop / forward), repeater, and
-      scope / match-replace. Arrives in Phase 2 (the proxy backend already exists;
-      this tab will surface it).</p>
+    <p class="muted" id="proxy-status">Proxy: checking…</p>
+    <p class="muted">History, live Intercept (pause / edit / drop / forward), Repeater, and
+      Scope / Match-Replace are all below. Intercept, Repeater sends, and Scope /
+      Match-Replace need the in-process proxy (<code>fuzzlab web --with-proxy --authorized</code>).</p>
+  </div>
+
+  <div class="card">
+    <h2>History</h2>
+    <div class="field">
+      <input type="text" id="flow-search" placeholder="search url / host / head…">
+      <button type="button" id="flow-refresh">Refresh</button>
+    </div>
+    <table id="flow-table">
+      <thead><tr><th>#</th><th>method</th><th>url</th><th>host</th><th>status</th>
+        <th>ms</th><th>proto</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="muted" id="flow-empty" hidden>No flows recorded yet. Start the proxy
+      (<code>fuzzlab web --with-proxy --authorized</code>, or <code>fuzzlab proxy</code>)
+      and drive traffic through it.</p>
+    <div id="flow-detail" hidden>
+      <h3>Flow <span id="flow-detail-id"></span>
+        <span class="muted">— stored bytes are redacted</span>
+        <button type="button" id="flow-to-repeater">&rarr; Repeater</button></h3>
+      <h4>Request</h4><pre class="flow-raw" id="flow-req"></pre>
+      <h4>Response</h4><pre class="flow-raw" id="flow-resp"></pre>
+    </div>
+  </div>
+
+  <div class="card" id="intercept-card">
+    <h2>Intercept</h2>
+    <p class="muted" id="intercept-unavailable" hidden>Not running in-process. Start with
+      <code>fuzzlab web --with-proxy --authorized</code> to pause, edit, drop, and forward
+      live traffic.</p>
+    <div id="intercept-controls" hidden>
+      <div class="field">
+        <label class="cat"><input type="checkbox" id="intercept-on"> Intercept requests</label>
+        <label class="cat"><input type="checkbox" id="intercept-resp"> and responses</label>
+        <span class="muted" id="intercept-count"></span>
+      </div>
+      <table id="pending-table">
+        <thead><tr><th>#</th><th>dir</th><th>method</th><th>target</th><th>host</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="muted" id="pending-empty" hidden>No flows held. Toggle intercept on and
+        drive traffic through the proxy.</p>
+      <div id="pending-detail" hidden>
+        <h3>Editing held flow <span id="pending-id"></span>
+          <span class="muted">— edit the raw bytes, then Forward (or Drop)</span></h3>
+        <textarea id="pending-raw" class="pending-raw" rows="12" spellcheck="false"></textarea>
+        <div class="actions">
+          <button type="button" id="pending-forward">Forward</button>
+          <button type="button" id="pending-drop">Drop</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="repeater-card">
+    <h2>Repeater</h2>
+    <p class="muted">Save a raw request as a tab and replay it byte-exact. Use
+      &ldquo;&rarr; Repeater&rdquo; on a History flow to seed one.
+      {% if not authorized %}Sending is disabled until <code>authorized: true</code>.{% endif %}</p>
+    <div class="field">
+      <label for="rep-tab-select">Tabs</label>
+      <select id="rep-tab-select"><option value="">— select a tab —</option></select>
+      <button type="button" id="rep-refresh">Refresh</button>
+    </div>
+    <details>
+      <summary>New tab</summary>
+      <div class="field"><label for="rep-new-name">name</label>
+        <input type="text" id="rep-new-name" placeholder="tab"></div>
+      <div class="field"><label for="rep-new-host">host</label>
+        <input type="text" id="rep-new-host" placeholder="127.0.0.1"></div>
+      <div class="field"><label for="rep-new-port">port</label>
+        <input type="number" id="rep-new-port" placeholder="8080"></div>
+      <div class="field"><label for="rep-new-tls">TLS</label>
+        <input type="checkbox" id="rep-new-tls"></div>
+      <div class="field"><label for="rep-new-raw">raw request</label>
+        <textarea id="rep-new-raw" class="pending-raw" rows="6"
+                  placeholder="GET / HTTP/1.1&#10;Host: 127.0.0.1&#10;&#10;"></textarea></div>
+      <div class="actions"><button type="button" id="rep-create">Create tab</button></div>
+    </details>
+    <div id="rep-editor" hidden>
+      <h4>Request</h4>
+      <textarea id="rep-raw" class="pending-raw" rows="10" spellcheck="false"></textarea>
+      <div class="actions">
+        <button type="button" id="rep-send"
+          {% if not authorized %}disabled title="set authorized:true to replay"{% endif %}>Send</button>
+      </div>
+      <h4>Response</h4>
+      <pre class="flow-raw" id="rep-resp"></pre>
+    </div>
+  </div>
+
+  <div class="card" id="scope-card">
+    <h2>Scope · Match-Replace</h2>
+    <p class="muted" id="scope-unavailable" hidden>Not running in-process. Start with
+      <code>fuzzlab web --with-proxy --authorized</code> to manage scope and rewrites.</p>
+    <div id="scope-controls" hidden>
+      <h3>Scope <span class="muted">— default-deny; an exclude always wins</span></h3>
+      <table id="scope-table">
+        <thead><tr><th>#</th><th>host</th><th>path regex</th><th>type</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="field"><label for="scope-host">host</label>
+        <input type="text" id="scope-host" placeholder="127.0.0.1:8080 · .lab.local · *"></div>
+      <div class="field"><label for="scope-path">path regex</label>
+        <input type="text" id="scope-path" placeholder="(optional)"></div>
+      <div class="field"><label for="scope-exclude">exclude</label>
+        <input type="checkbox" id="scope-exclude"></div>
+      <div class="actions"><button type="button" id="scope-add">Add scope rule</button></div>
+
+      <h3>Match-Replace <span class="muted">— ordered byte rewrites</span></h3>
+      <table id="mr-table">
+        <thead><tr><th>#</th><th>target</th><th>header</th><th>match &rarr; replace</th>
+          <th>regex</th><th>on</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="field"><label for="mr-target">target</label>
+        <select id="mr-target">
+          <option>request_line</option><option>status_line</option>
+          <option>header</option><option>body</option>
+        </select></div>
+      <div class="field"><label for="mr-header">header name</label>
+        <input type="text" id="mr-header" placeholder="(when target = header)"></div>
+      <div class="field"><label for="mr-match">match</label><input type="text" id="mr-match"></div>
+      <div class="field"><label for="mr-replace">replace</label><input type="text" id="mr-replace"></div>
+      <div class="field"><label for="mr-regex">regex</label><input type="checkbox" id="mr-regex"></div>
+      <div class="actions"><button type="button" id="mr-add">Add rewrite rule</button></div>
+      <p class="warn" id="mr-error"></p>
+    </div>
   </div>
 </section>
 
