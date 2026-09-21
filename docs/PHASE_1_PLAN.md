@@ -20,7 +20,8 @@ Phase 1 is **built and unit-tested** (session package 17 tests; suite 60 green).
 - **T1.4** success/expiry detection + single-flight re-auth + fail-loud — done.
 - **T1.5** wired into the `core/` HTTP seam (drop-in addon) — done.
 - **T1.6** identities per host — done.
-- **T1.7** secret redaction — done; persist non-secret state to a store table — todo.
+- **T1.7** secret redaction — done; persist non-secret state to a `session_state`
+  table (migration 3) with resume + audit trail — done (secrets never persisted).
 - **T1.8** auth-endpoint exclusion — done.
 - **T1.9** standalone `fuzzlab session` (set-credential / print) — done.
 - **T1.10** migrate tool HTTP onto the seam + **live two-lab validation** — in
@@ -32,8 +33,14 @@ Phase 1 is **built and unit-tested** (session package 17 tests; suite 60 green).
   the **live two-lab run** (per-identity crawl→audit→fuzz against the containerized
   lab and an external JWT lab — needs a container daemon / network / browser).
 
-Remaining to close Phase 1 end-to-end: the live two-lab per-identity run; wire
-non-secret session-state persistence for crash-resume (T1.7).
+Remaining to close Phase 1 end-to-end: the live two-lab per-identity run (the last
+item; all tool code paths and persistence are done).
+
+**TODO (revisit):** write a short **runbook** for the live two-lab validation —
+how to save per-host credentials (`fuzzlab session set-credential`), bring up the
+lab, and run per-identity crawl→audit→fuzz against the containerized lab (cookie)
+and an external JWT lab, with the expected checks. Deferred until we run it on a
+host with a container daemon / browser.
 
 ## Goal
 

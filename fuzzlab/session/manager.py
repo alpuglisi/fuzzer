@@ -73,18 +73,40 @@ class SessionManager:
     def __init__(self, credentials, scope_hosts: list[str] | None = None,
                  fetch_factory: Callable[[], Fetcher] | None = None,
                  identities: list[str] | None = None, max_reauth: int = 3,
-                 logger=None):
+                 logger=None, store=None):
         self._creds = credentials
         self._scope = set(scope_hosts or [])
         self._fetch_factory = fetch_factory or _requests_fetch_factory()
         self._identities = identities or [ANONYMOUS, "user", "admin"]
         self._max_reauth = max_reauth
         self._log = logger
+        self._store = store       # optional: persist NON-SECRET session state (T1.7)
         self._state: dict[tuple[str, str], SessionState] = {}
         self._auth_endpoints: dict[str, set[str]] = {}
         self._locks: dict[tuple[str, str], threading.Lock] = {}
         self._locks_guard = threading.Lock()
         self._failures: dict[tuple[str, str], int] = {}
+        self._persisted: dict[tuple[str, str], dict] = {}
+        if self._store is not None:
+            for rec in self._store.all_session_states():
+                self._persisted[(rec["host"], rec["identity"])] = rec
+            if self._persisted and self._log:
+                self._log.info("resuming known sessions",
+                               extra={"count": len(self._persisted)})
+
+    def persisted_state(self, host: str, identity: str) -> dict | None:
+        """The last non-secret session state persisted for (host, identity), if any.
+
+        Note: secrets are never persisted, so a resumed run still re-authenticates
+        to obtain a live cookie/token; this is metadata (audit + continuity).
+        """
+        if self._store is not None:
+            return self._store.get_session_state(host, identity)
+        return self._persisted.get((host, identity))
+
+    def _persist(self, state: SessionState) -> None:
+        if self._store is not None:
+            self._store.upsert_session_state(state.non_secret_state())
 
     # -- addon interface used by the HTTP seam ----------------------------
     def prepare(self, request, identity: str) -> None:
@@ -106,6 +128,7 @@ class SessionManager:
         if detect.detect_logout(response.status, response.headers, body,
                                 login_url=state.login_url):
             state.valid = False  # next prepare() re-authenticates
+            self._persist(state)
 
     # -- explicit / standalone -------------------------------------------
     def ensure(self, host: str, identity: str, base_url: str) -> SessionState:
@@ -201,6 +224,7 @@ class SessionManager:
         # Record auth endpoints so fuzzing excludes them (T1.8).
         self._auth_endpoints.setdefault(host, set()).update(
             {form.action_url, login_page_url, state.logout_url})
+        self._persist(state)   # NON-SECRET metadata only (T1.7)
         if self._log:
             self._log.info("authenticated", extra=state.redacted())
         return state

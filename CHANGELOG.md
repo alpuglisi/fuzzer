@@ -13,6 +13,17 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 1 build (T1.7): **non-secret session-state persistence**. Added migration 3
+  (`session_state` table) + Store methods; the session manager persists non-secret
+  metadata (host/identity/kind/validity/endpoints/token-exp) on login and logout,
+  resumes it in a fresh manager, and the tools pass `--store` so runs persist.
+  Secrets are never stored — a resume re-authenticates. +4 tests. Recorded a runbook
+  TODO for the live two-lab validation in `PHASE_1_PLAN.md`. Change-control:
+  CC-CORE-0005, CC-SESS-0006.
+- Bug: BUG-0002 — a harness test still hardcoded the schema head (`== 2`),
+  broken by migration 3 (recurrence of BUG-0001's class). Fixed to derive from the
+  migration registry; added PA-0002 (sweep the codebase for a bug class when adding
+  its preventive action, don't fix only the triggering instance). Suite 71/71 green.
 - Phase 1 build (T1.10, part): **authenticated the Playwright/browser path** for
   the crawler and auditor. Added `fuzzlab/tools/browserauth.py`, which shapes a
   session into Playwright cookies / an extra bearer header and applies it to the

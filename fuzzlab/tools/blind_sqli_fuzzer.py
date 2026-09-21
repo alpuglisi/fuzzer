@@ -240,7 +240,8 @@ def main(argv=None):
 
     if args.identity:
         from fuzzlab.tools.authhttp import make_authenticated_client
-        client = make_authenticated_client(args.url, args.identity, args.timeout)
+        client = make_authenticated_client(args.url, args.identity, args.timeout,
+                                           store_path=args.store)
         sender = SeamSender(client, args.identity)
     else:
         sender = RequestsSender(requests.Session())

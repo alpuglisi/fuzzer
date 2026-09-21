@@ -840,7 +840,8 @@ if __name__ == "__main__":
         if not args.base_url:
             sys.exit("--identity requires --base-url (the target base URL for login).")
         from fuzzlab.tools.authhttp import make_auth
-        session_manager, seam = make_auth(args.base_url, timeout=args.timeout / 1000)
+        session_manager, seam = make_auth(args.base_url, timeout=args.timeout / 1000,
+                                          store_path=args.store)
         log.info("auditing authenticated", extra={"identity": args.identity})
 
     targets = load_urls(args.spider_db)

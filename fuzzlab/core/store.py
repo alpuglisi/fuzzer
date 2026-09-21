@@ -64,6 +64,37 @@ class Store:
         ).fetchone()
         return bytes(row["data"]) if row else None
 
+    # -- session state (NON-SECRET only; never cookies/tokens/creds) ------
+    def upsert_session_state(self, state: dict[str, Any]) -> None:
+        """Persist one identity's non-secret session metadata (upsert by host+identity)."""
+        self.conn.execute(
+            "INSERT INTO session_state (host, identity, kind, valid, login_url, "
+            "logout_url, token_exp, updated_at) VALUES (?,?,?,?,?,?,?, datetime('now')) "
+            "ON CONFLICT(host, identity) DO UPDATE SET "
+            "kind=excluded.kind, valid=excluded.valid, login_url=excluded.login_url, "
+            "logout_url=excluded.logout_url, token_exp=excluded.token_exp, "
+            "updated_at=excluded.updated_at",
+            (state.get("host"), state.get("identity"), state.get("kind"),
+             int(bool(state.get("valid"))), state.get("login_url"),
+             state.get("logout_url"), state.get("token_exp")),
+        )
+        self.conn.commit()
+
+    def get_session_state(self, host: str, identity: str) -> dict[str, Any] | None:
+        row = self.conn.execute(
+            "SELECT host, identity, kind, valid, login_url, logout_url, token_exp, "
+            "updated_at FROM session_state WHERE host=? AND identity=?",
+            (host, identity),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def all_session_states(self) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            "SELECT host, identity, kind, valid, login_url, logout_url, token_exp, "
+            "updated_at FROM session_state ORDER BY host, identity"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     # -- misc -------------------------------------------------------------
     def schema_version(self) -> int:
         return migrations.current_version(self.conn)

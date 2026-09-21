@@ -3,6 +3,25 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0005 — Migration 3 + session-state store methods (2026-09-21)
+- Change: added migration 3 (a `session_state` table for **non-secret** session
+  metadata — host, identity, kind, valid, login/logout URLs, token_exp) and Store
+  methods `upsert_session_state`/`get_session_state`/`all_session_states`. Supports
+  T1.7 persistence. Secrets (cookies/tokens/creds) are never stored — the table has
+  no column for them.
+- Impact (other components / project): the session manager (#3) persists non-secret
+  state here; the diagnostics UI can later read it. Schema head is now version 3;
+  additive migration, existing data untouched.
+- Risk (level; mitigation): low — additive table + upsert. Mitigated by the
+  idempotent migration runner and tests. Discovered BUG-0002 (a test still
+  hardcoding the schema head `== 2`); fixed to derive from the registry and added
+  PA-0002 (sweep for a bug class when adding its preventive action).
+- Deliverables:
+  - [x] Migration 3 (`session_state`) + Store methods — done.
+  - [x] Fix BUG-0002 + PA-0002 — done.
+- Effectiveness (assessed 2026-09-21): effective — fresh store reports version 3,
+  session state round-trips, suite 71/71 green.
+
 ### CC-CORE-0004 — Per-host credential store implemented (2026-09-21)
 - Change: implemented `fuzzlab/core/credentials.py` (T1.1, D12) — a
   `CredentialStore` keyed by `(host, identity)` over `keyring`, with backend

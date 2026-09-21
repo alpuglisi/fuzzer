@@ -1,5 +1,6 @@
 """Tests for the integration harness: scoring math and store integration (T0.7)."""
 
+from fuzzlab.core import migrations
 from fuzzlab.core.store import Store
 from fuzzlab.harness import integration
 from fuzzlab.harness.scoring import Detection, score
@@ -62,7 +63,8 @@ def test_detection_matching_no_case_counts_as_fp():
 def test_score_from_store_and_metrics(tmp_path):
     gt = _gt()
     with Store(tmp_path / "s.db") as store:
-        assert store.schema_version() == 2  # migration 2 applied
+        # Derive the head from the migration registry (PA-0001), not a literal.
+        assert store.schema_version() == max(v for v, _ in migrations.MIGRATIONS)
         run_id = store.start_run("harness-test", "h")
         # Oracle writes confirmed findings for every positive case.
         for c in gt.positives():

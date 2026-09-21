@@ -3,6 +3,28 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0006 — Non-secret session-state persistence (T1.7) (2026-09-21)
+- Change: the `SessionManager` now accepts a `store` and persists **non-secret**
+  session state (via `SessionState.non_secret_state()`) on login success and on
+  logout detection; `persisted_state(host, identity)` reads it back, and a fresh
+  manager preloads known sessions on init. The auth builders (`authhttp`) open the
+  store when `--store` is given, and the crawler/auditor/fuzzer pass their `--store`
+  path so persistence happens in real authenticated runs. Realizes T1.7.
+- Impact (other components / project): adds an audit/continuity trail in the store
+  (CC-CORE-0005 `session_state`); no interface change for callers. Secrets are never
+  persisted, so a resumed run still re-authenticates to obtain a live cookie/token —
+  persistence is metadata, not a secret cache (as designed).
+- Risk (level; mitigation): low — writes non-secret metadata only; a test asserts no
+  cookie/token value appears in the row. Two connections to the same SQLite file
+  (manager + tool consolidation) are safe under WAL.
+- Deliverables:
+  - [x] `store` param; persist on login/logout; `persisted_state`; preload — done.
+  - [x] `authhttp`/tools pass `--store` so runs persist — done.
+  - [x] 4 persistence tests (non-secret-only, resume, logout-flips-valid, no-store) — done.
+- Effectiveness (assessed 2026-09-21): effective — state round-trips per host, a
+  fresh manager resumes the known non-secret state, logout flips persisted validity,
+  and no secret is written. Suite 71/71 green.
+
 ### CC-SESS-0005 — Session manager implemented (Phase 1) (2026-09-21)
 - Change: built `fuzzlab/session/` — `state.py` (SessionState: cookies + tokens per
   host/identity; redaction; JWT-time expiry), `detect.py` (dynamic login-form

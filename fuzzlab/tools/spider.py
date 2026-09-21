@@ -342,7 +342,7 @@ if __name__ == "__main__":
     session_manager = None
     if args.identity:
         from fuzzlab.tools.authhttp import make_session_manager
-        session_manager = make_session_manager(args.start)
+        session_manager = make_session_manager(args.start, store_path=args.store)
     spider = LocalSpider(
         args.start,
         max_depth=args.max_depth,

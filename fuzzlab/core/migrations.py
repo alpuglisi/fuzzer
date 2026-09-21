@@ -184,10 +184,30 @@ ALTER TABLE finding ADD COLUMN method TEXT;
 ALTER TABLE finding ADD COLUMN param TEXT;
 """
 
+# --- migration 3: non-secret session-state persistence ----------------------
+# The session manager persists only NON-SECRET session metadata (host, identity,
+# kind, validity, endpoints, token expiry) so a crashed run resumes / an audit
+# trail exists. Secrets (cookies, tokens, credentials) are never stored here.
+_M0003 = """
+CREATE TABLE session_state (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    host       TEXT NOT NULL,
+    identity   TEXT NOT NULL,
+    kind       TEXT,
+    valid      INTEGER,
+    login_url  TEXT,
+    logout_url TEXT,
+    token_exp  REAL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(host, identity)
+);
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
     (2, _M0002),
+    (3, _M0003),
 ]
 
 
