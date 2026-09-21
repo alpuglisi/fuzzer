@@ -40,7 +40,7 @@ item; all tool code paths and persistence are done).
 how to save per-host credentials (`fuzzlab session set-credential`), bring up the
 lab, and run per-identity crawl→audit→fuzz against the containerized lab (cookie)
 and an external JWT lab, with the expected checks. Deferred until we run it on a
-host with a container daemon / browser.
+host with a container daemon / browser. Tracked in `docs/ON_HOST_TASKS.md`.
 
 ## Goal
 

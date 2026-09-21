@@ -13,6 +13,10 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Docs: added `docs/ON_HOST_TASKS.md` — one place tracking the deferred **on-host**
+  work that needs a real lab/browser/container daemon (Phase 1 live two-lab run +
+  runbook; Phase 2 T2.8 live crawler/auditor wiring + request-reduction
+  measurement). Phase 1/2 plans point to it — so the last-mile items are not lost.
 - Phase 2 build (T2.8): **automatic-mode pipeline wired end-to-end** (library
   composition). Added `fuzzlab/harness/pipeline.py::run_pipeline` — one entry point
   that runs an automatic run: dedup by template cluster (T2.6) → fingerprint the

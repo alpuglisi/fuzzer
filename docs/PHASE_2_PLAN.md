@@ -62,7 +62,7 @@ Build started. Done so far:
 
 Next (T2.8, live): wire `run_pipeline` into the live crawler/auditor browser-fetch
 loops (real pages/HTML) and measure request reduction against the lab. 108/108
-tests green.
+tests green. This on-host last mile is tracked in `docs/ON_HOST_TASKS.md`.
 
 ## Principles (this phase)
 
