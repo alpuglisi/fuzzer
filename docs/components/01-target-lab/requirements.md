@@ -390,6 +390,41 @@ and measured. Authorized, lab-only.
   `fuzzlab.labgen.emitter`/`verdict` — both consume the same `Cell` IR regardless of
   which manifest path produced it. (`docs/LAB_IMPLEMENTATION_PLAN.md` §2.1, T-LAB2.1,
   `CC-LAB-0031`)
+- **FR-LAB-30** (Lab track, §2.2, L-P1.2a) *(Numbered `FR-LAB-30` rather than `FR-LAB-27`
+  at merge time — this lane independently claimed `FR-LAB-27`, colliding with lane
+  L-P2.1's identity/ownership requirement above; reconciled per this project's standing
+  multi-lane policy: keep both entries' full content, renumber this later-landing one,
+  fix its own `CC-LAB` cross-references to `CC-LAB-0032` below.)* A third, independent
+  oracle, `fuzzlab.labgen.identifier_sqli_oracle` (kept out of `oracle_wrapper.py`/
+  `nuclei_oracle.py` deliberately — see `CC-LAB-0032`), covers
+  **identifier/alias/connector-position SQL injection** (injection into a
+  column/table identifier or JOIN alias, not an ordinary literal value) — a class a
+  real sqlmap spot-check (documented in `CC-LAB-0029` and the module's own docstring)
+  confirmed sqlmap does not reliably detect, since none of its payload templates
+  express "substitute a different real identifier and diff the response," only
+  "inject boolean/comparison syntax or a comment." `run_identifier_sqli_oracle
+  (IdentifierSqliOracleRequest(...))` fires a healthy-baseline probe plus a
+  boolean-differential TRUE/FALSE probe pair
+  (`(CASE WHEN (<condition>) THEN <column_a> ELSE <column_b> END)` substituted whole
+  into the declared parameter) and classifies by diffing either the response bodies
+  (`DifferentialMode.RESPONSE_DIFF`, the default) or elapsed time
+  (`DifferentialMode.TIMING_BLIND`, gating a `SLEEP()` call behind the same CASE-WHEN
+  for endpoints whose body never reveals row-level differences), returning the same
+  fail-closed three-outcome verdict contract as FR-LAB-11/FR-LAB-26
+  (`confirmed_vulnerable | confirmed_secure | inconclusive`) as an independent
+  `IdentifierSqliVerdict` type. DBMS phrasing is dialect-pluggable via a small
+  `_DialectPhrasing` registry (`SqlDialect.MYSQL` implemented; `POSTGRESQL`/`SQLITE`
+  named in the enum, raising `DialectNotImplementedError` rather than guessing their
+  syntax, so adding either later is an additive registry entry, not a rewrite).
+  Reuses only `oracle_wrapper.assert_loopback` directly — this oracle fires HTTP
+  requests via an injected `HttpRunner`, never a subprocess, so it has no textual
+  need for `locate_tool`/`ToolNotFoundError`. Extends PA-0025's fail-closed doctrine
+  (verify the target was actually reached before ever inferring "secure" from an
+  absence of difference) to this HTTP-direct oracle: a healthy baseline probe is
+  required before any verdict, and two differential probes that error out
+  identically (the real allowlist-rejection failure mode the spot-check produced)
+  are `inconclusive`, never `confirmed_secure`. (`docs/LAB_IMPLEMENTATION_PLAN.md`
+  §2.2, `CC-LAB-0032`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

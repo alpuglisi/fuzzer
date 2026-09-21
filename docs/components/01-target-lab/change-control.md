@@ -254,6 +254,108 @@ later-landing one to the next free number, fix its own internal cross-references
   confirmed present on the clean pre-change tree and untouched by this change); new
   axis-range tests pass; both existing manifests' cell counts/IDs unchanged.
 
+### CC-LAB-0032 — L-P1.2a: identifier/alias/connector-position SQLi oracle (sqlmap spot-check + custom prober) (2026-09-21)
+*(Numbered `CC-LAB-0032` rather than `CC-LAB-0029` at merge time — this lane independently
+claimed `CC-LAB-0029` too, colliding with lane L-P2.1's identity/ownership graph entry, lane
+L-P0.9's regression-gate entry (`CC-LAB-0030`), and lane L-P1.1's resolver-wiring entry
+(`CC-LAB-0031`), all of which merged first. Reconciled per this project's standing
+multi-lane policy: keep all entries' full content, renumber this later-landing one to the
+next free number, fix its own internal `FR-LAB-27` cross-reference (see below, now
+`FR-LAB-30`). No content changed beyond the numbers.)*
+- Change: per `docs/LAB_IMPLEMENTATION_PLAN.md` sec 2.2's "spot-check first, then build
+  the fallback regardless" decision, this task did both, in order:
+  1. **Spot-check.** Installed the real sqlmap (`apt-get install -y sqlmap`, 1.8.4, none
+     previously on this host) and ran it against three hand-built PHP 8.4 + PDO/SQLite
+     test cases, at `--level=5 --risk=3 --technique=BEUSTQ`:
+     - An unsanitized `ORDER BY $sort` (no character filtering) — sqlmap **found it**, via
+       its built-in "boolean-based blind ... ORDER BY or GROUP BY clause (JSON)" heuristic
+       (appends a `CASE WHEN ... END` after the identifier; works because nothing stops
+       trailing SQL syntax).
+     - An unsanitized JOIN alias, `... JOIN items $alias ON i1.id = $alias.id` — sqlmap
+       **found it** too (time-based blind), but only because its payload's trailing `--
+       <rand>` comment truncates the rest of the line, including the second substitution
+       of the same tainted value in the `ON` clause — comment-based statement truncation,
+       not identifier-aware detection.
+     - A column-name parameter restricted to `^[A-Za-z0-9_]+$` (application-level
+       character allowlist; no space/quote/paren/comment reaches the query) where the real
+       defect is that the *value* is not checked against a real column allowlist
+       (`?col=secret` manually confirmed to leak the `secret` column) — sqlmap
+       **reported "all tested parameters do not appear to be injectable"** (8879/8879
+       requests rejected by the allowlist with HTTP 400; none of sqlmap's payloads are
+       built from identifier-safe characters alone). This is the decisive case: it
+       confirms the plan's research finding (sqlmap GitHub issues #97/#2459/#490 — no
+       identifier-substitution payload strategy exists in sqlmap) for exactly the shape
+       the harder SQLi cells (a later, separate lane, L-P1.2b) will emit, even though the
+       two looser cases above happened to be catchable through incidental syntax leakage.
+  2. **Fallback (built regardless, per the plan's decision).** Added
+     `fuzzlab/labgen/identifier_sqli_oracle.py`, a third, independent oracle sibling to
+     `oracle_wrapper.py`/`nuclei_oracle.py` (never imported by, and never modifying,
+     either): `run_identifier_sqli_oracle()` fires a baseline probe plus a
+     boolean-differential TRUE/FALSE pair (`(CASE WHEN (<condition>) THEN <col_a> ELSE
+     <col_b> END)`, substituted whole into the declared identifier position) and classifies
+     by diffing either the response bodies (`response_diff` mode — row order/value
+     differences) or elapsed time (`timing_blind` mode — a `SLEEP()` gated behind the same
+     CASE-WHEN, for endpoints whose body never reveals row-level differences). Returns the
+     same fail-closed `confirmed_vulnerable | confirmed_secure | inconclusive` contract as
+     `oracle_wrapper.Verdict`/`nuclei_oracle.NucleiVerdict`, as its own independent
+     `IdentifierSqliVerdict` enum. DBMS phrasing lives behind a small `_DialectPhrasing`
+     registry (`SqlDialect.MYSQL` implemented per task scope; `POSTGRESQL`/`SQLITE` named
+     in the enum with a `DialectNotImplementedError` rather than guessed syntax, and the
+     registry is the only thing a future dialect addition touches — no control-flow
+     rewrite). Reuses only `oracle_wrapper.assert_loopback` directly (this module fires
+     HTTP requests via an injected `HttpRunner`, not a subprocess, so it has no textual
+     need for `locate_tool`/`ToolNotFoundError`, though `fuzzlab.labgen` still re-exports
+     both from `oracle_wrapper` for any caller that wants them). **PA-0025 applied
+     proactively** (not as a bug fix — designed in from the start, since the spot-check's
+     own third case is exactly this failure mode): a "no differential" result is never
+     read as secure unless an independent baseline probe (a definitely-valid identifier
+     value) came back healthy first, and two probes that both error out identically (the
+     allowlist-rejection pattern the spot-check produced) are classified `inconclusive`,
+     never `confirmed_secure`.
+- Impact (other components / project): none outside LAB. Read-only against
+  `oracle_wrapper.assert_loopback`; `oracle_wrapper.py`, `nuclei_oracle.py`, and every
+  emitter/module file are untouched (out of scope for this lane — L-P1.2b, a later,
+  separate lane, will actually author the harder SQLi shapes in `php_current` that this
+  oracle will validate). `fuzzlab/labgen/__init__.py` re-exports the new module's public
+  names.
+- Risk (level; mitigation): low — new, additive module; no change to any other module's
+  behavior. The main risk for a caller is misreading a `response_diff` "secure" verdict
+  when `column_a`/`column_b` happen to sort/render identically for reasons unrelated to
+  the injection (documented in the request dataclass's docstring: callers must pick two
+  columns whose values actually differ across rows). Mitigated by requiring a healthy
+  baseline before any verdict, and by shipping both a response-diff and a timing-blind
+  mode so a caller whose endpoint doesn't reveal row-level differences in the body still
+  has a working oracle.
+- Deliverables:
+  - [x] Sqlmap spot-check against three real test cases, documented in the module
+        docstring and here — done.
+  - [x] `fuzzlab/labgen/identifier_sqli_oracle.py` (`SqlDialect`, `DifferentialMode`,
+        `IdentifierSqliVerdict`, `IdentifierSqliOracleRequest`,
+        `run_identifier_sqli_oracle`, `default_http_runner`) — done.
+  - [x] 24 offline tests (every classification branch — response-diff and timing-blind,
+        including the PA-0025 "both probes error identically" case — via an injected fake
+        HTTP runner; argv/URL construction; session-refresh/bounded-retry parity with
+        `oracle_wrapper`/`nuclei_oracle`) — done, all pass.
+  - [x] 3 real, unmocked integration tests (PA-0005) exercising `default_http_runner`'s
+        actual `requests` call against real local HTTP servers (vulnerable/secure/
+        unreachable) — done, all pass; not skip-guarded (no external tool binary is
+        involved, unlike `nuclei_oracle`'s skip-guarded suite).
+  - [x] `fuzzlab/labgen/__init__.py` export additions — done.
+  - [ ] PostgreSQL/SQLite dialect phrasing — explicitly out of scope (task said "at least
+        MySQL"); the registry is structured so adding them is additive.
+  - [ ] Wiring this oracle into an actual `php_current` identifier-context SQLi cell —
+        L-P1.2b, a separate, later lane per the plan's dependency map.
+- Effectiveness (assessed 2026-09-21): met this delivery's own bar — the spot-check
+  reproduced the plan's research finding against the real, currently-installed sqlmap
+  binary (not just inferred from 2012-era GitHub issues), and the new oracle's
+  classification logic is exercised for every branch by injected-runner tests, including
+  the exact allowlist-rejection failure mode the spot-check surfaced, and the real
+  `default_http_runner` code path is proven end to end by 3 unmocked integration tests
+  (PA-0005). Full suite: 896 passed / 8 skipped / 2 pre-existing unrelated
+  `test_mutation_operators.py` failures (confirmed pre-existing by stashing this change
+  and re-running against branch tip unchanged: same 2 failures, 10 passed in that file
+  alone).
+
 ### CC-LAB-0028 — Nuclei path-traversal/LFI oracle wrapper (Addendum E, Spike 004) (2026-09-21)
 *(Numbered `CC-LAB-0028` rather than `CC-LAB-0017` at merge time — this lane's worktree
 diverged onto a stale, unrelated branch lineage before starting, self-diagnosed and

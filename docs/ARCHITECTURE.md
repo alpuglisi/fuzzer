@@ -211,11 +211,17 @@ tracked in the requirements files, not here.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not
-  hand-authored exploit code, for every class with a mature oracle; the three
-  classes without one (IDOR/BOLA, business logic, race conditions) are
-  **deferred indefinitely** and not in scope for now. Built as the parallel Lab
-  track after the toolkit foundations; phase-level deliverables in
-  `CR-LAB-0001` §8.
+  hand-authored exploit code, for every class with a mature oracle. One class,
+  **identifier/alias/connector-position SQL injection**, has a real, documented
+  tool-oracle gap instead: a spot-check against the real sqlmap binary
+  (`CC-LAB-0029`) confirmed it does not reliably detect this shape, so
+  `fuzzlab/labgen/identifier_sqli_oracle.py` is a fourth, custom
+  differential-response prober (CASE-WHEN boolean differential, MySQL dialect
+  implemented) filling that gap rather than a fifth wrapped third-party tool.
+  The three classes without any oracle at all (IDOR/BOLA, business logic, race
+  conditions) are **deferred indefinitely** and not in scope for now. Built as
+  the parallel Lab track after the toolkit foundations; phase-level
+  deliverables in `CR-LAB-0001` §8.
 - **Depends on (components):** none (it is the system under test).
 - **Consumed by:** crawler, auditor, fuzzer, proxy, and the reward path.
 

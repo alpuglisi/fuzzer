@@ -51,6 +51,20 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   concurrently-claimed `CC-LAB-0029`, which collided with lane L-P2.1's identity-graph
   entry; see `CC-LAB-0031` for the note), `FR-LAB-29` (renumbered from a concurrently
   claimed `FR-LAB-27` for the same reason).
+- LAB (L-P1.2a): spot-checked the real, apt-installed sqlmap 1.8.4 against three
+  hand-built PHP/PDO test cases and confirmed the plan's research finding for the
+  case that matters — a bare-identifier-allowlisted column-name injection (real
+  vuln, `?col=secret` swaps a whole column) is reported "not injectable" by sqlmap
+  even at `--level=5 --risk=3`, since its payloads all require characters an
+  allowlist strips. Built `fuzzlab/labgen/identifier_sqli_oracle.py`, a new
+  sibling oracle module (same fail-closed `confirmed_vulnerable |
+  confirmed_secure | inconclusive` pattern as `nuclei_oracle.py`) implementing
+  the CASE-WHEN boolean-differential prober the plan called for, in both a
+  response-diff and a timing-blind mode, MySQL dialect implemented with the
+  registry structured for Postgres/SQLite later; `oracle_wrapper.py` itself is
+  untouched. (`CC-LAB-0032`, renumbered from a concurrently-claimed `CC-LAB-0029`
+  which collided with lanes L-P2.1/L-P0.9/L-P1.1; `FR-LAB-30`, renumbered from a
+  concurrently-claimed `FR-LAB-27` for the same reason.)
 - Docs: fleshed `docs/LAB_IMPLEMENTATION_PLAN.md`'s Phase 2 (§3) and Phase 3 (§4)
   from milestone-level bullets into full task breakdowns matching Phase 0/1's
   granularity, and added a new §7 lane/dependency map covering every Phase 0-3
