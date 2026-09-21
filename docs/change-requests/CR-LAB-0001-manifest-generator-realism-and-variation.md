@@ -288,3 +288,52 @@ loader now needing to not expose a provenance field to the verdict path (a
 detail-level addition to that deliverable, not a new one). See
 `LAB_PATTERN_CORPUS_SOURCING_PLAN.md` §0 and §4 for the full reasoning and
 the revised file layout.
+
+---
+
+## Addendum B (2026-09-21) — multi-artifact ground truth resolved
+
+Resolves §7 item 2 ("how do you label a cell that is vulnerable only in
+combination with another cell?"), left open at CR approval time. A Phase 0
+tooling-research pass looked at how NIST/SARD's Juliet test suite and the
+SARIF 2.1.0 standard both already solve this, rather than inventing a new
+scheme.
+
+**Finding.** Juliet's unit of ground truth is the **test case**, not a
+single location: each case names `BadSource`/`GoodSource`/`BadSink`/
+`GoodSink` roles plus an enumerated flow variant, and the higher variants are
+explicitly cross-method/cross-file/cross-class. SARIF 2.1.0 serializes this
+shape without breaking a one-row-per-finding contract: one primary
+`locations` entry (conventionally the sink), any other locations in
+`relatedLocations`, and an ordered `codeFlows` array when the path between
+them matters.
+
+**Decision:** adopt the same shape (**Option B** of three considered — see
+`LAB_PATTERN_CORPUS_SOURCING_PLAN.md`'s companion tooling report for the
+full comparison against a synthetic-pair-ID row type and a two-rows-linked-
+by-case-ID scheme, both rejected). A cell whose ground truth spans two
+artifacts stays **one row**: `expectedresults.csv` gains
+`primary_endpoint`/`primary_role`/`related_endpoints` (a list of
+`{endpoint, role}`, roles drawn from `source | propagator | sanitizer |
+sink`) and `flow_variant` (the existing `context_depth` axis, named the way
+Juliet names it: `direct`, `same_file_helper`, `cross_file`,
+`stored_second_order`, `cross_service`). The tie-break rule for which
+location is primary when it's ambiguous (the signing-key case: where the key
+is set, or where it's trusted?): **primary is always the location where the
+untrusted value reaches the dangerous operation** — for a signing-key pair,
+that's where the key is *trusted*, not where it's set. This rule is written
+down once here so it never needs re-deciding per cell.
+
+**Consequence accepted, stated plainly:** a detector that finds only the
+non-primary location of a pair (e.g. the stored-XSS write endpoint but not
+the read/render endpoint) scores zero on that case under this scheme — that
+is judged correct (finding an injection point without finding where it
+executes isn't a detection of the stored vulnerability), not a scoring gap.
+`related_endpoints` retains enough structure that partial credit could be
+added later as a scorer change, without a schema migration, if this judgment
+is ever revisited.
+
+This is recorded here as a decision (§7 item 2 is no longer open) and in
+`LAB_PHASE_0_PLAN.md` T-LAB0.9 as the concrete schema change, forward-
+compatible starting in Phase 0 even though Phase 0 itself has no
+multi-location cells yet.

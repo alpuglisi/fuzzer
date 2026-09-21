@@ -141,6 +141,15 @@ must not expose any provenance/card reference to the code path `verdict()`
 runs on — provenance lives in a separate `lab/patterns/provenance.yaml`
 keyed by `cell_id`, never inside a manifest cell.
 
+**Tool/design decisions resolved by research (2026-09-21):** a dedicated
+tooling-research pass (measured, not just cited — versions/benchmarks
+verified against PyPI and a working reference implementation) closed several
+previously-open implementation questions for T-LAB0.3, T-LAB0.4, T-LAB0.5,
+and T-LAB0.6 below, plus the multi-artifact ground-truth question from
+`CR-LAB-0001` §7 item 2 (now **Addendum B** there). The task descriptions
+below are updated in place to reflect these; nothing here overrides decisions
+1–5 above, which are still yours to confirm.
+
 ## Architecture (Phase 0 slice of the full design)
 
 ```
@@ -186,29 +195,75 @@ until you decide (a later, separate decision) to cut over.
   append-only convention.
 - **T-LAB0.3 — Resolver + IR + covering-array machinery (dormant) `[planned]`.**
   `lab/generator/resolver.py`: manifest → validated `Cell` IR. Covering-array
-  expansion (NIST ACTS-style, or a small IPOG reimplementation) is built and
-  unit-tested against synthetic axis sets, but the Phase-0 manifest itself
-  lists cells explicitly (one axis level each) so the real corpus doesn't
-  change yet — proves the machinery without touching today's labels.
+  expansion uses **`covertable` 3.2.0** (Apache-2.0; `sorter=sorters.hash`
+  pinned explicitly, never the library default; `sub_models` for mixed
+  strength; declarative `constraints`, JSON-serializable so they can live in
+  the manifest itself) rather than shelling out to NIST ACTS or hand-rolling
+  IPOG — measured to match or beat ACTS's published reference array sizes.
+  Wrap `covertable.make()` in a thin adapter that validates its own kwargs
+  against an allowlist before calling it (an unrecognized kwarg is silently
+  swallowed by the library rather than erroring) and snapshot-test the
+  generated array for the real Phase-0/Phase-1 axis model — a `covertable`
+  version bump is treated as a manifest version bump, since array-stability
+  across the library's own releases isn't documented. If it becomes
+  unmaintained, vendor it into `third_party/` rather than switching libraries
+  (switching changes the arrays, and therefore every cell ID). Unit-tested
+  against synthetic axis sets; the Phase-0 manifest itself still lists cells
+  explicitly (one axis level each), so the real corpus doesn't change yet —
+  this proves the machinery without touching today's labels.
 - **T-LAB0.4 — Emitter interface + the first (reproduction) emitter
   `[planned]`.** `lab/generator/emitter.py` (the ABC/protocol: `render(cell) ->
   EmittedFiles`, `supports(class, sink_context) -> bool`) and
   `lab/generator/emitters/php_current/` implementing it to emit exactly
-  today's `puppy-fort-factory/` pages from the Phase-0 manifest. This is the
+  today's `puppy-fort-factory/` pages from the Phase-0 manifest, via
+  **Jinja2** (BSD; `trim_blocks=True, lstrip_blocks=True,
+  keep_trailing_newline=True` set explicitly, never left at Jinja2's
+  defaults; templates receive pre-sorted lists, never iterate a dict/set
+  directly) rather than a custom string-concatenation emitter. This is the
   emitter conformance suite's first subject (T-LAB0.7).
 - **T-LAB0.5 — Determinism: sub-seed derivation + canonical serialization +
   CI gate `[planned]`.** `H(root_seed || cell_id)` sub-seeds; sorted
-  map/dict iteration; canonical JSON/CSV serialization (sorted keys, LF, fixed
-  float formatting); `SOURCE_DATE_EPOCH` honored for any embedded date. A
+  map/dict iteration; canonical serialization via stdlib `json`
+  (`sort_keys=True`, no floats in the label contract) and stdlib `csv`
+  (`lineterminator="\n"` set explicitly — the default is `\r\n`);
+  `SOURCE_DATE_EPOCH` honored for any embedded date, with a grep-for-current-
+  year assertion over the output tree as a crude but effective backstop.
+  **No formatter runs inside the generator or the gate** — emit already-
+  canonical source directly from templates, since Black's own stability
+  policy is a per-calendar-year guarantee, not a forever one (the January
+  release may reformat). A separate, **non-gating** CI job may run
+  Black/Prettier in check mode to report style drift against community
+  convention, pinned to an exact version recorded in the env profile, with a
+  version bump treated as a manifest version bump. A
   `scripts/lab_regenerate_check.sh` (or `fuzzlab lab-generate --check`) that
-  regenerates and `git diff --exit-code`s, wired as a CI/test-suite gate.
+  regenerates and `git diff --exit-code`s, wired as a CI/test-suite gate,
+  printing the before/after SHA256 of any changed file on failure (a
+  whitespace-only hash pair points at templating; a content change points at
+  ordering or a clock leak). Container-level (Level 2) determinism uses
+  digest-pinned base images plus a **Syft**-generated CycloneDX SBOM stored
+  beside `labels.json` (not inside the image) — out of scope for Phase 0's
+  single PHP target but the recording convention starts here.
 - **T-LAB0.6 — Name-leak scanner + secret scanner as build gates
-  `[planned]`.** Greps every emitted, *served* artifact (routes, filenames,
-  params, cookies, headers, HTML comments, error strings) against a denylist
-  of class names/synonyms/CWE IDs/`labels.json` vocabulary; fails the build on
-  a hit. Wires a secret scanner (gitleaks or equivalent) over emitted config.
-  Both run even in Phase 0's single-emitter, small-corpus state, so they're
-  proven before volume makes manual review impossible.
+  `[planned]`.** Two separate gates. **Secrets:** **Gitleaks** (MIT, `--no-git`
+  to scan the generated tree directly, a project `.gitleaks.toml` extending
+  the default ruleset) — not TruffleHog, whose differentiator is live
+  credential verification, which is pure noise against seeded fake
+  credentials and an unwanted outbound call from a loopback-only project's
+  build. **Name-leak:** no adequate prior art exists for this narrow problem
+  (grepping generated artifacts against a vulnerability-class denylist), so
+  this is bespoke — a versioned `denylist/vN.yaml` (terms, a CWE-ID regex,
+  and the full `labels.json` class vocabulary pulled in automatically) plus
+  an extractor covering routes, filenames, params, cookies/headers, HTML
+  comments, error strings, and (once relevant, Phase 3+) JS sourcemaps and
+  OpenAPI/GraphQL schema text. **The scanner ships with a positive-fixture
+  corpus it must correctly flag or reject, run in CI** — a
+  `scanner/fixtures/should_flag/` and `should_not_flag/` set (word-boundary
+  cases like `xss` inside `maxssl`, and the out-of-band label files
+  themselves as true negatives) — since a scanner with silent false
+  negatives is worse than no scanner, and that property is only established
+  by testing it against known-leaky inputs, not by code review. Both gates
+  run even in Phase 0's single-emitter, small-corpus state, and both must
+  fail the build on a scanner *crash*, not just a hit.
 - **T-LAB0.7 — Emitter conformance suite `[planned]`.** A stack-agnostic,
   HTTP-level test suite (per the report's §5.1/§5.6: "write the suite before
   the second emitter") that any future emitter must pass: for each
@@ -229,10 +284,38 @@ until you decide (a later, separate decision) to cut over.
   `injection-points.json` against the current hand-authored ground truth and
   fails if any existing case ID, page, or verdict is missing or changed —
   the mechanical enforcement of "never reduce functionality." This gate
-  stays in the suite permanently, not just for Phase 0.
+  stays in the suite permanently, not just for Phase 0. **Schema note
+  (resolves `CR-LAB-0001` §7 item 2, see Addendum B there):** `expectedresults.csv`
+  gains `primary_endpoint`/`primary_role`/`related_endpoints`/`flow_variant`
+  columns so a cell whose ground truth spans two artifacts (a stored-XSS or
+  signing-key write/read pair) is still exactly one row — the sink is
+  primary, other locations are roled attributes — keeping the existing
+  one-row-per-finding contract FUZZ's harness/oracle already assume. Phase 0
+  itself has no multi-location cells, so this is a forward-compatible schema
+  addition now, not a behavior change yet.
 - **T-LAB0.10 — `fuzzlab lab-generate` CLI `[planned]`.** Thin CLI wiring
   (pending decision 5 above) over T-LAB0.1–T-LAB0.4: `fuzzlab lab-generate
   --manifest lab/manifests/phase0.yaml --out <dir> [--check]`.
+- **T-LAB0.11 — Leakage-probe reference design (recorded, not gating yet)
+  `[planned]`.** Full build-gating only starts in Phase 1 once real variation
+  exists, but the design is settled and worth recording now since it shapes
+  the safety-matrix/sink-context schema: a closed feature allowlist (status,
+  response length, header count, latency, param-name length, path depth,
+  content-type — never anything payload- or body-derived), `scikit-learn`
+  `LogisticRegression` + `StandardScaler` (deliberately weak — a stronger
+  model finds faint signals a real detector would never exploit) evaluated
+  with `StratifiedGroupKFold` grouped by *generating-rule ID* (never a random
+  split — near-duplicate cells from the same rule must land on the same side
+  or the score inflates), and a **permutation-null threshold** (shuffle
+  labels ~200 times, take the 99th percentile of the resulting AUC
+  distribution) rather than a fixed constant. **Per-class feature exclusions**
+  handle legitimate metadata signal (e.g. `latency_ms` excluded for
+  time-based blind SQLi and race-condition classes, since the timing *is*
+  the vulnerability there) — never a per-class threshold, which would just
+  disable the gate for that class. Each exclusion requires a written
+  one-line justification in the safety matrix, and the total exclusion count
+  is reported, so the mechanism can't be quietly used to make a red build
+  green.
 
 ## How this connects to the rest of CR-LAB-0001
 
