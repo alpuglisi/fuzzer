@@ -258,6 +258,24 @@ and measured. Authorized, lab-only.
   composition sequences between twins and non-PHP identifier extraction — both
   documented limitations, not silently mishandled. (`CR-LAB-0001` §3,
   `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`, `CC-LAB-0025`)
+- **FR-LAB-24** (Lab track, mandatory once multi-stack — Phase 3) The
+  fingerprint-independence build gate, `fuzzlab.labgen.fingerprint_gate`,
+  guards against a stack becoming a de facto proxy for a vulnerability class
+  or verdict (`CR-LAB-0001` §3's "every Flask cell is SSTI" failure mode).
+  Schema-independent — operates on plain `{stack, vuln_class, verdict}`
+  mappings, never `fuzzlab.labgen.schema`. Two independent, both-mandatory
+  checks: (1) deterministic coverage (`check_min_stacks_per_class`/
+  `check_min_classes_per_stack`, canonical defaults: every class on >= 2
+  stacks, every stack carrying >= 3 classes); (2) a chi-square test of
+  independence (`scipy.stats.chi2_contingency`) between stack and
+  vuln_class/verdict — required because coverage alone can pass on a corpus
+  that is still strongly, statistically confounded. `run_fingerprint_gate()`
+  raises one `FingerprintIndependenceError` listing every violation found, or
+  returns a `FingerprintGateReport`. Requires the optional `labgen-stats`
+  extra (`scipy`), imported lazily; a missing install raises a typed
+  `MissingStatsDependencyError`, never a raw `ImportError`. Not yet wired
+  into a build gate/CLI — there is no real multi-stack corpus to run it
+  against until Phase 3. (`CR-LAB-0001` §3/§4, `CC-LAB-0026`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

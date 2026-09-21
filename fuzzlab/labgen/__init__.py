@@ -8,18 +8,25 @@ first (``php_current``) emitter (T-LAB0.4 — ``emitter``, ``modules``,
 ``emitters``), the sqlmap/commix/SSTImap per-parameter oracle wrapper
 (``oracle_wrapper``), the ZAP whole-app safety-net oracle (``zap_oracle``,
 a separate module since ZAP has no single declared parameter to scope by
-unlike the other three tools), and the minimal-pair invariant checker
+unlike the other three tools), the minimal-pair invariant checker
 (``minimal_pair``, pulled forward from Phase 1 — a standalone offline check
 that a cell's vulnerable/secure twins differ only within their declared
-transform/sink region) — all generator-build-time security-assertion
-tooling, unrelated to and never imported by ``fuzzlab.oracle``. None of these
-depends on any other. This re-exports all of them.
+transform/sink region), and the fingerprint-independence build gate
+(``fingerprint_gate``, `CR-LAB-0001` §3 — a chi-square test of independence
+between stack and vuln_class/verdict, guarding against a stack becoming a
+de facto proxy for a class once the generator goes multi-stack) — all
+generator-build-time security-assertion tooling, unrelated to and never
+imported by ``fuzzlab.oracle``. None of these depends on any other. This
+re-exports all of them. ``fingerprint_gate`` imports ``scipy`` lazily inside
+its chi-square functions (the optional ``labgen-stats`` extra), so importing
+this package does not require it.
 """
 
 from . import (
     denylist,
     emitter,
     emitters,
+    fingerprint_gate,
     gates,
     minimal_pair,
     modules,
@@ -57,6 +64,7 @@ __all__ = [
     "denylist",
     "emitter",
     "emitters",
+    "fingerprint_gate",
     "gates",
     "minimal_pair",
     "modules",

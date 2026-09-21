@@ -61,6 +61,12 @@ web = ["fastapi>=0.110,<1", "uvicorn>=0.27,<1", "jinja2>=3.1,<4"]
 # fuzzlab/labgen/, so kept optional rather than a main dependency (PA-0005:
 # declared where it's actually imported).
 labgen = ["scikit-learn>=1.3,<2", "numpy>=1.24,<3"]
+# Lab-generator fingerprint-independence build gate (CR-LAB-0001 §3,
+# fuzzlab/labgen/fingerprint_gate.py): scipy.stats.chi2_contingency backs the
+# stack<->class / stack<->verdict independence test. Imported lazily inside
+# the gate (PA-0005: never assumed present; a missing install raises a typed
+# `MissingStatsDependencyError` naming this extra, not a raw ImportError).
+labgen-stats = ["scipy>=1.11,<2"]
 # Developer tooling.
 dev = ["pytest>=8,<9"]
 

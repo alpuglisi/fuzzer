@@ -3,6 +3,73 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0026 — fingerprint-independence build gate (`CR-LAB-0001` §3/§4) (2026-09-21)
+*(Numbered `CC-LAB-0026` rather than `CC-LAB-0022` at merge time — this lane's worktree
+was based on a commit predating `CC-LAB-0020`-`0025` landing, so it independently
+claimed `0022` too. Its two genuinely new files were verified independently — read in
+full, then copied into trunk and re-run — with fresh bookkeeping written here rather
+than carrying over its isolated-worktree numbering. No content changed.)*
+- Change: added `fuzzlab/labgen/fingerprint_gate.py`, the **mandatory** (not optional,
+  unlike the non-gating `leakage_probe.py` reference implementation owned by a sibling
+  lane) build gate `CR-LAB-0001` §3 requires once the generator goes multi-stack
+  (Phase 3): guards against a stack becoming a de facto proxy for a vulnerability class
+  or verdict — a detector learning "every Flask cell is SSTI" (teaching a `Server:
+  Werkzeug` header) instead of the real signal. Deliberately schema-independent: a
+  "corpus record" is a plain mapping with `stack`/`vuln_class`/(optional)`verdict` keys,
+  never a `fuzzlab.labgen.schema.Manifest`/`Cell` object, so this gate can run against a
+  metadata export, a test fixture, or a future manifest without depending on that
+  schema's shape (or vice versa). Two independent checks, per the CR's own named
+  checks: (1) `check_min_stacks_per_class`/`check_min_classes_per_stack` — deterministic
+  coverage checks defaulting to the CR's own canonical thresholds (every class on >= 2
+  stacks, every stack carrying >= 3 classes), failing loud with a typed
+  `FingerprintIndependenceError` naming exactly what fell short (an optional
+  `expected_classes`/`expected_stacks` list additionally flags a class/stack wholly
+  absent from the corpus, rather than silently not checking it); (2)
+  `check_stack_class_independence`/`check_stack_verdict_independence` — a chi-square
+  test of independence (`scipy.stats.chi2_contingency`) between stack and
+  vuln_class/verdict; a hand-constructed test corpus demonstrates why both halves matter
+  by passing every coverage check while still being strongly, statistically confounded
+  — only the chi-square test catches that shape. A degenerate contingency table (a
+  stack/class that never co-occurs with anything) becomes a typed
+  `FingerprintIndependenceError`, not a raw `scipy` `ValueError`. `run_fingerprint_gate()`
+  runs all four checks and raises one error listing every violation found (not just the
+  first), or returns a `FingerprintGateReport` with the computed statistics when the
+  corpus passes. New optional `labgen-stats` extras group (`scipy>=1.11,<2` — the first
+  use of scipy in this project) in `pyproject.toml`, imported lazily inside the
+  chi-square functions (never at module import time): a missing install raises a typed
+  `MissingStatsDependencyError` naming the extra, never a raw `ImportError` (PA-0005's
+  established pattern).
+- Impact (other components / project): none outside LAB. Schema-independent by design,
+  so no coupling to `fuzzlab.labgen.schema`/`verdict`/`emitter`/`modules` (none
+  imported); not yet wired into any build gate/CLI — there is no real multi-stack
+  corpus to run it against yet (Phase 3), per the module's own docstring.
+- Risk (level; mitigation): low. New, additive, read-only code with no callers yet and
+  no dependency on any other component's contracts. The chi-square half's correctness is
+  verified against exact, deterministic hand-constructed corpora (a perfectly balanced
+  corpus yields p=1.0/chi2=0.0 exactly; a fully confounded corpus yields p<0.001), not
+  randomized sampling, so results are reproducible; a dedicated test corpus proves the
+  coverage checks alone are insufficient (passes coverage, still fails chi-square),
+  justifying why both halves are mandatory rather than either alone.
+- Deliverables:
+  - [x] `fuzzlab/labgen/fingerprint_gate.py` (`check_min_stacks_per_class`,
+        `check_min_classes_per_stack`, `check_stack_class_independence`,
+        `check_stack_verdict_independence`, `run_fingerprint_gate`,
+        `FingerprintIndependenceError`, `MissingStatsDependencyError`) — done.
+  - [x] Coverage checks with CR-LAB-0001's own canonical thresholds as defaults — done.
+  - [x] Chi-square independence test for stack<->class and stack<->verdict — done.
+  - [x] Typed `MissingStatsDependencyError` for a missing `scipy` install — done.
+  - [x] 18 new tests (coverage pass/fail, chi-square pass/fail, the
+        coverage-passes-but-chi-square-fails demonstration, degenerate-table handling,
+        missing-dependency simulation, `run_fingerprint_gate` end-to-end) — done, all
+        pass.
+  - [ ] Wiring into an actual build gate/CLI once a real multi-stack corpus exists
+        (Phase 3) — explicitly out of scope per the plan.
+- Effectiveness (assessed 2026-09-21): met this delivery's own bar — 18 new tests pass,
+  including the coverage-insufficient-alone demonstration that justifies the gate's own
+  two-halves design; full suite 811 passed / 6 skipped / 2 pre-existing unrelated
+  `test_mutation_operators.py` failures (baseline before this change: 793 passed, same 2
+  failures, 6 skipped).
+
 ### CC-LAB-0025 — minimal-pair invariant checker, pulled forward from Phase 1 (2026-09-21)
 *(This lane's worktree was based on a commit predating `CC-LAB-0020`-`0024` landing.
 Rather than merge its branch wholesale (would reintroduce duplicate/stale content its

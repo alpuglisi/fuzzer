@@ -193,7 +193,11 @@ tracked in the requirements files, not here.
   Phase 1) asserts a cell's vulnerable/secure twins differ only within their
   declared transform/sink region, emitter-agnostic via the module-composition
   provenance comment any such emitter writes; not yet wired into a build gate.
-  A manifest reproducing today's real ~30-page PHP
+  A mandatory (once multi-stack, Phase 3) fingerprint-independence gate
+  (`fuzzlab/labgen/fingerprint_gate.py`, `CC-LAB-0026`) chi-square-tests
+  stack against vuln_class/verdict, schema-independent, so a stack can never
+  become a de facto proxy for a class; not yet wired in, as there is no
+  real multi-stack corpus yet. A manifest reproducing today's real ~30-page PHP
   app byte-identically (the actual Phase 0 exit criterion) remains planned.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, et al. — see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

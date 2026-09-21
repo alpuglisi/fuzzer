@@ -14,6 +14,27 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (LAB, `CC-LAB-0026`, `CR-LAB-0001` §3): added `fuzzlab/labgen/fingerprint_gate.py`,
+  the mandatory fingerprint-independence build gate for once the generator goes
+  multi-stack (Phase 3) — guards against a stack becoming a de facto proxy for a
+  vulnerability class or verdict (e.g. "every Flask cell is SSTI," teaching a
+  `Server: Werkzeug` header instead of the real signal). Schema-independent: operates on
+  plain `{stack, vuln_class, verdict}` mappings, never `fuzzlab.labgen.schema`. Two
+  independent halves: deterministic coverage checks (`check_min_stacks_per_class`/
+  `check_min_classes_per_stack`, defaulting to the CR's own canonical thresholds — every
+  class on >= 2 stacks, every stack carrying >= 3 classes) and a chi-square test of
+  independence (`scipy.stats.chi2_contingency`) between stack and vuln_class/verdict —
+  a hand-constructed test corpus demonstrates a shape that passes every coverage check
+  while still being strongly, statistically confounded, which only the chi-square half
+  catches. `run_fingerprint_gate()` runs all four and raises one error listing every
+  violation, or returns a report with the computed statistics. New optional
+  `labgen-stats` extra (`scipy>=1.11,<2`, the first use of scipy in this project),
+  imported lazily inside the chi-square functions — a missing install raises a typed
+  `MissingStatsDependencyError`, never a raw `ImportError`. 18 new tests. This lane's
+  worktree was based on a commit predating several later Phase 0 merges; its two
+  genuinely new files were verified independently (read in full, re-run against current
+  trunk) and copied in, with fresh bookkeeping written here. Full suite 811 passed / 6
+  skipped / 2 pre-existing unrelated `test_mutation_operators.py` failures.
 - Feature (LAB, `CC-LAB-0025`, minimal-pair invariant pulled forward from Phase 1): added
   `fuzzlab/labgen/minimal_pair.py`, a standalone offline checker that a cell's
   vulnerable/secure `EmittedFiles` differ only within the declared transform/sink region
