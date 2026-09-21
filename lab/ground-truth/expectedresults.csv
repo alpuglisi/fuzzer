@@ -1,20 +1,25 @@
 # fuzzlab expected results (Benchmark-style). Derived from labels.json; the
 # loader cross-checks the two so they cannot drift. category is the vuln class;
 # expected_vulnerable is the ground-truth verdict for that (url, param) case.
-case_id,url,method,param,location,category,expected_vulnerable
-PFF-0001,/product.php,GET,id,query,sqli,true
-PFF-0002,/search.php,GET,q,query,sqli,true
-PFF-0003,/search.php,GET,q,query,xss-reflected,true
-PFF-0004,/login.php,POST,username,body,sqli,true
-PFF-0005,/profile.php,GET,bio,body,xss-stored,true
-PFF-0006,/blog_post.php,GET,id,query,sqli,true
-PFF-0007,/reviews.php,GET,author,fragment,xss-dom,true
-PFF-0008,/feedback.php,GET,ref,query,xss-dom,true
-PFF-1001,/products.php,GET,category,query,none,false
-PFF-1002,/track.php,GET,order_id,query,none,false
-PFF-1003,/api/products.php,GET,category,query,none,false
-PFF-1004,/register.php,POST,username,body,none,false
-PFF-1005,/contact.php,POST,message,body,none,false
-PFF-1006,/newsletter.php,POST,email,body,none,false
-PFF-1007,/edit_profile.php,POST,full_name,body,none,false
-PFF-1008,/login.php,POST,password,body,none,false
+# primary_endpoint/primary_role/related_endpoints/flow_variant (T-LAB0.9,
+# CR-LAB-0001 Addendum B) are the multi-artifact ground-truth columns; every
+# row here is a single-location case, so primary_endpoint mirrors url,
+# primary_role is sink (the location tested is where the value is used, not
+# just set), related_endpoints is empty, and flow_variant is direct.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+PFF-0001,/product.php,GET,id,query,sqli,true,/product.php,sink,,direct
+PFF-0002,/search.php,GET,q,query,sqli,true,/search.php,sink,,direct
+PFF-0003,/search.php,GET,q,query,xss-reflected,true,/search.php,sink,,direct
+PFF-0004,/login.php,POST,username,body,sqli,true,/login.php,sink,,direct
+PFF-0005,/profile.php,GET,bio,body,xss-stored,true,/profile.php,sink,,direct
+PFF-0006,/blog_post.php,GET,id,query,sqli,true,/blog_post.php,sink,,direct
+PFF-0007,/reviews.php,GET,author,fragment,xss-dom,true,/reviews.php,sink,,direct
+PFF-0008,/feedback.php,GET,ref,query,xss-dom,true,/feedback.php,sink,,direct
+PFF-1001,/products.php,GET,category,query,none,false,/products.php,sink,,direct
+PFF-1002,/track.php,GET,order_id,query,none,false,/track.php,sink,,direct
+PFF-1003,/api/products.php,GET,category,query,none,false,/api/products.php,sink,,direct
+PFF-1004,/register.php,POST,username,body,none,false,/register.php,sink,,direct
+PFF-1005,/contact.php,POST,message,body,none,false,/contact.php,sink,,direct
+PFF-1006,/newsletter.php,POST,email,body,none,false,/newsletter.php,sink,,direct
+PFF-1007,/edit_profile.php,POST,full_name,body,none,false,/edit_profile.php,sink,,direct
+PFF-1008,/login.php,POST,password,body,none,false,/login.php,sink,,direct

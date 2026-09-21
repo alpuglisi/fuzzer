@@ -14,6 +14,16 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- LAB: built T-LAB0.9, the regression/additive-only build gate
+  (`fuzzlab.labgen.regression_gate.check_no_regression`) that diffs a candidate
+  ground-truth snapshot against the hand-authored `lab/ground-truth/` by case ID and
+  fails loud on any missing case, changed page, or changed verdict — the mechanical
+  enforcement of "never reduce functionality" — plus, per `CR-LAB-0001` Addendum B, the
+  `primary_endpoint`/`primary_role`/`related_endpoints`/`flow_variant` multi-artifact
+  ground-truth fields on `fuzzlab.labels.contract.Case`, its JSON Schema, and
+  `expectedresults.csv` (all additive/defaulted; a FUZZ-consumer sweep across
+  `fuzzlab/harness/` and `fuzzlab/greybox/` done first, per plan, found no consumer
+  needed changes). See `docs/components/01-target-lab/change-control.md` `CC-LAB-0029`.
 - Docs: fleshed `docs/LAB_IMPLEMENTATION_PLAN.md`'s Phase 2 (§3) and Phase 3 (§4)
   from milestone-level bullets into full task breakdowns matching Phase 0/1's
   granularity, and added a new §7 lane/dependency map covering every Phase 0-3

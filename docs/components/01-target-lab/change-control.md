@@ -3,6 +3,111 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0029 — T-LAB0.9: regression/additive-only build gate + multi-artifact ground-truth columns (Addendum B) (2026-09-21)
+*(This lane's worktree also diverged onto a stale, unrelated UI-redesign branch lineage
+before starting; self-diagnosed via the sync check in this task's own brief and
+recovered with `git fetch . claude/trusting-noether-heon0n:refs/remotes/origin/...` +
+`git reset --hard` onto the live branch tip before any other work began. Numbered
+`CC-LAB-0029` following `CC-LAB-0028` as read from the branch tip at start; may collide
+with another concurrently-running lane's number at merge time, to be reconciled by the
+orchestrator per this project's standing multi-lane policy.)*
+- Change: two linked pieces, per `CR-LAB-0001` Addendum B and
+  `docs/LAB_IMPLEMENTATION_PLAN.md` §1.1 (T-LAB0.9), landed together as decided
+  (option (b) — consumer sweep first, not deferred):
+  1. **FUZZ-consumer sweep** (done first, per the plan's explicit decision): read every
+     consumer of `fuzzlab.labels.contract.Case`/`GroundTruth` (`.cases`, `.positives()`,
+     `.negatives()`, `case_by_id`) across `fuzzlab/harness/` (`integration.py`,
+     `scoring.py`, `auto.py`, `multitarget.py`) and `fuzzlab/greybox/run.py` (no consumers
+     exist under `fuzzlab/report/`). Finding: none assumes exactly one location per case
+     in a way the new fields would break — every consumer keys off the existing
+     `url`/`method`/`param`/`vuln_class`/`location`/`source_url` fields directly (e.g.
+     `scoring.score()`'s `case.key`, `auto.points_from_ground_truth()`'s per-case
+     `source_url` stored-XSS handling); none enumerates "all locations of a case" in a
+     way `related_endpoints` could violate. **No harness/report code changed** — the
+     sweep confirmed graceful degradation already holds, since the new fields are inert
+     to every current call site.
+  2. **`Case` extension** (`fuzzlab/labels/contract.py`): added
+     `primary_endpoint: str | None`, `primary_role: str | None`,
+     `related_endpoints: tuple[dict, ...]`, `flow_variant: str` (default `"direct"`),
+     following the Juliet/SARIF one-row-per-finding shape Addendum B adopted (primary
+     location = where the untrusted value reaches the dangerous operation, never where
+     it's set; `related_endpoints` items are `{"endpoint", "role"}` with role drawn from
+     `source | propagator | sanitizer | sink`; `flow_variant` one of `direct |
+     same_file_helper | cross_file | stored_second_order | cross_service`). All four are
+     additive metadata only — `load_labels()` defaults them when absent so every
+     pre-existing case (including the real `lab/ground-truth/labels.json`, left
+     otherwise untouched) round-trips unchanged.
+  3. **Schema + CSV extension**: `fuzzlab/labels/schemas/labels.schema.json`'s `case`
+     `$defs` entry gained the four properties (all optional, `related_endpoints` items
+     schema-validated, `primary_role`/`flow_variant` enum-constrained) — confirmed a
+     case omitting them still validates (real ground truth), and a bad `flow_variant`
+     value is rejected. `lab/ground-truth/expectedresults.csv` gained the four trailing
+     columns for every existing row (`primary_endpoint` mirrors `url`, `primary_role` is
+     `sink`, `related_endpoints` empty, `flow_variant` `direct` — all single-location
+     cases). Confirmed `_load_expected_csv` (uses `csv.DictReader`, reads only
+     `case_id`/`expected_vulnerable`) is unaffected by the new columns, as the task's own
+     up-front analysis predicted.
+  4. **The gate itself**: new module `fuzzlab/labgen/regression_gate.py`, following the
+     `gates.py`/`secret_scanner.py`/`fingerprint_gate.py` convention — typed error
+     (`RegressionGateError`, an `AssertionError` naming every violation, not just the
+     first), no silent pass. Deliberately schema-shaped rather than manifest-shaped: it
+     diffs two already-loaded `GroundTruth` snapshots by `case_id`
+     (`diff_ground_truth`/`assert_no_regression`), so it needs no generator-emitted
+     directory to exist yet (T-LAB0.10's CLI isn't built) and is reusable as-is once that
+     CLI's `--check` exists. `check_no_regression(baseline_dir, candidate_dir, *,
+     loader=contract.load)` wires directory loading with an injectable `loader` (no
+     subprocess involved here, so the injection point is the loader, not a `Runner`, per
+     this module's own actual dependency shape). Fails loud on any case ID missing from
+     the candidate, any changed page (`url`), or any changed verdict
+     (`expected_vulnerable`); a candidate that only *adds* cases passes cleanly
+     (additive-only, the whole point).
+- Bug found: none — this was pure additive feature work, not a defect fix. No
+  `ERROR_LOG.md`/`docs/bugs/`/`docs/PREVENTIVE_ACTIONS.md` entries required (confirmed
+  via `check-error-log-bookkeeping.sh`, which flagged nothing).
+- Impact (other components / project): FUZZ-touching by design (`CR-LAB-0001` §4 calls
+  this out explicitly) but net effect on FUZZ is nil for now — the consumer sweep found
+  nothing to change in `fuzzlab/harness/` or `fuzzlab/greybox/`. Any future FUZZ work
+  that wants to *use* `related_endpoints` for partial credit (explicitly deferred per
+  Addendum B: "could be added later as a scorer change, without a schema migration") is
+  unaffected and starts from a clean, already-swept baseline. No other component's
+  contracts change.
+- Risk (level; mitigation): low. The schema/dataclass change is additive-only and
+  covered by round-trip tests against both the real ground truth and a synthetic
+  multi-location fixture; the gate's diff logic is covered by unit tests over
+  in-memory `GroundTruth` objects (no filesystem dependency) plus directory-loading
+  tests against the real `lab/ground-truth/` and deliberately shrunk/altered temp-dir
+  fixtures (missing case, flipped verdict) mirroring `test_labgen_gates.py`'s own
+  convention.
+- Deliverables:
+  - [x] FUZZ-consumer sweep across `fuzzlab/harness/`, `fuzzlab/greybox/`,
+        `fuzzlab/report/` — done, no consumer needed changes.
+  - [x] `Case` extension (`primary_endpoint`/`primary_role`/`related_endpoints`/
+        `flow_variant`) in `fuzzlab/labels/contract.py` — done.
+  - [x] `fuzzlab/labels/schemas/labels.schema.json` extended, optional/defaulted — done.
+  - [x] `lab/ground-truth/expectedresults.csv` gained the four trailing columns — done.
+  - [x] `fuzzlab/labgen/regression_gate.py`
+        (`RegressionGateError`/`RegressionDiff`/`diff_ground_truth`/
+        `assert_no_regression`/`check_no_regression`) — done.
+  - [x] Tests: `tests/test_labgen_regression_gate.py` (17 tests: `Case` defaults/explicit
+        values, schema round-trip for a multi-location case, schema rejection of a bad
+        `flow_variant`, diff logic clean/additive/missing/changed-page/changed-verdict,
+        `assert_no_regression` fail-loud with every violation named, `check_no_regression`
+        against real ground truth and against shrunk/flipped-verdict fixtures, injected
+        loader) — done, all pass.
+  - [ ] Wiring `regression_gate.check_no_regression` into a `fuzzlab lab-generate
+        --check` CLI — out of scope for this task per the plan (T-LAB0.10, not started;
+        this gate is built so that CLI can call it without a rewrite).
+- Effectiveness (assessed 2026-09-21): met this delivery's own bar — the gate correctly
+  passes the real ground truth against itself and against an additive superset, and
+  fails loud (naming the exact case ID and the exact violation kind) on both a shrunk
+  and a verdict-flipped fixture, which is the acceptance test the plan itself specifies.
+  Full suite 886 passed / 8 skipped / 2 pre-existing unrelated
+  `test_mutation_operators.py` failures (baseline at this lane's synced start: 868
+  passed / 9 skipped / same 2 failures per the task brief; the +18/-1 shift versus that
+  baseline reflects this change's own +17 new tests plus one unrelated shift from other
+  lanes merged onto the branch tip before this lane started, not a regression this
+  change introduced).
+
 ### CC-LAB-0028 — Nuclei path-traversal/LFI oracle wrapper (Addendum E, Spike 004) (2026-09-21)
 *(Numbered `CC-LAB-0028` rather than `CC-LAB-0017` at merge time — this lane's worktree
 diverged onto a stale, unrelated branch lineage before starting, self-diagnosed and
