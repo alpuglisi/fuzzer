@@ -3,6 +3,35 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0008 — WebSocket framing + flow.protocol (Phase 9 T9.1) (2026-09-21)
+- Change: began protocol depth. `fuzzlab/proxy/ws.py` is a from-scratch, byte-exact RFC
+  6455 WebSocket frame codec — `encode_frame`/`decode_frame`/`decode_frames` (FIN/RSV/
+  opcode, MASK, 7/16/64-bit lengths, masking key), `apply_mask` (self-inverse),
+  `reassemble` (fragmented data frames → messages), control-frame handling, and the
+  handshake (`accept_key`, `is_upgrade_request`/`is_upgrade_response`) reusing the
+  HTTP/1.1 machinery. The Phase 6 history now tags each flow's protocol: `FlowRecord`
+  gains `protocol` (default `http/1.1`) and the writer persists it (migration 9's
+  `flow.protocol`). Dependency-light (stdlib); the `wsproto` parsed path is declared and
+  skip-guarded (on-host).
+- Impact (other components / project): the raw WebSocket path — inspect/edit/replay
+  frames (including masked/malformed) without a library normalizing them — recorded and
+  searchable in the existing history and replayable via the existing repeater (encoded
+  frames are raw bytes). Sets up HTTP/2 (T9.2/T9.3) and the parsed-path integration
+  (T9.4). No behavior change to HTTP/1.1 flows (protocol defaults to `http/1.1`).
+- Risk (level; mitigation): low — pure, dependency-light byte logic; optional (D5).
+  Mitigated by 11 tests (`tests/test_proxy_ws.py`): migration-9 schema; the RFC handshake
+  vector; upgrade detection; byte-exact unmasked frame; masking hides payload + round-trips
+  + self-inverse; 16/64-bit lengths; control frames; fragmentation reassembly; multi-frame
+  + partial-tail decode; truncated-frame errors; history records the protocol tag. Suite
+  328 passed / 4 skipped.
+- Deliverables:
+  - [x] WebSocket frame codec + handshake + history protocol tag (T9.1) — done.
+  - [ ] HTTP/2 frames + HPACK (T9.2); raw-frame client (T9.3); parsed-path wsproto/h2
+        (T9.4); lab downgrade front-end (T9.5); exit (T9.6) — next/on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — frames round-trip byte-exact
+  (masked and unmasked), the handshake matches the RFC vector, and flows carry a protocol
+  tag; live WS interception through the running proxy is on-host.
+
 ### CC-PROXY-0007 — Local CA, flow engine, and async server wiring (T6.6) (2026-09-21)
 - Change: tied the proxy together. `fuzzlab/proxy/server.py::ProxyEngine` is the
   **sans-I/O** flow pipeline — scope check → match-and-replace → interception →

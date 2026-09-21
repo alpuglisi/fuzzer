@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 9 (T9.1): started **protocol depth** with a from-scratch, byte-exact WebSocket
+  frame codec (`fuzzlab/proxy/ws.py`) — encode/decode, masking (self-inverse),
+  7/16/64-bit lengths, fragmentation reassembly, control frames, and the RFC 6455
+  handshake (`accept_key` matches the spec vector) reusing the HTTP/1.1 machinery. The
+  proxy history now tags each flow's `protocol` (migration 9; `FlowRecord.protocol`
+  defaults to `http/1.1`). Wrote `docs/PHASE_9_PLAN.md`; the raw path is dependency-light
+  (stdlib), `wsproto` declared+skip-guarded for the parsed path. +11 tests
+  (328 passed / 4 skipped). Change-control: CC-PROXY-0008, CC-CORE-0015.
 - Phase 8 (T8.5/T8.6): variant write-back + gated LLM scaffold — completes the mutation
   engine's offline stack. `mutation/catalog.py` records accepted variants' provenance to
   the `payload_variant` table and enforces the **destructive gate** (`is_destructive`):

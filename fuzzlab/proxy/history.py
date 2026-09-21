@@ -32,6 +32,7 @@ class FlowRecord:
     raw_response: bytes = b""
     req_body: bytes | None = None
     resp_body: bytes | None = None
+    protocol: str = "http/1.1"          # 'http/1.1' | 'h2' | 'ws' (Phase 9)
 
 
 @dataclass
@@ -78,10 +79,10 @@ class HistoryWriter:
             cur = conn.execute(
                 "INSERT INTO flow (run_id, identity, method, url, host, status, "
                 "elapsed_ms, in_scope, req_body_sha, resp_body_sha, req_raw_sha, "
-                "resp_raw_sha) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "resp_raw_sha, protocol) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (self.run_id, rec.identity, rec.method, rec.url, rec.host, rec.status,
                  rec.elapsed_ms, int(bool(rec.in_scope)), req_body_sha, resp_body_sha,
-                 req_raw_sha, resp_raw_sha),
+                 req_raw_sha, resp_raw_sha, rec.protocol),
             )
             flow_id = int(cur.lastrowid)
             conn.execute(

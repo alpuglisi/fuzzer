@@ -22,6 +22,8 @@ from fuzzlab.proxy.scope import Scope, ScopeRule
 from fuzzlab.proxy.server import (AsyncProxyServer, ProxyEngine, Target,
                                   parse_connect, target_from_request)
 from fuzzlab.proxy.session_capture import SessionCapture
+from fuzzlab.proxy.ws import (WSFrame, WSMessage, accept_key, decode_frame,
+                              decode_frames, encode_frame, reassemble)
 
 __all__ = [
     "RawMessage",
@@ -42,4 +44,11 @@ __all__ = [
     "Target",
     "parse_connect",
     "target_from_request",
+    "WSFrame",
+    "WSMessage",
+    "encode_frame",
+    "decode_frame",
+    "decode_frames",
+    "reassemble",
+    "accept_key",
 ]

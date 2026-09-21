@@ -297,6 +297,14 @@ CREATE TABLE payload_variant (
 CREATE INDEX idx_payload_variant_run ON payload_variant(run_id);
 """
 
+# --- migration 9: flow protocol tag (Phase 9 T9.1) ---------------------------
+# The proxy now records WebSocket and HTTP/2 flows alongside HTTP/1.1; a `protocol`
+# tag ('http/1.1' | 'h2' | 'ws') distinguishes them in history. Additive; existing
+# rows read as NULL (treated as http/1.1 by the writer's default).
+_M0009 = """
+ALTER TABLE flow ADD COLUMN protocol TEXT;
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -307,6 +315,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (6, _M0006),
     (7, _M0007),
     (8, _M0008),
+    (9, _M0009),
 ]
 
 

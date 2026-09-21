@@ -40,8 +40,9 @@ ranker (NDCG@k/Precision@k vs random), uncertainty sampling, and query-by-commit
 with the real-lab held-out exit on-host. Phase 8 (mutation engine) has begun: the lab
 WAF (D16) is the filter-evasion target, and the semantics-preserving operator framework
 + validator are built; context-typed XSS, filter learning, and bandit/coverage search
-remain. Phases 9–10 (protocol depth, plugin system + anomaly detector + second target)
-are planned.
+remain. Phase 9 (protocol depth) has begun — the from-scratch WebSocket frame codec is built;
+HTTP/2 frames + HPACK, the raw-frame client, and the opt-in h2→h1 desync lab front-end
+remain. Phase 10 (plugin system + anomaly detector + second target) is planned.
 
 ## Integration model
 
@@ -307,7 +308,11 @@ tracked in the requirements files, not here.
   surgery so untouched lines stay verbatim (NFR-PROXY-byte-exact) — and the **parsed
   path** over `h11` (`parser.py`). The exit criterion holds in miniature: a hand-edited
   conflicting duplicate `Content-Length` forwards byte-for-byte on the raw path while
-  the parsed path rejects it. `h2`/`wsproto` in the raw path are Phase 9.
+  the parsed path rejects it.
+- **WebSocket framing** `[built]` (Phase 9 T9.1, `ws.py`): a from-scratch, byte-exact RFC
+  6455 frame codec (encode/decode, masking, fragmentation, control frames) + the handshake,
+  recorded in history with a `protocol` tag (migration 9). HTTP/2 (`h2frames`/`hpack`/raw
+  client) and the parsed `wsproto`/`h2` path are the rest of Phase 9.
 - **Scope + match-and-replace** `[built]`: a default-deny scope engine (`scope.py`,
   host + optional path regex) and ordered byte-level rewrites (`matchreplace.py`).
 - **History, repeater, interception, session capture** `[built]`: `flow` history
@@ -451,13 +456,13 @@ replays and edits, including a raw byte path for malformed-traffic study.
 
 ## Build-status snapshot
 
-Suite: 289 passed / 4 skipped (the skips need a native build unavailable in the sandbox:
+Suite: 328 passed / 4 skipped (the skips need a native build unavailable in the sandbox:
 2 credential-store tests, the proxy real-CA minting test, and the mutation engine's
 `sqlglot` AST test). Everything below is offline-complete unless an on-host item is named.
 
 - `[built]` (offline-complete, unit-tested):
   - **Foundations (Phase 0 + T1.1):** `core/` — unified store + forward-only
-    migrations (head = 8), config, structured logging, request budget + per-host
+    migrations (head = 9), config, structured logging, request budget + per-host
     timing mutex, HTTP seam, versioned features (golden-file), path normalization,
     dedup, fingerprint, run-mode + D15 fail-safe, and the per-host credential store
     (`cryptography` Fernet fallback).
@@ -495,6 +500,10 @@ Suite: 289 passed / 4 skipped (the skips need a native build unavailable in the 
     filter model + bypass learner, the bandit/coverage-guided search, variant write-back
     to `payload_variant` (migration 8) behind the destructive gate, and the gated
     default-off LLM scaffold; only the live filter-bypass + coverage exit (T8.7) remains.
+  - **Protocol depth (Phase 9):** the from-scratch, byte-exact WebSocket frame codec +
+    handshake and the `flow.protocol` tag (migration 9) are built; HTTP/2 frames + HPACK,
+    the raw-frame client, the parsed `wsproto`/`h2` path, and the opt-in h2→h1 desync lab
+    front-end remain.
   - **Oracle mechanisms:** M8 (out-of-band) and M10 (grey-box) still to build.
   - **Intercepting proxy (Phase 6):** the full offline stack is built — byte-exact
     dual-path core (`RawMessage` + `h11`), scope, match-and-replace, flow history
@@ -508,5 +517,5 @@ Suite: 289 passed / 4 skipped (the skips need a native build unavailable in the 
   variants-bypass-the-WAF-and-reach-new-code exit (T8.7); live
   `--browser`/`--bandit`/`--score`/`--rank` runs and stored-XSS session-to-browser
   wiring — all tracked in `docs/ON_HOST_TASKS.md`.
-- `[planned]`: protocol depth (Phase 9), anomaly detector + plugin system + a second
-  target (Phase 10), and the manifest-driven lab generator (Lab track).
+- `[planned]`: anomaly detector + plugin system + a second target (Phase 10), and the
+  manifest-driven lab generator (Lab track).

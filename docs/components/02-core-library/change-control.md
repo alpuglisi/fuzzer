@@ -3,6 +3,20 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0015 — Migration 9: flow protocol tag (Phase 9 T9.1) (2026-09-21)
+- Change: migration 9 adds a `protocol` column to `flow` (append-only registry; head → 9)
+  so history distinguishes `http/1.1` / `h2` / `ws` flows. Additive; existing rows read as
+  NULL and the proxy's `HistoryWriter` defaults new rows to `http/1.1`.
+- Impact (other components / project): lets the PROXY component record WebSocket and (later)
+  HTTP/2 flows alongside HTTP/1.1 without touching existing rows. Version-pinning tests
+  derive the head from `migrations.MIGRATIONS` (PA-0001).
+- Risk (level; mitigation): low — one nullable column. Mitigated by
+  `tests/test_proxy_ws.py::test_migration_9_adds_flow_protocol`. Suite 328 passed / 4 skipped.
+- Deliverables:
+  - [x] Migration 9 (`flow.protocol`) — done.
+- Effectiveness (assessed 2026-09-21): effective — WebSocket flows persist with their
+  protocol tag.
+
 ### CC-CORE-0014 — Migration 8: mutation-engine payload variants (Phase 8 T8.1) (2026-09-21)
 - Change: migration 8 adds the `payload_variant` table (append-only registry; head → 8):
   the provenance of each accepted mutation — `base_payload`, `variant`, the `operators`
