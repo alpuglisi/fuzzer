@@ -14,6 +14,23 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Lab (L-P0.10, T-LAB0.10): added the `fuzzlab lab-generate --manifest <path> --out
+  <dir> [--emitter NAME] [--check]` CLI (`fuzzlab/labgen/cli.py`), wired into
+  `fuzzlab/cli.py`'s existing subcommand dispatch. Renders a manifest's supported
+  cells via a registry-looked-up emitter (default `php_current`, so Phase 3's
+  additional emitters need no CLI rewrite) and, with `--check`, runs the name-leak
+  scanner, secret scanner, a real-emitter regenerate-and-diff determinism check,
+  the minimal-pair checker (against a generic transform-emptied twin of each
+  cell, so it works for any manifest, not only one authoring explicit twin
+  pairs), and conformance Tier 0/Tier 3 -- all offline gates that already existed.
+  The manifest-loading resolver hook (L-P1.1) and the regression/additive-only
+  gate (L-P0.9) have not landed in this worktree yet, so manifests load as
+  explicit cell lists only and the regression gate is left as a marked TODO in
+  `run_checks()`, to be wired in a small follow-up once L-P0.9 merges, per the
+  plan's own dependency note (§7). 11 new end-to-end tests
+  (`tests/test_labgen_cli.py`), reusing each gate's own known-bad fixtures from
+  `tests/test_labgen_gates.py`, `tests/test_labgen_secret_scanner.py`, and
+  `tests/test_labgen_minimal_pair.py` rather than re-authoring them.
 - Docs: fleshed `docs/LAB_IMPLEMENTATION_PLAN.md`'s Phase 2 (§3) and Phase 3 (§4)
   from milestone-level bullets into full task breakdowns matching Phase 0/1's
   granularity, and added a new §7 lane/dependency map covering every Phase 0-3

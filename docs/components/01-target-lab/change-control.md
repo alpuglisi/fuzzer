@@ -3,6 +3,99 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0029 — `fuzzlab lab-generate` CLI (T-LAB0.10, L-P0.10) (2026-09-21)
+*(Numbered `CC-LAB-0029` rather than possibly colliding with another concurrently
+landing lane's number at merge time — per this project's own numbering convention,
+"collisions with concurrent lanes are expected and reconciled at merge.")*
+- Change: added `fuzzlab/labgen/cli.py` (`main(argv) -> int`, parsing `--manifest
+  <path> --out <dir> [--emitter NAME] [--check]`) and a one-line `lab-generate`
+  branch in `fuzzlab/cli.py`'s existing subcommand dispatch, following the exact
+  pattern every other subcommand (`web`/`session`/`crawl`/.../`report`) already
+  uses. `--manifest`/`--out` load a manifest via `fuzzlab.labgen.schema
+  .load_manifest` and render every cell the selected emitter supports via
+  `fuzzlab.labgen.conformance.tier3.render_whole_sample` (the existing helper
+  that already drives a real `Emitter` over a whole cell set), writing the
+  result to `--out`. The emitter is looked up by name from a small
+  `EMITTER_REGISTRY: dict[str, type[Emitter]]` (default `"php_current"`), never
+  hardcoded, so a future emitter (Phase 3, built by parallel lanes) registers
+  itself without a CLI rewrite. `--check` runs, in order: the name-leak scanner
+  (`gates.scan_generated_tree_for_name_leaks`), the secret scanner
+  (`secret_scanner.scan_tree_for_secrets`, Gitleaks-backed), a real-emitter
+  regenerate-and-diff determinism check
+  (`conformance.tier3.regenerate_and_diff_emitter`), the minimal-pair checker
+  (`minimal_pair.check_minimal_pair`), and conformance Tier 0 (lint +
+  minimal-pair diff) and Tier 3 (whole-lab regeneration) again as their own
+  registered step, per the task's explicit instruction to register both
+  separately from the standalone minimal-pair/determinism steps. Every gate
+  failure is collected (not fail-fast) and printed with `--check` returning
+  exit code 1 naming every failing gate; a clean tree exits 0.
+- Design notes/deviations from the literal task brief, made explicit rather than
+  silently substituted:
+  - **Resolver wiring (L-P1.1) not yet landed.** `fuzzlab.labgen.schema.load_manifest`
+    still does no axis-range expansion as of this change (its own docstring: "this
+    loader does no expansion") and exposes no resolver-wiring hook to call instead.
+    This CLI therefore loads every manifest as an explicit cell list only, which is
+    what every manifest under `lab/manifests/` already is. No functional gap for
+    Phase 0; revisit once L-P1.1 lands a hook (per this module's own docstring note)
+    -- no other change needed here for that to work, mirroring
+    `conformance.tier0.get_minimal_pair_checker`'s own "upgrades automatically"
+    convention.
+  - **Minimal-pair checker wired against a generic self-pair, not manifest-declared
+    twins.** `fuzzlab.labgen.minimal_pair`'s own test module explicitly documents that
+    it does not attempt "manifest-level twin pairing" (two different cell_ids, e.g.
+    the example manifest's `LABGEN-EX-0001`/`0002`, legitimately emit different
+    handler names and are not a valid input to it). This CLI instead pairs each
+    supported cell against `dataclasses.replace(cell, transform=Pipeline(()))` --
+    the *same* cell identity with its transform pipeline emptied, exactly the
+    fixture shape `tests/test_labgen_minimal_pair.py`'s own positive fixture uses --
+    so the check works for any manifest, not only one that happens to author
+    explicit vulnerable/secure twin cells.
+  - **Regenerate-and-diff wired against the real emitter (Tier 3), not
+    `gates.regenerate_and_diff`.** `gates.regenerate_and_diff` only proves
+    determinism for the Phase-0 *scaffold* renderer
+    (`fuzzlab.labgen.subseed.render_cell_stub`), not a real `Emitter` -- it is not
+    meaningful against this CLI's actual output. `conformance.tier3
+    .regenerate_and_diff_emitter` is the emitter-level counterpart that already
+    exists for exactly this purpose and is used instead; it doubles as this
+    change's Tier 3 registration (item 4 of the task brief), so it is invoked once
+    as the named "regenerate-and-diff determinism check" step and again as the
+    explicit "conformance Tier 3" step, both real, non-redundant in intent (the
+    task brief lists them as two separate line items).
+  - **`fingerprint_gate.py` and the regression/additive-only gate (L-P0.9) are not
+    wired**, per the task brief's own instruction: the former needs a real
+    multi-stack corpus (Phase 3) to mean anything; the latter's module
+    (`fuzzlab/labgen/regression_gate.py` or similar) does not exist in this
+    worktree as of this change (L-P0.9 has not landed) -- left as a
+    `# TODO(L-P0.9)` comment in `run_checks()` naming the follow-up.
+- Impact (other components / project): none outside this component -- pure
+  addition of a CLI entry point over already-built, already-tested pieces. No
+  change to `fuzzlab.labgen.schema`, `.gates`, `.secret_scanner`, `.minimal_pair`,
+  `.emitter`, `.emitters.php_current`, or `.conformance` (all read-only imports).
+- Risk (level; mitigation): low. The CLI is read-only with respect to the target
+  (D11 unaffected -- it writes local files only, sends no traffic) and every gate
+  it calls already has its own dedicated test coverage; this change adds
+  end-to-end coverage of the wiring itself, not the gates' own logic.
+- Deliverables:
+  - [x] `fuzzlab/labgen/cli.py` (`main`, `EMITTER_REGISTRY`, `render_manifest`,
+    `run_checks`) — done.
+  - [x] `fuzzlab/cli.py` `lab-generate` dispatch branch + usage line — done.
+  - [x] 11 end-to-end tests (`tests/test_labgen_cli.py`): clean-tree pass, one
+    per wired gate's own known-bad fixture (name-leak, secret, determinism,
+    minimal-pair, Tier 0 lint), unknown-emitter/missing-manifest error paths,
+    and a generic-weakened-twin-pairing check against a hand-built cell reusing
+    `tests/test_labgen_minimal_pair.py`'s own `_base_cell` helper — done.
+  - [ ] Wire the resolver (L-P1.1) once it lands a hook into `schema.py` — todo.
+  - [ ] Wire the regression/additive-only gate (L-P0.9) once it lands — todo
+    (marked `# TODO(L-P0.9)` in `run_checks()`).
+- Effectiveness (assessed 2026-09-21): effective — `fuzzlab lab-generate --check`
+  passes clean on the real example manifest and fails loud (exit 1, naming the
+  gate) when any of the five currently-wired gates' own known-bad fixture is
+  injected via a test-double emitter wrapper; full repo test suite run alongside
+  this change (880 pre-existing tests passed, 8 skipped, plus these 11 new ones;
+  2 pre-existing failures in `tests/test_mutation_operators.py` confirmed
+  unrelated to this change and present before it, in a different lane's
+  component).
+
 ### CC-LAB-0028 — Nuclei path-traversal/LFI oracle wrapper (Addendum E, Spike 004) (2026-09-21)
 *(Numbered `CC-LAB-0028` rather than `CC-LAB-0017` at merge time — this lane's worktree
 diverged onto a stale, unrelated branch lineage before starting, self-diagnosed and

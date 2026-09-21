@@ -314,6 +314,33 @@ and measured. Authorized, lab-only.
   signal). XXE, open redirect, and known-CVE templates remain unintegrated — a separate,
   larger undertaking. (`CR-LAB-0001` tool-mapping table,
   `docs/spikes/SPIKE-004-nuclei-vs-dvwa.md`, `CC-LAB-0028`)
+- **FR-LAB-27** (Lab track, T-LAB0.10) A `fuzzlab lab-generate --manifest <path>
+  --out <dir> [--emitter NAME] [--check]` CLI (`fuzzlab.labgen.cli`), dispatched
+  from `fuzzlab/cli.py` following the same thin-subcommand-branch convention every
+  other `fuzzlab <command>` already uses. Loads a manifest (`fuzzlab.labgen.schema
+  .load_manifest`) and renders every cell the selected emitter declares support
+  for; the emitter is looked up by name in a small registry
+  (`EMITTER_REGISTRY: dict[str, type[Emitter]]`, default `"php_current"`) rather
+  than hardcoded, so a future emitter (Phase 3) needs no CLI change to become
+  selectable. `--check` runs the offline build-gate suite this component already
+  built against the rendered output, collecting every failure rather than
+  stopping at the first: the name-leak scanner (FR-LAB-15), the secret scanner
+  (FR-LAB-22), a real-emitter regenerate-and-diff determinism check
+  (`conformance.tier3.regenerate_and_diff_emitter`), the minimal-pair checker
+  (FR-LAB-23) — paired generically against each cell's own transform-emptied twin
+  (`dataclasses.replace(cell, transform=Pipeline(()))`), so it applies to any
+  manifest, not only one that authors explicit vulnerable/secure twin cell pairs
+  — and conformance Tier 0/Tier 3 (FR-LAB-25). Exits 1 and names every failing
+  gate on a `--check` failure, 0 on a clean pass. Two things this CLI does **not**
+  yet do, both explicitly noted rather than silently glossed over: it does not
+  expand axis-range manifests via `resolver.py` — `schema.py` exposes no
+  resolver-wiring hook as of this requirement's authoring, so manifests load as
+  explicit cell lists only (today's only real manifest shape); and it does not
+  run the regression/additive-only gate (a separate, not-yet-landed component
+  deliverable) — a `# TODO(L-P0.9)` in `run_checks()` marks where it plugs in.
+  `fingerprint_gate.py` is deliberately not wired (needs a real multi-stack
+  corpus, Phase 3, to mean anything against a single-stack corpus).
+  (`docs/LAB_IMPLEMENTATION_PLAN.md` §1.2 T-LAB0.10, `CC-LAB-0029`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
