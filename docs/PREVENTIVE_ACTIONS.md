@@ -198,3 +198,18 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   for "cleaner" output) and check for them before returning `confirmed_secure`. Extends
   PA-0007's fail-closed doctrine from authentication-signal inference to tool-oracle-
   output inference generally. (from BUG-0023)
+- **PA-0026** — Supersedes/strengthens PA-0010. When building an explicit-allowlist
+  adapter around a third-party function specifically because it silently accepts and
+  mishandles some input class, enumerate the value-shape preconditions the wrapped
+  implementation assumes but does not itself validate — for **every** allowlisted
+  parameter, not only the one input class that originally motivated writing the adapter
+  (cardinality relationships between parameters, min/max counts, ordering assumptions,
+  mutual exclusivity, etc.) — and add an explicit precondition check plus a test that
+  first reproduces the library's own silent failure, for each one found. PA-0010 named
+  the general instinct ("confirm granularity", "verify the signal") but gave no
+  checklist step forcing every allowlisted parameter's preconditions to be enumerated,
+  which is exactly how a PA-0010-citing adapter still shipped with an uncovered gap
+  (`covertable.make()`'s `strength` silently producing `[]` when it exceeds the factor
+  count, uncaught by an adapter that had already defended the kwarg-key and sorter-
+  default surfaces). Applies to every existing PA-0010-motivated adapter, per PA-0002's
+  sweep obligation. (from BUG-0024)

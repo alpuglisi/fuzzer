@@ -18,6 +18,23 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — Covering-array resolver silently returns zero cells when `strength` exceeds the factor count
+
+- **Symptom:** while wiring `fuzzlab.labgen.resolver.expand()` into manifest loading
+  (T-LAB2.1), an `axis_ranges` block with a single-axis `factors` mapping and the
+  default `strength: 2` validated cleanly and expanded to an **empty** cell list — no
+  error, no cells, nothing to catch it short of noticing the count.
+- **Root cause:** `covertable.make()` does not raise when `strength` exceeds the number
+  of factors (or a `sub_models` entry's own `strength` exceeds its own field count) — it
+  silently returns `[]`, a t-way covering array being undefined for fewer than t factors.
+  `fuzzlab.labgen.resolver.validate_covering_array_config()` already defends against two
+  other silent-covertable-failure shapes (an unrecognized kwarg, an unpinned sorter
+  default — both PA-0010) but had no check for this third shape.
+- **Remediation:** `validate_covering_array_config()` now rejects `strength >
+  len(factors)` and, per `sub_models` entry, `strength > len(fields)`, both before ever
+  calling `covertable.make()`. Full RCA: `docs/bugs/BUG-0024-covering-array-strength-exceeds-factor-count.md`.
+- **Status:** Fixed (`CC-LAB-0029`).
+
 ## 2026-09-21 — Nuclei oracle draft would misclassify an unreachable target as `confirmed_secure`
 
 - **Symptom:** while validating `nuclei` as a tool-oracle (Spike 004), a first-draft

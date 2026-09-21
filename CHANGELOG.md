@@ -36,6 +36,21 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   decoupled from it (CR-LAB-0001 Addendum A): `fuzzlab.labgen.verdict` never imports
   `identity.py`, asserted by a new test mirroring
   `test_labgen_gates.py::test_provenance_is_one_directional_no_leak_into_verdict_source`.
+- Lab (LAB, T-LAB2.1, lane L-P1.1): wired `fuzzlab.labgen.resolver`'s covertable-backed
+  covering-array expansion into `fuzzlab.labgen.schema`'s manifest loader — a manifest
+  may now declare an `axis_ranges` block (e.g. every `class` x every
+  `sink_context.family`, pairwise) alongside today's explicit `cells` list, expanded
+  into the same `Cell` IR before any emitter sees it. `lab/schemas/manifest.schema.json`
+  gained the `axis_range` shape (additive; explicit-cells-only manifests are unaffected —
+  both example manifests still load byte-for-byte identically, asserted by regression
+  tests). While wiring this, found and fixed BUG-0024: `resolver.validate_covering_array_config()`
+  did not reject a `strength` exceeding the factor count (or a `sub_models` entry's
+  `strength` exceeding its own field count), which `covertable.make()` silently turns
+  into an empty array rather than an error — see `docs/bugs/BUG-0024-covering-array-strength-exceeds-factor-count.md`
+  and new rule `PA-0026` (supersedes `PA-0010`). `CC-LAB-0031` (renumbered from a
+  concurrently-claimed `CC-LAB-0029`, which collided with lane L-P2.1's identity-graph
+  entry; see `CC-LAB-0031` for the note), `FR-LAB-29` (renumbered from a concurrently
+  claimed `FR-LAB-27` for the same reason).
 - Docs: fleshed `docs/LAB_IMPLEMENTATION_PLAN.md`'s Phase 2 (§3) and Phase 3 (§4)
   from milestone-level bullets into full task breakdowns matching Phase 0/1's
   granularity, and added a new §7 lane/dependency map covering every Phase 0-3

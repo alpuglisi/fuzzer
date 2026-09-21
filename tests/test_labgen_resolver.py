@@ -86,6 +86,34 @@ def test_bool_strength_rejected():
         validate_covering_array_config({"factors": SYNTHETIC_FACTORS, "strength": True})
 
 
+def test_strength_exceeding_factor_count_rejected_not_silently_empty():
+    """BUG-0024: covertable.make() itself does not raise for this -- it
+    silently returns an empty array (demonstrated below), which is exactly
+    the failure mode PA-0010 exists to catch. The adapter must reject it."""
+    from covertable import make, sorters
+
+    swallowed = make({"a": ["x", "y"]}, strength=2, sorter=sorters.hash)
+    assert swallowed == []  # covertable ran "fine" and silently produced nothing
+
+    with pytest.raises(CoveringArrayError):
+        validate_covering_array_config({"factors": {"a": ["x", "y"]}, "strength": 2})
+
+
+def test_strength_equal_to_factor_count_is_allowed():
+    out = validate_covering_array_config({"factors": {"a": ["x", "y"], "b": ["p", "q"]}, "strength": 2})
+    assert out["strength"] == 2
+
+
+def test_sub_model_strength_exceeding_its_own_field_count_rejected():
+    with pytest.raises(CoveringArrayError):
+        validate_covering_array_config(
+            {
+                "factors": SYNTHETIC_FACTORS,
+                "sub_models": [{"fields": ["class", "stack_profile"], "strength": 3}],
+            }
+        )
+
+
 def test_sub_model_referencing_unknown_factor_rejected():
     with pytest.raises(CoveringArrayError):
         validate_covering_array_config(

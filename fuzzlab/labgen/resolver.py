@@ -102,6 +102,18 @@ def validate_covering_array_config(raw: Mapping[str, Any]) -> dict[str, Any]:
     strength = raw.get("strength", 2)
     if not isinstance(strength, int) or isinstance(strength, bool) or strength < 1:
         raise CoveringArrayError(f"'strength' must be a positive integer, got {strength!r}")
+    if strength > len(factors):
+        # covertable.make() does not raise for this — it silently returns an
+        # empty array (verified directly against the installed 3.2.0 package:
+        # a 1-factor model at strength=2 returns []), exactly the "silently
+        # empty/wrong" failure mode PA-0010 exists to catch. A t-way covering
+        # array is undefined for fewer than t factors, so this is always a
+        # caller error, not a valid degenerate case.
+        raise CoveringArrayError(
+            f"'strength' ({strength}) exceeds the number of factors ({len(factors)}) — "
+            "covertable.make() would silently return an empty array rather than raising "
+            "for this (PA-0010); a t-way covering array needs at least t factors"
+        )
 
     sub_models = list(raw.get("sub_models", ()))
     for sm in sub_models:
@@ -110,6 +122,15 @@ def validate_covering_array_config(raw: Mapping[str, Any]) -> dict[str, Any]:
         unknown_fields = set(sm["fields"]) - set(factors)
         if unknown_fields:
             raise CoveringArrayError(f"sub_model references unknown factor(s) {sorted(unknown_fields)}")
+        sm_strength = sm.get("strength", strength)
+        if not isinstance(sm_strength, int) or isinstance(sm_strength, bool) or sm_strength < 1:
+            raise CoveringArrayError(f"sub_model {sm!r} has an invalid 'strength': {sm_strength!r}")
+        if sm_strength > len(sm["fields"]):
+            raise CoveringArrayError(
+                f"sub_model {sm!r} 'strength' ({sm_strength}) exceeds its own field count "
+                f"({len(sm['fields'])}) — same silent-empty-array risk as the top-level "
+                "'strength' check above (PA-0010)"
+            )
 
     constraints = list(raw.get("constraints", ()))
 

@@ -166,8 +166,11 @@ tracked in the requirements files, not here.
   plus `lab/schemas/*.schema.json`, `lab/safety_matrix.yaml`, and a
   `lab/patterns/` scaffold (3 example cards, not the full corpus). A real
   covering-array resolver (`fuzzlab/labgen/resolver.py`, over `covertable`
-  3.2.0, pairwise/mixed-strength/constrained) is also built (`CC-LAB-0018`)
-  but not yet wired into manifest loading. The per-stack module-composition
+  3.2.0, pairwise/mixed-strength/constrained) is built (`CC-LAB-0018`) and, as
+  of Phase 1 (T-LAB2.1, `CC-LAB-0029`), wired into manifest loading: a
+  manifest's optional `axis_ranges` block expands into concrete cells
+  alongside today's explicit `cells` list, into the same `Cell` IR the
+  emitter and verdict engine already consume. The per-stack module-composition
   emitter interface is built (`CC-LAB-0019`): `fuzzlab/labgen/emitter.py` (the
   `Emitter` ABC, `EmittedFiles` forward-compatible with multi-file/routed
   output), a composable `fuzzlab/labgen/modules/` Jinja2-template inventory
