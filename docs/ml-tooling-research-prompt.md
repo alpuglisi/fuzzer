@@ -1,16 +1,3 @@
-# Research prompt: ML and tooling for the injection-fuzzer project
-
-Paste the block below into an internet-capable Claude chat. It is self-contained
-(the other chat has no access to this project's history), states the authorized
-local-lab framing, lists the machine-learning topics and the tools to research,
-sets the analysis lens, and asks for a cited report with a phased roadmap.
-
-Tweak the "Already built" section if any project detail has drifted. To keep each
-half focused, you can run Part A and Part B in separate chats.
-
----
-
-```
 You are a senior security-tooling architect and applied-ML researcher. I need a
 rigorous, up-to-date research report to inform the design of a personal,
 open-source security-testing toolkit. Use web search extensively. Prefer
@@ -145,4 +132,3 @@ with (a) a prioritized, phased build roadmap for the whole project and (b) a lis
 of open questions and decisions I still need to make. Cite sources inline with
 URLs and dates, and add a final reference list. Flag anything that is hype or not
 worth the effort at solo/local scale.
-```

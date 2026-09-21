@@ -1,17 +1,3 @@
-# Research prompt: scaling the Puppy Fort Factory test app
-
-Paste the block below into an internet-capable Claude chat. It is self-contained
-(the other chat has no access to this project's history), states the authorized
-local-lab framing, and asks for cited research into efficient ways to grow the
-deliberately vulnerable web app in both scale (page count) and complexity
-(vulnerability variety and difficulty), while keeping machine-readable ground
-truth intact.
-
-Tweak the "Current state" section if any project detail has drifted.
-
----
-
-```
 You are a senior application-security engineer and security test-lab architect. I
 need a rigorous, cited research report on how to efficiently grow a deliberately
 vulnerable web application used as a local test target. Use web search
@@ -107,4 +93,3 @@ phased plan to grow the app in both benign and vulnerable coverage; and (c) open
 questions and decisions I still need to make. Cite sources inline with URLs and
 dates, add a final reference list, and flag anything that is hype or not worth
 the effort at solo/local scale.
-```
