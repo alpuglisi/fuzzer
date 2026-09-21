@@ -3,6 +3,36 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0011 — Command-spec registry + `build_parser()` convention (Phase 0.1) (2026-09-21)
+- Change: added `fuzzlab/web/commandspec.py` — a registry that introspects each launchable
+  activity's own `argparse` parser into a machine-readable form schema
+  (`OptionSpec`/`CommandSpec`: name, dest, type ∈ {bool,int,float,str,choice}, required,
+  default, choices, multiple; plus per-command `sends_traffic`, `needs_authorized`,
+  `destructive_gate`). The authorized/destructive gates are *derived* from the parser
+  (presence of the flags), not restated. To supply the parsers without parsing, every tool
+  now exposes a **`build_parser()`** returning its `ArgumentParser`; each `main()` delegates
+  to it — a behavior-preserving refactor (see the per-component CC entries). This is the
+  single-source-of-truth backbone for the Phase-1 launcher: a new tool flag appears in the
+  UI automatically, with nothing hand-mirrored (PA-0001/PA-0003). Parsers are imported
+  lazily and the registry survives a single tool's optional-dep import failure.
+- Impact (other components / project): the launcher (Phase 1) renders controls from these
+  specs. Touches the tool modules across CRAWL/AUD/FUZZ/MUT/PROXY/SESS + UI(report) to add
+  `build_parser()` (CC-CRAWL-0006, CC-AUD-0014, CC-FUZZ-0018, CC-MUT-0007, CC-PROXY-0014,
+  CC-SESS-0009). No CLI behavior, flags, or defaults change; no schema change; no traffic.
+- Risk (level; mitigation): low — a refactor + a pure read-only introspection module.
+  Mitigated by `tests/test_web_commandspec.py` (17 tests: type mapping in isolation,
+  subparser recursion, long-flag naming, every activity builds + is JSON-serializable, the
+  gate/traffic matrix, gates-derived-from-parser, defaults-read-from-parser-not-a-constant)
+  and the unchanged full suite. Suite 433 passed / 6 skipped.
+- Deliverables:
+  - [x] `fuzzlab/web/commandspec.py` (introspection + registry) — done.
+  - [x] `build_parser()` on all launchable tools; `main()` delegates — done.
+  - [x] `tests/test_web_commandspec.py` — done.
+  - [ ] Consume the spec in the launcher UI (Phase 1) — next.
+- Effectiveness (assessed 2026-09-21): effective — the registry yields correct form schemas
+  for all 10 activities from their real parsers, and the tests pin the mapping + the
+  no-hand-mirror invariant.
+
 ### CC-UI-0010 — Web UI revamp implementation plan (design record) (2026-09-21)
 - Change: added `docs/UI_REVAMP_PLAN.md` — the tracked design plan to take the read-only
   control panel to a full local control plane: (1) an activity launcher with per-tool

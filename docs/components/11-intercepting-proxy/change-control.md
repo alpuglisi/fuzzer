@@ -3,6 +3,19 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0014 — Expose `build_parser()` for the command-spec registry (2026-09-21)
+- Change: `fuzzlab/proxy/cli.py` now factors its argparse setup into `build_parser()`;
+  `main()` keeps the `p` reference (so `p.error(...)` on `--export-ca`/`--authorized` still
+  works) and delegates parsing. Behavior-preserving — same flags, defaults, and gates.
+- Impact: lets the web launcher introspect the proxy's flags (CC-UI-0011). Independent of
+  the Phase-2 proxy-workbench wiring. No CLI behavior change; no traffic; no schema change.
+- Risk (level; mitigation): low — a pure refactor. Mitigated by the unchanged suite
+  (433 passed / 6 skipped) and the command-spec tests.
+- Deliverables:
+  - [x] `build_parser()`; `main()` delegates — done.
+- Effectiveness (assessed 2026-09-21): effective — the registry builds the proxy's spec
+  from this parser.
+
 ### CC-PROXY-0013 — Fix (BUG-0012): proxy_e2e.sh self-test uses conflicting Content-Length (2026-09-21)
 - Change: `scripts/proxy_e2e.sh` step 5 now sends **conflicting** Content-Length values
   (`0` and `5`) instead of two identical `0`s. Duplicate-*identical* Content-Length is

@@ -14,6 +14,16 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (UI, Phase 0.1): added `fuzzlab/web/commandspec.py`, a registry that introspects
+  each launchable activity's own `argparse` parser into a machine-readable form schema
+  (name/type/required/default/choices/multiple; per-command sends-traffic + derived
+  authorized/destructive gates). Every tool now exposes a `build_parser()` and its `main()`
+  delegates to it — a behavior-preserving refactor across CRAWL/AUD/FUZZ/MUT/PROXY/SESS +
+  UI(report). This is the single-source-of-truth backbone for the launcher (FR-UI-6): a new
+  tool flag appears in the UI automatically, nothing hand-mirrored (PA-0001/PA-0003). No CLI
+  behavior/flags/defaults change; no traffic; no schema change. 17 new tests
+  (`tests/test_web_commandspec.py`); suite 433 passed / 6 skipped. See CC-UI-0011 (+
+  CC-CRAWL-0006, CC-AUD-0014, CC-FUZZ-0018, CC-MUT-0007, CC-PROXY-0014, CC-SESS-0009).
 - Docs (UI): added `docs/UI_REVAMP_PLAN.md`, the tracked design plan to grow the read-only
   web control panel into a full local control plane — an activity launcher (per-tool flag
   forms, dry-run, live output), a proxy workbench (history/intercept/repeater/scope), a

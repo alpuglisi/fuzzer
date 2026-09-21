@@ -3,6 +3,21 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0018 — Expose `build_parser()` for the command-spec registry (2026-09-21)
+- Change: the fuzz/oracle activities factor their argparse setup into `build_parser()`, with
+  `main()` delegating — `fuzzlab/tools/blind_sqli_fuzzer.py` (`parse_args()` delegates;
+  `prog="fuzzlab fuzz"`), `fuzzlab/harness/auto_cli.py`, and `fuzzlab/greybox/greybox_cli.py`
+  (both keep the `p` reference so `p.error(...)` still works). Behavior-preserving — same
+  flags, defaults, gates, and parsing.
+- Impact: lets the web launcher introspect the fuzz/auto/greybox-run flags (CC-UI-0011).
+  No CLI behavior change; no traffic; no schema change.
+- Risk (level; mitigation): low — a pure refactor. Mitigated by the unchanged suite
+  (433 passed / 6 skipped) and the command-spec tests.
+- Deliverables:
+  - [x] `build_parser()` on fuzz/auto/greybox-run; `main()` delegates — done.
+- Effectiveness (assessed 2026-09-21): effective — the registry builds these specs from the
+  real parsers (authorized gate derived from the `--authorized` flag).
+
 ### CC-FUZZ-0017 — Fix (BUG-0016): per-point differential coverage in `greybox-run` (2026-09-21)
 - Change: `greybox/run.py::run_greybox` now credits an attack's coverage as a **per-point
   differential** — baselines are sent first to establish each point's benign coverage, and

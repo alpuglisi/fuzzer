@@ -18,7 +18,7 @@ from fuzzlab.core.credentials import CredentialStore
 from fuzzlab.session.manager import SessionAuthError, SessionManager
 
 
-def main(argv: list[str]) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fuzzlab session")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -31,8 +31,11 @@ def main(argv: list[str]) -> int:
     pr.add_argument("--host", required=True)
     pr.add_argument("--identity", required=True)
     pr.add_argument("--base-url", required=True)
+    return parser
 
-    args = parser.parse_args(argv)
+
+def main(argv: list[str]) -> int:
+    args = build_parser().parse_args(argv)
     cfg = load_config()
     store = CredentialStore.open(cfg)
 

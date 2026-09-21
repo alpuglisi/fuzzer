@@ -308,8 +308,9 @@ class LocalSpider:
             logging.info("Crawl finished. Data saved to SQLite database.")
 
 
-def parse_args():
+def build_parser():
     p = argparse.ArgumentParser(
+        prog="fuzzlab crawl",
         description="Local crawler with optional JavaScript rendering (headless Chromium)."
     )
     p.add_argument("--start", default="http://localhost", help="Start URL (default: http://localhost)")
@@ -331,7 +332,11 @@ def parse_args():
     p.add_argument("--identity", default=None,
                    help="Crawl authenticated as this identity via the session manager "
                         "(needs saved credentials; Playwright engine). Omit to crawl anonymously.")
-    return p.parse_args()
+    return p
+
+
+def parse_args():
+    return build_parser().parse_args()
 
 
 if __name__ == "__main__":

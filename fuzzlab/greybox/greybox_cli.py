@@ -42,7 +42,7 @@ def _cookie_for(host: str, identity: str, base_url: str) -> str | None:
     return None
 
 
-def main(argv: list[str]) -> int:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="fuzzlab greybox-run")
     p.add_argument("--base-url", required=True, help="Target base URL (lab, loopback)")
     p.add_argument("--store", required=True, help="Unified store (SQLite) to write to")
@@ -66,6 +66,11 @@ def main(argv: list[str]) -> int:
                    help="Seconds to wait after each request for the shim to flush")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
+    return p
+
+
+def main(argv: list[str]) -> int:
+    p = build_parser()
     args = p.parse_args(argv)
 
     if not args.authorized:
