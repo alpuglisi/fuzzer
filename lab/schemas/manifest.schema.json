@@ -81,6 +81,21 @@
         "nuisance": {
           "type": "object",
           "description": "Opaque bag of nuisance-axis values (naming, whitespace, comment style, etc.) that must not affect the derived verdict. Reserved for the covering-array/nuisance-independence work in later phases; unused by Phase 0's verdict derivation."
+        },
+        "param": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Where the injection parameter lives and how its value is encoded on the wire (CR-LAB-0001 §3.4, L-P2.4). Optional; defaults to query/raw when omitted (today's entire corpus). Render/tracking metadata like `nuisance`/a future `sink_endpoint` -- never a verdict input (verdict derivation depends only on `transform` and `sink_context`).",
+          "properties": {
+            "location": {
+              "enum": ["query", "body", "header", "cookie", "json"],
+              "description": "Where the injection parameter is carried in the request."
+            },
+            "encoding": {
+              "enum": ["raw", "url_encoded", "double_url_encoded", "base64"],
+              "description": "How the parameter's value is encoded on the wire before it reaches the sink -- e.g. a url_encoded or double_url_encoded payload can bypass a naive string-match filter that a raw payload would not."
+            }
+          }
         }
       }
     }

@@ -14,6 +14,18 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Lab (LAB): added the parameter location/encoding axis (§3.4, lane L-P2.4) —
+  `fuzzlab.labgen.schema.ParamSpec` (`location`: query/body/header/cookie/json,
+  `encoding`: raw/url_encoded/double_url_encoded/base64) as a new optional
+  `Cell.param` field, with a matching optional property in
+  `lab/schemas/manifest.schema.json`; put on `Cell` rather than `SinkContext`
+  because it never changes the verdict-derivation contract, only how a cell is
+  rendered/confirmed. Closed two real gaps found in
+  `fuzzlab.labgen.oracle_wrapper` while checking its existing handling:
+  cookie/JSON marking support and a new `Encoding` enum wired into SSTImap's
+  marker mechanism. Resolver-axis wiring (lane L-P1.1) deferred — not yet
+  landed in this worktree; a manifest lists the axis explicitly per cell for
+  now. See `CC-LAB-0029` / `FR-LAB-27`.
 - Docs: fleshed `docs/LAB_IMPLEMENTATION_PLAN.md`'s Phase 2 (§3) and Phase 3 (§4)
   from milestone-level bullets into full task breakdowns matching Phase 0/1's
   granularity, and added a new §7 lane/dependency map covering every Phase 0-3

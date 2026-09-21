@@ -59,7 +59,9 @@ Design notes, tracing directly to the three spikes that motivated this module
 
 from __future__ import annotations
 
+import base64
 import dataclasses
+import json
 import re
 import shutil
 import subprocess
@@ -68,11 +70,12 @@ import time
 from enum import Enum
 from pathlib import Path
 from typing import Callable, Mapping, Optional, Sequence
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 __all__ = [
     "VulnClass",
     "ParamLocation",
+    "Encoding",
     "Verdict",
     "OracleSafetyError",
     "ToolNotFoundError",
@@ -105,11 +108,63 @@ class VulnClass(str, Enum):
 
 
 class ParamLocation(str, Enum):
-    """Where the declared injection parameter lives."""
+    """Where the declared injection parameter lives.
+
+    ``COOKIE``/``JSON`` added for L-P2.4 (parameter location/encoding axis,
+    ``fuzzlab.labgen.schema.ParamSpec``): the schema-level axis names five
+    locations (``query | body | header | cookie | json``); this enum used to
+    only cover the three sqlmap/commix/SSTImap already had built-in
+    ``-p``-flag-style handling for. SSTImap's own ``-P`` sweep already
+    supports a ``C`` (cookie) category (verified by reading its source,
+    ``docs/spikes/SPIKE-003-...md``'s ``QBHC`` default) -- only the marker
+    mechanism to *use* it was missing here, added below. SSTImap has no
+    JSON-specific ``-P`` category; a JSON body is still a body on the wire,
+    so ``JSON`` maps to the same ``B`` flag as ``BODY`` and is marked via a
+    JSON-aware helper instead of the form-encoded one.
+    """
 
     QUERY = "query"
     BODY = "body"
     HEADER = "header"
+    COOKIE = "cookie"
+    JSON = "json"
+
+
+class Encoding(str, Enum):
+    """How a marker/payload value is encoded before being placed on the wire
+    (L-P2.4). Only meaningful where a request type builds its own marked
+    request rather than delegating parameter-selection to the underlying
+    tool's own ``-p`` flag -- today that is
+    `ServerSideTemplateInjectionOracleRequest` alone (see its `encoding`
+    field); `SqlInjectionOracleRequest`/`CommandInjectionOracleRequest` let
+    sqlmap/commix find and encode their own payloads once `-p` points them
+    at the right parameter, so an `encoding` field there would be a phantom,
+    unwired axis value -- not added, per this project's "extend, don't
+    restructure speculatively" convention.
+    """
+
+    RAW = "raw"
+    URL_ENCODED = "url_encoded"
+    DOUBLE_URL_ENCODED = "double_url_encoded"
+    BASE64 = "base64"
+
+
+def _encode_marker(marker: str, encoding: "Encoding") -> str:
+    """Encode `marker` per `encoding` before it is substituted into a
+    request. The *encoded* form is what actually travels on the wire (and
+    what `-M` is told to look for, see `_build_sstimap_argv`) -- exercising
+    exactly the "does a non-raw encoding survive/confirm correctly"
+    question L-P2.4 is about (e.g. a double_url_encoded payload reaching a
+    naive string-match filter undetected)."""
+    if encoding == Encoding.RAW:
+        return marker
+    if encoding == Encoding.URL_ENCODED:
+        return quote(marker, safe="")
+    if encoding == Encoding.DOUBLE_URL_ENCODED:
+        return quote(quote(marker, safe=""), safe="")
+    if encoding == Encoding.BASE64:
+        return base64.b64encode(marker.encode("utf-8")).decode("ascii")
+    raise ValueError(f"unknown Encoding {encoding!r}")  # pragma: no cover - exhaustive enum
 
 
 class Verdict(str, Enum):
@@ -332,6 +387,7 @@ class ServerSideTemplateInjectionOracleRequest:
     max_attempts: int = 1
     tool_path: Optional[str] = None
     marker: str = "*"
+    encoding: Encoding = Encoding.RAW
     extra_args: Sequence[str] = ()
     vulnerable_marker: "re.Pattern[str]" = dataclasses.field(
         default_factory=lambda: re.compile(r"identified the following injection point", re.I)
@@ -434,10 +490,56 @@ def _mark_body_param(data: Optional[str], param_name: str, marker: str) -> str:
     return urlencode(new_pairs)
 
 
+def _mark_cookie_param(cookie: Optional[str], param_name: str, marker: str) -> str:
+    """Return a `k=v; k2=v2` cookie string with `param_name`'s value replaced
+    by `marker` (or `param_name=marker` appended if it wasn't already
+    present). Mirrors `_mark_query_param`/`_mark_body_param`'s
+    replace-or-append convention; previously there was no cookie-marking
+    helper at all, so `ParamLocation.COOKIE` had nothing to substitute into
+    (a real gap this closes -- SSTImap's cookies were only ever passed
+    through whole, never marked at a specific key)."""
+    pairs = []
+    marked = False
+    for part in (cookie or "").split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        key, _, value = part.partition("=")
+        if key == param_name:
+            value = marker
+            marked = True
+        pairs.append(f"{key}={value}")
+    if not marked:
+        pairs.append(f"{param_name}={marker}")
+    return "; ".join(pairs)
+
+
+def _mark_json_param(data: Optional[str], param_name: str, marker: str) -> str:
+    """Return a JSON object string (parsed from `data`, or `{}` if absent or
+    not a JSON object) with `param_name` set to `marker`. A separate helper
+    from `_mark_body_param` because a JSON body is not `key=value&...`
+    form-encoded -- reusing that helper would corrupt a JSON body rather
+    than marking it."""
+    try:
+        obj = json.loads(data) if data else {}
+    except (TypeError, ValueError):
+        obj = {}
+    if not isinstance(obj, dict):
+        obj = {}
+    obj[param_name] = marker
+    return json.dumps(obj)
+
+
 _SSTIMAP_LOCATION_FLAG = {
     ParamLocation.QUERY: "Q",
     ParamLocation.BODY: "B",
     ParamLocation.HEADER: "H",
+    ParamLocation.COOKIE: "C",
+    # SSTImap has no JSON-specific -P category (its own sweep is QBHC only,
+    # per Spike 003) -- a JSON body still travels as the request body, so it
+    # shares BODY's flag and is marked via `_mark_json_param` instead of
+    # `_mark_body_param`.
+    ParamLocation.JSON: "B",
 }
 
 
@@ -450,20 +552,29 @@ def _build_sstimap_argv(tool_path: str, request: ServerSideTemplateInjectionOrac
     target_url = request.target_url
     data = request.data
     headers = dict(headers)
+    # The *encoded* marker is what is actually substituted into the request
+    # (L-P2.4): a non-raw `encoding` must survive on the wire exactly as a
+    # real encoded payload would, so `-M` is told to look for the encoded
+    # form too, never the plain `request.marker`.
+    marker = _encode_marker(request.marker, request.encoding)
     if request.param_location == ParamLocation.QUERY:
-        target_url = _mark_query_param(target_url, request.param_name, request.marker)
+        target_url = _mark_query_param(target_url, request.param_name, marker)
     elif request.param_location == ParamLocation.BODY:
-        data = _mark_body_param(data, request.param_name, request.marker)
+        data = _mark_body_param(data, request.param_name, marker)
+    elif request.param_location == ParamLocation.JSON:
+        data = _mark_json_param(data, request.param_name, marker)
     elif request.param_location == ParamLocation.HEADER:
-        headers[request.param_name] = request.marker
+        headers[request.param_name] = marker
+    elif request.param_location == ParamLocation.COOKIE:
+        cookie = _mark_cookie_param(cookie, request.param_name, marker)
 
     argv = [
         sys.executable, tool_path,
         "-u", target_url,
         "-P", _SSTIMAP_LOCATION_FLAG[request.param_location],
     ]
-    if request.marker != "*":
-        argv += ["-M", request.marker]
+    if marker != "*":
+        argv += ["-M", marker]
     if request.method.upper() != "GET":
         argv += ["-m", request.method.upper()]
     if data is not None:

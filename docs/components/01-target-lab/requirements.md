@@ -314,6 +314,40 @@ and measured. Authorized, lab-only.
   signal). XXE, open redirect, and known-CVE templates remain unintegrated — a separate,
   larger undertaking. (`CR-LAB-0001` tool-mapping table,
   `docs/spikes/SPIKE-004-nuclei-vs-dvwa.md`, `CC-LAB-0028`)
+- **FR-LAB-27** (Lab track, §3.4, lane L-P2.4) A parameter location/encoding axis:
+  `fuzzlab.labgen.schema.ParamSpec` (`location` in `query | body | header | cookie |
+  json`, `encoding` in `raw | url_encoded | double_url_encoded | base64`, both
+  validated against `PARAM_LOCATIONS`/`PARAM_ENCODINGS`) as an optional `Cell.param`
+  field, defaulting to `query`/`raw` so every cell omitting it (today's entire corpus)
+  keeps its current meaning; `lab/schemas/manifest.schema.json` gained a matching
+  optional `param` property on a manifest cell. Deliberately a `Cell`-level field, not
+  folded into `SinkContext`: the axis never changes the `(transform, sink_context)`
+  verdict-derivation contract `fuzzlab.labgen.verdict.verdict()` consumes — it changes
+  only how a cell is rendered into a request and how the build-time oracle constructs
+  its confirmation request — the same render/tracking-metadata category §3.3's
+  (lane L-P2.3, not yet landed in this worktree at implementation time) proposed
+  `sink_endpoint` field is framed as in the plan, i.e. not a verdict input. To
+  exercise a non-`query`,
+  non-`raw` cell against the FR-LAB-11 oracle contract, `fuzzlab.labgen.oracle_wrapper`
+  gained: (1) `ParamLocation.COOKIE`/`.JSON` (query/body/header already existed) with
+  new `_mark_cookie_param`/`_mark_json_param` marking helpers, since SSTImap's own `-P`
+  sweep already supports a cookie category (`QBHC`) but the wrapper had no marker
+  mechanism for it — JSON has no SSTImap-native `-P` category and shares `BODY`'s flag,
+  marked via the JSON-aware helper instead of the pre-existing form-urlencoded one; (2)
+  a new `Encoding` enum (`RAW | URL_ENCODED | DOUBLE_URL_ENCODED | BASE64`) and
+  `_encode_marker()`, wired into `ServerSideTemplateInjectionOracleRequest`'s new
+  `encoding` field and `_build_sstimap_argv`, which substitutes the *encoded* marker on
+  the wire and tells SSTImap's `-M` to look for that same encoded form. Deliberately
+  not added to `SqlInjectionOracleRequest`/`CommandInjectionOracleRequest`: those
+  delegate parameter-selection to sqlmap's/commix's own `-p` flag rather than the
+  wrapper's marker mechanism, so an `encoding` field there would be an unwired phantom
+  axis value. Not yet wired as a `fuzzlab.labgen.resolver` axis (lane L-P1.1's
+  per-cell axis-range/manifest mechanism had not landed in this worktree at
+  implementation time) — a manifest lists `param.location`/`param.encoding` explicitly
+  per cell today, same as every other Phase 0 axis before L-P1.1 lands. Not yet wired
+  into `php_current`'s emitter (out of this task's scope; the emitter still renders
+  every cell as if `param` were its `query`/`raw` default). (`docs/LAB_IMPLEMENTATION_PLAN.md`
+  §3.4, `CC-LAB-0029`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
