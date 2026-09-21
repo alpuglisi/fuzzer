@@ -14,6 +14,17 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (LAB, T-LAB0.8, mechanical tooling only): `fuzzlab/tools/pattern_corpus_sourcing.py`
+  — a pull/index/scope/rank/cluster pipeline that produces a structured candidate
+  list for human triage from `github/advisory-database` (git-clone pull, per
+  `docs/LAB_PATTERN_CORPUS_SOURCING_PLAN.md` Revision 2, never the OSV/GHSA APIs),
+  scoped by a new `lab/patterns/sourcing/crosswalk.yaml` (the ten first-wave
+  classes' CWE/keyword rules). Deliberately stops short of card authoring: never
+  writes `lab/patterns/cards/`, never touches `provenance.yaml`. Clustering is a
+  lightweight, dependency-free token-overlap heuristic (a documented stand-in for
+  the plan's eventual embedding-based clustering). Idempotent (dedupes
+  `REFRESH_LOG.md` entries by commit SHA); git layer fully mockable, one
+  auto-skipped live reachability probe. 34 offline tests. `CC-LAB-0019`.
 - Feature (LAB, `CC-LAB-0017`): validated SSTImap as a third independent tool-oracle
   (`docs/spikes/SPIKE-003-sstimap-vs-ssti-flask-hacking-playground.md` — real Jinja2 SSTI
   app, GPL-3.0/Apache-2.0 licenses read directly, manual curl confirmation before ever

@@ -198,6 +198,125 @@ independently claimed `0016` too. No content changed; purely a numbering fix.)*
   wrapper against a real vulnerable/secure twin pair) is assessed once playbook step 2
   is attempted.
 
+### CC-LAB-0019 — T-LAB0.8: mechanical OSV/GHSA pull + candidate-list tooling (2026-09-21)
+- Change: added `fuzzlab/tools/pattern_corpus_sourcing.py`, implementing steps
+  1-5 (pull, index, scope, rank, cluster) of the pattern-corpus sourcing
+  pipeline in `docs/LAB_PATTERN_CORPUS_SOURCING_PLAN.md` (Revision 2) —
+  **deliberately not** step 6/7 (human triage, card authoring), per that
+  plan's own explicit rule ("human, on cluster representatives only") and per
+  the task brief for this entry.
+  - **Pull:** `sync_advisory_database()` clones/pulls `github/advisory-database`
+    (git, not the OSV or GHSA APIs — confirmed against the plan's own
+    research: the OSV REST API has no CWE filter, and unauthenticated GHSA
+    GraphQL is rate-limited to 0 req/hour) into a local, gitignored cache
+    (`.cache/advisory-database`, new `.gitignore` entry — never the
+    deliverable; the deliverable stays the small, hand-curated
+    `lab/patterns/cards/*.yaml`). Verified the real repository's OSV JSON
+    schema directly: cloned a small sparse slice
+    (`advisories/github-reviewed/2024/01`) during development to confirm
+    `id`/`summary`/`details`/`published`/`database_specific.cwe_ids`/
+    `affected[].package.ecosystem` match this module's parser — that probe
+    checkout was discarded, not committed.
+  - **Index:** `iter_advisories()`/`parse_advisory_file()` parse only
+    `github_reviewed` advisories (the plan measured ~90% of the rest as
+    unusable, median 321 characters, no structured prose).
+  - **Scope:** `scope()` filters by the plan's target ecosystems (npm, PyPI,
+    Packagist, Maven), a 24-month currency window, and a new, versioned CWE/
+    keyword crosswalk (`lab/patterns/sourcing/crosswalk.yaml`, all ten
+    first-wave classes from the plan's §5, including the CWE-94
+    keyword-gating correction for SSTI's under-counted crosswalk). A
+    multi-CWE advisory's losing class matches are recorded in
+    `other_matches`, never silently dropped, per the plan's precedence rule
+    (declaration order in the crosswalk file).
+  - **Rank:** `rank()` scores by prose length + a structured-heading bonus
+    (plan step 4); EPSS/KEV tiebreakers from the plan are **not** implemented
+    (another external network dependency this environment's egress proxy
+    does not clear for osv.dev-adjacent domains — confirmed by a direct
+    reachability check during this delivery) and are flagged as a documented,
+    easy follow-up rather than silently attempted and failing.
+  - **Cluster:** `cluster_by_shape()` is a lightweight, dependency-free
+    token-overlap (Jaccard) greedy clustering — an explicit, documented
+    stand-in for the plan's eventual embedding-based clustering (avoids
+    pulling in a heavy ML dependency / model download for this delivery);
+    swapping in a real embedding model later is scoped to this one function.
+  - **Emit:** `run_refresh()` writes a per-quarter candidate list
+    (`lab/patterns/refresh/<quarter>-candidates.json`) and a human-readable
+    report (`lab/patterns/refresh/<quarter>.md`), and appends one line to
+    `lab/patterns/REFRESH_LOG.md` (new, per the plan's exact file layout) —
+    **idempotent**: re-running against an unchanged upstream commit SHA
+    overwrites the quarter's files with identical content and does not
+    append a duplicate log line (deduped by SHA).
+  - A test (`test_run_refresh_never_writes_to_cards_or_provenance`) asserts
+    a `run_refresh()` call leaves `lab/patterns/cards/*.yaml` and
+    `lab/patterns/provenance.yaml` byte-for-byte unchanged — mechanically
+    enforcing this entry's scope boundary, not just stating it.
+  - Live network: confirmed `git ls-remote` reachability to
+    `github.com/github/advisory-database` directly in this environment
+    (`osv.dev` itself is proxy-blocked here, consistent with the plan's own
+    "GHSA git mirror is the primary and effectively only source" finding).
+    A full clone (~3.3 GB, ~4 min per the plan) is intentionally **not**
+    exercised by this delivery or its test suite — too heavy for a routine
+    test run; the one live test is a cheap reachability probe only, and is
+    auto-skipped (not failed) if the environment running it can't reach
+    GitHub, matching this repo's existing `skipif`-on-capability-probe
+    convention (e.g. `tests/test_lab_waf.py`'s `PHP is None` guard).
+- Impact (other components / project): none — new, self-contained tool file
+  plus new data files under `lab/patterns/sourcing/`; does not import from or
+  get imported by `fuzzlab/labgen/`, `fuzzlab/oracle/`, `fuzzlab/harness/`, or
+  `fuzzlab/web/`. Does not modify `lab/patterns/cards/`,
+  `lab/patterns/provenance.yaml`, or `lab/patterns/taxonomy/classes-v1.yaml`
+  (that taxonomy is card-authoring vocabulary — a separate concern from this
+  tool's own sourcing-scope crosswalk, which is why the crosswalk lives at
+  `lab/patterns/sourcing/crosswalk.yaml` rather than being folded into it).
+- Risk (level; mitigation): **low**. No secrets involved (anonymous,
+  unauthenticated git access only); the cache directory is gitignored so a
+  multi-gigabyte clone can never be committed by accident. Main risk
+  accepted: the clustering heuristic is a simplification of the plan's
+  eventual embedding-based approach and may under- or over-cluster on real,
+  messier advisory prose than the synthetic test fixtures — mitigated by
+  keeping the human triage step (step 6) fully in the loop regardless (this
+  tool narrows hundreds of candidates to tens, it never decides for the
+  human), and by the fact that a clustering miss costs a human an extra
+  minute reviewing one more representative, not a wrong card.
+- Deliverables:
+  - [x] `fuzzlab/tools/pattern_corpus_sourcing.py`: pull/index/scope/rank/
+        cluster/emit pipeline + CLI (`probe`, `refresh`) — done.
+  - [x] `lab/patterns/sourcing/crosswalk.yaml`: versioned CWE/keyword
+        crosswalk, all ten first-wave classes — done.
+  - [x] `.gitignore`: `.cache/` entry for the local advisory-database mirror
+        — done.
+  - [x] 34 offline tests (`tests/test_pattern_corpus_sourcing.py`): parsing,
+        crosswalk matching incl. keyword-gating, scoping, ranking,
+        clustering (incl. order-independence and max-alternates), candidate-
+        list shape (asserts no card-authoring fields leak in), git-sync layer
+        via a fake runner, `run_refresh()` end-to-end + idempotency + the
+        never-touches-cards-or-provenance guard, CLI smoke tests, one
+        auto-skipped live reachability probe — done.
+  - [x] `FR-LAB-18` added to `requirements.md`; status line and interfaces
+        section updated — done.
+  - [ ] The real 25-30/~31-card corpus authoring (plan steps 6/7) — **not
+        started, separate human-supervised follow-up task**, unaffected by
+        this entry (this tool produces its *input*, nothing more).
+  - [ ] EPSS/KEV ranking tiebreakers — not implemented (network-dependency
+        risk in this environment); documented as a follow-up, not silently
+        dropped.
+- Effectiveness (assessed 2026-09-21): met this delivery's own bar — 34 new
+  tests pass, including a live-verified real advisory JSON schema match
+  (checked directly against a real, small sparse clone during development,
+  discarded afterward) and a live (auto-skip-guarded) reachability check
+  that actually ran and passed in this environment. Full suite: 656 passed,
+  5 skipped, 2 pre-existing unrelated `test_mutation_operators.py` failures
+  (baseline was 622/5/2 before this entry — delta is exactly the 34 new
+  tests). Also observed, unrelated to this change: an intermittent flake in
+  `tests/test_web_repeater.py::test_route_send_reaches_upstream_when_authorized`
+  (an SQLite thread-affinity error in `fuzzlab/web/proxycontrol.py`/
+  `fuzzlab/proxy/repeater.py`, out of this entry's scope — not investigated
+  or fixed here, flagged for whoever owns that component). Not yet
+  assessable: whether the mechanical scope/rank/cluster output actually
+  reduces a human's real triage effort as intended against the real, full
+  ~35,729-advisory corpus — that can only be judged once someone runs
+  `refresh` for real and does the step-6 triage it's meant to support.
+
 ### CC-LAB-0018 — T-LAB0.3: real covering-array resolver over `covertable` (2026-09-21)
 *(Numbered `CC-LAB-0018` rather than `CC-LAB-0017` at merge time — this lane's worktree
 was based on a commit that predated `CC-LAB-0017` (SSTImap support) landing, so it

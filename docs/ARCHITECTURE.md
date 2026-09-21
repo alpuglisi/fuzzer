@@ -167,9 +167,14 @@ tracked in the requirements files, not here.
   `lab/patterns/` scaffold (3 example cards, not the full corpus). A real
   covering-array resolver (`fuzzlab/labgen/resolver.py`, over `covertable`
   3.2.0, pairwise/mixed-strength/constrained) is also built (`CC-LAB-0018`)
-  but not yet wired into manifest loading. The per-stack module-composition
-  emitter and a manifest reproducing today's PHP app byte-identically remain
-  planned.
+  but not yet wired into manifest loading. A mechanical pull/index/scope/
+  rank/cluster tool for the pattern-provenance corpus
+  (`fuzzlab/tools/pattern_corpus_sourcing.py`, over `github/advisory-database`
+  via git — `CC-LAB-0019`) produces a candidate list for human triage; it
+  never authors a card and never writes `lab/patterns/cards/` or
+  `provenance.yaml`, so the corpus itself is still only the 3 scaffold cards.
+  The per-stack module-composition emitter and a manifest reproducing
+  today's PHP app byte-identically remain planned.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, et al. — see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not
   hand-authored exploit code, for every class with a mature oracle; the three
