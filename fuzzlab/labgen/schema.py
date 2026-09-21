@@ -106,6 +106,61 @@ class Pipeline:
         return list(self.ops)
 
 
+#: Allowed values for `ParamSpec.location`/`.encoding` (§3.4, L-P2.4). Kept as
+#: plain validated strings, not an importable enum shared with
+#: `fuzzlab.labgen.oracle_wrapper`: that module is deliberately independent of
+#: any manifest/schema type (see its module docstring), so this schema owns
+#: its own copy of the allowed vocabulary rather than creating a coupling
+#: that module explicitly disclaims.
+PARAM_LOCATIONS = ("query", "body", "header", "cookie", "json")
+PARAM_ENCODINGS = ("raw", "url_encoded", "double_url_encoded", "base64")
+
+
+@dataclass(frozen=True)
+class ParamSpec:
+    """Where the injection parameter lives and how its value is encoded on
+    the wire (§3.4, L-P2.4).
+
+    Deliberately a `Cell`-level field, not folded into `SinkContext`:
+    `SinkContext` (family + `required_neutralizations`) is the
+    verdict-derivation contract -- what a pipeline must neutralize for a
+    cell to be SECURE, consumed directly by `fuzzlab.labgen.verdict`.
+    Parameter location/encoding never changes that contract -- the same
+    `(transform, sink_context)` pair still derives the same verdict whether
+    the tainted value arrived via a raw query string or a base64-encoded
+    cookie. It changes only how the cell is *rendered into a request* and
+    how the build-time oracle must construct its confirmation request --
+    render/tracking metadata, the same category the plan's §3.3 (a proposed
+    `sink_endpoint` field, lane L-P2.3, separately tracked) is framed as, not
+    a verdict input.
+    """
+
+    location: str = "query"
+    encoding: str = "raw"
+
+    def __post_init__(self) -> None:
+        if self.location not in PARAM_LOCATIONS:
+            raise ManifestError(
+                f"param.location must be one of {PARAM_LOCATIONS}, got {self.location!r}"
+            )
+        if self.encoding not in PARAM_ENCODINGS:
+            raise ManifestError(
+                f"param.encoding must be one of {PARAM_ENCODINGS}, got {self.encoding!r}"
+            )
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "ParamSpec":
+        if data is None:
+            return cls()
+        return cls(
+            location=data.get("location", "query"),
+            encoding=data.get("encoding", "raw"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"location": self.location, "encoding": self.encoding}
+
+
 @dataclass(frozen=True)
 class Route:
     method: str
@@ -138,7 +193,8 @@ class Cell:
     cells (e.g. a profile-bio write endpoint whose payload executes on a
     separate profile-view page). Render/tracking metadata only, like
     ``identity.py``'s data -- ``fuzzlab.labgen.verdict`` never reads it (see
-    docs/LAB_IMPLEMENTATION_PLAN.md §3.3 / CC-LAB-0029)."""
+    docs/LAB_IMPLEMENTATION_PLAN.md §3.3 / CC-LAB-0038)."""
+    param: ParamSpec = ParamSpec()
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Cell":
@@ -151,6 +207,7 @@ class Cell:
             sink_context=SinkContext.from_dict(data["sink_context"]),
             transform=Pipeline.from_list(data.get("transform", [])),
             sink_endpoint=Route.from_dict(sink_endpoint_data) if sink_endpoint_data else None,
+            param=ParamSpec.from_dict(data.get("param")),
         )
 
 

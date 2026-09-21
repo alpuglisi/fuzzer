@@ -921,6 +921,106 @@ closing this entry's own flagged schema gap.)*
   present before this change too, outside LAB/this lane's scope). Full suite re-run
   after the merge-time schema fix; see the merge commit for the exact count.
 
+### CC-LAB-0039 — Parameter location/encoding axis (§3.4, lane L-P2.4) (2026-09-21)
+*(Numbered `CC-LAB-0039` rather than `CC-LAB-0029` at merge time — this lane
+independently claimed `CC-LAB-0029` too, colliding with nine other concurrently
+landed lanes (L-P2.1, L-P0.9, L-P1.1, L-P1.2a, L-P2.2, L-P0.10, L-P3.1, L-P3.2,
+L-P3.3a). Reconciled per this project's standing multi-lane policy: keep this
+entry's full content, renumber it to the next free number, fix its own internal
+`FR-LAB` cross-reference (see below, now `FR-LAB-37`). `schema.py`'s merge with
+lane L-P2.3 (also merged first, also touching `Cell`) was a clean, non-overlapping
+field addition — both `sink_endpoint` and `param` now coexist on `Cell` exactly as
+each lane designed them.)*
+- Change: added the parameter location/encoding axis from
+  `docs/LAB_IMPLEMENTATION_PLAN.md` §3.4:
+  - `fuzzlab.labgen.schema.ParamSpec` (new frozen dataclass: `location` in
+    `query | body | header | cookie | json`, `encoding` in `raw |
+    url_encoded | double_url_encoded | base64`, both validated in
+    `__post_init__`/`from_dict`) and a new optional `Cell.param: ParamSpec`
+    field (defaults to `query`/`raw` so every existing cell, which omits the
+    field, keeps meaning exactly what it meant). Put on `Cell`, not
+    `SinkContext` -- see the design-decision note below.
+  - `lab/schemas/manifest.schema.json`: a matching optional `param` object
+    on `$defs/cell` (`additionalProperties: false`, both sub-fields as JSON
+    Schema `enum`s), so a manifest can declare the axis and invalid values
+    are rejected at validation time, not silently accepted.
+  - `fuzzlab.labgen.oracle_wrapper`: closed two real gaps found while
+    checking the existing header/cookie/encoding handling per the task
+    instructions (`ParamLocation`/`_resolve_session`/`_build_sstimap_argv`):
+    (1) `ParamLocation` only had `QUERY`/`BODY`/`HEADER` -- `COOKIE`/`JSON`
+    added, with new `_mark_cookie_param`/`_mark_json_param` marking helpers
+    (SSTImap's own `-P` sweep already supports a `C` category per Spike
+    003's `QBHC`; only the wrapper's marker-substitution side was missing).
+    JSON has no SSTImap-native `-P` category, so it shares `BODY`'s `B` flag
+    and is marked via the new JSON-aware helper instead of the
+    form-urlencoded one. (2) no encoding support existed at all -- new
+    `Encoding` enum (`RAW | URL_ENCODED | DOUBLE_URL_ENCODED | BASE64`) and
+    `_encode_marker()`, wired into `ServerSideTemplateInjectionOracleRequest`
+    (new `encoding` field) and `_build_sstimap_argv`, which now encodes the
+    marker before substitution and passes the *encoded* form to `-M` so
+    SSTImap looks for what actually travels on the wire. Deliberately not
+    added to `SqlInjectionOracleRequest`/`CommandInjectionOracleRequest`:
+    those two delegate parameter-selection to sqlmap's/commix's own `-p`
+    flag rather than the wrapper's own marker mechanism, so `param_location`
+    there is already vestigial/documentation-only and an `encoding` field
+    would be an unwired phantom axis value.
+  - Design decision (per the task's own stated heuristic): `SinkContext` is
+    the verdict-derivation contract (`family` + `required_neutralizations`,
+    consumed directly by `fuzzlab.labgen.verdict.verdict()`) -- the same
+    `(transform, sink_context)` pair must always derive the same verdict.
+    Parameter location/encoding never changes that contract: a cookie vs. a
+    query parameter, or a base64- vs. raw-encoded value, doesn't change what
+    a pipeline must neutralize for the *generated code* to be SECURE. It
+    changes only how the cell is rendered into a request and how the
+    build-time oracle must construct its confirmation request -- the same
+    "render/tracking metadata, not a verdict input" category §3.3's
+    `sink_endpoint` is in. Put on `Cell`, matching that precedent.
+  - Resolver integration (`fuzzlab.labgen.resolver`'s axis-range/manifest
+    mechanism, lane L-P1.1) was **not yet landed** in this worktree at
+    implementation time (`resolver.py` only has the standalone covering-array
+    `expand()` utility; no per-cell axis-range wiring into manifest loading
+    exists yet) -- deferred per the task's own explicit fallback: a manifest
+    can still list `param.location`/`param.encoding` explicitly per cell
+    today, which is exactly what `ParamSpec`/the schema change support.
+    Revisit wiring `param` as a resolver axis once L-P1.1 merges.
+- Impact (other components / project): `fuzzlab.labgen.schema` (new field,
+  additive/backward-compatible -- every existing manifest and test that
+  omits `param` is unaffected) and `fuzzlab.labgen.oracle_wrapper` (new enum
+  values + one new dataclass field, both additive; no existing call site's
+  behavior changes since `encoding` defaults to `RAW` and the new
+  `ParamLocation` members are opt-in). No other component reads `Cell.param`
+  yet (the `php_current` emitter is untouched by this change, per this
+  lane's scope discipline -- wiring `param` into code rendering is future
+  work, tracked implicitly by this entry, not claimed as done here).
+- Risk (level; mitigation or accepted-risk justification): low. Both changed
+  files are touched by concurrent lanes (L-P2.3/L-P2.5 on `schema.py` per
+  the plan's own note in §7); the diff is a minimal, additive field (one new
+  dataclass, one new optional `Cell`/JSON-Schema field) rather than a
+  restructuring, to keep merges easy as instructed. The JSON-schema-level
+  `enum` constraints fail closed on an invalid value rather than silently
+  accepting it.
+- Deliverables:
+  - [x] `ParamSpec` dataclass + `Cell.param` field, `schema.py` — done
+  - [x] `lab/schemas/manifest.schema.json` optional `param` property — done
+  - [x] `oracle_wrapper.py` cookie/JSON marking + encoding gap-fill — done
+  - [x] `docs/components/01-target-lab/requirements.md` `FR-LAB-37` — done
+  - [x] Tests: `tests/test_labgen_param_axis.py` (32 new tests: schema
+        validation/round-trip for all 5x4 location/encoding combinations,
+        verdict-orthogonality, and oracle-wrapper cookie/JSON marking +
+        all three non-raw encodings against a fake runner) — done, all
+        passing; full suite run (`python -m pytest -q`): 901 passed, 8
+        skipped, 2 pre-existing failures in `tests/test_mutation_operators.py`
+        unrelated to this change (confirmed via `git stash` bisection: fail
+        identically with this change reverted; a different lane's concern,
+        not fixed here to stay in scope).
+  - [x] CHANGELOG.md line — done
+- Effectiveness (assessed 2026-09-21): the new axis validates end-to-end
+  (manifest dict -> `Cell.param` -> unaffected verdict derivation) and the
+  oracle-wrapper gap-fill is exercised against a fake runner for a
+  cookie-located, base64-encoded cell exactly as the task specified,
+  confirming both `confirmed_vulnerable` and `confirmed_secure` outcomes
+  still classify correctly through the new marking/encoding path.
+
 ### CC-LAB-0028 — Nuclei path-traversal/LFI oracle wrapper (Addendum E, Spike 004) (2026-09-21)
 *(Numbered `CC-LAB-0028` rather than `CC-LAB-0017` at merge time — this lane's worktree
 diverged onto a stale, unrelated branch lineage before starting, self-diagnosed and
