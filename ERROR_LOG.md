@@ -14,6 +14,22 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — `labctl.sh up` failed: no Compose provider
+
+- **Symptom:** on a Fedora host, `./labctl.sh up` dumped
+  `Error: looking up compose provider failed / 7 errors occurred: ... docker-compose
+  ... podman-compose ... executable file not found`.
+- **Root cause:** the host had the `docker`/`podman` CLI (podman-docker) but no
+  Compose provider package installed; `labctl.sh` assumed `docker` existing implied
+  `docker compose` worked, so it invoked a provider that was not present.
+- **Remediation (environment):** install a provider —
+  `sudo dnf install -y podman-compose` (or `docker-compose-plugin`).
+- **Remediation (repo hardening, PA-0004):** `labctl.sh` now probes each candidate
+  (`docker compose`, `podman compose`, `docker-compose`, `podman-compose`) and uses
+  the first that runs, and prints an install hint if none is found instead of the raw
+  provider dump. Lab README + on-host runbook note the prerequisite.
+- **Status:** Environment (install a provider); repo hardened. See CC-LAB-0005.
+
 ## 2026-09-21 — App DB config defaulted to `root` (repo default fixed)
 
 - **Symptom:** `config.php` defaulted the DB user to `root`/empty; with no PFF_DB_*

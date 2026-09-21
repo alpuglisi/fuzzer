@@ -18,13 +18,22 @@ live work) and the phase plans.
    git pull            # main, includes the config.php pff-user fix (BUG-0004)
    ```
 
-2. **Start the containerized lab** (Docker or Podman):
+2. **Start the containerized lab** (Docker or Podman). A Compose **provider** must be
+   installed — the `docker`/`podman` CLI alone is not enough. On Fedora
+   (podman-docker):
+   ```bash
+   sudo dnf install -y podman-compose        # or, on Docker Engine: docker-compose-plugin
+   ```
+   Then:
    ```bash
    cd lab
    cp .env.example .env          # local lab credentials (not real secrets)
    ./labctl.sh up                # build + start; serves http://127.0.0.1:8080/
    ./labctl.sh status            # wait for the db healthcheck to report healthy
    ```
+   (`labctl.sh` auto-selects `docker compose` / `podman compose` / `docker-compose` /
+   `podman-compose` — the first that works — and prints an install hint if none is
+   found.)
 
 3. **Verify the DB connection** (this is what BUG-0004 fixed — the app connects as the
    least-privilege `pff` user, not `root`):

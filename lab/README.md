@@ -19,8 +19,18 @@ cp .env.example .env          # local lab credentials (not real secrets)
 ./labctl.sh down              # stop
 ```
 
-`docker compose` and `podman compose` (Fedora-native) both work against
-`compose.yaml`.
+**Prerequisite — a Compose provider.** `docker compose`, `podman compose`,
+`docker-compose`, or `podman-compose` all work against `compose.yaml`, and
+`labctl.sh` uses the first one it finds. A bare `docker`/`podman` CLI is **not**
+enough — the compose provider is a separate package. On Fedora (podman-docker):
+
+```bash
+sudo dnf install -y podman-compose            # Podman (Fedora-native)
+# or, on Docker Engine:  sudo dnf install -y docker-compose-plugin
+```
+
+If none is installed, `labctl.sh` stops with this instruction instead of a raw
+"looking up compose provider failed" dump.
 
 ## What it does
 

@@ -14,13 +14,22 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# Prefer docker compose; fall back to podman compose.
-if command -v docker >/dev/null 2>&1; then
-  COMPOSE=(docker compose)
-elif command -v podman >/dev/null 2>&1; then
-  COMPOSE=(podman compose)
-else
-  echo "need docker or podman" >&2; exit 1
+# Pick a *working* compose provider. A `docker`/`podman` CLI existing does NOT mean
+# a compose provider is installed (e.g. podman-docker without podman-compose), so
+# probe each candidate's `version` and use the first that actually runs.
+COMPOSE=()
+for cand in "docker compose" "podman compose" "docker-compose" "podman-compose"; do
+  if $cand version >/dev/null 2>&1; then
+    read -r -a COMPOSE <<< "$cand"
+    break
+  fi
+done
+if [ ${#COMPOSE[@]} -eq 0 ]; then
+  echo "No working Compose provider found (the docker/podman CLI alone is not enough)." >&2
+  echo "Install one, e.g. on Fedora:" >&2
+  echo "  sudo dnf install -y podman-compose        # Podman (Fedora-native)" >&2
+  echo "  # or the Docker Compose plugin:  sudo dnf install -y docker-compose-plugin" >&2
+  exit 1
 fi
 
 PORT="${PFF_WEB_PORT:-8080}"

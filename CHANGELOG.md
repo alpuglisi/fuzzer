@@ -13,6 +13,12 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Lab tooling: `labctl.sh` now probes for a *working* Compose provider
+  (`docker compose` / `podman compose` / `docker-compose` / `podman-compose`) instead
+  of assuming a `docker`/`podman` CLI implies one, and prints an install hint if none
+  is found — fixes a "looking up compose provider failed" dump on a Fedora host with
+  podman-docker but no compose package. Documented the prerequisite in the lab README
+  and on-host runbook. Change-control: CC-LAB-0005.
 - Docs: added `docs/ON_HOST_RUNBOOK.md` — step-by-step for running the toolkit on a
   host with a container daemon: bring up the lab and verify the DB fix, install the
   toolkit, Phase 1 authenticated per-identity crawl→audit→fuzz (+ two-lab), Phase 2

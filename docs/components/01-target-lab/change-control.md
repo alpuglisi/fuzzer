@@ -3,6 +3,28 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0005 — `labctl.sh` probes for a working Compose provider (2026-09-21)
+- Change: `labctl.sh` no longer assumes a `docker`/`podman` CLI implies a Compose
+  provider. It probes `docker compose`, `podman compose`, `docker-compose`, and
+  `podman-compose` (in that order) via `<cand> version` and uses the first that runs;
+  if none works it exits with an install hint (`sudo dnf install -y podman-compose`
+  or `docker-compose-plugin`) instead of the raw "looking up compose provider failed"
+  dump. Lab README and `docs/ON_HOST_RUNBOOK.md` note the provider prerequisite.
+- Impact (other components / project): fixes a confusing bring-up failure on a Fedora
+  host that had podman-docker but no compose provider; unblocks the on-host lab. No
+  change to the compose stack itself.
+- Risk (level; mitigation): low — a shell provider-detection change only. Applies
+  PA-0004 (fix the repo, not just the environment, after an environment-only
+  incident). Verified by inspection here (this sandbox has no compose provider to run
+  it against); to be exercised on the host.
+- Deliverables:
+  - [x] Provider probing + clear install hint in `labctl.sh` — done.
+  - [x] Prerequisite documented (lab README, on-host runbook) — done.
+  - [ ] Confirmed `up`/`status`/`reset` on the host with a provider installed — on-host.
+- Effectiveness (assessed 2026-09-21): expected effective — the script now selects an
+  available provider and gives an actionable message when none exists; live bring-up
+  pending on the host.
+
 ### CC-LAB-0004 — App DB defaults to the `pff` user, not `root` (BUG-0004) (2026-09-21)
 - Change: `puppy-fort-factory/config/config.php` now defaults `DB_USER`/`DB_PASS` to
   the dedicated lab application user (`pff` / `pff_lab_pw`) instead of `root` / empty.
