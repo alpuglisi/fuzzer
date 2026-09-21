@@ -126,9 +126,14 @@ not always all of them:
 
 The selection scopes three things together: the auditor's active rules (which
 candidates are emitted), the payload sources drawn from `references/`, and which
-`ConfirmationStrategy` classes the oracle runs. A target without ground truth
-(external lab / arbitrary target) cannot auto-derive, so it uses an explicit
-selection.
+`ConfirmationStrategy` classes the oracle runs.
+
+**No-ground-truth fail-safe (D15).** A target without ground truth (external lab /
+arbitrary target) cannot auto-derive. An automatic run against it therefore
+**requires an explicit category selection** — it never guesses and never runs all
+categories by default — **fails loudly** if none is given, runs **unscored** (the
+harness reports findings but no TP/FP/FN, since there is nothing to score against),
+and keeps every safety gate on (destructive off, scope-enforced, authorized).
 
 ## Design notes
 

@@ -237,6 +237,27 @@ without ground truth cannot auto-derive; there the categories must be given, i.e
 the manual-style selection applies.) This does not weaken no-auto-run (D11): the
 user still chooses automatic mode before anything runs.
 
+### D15 — No-ground-truth fail-safe for automatic runs
+
+An automatic run against a target with **no ground-truth contract** (an external
+validation lab, or any target whose vulnerabilities we do not know) must fail
+safe — it never guesses and never blasts everything:
+
+- **No auto-derivation, no "test everything" default.** With no ground truth there
+  is nothing to auto-select from, so the run **requires an explicit category
+  selection** (launcher selection / `--categories`). If none is given it **fails
+  loudly** with a clear message rather than silently doing nothing or testing all
+  categories.
+- **Unscored (exploration) posture.** Without ground truth the integration harness
+  cannot compute TP/FP/TN/FN, so it **reports findings without a benchmark score**
+  and marks the run "no ground truth — unscored." It never fabricates a score.
+- **All safety gates stay on.** Destructive-payload classes remain off by default,
+  scope is enforced (lab-only, in-scope hosts only), and `--authorized` is still
+  required. No-auto-run (D11) is unchanged.
+
+This is the counterpart to D14: D14 covers the known-lab and manual cases; D15
+covers the unknown-target automatic case.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **WAF in the lab** — decide before the mutation engine (Phase 8); without one,
@@ -280,6 +301,11 @@ user still chooses automatic mode before anything runs.
   tools run in sequence) or manual (the tools are made available for hand-driven
   use) — and nothing is sent to the target until the user chooses automatic mode
   or invokes a tool by hand.
+- **Fail safe without ground truth.** An automatic run against a target with no
+  ground-truth contract requires an explicit category selection (never
+  auto-guesses or tests everything), runs unscored, and keeps every safety gate on
+  (destructive off, scope-enforced, authorized). It fails loudly if categories are
+  not specified. (D15)
 - **Bug investigation + preventive actions.** Every bug discovered in the code
   gets a bug investigation document under `docs/bugs/` (description, where
   encountered, what failed, what the bug was, a root-cause analysis, the

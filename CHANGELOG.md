@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Planning: added a **no-ground-truth fail-safe** for automatic runs (D15) — an
+  automatic test against a validation lab / target whose vulnerabilities we don't
+  know must not auto-select or test everything: it requires an explicit category
+  selection, fails loudly if none is given, runs unscored (findings but no
+  TP/FP/FN), and keeps all safety gates on (destructive off, scope-enforced,
+  authorized). Recorded as D15 + a cross-cutting safety principle in
+  `DECISIONS_AND_ROADMAP.md` and `ARCHITECTURE.md`, the UI spec (FR-UI-nogt), the
+  oracle doc, and `PHASE_2_PLAN.md` (T2.10). Change-control: CC-UI-0006.
 - Planning: added **injection-category selection by run mode** (D14) — automatic
   runs (against our lab) auto-select the categories from the lab's ground truth;
   manual runs let the user select which vulnerabilities/categories to test (launcher

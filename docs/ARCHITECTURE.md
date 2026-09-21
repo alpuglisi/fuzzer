@@ -343,9 +343,12 @@ replays and edits, including a raw byte path for malformed-traffic study.
   assert-N-known-vulns integration suite, and oracle precision tests.
 - **Security and safety:** credentials in the OS keyring, redaction on write,
   automatic scope enforcement, a default-off destructive-payload gate, a lab-only
-  posture throughout, and **no auto-run** — bring-up presents a launcher and no
+  posture throughout, **no auto-run** — bring-up presents a launcher and no
   tool sends traffic to the container until the user selects automatic mode or
-  runs a tool by hand.
+  runs a tool by hand — and a **no-ground-truth fail-safe** (D15): an automatic run
+  against a target we have no ground truth for requires an explicit category
+  selection (never guesses or tests everything), runs unscored, keeps every safety
+  gate on, and fails loudly if categories are not given.
 
 ## Build-status snapshot
 

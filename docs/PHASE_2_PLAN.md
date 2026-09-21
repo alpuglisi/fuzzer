@@ -113,6 +113,16 @@ classes run.
 - **Accept:** an automatic lab run tests exactly the ground-truth categories; a
   manual run with `--categories` tests only the chosen categories and nothing else.
 
+### T2.10 — No-ground-truth fail-safe (D15)
+An automatic run against a target with no ground-truth contract must fail safe: no
+auto-derivation and no test-everything default; require an explicit category
+selection; **fail loudly** if none is given; run **unscored** (harness reports
+findings but no TP/FP/FN); keep destructive off, scope enforced, `--authorized`
+required.
+- **Accept:** pointing an automatic run at a no-ground-truth target without
+  `--categories` fails loudly (no traffic); with `--categories` it runs unscored,
+  tests only those categories, and destructive stays off.
+
 ## Exit criterion
 
 The class-pluggable deterministic oracle confirms **all** the lab's known

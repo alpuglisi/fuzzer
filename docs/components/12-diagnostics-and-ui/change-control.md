@@ -3,6 +3,28 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0006 — No-ground-truth fail-safe for automatic runs (spec) (2026-09-21)
+- Change: added FR-UI-nogt (D15). An automatic run against a target with no
+  ground-truth contract must not auto-select or test everything; it requires an
+  explicit category selection, fails loudly if none is given, runs unscored
+  (findings shown, no TP/FP/FN), and keeps all safety gates on. Complements D14
+  (which covers the known-lab and manual cases). Spec only — no code.
+- Impact (other components / project): governs automatic runs on external
+  validation labs / unknown targets; the integration harness must skip scoring
+  without ground truth (and never fabricate a score); ties to D10 external
+  validation. Recorded as D15 + a cross-cutting safety principle in
+  `DECISIONS_AND_ROADMAP.md` and `ARCHITECTURE.md`; `oracle-confirmation.md` and
+  `PHASE_2_PLAN.md` (T2.10) updated.
+- Risk (level; mitigation): this change reduces risk — it prevents a surprise
+  "test everything" or a silent no-op against an unknown target. Residual risk is a
+  missing/instructive error message; mitigated by fail-loud with clear guidance.
+- Deliverables:
+  - [x] FR-UI-nogt + D15 + cross-cutting principle recorded — done.
+  - [ ] Implement: detect no ground truth; require categories; unscored run; gates — todo (Phase 2, T2.10).
+- Effectiveness (assessed or pending): pending — spec. Judged when an automatic run
+  on a no-ground-truth target fails loudly without `--categories` and runs unscored
+  with them, gates on.
+
 ### CC-UI-0005 — Injection-category selection by run mode (spec) (2026-09-21)
 - Change: added FR-UI-categories (D14) — automatic mode auto-selects injection
   categories from the lab's ground truth; manual mode presents a category selector

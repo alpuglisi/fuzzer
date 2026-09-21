@@ -37,6 +37,11 @@ bugs — the research-platform diagnostics of decision D2.
     only selected categories run, backed by a `--categories` flag on the tools.
   The selection scopes the auditor's rules, payload sources, and which oracle
   strategies run.
+- **FR-UI-nogt** No-ground-truth fail-safe (D15): an automatic run against a target
+  with no ground-truth contract must **not** auto-select or test-everything — it
+  requires an explicit category selection, **fails loudly** if none is given, runs
+  **unscored** (findings shown, no TP/FP/FN), and keeps all safety gates on
+  (destructive off, scope-enforced, authorized).
 - **FR-UI-1** A local web dashboard showing live interception, in-progress runs,
   and results in the browser.
 - **FR-UI-cli** Retain a plain CLI entry point for each tool (automation,
