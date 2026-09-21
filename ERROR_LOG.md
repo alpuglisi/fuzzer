@@ -14,6 +14,19 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — Oracle stored findings with full URLs (path-form mismatch)
+
+- **Symptom:** the T2.8 scored pipeline reported `tp=0, fp=3` — every genuine,
+  oracle-confirmed vulnerability counted as a false alarm.
+- **Root cause:** `Oracle._write_finding` stored `candidate.url` verbatim
+  (`http://localhost/product.php`) while ground truth and every other stored URL
+  use path form (`/product.php`); the normalization convention lived only as a
+  private helper in `store_adapter`, invisible to the oracle.
+- **Remediation:** added `fuzzlab/core/urls.py::to_path` as the single home of the
+  convention; the oracle and `store_adapter` both call it. Full RCA in
+  `docs/bugs/BUG-0003-oracle-stored-full-urls-not-path-form.md`; rule PA-0003.
+- **Status:** Fixed (this commit).
+
 ## 2026-09-18 — `build_sql_db.py` / auditor coverage
 
 - **Symptom:** the auditor implemented 28 rules but only ever ran 7; all findings

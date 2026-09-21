@@ -147,3 +147,12 @@ def default_strategies() -> list[ConfirmationStrategy]:
     """Cheapest/strongest first: error signature, boolean, timing, then XSS."""
     return [SqliErrorStrategy(), SqliBooleanStrategy(), SqliTimingStrategy(),
             ReflectedXssStrategy()]
+
+
+# Reference-style category -> the oracle vuln_class we currently have a strategy for.
+# Categories absent here have no confirmer yet (candidate emitted, not confirmed).
+_CATEGORY_TO_CLASS = {"sql-injection": "sqli", "xss": "xss-reflected"}
+
+
+def category_to_oracle_class(category: str) -> str | None:
+    return _CATEGORY_TO_CLASS.get(category)

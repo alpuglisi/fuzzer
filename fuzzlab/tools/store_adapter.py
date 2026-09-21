@@ -25,15 +25,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlparse
 
 from fuzzlab.core.store import Store
-
-
-def _path(url: str) -> str:
-    """Normalize an absolute or relative URL to its path (leading slash)."""
-    parsed = urlparse(url)
-    path = parsed.path or "/"
-    if not path.startswith("/"):
-        path = "/" + path
-    return path
+from fuzzlab.core.urls import to_path
 
 
 def _upsert_endpoint(store: Store, run_id: int, url_path: str, method: str,
@@ -73,7 +65,7 @@ def import_spider(spider_db: str | Path, store: Store, run_id: int) -> dict[str,
         rows = []
     for row in rows:
         raw = row["url"]
-        path = _path(raw)
+        path = to_path(raw)
         source = row["source"] if "source" in row.keys() else "link"
         if (path, "GET") not in seen_pages:
             store.conn.execute(
@@ -113,7 +105,7 @@ def import_audit(audit_db: str | Path, store: Store, run_id: int) -> dict[str, i
     except sqlite3.Error:
         rows = []
     for row in rows:
-        path = _path(row["page_url"])
+        path = to_path(row["page_url"])
         endpoint_id = _upsert_endpoint(store, run_id, path, "GET", "audit")
         param_id = _get_parameter(store, run_id, endpoint_id, row["target_identifier"])
         evidence = {

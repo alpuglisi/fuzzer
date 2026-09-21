@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 
+from fuzzlab.core.urls import to_path
 from fuzzlab.oracle.probe import Candidate, Sender, Verdict
 from fuzzlab.oracle.strategies import ConfirmationStrategy, default_strategies
 
@@ -39,7 +40,7 @@ class Oracle:
             "INSERT INTO finding (run_id, vuln_class, label, confidence, evidence, "
             "url, method, param) VALUES (?,?,?,?,?,?,?,?)",
             (self.run_id, verdict.vuln_class, 1, verdict.mechanism,
-             json.dumps(verdict.evidence), candidate.url, candidate.method,
+             json.dumps(verdict.evidence), to_path(candidate.url), candidate.method,
              candidate.param),
         )
         self.store.conn.commit()

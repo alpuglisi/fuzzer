@@ -13,6 +13,21 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 2 build (T2.8): **automatic-mode pipeline wired end-to-end** (library
+  composition). Added `fuzzlab/harness/pipeline.py::run_pipeline` — one entry point
+  that runs an automatic run: dedup by template cluster (T2.6) → fingerprint the
+  target and record the `target` row (T2.5) → evaluate the rules engine scoped to the
+  run's categories, logging negatives (T2.3/D14/D15) → confirm each candidate with the
+  deterministic oracle (sole finding-writer) → score against ground truth only when
+  the plan is scored (D15) → record request-efficiency metrics. Fully testable with an
+  injected sender; the live crawler/auditor browser-fetch wiring is the remaining
+  on-host last mile. +3 tests (108/108 green). Change-control: CC-FUZZ-0008.
+- Bug fix (BUG-0003): the oracle stored `finding` URLs verbatim (full URLs) while
+  ground truth and every other stored URL use **path form**, so a scored pipeline run
+  counted every true finding as a false alarm (`tp=0, fp=3`). Centralized URL
+  normalization in `fuzzlab/core/urls.py::to_path` (the single home of the convention)
+  and call it at every finding writer; removed `store_adapter`'s duplicate helper.
+  Preventive rule PA-0003. Change-control: CC-CORE-0008.
 - Phase 2 build (T2.9/T2.10): **category selection + no-ground-truth fail-safe**
   decision logic. `core/runmode.py` `resolve_run` implements D14 (automatic against
   our lab auto-derives categories from ground truth and is scored; manual selects,

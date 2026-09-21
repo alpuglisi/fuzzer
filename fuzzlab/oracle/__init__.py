@@ -14,6 +14,7 @@ reflected-canary-in-executable-context (M5) for reflected XSS. Browser execution
 
 from fuzzlab.oracle.probe import Probe, Candidate, Verdict
 from fuzzlab.oracle.oracle import Oracle
-from fuzzlab.oracle.strategies import default_strategies
+from fuzzlab.oracle.strategies import category_to_oracle_class, default_strategies
 
-__all__ = ["Probe", "Candidate", "Verdict", "Oracle", "default_strategies"]
+__all__ = ["Probe", "Candidate", "Verdict", "Oracle", "default_strategies",
+           "category_to_oracle_class"]

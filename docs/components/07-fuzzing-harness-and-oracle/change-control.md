@@ -3,6 +3,42 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0008 — Automatic-mode pipeline wired end-to-end (Phase 2 T2.8) (2026-09-21)
+- Change: added `fuzzlab/harness/pipeline.py::run_pipeline`, the library-level
+  composition of an automatic run: dedup injection points by DOM-skeleton template
+  cluster (T2.6) → fingerprint the target from a baseline probe and record the
+  `target` row (T2.5) → evaluate the rules-as-data engine scoped to the `RunPlan`
+  categories, logging negatives (T2.3 / D14 / D15) → confirm each candidate with
+  the deterministic oracle (sole finding-writer) via
+  `oracle.category_to_oracle_class` → score against ground truth only when the plan
+  is scored (D15 fail-safe) → record request-efficiency metrics. Exported
+  `category_to_oracle_class` from `fuzzlab.oracle`. This completes the
+  "same wiring in the generalized harness / automatic pipeline" deliverable left
+  open in CC-FUZZ-0007. Fixed a path-form defect surfaced by the scored pipeline
+  (see Risk; BUG-0003 / CC-CORE-0008).
+- Impact (other components / project): gives the web UI / automatic-test path one
+  entry point that runs the whole Phase 2 loop with an injected sender (fully
+  testable offline). The live crawler/auditor browser-fetch edits that feed it real
+  pages/HTML remain the on-host last mile. Store schema unchanged.
+- Risk (level; mitigation): medium — composing five stages exposed a real
+  integration bug: the oracle stored findings with full URLs while ground truth is
+  keyed on path form, so a scored run reported `tp=0, fp=3`. Root-caused (BUG-0003),
+  fixed by centralizing URL normalization in `fuzzlab/core/urls.py::to_path`
+  (CC-CORE-0008) and calling it at every finding writer; preventive rule PA-0003.
+  Mitigated further by three pipeline tests (scored end-to-end with TP/FP checks;
+  unscored per D15; dedup collapses same-template pages).
+- Deliverables:
+  - [x] `run_pipeline` composing dedup→fingerprint→scoped-eval→confirm→score/metrics — done.
+  - [x] `category_to_oracle_class` exported and used to select confirmers — done.
+  - [x] Path-form fix + shared `to_path` (BUG-0003 / PA-0003) — done.
+  - [x] Tests (`tests/test_pipeline.py`: scored, unscored, dedup) — done.
+  - [ ] Wire `run_pipeline` into the live crawler/auditor browser-fetch loops and
+    measure request reduction against the running lab — todo (on-host last mile).
+- Effectiveness (assessed 2026-09-21): effective in tests — the pipeline produces
+  three oracle findings on the lab fixture, the harness scores them TP with 0 FP
+  (after the path-form fix), negatives are logged, and unscored runs report findings
+  without TP/FP/FN. Live confirmation pending a lab. Suite 108/108.
+
 ### CC-FUZZ-0007 — Oracle wired in as the sole finding-writer (Phase 2) (2026-09-21)
 - Change: routed confirmation through the oracle. Added `fuzzlab/tools/probesender.py`
   (`SeamProbeSender` authenticated / `RequestsProbeSender` standalone; `make_probe_sender`)

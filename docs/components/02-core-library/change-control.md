@@ -3,6 +3,27 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0008 — Single home for URL path-normalization (`urls.to_path`) (2026-09-21)
+- Change: added `fuzzlab/core/urls.py::to_path(url)` — the one shared function that
+  normalizes a result URL to path form (`/product.php`), the convention every
+  stored, ground-truth-cross-referenced URL must follow. The oracle's finding
+  writer and `tools/store_adapter` (which had a private `_path` duplicate) both now
+  call it; the duplicate is removed.
+- Impact (other components / project): fixes BUG-0003 (the oracle stored full URLs,
+  so scored pipeline runs reported every true finding as a false alarm). Any future
+  writer of a cross-referenced URL imports `to_path` rather than re-implementing the
+  rule (PA-0003). No schema change; behavior change is that oracle findings are now
+  stored in path form like every other URL.
+- Risk (level; mitigation): low — a pure, well-tested normalization helper.
+  Mitigated by the pipeline tests (scored TP/FP now correct) and the existing
+  store-adapter/harness tests (unchanged, still green). Suite 108/108.
+- Deliverables:
+  - [x] `core/urls.py::to_path` with the convention documented in-module — done.
+  - [x] Oracle + store_adapter call it; local duplicate removed — done.
+  - [x] BUG-0003 investigation + PA-0003 recorded — done.
+- Effectiveness (assessed 2026-09-21): effective — the previously-failing scored
+  pipeline test passes and no writer stores a verbatim URL for cross-referencing.
+
 ### CC-CORE-0007 — Run-mode category resolver (D14/D15) (2026-09-21)
 - Change: added `core/runmode.py` — the pure decision logic for category selection
   and the no-ground-truth fail-safe. `resolve_run(mode, ...)` returns a `RunPlan`

@@ -14,3 +14,9 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   codebase for existing instances of that bug class and remediate them (or record
   why not) — do not fix only the instance that triggered the investigation. (from
   BUG-0002)
+- **PA-0003** — A storage or serialization convention that must hold across more
+  than one writer lives in exactly one shared function that every writer calls at
+  the write site — not as a per-writer private helper, and not as a convention
+  stated only in prose. New writers of the same column/field go through that shared
+  function (e.g. result URLs are stored in path form via `fuzzlab.core.urls.to_path`).
+  (from BUG-0003)

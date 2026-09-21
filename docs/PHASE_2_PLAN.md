@@ -50,9 +50,19 @@ Build started. Done so far:
   known_categories()` supplies the selectable set. Fail-closed on unknown
   categories/modes.
 
-Next (T2.8, live): wire `resolve_run` into the launcher/harness (scope the tools;
-scored vs unscored) and the fewer-requests trio + rules engine into the crawler/
-auditor loops, then measure request reduction against the lab. 105/105 tests green.
+- **T2.8** (library composition) — `fuzzlab/harness/pipeline.py::run_pipeline` ties
+  the phase together for an automatic run: dedup (T2.6) → fingerprint→`target` row
+  (T2.5) → scoped rules-eval with negatives (T2.3) → oracle confirm (sole
+  finding-writer) → score only when the `RunPlan` is scored (D15) → request-efficiency
+  metrics. Fully testable with an injected sender (`tests/test_pipeline.py`). Wiring
+  this into the *live* crawler/auditor browser-fetch loops and measuring request
+  reduction against the running lab is the remaining on-host last mile. This is also
+  where BUG-0003 surfaced (oracle stored full URLs vs path-form ground truth); fixed
+  via `core/urls.to_path` (CC-CORE-0008, PA-0003).
+
+Next (T2.8, live): wire `run_pipeline` into the live crawler/auditor browser-fetch
+loops (real pages/HTML) and measure request reduction against the lab. 108/108
+tests green.
 
 ## Principles (this phase)
 
@@ -141,6 +151,11 @@ Phase-1 baseline run.
 - **Accept:** a full run records requests-per-finding and shows **measurably fewer
   requests** than the Phase-1 baseline for the same findings, and the `candidate`/
   `attempt` tables contain negatives.
+- **Status:** library composition **done** — `run_pipeline` records
+  `pipeline_requests`/`pipeline_requests_per_finding` in `run_metrics` (when a budget
+  is supplied) and the `evaluation`/`candidate` tables carry negatives; verified in
+  `tests/test_pipeline.py`. The measurably-fewer-requests comparison is a **live**
+  measurement against the running lab (on-host), still pending.
 
 ### T2.9 — Injection-category selection by run mode (D14)
 Scope which categories run by launcher mode: **automatic** (against our lab)
