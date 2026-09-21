@@ -14,6 +14,16 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- LAB: built T-LAB0.9, the regression/additive-only build gate
+  (`fuzzlab.labgen.regression_gate.check_no_regression`) that diffs a candidate
+  ground-truth snapshot against the hand-authored `lab/ground-truth/` by case ID and
+  fails loud on any missing case, changed page, or changed verdict — the mechanical
+  enforcement of "never reduce functionality" — plus, per `CR-LAB-0001` Addendum B, the
+  `primary_endpoint`/`primary_role`/`related_endpoints`/`flow_variant` multi-artifact
+  ground-truth fields on `fuzzlab.labels.contract.Case`, its JSON Schema, and
+  `expectedresults.csv` (all additive/defaulted; a FUZZ-consumer sweep across
+  `fuzzlab/harness/` and `fuzzlab/greybox/` done first, per plan, found no consumer
+  needed changes). See `docs/components/01-target-lab/change-control.md` `CC-LAB-0030`.
 - LAB: added `lab/identities/identities.yaml` (identity/ownership graph — named test
   identities, resource ownership, and binary `allowed|denied` authz expectations,
   D20/CR-LAB-0001 §8), its JSON Schema (`lab/schemas/identities.schema.json`), and a

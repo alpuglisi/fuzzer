@@ -31,7 +31,32 @@
         "expected_vulnerable": { "type": "boolean" },
         "rendering": { "enum": ["server", "js", "server-json"] },
         "source_url": { "type": "string" },
-        "notes": { "type": "string" }
+        "notes": { "type": "string" },
+        "primary_endpoint": {
+          "type": "string",
+          "description": "The location where the untrusted value reaches the dangerous operation (CR-LAB-0001 Addendum B tie-break: where it's used, never where it's set). Optional; a single-location case has no need of it beyond `url`."
+        },
+        "primary_role": {
+          "enum": ["source", "propagator", "sanitizer", "sink"],
+          "description": "Role of `primary_endpoint` in the flow (Juliet-style)."
+        },
+        "related_endpoints": {
+          "type": "array",
+          "description": "Other locations in this case's flow, beyond the primary one (SARIF relatedLocations shape). Empty/absent for a single-location case.",
+          "items": {
+            "type": "object",
+            "required": ["endpoint", "role"],
+            "additionalProperties": false,
+            "properties": {
+              "endpoint": { "type": "string" },
+              "role": { "enum": ["source", "propagator", "sanitizer", "sink"] }
+            }
+          }
+        },
+        "flow_variant": {
+          "enum": ["direct", "same_file_helper", "cross_file", "stored_second_order", "cross_service"],
+          "description": "How far the flow travels between source and sink (Juliet naming). Defaults to 'direct' when absent."
+        }
       }
     }
   }

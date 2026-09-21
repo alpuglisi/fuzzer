@@ -314,6 +314,28 @@ and measured. Authorized, lab-only.
   signal). XXE, open redirect, and known-CVE templates remain unintegrated — a separate,
   larger undertaking. (`CR-LAB-0001` tool-mapping table,
   `docs/spikes/SPIKE-004-nuclei-vs-dvwa.md`, `CC-LAB-0028`)
+- **FR-LAB-28** (Lab track, T-LAB0.9, `CR-LAB-0001` Addendum B) A permanent
+  regression/additive-only build gate, `fuzzlab.labgen.regression_gate`, diffs a
+  candidate ground-truth snapshot (normally the generator's freshly emitted output)
+  against a baseline (normally the hand-authored `lab/ground-truth/`) by `case_id` and
+  fails loud (`RegressionGateError`, naming every violation) if any case present in the
+  baseline is missing from the candidate, or has changed page (`url`) or verdict
+  (`expected_vulnerable`) — additive growth (new case IDs) always passes. This is the
+  mechanical enforcement of "never reduce functionality"
+  (`docs/LAB_IMPLEMENTATION_PLAN.md` section 1.1). It also required extending
+  `fuzzlab.labels.contract.Case` with `primary_endpoint`/`primary_role`/
+  `related_endpoints`/`flow_variant`, the multi-artifact (Juliet/SARIF-shaped)
+  ground-truth fields Addendum B resolved: a cell whose vulnerability spans more than
+  one endpoint stays one row/case, naming its primary location (where the untrusted
+  value reaches the dangerous operation) plus any `related_endpoints`
+  (`{endpoint, role}`, role one of `source | propagator | sanitizer | sink`) and a
+  `flow_variant` (`direct | same_file_helper | cross_file | stored_second_order |
+  cross_service`). All four fields are additive/defaulted (`flow_variant` defaults
+  `"direct"`, the rest default empty/`None`) so every pre-existing single-location case
+  is unaffected; a FUZZ-consumer sweep across `fuzzlab/harness/` and `fuzzlab/greybox/`
+  (done as part of this same task, not deferred) confirmed no consumer assumes exactly
+  one location per case in a way these fields would violate.
+  (`docs/LAB_IMPLEMENTATION_PLAN.md` section 1.1, `CR-LAB-0001` Addendum B, `CC-LAB-0030`)
 - **FR-LAB-27** (Lab track, Phase 2, `CR-LAB-0001` §8, L-P2.1) An identity/ownership
   graph, `lab/identities/identities.yaml` (schema `lab/schemas/identities.schema.json`),
   declares named test identities (`id`, `role`), the resources they own
@@ -382,6 +404,18 @@ refresh`) which reads/writes only `lab/patterns/sourcing/` and
 `lab/patterns/refresh/`/`REFRESH_LOG.md`; it takes no dependency on and does
 not write `lab/patterns/cards/` or `lab/patterns/provenance.yaml` — see
 FR-LAB-18.
+(Lab track, generator-build-time) `fuzzlab.labgen.regression_gate.check_no_regression(
+baseline_dir, candidate_dir, *, loader=fuzzlab.labels.contract.load)` loads both
+directories (an injectable `loader`, so a future CLI can point it at a not-yet-written
+generator output directory) and calls `assert_no_regression(baseline: GroundTruth,
+candidate: GroundTruth) -> RegressionDiff`, which raises `RegressionGateError` — naming
+every missing case ID / changed page / changed verdict found, not just the first — or
+returns a `RegressionDiff` (also exposing `added_case_ids`, informational). See
+FR-LAB-28. `fuzzlab.labels.contract.Case` gained `primary_endpoint`, `primary_role`,
+`related_endpoints` (tuple of `{endpoint, role}` mappings), `flow_variant` (default
+`"direct"`) — all additive/defaulted; `fuzzlab.labels.schemas.labels.schema.json`'s
+`case` definition and `lab/ground-truth/expectedresults.csv` extended to match, see
+FR-LAB-28.
 (Lab track, generator-build-time) `fuzzlab.labgen.identity.load_identities(path) ->
 IdentityGraph` reads `lab/identities/identities.yaml`, validated against
 `lab/schemas/identities.schema.json` — see FR-LAB-27. Reads nothing the manifest
@@ -403,6 +437,11 @@ None (it is the system under test).
   manifest; the name-leak scanner passes its should-flag/should-not-flag
   fixture set; every `patterns/` card validates and every `provenance.yaml`
   reference resolves. See `tests/test_labgen_*.py`.
+- (Lab track, T-LAB0.9 — met) `fuzzlab.labgen.regression_gate.check_no_regression`
+  passes the real `lab/ground-truth/` against itself and against an additive superset,
+  and fails loud, naming the exact case ID and violation kind, on a deliberately
+  shrunk or verdict-flipped ground-truth fixture. See
+  `tests/test_labgen_regression_gate.py`.
 - (Lab track, Phase 2, L-P2.1 — met) `identities.yaml` validates against its JSON
   Schema; every `resources[].owner` and `authz_expectations[].accessing_identity`/
   `target_resource` resolves to a declared identity/resource; `verdict.py` carries no

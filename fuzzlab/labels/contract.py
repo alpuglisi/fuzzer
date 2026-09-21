@@ -57,6 +57,22 @@ class Case:
     subtypes: tuple[str, ...] = ()
     source_url: str | None = None
     notes: str | None = None
+    # Multi-artifact ground truth (CR-LAB-0001 Addendum B / T-LAB0.9). A cell's
+    # ground truth stays one row/case even when it spans more than one
+    # endpoint (Juliet/SARIF "one primary location, N related locations"
+    # shape): ``primary_endpoint``/``primary_role`` name the location where
+    # the untrusted value reaches the dangerous operation (the tie-break rule
+    # is always "where it's used", never "where it's set"), and
+    # ``related_endpoints`` carries the rest as ``{"endpoint": ..., "role":
+    # ...}`` mappings (role one of source|propagator|sanitizer|sink).
+    # ``flow_variant`` names how far the flow travels, per Juliet's naming.
+    # All four are additive metadata: every case predating this field set
+    # defaults to a single direct location, and no scorer/consumer logic
+    # changes based on them (see docs/bugs and CR-LAB-0001 Addendum B).
+    primary_endpoint: str | None = None
+    primary_role: str | None = None
+    related_endpoints: tuple[dict, ...] = ()
+    flow_variant: str = "direct"
 
     @property
     def key(self) -> tuple[str, str, str, str]:
@@ -106,6 +122,10 @@ def load_labels(ground_truth_dir: str | Path) -> list[Case]:
             expected_vulnerable=bool(c["expected_vulnerable"]),
             rendering=c["rendering"], subtypes=tuple(c.get("subtypes", ())),
             source_url=c.get("source_url"), notes=c.get("notes"),
+            primary_endpoint=c.get("primary_endpoint"),
+            primary_role=c.get("primary_role"),
+            related_endpoints=tuple(c.get("related_endpoints", ())),
+            flow_variant=c.get("flow_variant", "direct"),
         )
         for c in data["cases"]
     ]
