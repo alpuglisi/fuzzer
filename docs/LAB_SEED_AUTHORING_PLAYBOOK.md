@@ -226,16 +226,34 @@ see `docs/spikes/SPIKE-001-sqlmap-vs-vapi.md` and
 `docs/spikes/SPIKE-002-commix-vs-dvwa.md`. What's left before attempting an
 original seed:
 
-1. **Build the actual reusable oracle wrapper**, not just ad-hoc CLI
-   invocations — a small function that runs sqlmap/commix headlessly against
-   a given endpoint and returns a clean pass/fail, encoding both spikes'
-   lessons: read the cell's declared "secure" HTTP status from the manifest
-   and pass the matching `--ignore-code` automatically (Spike 001), and
-   either scope each security assertion to just the transform under test or
-   give the wrapper session/token-refresh awareness so an unrelated ambient
-   defense (like a rotating CSRF token) doesn't silently defeat the probe
-   (Spike 002) — plus the loopback-only/oracle-never-matches-SUT constraints
-   from Addendum E.
+1. **Done (2026-09-21).** The reusable oracle wrapper — not ad-hoc CLI
+   invocations — lives at `fuzzlab/labgen/oracle_wrapper.py`
+   (`fuzzlab.labgen.oracle_wrapper`, re-exported from `fuzzlab.labgen`).
+   Call `run_sql_injection_oracle(SqlInjectionOracleRequest(...))` or
+   `run_command_injection_oracle(CommandInjectionOracleRequest(...))` (or the
+   type-dispatching `run_oracle(request)`) with plain, explicit parameters —
+   target URL, method, the injection parameter's name and location, the
+   expected "secure" HTTP status code(s), and an optional `refresh_session`
+   callback — never a manifest/cell object (that schema is a separate,
+   concurrently-developed concern; this wrapper takes no dependency on it).
+   It encodes both spikes' lessons: a given `secure_status_codes` list is
+   translated into sqlmap's `--ignore-code` automatically (Spike 001); every
+   invocation is scoped to the one declared parameter via `-p`, never a blind
+   sweep (Spike 002 part 1); and a bounded per-attempt timeout × bounded
+   `max_attempts` loop (refreshing the session on each attempt when a
+   `refresh_session` callback is given) guarantees a hung tool can never
+   block the caller indefinitely, regardless of cause (Spike 002 part 2) —
+   see `docs/components/01-target-lab/change-control.md` `CC-LAB-0015` for
+   why a bounded timeout/retry was chosen as the safety valve over building
+   generic per-request session-refresh machinery into each tool's own request
+   loop. The loopback-only constraint from Addendum E is enforced before
+   every invocation (`assert_loopback`, no bypass). Returns a fail-closed
+   `confirmed_vulnerable | confirmed_secure | inconclusive` verdict — a tool
+   crash, timeout, or missing binary is always `inconclusive`, never guessed
+   as secure. 33 offline tests (every branch, injected fake runner) + 2
+   skip-guarded tests against the real cloned `sqlmap`/`commix` binaries
+   (`tests/test_labgen_oracle_wrapper.py`,
+   `tests/test_labgen_oracle_wrapper_integration.py`).
 2. Only after that wrapper exists does it make sense to attempt an original
    Tier-A seed on this project's own (eventual) generated code — the
    security assertion for it is now a call to that wrapper, not hand-written

@@ -3,6 +3,106 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0015 — Reusable sqlmap/commix oracle wrapper (Lane A, `LAB_SEED_AUTHORING_PLAYBOOK.md` step 1) (2026-09-21)
+- Change: added `fuzzlab/labgen/oracle_wrapper.py` (+ minimal `fuzzlab/labgen/__init__.py`
+  re-exporting only its own public API) — the reusable, importable wrapper the playbook's
+  "Recommended next action" step 1 called for, replacing "ad-hoc CLI invocations" with a
+  shared function per validated class. `run_sql_injection_oracle(SqlInjectionOracleRequest)`
+  and `run_command_injection_oracle(CommandInjectionOracleRequest)` (plus a
+  type-dispatching `run_oracle`) each: (1) validate the target is loopback
+  (`assert_loopback`) before doing anything else, raising `OracleSafetyError` otherwise —
+  never silently proceeding (CLAUDE.md safety section, Addendum E); (2) locate the tool
+  executable via `PATH` or an injectable `tool_path`, raising a typed, actionable
+  `ToolNotFoundError` instead of a raw `FileNotFoundError` (BUG-0007/PA-0021's pattern,
+  applied here proactively rather than as a fix); (3) translate a caller-given
+  `secure_status_codes` list into sqlmap's `--ignore-code` automatically (Spike 001's
+  401/403 lesson) — commix has no equivalent flag, so this field only exists on the
+  SQLi request; (4) always scope the tool invocation to the one declared `param_name` via
+  `-p` (Spike 002's parameter-sweep lesson) — never a blind sweep; (5) run under a hard
+  per-attempt subprocess timeout via a dependency-injected `Runner` callable (never
+  `subprocess` touched globally, never the tool's own less-reliable internal timeout
+  flags), with a bounded `max_attempts` loop that calls an optional `refresh_session`
+  callback fresh on every attempt before rebuilding the argv — so total wall time is
+  always bounded by `timeout_s * max_attempts` regardless of how the caller configures
+  retries or session refresh (Spike 002's rotating-CSRF-token lesson, part 2). Verdicts
+  are exactly `confirmed_vulnerable | confirmed_secure | inconclusive`
+  (`fuzzlab.labgen.oracle_wrapper.Verdict`); a timeout, non-zero exit with no verdict
+  marker in the tool's own output, or an ambiguous/missing marker is always
+  `inconclusive` — a crash or hang is never treated as "secure" (fail-closed). Verdict
+  markers and the tool-exit-code check were tuned against the two tools' **real** output
+  (see Deliverables) after an initial draft wrongly gated on exit code 0, which both
+  sqlmap and commix violate on a legitimate "not injectable" finding, not only on a
+  crash — caught by the real-binary integration test before it shipped, not left latent.
+  Deliberately self-contained: no manifest/cell schema type is imported or assumed
+  (Lane B owns that schema, built concurrently); callers pass plain, explicit parameters
+  instead. Deliberately unrelated to and never imported by `fuzzlab/oracle/` (the FUZZ
+  component's runtime detection oracle) — same word, different tool, different component.
+- Decision point (session/token-refresh vs. bounded-retry safety valve, both named in the
+  brief as the two options for Spike 002's CSRF-rotation lesson, "pick the simpler, more
+  robust one"): implemented the **bounded timeout × bounded max_attempts loop as the
+  mandatory safety valve**, plus a **lightweight optional `refresh_session` callback**
+  called once per attempt (not per-HTTP-request inside the tool's own crawl) as the
+  session-refresh half. Rejected: building generic per-HTTP-request session-refresh
+  hooks into sqlmap's/commix's own request loop (e.g. proxying every request through a
+  refreshing middleman) — that requires reverse-engineering and staying in sync with each
+  tool's internal request architecture (a much larger, more fragile surface, and neither
+  tool exposes a stable public hook for it), whereas a subprocess timeout is a property of
+  *any* subprocess regardless of what it does internally, so it robustly bounds a hang from
+  *any* cause (a stale token, a network stall, an unrelated bug in the tool), not only the
+  one cause Spike 002 happened to hit. The per-attempt `refresh_session` callback still
+  covers the common case (a fresh cookie/CSRF token per *attempt*, sufficient for a tool run
+  short enough that the token doesn't rotate mid-run) without the larger integration cost.
+- Impact (other components / project): fulfills `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`'s
+  "Recommended next action" step 1 (marked done there, pointing here). Unblocks step 2
+  (an original Tier-A seed's security assertion becomes a call to this wrapper). No other
+  component's contracts change; `fuzzlab/oracle/`, `fuzzlab/harness/`, and `fuzzlab/web/`
+  are untouched. New `requirements.md` FR-LAB-11 documents the wrapper's contract (FR-LAB-10
+  already covered "use the tool headlessly"; FR-LAB-11 covers the wrapper's own interface
+  guarantees, which are new). Lane B's concurrently-developed manifest/schema/gates work is
+  unaffected — this module takes no dependency on it and was designed not to.
+- Risk (level; mitigation): medium (a defect here could make a generated cell's ground-truth
+  label wrong, silently corrupting every downstream metric — the same risk class
+  `CC-LAB-0002` already flagged for hand-authored labels). Mitigated by: fail-closed
+  verdict logic (ambiguity is always `inconclusive`, never a guess); the mandatory
+  loopback check with no bypass; 33 offline unit tests covering every branch (loopback
+  accept/reject incl. no-scheme/spoofed-suffix hosts, tool-found/not-found via injected
+  `shutil.which`, `--ignore-code` construction present/absent, parameter-scoping for both
+  tools, cookie/header merging and `refresh_session` cookie-splitting, bounded-retry
+  exhaustion and early-stop, timeout/non-zero-exit/vulnerable/secure/ambiguous/both-markers
+  classification, `run_oracle` dispatch + rejection of an unknown request type, all three
+  `ParamLocation` values); plus 2 real, skip-guarded integration tests (PA-0005) that
+  actually shell out to a real cloned `sqlmap`/`commix` against a genuinely non-vulnerable
+  local echo endpoint and assert a real `confirmed_secure` verdict end to end — these
+  caught the exit-code-gating defect described above before it shipped. Neither tool is a
+  declared project dependency (they are external, licensed-separately tools the wrapper
+  merely shells out to, matching sqlmap's/commix's own licensing — nothing from either is
+  vendored or copied); the integration tests skip cleanly, not fail, when the binaries
+  aren't reachable (checked via `PATH` or `FUZZLAB_SQLMAP_PATH`/`FUZZLAB_COMMIX_PATH`).
+- Deliverables:
+  - [x] `fuzzlab/labgen/oracle_wrapper.py` + minimal `fuzzlab/labgen/__init__.py` — done.
+  - [x] `--ignore-code` auto-construction from `secure_status_codes` (Spike 001) — done.
+  - [x] Mandatory single-parameter scoping for both tools (Spike 002 part 1) — done.
+  - [x] Bounded timeout × bounded-attempt safety valve + per-attempt `refresh_session`
+        (Spike 002 part 2) — done.
+  - [x] Loopback-only safety guard, no bypass — done.
+  - [x] Typed `ToolNotFoundError` (never a raw `FileNotFoundError`) — done.
+  - [x] 33 offline tests, injected fake runner, every branch — done (all pass).
+  - [x] 2 skip-guarded real-binary integration tests (real `sqlmap`/`commix` cloned this
+        session, not committed; a non-vulnerable local echo endpoint) — done (both pass
+        when the binaries are present; both skip cleanly otherwise).
+  - [x] `docs/LAB_SEED_AUTHORING_PLAYBOOK.md` "Recommended next action" step 1 marked done,
+        pointing here — done.
+  - [ ] An original Tier-A seed whose security assertion actually calls this wrapper
+        (playbook step 2) — not started, tracked there.
+- Effectiveness (assessed 2026-09-21): effective against its own test suite — 35 new tests
+  (33 offline + 2 real-binary integration) all pass; the integration tests exercise the
+  actual code path the offline suite's fake runner bypasses (PA-0005) and, in doing so,
+  caught and fixed a wrong assumption (exit-code-0 gating) that the offline suite alone
+  could not have caught since it only asserts what its own author assumed about the real
+  tools' behavior. Full effectiveness (a real seed's label correctly confirmed by this
+  wrapper against a real vulnerable/secure twin pair) is assessed once playbook step 2
+  is attempted.
+
 ### CC-LAB-0014 — D20: manifest-driven generator target shape decided (2026-09-21)
 - Change: approved `docs/change-requests/CR-LAB-0001-manifest-generator-realism-and-variation.md`
   and recorded **D20** in `docs/DECISIONS_AND_ROADMAP.md`. Three scope-gating decisions:

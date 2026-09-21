@@ -18,6 +18,17 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   in-progress parallel work (e.g. the Lane A/B oracle-wrapper and lab-generator-Phase-0
   builds) showed up as untracked and tripped the git-status Stop hook; they're never a
   deliverable and should never be committed.
+- Feature (LAB, `CC-LAB-0015`): added `fuzzlab/labgen/oracle_wrapper.py`, the reusable
+  sqlmap/commix oracle wrapper called for by `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`'s
+  "Recommended next action" step 1 — a plain, schema-independent Python function per
+  validated class (`run_sql_injection_oracle`, `run_command_injection_oracle`) that
+  automates both spikes' lessons (`SPIKE-001`'s `--ignore-code` auth-bypass, `SPIKE-002`'s
+  mandatory single-parameter scoping and a bounded timeout/retry safety valve against a
+  hung tool), enforces the loopback-only safety rule before every invocation, and returns
+  a fail-closed `confirmed_vulnerable | confirmed_secure | inconclusive` verdict — because
+  the playbook's own seed pipeline now needs this wrapper, not hand-written exploit code,
+  as the security assertion for every SQLi/command-injection cell. 33 offline tests (every
+  branch, injected fake runner) + 2 skip-guarded tests against the real cloned binaries.
 - Fix (BUG-0020, tooling/process): `.claude/hooks/check-error-log-bookkeeping.sh`'s
   keyword regex matched `hang` as an unanchored substring of `change`/`changed`/`changes` —
   words this project's own changelog convention uses constantly — false-positiving on its
