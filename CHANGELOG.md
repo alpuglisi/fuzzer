@@ -14,6 +14,20 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (LAB, `CC-LAB-0016`): validated SSTImap as a third independent tool-oracle
+  (`docs/spikes/SPIKE-003-sstimap-vs-ssti-flask-hacking-playground.md` — real Jinja2 SSTI
+  app, GPL-3.0/Apache-2.0 licenses read directly, manual curl confirmation before ever
+  touching the tool) and extended `fuzzlab/labgen/oracle_wrapper.py` with
+  `ServerSideTemplateInjectionOracleRequest` / `run_server_side_template_injection_oracle`,
+  reusing the existing loopback-safety, tool-location, and bounded-timeout×max-attempts
+  machinery unchanged — because SSTI is the third validated class named in
+  `LAB_SEED_AUTHORING_PLAYBOOK.md`'s "SSTImap/Nuclei/ZAP remain unintegrated" line and
+  `CR-LAB-0001`'s tool-mapping table, and this project's own "spike, then wrap" discipline
+  (established for sqlmap/commix) applies to every new tool-oracle, not just the first two.
+  SSTImap needed its own scoping mechanism (a marker + `-P` location restriction, since it
+  has no `-p` flag) and, per Spike 003, no `--ignore-code` equivalent (verified by reading
+  its source: no 401/403 special-casing exists). 12 new offline tests + 1 new skip-guarded
+  real-`sstimap` integration test, all passing.
 - Decision (LAB, D20 clarification): resolved a conflict between D20 ("migrate the
   hand-built app") and an earlier draft of `docs/LAB_PHASE_0_PLAN.md` (which had read a
   separate "additive-only" instruction as "never remove the hand-built app," and

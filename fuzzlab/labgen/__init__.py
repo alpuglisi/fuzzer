@@ -15,6 +15,7 @@ from .oracle_wrapper import (
     OracleSafetyError,
     OracleVerdict,
     ParamLocation,
+    ServerSideTemplateInjectionOracleRequest,
     SqlInjectionOracleRequest,
     ToolNotFoundError,
     Verdict as OracleVerdictOutcome,
@@ -24,6 +25,7 @@ from .oracle_wrapper import (
     locate_tool,
     run_command_injection_oracle,
     run_oracle,
+    run_server_side_template_injection_oracle,
     run_sql_injection_oracle,
 )
 
@@ -38,6 +40,7 @@ __all__ = [
     "OracleSafetyError",
     "OracleVerdict",
     "ParamLocation",
+    "ServerSideTemplateInjectionOracleRequest",
     "SqlInjectionOracleRequest",
     "ToolNotFoundError",
     "OracleVerdictOutcome",
@@ -47,5 +50,6 @@ __all__ = [
     "locate_tool",
     "run_command_injection_oracle",
     "run_oracle",
+    "run_server_side_template_injection_oracle",
     "run_sql_injection_oracle",
 ]

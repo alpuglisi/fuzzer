@@ -47,20 +47,33 @@ and measured. Authorized, lab-only.
   further decided. (D20, `CR-LAB-0001` Addendum E)
 - **FR-LAB-11** (Lab track) FR-LAB-10's "tool invoked headlessly" is a single
   reusable, importable wrapper (`fuzzlab.labgen.oracle_wrapper`, see
-  `CC-LAB-0015`) shared by every seed's security assertion, not a per-seed
-  ad-hoc CLI invocation. Its contract: (a) plain, explicit parameters
-  (target URL, method, injection parameter name/location, vulnerability
-  class, expected "secure" HTTP status code(s), an optional session/token-
-  refresh callback) — independent of the manifest/cell schema, so it can be
-  called before, during, or after that schema exists; (b) a bounded-timeout ×
-  bounded-attempt safety valve so a hung tool invocation can never block the
-  caller indefinitely (encodes Spike 002's rotating-CSRF-token finding);
-  (c) a caller-supplied "secure" status code is translated automatically into
-  the tool's own auth-bypass flag (e.g. sqlmap's `--ignore-code`, encoding
-  Spike 001's finding) so the caller never needs the tool's flag syntax;
+  `CC-LAB-0015`/`CC-LAB-0016`) shared by every seed's security assertion, not
+  a per-seed ad-hoc CLI invocation. Covers sqlmap (SQL injection), commix
+  (OS command injection), and SSTImap (server-side template injection) as of
+  `CC-LAB-0016`; each gets its own request dataclass
+  (`SqlInjectionOracleRequest`, `CommandInjectionOracleRequest`,
+  `ServerSideTemplateInjectionOracleRequest`) and `run_*_oracle` function
+  (plus a type-dispatching `run_oracle`), all sharing the contract below. Its
+  contract: (a) plain, explicit parameters (target URL, method, injection
+  parameter name/location, an optional session/token-refresh callback, and —
+  only where the underlying tool needs it, e.g. sqlmap — an expected "secure"
+  HTTP status code list) — independent of the manifest/cell schema, so it can
+  be called before, during, or after that schema exists; (b) a
+  bounded-timeout × bounded-attempt safety valve so a hung tool invocation
+  can never block the caller indefinitely (encodes Spike 002's
+  rotating-CSRF-token finding); (c) where the underlying tool special-cases
+  an HTTP status code as an unrecoverable failure, a caller-supplied "secure"
+  status code is translated automatically into the tool's own auth-bypass
+  flag (sqlmap's `--ignore-code`, encoding Spike 001's finding) so the caller
+  never needs the tool's flag syntax — SSTImap needs no such field, having no
+  such special-casing (verified by reading its source, Spike 003);
   (d) every invocation is scoped to the one declared injection parameter,
-  never a blind sweep of the target's other fields (encodes Spike 002's
-  parameter-sweep finding); (e) the loopback-only safety check
+  never a blind sweep of the target's other fields — via the tool's own
+  parameter-selection flag where one exists (sqlmap's/commix's `-p`,
+  Spike 002's parameter-sweep finding) or, where none exists, by building the
+  tool's own injection-marker mechanism at exactly that parameter's value
+  plus restricting its injection-point scope to that one location category
+  (SSTImap's `-M`/`-P`, Spike 003); (e) the loopback-only safety check
   (`assert_loopback`) runs before every invocation and raises rather than
   silently proceeding on a non-loopback target; (f) the result is one of
   exactly three verdicts — `confirmed_vulnerable | confirmed_secure |
@@ -123,7 +136,8 @@ plus `sitemap.xml`/OpenAPI later. Exposes grey-box coverage and fault signals fo
 the fuzzer, scheduler, and oracle. Does not write the SQLite store directly.
 (Lab track, generator-build-time) `fuzzlab.labgen.oracle_wrapper` exposes a plain
 Python function per validated class (`run_sql_injection_oracle`,
-`run_command_injection_oracle`, plus a type-dispatching `run_oracle`) taking a
+`run_command_injection_oracle`, `run_server_side_template_injection_oracle`,
+plus a type-dispatching `run_oracle`) taking a
 small request dataclass and returning an `OracleVerdict`
 (`confirmed_vulnerable | confirmed_secure | inconclusive` + raw tool
 output/exit info) — see FR-LAB-11. It takes no dependency on and is never

@@ -208,8 +208,28 @@ labels.json / expectedresults.csv / injection-points.json
   injection point** (e.g. sqlmap's/commix's own parameter-selection flags),
   never a blind sweep of every form field, both for correctness and to
   bound runtime — or it will
-  silently under-test rather than fail loudly. SSTImap/Nuclei/ZAP remain
-  unintegrated.
+  silently under-test rather than fail loudly.
+- **SSTImap-as-oracle is now validated too**
+  (`docs/spikes/SPIKE-003-sstimap-vs-ssti-flask-hacking-playground.md`,
+  2026-09-21), extending the validated set from {SQL injection, OS command
+  injection} to {SQL injection, OS command injection, server-side template
+  injection}: headless `sstimap.py` (no separate batch flag needed — its
+  default, non-interactive mode already is one) correctly confirmed a real
+  Jinja2 SSTI in `filipkarc/ssti-flask-hacking-playground` and correctly
+  cleared a secure twin authored for the spike (passing `user` as a Jinja2
+  context variable instead of `.format()`-ing it into the template source).
+  Two findings distinct from sqlmap/commix: **SSTImap has no `-p`-style
+  parameter selector** — the equivalent scoping mechanism is its own
+  *marker* (default `*`) substituted at the declared parameter's exact
+  value, combined with restricting its `-P` injection-point flag to the one
+  location category (query/body/header) that parameter lives in, never its
+  default un-marked, all-locations sweep; and **SSTImap has no sqlmap-style
+  401/403 auth-abort behavior** (confirmed by reading `core/matcher.py`
+  directly — status code is only ever one of several boolean-blind matching
+  signals, never a hard gate), so its request type carries no
+  `--ignore-code`-equivalent field. **SSTImap/Nuclei/ZAP remain
+  unintegrated** narrows to: **SSTImap integrated; Nuclei/ZAP remain
+  unintegrated.**
 - **AutoBaxBuilder's self-bias question is contested** (paper vs. project
   site) and unresolved — don't attribute full independence to its exploits
   until arXiv:2512.21132 §4.4 has been read and its verdicts cross-checked
@@ -218,42 +238,49 @@ labels.json / expectedresults.csv / injection-points.json
   business logic, race conditions) has not been decided or budgeted** —
   this needs your call, not a default assumption.
 
-## Recommended next action (revised again, post-Spike-002)
+## Recommended next action (revised again, post-Spike-003)
 
-Both the sqlmap and commix validations from the original "wrap sqlmap and
-commix, validate against a known-vulnerable seed app" action are **done** —
-see `docs/spikes/SPIKE-001-sqlmap-vs-vapi.md` and
-`docs/spikes/SPIKE-002-commix-vs-dvwa.md`. What's left before attempting an
-original seed:
+The sqlmap, commix, and SSTImap validations from the original "wrap sqlmap
+and commix, validate against a known-vulnerable seed app" action (later
+extended to a third tool) are **done** — see
+`docs/spikes/SPIKE-001-sqlmap-vs-vapi.md`,
+`docs/spikes/SPIKE-002-commix-vs-dvwa.md`, and
+`docs/spikes/SPIKE-003-sstimap-vs-ssti-flask-hacking-playground.md`. What's
+left before attempting an original seed:
 
-1. **Done (2026-09-21).** The reusable oracle wrapper — not ad-hoc CLI
-   invocations — lives at `fuzzlab/labgen/oracle_wrapper.py`
-   (`fuzzlab.labgen.oracle_wrapper`, re-exported from `fuzzlab.labgen`).
-   Call `run_sql_injection_oracle(SqlInjectionOracleRequest(...))` or
-   `run_command_injection_oracle(CommandInjectionOracleRequest(...))` (or the
-   type-dispatching `run_oracle(request)`) with plain, explicit parameters —
-   target URL, method, the injection parameter's name and location, the
-   expected "secure" HTTP status code(s), and an optional `refresh_session`
-   callback — never a manifest/cell object (that schema is a separate,
-   concurrently-developed concern; this wrapper takes no dependency on it).
-   It encodes both spikes' lessons: a given `secure_status_codes` list is
-   translated into sqlmap's `--ignore-code` automatically (Spike 001); every
-   invocation is scoped to the one declared parameter via `-p`, never a blind
-   sweep (Spike 002 part 1); and a bounded per-attempt timeout × bounded
-   `max_attempts` loop (refreshing the session on each attempt when a
-   `refresh_session` callback is given) guarantees a hung tool can never
-   block the caller indefinitely, regardless of cause (Spike 002 part 2) —
-   see `docs/components/01-target-lab/change-control.md` `CC-LAB-0015` for
-   why a bounded timeout/retry was chosen as the safety valve over building
-   generic per-request session-refresh machinery into each tool's own request
-   loop. The loopback-only constraint from Addendum E is enforced before
-   every invocation (`assert_loopback`, no bypass). Returns a fail-closed
-   `confirmed_vulnerable | confirmed_secure | inconclusive` verdict — a tool
-   crash, timeout, or missing binary is always `inconclusive`, never guessed
-   as secure. 33 offline tests (every branch, injected fake runner) + 2
-   skip-guarded tests against the real cloned `sqlmap`/`commix` binaries
-   (`tests/test_labgen_oracle_wrapper.py`,
-   `tests/test_labgen_oracle_wrapper_integration.py`).
+1. **Done (2026-09-21; extended to SSTImap 2026-09-21).** The reusable oracle
+   wrapper — not ad-hoc CLI invocations — lives at
+   `fuzzlab/labgen/oracle_wrapper.py` (`fuzzlab.labgen.oracle_wrapper`,
+   re-exported from `fuzzlab.labgen`). Call
+   `run_sql_injection_oracle(SqlInjectionOracleRequest(...))`,
+   `run_command_injection_oracle(CommandInjectionOracleRequest(...))`, or
+   `run_server_side_template_injection_oracle(ServerSideTemplateInjectionOracleRequest(...))`
+   (or the type-dispatching `run_oracle(request)`) with plain, explicit
+   parameters — target URL, method, the injection parameter's name and
+   location, (for SQLi) the expected "secure" HTTP status code(s), and an
+   optional `refresh_session` callback — never a manifest/cell object (that
+   schema is a separate, concurrently-developed concern; this wrapper takes
+   no dependency on it). It encodes all three spikes' lessons: a given
+   `secure_status_codes` list is translated into sqlmap's `--ignore-code`
+   automatically (Spike 001); every invocation is scoped to the one declared
+   parameter — via `-p` for sqlmap/commix, via SSTImap's own marker mechanism
+   plus its `-P` location restriction for SSTImap, which has no `-p` flag —
+   never a blind sweep (Spike 002 part 1, Spike 003); and a bounded
+   per-attempt timeout × bounded `max_attempts` loop (refreshing the session
+   on each attempt when a `refresh_session` callback is given) guarantees a
+   hung tool can never block the caller indefinitely, regardless of cause
+   (Spike 002 part 2) — see `docs/components/01-target-lab/change-control.md`
+   `CC-LAB-0015`/`CC-LAB-0016` for why a bounded timeout/retry was chosen as
+   the safety valve over building generic per-request session-refresh
+   machinery into each tool's own request loop. The loopback-only constraint
+   from Addendum E is enforced before every invocation (`assert_loopback`, no
+   bypass). Returns a fail-closed `confirmed_vulnerable | confirmed_secure |
+   inconclusive` verdict — a tool crash, timeout, or missing binary is always
+   `inconclusive`, never guessed as secure. 45 offline tests (every branch,
+   injected fake runner) + 3 skip-guarded tests against the real cloned
+   `sqlmap`/`commix`/`sstimap` binaries (`tests/test_labgen_oracle_wrapper.py`,
+   `tests/test_labgen_oracle_wrapper_integration.py`). Nuclei and ZAP remain
+   unintegrated — one tool at a time, same discipline as the first two.
 2. Only after that wrapper exists does it make sense to attempt an original
    Tier-A seed on this project's own (eventual) generated code — the
    security assertion for it is now a call to that wrapper, not hand-written
