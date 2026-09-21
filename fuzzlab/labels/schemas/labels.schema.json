@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fuzzlab.local/schemas/labels.schema.json",
+  "title": "fuzzlab ground-truth labels",
+  "type": "object",
+  "required": ["version", "target", "cases"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "target": { "type": "string" },
+    "cases": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "case": {
+      "type": "object",
+      "required": ["case_id", "url", "method", "param", "location",
+                   "vuln_class", "sink_context", "expected_vulnerable", "rendering"],
+      "additionalProperties": false,
+      "properties": {
+        "case_id": { "type": "string", "pattern": "^[A-Z]+-[0-9]{4}$" },
+        "url": { "type": "string" },
+        "method": { "enum": ["GET", "POST"] },
+        "param": { "type": "string" },
+        "location": { "enum": ["query", "body", "fragment", "header", "path"] },
+        "vuln_class": { "enum": ["sqli", "xss-reflected", "xss-stored", "xss-dom", "none"] },
+        "subtypes": { "type": "array", "items": { "type": "string" } },
+        "sink_context": { "enum": ["sql", "html", "html-attribute", "js", "dom", "none"] },
+        "expected_vulnerable": { "type": "boolean" },
+        "rendering": { "enum": ["server", "js", "server-json"] },
+        "source_url": { "type": "string" },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}

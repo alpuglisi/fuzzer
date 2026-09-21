@@ -3,6 +3,24 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0003 — Migration 2: self-describing findings (2026-09-21)
+- Change: added migration 2, which ALTERs `finding` to add `url`, `method`, and
+  `param` columns so a confirmed finding carries its own location and the
+  integration harness can score by `(url, method, param, vuln_class)` without a
+  candidate/parameter join. Registered as a new, higher-numbered migration (the
+  registry is append-only; migration 1 is untouched).
+- Impact (other components / project): the store schema head is now version 2; the
+  harness (T0.7) reads these columns. Additive only — existing rows/columns
+  unchanged; a fresh store applies 1 then 2.
+- Risk (level; mitigation): low — additive `ALTER TABLE ADD COLUMN`. Mitigated by
+  the idempotent migration runner and tests; the two foundation tests that pinned
+  version 1 were updated to assert the current head rather than a literal.
+- Deliverables:
+  - [x] Migration 2 (finding url/method/param) + registry entry — done.
+  - [x] Update version-pinning tests to the head version — done.
+- Effectiveness (assessed 2026-09-21): effective — a fresh store reports version 2,
+  re-migration is a no-op, and the harness scores from finding rows (22/22 tests).
+
 ### CC-CORE-0002 — Phase 0 core library implemented (2026-09-21)
 - Change: created the `fuzzlab` package with a `core/` subpackage and built the
   Phase 0 foundations — the project store (`store.py`) with WAL/foreign-key

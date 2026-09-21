@@ -13,6 +13,15 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 0 build (cont.): added the ground-truth label contract (T0.6) —
+  `lab/ground-truth/{labels.json,injection-points.json,expectedresults.csv}` with
+  JSON Schemas and a validating loader that cross-checks the files; the integration
+  harness (T0.7) — a scorer (TP/FP/TN/FN, precision/recall/F1/MCC) and an
+  assert-known-vulns run that reads oracle findings and records `run_metrics`; the
+  minimal local web launcher (T0.9, D11) — loopback-only, offering automatic vs
+  manual with no auto-run and an authorization gate; a `fuzzlab` CLI entry point;
+  and migration 2 (self-describing findings). Tests: 28/28 green.
+  Change-control: CC-LAB-0002, CC-CORE-0003, CC-UI-0004.
 - Phase 0 build: created the `fuzzlab` Python package with a `core/` shared
   library and implemented the foundations — the SQLite project store with a
   numbered, idempotent migration runner and the core-contract tables (T0.3);

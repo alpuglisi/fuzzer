@@ -3,6 +3,42 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0004 — Minimal web launcher + integration harness (2026-09-21)
+- Change: built the Phase 0 minimal local web launcher (`fuzzlab/web/app.py`,
+  FastAPI): a control panel that shows target/scope/mode and offers **automatic**
+  vs **manual**, sending nothing to the target until the user acts; `serve()`
+  binds to loopback only and refuses a non-loopback host. Automatic mode is gated
+  on `authorized` and runs an injected pipeline callable. Added a `fuzzlab` CLI
+  entry point (`web`, `crawl`, `audit`, `fuzz`, `build-db`, `version`) that also
+  sends nothing on its own. Built the integration harness that automatic mode
+  drives (T0.7): `fuzzlab/harness/scoring.py` (TP/FP/TN/FN + precision/recall/F1/
+  MCC, matching by case key) and `integration.py` (`assert_known_vulns` reads the
+  oracle's findings, scores against the ground-truth contract, records
+  `run_metrics`). Realizes Phase 0 T0.9 and T0.7.
+- Impact (other components / project): gives the project its no-auto-run entry
+  point (D11) and its assert-known-vulns evaluation. The harness reads LAB's
+  ground-truth contract (CC-LAB-0002) and the oracle's `finding` rows (self-
+  describing via CC-CORE-0003). The pipeline runner is injected, so the crawler →
+  auditor → fuzzer wiring drops in once the tools write to the store (T0.8).
+- Risk (level; mitigation): low–medium. A local web server is a surface; mitigated
+  by loopback-only binding (asserted, with a non-loopback refusal), the
+  authorization gate on automatic mode, and the invariant that loading the panel
+  runs nothing (a test asserts the injected pipeline is not called on GET). Harness
+  correctness is covered by scoring tests (perfect run, misses, false alarms,
+  wrong-class-on-right-param, and a store round-trip).
+- Deliverables:
+  - [x] Minimal web control panel with automatic/manual selection (T0.9) — done.
+  - [x] Loopback-only serve with non-loopback refusal (T0.9) — done.
+  - [x] `fuzzlab` CLI entry point + headless tool passthrough — done.
+  - [x] Integration harness: scoring + assert-known-vulns + run_metrics (T0.7) — done.
+  - [x] Web (6) + harness (5) tests passing — done.
+  - [ ] Wire the real crawler→auditor→fuzzer pipeline into automatic mode — todo (needs T0.8).
+  - [ ] Full dashboard (live runs, results tables) — todo (later UI phase).
+- Effectiveness (assessed 2026-09-21): effective — panel offers both modes and
+  stays idle on load; automatic mode is blocked without authorization and runs the
+  injected pipeline only on explicit POST; harness scores a seeded store run as a
+  pass with correct metrics. Real-pipeline wiring pending T0.8.
+
 ### CC-UI-0003 — Primary UI is a local web app, not a `textual` TUI (2026-09-21)
 - Change: adopt decision D11 — the primary interface becomes a **local web
   application** (control panel + dashboard on localhost) instead of a `textual`

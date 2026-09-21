@@ -15,9 +15,10 @@ from fuzzlab.core.store import Store, connect
 def test_migrations_are_idempotent(tmp_path):
     db = tmp_path / "s.db"
     conn = connect(db)
+    head = max(v for v, _ in migrations.MIGRATIONS)
     v1 = migrations.migrate(conn)
     v2 = migrations.migrate(conn)  # re-running applies nothing
-    assert v1 == v2 == 1
+    assert v1 == v2 == head
     tables = {r["name"] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
     for expected in ("run", "page", "candidate", "attempt", "finding",
@@ -27,7 +28,7 @@ def test_migrations_are_idempotent(tmp_path):
 
 def test_store_run_and_body_roundtrip(tmp_path):
     with Store(tmp_path / "s.db") as store:
-        assert store.schema_version() == 1
+        assert store.schema_version() == max(v for v, _ in migrations.MIGRATIONS)
         run_id = store.start_run("test", "hash123")
         assert run_id == 1
         digest = store.put_body(b"hello")

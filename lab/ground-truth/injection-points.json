@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "target": "puppy-fort-factory",
+  "points": [
+    { "url": "/product.php", "method": "GET", "param": "id", "location": "query", "rendering": "server" },
+    { "url": "/products.php", "method": "GET", "param": "category", "location": "query", "rendering": "server" },
+    { "url": "/search.php", "method": "GET", "param": "q", "location": "query", "rendering": "server" },
+    { "url": "/api/products.php", "method": "GET", "param": "category", "location": "query", "rendering": "server-json" },
+    { "url": "/track.php", "method": "GET", "param": "order_id", "location": "query", "rendering": "server" },
+    { "url": "/blog_post.php", "method": "GET", "param": "id", "location": "query", "rendering": "server" },
+
+    { "url": "/login.php", "method": "POST", "param": "username", "location": "body", "rendering": "server" },
+    { "url": "/login.php", "method": "POST", "param": "password", "location": "body", "rendering": "server" },
+    { "url": "/register.php", "method": "POST", "param": "username", "location": "body", "rendering": "server" },
+    { "url": "/register.php", "method": "POST", "param": "email", "location": "body", "rendering": "server" },
+    { "url": "/register.php", "method": "POST", "param": "password", "location": "body", "rendering": "server" },
+    { "url": "/add_to_cart.php", "method": "POST", "param": "product_id", "location": "body", "rendering": "server" },
+    { "url": "/add_to_cart.php", "method": "POST", "param": "quantity", "location": "body", "rendering": "server" },
+    { "url": "/cart.php", "method": "POST", "param": "remove", "location": "body", "rendering": "server" },
+    { "url": "/checkout.php", "method": "POST", "param": "place_order", "location": "body", "rendering": "server" },
+    { "url": "/contact.php", "method": "POST", "param": "name", "location": "body", "rendering": "server" },
+    { "url": "/contact.php", "method": "POST", "param": "message", "location": "body", "rendering": "server" },
+    { "url": "/newsletter.php", "method": "POST", "param": "email", "location": "body", "rendering": "server" },
+    { "url": "/edit_profile.php", "method": "POST", "param": "full_name", "location": "body", "rendering": "server" },
+    { "url": "/edit_profile.php", "method": "POST", "param": "email", "location": "body", "rendering": "server" },
+    { "url": "/edit_profile.php", "method": "POST", "param": "address", "location": "body", "rendering": "server" },
+    { "url": "/edit_profile.php", "method": "POST", "param": "bio", "location": "body", "rendering": "server" },
+
+    { "url": "/reviews.php", "method": "GET", "param": "author", "location": "fragment", "rendering": "js", "client_only": true },
+    { "url": "/feedback.php", "method": "GET", "param": "ref", "location": "query", "rendering": "js", "client_only": true }
+  ]
+}

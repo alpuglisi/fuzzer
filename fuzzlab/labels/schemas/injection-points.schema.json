@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fuzzlab.local/schemas/injection-points.schema.json",
+  "title": "fuzzlab parameter-discovery ground truth",
+  "type": "object",
+  "required": ["version", "target", "points"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "target": { "type": "string" },
+    "points": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/point" }
+    }
+  },
+  "$defs": {
+    "point": {
+      "type": "object",
+      "required": ["url", "method", "param", "location"],
+      "additionalProperties": false,
+      "properties": {
+        "url": { "type": "string" },
+        "method": { "enum": ["GET", "POST"] },
+        "param": { "type": "string" },
+        "location": { "enum": ["query", "body", "fragment", "header", "path"] },
+        "rendering": { "enum": ["server", "js", "server-json"] },
+        "client_only": {
+          "type": "boolean",
+          "description": "true when the param is used only client-side (no server reflection); a server-side crawler cannot see it."
+        }
+      }
+    }
+  }
+}

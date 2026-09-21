@@ -4,6 +4,8 @@ __pycache__/
 venv/
 # generated datasets
 *.csv
+# ...but the ground-truth contract CSV is tracked, not a generated dataset
+!lab/ground-truth/*.csv
 # python build / test artifacts
 *.egg-info/
 build/

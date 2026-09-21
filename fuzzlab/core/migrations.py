@@ -174,9 +174,20 @@ CREATE INDEX idx_finding_run ON finding(run_id);
 CREATE INDEX idx_flow_run ON flow(run_id);
 """
 
+# --- migration 2: self-describing findings ----------------------------------
+# The integration harness scores detections by (url, method, param, vuln_class),
+# so a finding must carry its own location rather than only an attempt/candidate
+# reference. Added as a new migration (the registry is append-only).
+_M0002 = """
+ALTER TABLE finding ADD COLUMN url TEXT;
+ALTER TABLE finding ADD COLUMN method TEXT;
+ALTER TABLE finding ADD COLUMN param TEXT;
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
+    (2, _M0002),
 ]
 
 

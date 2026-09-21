@@ -1,0 +1,20 @@
+# fuzzlab expected results (Benchmark-style). Derived from labels.json; the
+# loader cross-checks the two so they cannot drift. category is the vuln class;
+# expected_vulnerable is the ground-truth verdict for that (url, param) case.
+case_id,url,method,param,location,category,expected_vulnerable
+PFF-0001,/product.php,GET,id,query,sqli,true
+PFF-0002,/search.php,GET,q,query,sqli,true
+PFF-0003,/search.php,GET,q,query,xss-reflected,true
+PFF-0004,/login.php,POST,username,body,sqli,true
+PFF-0005,/profile.php,GET,bio,body,xss-stored,true
+PFF-0006,/blog_post.php,GET,id,query,sqli,true
+PFF-0007,/reviews.php,GET,author,fragment,xss-dom,true
+PFF-0008,/feedback.php,GET,ref,query,xss-dom,true
+PFF-1001,/products.php,GET,category,query,none,false
+PFF-1002,/track.php,GET,order_id,query,none,false
+PFF-1003,/api/products.php,GET,category,query,none,false
+PFF-1004,/register.php,POST,username,body,none,false
+PFF-1005,/contact.php,POST,message,body,none,false
+PFF-1006,/newsletter.php,POST,email,body,none,false
+PFF-1007,/edit_profile.php,POST,full_name,body,none,false
+PFF-1008,/login.php,POST,password,body,none,false
