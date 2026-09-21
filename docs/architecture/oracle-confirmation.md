@@ -112,6 +112,24 @@ check family), `mass-assignment`, `orm-leak`, `prompt-injection`, `race-conditio
 could use M1 timing later), `tabnabbing`, `xs-leak`. Several of these become their
 own checks in later phases; this document tracks only oracle confirmation.
 
+## Category selection by run mode (D14)
+
+Which classes' strategies actually run is chosen by the launcher run mode (D11),
+not always all of them:
+
+- **Automatic** (benchmark against our lab): the set of active categories is
+  **auto-derived from the lab's ground truth** (the distinct `vuln_class` values in
+  `labels.json` / `injection-points.json`). The oracle runs exactly the strategies
+  for the classes the lab is known to contain.
+- **Manual** (hand-driven): the user **selects the categories** (launcher selector
+  / `--categories` flag); only the selected classes' strategies run.
+
+The selection scopes three things together: the auditor's active rules (which
+candidates are emitted), the payload sources drawn from `references/`, and which
+`ConfirmationStrategy` classes the oracle runs. A target without ground truth
+(external lab / arbitrary target) cannot auto-derive, so it uses an explicit
+selection.
+
 ## Design notes
 
 - **`ConfirmationStrategy` interface.** One per class: `applies(candidate)`,

@@ -104,6 +104,15 @@ Phase-1 baseline run.
   requests** than the Phase-1 baseline for the same findings, and the `candidate`/
   `attempt` tables contain negatives.
 
+### T2.9 — Injection-category selection by run mode (D14)
+Scope which categories run by launcher mode: **automatic** (against our lab)
+auto-derives the category set from the ground-truth contract; **manual** exposes a
+category selector and a `--categories` flag on the tools. The selection scopes the
+auditor's active rules, the payload sources, and which oracle `ConfirmationStrategy`
+classes run.
+- **Accept:** an automatic lab run tests exactly the ground-truth categories; a
+  manual run with `--categories` tests only the chosen categories and nothing else.
+
 ## Exit criterion
 
 The class-pluggable deterministic oracle confirms **all** the lab's known

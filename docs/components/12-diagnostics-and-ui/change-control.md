@@ -3,6 +3,25 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0005 — Injection-category selection by run mode (spec) (2026-09-21)
+- Change: added FR-UI-categories (D14) — automatic mode auto-selects injection
+  categories from the lab's ground truth; manual mode presents a category selector
+  and passes a `--categories` flag to the tools. The selection scopes the auditor's
+  rules, payload sources, and which oracle `ConfirmationStrategy` classes run.
+  Spec only — no code.
+- Impact (other components / project): threads category scope from the launcher
+  through the auditor (#5), payload catalogs (#6), and the oracle (#7,
+  `architecture/oracle-confirmation.md`). Recorded as D14; no store-schema change.
+- Risk (level; mitigation): low — a selection/scoping control; the default is
+  conservative (automatic = exactly the ground-truth set; manual = only what the
+  user picks). No-auto-run (D11) unchanged.
+- Deliverables:
+  - [x] FR-UI-categories + D14 recorded; oracle doc updated — done.
+  - [ ] Implement the selector + `--categories` flag + ground-truth derivation — todo (Phase 2).
+- Effectiveness (assessed or pending): pending — spec. Judged when the selector and
+  flag land and a manual run tests only the chosen categories while an automatic lab
+  run tests exactly the ground-truth set.
+
 ### CC-UI-0004 — Minimal web launcher + integration harness (2026-09-21)
 - Change: built the Phase 0 minimal local web launcher (`fuzzlab/web/app.py`,
   FastAPI): a control panel that shows target/scope/mode and offers **automatic**

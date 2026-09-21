@@ -13,6 +13,13 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Planning: added **injection-category selection by run mode** (D14) — automatic
+  runs (against our lab) auto-select the categories from the lab's ground truth;
+  manual runs let the user select which vulnerabilities/categories to test (launcher
+  selector + a `--categories` flag). The selection scopes the auditor's rules,
+  payload sources, and which oracle strategies run. Recorded in
+  `DECISIONS_AND_ROADMAP.md` (D14), `architecture/oracle-confirmation.md`, the UI
+  spec (FR-UI-categories), and `PHASE_2_PLAN.md` (T2.9). Change-control: CC-UI-0005.
 - Planning: scoped the deterministic oracle as a **class-pluggable confirmer across
   attack vectors** (not time-based only), per direction to expand coverage. Reviewed
   the `references/` catalogs (63 categories) and wrote a secondary architecture doc

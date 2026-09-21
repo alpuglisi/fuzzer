@@ -30,6 +30,13 @@ bugs — the research-platform diagnostics of decision D2.
     pre-wired), sending nothing to the target until the user invokes a tool.
   Bringing up the lab must never trigger tool traffic on its own (the no-auto-run
   principle). A minimal panel ships in Phase 0; the full dashboard elaborates it.
+- **FR-UI-categories** Injection-category selection follows the run mode (D14):
+  - **automatic** (against our lab) auto-selects the categories from the lab's
+    ground truth (`labels.json`); the panel shows them but the user does not pick.
+  - **manual** presents a **category selector** (which vulnerabilities to test);
+    only selected categories run, backed by a `--categories` flag on the tools.
+  The selection scopes the auditor's rules, payload sources, and which oracle
+  strategies run.
 - **FR-UI-1** A local web dashboard showing live interception, in-progress runs,
   and results in the browser.
 - **FR-UI-cli** Retain a plain CLI entry point for each tool (automation,

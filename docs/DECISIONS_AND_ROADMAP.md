@@ -218,6 +218,25 @@ Internally the detected mechanism maps to an auth handler (cookie/form,
 JSON+token, Basic, header-key); these are implementation detail selected by
 detection, not user-authored profiles.
 
+### D14 — Injection-category selection by run mode
+
+Which injection categories are tested depends on the launcher run mode (D11):
+
+- **Automatic** (the benchmark against our lab): categories are **auto-selected
+  from the lab's ground truth** (`labels.json` vuln classes / `injection-points`) —
+  the run tests exactly what the lab is known to contain, so it stays a clean
+  detection benchmark.
+- **Manual** (hand-driven tool use): the user **selects which vulnerabilities /
+  categories to test**, via a category selector in the launcher and a
+  `--categories` flag on the tools. Nothing is tested for a category the user did
+  not select.
+
+Category selection scopes the auditor's active rules, the payload sources, and
+which oracle `ConfirmationStrategy` classes run. (An automatic run against a target
+without ground truth cannot auto-derive; there the categories must be given, i.e.
+the manual-style selection applies.) This does not weaken no-auto-run (D11): the
+user still chooses automatic mode before anything runs.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **WAF in the lab** — decide before the mutation engine (Phase 8); without one,
