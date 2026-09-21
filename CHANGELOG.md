@@ -13,6 +13,16 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 6 (T6.6): tied the proxy together. `server.py::ProxyEngine` is the sans-I/O
+  flow pipeline (scope → match-and-replace → interception → byte-exact forward →
+  history; out-of-scope traffic bypasses untouched/unrecorded); `parse_connect` +
+  `target_from_request` handle CONNECT and rewrite absolute-form to origin-form;
+  `AsyncProxyServer` is the asyncio socket layer (plain-HTTP path tested offline over
+  loopback); `ca.py::LocalCA` is the local CA with a per-host leaf-cert cache behind an
+  injectable minter (real X.509 minting is lazy `cryptography`). The **live** CONNECT +
+  TLS serving and browser trust are the on-host last mile. This completes the
+  offline-buildable proxy stack. +12 tests, 1 skipped for broken sandbox crypto (248
+  passed / 3 skipped). Change-control: CC-PROXY-0007.
 - Phase 6 (T6.4/T6.5): added the proxy's interactive tooling and the manual-login
   escape hatch. `intercept.py::Interceptor` models interception as an awaited
   `asyncio.Future` (hold → edit → release/drop; off = transparent pass-through);

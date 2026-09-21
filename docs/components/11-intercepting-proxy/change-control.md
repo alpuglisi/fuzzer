@@ -3,6 +3,41 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0007 — Local CA, flow engine, and async server wiring (T6.6) (2026-09-21)
+- Change: tied the proxy together. `fuzzlab/proxy/server.py::ProxyEngine` is the
+  **sans-I/O** flow pipeline — scope check → match-and-replace → interception →
+  byte-exact forward (via an injected upstream sender seam) → history — where
+  FR-PROXY-1/3/5/6 meet; out-of-scope traffic is forwarded untouched and unrecorded.
+  `parse_connect`/`target_from_request` handle CONNECT and rewrite absolute-form
+  requests to origin-form. `AsyncProxyServer` is the asyncio socket layer; its
+  **plain-HTTP** path is exercised offline over loopback. `fuzzlab/proxy/ca.py::LocalCA`
+  is the local CA (FR-PROXY-2) with a per-host **leaf-cert cache** behind an injectable
+  minter seam; the real X.509 minting is lazy `cryptography` (on-host).
+- Impact (other components / project): completes the offline-buildable proxy stack — the
+  engine, CONNECT/target parsing, the async plumbing, and the CA cache are all in place
+  and tested. The **live last mile** is on-host: CONNECT + TLS socket serving and
+  browser trust of the CA (the sandbox has no working `cryptography`/TLS), tracked in
+  `docs/ON_HOST_TASKS.md`. Optional per D5; timing traffic bypasses it.
+- Risk (level; mitigation): low offline (seam-isolated, pure pipeline); the security-
+  sensitive TLS MITM is on-host with a local-only CA, scope enforcement, and redaction.
+  Mitigated by 12 tests (`tests/test_proxy_server.py`, 1 skipped for broken sandbox
+  crypto): CONNECT + absolute/origin/https target parsing; leaf-cache mints once per
+  hostname (port-independent) + a skip-guarded real-minting test; engine forwards +
+  records in scope, bypasses out-of-scope untouched/unrecorded, applies match-replace,
+  and drops/edits via the interceptor; and the async server round-trips a plain-HTTP
+  request over loopback (absolute→origin rewrite) and returns 501 for CONNECT offline.
+  Suite 248 passed / 3 skipped.
+- Deliverables:
+  - [x] `ProxyEngine` sans-I/O pipeline (scope/match-replace/intercept/forward/log) — done.
+  - [x] `parse_connect` + `target_from_request` (absolute↔origin) — done.
+  - [x] `AsyncProxyServer` plain-HTTP path (offline loopback) — done.
+  - [x] `LocalCA` leaf-cert cache + lazy `cryptography` minting — done.
+  - [ ] Live CONNECT + TLS serving + browser trust of the CA — on-host.
+  - [ ] Exit: browse the lab, hand-edit a duplicate `Content-Length`, see exact bytes — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — the engine enforces scope,
+  forwards byte-exact, intercepts, and records; the CA caches leaves per host; the async
+  server round-trips plain HTTP. The live TLS browse-and-edit exit is on-host.
+
 ### CC-PROXY-0006 — Manual-login session capture + manager adoption (T6.5) (2026-09-21)
 - Change: implemented FR-PROXY-9. `fuzzlab/proxy/session_capture.py::SessionCapture`
   watches the flows of a **manual browser login** through the proxy

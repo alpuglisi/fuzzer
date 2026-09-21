@@ -31,11 +31,12 @@ out inline and tracked in `docs/ON_HOST_TASKS.md`.
 manager, deterministic wins). Phase 3 (grey-box) has its offline consumer layer
 built; its live coverage/DB-fault sources are on-host. Phase 4 (bandit) and Phase 5
 (detection classifier) have their learning cores built offline; their
-beats-the-control exits run on the lab. Phase 6 (the intercepting proxy) is in
-progress — its byte-exact dual-path core, scope engine, and match-and-replace are
-built; history, repeater, interception, session capture, and live TLS serving remain.
-Phases 7–10 (ranker/active-learning, mutation engine, protocol depth, plugin system)
-are planned.
+beats-the-control exits run on the lab. Phase 6 (the intercepting proxy) has its full
+**offline** stack built — byte-exact dual-path core, scope, match-and-replace, flow
+history, repeater, interception, manual-login session capture, the flow engine, and the
+local-CA leaf cache — leaving only live CONNECT/TLS socket serving and browser trust
+on-host. Phases 7–10 (ranker/active-learning, mutation engine, protocol depth, plugin
+system) are planned.
 
 ## Integration model
 
@@ -272,7 +273,7 @@ tracked in the requirements files, not here.
   the classifier, proxy/flows for the anomaly detector).
 - **Attach as:** plugins on `core/` hooks. Shipping without ML is a config change.
 
-### 11. Intercepting proxy `[partial — dual-path core built; live serving on-host]` (Phase 6)
+### 11. Intercepting proxy `[partial — full offline stack built; live TLS serving on-host]` (Phase 6)
 - **Dual-path core** `[built]` (D4, `fuzzlab/proxy/`): the **raw byte path**
   (`message.py::RawMessage`) — byte-exact, round-trips received bytes and edits by byte
   surgery so untouched lines stay verbatim (NFR-PROXY-byte-exact) — and the **parsed
@@ -281,15 +282,19 @@ tracked in the requirements files, not here.
   the parsed path rejects it. `h2`/`wsproto` in the raw path are Phase 9.
 - **Scope + match-and-replace** `[built]`: a default-deny scope engine (`scope.py`,
   host + optional path regex) and ordered byte-level rewrites (`matchreplace.py`).
-- **History, repeater, interception, session capture** `[planned — this phase]`:
-  `flow` history (FTS5, batched writes, content-addressed bodies + raw bytes; migration
-  6); repeater (DB-persisted tabs); interception-as-awaited-future; manual-login
-  **session capture** (hand the session a human browser login establishes to the
-  session manager to adopt — FR-PROXY-9 — the escape hatch for logins detection can't
-  crack: MFA, CAPTCHA, multi-step).
-- **CONNECT + TLS interception** `[planned — live on-host]`: a local CA with cached
-  leaf certs and the async socket server; the flow wiring is offline-testable via an
-  injected transport seam, but live TLS serving and browser trust run on-host.
+- **History, repeater, interception, session capture** `[built]`: `flow` history
+  (`history.py` — FTS5, batched writes, content-addressed bodies + raw bytes, secret
+  redaction on write; migration 6); repeater (`repeater.py` — DB-persisted tabs, replay
+  via a sender seam); interception-as-awaited-`asyncio.Future` (`intercept.py`);
+  manual-login **session capture** (`session_capture.py` → `SessionManager.adopt`,
+  FR-PROXY-9/FR-SESS-11 — the escape hatch for logins detection can't crack: MFA,
+  CAPTCHA, multi-step).
+- **Flow engine + CONNECT/TLS** `[partial]`: `server.py::ProxyEngine` is the sans-I/O
+  pipeline (scope → match-replace → intercept → byte-exact forward → history) and
+  `AsyncProxyServer` the asyncio socket layer (plain-HTTP path tested offline over
+  loopback); `ca.py::LocalCA` is the local CA with a per-host leaf-cert cache (real
+  minting is lazy `cryptography`). **Live CONNECT + TLS socket serving and browser trust
+  of the CA are the on-host last mile.**
 - **Depends on (components):** `core/`, session manager (attached as an addon).
 - **Role:** optional observer; other tools may route through it for unified
   history, but timing-sensitive traffic does not (D5).
@@ -451,10 +456,11 @@ offline-complete unless an on-host item is named.
     shaped reward, reset call points) built; **live sources on-host** (Xdebug/pcov,
     DB error hook, snapshot/restore).
   - **Oracle mechanisms:** M8 (out-of-band) and M10 (grey-box) still to build.
-  - **Intercepting proxy (Phase 6):** the byte-exact dual-path core (`RawMessage` +
-    `h11`), scope engine, and match-and-replace are built; history (migration 6),
-    repeater, interception, and session capture remain, and live TLS serving is
-    on-host.
+  - **Intercepting proxy (Phase 6):** the full offline stack is built — byte-exact
+    dual-path core (`RawMessage` + `h11`), scope, match-and-replace, flow history
+    (migration 6, FTS5), repeater, interception, manual-login session capture, the
+    sans-I/O flow engine, and the local-CA leaf cache; only live CONNECT/TLS socket
+    serving and browser trust remain (on-host).
 - `[on-host]` (offline pieces done; the exit/validation runs on the live lab):
   Phase 3 live capture; Phase 4 beats-uniform exit (T4.6); Phase 5 held-out exit
   (T5.5); Phase 6 live CONNECT/TLS serving + browser trust; live

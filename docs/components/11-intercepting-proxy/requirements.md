@@ -1,6 +1,6 @@
 # Intercepting Proxy — Requirement Specification
 
-Component code: **PROXY** · Status: `[planned]` (Phase 6) · Last updated: 2026-09-21
+Component code: **PROXY** · Status: `[partial — offline stack built; live TLS serving on-host]` (Phase 6) · Last updated: 2026-09-21
 
 Related: `ARCHITECTURE.md` #11; `DECISIONS_AND_ROADMAP.md` (D3, D4, D5);
 `./change-control.md`.

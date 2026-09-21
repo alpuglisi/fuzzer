@@ -12,12 +12,15 @@ serving is the on-host last mile (see ``docs/PHASE_6_PLAN.md``).
 
 from __future__ import annotations
 
+from fuzzlab.proxy.ca import LocalCA
 from fuzzlab.proxy.history import FlowRecord, HistoryWriter
 from fuzzlab.proxy.intercept import Interceptor, PendingFlow
 from fuzzlab.proxy.matchreplace import MatchReplaceEngine, MatchReplaceRule
 from fuzzlab.proxy.message import RawMessage
 from fuzzlab.proxy.repeater import Repeater, RepeaterTab
 from fuzzlab.proxy.scope import Scope, ScopeRule
+from fuzzlab.proxy.server import (AsyncProxyServer, ProxyEngine, Target,
+                                  parse_connect, target_from_request)
 from fuzzlab.proxy.session_capture import SessionCapture
 
 __all__ = [
@@ -33,4 +36,10 @@ __all__ = [
     "Repeater",
     "RepeaterTab",
     "SessionCapture",
+    "LocalCA",
+    "ProxyEngine",
+    "AsyncProxyServer",
+    "Target",
+    "parse_connect",
+    "target_from_request",
 ]

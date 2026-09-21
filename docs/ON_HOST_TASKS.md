@@ -83,6 +83,29 @@ lab:
   over held-out pages — the bandit must beat uniform. Also wire cost-normalization
   (T4.4) and hierarchical backoff (T4.5) if the live numbers call for them.
 
+## Phase 6 — intercepting proxy: live TLS serving + the exit
+
+The full offline proxy stack is built and unit-tested (`fuzzlab/proxy/`): the
+byte-exact dual-path core, scope, match-and-replace, flow history (FTS5), repeater,
+interception (awaited future), manual-login session capture, the sans-I/O
+`ProxyEngine`, the `AsyncProxyServer` plain-HTTP path, and the `LocalCA` leaf-cert
+cache. The **live last mile** needs a real browser + TLS (the sandbox has no working
+`cryptography`/TLS):
+- [ ] **Wire live upstream + CONNECT/TLS serving:** implement the real socket `Sender`
+  (upstream connect/send/recv) and TLS-terminate CONNECT with `LocalCA` leaf certs
+  (mint on first CONNECT, cache per host). `AsyncProxyServer` currently returns 501 for
+  CONNECT offline.
+- [ ] **Browser trust:** install the generated `fuzzlab-ca.crt` in the browser/OS trust
+  store used to browse the lab (never distribute the CA key; it stays 0600 on the host).
+- [ ] **Verify the real `cryptography` minting** on the host: `test_proxy_server.py::
+  test_real_ca_mints_signed_leaf` currently skips in the sandbox — it must pass on-host.
+- [ ] **Exit criterion:** browse the lab through the proxy, intercept a request, hand-edit
+  it to carry a **duplicate `Content-Length`**, forward it, and confirm the **exact
+  bytes** go on the wire (the raw path) while the parsed path would have rejected it.
+- [ ] **Manual-login session capture live:** log in to the lab through the proxy, capture
+  the session (`SessionCapture`), `adopt_into` the `SessionManager`, and confirm a
+  subsequent authenticated tool run reuses it — no per-host config.
+
 ## How to pick these up
 
 Step-by-step commands for all of the above are in **`docs/ON_HOST_RUNBOOK.md`**.

@@ -69,11 +69,14 @@ the raw path forwards it byte-for-byte.
   detector), and hands a `SessionState` to the `SessionManager` to adopt — the escape
   hatch for logins detection can't parse (MFA/CAPTCHA/multi-step), no per-host config.
   Secrets redacted on write.
-- **T6.6 — Local CA + async server wiring `[offline skeleton; live on-host]`.**
-  `fuzzlab/proxy/ca.py` (local CA + cached per-host leaf certs, `cryptography`).
-  `fuzzlab/proxy/server.py` (asyncio CONNECT handling + the intercept/history/scope
-  wiring) with an injected transport seam so the flow logic is testable; **live TLS
-  socket serving and browser trust are on-host.**
+- **T6.6 — Local CA + async server wiring `[done offline; live serving on-host]`.**
+  `fuzzlab/proxy/ca.py::LocalCA` — local CA + per-host leaf-cert cache behind an
+  injectable minter seam (real X.509 minting is lazy `cryptography`, on-host).
+  `fuzzlab/proxy/server.py`: `ProxyEngine` (the sans-I/O scope → match-replace →
+  intercept → byte-exact forward → history pipeline), `parse_connect` +
+  `target_from_request` (absolute↔origin rewrite), and `AsyncProxyServer` (the asyncio
+  socket layer; its plain-HTTP path is tested offline over loopback). **Live CONNECT +
+  TLS socket serving and browser trust of the CA are on-host.**
 
 ## Non-goals for Phase 6 (deferred)
 
