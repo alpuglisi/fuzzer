@@ -118,6 +118,12 @@ tracked in the requirements files, not here.
   generator (D8), at which point `VULNERABILITIES.md` becomes a generated, human-facing
   artifact. The lab grows into two tiers (dense "range", realistic "shop") with
   annotated / blind / all-secure build profiles.
+- **Lab WAF** `[built; default off]` (D16): a configurable, deliberately naive request
+  prefilter (`includes/waf.php`, `config/waf-rules.json`) wired globally via PHP
+  `auto_prepend_file`. Off by default (a no-op unless `PFF_WAF` is enabled), so existing
+  labels stay valid; modes `block`/`sanitize`/`log`. It is the **Phase 8 filter-evasion
+  target** the mutation engine learns to bypass — realistic but bypassable, not real
+  protection.
 - **Grey-box instrumentation** `[partial — offline consumer built; live sources on-host]`
   (D7): the consumer layer is built and unit-tested (`fuzzlab/greybox/`): coverage and
   DB-fault readers behind injected seams (`CoverageSource`/`InMemoryCoverageSource`,

@@ -258,10 +258,32 @@ safe — it never guesses and never blasts everything:
 This is the counterpart to D14: D14 covers the known-lab and manual cases; D15
 covers the unknown-target automatic case.
 
+### D16 — Configurable lab WAF (Phase 8 filter-evasion target)
+
+Resolves the deferred "WAF in the lab" question: the Puppy Fort Factory ships a
+**configurable, deliberately naive request prefilter** ("lab WAF") so the Phase 8
+mutation engine's filter-transformation learning (FR-MUT-3) and its
+defeat-the-filter exit have a real, controllable target.
+
+- **In-app prefilter, wired globally, default OFF.** `includes/waf.php` runs via PHP
+  `auto_prepend_file` (set in `web.Dockerfile`), so no page is edited. It is a **no-op
+  unless `PFF_WAF` is enabled**, so the default app — and every existing ground-truth
+  label — is unchanged; the filter is turned on only for filter-evasion experiments.
+- **Configurable at runtime (no rebuild).** `PFF_WAF=on|off`, `PFF_WAF_MODE=block|
+  sanitize|log`, and a machine-readable ruleset (`config/waf-rules.json`). `block`
+  returns 403; `sanitize` strips the matched fragment (the transformation the engine
+  learns); `log` observes only.
+- **Deliberately bypassable.** The signatures are naive on purpose (e.g. `union select`
+  but not `union/**/select`; `<script>` but not `<svg onfocus=>`) — a realistic target
+  to learn to evade, not real protection. The ruleset is shared so the toolkit can model
+  the filter offline.
+- **Not a WAF-bypass-as-defense claim.** It exists to *exercise* evasion in the lab,
+  under the same lab-only, loopback-only, no-auto-run posture as the rest of the target.
+
+Because it is off by default, D7 reproducibility and all prior phases are unaffected.
+
 ### Deferred decisions (revisit at the noted point)
 
-- **WAF in the lab** — decide before the mutation engine (Phase 8); without one,
-  the WAF-bypass line has no target.
 - **Classifier false-positive tolerance (conformal α)** — decide at the
   classifier phase (Phase 5); a value judgment, leaning to a high abstain rate
   and low false-flag rate.
@@ -424,7 +446,8 @@ Goal: browse the lab through it and inspect exact bytes on the wire.
 - Filter-transformation learning from canary probes.
 - Bandit-scheduled operator selection; coverage-guided hill climbing.
 - (Optional) offline LLM catalog expansion behind the AST/semantics gate.
-- Prerequisite: decide on a lab WAF.
+- Prerequisite: decide on a lab WAF — **done (D16):** a configurable, default-off,
+  deliberately bypassable prefilter now ships in the lab as the filter-evasion target.
 
 ### Phase 9 — Protocol depth `[planned]`
 - WebSockets via `wsproto` in the proxy.

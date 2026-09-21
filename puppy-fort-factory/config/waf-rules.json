@@ -1,0 +1,62 @@
+{
+  "_comment": [
+    "Lab WAF ruleset for Ryder's Puppy Fort Factory (config prefilter).",
+    "DELIBERATELY NAIVE, signature-based rules — a realistic-but-bypassable filter",
+    "so the Phase 8 mutation engine has a real target to learn to evade (FR-MUT-3).",
+    "These are NOT a real WAF and provide no real protection. Lab-only.",
+    "Each rule: id, category, action (block|sanitize|log; '' = use the global mode),",
+    "and a PCRE pattern (as used by PHP preg_match, delimiters included)."
+  ],
+  "version": 1,
+  "rules": [
+    {
+      "id": "sqli-union-select",
+      "category": "sql-injection",
+      "pattern": "/union\\s+select/i",
+      "action": "",
+      "note": "bypass e.g. union/**/select, UNION%0aSELECT"
+    },
+    {
+      "id": "sqli-quote-or",
+      "category": "sql-injection",
+      "pattern": "/'\\s+or\\s+/i",
+      "action": "",
+      "note": "bypass e.g. '/**/or/**/, '||, '%09or%09"
+    },
+    {
+      "id": "sqli-comment-tail",
+      "category": "sql-injection",
+      "pattern": "/(--\\s|#)/",
+      "action": "",
+      "note": "bypass e.g. terminate without a trailing comment"
+    },
+    {
+      "id": "xss-script-tag",
+      "category": "xss",
+      "pattern": "/<script/i",
+      "action": "",
+      "note": "bypass e.g. <svg onload=...>, <img src=x onerror=...>"
+    },
+    {
+      "id": "xss-on-event",
+      "category": "xss",
+      "pattern": "/on(error|load|click|mouseover)=/i",
+      "action": "",
+      "note": "bypass e.g. onfocus=, 'onerror =' with a space, backtick/newline splits"
+    },
+    {
+      "id": "path-traversal",
+      "category": "file-inclusion",
+      "pattern": "/\\.\\.\\//",
+      "action": "",
+      "note": "bypass e.g. double-encoding %252e%252e%252f, ..%c0%af"
+    },
+    {
+      "id": "cmd-metachar",
+      "category": "command-injection",
+      "pattern": "/[;&|]/",
+      "action": "",
+      "note": "bypass e.g. $(cmd), command substitution, %0a newline"
+    }
+  ]
+}

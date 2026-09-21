@@ -16,5 +16,12 @@ RUN docker-php-ext-install mysqli \
 # Grey-box coverage (Phase 3) will add pcov/Xdebug here; left out for now so the
 # base image is unchanged until instrumentation lands.
 
+# Lab WAF (Phase 8 prerequisite, decision D16): a configurable, deliberately naive
+# request prefilter wired globally via auto_prepend_file so no page needs editing.
+# It is a no-op unless PFF_WAF is enabled at runtime, so the default app — and every
+# existing ground-truth label — is unchanged. The file lives in the bind-mounted app.
+RUN printf 'auto_prepend_file=/var/www/html/includes/waf.php\n' \
+    > /usr/local/etc/php/conf.d/zz-pff-waf.ini
+
 # Apache serves /var/www/html, where compose bind-mounts the app.
 EXPOSE 80

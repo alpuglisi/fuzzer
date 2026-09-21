@@ -3,6 +3,34 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0006 — Configurable lab WAF (Phase 8 prerequisite, D16) (2026-09-21)
+- Change: added a **configurable, deliberately naive request prefilter** to the lab
+  (`puppy-fort-factory/includes/waf.php` + `config/waf-rules.json`), wired globally via
+  PHP `auto_prepend_file` (a conf.d ini in `web.Dockerfile`), with `PFF_WAF`/
+  `PFF_WAF_MODE` env passthrough in `compose.yaml`/`.env.example`. Modes: `block` (403),
+  `sanitize` (strip the matched fragment), `log` (observe). The signatures are naive on
+  purpose (e.g. `union select` but not `union/**/select`; `<script>` but not
+  `<svg onfocus=>`) — a realistic-but-bypassable filter. **Default OFF:** the file is a
+  no-op unless `PFF_WAF` is enabled, so the app and all existing ground-truth labels are
+  unchanged (D7 reproducibility preserved). Recorded as decision **D16**.
+- Impact (other components / project): resolves the deferred "WAF in the lab" question
+  and gives the Phase 8 mutation engine (MUT) a real target for filter-transformation
+  learning (FR-MUT-3) and its defeat-the-filter exit. Shared ruleset lets the toolkit
+  model the filter offline. No change to the app's behavior while off.
+- Risk (level; mitigation): low — off by default and factored so the meaning-bearing
+  logic (`pff_waf_check_value`) is pure and testable. Mitigated by 5 tests
+  (`tests/test_lab_waf.py`, PHP-CLI driven, skip if `php` absent): ruleset well-formed +
+  unique ids; default-off wiring; naive payloads caught; classic bypasses evade;
+  benign passes and `sanitize` strips the match. Suite 278 passed / 3 skipped.
+- Deliverables:
+  - [x] `waf.php` prefilter (block/sanitize/log) + `waf-rules.json` — done.
+  - [x] Global wiring via `auto_prepend_file`; env config; default off — done.
+  - [x] Offline PHP-driven tests + ruleset validation — done.
+  - [ ] Enable on-host and confirm block/sanitize behavior against the live lab — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — the filter catches the naive
+  payloads and lets the classic bypasses through, exactly the target Phase 8 needs; live
+  block/sanitize verification is on-host.
+
 ### CC-LAB-0005 — `labctl.sh` probes for a working Compose provider (2026-09-21)
 - Change: `labctl.sh` no longer assumes a `docker`/`podman` CLI implies a Compose
   provider. It probes `docker compose`, `podman compose`, `docker-compose`, and

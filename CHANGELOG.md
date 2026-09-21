@@ -13,6 +13,13 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Lab (D16, Phase 8 prerequisite): added a **configurable lab WAF** — a deliberately
+  naive request prefilter (`puppy-fort-factory/includes/waf.php` + `config/waf-rules.json`)
+  wired globally via PHP `auto_prepend_file` (`web.Dockerfile`), with `PFF_WAF`/
+  `PFF_WAF_MODE` env in `compose.yaml`/`.env.example`. Modes block/sanitize/log; signatures
+  are bypassable on purpose (the mutation engine's target). **Default OFF** — a no-op
+  unless enabled, so the app and all ground-truth labels are unchanged. +5 tests
+  (PHP-CLI driven, skip without `php`; 278 passed / 3 skipped). Change-control: CC-LAB-0006.
 - Phase 7 (T7.3): added **active learning** (`ml/active.py`): `uncertainty_sampling`
   (candidates nearest the 0.5 boundary, reusing the ranker's `rank_uncertainty`) and
   `query_by_committee` over a bootstrap `Committee` of rankers (highest score variance),
