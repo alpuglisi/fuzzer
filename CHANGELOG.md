@@ -14,6 +14,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Docs (UI): added `docs/UI_LAYOUT_REDESIGN.md`, a design record for reworking the panel's
+  layout/IA — grounded in a cross-tool UX review (Rapid7, Tenable, Qualys VMDR,
+  Greenbone/OpenVAS, NodeWare, Burp Suite, OWASP ZAP). Proposes an app shell (left sidebar +
+  top context bar) over a deep-linkable multi-page app with a shared design system (tokens +
+  light/dark/density, one DataTable with faceted filters + saved views, one proxy message
+  editor, list→detail, command palette + send-to), an Overview dashboard, a Findings
+  workbench, and a rebuilt Proxy workbench, with an incremental R0–R3 migration that keeps
+  the safety invariants. Design only; see CC-UI-0020.
 - Feature (UI, Phase 2.4): Proxy Scope + Match-Replace — completes the Proxy workbench.
   `ProxyController` gained live scope (default-deny include/exclude) and ordered
   match-replace (byte rewrites) management, exposed via `GET|POST /api/proxy/scope`, `DELETE

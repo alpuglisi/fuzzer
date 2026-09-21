@@ -3,6 +3,32 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0020 — Web UI layout redesign (design record) (2026-09-21)
+- Change: added `docs/UI_LAYOUT_REDESIGN.md` — a design record for reworking the panel's
+  **layout / information architecture** (distinct from the feature revamp in
+  `UI_REVAMP_PLAN.md`). Grounded in researched UI/UX patterns from Rapid7 InsightVM, Tenable
+  (Nessus / VM / .sc), Qualys VMDR, Greenbone/OpenVAS (GSA), NodeWare, Burp Suite, and OWASP
+  ZAP. Proposes replacing the single-page top hash-tab layout with an **app shell** (persistent
+  left sidebar + top context bar) over a **deep-linkable multi-page app** (jinja `shell.html` +
+  per-section routes, still dependency-light — no SPA/build), a shared design system (tokens
+  with light/dark + density, one DataTable with faceted filters + saved views, one reusable
+  proxy message editor, list→detail with breadcrumbs, command palette + "send to" chaining),
+  an Overview dashboard, a Findings workbench, and a rebuilt Proxy workbench; plus an
+  incremental migration path (R0 shell/tokens → R1 routes+Overview → R2 Findings → R3 Proxy
+  rebuild) that preserves the no-auto-run / loopback / authorized / read-only / redaction
+  invariants and folds Phases 3–4 in as sections.
+- Impact (other components / project): design only — no code, no schema change. Supersedes the
+  Phase-0.2 top-tab shell (CC-UI-0012) once adopted; will add a decision (UI shell = left-nav
+  MPA) and FR-UI entries at that point.
+- Risk (level; mitigation): none (documentation). The doc scopes each migration step as
+  independently testable with invariants preserved.
+- Deliverables:
+  - [x] `docs/UI_LAYOUT_REDESIGN.md` (research synthesis + IA + design system + migration) — done.
+  - [ ] Visual mockup of the shell for review — in progress.
+  - [ ] R0–R3 implementation — pending user direction.
+- Effectiveness (assessed 2026-09-21): effective as a design record — grounded in a
+  cross-tool UX review; awaiting direction before implementation.
+
 ### CC-UI-0019 — Proxy tab: Scope + Match-Replace (Phase 2.4; completes the workbench) (2026-09-21)
 - Change: `ProxyController` gained live `scope_view` / `scope_add(host, path_regex?, exclude)`
   / `scope_remove(index)` over the engine's default-deny `Scope`, and `matchreplace_view` /
