@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 9 (T9.2/T9.3): from-scratch **HTTP/2**. `proxy/h2frames.py` (byte-exact frame
+  encode/decode, the preface, and a declared-length override = a length-desync primitive),
+  `proxy/hpack.py` (minimal HPACK — integer/string primitives, static table, literal reps;
+  passes arbitrary header bytes verbatim), and `proxy/h2client.py::H2RawClient` (assembles
+  preface→SETTINGS→HEADERS→DATA, and arbitrary/malformed frame sequences via build_raw —
+  the desync tool for the self-owned lab). Dependency-light; the parsed `h2` path is
+  declared + skip-guarded. HPACK matches the RFC 7541 integer vectors. +13 tests
+  (341 passed / 4 skipped). Change-control: CC-PROXY-0009.
 - Phase 9 (T9.1): started **protocol depth** with a from-scratch, byte-exact WebSocket
   frame codec (`fuzzlab/proxy/ws.py`) — encode/decode, masking (self-inverse),
   7/16/64-bit lengths, fragmentation reassembly, control frames, and the RFC 6455

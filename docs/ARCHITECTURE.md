@@ -40,9 +40,10 @@ ranker (NDCG@k/Precision@k vs random), uncertainty sampling, and query-by-commit
 with the real-lab held-out exit on-host. Phase 8 (mutation engine) has begun: the lab
 WAF (D16) is the filter-evasion target, and the semantics-preserving operator framework
 + validator are built; context-typed XSS, filter learning, and bandit/coverage search
-remain. Phase 9 (protocol depth) has begun — the from-scratch WebSocket frame codec is built;
-HTTP/2 frames + HPACK, the raw-frame client, and the opt-in h2→h1 desync lab front-end
-remain. Phase 10 (plugin system + anomaly detector + second target) is planned.
+remain. Phase 9 (protocol depth) is well underway — the from-scratch WebSocket codec and the
+byte-exact HTTP/2 frame layer + minimal HPACK + raw-frame client are built; the parsed
+`wsproto`/`h2` path, live ALPN/socket, and the opt-in h2→h1 desync lab front-end remain.
+Phase 10 (plugin system + anomaly detector + second target) is planned.
 
 ## Integration model
 
@@ -311,8 +312,13 @@ tracked in the requirements files, not here.
   the parsed path rejects it.
 - **WebSocket framing** `[built]` (Phase 9 T9.1, `ws.py`): a from-scratch, byte-exact RFC
   6455 frame codec (encode/decode, masking, fragmentation, control frames) + the handshake,
-  recorded in history with a `protocol` tag (migration 9). HTTP/2 (`h2frames`/`hpack`/raw
-  client) and the parsed `wsproto`/`h2` path are the rest of Phase 9.
+  recorded in history with a `protocol` tag (migration 9).
+- **HTTP/2 raw path** `[built]` (Phase 9 T9.2/T9.3): from-scratch byte-exact frames
+  (`h2frames.py`, with a declared-length-override desync primitive), a minimal HPACK
+  (`hpack.py`, passes arbitrary header bytes), and the raw-frame client (`h2client.py` —
+  preface→SETTINGS→HEADERS→DATA and arbitrary/malformed sequences), for authorized desync
+  research against the self-owned lab. The parsed `wsproto`/`h2` path and live ALPN/socket
+  are the rest of Phase 9 (on-host).
 - **Scope + match-and-replace** `[built]`: a default-deny scope engine (`scope.py`,
   host + optional path regex) and ordered byte-level rewrites (`matchreplace.py`).
 - **History, repeater, interception, session capture** `[built]`: `flow` history
@@ -500,10 +506,10 @@ Suite: 328 passed / 4 skipped (the skips need a native build unavailable in the 
     filter model + bypass learner, the bandit/coverage-guided search, variant write-back
     to `payload_variant` (migration 8) behind the destructive gate, and the gated
     default-off LLM scaffold; only the live filter-bypass + coverage exit (T8.7) remains.
-  - **Protocol depth (Phase 9):** the from-scratch, byte-exact WebSocket frame codec +
-    handshake and the `flow.protocol` tag (migration 9) are built; HTTP/2 frames + HPACK,
-    the raw-frame client, the parsed `wsproto`/`h2` path, and the opt-in h2→h1 desync lab
-    front-end remain.
+  - **Protocol depth (Phase 9):** the from-scratch WebSocket frame codec + handshake, the
+    `flow.protocol` tag (migration 9), and the byte-exact HTTP/2 frame layer + minimal
+    HPACK + raw-frame client are built; the parsed `wsproto`/`h2` path, live ALPN/socket,
+    and the opt-in h2→h1 desync lab front-end remain.
   - **Oracle mechanisms:** M8 (out-of-band) and M10 (grey-box) still to build.
   - **Intercepting proxy (Phase 6):** the full offline stack is built — byte-exact
     dual-path core (`RawMessage` + `h11`), scope, match-and-replace, flow history

@@ -3,6 +3,40 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0009 — HTTP/2 frames + minimal HPACK + raw-frame client (T9.2/T9.3) (2026-09-21)
+- Change: from-scratch, byte-exact HTTP/2 for the raw path. `fuzzlab/proxy/h2frames.py`
+  encodes/decodes the frame types (DATA/HEADERS/SETTINGS/WINDOW_UPDATE/RST_STREAM/PING/
+  GOAWAY/…), the connection preface, and lets the caller **override the declared length**
+  independent of the payload (a length-desync primitive). `fuzzlab/proxy/hpack.py` is a
+  minimal HPACK (integer/string primitives, the static table, literal representations,
+  decode of static-indexed + literal; dynamic table + Huffman-encode out of scope) that
+  passes **arbitrary header bytes** through unchanged. `fuzzlab/proxy/h2client.py::H2RawClient`
+  assembles a request (preface → SETTINGS → HEADERS → optional DATA) and, via `build_raw`,
+  arbitrary/malformed frame sequences — the desync/smuggling tool for the **self-owned
+  lab** (the T9.5 h2→h1 front-end). Dependency-light; the parsed `h2` path is declared +
+  skip-guarded (on-host).
+- Impact (other components / project): realizes the HTTP/2 half of protocol depth — raw
+  frame construction with arbitrary bytes for authorized desync research, offline-testable.
+  The live socket + TLS + ALPN override and sending to a real h2 endpoint are on-host
+  (T9.4/T9.6). Lab-only posture unchanged; no store change.
+- Risk (level; mitigation): medium (dual-use tooling) — mitigated structurally by scope
+  enforcement, loopback/lab-only, no-auto-run, and the target being infrastructure we run
+  ourselves; the raw client only *builds bytes* here (no network). Correctness mitigated
+  by 13 tests (`tests/test_proxy_h2.py`): HPACK integer RFC vectors, header round-trip
+  incl. arbitrary CRLF, static-indexed decode, Huffman-decode raises; frame round-trip +
+  flags, the length-override desync primitive, all builders, multi/partial-tail decode,
+  truncation errors; client request structure, body DATA frame + odd/incrementing stream
+  ids, arbitrary-header passthrough, and arbitrary-frame `build_raw`. Suite 341 passed / 4 skipped.
+- Deliverables:
+  - [x] HTTP/2 frame layer (T9.2) — done.
+  - [x] Minimal HPACK (T9.2) — done.
+  - [x] HTTP/2 raw-frame client (T9.3, offline builder) — done.
+  - [ ] Parsed `wsproto`/`h2` path (T9.4); lab h2→h1 front-end (T9.5); exit (T9.6) — next/on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — HPACK matches the RFC integer
+  vectors and preserves arbitrary bytes, frames round-trip byte-exact with a working
+  length-desync primitive, and the client builds valid and deliberately-malformed requests;
+  live ALPN/socket + the desync exit are on-host.
+
 ### CC-PROXY-0008 — WebSocket framing + flow.protocol (Phase 9 T9.1) (2026-09-21)
 - Change: began protocol depth. `fuzzlab/proxy/ws.py` is a from-scratch, byte-exact RFC
   6455 WebSocket frame codec — `encode_frame`/`decode_frame`/`decode_frames` (FIN/RSV/

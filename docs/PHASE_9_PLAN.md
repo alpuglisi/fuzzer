@@ -74,12 +74,12 @@ lab-only, on our own infrastructure.
   lengths), fragmentation/continuation, and control frames (ping/pong/close). Reuse the
   HTTP/1.1 Upgrade handshake; record WS messages to history; replay via the repeater.
   Parsed path via `wsproto` (declared, skip-guarded).
-- **T9.2 — HTTP/2 frame layer + minimal HPACK `[planned]`.** `fuzzlab/proxy/h2frames.py`
+- **T9.2 — HTTP/2 frame layer + minimal HPACK `[done, offline]`.** `fuzzlab/proxy/h2frames.py`
   — byte-exact encode/decode of the HTTP/2 frame types (DATA, HEADERS, SETTINGS,
   WINDOW_UPDATE, RST_STREAM, PING, GOAWAY, …), the connection preface, and
   `fuzzlab/proxy/hpack.py` — a minimal HPACK (static table + literal reps + int/string
   primitives) sufficient for arbitrary header bytes.
-- **T9.3 — HTTP/2 raw-frame client `[planned]` (offline builder; live on-host).**
+- **T9.3 — HTTP/2 raw-frame client `[done, offline builder; live on-host]`.**
   `fuzzlab/proxy/h2client.py` — assemble a request from frames (preface → SETTINGS →
   HEADERS → DATA), allowing **arbitrary/malformed** frames and header bytes for desync
   study. Frame assembly is offline-tested; the socket + TLS + ALPN override is on-host.
