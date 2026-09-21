@@ -6,6 +6,16 @@ changed, and the reason. Reference the commit hash where useful.
 
 Format per entry: `- <area>: <what changed> — <why>` (commit `<hash>`).
 
+## 2026-09-21
+
+- Planning: added `docs/DECISIONS_AND_ROADMAP.md` (settled design decisions
+  D1–D7, cross-cutting principles, and the phased build plan) and
+  `docs/ARCHITECTURE.md` (component map, subcomponents, interactions, and
+  dependencies) — to lock the project direction before building the next phase
+  (lean foundations, then the session manager).
+- Planning: committed the two research prompts under `docs/` and stripped their
+  human-facing preambles so each `.md` is a raw prompt fed directly to an agent.
+
 ## 2026-09-20
 
 - Project docs: added `CHANGELOG.md` (this file) and `ERROR_LOG.md` — to keep a
