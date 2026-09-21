@@ -547,3 +547,110 @@ Laravel and Express emitters need a real `routes/web.php`/`app.js`
 accumulator (FastAPI may avoid needing one at all via `APIRouter`
 auto-inclusion — unconfirmed, worth ten minutes to check before Phase 3
 starts).
+
+---
+
+## Addendum E (2026-09-21) — independent tool-oracles replace hand-authored assertions for most classes; permissive seed reuse; patch-inversion rejected
+
+Resolves the practical blocker raised after Addendum C/D: the project owner
+has no hands-on exploit-authoring expertise, and using the same LLM to both
+draft code and judge it reintroduces the self-grading risk those addenda
+were built to avoid. A research pass found a working answer, not a
+workaround — this is a real, adopted change to the authoring/verification
+architecture, not just new information.
+
+**1. For most classes, the "human authors the oracle assertion" default
+(Addendum C step 7 / the playbook's step 7) is replaced by wiring a mature,
+independently-authored exploitation tool as the security assertion.** These
+tools were written by different people, in a different era, using
+different detection logic than any drafting LLM — using them to confirm
+exploitability is genuine independence, not self-grading under a different
+name. Adopted mapping:
+
+| Class | Oracle | Maturity |
+|---|---|---|
+| SQL injection | **sqlmap** (`--batch`, or `sqlmapapi.py`'s REST/JSON server) | High — purpose-built exploiter |
+| OS command injection | **commix** (`--batch --report-json`) | High |
+| SSTI / code injection | **SSTImap** (not tplmap — self-declared unmaintained) | Medium-high |
+| Path traversal/LFI, XXE, open redirect | **Nuclei**, one hand-authored template per class | Medium — template authored once, not per cell |
+| Known-CVE/component | **Nuclei** KEV/CVE templates | High |
+| Reflected/stored XSS | ZAP active scan or Nuclei | Medium — spot-check advised |
+| Whole-app safety net | **OWASP ZAP** daemon mode / Automation Framework | Supplementary |
+
+**2. Three classes have no mature automated oracle and keep a human
+touchpoint — but that touchpoint is now scoped to a small, one-off,
+purchasable engagement, not per-cell expertise:** IDOR/BOLA, business-logic
+flaws, and race conditions. The adopted minimum viable form is **one review
+of the safety-matrix design plus authored oracles for these three classes**
+— which can be filled by a paid one-off security consultation rather than
+the project owner developing exploit-writing skill. Race conditions have a
+weak heuristic fallback (Nuclei's parallel-request-count approach) that is
+not trusted as a primary oracle.
+
+**3. A new build-time constraint, adopted:** the confirmation oracle for a
+class must never be the same tool family as any system-under-test this
+project's own tools are later evaluated against — otherwise the corpus
+becomes biased toward exactly what that tool family can find, undermining
+the lab's purpose as an independent benchmark. Where `fuzzlab`'s own future
+components resemble one of the adopted oracle tools, a different
+confirmation path (a hand-crafted template or scripted PoC) is used
+instead.
+
+**4. Patch-inversion vulnerability-injection tools (LAVA, EvilCoder, VulGen,
+VGX) are explicitly rejected**, not merely deprioritized: they are C/binary-
+focused, mostly unmaintained or unlicensed research artifacts, and — the
+decisive reason — VulGen/VGX-style techniques mine and invert *real* patch
+commits, meaning their output is at meaningful risk of being a derivative
+work of specific copyrighted source. That is categorically different from
+this project's existing provenance approach (a human paraphrase of an
+advisory's *mechanism*, never its *expression*) and would reintroduce
+exactly the licensing risk this program has otherwise avoided. This closes
+out that line of investigation from the prior research prompt; it is not
+revisited pending new evidence.
+
+**5. Permissively-licensed, complete runnable web apps are adopted as
+legitimate seed material**, on top of (not instead of) the pattern-card
+provenance corpus — each still individually license-verified before use:
+**OWASP Juice Shop** (MIT — the app code, not its CC-BY-NC-ND companion
+book; Node/Express), **crAPI** (Apache-2.0), **VAmPI** (commonly MIT,
+Flask/Python), **vAPI** (PHP/Laravel — directly on this project's first
+target stack), **NodeGoat**/**RailsGoat** (Apache-family), and the
+generated-content artifacts **AutoBaxBench** and **SecCodePLT** (both MIT,
+ship with their own tests/exploits). These are structural/idiom references
+for authoring — reducing how often a module is written from a blank page —
+never a source to copy verbatim into a generated cell; SecGen's GPL-3.0
+module content is explicitly excluded (its per-module-metadata *design
+pattern* is a fine reference; its actual modules are not reusable).
+
+**6. AutoBaxBuilder/AutoBaxBench (ETH Zürich, MIT, Dec 2025) is adopted as a
+trial-worthy force multiplier, not a primary oracle.** It's an agentic
+pipeline that generates scenario + functional tests + an end-to-end exploit
+fully automatically, judged by *actually running the exploit* — more
+independent than an LLM judge, but the exploit is still LLM-authored, and
+the research surfaced a genuine, unresolved conflict between the paper's
+own ablation language and the project site's stronger claim about the
+absence of self-bias. **Adopted posture: read arXiv:2512.21132 §4.4 before
+attributing full independence to any AutoBaxBuilder-produced exploit; cross-
+check its verdicts against the class-specific tool-oracles in item 1 before
+trusting it standalone.** Covers Python/Node backends, relevant to two of
+this project's three target stacks.
+
+**7. Effort estimate flagged for recalibration, not yet changed.** Addendum
+C's ~330h/stack figure assumed authoring from a blank page with a
+hand-written oracle for every class. Items 1 and 5 both reduce that
+assumption's validity — tool-oracles remove hand-authored assertions for
+most classes, and permissive seed apps reduce blank-page authoring for
+some. The number is not revised here because no real data yet exists on
+how much time either saves in practice; §8's recommended spike (revised
+below) is what should produce that data.
+
+**8. Recommended next action, revised.** The playbook's original
+recommendation ("author three seeds with a stopwatch," requiring original
+exploit code) is superseded by a cheaper, lower-expertise-required first
+step: **wrap sqlmap and commix as headless pass/fail oracles and validate
+them against a known-vulnerable permissive seed (e.g. vAPI or DVWA) and its
+secure counterpart.** This requires no original exploit authoring from
+anyone — the tools already encode the expertise — and validates the core
+architectural thesis (independent tool-oracle confirms a label) at near-zero
+cost before any original seed is attempted. See
+`docs/LAB_SEED_AUTHORING_PLAYBOOK.md`, updated accordingly.

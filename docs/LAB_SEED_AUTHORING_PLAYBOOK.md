@@ -1,12 +1,26 @@
 # Seed authoring playbook — from a vulnerability report to a generated cell
 
 **Status: consolidation of already-decided rules, not a new decision.**
-Everything below is already settled across `CR-LAB-0001` Addenda B/C/D and
-`LAB_PHASE_0_PLAN.md`; this document exists because those rules were never
-written down as one executable sequence, and answers the question "how,
-concretely, do we turn a real disclosure into a generated lab cell." **This
-playbook has never been exercised on a real seed.** Its own recommended
-first action (§8) is to fix that before trusting anything else in it.
+Everything below is already settled across `CR-LAB-0001` Addenda B/C/D/E
+and `LAB_PHASE_0_PLAN.md`; this document exists because those rules were
+never written down as one executable sequence, and answers the question
+"how, concretely, do we turn a real disclosure into a generated lab cell."
+**This playbook has never been exercised on a real seed.** Its own
+recommended first action ("Recommended next action" below) is to fix that
+before trusting anything else in it.
+
+**Revision note (Addendum E):** the original version of this playbook
+required a human to hand-author the security oracle assertion for every
+seed. That's no longer the default. For most classes, the security
+assertion is now **a mature, independently-authored exploitation tool**
+(sqlmap, commix, SSTImap, Nuclei) invoked headlessly — genuinely
+independent of whatever drafted the code, since these tools predate this
+project and use their own detection logic. **A hand-authored assertion is
+now the exception**, reserved for the three classes with no mature
+automated oracle: IDOR/BOLA, business-logic flaws, and race conditions —
+and even there, the recommended source is a one-off paid expert
+consultation, not the project owner personally developing exploit-writing
+skill.
 
 ## The pipeline, end to end
 
@@ -21,11 +35,21 @@ scenario brief (human-written; must NOT name the vulnerability
                 or the required mitigation — SecCodePLT rule, Addendum D)
       │
       ▼
+check: does a permissive seed app already have this shape? (Addendum E #5 —
+       Juice Shop/MIT, crAPI/Apache-2.0, vAPI/PHP-Laravel, NodeGoat,
+       AutoBaxBench/SecCodePLT/MIT) — reference its idiom, never copy verbatim
+      │
+      ▼
 SEED  — one (class, sink_context) pair, on stack 1, human-authored:
    • safety-matrix entry: (op, sink_context) -> effect
    • vulnerable module fragment(s), by file_role
    • secure twin (identical identifiers, differs ONLY in the transform)
-   • TWO oracle assertions: functional, security
+   • ONE functional assertion (human- or LLM-drafted, low stakes)
+   • ONE security assertion: an INDEPENDENT TOOL-ORACLE where one exists
+     (sqlmap/commix/SSTImap/Nuclei — Addendum E #1); hand-authored (ideally
+     by a paid one-off expert, not the project owner) only for the three
+     gap classes with no mature tool (IDOR/BOLA, business logic, race
+     conditions — Addendum E #2)
    • TWO Semgrep "shape" rules: sink present, transform present
       │
       ├──► PORT / VARIANT (LLM may draft; never the seed itself):
@@ -81,11 +105,26 @@ labels.json / expectedresults.csv / injection-points.json
    cell ID; the vulnerable and secure twins must emit **identical**
    identifiers. (Juliet's own documented defect: generic helper names made
    false positives unattributable to the right variant — don't repeat it.)
-7. **Write two oracle assertions, by hand.** One functional ("the route
-   works and returns the expected shape"), one security ("the vulnerable
-   variant is exploitable; the secure twin is not"). **This step is never
-   delegated to an LLM** — if the model writes both the code and the test
-   that judges the code, a confidently-wrong pair passes silently.
+7. **Confirm the cell with an independent oracle, not a hand-written
+   assertion, wherever one exists (Addendum E).** Write one functional
+   assertion ("the route works and returns the expected shape" — this one
+   is low-stakes and fine to draft with LLM help). For the security
+   assertion, wire the class-appropriate independent tool instead of
+   writing exploit logic yourself: sqlmap for SQL injection, commix for OS
+   command injection, SSTImap for SSTI (never tplmap — unmaintained), a
+   hand-authored Nuclei template for path traversal/XXE/open redirect/
+   known-CVE classes, ZAP as a whole-app safety net. Run it against both
+   twins: a positive result on the vulnerable variant and a negative result
+   on the secure twin, from the **same tool**, is the confirmation — never
+   an LLM's opinion about its own code. **Never use an oracle tool from the
+   same family as any system-under-test this project's own tools will
+   later be evaluated against** (Addendum E #3) — that biases the corpus
+   toward exactly what that tool family can find. Only for the three gap
+   classes with no mature tool — IDOR/BOLA, business-logic flaws, race
+   conditions — does this step fall back to a hand-authored assertion, and
+   the recommended source for that is a one-off paid security consultation,
+   not the project owner personally writing exploit code (Addendum E §8's
+   "Recommended next action" starts here for a reason).
 8. **Write two Semgrep shape rules.** One asserting the vulnerable module
    contains the intended sink pattern, one asserting the secure module
    contains the intended transform. Mark the pair's
@@ -114,8 +153,16 @@ labels.json / expectedresults.csv / injection-points.json
 
 - The pattern card informs the *scenario*; it never appears in code, in an
   LLM's code-drafting context, or inside the manifest.
-- A human authors every seed's oracle assertions and safety-matrix entry.
-  An LLM may only draft/port *modules*.
+- A human authors every seed's safety-matrix entry. Security *assertions*
+  come from an independent tool-oracle wherever one exists (Addendum E);
+  only the three gap classes still need a hand-authored one. An LLM may
+  draft/port *modules* and low-stakes functional assertions, never a
+  security assertion or a safety-matrix entry.
+- An oracle tool is never drawn from the same family as a system-under-test
+  this project's own tools are evaluated against (Addendum E #3).
+- Patch-inversion vulnerability-injection tools (LAVA, EvilCoder, VulGen,
+  VGX) are rejected outright, not just deprioritized — their output risks
+  being a derivative work of the real patches they mine (Addendum E #4).
 - The scenario brief never names the vulnerability class or its required
   mitigation.
 - Vulnerable and secure twins differ *only* in the transform, are diffed
@@ -138,17 +185,38 @@ labels.json / expectedresults.csv / injection-points.json
 - **The 5–20% expected LLM-draft error rate** (Addendum C §2.2) has no
   measurement yet specific to framework-idiomatic web code, only adjacent
   analogues from other artifact types.
+- **No tool-oracle has actually been wired up yet** — sqlmap/commix/
+  SSTImap/Nuclei/ZAP are recommended but unintegrated; §"Recommended next
+  action" below is exactly the step that closes this gap.
+- **AutoBaxBuilder's self-bias question is contested** (paper vs. project
+  site) and unresolved — don't attribute full independence to its exploits
+  until arXiv:2512.21132 §4.4 has been read and its verdicts cross-checked
+  against a class-specific tool-oracle (Addendum E #6).
+- **The paid-expert-engagement path for the three gap classes (IDOR/BOLA,
+  business logic, race conditions) has not been decided or budgeted** —
+  this needs your call, not a default assumption.
 
-## Recommended next action
+## Recommended next action (revised, Addendum E)
 
-Before trusting this playbook's effort estimate or its untested schema
-pieces any further: **author three real seeds with a stopwatch** — one
-Tier-A (textbook-shaped), one Tier-B (deliberately hard, e.g. an
-identifier-position SQLi case), and one cross-stack port — on the current
-PHP stack or a minimal FastAPI/Express spike, whichever is faster to stand
-up a throwaway harness for. This is the cheapest way to convert this
-document from "a plan" into "a validated process," and it's the same
-recommendation the underlying research made independently. It does not
-require Phase 0 to be finished first, but it does require your go-ahead,
-since it means writing actual (original, non-copied) vulnerable code for
-the first time in this program.
+The original recommendation here — "author three real seeds with a
+stopwatch," which assumed someone writes original exploit code — is
+superseded by a cheaper, no-exploit-authoring-required first step:
+
+**Wrap sqlmap and commix as headless pass/fail oracles, and validate them
+against a known-vulnerable permissive seed app (e.g. vAPI or DVWA) and its
+secure counterpart.** Concretely: stand up one of those apps, point sqlmap
+(or commix) at a known-SQLi (or known-command-injection) endpoint and its
+secure equivalent, and confirm the tool correctly returns
+vulnerable-on-one, clean-on-the-other. This requires **no original exploit
+authoring from anyone** — the tools already encode the expertise this
+project was missing — and it validates the core architectural thesis
+(independent tool-oracle confirms a label) at near-zero cost before this
+project attempts an original seed on its own generated code.
+
+Only after that's proven does it make sense to attempt an original Tier-A
+seed (still low-risk, since its security assertion is now a tool-oracle
+call, not hand-written exploit logic) and, later, decide whether to pursue
+the three gap classes via a paid one-off consultation or defer them. None
+of this requires Phase 0 to be finished first, but the sqlmap/commix
+validation step is cheap enough that it can reasonably happen in parallel
+with Phase 0's implementation.
