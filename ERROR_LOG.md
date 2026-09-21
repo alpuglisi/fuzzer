@@ -18,6 +18,27 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — ON_HOST_RUNBOOK documented unbuilt/unverified steps as followable (BUG-0014)
+
+- **Symptom:** the initial runbook's `[build+run]` parts (E, I, J, K) could not be followed —
+  they referenced last-mile code that didn't exist and commands/outputs never run, and
+  contained concrete errors (a second `auto_prepend_file` line that would silently disable
+  the WAF; per-request DB fault via log-tailing; `up --profile desync` that didn't work; a
+  duplicate-*identical* Content-Length "exit" that is valid HTTP).
+- **Root cause:** operational docs were authored from design intent and never executed/
+  verified against the real host, and the format didn't distinguish verified-runnable from
+  unbuilt/aspirational steps (`[build+run]` conflated "needs building" with "runnable").
+- **Recurrence:** the same root cause recurred across Parts E/I/J/K and produced BUG-0009
+  (double auto_prepend), BUG-0012 (dup-CL), BUG-0013 (up --profile) + the "no Compose
+  provider" incident; each was fixed piecemeal with no PA about documentation adequacy, so
+  the class stayed unguarded (same failure mode as BUG-0013).
+- **Remediation:** Parts E/I/J/K rebuilt into verified one-command `[run]` flows backed by
+  tested code + self-testing scripts; the concrete errors fixed (BUG-0009/0012/0013); the
+  runbook Legend corrected (all parts `[run]`; a `[design]` tag now marks any unbuilt/
+  unverified step, which must not be written as followable). Full RCA + recurrence/prior-PA
+  analysis in `docs/bugs/BUG-0014-*`; rule PA-0015.
+- **Status:** Fixed (this commit). Suite 415 passed / 6 skipped.
+
 ## 2026-09-21 — On-host script defects: proxy self-test premise (BUG-0012) + compose recreate (BUG-0013)
 
 - **Symptom (1):** `scripts/proxy_e2e.sh` step 5 reported `FAIL: the parsed path did not

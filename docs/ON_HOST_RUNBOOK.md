@@ -161,13 +161,16 @@ negatives → oracle confirm → target fingerprint → score → request metric
 
 ## Legend — what kind of step each part is
 
-- **[run]** — the code is built; you run commands and read results. Do these first.
-- **[build+run]** — needs an on-host last-mile implementation (live source/socket/lib the
-  sandbox can't provide) before the exit runs. Concrete steps are given; ping me and I can
-  implement the fuzzlab-side code for you to validate.
+- **[run]** — the code is built and the flow is verified; you run commands (often a single
+  `scripts/*_e2e.sh`) and read results. Every part below is now `[run]`.
+- **[design]** *(none currently)* — reserved for a step whose on-host last-mile code is not
+  yet built/verified. Such a step must be tagged `[design]` and must **not** be written as
+  a followable command sequence until its code exists and a self-test proves it, at which
+  point it becomes `[run]` (see PA-0015). The earlier `[build+run]` parts (E, I, J, K) were
+  the anti-pattern this replaces — see `docs/bugs/BUG-0014-*`.
 
-The quickest wins are **Parts F, G, H, L** (all `[run]`): same lab, extra flags, read
-`run_metrics`. Parts E, I, J, K are `[build+run]`.
+All parts (A–L) are `[run]`. The quickest wins are **Parts F, G, H, L**: same lab, extra
+flags, read `run_metrics`. Parts E, I, J, K each have a one-command `scripts/*_e2e.sh`.
 
 ---
 

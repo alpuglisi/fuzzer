@@ -97,3 +97,11 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   containers/pod/network under podman, and retry. And when a provider/environment incident
   is fixed in place, still record a PA for the *class* — closing it as a one-off leaves the
   class unguarded and it recurs. (from BUG-0013)
+- **PA-0015** — Operational / runbook documentation must be written from an **executed,
+  verified run**, not from design intent. A step whose on-host last-mile code is not yet
+  built and self-tested is tagged `[design]` and must **not** be presented as a followable
+  command sequence; it becomes `[run]` only once its code exists and a self-testing script
+  (that fails loud) proves the exit. Commands and expected outputs in a `[run]` step must be
+  ones actually produced, and any step that changes host state or sends traffic ships with
+  such a script. If the build environment cannot execute the steps (no lab/host), say so and
+  keep them `[design]` until validated on the host. (from BUG-0014)

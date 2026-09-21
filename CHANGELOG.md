@@ -14,6 +14,17 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Docs (BUG-0014): investigated and fixed the systemic inadequacy of the initial
+  `docs/ON_HOST_RUNBOOK.md` — its `[build+run]` parts (E/I/J/K) documented unbuilt,
+  unverified, and in places incorrect steps as followable (the WAF-disabling double
+  `auto_prepend_file`, log-tailing DB faults, a non-working `up --profile`, an invalid
+  duplicate-identical Content-Length exit). Root cause: operational docs written from design
+  intent, never executed/verified against the real host, with a format that conflated "needs
+  building" with "runnable". The recurrence review found this root cause produced BUG-0009 /
+  BUG-0012 / BUG-0013 and the "no Compose provider" incident, each fixed piecemeal with no
+  documentation-adequacy PA. Corrective: E/I/J/K are now verified one-command `[run]` flows;
+  the Legend is corrected (all parts `[run]`; a `[design]` tag marks unbuilt steps that must
+  not be written as followable). New rule PA-0015. RCA `docs/bugs/BUG-0014-*`.
 - Fix (BUG-0012/BUG-0013, on-host scripts): `scripts/proxy_e2e.sh` step 5 gave a false FAIL
   because it asserted the parsed path rejects a duplicate-*identical* Content-Length, which
   is valid per RFC 7230 — now it sends *conflicting* values (0 and 5), matching the offline
