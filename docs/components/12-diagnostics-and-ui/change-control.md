@@ -3,6 +3,43 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0014 — Unified serve mode: in-process proxy controller (Phase 0.4; D19) (2026-09-21)
+- Change: added `fuzzlab/web/proxycontrol.py` (`ProxyConfig` + `ProxyController`) — it
+  builds the proxy engine (Scope + `MatchReplaceEngine` + `Interceptor` + `SocketSender` +
+  optional `HistoryWriter` + `LocalCA`) and owns its lifecycle. `create_app(..., proxy=)`
+  gained a FastAPI **lifespan** that starts the controller on startup and stops it on
+  shutdown, so the live interceptor shares the panel's event loop (its `asyncio.Future`s
+  are not cross-process). New endpoints `GET /api/proxy/status` (dormant `{configured:
+  false}` when no proxy) and `POST /api/proxy/intercept` (toggle; 409 when none). `serve()`
+  takes an optional `proxy` and refuses a non-loopback proxy host; a new `web_main()` parses
+  `fuzzlab web [--with-proxy …]` and, because the proxy forwards to upstreams, requires
+  `--authorized` before wiring one (mirrors `fuzzlab proxy`). `fuzzlab web` now routes
+  through `web_main` (`cli.py`).
+- Impact (other components / project): the seam the **Phase-2 Proxy workbench** will use —
+  its routes reach the live `Interceptor` via the controller (pause/edit/drop/forward),
+  while flow history stays store-readable cross-process. Consumes the existing proxy
+  component unchanged (no proxy code edited; the response-intercept hook is Phase 2). No
+  schema change. The proxy is opt-in, `--authorized`-gated, loopback-only, on a separate
+  port; without `--with-proxy` the panel is unchanged. Records D18 (subprocess launch, from
+  0.3) and D19 (in-process proxy).
+- Risk (level; mitigation): medium — the panel can now host a listener that forwards
+  traffic. Mitigated by the authorization gate on `--with-proxy`, loopback-only binding for
+  both the panel and the proxy (asserted; `serve` refuses non-loopback), the opt-in default
+  (dormant unless asked), and tests: `tests/test_web_proxy_serve.py` (7) — controller
+  start/status/stop on an ephemeral port, intercept toggle, dormant status + 409 without a
+  proxy, lifespan start/stop via the TestClient context manager, `serve` refusing a
+  non-loopback proxy host, and `web_main` refusing `--with-proxy` without `--authorized`.
+  Suite 462 passed / 6 skipped.
+- Deliverables:
+  - [x] `web/proxycontrol.py` (build/start/stop/status/set_intercept) — done.
+  - [x] Lifespan wiring + `/api/proxy/status` + `/api/proxy/intercept` — done.
+  - [x] `serve(proxy=)` loopback guard + `web_main` (`--with-proxy`, authorized-gated) — done.
+  - [x] D18/D19 recorded; tests — done.
+  - [ ] Proxy workbench UI: history, intercept edit/drop/forward, repeater (Phase 2) — next.
+- Effectiveness (assessed 2026-09-21): effective — the controller binds/stops cleanly in the
+  app's loop, status/intercept reflect the live engine, and the gates hold. This completes
+  the Phase-0 foundations; Phases 1–4 build the tabs on them.
+
 ### CC-UI-0013 — Launcher runner: dry-run + gated execution + SSE output (Phase 0.3) (2026-09-21)
 - Change: added `fuzzlab/web/runner.py` and four launcher endpoints. `build_flags`/
   `build_argv`/`display_command` turn a `CommandSpec` + submitted flag values into an argv

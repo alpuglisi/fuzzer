@@ -300,6 +300,29 @@ The lab ships an **opt-in, default-off** front-end reverse proxy that terminates
   *exercise* desync in the lab, on infrastructure we run ourselves — never a technique
   aimed at third parties. This is the counterpart, for protocol depth, of the D16 WAF.
 
+### D18 — The web launcher runs tools as gated subprocesses (UI revamp Phase 0.3)
+
+The control panel launches each activity as its **own child process**
+(`python -m fuzzlab.cli <name> …`), not in the web process. Rationale: the tools keep
+writing their own results (the UI still writes none — NFR-UI-read-only), a run is
+cleanly cancellable, and a crashing tool can't take down the panel. Safety is built in:
+argv is assembled **only from flags the command spec declares** (unknown form fields are
+ignored — no arbitrary-argument injection) and **without a shell** (`create_subprocess_exec`
+with an argv list). A run sends nothing until an explicit, `authorized`-gated
+`POST /api/launch`, and a **dry run** previews the exact command first (FR-UI-5), so
+no-auto-run (D11) is preserved. See `docs/UI_REVAMP_PLAN.md`; realized in `web/runner.py`.
+
+### D19 — Live interception runs the proxy in the web app's event loop (UI revamp Phase 0.4)
+
+The Proxy tab's live pause/edit/drop/forward is backed by `proxy/intercept.py`, which
+holds `asyncio.Future` objects — **not shareable across processes**. So when the panel
+hosts live interception it runs `AsyncProxyServer` **in its own uvicorn event loop**
+(`fuzzlab web --with-proxy`, via `web/proxycontrol.py`), rather than as the separate
+`fuzzlab proxy` process. The proxy stays **opt-in and `--authorized`-gated** (it forwards
+to upstreams), loopback-only, and on a **separate port** from the panel; flow **history**
+remains readable cross-process from the store. Without `--with-proxy` the tab is dormant
+and the panel is unchanged. See `docs/UI_REVAMP_PLAN.md`.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the

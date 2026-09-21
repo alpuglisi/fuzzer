@@ -22,7 +22,8 @@ _TOOL_MODULES = {
 _USAGE = """usage: fuzzlab <command> [args]
 
 commands:
-  web                 open the local control panel / launcher (loopback only)
+  web [--with-proxy]  open the local control panel / launcher (loopback only;
+                      --with-proxy runs the intercepting proxy in-process, needs --authorized)
   session <sub>       manage per-host credentials / print a session header
   crawl [args]        run the crawler        (python -m fuzzlab.tools.spider)
   audit [args]        run the auditor        (python -m fuzzlab.tools.fetcher)
@@ -52,9 +53,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if command == "web":
-        from fuzzlab.web.app import serve
-        serve()
-        return 0
+        from fuzzlab.web.app import web_main
+        return web_main(rest)
 
     if command == "session":
         from fuzzlab.session import cli as session_cli

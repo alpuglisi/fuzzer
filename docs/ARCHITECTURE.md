@@ -344,7 +344,9 @@ tracked in the requirements files, not here.
   via a sender seam); interception-as-awaited-`asyncio.Future` (`intercept.py`);
   manual-login **session capture** (`session_capture.py` → `SessionManager.adopt`,
   FR-PROXY-9/FR-SESS-11 — the escape hatch for logins detection can't crack: MFA,
-  CAPTCHA, multi-step).
+  CAPTCHA, multi-step). For **live** interception the engine is hosted in the web app's
+  event loop by `web/proxycontrol.py` (D19), since the intercept futures are not
+  cross-process; the standalone `fuzzlab proxy` remains for record-and-forward.
 - **Flow engine + CONNECT/TLS** `[partial]`: `server.py::ProxyEngine` is the sans-I/O
   pipeline (scope → match-replace → intercept → byte-exact forward → history) and
   `AsyncProxyServer` the asyncio socket layer (plain-HTTP path tested offline over
@@ -368,9 +370,12 @@ tracked in the requirements files, not here.
   Diagnostics; jinja2 templates + a `/static` asset pipeline). Phase 0 foundations built:
   a **command-spec registry** (`web/commandspec.py`) that derives per-tool flag forms from
   each tool's own `argparse` parser (every tool exposes `build_parser()`), **SSE plumbing**
-  (`web/sse.py`), and a **subprocess runner** (`web/runner.py`) with dry-run preview,
+  (`web/sse.py`), a **subprocess runner** (`web/runner.py`) with dry-run preview,
   authorized-gated execution, and live SSE output (`/api/launch*`; only declared flags reach
-  argv, no shell). **Pending:** the launcher run controls (Phase 1), the proxy
+  argv, no shell), and a **unified serve mode** (`web/proxycontrol.py`, `fuzzlab web
+  --with-proxy`) that runs the intercepting proxy in the panel's own event loop so live
+  interception's futures work (D19; opt-in, `--authorized`-gated, loopback-only, separate
+  port). **Pending:** the launcher run controls (Phase 1), the proxy
   workbench (Phase 2), the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
   `metric_series` time-series table (Phase 4), Datasette-style store exploration, a
   `--dry-run` mode, and a plain CLI entry point per tool for headless use

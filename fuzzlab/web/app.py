@@ -18,8 +18,9 @@ only *reads* results the tools already wrote to the store.
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
 
 # FastAPI is imported at module scope (not lazily) so the route handlers' `Request`
 # annotations resolve under `from __future__ import annotations`. Importing this
@@ -33,6 +34,9 @@ from fuzzlab.core.config import Config, load_config
 from fuzzlab.web import commandspec, results
 from fuzzlab.web.runner import Runner, build_argv, display_command
 from fuzzlab.web.sse import sse_response
+
+if TYPE_CHECKING:
+    from fuzzlab.web.proxycontrol import ProxyController
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _TEMPLATES_DIR = os.path.join(_HERE, "templates")
@@ -120,12 +124,30 @@ def _index_context(cfg: Config, state: LauncherState, runs: list[dict]) -> dict[
     }
 
 
-def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None):
-    """Build the FastAPI app (loopback-only, read-only over the store)."""
+def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None,
+               proxy: "ProxyController | None" = None):
+    """Build the FastAPI app (loopback-only, read-only over the store).
+
+    ``proxy`` (optional) is an in-process :class:`ProxyController`; when given, the app
+    starts it on lifespan startup and stops it on shutdown, so live interception shares
+    this event loop (Phase 0.4). ``None`` (the default) leaves the proxy tab dormant.
+    """
     cfg = cfg or load_config()
     state = LauncherState()
     runner = Runner()
-    app = FastAPI(title="fuzzlab control panel", docs_url=None, redoc_url=None)
+
+    @asynccontextmanager
+    async def _lifespan(_app):
+        if proxy is not None:
+            await proxy.start()
+        try:
+            yield
+        finally:
+            if proxy is not None:
+                await proxy.stop()
+
+    app = FastAPI(title="fuzzlab control panel", docs_url=None, redoc_url=None,
+                  lifespan=_lifespan)
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 
@@ -237,11 +259,33 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     async def launch_stop(token: str):
         return {"stopped": runner.stop(token)}
 
+    # --- in-process proxy status/control (Phase 0.4; full workbench in Phase 2) ---
+
+    @app.get("/api/proxy/status")
+    def proxy_status():
+        if proxy is None:
+            return {"configured": False, "running": False}
+        return proxy.status()
+
+    @app.post("/api/proxy/intercept")
+    async def proxy_intercept(request: Request):
+        if proxy is None:
+            return JSONResponse({"error": "no in-process proxy "
+                                 "(start with `fuzzlab web --with-proxy`)"},
+                                status_code=409)
+        body = await request.json()
+        return {"intercept": proxy.set_intercept(bool(body.get("on")))}
+
     return app
 
 
-def serve(cfg: Config | None = None, pipeline: PipelineRunner | None = None) -> None:
-    """Serve the panel on loopback only (never exposed)."""
+def serve(cfg: Config | None = None, pipeline: PipelineRunner | None = None,
+          proxy: "ProxyController | None" = None) -> None:
+    """Serve the panel on loopback only (never exposed).
+
+    When ``proxy`` is given it runs in this same uvicorn event loop (so live
+    interception's futures work); its own loopback listener is separate from the panel's.
+    """
     import ipaddress
 
     import uvicorn
@@ -250,4 +294,52 @@ def serve(cfg: Config | None = None, pipeline: PipelineRunner | None = None) -> 
     host = cfg.get("web_host", "127.0.0.1")
     if not ipaddress.ip_address(host).is_loopback:
         raise ValueError(f"refusing to bind web panel to non-loopback host {host!r}")
-    uvicorn.run(create_app(cfg, pipeline), host=host, port=int(cfg.get("web_port", 8787)))
+    if proxy is not None and not ipaddress.ip_address(proxy.config.host).is_loopback:
+        raise ValueError(
+            f"refusing to bind proxy to non-loopback host {proxy.config.host!r}")
+    uvicorn.run(create_app(cfg, pipeline, proxy), host=host,
+                port=int(cfg.get("web_port", 8787)))
+
+
+def web_main(argv: list[str] | None = None) -> int:
+    """CLI for ``fuzzlab web`` — optionally start the in-process proxy (Phase 0.4).
+
+    The panel itself is read-only and needs no authorization; ``--with-proxy`` runs the
+    intercepting proxy in this process (for the live Proxy tab) and, because that forwards
+    traffic to upstreams, requires ``--authorized`` (lab-only), mirroring `fuzzlab proxy`.
+    """
+    import argparse
+    from urllib.parse import urlparse
+
+    p = argparse.ArgumentParser(prog="fuzzlab web")
+    p.add_argument("--with-proxy", action="store_true",
+                   help="also run the intercepting proxy in-process (live Proxy tab); "
+                        "requires --authorized")
+    p.add_argument("--proxy-host", default="127.0.0.1", help="proxy listen host (loopback)")
+    p.add_argument("--proxy-port", type=int, default=8888, help="proxy listen port")
+    p.add_argument("--proxy-scope", action="append",
+                   help="host to intercept (repeatable; default: the target host)")
+    p.add_argument("--proxy-ca-dir", default=None,
+                   help="local CA dir to enable CONNECT/TLS interception")
+    p.add_argument("--proxy-no-verify-tls", action="store_true",
+                   help="do not verify upstream TLS certs (self-signed lab origins)")
+    p.add_argument("--intercept", action="store_true",
+                   help="start with interception ON (hold flows for edit/drop/forward)")
+    p.add_argument("--authorized", action="store_true",
+                   help="required to run the in-process proxy (it forwards traffic)")
+    args = p.parse_args(argv)
+
+    cfg = load_config()
+    proxy = None
+    if args.with_proxy:
+        if not args.authorized:
+            p.error("refusing to run the in-process proxy without --authorized (lab-only)")
+        from fuzzlab.web.proxycontrol import ProxyConfig, ProxyController
+        default_host = urlparse(cfg.get("target_base_url", "")).hostname or "127.0.0.1"
+        scope = tuple(args.proxy_scope or [default_host])
+        proxy = ProxyController(ProxyConfig(
+            host=args.proxy_host, port=args.proxy_port, scope_hosts=scope,
+            ca_dir=args.proxy_ca_dir, store_path=cfg.get("store_path"),
+            verify_tls=not args.proxy_no_verify_tls, intercept=args.intercept))
+    serve(cfg, proxy=proxy)
+    return 0

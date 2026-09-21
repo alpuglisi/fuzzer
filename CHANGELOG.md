@@ -14,6 +14,17 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (UI, Phase 0.4): unified serve mode with an in-process proxy — completes the
+  Phase-0 foundations. Added `fuzzlab/web/proxycontrol.py` (`ProxyConfig`/`ProxyController`)
+  that builds the proxy engine (Scope + MatchReplace + Interceptor + SocketSender + optional
+  history/CA) and owns its lifecycle; `create_app(proxy=)` starts/stops it via a FastAPI
+  lifespan so live interception shares the panel's event loop (its futures aren't
+  cross-process — D19). New `GET /api/proxy/status` + `POST /api/proxy/intercept`; `serve()`
+  refuses a non-loopback proxy host; `fuzzlab web --with-proxy` (new `web_main`) runs the
+  proxy in-process and requires `--authorized` (it forwards traffic). Opt-in, loopback-only,
+  separate port; dormant by default. Records D18 (subprocess launch) + D19 (in-process
+  proxy). 7 new tests (`test_web_proxy_serve.py`); suite 462 passed / 6 skipped. See
+  CC-UI-0014. Proxy code unchanged (the response-intercept hook is Phase 2).
 - Feature (UI, Phase 0.3): launcher runner + dry-run + live output. Added
   `fuzzlab/web/runner.py` (`build_argv`/`display_command`; an async `Runner` that spawns a
   tool as `python -m fuzzlab.cli <name> <flags>` and streams stdout/stderr as SSE, with
