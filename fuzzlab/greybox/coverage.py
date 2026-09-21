@@ -12,13 +12,25 @@ request's **novelty** (new lines it reached) can drive the reward (T3.3).
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from typing import Iterable, Mapping, Protocol, runtime_checkable
 
 # Path fragments that mark a file as NOT application code. Extend per-lab as needed.
 DEFAULT_EXCLUDES: tuple[str, ...] = (
     "/vendor/", "/node_modules/", "/usr/", "/tmp/",
-    "coverage_shim", "auto_prepend", "auto_append",
+    "coverage_shim", "auto_prepend", "auto_append", "cov.php",
 )
+
+# The correlation id the tools send as X-Fzl-Cov and the lab's cov.php shim uses to
+# name the side-channel file. Sanitize identically on both sides so a request's id
+# maps to exactly one file (and no id can traverse out of the side-channel directory).
+_CID_SANITIZE = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+def sanitize_cid(cid: str) -> str:
+    """Filesystem-safe correlation id, matching the lab shim's `preg_replace`."""
+    return _CID_SANITIZE.sub("", cid or "")
 
 
 @runtime_checkable
@@ -43,6 +55,48 @@ class InMemoryCoverageSource:
 
     def lines_for(self, request_id: str) -> dict[str, set[int]]:
         return {f: set(lines) for f, lines in self._by_request.get(request_id, {}).items()}
+
+
+def _coverage_from_payload(data: object) -> dict[str, set[int]]:
+    """Extract a ``{file: {lines}}`` map from the shim's JSON payload.
+
+    Accepts either the structured shim file ``{"files": {path: [lines]}, ...}`` or a
+    bare ``{path: [lines]}`` map, so the reader tolerates a shim that writes only
+    coverage. Non-list line values are ignored rather than raising.
+    """
+    if isinstance(data, Mapping) and "files" in data:
+        data = data["files"]
+    out: dict[str, set[int]] = {}
+    if isinstance(data, Mapping):
+        for path, lines in data.items():
+            if isinstance(lines, (list, tuple, set)):
+                out[str(path)] = {int(n) for n in lines}
+    return out
+
+
+class FileCoverageSource:
+    """Live source: reads the lab shim's per-request pcov side channel (T3.1/T3.2).
+
+    ``cov.php`` writes one JSON file per request into ``directory``, named by the
+    sanitized ``X-Fzl-Cov`` correlation id. This reads that file back for a given id.
+    Missing/half-written/undecodable files return ``{}`` (no coverage) rather than
+    raising — a request the shim did not instrument simply has no novelty, which the
+    reward layer already treats as "reached no new code".
+    """
+
+    def __init__(self, directory: str | Path = "/tmp/fzl-cov"):
+        self._dir = Path(directory)
+
+    def _path(self, request_id: str) -> Path:
+        return self._dir / sanitize_cid(request_id)
+
+    def lines_for(self, request_id: str) -> dict[str, set[int]]:
+        path = self._path(request_id)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return _coverage_from_payload(data)
 
 
 def app_lines(coverage: Mapping[str, Iterable[int]], *,

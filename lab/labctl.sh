@@ -6,6 +6,8 @@
 #   ./labctl.sh reset    down + drop the DB volume + up (clean re-seed)
 #   ./labctl.sh status   show container + health status
 #   ./labctl.sh logs     follow logs
+#   ./labctl.sh snapshot [name]  dump the DB to .snapshots/<name>.sql (default baseline)
+#   ./labctl.sh restore  [name]  restore the DB from .snapshots/<name>.sql (T3.5)
 #   ./labctl.sh pin      print pulled image digests to pin in web.Dockerfile (D7)
 #
 # Uses `docker compose` (Podman-compatible: `podman compose` or podman-compose
@@ -52,6 +54,27 @@ case "${1:-}" in
     ;;
   logs)
     "${COMPOSE[@]}" logs -f
+    ;;
+  snapshot)
+    # Fast DB snapshot for deterministic resets between fuzzing iterations (T3.5).
+    # Not a container rebuild — just a mariadb-dump into lab/.snapshots/.
+    name="${2:-baseline}"
+    mkdir -p .snapshots
+    "${COMPOSE[@]}" exec -T db sh -c \
+      'MYSQL_PWD="$MARIADB_PASSWORD" mariadb-dump --no-tablespaces --skip-comments \
+         -u"$MARIADB_USER" "$MARIADB_DATABASE"' > ".snapshots/${name}.sql"
+    echo "snapshot saved: lab/.snapshots/${name}.sql"
+    ;;
+  restore)
+    name="${2:-baseline}"
+    if [ ! -f ".snapshots/${name}.sql" ]; then
+      echo "no snapshot lab/.snapshots/${name}.sql (run: ./labctl.sh snapshot ${name})" >&2
+      exit 1
+    fi
+    "${COMPOSE[@]}" exec -T db sh -c \
+      'MYSQL_PWD="$MARIADB_PASSWORD" mariadb -u"$MARIADB_USER" "$MARIADB_DATABASE"' \
+      < ".snapshots/${name}.sql"
+    echo "restored DB from lab/.snapshots/${name}.sql"
     ;;
   pin)
     echo "Pin these digests into web.Dockerfile / compose.yaml for reproducibility:"

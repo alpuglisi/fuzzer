@@ -13,6 +13,20 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Feature (Phase 3 live last mile, T3.2–T3.7): grey-box instrumentation is now runnable end
+  to end. Built `greybox/coverage.py::FileCoverageSource` + `greybox/dbfault.py::
+  FileDbFaultSource` (read the lab shim's per-request side channel — covered lines *and* a
+  db_fault marker in one correlation-keyed file), `greybox/reset.py::ScriptLabControl`
+  (labctl snapshot/restore), and `fuzzlab greybox-run` (`greybox/run.py` + `greybox_cli.py`)
+  which sends correlated probes, shapes the reward (screening + coverage novelty + db_fault),
+  and writes enriched `attempt` rows. Lab side: `lab/web.Dockerfile` adds pcov; new
+  `puppy-fort-factory/includes/cov.php` shim + `includes/prepend.php` chain (fixes the
+  single-valued `auto_prepend_file` — the old runbook prose would have silently disabled the
+  WAF); `lab/compose.yaml` mounts the side channel; `lab/labctl.sh` gains `snapshot`/
+  `restore`. One-command runner `scripts/greybox_e2e.sh` (build → self-test → snapshot →
+  run → exit check). Runbook Part E rewritten from `[build+run]` to a single command.
+  M10 stays advisory (oracle remains sole finding-writer). See CC-FUZZ-0016, CC-LAB-0009.
+  Suite 405 passed / 4 skipped.
 - Fix (BUG-0008, auth correctness): the session manager no longer treats the presence of
   a session cookie as proof of login. PHP's `session_start()` issues an anonymous
   `PHPSESSID` on the first GET, so the login fetcher's jar was non-empty even on a *failed*

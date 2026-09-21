@@ -3,6 +3,40 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0009 — Grey-box instrumentation: pcov + cov.php shim, prepend chain, DB snapshot (Phase 3 T3.1/T3.5) (2026-09-21)
+- Change: instrumented the lab image for grey-box runs. `lab/web.Dockerfile` installs pcov
+  (`pcov.enabled=1`, `pcov.directory=/var/www/html`). New `puppy-fort-factory/includes/
+  cov.php` is a no-op unless a request carries `X-Fzl-Cov`; when present it writes one JSON
+  side-channel file per request (`/tmp/fzl-cov/<id>`) with covered app lines **and** a
+  per-request `db_fault`/`db_error` marker (from PHP's error state). Because
+  `auto_prepend_file` is single-valued, the WAF and the shim are chained through new
+  `includes/prepend.php` (the Dockerfile now prepends that, not `waf.php` directly) — this
+  also **fixes** the double-`auto_prepend_file` mistake the old runbook prose would have
+  produced (the last line silently wins, disabling the WAF). `lab/compose.yaml` bind-mounts
+  the host `${FZL_COV_DIR:-/tmp/fzl-cov}` and sets `FZL_COV_DIR`. `lab/labctl.sh` gains
+  `snapshot`/`restore` (fast `mariadb-dump`/restore for deterministic resets, T3.5).
+  `scripts/greybox_e2e.sh` orchestrates the whole Part E flow (build → health → curl
+  self-test → snapshot → `fuzzlab greybox-run` → exit check). `lab/.snapshots/` is gitignored.
+- Impact (other components / project): backs the grey-box readers/driver (CC-FUZZ-0016)
+  with live sources, making Part E a one-command run. Both instrumentation paths self-gate,
+  so the default app and **every ground-truth label are unchanged** (WAF off unless
+  `PFF_WAF=on`; coverage a no-op unless `X-Fzl-Cov` is sent). Loopback-only; lab-only.
+- Risk (level; mitigation): low–medium — enabling pcov globally adds per-request overhead
+  and the prepend chain touches the WAF wiring. Mitigated by: the shim self-gating on the
+  header (no cost on ordinary traffic beyond pcov idle), the chain preserving WAF ordering
+  (WAF first, may block/exit; coverage second), the side-channel file being written under
+  a dedicated `/tmp/fzl-cov` mount, and `scripts/greybox_e2e.sh` self-testing both signals
+  before the run. Container-side, so not covered by the Python suite; validated on-host by
+  the script's curl self-test.
+- Deliverables:
+  - [x] pcov in the image; `cov.php` coverage + per-request db_fault shim — done.
+  - [x] `prepend.php` chain (fixes single-valued `auto_prepend_file`) — done.
+  - [x] compose side-channel mount + `FZL_COV_DIR`; `labctl.sh snapshot/restore` — done.
+  - [x] `scripts/greybox_e2e.sh` orchestration; `.gitignore` for snapshots — done.
+- Effectiveness (assessed 2026-09-21): pending live confirmation on the host — the script's
+  step-3 self-test asserts coverage is recorded and an error-based SQLi sets db_fault
+  before the run proceeds. Offline, the readers/driver are covered by CC-FUZZ-0016's tests.
+
 ### CC-LAB-0008 — Multi-target evaluation harness (Phase 10 T10.5) (2026-09-21)
 - Change: `fuzzlab/harness/multitarget.py` runs the full pipeline against several targets
   — each a `TargetSpec` (name, base-url, optional ground-truth contract) — one `run_auto`

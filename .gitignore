@@ -15,3 +15,5 @@ dist/
 /fuzzlab.db
 *.db-wal
 *.db-shm
+# grey-box DB snapshots (lab-only, regenerated on demand — T3.5)
+lab/.snapshots/

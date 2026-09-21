@@ -171,71 +171,90 @@ The quickest wins are **Parts F, G, H, L** (all `[run]`): same lab, extra flags,
 
 ---
 
-## Part E — Phase 3: grey-box instrumentation `[build+run]`
+## Part E — Phase 3: grey-box instrumentation `[run]`
 
 Goal: a request reaching **new application code** produces a higher `attempt.reward`, and
-error-based SQLi is distinguishable via `attempt.db_fault`. The consumer layer
-(`fuzzlab/greybox/`) is built and unit-tested behind injected seams; here you back those
-seams with live sources. Do the steps in order.
+error-based SQLi is distinguishable via `attempt.db_fault`. The whole live last mile now
+ships in the repo — the instrumentation (pcov + the `cov.php` shim), the file-backed
+readers, the DB snapshot/restore, the `fuzzlab greybox-run` driver, and the exit check —
+so this part is a single command.
 
-1. **Add line coverage to the image (T3.1).** Edit `lab/web.Dockerfile` to install pcov
-   and point it at the app, then add a request-scoped coverage shim:
-   ```dockerfile
-   # after the mysqli install:
-   RUN pecl install pcov && docker-php-ext-enable pcov
-   RUN printf 'pcov.enabled=1\npcov.directory=/var/www/html\n' \
-       > /usr/local/etc/php/conf.d/zz-pcov.ini
-   RUN printf 'auto_prepend_file=/var/www/html/includes/cov.php\n' \
-       >> /usr/local/etc/php/conf.d/zz-pff-waf.ini   # reuse the prepend ini
-   ```
-   Create `puppy-fort-factory/includes/cov.php` — a **loopback-only** shim that, when a
-   per-request correlation header is present, starts pcov and on shutdown writes the
-   app-filtered covered lines to a side-channel file keyed by that id:
-   ```php
-   <?php
-   // Grey-box coverage shim (lab-only). No-op unless the tool sets X-Fzl-Cov.
-   $cid = $_SERVER['HTTP_X_FZL_COV'] ?? '';
-   if ($cid !== '' && function_exists('\pcov\start')) {
-       \pcov\start();
-       register_shutdown_function(function () use ($cid) {
-           \pcov\stop();
-           $cov = \pcov\collect(\pcov\inclusive, ['/var/www/html']);
-           $out = [];
-           foreach ($cov as $file => $lines) { $out[$file] = array_keys($lines); }
-           @file_put_contents("/tmp/fzl-cov/" . preg_replace('/[^A-Za-z0-9_.-]/','',$cid),
-                              json_encode($out));
-       });
-   }
-   ```
-   Bind-mount a writable `/tmp/fzl-cov` for the side channel in `lab/compose.yaml` (a
-   named volume or a host bind), then rebuild: `cd lab && ./labctl.sh reset`.
+### E.1 One command
 
-2. **Back the readers (fuzzlab side).** Implement a live `CoverageSource` that reads the
-   side channel written in step 1 (keyed by the correlation id the tools send as
-   `X-Fzl-Cov`) and a live `DbFaultSource` that tails MariaDB's error/general log (enable
-   `log_error`/`general_log` on the `db` service). Feed them through the **already-built**
-   `app_lines` → `CoverageFrontier` → `shaped_reward` and `record_attempt_signals`. The
-   seam interfaces are `fuzzlab/greybox/coverage.py::CoverageSource` and
-   `dbfault.py::DbFaultSource` — the fakes there show the exact contract. *(This is
-   fuzzlab code, not container config — say the word and I'll write these against the
-   seams so you only have to run them.)*
+From the repo root, with the lab prerequisites installed (Part A) and the toolkit
+installed (Part B):
 
-3. **Deterministic reset (T3.5).** Add DB snapshot/restore to `lab/labctl.sh` (e.g.
-   `mariadb-dump` before a run, restore between iterations) so state-changing payloads
-   start from a clean DB. Call it between iterations for POST/stored-payload endpoints.
+```bash
+scripts/greybox_e2e.sh
+```
 
-4. **Wire M10 (T3.6).** With the live sources injected, `Oracle.confirm` consults the
-   grey-box confirm hook (`greybox/confirm.py`) with the sink's file/line, so grey-box
-   confirms where a black-box mechanism abstains — the oracle stays the sole, fail-closed
-   finding-writer.
+It runs, in order (T3.1–T3.7):
 
-5. **Exit (T3.7).** Run the fuzzer against the instrumented lab, then check that new-code
-   requests scored higher and error-based SQLi set the fault bit:
-   ```bash
-   sqlite3 run.db "SELECT id, round(reward,3), db_fault FROM attempt ORDER BY id DESC LIMIT 10;"
-   ```
-   Expect a request reaching new app lines to show a higher `reward`, and an error-based
-   SQLi attempt to show `db_fault=1` while benign traffic shows `0`.
+1. **Rebuild the instrumented lab** — `cd lab && ./labctl.sh reset` builds the image with
+   pcov and the coverage/db-fault shim and re-seeds a clean DB.
+2. **Wait for health** at `http://127.0.0.1:${PFF_WEB_PORT:-8080}/`.
+3. **Self-test the side channel** with two `curl`s (a benign request records covered
+   lines; an error-based SQLi on `login.php`'s username sets `db_fault`). It fails loud
+   with a specific hint if either is missing.
+4. **Snapshot the DB baseline** (`./labctl.sh snapshot baseline`) for deterministic resets.
+5. **Run the live grey-box pass** (`fuzzlab greybox-run … --reset --authorized`).
+6. **Print the exit check** (see E.4).
+
+Knobs (all optional env vars): `PFF_WEB_PORT`, `FZL_COV_DIR` (default `/tmp/fzl-cov`),
+`GB_STORE` (default `greybox.db`), `GB_POINTS` (`ground-truth` | `crawl` | `auto`),
+`GB_SPIDER_DB`, `GB_GROUND_TRUTH`, `GB_SETTLE`.
+
+### E.2 What was built (so you can trust/inspect it)
+
+- **Image (T3.1)** — `lab/web.Dockerfile` installs pcov (`pcov.enabled=1`,
+  `pcov.directory=/var/www/html`). `auto_prepend_file` is **single-valued**, so the WAF
+  and the coverage shim are chained through `puppy-fort-factory/includes/prepend.php`
+  (do **not** add a second `auto_prepend_file` line — the last one silently wins). Both
+  self-gate, so the default app and every ground-truth label are unchanged.
+- **Shim (T3.1/T3.4)** — `puppy-fort-factory/includes/cov.php` is a no-op unless a request
+  carries `X-Fzl-Cov`. When present it writes one JSON file per request to
+  `/tmp/fzl-cov/<id>`: `{"files": {path: [lines]}, "db_fault": bool, "db_error": "…"}`.
+  `db_fault` is captured **per request** from PHP's error state (PHP 8's default mysqli
+  throws on a SQL error → a fatal in `error_get_last()`), so there is no racy DB-log
+  tailing — the coverage and the fault share one correlation-keyed file.
+- **Side channel** — `lab/compose.yaml` bind-mounts the host `${FZL_COV_DIR:-/tmp/fzl-cov}`
+  into the container so fuzzlab reads back what the shim writes.
+- **Readers (T3.2/T3.4)** — `greybox/coverage.py::FileCoverageSource` and
+  `greybox/dbfault.py::FileDbFaultSource` read that side channel; they feed the
+  already-built `app_lines` → `CoverageFrontier` → `shaped_reward` and
+  `record_attempt_signals`.
+- **Deterministic reset (T3.5)** — `lab/labctl.sh snapshot|restore [name]` (fast
+  `mariadb-dump`/restore, not a rebuild), driven live by
+  `greybox/reset.py::ScriptLabControl`. `greybox-run --reset` restores the baseline
+  between stateful (non-GET) points.
+- **Driver (T3.6/T3.7)** — `fuzzlab greybox-run` (`greybox/run.py` + `greybox_cli.py`)
+  sends a benign baseline plus SQLi/XSS probes per point (each with a fresh `X-Fzl-Cov`
+  id), reads coverage novelty + db_fault, writes a shaped-reward `attempt` row, and
+  records grey-box `run_metrics`.
+
+### E.3 M10 (grey-box confirmation) — status
+
+`greybox-run` computes M10 **advisorily** and reports `M10 would-confirm` (the sink file
+executed, plus a DB fault for SQLi) using the pure decision in `greybox/confirm.py`. The
+oracle remains the **sole, fail-closed finding-writer**; folding M10 into `Oracle.confirm`
+with a per-candidate sink file/line is the remaining deepening (the contract carries
+`vuln_class`/`sink_context` but not a sink line, so that step needs a sink map). Nothing
+in Part E writes findings.
+
+### E.4 Exit (T3.7)
+
+The script prints the exit automatically. To re-check by hand:
+
+```bash
+sqlite3 greybox.db "SELECT id, payload_family, round(reward,3) AS reward, db_fault
+                    FROM attempt WHERE run_id=(SELECT MAX(id) FROM run WHERE tool='greybox')
+                    ORDER BY reward DESC LIMIT 10;"
+```
+
+Expect payload requests that reach **new app lines** to show a **higher `reward`** than
+the benign baseline, and error-based SQLi to show **`db_fault=1`** while benign traffic
+shows `0`. (If new-code reward does not exceed baseline, the shim/side-channel is not
+wired — the self-test in step 3 catches this first.)
 
 ## Part F — Phase 4: bandit beats the fixed order (T4.6) `[run]`
 
@@ -356,7 +375,9 @@ cleanly on-host: `pip install "sqlglot>=20,<30"`.
    (recorded in `payload_variant`). *(Wiring the live-sender adapter for `FilterLearner`
    is the small last-mile bit — I can add it.)*
 4. **Exit:** variants bypass the filter where the base payload is blocked **and** reach
-   new code (needs Part E's live coverage).
+   new code. The live coverage this needs is now the Part E instrumentation — run Part E
+   first (its shim/side channel), then compare `attempt` coverage/reward for a blocked
+   base payload vs. its accepted variant.
 
 ## Part K — Phase 9: protocol depth `[build+run]`
 

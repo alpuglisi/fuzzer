@@ -3,6 +3,45 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0016 — Live grey-box last mile: file-backed sources + `greybox-run` (T3.2–T3.7) (2026-09-21)
+- Change: built the on-host "run" side of Phase 3 so `docs/ON_HOST_RUNBOOK.md` Part E is a
+  single command. New live implementations behind the existing seams:
+  `greybox/coverage.py::FileCoverageSource` and `greybox/dbfault.py::FileDbFaultSource`
+  read the lab shim's per-request side channel (one JSON file per `X-Fzl-Cov` id, holding
+  both covered app lines and a `db_fault`/`db_error` marker); `greybox/reset.py::
+  ScriptLabControl` drives `labctl.sh snapshot|restore` (fail-loud). New driver
+  `greybox/run.py` (`run_greybox`, `RequestsCorrelatingSender`, `GreyboxPoint`,
+  point builders) sends a benign baseline + SQLi/XSS probes per point, reads coverage
+  novelty + db_fault, folds them via the already-built `shaped_reward`, writes an
+  `attempt` row enriched through `record_attempt_signals`, resets between stateful points,
+  and records grey-box `run_metrics`. Exposed as `fuzzlab greybox-run`
+  (`greybox/greybox_cli.py`, `cli.py`), requires `--authorized`.
+- Impact (other components / project): realizes the T3.2–T3.7 exit (a new-code request
+  scores strictly higher; error-based SQLi sets `db_fault=1`) without touching the shared
+  oracle. M10 is **advisory** in the driver (counts where grey-box would confirm via
+  `greybox/confirm.py`); the oracle stays the sole, fail-closed finding-writer, and folding
+  M10 into `Oracle.confirm` with a per-candidate sink line remains a follow-up (the
+  contract has `vuln_class`/`sink_context` but no sink line). Depends on the target-lab
+  instrumentation (CC-LAB-0009). Note (design correctness): the DB-fault signal is read
+  from the same per-request side-channel file as coverage, not by tailing the MariaDB log,
+  so it is attributed to exactly one request (no race).
+- Risk (level; mitigation): low — all new code is additive and lab-only (gated on
+  `--authorized`); the sources fail safe (missing/half-written files → no coverage / no
+  fault, never a raise). Mitigated by 11 offline tests (`tests/test_greybox_live.py`):
+  file sources incl. cid sanitization/missing-file, `ScriptLabControl` sequencing +
+  fail-loud, `run_greybox` reward ordering + db_fault propagation + enriched rows +
+  run_metrics + reset sequencing, and the correlating sender's header. Suite 405 passed /
+  4 skipped.
+- Deliverables:
+  - [x] `FileCoverageSource` / `FileDbFaultSource` (live readers) — done.
+  - [x] `ScriptLabControl` (live DB snapshot/restore) — done.
+  - [x] `run_greybox` driver + `fuzzlab greybox-run` CLI — done.
+  - [x] Offline tests; runbook Part E rewritten to the one-command flow — done.
+  - [ ] Fold M10 into `Oracle.confirm` with a per-candidate sink line (T3.6 deepening) — todo.
+- Effectiveness (assessed 2026-09-21): effective in tests — enriched attempts show the
+  reward-ordering and db_fault exit properties end to end offline. The live on-lab exit is
+  driven by `scripts/greybox_e2e.sh` (self-tests the side channel, then runs the pass).
+
 ### CC-FUZZ-0015 — Bandit orders oracle mechanisms in the confirm loop (T4.3) (2026-09-21)
 - Change: `Oracle` takes an optional `scheduler`; `confirm` now orders its **applicable
   mechanisms** via `scheduler.order(context, arms)` (arm = `vuln_class:mechanism`,
