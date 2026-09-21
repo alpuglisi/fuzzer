@@ -14,6 +14,29 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Docs: reviewed `docs/LAB_IMPLEMENTATION_PLAN.md` again for areas needing more
+  clarity/research/information, identified four new gaps beyond the first pass,
+  and dispatched four more parallel web-enabled research agents (each with a
+  purpose-built prompt) to close them. Headline results: **SBOM/digest-pinning
+  tooling** — recommends Syft (CycloneDX output), a quarterly local digest-diff
+  script instead of a bot (Renovate/Dependabot judged overkill at this scale);
+  **framework debug-page false-positive contract** — found no comparable
+  prior-art project (DVWA/Juice Shop/WebGoat/OWASP Benchmark) has actually
+  solved this; documents each target framework's exact debug-mode exposure and
+  disable flag (flagging FastAPI's `/docs`/`/redoc`/`/openapi.json` as needing
+  an explicit, separate disable regardless of debug mode) plus a ZAP
+  rules-file/Alert-Filter allowlist as a second line of defense; **`stack`
+  field placement in the label contract** — prior art and the general ML
+  shortcut-learning literature both favor inlining `stack` in `labels.json`
+  over a schema split, resolving one of `CR-LAB-0001` §7's originally deferred
+  questions; **DOM XSS fixture authoring** — confirmed hand-authoring is the
+  field norm (no templated approach found in any surveyed project), refined to
+  recommend a per-sink-type template with an explicit vulnerable/safe swap
+  point to preserve this project's existing minimal-pair discipline, with a
+  concrete 5-8 item sink taxonomy specified. All four folded into the relevant
+  plan sections and the consolidated open-items list (§6), which now tracks 15
+  items total (8 resolved by research, 6 remaining as judgment/scope
+  `[decision needed]` calls, 1 deliberately left unresearched as premature).
 - Docs: dispatched four parallel web-enabled research agents against the four
   genuine **[research needed]** items flagged in `docs/LAB_IMPLEMENTATION_PLAN.md`
   (identifier/alias/connector-position SQLi oracle coverage; `authz_expectations`

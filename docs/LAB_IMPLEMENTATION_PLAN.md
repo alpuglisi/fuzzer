@@ -1,7 +1,7 @@
 # Lab generator — implementation plan for the remaining work
 
-**Status: draft, for review — four flagged research items resolved
-2026-09-21.** This is a task-level plan, in the style of
+**Status: draft, for review — eight flagged research items resolved across
+two passes, 2026-09-21.** This is a task-level plan, in the style of
 `docs/LAB_PHASE_0_PLAN.md`, covering everything **after** the point Phase 0
 has actually reached (as of `CC-LAB-0028`) through the rest of `CR-LAB-0001`
 §8's phase list. It does not re-litigate anything already decided (D20,
@@ -11,14 +11,19 @@ before it can be built, rather than building through it speculatively. Per
 this project's own convention, items marked **[research needed]** or
 **[decision needed]** are not blocking the rest of the plan unless a
 dependency arrow below says so — most of them gate one phase, not all of
-them. Four of the original **[research needed]** items were dispatched to
-web-enabled research agents and are now marked **[research complete,
-2026-09-21]** with findings folded into the relevant sections and
-summarized in §6; the fifth (Phase 4's SSRF/GraphQL design passes) was
-deliberately left undispatched, since the plan itself judged that research
-premature this far out — see §6 item 11. Every remaining
-**[decision needed]** item is a judgment/scope call research cannot resolve
-and is still yours to make.
+them. Eight **[research needed]** items — the original four (identifier-
+context SQLi oracle coverage, `authz_expectations` placement, the FastAPI
+route-accumulator question, the complexity-as-file-count-multiplier
+interaction) plus four more surfaced on a follow-up review pass (SBOM/
+digest-pinning tooling, the framework-debug-page false-positive contract,
+`stack` field placement in the label contract, DOM XSS fixture authoring) —
+were each dispatched to a web-enabled research agent with its own
+purpose-built prompt and are now marked **[research complete]** with
+findings folded into the relevant sections and summarized in §6. One item
+(Phase 4's SSRF/GraphQL design passes) was deliberately left undispatched
+both times, since the plan itself judges that research premature this far
+out — see §6 item 15. Every remaining **[decision needed]** item is a
+judgment/scope call research cannot resolve and is still yours to make.
 
 Companion documents this plan assumes you have open: `CR-LAB-0001` (the
 approved change request, including Addenda A-E), `docs/DECISIONS_AND_ROADMAP.md`
@@ -391,7 +396,44 @@ actually gating (they exist; Phase 3 is when they have real cross-stack data
 to check, same dependency shape as Phase 1's leakage probe), Python/FastAPI
 emitter, digest-pinned bases + lockfiles + SBOM recording, PHP/Laravel
 emitter (**migrating the existing hand-built app**, per D20 §7.2 — the app
-is retired once this lands, not kept alongside it).
+is retired once this lands, not kept alongside it). Once a second stack
+lands, `labels.json` also gains a `stack` (or `stack_profile`, per
+`CR-LAB-0001` §4's naming) field, resolving one of the CR's originally
+deferred §7 questions.
+
+**[research complete, 2026-09-21]:** whether `stack` belongs inline in
+`labels.json` or in a separate analysis-only file (`CR-LAB-0001` §7). Two
+findings converge on the same answer. First, **prior art uniformly inlines
+this kind of metadata**: OWASP Benchmark's own `expectedresults.csv` keeps
+every per-case field (test name, category, real-vulnerability flag, CWE) in
+one flat file, and the multi-language academic vulnerability-dataset
+literature (CrossVul, CVEfixes, DiverseVul, ICVul) consistently stores
+language/framework identity inline alongside the vulnerability label — no
+example of a deliberate schema split for this reason was found. Second, and
+more decisively, **the general ML shortcut-learning/spurious-correlation
+literature actually favors inlining, not splitting**: it treats the
+*statistical correlation a scorer or model actually consumes* as the
+leakage vector, never *file co-location* as an independent risk — and the
+closest established convention (group-robustness benchmarks like
+Waterbirds/CelebA) deliberately stores the spurious/group attribute
+**alongside** the class label specifically so group-conditioned audits (like
+this project's own χ² fingerprint-independence gate) can be computed
+directly, without a join. **Recommendation, adopted: keep `stack` inline in
+`labels.json`.** The fingerprint-independence gate's correctness doesn't
+depend on file layout either way (it operates on the underlying pairing
+regardless), the tool under test sees neither file, and a schema split would
+only make the gate's own implementation marginally more awkward (a join
+instead of a flat read) for no compensating protection. If a "belt and
+suspenders" instinct remains, the cheaper mitigation is a documentation/lint
+rule ("no scoring script may branch on `stack`"), not a schema split — that
+targets the actual risk (a human misusing the field) rather than file
+layout, which the research found no evidence protects against it anyway.
+One caveat the research flagged honestly: it could not fetch one
+tangentially relevant paper (arXiv, blocked by this environment's egress
+proxy) whose abstract mentions a "leakage-aware evaluation mode" for a
+similar dataset — worth a follow-up read from an unblocked environment if
+this needs to be closed out with full rigor, though the recommendation
+above does not depend on it.
 
 **[decision needed before scheduling this phase — carried over from
 Addendum C, unresolved]:** Addendum C's calibrated effort estimate is
@@ -485,6 +527,46 @@ accumulator's deterministic ordering — before generalizing to an N-valued
 combinable axis. If the two-level spike is clean, extending to more depth
 levels is a parameter change, not a redesign.
 
+**[research complete, 2026-09-21]:** the "all-secure-profile false-positive
+contract around framework debug pages" (`CR-LAB-0001` §7, previously
+deferred without a resolution date) is now researched, since it becomes
+acute exactly when multiple frameworks exist. **Finding: no comparable
+prior-art project (DVWA, Juice Shop, WebGoat, OWASP Benchmark) has actually
+solved this — it is a genuinely open problem, not something this project
+missed finding an existing answer to.** DVWA in fact runs the *opposite* of
+a hardened default (`display_errors = On` required for the app to function
+at all); Juice Shop folds verbose error output into one of its own graded
+challenges rather than treating it as noise; OWASP Benchmark sidesteps the
+whole class by not being a full framework app with a debug mode at all
+(each test case is an isolated servlet). **What each of this project's
+three target frameworks exposes by default, and how to close it:**
+
+| Framework | Default exposure | Disable via | Residual exposure |
+|---|---|---|---|
+| Laravel | Full stack trace, all env vars (DB/API credentials), file paths, query logs via the Ignition debug page (`APP_DEBUG=true`) | `APP_DEBUG=false` + `APP_ENV=production` | None found beyond the generic 500 page |
+| Express | `err.stack` written into the HTTP response by the built-in default error handler | `NODE_ENV=production` (suppresses the built-in handler's stack output) | Only covers Express's *built-in* handler — any custom error middleware the emitter generates must independently avoid leaking internals; `NODE_ENV` doesn't enforce that |
+| FastAPI | No single "debug mode" flag; **`/docs`, `/redoc`, `/openapi.json` are enabled by default regardless of any debug setting** and expose the full API schema | `FastAPI(debug=False)` (default) for tracebacks; **separately**, `FastAPI(docs_url=None, redoc_url=None, openapi_url=None)` for the schema routes | None found once both are disabled |
+
+The FastAPI row confirms the suspicion behind flagging this at all:
+"production mode" alone is not sufficient for every framework — FastAPI
+needs an explicit, separate step orthogonal to any debug flag.
+**Recommendation, two-layered:** (1) build/run every generated container in
+production-equivalent mode by default as a blanket rule, with the FastAPI
+docs-routes disable treated as its own named checklist item, not assumed
+covered by "production mode"; (2) as a second line of defense, `zap_oracle.py`'s
+whole-app "safety net" mode should carry an explicit, reviewed allowlist of
+known framework-debug alert IDs, using ZAP's own documented mechanisms for
+this — a **rules file** (tab-separated, mapping plugin IDs to
+`IGNORE`/`WARN`/`FAIL`, the same mechanism ZAP's baseline/full-scan
+automation already uses) or **Alert Filters** (reclassifying alerts matching
+a plugin ID/URL pattern as false-positive) — never a broad "ignore
+everything unscoped" rule, so a genuine regression (debug mode left on by
+mistake) still fails the oracle rather than being silently swallowed. The
+exact ZAP alert/plugin IDs that fire on each framework's debug page were
+not pinned down by this research (would need empirical confirmation against
+real generated cells) — flagged as a small follow-up spike when Phase 3's
+first non-PHP emitter is being validated, not before.
+
 Once the pacing decision above is made, the task breakdown is, per stack (in
 whatever order the decision picks):
 1. `StackEnv` + scaffold files for the new stack (Addendum D's schema).
@@ -494,6 +576,38 @@ whatever order the decision picks):
    already stack-agnostic by design — this is the first real test of that
    claim).
 4. Digest-pinned base image + lockfile + SBOM for that stack's container.
+   **[research complete, 2026-09-21]:** tooling now settled rather than
+   left open. **Generate SBOMs with Syft** (Anchore) — mature, CLI-first,
+   non-interactive (clean JSON to stdout/file, standard exit codes), scans
+   both images and lockfiles, and emits both CycloneDX and SPDX from one
+   scan. `docker sbom`/`docker scout sbom` were checked and rejected: the
+   old `docker sbom` plugin is deprecated (its repo archived), and
+   `docker scout sbom` requires Docker Hub authentication — a real conflict
+   with this project's no-cloud-dependency, loopback-only posture. `cdxgen`
+   was also checked as an alternative (wider raw ecosystem coverage, newer
+   reachability features) but is CycloneDX-only, foreclosing format
+   flexibility for no offsetting benefit here. **Record as CycloneDX**
+   (not SPDX) — more compact, application-security-oriented rather than
+   license-compliance-oriented, and Syft can still emit SPDX later from the
+   same scan if ever needed, so nothing is foreclosed by defaulting to
+   CycloneDX now. **Digest-pin freshness**: skip Renovate/Dependabot (both
+   are CI-service/bot-oriented — genuine overkill for a solo, low-frequency-
+   rebuild project with no CI service); instead, use a small local script,
+   run on the same quarterly cadence already established for the pattern
+   corpus refresh (`docs/LAB_PATTERN_CORPUS_SOURCING_PLAN.md` §3 step 8):
+   `docker pull <image>:<tag>`, diff the resulting digest against the pinned
+   one, and surface a manual-review reminder rather than auto-bumping —
+   consistent with this project's existing "reviewed, not automated" refresh
+   philosophy, and documented as a runbook step
+   (`docs/ON_HOST_RUNBOOK.md`-style) rather than infrastructure. **One
+   design gap surfaced, not yet resolved:** no existing tool distinguishes
+   "this vulnerable dependency version is the deliberate point of a lab
+   cell" from "this SBOM entry is a real, unintended supply-chain
+   regression" — if a vulnerability scanner is ever pointed at these SBOMs
+   as a build gate, the project will need its own allowlist/expected-
+   findings file (keyed by CVE + component), designed from scratch; flagged
+   here rather than assumed solved, since research found no comparable
+   project's convention to borrow.
 5. Wire the fingerprint-independence gate as required once ≥2 stacks exist
    (its own minimum precondition, `min_stacks_per_class >= 2`).
 6. For the PHP/Laravel emitter specifically: the migration step (D20 §7.2)
@@ -515,6 +629,38 @@ surfaces, hand-written Next.js fixture cells, optional Spring Boot emitter.
 the Phase 3 pacing decision above (option (c)) — don't schedule Phase 4's
 Spring Boot line independently of that call.
 
+**[research complete, 2026-09-21]:** DOM-based XSS/frontend-code-generation
+approach (`CR-LAB-0001` §7, "lean toward hand-written fixtures per the
+report, final call later"). **Confirmed, with one refinement.** DVWA, Juice
+Shop, and WebGoat were each checked directly: all three hand-author DOM XSS
+as a single bespoke vulnerable snippet embedded in realistic app-routing/
+component code (Juice Shop's Angular search component bypassing
+`DomSanitizer`; DVWA's three difficulty-tier PHP files with independently
+hand-written filter logic per tier; WebGoat's Backbone.js router reflecting
+a URL parameter) — **no evidence of a templated or generated approach in any
+of them**, a consistent pattern across three independently-built projects.
+This confirms hand-authoring is the field norm, validating the tentative
+call. **Refinement the research recommends:** "hand-written" should mean
+"hand-written per sink-type template with an explicit vulnerable/safe swap
+point," not "fully independent, twin-by-twin" — none of the three surveyed
+projects need this refinement themselves (they're unpaired training apps
+with no "secure twin" concept at all), but this project already relies on
+the minimal-pair discipline elsewhere and can preserve it here at
+negligible extra cost, since there are only ~5-8 sink-type cells total, not
+a combinatorial set. **Sink taxonomy to cover** (OWASP's DOM-based XSS
+Prevention Cheat Sheet — the single authoritative source found; no separate
+academic taxonomy paper exists): `innerHTML`/`outerHTML` (incl. jQuery
+`.html()`), `document.write()`/`document.writeln()`, `eval()`,
+`setTimeout()`/`setInterval()` with a string argument, `new Function()`,
+`location.href`/navigation assignment, and `element.setAttribute()` writing
+an event-handler or `href`/`src` attribute — a well-cited core set of 5,
+extendable to 7 for solid coverage; CSS sinks (`style.cssText`, CSS
+`url()`/`expression()`) are largely legacy/IE-era and can reasonably be
+skipped. Suggested concrete shape per cell: a fixed HTML+JS scaffold (fixed
+DOM setup, fixed "read tainted value from `location.hash`/`search`"
+boilerplate) with a single swapped line — e.g. `el.innerHTML = tainted`
+(vulnerable) vs. `el.textContent = tainted` (safe) for the innerHTML cell.
+
 **[research needed, deferred appropriately]:** the seeded internal SSRF
 target and the GraphQL surface (introspection/aliasing/depth-limit/
 resolver-BOLA, per CR-LAB-0001 §3's renaming of the old
@@ -534,11 +680,12 @@ guessing.
 
 ## 6. Consolidated list of open decisions and research items
 
-Four research items were dispatched to web-enabled research agents on
-2026-09-21 and are now resolved (marked below); their findings are folded
-into the relevant sections above. Items still needing a human decision (not
-resolvable by research — they are judgment/scope calls) remain open, in the
-order they first become load-bearing:
+Eight research items have now been dispatched to web-enabled research
+agents across two passes (four on 2026-09-21's first pass, four more the
+same day on a second review pass) and are resolved (marked below); their
+findings are folded into the relevant sections above. Items still needing a
+human decision (not resolvable by research — they are judgment/scope calls)
+remain open, in the order they first become load-bearing:
 
 1. **T-LAB0.9 scope** (§1.1) — **[decision needed]** sweep FUZZ consumers
    before or alongside the schema change? *Recommended: alongside, before
@@ -547,16 +694,16 @@ order they first become load-bearing:
    one global 0.55-0.60 band, now that Phase 1 will produce the first real
    data to decide it against.
 3. ~~Identifier/alias/connector-position SQLi oracle coverage~~ (§2.2) —
-   **[research complete, 2026-09-21]** sqlmap does not reliably detect this
-   shape; build a custom differential-response prober alongside
-   `oracle_wrapper.py` instead. One residual **[decision needed]**: whether
-   to spot-check the verdict against the real installed sqlmap binary before
-   committing to the fallback design (recommended, low cost).
-4. ~~`authz_expectations` placement~~ (§3) — **[research complete,
-   2026-09-21]** no external prior art declares ownership/authz as static
-   data at all (crAPI/vAPI leave it fully implicit; AuthProbe, the closest
-   academic tool, discovers it at runtime rather than declaring it) — this
-   is genuinely novel schema ground. Recommendation, by analogy to this
+   **[research complete]** sqlmap does not reliably detect this shape; build
+   a custom differential-response prober alongside `oracle_wrapper.py`
+   instead. One residual **[decision needed]**: whether to spot-check the
+   verdict against the real installed sqlmap binary before committing to the
+   fallback design (recommended, low cost).
+4. ~~`authz_expectations` placement~~ (§3) — **[research complete]** no
+   external prior art declares ownership/authz as static data at all
+   (crAPI/vAPI leave it fully implicit; AuthProbe, the closest academic
+   tool, discovers it at runtime rather than declaring it) — this is
+   genuinely novel schema ground. Recommendation, by analogy to this
    project's own `provenance.yaml` precedent (not an external citation):
    keep it in a **separate side file**, decoupled from the manifest cells
    the verdict engine consumes.
@@ -571,27 +718,68 @@ order they first become load-bearing:
    depth, (b) stack 1 full + stacks 2-3 Tier-A, or (c) drop Spring Boot from
    near-term scope. Inform with Phase 1's actual authoring-hours data before
    deciding.
-7. ~~FastAPI route-accumulator need~~ (§4) — **[research complete,
-   2026-09-21]** avoidable via a one-time static discovery scaffold
-   (~15 lines, project-owned, not a first-party FastAPI feature); the
-   `route` accumulator module is still needed for Laravel/Express.
+7. ~~FastAPI route-accumulator need~~ (§4) — **[research complete]**
+   avoidable via a one-time static discovery scaffold (~15 lines,
+   project-owned, not a first-party FastAPI feature); the `route`
+   accumulator module is still needed for Laravel/Express.
 8. ~~Complexity-as-file-count-multiplier interaction~~ (§4) — **[research
-   complete, 2026-09-21]** no direct prior art exists for this combination;
+   complete]** no direct prior art exists for this combination;
    recommendation adopted into the plan: spike with two fixed depth levels
    before generalizing to a combinable N-valued axis.
 9. **`patterns/` card-authoring schedule** (§1.3) — **[decision needed]**
    not gating, purely a "when do you want to do this" scheduling call.
-10. Everything in `CR-LAB-0001` §7's remaining deferred list not already
-    resolved by an addendum (stack in `labels.json` vs. a separate file;
-    the all-secure-profile false-positive contract around framework debug
-    pages; whether the pattern corpus versions with the manifest or
-    independently; DOM XSS frontend-code generation) — **[decision
-    needed]**, none of these gate Phase 1, but each should be resolved
-    before the phase that first needs it, per the CR's own original framing.
-11. **Phase 4 SSRF target + GraphQL surface design** (§5) — **deliberately
-    not dispatched for research in this pass.** The plan itself states this
-    research would be premature ("Phase 4 is far enough out that anything
-    decided today would likely be stale by the time it matters"); spawning
-    a research agent for it now would contradict that reasoning rather than
-    honor it. Flagged here, not silently skipped — revisit when Phase 3 is
-    close to landing.
+10. ~~SBOM/digest-pinning tooling~~ (§4) — **[research complete]** generate
+    SBOMs with **Syft**, record as **CycloneDX**; pin base-image digests via
+    a small local script on the same quarterly cadence as the pattern-corpus
+    refresh, not a bot (Renovate/Dependabot are overkill for this project's
+    scale). One residual **[decision needed, low priority]**: no comparable
+    project's convention exists for distinguishing a deliberately-vulnerable
+    pinned dependency from a real supply-chain regression in an SBOM-based
+    scan — needs its own allowlist design if a vulnerability scanner is ever
+    wired to these SBOMs as a build gate; not urgent, no such gate is
+    currently planned.
+11. ~~The all-secure-profile false-positive contract around framework debug
+    pages~~ (§4) — **[research complete]** no comparable prior-art project
+    has actually solved this (DVWA runs the opposite of hardened by design;
+    Juice Shop folds it into a graded challenge; OWASP Benchmark sidesteps
+    it structurally) — genuinely unsolved territory, not a known-answer gap.
+    Recommendation adopted: production-mode-by-default for every generated
+    container (with FastAPI's `/docs`/`/redoc`/`/openapi.json` disabled as
+    an explicit separate step, since it's on by default regardless of any
+    debug flag), plus a reviewed ZAP rules-file/Alert-Filter allowlist as a
+    second line of defense. One residual **[decision/verification needed,
+    small]**: the exact ZAP alert/plugin IDs that fire on each framework's
+    debug page need empirical confirmation against real generated cells —
+    a small follow-up spike when Phase 3's first non-PHP emitter is
+    validated, not before.
+12. ~~Whether `stack` belongs in `labels.json` directly vs. a separate
+    file~~ (§4) — **[research complete]** prior art (OWASP Benchmark, the
+    multi-language academic vulnerability-dataset literature) uniformly
+    inlines this kind of metadata, and the general ML shortcut-learning
+    literature actually favors inlining over splitting for this exact
+    reason (group-robustness benchmarks deliberately co-locate a spurious
+    attribute with its class label specifically to enable the kind of
+    conditional audit this project's own χ² gate already performs).
+    Recommendation adopted: keep `stack` inline in `labels.json`.
+13. **Whether the pattern corpus versions with the manifest or
+    independently** (§1.3) — **[decision needed]**, not dispatched for
+    research in this pass (this is a pure project-versioning-policy
+    question with no external prior art to inform it — a design choice,
+    not a research gap). Still open, low priority, no phase currently
+    depends on it.
+14. ~~DOM XSS frontend-code generation~~ (§5) — **[research complete]**
+    confirmed hand-authoring is the field norm (DVWA, Juice Shop, WebGoat
+    all hand-author, no templated approach found in any), validating the
+    plan's tentative call, with one refinement: use a per-sink-type template
+    with an explicit vulnerable/safe swap point (preserving this project's
+    existing minimal-pair discipline at negligible cost, since only ~5-8
+    sink-type cells are needed) rather than fully independent authoring per
+    cell. A concrete 5-8 item sink taxonomy (OWASP's DOM-based XSS
+    Prevention Cheat Sheet) is now specified.
+15. **Phase 4 SSRF target + GraphQL surface design** (§5) — **deliberately
+    not dispatched for research in either pass.** The plan itself states
+    this research would be premature ("Phase 4 is far enough out that
+    anything decided today would likely be stale by the time it matters");
+    spawning a research agent for it now would contradict that reasoning
+    rather than honor it. Flagged here, not silently skipped — revisit when
+    Phase 3 is close to landing.
