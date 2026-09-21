@@ -188,3 +188,13 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   before landing such a widening, add or extend a whole-collection regression test (e.g. a
   "render every cell of every existing manifest" test) rather than relying on tests scoped
   to the new record alone. (from BUG-0022)
+- **PA-0025** — A tool-oracle wrapper that classifies a "no positive finding" result as
+  `confirmed_secure` must independently verify, from the tool's own diagnostic output,
+  that the tool actually reached and exercised the target — never infer "secure" purely
+  from the absence of a positive match plus a clean exit code, since a match-only-output
+  tool (no dedicated "not vulnerable" marker, unlike sqlmap/commix) cannot otherwise
+  distinguish "ran cleanly, found nothing" from "never ran at all." Run the tool at a
+  verbosity that surfaces its own connectivity/health diagnostics (never suppress them
+  for "cleaner" output) and check for them before returning `confirmed_secure`. Extends
+  PA-0007's fail-closed doctrine from authentication-signal inference to tool-oracle-
+  output inference generally. (from BUG-0023)

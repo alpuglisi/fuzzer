@@ -18,6 +18,25 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — Nuclei oracle draft would misclassify an unreachable target as `confirmed_secure`
+
+- **Symptom:** while validating `nuclei` as a tool-oracle (Spike 004), a first-draft
+  classifier for `fuzzlab.labgen.nuclei_oracle` treated "exit 0, zero JSONL matches" as
+  `confirmed_secure` — but `nuclei` also exits 0 with zero matches when it never reached
+  the target at all (a closed port), so a torn-down/misconfigured secure twin would be
+  recorded as confirmed secure.
+- **Root cause:** unlike sqlmap/commix, Nuclei has no dedicated "not vulnerable" textual
+  marker; a clean scan and an unreachable-target scan are both silent on stdout with exit
+  code 0, distinguishable only via a stderr health-check line Nuclei prints unless
+  `-silent` is passed.
+- **Remediation:** `_classify()` checks `stderr` for Nuclei's own host-unreachable
+  signal before ever returning `confirmed_secure`, downgrading to `inconclusive`
+  instead; the wrapper never passes `-silent`. Caught and fixed during development,
+  before shipping. Full RCA:
+  `docs/bugs/BUG-0023-nuclei-oracle-unreachable-target-false-secure.md`; preventive
+  action `PA-0025`.
+- **Status:** Fixed.
+
 ## 2026-09-21 — `php_current.supports()` accepted a shape whose illustrative-manifest cell had no page profile
 
 - **Symptom:** `PhpCurrentEmitter.render()` raised `ValueError` for

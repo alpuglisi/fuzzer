@@ -17,7 +17,11 @@ between stack and vuln_class/verdict, guarding against a stack becoming a
 de facto proxy for a class once the generator goes multi-stack), and the
 tiered emitter conformance suite (``conformance``, T-LAB0.7 — Tiers 0/3
 fully exercised offline, Tiers 1/2 built as honestly-labeled ``[design]``
-interfaces requiring on-host resources) — all generator-build-time
+interfaces requiring on-host resources), and a second, independent tool
+oracle for Nuclei (``nuclei_oracle``, path traversal/LFI only — a separate
+module from ``oracle_wrapper`` since Nuclei has no auto-detection against a
+declared parameter the way sqlmap/commix/SSTImap do; it matches
+hand-authored templates instead) — all generator-build-time
 security-assertion tooling, unrelated to and never imported by
 ``fuzzlab.oracle``. None of these depends on any other. This re-exports all
 of them. ``fingerprint_gate`` imports ``scipy`` lazily inside its chi-square
@@ -63,6 +67,15 @@ from .zap_oracle import (
     ZapWholeAppScanRequest,
     run_zap_whole_app_scan,
 )
+from .nuclei_oracle import (
+    NucleiOracleVerdict,
+    NucleiRunResult,
+    NucleiVerdict,
+    PathTraversalOracleRequest,
+    TraversalVulnClass,
+    default_nuclei_runner,
+    run_path_traversal_oracle,
+)
 
 __all__ = [
     "conformance",
@@ -97,4 +110,11 @@ __all__ = [
     "ZapScanVerdict",
     "ZapWholeAppScanRequest",
     "run_zap_whole_app_scan",
+    "NucleiOracleVerdict",
+    "NucleiRunResult",
+    "NucleiVerdict",
+    "PathTraversalOracleRequest",
+    "TraversalVulnClass",
+    "default_nuclei_runner",
+    "run_path_traversal_oracle",
 ]

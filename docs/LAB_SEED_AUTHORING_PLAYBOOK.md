@@ -229,9 +229,21 @@ labels.json / expectedresults.csv / injection-points.json
   signals, never a hard gate), so its request type carries no
   `--ignore-code`-equivalent field. **SSTImap/Nuclei/ZAP remain
   unintegrated** narrows to: **SSTImap integrated; Nuclei/ZAP remain
-  unintegrated**, and (below) further to **SSTImap and ZAP integrated;
-  Nuclei remains unintegrated** (Nuclei is a separate, concurrent lane's
-  work — Spike 004, not documented in this playbook by this lane).
+  unintegrated**, then **SSTImap and ZAP integrated; Nuclei remains
+  unintegrated**, and finally (Spike 004, `docs/spikes/SPIKE-004-nuclei-vs-dvwa.md`,
+  2026-09-21) to: **all four integrated.** Nuclei covers **path traversal /
+  local file inclusion only**, via `fuzzlab.labgen.nuclei_oracle` — a hand-
+  authored template plus a thin wrapper, since Nuclei has no per-parameter
+  auto-detection the way sqlmap/commix/SSTImap do (it matches templates, not
+  a declared parameter). That spike found a third, Nuclei-specific lesson
+  beyond the two above: **Nuclei has no explicit "not vulnerable" textual
+  marker, so a clean scan and a scan against an unreachable target are
+  indistinguishable on stdout/exit-code alone** — a wrapper must
+  independently check the tool's own stderr diagnostics for a
+  host-unreachable signal before ever returning `confirmed_secure`
+  (`BUG-0023`, `PA-0025`), never suppressing them via `-silent` for "cleaner"
+  output. XXE, open redirect, and known-CVE Nuclei templates remain
+  unintegrated (a separate, larger undertaking).
 - **ZAP-as-a-whole-app-safety-net-oracle is now validated too**
   (`docs/spikes/SPIKE-005-zap-vs-ssti-flask-hacking-playground.md`,
   2026-09-21), per `CR-LAB-0001`'s "Whole-app safety net → OWASP ZAP daemon
@@ -269,14 +281,14 @@ labels.json / expectedresults.csv / injection-points.json
 
 ## Recommended next action (revised again, post-Spike-005)
 
-The sqlmap, commix, SSTImap, and ZAP validations from the original "wrap
+The sqlmap, commix, SSTImap, ZAP, and Nuclei validations from the original "wrap
 sqlmap and commix, validate against a known-vulnerable seed app" action
-(later extended to a third and fourth tool) are **done** — see
+(later extended to a third, fourth, and fifth tool) are **done** — see
 `docs/spikes/SPIKE-001-sqlmap-vs-vapi.md`,
 `docs/spikes/SPIKE-002-commix-vs-dvwa.md`,
-`docs/spikes/SPIKE-003-sstimap-vs-ssti-flask-hacking-playground.md`, and
-`docs/spikes/SPIKE-005-zap-vs-ssti-flask-hacking-playground.md` (Nuclei is a
-separate, concurrent lane's Spike 004, not covered here). What's left before
+`docs/spikes/SPIKE-003-sstimap-vs-ssti-flask-hacking-playground.md`,
+`docs/spikes/SPIKE-004-nuclei-vs-dvwa.md`, and
+`docs/spikes/SPIKE-005-zap-vs-ssti-flask-hacking-playground.md`. What's left before
 attempting an original seed:
 
 1. **Done (2026-09-21; extended to SSTImap 2026-09-21; extended to ZAP
@@ -322,8 +334,21 @@ attempting an original seed:
    its opaque exit code — for the same three-outcome fail-closed verdict. 22
    offline tests + 1 skip-guarded real-ZAP integration test
    (`tests/test_labgen_zap_oracle.py`,
-   `tests/test_labgen_zap_oracle_integration.py`). **Nuclei remains
-   unintegrated** — a separate, concurrent lane's work.
+   `tests/test_labgen_zap_oracle_integration.py`). **Separately, a second
+   independent tool oracle** lives at `fuzzlab/labgen/nuclei_oracle.py`
+   (`PathTraversalOracleRequest`/`run_path_traversal_oracle`, kept out of
+   `oracle_wrapper.py` since Nuclei matches hand-authored templates rather
+   than auto-detecting against a declared parameter — see `CC-LAB-0028`):
+   covers **path traversal / local file inclusion only**, scoped to a
+   declared `(endpoint_path, param_name)` pair via Nuclei's own
+   template-variable mechanism (`-var`), and classifies via the same
+   fail-closed three-outcome verdict, with an explicit stderr check for a
+   host-unreachable signal (`BUG-0023`) before ever returning
+   `confirmed_secure`. 26 offline tests + 3 skip-guarded real-`nuclei`
+   integration tests (`tests/test_labgen_nuclei_oracle.py`,
+   `tests/test_labgen_nuclei_oracle_integration.py`). XXE, open redirect,
+   and known-CVE templates remain unintegrated — a separate, larger
+   undertaking.
 2. Only after that wrapper exists does it make sense to attempt an original
    Tier-A seed on this project's own (eventual) generated code — the
    security assertion for it is now a call to that wrapper, not hand-written

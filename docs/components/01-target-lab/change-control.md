@@ -3,6 +3,88 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0028 — Nuclei path-traversal/LFI oracle wrapper (Addendum E, Spike 004) (2026-09-21)
+*(Numbered `CC-LAB-0028` rather than `CC-LAB-0017` at merge time — this lane's worktree
+diverged onto a stale, unrelated branch lineage before starting, self-diagnosed and
+recovered via a documented sync commit onto a point that itself predated
+`CC-LAB-0018`-`0027` landing, so it independently claimed `0017` too. Its own
+`BUG-0018`/`PA-0019` bug-protocol IDs collided with already-merged, unrelated numbers
+(`BUG-0018` is an existing oracle-spike-logging bug; `PA-0019` is an existing
+bookkeeping-hook rule) and were renumbered to `BUG-0023`/`PA-0025` — see that bug doc's
+own note. Its files were verified independently (read in full, re-run against current
+trunk) and copied in. No other content changed.)*
+- Change: added `fuzzlab/labgen/nuclei_oracle.py`, a second, independent tool-oracle
+  wrapper (`docs/LAB_SEED_AUTHORING_PLAYBOOK.md` Addendum E) extending the validated set
+  from {sqlmap, commix, SSTImap, ZAP} to include **Nuclei**, scoped to **path traversal /
+  local file inclusion only** for this task. Kept as its own module, never an extension
+  of `oracle_wrapper.py`: sqlmap/commix/SSTImap each auto-detect against a declared
+  `-p`-style parameter, but Nuclei has no such mechanism — it matches hand-authored YAML
+  **templates** against a target, so the oracle here is two things together: (1) one
+  hand-authored template, `lab/nuclei-templates/path-traversal-etc-passwd.yaml` (four
+  dot-dot-slash/null-byte/double-encoding payload variants against `/etc/passwd`,
+  matched on status 200 + a `root:...:0:0:` regex); (2) `run_path_traversal_oracle()`,
+  which scopes the template to a declared `(endpoint_path, param_name)` pair via
+  Nuclei's own `-var` template-variable substitution (the closest equivalent to
+  sqlmap's/commix's `-p`, since a template's request shape is otherwise fixed at
+  authoring time) and returns the same fail-closed `confirmed_vulnerable |
+  confirmed_secure | inconclusive` verdict shape as `oracle_wrapper.Verdict`, defined as
+  its own independent type — this module never imports `oracle_wrapper`'s sqlmap/commix
+  dataclasses, and `oracle_wrapper.py` itself is untouched; it reuses only the three
+  generic safety/lookup helpers (`assert_loopback`, `locate_tool`, `ToolNotFoundError`
+  via `locate_tool`) that encode no sqlmap/commix-specific behavior. Same bounded
+  subprocess-timeout × max-attempts contract and session-refresh support as
+  `oracle_wrapper`, via an independently defined (structurally identical) injected
+  `Runner`. Every entry point calls `assert_loopback` before invoking `nuclei`.
+- Bug found and fixed while building this (`BUG-0023`, see that doc for the full RCA): a
+  first-draft classifier treated "nuclei exits 0 with zero JSONL matches" as
+  `confirmed_secure`, but Nuclei — unlike sqlmap/commix, which print an explicit
+  "not vulnerable" marker only after actually probing — also exits 0 with zero matches
+  against a target it never reached at all (a closed port), since it has no dedicated
+  secure-side marker. Fixed by checking `stderr` for Nuclei's own host-unreachable
+  health-check line (`_HOST_UNREACHABLE_RE`) before ever returning `confirmed_secure`,
+  downgrading to `inconclusive` instead; `_build_nuclei_argv()` deliberately never
+  passes `-silent`, which would suppress that exact diagnostic. Full bug protocol:
+  `ERROR_LOG.md`, `docs/bugs/BUG-0023-*.md` (five-whys RCA; recurrence review found
+  related-but-not-identical prior art in PA-0007/BUG-0008, no prior-PA-failure analysis
+  needed), `PA-0025` (generalizes the fail-closed doctrine to match-only-output
+  tool-oracles; swept `oracle_wrapper.py` per PA-0002 and confirmed it does not share
+  this gap, since sqlmap/commix's marker-based design is immune to it by construction).
+- Impact (other components / project): none outside LAB. Read-only against
+  `oracle_wrapper`'s three generic safety/lookup helpers; no other component's contracts
+  change. `docs/LAB_SEED_AUTHORING_PLAYBOOK.md` updated to record Nuclei as the fourth
+  (now fifth counting SSTImap) validated tool-oracle, narrowing its own running
+  "remains unintegrated" note.
+- Risk (level; mitigation): low-to-moderate for the class of bug found (a fail-open
+  security-oracle defect is high-severity by nature), but caught and fixed during this
+  same task's development, before shipping or being relied upon by any other code path.
+  Mitigated going forward by: the explicit host-unreachable regex check as a hard gate
+  before `confirmed_secure`; a dedicated parametrized test covering five distinct
+  unreachable-host stderr phrasings; a defense-in-depth test proving the unreachable
+  check wins even if a template match somehow also appears in the same run; 3
+  skip-guarded real-`nuclei`-binary integration tests (vulnerable/secure/unreachable)
+  that are the actual regression guard against this bug class recurring silently.
+- Deliverables:
+  - [x] `fuzzlab/labgen/nuclei_oracle.py` (`PathTraversalOracleRequest`,
+        `run_path_traversal_oracle`, `NucleiOracleVerdict`, `NucleiVerdict`) — done.
+  - [x] `lab/nuclei-templates/path-traversal-etc-passwd.yaml` — done.
+  - [x] Host-unreachable stderr detection before ever returning `confirmed_secure` — done.
+  - [x] 26 offline tests (every classification/argv/retry/session-refresh branch via an
+        injected fake runner) — done, all pass.
+  - [x] 3 skip-guarded real-`nuclei`-binary integration tests (vulnerable/secure/
+        unreachable, against hermetic local HTTP servers) — done, skip cleanly when
+        `nuclei` isn't installed (PA-0005).
+  - [x] `docs/spikes/SPIKE-004-nuclei-vs-dvwa.md` — done.
+  - [x] Full bug protocol for `BUG-0023` — done.
+  - [ ] XXE, open redirect, known-CVE Nuclei templates — explicitly out of scope, a
+        separate, larger undertaking per this task's own brief.
+- Effectiveness (assessed 2026-09-21): met this delivery's own bar — the wrapper
+  correctly classifies all three cases (vulnerable/secure/unreachable) against a real
+  `nuclei` binary where available, and against an injected fake runner otherwise; the
+  security-relevant defect this task's own methodology was designed to catch (a
+  three-case, not two-case, validation) was in fact caught before shipping. Full suite
+  868 passed / 9 skipped / 2 pre-existing unrelated `test_mutation_operators.py`
+  failures (baseline before this change: 842 passed, same 2 failures, 6 skipped).
+
 ### CC-LAB-0027 — T-LAB0.7: tiered emitter conformance suite (2026-09-21)
 *(Numbered `CC-LAB-0027` rather than `CC-LAB-0023` at merge time — this lane's worktree
 was based on a commit predating `CC-LAB-0024`-`0026` landing (including the sibling

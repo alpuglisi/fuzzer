@@ -14,6 +14,36 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (LAB, `CC-LAB-0028`, Addendum E, Spike 004): added
+  `fuzzlab/labgen/nuclei_oracle.py`, a second, independent tool-oracle wrapper
+  extending the validated-oracle set from {sqlmap, commix, SSTImap, ZAP} to include
+  **Nuclei** for **path traversal / local file inclusion only**. Kept separate from
+  `oracle_wrapper.py`: Nuclei has no per-parameter auto-detection the way
+  sqlmap/commix/SSTImap do — it matches hand-authored YAML templates instead, so the
+  oracle is the bundled template (`lab/nuclei-templates/path-traversal-etc-passwd.yaml`)
+  plus this thin wrapper together. `run_path_traversal_oracle()` scopes to a declared
+  `(endpoint_path, param_name)` pair via Nuclei's own template-variable mechanism
+  (`-var`) and returns the same fail-closed `confirmed_vulnerable | confirmed_secure |
+  inconclusive` verdict shape as an independent type, reusing only
+  `oracle_wrapper`'s generic `assert_loopback`/`locate_tool`/`ToolNotFoundError` safety
+  primitives. Found and fixed a real, security-relevant defect during development
+  (`BUG-0023`): a first-draft classifier treated "exit 0, zero matches" as
+  `confirmed_secure`, but Nuclei also exits 0 with zero matches against a target it
+  never reached (no dedicated "not vulnerable" marker, unlike sqlmap/commix) — fixed by
+  checking `stderr` for Nuclei's own host-unreachable signal before ever returning
+  `confirmed_secure`, and never passing `-silent` (which would suppress that signal).
+  New `PA-0025` generalizes the fail-closed doctrine to match-only-output tool oracles.
+  Validated end to end against a real vulnerable/secure/unreachable three-case test
+  (`docs/spikes/SPIKE-004-nuclei-vs-dvwa.md`). 26 offline tests + 3 skip-guarded
+  real-`nuclei`-binary integration tests. This lane's worktree diverged onto a stale,
+  unrelated branch lineage before starting (self-diagnosed and recovered via a
+  documented sync commit) and was based on a point predating several later Phase 0
+  merges; its files were verified independently (read in full, re-run against current
+  trunk) and copied in, with fresh bookkeeping (`CC-LAB-0028`, `FR-LAB-26`,
+  `BUG-0023`/`PA-0025` — renumbered from this lane's own worktree-local
+  `BUG-0018`/`PA-0019`, which collided with already-merged, unrelated numbers) written
+  here. Full suite 868 passed / 9 skipped / 2 pre-existing unrelated
+  `test_mutation_operators.py` failures.
 - Feature (LAB, `CC-LAB-0027`, T-LAB0.7): added `fuzzlab/labgen/conformance/`, the
   stack-agnostic tiered emitter conformance suite any future emitter must pass, per
   `docs/LAB_PHASE_0_PLAN.md` T-LAB0.7: **Tier 0** (lint + minimal-pair diff, fully

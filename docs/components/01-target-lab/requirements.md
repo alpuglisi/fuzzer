@@ -294,6 +294,26 @@ and measured. Authorized, lab-only.
   structurally blind to (e.g. identifier-position SQL injection) is never
   mistaken for confirmation. (`docs/LAB_PHASE_0_PLAN.md` T-LAB0.7,
   `CR-LAB-0001` Addendum C, `CC-LAB-0027`)
+- **FR-LAB-26** (Lab track, Addendum E, Spike 004) A second, independent tool-oracle
+  wrapper, `fuzzlab.labgen.nuclei_oracle` (kept out of `oracle_wrapper.py` deliberately
+  — see `CC-LAB-0028`), covers **Nuclei** for **path traversal / local file inclusion
+  only**. Unlike FR-LAB-11's per-parameter contract (sqlmap/commix/SSTImap), Nuclei has
+  no auto-detection against a declared parameter — it matches hand-authored YAML
+  templates — so the oracle is the bundled template
+  (`lab/nuclei-templates/path-traversal-etc-passwd.yaml`) plus this wrapper together.
+  `run_path_traversal_oracle(PathTraversalOracleRequest(...))` scopes the template to a
+  declared `(endpoint_path, param_name)` pair via Nuclei's own `-var` template-variable
+  mechanism and returns the same fail-closed three-outcome verdict contract as FR-LAB-11
+  (`confirmed_vulnerable | confirmed_secure | inconclusive`) as an independent type,
+  reusing only `oracle_wrapper`'s generic `assert_loopback`/`locate_tool` safety
+  primitives. Because Nuclei has no dedicated "not vulnerable" textual marker (unlike
+  sqlmap/commix/SSTImap), a clean scan and a scan against an unreachable target are
+  otherwise indistinguishable on stdout/exit-code alone — the wrapper independently
+  checks Nuclei's own stderr diagnostics for a host-unreachable signal before ever
+  returning `confirmed_secure`, and never passes `-silent` (which would suppress that
+  signal). XXE, open redirect, and known-CVE templates remain unintegrated — a separate,
+  larger undertaking. (`CR-LAB-0001` tool-mapping table,
+  `docs/spikes/SPIKE-004-nuclei-vs-dvwa.md`, `CC-LAB-0028`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

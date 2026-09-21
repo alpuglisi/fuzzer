@@ -206,7 +206,8 @@ tracked in the requirements files, not here.
   manifest reproducing today's real ~30-page PHP
   app byte-identically (the actual Phase 0 exit criterion) remains planned.
   Security assertions are **independent third-party tools invoked headlessly**
-  (sqlmap, commix, et al. — see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not
+  (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
+  zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not
   hand-authored exploit code, for every class with a mature oracle; the three
   classes without one (IDOR/BOLA, business logic, race conditions) are
   **deferred indefinitely** and not in scope for now. Built as the parallel Lab
