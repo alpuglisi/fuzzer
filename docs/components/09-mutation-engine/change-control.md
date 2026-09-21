@@ -3,6 +3,43 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0006 — Live WAF-evasion last mile: HttpFilter + `fuzzlab mutate-run` (T8.7 on-host) (2026-09-21)
+- Change: built the Phase 8 on-host last mile so runbook Part J is a one-command flow. New
+  `fuzzlab/mutation/livefilter.py::HttpFilter` implements the mutation `Filter` seam
+  (`caught`/`evaluate`) against the **live** lab WAF — it sends the payload through a probe
+  sender and maps the block status (HTTP 403) to "caught", parsing matched rule ids from
+  the block page. New `fuzzlab/mutation/run.py::run_mutation` + `fuzzlab mutate-run`
+  (`fuzzlab/mutation/cli.py`, dispatched in `cli.py`): per base payload, run
+  `MutationSearch` against the live filter and, when the base is blocked and a
+  semantics-preserving variant evades, record it via the destructive-gated
+  `record_search_result` (`payload_variant`). `make_coverage_fn` wires a coverage function
+  over the Part E grey-box side channel so `coverage_gain` (new app lines the variant
+  reaches) is measured live. Orchestration `scripts/waf_evasion_e2e.sh`.
+- Impact (other components / project): the mutation engine — previously import-only — is
+  now driven end to end against the running lab; it reuses the existing `Filter` seam,
+  `MutationSearch`, validator, and `record_variant` unchanged (only a new live `Filter`
+  impl + a runner). Depends on the lab WAF (D16, CC-LAB-0006) being enabled and, for the
+  coverage half, the Part E instrumentation (CC-LAB-0009 / CC-FUZZ-0016). The destructive
+  gate (NFR-MUT-safe) still governs what is recorded.
+- Risk (level; mitigation): medium — it sends attack payloads at the live lab. Mitigated
+  by: `--authorized` gating the run, loopback-only, the destructive-payload gate on
+  write-back (default refuses), semantics validation before a variant counts as a bypass
+  (no false "bypass"), and the script always restoring the WAF to OFF (even on error) so
+  the lab returns to its default state and ground-truth labels stay valid. Tests
+  (`tests/test_mutation_live.py`): HttpFilter block/allow mapping + rule-id parsing, and
+  `run_mutation` finding + recording a preserving bypass against a fake WAF while NOT
+  recording when the base is unblocked. Suite 415 passed / 5 skipped.
+- Deliverables:
+  - [x] `HttpFilter` (live `Filter` seam) + rule-id parsing + tests — done.
+  - [x] `run_mutation` + `fuzzlab mutate-run` CLI + coverage wiring — done.
+  - [x] `scripts/waf_evasion_e2e.sh` (enable → evade → verify → restore off) — done.
+  - [x] Runbook Part J rewritten; MUT requirements status updated — done.
+  - [ ] Oracle-confirm the accepted variant is a real finding (nice-to-have) — todo.
+- Effectiveness (assessed 2026-09-21): effective offline — the driver finds and records a
+  semantics-preserving bypass against a modeled WAF and refrains when the base is not
+  blocked. The live evasion + before/after (base 403, variant 200) is driven by
+  `scripts/waf_evasion_e2e.sh` against the real WAF on-host.
+
 ### CC-MUT-0005 — Variant write-back + destructive gate; gated LLM scaffold (T8.5/T8.6) (2026-09-21)
 - Change: `fuzzlab/mutation/catalog.py` records accepted variants' provenance to the
   `payload_variant` table (operator chain, `bypassed_rule`, `semantics_ok`,

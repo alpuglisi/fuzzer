@@ -14,6 +14,13 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (Phase 8 mutation-vs-WAF on-host last mile): runbook Part J is now a one-command
+  flow. Built `fuzzlab/mutation/livefilter.py::HttpFilter` (the mutation `Filter` seam
+  backed by live WAF round-trips: 403 -> caught, with rule-id parsing) and
+  `fuzzlab/mutation/run.py` + `fuzzlab mutate-run` (search a preserving bypass against the
+  live WAF and record it to `payload_variant`, with optional Part E coverage gain).
+  `scripts/waf_evasion_e2e.sh` enables the WAF, evades it, verifies base 403 / variant 200,
+  and restores the WAF to OFF (even on error). See CC-MUT-0006. Suite 415 passed / 5 skipped.
 - Feature (Phase 9 protocol on-host last mile): runbook Part K is now a one-command flow.
   Built `fuzzlab/proxy/h2transport.py::H2Transport` — the live h2c socket send/receive
   around the from-scratch `H2RawClient`: `request(...)` (well-behaved: preface+SETTINGS+

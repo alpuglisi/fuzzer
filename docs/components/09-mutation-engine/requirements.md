@@ -1,6 +1,6 @@
 # Mutation Engine — Requirement Specification
 
-Component code: **MUT** · Status: `[planned]` (Phase 8) · Last updated: 2026-09-21
+Component code: **MUT** · Status: `[built — operators/validator/XSS, filter model + learner, bandit/coverage search, destructive-gated variant write-back, and the live HttpFilter + fuzzlab mutate-run driver; live WAF evasion verified on-host]` (Phase 8) · Last updated: 2026-09-21 · see CC-MUT-0006
 
 Related: `ARCHITECTURE.md` #9; `DECISIONS_AND_ROADMAP.md` (D1, Phase 8);
 `./change-control.md`.

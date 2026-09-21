@@ -406,33 +406,58 @@ the recorded flow's raw request has both headers verbatim while
 `fuzzlab.proxy.parser.is_valid_request` returns `False` — the raw path forwards what the
 parsed path would reject.
 
-## Part J — Phase 8: mutation engine vs the lab WAF (T8.7) `[build+run]`
+## Part J — Phase 8: mutation engine vs the lab WAF (T8.7) `[run]`
 
-The engine is built (`fuzzlab/mutation/`): semantics-preserving operators + validator,
-context-typed XSS, the filter model + bypass learner, the bandit/coverage search, and the
-variant write-back behind the destructive gate. `sqlglot` (SQL-AST operators) installs
-cleanly on-host: `pip install "sqlglot>=20,<30"`.
+The engine was already built (`fuzzlab/mutation/`): semantics-preserving operators +
+validator, context-typed XSS, the filter model + bypass learner, the bandit/coverage
+search, and the destructive-gated variant write-back. The live last mile now ships too —
+`HttpFilter` (the `Filter` seam backed by real WAF round-trips) and a `fuzzlab mutate-run`
+driver — so this part is one command. (`sqlglot` for the SQL-AST operators installs
+cleanly on-host: `pip install "sqlglot>=20,<30"`; without it the validator falls back to
+canonicalization.)
 
-1. **Enable the WAF** (D16, default off): edit `lab/.env` → `PFF_WAF=on`,
-   `PFF_WAF_MODE=block` (or `sanitize`), then `( cd lab && ./labctl.sh up )` to restart.
-2. **Confirm the filter is live:** a naive payload should be blocked, a classic bypass
-   should pass:
-   ```bash
-   curl -s -o /dev/null -w "%{http_code}\n" \
-     "http://127.0.0.1:8080/search.php?q=1%20union%20select%201"        # 403 (blocked)
-   curl -s -o /dev/null -w "%{http_code}\n" \
-     "http://127.0.0.1:8080/search.php?q=1%20union/**/select%201"        # 200 (bypass)
-   ```
-3. **Learn + evade against the live WAF.** Point `FilterLearner` at real canary
-   round-trips (an HTTP sender) instead of the offline `FilterModel`, and run
-   `MutationSearch` — confirm it finds a semantics-preserving variant the live WAF lets
-   through where the base is blocked, and that the variant then confirms via the oracle
-   (recorded in `payload_variant`). *(Wiring the live-sender adapter for `FilterLearner`
-   is the small last-mile bit — I can add it.)*
-4. **Exit:** variants bypass the filter where the base payload is blocked **and** reach
-   new code. The live coverage this needs is now the Part E instrumentation — run Part E
-   first (its shim/side channel), then compare `attempt` coverage/reward for a blocked
-   base payload vs. its accepted variant.
+### J.1 One command
+
+```bash
+scripts/waf_evasion_e2e.sh
+```
+
+It: enables the WAF (D16) and restarts → confirms the filter is live (naive payload 403,
+classic bypass 200) → runs `fuzzlab mutate-run` to learn a **semantics-preserving** variant
+the live WAF lets through and record it to `payload_variant` → verifies the recorded
+variant live (base 403, variant 200) → **restores the WAF to OFF** (leaves the lab in its
+default state, even on error). If the Part E side channel (`/tmp/fzl-cov`) exists, it also
+measures the variant's coverage gain.
+
+Knobs (env): `PFF_WEB_PORT`, `WAF_MODE` (block|sanitize), `MUT_STORE`
+(default `waf_variants.db`), `FZL_COV_DIR`.
+
+### J.2 What was built
+
+- **Live filter (T8.x)** — `fuzzlab/mutation/livefilter.py::HttpFilter` implements the
+  mutation `Filter` seam (`caught`/`evaluate`) against the live WAF: it sends the payload
+  through a probe sender and maps the block status (HTTP 403) to "caught", parsing the
+  matched rule ids from the block page. Drop-in for `FilterLearner`/`MutationSearch` where
+  offline tests used `FilterModel.from_lab()`.
+- **Driver + CLI (T8.7)** — `fuzzlab/mutation/run.py::run_mutation` + `fuzzlab mutate-run`
+  (`fuzzlab/mutation/cli.py`): per base payload, search for a preserving evader; when the
+  base is blocked and a variant evades, record it via the destructive-gated
+  `record_search_result` (`payload_variant`). `--cov-dir` wires a coverage function over
+  the Part E side channel so `coverage_gain` (new app lines the variant reaches) is real.
+
+### J.3 Exit
+
+Variants bypass the filter where the base is blocked (step 4 proves it live: base 403,
+variant 200) **and** reach new code. For the coverage half, run Part E first so the shim /
+side channel is live, then pass `--cov-dir /tmp/fzl-cov` (the script does this
+automatically when the dir exists); the recorded `payload_variant.coverage_gain` is the new
+app lines the accepted variant executed that the blocked base could not. Manual check:
+
+```bash
+sqlite3 waf_variants.db "SELECT base_payload, variant, operators, bypassed_rule, coverage_gain
+                         FROM payload_variant
+                         WHERE run_id=(SELECT MAX(id) FROM run WHERE tool='mutate');"
+```
 
 ## Part K — Phase 9: protocol depth `[run]`
 

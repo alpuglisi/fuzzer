@@ -30,6 +30,7 @@ commands:
   auto  [args]        run an automatic pipeline pass over a crawl (requires --authorized)
   greybox-run [args]  live grey-box pass: coverage/DB-fault reward (requires --authorized)
   proxy [args]        run the intercepting proxy / export its CA (requires --authorized)
+  mutate-run [args]   learn + evade the live lab WAF, record variants (requires --authorized)
   report [args]       print a reproducible evaluation report for a stored run (read-only)
   build-db [args]     rebuild the indicator database
   version             print the version
@@ -70,6 +71,10 @@ def main(argv: list[str] | None = None) -> int:
     if command == "proxy":
         from fuzzlab.proxy import cli as proxy_cli
         return proxy_cli.main(rest)
+
+    if command == "mutate-run":
+        from fuzzlab.mutation import cli as mutation_cli
+        return mutation_cli.main(rest)
 
     if command == "report":
         from fuzzlab.report import cli as report_cli
