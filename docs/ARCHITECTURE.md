@@ -123,6 +123,9 @@ tracked in the requirements files, not here.
   separate `injection-points.json`), read from disk by the tools and the harness,
   never served by the target, with opaque case IDs (D9). The loader/consumer is built
   (`fuzzlab/labels/contract.py`) and drives the `fuzzlab auto --ground-truth` scoring.
+  A case may additionally carry an optional per-case `stack` (`CC-LAB-0040`) naming its
+  stack profile — inline, not a separate analysis file — which is the axis the
+  fingerprint-independence gate tests for independence from `vuln_class`.
   Labels are hand-authored initially; later emitted by the manifest-driven lab
   generator (D8), at which point `VULNERABILITIES.md` becomes a generated, human-facing
   artifact. The lab grows into two tiers (dense "range", realistic "shop") with
@@ -199,8 +202,14 @@ tracked in the requirements files, not here.
   A mandatory (once multi-stack, Phase 3) fingerprint-independence gate
   (`fuzzlab/labgen/fingerprint_gate.py`, `CC-LAB-0026`) chi-square-tests
   stack against vuln_class/verdict, schema-independent, so a stack can never
-  become a de facto proxy for a class; not yet wired in, as there is no
-  real multi-stack corpus yet. A stack-agnostic tiered conformance suite
+  become a de facto proxy for a class. It **is** now wired into `fuzzlab
+  lab-generate --check` as a required step (`CC-LAB-0040`), conditional on the
+  loaded manifest's cells actually spanning 2+ distinct `stack_profile` values;
+  a single-stack manifest (every sample manifest today) skips it with an
+  explicit printed reason, since the check is ill-defined for one stack rather
+  than merely unhelpful. Per-case `stack` is also carried in the ground-truth
+  `labels.json` contract (optional, inline) so the axis reaches the artifact
+  downstream analysis reads, not just the manifest. A stack-agnostic tiered conformance suite
   (`fuzzlab/labgen/conformance/`, `CC-LAB-0027`) any emitter must pass: Tier
   0 (lint + minimal-pair diff) and Tier 3 (whole-lab regeneration) are real,
   fully exercised offline; Tier 1 (in-process functional/security) and

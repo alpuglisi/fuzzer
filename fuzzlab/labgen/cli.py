@@ -17,7 +17,12 @@ This is a thin CLI over already-built pieces:
   secret scanner (``secret_scanner.py``), the regenerate-and-diff
   determinism check, the minimal-pair checker (``minimal_pair.py``), and the
   Tier 0 (lint + minimal-pair) and Tier 3 (whole-lab regeneration)
-  conformance checks (``fuzzlab.labgen.conformance``). The regression/
+  conformance checks (``fuzzlab.labgen.conformance``), and the
+  fingerprint-independence gate (``fuzzlab.labgen.fingerprint_gate``,
+  ``CR-LAB-0001`` §3) -- the last of these only when the manifest's cells
+  actually span two or more ``stack_profile`` values, since that gate is
+  ill-defined for a single-stack corpus (see
+  ``MIN_STACKS_FOR_FINGERPRINT_GATE``). The regression/
   additive-only gate (``fuzzlab.labgen.regression_gate``, T-LAB0.9) is not
   yet wired here -- see the ``# TODO(L-P0.9-integration)`` in ``run_checks``.
 
@@ -36,7 +41,7 @@ import dataclasses
 import sys
 from pathlib import Path
 
-from fuzzlab.labgen import gates, minimal_pair, secret_scanner
+from fuzzlab.labgen import fingerprint_gate, gates, minimal_pair, secret_scanner
 from fuzzlab.labgen.conformance import tier0, tier3
 from fuzzlab.labgen.emitter import Emitter
 from fuzzlab.labgen.emitters.php_current import PhpCurrentEmitter
@@ -50,6 +55,24 @@ EMITTER_REGISTRY: dict[str, type[Emitter]] = {
 }
 
 DEFAULT_ROOT_SEED = "lab-generate-cli"
+
+#: Minimum number of distinct ``Cell.stack_profile`` values a manifest must
+#: span before the fingerprint-independence gate (``fingerprint_gate.py``,
+#: ``CR-LAB-0001`` §3) is run at all -- and simultaneously the
+#: ``min_stacks_per_class`` the gate is run with. Both are the same number for
+#: the same reason: "every vulnerability class appears on >= 2 stacks" is
+#: unsatisfiable, and the chi-square test's contingency table is degenerate,
+#: for a corpus with only one stack. This is ``CR-LAB-0001`` §3/§4's own
+#: canonical value, and matches ``fingerprint_gate.run_fingerprint_gate``'s
+#: own default (see ``docs/LAB_IMPLEMENTATION_PLAN.md`` §4.4, which makes this
+#: dependency explicit: "the fingerprint-independence gate specifically needs
+#: **two** stacks landed (``min_stacks_per_class >= 2``)").
+MIN_STACKS_FOR_FINGERPRINT_GATE = 2
+
+#: ``CR-LAB-0001`` §3/§4's canonical "every stack carries >= N classes" value,
+#: used as a *ceiling* rather than a flat requirement -- see
+#: :func:`fingerprint_gate_config` for why.
+CANONICAL_MIN_CLASSES_PER_STACK = 3
 
 
 class LabGenCliError(RuntimeError):
@@ -119,6 +142,61 @@ def _weakened_twin(cell: Cell) -> Cell:
     checkers below run against *any* manifest, not only one that happens to
     author explicit vulnerable/secure twin cells."""
     return dataclasses.replace(cell, transform=Pipeline(()))
+
+
+def corpus_records_from_manifest(manifest: Manifest) -> list[dict[str, str]]:
+    """The manifest's cells as ``fingerprint_gate``-shaped corpus records.
+
+    ``fingerprint_gate`` is deliberately schema-independent (a record is just a
+    mapping with ``stack``/``vuln_class`` keys, never a :class:`Cell`), so this
+    is the one adapter between the two -- the gate keeps knowing nothing about
+    :mod:`fuzzlab.labgen.schema`, per PA-0003/PA-0021's "one shared conversion
+    at one site" shape.
+
+    Scoped to ``manifest.cells``, **not** to :func:`_supported_cells`:
+    fingerprint independence is a property of the *authored corpus's* metadata
+    shape (`CR-LAB-0001` §3), not of whichever subset one emitter happens to
+    render, and a multi-stack manifest is by construction never fully
+    renderable by any single emitter.
+
+    No ``verdict`` key is emitted: a cell's verdict is *derived* (never
+    authored) from the safety matrix by :mod:`fuzzlab.labgen.verdict`, whose
+    matrix lives at a repo-relative default path that no production code
+    currently loads -- reading it here would make ``--check`` silently
+    cwd-dependent. ``run_fingerprint_gate`` already documents and tests the
+    "verdict key absent -> skip the stack/verdict check" path, so this degrades
+    explicitly rather than by accident. Wiring the stack/verdict half is a real
+    remaining deliverable, not an oversight (see ``CC-LAB`` entry for L-P3.4).
+    """
+    return [{"stack": cell.stack_profile, "vuln_class": cell.vuln_class} for cell in manifest.cells]
+
+
+def fingerprint_gate_config(records: list[dict[str, str]]) -> dict[str, object]:
+    """The ``run_fingerprint_gate`` kwargs for ``records``, with
+    ``expected_classes``/``expected_stacks`` derived from the corpus actually
+    at hand (`docs/LAB_IMPLEMENTATION_PLAN.md` §4.4: "populated from whichever
+    stacks/classes actually exist at that point (not hand-waved
+    placeholders)").
+
+    ``min_classes_per_stack`` is ``min(CANONICAL_MIN_CLASSES_PER_STACK, <number
+    of distinct classes in the corpus>)``. The canonical 3 is a *ceiling*, not
+    a flat requirement, because a corpus whose whole class vocabulary is
+    smaller than 3 cannot satisfy it for a reason that has nothing to do with
+    fingerprint leakage -- today's manifests only author two classes
+    (``sqli``/``xss``), so a flat 3 would fail every real manifest while
+    telling us nothing about stack/class entanglement. The requirement it
+    enforces is therefore "every stack carries *every* class the corpus has,
+    up to the canonical 3", which is the actual anti-fingerprint property and
+    tightens automatically as more classes land.
+    """
+    stacks = sorted({r["stack"] for r in records})
+    classes = sorted({r["vuln_class"] for r in records})
+    return {
+        "min_stacks_per_class": MIN_STACKS_FOR_FINGERPRINT_GATE,
+        "min_classes_per_stack": min(CANONICAL_MIN_CLASSES_PER_STACK, len(classes)),
+        "expected_classes": classes,
+        "expected_stacks": stacks,
+    }
 
 
 def run_checks(emitter: Emitter, manifest: Manifest, tree: dict[str, bytes]) -> list[str]:
@@ -210,6 +288,32 @@ def run_checks(emitter: Emitter, manifest: Manifest, tree: dict[str, bytes]) -> 
         tier3.regenerate_and_diff_emitter(emitter, cells)
     except tier3.RegenerateDiffError as exc:
         failures.append(f"conformance Tier 3 whole-lab regeneration: {exc}")
+
+    # 8. Fingerprint-independence gate (fingerprint_gate.py, CR-LAB-0001 §3) --
+    #    a REQUIRED step whenever, and only whenever, the manifest's cells
+    #    actually span >= MIN_STACKS_FOR_FINGERPRINT_GATE distinct
+    #    stack_profile values. For a single-stack manifest the gate is not
+    #    merely unhelpful but ill-defined (see MIN_STACKS_FOR_FINGERPRINT_GATE),
+    #    so it is skipped with an explicit printed reason -- never a silent
+    #    no-op, and never a failure for "a corpus that has not gone multi-stack
+    #    yet", which is not a leakage problem.
+    records = corpus_records_from_manifest(manifest)
+    stacks = sorted({r["stack"] for r in records})
+    if len(stacks) < MIN_STACKS_FOR_FINGERPRINT_GATE:
+        print(
+            f"lab-generate --check: fingerprint-independence gate SKIPPED -- this manifest's "
+            f"cells span only {len(stacks)} distinct stack_profile value(s) {stacks}; the gate "
+            f"needs >= {MIN_STACKS_FOR_FINGERPRINT_GATE} to be meaningful (a one-stack corpus "
+            f"cannot put a class on two stacks, and its chi-square contingency table is "
+            f"degenerate). Not a failure: single-stack is not a leakage problem."
+        )
+    else:
+        try:
+            fingerprint_gate.run_fingerprint_gate(records, **fingerprint_gate_config(records))
+        except fingerprint_gate.MissingStatsDependencyError as exc:
+            failures.append(f"fingerprint-independence gate (fail-closed, missing dependency): {exc}")
+        except fingerprint_gate.FingerprintIndependenceError as exc:
+            failures.append(f"fingerprint-independence gate: {exc}")
 
     return failures
 

@@ -921,6 +921,113 @@ closing this entry's own flagged schema gap.)*
   present before this change too, outside LAB/this lane's scope). Full suite re-run
   after the merge-time schema fix; see the merge commit for the exact count.
 
+### CC-LAB-0040 — Stack axis in `labels.json` + fingerprint-independence gate wired into `--check` (§4.4, lane L-P3.4) (2026-09-21)
+- Change: `docs/LAB_IMPLEMENTATION_PLAN.md` §4.4's two halves, now that three stack
+  emitters (`php_current`, `node_express`, `python_fastapi`) plus `php_laravel`'s
+  foundation have landed:
+  1. **Check-first finding (no redundant field added).** `fuzzlab.labgen.schema.Cell`
+     already carries `stack_profile: str` as a **required** field; `lab/schemas/
+     manifest.schema.json` requires it per cell; it is a recognized `axis_ranges` factor
+     axis (`AXIS_RANGE_FACTOR_NAMES`); `fuzzlab.labgen.subseed` already mixes it into
+     every per-cell sub-seed; and all four emitters' sample manifests populate it
+     meaningfully and distinctly (`php_current` in `phase0_real_pages_sample.yaml` /
+     `example_phase0_scaffold.yaml`, `node_express` in `phase3_node_express_sample.yaml`,
+     `python_fastapi` in `phase3_python_fastapi_sample.yaml`, `php_laravel` in
+     `phase3_php_laravel_sample.yaml`). §4.4's "add `stack` (or `stack_profile`) to
+     `Cell`" was therefore **already satisfied**, and was deliberately *not* re-added in
+     another spelling — a second field of the same meaning is exactly the two-writers
+     divergence PA-0003/PA-0021 forbid.
+  2. **The real gap: the ground-truth side.** `fuzzlab.labels.contract.Case` and
+     `fuzzlab/labels/schemas/labels.schema.json` had no per-case stack field at all, so
+     the stack axis stopped at the manifest and never reached `labels.json` (§4.4's
+     other half, and the artifact any downstream leakage/fingerprint analysis actually
+     reads). Added an optional `stack: str | None` to `Case`, read in `load_labels()`,
+     and an optional `stack` string property (`minLength: 1`, so an empty stack name
+     fails closed rather than being recorded as meaningless) to the schema's `case`
+     `$defs`. **Inline**, per the settled research decision in the plan's §4 (OWASP
+     Benchmark's `expectedresults.csv`; CrossVul/CVEfixes/DiverseVul/ICVul), not a
+     separate analysis-only file. Additive and inert: absent → `None`, no scorer keys on
+     it, not part of `Case.key`, and `lab/ground-truth/labels.json` (the hand-built PHP
+     app, single-stack by construction) is left untouched — backfilling it belongs to
+     the D20 §7.2 `php_laravel` migration that retires it, not here.
+  3. **Gate wiring (`fuzzlab/labgen/cli.py`).** `run_checks()` gained step 8: the
+     fingerprint-independence gate (`fuzzlab.labgen.fingerprint_gate
+     .run_fingerprint_gate`, `CR-LAB-0001` §3), a required step whenever — and only
+     whenever — the loaded manifest's cells span >= `MIN_STACKS_FOR_FINGERPRINT_GATE`
+     (2) distinct `stack_profile` values. Two new small public helpers, so both halves
+     are testable and neither is buried in the gate step: `corpus_records_from_manifest()`
+     (the single adapter between `Cell` and the gate's deliberately schema-independent
+     `{stack, vuln_class}` record shape — the gate keeps depending on nothing from
+     `schema.py`) and `fingerprint_gate_config()` (derives `expected_classes`/
+     `expected_stacks` from the corpus at hand, never placeholders).
+     `fingerprint_gate.py`'s own chi-square logic was **not** touched.
+  Three deliberate design calls in that wiring, each documented at its site:
+  - **Corpus scope = all `manifest.cells`, not `_supported_cells()`.** Fingerprint
+    independence is a property of the *authored corpus's* metadata shape, and a
+    multi-stack manifest is by construction never fully renderable by one emitter, so
+    filtering by this emitter's `supports()` would measure the wrong population.
+  - **`min_classes_per_stack` = `min(3, <distinct classes in corpus>)`.**
+    `CR-LAB-0001` §3/§4's canonical 3 is applied as a *ceiling*: today's manifests
+    author only two classes (`sqli`, `xss`), so a flat 3 would fail every real manifest
+    for a reason unrelated to fingerprint leakage. The enforced property is "every stack
+    carries *every* class the corpus has, up to 3", which is the actual anti-fingerprint
+    requirement and tightens by itself as more classes land. `min_stacks_per_class`
+    stays at the canonical 2.
+  - **Single-stack manifests skip the gate, loudly.** With one stack, "every class on
+    >= 2 stacks" is unsatisfiable and the chi-square contingency table is degenerate, so
+    the step prints an explicit SKIPPED line naming the stacks found and why — not a
+    silent no-op (and not a failure: single-stack is not a leakage problem). Every
+    existing sample manifest is single-stack, so no existing `--check` invocation changes
+    behavior.
+  - **Fail-closed on a missing optional dependency.** `MissingStatsDependencyError`
+    (scipy / the `labgen-stats` extra) is caught separately and becomes a `--check`
+    failure naming the extra — never a silent pass, per PA-0021/PA-0025's fail-closed
+    doctrine.
+- Impact (other components / project): FUZZ consumes `fuzzlab.labels.contract` — no
+  consumer change needed, for the same reason `CC-LAB-0030`'s sweep established: every
+  consumer keys off `url`/`method`/`param`/`vuln_class`/`location`, and the new field is
+  inert to all of them (re-checked: no reader of `Case` enumerates its fields or
+  round-trips it). No emitter module inventory or template file was touched, and
+  `fingerprint_gate.py` is unchanged.
+- Risk (level; mitigation or accepted-risk justification): **Low-to-moderate.**
+  (a) `--check` gains a step that can newly fail a build — mitigated by it being
+  inapplicable (and explicitly skipped) for every manifest that exists today, so the
+  only builds it can fail are genuinely multi-stack ones, which is its purpose.
+  (b) The `min_classes_per_stack` ceiling is a deliberate, documented relaxation of a
+  canonical value; **accepted risk**, with the mitigation that it is expressed as
+  `min(canonical, corpus)` rather than a hardcoded 2, so it re-tightens automatically
+  and cannot silently stay loose once a third class lands. (c) The stack↔verdict half of
+  the gate is not fed from the CLI (no `verdict` key in the records), because a cell's
+  verdict is derived from `lab/safety_matrix.yaml` via `fuzzlab.labgen.verdict` at a
+  repo-relative default path that **no production code currently loads** — reading it in
+  the CLI would make `--check` silently cwd-dependent. The gate's own documented and
+  tested "verdict key absent → skip that check" path handles it, and this is recorded as
+  an open deliverable rather than hidden: wiring it needs a cwd-independent
+  safety-matrix location (or an explicit `--safety-matrix` argument), which is a
+  separate change.
+- Deliverables:
+  - [x] Confirm `Cell.stack_profile` already exists and is populated by all four
+        emitters' sample manifests — done; no redundant field added.
+  - [x] Optional per-case `stack` in `fuzzlab.labels.contract.Case` + `labels.schema.json`.
+  - [x] `corpus_records_from_manifest()` / `fingerprint_gate_config()` +
+        `run_checks()` step 8 in `fuzzlab/labgen/cli.py`.
+  - [x] Tests: two-stack balanced (gate passes) and confounded (gate fails loud)
+        manifest fixtures, built by relabelling the real `phase0_real_pages_sample.yaml`
+        cells onto a second stack; single-stack skip-with-reason; scipy-absent
+        fail-closed; end-to-end `--check` nonzero exit on a confounded manifest on disk;
+        record-level fixtures (`_balanced_independent_corpus`,
+        `_skewed_but_covered_corpus`) **reused** from
+        `tests/test_labgen_fingerprint_gate.py` rather than re-authored, per this lane's
+        scope discipline. `tests/test_labels_contract.py` gained the `stack`
+        present/absent/empty-string cases plus a "real ground truth still loads" guard.
+  - [x] Full suite run: 1170 passed, 8 skipped, plus 2 **pre-existing, unrelated**
+        failures in `tests/test_mutation_operators.py` (MUT component) reproduced on a
+        pristine detached worktree of this branch's tip — see `ERROR_LOG.md`'s entry;
+        not caused by and not in scope for this lane.
+- Effectiveness (assessed pending): pending — becomes measurable once a genuinely
+  multi-stack manifest ships as a lab artifact (today the gate's live path is exercised
+  only by tests, since every sample manifest is single-stack by design).
+
 ### CC-LAB-0039 — Parameter location/encoding axis (§3.4, lane L-P2.4) (2026-09-21)
 *(Numbered `CC-LAB-0039` rather than `CC-LAB-0029` at merge time — this lane
 independently claimed `CC-LAB-0029` too, colliding with nine other concurrently

@@ -73,6 +73,18 @@ class Case:
     primary_role: str | None = None
     related_endpoints: tuple[dict, ...] = ()
     flow_variant: str = "direct"
+    # Which stack profile this case's code was generated for / hand-written in
+    # (CR-LAB-0001 §4's `stack_profile` naming; `fuzzlab.labgen.schema.Cell`'s
+    # field of the same meaning). Inline here, per the settled research
+    # decision in docs/LAB_IMPLEMENTATION_PLAN.md §4 ("prior art uniformly
+    # inlines this kind of metadata" -- OWASP Benchmark's expectedresults.csv,
+    # CrossVul/CVEfixes/DiverseVul/ICVul) rather than in a separate
+    # analysis-only file. Optional and additive: a case predating multi-stack
+    # ground truth carries None, and no scorer/consumer keys on it -- it is
+    # analysis metadata (what the fingerprint-independence gate,
+    # `fuzzlab.labgen.fingerprint_gate`, consumes as a record's `stack`), not
+    # part of `key`/matching.
+    stack: str | None = None
 
     @property
     def key(self) -> tuple[str, str, str, str]:
@@ -126,6 +138,7 @@ def load_labels(ground_truth_dir: str | Path) -> list[Case]:
             primary_role=c.get("primary_role"),
             related_endpoints=tuple(c.get("related_endpoints", ())),
             flow_variant=c.get("flow_variant", "direct"),
+            stack=c.get("stack"),
         )
         for c in data["cases"]
     ]

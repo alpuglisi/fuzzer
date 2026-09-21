@@ -57,6 +57,49 @@ def test_schema_rejects_bad_case(tmp_path):
         contract.load_labels(tmp_path)
 
 
+def _minimal_case(**overrides):
+    case = {
+        "case_id": "PFF-9001", "url": "/x", "method": "GET", "param": "p",
+        "location": "query", "vuln_class": "sqli", "sink_context": "sql",
+        "expected_vulnerable": True, "rendering": "server",
+    }
+    case.update(overrides)
+    return case
+
+
+def test_per_case_stack_is_loaded_when_present(tmp_path):
+    # Multi-stack ground truth (docs/LAB_IMPLEMENTATION_PLAN.md §4.4): `stack`
+    # is inline, per-case metadata -- the same axis the fingerprint-
+    # independence gate tests for independence from vuln_class.
+    data = {"version": 1, "target": "x", "cases": [_minimal_case(stack="node_express")]}
+    (tmp_path / "labels.json").write_text(json.dumps(data))
+    (case,) = contract.load_labels(tmp_path)
+    assert case.stack == "node_express"
+
+
+def test_per_case_stack_is_optional_and_defaults_to_none(tmp_path):
+    data = {"version": 1, "target": "x", "cases": [_minimal_case()]}
+    (tmp_path / "labels.json").write_text(json.dumps(data))
+    (case,) = contract.load_labels(tmp_path)
+    assert case.stack is None
+
+
+def test_empty_stack_string_is_rejected_by_the_schema(tmp_path):
+    # Fail closed rather than record a meaningless stack name.
+    data = {"version": 1, "target": "x", "cases": [_minimal_case(stack="")]}
+    (tmp_path / "labels.json").write_text(json.dumps(data))
+    with pytest.raises(contract.ContractError):
+        contract.load_labels(tmp_path)
+
+
+def test_real_ground_truth_still_loads_without_a_stack_field():
+    # The hand-built PHP app's ground truth predates multi-stack and is not
+    # backfilled here (its migration onto the generator is D20 §7.2 /
+    # php_laravel's lane); the field must therefore stay optional.
+    gt = contract.load(GT_DIR)
+    assert all(c.stack is None for c in gt.cases)
+
+
 def test_drift_between_labels_and_csv_is_caught(tmp_path):
     # Copy the real labels + points, but write a CSV with a flipped verdict.
     gt_src = contract.load(GT_DIR)

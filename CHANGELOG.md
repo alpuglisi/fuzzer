@@ -14,6 +14,18 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- LAB: carried the stack axis end to end and made the fingerprint-independence gate
+  actually gate (plan §4.4, lane L-P3.4) — `Cell.stack_profile` already existed and is
+  populated by all four emitters' sample manifests, so no redundant field was added;
+  the real gap was the ground-truth side, which gained an optional per-case `stack`
+  (`fuzzlab.labels.contract.Case` + `labels.schema.json`, inline per the §4 research
+  decision, additive and inert to every existing case). `fuzzlab lab-generate --check`
+  now runs `fingerprint_gate.run_fingerprint_gate` as a required step whenever the
+  manifest's cells span 2+ distinct stack profiles, with `expected_classes`/
+  `expected_stacks` derived from that manifest, and skips it with an explicit printed
+  reason for a single-stack manifest (where the gate is ill-defined, not merely
+  unhelpful) — so a multi-stack corpus can no longer ship with stack fingerprints
+  predicting the vulnerability class (`CR-LAB-0001` §3, `CC-LAB-0040`, `FR-LAB-38`).
 - LAB: built T-LAB0.9, the regression/additive-only build gate
   (`fuzzlab.labgen.regression_gate.check_no_regression`) that diffs a candidate
   ground-truth snapshot against the hand-authored `lab/ground-truth/` by case ID and

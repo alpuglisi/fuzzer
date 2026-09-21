@@ -18,6 +18,28 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — MUT: two `tests/test_mutation_operators.py` failures pre-existing on the branch tip (found, not fixed)
+
+- **Symptom:** the full suite run for lane L-P3.4 (§4.4, `CC-LAB-0040`) ended
+  `2 failed, 1170 passed, 8 skipped`. The two failures are
+  `test_every_surface_variant_preserves_semantics` and
+  `test_sql_equivalent_needs_trusted_provenance`: `SemanticsValidator.preserves()`
+  returns `False` for a surface-only case-toggle variant of a SQLi payload that it
+  should accept, and `True` for an unvetted `-- x` comment append that it should refuse
+  (a fail-*open* direction, so the more serious of the two).
+- **Root cause:** not yet diagnosed here — outside this lane's component (MUT,
+  `fuzzlab/mutation/semantics.py`) and outside its scope. Recorded because it was
+  observed, per `ERROR_LOG.md`'s own scope line and PA-0019: both failures reproduce on
+  a **pristine detached worktree of this branch's tip (`HEAD`, no L-P3.4 changes
+  applied)**, so they are pre-existing on `claude/trusting-noether-heon0n` and not
+  caused by this lane's change — verified explicitly rather than assumed.
+- **Remediation:** none by this lane (deliberately: fixing another in-flight lane's
+  component mid-merge would collide). Flagged to the orchestrating session in this
+  lane's hand-off report so it can be routed to whoever owns MUT; a code defect, so it
+  needs the full `docs/bugs/BUG-NNNN` + `PA-NNNN` protocol from that owner, not just
+  this line.
+- **Status:** Open (not caused by, and not remediated by, `CC-LAB-0040`).
+
 ## 2026-09-21 — Covering-array resolver silently returns zero cells when `strength` exceeds the factor count
 
 - **Symptom:** while wiring `fuzzlab.labgen.resolver.expand()` into manifest loading

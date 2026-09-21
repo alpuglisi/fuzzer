@@ -693,6 +693,43 @@ lane) can submit a payload as
   into `php_current`'s emitter (out of this task's scope; the emitter still renders
   every cell as if `param` were its `query`/`raw` default). (`docs/LAB_IMPLEMENTATION_PLAN.md`
   §3.4, `CC-LAB-0039`)
+- **FR-LAB-38** (Lab track, §4.4, lane L-P3.4) The stack axis is carried end to end and
+  the fingerprint-independence gate runs on every multi-stack build:
+  1. **Ground-truth contract.** A `labels.json` case may carry an optional per-case
+     `stack` string (`fuzzlab.labels.contract.Case.stack`, schema-validated,
+     `minLength: 1` so an empty stack name fails closed) naming the stack profile its
+     code belongs to — the same meaning as `fuzzlab.labgen.schema.Cell.stack_profile`
+     / `CR-LAB-0001` §4's `stack_profile`. **Inline**, per the settled research decision
+     in `docs/LAB_IMPLEMENTATION_PLAN.md` §4, not a separate analysis-only file. Optional
+     and additive: a case omitting it loads as `None`, so the pre-multi-stack
+     `lab/ground-truth/labels.json` round-trips unchanged and no scorer keys on it (it is
+     analysis metadata, not part of `Case.key`). `Cell.stack_profile` itself already
+     existed and is already required by `lab/schemas/manifest.schema.json`, populated by
+     every sample manifest of all four emitters, usable as a covering-array factor axis
+     (see the `axis_ranges` requirement above), and already an input to
+     `fuzzlab.labgen.subseed`'s sub-seed derivation — so nothing was re-added there;
+     §4.4's "add `stack` (or `stack_profile`) to `Cell`" instruction was already
+     satisfied, and only the `labels.json` half was an actual gap.
+  2. **Gate wiring.** `fuzzlab lab-generate --check` runs
+     `fuzzlab.labgen.fingerprint_gate.run_fingerprint_gate` as a required step whenever —
+     and only whenever — the loaded manifest's cells span at least
+     `fuzzlab.labgen.cli.MIN_STACKS_FOR_FINGERPRINT_GATE` (2) distinct `stack_profile`
+     values. `expected_classes`/`expected_stacks` are derived from that manifest's own
+     cells (never placeholders); `min_stacks_per_class` is `CR-LAB-0001` §3/§4's canonical
+     2; `min_classes_per_stack` is `min(3, <distinct classes in this corpus>)` — the
+     canonical 3 as a *ceiling*, since a corpus whose whole class vocabulary is smaller
+     cannot satisfy a flat 3 for any reason related to fingerprint leakage. For a
+     single-stack manifest the step is skipped with an explicit printed reason (a
+     one-stack corpus cannot place a class on two stacks and its chi-square contingency
+     table is degenerate) — never a silent no-op and never a failure. The corpus records
+     are built from **all** `manifest.cells`, not only the cells one emitter supports:
+     fingerprint independence is a property of the authored corpus, and a multi-stack
+     manifest is by construction not fully renderable by any single emitter. No `verdict`
+     key is fed from the CLI, so the gate's stack↔verdict half is (per its own documented
+     contract) skipped; deriving it needs the repo-relative safety matrix
+     (`fuzzlab.labgen.verdict`), which no production code loads today — a known remaining
+     deliverable, recorded in `CC-LAB-0040`, not an oversight.
+     (`docs/LAB_IMPLEMENTATION_PLAN.md` §4.4, `CC-LAB-0040`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
