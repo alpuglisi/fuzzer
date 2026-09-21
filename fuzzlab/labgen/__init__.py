@@ -17,14 +17,18 @@ between stack and vuln_class/verdict, guarding against a stack becoming a
 de facto proxy for a class once the generator goes multi-stack), and the
 tiered emitter conformance suite (``conformance``, T-LAB0.7 — Tiers 0/3
 fully exercised offline, Tiers 1/2 built as honestly-labeled ``[design]``
-interfaces requiring on-host resources), and a second, independent tool
-oracle for Nuclei (``nuclei_oracle``, path traversal/LFI only — a separate
-module from ``oracle_wrapper`` since Nuclei has no auto-detection against a
+interfaces requiring on-host resources), a second, independent tool oracle
+for Nuclei (``nuclei_oracle``, path traversal/LFI only — a separate module
+from ``oracle_wrapper`` since Nuclei has no auto-detection against a
 declared parameter the way sqlmap/commix/SSTImap do; it matches
-hand-authored templates instead) — all generator-build-time
-security-assertion tooling, unrelated to and never imported by
-``fuzzlab.oracle``. None of these depends on any other. This re-exports all
-of them. ``fingerprint_gate`` imports ``scipy`` lazily inside its chi-square
+hand-authored templates instead), and a third, independent oracle for
+identifier/alias/connector-position SQL injection
+(``identifier_sqli_oracle``, L-P1.2a — a custom differential-response
+prober, since a real sqlmap spot-check confirmed it does not reliably
+detect this class; see that module's docstring for the spot-check findings)
+— all generator-build-time security-assertion tooling, unrelated to and
+never imported by ``fuzzlab.oracle``. None of these depends on any other.
+This re-exports all of them. ``fingerprint_gate`` imports ``scipy`` lazily inside its chi-square
 functions (the optional ``labgen-stats`` extra), so importing this package
 does not require it.
 """
@@ -76,6 +80,17 @@ from .nuclei_oracle import (
     default_nuclei_runner,
     run_path_traversal_oracle,
 )
+from .identifier_sqli_oracle import (
+    DialectNotImplementedError,
+    DifferentialMode,
+    HttpProbeResult,
+    IdentifierSqliOracleRequest,
+    IdentifierSqliOracleVerdict,
+    IdentifierSqliVerdict,
+    SqlDialect,
+    default_http_runner,
+    run_identifier_sqli_oracle,
+)
 
 __all__ = [
     "conformance",
@@ -117,4 +132,13 @@ __all__ = [
     "TraversalVulnClass",
     "default_nuclei_runner",
     "run_path_traversal_oracle",
+    "DialectNotImplementedError",
+    "DifferentialMode",
+    "HttpProbeResult",
+    "IdentifierSqliOracleRequest",
+    "IdentifierSqliOracleVerdict",
+    "IdentifierSqliVerdict",
+    "SqlDialect",
+    "default_http_runner",
+    "run_identifier_sqli_oracle",
 ]
