@@ -3,6 +3,44 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0010 — Live upstream SocketSender + CONNECT/TLS termination + `fuzzlab proxy` CLI (Phase 6 on-host, T6.x) (2026-09-21)
+- Change: built the Phase 6 on-host last mile so runbook Part I is a one-command flow.
+  New `fuzzlab/proxy/socketsender.py::SocketSender` is a real upstream `Sender`
+  (`(host,port,use_tls,raw)->bytes`): TCP/TLS-connect, send byte-exact, read the whole
+  HTTP/1 response (Content-Length / chunked / close-delimited). `AsyncProxyServer` gained
+  a `ca` param and a `_handle_connect` that replies `200 Connection Established`,
+  TLS-terminates the client with a CA-minted per-host leaf (new
+  `LocalCA.leaf_cert_files` materializes the leaf to 0600 files; server-side upgrade via
+  `loop.start_tls`), and forwards tunnelled requests through the same engine to the HTTPS
+  upstream; without a CA, CONNECT still answers 501. New `fuzzlab/proxy/cli.py`
+  (`fuzzlab proxy`, dispatched in `cli.py`): `--export-ca` (no `--authorized`; sends
+  nothing) and the run path (requires `--authorized`), with scope/store/ca-dir flags.
+  Orchestration `scripts/proxy_e2e.sh`.
+- Impact (other components / project): the proxy can now intercept live traffic against
+  the lab and record flows to the store; HTTPS interception works once the CA is trusted.
+  Reuses the existing sans-I/O engine/repeater seam unchanged (the sender is injected), so
+  no change to match-replace/history/scope/intercept. Per D5 the proxy stays optional and
+  out of the timing path. Depends on `cryptography` on-host for minting + the handshake.
+- Risk (level; mitigation): medium — real sockets + a server-side `loop.start_tls`
+  upgrade (an internal-ish streams idiom) and MITM TLS. Mitigated by: byte-exact
+  forwarding (no reserialization), full upstream TLS verification by default
+  (`--no-verify-tls` opt-in for self-signed lab origins), the CA key staying 0600 and
+  never distributed, `--authorized` gating the run, loopback defaults, and tests —
+  `tests/test_proxy_live.py`: SocketSender Content-Length + close-delimited reads, the
+  byte-exact duplicate-Content-Length forward through the async server (parsed path
+  rejects it), and a skip-guarded on-host CONNECT+TLS tunnel that forwards byte-exact.
+  Suite 408 passed / 5 skipped.
+- Deliverables:
+  - [x] `SocketSender` (real upstream, byte-exact) + tests — done.
+  - [x] CONNECT/TLS termination in `AsyncProxyServer` + `LocalCA.leaf_cert_files` — done.
+  - [x] `fuzzlab proxy` CLI (+ `--export-ca`) and dispatch — done.
+  - [x] `scripts/proxy_e2e.sh`; runbook Part I rewritten to one command — done.
+  - [ ] Live browser-trust + HTTPS interception walk-through — on-host (script prints steps).
+- Effectiveness (assessed 2026-09-21): effective offline — the real sender round-trips and
+  the duplicate-Content-Length request forwards byte-exact while the parsed path rejects
+  it. The CONNECT+TLS tunnel and CA minting are covered by skip-guarded tests that run
+  on-host, and `scripts/proxy_e2e.sh` drives the live lab exit.
+
 ### CC-PROXY-0009 — HTTP/2 frames + minimal HPACK + raw-frame client (T9.2/T9.3) (2026-09-21)
 - Change: from-scratch, byte-exact HTTP/2 for the raw path. `fuzzlab/proxy/h2frames.py`
   encodes/decodes the frame types (DATA/HEADERS/SETTINGS/WINDOW_UPDATE/RST_STREAM/PING/

@@ -57,6 +57,23 @@ class LocalCA:
         self._leaf_cache[host] = leaf
         return leaf
 
+    def leaf_cert_files(self, host: str) -> tuple[Path, Path]:
+        """Materialize ``host``'s leaf cert+key to files and return their paths.
+
+        ``ssl.SSLContext.load_cert_chain`` needs file paths, so the cached PEMs are
+        written under ``<ca_dir>/leaves/`` (the key 0600). On-host (needs a real leaf).
+        """
+        cert_pem, key_pem = self.leaf_cert(host)
+        safe = host.split(":", 1)[0].lower()
+        d = self._dir / "leaves"
+        d.mkdir(parents=True, exist_ok=True)
+        cert_path = d / f"{safe}.crt"
+        key_path = d / f"{safe}.key"
+        cert_path.write_bytes(cert_pem)
+        key_path.write_bytes(key_pem)
+        key_path.chmod(0o600)
+        return cert_path, key_path
+
     def cached_hosts(self) -> list[str]:
         return sorted(self._leaf_cache)
 

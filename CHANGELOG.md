@@ -14,6 +14,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (Phase 6 proxy on-host last mile): runbook Part I is now a one-command flow.
+  Built `fuzzlab/proxy/socketsender.py::SocketSender` (real upstream `Sender`: byte-exact
+  TCP/TLS forward + full HTTP/1 response read), CONNECT/TLS termination in
+  `AsyncProxyServer` (CA-minted per-host leaves via new `LocalCA.leaf_cert_files`;
+  server-side `loop.start_tls`), and a `fuzzlab proxy` CLI (`--export-ca` + the
+  `--authorized` run path). `scripts/proxy_e2e.sh` proves the real upstream and the
+  byte-exact duplicate-Content-Length exit against the live lab. See CC-PROXY-0010.
+  Suite 408 passed / 5 skipped.
 - Process/governance: added `CLAUDE.md` — an auto-loaded, session-start checklist that
   makes the engineering bookkeeping impossible to overlook: the preventive-action rules
   (mandatory), CHANGELOG + per-component change-control, the living `requirements.md` and

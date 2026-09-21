@@ -18,7 +18,9 @@ sends directly, not through here.
 from __future__ import annotations
 
 import asyncio
+import ssl
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from fuzzlab.proxy.history import FlowRecord, HistoryWriter
@@ -27,6 +29,9 @@ from fuzzlab.proxy.matchreplace import MatchReplaceEngine
 from fuzzlab.proxy.message import RawMessage
 from fuzzlab.proxy.repeater import Sender
 from fuzzlab.proxy.scope import Scope
+
+if TYPE_CHECKING:
+    from fuzzlab.proxy.ca import LocalCA
 
 
 @dataclass
@@ -130,12 +135,22 @@ class ProxyEngine:
 
 
 class AsyncProxyServer:
-    """asyncio socket layer over :class:`ProxyEngine` (plain-HTTP path offline-testable)."""
+    """asyncio socket layer over :class:`ProxyEngine`.
 
-    def __init__(self, engine: ProxyEngine, host: str = "127.0.0.1", port: int = 0):
+    The **plain-HTTP** path (absolute-form requests from a proxy-configured browser) is
+    offline-testable over loopback. **CONNECT + TLS interception** is enabled by passing
+    a :class:`~fuzzlab.proxy.ca.LocalCA`; without one, CONNECT still answers 501 (the
+    offline default). The CONNECT path terminates TLS with a CA-minted leaf and forwards
+    tunnelled requests through the same engine — on-host (needs a working ``cryptography``
+    for minting and a browser that trusts the CA).
+    """
+
+    def __init__(self, engine: ProxyEngine, host: str = "127.0.0.1", port: int = 0,
+                 ca: "LocalCA | None" = None):
         self.engine = engine
         self.host = host
         self.port = port
+        self.ca = ca
         self._server: asyncio.AbstractServer | None = None
 
     async def start(self) -> "AsyncProxyServer":
@@ -155,11 +170,15 @@ class AsyncProxyServer:
             raw = await _read_http_message(reader)
             if not raw:
                 return
-            if parse_connect(raw) is not None:
-                # Live CONNECT/TLS interception is on-host (needs the local CA + TLS).
-                writer.write(b"HTTP/1.1 501 Not Implemented\r\n"
-                             b"Content-Length: 0\r\n\r\n")
-                await writer.drain()
+            connect = parse_connect(raw)
+            if connect is not None:
+                if self.ca is None:
+                    # No local CA wired: TLS interception is off (offline default).
+                    writer.write(b"HTTP/1.1 501 Not Implemented\r\n"
+                                 b"Content-Length: 0\r\n\r\n")
+                    await writer.drain()
+                    return
+                await self._handle_connect(reader, writer, connect)
                 return
             tgt = target_from_request(raw)
             resp = await self.engine.handle_request(tgt.request, tgt.host, tgt.port,
@@ -169,6 +188,53 @@ class AsyncProxyServer:
                 await writer.drain()
         finally:
             writer.close()
+
+    async def _handle_connect(self, reader: asyncio.StreamReader,
+                              writer: asyncio.StreamWriter,
+                              connect: tuple[str, int]) -> None:
+        """Terminate CONNECT: reply 200, TLS-serve with a CA-minted leaf, forward.
+
+        After the TLS upgrade the tunnelled requests are origin-form for ``host``; each
+        is forwarded through the same engine with ``use_tls=True`` (the real upstream is
+        HTTPS). On-host only — minting and the handshake need a working ``cryptography``.
+        """
+        host, port = connect
+        writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+        await writer.drain()
+        try:
+            ctx = _leaf_server_context(self.ca, host)
+        except Exception:  # noqa: BLE001 - minting/crypto failure must not crash the loop
+            return
+        loop = asyncio.get_running_loop()
+        transport = writer.transport
+        protocol = transport.get_protocol()
+        try:
+            tls_transport = await loop.start_tls(
+                transport, protocol, ctx, server_side=True)
+        except (ssl.SSLError, OSError):
+            return
+        if tls_transport is None:
+            return
+        # Rebind writes to the upgraded (TLS) transport; the same StreamReader keeps
+        # being fed decrypted bytes by the wrapped protocol.
+        writer._transport = tls_transport  # noqa: SLF001 - documented start_tls-with-streams idiom
+        while True:
+            raw = await _read_http_message(reader)
+            if not raw:
+                break
+            resp = await self.engine.handle_request(raw, host, port, use_tls=True)
+            if resp is None:
+                break
+            writer.write(resp)
+            await writer.drain()
+
+
+def _leaf_server_context(ca: "LocalCA", host: str) -> ssl.SSLContext:
+    """A server-side TLS context using ``host``'s CA-minted leaf cert (on-host)."""
+    cert_path, key_path = ca.leaf_cert_files(host)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
+    return ctx
 
 
 async def _read_http_message(reader: asyncio.StreamReader) -> bytes:

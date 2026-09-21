@@ -342,22 +342,69 @@ with Store("auto.db") as s:
 PY
 ```
 
-## Part I — Phase 6: intercepting proxy, live TLS `[build+run]`
+## Part I — Phase 6: intercepting proxy, live TLS `[run]`
 
-The whole offline stack is built (`fuzzlab/proxy/`): byte-exact `RawMessage`, the `h11`
-parsed path, scope, match-and-replace, flow history, repeater, interception, the local CA
-cache, and the async server (plain-HTTP path). The on-host last mile:
+The offline stack was already built (`fuzzlab/proxy/`): byte-exact `RawMessage`, the
+`h11` parsed path, scope, match-and-replace, flow history, repeater, interception, the
+local CA cache, and the async server (plain-HTTP path). The live last mile now ships too
+— the real upstream `SocketSender`, CONNECT/TLS termination with CA-minted leaves, and a
+`fuzzlab proxy` CLI — so this part is a script plus (for HTTPS) importing the CA.
 
-1. **Real upstream + CONNECT/TLS.** Implement the socket `Sender` (connect/send/recv to
-   the upstream) and TLS-terminate CONNECT with `LocalCA` leaf certs (mint on first
-   CONNECT, cache per host). `AsyncProxyServer` currently returns 501 for CONNECT.
-2. **Verify real CA minting** on-host: `pytest tests/test_proxy_server.py::test_real_ca_mints_signed_leaf`
-   should pass here (it skips in the sandbox for lack of a working `cryptography`).
-3. **Trust the CA** in the browser/OS store used to browse the lab (install
-   `fuzzlab-ca.crt`; never distribute the CA key — it stays 0600 on the host).
-4. **Exit:** browse the lab through the proxy, intercept a request, hand-edit it to carry
-   a **duplicate `Content-Length`**, forward it, and confirm the **exact bytes** go on the
-   wire (the raw path) while the parsed path would have rejected it.
+### I.1 One command
+
+```bash
+scripts/proxy_e2e.sh
+```
+
+It runs, in order: ensure the lab is up → export the local CA → start `fuzzlab proxy`
+(recording flows to a store) → fetch the lab **through** the proxy (proves the real
+`SocketSender`, HTTP 200) → send a **duplicate-`Content-Length`** request through the
+proxy and read it back from the store to prove it went on the wire **byte-exact** while
+the parsed path rejects it (the Part I exit) → print how to trust the CA and browse.
+
+Knobs (env): `PFF_WEB_PORT`, `PROXY_PORT` (default 8888), `PROXY_STORE`
+(default `proxy_flows.db`), `CA_DIR` (default `~/.fuzzlab/ca`).
+
+### I.2 What was built
+
+- **Real upstream (T6.x)** — `fuzzlab/proxy/socketsender.py::SocketSender`: the injected
+  `Sender` seam, now a real TCP/TLS client that forwards the request **byte-exact** and
+  reads the whole response back byte-exact (Content-Length, chunked, or close-delimited).
+- **CONNECT/TLS (T6.x)** — `AsyncProxyServer(ca=LocalCA(...))` replies `200 Connection
+  Established`, TLS-terminates the client with a CA-minted per-host leaf
+  (`LocalCA.leaf_cert_files`), and forwards tunnelled requests through the same engine to
+  the HTTPS upstream. Without a CA, CONNECT still answers 501 (offline default).
+- **CLI** — `fuzzlab proxy` (`fuzzlab/proxy/cli.py`): `--export-ca` writes/prints
+  `fuzzlab-ca.crt` (sends nothing, needs no `--authorized`); running the proxy needs
+  `--authorized`. Flags: `--host --port --scope (repeatable) --ca-dir --store --identity
+  --no-verify-tls --no-tls`.
+
+### I.3 Trust the CA + browse (interactive)
+
+For HTTPS interception, import the CA once and point your browser at the proxy:
+
+```bash
+fuzzlab proxy --export-ca --ca-dir ~/.fuzzlab/ca        # prints the .crt path
+# import ~/.fuzzlab/ca/fuzzlab-ca.crt into your browser/OS trust store
+fuzzlab proxy --scope 127.0.0.1 --ca-dir ~/.fuzzlab/ca --store proxy_flows.db --authorized
+# set the browser HTTP/HTTPS proxy to 127.0.0.1:8888, then browse http://127.0.0.1:8080/
+```
+
+The CA private key never leaves the host (0600). On-host you can also confirm the real
+X.509 paths that skip in the sandbox:
+
+```bash
+pytest tests/test_proxy_server.py::test_real_ca_mints_signed_leaf \
+       tests/test_proxy_live.py::test_connect_tls_tunnel_forwards_byte_exact
+```
+
+### I.4 Exit (byte-exact malformed forwarding)
+
+The script proves it automatically (step 5). By hand: with the proxy running, intercept a
+request, hand-edit it to carry a **duplicate `Content-Length`**, forward it, and confirm
+the recorded flow's raw request has both headers verbatim while
+`fuzzlab.proxy.parser.is_valid_request` returns `False` — the raw path forwards what the
+parsed path would reject.
 
 ## Part J — Phase 8: mutation engine vs the lab WAF (T8.7) `[build+run]`
 
