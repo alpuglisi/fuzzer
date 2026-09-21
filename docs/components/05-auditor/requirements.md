@@ -1,0 +1,61 @@
+# Auditor / Fetcher — Requirement Specification
+
+Component code: **AUD** · Status: `[built; to harden]` · Last updated: 2026-09-21
+
+Related: `ARCHITECTURE.md` #5; `DECISIONS_AND_ROADMAP.md` (D5, D6, D9, Phase 2);
+`./change-control.md`.
+
+## 1. Purpose
+Turn discovered surface (pages, endpoints, parameters) into ranked **injection
+candidates** with recorded rule evidence, so the fuzzer and oracle spend their
+budget where a vulnerability is plausible.
+
+## 2. Scope
+- **In:** per-parameter rule evaluation, canary reflection probing with context
+  typing, target fingerprinting, candidate emission with evidence and features.
+- **Out:** confirming a vulnerability (fuzzer + oracle) and ordering candidates by
+  a learned model (the ranker reads what the auditor writes).
+
+## 3. Functional requirements
+- **FR-AUD-1** Evaluate each injection point against the rule set and record a
+  full per-rule evaluation log (which rules fired, which did not, and why), not
+  only the rules that matched.
+- **FR-AUD-2** Move rules from code toward data (rules-as-data) so the rule set is
+  editable and versioned without code changes.
+- **FR-AUD-3** Probe reflection with a unique canary and classify the **sink
+  context** of each reflection (HTML body, attribute, JS string, URL, etc.).
+- **FR-AUD-4** Fingerprint the target (DBMS, framework, WAF) and record it for
+  the scheduler and fuzzer to condition on.
+- **FR-AUD-5** Emit `candidate` rows carrying rule evidence and an extracted,
+  versioned feature vector; never emit a vulnerability label.
+- **FR-AUD-6** Read discovered surface from the shared store and write candidates
+  back to it (no direct tool-to-tool calls). (D5)
+
+## 4. Non-functional requirements
+- **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that
+  produced it; a candidate with no evidence is a bug.
+- **NFR-AUD-idempotent** Re-auditing the same surface produces stable candidate
+  identities (no duplicate churn).
+- **NFR-AUD-safe** Probing uses non-destructive canaries only; destructive checks
+  are gated off by default.
+- **NFR-AUD-no-leak** Candidate identifiers carry no vulnerability class name (D9).
+
+## 5. Interfaces and data contracts
+Reads `page`, `endpoint`, `parameter` from the store; writes `candidate` rows
+(rule evidence, `features_json` + `feature_version`) and `target` fingerprint
+data. Reads indicators/rules from the indicator DB & catalogs. Authenticates via
+the session manager. Runs standalone or in the discovery pipeline.
+
+## 6. Dependencies (components)
+`core/`, session manager, crawler, indicator DB & catalogs.
+
+## 7. Acceptance criteria
+- Produces candidates with complete per-rule evidence on the lab's known
+  injection points.
+- Correctly types reflection contexts on the lab's reflected-input pages.
+- Fingerprints the lab's DBMS/framework; candidates carry a versioned feature
+  vector consumable by the ranker.
+
+## 8. Open questions
+- Rules-as-data schema and how rule versions bind to a run.
+- Confidence weighting of overlapping rules for the same parameter.

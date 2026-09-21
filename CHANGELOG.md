@@ -8,6 +8,17 @@ Format per entry: `- <area>: <what changed> — <why>` (commit `<hash>`).
 
 ## 2026-09-21
 
+- Planning: updated `docs/ARCHITECTURE.md` to reflect the settled decisions — a
+  standing maintenance rule (keep the doc in sync whenever the architecture
+  changes; each component now also has its own spec and change-control log),
+  containerization/env-pinning of the lab (D7), and the manifest-driven generator
+  (D8) — so the architecture document matches the decisions we made.
+- Planning: added `docs/components/` — a requirement specification and a
+  per-component change-control log for each of the 13 primary components, plus a
+  `README.md` defining the change-control entry format (change, impact, risk +
+  mitigation, deliverables with status, effectiveness). The component
+  change-control logs are lower-level and per-component; the root CHANGELOG stays
+  the high-level project history.
 - Planning: added `docs/DECISIONS_AND_ROADMAP.md` (settled design decisions
   D1–D7, cross-cutting principles, and the phased build plan) and
   `docs/ARCHITECTURE.md` (component map, subcomponents, interactions, and

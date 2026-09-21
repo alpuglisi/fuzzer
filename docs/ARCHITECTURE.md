@@ -4,6 +4,11 @@ High-level outline of the toolkit's components, their subcomponents, how they
 interact, and their dependencies. Living document; keep it in sync with
 `docs/DECISIONS_AND_ROADMAP.md`.
 
+**Maintenance rule:** update this document whenever the project architecture
+changes — a component added, removed, or split, or its responsibilities,
+interfaces, or dependencies changed. Each primary component below also has its own
+requirement specification and change-control log under `docs/components/`.
+
 *Last updated: 2026-09-21.*
 
 Status legend: `[built]`, `[partial]`, `[planned]`.
@@ -16,7 +21,9 @@ store, not by calling other tools' APIs. Shared concerns live in a `core/`
 library that every tool imports (decision D6). The intercepting proxy is an
 **optional observer**, never a mandatory pipeline. A deterministic **oracle** is
 the only component allowed to write vulnerability labels; machine-learning
-components only write scores and uncertainty (the oracle/advisory split).
+components only write scores and uncertainty (the oracle/advisory split). The
+target lab runs in a container with pinned PHP/Apache/MySQL/libxml versions (D7),
+so labels stay valid across upgrades and runs are reproducible.
 
 ## Component map
 
@@ -65,8 +72,9 @@ LightGBM) are implementation details, mentioned within the subcomponents and
 tracked in the requirements files, not here.
 
 ### 1. Target lab and ground truth `[built app; planned instrumentation]`
-- **Puppy Fort Factory** `[built]`: PHP/MySQL/Apache app; ~30 pages, ~10
-  JavaScript-rendered; documented mix of vulnerable and secure pages.
+- **Puppy Fort Factory** `[built app]`: PHP/MySQL/Apache app; ~30 pages, ~10
+  JavaScript-rendered; documented mix of vulnerable and secure pages. Runs
+  containerized with pinned PHP/Apache/MySQL/libxml versions (D7).
 - **Ground-truth labels** `[partial]`: a machine-readable, out-of-band contract
   (`labels.json`, `expectedresults.csv`, and a separate `injection-points.json`),
   read from disk by the tools and the harness, never served by the target, with
@@ -76,6 +84,10 @@ tracked in the requirements files, not here.
   realistic "shop") with annotated / blind / all-secure build profiles.
 - **Grey-box instrumentation** `[planned]` (D7): line coverage (Xdebug/pcov), a
   database error hook, and snapshot/restore for state reset.
+- **Manifest-driven generator** `[planned]` (D8): the "lab as a compiler" — one
+  manifest plus a safety matrix, seed, and env-profile generate the app, labels,
+  docs, and oracle tests, with verdicts derived from `(transform, sink context)`.
+  Built as the parallel Lab track after the toolkit foundations.
 - **Depends on (components):** none (it is the system under test).
 - **Consumed by:** crawler, auditor, fuzzer, proxy, and the reward path.
 
