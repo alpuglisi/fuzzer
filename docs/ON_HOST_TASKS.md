@@ -39,6 +39,16 @@ measurement/validation remains.
   crawler to store rendered HTML so `pages_html` can feed the pipeline's T2.6 dedup.
   Not needed for this lab (endpoint-keying already collapses `?id=1..10` to one point).
 
+### Detection-capability gaps the benchmark will show as false negatives (next build)
+
+The `fuzzlab auto --ground-truth` benchmark tests all enumerated points and lists what
+it can't yet confirm. These are scoped capabilities, not bugs:
+- [ ] **POST-body injection** in the probe sender/oracle (e.g. `login.php` auth-bypass
+  SQLi, register/edit_profile params) — currently GET/query only.
+- [ ] **Browser-execution (M6)** for stored + DOM XSS (`profile.php` stored via
+  `edit_profile`, `reviews.php#author`, `feedback.php?ref`) — needs Playwright
+  execution in the oracle (planned with Phase 3 grey-box or as an oracle M6 addition).
+
 ## Phase 3 — grey-box live sources + validation
 
 The consumer layer (`fuzzlab/greybox/`) is **built and unit-tested offline** behind

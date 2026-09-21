@@ -14,6 +14,19 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — Automatic mode never nominated XSS (rule keyed on a post-detection label)
+
+- **Symptom:** the live `fuzzlab auto` scored run missed every reflected/DOM XSS case
+  (e.g. `search.php?q`) as a false negative, though the oracle can confirm reflected XSS.
+- **Root cause:** `R-XSS-REFLECT` fired only when `sink_context` was set, but that is a
+  label discovery never sets on a fresh point, so no XSS candidate was ever nominated
+  for the oracle. `test_pipeline` masked it by hand-setting `sink_context="html"`.
+- **Remediation:** `R-XSS-REFLECT` now nominates on location (query/body); the oracle's
+  M5 types the reflection context itself and confirms (fail-closed → no FP). Pipeline
+  now counts oracle-rejected candidates as negatives. Full RCA in
+  `docs/bugs/BUG-0006-xss-never-nominated-in-automatic-mode.md`; rule PA-0006.
+- **Status:** Fixed (this commit). See CC-AUD-0009, CC-FUZZ-0010.
+
 ## 2026-09-21 — Headless credential store crashed (`No module named 'Crypto'`)
 
 - **Symptom:** `fuzzlab session set-credential` with `FUZZLAB_KEYRING_PATH`/

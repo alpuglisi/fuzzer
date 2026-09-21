@@ -3,6 +3,36 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0010 — `auto`: ground-truth point sourcing + oracle-rejection negatives (2026-09-21)
+- Change: `fuzzlab auto` can source injection points from the enumerated ground-truth
+  contract (`points_from_ground_truth`), not only the crawl. A new `--points`
+  flag (`auto`|`crawl`|`ground-truth`, default `auto` = ground-truth when a contract
+  is given, else crawl) selects the source. Ground-truth sourcing filters to points
+  the current pipeline can test (GET/query, server-rendered) and reports the rest
+  (POST body, fragment, client-only/DOM) as explicit skipped gaps rather than silent
+  misses. `run_pipeline` now also counts oracle-rejected candidates (nominated but not
+  confirmed) as negatives (`oracle_rejected`), so the dataset's negatives stay
+  meaningful after R-XSS-REFLECT was broadened (CC-AUD-0009).
+- Impact (other components / project): the scored run is now a real **detection
+  benchmark** decoupled from crawl coverage — it tests every enumerated point, so the
+  oracle's true tp/fp is measured (the crawl-only run under-covered, inflating fn).
+  The skipped gaps name the next capabilities precisely: POST-body injection and
+  browser-execution (M6) for stored/DOM XSS. Discovery runs (`--points crawl`) still
+  measure the end-to-end tool including crawl coverage.
+- Risk (level; mitigation): low/medium — more points audited means more probes, but
+  scoped to testable GET/query points; the oracle stays fail-closed (no FP). Mitigated
+  by `tests/test_auto.py` (GT-point filtering; GT-source scored run beats crawl
+  coverage with fp=0; crawl-source path; D15 paths). Suite 132 passed / 2 skipped.
+- Deliverables:
+  - [x] `points_from_ground_truth` + `--points` selector + skipped-gap reporting — done.
+  - [x] `run_pipeline` negatives include oracle-rejected candidates — done.
+  - [x] Tests for both point sources + the skipped gaps — done.
+  - [ ] Live GT-benchmark run on the host (expect tp for the GET/query SQLi + reflected
+    XSS; fn for POST SQLi + stored/DOM XSS until those capabilities land) — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — the GT-sourced run audits
+  all enumerated GET/query points, scores fp=0, and lists the POST/DOM gaps; live
+  numbers pending on the host.
+
 ### CC-FUZZ-0009 — `fuzzlab auto`: automatic-mode entry point wired live (T2.8) (2026-09-21)
 - Change: added `fuzzlab/harness/auto.py` (`run_auto`, `injection_points_from_store`,
   `_CountingSender`) and `fuzzlab/harness/auto_cli.py`, wired as `fuzzlab auto`.

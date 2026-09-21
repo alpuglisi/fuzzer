@@ -14,8 +14,37 @@ path form via `core.urls.to_path`).
 from __future__ import annotations
 
 from fuzzlab.audit import InjectionPoint, known_categories
-from fuzzlab.core.runmode import categories_from_vuln_classes, resolve_run
+from fuzzlab.core.runmode import RunModeError, categories_from_vuln_classes, resolve_run
 from fuzzlab.harness.pipeline import PipelineResult, run_pipeline
+
+
+def points_from_ground_truth(ground_truth, base_url: str):
+    """Injection points from the enumerated ground-truth contract (detection benchmark).
+
+    Returns ``(points, skipped)``. Only points the current pipeline can test are
+    audited — server-rendered **GET query** params — because the probe sender is
+    GET/query and the oracle has no browser-execution (M6) or POST-body injection
+    yet. The rest are returned as ``skipped`` (path, method, param, reason) so the
+    coverage gap is explicit rather than a silent miss; they score as false negatives
+    until those capabilities land.
+    """
+    base = base_url.rstrip("/")
+    points: list[InjectionPoint] = []
+    skipped: list[tuple[str, str, str, str]] = []
+    for gp in ground_truth.points:
+        path = gp.url if gp.url.startswith("/") else "/" + gp.url
+        if gp.method.upper() == "GET" and gp.location == "query" and not gp.client_only:
+            points.append(InjectionPoint(url=base + path, param=gp.param,
+                                         method="GET", location="query"))
+        else:
+            if gp.client_only or (gp.rendering or "") == "js":
+                reason = "client-only/DOM (needs browser execution, M6)"
+            elif gp.method.upper() != "GET":
+                reason = f"{gp.method} body (needs POST-body injection)"
+            else:
+                reason = f"location={gp.location} (unsupported yet)"
+            skipped.append((path, gp.method, gp.param, reason))
+    return points, skipped
 
 
 def injection_points_from_store(store, run_id: int, base_url: str) -> list[InjectionPoint]:
@@ -60,10 +89,26 @@ class _CountingSender:
 
 
 def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automatic",
-             ground_truth=None, selected_categories=None,
+             ground_truth=None, selected_categories=None, points_source: str = "auto",
              pages_html: dict[str, str] | None = None) -> PipelineResult:
-    """Resolve the plan (D14/D15) and run the Phase 2 pipeline over crawl results."""
-    points = injection_points_from_store(store, run_id, base_url)
+    """Resolve the plan (D14/D15) and run the Phase 2 pipeline.
+
+    ``points_source``: ``"ground-truth"`` audits the enumerated contract points (a
+    detection benchmark, decoupled from crawl coverage); ``"crawl"`` audits what the
+    crawl discovered (a discovery run); ``"auto"`` (default) picks ground-truth when a
+    contract is present, else crawl.
+    """
+    source = points_source
+    if source == "auto":
+        source = "ground-truth" if ground_truth is not None else "crawl"
+
+    skipped: list[tuple[str, str, str, str]] = []
+    if source == "ground-truth":
+        if ground_truth is None:
+            raise RunModeError("points_source='ground-truth' requires a ground-truth contract")
+        points, skipped = points_from_ground_truth(ground_truth, base_url)
+    else:
+        points = injection_points_from_store(store, run_id, base_url)
 
     gt_categories = None
     if ground_truth is not None:
@@ -75,6 +120,9 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
                        all_categories=known_categories())
 
     counting = _CountingSender(sender)
-    return run_pipeline(points, store, run_id, counting, plan,
-                        ground_truth=ground_truth, pages_html=pages_html,
-                        budget=counting)
+    result = run_pipeline(points, store, run_id, counting, plan,
+                          ground_truth=ground_truth, pages_html=pages_html,
+                          budget=counting)
+    result.metrics["points_source"] = source
+    result.metrics["skipped_points"] = skipped
+    return result

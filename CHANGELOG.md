@@ -13,6 +13,18 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Bug fix (BUG-0006): automatic mode never nominated XSS — `R-XSS-REFLECT` required
+  `sink_context`, a post-detection label the pipeline's discovery never sets, so no XSS
+  candidate reached the oracle (the `test_pipeline` fixture masked it by hand-setting
+  the label). Changed the rule to nominate on location (query/body); the oracle's M5
+  types the context itself and confirms (fail-closed → no FP on escaped params).
+  Preventive rule PA-0006. Change-control: CC-AUD-0009.
+- Phase 2 build (T2.8): `fuzzlab auto` now runs a real **detection benchmark** — with
+  `--ground-truth` it audits the enumerated contract points (not just crawl-discovered
+  ones), decoupling detection from crawl coverage, and lists the points it can't yet
+  test (POST-body injection, stored/DOM XSS needing M6) instead of silently missing
+  them. `--points auto|crawl|ground-truth` selects the source. `run_pipeline` now
+  counts oracle-rejected candidates as negatives too. Change-control: CC-FUZZ-0010.
 - Phase 2 build (T2.8 live wiring): added **`fuzzlab auto`** — the automatic-mode
   entry point (`fuzzlab/harness/auto.py` + `auto_cli.py`). It builds injection points
   from a crawl consolidated into the store, resolves the run plan (D14 categories from

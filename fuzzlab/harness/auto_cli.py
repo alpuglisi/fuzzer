@@ -14,6 +14,7 @@ fails loudly (unscored); manual selects, defaulting to all known categories.
 from __future__ import annotations
 
 import argparse
+import os
 from urllib.parse import urlparse
 
 from fuzzlab.core.runmode import RunModeError
@@ -34,6 +35,10 @@ def main(argv: list[str]) -> int:
     p.add_argument("--ground-truth", default=None,
                    help="Ground-truth dir (enables D14 categories + scoring)")
     p.add_argument("--mode", choices=["automatic", "manual"], default="automatic")
+    p.add_argument("--points", choices=["auto", "crawl", "ground-truth"], default="auto",
+                   help="Where injection points come from: ground-truth (detection "
+                        "benchmark), crawl (discovery run), or auto (default: "
+                        "ground-truth if --ground-truth is given, else crawl)")
     p.add_argument("--categories", default=None,
                    help="Comma-separated categories (manual, or D15 fail-safe)")
     p.add_argument("--identity", default=None,
@@ -51,12 +56,13 @@ def main(argv: list[str]) -> int:
 
     with Store(args.store) as store:
         run_id = store.start_run("auto", host)
-        counts = import_spider(args.spider_db, store, run_id)
+        counts = import_spider(args.spider_db, store, run_id) if \
+            os.path.exists(args.spider_db) else {}
         sender = make_probe_sender(args.base_url, args.identity)
         try:
             result = run_auto(base_url=args.base_url, store=store, run_id=run_id,
                               sender=sender, mode=args.mode, ground_truth=ground_truth,
-                              selected_categories=selected)
+                              selected_categories=selected, points_source=args.points)
         except RunModeError as exc:
             p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
 
@@ -66,10 +72,13 @@ def main(argv: list[str]) -> int:
 
 def _print_summary(args, counts, result) -> None:
     plan = result.plan
+    m = result.metrics
     print(f"\nauto run ({plan.mode}, {'scored' if plan.scored else 'unscored'}; "
           f"categories={plan.categories}; source={plan.source})")
-    print(f"  imported: {counts.get('endpoint', 0)} endpoint(s), "
-          f"{counts.get('parameter', 0)} parameter(s)")
+    print(f"  points from: {m.get('points_source', 'crawl')}")
+    if counts:
+        print(f"  crawl imported: {counts.get('endpoint', 0)} endpoint(s), "
+              f"{counts.get('parameter', 0)} parameter(s)")
     print(f"  points audited: {result.points_audited}   "
           f"candidates: {result.candidates}   negatives: {result.negatives}")
     print(f"  findings (oracle-confirmed): {result.findings}")
@@ -78,8 +87,13 @@ def _print_summary(args, counts, result) -> None:
         print(f"  score vs ground truth: tp={r.tp} fp={r.fp} fn={r.fn} tn={r.tn}")
     else:
         print("  unscored (no ground truth / D15 fail-safe)")
-    m = result.metrics
     if m.get("requests") is not None:
         rpf = m.get("requests_per_finding")
         print(f"  requests: {m['requests']}"
               + (f"   requests/finding: {rpf}" if rpf is not None else ""))
+    skipped = m.get("skipped_points") or []
+    if skipped:
+        print(f"  not audited ({len(skipped)} enumerated point(s) — scoped as future "
+              f"capability; they score as false negatives):")
+        for path, method, param, reason in skipped:
+            print(f"    - {method} {path} [{param}]: {reason}")

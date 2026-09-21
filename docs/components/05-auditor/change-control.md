@@ -3,6 +3,31 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0009 — R-XSS-REFLECT nominates on location, oracle confirms context (BUG-0006) (2026-09-21)
+- Change: changed the `R-XSS-REFLECT` rule's `when` from `sink_context_in [...]` to
+  `location_in [query, body]` (symmetric with `R-SQLI-PARAM`). `sink_context` is a
+  post-detection label the pipeline's discovery upstream never sets, so the old rule
+  never fired in automatic mode and no XSS candidate was ever nominated. The oracle's
+  M5 strategy already types the reflection context from the response and is
+  fail-closed, so nomination-on-location + oracle-confirmation is the correct division
+  of labor (rules nominate on what discovery knows; the oracle decides precisely).
+- Impact (other components / project): fixes BUG-0006 — automatic mode can now detect
+  reflected XSS (e.g. `search.php?q`) with no false positives on escaped params
+  (oracle rejects them). Broader nomination shifts negatives from non-firing rules to
+  oracle-rejected candidates (see CC-FUZZ-0010). `R-SSTI` still keys on `sink_context`
+  (a spec placeholder; no oracle strategy yet).
+- Risk (level; mitigation): low — a data-only rule edit; the oracle remains the sole,
+  fail-closed finding-writer so no FP is introduced. Mitigated by updated
+  `test_audit_rules` (nomination model) and the auto/pipeline scored tests. Suite 132
+  passed / 2 skipped.
+- Deliverables:
+  - [x] Rule predicate changed to location-based nomination — done.
+  - [x] `test_audit_rules` updated to the model; no fixture hand-sets a post-detection
+    label to fire a rule (PA-0006) — done.
+- Effectiveness (assessed 2026-09-21): effective — XSS candidates are now nominated and
+  the oracle confirms the reflected case; live tp for `search.php?q` XSS expected on
+  the host run.
+
 ### CC-AUD-0008 — `known_categories()` for run-mode selection (2026-09-21)
 - Change: added `audit.known_categories()` returning the sorted set of injection
   categories the rule set can test, so the run-mode resolver (CC-CORE-0007,

@@ -102,16 +102,24 @@ Automatic mode is wired as `fuzzlab auto` — it consolidates a crawl, resolves 
 plan (D14/D15), and runs the deterministic pipeline (scoped rules eval with
 negatives → oracle confirm → target fingerprint → score → request metrics).
 
-1. **Crawl once** (feeds the pipeline), then run the automatic **scored** pass against
-   our lab (categories auto-derived from ground truth, D14; scored, D15):
+1. **Detection benchmark (default with `--ground-truth`).** With a contract, `auto`
+   audits the **enumerated ground-truth points** (not only what the crawl reached), so
+   the score measures the oracle's true detection rather than crawl coverage:
    ```bash
    fuzzlab crawl --start http://127.0.0.1:8080 --db spider_results.db
    fuzzlab auto  --base-url http://127.0.0.1:8080 --spider-db spider_results.db \
                  --store auto.db --ground-truth lab/ground-truth --authorized
    ```
-   The summary prints the plan, candidates/negatives, oracle findings,
-   `tp/fp/fn/tn` vs ground truth, and the request cost. Add `--identity admin` to run
-   authenticated.
+   The summary prints the plan, points source, candidates/negatives, oracle findings,
+   `tp/fp/fn/tn`, request cost, and a **"not audited"** list. Expect roughly
+   `tp≈4 fp=0` — the GET/query SQLi + reflected XSS (`product.php?id`, `blog_post.php?id`,
+   `search.php?q` SQLi + XSS) — with the remaining positives listed as scoped gaps:
+   `login.php` (POST-body injection) and the stored/DOM-XSS points (browser execution,
+   M6). `fp=0` on the secure controls is the key correctness signal. Add `--identity
+   admin` to run authenticated.
+
+   For a **discovery run** (measures the whole tool incl. crawl coverage) use
+   `--points crawl`.
 2. **Fail-safe check (D15):** point automatic mode at a target with **no**
    `--ground-truth` and no `--categories` — it must refuse loudly:
    ```bash

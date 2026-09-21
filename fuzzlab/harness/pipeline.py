@@ -96,7 +96,12 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
         report = score(integration.detections_from_store(store, run_id), ground_truth)
         integration.record_metrics(store, run_id, report)
 
-    metrics = {"candidates": counts["candidate"], "negatives": counts["negative"],
+    # Negative training examples come from two places: rules that evaluated but did
+    # not fire, AND candidates the oracle nominated but did not confirm (fail-closed).
+    rejected = max(0, counts["candidate"] - findings)
+    negatives = counts["negative"] + rejected
+    metrics = {"candidates": counts["candidate"], "negatives": negatives,
+               "rule_negatives": counts["negative"], "oracle_rejected": rejected,
                "findings": findings, "scored": plan.scored}
     if budget is not None:
         used = budget.used()
@@ -110,5 +115,5 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     store.conn.commit()
 
     return PipelineResult(plan=plan, points_audited=len(points),
-                          candidates=counts["candidate"], negatives=counts["negative"],
+                          candidates=counts["candidate"], negatives=negatives,
                           findings=findings, report=report, metrics=metrics)

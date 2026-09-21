@@ -34,3 +34,9 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   implementation (skippable when it needs an environment feature) or a documented
   on-host smoke check, so fresh-install / first-use failures are caught before a user
   hits them. (from BUG-0005)
+- **PA-0006** — An integration/pipeline test must feed inputs shaped like what the
+  real upstream produces; do not hand-populate a field the live path does not set at
+  that stage (e.g. a post-detection label like `sink_context` on a freshly-discovered
+  point) to make a downstream step succeed — that masks a wiring gap. A rule or step
+  keys only on what is available at its stage; anything derived later belongs to the
+  stage that derives it. (from BUG-0006)

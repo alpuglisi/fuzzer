@@ -4,7 +4,11 @@ import pytest
 
 from fuzzlab.core.runmode import RunModeError
 from fuzzlab.core.store import Store
-from fuzzlab.harness.auto import injection_points_from_store, run_auto
+from fuzzlab.harness.auto import (
+    injection_points_from_store,
+    points_from_ground_truth,
+    run_auto,
+)
 from fuzzlab.labels import contract
 from fuzzlab.oracle.probe import Probe
 
@@ -61,14 +65,48 @@ def test_run_auto_scored_against_ground_truth(tmp_path):
         run_id = store.start_run("auto", "h")
         _seed_crawl(store, run_id)
         result = run_auto(base_url="http://localhost", store=store, run_id=run_id,
-                          sender=AutoSender(), mode="automatic", ground_truth=gt)
+                          sender=AutoSender(), mode="automatic", ground_truth=gt,
+                          points_source="crawl")
         # D14: categories derived from ground truth; scored.
         assert result.plan.scored is True and result.plan.source == "ground-truth"
+        assert result.metrics["points_source"] == "crawl"
         assert result.findings >= 2 and result.report is not None
         assert result.report.tp >= 2 and result.report.fp == 0
         # Request cost was measured (counting sender wired as the budget).
         assert result.metrics["requests"] > 0
         assert result.negatives > 0                       # negatives logged
+
+
+def test_points_from_ground_truth_filters_to_testable():
+    gt = contract.load(GT_DIR)
+    points, skipped = points_from_ground_truth(gt, "http://127.0.0.1:8080")
+    tested = {(p.url, p.param) for p in points}
+    # GET/query, server-rendered points are audited...
+    assert ("http://127.0.0.1:8080/product.php", "id") in tested
+    assert ("http://127.0.0.1:8080/search.php", "q") in tested
+    assert ("http://127.0.0.1:8080/blog_post.php", "id") in tested
+    # ...POST body, fragment, and client-only/DOM points are skipped with a reason.
+    skipped_keys = {(path, param) for path, _m, param, _r in skipped}
+    assert ("/login.php", "username") in skipped_keys        # POST body
+    assert ("/reviews.php", "author") in skipped_keys        # fragment / DOM
+    assert ("/feedback.php", "ref") in skipped_keys          # client-only DOM
+    assert all("?" not in p.url for p in points)
+
+
+def test_run_auto_ground_truth_points_beats_crawl_coverage(tmp_path):
+    gt = contract.load(GT_DIR)
+    with Store(tmp_path / "u.db") as store:
+        run_id = store.start_run("auto", "h")
+        _seed_crawl(store, run_id)   # only 3 crawl points
+        result = run_auto(base_url="http://localhost", store=store, run_id=run_id,
+                          sender=AutoSender(), mode="automatic", ground_truth=gt,
+                          points_source="ground-truth")
+        assert result.metrics["points_source"] == "ground-truth"
+        # Audits the enumerated GET/query points (more than the 3 crawl points).
+        assert result.points_audited > 3
+        assert result.report is not None and result.report.fp == 0
+        assert result.report.tp >= 3          # product/blog SQLi + search XSS at least
+        assert result.metrics["skipped_points"]   # POST/DOM gaps reported
 
 
 def test_run_auto_no_ground_truth_requires_categories(tmp_path):

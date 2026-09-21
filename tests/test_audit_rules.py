@@ -18,12 +18,14 @@ def test_matches_predicate():
     rules = {r.id: r for r in load_rules()}
     q = InjectionPoint(url="/p.php", param="id", location="query")
     assert matches(rules["R-SQLI-PARAM"], q)                 # any query param
-    assert not matches(rules["R-XSS-REFLECT"], q)            # no sink context
+    # R-XSS-REFLECT nominates on location; the oracle types context and confirms.
+    assert matches(rules["R-XSS-REFLECT"], q)
+    hdr = InjectionPoint(url="/h.php", param="ua", location="header")
+    assert not matches(rules["R-XSS-REFLECT"], hdr)          # not a query/body point
     redir = InjectionPoint(url="/go.php", param="returnUrl", location="query")
     assert matches(rules["R-OPEN-REDIRECT"], redir)
     html = InjectionPoint(url="/s.php", param="q", location="query", sink_context="html")
-    assert matches(rules["R-XSS-REFLECT"], html)
-    assert matches(rules["R-SSTI"], html)
+    assert matches(rules["R-SSTI"], html)                    # SSTI still keys on sink context
 
 
 def test_evaluate_logs_negatives_and_candidates(tmp_path):
@@ -48,12 +50,14 @@ def test_evaluate_logs_negatives_and_candidates(tmp_path):
         # Fired evaluations produced candidate rows.
         cand = store.conn.execute("SELECT COUNT(*) c FROM candidate").fetchone()["c"]
         assert cand == counts["candidate"]
-        # product.php?id fired SQLi (a positive), and it also has SSTI/XSS negatives.
+        # product.php?id nominates SQLi and XSS (query param); the oracle later
+        # confirms context. It still has negatives (SSTI/file/command/redirect).
         rows = store.conn.execute(
             "SELECT rule_id, fired FROM evaluation WHERE url='/product.php'").fetchall()
         outcomes = {r["rule_id"]: r["fired"] for r in rows}
         assert outcomes["R-SQLI-PARAM"] == 1
-        assert outcomes["R-XSS-REFLECT"] == 0                # no sink context -> negative
+        assert outcomes["R-XSS-REFLECT"] == 1                # nominated on location
+        assert outcomes["R-SSTI"] == 0                       # no sink context -> negative
 
 
 def test_evaluate_category_filter_scopes_rules(tmp_path):
