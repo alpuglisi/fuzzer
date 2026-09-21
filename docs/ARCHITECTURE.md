@@ -43,9 +43,9 @@ WAF (D16) is the filter-evasion target, and the semantics-preserving operator fr
 remain. Phase 9 (protocol depth) is well underway — the from-scratch WebSocket codec and the
 byte-exact HTTP/2 frame layer + minimal HPACK + raw-frame client are built; the parsed
 `wsproto`/`h2` path, live ALPN/socket, and the opt-in h2→h1 desync lab front-end remain.
-Phase 10 (polish + generalization) is underway — the plugin system (registry + pipeline
-wiring) and the ECOD anomaly detector are built; the reproducible report and the
-multi-target transfer test remain.
+Phase 10 (polish + generalization) is nearly complete offline — the plugin system
+(registry + pipeline wiring), the ECOD anomaly detector, and the reproducible evaluation
+report are built; only the multi-target transfer test (on-host) remains.
 
 ## Integration model
 
@@ -357,6 +357,10 @@ tracked in the requirements files, not here.
   and structured audit/debug logs are built. **Pending:** Datasette over the store for
   deep exploration, interception views (await Phase 6), a `--dry-run` mode, and a plain
   CLI entry point per tool for headless/automation use (`fuzzlab auto` exists today).
+- **Reproducible evaluation report** `[built]` (Phase 10 T10.4, `fuzzlab/report/`): a
+  deterministic report over a stored run (run/config identity, target, counts, findings,
+  metrics, deployed models, active plugins), canonical JSON for diffing; read-only
+  `fuzzlab report [--run] [--json]`.
 - **Depends on (components):** `core/` (store and logging); in automatic mode the
   web app invokes the tools (crawler, auditor, fuzzer, harness).
 - **Purpose:** the research-platform diagnostics from decision D2, made easy to
@@ -479,7 +483,7 @@ replays and edits, including a raw byte path for malformed-traffic study.
 
 ## Build-status snapshot
 
-Suite: 375 passed / 4 skipped (the skips need a native build unavailable in the sandbox:
+Suite: 381 passed / 4 skipped (the skips need a native build unavailable in the sandbox:
 2 credential-store tests, the proxy real-CA minting test, and the mutation engine's
 `sqlglot` AST test). Everything below is offline-complete unless an on-host item is named.
 
@@ -514,7 +518,8 @@ Suite: 375 passed / 4 skipped (the skips need a native build unavailable in the 
     advisory scores/flags) + the XGBOD-style hybrid feature for the classifier
     (`train_and_score(hybrid=True)`); never labels.
   - **Diagnostics/UI:** the loopback FastAPI control panel + dashboard/run-detail
-    (findings + advisory scores).
+    (findings + advisory scores), and the deterministic reproducible evaluation report
+    (`fuzzlab report`, Phase 10 T10.4).
   - **Lab WAF (D16):** a configurable, default-off, deliberately bypassable request
     prefilter — the Phase 8 filter-evasion target.
   - **h2→h1 downgrade front-end (D17):** an opt-in, default-off (profile-gated) nginx
@@ -536,8 +541,7 @@ Suite: 375 passed / 4 skipped (the skips need a native build unavailable in the 
     disable isolation, oracle/advisory-split guard), entry-point discovery, `PluginManager`,
     `run_plugin` recording (migration 10), and the pipeline wiring (T10.2 — HTTP seam,
     auditor, oracle; `fuzzlab auto --plugins`) are built; a `register_payload_source`
-    consumer, the reproducible report (T10.4), and the multi-target transfer test (T10.5)
-    remain.
+    consumer and the multi-target transfer test (T10.5) remain.
   - **Oracle mechanisms:** M8 (out-of-band) and M10 (grey-box) still to build.
   - **Intercepting proxy (Phase 6):** the full offline stack is built — byte-exact
     dual-path core (`RawMessage` + `h11`), scope, match-and-replace, flow history
@@ -551,5 +555,6 @@ Suite: 375 passed / 4 skipped (the skips need a native build unavailable in the 
   variants-bypass-the-WAF-and-reach-new-code exit (T8.7); live
   `--browser`/`--bandit`/`--score`/`--rank` runs and stored-XSS session-to-browser
   wiring — all tracked in `docs/ON_HOST_TASKS.md`.
-- `[planned]`: the rest of Phase 10 — the reproducible evaluation report and the
-  multi-target transfer test — and the manifest-driven lab generator (Lab track).
+- `[planned]`: the rest of Phase 10 — the multi-target transfer test (T10.5/T10.6, the
+  harness offline + the live run on-host) — and the manifest-driven lab generator (Lab
+  track).

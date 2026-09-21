@@ -3,6 +3,31 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0009 — Reproducible evaluation report + `fuzzlab report` (T10.4) (2026-09-21)
+- Change: added `fuzzlab/report/` — `build_report(store, run_id)` assembles a
+  **deterministic** report from a stored run (run/config identity, target fingerprint,
+  pipeline counts, confirmed findings, `run_metrics`, deployed models, and the active
+  plugin set from migration 10), with every list stably sorted; `format_json` renders
+  canonical (sorted-key) JSON for diffing, `format_text` a human summary. Wired as a
+  read-only `fuzzlab report [--run latest|<id>] [--json]` command (dispatched from
+  `fuzzlab/cli.py`).
+- Impact (other components / project): the reproducibility artifact for Phase 10 — a run
+  can be captured, diffed, and re-verified, and it records exactly what produced a result
+  (config hash, feature/model versions, plugin set, schema version). Pure reads, no
+  traffic; no schema change.
+- Risk (level; mitigation): low — read-only, offline, deterministic. Mitigated by 6 tests
+  (`tests/test_report.py`): captures run/target/counts/findings/metrics/models/plugins/
+  reproducibility; canonical JSON is byte-identical across builds and valid; defaults to
+  the latest run; empty store; text summary; and the `fuzzlab report` CLI (text + `--json`).
+  Suite 381 passed / 4 skipped.
+- Deliverables:
+  - [x] `build_report` + `format_json`/`format_text` (T10.4) — done.
+  - [x] `fuzzlab report` CLI dispatch — done.
+  - [ ] Surface the report in the web panel — optional follow-up.
+- Effectiveness (assessed 2026-09-21): effective in tests — the report renders
+  deterministically over a run and names the versions/plugins that produced it; a live
+  reproduce-a-run demonstration is part of the T10.6 exit.
+
 ### CC-UI-0008 — Panel surfaces advisory model scores (Phase 5) (2026-09-21)
 - Change: `web/results.py::run_detail` now includes the latest `model` and the run's
   top advisory-scored candidates with their conformal flag/abstain/drop decision; the

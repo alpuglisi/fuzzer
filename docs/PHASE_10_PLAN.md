@@ -80,7 +80,7 @@ metrics deterministically; and the toolkit produces results on a second lab targ
   ECOD tripwire (advisory scores/flags) + the XGBOD-style hybrid (anomaly score as a
   classifier feature). A test shows it flags synthetic outliers and beats a naive
   baseline; it never writes labels.
-- **T10.4 — Reproducible evaluation report `[planned]`.** `fuzzlab/report/` + a
+- **T10.4 — Reproducible evaluation report `[done, offline]`.** `fuzzlab/report/` + a
   `fuzzlab report` CLI: a deterministic report over a stored run (config hash, feature/
   model versions, seeds, metrics, findings, active plugins) — the reproducibility artifact.
 - **T10.5 — Multi-target harness + transfer `[planned; live on-host]`.** A thin

@@ -28,6 +28,7 @@ commands:
   audit [args]        run the auditor        (python -m fuzzlab.tools.fetcher)
   fuzz  [args]        run the blind SQLi fuzzer (requires --authorized)
   auto  [args]        run an automatic pipeline pass over a crawl (requires --authorized)
+  report [args]       print a reproducible evaluation report for a stored run (read-only)
   build-db [args]     rebuild the indicator database
   version             print the version
 
@@ -59,6 +60,10 @@ def main(argv: list[str] | None = None) -> int:
     if command == "auto":
         from fuzzlab.harness import auto_cli
         return auto_cli.main(rest)
+
+    if command == "report":
+        from fuzzlab.report import cli as report_cli
+        return report_cli.main(rest)
 
     module = _TOOL_MODULES.get(command)
     if module is None:

@@ -13,6 +13,12 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 10 (T10.4): added the **reproducible evaluation report** (`fuzzlab/report/`).
+  `build_report(store, run_id)` assembles a deterministic report from a stored run
+  (run/config identity, target, counts, findings, `run_metrics`, deployed models, active
+  plugins), stably sorted; `format_json` is canonical (sorted-key) JSON for diffing,
+  `format_text` a human summary. Wired as a read-only `fuzzlab report [--run] [--json]`
+  command. +6 tests (381 passed / 4 skipped). Change-control: CC-UI-0009.
 - Phase 10 (T10.3): added the **anomaly-detection tripwire** (`fuzzlab/ml/anomaly.py`).
   `ECOD` — a parameter-free, pure-Python Empirical-CDF outlier detector (no numpy/sklearn,
   no labels); `flag_top` flags the top contamination fraction; `detect_anomalies` runs it
