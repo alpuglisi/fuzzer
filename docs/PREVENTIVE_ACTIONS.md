@@ -132,3 +132,12 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   env/profile change). This re-keys PA-0014 from the trigger to the mechanism
   (podman-compose cannot remove or recreate a running/wedged stack) so a sibling path with
   the same cause but a different trigger cannot slip through the sweep. (from BUG-0017)
+- **PA-0019** — When a turn's work produces a finding that matches an artifact's stated
+  scope for what it records (e.g. `ERROR_LOG.md`'s "anything that broke and was fixed"),
+  add that artifact's entry in the same turn, checked against the artifact's literal scope
+  statement — never inferred from whether the finding *feels* bug-shaped, and never treated
+  as satisfied merely because the finding is also written up elsewhere (a spike report, a
+  design doc, a playbook). Before ending any turn that involved running something and
+  hitting unexpected behavior, re-read the relevant bookkeeping artifacts' own scope lines
+  as a checklist item, not as background context absorbed once at session start. (from
+  BUG-0018)

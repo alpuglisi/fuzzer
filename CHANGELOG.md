@@ -14,6 +14,17 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Fix (BUG-0018, process): the sqlmap/commix oracle-spike findings (below) were fully
+  written up in their spike documents but not added to `ERROR_LOG.md` until the user asked
+  for it. RCA found reliance on a finding's narrative framing to decide whether the
+  `CLAUDE.md` bookkeeping checklist applied, instead of checking it against each artifact's
+  literal stated scope; rule PA-0018's own neighbor here is unrelated — see
+  `docs/bugs/BUG-0018-*`; new rule PA-0019. The PA-0002 sweep of this session's own conduct
+  found one more un-logged instance (Docker Hub pulls blocked by this environment's egress
+  policy during Spike 001) and logged it; a second candidate (Spike 001's PHP-8.4/Laravel
+  vendor-compatibility patching) was reviewed and deliberately not logged separately, since
+  it's throwaway spike-environment friction already fully captured in that spike's own
+  write-up.
 - Docs (LAB, lab-generator program): recorded two oracle-tool design gaps found while
   validating the manifest generator's planned tool-oracle architecture (`CR-LAB-0001`
   Addendum E) against real vulnerable targets — sqlmap refusing to test past a 401/403

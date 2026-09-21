@@ -18,6 +18,44 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — oracle-spike break/fix findings not logged to ERROR_LOG until prompted (BUG-0018)
+
+- **Symptom:** the sqlmap 401/403-handling finding (Spike 001) and the commix ambient-
+  defense/field-sweep hang (Spike 002) were each fully written up inside their spike
+  documents and folded into `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`, but neither was added to
+  this log at the time. Both were only logged after the user explicitly asked, in a
+  following turn, to "record those both in a bug log."
+- **Root cause:** reliance on a finding's narrative framing/salience to decide whether the
+  `CLAUDE.md` bookkeeping checklist applied, rather than mechanically checking new findings
+  against this log's own stated scope ("anything that broke and was fixed") regardless of
+  how the finding was phrased or where else it was written up. Full RCA in
+  `docs/bugs/BUG-0018-*`.
+- **Remediation:** added the two findings to this log (previous entries below) with
+  cross-references to their spike docs; added PA-0019 (re-check a turn's findings against
+  each bookkeeping artifact's literal scope before ending the turn, not by how bug-shaped
+  the finding feels); swept this session's own conduct per PA-0002 and found one more
+  un-logged instance (the Docker Hub egress-policy block during Spike 001 — logged below).
+- **Status:** Fixed (this commit).
+
+## 2026-09-21 — Docker Hub image pulls blocked by egress policy during Spike 001 (found via BUG-0018's PA-0002 sweep)
+
+- **Symptom:** `docker compose up -d --build` against a cloned `vAPI` repo (Spike 001)
+  failed pulling `mysql:8.0`/`phpmyadmin/phpmyadmin` with a 403 from
+  `production.cloudfront.docker.com`, reported by this session's agent proxy as a policy
+  denial, not a transient failure.
+- **Root cause:** this execution environment's egress policy blocks Docker Hub image pulls
+  outright; per this environment's own guidance, a policy denial is reported, not retried
+  or routed around.
+- **Remediation:** ran the spike's target application natively instead (PHP built-in
+  server + a local MariaDB install via `apt`), loopback-only, rather than in containers.
+  Fully described in `docs/spikes/SPIKE-001-sqlmap-vs-vapi.md`, but not given its own log
+  line until the BUG-0018 sweep found it. **Forward-looking implication:** Phase 3's
+  containerized per-stack emitters (`CR-LAB-0001` Addendum D's `StackEnv.base_image`)
+  should not assume Docker Hub is reachable in every execution context this project might
+  run in; worth a documented fallback when that work actually starts.
+- **Status:** Environment (worked around outside the repo; no repo change needed unless
+  Phase 3 implementation later needs a documented fallback).
+
 ## 2026-09-21 — commix oracle hangs on ambient defenses and non-target form fields (Spike 002)
 
 - **Symptom:** during `docs/spikes/SPIKE-002-commix-vs-dvwa.md` (validating commix as an
