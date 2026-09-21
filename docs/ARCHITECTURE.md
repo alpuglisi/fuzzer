@@ -112,19 +112,29 @@ tracked in the requirements files, not here.
 - **Request budget + concurrency**: per-component caps, and a per-host mutex so
   timing measurements run at concurrency 1.
 - **Logging** (structured) and **config** (layered, hashed onto the run).
+- **Credential store**: keyring-abstracted, with OS Secret Service and an
+  encrypted-file headless/CI fallback (D12); secrets by reference only, never in
+  the project store.
 - **Plugin registry**: entry points plus hooks.
 - **Depends on (components):** none (foundational layer; it manages the project store).
 - **Consumed by:** every tool and ML component.
 
 ### 3. Session manager `[planned]` (Phase 1)
-- **Subcomponents:** identity model, cookie jar, token extractors (CSRF, JWT,
-  custom), validity checker, re-auth macro with single-flight lock, credential
-  access via OS keyring.
+- **Subcomponents:** target profiles (data, one per lab); identity model;
+  pluggable **auth strategies** (form+cookie, JSON+JWT/bearer, HTTP Basic, header
+  API key, scripted/multi-step) behind one `AuthStrategy` interface (D13);
+  session state (cookies + headers/tokens); token extractors (CSRF, JWT, custom,
+  by profile-declared location); per-profile validity/logout detection; re-auth
+  macro with single-flight lock; credential access via the `core/` credential
+  store (OS keyring + encrypted-file headless fallback, D12).
 - **Interface:** `prepare(request, identity)`, `observe(request, response,
-  identity)`, `ensure(identity)`.
-- **Depends on (components):** `core/`.
+  identity)`, `ensure(identity)`, resolved against the active target profile.
+  Extension points: auth strategies and target profiles.
+- **Depends on (components):** `core/` (config, store, HTTP seam, credential
+  store); plugin system (#13) for third-party strategies (built-in until then).
 - **Consumed by:** crawler, auditor, fuzzer, and the proxy (as an addon). This is
-  the most load-bearing dependency; everything authenticated flows through it.
+  the most load-bearing dependency; everything authenticated flows through it, on
+  every target — the Puppy Fort Factory and the external validation labs (D10).
 
 ### 4. Crawler / spider `[built; to harden]`
 - **Subcomponents:** hybrid fetch (HTTP first, headless on demand), XHR/fetch

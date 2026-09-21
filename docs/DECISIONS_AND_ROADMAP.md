@@ -157,6 +157,54 @@ choice and touches the target only when the user acts.
   stays deferred." Stack (e.g. FastAPI or Flask + a light frontend, Datasette
   embedded/linked) is a to-confirm-during-build detail.
 
+### D12 — Credential store: OS keyring with an encrypted-file headless fallback
+
+Credentials are obtained through a `core/` credential-store abstraction over the
+`keyring` library, never stored in the project store or the repo. Backend
+resolution, auto-selected and config-overridable:
+
+1. **OS Secret Service** (gnome-keyring/KWallet) when present and unlocked — the
+   interactive-desktop path.
+2. **Encrypted-file backend** (`keyrings.alt` AES `EncryptedKeyring`) for headless
+   boxes, CI, and containers — unlocked by a passphrase from
+   `FUZZLAB_KEYRING_PASSPHRASE` (or an interactive prompt), with the encrypted
+   store at a configured, repo-external path (`$FUZZLAB_KEYRING_PATH`, default
+   `~/.config/fuzzlab/credentials.enc`). Only the passphrase ever lives in the
+   environment; the credentials stay encrypted at rest.
+3. **Gated, lab-only env fallback** (default off) for ephemeral CI: per-identity
+   `FUZZLAB_CRED_<IDENTITY>`, honored only when `allow_env_credentials` is set
+   **and** the target scope is loopback/lab, with a loud warning. Never for a
+   non-lab target.
+
+Config holds only references (service + username / key name); redaction on write
+applies everywhere. This resolves the Phase 1 open question and makes the session
+manager usable on desktops, headless hosts, containers, and CI alike.
+
+### D13 — Multi-target auth: pluggable strategies + per-target profiles
+
+The session manager must log in and hold sessions across **many** labs, not just
+the Puppy Fort Factory (this is what D10's external validation on WAVSEP, Juice
+Shop, and others requires). So it is **target-profile-driven** and
+**auth-scheme-pluggable**, not a single hardcoded login macro:
+
+- An **`AuthStrategy`** interface — `authenticate(identity, http) -> SessionState`,
+  `attach(request, session_state)`, `is_expired(...) -> bool`, optional
+  `refresh(...)`. Built-in strategies: **form + cookie** (Puppy Fort Factory,
+  DVWA, Mutillidae, bWAPP — with optional login-form CSRF token pre-fetch),
+  **JSON login + bearer/JWT** (Juice Shop), **HTTP Basic**, **header API key**,
+  and a **scripted/multi-step** strategy for bespoke flows. New schemes register
+  through the plugin system (component #13); built-in for now.
+- A **target profile** (data, one per lab): base URL, scope, the auth strategy and
+  its parameters (login endpoint/method, credential field mapping, token location
+  — cookie name / header / JSON path, success and logout signals, token TTL / JWT
+  `exp` source), and its identities with keyring references. Adding a same-scheme
+  lab is a new profile; a genuinely new scheme is a new strategy.
+- **Session state generalizes** beyond a cookie jar to cookies **and**
+  headers/tokens, per (target, identity); validity/logout detection is per-profile.
+
+This makes the component robust across validation environments and keeps
+per-target quirks in data, not code.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **WAF in the lab** — decide before the mutation engine (Phase 8); without one,

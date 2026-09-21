@@ -13,6 +13,16 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Planning: settled the session manager's **credential store** (D12 — OS keyring
+  with an encrypted-file headless/CI fallback and a gated lab-only env fallback)
+  and re-architected it for **multi-target auth** (D13 — pluggable `AuthStrategy`
+  strategies: form+cookie, JSON+JWT, Basic, header key, scripted; per-target
+  profiles as data) so it can log in and hold sessions across the external
+  validation labs (D10), not just the Puppy Fort Factory. Expanded the
+  session-manager spec (FR-SESS-6/9/10, NFR-portable/extensible), updated
+  `ARCHITECTURE.md` (#3 + `core/` credential store) and `docs/PHASE_1_PLAN.md`
+  (now T1.1–T1.10), and added the `keyring`/`keyrings.alt`/`pyjwt` dependencies.
+  Change-control: CC-SESS-0002.
 - Planning: added `docs/PHASE_1_PLAN.md` — the session-manager task breakdown
   (T1.1–T1.8) with acceptance checks, grounded in the lab's actual auth (PHP
   session cookies; no CSRF/JWT). Scope decision recorded: CSRF/JWT built to spec
