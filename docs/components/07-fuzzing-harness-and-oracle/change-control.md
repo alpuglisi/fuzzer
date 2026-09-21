@@ -3,6 +3,31 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0004 — Fuzzer HTTP migrated onto the auth seam (2026-09-21)
+- Change: the fuzzer's HTTP now goes through a sender abstraction — `RequestsSender`
+  (standalone, unchanged raw-requests behavior) or `SeamSender` (routes through the
+  `core/` HTTP seam with the session manager, timing-serialized per host). Added a
+  `--identity` flag: with it, the fuzzer authenticates as that identity (per-host
+  credentials, detection-only login) via a shared `fuzzlab/tools/authhttp.py`
+  helper; without it, behavior is exactly as before. Realizes the requests-tool
+  half of Phase 1 T1.10 for the fuzzer.
+- Impact (other components / project): the fuzzer can now fuzz authenticated
+  endpoints as a given identity; depends on the session manager (#3) and credential
+  store. Timing goes through the seam's per-host mutex. No output-format change.
+- Risk (level; mitigation): medium — must not perturb standalone timing. Mitigated
+  by keeping `RequestsSender` byte-identical to the old `measure_once`, routing
+  timing through the seam only on the authenticated path (`timing=True`), and
+  fail-loud auth (a `SessionAuthError` aborts the run rather than fuzzing
+  unauthenticated). Covered by 3 tests (URL building, standalone unchanged,
+  authenticated send attaches the session cookie).
+- Deliverables:
+  - [x] Sender abstraction; `--identity`; `authhttp` helper — done.
+  - [x] Tests (standalone + authenticated) — done.
+  - [ ] Live authenticated fuzz run against the lab (T1.10) — todo (needs a lab).
+- Effectiveness (assessed 2026-09-21): effective in tests — the authenticated
+  sender attaches the session and reaches the fuzzed URL; standalone path
+  unchanged. Live run pending.
+
 ### CC-FUZZ-0003 — Writes attempts/findings to the unified store (2026-09-21)
 - Change: added `--store PATH` to the fuzzer; after a run it consolidates its CSV
   into the unified store via `store_adapter.import_fuzz_csv`, writing `attempt`

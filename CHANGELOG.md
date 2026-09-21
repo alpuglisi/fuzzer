@@ -13,6 +13,15 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 1 build (T1.10, part): migrated the **requests-based tools onto the auth
+  seam** so they authenticate via the session manager. Added
+  `fuzzlab/tools/authhttp.py` (build an authenticated `HttpClient` for a target +
+  identity). The fuzzer gained `--identity` and a sender abstraction
+  (`RequestsSender` standalone / `SeamSender` authenticated, timing-serialized);
+  the auditor's static fetch gained `--identity`/`--base-url` and routes through the
+  seam. Standalone behavior preserved; +5 tests (65/65 green). Remaining: the
+  crawler/Playwright browser path (cookie injection) and the live two-lab run.
+  Change-control: CC-FUZZ-0004, CC-AUD-0004.
 - Phase 1 build: implemented the **session manager** (detection-only auth,
   per-host credentials) and the **per-host credential store**. `core/credentials.py`
   (T1.1) stores credentials keyed by `(host, identity)` in the OS keyring with an

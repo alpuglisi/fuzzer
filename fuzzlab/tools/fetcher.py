@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import sqlite3
+import sys
 from urllib.parse import urlparse, urljoin, parse_qsl
 
 import requests
@@ -280,9 +281,14 @@ class ContentFetcher:
             status, content_type, html, xhr = fetcher.fetch(url)
     """
 
-    def __init__(self, engine="auto", timeout_ms=10000):
+    def __init__(self, engine="auto", timeout_ms=10000, identity=None, seam_client=None):
         self.timeout_ms = timeout_ms
         self.session = requests.Session()
+        # When an identity + seam client are given, the static-fetch path routes
+        # through the core HTTP seam so pages are fetched authenticated (Option A).
+        # The Playwright (browser) path is migrated separately (cookie injection).
+        self._identity = identity
+        self._seam = seam_client
 
         if engine == "auto":
             engine = "playwright" if _PLAYWRIGHT_AVAILABLE else "requests"
@@ -358,6 +364,17 @@ class ContentFetcher:
                 logging.info(f"    browser could not render {url} ({str(e).splitlines()[0][:80]}); "
                              f"falling back to a static request")
 
+        return self._static_fetch(url)
+
+    def _static_fetch(self, url):
+        """Static (non-browser) fetch: via the auth seam if configured, else raw."""
+        if self._seam is not None:
+            from fuzzlab.core.http import Request
+            resp = self._seam.send(Request("GET", url, identity=self._identity or "anonymous",
+                                           component="auditor"))
+            headers = {k.lower(): v for k, v in resp.headers.items()}
+            html = resp.body.decode("utf-8", errors="replace")
+            return resp.status, headers.get("content-type", ""), html, []
         resp = self.session.get(url, timeout=self.timeout_ms / 1000)
         return resp.status_code, resp.headers.get('Content-Type', ''), resp.text, []
 
@@ -774,6 +791,12 @@ def parse_args():
     p.add_argument("--quiet", action="store_true", help="Only print the closing summary.")
     p.add_argument("--store", default=None,
                    help="Also consolidate candidates into the unified fuzzlab store at this path.")
+    p.add_argument("--identity", default=None,
+                   help="Audit authenticated as this identity via the session manager "
+                        "(needs saved credentials and --base-url). Static engine only for now.")
+    p.add_argument("--base-url", default=None,
+                   help="Target base URL for authentication (required with --identity), "
+                        "e.g. http://localhost:8080")
     return p.parse_args()
 
 
@@ -800,6 +823,15 @@ if __name__ == "__main__":
     log = get_logger("auditor")
     log.info("auditor starting", extra={"indicator_db": args.indicator_db,
                                         "spider_db": args.spider_db})
+    seam = None
+    if args.identity:
+        if not args.base_url:
+            sys.exit("--identity requires --base-url (the target base URL for login).")
+        from fuzzlab.tools.authhttp import make_authenticated_client
+        seam = make_authenticated_client(args.base_url, args.identity,
+                                         timeout=args.timeout / 1000)
+        log.info("auditing authenticated", extra={"identity": args.identity})
+
     targets = load_urls(args.spider_db)
     rules = load_indicators(args.indicator_db)
 
@@ -810,7 +842,8 @@ if __name__ == "__main__":
 
         unhandled = set()
         results_db = setup_results_db(args.out, append=args.append)
-        with ContentFetcher(engine=args.engine, timeout_ms=args.timeout) as fetcher:
+        with ContentFetcher(engine=args.engine, timeout_ms=args.timeout,
+                            identity=args.identity, seam_client=seam) as fetcher:
             for target, source in targets:
                 audit_page(target, source, fetcher, rules, results_db, unhandled,
                            verbose=not args.quiet)

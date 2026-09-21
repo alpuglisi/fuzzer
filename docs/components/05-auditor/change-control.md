@@ -3,6 +3,31 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0004 — Auditor static fetch migrated onto the auth seam (2026-09-21)
+- Change: `ContentFetcher` gained `identity`/`seam_client`; its static
+  (non-browser) fetch now routes through the `core/` HTTP seam + session manager
+  when an identity is given (via `fuzzlab/tools/authhttp.py`), so pages are audited
+  authenticated. Added `--identity` and `--base-url` flags. The Playwright (browser)
+  path is unchanged — cookie injection into the browser context is the separate,
+  later sub-step. Standalone behavior is unchanged when no identity is given.
+  Realizes the requests-tool half of Phase 1 T1.10 for the auditor.
+- Impact (other components / project): the auditor can now reach and audit
+  authenticated pages as an identity; depends on the session manager (#3) and
+  credential store. No rule or output-format change; browser-rendered auditing is
+  still unauthenticated until the Playwright sub-step.
+- Risk (level; mitigation): low–medium — only the static path changed; standalone
+  raw-requests path preserved. Mitigated by isolating the change to `_static_fetch`
+  and 2 tests (authenticated static fetch attaches the cookie; standalone uses raw
+  requests). Note the mixed state: static = authenticated, browser = not yet.
+- Deliverables:
+  - [x] `identity`/`seam_client` on ContentFetcher; `_static_fetch`; flags — done.
+  - [x] Tests (authenticated static + standalone) — done.
+  - [ ] Playwright path cookie injection (browser auth) — todo (next A sub-step).
+  - [ ] Live authenticated audit run against the lab (T1.10) — todo.
+- Effectiveness (assessed 2026-09-21): effective in tests — the static fetch is
+  authenticated and returns the protected page; standalone unchanged. Browser-path
+  auth and the live run pending.
+
 ### CC-AUD-0003 — Consolidates candidates into the unified store (2026-09-21)
 - Change: added `--store PATH` to the auditor; after an audit it consolidates its
   native `findings` into the unified store via `store_adapter.import_audit`,

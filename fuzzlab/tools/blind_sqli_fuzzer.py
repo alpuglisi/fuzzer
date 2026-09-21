@@ -33,6 +33,47 @@ except ImportError:
     sys.exit("This tool requires the 'requests' package: pip install requests")
 
 from fuzzlab.core import get_logger
+from fuzzlab.tools.authhttp import with_query_param
+
+
+# --- Request senders -------------------------------------------------------
+# Both expose get(url, param, value, timeout) -> (latency_seconds, status, size).
+class RequestsSender:
+    """Standalone path: a raw requests.Session (unauthenticated, unchanged behavior)."""
+
+    def __init__(self, session):
+        self._session = session
+
+    def get(self, url, param, value, timeout):
+        start = time.perf_counter()
+        try:
+            resp = self._session.get(url, params={param: value}, timeout=timeout)
+            return time.perf_counter() - start, resp.status_code, len(resp.text)
+        except requests.Timeout:
+            return float(timeout), 504, 0
+
+
+class SeamSender:
+    """Authenticated path: routes through the core HTTP seam + session manager.
+
+    Timing is measured by the seam (which also serializes timing-sensitive requests
+    per host via the budget mutex) and the session is attached by the manager.
+    """
+
+    def __init__(self, client, identity):
+        self._client = client
+        self._identity = identity
+
+    def get(self, url, param, value, timeout):
+        from fuzzlab.core.http import Request
+
+        req = Request("GET", with_query_param(url, param, value),
+                      identity=self._identity, timing=True, component="fuzzer")
+        try:
+            resp = self._client.send(req)
+        except requests.Timeout:
+            return float(timeout), 504, 0
+        return resp.elapsed_ms / 1000.0, resp.status, len(resp.body)
 
 
 # --- Payload catalog -------------------------------------------------------
@@ -51,28 +92,14 @@ PAYLOADS = [
 ]
 
 
-def measure_once(session, url, param, value, timeout):
-    """One request. Returns (latency_seconds, status_code, body_len).
-
-    On timeout, latency is reported as the timeout bound and status as 504.
-    """
-    start = time.perf_counter()
-    try:
-        resp = session.get(url, params={param: value}, timeout=timeout)
-        latency = time.perf_counter() - start
-        return latency, resp.status_code, len(resp.text)
-    except requests.Timeout:
-        return float(timeout), 504, 0
-
-
-def establish_baseline(session, url, param, iterations, timeout):
+def establish_baseline(sender, url, param, iterations, timeout):
     """Measure normal latency and body size to resist jitter-driven false positives."""
     print(f"[*] Baselining target over {iterations} requests...")
     times, sizes = [], []
     for _ in range(iterations):
         try:
-            latency, status, size = measure_once(
-                session, url, param, random.randint(1, 100), timeout
+            latency, status, size = sender.get(
+                url, param, random.randint(1, 100), timeout
             )
         except requests.RequestException:
             continue
@@ -98,7 +125,7 @@ def establish_baseline(session, url, param, iterations, timeout):
     return baseline
 
 
-def run_fuzzing_cycle(session, url, param, baseline, payloads, args):
+def run_fuzzing_cycle(sender, url, param, baseline, payloads, args):
     """Execute payloads and classify by measured timing (label-independent)."""
     rows = []
     # A hit needs a clear multi-second delay AND to clear the jitter band.
@@ -112,8 +139,8 @@ def run_fuzzing_cycle(session, url, param, baseline, payloads, args):
         latencies, status, size = [], None, None
         for _ in range(args.repeats):
             try:
-                latency, status, size = measure_once(
-                    session, url, param, payload, args.timeout
+                latency, status, size = sender.get(
+                    url, param, payload, args.timeout
                 )
             except requests.RequestException as exc:
                 print(f"[-] Request error on {payload[:24]!r}: {exc}")
@@ -195,6 +222,10 @@ def parse_args(argv=None):
                    help="Required. Affirms you are authorized to test --url.")
     p.add_argument("--store", default=None,
                    help="Also consolidate attempts/findings into the unified fuzzlab store at this path.")
+    p.add_argument("--identity", default=None,
+                   help="Authenticate as this identity via the session manager "
+                        "(needs saved credentials: `fuzzlab session set-credential`). "
+                        "Omit to run unauthenticated.")
     return p.parse_args(argv)
 
 
@@ -203,14 +234,22 @@ def main(argv=None):
     if not args.authorized:
         sys.exit("Refusing to run without --authorized. Only test systems you own or may test.")
 
-    get_logger("fuzzer").info("fuzzer starting", extra={"url": args.url, "param": args.param})
+    get_logger("fuzzer").info("fuzzer starting",
+                              extra={"url": args.url, "param": args.param,
+                                     "identity": args.identity})
 
-    session = requests.Session()
+    if args.identity:
+        from fuzzlab.tools.authhttp import make_authenticated_client
+        client = make_authenticated_client(args.url, args.identity, args.timeout)
+        sender = SeamSender(client, args.identity)
+    else:
+        sender = RequestsSender(requests.Session())
+
     try:
         baseline = establish_baseline(
-            session, args.url, args.param, args.baseline_iterations, args.timeout
+            sender, args.url, args.param, args.baseline_iterations, args.timeout
         )
-        rows = run_fuzzing_cycle(session, args.url, args.param, baseline, PAYLOADS, args)
+        rows = run_fuzzing_cycle(sender, args.url, args.param, baseline, PAYLOADS, args)
         save_dataset(rows, args.output)
         if args.store:
             from fuzzlab.core.config import load_config
