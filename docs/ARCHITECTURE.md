@@ -119,7 +119,7 @@ tracked in the requirements files, not here.
 - **Depends on (components):** none (foundational layer; it manages the project store).
 - **Consumed by:** every tool and ML component.
 
-### 3. Session manager `[planned]` (Phase 1)
+### 3. Session manager `[built; live validation pending]` (Phase 1)
 - **Subcomponents:** a **login/session detector** (D13) — finds the login form
   (carrying hidden/CSRF fields fresh), detects the session credential from the
   response (cookie / JSON token+JWT / Basic-Bearer challenge), confirms success by
@@ -338,10 +338,14 @@ replays and edits, including a raw byte path for malformed-traffic study.
 
 ## Build-status snapshot
 
-- `[built]`: target lab, crawler, auditor, indicator DB + catalogs, blind SQLi
-  fuzzer, deploy script, logs, planning docs.
-- `[planned, near-term]`: `core/` + unified store (Phase 0), session manager
-  (Phase 1), deterministic hardening (Phase 2), grey-box instrumentation
-  (Phase 3).
+- `[built]`: target lab (app + containerized), crawler, auditor, indicator DB +
+  catalogs, blind SQLi fuzzer, deploy script, logs, planning docs; `core/` + unified
+  store + migrations + config/logging/budget/HTTP-seam/features + per-host
+  credential store (Phase 0 + T1.1); ground-truth label contract; integration
+  harness; local web launcher; the session manager (Phase 1, unit-tested — live
+  two-lab validation pending).
+- `[planned, near-term]`: deterministic hardening (Phase 2), grey-box
+  instrumentation (Phase 3); migrate tool HTTP onto the seam + session for live
+  per-identity runs (T1.10).
 - `[planned, later]`: bandit, classifier, proxy, ranker/active learning, mutation
   engine, protocol depth, plugin system, second target.

@@ -10,6 +10,27 @@ in D10.
 `docs/components/03-session-manager/` (spec + change-control), and
 `docs/PREVENTIVE_ACTIONS.md` (rules to follow).*
 
+## Status (2026-09-21)
+
+Phase 1 is **built and unit-tested** (session package 17 tests; suite 60 green).
+
+- **T1.1** per-host credential store (`core/credentials.py`) — done.
+- **T1.2** login detection (form + fresh CSRF carry-through) — done.
+- **T1.3** session-credential detection (cookie / JSON-token+JWT / Basic) — done.
+- **T1.4** success/expiry detection + single-flight re-auth + fail-loud — done.
+- **T1.5** wired into the `core/` HTTP seam (drop-in addon) — done.
+- **T1.6** identities per host — done.
+- **T1.7** secret redaction — done; persist non-secret state to a store table — todo.
+- **T1.8** auth-endpoint exclusion — done.
+- **T1.9** standalone `fuzzlab session` (set-credential / print) — done.
+- **T1.10** migrate tool HTTP onto the seam + **live two-lab validation** (cookie
+  lab + JWT lab) — todo (needs a runnable container daemon / network to an external
+  lab; the cookie and JWT paths are covered by unit tests with scripted fetchers).
+
+Remaining to close Phase 1 end-to-end: route the crawler/fuzzer HTTP through the
+seam with the session addon and run per-identity against the containerized lab and
+an external JWT lab; wire non-secret session-state persistence for crash-resume.
+
 ## Goal
 
 Point the toolkit at a host; it **detects that host's login dynamically**, logs in

@@ -1,6 +1,7 @@
 # Session Manager — Requirement Specification
 
-Component code: **SESS** · Status: `[planned]` (Phase 1) · Last updated: 2026-09-21
+Component code: **SESS** · Status: `[built; live validation + resume pending]` (Phase 1)
+· Last updated: 2026-09-21
 
 Related: `ARCHITECTURE.md` #3; `DECISIONS_AND_ROADMAP.md` (D3, D10, D12, D13);
 `./change-control.md`.

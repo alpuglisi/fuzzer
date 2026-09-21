@@ -13,6 +13,18 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 1 build: implemented the **session manager** (detection-only auth,
+  per-host credentials) and the **per-host credential store**. `core/credentials.py`
+  (T1.1) stores credentials keyed by `(host, identity)` in the OS keyring with an
+  encrypted-file headless fallback and a gated lab-only env fallback; JWT `exp` is
+  read without a crypto dependency. `fuzzlab/session/` (T1.2–T1.9) detects a host's
+  login form (with fresh CSRF carry-through), detects the session credential
+  (cookie / JSON-token+JWT / Basic), verifies success differentially, detects
+  logout, re-authenticates single-flight, fails loudly on unparseable logins,
+  excludes auth endpoints from fuzzing, and is a drop-in `core/` HTTP-seam addon;
+  added a `fuzzlab session` CLI. Tests: session package 17, suite 60/60 green.
+  Remaining (T1.10): route tool HTTP through the seam + live two-lab validation
+  (needs a runnable lab). Change-control: CC-CORE-0004, CC-SESS-0005.
 - Planning: recorded a **manual-login session capture** capability (post-Phase 6):
   once the proxy exists, a human logs in through it in a real browser, the proxy
   captures the established session (FR-PROXY-9), and the session manager adopts it

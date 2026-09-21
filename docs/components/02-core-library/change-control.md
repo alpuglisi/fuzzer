@@ -3,6 +3,32 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0004 — Per-host credential store implemented (2026-09-21)
+- Change: implemented `fuzzlab/core/credentials.py` (T1.1, D12) — a
+  `CredentialStore` keyed by `(host, identity)` over `keyring`, with backend
+  resolution (OS Secret Service → encrypted-file via `keyrings.alt` at
+  `FUZZLAB_KEYRING_PATH`/`FUZZLAB_KEYRING_PASSPHRASE` → gated lab-only env fallback
+  `FUZZLAB_CRED_<HOST>_<IDENTITY>`). Backend is injectable; `Credential` masks its
+  password in `repr`. Exported from `core`. Added `keyring`/`keyrings.alt` deps;
+  dropped the planned PyJWT dep (JWT `exp` is read by base64url-decoding the
+  payload — no crypto dependency).
+- Impact (other components / project): the session manager (component #3) draws
+  per-host credentials from here; no other component affected. Secrets never enter
+  the project store or repo (config holds references only).
+- Risk (level; mitigation): medium — mishandled credentials are high-impact.
+  Mitigated by keyring-only storage, password-masked repr, redaction discipline,
+  and the env fallback being default-off and lab-scope-gated. The real
+  encrypted-file backend is environment-dependent (needs a working `cryptography`);
+  the store's own logic is covered by tests with an injected in-memory backend.
+- Deliverables:
+  - [x] `CredentialStore` (set/get/require/delete), per-host keying — done.
+  - [x] Backend resolution incl. encrypted-file + gated env fallback — done.
+  - [x] 6 unit tests (per-host, env-fallback gating, repr masking) — done.
+  - [ ] Live check of the encrypted-file backend on a host with `cryptography` — todo.
+- Effectiveness (assessed 2026-09-21): effective — 6/6 tests green; credentials
+  round-trip per host, env fallback honored only when enabled + in scope, password
+  never appears in `repr`.
+
 ### CC-CORE-0003 — Migration 2: self-describing findings (2026-09-21)
 - Change: added migration 2, which ALTERs `finding` to add `url`, `method`, and
   `param` columns so a confirmed finding carries its own location and the

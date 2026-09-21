@@ -3,6 +3,39 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0005 — Session manager implemented (Phase 1) (2026-09-21)
+- Change: built `fuzzlab/session/` — `state.py` (SessionState: cookies + tokens per
+  host/identity; redaction; JWT-time expiry), `detect.py` (dynamic login-form
+  detection with fresh hidden/CSRF carry-through; session-credential detection for
+  cookie / JSON-token+JWT / Basic challenge; success + logout detection; base64url
+  JWT `exp`), and `manager.py` (`prepare`/`observe`/`ensure`, identities per host,
+  single-flight re-auth, fail-loud on unparseable logins, auth-endpoint exclusion,
+  standalone `session_header`). Added a `fuzzlab session` CLI (set-credential /
+  print). Drop-in addon for the `core/` HTTP seam. Realizes T1.2–T1.9.
+- Impact (other components / project): the crawler/auditor/fuzzer can authenticate
+  by routing HTTP through the seam with this addon; depends on the credential store
+  (CC-CORE-0004). Detection-only per D13; no per-host profiles. No store-schema
+  change (non-secret session-state persistence method exists but is not yet wired
+  to a table — deferred, see below).
+- Risk (level; mitigation): medium–high (auth correctness). Mitigated by: fail-loud
+  with diagnostics (never a silent unauthenticated run), differential success
+  verification, multi-signal logout detection, single-flight re-auth with a cap,
+  auth-endpoint exclusion, secret redaction, and 17 unit tests (cookie + JWT login,
+  wrong-creds/no-form/missing-creds/out-of-scope failures, single-flight one-login,
+  auth-endpoint exclusion, observe→re-auth, standalone header, seam integration).
+- Deliverables:
+  - [x] SessionState + detection + manager (T1.2–T1.6, T1.8) — done.
+  - [x] Fail-loud on unparseable logins (FR-SESS-6) — done.
+  - [x] Standalone `session_header` + `fuzzlab session` CLI (T1.9) — done.
+  - [x] Redaction of secrets in logs/repr (T1.7 redaction) — done.
+  - [ ] Persist non-secret session state to a store table (T1.7 resume) — todo.
+  - [ ] Migrate tool HTTP onto the seam + live two-lab validation (T1.10) — todo (needs a runnable lab; cookie path validated on PFF, JWT path on an external lab).
+- Effectiveness (assessed 2026-09-21): effective in unit tests (17/17 for the
+  session package; 60/60 suite) — cookie and JWT logins detected and handled,
+  single-flight confirmed, unparseable logins fail loud. Live end-to-end on the
+  containerized lab and an external JWT lab is pending an environment with a
+  container daemon / network to those labs.
+
 ### CC-SESS-0004 — Planned: adopt proxy-captured manual sessions (spec) (2026-09-21)
 - Change: added FR-SESS-11 `[planned, post-Phase 6]` — for logins detection can't
   parse (the FR-SESS-6 fail-loud cases: MFA, CAPTCHA, multi-step, exotic SPA), the

@@ -21,8 +21,8 @@ dependencies = [
     # Credential store (D12): OS keyring + encrypted-file headless fallback.
     "keyring>=24,<26",
     "keyrings.alt>=5,<6",
-    # JWT decode (read `exp` locally) for the bearer/JWT auth strategy (D13).
-    "pyjwt>=2.8,<3",
+    # Note: JWT `exp` is read by decoding the payload directly (base64url); we never
+    # verify or trust the token, only time its refresh, so no JWT/crypto dependency.
 ]
 
 [project.optional-dependencies]

@@ -11,6 +11,7 @@ from fuzzlab.core.store import Store, connect
 from fuzzlab.core import migrations
 from fuzzlab.core.obs import get_logger
 from fuzzlab.core.budget import RequestBudget, BudgetExceeded
+from fuzzlab.core.credentials import Credential, CredentialStore, CredentialError
 
 __all__ = [
     "Config",
@@ -21,4 +22,7 @@ __all__ = [
     "get_logger",
     "RequestBudget",
     "BudgetExceeded",
+    "Credential",
+    "CredentialStore",
+    "CredentialError",
 ]

@@ -23,6 +23,7 @@ _USAGE = """usage: fuzzlab <command> [args]
 
 commands:
   web                 open the local control panel / launcher (loopback only)
+  session <sub>       manage per-host credentials / print a session header
   crawl [args]        run the crawler        (python -m fuzzlab.tools.spider)
   audit [args]        run the auditor        (python -m fuzzlab.tools.fetcher)
   fuzz  [args]        run the blind SQLi fuzzer (requires --authorized)
@@ -49,6 +50,10 @@ def main(argv: list[str] | None = None) -> int:
         from fuzzlab.web.app import serve
         serve()
         return 0
+
+    if command == "session":
+        from fuzzlab.session import cli as session_cli
+        return session_cli.main(rest)
 
     module = _TOOL_MODULES.get(command)
     if module is None:
