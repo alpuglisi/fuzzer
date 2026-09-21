@@ -150,6 +150,18 @@ and T-LAB0.6 below, plus the multi-artifact ground-truth question from
 below are updated in place to reflect these; nothing here overrides decisions
 1–5 above, which are still yours to confirm.
 
+**Architecture correction from a follow-on authoring-feasibility pass
+(2026-09-21, `CR-LAB-0001` Addendum C):** T-LAB0.4's emitter, described below
+as `render(cell) -> EmittedFiles`, must internally decompose that rendering
+into **composable modules** (source/transform/sink fragments assembled per
+cell) rather than one monolithic template per `(class, sink_context)` —
+following the schema (not the code) of NIST's MIT-licensed VTSG generator,
+which demonstrates this composition model gives a ~122:1 ratio of authored
+modules to generated cells. Read NISTIR 8493 before implementing T-LAB0.4's
+internals. This doesn't change T-LAB0.4's external interface or Phase 0's
+exit criterion, but it changes what "the emitter" contains, so it's worth
+getting right before Phase 1/3 authoring depends on it.
+
 ## Architecture (Phase 0 slice of the full design)
 
 ```
@@ -213,14 +225,23 @@ until you decide (a later, separate decision) to cut over.
   this proves the machinery without touching today's labels.
 - **T-LAB0.4 — Emitter interface + the first (reproduction) emitter
   `[planned]`.** `lab/generator/emitter.py` (the ABC/protocol: `render(cell) ->
-  EmittedFiles`, `supports(class, sink_context) -> bool`) and
-  `lab/generator/emitters/php_current/` implementing it to emit exactly
-  today's `puppy-fort-factory/` pages from the Phase-0 manifest, via
-  **Jinja2** (BSD; `trim_blocks=True, lstrip_blocks=True,
-  keep_trailing_newline=True` set explicitly, never left at Jinja2's
-  defaults; templates receive pre-sorted lists, never iterate a dict/set
-  directly) rather than a custom string-concatenation emitter. This is the
-  emitter conformance suite's first subject (T-LAB0.7).
+  EmittedFiles`, `supports(class, sink_context) -> bool`), but internally
+  built as **module composition, not one template per cell** — a
+  `lab/generator/modules/{sources,transforms,sinks,complexities}/` inventory
+  (source/transform/sink fragments, each a small Jinja2-rendered unit) that
+  the emitter assembles per cell, following NIST VTSG's schema (read NISTIR
+  8493 first; do not reuse VTSG's own PHP templates — procedural, not Laravel
+  idiom, and its verdict is asserted per-module where ours stays derived).
+  This is the architecture correction from `CR-LAB-0001` Addendum C: it
+  changes the unit of authoring from "one template per `(class,
+  sink_context)`" to "a handful of composable modules," which is what makes
+  Phase 1/3 authoring volume tractable. `lab/generator/emitters/php_current/`
+  implements this to emit exactly today's `puppy-fort-factory/` pages from
+  the Phase-0 manifest, via **Jinja2** (BSD; `trim_blocks=True,
+  lstrip_blocks=True, keep_trailing_newline=True` set explicitly, never left
+  at Jinja2's defaults; templates receive pre-sorted lists, never iterate a
+  dict/set directly). This is the emitter conformance suite's first subject
+  (T-LAB0.7).
 - **T-LAB0.5 — Determinism: sub-seed derivation + canonical serialization +
   CI gate `[planned]`.** `H(root_seed || cell_id)` sub-seeds; sorted
   map/dict iteration; canonical serialization via stdlib `json`
@@ -271,7 +292,21 @@ until you decide (a later, separate decision) to cut over.
   unsafe rendering is vulnerable and the paired secure rendering is not.
   Phase 0 runs it against `emitters/php_current/` only, but it is written
   generically now so Phase 3's Node/Python/PHP-Laravel emitters plug into it
-  unchanged.
+  unchanged. **Structured as a tiered check** (per `CR-LAB-0001` Addendum C):
+  Tier 0 lint/minimal-pair-diff (seconds), Tier 1 an in-process functional +
+  security assertion for classes where that's valid (app in-process, real
+  database in a long-lived container — never an in-memory SQLite substitute,
+  which produces dialect-dependent false passes specifically for SQL-
+  injection cells), Tier 2 the full container-based oracle (the only tier
+  that actually confirms a label), Tier 3 whole-lab regeneration. A Tier-1
+  pass is never recorded as oracle confirmation. Each `(class, sink_context)`
+  entry in the safety matrix also carries a `static_precheck: informative |
+  uninformative` flag (Psalm+`psalm/plugin-laravel` for PHP, Semgrep for
+  Python/Node, used as bespoke shape-conformance rules — "does the module
+  contain the intended sink/transform" — not as vulnerability detectors,
+  since a taint tool is structurally blind to identifier/alias/connector-
+  position injection and would falsely "confirm" those cells as clean); the
+  pipeline skips uninformative checks rather than treating them as evidence.
 - **T-LAB0.8 — `patterns/` provenance corpus, first 25–30 cards `[planned]`.**
   `lab/patterns/`: an OSV.dev + GHSA pull script (per CR-LAB-0001 §3, report
   §1.1), hand-triaged into cards (`id`, `class`, `stack`, `sink_family`,

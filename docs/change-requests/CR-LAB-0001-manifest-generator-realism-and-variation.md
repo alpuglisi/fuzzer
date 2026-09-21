@@ -337,3 +337,102 @@ This is recorded here as a decision (§7 item 2 is no longer open) and in
 `LAB_PHASE_0_PLAN.md` T-LAB0.9 as the concrete schema change, forward-
 compatible starting in Phase 0 even though Phase 0 itself has no
 multi-location cells yet.
+
+---
+
+## Addendum C (2026-09-21) — module composition, authoring workflow, and a realistic effort number
+
+A research pass on vulnerable-code authoring feasibility (answering: can we
+actually produce the code, at scale, from what we can legally source?) found
+a public-domain/MIT reference architecture that changes how the emitter
+should be built, and produced the first grounded effort estimate this
+program has had. Recorded here because it changes real scope/timeline
+inputs to §8's phased plan, not because it changes §3's core decisions.
+
+**1. Architecture change: the emitter's internal model adopts NIST VTSG's
+module-composition schema, not a monolithic per-cell template.** NIST's
+Vulnerability Test Suite Generator (NISTIR 8493, MIT-licensed,
+`usnistgov/VTSG`) is — measured, from a cloned copy — a manifest-driven
+generator with the same shape as ours (inputs × filters × sinks ×
+complexities, ACTS covering-array selection), and it demonstrates a ~122:1
+leverage ratio: 65 hand-authored PHP modules compose into 7,920 combinations.
+**The unit of authoring effort is the module (a source/transform/sink
+fragment), not the "template pair."** T-LAB0.4's emitter interface should
+internally decompose a cell's rendering into these composable pieces rather
+than one template per `(class, sink_context, stack)` combination. VTSG's
+own code is not reusable for us (its PHP is procedural, not Laravel/Eloquent/
+Blade idiom, and its verdict model is *asserted* per module rather than
+*derived* — ours stays derived, which is strictly better and already
+correct). Its **schema, module inventory, and safety-declaration model are
+the thing to study** (read NISTIR 8493 before implementing T-LAB0.4's
+internals) — not its templates.
+
+**2. A grounded effort estimate, replacing an unstated assumption.**
+Calibrated against VTSG's measured module counts and published
+benchmark-construction team sizes (SecCodePLT, CASTLE): roughly **~330 hours
+for the first stack** (including one-time harness/emitter/oracle-runner
+cost) and **~180 hours per additional ported stack**, i.e. **~450–520 hours
+for three stacks with disciplined LLM-assisted porting** (~650–750
+unassisted). A fourth stack is a further ~150–180 hours. These are
+judgment-calibrated estimates with a stated ±40% band, not measurements —
+see the report's own gap #1, which recommends timing three real seed
+authoring sessions before trusting the schedule.
+
+**Decision needed from you, not resolved by this addendum:** this doesn't
+reduce anything already planned (CR-LAB-0001's additive-only mandate is
+unaffected — nothing built is removed), but it does mean the **pace** at
+which new stacks arrive in Phase 3/4 should be set with this number in view.
+Options, none of which are default — your call: (a) proceed with three
+stacks as planned, accepting an ~8-month solo timeline at 15h/week; (b)
+build stack 1 (PHP/Laravel) to full depth and stacks 2–3 to Tier-A-only
+depth (well-documented classes only, deferring the deliberately-hard
+identifier/alias/connector-position cases on those stacks until later),
+roughly halving stacks 2–3's cost; (c) treat the optional fourth stack
+(Spring Boot) as explicitly out of near-term scope rather than "optional
+Phase 4" per the original CR-LAB-0001 §4 wording. This does not need
+resolving before Phase 0 starts — Phase 0 is single-stack — but should be
+decided before Phase 3 is scheduled.
+
+**3. Authoring workflow rule, mirroring the existing pattern-card rule.**
+Per the report's reading of SecCodePLT's published methodology (expert
+authors a seed plus its own oracle assertions; an LLM only mutates/ports
+from there, filtered by the seed's oracle, with failures regenerated, never
+accepted on faith): **a human authors every seed's oracle assertions and
+safety-matrix entry; an LLM may only draft candidate modules and port them
+between stacks, and never sees the pattern-card text while doing so** (the
+card is provenance for the cell's existence, not a code specification — it's
+underdetermined as one, and reading it while drafting code would blur the
+licensing separation the pattern-corpus work deliberately maintains). This
+is the code-authoring analogue of the already-established rule that an LLM
+may label a pattern card but never author its `root_cause` text.
+
+**4. Static pre-checks are reframed from "detect the vulnerability" to
+"assert the module is shaped as intended."** A taint analyzer (Psalm+
+`psalm/plugin-laravel` for PHP — CodeQL doesn't support PHP; Semgrep for
+Python/Node) cannot validate the deliberately-hard cells this program cares
+about (identifier/alias/connector-position injection looks identical to safe
+code to a taint engine), so a clean scan is evidence for textbook cases only.
+Each `(class, sink_context)` entry in the safety matrix gets a
+`static_precheck: informative | uninformative` flag; the pipeline **skips**
+uninformative checks rather than treating a clean-but-meaningless scan as
+confirmation. The actually load-bearing use of a tool like Semgrep is
+writing one bespoke "shape" rule per seed asserting the vulnerable module
+contains the intended sink and the secure twin contains the intended
+transform — a conformance check, not a vulnerability detector.
+
+**5. Fast-feedback tiering for the emitter conformance suite (T-LAB0.7),
+with one hard trap flagged.** A tiered check (lint/diff → in-process
+functional+security test → full container oracle → whole-lab regeneration)
+keeps authoring iteration fast without ever recording a fast-tier pass as
+oracle confirmation — only the full container-based oracle confirms a label.
+**The trap:** substituting in-memory SQLite for the real database in the
+fast tier produces dialect-dependent false passes/fails for SQL-injection
+cells specifically (identifier-position injection behaves differently across
+SQL dialects) — the fix is app-in-process, database in a long-lived
+container booted once per authoring session, never a full stack rebuild per
+edit but never a different database engine either.
+
+None of this changes Phase 0's scope (still single-stack, still reproducing
+today's PHP lab) — it changes how T-LAB0.4's internals should be designed
+now so Phase 1/3 authoring doesn't hit a module-vs-template rework later,
+and it sets honest expectations for Phase 3's timeline per point 2 above.
