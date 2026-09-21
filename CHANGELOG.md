@@ -14,6 +14,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (UI, layout redesign): rebuilt the **Launch view** inside the shell as the approved
+  **master-detail** — a grouped activity picker (Discovery / Attack / Analysis, with
+  traffic/auth/destr gate tags + selection accent bar) on the left, and the selected activity's
+  configurable form on the right (tags, Dry-run/Run/Stop, argparse fields, inline option
+  checkboxes, D14 category pills, plugins panel, dry-run preview + live SSE console). Brought
+  forward from R1 at the user's request so the reviewed mockup is what ships. Command-spec form
+  contract unchanged (same data-dest/data-type hooks → runner/dry-run/gating/SSE untouched);
+  full suite green (499/6) + light/dark screenshots. CC-UI-0022, FR-UI-8.
 - Feature (UI, layout redesign R0): reframed the web panel in a persistent **app shell** — a
   left-sidebar nav (grouped Workbench / Analysis) + a top context bar (target / scope /
   authorized / proxy chips) — over a new **design-token** stylesheet (`web/static/tokens.css`:

@@ -107,11 +107,13 @@ def test_launcher_renders_a_form_per_activity():
 
 
 def test_run_buttons_gated_by_authorization():
-    # unauthorized: traffic tools' Run is disabled; read-only tools stay enabled
+    # unauthorized: traffic tools' Run is disabled; read-only tools stay enabled.
+    # Matched on the (whitespace-independent) gate title so the layout can evolve.
+    gate = 'title="set authorized:true to run traffic tools"'
     unauth = _client(authorized=False).get("/").text
-    assert unauth.count('data-action="run"\n            disabled') == 7
+    assert unauth.count(gate) == 7
     auth = _client(authorized=True).get("/").text
-    assert 'data-action="run"\n            disabled' not in auth
+    assert gate not in auth
 
 
 def test_category_picker_rendered_for_auto():

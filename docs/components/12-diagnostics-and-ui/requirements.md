@@ -83,9 +83,11 @@ bugs — the research-platform diagnostics of decision D2.
   applied before first paint (no flash). The shell is chrome only: it changes no launcher /
   proxy / results behavior and touches none of the NFR-UI invariants.
   *(Realized: R0 of the layout redesign — `base.html` shell, `tokens.css`, retokenized
-  `app.css`, and `initShell()` for theme/density/collapse persistence + the proxy chip.
-  Deep-linkable per-section routes and the Overview / Findings / Proxy rebuilds follow in
-  R1–R3, per `docs/UI_LAYOUT_REDESIGN.md`.)*
+  `app.css`, and `initShell()` for theme/density/collapse persistence + the proxy chip. The
+  **Launch view** was then rebuilt as the approved **master-detail** (a grouped, gate-tagged
+  activity picker → the selected activity's form; `initLaunchNav()`, CC-UI-0022) — brought
+  forward from R1. Deep-linkable per-section routes, the Overview dashboard, and the Findings /
+  Proxy rebuilds still follow in R1–R3, per `docs/UI_LAYOUT_REDESIGN.md`.)*
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

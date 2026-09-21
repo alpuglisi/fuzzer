@@ -156,6 +156,33 @@ function collectValues(form) {
   return values;
 }
 
+// --- Launch view: master (activity picker) → detail (one form shown) ---
+// Every activity's detail renders server-side; with JS on we show one at a time and let the
+// left list switch between them (no-JS shows all — same progressive-enhancement rule as tabs).
+function initLaunchNav() {
+  const acts = Array.from(document.querySelectorAll(".actlist .act"));
+  const details = Array.from(document.querySelectorAll(".lform-detail"));
+  if (!acts.length || !details.length) return;
+
+  function select(name) {
+    let matched = false;
+    for (const d of details) {
+      const on = d.dataset.for === name;
+      d.classList.toggle("hidden", !on);
+      matched = matched || on;
+    }
+    for (const a of acts) a.classList.toggle("sel", a.dataset.for === name);
+    return matched;
+  }
+
+  for (const a of acts) {
+    a.addEventListener("click", (e) => { e.preventDefault(); select(a.dataset.for); });
+  }
+  // Default to `auto` when present (the full pipeline), else the first activity.
+  const prefer = acts.find((a) => a.dataset.for === "auto") || acts[0];
+  select(prefer.dataset.for);
+}
+
 function initLaunchForms() {
   for (const form of document.querySelectorAll("form.launch-form")) {
     const command = form.dataset.command;
@@ -474,5 +501,6 @@ function initScope() {
 
 document.addEventListener("DOMContentLoaded", () => {
   initShell();
-  initTabs(); initLaunchForms(); initProxy(); initIntercept(); initRepeater(); initScope();
+  initTabs(); initLaunchNav(); initLaunchForms();
+  initProxy(); initIntercept(); initRepeater(); initScope();
 });
