@@ -13,6 +13,13 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 0 build (cont.): migrated the tools onto the unified store (T0.8) via a
+  `store_adapter` and an opt-in `--store` flag on each tool. The crawler writes
+  `page`/`endpoint`/`parameter`, the auditor writes `candidate`, and the fuzzer
+  writes `attempt` rows plus `finding` rows for confirmed timing hits (flagged
+  `timing-only` until the Phase 2 oracle). A synthetic end-to-end test shows a full
+  run populating all six tables and the harness scoring the consolidated findings.
+  Change-control: CC-CRAWL-0003, CC-AUD-0003, CC-FUZZ-0003.
 - Phase 0 build (cont.): containerized the target lab (T0.2, D7) under `lab/` —
   `compose.yaml` (PHP/Apache + MariaDB), `web.Dockerfile`, `.env.example`,
   `labctl.sh` (up/down/reset), and a README. Web tier published on loopback only,

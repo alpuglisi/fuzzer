@@ -3,6 +3,23 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0003 — Consolidates into the unified store (2026-09-21)
+- Change: added `--store PATH` to the crawler; after a crawl it consolidates its
+  native `discovered_pages` output into the unified store via
+  `fuzzlab/tools/store_adapter.import_spider`, writing `page`, `endpoint`, and
+  `parameter` rows (URLs normalized to path form; query params captured). Native
+  standalone output is unchanged when `--store` is omitted. Phase 0 T0.8.
+- Impact (other components / project): the crawler now feeds the integration bus
+  (D5); its pages/params are readable by the auditor, harness, and (later) ranker.
+  Adapter-based for now; a future phase can make the crawl write directly.
+- Risk (level; mitigation): low — opt-in and additive; covered by the
+  consolidation end-to-end test (synthetic spider DB → page/endpoint/parameter).
+- Deliverables:
+  - [x] `--store` + `import_spider` (page/endpoint/parameter) (T0.8) — done.
+  - [ ] Direct-to-store writes (drop the native DB) — todo (later).
+- Effectiveness (assessed 2026-09-21): effective — a synthetic crawl of 5 pages
+  populates 5 pages and 4 parameters in the unified store (test green).
+
 ### CC-CRAWL-0002 — Moved into the `fuzzlab` package (2026-09-21)
 - Change: `spider.py` moved to `fuzzlab/tools/spider.py` and now imports `core/`
   (`get_logger`), emitting a structured startup line. Still writes its own SQLite

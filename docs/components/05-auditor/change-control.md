@@ -3,6 +3,25 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0003 — Consolidates candidates into the unified store (2026-09-21)
+- Change: added `--store PATH` to the auditor; after an audit it consolidates its
+  native `findings` into the unified store via `store_adapter.import_audit`,
+  writing `candidate` rows (rule = transaction type, evidence JSON incl. category/
+  reference/occurrences, sink_context from the HTML context) and linking to a
+  discovered `parameter` when one matches. It first imports the spider DB so
+  candidates can link to parameters. Native output unchanged without `--store`.
+  Phase 0 T0.8.
+- Impact (other components / project): candidates now land on the integration bus
+  for the scheduler/fuzzer/ranker; depends on the crawler having populated
+  parameters (CC-CRAWL-0003) for linkage.
+- Risk (level; mitigation): low — opt-in, additive; covered by the consolidation
+  test (synthetic audit DB → candidate rows).
+- Deliverables:
+  - [x] `--store` + `import_audit` (candidate rows, param linkage) (T0.8) — done.
+  - [ ] Full per-rule evaluation evidence + versioned features (Phase 2) — todo.
+- Effectiveness (assessed 2026-09-21): effective — synthetic findings become
+  candidate rows in the unified store (test green).
+
 ### CC-AUD-0002 — Moved into the `fuzzlab` package (2026-09-21)
 - Change: `fetcher.py` moved to `fuzzlab/tools/fetcher.py`; imports `core/`
   (`get_logger`, structured startup line) and now defaults `--indicator-db` to the

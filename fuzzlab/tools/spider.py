@@ -311,6 +311,8 @@ def parse_args():
         help="Keep results already in the database and skip those URLs. "
              "By default each run clears the table and re-crawls.",
     )
+    p.add_argument("--store", default=None,
+                   help="Also consolidate results into the unified fuzzlab store at this path.")
     return p.parse_args()
 
 
@@ -327,3 +329,11 @@ if __name__ == "__main__":
         resume=args.resume,
     )
     spider.crawl()
+    if args.store:
+        from fuzzlab.core.config import load_config
+        from fuzzlab.core.store import Store
+        from fuzzlab.tools import store_adapter
+        with Store(args.store) as store:
+            run_id = store.start_run("crawler", load_config().hash())
+            counts = store_adapter.import_spider(args.db, store, run_id)
+        get_logger("crawler").info("consolidated into store", extra=counts)

@@ -3,6 +3,27 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0003 — Writes attempts/findings to the unified store (2026-09-21)
+- Change: added `--store PATH` to the fuzzer; after a run it consolidates its CSV
+  into the unified store via `store_adapter.import_fuzz_csv`, writing `attempt`
+  rows (behavioral features JSON + reward) and, for confirmed timing hits, a
+  `finding` row (vuln_class `sqli`, label 1, confidence `timing-only`, self-
+  describing url/method/param). Native CSV unchanged without `--store`. Phase 0 T0.8.
+- Impact (other components / project): closes the Phase 0 loop — the harness (T0.7)
+  reads these findings to score against ground truth. Note the confidence is
+  `timing-only`: the deterministic oracle that will own finding labels is Phase 2,
+  so these are provisional confirmations flagged as such, not oracle verdicts.
+- Risk (level; mitigation): medium — writing findings from a timing-only signal
+  risks false positives before the real oracle exists. Mitigated by flagging them
+  `timing-only`, keeping the differential/median timing logic from the baseline,
+  and requiring `--authorized`; the Phase 2 oracle will supersede this path.
+- Deliverables:
+  - [x] `--store` + `import_fuzz_csv` (attempt + finding rows) (T0.8) — done.
+  - [ ] Replace timing-only findings with the deterministic oracle (Phase 2) — todo.
+- Effectiveness (assessed 2026-09-21): effective for Phase 0 — synthetic fuzz
+  output yields 3 attempts and 2 timing findings that the harness scores as true
+  positives on the lab's known GET SQLi cases (test green).
+
 ### CC-FUZZ-0002 — Moved into the `fuzzlab` package (2026-09-21)
 - Change: `blind_sqli_fuzzer.py` moved to `fuzzlab/tools/blind_sqli_fuzzer.py`;
   imports `core/` (`get_logger`, structured startup line after the `--authorized`

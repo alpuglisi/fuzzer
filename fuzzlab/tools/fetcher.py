@@ -772,6 +772,8 @@ def parse_args():
              "starts from an empty findings table.",
     )
     p.add_argument("--quiet", action="store_true", help="Only print the closing summary.")
+    p.add_argument("--store", default=None,
+                   help="Also consolidate candidates into the unified fuzzlab store at this path.")
     return p.parse_args()
 
 
@@ -819,3 +821,14 @@ if __name__ == "__main__":
 
         print_summary(results_db, args.out)
         results_db.close()
+
+        if args.store:
+            from fuzzlab.core.config import load_config
+            from fuzzlab.core.store import Store
+            from fuzzlab.tools import store_adapter
+            with Store(args.store) as store:
+                run_id = store.start_run("auditor", load_config().hash())
+                # Bring discovered pages/params over first if the spider DB is present.
+                store_adapter.import_spider(args.spider_db, store, run_id)
+                counts = store_adapter.import_audit(args.out, store, run_id)
+            log.info("consolidated into store", extra=counts)

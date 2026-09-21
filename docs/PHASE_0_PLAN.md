@@ -4,8 +4,32 @@ The lean foundations that every later phase depends on. Producing zero new
 vulnerabilities is expected and correct; this phase is about the platform, not
 the payloads.
 
-*Last updated: 2026-09-21. See `DECISIONS_AND_ROADMAP.md` (D1–D10) and
+*Last updated: 2026-09-21. See `DECISIONS_AND_ROADMAP.md` (D1–D11) and
 `ARCHITECTURE.md`.*
+
+## Status (2026-09-21)
+
+Phase 0 is **built and unit-tested** (30 tests green). Implemented in the
+`fuzzlab` package:
+
+- **T0.1** package layout + `pyproject.toml`; tools moved to `fuzzlab/tools/` — done.
+- **T0.2** containerized lab under `lab/` — files done; `docker compose config`
+  validates. **Bring-up + smoke test must be run in an environment with a
+  container daemon** (this sandbox has the docker CLI but no daemon).
+- **T0.3** store + numbered idempotent migrations (head = v2) — done.
+- **T0.4** config (hash/redaction), logging, budget + timing mutex, HTTP seam — done.
+- **T0.5** versioned features + golden tests — done.
+- **T0.6** ground-truth label contract (schemas, loader, cross-check) — done.
+- **T0.7** integration harness (scoring + assert-known-vulns + `run_metrics`) — done.
+- **T0.8** tools consolidate into the unified store via `--store` — done (adapter-based).
+- **T0.9** minimal local web launcher (loopback-only, no auto-run) + CLI — done.
+
+Remaining to close Phase 0 end-to-end (needs a running container daemon, i.e. the
+user's Fedora/Podman host): bring the lab up with `lab/labctl.sh up`, run
+`crawler → auditor → fuzzer --store fuzzlab.db` against it (or automatic mode from
+the launcher once the pipeline is wired), and confirm the harness reports the
+known vulnerabilities from live data. The deterministic oracle (currently
+timing-only findings) lands in Phase 2.
 
 ## Goal
 

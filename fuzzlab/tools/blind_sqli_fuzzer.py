@@ -193,6 +193,8 @@ def parse_args(argv=None):
     p.add_argument("--timeout", type=float, default=15.0, help="Per-request timeout (s); keep it > max sleep")
     p.add_argument("--authorized", action="store_true",
                    help="Required. Affirms you are authorized to test --url.")
+    p.add_argument("--store", default=None,
+                   help="Also consolidate attempts/findings into the unified fuzzlab store at this path.")
     return p.parse_args(argv)
 
 
@@ -210,6 +212,14 @@ def main(argv=None):
         )
         rows = run_fuzzing_cycle(session, args.url, args.param, baseline, PAYLOADS, args)
         save_dataset(rows, args.output)
+        if args.store:
+            from fuzzlab.core.config import load_config
+            from fuzzlab.core.store import Store
+            from fuzzlab.tools import store_adapter
+            with Store(args.store) as store:
+                run_id = store.start_run("fuzzer", load_config().hash())
+                counts = store_adapter.import_fuzz_csv(args.output, store, run_id)
+            get_logger("fuzzer").info("consolidated into store", extra=counts)
     except KeyboardInterrupt:
         print("\n[-] Interrupted by user.")
     except Exception as exc:  # noqa: BLE001 - top-level guard
