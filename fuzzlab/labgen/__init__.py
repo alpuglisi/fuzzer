@@ -26,16 +26,20 @@ hand-authored templates instead), the identity/ownership graph loader
 resource ownership, and binary authz expectations, loaded from
 ``lab/identities/identities.yaml``; deliberately decoupled from the
 manifest/``Cell`` IR the same way ``lab/patterns/provenance.yaml`` is
-decoupled from it, and never imported by ``verdict``), and a third,
-independent oracle for identifier/alias/connector-position SQL injection
+decoupled from it, and never imported by ``verdict``), a third, independent
+oracle for identifier/alias/connector-position SQL injection
 (``identifier_sqli_oracle``, L-P1.2a — a custom differential-response
 prober, since a real sqlmap spot-check confirmed it does not reliably
-detect this class; see that module's docstring for the spot-check findings)
-— all generator-build-time security-assertion tooling, unrelated to and
-never imported by ``fuzzlab.oracle``. None of these depends on any other.
-This re-exports all of them. ``fingerprint_gate`` imports ``scipy`` lazily
-inside its chi-square functions (the optional ``labgen-stats`` extra), so
-importing this package does not require it.
+detect this class; see that module's docstring for the spot-check findings),
+and a small LAB-owned session helper (``identity_session``, L-P2.2 — one
+cookie jar per known, generator-controlled test identity, for build-time
+oracle confirmation of stored/second-order cells; deliberately not the
+toolkit's own separate Session-manager component) — all generator-build-time
+security-assertion tooling, unrelated to and never imported by
+``fuzzlab.oracle``. None of these depends on any other. This re-exports all
+of them. ``fingerprint_gate`` imports ``scipy`` lazily inside its chi-square
+functions (the optional ``labgen-stats`` extra), so importing this package
+does not require it.
 """
 
 from . import (
@@ -52,6 +56,13 @@ from . import (
     schema,
     subseed,
     verdict,
+)
+from .identity_session import (
+    DuplicateIdentityError,
+    IdentityLike,
+    IdentitySessionStore,
+    Session as IdentitySession,
+    UnknownIdentityError,
 )
 from .oracle_wrapper import (
     CommandInjectionOracleRequest,
@@ -112,6 +123,11 @@ __all__ = [
     "schema",
     "subseed",
     "verdict",
+    "DuplicateIdentityError",
+    "IdentityLike",
+    "IdentitySessionStore",
+    "IdentitySession",
+    "UnknownIdentityError",
     "CommandInjectionOracleRequest",
     "OracleRunResult",
     "OracleSafetyError",

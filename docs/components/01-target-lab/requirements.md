@@ -425,6 +425,29 @@ and measured. Authorized, lab-only.
   identically (the real allowlist-rejection failure mode the spot-check produced)
   are `inconclusive`, never `confirmed_secure`. (`docs/LAB_IMPLEMENTATION_PLAN.md`
   §2.2, `CC-LAB-0032`)
+- **FR-LAB-31** (Lab track, §3.2, lane L-P2.2) *(Numbered `FR-LAB-31` rather than
+  `FR-LAB-27` at merge time — this lane independently claimed `FR-LAB-27`, colliding
+  with lane L-P2.1's identity/ownership requirement above; reconciled per this
+  project's standing multi-lane policy: keep both entries' full content, renumber this
+  later-landing one, fix its own `CC-LAB` cross-reference to `CC-LAB-0033` below.)* A
+  small LAB-owned session helper,
+  `fuzzlab.labgen.identity_session.IdentitySessionStore`, holds one cookie jar per
+  named test identity (from `identities.yaml` / `fuzzlab.labgen.identity`, FR-LAB-9's
+  sibling identity-and-ownership schema — accepted duck-typed via a local
+  `IdentityLike` fallback until that lane merges) so build-time oracle confirmation of
+  stored/second-order cells (§3.3's `sink_endpoint`, a concurrent, not-yet-landed
+lane) can submit a payload as
+  one known identity and observe the sink under another. `login(identity_id) ->
+  Session` logs in (replacing, never duplicating, that identity's jar entry on a
+  second call); `refresh_session_for(identity_id)` returns a callable of exactly
+  FR-LAB-11's `SessionRefresh` shape (`Callable[[], Mapping[str, str]]`), so it slots
+  directly into any `oracle_wrapper.*OracleRequest.refresh_session` field, mirroring
+  that convention rather than inventing a new one. Deliberately **not** the toolkit's
+  separate Session-manager component (a different roadmap track built for adversarial
+  tools against an unknown target, with re-auth-on-expiry, JWT handling, and
+  auto-exclusion of auth endpoints): this helper only ever talks to identities the
+  generator itself declared, and none of re-auth/JWT/auto-exclusion/unknown-target
+  defenses are in scope here. (`CC-LAB-0033`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

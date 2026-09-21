@@ -65,6 +65,13 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   untouched. (`CC-LAB-0032`, renumbered from a concurrently-claimed `CC-LAB-0029`
   which collided with lanes L-P2.1/L-P0.9/L-P1.1; `FR-LAB-30`, renumbered from a
   concurrently-claimed `FR-LAB-27` for the same reason.)
+- LAB (lane L-P2.2): added `fuzzlab/labgen/identity_session.py`, a small
+  LAB-owned session-holder (one cookie jar per known, generator-controlled
+  test identity) so build-time oracle confirmation of stored/second-order
+  cells can log in as a declared test identity and reuse its session — a
+  narrow helper, deliberately not the toolkit's own separate Session-manager
+  component (`CC-LAB-0033`, renumbered from a concurrently-claimed
+  `CC-LAB-0029` which collided with lanes L-P2.1/L-P0.9/L-P1.1/L-P1.2a).
 - Docs: fleshed `docs/LAB_IMPLEMENTATION_PLAN.md`'s Phase 2 (§3) and Phase 3 (§4)
   from milestone-level bullets into full task breakdowns matching Phase 0/1's
   granularity, and added a new §7 lane/dependency map covering every Phase 0-3
