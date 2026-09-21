@@ -188,7 +188,12 @@ tracked in the requirements files, not here.
   scanner above — a `.gitleaks.toml` at the repo root allowlists explicitly
   `FAKE`/`EXAMPLE`/`PLACEHOLDER`-marked seeded credentials the generator may
   legitimately emit as vulnerable-code content, while an unmarked real-shaped
-  secret still fails the build. A manifest reproducing today's real ~30-page PHP
+  secret still fails the build. A standalone, offline minimal-pair invariant
+  checker (`fuzzlab/labgen/minimal_pair.py`, `CC-LAB-0025`, pulled forward from
+  Phase 1) asserts a cell's vulnerable/secure twins differ only within their
+  declared transform/sink region, emitter-agnostic via the module-composition
+  provenance comment any such emitter writes; not yet wired into a build gate.
+  A manifest reproducing today's real ~30-page PHP
   app byte-identically (the actual Phase 0 exit criterion) remains planned.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, et al. — see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

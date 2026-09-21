@@ -6,14 +6,28 @@ foundation, D20 — ``schema``, ``verdict``, ``subseed``, ``gates``,
 ``denylist``, ``resolver``), the module-composition emitter interface and
 first (``php_current``) emitter (T-LAB0.4 — ``emitter``, ``modules``,
 ``emitters``), the sqlmap/commix/SSTImap per-parameter oracle wrapper
-(``oracle_wrapper``), and the ZAP whole-app safety-net oracle (``zap_oracle``,
+(``oracle_wrapper``), the ZAP whole-app safety-net oracle (``zap_oracle``,
 a separate module since ZAP has no single declared parameter to scope by
-unlike the other three tools) — all generator-build-time security-assertion
+unlike the other three tools), and the minimal-pair invariant checker
+(``minimal_pair``, pulled forward from Phase 1 — a standalone offline check
+that a cell's vulnerable/secure twins differ only within their declared
+transform/sink region) — all generator-build-time security-assertion
 tooling, unrelated to and never imported by ``fuzzlab.oracle``. None of these
 depends on any other. This re-exports all of them.
 """
 
-from . import denylist, emitter, emitters, gates, modules, resolver, schema, subseed, verdict
+from . import (
+    denylist,
+    emitter,
+    emitters,
+    gates,
+    minimal_pair,
+    modules,
+    resolver,
+    schema,
+    subseed,
+    verdict,
+)
 from .oracle_wrapper import (
     CommandInjectionOracleRequest,
     OracleRunResult,
@@ -44,6 +58,7 @@ __all__ = [
     "emitter",
     "emitters",
     "gates",
+    "minimal_pair",
     "modules",
     "resolver",
     "schema",

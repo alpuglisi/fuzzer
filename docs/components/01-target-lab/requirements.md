@@ -237,6 +237,27 @@ and measured. Authorized, lab-only.
   `ERROR_LOG.md`) — Gitleaks' own detection, which scans the fully-assembled
   bytes at test time, is unaffected. (NFR-LAB-no-secret-leak,
   `docs/LAB_PHASE_0_PLAN.md` T-LAB0.6, `CC-LAB-0024`)
+- **FR-LAB-23** (Lab track, minimal-pair invariant pulled forward from Phase 1)
+  `fuzzlab.labgen.minimal_pair.check_minimal_pair()` asserts a cell's rendered
+  vulnerable/secure `EmittedFiles` differ only within the declared
+  transform/sink region (`CR-LAB-0001` §3, `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`
+  steps 5/6): it parses the `// Module composition: a -> b -> c` provenance
+  comment a module-composition emitter writes, classifies each named position
+  by its module's own registered category, and independently cross-checks the
+  empirically differing content region via a longest-common-prefix/suffix
+  trim — catching an unrelated identifier rename that leaves the composition
+  comment unchanged (the Juliet-style failure mode the playbook itself cites),
+  not just a declared-region mismatch. `check_identifier_stability()`
+  separately asserts every declared function/handler name is byte-identical
+  across twins. Raises `MinimalPairViolation` on an actual invariant
+  violation or the base `MinimalPairError` when the check cannot be evaluated
+  at all (no composition comment, or an unregistered module name) — never a
+  silent pass. Standalone and offline: reads (never renders or modifies)
+  `fuzzlab.labgen.emitter`'s types and `fuzzlab.labgen.modules`' registries.
+  Not yet wired into a build gate/CLI. Explicitly out of scope: unequal-length
+  composition sequences between twins and non-PHP identifier extraction — both
+  documented limitations, not silently mishandled. (`CR-LAB-0001` §3,
+  `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`, `CC-LAB-0025`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

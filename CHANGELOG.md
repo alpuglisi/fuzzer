@@ -14,6 +14,24 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (LAB, `CC-LAB-0025`, minimal-pair invariant pulled forward from Phase 1): added
+  `fuzzlab/labgen/minimal_pair.py`, a standalone offline checker that a cell's
+  vulnerable/secure `EmittedFiles` differ only within the declared transform/sink region
+  (`CR-LAB-0001` §3, `docs/LAB_SEED_AUTHORING_PLAYBOOK.md` steps 5/6) — parses the
+  `// Module composition: a -> b -> c` provenance comment any module-composition emitter
+  writes, classifies each position by its module's registered category, and independently
+  cross-checks the empirically differing content region via longest-common-prefix/suffix
+  trim, catching the Juliet-style failure mode where an unrelated identifier rename slips
+  through as "a small diff." `check_identifier_stability()` additionally asserts declared
+  function/handler names are byte-identical across twins. Explicitly out of scope for this
+  Phase-0-pulled-forward delivery: unequal-length transform pipelines between twins (raises
+  `MinimalPairError` rather than silently passing) and non-PHP identifier extraction. 16 new
+  tests using a real `php_current`-rendered pair as the positive fixture. This lane's
+  worktree was based on a commit predating several later Phase 0 merges; only its two
+  genuinely new files were verified independently (re-read, re-run against current trunk's
+  `emitter`/`modules`) and copied in, with fresh bookkeeping written here rather than
+  carrying over its isolated-worktree numbering. Full suite 793 passed / 6 skipped / 2
+  pre-existing unrelated `test_mutation_operators.py` failures.
 - Feature (LAB, `CC-LAB-0024`, T-LAB0.6): added the Gitleaks-based secret-scanner
   build gate — `.gitleaks.toml` (repo root) extending Gitleaks' default ruleset with
   an allowlist for explicitly `FAKE`/`EXAMPLE`/`PLACEHOLDER`-marked seeded credentials,

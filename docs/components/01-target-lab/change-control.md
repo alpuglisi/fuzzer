@@ -3,6 +3,67 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0025 — minimal-pair invariant checker, pulled forward from Phase 1 (2026-09-21)
+*(This lane's worktree was based on a commit predating `CC-LAB-0020`-`0024` landing.
+Rather than merge its branch wholesale (would reintroduce duplicate/stale content its
+own worktree never saw land), its two genuinely new files
+(`fuzzlab/labgen/minimal_pair.py`, `tests/test_labgen_minimal_pair.py`) were verified
+independently — read in full, then copied into trunk and re-run against trunk's current
+`emitter.py`/`modules/` — and this entry writes fresh bookkeeping rather than carrying
+over its isolated-worktree numbering.)*
+- Change: added `fuzzlab/labgen/minimal_pair.py`, a standalone, offline checker over two
+  already-rendered `EmittedFiles` results (never renders anything itself) asserting a
+  cell's vulnerable and secure twins form a valid minimal pair per `CR-LAB-0001` §3 and
+  `docs/LAB_SEED_AUTHORING_PLAYBOOK.md` steps 5/6 — everything outside the declared
+  transform/sink region must be byte-identical. Region detection is emitter-agnostic: it
+  parses the `// Module composition: a -> b -> c` provenance comment any
+  module-composition emitter writes (this project's established convention, per
+  `fuzzlab/labgen/emitters/php_current/__init__.py`), classifies each named position by
+  its module's own registered `category` via read-only lookup against
+  `fuzzlab.labgen.modules`' registries, and independently cross-checks the empirically
+  differing content region via a longest-common-prefix/longest-common-suffix trim over
+  each file's lines (excluding the composition comment itself) — when the composition
+  sequences are name-for-name identical, this middle band is required to be empty,
+  catching the Juliet-style failure mode the playbook itself cites: an unrelated
+  identifier rename with no declared composition change slipping through as "a small
+  diff." `check_identifier_stability()` separately asserts every declared
+  function/handler name (`function NAME(`) is byte-identical between twins. Raises
+  `MinimalPairViolation` (a real invariant violation, naming exactly what differed) or
+  the base `MinimalPairError` (the check itself couldn't be evaluated — no composition
+  comment found, or a composition names an unregistered module) — never a silent pass.
+  Explicitly out of scope for this Phase-0-pulled-forward delivery, per the module's own
+  docstring: unequal-length composition sequences between twins (raises
+  `MinimalPairError`, not a guess) and non-PHP identifier extraction (currently
+  `function NAME(`/`$var`-oriented).
+- Impact (other components / project): none outside LAB. Read-only against
+  `fuzzlab.labgen.emitter`'s `EmittedFile`/`EmittedFiles` types and
+  `fuzzlab.labgen.modules`' registries; does not modify either. Not yet wired into any
+  build gate or CLI — a standalone checker exercised via its own test suite today, same
+  convention as `gates.py`'s name-leak scanner and `secret_scanner.py` before their own
+  eventual `--check` CLI wiring.
+- Risk (level; mitigation): low. New, additive, read-only code with no callers yet. The
+  positive fixture in its test suite is a *real* `php_current`-rendered pair (same cell
+  identity, `dataclasses.replace`'d transform field only), not a synthetic string —
+  proving the checker actually accepts a real minimal pair, not just an idealized one; 9
+  hand-constructed negative fixtures cover file-set/role mismatches, missing composition
+  comments, unrelated content drift with no composition change, identifier renames,
+  composition-length mismatches, unregistered module names, and both directions of the
+  `variable_categories` restriction.
+- Deliverables:
+  - [x] `fuzzlab/labgen/minimal_pair.py` (`check_minimal_pair`, `check_identifier_stability`,
+        `MinimalPairError`, `MinimalPairViolation`) — done.
+  - [x] Emitter-agnostic region detection via the composition-comment convention — done.
+  - [x] Content-confinement cross-check independent of the composition parse — done.
+  - [x] 16 new tests (positive real-pair fixture + 9 hand-constructed negative cases +
+        6 direct `check_identifier_stability` cases) — done, all pass.
+  - [ ] Wiring into an actual build gate/CLI — not yet, same as the sibling gates above.
+  - [ ] Variable-length transform pipelines between twins — not supported, documented
+        limitation, not silently mishandled.
+- Effectiveness (assessed 2026-09-21): met this delivery's own bar — 16 new tests pass
+  against a real rendered pair and 9 distinct hand-constructed violation shapes; full
+  suite 793 passed / 6 skipped / 2 pre-existing unrelated `test_mutation_operators.py`
+  failures (baseline before this change: 777 passed, same 2 failures, 6 skipped).
+
 ### CC-LAB-0024 — T-LAB0.6: Gitleaks secret-scanner build gate (2026-09-21)
 *(Numbered `CC-LAB-0024` rather than `CC-LAB-0020` at merge time — this lane's worktree
 was based on a commit that predated `CC-LAB-0020`-`0023` landing, so it independently
