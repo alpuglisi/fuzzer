@@ -13,6 +13,12 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Planning: added `docs/PHASE_2_PLAN.md` — the deterministic-hardening (no-ML) task
+  breakdown (T2.1–T2.8): a standalone deterministic oracle (differential timing +
+  error signatures) as the sole finding-writer, median/MAD baselines, rules-as-data
+  with full evaluation logging (negatives), canary reflection + sink-context typing,
+  fingerprint-before-fuzz, template-cluster (MinHash) dedup, hybrid crawl, and a
+  request-efficiency exit measurement. Referenced from the roadmap.
 - Phase 1 build (T1.7): **non-secret session-state persistence**. Added migration 3
   (`session_state` table) + Store methods; the session manager persists non-secret
   metadata (host/identity/kind/validity/endpoints/token-exp) on login and logout,

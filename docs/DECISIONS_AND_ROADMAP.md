@@ -303,7 +303,7 @@ Goal: tools stay authenticated through a full run. Task breakdown in
 
 ### Phase 2 — Deterministic wins (no ML) `[planned]`
 Goal: fewer requests for the same findings, and a trainable dataset with
-negatives.
+negatives. Task breakdown in `docs/PHASE_2_PLAN.md`.
 - Differential-timing oracle.
 - Median/MAD rolling baselines replacing mean/σ.
 - Template-cluster dedup via DOM-skeleton MinHash.
