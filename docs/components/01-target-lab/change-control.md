@@ -851,6 +851,76 @@ number. No content changed beyond the number.)*
   unrelated `test_mutation_operators.py` failures (same 2 as `CC-LAB-0027`'s
   own recorded baseline) — 19 new tests added, zero regressions.
 
+### CC-LAB-0038 — `sink_endpoint` distinct from `injection_endpoint` (L-P2.3) (2026-09-21)
+*(This lane's worktree was created onto a stale, unrelated branch lineage with no
+`fuzzlab/labgen/` directory present at all; self-diagnosed via the task's own sync
+check and recovered with `git fetch . claude/trusting-noether-heon0n:refs/remotes/
+origin/claude/trusting-noether-heon0n` + `git reset --hard` onto the live branch tip
+before any work began. Numbered `CC-LAB-0038` rather than the `CC-LAB-0029` this
+lane's own report expected as "simply the next number" — by merge time, eight other
+concurrent lanes (L-P2.1, L-P0.9, L-P1.1, L-P1.2a, L-P2.2, L-P0.10, L-P3.1, L-P3.2,
+L-P3.3a) had already claimed and reconciled numbers up through `CC-LAB-0037`.
+Reconciled per this project's standing multi-lane policy: keep this entry's full
+content, renumber it to the next free number, fix its own internal `FR-LAB-27`
+cross-reference (see below, now `FR-LAB-36`). See also the merge-time addendum below,
+closing this entry's own flagged schema gap.)*
+- Change: extended `fuzzlab.labgen.schema.Cell` with an optional
+  `sink_endpoint: Route | None = None` field (`docs/LAB_IMPLEMENTATION_PLAN.md` §3.3),
+  reusing the existing `Route` type. `None` (the default) means same-endpoint —
+  today's entire corpus, and `Cell.from_dict` only sets it when a manifest cell
+  actually declares `sink_endpoint`, so every pre-existing cell is unaffected.
+  Populated only for stored/second-order cells (e.g. a stored-XSS cell whose
+  injection point, `route`, is a profile-bio write endpoint, distinct from
+  `sink_endpoint`, the profile-view page that actually echoes and executes the
+  payload). `fuzzlab.labgen.verdict`'s derivation logic is untouched by design —
+  `sink_endpoint` is render/tracking metadata, the same category as `identity.py`'s
+  data, never a verdict input.
+  Confirmed `fuzzlab.labgen.emitters.php_current`'s existing `read_stored_field`
+  source module (already built, `CC-LAB-0022`) composes with a `sink_endpoint` cell
+  by hand-rendering a stored-XSS test cell end to end. That composition surfaced one
+  genuine, narrow gap (not a new module category, matching this project's own
+  "extend, don't rebuild" convention): `PhpCurrentEmitter.render()` resolved its
+  `_PAGE_PARAMS` page profile — and its `// Real page:` comment — from `cell.route`
+  unconditionally, which is correct for a same-endpoint cell but wrong for a
+  `sink_endpoint` cell, since php_current only ever renders the sink side of a
+  stored-XSS shape (the `ReadStoredFieldSource` module's own docstring already says
+  so). Fixed with one `render_route = cell.sink_endpoint or cell.route` line and its
+  two downstream uses — no new module, no restructuring.
+- Impact (other components / project): LAB only. `verdict.py` untouched (see above).
+  `lab/schemas/manifest.schema.json` was deliberately **not** touched by this lane,
+  per its own scope discipline — its new tests exercise
+  `Cell.from_dict`/`Manifest.from_dict(..., validate=False)` directly rather than
+  the full YAML+jsonschema `load_manifest()` path, so a manifest author who wants
+  to declare `sink_endpoint` in an actual YAML manifest file could not yet do so
+  through the validated loader. **Closed at merge time**: added a `sink_endpoint`
+  property to the cell definition in `lab/schemas/manifest.schema.json`
+  (`"$ref": "#/$defs/route"`, mirroring `route`'s own shape exactly, optional —
+  `additionalProperties: false` on the cell schema meant the field was otherwise
+  silently rejected by `load_manifest()`'s validation step). This is a field
+  addition, not a restructuring, so it stays easy to reconcile with the concurrent
+  `schema.py`/`manifest.schema.json` lanes (L-P1.1's `axis_ranges`, already merged;
+  L-P2.4's parameter-encoding, not yet merged).
+- Risk (level; mitigation): low. Purely additive dataclass field with a safe default;
+  regression-tested against both existing Phase 0 manifests to confirm byte-identical
+  render output. The one behavior change inside `php_current` (page-profile
+  resolution) is exercised by the same regression tests and only changes behavior
+  when `sink_endpoint` is set, which no existing cell does.
+- Deliverables:
+  - [x] `Cell.sink_endpoint: Route | None = None` in `fuzzlab/labgen/schema.py` — done
+  - [x] `php_current` render()'s page-profile/comment resolution made sink_endpoint-aware — done
+  - [x] Hand-built stored-XSS test cell round-trips + renders via `php_current` — done
+  - [x] Regression: both existing manifests still load/render identically — done
+  - [x] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-36` — done
+  - [x] `lab/schemas/manifest.schema.json` `sink_endpoint` property — closed at merge
+        time (see Impact above); a new regression test asserts a manifest
+        declaring `sink_endpoint` now loads through the full validated
+        `load_manifest()` path, not just `validate=False`.
+- Effectiveness (assessed 2026-09-21): full suite green for this change (8 new tests
+  in `tests/test_labgen_sink_endpoint.py`, all passing; 877 passed / 8 skipped overall,
+  2 pre-existing unrelated failures in `tests/test_mutation_operators.py` confirmed
+  present before this change too, outside LAB/this lane's scope). Full suite re-run
+  after the merge-time schema fix; see the merge commit for the exact count.
+
 ### CC-LAB-0028 — Nuclei path-traversal/LFI oracle wrapper (Addendum E, Spike 004) (2026-09-21)
 *(Numbered `CC-LAB-0028` rather than `CC-LAB-0017` at merge time — this lane's worktree
 diverged onto a stale, unrelated branch lineage before starting, self-diagnosed and

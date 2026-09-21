@@ -149,6 +149,22 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   later lanes this work unblocks — see `CC-LAB-0037` (renumbered from a
   concurrently-claimed `CC-LAB-0029` which collided with lanes
   L-P2.1/L-P0.9/L-P1.1/L-P1.2a/L-P2.2/L-P0.10/L-P3.1/L-P3.2).
+- Lab (L-P2.3): added `Cell.sink_endpoint: Route | None = None` (default `None` =
+  same-endpoint, unchanged behavior for the entire existing corpus) so a stored/
+  second-order cell can name a sink page distinct from its injection-point `route`
+  (e.g. a profile-bio write endpoint whose payload executes on a separate view page).
+  `verdict.py` untouched — it is render/tracking metadata, not a verdict input.
+  Composing this with `php_current`'s existing `read_stored_field` source
+  (CC-LAB-0022) surfaced one genuine gap: `render()` resolved its page profile from
+  `cell.route` unconditionally, so it raised for a cell whose injection route has no
+  page profile of its own; fixed by resolving the page profile from `sink_endpoint`
+  when set, falling back to `route` otherwise. At merge time, also added the missing
+  `sink_endpoint` property to `lab/schemas/manifest.schema.json` (mirroring `route`'s
+  own `$ref`), since this lane's own tests exercised the new field only via
+  `Manifest.from_dict(..., validate=False)` — without the schema property, a real,
+  schema-validated manifest could never actually populate `sink_endpoint`
+  (`CC-LAB-0038`, renumbered from a concurrently-claimed `CC-LAB-0029` which collided
+  with lanes L-P2.1/L-P0.9/L-P1.1/L-P1.2a/L-P2.2/L-P0.10/L-P3.1/L-P3.2/L-P3.3a).
 - Docs: fleshed `docs/LAB_IMPLEMENTATION_PLAN.md`'s Phase 2 (§3) and Phase 3 (§4)
   from milestone-level bullets into full task breakdowns matching Phase 0/1's
   granularity, and added a new §7 lane/dependency map covering every Phase 0-3

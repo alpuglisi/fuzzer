@@ -87,6 +87,10 @@
         "route": { "$ref": "#/$defs/route" },
         "sink_context": { "$ref": "#/$defs/sink_context" },
         "transform": { "$ref": "#/$defs/pipeline" },
+        "sink_endpoint": {
+          "allOf": [{ "$ref": "#/$defs/route" }],
+          "description": "Where the tainted value actually reaches the sink and executes, if different from 'route' (the injection point). Absent means same-endpoint. Populated only for stored/second-order cells (CC-LAB-0038)."
+        },
         "nuisance": {
           "type": "object",
           "description": "Opaque bag of nuisance-axis values (naming, whitespace, comment style, etc.) that must not affect the derived verdict. Reserved for the covering-array/nuisance-independence work in later phases; unused by Phase 0's verdict derivation."

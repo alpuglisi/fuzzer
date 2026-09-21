@@ -628,6 +628,32 @@ lane) can submit a payload as
   documented in `fuzzlab/labgen/emitters/php_laravel/stack/README.md`).
   (`docs/LAB_IMPLEMENTATION_PLAN.md` §4.3 steps 1/3/4/5, `CR-LAB-0001`
   Addendum D, `CC-LAB-0037`)
+- **FR-LAB-36** (Lab track, L-P2.3) *(Numbered `FR-LAB-36` rather than `FR-LAB-27` at
+  merge time — this lane independently claimed `FR-LAB-27`, colliding with lane
+  L-P2.1's identity/ownership requirement above; reconciled per this project's
+  standing multi-lane policy: keep both entries' full content, renumber this
+  later-landing one, fix its own `CC-LAB` cross-references to `CC-LAB-0038` below,
+  and update its own "still requires a follow-up" sentence, closed at merge time —
+  see `CC-LAB-0038`'s merge-time addendum.)* `fuzzlab.labgen.schema.Cell` carries an optional
+  `sink_endpoint: Route | None = None`, distinct from `route` (the injection point),
+  naming where a stored/second-order cell's payload actually reaches its sink and
+  executes — e.g. a profile-bio write endpoint (`route`) whose payload executes on a
+  separate profile-view page (`sink_endpoint`). `None` (the default) means
+  same-endpoint, matching every cell in today's corpus unchanged. This is
+  render/tracking metadata only, the same category as `identity.py`'s data —
+  `fuzzlab.labgen.verdict.verdict()`'s derivation never reads it, and a cell's
+  verdict depends only on `(transform, sink_context, safety_matrix)` as before
+  (D20). `fuzzlab.labgen.emitters.php_current.PhpCurrentEmitter.render()` resolves
+  its page profile (and its `// Real page:` comment) from `sink_endpoint` when set,
+  falling back to `route` otherwise, since this emitter renders the sink side of a
+  cell (the existing `read_stored_field` source module, FR-LAB-18 / `CC-LAB-0022`,
+  already documented this "sink side only" scope before `sink_endpoint` existed to
+  express it). `lab/schemas/manifest.schema.json` now declares `sink_endpoint` on
+  the cell definition (added at merge time — see `CC-LAB-0038`'s merge-time
+  addendum), mirroring `route`'s own `$ref` shape, so a manifest can declare it
+  through the full validated `load_manifest()` path, not only via
+  `Cell.from_dict`/`Manifest.from_dict(..., validate=False)`.
+  (`docs/LAB_IMPLEMENTATION_PLAN.md` §3.3, `CC-LAB-0038`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
