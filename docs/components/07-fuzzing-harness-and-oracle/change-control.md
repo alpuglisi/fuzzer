@@ -3,6 +3,40 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0009 — `fuzzlab auto`: automatic-mode entry point wired live (T2.8) (2026-09-21)
+- Change: added `fuzzlab/harness/auto.py` (`run_auto`, `injection_points_from_store`,
+  `_CountingSender`) and `fuzzlab/harness/auto_cli.py`, wired as `fuzzlab auto`.
+  `run_auto` builds injection points from a crawl consolidated into the store (one
+  point per endpoint+param, full URL with no query so the sender adds `?param=value`),
+  resolves the run plan (D14 categories from ground truth + scored, or D15 fail-safe),
+  wraps the probe sender in a request counter, and runs `run_pipeline` (scoped rules
+  eval with negatives → oracle confirm → target fingerprint → score → request
+  metrics). The CLI consolidates an existing `spider_results.db`, requires
+  `--authorized`, and prints the plan, counts, findings, score, and request cost.
+- Impact (other components / project): gives the automatic-mode path a real runnable
+  entry (the missing half of the manual tool chain) — it writes the `target`,
+  `evaluation` (negatives), and oracle `finding` rows and scores against ground truth,
+  which the standalone tools did not. Uses the real requests/seam probe sender
+  (`make_probe_sender`), so it also runs authenticated (`--identity`). This is the
+  "live wiring" T2.8 left open in CC-FUZZ-0008.
+- Risk (level; mitigation): medium — it sends confirmation probes at a live target.
+  Mitigated by the `--authorized` gate, the oracle's fail-closed confirmation, the
+  D15 no-ground-truth fail-safe (loud, unscored), category scoping, and 4 offline
+  tests (`tests/test_auto.py`: point building, scored end-to-end with request
+  counting, D15 fail-loud, D15 unscored-with-categories). Suite 130 passed / 2 skipped.
+- Deliverables:
+  - [x] `run_auto` + `injection_points_from_store` + request-counting sender — done.
+  - [x] `fuzzlab auto` CLI (import crawl, `--authorized`, D14/D15, summary) — done.
+  - [x] Offline tests (scored, fail-safe, unscored) — done.
+  - [ ] Run against the live lab; compare requests-per-finding to a Phase-1 baseline — on-host.
+  - [ ] DOM-skeleton dedup for distinct-URL same-template pages (needs the crawler to
+    store rendered HTML) — follow-up; endpoint-keying already collapses query-param
+    variants (e.g. product.php?id=1..10 → one point), so it is not needed for this lab.
+- Effectiveness (assessed 2026-09-21): effective in tests — automatic mode produces
+  oracle findings, logs negatives, records the target fingerprint and request cost,
+  and scores TP/FP against ground truth; live run + the fewer-requests comparison
+  pending on the host.
+
 ### CC-FUZZ-0008 — Automatic-mode pipeline wired end-to-end (Phase 2 T2.8) (2026-09-21)
 - Change: added `fuzzlab/harness/pipeline.py::run_pipeline`, the library-level
   composition of an automatic run: dedup injection points by DOM-skeleton template

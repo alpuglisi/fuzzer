@@ -27,6 +27,7 @@ commands:
   crawl [args]        run the crawler        (python -m fuzzlab.tools.spider)
   audit [args]        run the auditor        (python -m fuzzlab.tools.fetcher)
   fuzz  [args]        run the blind SQLi fuzzer (requires --authorized)
+  auto  [args]        run an automatic pipeline pass over a crawl (requires --authorized)
   build-db [args]     rebuild the indicator database
   version             print the version
 
@@ -54,6 +55,10 @@ def main(argv: list[str] | None = None) -> int:
     if command == "session":
         from fuzzlab.session import cli as session_cli
         return session_cli.main(rest)
+
+    if command == "auto":
+        from fuzzlab.harness import auto_cli
+        return auto_cli.main(rest)
 
     module = _TOOL_MODULES.get(command)
     if module is None:

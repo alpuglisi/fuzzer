@@ -1,0 +1,80 @@
+"""Automatic-mode entry point: crawl results -> the Phase 2 pipeline (T2.8).
+
+`run_auto` is the live glue over `run_pipeline`: it builds injection points from a
+crawl already consolidated into the store (endpoint/parameter rows), resolves the
+run plan (D14 categories from ground truth + scored, or D15 fail-safe), wraps the
+probe sender in a request counter so the run's request cost is measured, and runs
+the pipeline. `fuzzlab auto` (see `auto_cli`) wires this to the CLI.
+
+Injection points use the endpoint's **full** URL (base + stored path) with no query
+string, so the probe sender adds `?param=value` cleanly (the stored path is in
+path form via `core.urls.to_path`).
+"""
+
+from __future__ import annotations
+
+from fuzzlab.audit import InjectionPoint, known_categories
+from fuzzlab.core.runmode import categories_from_vuln_classes, resolve_run
+from fuzzlab.harness.pipeline import PipelineResult, run_pipeline
+
+
+def injection_points_from_store(store, run_id: int, base_url: str) -> list[InjectionPoint]:
+    """Build injection points from the run's endpoint/parameter rows."""
+    base = base_url.rstrip("/")
+    rows = store.conn.execute(
+        "SELECT e.url AS path, e.method AS method, p.name AS name, p.location AS location "
+        "FROM parameter p JOIN endpoint e ON p.endpoint_id = e.id "
+        "WHERE p.run_id = ?",
+        (run_id,),
+    ).fetchall()
+    points: list[InjectionPoint] = []
+    seen: set[tuple[str, str, str]] = set()
+    for r in rows:
+        path = r["path"] if r["path"].startswith("/") else "/" + r["path"]
+        method = r["method"] or "GET"
+        key = (path, method, r["name"])
+        if key in seen:
+            continue
+        seen.add(key)
+        points.append(InjectionPoint(url=base + path, param=r["name"],
+                                     method=method, location=r["location"] or "query"))
+    return points
+
+
+class _CountingSender:
+    """Wrap a probe sender to count sends, so the run's request cost is measured.
+
+    Serves as both the pipeline's ``sender`` and its ``budget`` (``used()``).
+    """
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.count = 0
+
+    def send(self, url, param, value, timing: bool = False):
+        self.count += 1
+        return self._inner.send(url, param, value, timing=timing)
+
+    def used(self, component: str | None = None) -> int:
+        return self.count
+
+
+def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automatic",
+             ground_truth=None, selected_categories=None,
+             pages_html: dict[str, str] | None = None) -> PipelineResult:
+    """Resolve the plan (D14/D15) and run the Phase 2 pipeline over crawl results."""
+    points = injection_points_from_store(store, run_id, base_url)
+
+    gt_categories = None
+    if ground_truth is not None:
+        gt_categories = categories_from_vuln_classes(
+            c.vuln_class for c in ground_truth.positives())
+
+    plan = resolve_run(mode, ground_truth_categories=gt_categories,
+                       selected_categories=selected_categories,
+                       all_categories=known_categories())
+
+    counting = _CountingSender(sender)
+    return run_pipeline(points, store, run_id, counting, plan,
+                        ground_truth=ground_truth, pages_html=pages_html,
+                        budget=counting)

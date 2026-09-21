@@ -154,8 +154,14 @@ Phase-1 baseline run.
 - **Status:** library composition **done** — `run_pipeline` records
   `pipeline_requests`/`pipeline_requests_per_finding` in `run_metrics` (when a budget
   is supplied) and the `evaluation`/`candidate` tables carry negatives; verified in
-  `tests/test_pipeline.py`. The measurably-fewer-requests comparison is a **live**
-  measurement against the running lab (on-host), still pending.
+  `tests/test_pipeline.py`. Live entry point **done** — `fuzzlab auto`
+  (`fuzzlab/harness/auto.py` + `auto_cli.py`, CC-FUZZ-0009) builds injection points
+  from a crawl, resolves the plan (D14/D15), runs the pipeline with the real probe
+  sender + a request counter, writes the `target`/`evaluation`/`finding` rows, and
+  scores vs ground truth; `tests/test_auto.py`. Remaining: **run it against the
+  running lab and compare requests-per-finding to a Phase-1 baseline** (on-host); and
+  DOM-skeleton dedup for distinct-URL same-template pages (needs the crawler to store
+  rendered HTML — endpoint-keying already collapses query-param variants for this lab).
 
 ### T2.9 — Injection-category selection by run mode (D14)
 Scope which categories run by launcher mode: **automatic** (against our lab)

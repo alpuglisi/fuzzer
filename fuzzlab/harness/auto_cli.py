@@ -1,0 +1,85 @@
+"""`fuzzlab auto` — run an automatic-mode pass over a crawl (Phase 2 T2.8).
+
+Consolidates an existing crawl (`spider_results.db` from `fuzzlab crawl`) into the
+store, then runs the deterministic pipeline: scoped rules evaluation with negatives,
+oracle confirmation (sole finding-writer), target fingerprint, and — when a
+ground-truth contract is given — TP/FP scoring. Sends confirmation probes, so it
+requires ``--authorized`` (lab-only).
+
+Category selection follows the run mode (D14/D15): automatic + ground truth derives
+the categories and scores; automatic + no ground truth needs ``--categories`` or
+fails loudly (unscored); manual selects, defaulting to all known categories.
+"""
+
+from __future__ import annotations
+
+import argparse
+from urllib.parse import urlparse
+
+from fuzzlab.core.runmode import RunModeError
+from fuzzlab.core.store import Store
+from fuzzlab.harness.auto import run_auto
+from fuzzlab.labels import contract
+from fuzzlab.tools.probesender import make_probe_sender
+from fuzzlab.tools.store_adapter import import_spider
+
+
+def main(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(prog="fuzzlab auto")
+    p.add_argument("--base-url", required=True,
+                   help="Target origin, e.g. http://127.0.0.1:8080")
+    p.add_argument("--spider-db", default="spider_results.db",
+                   help="Crawl results to consolidate (from `fuzzlab crawl`)")
+    p.add_argument("--store", required=True, help="Unified store (SQLite) to write to")
+    p.add_argument("--ground-truth", default=None,
+                   help="Ground-truth dir (enables D14 categories + scoring)")
+    p.add_argument("--mode", choices=["automatic", "manual"], default="automatic")
+    p.add_argument("--categories", default=None,
+                   help="Comma-separated categories (manual, or D15 fail-safe)")
+    p.add_argument("--identity", default=None,
+                   help="Authenticated run as this identity (else anonymous)")
+    p.add_argument("--authorized", action="store_true",
+                   help="Required: confirm you are authorized to test this lab target")
+    args = p.parse_args(argv)
+
+    if not args.authorized:
+        p.error("refusing to send probes without --authorized (lab-only)")
+
+    selected = [c.strip() for c in args.categories.split(",")] if args.categories else None
+    ground_truth = contract.load(args.ground_truth) if args.ground_truth else None
+    host = urlparse(args.base_url).netloc or args.base_url
+
+    with Store(args.store) as store:
+        run_id = store.start_run("auto", host)
+        counts = import_spider(args.spider_db, store, run_id)
+        sender = make_probe_sender(args.base_url, args.identity)
+        try:
+            result = run_auto(base_url=args.base_url, store=store, run_id=run_id,
+                              sender=sender, mode=args.mode, ground_truth=ground_truth,
+                              selected_categories=selected)
+        except RunModeError as exc:
+            p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
+
+        _print_summary(args, counts, result)
+    return 0
+
+
+def _print_summary(args, counts, result) -> None:
+    plan = result.plan
+    print(f"\nauto run ({plan.mode}, {'scored' if plan.scored else 'unscored'}; "
+          f"categories={plan.categories}; source={plan.source})")
+    print(f"  imported: {counts.get('endpoint', 0)} endpoint(s), "
+          f"{counts.get('parameter', 0)} parameter(s)")
+    print(f"  points audited: {result.points_audited}   "
+          f"candidates: {result.candidates}   negatives: {result.negatives}")
+    print(f"  findings (oracle-confirmed): {result.findings}")
+    if result.report is not None:
+        r = result.report
+        print(f"  score vs ground truth: tp={r.tp} fp={r.fp} fn={r.fn} tn={r.tn}")
+    else:
+        print("  unscored (no ground truth / D15 fail-safe)")
+    m = result.metrics
+    if m.get("requests") is not None:
+        rpf = m.get("requests_per_finding")
+        print(f"  requests: {m['requests']}"
+              + (f"   requests/finding: {rpf}" if rpf is not None else ""))

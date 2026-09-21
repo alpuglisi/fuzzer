@@ -13,6 +13,16 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 2 build (T2.8 live wiring): added **`fuzzlab auto`** — the automatic-mode
+  entry point (`fuzzlab/harness/auto.py` + `auto_cli.py`). It builds injection points
+  from a crawl consolidated into the store, resolves the run plan (D14 categories from
+  ground truth + scored, or D15 fail-safe), wraps the real probe sender in a request
+  counter, and runs `run_pipeline` — writing the `target` fingerprint, `evaluation`
+  negatives, and oracle `finding` rows, and scoring TP/FP vs ground truth. Requires
+  `--authorized`; runs authenticated with `--identity`. This is the runnable automatic
+  path the manual tool chain lacked. +4 tests (130 passed / 2 skipped). Runbook Part D
+  updated with the command; on-host step is the run + fewer-requests measurement.
+  Change-control: CC-FUZZ-0009.
 - Bug fix (BUG-0005): the headless encrypted-credential backend used `keyrings.alt`'s
   `EncryptedKeyring`, which needs PyCrypto/pycryptodome (undeclared, uninstalled) — so
   `fuzzlab session set-credential` crashed with `No module named 'Crypto'` on a fresh

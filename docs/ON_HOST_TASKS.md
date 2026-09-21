@@ -25,17 +25,19 @@ measurement/validation remains.
 
 ## Phase 2 — live wiring + exit measurement (T2.8)
 
-- [ ] **Wire `run_pipeline` into the live crawler/auditor loops.**
-  `fuzzlab/harness/pipeline.py::run_pipeline` composes the automatic run and is
-  tested with an injected sender; feed it **real pages/HTML** from the crawler and
-  the auditor's browser-fetch paths (cluster-id from live HTML, engine switch,
-  fingerprint→`target` row from a live baseline probe).
-- [ ] **Measure the request reduction (Phase 2 exit).** Run a full pipeline against
-  the running lab and show **measurably fewer requests** for the same findings than
-  the Phase-1 baseline; confirm `run_metrics` records
-  `pipeline_requests` / `pipeline_requests_per_finding` and the
-  `evaluation`/`candidate`/`attempt` tables hold negatives.
-  (Phase 2 plan T2.8 exit criterion.)
+- [x] **Automatic-mode entry point wired.** `fuzzlab auto`
+  (`fuzzlab/harness/auto.py` + `auto_cli.py`, CC-FUZZ-0009) builds injection points
+  from a crawl, resolves the plan (D14/D15), runs the pipeline with the real probe
+  sender + a request counter, and writes `target`/`evaluation`/`finding` rows + scores.
+  Offline-tested (`tests/test_auto.py`).
+- [ ] **Run it against the lab + measure the request reduction (Phase 2 exit).** Run
+  `fuzzlab auto` against the running lab (see runbook Part D) and show **measurably
+  fewer requests** for the same findings than the Phase-1 baseline (`fuzz` request
+  count); confirm `run_metrics` has `pipeline_requests` /
+  `pipeline_requests_per_finding` and the `evaluation` table holds negatives (fired=0).
+- [ ] **(Optional) DOM-skeleton dedup for distinct-URL same-template pages.** Needs the
+  crawler to store rendered HTML so `pages_html` can feed the pipeline's T2.6 dedup.
+  Not needed for this lab (endpoint-keying already collapses `?id=1..10` to one point).
 
 ## Phase 3 — grey-box live sources + validation
 

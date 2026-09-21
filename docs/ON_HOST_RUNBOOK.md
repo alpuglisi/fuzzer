@@ -98,19 +98,37 @@ The lab's test accounts are `admin/admin123`, `alice/password1`, `bob/letmein`.
 
 ## Part D — Phase 2: automatic run + request-reduction measurement
 
-The pieces exist and are unit-tested (`fuzzlab/harness/pipeline.py::run_pipeline`
-composes dedup → fingerprint → scoped rules-eval → oracle-confirm → score → metrics).
-The remaining **live wiring** feeds it real pages/HTML from the crawler/auditor loops:
+Automatic mode is wired as `fuzzlab auto` — it consolidates a crawl, resolves the
+plan (D14/D15), and runs the deterministic pipeline (scoped rules eval with
+negatives → oracle confirm → target fingerprint → score → request metrics).
 
-1. Wire `run_pipeline` into the live crawl/audit browser-fetch path (see the T2.8
-   note in `docs/PHASE_2_PLAN.md`), supplying a real probe sender and the crawled
-   `pages_html`.
-2. Run an **automatic** scored pass against the lab (categories auto-derived from the
-   ground truth, D14; scored, D15) and a **manual** pass with `--categories`.
-3. **Measure:** compare `run_metrics` (`pipeline_requests`,
-   `pipeline_requests_per_finding`) against a Phase-1 baseline for the same findings —
-   the Phase 2 exit is *measurably fewer requests*. Confirm the `evaluation`/
-   `candidate`/`attempt` tables hold negatives.
+1. **Crawl once** (feeds the pipeline), then run the automatic **scored** pass against
+   our lab (categories auto-derived from ground truth, D14; scored, D15):
+   ```bash
+   fuzzlab crawl --start http://127.0.0.1:8080 --db spider_results.db
+   fuzzlab auto  --base-url http://127.0.0.1:8080 --spider-db spider_results.db \
+                 --store auto.db --ground-truth lab/ground-truth --authorized
+   ```
+   The summary prints the plan, candidates/negatives, oracle findings,
+   `tp/fp/fn/tn` vs ground truth, and the request cost. Add `--identity admin` to run
+   authenticated.
+2. **Fail-safe check (D15):** point automatic mode at a target with **no**
+   `--ground-truth` and no `--categories` — it must refuse loudly:
+   ```bash
+   fuzzlab auto --base-url http://127.0.0.1:8080 --spider-db spider_results.db \
+                --store t.db --authorized            # → error: requires --categories
+   fuzzlab auto --base-url http://127.0.0.1:8080 --spider-db spider_results.db \
+                --store t.db --categories sql-injection --authorized   # unscored run
+   ```
+3. **Measure:** compare the auto run's `pipeline_requests` /
+   `pipeline_requests_per_finding` in `run_metrics` against a Phase-1 baseline (the
+   standalone `fuzz` run's request count) for the same findings — the Phase 2 exit is
+   *measurably fewer requests*. Confirm negatives are present:
+   ```bash
+   sqlite3 auto.db "SELECT key,value FROM run_metrics WHERE key LIKE 'pipeline_%';"
+   sqlite3 auto.db "SELECT fired, COUNT(*) FROM evaluation GROUP BY fired;"  -- 0 = negatives
+   sqlite3 auto.db "SELECT dbms, framework FROM target;"                     -- fingerprint
+   ```
 
 ## Part E — Phase 3: grey-box instrumentation
 
