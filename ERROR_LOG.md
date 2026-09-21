@@ -18,6 +18,26 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — sqlmap/commix exit non-zero on a legitimate negative finding, not only on a crash
+
+- **Symptom:** while building `fuzzlab/labgen/oracle_wrapper.py` (`CC-LAB-0015`), an initial
+  draft gated a verdict on the tool's subprocess exit code being `0` before trusting its
+  textual output — the two skip-guarded integration tests against real cloned `sqlmap`/
+  `commix` binaries failed immediately, because both tools exit non-zero on a clean "not
+  injectable" finding, not only on a crash.
+- **Root cause:** an untested assumption about a third-party tool's exit-code contract,
+  carried over from a more typical CLI convention (0 = success/negative, non-zero = error)
+  that doesn't hold for these two tools.
+- **Remediation:** verdicts are now derived from the tool's own textual output via
+  configurable regex markers, tuned against real tool output; a non-zero exit code is only
+  consulted to add detail when neither marker matched (never as the primary signal). Caught
+  by the real-binary integration test before the assumption ever shipped in a commit — no
+  `docs/bugs/BUG-NNNN` opened, matching this project's own precedent (`docs/bugs/BUG-0018`'s
+  scope note): this is a fact caught and fixed within the same session's authoring work,
+  never landed as a defect in committed code, same as the two prior sqlmap/commix
+  tool-behavior findings below.
+- **Status:** Fixed (this commit). See CC-LAB-0015.
+
 ## 2026-09-21 — ERROR_LOG hook's keyword regex false-positives on "change" (BUG-0020)
 
 - **Symptom:** the first real use of `.claude/hooks/check-error-log-bookkeeping.sh` (added
