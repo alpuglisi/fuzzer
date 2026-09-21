@@ -3,6 +3,19 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0014 — Expose `build_parser()` for the command-spec registry (2026-09-21)
+- Change: `fuzzlab/tools/fetcher.py` now factors its argparse setup into `build_parser()`;
+  `parse_args()` delegates to it. Added `prog="fuzzlab audit"` for accurate usage.
+  Behavior-preserving — same flags, defaults, and parsing.
+- Impact: lets the web launcher introspect the auditor's flags (CC-UI-0011). No CLI
+  behavior change; no traffic; no schema change.
+- Risk (level; mitigation): low — a pure refactor. Mitigated by the unchanged suite
+  (433 passed / 6 skipped) and the command-spec tests.
+- Deliverables:
+  - [x] `build_parser()`; `parse_args()` delegates — done.
+- Effectiveness (assessed 2026-09-21): effective — the registry builds the auditor's spec
+  from this parser.
+
 ### CC-AUD-0013 — InjectionPoint carries stored-XSS store endpoint (2026-09-21)
 - Change: `audit.InjectionPoint` gained optional `store_url`/`store_param`, and the
   engine writes them into the candidate evidence when set, so a stored-XSS observe

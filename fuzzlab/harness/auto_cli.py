@@ -25,7 +25,7 @@ from fuzzlab.tools.probesender import make_probe_sender
 from fuzzlab.tools.store_adapter import import_spider
 
 
-def main(argv: list[str]) -> int:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="fuzzlab auto")
     p.add_argument("--base-url", required=True,
                    help="Target origin, e.g. http://127.0.0.1:8080")
@@ -59,6 +59,11 @@ def main(argv: list[str]) -> int:
                         "set is recorded on the run. Default off (runs with no plugins).")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
+    return p
+
+
+def main(argv: list[str]) -> int:
+    p = build_parser()
     args = p.parse_args(argv)
 
     if not args.authorized:

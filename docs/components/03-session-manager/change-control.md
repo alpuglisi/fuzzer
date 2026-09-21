@@ -3,6 +3,21 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0009 — Expose `build_parser()` for the command-spec registry (2026-09-21)
+- Change: `fuzzlab/session/cli.py` now factors its argparse setup (including the
+  `set-credential`/`print` subparsers) into `build_parser()`; `main()` delegates parsing.
+  Behavior-preserving — same subcommands, flags, and prompts.
+- Impact: lets the web launcher introspect the session subcommands (CC-UI-0011; the registry
+  recurses one level into subparsers). No CLI behavior change; the password prompt is
+  unchanged (the launcher will treat `session` specially). No traffic on build; no schema
+  change.
+- Risk (level; mitigation): low — a pure refactor. Mitigated by the unchanged suite
+  (433 passed / 6 skipped) and the command-spec tests (subparser recursion covered).
+- Deliverables:
+  - [x] `build_parser()` (with subparsers); `main()` delegates — done.
+- Effectiveness (assessed 2026-09-21): effective — the registry surfaces both session
+  subcommands from this parser.
+
 ### CC-SESS-0008 — Fix (BUG-0008): require a positive login-success signal, not an ambient cookie (2026-09-21)
 - Change: `SessionManager._login` now fails loud when the login POST response is still a
   login page (`detect.is_login_page`) or is `401/403`, **before** inspecting cookies. The

@@ -54,6 +54,7 @@ include = ["fuzzlab*"]
 "fuzzlab.tools" = ["data/*.db"]
 "fuzzlab.labels" = ["schemas/*.json"]
 "fuzzlab.audit.rules_data" = ["*.json"]
+"fuzzlab.web" = ["templates/*.html", "static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

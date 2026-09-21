@@ -779,8 +779,9 @@ def audit_page(url, source, fetcher, indicators, db_conn, unhandled, verbose=Tru
         print(f"[-] Fetch failed for {url}: {e}")
 
 
-def parse_args():
+def build_parser():
     p = argparse.ArgumentParser(
+        prog="fuzzlab audit",
         description="Audit spidered pages for injection points, mapped to the "
                     "payload categories in references/. Renders JavaScript with "
                     "a headless browser when Playwright is available."
@@ -808,7 +809,11 @@ def parse_args():
     p.add_argument("--base-url", default=None,
                    help="Target base URL for authentication (required with --identity), "
                         "e.g. http://localhost:8080")
-    return p.parse_args()
+    return p
+
+
+def parse_args():
+    return build_parser().parse_args()
 
 
 def print_summary(conn, out_name):

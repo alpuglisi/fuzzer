@@ -17,12 +17,30 @@ only *reads* results the tools already wrote to the store.
 
 from __future__ import annotations
 
-import html
+import os
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
+
+# FastAPI is imported at module scope (not lazily) so the route handlers' `Request`
+# annotations resolve under `from __future__ import annotations`. Importing this
+# module implies the web extra; `core` never imports it, so core stays web-free.
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from fuzzlab.core.config import Config, load_config
-from fuzzlab.web import results
+from fuzzlab.web import commandspec, results
+from fuzzlab.web.runner import Runner, build_argv, display_command
+from fuzzlab.web.sse import sse_response
+
+if TYPE_CHECKING:
+    from fuzzlab.web.proxycontrol import ProxyController
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_TEMPLATES_DIR = os.path.join(_HERE, "templates")
+_STATIC_DIR = os.path.join(_HERE, "static")
 
 # A pipeline runner takes the config and returns a summary dict. Injected so the
 # panel is testable and does not itself send traffic.
@@ -81,179 +99,69 @@ def _read_detail(cfg: Config, run_id: int) -> dict | None:
         return results.run_detail(store, run_id)
 
 
-# --- HTML rendering -----------------------------------------------------------
+# --- template context builders (rendering lives in templates/, via jinja2) ----
 
-_STYLE = """
- :root { color-scheme: light dark; }
- body { font-family: system-ui, sans-serif; max-width: 860px; margin: 2rem auto;
-        padding: 0 16px; line-height: 1.5; }
- h1 { font-size: 1.4rem; } h2 { font-size: 1.1rem; }
- .card { border: 1px solid #8884; border-radius: 10px; padding: 1rem; margin: 1rem 0; }
- button { font-size: 1rem; padding: .5rem 1rem; border-radius: 8px; cursor: pointer; }
- code { background: #8882; padding: .1rem .3rem; border-radius: 4px; }
- .warn { color: #b00; } .ok { color: #0a0; } .bad { color: #b00; }
- .muted { color: #8888; font-size: .9rem; }
- .result { background: #8882; padding: .5rem; border-radius: 8px; white-space: pre-wrap; }
- table { border-collapse: collapse; width: 100%; }
- th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid #8883;
-          font-size: .95rem; vertical-align: top; }
- a { color: inherit; }
-"""
+def _activities() -> list[dict]:
+    """Every launchable activity's spec, for the Launcher preview. Read-only."""
+    try:
+        from fuzzlab.web.commandspec import all_specs
+        return [s.to_dict() for s in all_specs()]
+    except Exception:  # noqa: BLE001 - the panel must render even if a spec fails
+        return []
 
 
-def _doc(title: str, body: str) -> str:
-    return (f"<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-            f"<title>{html.escape(title)}</title>"
-            f"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-            f"<style>{_STYLE}</style></head><body>{body}</body></html>")
+def _index_context(cfg: Config, state: LauncherState, runs: list[dict]) -> dict[str, Any]:
+    return {
+        "target": cfg.get("target_base_url", ""),
+        "scope": ", ".join(cfg.get("scope_hosts", [])),
+        "mode": state.mode,
+        "authorized": bool(cfg.get("authorized", False)),
+        "categories": _known_categories(),
+        "commands": _tool_commands(cfg),
+        "activities": _activities(),
+        "runs": runs,
+        "last_result": None if state.last_result is None else str(state.last_result),
+    }
 
 
-def _runs_table(runs: list[dict]) -> str:
-    if not runs:
-        return ("<p class='muted'>No runs recorded yet. Run a tool with "
-                "<code>--store</code>, or use automatic mode, then refresh.</p>")
-    rows = "".join(
-        f"<tr><td><a href='/runs/{r['id']}'>#{r['id']}</a></td>"
-        f"<td>{html.escape(str(r['tool']))}</td>"
-        f"<td><code>{html.escape(str(r['target'] or ''))}</code></td>"
-        f"<td>{html.escape(str(r['started_at'] or ''))}</td>"
-        f"<td>{r['findings']}</td></tr>"
-        for r in runs)
-    return ("<table><thead><tr><th>run</th><th>tool</th><th>target</th>"
-            f"<th>started</th><th>findings</th></tr></thead><tbody>{rows}</tbody></table>")
+def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None,
+               proxy: "ProxyController | None" = None):
+    """Build the FastAPI app (loopback-only, read-only over the store).
 
-
-def _page(cfg: Config, state: LauncherState, runs: list[dict]) -> str:
-    base = html.escape(cfg.get("target_base_url", ""))
-    authorized = cfg.get("authorized", False)
-    scope = ", ".join(html.escape(h) for h in cfg.get("scope_hosts", []))
-    cmds = "".join(
-        f"<li><b>{html.escape(c['name'])}</b>: <code>{html.escape(c['cmd'])}</code></li>"
-        for c in _tool_commands(cfg))
-    cats = ", ".join(html.escape(c) for c in _known_categories())
-    warn = "" if authorized else (
-        "<p class='warn'>Not authorized: set <code>authorized: true</code> in config "
-        "to enable automatic mode. Lab-only.</p>")
-    result = ""
-    if state.last_result is not None:
-        result = f"<pre class='result'>{html.escape(str(state.last_result))}</pre>"
-    body = f"""
- <h1>fuzzlab &mdash; control panel</h1>
- <p class="muted">Local, lab-only. Nothing is sent to the target until you choose a
-   mode (no auto-run). This panel only reads results the tools wrote.</p>
- <div class="card">
-   <div>Target: <code>{base}</code></div>
-   <div>Scope: <code>{scope}</code></div>
-   <div>Mode: <code>{html.escape(state.mode)}</code></div>
- </div>
- {warn}
- <div class="card">
-   <h2>Automatic</h2>
-   <p>Run the discovery &rarr; oracle-confirm pipeline against the lab, then review
-      results below.</p>
-   <form method="post" action="/api/run/automatic">
-     <button type="submit"{'' if authorized else ' disabled'}>Run automatically</button>
-   </form>
- </div>
- <div class="card">
-   <h2>Manual</h2>
-   <p>Leave the lab running and use the tools by hand. Selectable categories (D14):
-      <code>{cats}</code> &mdash; add <code>--categories &lt;list&gt;</code> to scope.</p>
-   <ul>{cmds}</ul>
- </div>
- <div class="card">
-   <h2>Review runs</h2>
-   {_runs_table(runs)}
- </div>
- {result}"""
-    return _doc("fuzzlab control panel", body)
-
-
-def _finding_rows(findings: list[dict]) -> str:
-    if not findings:
-        return "<p class='muted'>No findings for this run.</p>"
-    rows = "".join(
-        f"<tr><td>{html.escape(f['vuln_class'] or '')}</td>"
-        f"<td><code>{html.escape(f['url'] or '')}</code></td>"
-        f"<td>{html.escape(f['method'] or '')}</td>"
-        f"<td>{html.escape(f['param'] or '')}</td>"
-        f"<td>{html.escape(f['confidence'] or '')}</td></tr>"
-        for f in findings)
-    return ("<table><thead><tr><th>class</th><th>url</th><th>method</th>"
-            f"<th>param</th><th>mechanism</th></tr></thead><tbody>{rows}</tbody></table>")
-
-
-def _run_page(detail: dict) -> str:
-    c = detail["counts"]
-    fp = detail["target_fingerprint"] or {}
-    score = detail["score"]
-    score_html = "<p class='muted'>Unscored (no ground truth).</p>"
-    if score:
-        cls = "ok" if score.get("fp", 0) == 0 else "bad"
-        score_html = (f"<p class='{cls}'>Score: TP={int(score.get('tp',0))} "
-                      f"FP={int(score.get('fp',0))} FN={int(score.get('fn',0))} "
-                      f"TN={int(score.get('tn',0))} "
-                      f"(precision={score.get('precision','?')}, "
-                      f"recall={score.get('recall','?')})</p>")
-    metrics = "".join(
-        f"<li><code>{html.escape(str(k))}</code>: {html.escape(str(v))}</li>"
-        for k, v in sorted(detail["metrics"].items()))
-    body = f"""
- <p><a href="/">&larr; all runs</a></p>
- <h1>Run #{detail['id']} &mdash; {html.escape(str(detail['tool']))}</h1>
- <p class="muted">Target <code>{html.escape(str(detail['target'] or ''))}</code>,
-   started {html.escape(str(detail['started_at'] or ''))}.</p>
- <div class="card">{score_html}
-   <div>Fingerprint: DBMS <code>{html.escape(str(fp.get('dbms') or '?'))}</code>,
-     framework <code>{html.escape(str(fp.get('framework') or '?'))}</code>,
-     WAF <code>{html.escape(str(fp.get('waf') or '?'))}</code></div>
-   <div class="muted">candidates {c['candidates']} &middot; negatives {c['negatives']}
-     &middot; evaluations {c['evaluations']} &middot; attempts {c['attempts']}
-     &middot; pages {c['pages']}</div>
- </div>
- <div class="card"><h2>Findings ({len(detail['findings'])})</h2>
-   {_finding_rows(detail['findings'])}</div>
- {_scores_card(detail)}
- <div class="card"><h2>Metrics</h2><ul>{metrics or '<li class=muted>none</li>'}</ul></div>"""
-    return _doc(f"fuzzlab run #{detail['id']}", body)
-
-
-def _scores_card(detail: dict) -> str:
-    scored = detail.get("scored") or []
-    model = detail.get("model")
-    if not model and not scored:
-        return ""
-    name = f"{model['name']} v{model['version']}" if model else "none"
-    if not scored:
-        return (f"<div class='card'><h2>Model scores (advisory)</h2>"
-                f"<p class='muted'>Model: <code>{html.escape(name)}</code>. "
-                f"No scored candidates for this run.</p></div>")
-    rows = "".join(
-        f"<tr><td><code>{html.escape(s['url'] or '')}</code></td>"
-        f"<td>{html.escape(s['param'] or '')}</td>"
-        f"<td>{html.escape(s['category'] or '')}</td>"
-        f"<td>{s['score']}</td><td>{html.escape(s['decision'])}</td></tr>"
-        for s in scored)
-    return (f"<div class='card'><h2>Model scores (advisory)</h2>"
-            f"<p class='muted'>Model: <code>{html.escape(name)}</code>. Scores rank "
-            f"candidates and the conformal gate triages them (flag / abstain / drop); "
-            f"they never confirm — the oracle owns findings.</p>"
-            f"<table><thead><tr><th>url</th><th>param</th><th>category</th>"
-            f"<th>score</th><th>decision</th></tr></thead><tbody>{rows}</tbody></table></div>")
-
-
-def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None):
-    """Build the FastAPI app. Import is lazy so ``core`` has no web dependency."""
-    from fastapi import FastAPI
-    from fastapi.responses import HTMLResponse, JSONResponse
-
+    ``proxy`` (optional) is an in-process :class:`ProxyController`; when given, the app
+    starts it on lifespan startup and stops it on shutdown, so live interception shares
+    this event loop (Phase 0.4). ``None`` (the default) leaves the proxy tab dormant.
+    """
     cfg = cfg or load_config()
     state = LauncherState()
-    app = FastAPI(title="fuzzlab control panel", docs_url=None, redoc_url=None)
+    runner = Runner()
+
+    @asynccontextmanager
+    async def _lifespan(_app):
+        if proxy is not None:
+            await proxy.start()
+        try:
+            yield
+        finally:
+            if proxy is not None:
+                await proxy.stop()
+
+    app = FastAPI(title="fuzzlab control panel", docs_url=None, redoc_url=None,
+                  lifespan=_lifespan)
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+    templates = Jinja2Templates(directory=_TEMPLATES_DIR)
+
+    def _resolve(name: str):
+        """Look up a launchable activity's spec, or None if unknown."""
+        try:
+            return commandspec.spec(name)
+        except KeyError:
+            return None
 
     @app.get("/", response_class=HTMLResponse)
-    def index() -> str:
-        return _page(cfg, state, _read_runs(cfg))
+    def index(request: Request):
+        return templates.TemplateResponse(
+            request, "index.html", _index_context(cfg, state, _read_runs(cfg)))
 
     @app.get("/api/status")
     def status() -> dict[str, Any]:
@@ -299,19 +207,85 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         return detail
 
     @app.get("/runs/{run_id}", response_class=HTMLResponse)
-    def run_html(run_id: int):
+    def run_html(request: Request, run_id: int):
         detail = _read_detail(cfg, run_id)
         if detail is None:
-            return HTMLResponse(_doc("not found",
-                                     f"<p>Run {html.escape(str(run_id))} not found. "
-                                     f"<a href='/'>Back</a></p>"), status_code=404)
-        return _run_page(detail)
+            return templates.TemplateResponse(
+                request, "not_found.html", {"run_id": run_id}, status_code=404)
+        return templates.TemplateResponse(request, "run.html", {"detail": detail})
+
+    # --- launcher: dry-run preview, gated execution, live output (Phase 0.3) ---
+
+    @app.post("/api/launch/dry-run")
+    async def launch_dry_run(request: Request):
+        body = await request.json()
+        spec = _resolve(body.get("command"))
+        if spec is None:
+            return JSONResponse({"error": f"unknown command {body.get('command')!r}"},
+                                status_code=400)
+        values = body.get("values") or {}
+        # A dry run plans and reports the exact command and never sends traffic (FR-UI-5).
+        return {
+            "command": spec.name,
+            "argv": build_argv(spec, values),
+            "display": display_command(spec, values),
+            "sends_traffic": spec.sends_traffic,
+            "needs_authorized": spec.needs_authorized,
+            "would_execute": not (spec.sends_traffic and not cfg.get("authorized")),
+        }
+
+    @app.post("/api/launch")
+    async def launch(request: Request):
+        body = await request.json()
+        spec = _resolve(body.get("command"))
+        if spec is None:
+            return JSONResponse({"error": f"unknown command {body.get('command')!r}"},
+                                status_code=400)
+        # No-auto-run gate: a traffic-sending activity runs only when authorized.
+        if spec.sends_traffic and not cfg.get("authorized"):
+            return JSONResponse(
+                {"error": "not authorized; set authorized:true (lab-only)"},
+                status_code=403)
+        argv = build_argv(spec, body.get("values") or {})
+        token = await runner.launch(argv)
+        state.history.append(f"launched {spec.name}")
+        return {"token": token, "argv": argv}
+
+    @app.get("/api/launch/{token}/stream")
+    async def launch_stream(token: str):
+        return sse_response(runner.stream(token))
+
+    @app.post("/api/launch/{token}/stop")
+    async def launch_stop(token: str):
+        return {"stopped": runner.stop(token)}
+
+    # --- in-process proxy status/control (Phase 0.4; full workbench in Phase 2) ---
+
+    @app.get("/api/proxy/status")
+    def proxy_status():
+        if proxy is None:
+            return {"configured": False, "running": False}
+        return proxy.status()
+
+    @app.post("/api/proxy/intercept")
+    async def proxy_intercept(request: Request):
+        if proxy is None:
+            return JSONResponse({"error": "no in-process proxy "
+                                 "(start with `fuzzlab web --with-proxy`)"},
+                                status_code=409)
+        body = await request.json()
+        return {"intercept": proxy.set_intercept(bool(body.get("on")))}
 
     return app
 
 
-def serve(cfg: Config | None = None, pipeline: PipelineRunner | None = None) -> None:
-    """Serve the panel on loopback only (never exposed)."""
+def serve(cfg: Config | None = None, pipeline: PipelineRunner | None = None,
+          proxy: "ProxyController | None" = None) -> None:
+    """Serve the panel on loopback only (never exposed).
+
+    When ``proxy`` is given it runs in this same uvicorn event loop (so live
+    interception's futures work); its own loopback listener is separate from the panel's.
+    """
     import ipaddress
 
     import uvicorn
@@ -320,4 +294,52 @@ def serve(cfg: Config | None = None, pipeline: PipelineRunner | None = None) -> 
     host = cfg.get("web_host", "127.0.0.1")
     if not ipaddress.ip_address(host).is_loopback:
         raise ValueError(f"refusing to bind web panel to non-loopback host {host!r}")
-    uvicorn.run(create_app(cfg, pipeline), host=host, port=int(cfg.get("web_port", 8787)))
+    if proxy is not None and not ipaddress.ip_address(proxy.config.host).is_loopback:
+        raise ValueError(
+            f"refusing to bind proxy to non-loopback host {proxy.config.host!r}")
+    uvicorn.run(create_app(cfg, pipeline, proxy), host=host,
+                port=int(cfg.get("web_port", 8787)))
+
+
+def web_main(argv: list[str] | None = None) -> int:
+    """CLI for ``fuzzlab web`` — optionally start the in-process proxy (Phase 0.4).
+
+    The panel itself is read-only and needs no authorization; ``--with-proxy`` runs the
+    intercepting proxy in this process (for the live Proxy tab) and, because that forwards
+    traffic to upstreams, requires ``--authorized`` (lab-only), mirroring `fuzzlab proxy`.
+    """
+    import argparse
+    from urllib.parse import urlparse
+
+    p = argparse.ArgumentParser(prog="fuzzlab web")
+    p.add_argument("--with-proxy", action="store_true",
+                   help="also run the intercepting proxy in-process (live Proxy tab); "
+                        "requires --authorized")
+    p.add_argument("--proxy-host", default="127.0.0.1", help="proxy listen host (loopback)")
+    p.add_argument("--proxy-port", type=int, default=8888, help="proxy listen port")
+    p.add_argument("--proxy-scope", action="append",
+                   help="host to intercept (repeatable; default: the target host)")
+    p.add_argument("--proxy-ca-dir", default=None,
+                   help="local CA dir to enable CONNECT/TLS interception")
+    p.add_argument("--proxy-no-verify-tls", action="store_true",
+                   help="do not verify upstream TLS certs (self-signed lab origins)")
+    p.add_argument("--intercept", action="store_true",
+                   help="start with interception ON (hold flows for edit/drop/forward)")
+    p.add_argument("--authorized", action="store_true",
+                   help="required to run the in-process proxy (it forwards traffic)")
+    args = p.parse_args(argv)
+
+    cfg = load_config()
+    proxy = None
+    if args.with_proxy:
+        if not args.authorized:
+            p.error("refusing to run the in-process proxy without --authorized (lab-only)")
+        from fuzzlab.web.proxycontrol import ProxyConfig, ProxyController
+        default_host = urlparse(cfg.get("target_base_url", "")).hostname or "127.0.0.1"
+        scope = tuple(args.proxy_scope or [default_host])
+        proxy = ProxyController(ProxyConfig(
+            host=args.proxy_host, port=args.proxy_port, scope_hosts=scope,
+            ca_dir=args.proxy_ca_dir, store_path=cfg.get("store_path"),
+            verify_tls=not args.proxy_no_verify_tls, intercept=args.intercept))
+    serve(cfg, proxy=proxy)
+    return 0

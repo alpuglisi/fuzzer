@@ -3,6 +3,19 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0006 — Expose `build_parser()` for the command-spec registry (2026-09-21)
+- Change: `fuzzlab/tools/spider.py` now factors its argparse setup into `build_parser()`
+  (returns the `ArgumentParser`); `parse_args()` delegates to it. Added `prog="fuzzlab
+  crawl"` for accurate usage. Behavior-preserving — same flags, defaults, and parsing.
+- Impact: lets the web launcher introspect the crawler's flags (CC-UI-0011). No CLI
+  behavior change; no traffic; no schema change.
+- Risk (level; mitigation): low — a pure refactor. Mitigated by the unchanged suite
+  (433 passed / 6 skipped) and the command-spec tests.
+- Deliverables:
+  - [x] `build_parser()`; `parse_args()` delegates — done.
+- Effectiveness (assessed 2026-09-21): effective — the registry builds the crawler's spec
+  from this parser.
+
 ### CC-CRAWL-0005 — Template dedup + hybrid-crawl decision (algorithms) (2026-09-21)
 - Change: built two Phase 2 crawler algorithms as pure, tested `core/` modules.
   `core/dedup.py` (T2.6): DOM-skeleton MinHash + `TemplateClusterer` — near-duplicate

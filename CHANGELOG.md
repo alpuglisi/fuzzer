@@ -14,6 +14,105 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (UI, Phase 0.4): unified serve mode with an in-process proxy — completes the
+  Phase-0 foundations. Added `fuzzlab/web/proxycontrol.py` (`ProxyConfig`/`ProxyController`)
+  that builds the proxy engine (Scope + MatchReplace + Interceptor + SocketSender + optional
+  history/CA) and owns its lifecycle; `create_app(proxy=)` starts/stops it via a FastAPI
+  lifespan so live interception shares the panel's event loop (its futures aren't
+  cross-process — D19). New `GET /api/proxy/status` + `POST /api/proxy/intercept`; `serve()`
+  refuses a non-loopback proxy host; `fuzzlab web --with-proxy` (new `web_main`) runs the
+  proxy in-process and requires `--authorized` (it forwards traffic). Opt-in, loopback-only,
+  separate port; dormant by default. Records D18 (subprocess launch) + D19 (in-process
+  proxy). 7 new tests (`test_web_proxy_serve.py`); suite 462 passed / 6 skipped. See
+  CC-UI-0014. Proxy code unchanged (the response-intercept hook is Phase 2).
+- Feature (UI, Phase 0.3): launcher runner + dry-run + live output. Added
+  `fuzzlab/web/runner.py` (`build_argv`/`display_command`; an async `Runner` that spawns a
+  tool as `python -m fuzzlab.cli <name> <flags>` and streams stdout/stderr as SSE, with
+  stop) and four endpoints: `POST /api/launch/dry-run` (previews the exact command, sends
+  nothing — FR-UI-5), `POST /api/launch` (no-auto-run gate: a traffic tool is 403 unless
+  `authorized:true`), `GET /api/launch/{token}/stream` (SSE), `POST /api/launch/{token}/stop`.
+  Safe by construction: only flags the command spec declares reach argv (no arbitrary-arg
+  injection) and no shell is used. 12 new tests (`test_web_runner.py`) incl. a real
+  child-process stream; suite 455 passed / 6 skipped. See CC-UI-0013. (Launcher UI forms
+  wired to these endpoints land in Phase 1.)
+- Feature (UI, Phase 0.2): frontend foundation for the revamp. Reworked `fuzzlab/web/app.py`
+  from hand-rendered HTML to **jinja2 templates** (`web/templates/`) + a **static asset
+  pipeline** (`web/static/app.css`, `app.js` mounted at `/static`); the index is now a
+  **tabbed shell** (Launcher / Proxy / Results / ML / Diagnostics) rendered server-side with
+  a vanilla-JS toggler (no-JS shows all panels). The Launcher previews every activity from
+  the command-spec registry; Results keeps the runs dashboard; Proxy/ML/Diagnostics are
+  stubs for Phases 2–4. Added `fuzzlab/web/sse.py` (SSE plumbing for later live streams).
+  No JSON-API/behavior/schema change; read-only + loopback + no-auto-run invariants intact.
+  jinja2 (a declared `web` extra) is now used; templates/static added to package-data. New
+  tests: `test_web_frontend.py` (10) + `test_web_sse.py` (5); suite 443 passed / 6 skipped.
+  See CC-UI-0012, FR-UI-7. (uPlot charting deferred to first use in Phase 4.)
+- Feature (UI, Phase 0.1): added `fuzzlab/web/commandspec.py`, a registry that introspects
+  each launchable activity's own `argparse` parser into a machine-readable form schema
+  (name/type/required/default/choices/multiple; per-command sends-traffic + derived
+  authorized/destructive gates). Every tool now exposes a `build_parser()` and its `main()`
+  delegates to it — a behavior-preserving refactor across CRAWL/AUD/FUZZ/MUT/PROXY/SESS +
+  UI(report). This is the single-source-of-truth backbone for the launcher (FR-UI-6): a new
+  tool flag appears in the UI automatically, nothing hand-mirrored (PA-0001/PA-0003). No CLI
+  behavior/flags/defaults change; no traffic; no schema change. 17 new tests
+  (`tests/test_web_commandspec.py`); suite 433 passed / 6 skipped. See CC-UI-0011 (+
+  CC-CRAWL-0006, CC-AUD-0014, CC-FUZZ-0018, CC-MUT-0007, CC-PROXY-0014, CC-SESS-0009).
+- Docs (UI): added `docs/UI_REVAMP_PLAN.md`, the tracked design plan to grow the read-only
+  web control panel into a full local control plane — an activity launcher (per-tool flag
+  forms, dry-run, live output), a proxy workbench (history/intercept/repeater/scope), a
+  dedicated ML tab, and a TensorBoard-like diagnostics tab — with the Phase-0 foundations,
+  the exists-vs-needs-building split, and the invariants (no-auto-run/loopback/authorized/
+  read-only/redaction) each phase must preserve. Design only; see CC-UI-0010.
+- Fix (BUG-0017, on-host): `scripts/greybox_e2e.sh` step 1 (`labctl.sh reset`) failed under
+  podman-compose (`exit status 125`, "cannot remove … as it is running") and wedged the
+  stack, blocking Part E. A **recurrence of BUG-0013**: that fix made `labctl.sh up`
+  self-healing but left `reset` recreating containers with a bare `down -v` + `up` and no
+  force-clean fallback. Factored the force-clean into one shared `_force_clean()` helper and
+  routed every lifecycle path — `up` (keep-volume), `reset` (drop-volume), and `down`
+  (keep-volume, from the sweep) — through it. Recurrence review +
+  prior-PA-failure analysis (PA-0014 was scoped to the *trigger* env/profile change, the
+  PA-0002 sweep inherited that framing, and PA-0003 wasn't applied so the self-heal was
+  duplicated-by-omission) in `docs/bugs/BUG-0017-*`; new rule PA-0018 re-keys the self-heal to
+  the *mechanism* and to all container-recreate paths. See CC-LAB-0013. Verified statically
+  (mocked podman/compose; `up`/`reset` both branches exit 0). Suite 416 passed / 6 skipped.
+- Fix (BUG-0016): `greybox-run`'s "new-code reward" was starved by a global coverage
+  frontier (the benign baseline, sent first per point, consumed the novelty), so every
+  attack showed `novel=0`, `newcode_reward` read 0, and a false "shim not installed?" NOTE
+  contradicted the step-6 PASS. `run_greybox` now credits an attack's coverage as a
+  **per-point differential** (attack vs its own baseline); the global frontier is kept only
+  for the run-wide exploration total; the NOTE fires only when no coverage was captured. The
+  Part F runbook exit was reframed (verify the bandit via posteriors; `requests_per_finding`
+  can't show its oracle-probe savings) — same class. Recurrence review + prior-PA-0015
+  analysis in the RCA; new rule PA-0017 (an exit metric must isolate the capability it
+  claims). RCA `docs/bugs/BUG-0016-*`; see CC-FUZZ-0017. Suite 416 passed / 6 skipped.
+- Fix (BUG-0015, on-host): `scripts/waf_evasion_e2e.sh` exited silently after step 1 because
+  `labctl.sh up` returned non-zero on success when no profile was set — its `up)` case ended
+  with `[ -n "$PFF_PROFILE" ] && echo ...`, a trailing `A && B` that fails (and, as the last
+  command, sets the exit status) when the profile is empty, aborting the `set -e` caller. Now
+  an `if`. Parts I and K passed on-host; this unblocks Part J. Recurrence review: shipped
+  because on-host scripts can't be executed in the build sandbox (recurrence of BUG-0014),
+  and a fail-loud self-test can't catch an abort before it runs — captured as PA-0016
+  (static/shellcheck + exit-code checks on both branches; verify the script's own harness,
+  strengthening PA-0015). RCA `docs/bugs/BUG-0015-*`; see CC-LAB-0012.
+- Docs (BUG-0014): investigated and fixed the systemic inadequacy of the initial
+  `docs/ON_HOST_RUNBOOK.md` — its `[build+run]` parts (E/I/J/K) documented unbuilt,
+  unverified, and in places incorrect steps as followable (the WAF-disabling double
+  `auto_prepend_file`, log-tailing DB faults, a non-working `up --profile`, an invalid
+  duplicate-identical Content-Length exit). Root cause: operational docs written from design
+  intent, never executed/verified against the real host, with a format that conflated "needs
+  building" with "runnable". The recurrence review found this root cause produced BUG-0009 /
+  BUG-0012 / BUG-0013 and the "no Compose provider" incident, each fixed piecemeal with no
+  documentation-adequacy PA. Corrective: E/I/J/K are now verified one-command `[run]` flows;
+  the Legend is corrected (all parts `[run]`; a `[design]` tag marks unbuilt steps that must
+  not be written as followable). New rule PA-0015. RCA `docs/bugs/BUG-0014-*`.
+- Fix (BUG-0012/BUG-0013, on-host scripts): `scripts/proxy_e2e.sh` step 5 gave a false FAIL
+  because it asserted the parsed path rejects a duplicate-*identical* Content-Length, which
+  is valid per RFC 7230 — now it sends *conflicting* values (0 and 5), matching the offline
+  test (PA-0013). And `lab/labctl.sh up` is now self-healing under podman-compose (which
+  can't recreate a running stack in place on an env/profile change): on failure it downs,
+  force-clears wedged podman containers/pod/network, and retries — unblocking
+  `waf_evasion_e2e.sh` / `h2_desync_e2e.sh`. BUG-0013's recurrence review found this is the
+  same class as the earlier "no Compose provider" incident, which had been fixed in place
+  without a PA; captured now as PA-0014. See CC-PROXY-0013, CC-LAB-0011. Suite 415 passed / 6 skipped.
 - Process/governance: strengthened the bug protocol with a **recurrence-escalation** step.
   Before deciding a preventive action, the investigation must now review the other
   `docs/bugs/` logs and `docs/PREVENTIVE_ACTIONS.md` for a prior occurrence of the same bug

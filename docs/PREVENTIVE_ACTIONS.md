@@ -84,3 +84,51 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   in-flight connection tasks on stop and wrap the final wait in a timeout. Persist
   important state as it is produced (not only on graceful shutdown), so a forced/abrupt
   stop loses nothing. (from BUG-0011)
+- **PA-0013** — A self-test assertion must reflect the **true contract of the system under
+  test**, not an intuitive-but-wrong premise (e.g. only *conflicting* Content-Length is
+  invalid; duplicate-*identical* is valid per RFC 7230). An on-host / integration self-test
+  must use the same construction the validated offline test proved — never a weaker or
+  hand-rolled variant that asserts something the offline test did not establish. (from
+  BUG-0012)
+- **PA-0014** — Do not rely on compose behaviors that differ between `docker compose` and
+  `podman-compose` — chiefly in-place recreate on a config/env change, which
+  podman-compose cannot do. Orchestration that changes env/profile on a running stack must
+  be self-healing: on failure, tear the stack down (keep data volumes), force-clear wedged
+  containers/pod/network under podman, and retry. And when a provider/environment incident
+  is fixed in place, still record a PA for the *class* — closing it as a one-off leaves the
+  class unguarded and it recurs. (from BUG-0013)
+- **PA-0015** — Operational / runbook documentation must be written from an **executed,
+  verified run**, not from design intent. A step whose on-host last-mile code is not yet
+  built and self-tested is tagged `[design]` and must **not** be presented as a followable
+  command sequence; it becomes `[run]` only once its code exists and a self-testing script
+  (that fails loud) proves the exit. Commands and expected outputs in a `[run]` step must be
+  ones actually produced, and any step that changes host state or sends traffic ships with
+  such a script. If the build environment cannot execute the steps (no lab/host), say so and
+  keep them `[design]` until validated on the host. (from BUG-0014)
+- **PA-0016** — Shell scripts under `set -e` must never end a function/case/script (or any
+  branch whose status becomes the script's exit status) with a bare `A && B`: it returns
+  non-zero when `A` is false (`B` is skipped), so the script exits non-zero on success and
+  aborts `set -e` callers. Use an `if`, or append `|| true`. Because the build environment
+  cannot run the on-host scripts, verify them statically: `shellcheck`, plus a targeted
+  `bash -c` exit-code check on **both** relevant branches (e.g. an optional var set and
+  unset), and assert the success path exits 0. This strengthens PA-0015 — a `[run]`
+  script's own harness (control flow, exit codes on every path) must be verified, not just
+  its exit assertion, since a fail-loud self-test cannot catch an abort that happens before
+  it runs. (from BUG-0015)
+- **PA-0017** — An exit criterion or self-test metric must **isolate and measure the
+  specific capability it claims to prove**, via a controlled comparison (e.g. an
+  attack-vs-its-own-baseline differential), not a proxy dominated by unrelated work (a
+  global frontier the control fills first; a total-requests count dominated by discovery).
+  A passing self-test is not sufficient if the metric doesn't reflect the capability, and a
+  diagnostic/NOTE must key on the actual condition it names (e.g. "no coverage captured" ⇒
+  coverage-seen == 0), not a derived artifact. (from BUG-0016)
+- **PA-0018** — Container-lifecycle self-heal is a cross-path convention. Every
+  orchestration path that creates, removes, or recreates containers on a possibly-running
+  or wedged podman stack must route through the **one shared force-clean helper** (per
+  PA-0003) — never reimplement it per subcommand and never leave a path without it. When a
+  container-lifecycle fix is added, the PA-0002 sweep must enumerate call sites by the
+  **operation** (recreate / remove / tear-down) — every relevant subcommand (`up`, `reset`,
+  `down`, and any future one) — not by the **trigger** that first surfaced it (e.g. an
+  env/profile change). This re-keys PA-0014 from the trigger to the mechanism
+  (podman-compose cannot remove or recreate a running/wedged stack) so a sibling path with
+  the same cause but a different trigger cannot slip through the sweep. (from BUG-0017)

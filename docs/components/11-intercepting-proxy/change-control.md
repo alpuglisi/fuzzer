@@ -3,6 +3,37 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0014 — Expose `build_parser()` for the command-spec registry (2026-09-21)
+- Change: `fuzzlab/proxy/cli.py` now factors its argparse setup into `build_parser()`;
+  `main()` keeps the `p` reference (so `p.error(...)` on `--export-ca`/`--authorized` still
+  works) and delegates parsing. Behavior-preserving — same flags, defaults, and gates.
+- Impact: lets the web launcher introspect the proxy's flags (CC-UI-0011). Independent of
+  the Phase-2 proxy-workbench wiring. No CLI behavior change; no traffic; no schema change.
+- Risk (level; mitigation): low — a pure refactor. Mitigated by the unchanged suite
+  (433 passed / 6 skipped) and the command-spec tests.
+- Deliverables:
+  - [x] `build_parser()`; `main()` delegates — done.
+- Effectiveness (assessed 2026-09-21): effective — the registry builds the proxy's spec
+  from this parser.
+
+### CC-PROXY-0013 — Fix (BUG-0012): proxy_e2e.sh self-test uses conflicting Content-Length (2026-09-21)
+- Change: `scripts/proxy_e2e.sh` step 5 now sends **conflicting** Content-Length values
+  (`0` and `5`) instead of two identical `0`s. Duplicate-*identical* Content-Length is
+  valid per RFC 7230 (h11 accepts it), so the old assertion (`is_valid_request` is False)
+  produced a false FAIL even though the proxy forwarded byte-exact correctly. Runbook
+  Part I.4 clarified to use conflicting values.
+- Impact (other components / project): the Part I exit self-test now matches the validated
+  offline unit test (which already used 5/6) and passes on-host. No product-code change —
+  the proxy's raw byte-exact forwarding was already correct.
+- Risk (level; mitigation): low — test/script-only. The offline
+  `test_async_server_forwards_duplicate_content_length_byte_exact` already covers the
+  correct (conflicting) case. Suite 415 passed / 6 skipped.
+- Deliverables:
+  - [x] Conflicting-CL request in `proxy_e2e.sh`; runbook wording — done.
+  - [x] RCA `docs/bugs/BUG-0012-*`; rule PA-0013; ERROR_LOG — done.
+- Effectiveness (assessed 2026-09-21): the on-host Part I run's exit check now reflects the
+  true HTTP contract (only conflicting CL is rejected) and passes.
+
 ### CC-PROXY-0012 — Fix (BUG-0010/BUG-0011): leaf-cert AKI/SKI + bounded async shutdown (2026-09-21)
 - Change: fixed two on-host proxy defects found running Part I. (BUG-0010) `LocalCA` now
   mints certs strict verifiers accept — CA with SKI + keyCertSign KeyUsage; leaf with SKI,

@@ -12,13 +12,17 @@ from fuzzlab.core.store import Store
 from fuzzlab.report.report import build_report, format_json, format_text
 
 
-def main(argv: list[str]) -> int:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="fuzzlab report")
     p.add_argument("--store", required=True, help="Unified store (SQLite) to read")
     p.add_argument("--run", default="latest",
                    help="Run id to report on, or 'latest' (default)")
     p.add_argument("--json", action="store_true", help="Emit canonical JSON")
-    args = p.parse_args(argv)
+    return p
+
+
+def main(argv: list[str]) -> int:
+    args = build_parser().parse_args(argv)
 
     with Store(args.store) as store:
         run_id = None if args.run == "latest" else int(args.run)

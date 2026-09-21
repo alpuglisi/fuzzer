@@ -18,6 +18,108 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — `labctl.sh reset` not self-healing under podman-compose (BUG-0017, recurrence of BUG-0013)
+
+- **Symptom:** `scripts/greybox_e2e.sh` step 1 (`labctl.sh reset`) failed on the host with
+  `executing /usr/bin/podman-compose up -d --build: exit status 125` and "cannot remove
+  container … as it is running" / "container state improper" — the stack was wedged and
+  Part E could not start.
+- **Root cause:** `reset` recreated containers with a bare `compose down -v` + `up` and no
+  force-clean fallback. podman-compose cannot remove/recreate a running/wedged stack — the
+  exact limitation fixed in BUG-0013, but that fix (CC-LAB-0011) was applied only to the
+  `up` subcommand. A **recurrence of BUG-0013**: PA-0014 was scoped to the *trigger*
+  (env/profile change) not the *mechanism*, the PA-0002 sweep inherited that narrow framing
+  and missed the sibling recreate path, and the self-heal was inlined in `up` instead of a
+  shared helper (PA-0003 not applied).
+- **Remediation:** factored the force-clean sequence into one shared `_force_clean()` helper
+  and routed **both** `up` (keep-volume, on failure) and `reset` (drop-volume, before +
+  after with retry) through it. Full RCA incl. recurrence + prior-PA-failure analysis in
+  `docs/bugs/BUG-0017-*`; new rule PA-0018 (re-keys the self-heal to the mechanism and to
+  all container-recreate paths). See CC-LAB-0013.
+- **Status:** Fixed (this commit). labctl `up`/`reset` exit-code paths verified statically
+  (mocked podman/compose, both success and fallback branches exit 0); suite 416 passed /
+  6 skipped.
+
+## 2026-09-21 — Grey-box "new-code reward" starved by the global frontier (BUG-0016)
+
+- **Symptom:** `greybox-run` step 5 reported `new-code max: 0.000` + a NOTE "is the cov.php
+  shim installed?" while step 6 said PASS and 338 novel lines were captured — a
+  self-contradiction. The coverage-reward property (T3.7) wasn't actually demonstrated
+  (payloads scored higher only via db_fault).
+- **Root cause:** novelty was measured against a single **global** frontier and the benign
+  baseline ran first per point, consuming that point's coverage — so every attack showed
+  `novel=0`, `newcode_reward` was ~always 0, the baseline earned a novelty-only reward, and
+  the NOTE inferred "shim broken" from that artifact.
+- **Recurrence:** same class as the Part F metric (`requests_per_finding` can't show the
+  bandit's oracle-probe savings) and BUG-0014 — a metric/self-test that passes/fires
+  without measuring the capability. PA-0015 didn't prevent it (a self-test can pass while
+  measuring the wrong thing).
+- **Remediation:** `run_greybox` now uses a **per-point differential** (attack coverage vs
+  its own baseline) for the reward novelty and `newcode_reward`; the global frontier is kept
+  only for the run-wide exploration total; the NOTE fires only when `coverage_lines_seen==0`.
+  Part F's runbook exit reframed to verify via posteriors with a metric caveat. Full RCA +
+  recurrence/prior-PA analysis in `docs/bugs/BUG-0016-*`; rule PA-0017. See CC-FUZZ-0017.
+- **Status:** Fixed (this commit). Suite 416 passed / 6 skipped.
+
+## 2026-09-21 — `labctl.sh up` exits non-zero on success without a profile (BUG-0015)
+
+- **Symptom:** `scripts/waf_evasion_e2e.sh` printed step 1 "lab up" then exited silently
+  with no steps 2–5 (its EXIT trap quietly turned the WAF back off). `h2_desync_e2e.sh`
+  (which sets `PFF_PROFILE=desync`) was unaffected.
+- **Root cause:** the `up)` case ended with `[ -n "${PFF_PROFILE:-}" ] && echo ...`; with no
+  profile, `[ -n "" ]` returns 1 and — being the last command — `labctl.sh up` exits 1
+  despite success, so the caller under `set -e` aborts. A shell trailing-`A && B` exit-status
+  pitfall introduced by the profile support (CC-LAB-0010). It shipped because the on-host
+  scripts can't be executed in the build sandbox (recurrence of BUG-0014's root cause), and a
+  fail-loud self-test can't catch an abort that precedes it.
+- **Remediation:** the profile notice now uses an `if` (returns 0 with or without a profile);
+  verified `up`'s no-profile tail exits 0. Swept the other `&&` sites (safe). Full RCA +
+  recurrence + prior-PA-failure analysis in `docs/bugs/BUG-0015-*`; rule PA-0016. See
+  CC-LAB-0012.
+- **Status:** Fixed (this commit). Parts I and K passed on-host; Part J unblocked.
+
+## 2026-09-21 — ON_HOST_RUNBOOK documented unbuilt/unverified steps as followable (BUG-0014)
+
+- **Symptom:** the initial runbook's `[build+run]` parts (E, I, J, K) could not be followed —
+  they referenced last-mile code that didn't exist and commands/outputs never run, and
+  contained concrete errors (a second `auto_prepend_file` line that would silently disable
+  the WAF; per-request DB fault via log-tailing; `up --profile desync` that didn't work; a
+  duplicate-*identical* Content-Length "exit" that is valid HTTP).
+- **Root cause:** operational docs were authored from design intent and never executed/
+  verified against the real host, and the format didn't distinguish verified-runnable from
+  unbuilt/aspirational steps (`[build+run]` conflated "needs building" with "runnable").
+- **Recurrence:** the same root cause recurred across Parts E/I/J/K and produced BUG-0009
+  (double auto_prepend), BUG-0012 (dup-CL), BUG-0013 (up --profile) + the "no Compose
+  provider" incident; each was fixed piecemeal with no PA about documentation adequacy, so
+  the class stayed unguarded (same failure mode as BUG-0013).
+- **Remediation:** Parts E/I/J/K rebuilt into verified one-command `[run]` flows backed by
+  tested code + self-testing scripts; the concrete errors fixed (BUG-0009/0012/0013); the
+  runbook Legend corrected (all parts `[run]`; a `[design]` tag now marks any unbuilt/
+  unverified step, which must not be written as followable). Full RCA + recurrence/prior-PA
+  analysis in `docs/bugs/BUG-0014-*`; rule PA-0015.
+- **Status:** Fixed (this commit). Suite 415 passed / 6 skipped.
+
+## 2026-09-21 — On-host script defects: proxy self-test premise (BUG-0012) + compose recreate (BUG-0013)
+
+- **Symptom (1):** `scripts/proxy_e2e.sh` step 5 reported `FAIL: the parsed path did not
+  reject the duplicate Content-Length`, even though the proxy forwarded byte-exact correctly.
+- **Root cause (1):** the self-test used two *identical* `Content-Length: 0` headers;
+  duplicate-identical CL is valid per RFC 7230 (h11 accepts it) — only *conflicting* values
+  are rejected. The script diverged from the offline unit test, which used 5/6.
+- **Remediation (1):** the script now sends conflicting values (0 and 5); runbook Part I.4
+  clarified. RCA `docs/bugs/BUG-0012-*`; rule PA-0013.
+- **Symptom (2):** `scripts/waf_evasion_e2e.sh` / `h2_desync_e2e.sh` step 1 failed under
+  podman-compose (`container name ... already in use ... use --replace`; dependent-container
+  errors) and left the stack wedged.
+- **Root cause (2):** the orchestration assumed `compose up` recreates a running stack in
+  place on an env/profile change (a docker-compose behavior); podman-compose cannot. Same
+  *class* as the earlier "no Compose provider" entry (assuming a compose capability podman
+  lacks) — which was fixed in place and never captured as a PA, so the class recurred.
+- **Remediation (2):** `lab/labctl.sh up` is now self-healing — on failure it `down`s (keeps
+  the DB volume), force-clears wedged podman containers/pod/network, and retries `up`. Full
+  RCA + recurrence/prior-PA-failure analysis in `docs/bugs/BUG-0013-*`; rule PA-0014.
+- **Status:** Fixed (this commit). See CC-PROXY-0013, CC-LAB-0011. Suite 415 passed / 6 skipped.
+
 ## 2026-09-21 — Proxy on-host: leaf cert rejected (BUG-0010) + shutdown hang (BUG-0011)
 
 - **Symptom (1):** on the host, `pytest ...test_connect_tls_tunnel_forwards_byte_exact`

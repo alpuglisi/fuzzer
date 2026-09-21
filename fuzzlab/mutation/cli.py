@@ -16,7 +16,7 @@ from fuzzlab.mutation import run as mrun
 from fuzzlab.tools.probesender import make_probe_sender
 
 
-def main(argv: list[str]) -> int:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="fuzzlab mutate-run")
     p.add_argument("--url", required=True,
                    help="Full endpoint URL, e.g. http://127.0.0.1:8080/search.php")
@@ -38,6 +38,11 @@ def main(argv: list[str]) -> int:
                    help="Permit recording destructive variants (default: refused)")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
+    return p
+
+
+def main(argv: list[str]) -> int:
+    p = build_parser()
     args = p.parse_args(argv)
 
     if not args.authorized:

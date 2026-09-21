@@ -3,6 +3,51 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0018 — Expose `build_parser()` for the command-spec registry (2026-09-21)
+- Change: the fuzz/oracle activities factor their argparse setup into `build_parser()`, with
+  `main()` delegating — `fuzzlab/tools/blind_sqli_fuzzer.py` (`parse_args()` delegates;
+  `prog="fuzzlab fuzz"`), `fuzzlab/harness/auto_cli.py`, and `fuzzlab/greybox/greybox_cli.py`
+  (both keep the `p` reference so `p.error(...)` still works). Behavior-preserving — same
+  flags, defaults, gates, and parsing.
+- Impact: lets the web launcher introspect the fuzz/auto/greybox-run flags (CC-UI-0011).
+  No CLI behavior change; no traffic; no schema change.
+- Risk (level; mitigation): low — a pure refactor. Mitigated by the unchanged suite
+  (433 passed / 6 skipped) and the command-spec tests.
+- Deliverables:
+  - [x] `build_parser()` on fuzz/auto/greybox-run; `main()` delegates — done.
+- Effectiveness (assessed 2026-09-21): effective — the registry builds these specs from the
+  real parsers (authorized gate derived from the `--authorized` flag).
+
+### CC-FUZZ-0017 — Fix (BUG-0016): per-point differential coverage in `greybox-run` (2026-09-21)
+- Change: `greybox/run.py::run_greybox` now credits an attack's coverage as a **per-point
+  differential** — baselines are sent first to establish each point's benign coverage, and
+  an attack's `new_lines_vs_baseline` drives the reward novelty and the summary
+  `newcode_reward`. The global `CoverageFrontier` is retained only for the run-wide
+  exploration total (`greybox_novel_lines`/`frontier_size`), not for per-attempt reward, so
+  the benign baseline no longer consumes the novelty (it now scores ~0, a true control).
+  Added a `coverage_lines_seen` total + metric; `greybox_cli` prints it and only warns
+  ("no application coverage captured") when it is 0 (the real shim-not-wired case) instead
+  of the old contradictory `newcode <= baseline` NOTE.
+- Impact (other components / project): fixes the self-contradictory Part E output (step-5
+  NOTE vs step-6 PASS) and makes the T3.7 "reaching new code → higher reward" property
+  actually demonstrable (attack-vs-baseline), not incidentally passed via db_fault. No
+  schema change; `attempt.features_json` now carries `new_lines_vs_baseline`/`cov_lines`.
+  The Part F runbook exit was reframed (verify the bandit by posteriors; oracle-probes
+  metric is a follow-up) — same BUG-0016 class.
+- Risk (level; mitigation): low — reward is now a cleaner controlled comparison; the exit
+  still passes and is more meaningful. Tests (`tests/test_greybox_live.py`): baseline earns
+  0, attack new-code is per-point, and a regression proves a 2nd point's attack still
+  scores new lines when those lines were globally seen by the 1st point. Suite 416 passed /
+  6 skipped.
+- Deliverables:
+  - [x] Per-point differential coverage + `coverage_lines_seen`; corrected NOTE — done.
+  - [x] Tests incl. the global-frontier-starvation regression — done.
+  - [x] Part F runbook reframe; RCA `docs/bugs/BUG-0016-*`; PA-0017 — done.
+  - [ ] Oracle-probes-per-finding metric so Part F can show the bandit's request savings — todo.
+- Effectiveness (assessed 2026-09-21): effective in tests — benign baselines score 0, an
+  attack reaching new branches scores strictly higher, and the shim-not-wired NOTE only
+  fires on genuinely empty coverage. On-host re-run via `scripts/greybox_e2e.sh`.
+
 ### CC-FUZZ-0016 — Live grey-box last mile: file-backed sources + `greybox-run` (T3.2–T3.7) (2026-09-21)
 - Change: built the on-host "run" side of Phase 3 so `docs/ON_HOST_RUNBOOK.md` Part E is a
   single command. New live implementations behind the existing seams:

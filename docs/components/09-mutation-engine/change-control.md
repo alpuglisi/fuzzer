@@ -3,6 +3,20 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0007 — Expose `build_parser()` for the command-spec registry (2026-09-21)
+- Change: `fuzzlab/mutation/cli.py` now factors its argparse setup into `build_parser()`;
+  `main()` keeps the `p` reference (so `p.error(...)` still works) and delegates parsing.
+  Behavior-preserving — same flags, defaults, and both gates (`--authorized`,
+  `--allow-destructive`).
+- Impact: lets the web launcher introspect `mutate-run`'s flags (CC-UI-0011), including the
+  destructive-gate detection. No CLI behavior change; no traffic; no schema change.
+- Risk (level; mitigation): low — a pure refactor. Mitigated by the unchanged suite
+  (433 passed / 6 skipped) and the command-spec tests.
+- Deliverables:
+  - [x] `build_parser()`; `main()` delegates — done.
+- Effectiveness (assessed 2026-09-21): effective — the registry builds `mutate-run`'s spec
+  from this parser (destructive_gate derived from `--allow-destructive`).
+
 ### CC-MUT-0006 — Live WAF-evasion last mile: HttpFilter + `fuzzlab mutate-run` (T8.7 on-host) (2026-09-21)
 - Change: built the Phase 8 on-host last mile so runbook Part J is a one-command flow. New
   `fuzzlab/mutation/livefilter.py::HttpFilter` implements the mutation `Filter` seam

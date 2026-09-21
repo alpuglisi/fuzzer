@@ -3,6 +3,171 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0014 — Unified serve mode: in-process proxy controller (Phase 0.4; D19) (2026-09-21)
+- Change: added `fuzzlab/web/proxycontrol.py` (`ProxyConfig` + `ProxyController`) — it
+  builds the proxy engine (Scope + `MatchReplaceEngine` + `Interceptor` + `SocketSender` +
+  optional `HistoryWriter` + `LocalCA`) and owns its lifecycle. `create_app(..., proxy=)`
+  gained a FastAPI **lifespan** that starts the controller on startup and stops it on
+  shutdown, so the live interceptor shares the panel's event loop (its `asyncio.Future`s
+  are not cross-process). New endpoints `GET /api/proxy/status` (dormant `{configured:
+  false}` when no proxy) and `POST /api/proxy/intercept` (toggle; 409 when none). `serve()`
+  takes an optional `proxy` and refuses a non-loopback proxy host; a new `web_main()` parses
+  `fuzzlab web [--with-proxy …]` and, because the proxy forwards to upstreams, requires
+  `--authorized` before wiring one (mirrors `fuzzlab proxy`). `fuzzlab web` now routes
+  through `web_main` (`cli.py`).
+- Impact (other components / project): the seam the **Phase-2 Proxy workbench** will use —
+  its routes reach the live `Interceptor` via the controller (pause/edit/drop/forward),
+  while flow history stays store-readable cross-process. Consumes the existing proxy
+  component unchanged (no proxy code edited; the response-intercept hook is Phase 2). No
+  schema change. The proxy is opt-in, `--authorized`-gated, loopback-only, on a separate
+  port; without `--with-proxy` the panel is unchanged. Records D18 (subprocess launch, from
+  0.3) and D19 (in-process proxy).
+- Risk (level; mitigation): medium — the panel can now host a listener that forwards
+  traffic. Mitigated by the authorization gate on `--with-proxy`, loopback-only binding for
+  both the panel and the proxy (asserted; `serve` refuses non-loopback), the opt-in default
+  (dormant unless asked), and tests: `tests/test_web_proxy_serve.py` (7) — controller
+  start/status/stop on an ephemeral port, intercept toggle, dormant status + 409 without a
+  proxy, lifespan start/stop via the TestClient context manager, `serve` refusing a
+  non-loopback proxy host, and `web_main` refusing `--with-proxy` without `--authorized`.
+  Suite 462 passed / 6 skipped.
+- Deliverables:
+  - [x] `web/proxycontrol.py` (build/start/stop/status/set_intercept) — done.
+  - [x] Lifespan wiring + `/api/proxy/status` + `/api/proxy/intercept` — done.
+  - [x] `serve(proxy=)` loopback guard + `web_main` (`--with-proxy`, authorized-gated) — done.
+  - [x] D18/D19 recorded; tests — done.
+  - [ ] Proxy workbench UI: history, intercept edit/drop/forward, repeater (Phase 2) — next.
+- Effectiveness (assessed 2026-09-21): effective — the controller binds/stops cleanly in the
+  app's loop, status/intercept reflect the live engine, and the gates hold. This completes
+  the Phase-0 foundations; Phases 1–4 build the tabs on them.
+
+### CC-UI-0013 — Launcher runner: dry-run + gated execution + SSE output (Phase 0.3) (2026-09-21)
+- Change: added `fuzzlab/web/runner.py` and four launcher endpoints. `build_flags`/
+  `build_argv`/`display_command` turn a `CommandSpec` + submitted flag values into an argv
+  (`python -m fuzzlab.cli <name> <flags>`, mirroring the real CLI); `Runner` launches it
+  with `asyncio.create_subprocess_exec` and streams stdout/stderr as SSE (`output` events
+  then a `done` event with the return code), with `stop()` to terminate. Endpoints:
+  `POST /api/launch/dry-run` (plans + returns the exact argv/display, sends nothing —
+  FR-UI-5), `POST /api/launch` (no-auto-run gate: a `sends_traffic` activity is refused
+  with 403 unless `authorized:true`), `GET /api/launch/{token}/stream` (SSE), and
+  `POST /api/launch/{token}/stop`. Two safety properties by construction: **only flags the
+  spec declares reach argv** (unknown `values` keys are ignored — no arbitrary-arg
+  injection), and **no shell** is used (`create_subprocess_exec` with an argv list, so
+  values can't be shell-interpreted).
+- Impact (other components / project): the execution backbone for the Phase-1 launcher UI
+  (forms → dry-run → gated run → live output). Runs each tool as its own subprocess, so the
+  tools keep writing their own results (the UI writes none). No schema change. The UI does
+  not send traffic on its own — only an explicit, authorized `POST /api/launch` of a
+  traffic tool does.
+- Risk (level; mitigation): medium — the panel can now spawn tools. Mitigated by the
+  authorized gate (mirrors automatic mode), the declared-flags-only + no-shell properties,
+  dry-run-first, and tests: `tests/test_web_runner.py` (12) — argv type mapping,
+  unknown-key rejection, CLI-targeted argv, a real child-process stream asserting output +
+  exit code, unknown-token stream, dry-run without executing, 400 unknown command, the 403
+  traffic gate, launch returns a token, and stop of an unknown token. Suite 455 passed /
+  6 skipped.
+- Deliverables:
+  - [x] `runner.py` (build_argv + async `Runner` + SSE stream + stop) — done.
+  - [x] `/api/launch/dry-run`, `/api/launch`, `/api/launch/{token}/stream|stop` — done.
+  - [x] Tests (pure argv, real-subprocess stream, endpoint gate) — done.
+  - [ ] Launcher UI forms wired to these endpoints — Phase 1.
+- Effectiveness (assessed 2026-09-21): effective — dry-run previews the exact command
+  without traffic, the gate blocks unauthorized traffic tools, and a real child's output +
+  exit code stream over SSE. HTTP-level SSE draining is validated live/in Phase 1 (reading
+  an event-stream synchronously through TestClient is avoided; the Runner stream is tested
+  directly).
+
+### CC-UI-0012 — Frontend foundation: jinja2 + static assets + tab shell + SSE (Phase 0.2) (2026-09-21)
+- Change: reworked `fuzzlab/web/app.py` from hand-rendered HTML f-strings to **jinja2
+  templates** (`fuzzlab/web/templates/`: `base.html`, `index.html`, `run.html`,
+  `not_found.html`; autoescaped) served alongside a **static asset pipeline**
+  (`fuzzlab/web/static/app.css`, `app.js`) mounted at `/static`. The index is now a
+  **tabbed shell** — Launcher / Proxy / Results / ML / Diagnostics — with all panels
+  rendered server-side and a small vanilla-JS module toggling them (progressive
+  enhancement: no-JS shows every panel). The Launcher tab previews every activity from the
+  command-spec registry (CC-UI-0011) with gate pills; Results holds the existing runs
+  dashboard; Proxy/ML/Diagnostics are stubs for Phases 2–4. Added `fuzzlab/web/sse.py`
+  (`format_event`, `sse_response`) as the SSE plumbing for later live streams (first
+  consumer: the Phase 0.3 runner). `jinja2` (already a declared `web` extra) is now used;
+  FastAPI is imported at module scope so route `Request` annotations resolve. Templates and
+  static files added to `[tool.setuptools.package-data]`.
+- Impact (other components / project): UI-internal. No route/behavior change to the JSON
+  API, no schema change, no traffic, and the read-only + loopback + no-auto-run invariants
+  are unchanged (the only interactive form is still gated automatic mode). Sets up the
+  Phase-1 launcher UI and the Phase-2/3/4 tabs.
+- Risk (level; mitigation): low–medium — a rendering refactor of every panel. Mitigated by
+  the unchanged launcher/results suites (13 tests: mode selection, 403-without-auth,
+  injected-pipeline-not-run-on-load, loopback refusal, run-detail strings, empty-store
+  no-create) plus new `tests/test_web_frontend.py` (10: static assets served, tab shell,
+  activities preview, single-form invariant) and `tests/test_web_sse.py` (SSE formatting).
+  Suite 443 passed / 6 skipped.
+- Deliverables:
+  - [x] jinja2 templates + `/static` pipeline; tab shell (5 tabs) — done.
+  - [x] `fuzzlab/web/sse.py` + client `subscribe()` helper — done.
+  - [x] Package-data for templates/static — done.
+  - [x] Tests (frontend shell + SSE); existing web suites green — done.
+  - [ ] Vendored charting lib (uPlot) — deferred to first use (Phase 4 diagnostics).
+  - [ ] Launcher run controls (forms/dry-run/live output) — Phase 1 (needs the runner).
+- Effectiveness (assessed 2026-09-21): effective — the panel renders as a tabbed shell with
+  external CSS/JS, previews all activities from their parsers, and keeps every prior
+  invariant; SSE plumbing is in place for the runner.
+
+### CC-UI-0011 — Command-spec registry + `build_parser()` convention (Phase 0.1) (2026-09-21)
+- Change: added `fuzzlab/web/commandspec.py` — a registry that introspects each launchable
+  activity's own `argparse` parser into a machine-readable form schema
+  (`OptionSpec`/`CommandSpec`: name, dest, type ∈ {bool,int,float,str,choice}, required,
+  default, choices, multiple; plus per-command `sends_traffic`, `needs_authorized`,
+  `destructive_gate`). The authorized/destructive gates are *derived* from the parser
+  (presence of the flags), not restated. To supply the parsers without parsing, every tool
+  now exposes a **`build_parser()`** returning its `ArgumentParser`; each `main()` delegates
+  to it — a behavior-preserving refactor (see the per-component CC entries). This is the
+  single-source-of-truth backbone for the Phase-1 launcher: a new tool flag appears in the
+  UI automatically, with nothing hand-mirrored (PA-0001/PA-0003). Parsers are imported
+  lazily and the registry survives a single tool's optional-dep import failure.
+- Impact (other components / project): the launcher (Phase 1) renders controls from these
+  specs. Touches the tool modules across CRAWL/AUD/FUZZ/MUT/PROXY/SESS + UI(report) to add
+  `build_parser()` (CC-CRAWL-0006, CC-AUD-0014, CC-FUZZ-0018, CC-MUT-0007, CC-PROXY-0014,
+  CC-SESS-0009). No CLI behavior, flags, or defaults change; no schema change; no traffic.
+- Risk (level; mitigation): low — a refactor + a pure read-only introspection module.
+  Mitigated by `tests/test_web_commandspec.py` (17 tests: type mapping in isolation,
+  subparser recursion, long-flag naming, every activity builds + is JSON-serializable, the
+  gate/traffic matrix, gates-derived-from-parser, defaults-read-from-parser-not-a-constant)
+  and the unchanged full suite. Suite 433 passed / 6 skipped.
+- Deliverables:
+  - [x] `fuzzlab/web/commandspec.py` (introspection + registry) — done.
+  - [x] `build_parser()` on all launchable tools; `main()` delegates — done.
+  - [x] `tests/test_web_commandspec.py` — done.
+  - [ ] Consume the spec in the launcher UI (Phase 1) — next.
+- Effectiveness (assessed 2026-09-21): effective — the registry yields correct form schemas
+  for all 10 activities from their real parsers, and the tests pin the mapping + the
+  no-hand-mirror invariant.
+
+### CC-UI-0010 — Web UI revamp implementation plan (design record) (2026-09-21)
+- Change: added `docs/UI_REVAMP_PLAN.md` — the tracked design plan to take the read-only
+  control panel to a full local control plane: (1) an activity launcher with per-tool
+  flag forms, dry-run preview, and live output; (2) a proxy workbench (history, intercept
+  edit/drop/forward, repeater, scope/match-replace); (3) a dedicated ML tab; (4) a
+  TensorBoard-like diagnostics tab. Records the target tab architecture, the Phase-0
+  foundations (jinja2 + vendored static assets + SSE; an argparse-introspecting command
+  spec; a subprocess runner; a unified serve mode that hosts an in-process proxy for live
+  interception), the honest exists-vs-needs-building split (most proxy/ML backends exist;
+  time-series charts need a new `metric_series` table + per-step emitters), and how every
+  new capability preserves the no-auto-run / loopback / authorized / read-only / redaction
+  invariants.
+- Impact (other components / project): design only — no code, no schema change. Scopes
+  upcoming work across UI (#12), the intercepting proxy (#11 — a response-intercept hook),
+  and core (#2 — a `metric_series` migration). New FR-UI entries and the two Phase-0
+  decisions (UI-launches-tools-as-gated-subprocesses; unified-serve-in-process-proxy) will
+  be recorded when Phase 0 lands.
+- Risk (level; mitigation): none (documentation). The plan itself calls out the invariants
+  each phase must preserve and the tests each ships with.
+- Deliverables:
+  - [x] `docs/UI_REVAMP_PLAN.md` recorded — done.
+  - [ ] Phase 0 foundations (command spec, runner, frontend stack, unified serve) — next.
+  - [ ] Phases 1–4 (launcher, proxy workbench, ML tab, diagnostics) — planned.
+- Effectiveness (assessed 2026-09-21): effective as a design record — the plan is grounded
+  in a full survey of the web/proxy/ML/instrumentation code and preserves the component's
+  requirements (D11/D14/D15, NFR-UI-*).
+
 ### CC-UI-0009 — Reproducible evaluation report + `fuzzlab report` (T10.4) (2026-09-21)
 - Change: added `fuzzlab/report/` — `build_report(store, run_id)` assembles a
   **deterministic** report from a stored run (run/config identity, target fingerprint,

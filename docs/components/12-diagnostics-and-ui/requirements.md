@@ -54,6 +54,22 @@ bugs — the research-platform diagnostics of decision D2.
   `identity`, and `flow_id`.
 - **FR-UI-5** A `--dry-run` mode that plans and reports actions without sending
   traffic.
+- **FR-UI-6** An **activity launcher**: the panel offers a control for every flag of
+  every launchable activity (crawl, audit, fuzz, auto, greybox-run, proxy, mutate-run,
+  report, session), a dry-run preview of the exact command before anything runs, an
+  explicit gated Run/Stop, and live output. The flag controls are **derived from each
+  tool's own `argparse` parser** (single source of truth — never hand-mirrored), so a new
+  tool flag appears in the UI automatically. Launching still sends nothing until the user
+  acts and stays behind the `authorized` gate (no-auto-run, NFR-UI-no-auto-run).
+  *(Realized incrementally: Phase 0.1 adds the command-spec registry that introspects the
+  parsers; the launcher UI and runner follow.)*
+- **FR-UI-7** The panel is organized as a **tabbed shell**: **Launcher** (run controls),
+  **Proxy** (traffic review/edit/drop/forward/repeat), **Results** (runs dashboard),
+  **ML** (classifier/ranker/conformal/anomaly/active-learning/bandit/mutation — kept
+  **separate** from the primary panel), and **Diagnostics** (a TensorBoard-like view for
+  performance review and deep troubleshooting). Panels render server-side and degrade
+  without JavaScript. *(Realized incrementally: Phase 0.2 builds the shell + Results;
+  Proxy/ML/Diagnostics fill in Phases 2–4.)*
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

@@ -206,8 +206,9 @@ def save_dataset(rows, filename):
     print(f"\n[+] Logged {len(rows)} observations to {filename!r}")
 
 
-def parse_args(argv=None):
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+def build_parser():
+    p = argparse.ArgumentParser(prog="fuzzlab fuzz", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--url", required=True, help="Target URL, e.g. http://localhost:8080/api/users")
     p.add_argument("--param", default="id", help="Request parameter to fuzz (default: id)")
     p.add_argument("--output", default="blind_sqli_dataset.csv", help="CSV output path")
@@ -226,7 +227,11 @@ def parse_args(argv=None):
                    help="Authenticate as this identity via the session manager "
                         "(needs saved credentials: `fuzzlab session set-credential`). "
                         "Omit to run unauthenticated.")
-    return p.parse_args(argv)
+    return p
+
+
+def parse_args(argv=None):
+    return build_parser().parse_args(argv)
 
 
 def main(argv=None):

@@ -173,29 +173,42 @@ def run_greybox(*, base_url: str, store, run_id: int,
     """
     probes = tuple(probes)
     include = (app_root.rstrip("/") + "/",)
-    frontier = CoverageFrontier()
+    frontier = CoverageFrontier()          # run-wide exploration total only (a metric)
     summary = {"points": len(points), "attempts": 0, "db_faults": 0,
                "novel_lines": 0, "m10_would_confirm": 0, "max_reward": 0.0,
-               "baseline_reward": 0.0, "newcode_reward": 0.0}
+               "baseline_reward": 0.0, "newcode_reward": 0.0, "coverage_lines_seen": 0}
 
     if lab_control is not None:
         lab_control.snapshot("baseline")
 
     for pt in points:
+        # Send the benign baseline(s) first to establish this point's baseline coverage,
+        # then diff each attack against it. Novelty for the reward is PER-POINT
+        # differential (lines the attack reaches that the point's benign request did not),
+        # NOT global-frontier consumption — otherwise the baseline, running first, eats
+        # all the novelty and every attack shows novel=0 (BUG-0016).
+        ordered = sorted(probes, key=lambda s: s.kind != "baseline")   # baselines first
         baseline_probe: Probe | None = None
-        for spec in probes:
+        baseline_cov: set[tuple[str, int]] = set()
+        for spec in ordered:
             probe, cid = sender.send_correlated(
                 pt.url, pt.param, spec.value, method=pt.method, location=pt.location)
             if settle:
                 time.sleep(settle)
             cov = app_lines(coverage_source.lines_for(cid), include_prefixes=include)
-            novel = frontier.observe(cov)
+            cov_lines = {(f, ln) for f, lns in cov.items() for ln in lns}
+            frontier.observe(cov)          # accumulate the run-wide exploration total
             fault = dbfault_source.fault_for(cid)
-            if spec.kind == "baseline" and baseline_probe is None:
-                baseline_probe = probe
+            if spec.kind == "baseline":
+                if baseline_probe is None:
+                    baseline_probe = probe
+                baseline_cov |= cov_lines
+                new_lines = 0              # the control reaches no code "beyond itself"
+            else:
+                new_lines = len(cov_lines - baseline_cov)   # attack vs its own baseline
             screening = _screening(spec, probe, baseline_probe)
             sink_covered = _endpoint_file(pt.url, app_root) in cov
-            signal = GreyboxSignal(screening=screening, novel_lines=novel,
+            signal = GreyboxSignal(screening=screening, novel_lines=new_lines,
                                    db_fault=fault.faulted, sink_covered=sink_covered)
             reward = shaped_reward(signal)
             features = {
@@ -206,8 +219,8 @@ def run_greybox(*, base_url: str, store, run_id: int,
                 "method": pt.method,
                 "status": probe.status,
                 "resp_len": len(probe.text or ""),
-                "elapsed_s": round(probe.elapsed, 4),
-                "novel_lines": novel,
+                "new_lines_vs_baseline": new_lines,
+                "cov_lines": len(cov_lines),
                 "sink_covered": sink_covered,
                 "db_fault": fault.faulted,
                 "screening": screening,
@@ -215,15 +228,15 @@ def run_greybox(*, base_url: str, store, run_id: int,
             attempt_id = _insert_attempt(store, run_id, spec.family, features, reward)
             record_attempt_signals(
                 store, attempt_id,
-                coverage=encode_coverage(cov, novel=novel),
+                coverage=encode_coverage(cov, novel=new_lines),
                 db_fault=fault.faulted, reward=reward)
 
             summary["attempts"] += 1
-            summary["novel_lines"] += novel
+            summary["coverage_lines_seen"] += len(cov_lines)
             summary["max_reward"] = max(summary["max_reward"], reward)
             if spec.kind == "baseline":
                 summary["baseline_reward"] = max(summary["baseline_reward"], reward)
-            elif novel > 0:
+            elif new_lines > 0:
                 summary["newcode_reward"] = max(summary["newcode_reward"], reward)
             if fault.faulted:
                 summary["db_faults"] += 1
@@ -232,15 +245,18 @@ def run_greybox(*, base_url: str, store, run_id: int,
             if logger:
                 logger.info("greybox attempt", extra={
                     "url": pt.url, "family": spec.family, "reward": reward,
-                    "novel": novel, "db_fault": fault.faulted})
+                    "new_lines": new_lines, "db_fault": fault.faulted})
 
         if (reset_between and lab_control is not None
                 and pt.method.upper() != "GET"):
             lab_control.reset("baseline")
 
+    summary["novel_lines"] = frontier.size
     _record_metric(store, run_id, "greybox_attempts", summary["attempts"])
     _record_metric(store, run_id, "greybox_db_faults", summary["db_faults"])
     _record_metric(store, run_id, "greybox_novel_lines", summary["novel_lines"])
+    _record_metric(store, run_id, "greybox_coverage_lines_seen",
+                   summary["coverage_lines_seen"])
     _record_metric(store, run_id, "greybox_m10_would_confirm",
                    summary["m10_would_confirm"])
     _record_metric(store, run_id, "greybox_frontier_size", frontier.size)

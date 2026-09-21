@@ -344,7 +344,9 @@ tracked in the requirements files, not here.
   via a sender seam); interception-as-awaited-`asyncio.Future` (`intercept.py`);
   manual-login **session capture** (`session_capture.py` → `SessionManager.adopt`,
   FR-PROXY-9/FR-SESS-11 — the escape hatch for logins detection can't crack: MFA,
-  CAPTCHA, multi-step).
+  CAPTCHA, multi-step). For **live** interception the engine is hosted in the web app's
+  event loop by `web/proxycontrol.py` (D19), since the intercept futures are not
+  cross-process; the standalone `fuzzlab proxy` remains for record-and-forward.
 - **Flow engine + CONNECT/TLS** `[partial]`: `server.py::ProxyEngine` is the sans-I/O
   pipeline (scope → match-replace → intercept → byte-exact forward → history) and
   `AsyncProxyServer` the asyncio socket layer (plain-HTTP path tested offline over
@@ -355,16 +357,29 @@ tracked in the requirements files, not here.
 - **Role:** optional observer; other tools may route through it for unified
   history, but timing-sensitive traffic does not (D5).
 
-### 12. Diagnostics and UI `[built control panel; Datasette/depth pending]`
+### 12. Diagnostics and UI `[built control panel; revamp in progress (see docs/UI_REVAMP_PLAN.md)]`
 - **Subcomponents:** a **local web application** (D11, `fuzzlab/web/`) `[built]` — a
   FastAPI control panel (loopback-only, read-only over the store, no auto-run) that
   hosts the **launcher with run-mode selection** (automatic vs manual; nothing is sent
   to the target until the user chooses) and a dashboard + run-detail view for live
   runs and results, surfacing oracle findings and the advisory model scores with their
   flag/abstain/drop decision (`web/app.py`, `web/results.py`). The `run_metrics` table
-  and structured audit/debug logs are built. **Pending:** Datasette over the store for
-  deep exploration, interception views (await Phase 6), a `--dry-run` mode, and a plain
-  CLI entry point per tool for headless/automation use (`fuzzlab auto` exists today).
+  and structured audit/debug logs are built.
+- **Revamp (in progress, `docs/UI_REVAMP_PLAN.md`):** growing the read-only panel into a
+  full control plane over a **tabbed shell** (Launcher / Proxy / Results / ML /
+  Diagnostics; jinja2 templates + a `/static` asset pipeline). Phase 0 foundations built:
+  a **command-spec registry** (`web/commandspec.py`) that derives per-tool flag forms from
+  each tool's own `argparse` parser (every tool exposes `build_parser()`), **SSE plumbing**
+  (`web/sse.py`), a **subprocess runner** (`web/runner.py`) with dry-run preview,
+  authorized-gated execution, and live SSE output (`/api/launch*`; only declared flags reach
+  argv, no shell), and a **unified serve mode** (`web/proxycontrol.py`, `fuzzlab web
+  --with-proxy`) that runs the intercepting proxy in the panel's own event loop so live
+  interception's futures work (D19; opt-in, `--authorized`-gated, loopback-only, separate
+  port). **Pending:** the launcher run controls (Phase 1), the proxy
+  workbench (Phase 2), the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
+  `metric_series` time-series table (Phase 4), Datasette-style store exploration, a
+  `--dry-run` mode, and a plain CLI entry point per tool for headless use
+  (`fuzzlab auto` exists today).
 - **Reproducible evaluation report** `[built]` (Phase 10 T10.4, `fuzzlab/report/`): a
   deterministic report over a stored run (run/config identity, target, counts, findings,
   metrics, deployed models, active plugins), canonical JSON for diffing; read-only

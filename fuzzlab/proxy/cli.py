@@ -26,7 +26,7 @@ def _build_scope(hosts: list[str] | None) -> Scope:
     return scope
 
 
-def main(argv: list[str]) -> int:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="fuzzlab proxy")
     p.add_argument("--host", default="127.0.0.1", help="Proxy listen host (loopback)")
     p.add_argument("--port", type=int, default=8888, help="Proxy listen port")
@@ -45,6 +45,11 @@ def main(argv: list[str]) -> int:
                    help="Disable CONNECT/TLS interception (plain-HTTP proxy only)")
     p.add_argument("--authorized", action="store_true",
                    help="Required to run the proxy (it forwards traffic to upstreams)")
+    return p
+
+
+def main(argv: list[str]) -> int:
+    p = build_parser()
     args = p.parse_args(argv)
 
     ca = LocalCA(args.ca_dir)

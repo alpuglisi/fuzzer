@@ -1,0 +1,69 @@
+/* fuzzlab control panel — served locally on loopback only. */
+:root { color-scheme: light dark; }
+
+body {
+  font-family: system-ui, sans-serif;
+  max-width: 960px;
+  margin: 1.5rem auto;
+  padding: 0 16px;
+  line-height: 1.5;
+}
+
+h1 { font-size: 1.4rem; margin: .2rem 0 .1rem; }
+h2 { font-size: 1.1rem; }
+h3 { font-size: 1rem; margin: .6rem 0 .3rem; }
+
+.card {
+  border: 1px solid #8884;
+  border-radius: 10px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+button {
+  font-size: 1rem;
+  padding: .5rem 1rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+button:disabled { cursor: not-allowed; opacity: .55; }
+
+code { background: #8882; padding: .1rem .3rem; border-radius: 4px; }
+.warn { color: #b00; } .ok { color: #0a0; } .bad { color: #b00; }
+.muted { color: #8888; font-size: .9rem; }
+.pill {
+  display: inline-block; font-size: .75rem; padding: .05rem .45rem;
+  border: 1px solid #8886; border-radius: 999px; margin-left: .35rem;
+}
+.pill.traffic { color: #b60; border-color: #b606; }
+.pill.authz { color: #06a; border-color: #06a6; }
+.pill.destructive { color: #b00; border-color: #b006; }
+
+.result { background: #8882; padding: .5rem; border-radius: 8px; white-space: pre-wrap; }
+table { border-collapse: collapse; width: 100%; }
+th, td {
+  text-align: left; padding: .35rem .5rem; border-bottom: 1px solid #8883;
+  font-size: .95rem; vertical-align: top;
+}
+a { color: inherit; }
+
+/* --- tab shell --- */
+header.masthead { border-bottom: 1px solid #8884; margin-bottom: .5rem; }
+nav.tabs {
+  display: flex; flex-wrap: wrap; gap: .25rem; margin: .5rem 0 0;
+}
+nav.tabs a {
+  text-decoration: none; padding: .45rem .8rem; border-radius: 8px 8px 0 0;
+  border: 1px solid transparent; font-size: .95rem;
+}
+nav.tabs a:hover { background: #8881; }
+nav.tabs a.active { background: #8882; border-color: #8884; font-weight: 600; }
+
+/* Panels render server-side; JS hides the inactive ones (no-JS shows all). */
+.panel.hidden { display: none; }
+
+.field { margin: .35rem 0; }
+.field label { display: inline-block; min-width: 11rem; font-size: .9rem; }
+.badge-row { margin: .2rem 0 .4rem; }
+.spec-flags { font-size: .85rem; }
+.spec-flags li { margin: .1rem 0; }
