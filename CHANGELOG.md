@@ -13,6 +13,13 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 10 (T10.5): added the **multi-target evaluation harness**
+  (`fuzzlab/harness/multitarget.py`). `run_targets` runs the pipeline against several
+  `TargetSpec`s (base-url + ground-truth) via an injected `sender_for` seam;
+  `transfer_summary` reports per-target scores + macro precision/recall + a `generalizes`
+  verdict (real vulns on ≥ 2 scored targets); `format_transfer` renders it. Offline-
+  testable; the live external-lab transfer run is the on-host T10.6 exit. +4 tests
+  (385 passed / 4 skipped). Change-control: CC-LAB-0008.
 - Phase 10 (T10.4): added the **reproducible evaluation report** (`fuzzlab/report/`).
   `build_report(store, run_id)` assembles a deterministic report from a stored run
   (run/config identity, target, counts, findings, `run_metrics`, deployed models, active

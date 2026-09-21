@@ -156,6 +156,23 @@ On the host:
 - [ ] **Record** WS/HTTP-2 flows in history (they carry the `flow.protocol` tag) and replay
   them via the repeater.
 
+## Phase 10 — generalization / transfer exit
+
+The plugin system, the ECOD anomaly detector, the reproducible report (`fuzzlab report`),
+and the multi-target harness (`fuzzlab/harness/multitarget.py`) are built and offline-
+tested. On the host:
+- [ ] **T10.6 transfer exit:** stand up a **second, external** validation lab (OWASP Juice
+  Shop or WAVSEP, per D10) with a ground-truth contract, then run `run_targets` over both
+  the Puppy Fort Factory and the external lab (live senders) and confirm `transfer_summary`
+  reports non-trivial recall on the second target — i.e. `generalizes` is true. Capture
+  each run with `fuzzlab report` for the reproducibility record.
+- [ ] **Held-out anomaly eval:** run the ECOD tripwire over real proxy/attempt flows and
+  confirm it flags genuinely anomalous traffic without drowning the signal.
+- [ ] **Sample plugin (no core change):** install a small entry-point plugin
+  (`fuzzlab.plugins` group), run `fuzzlab auto --plugins`, and confirm it attaches at the
+  right hooks and is recorded in `run_plugin` — the FR-PLUG "extends without a core edit"
+  demonstration.
+
 ## How to pick these up
 
 Step-by-step commands for all of the above are in **`docs/ON_HOST_RUNBOOK.md`**.

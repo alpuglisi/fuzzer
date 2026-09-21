@@ -3,6 +3,31 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0008 — Multi-target evaluation harness (Phase 10 T10.5) (2026-09-21)
+- Change: `fuzzlab/harness/multitarget.py` runs the full pipeline against several targets
+  — each a `TargetSpec` (name, base-url, optional ground-truth contract) — one `run_auto`
+  per target, and produces a **transfer summary**: per-target scores (tp/fp/fn,
+  precision/recall from the existing scoring), macro precision/recall over the scored
+  targets, a `found_on` list, and a `generalizes` verdict (real vulnerabilities — recall
+  > 0 — on ≥ 2 scored targets). The network is injected via `sender_for(spec)` so it is
+  offline-testable; `format_transfer` renders a deterministic summary.
+- Impact (other components / project): the generalization/transfer capability for
+  Phase 10 — evidence the toolkit isn't overfit to the Puppy Fort Factory. The live run
+  against an external validation lab (Juice Shop/WAVSEP, D10) is the on-host T10.6 exit;
+  the eventual manifest-generated second target (option C) plugs in as just another
+  `TargetSpec`. No schema change; reuses `run_auto` + `ScoreReport`.
+- Risk (level; mitigation): low — a thin orchestration over the existing pipeline, behind
+  an injected sender seam. Mitigated by 4 tests (`tests/test_multitarget.py`): two scored
+  targets both confirm SQLi and `generalizes` is True with macro metrics; a mixed
+  scored/unscored run summarizes correctly and does not over-claim generalization;
+  `format_transfer` text; empty target list. Suite 385 passed / 4 skipped.
+- Deliverables:
+  - [x] `run_targets` + `transfer_summary` + `format_transfer` (T10.5) — done.
+  - [ ] Live transfer run against an external lab (T10.6) — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — the harness runs multiple
+  targets and reports per-target + macro transfer metrics with a generalization verdict;
+  the live external-lab transfer is on-host.
+
 ### CC-LAB-0007 — Opt-in h2→h1 downgrade front-end (Phase 9 T9.5, D17) (2026-09-21)
 - Change: added a **default-off** front-end reverse proxy to the lab as a desync research
   target. `lab/downgrade/nginx.conf` accepts HTTP/2 (h2c) and proxies **HTTP/1.1** to

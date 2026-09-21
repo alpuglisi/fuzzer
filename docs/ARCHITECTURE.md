@@ -43,9 +43,11 @@ WAF (D16) is the filter-evasion target, and the semantics-preserving operator fr
 remain. Phase 9 (protocol depth) is well underway — the from-scratch WebSocket codec and the
 byte-exact HTTP/2 frame layer + minimal HPACK + raw-frame client are built; the parsed
 `wsproto`/`h2` path, live ALPN/socket, and the opt-in h2→h1 desync lab front-end remain.
-Phase 10 (polish + generalization) is nearly complete offline — the plugin system
-(registry + pipeline wiring), the ECOD anomaly detector, and the reproducible evaluation
-report are built; only the multi-target transfer test (on-host) remains.
+Phase 10 (polish + generalization) is complete offline — the plugin system (registry +
+pipeline wiring), the ECOD anomaly detector, the reproducible evaluation report, and the
+multi-target evaluation harness are built; only the live transfer run against a second
+target is on-host. That leaves the accumulated on-host exits and the Lab-track manifest
+generator as the remaining work.
 
 ## Integration model
 
@@ -143,6 +145,12 @@ tracked in the requirements files, not here.
   The **live sources** — Xdebug/pcov line coverage per request, the database error
   hook/query-log reader, and DB snapshot/restore — must run against the container and
   are on-host (`docs/ON_HOST_TASKS.md`).
+- **Multi-target evaluation harness** `[built; live transfer on-host]` (Phase 10 T10.5,
+  `fuzzlab/harness/multitarget.py`): runs the pipeline against several targets (each a
+  base-url + ground-truth contract) and reports per-target + macro transfer metrics with a
+  `generalizes` verdict — the generalization evidence. The live run against an external
+  validation lab is on-host; the manifest-generated second target plugs in as a
+  `TargetSpec`.
 - **Manifest-driven generator** `[planned]` (D8): the "lab as a compiler" — one
   manifest plus a safety matrix, seed, and env-profile generate the app, labels,
   docs, and oracle tests, with verdicts derived from `(transform, sink context)`.
@@ -483,7 +491,7 @@ replays and edits, including a raw byte path for malformed-traffic study.
 
 ## Build-status snapshot
 
-Suite: 381 passed / 4 skipped (the skips need a native build unavailable in the sandbox:
+Suite: 385 passed / 4 skipped (the skips need a native build unavailable in the sandbox:
 2 credential-store tests, the proxy real-CA minting test, and the mutation engine's
 `sqlglot` AST test). Everything below is offline-complete unless an on-host item is named.
 
@@ -541,7 +549,7 @@ Suite: 381 passed / 4 skipped (the skips need a native build unavailable in the 
     disable isolation, oracle/advisory-split guard), entry-point discovery, `PluginManager`,
     `run_plugin` recording (migration 10), and the pipeline wiring (T10.2 — HTTP seam,
     auditor, oracle; `fuzzlab auto --plugins`) are built; a `register_payload_source`
-    consumer and the multi-target transfer test (T10.5) remain.
+    consumer remains (and the live transfer run, T10.6, is on-host).
   - **Oracle mechanisms:** M8 (out-of-band) and M10 (grey-box) still to build.
   - **Intercepting proxy (Phase 6):** the full offline stack is built — byte-exact
     dual-path core (`RawMessage` + `h11`), scope, match-and-replace, flow history
@@ -552,9 +560,9 @@ Suite: 381 passed / 4 skipped (the skips need a native build unavailable in the 
   Phase 3 live capture; Phase 4 beats-uniform exit (T4.6); Phase 5 held-out exit
   (T5.5); Phase 6 live CONNECT/TLS serving + browser trust; Phase 7 held-out
   NDCG@k/Precision@k exit + active-learning-budget-vs-random (T7.4); Phase 8
-  variants-bypass-the-WAF-and-reach-new-code exit (T8.7); live
-  `--browser`/`--bandit`/`--score`/`--rank` runs and stored-XSS session-to-browser
+  variants-bypass-the-WAF-and-reach-new-code exit (T8.7); Phase 9 live WS/HTTP-2 + h2→h1
+  desync exit (T9.6); Phase 10 live transfer run against a second/external target (T10.6);
+  live `--browser`/`--bandit`/`--score`/`--rank` runs and stored-XSS session-to-browser
   wiring — all tracked in `docs/ON_HOST_TASKS.md`.
-- `[planned]`: the rest of Phase 10 — the multi-target transfer test (T10.5/T10.6, the
-  harness offline + the live run on-host) — and the manifest-driven lab generator (Lab
-  track).
+- `[planned]`: a `register_payload_source` consumer (fuzz/mutation payload pool) and the
+  manifest-driven lab generator (Lab track, the eventual option-C second target).

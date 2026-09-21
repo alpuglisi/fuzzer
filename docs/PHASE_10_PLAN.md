@@ -83,7 +83,7 @@ metrics deterministically; and the toolkit produces results on a second lab targ
 - **T10.4 — Reproducible evaluation report `[done, offline]`.** `fuzzlab/report/` + a
   `fuzzlab report` CLI: a deterministic report over a stored run (config hash, feature/
   model versions, seeds, metrics, findings, active plugins) — the reproducibility artifact.
-- **T10.5 — Multi-target harness + transfer `[planned; live on-host]`.** A thin
+- **T10.5 — Multi-target harness + transfer `[done — harness offline; live run on-host]`.** A thin
   multi-target eval harness (base-url + ground-truth contract per target) + docs; the live
   transfer run against an external lab is on-host; a bespoke second app is deferred to the
   Lab track.
