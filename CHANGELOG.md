@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Web control panel (D11): built out `fuzzlab web` into a real dashboard. Added
+  `fuzzlab/web/results.py` (store-backed `list_runs`/`run_detail`) and expanded the
+  app with a **runs table**, **run-detail** views (`/runs/{id}` HTML + `/api/runs[/{id}]`)
+  showing the score (TP/FP/FN/TN), target fingerprint, dataset counts (findings,
+  negatives, candidates, attempts, pages), the findings table, and run metrics. Manual
+  mode surfaces the selectable categories (D14). The panel is **read-only** over the
+  store (never creates it, never sends traffic — no-auto-run and loopback-only
+  preserved). +6 tests (160 passed / 2 skipped). Change-control: CC-UI-0007.
 - Oracle vectors (M6): **browser execution for stored + DOM XSS**. Added an injected
   `BrowserExecutor` seam (`fuzzlab/oracle/browser.py`) with a `FakeBrowserExecutor` for
   offline tests and a live `PlaywrightBrowserExecutor` (`fuzzlab/tools/browserexec.py`,

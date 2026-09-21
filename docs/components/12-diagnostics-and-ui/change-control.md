@@ -3,6 +3,38 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0007 — Web control panel: results review + full dashboard (D11) (2026-09-21)
+- Change: built out the local web control panel beyond the Phase-0 launcher. Added
+  `fuzzlab/web/results.py` (pure, store-backed `list_runs` / `run_detail` / `store_exists`)
+  and expanded `fuzzlab/web/app.py` with a **runs dashboard** (index lists every run
+  with its finding count), **run-detail** views (`GET /runs/{id}` HTML and
+  `GET /api/runs/{id}` JSON) showing the score (TP/FP/FN/TN, precision/recall), the
+  target fingerprint, dataset counts (candidates, negatives, evaluations, attempts,
+  pages), the oracle findings table, and all run metrics, plus `GET /api/runs`. Manual
+  mode now surfaces the selectable categories (D14) and the pre-wired commands use the
+  `fuzzlab` CLI (crawl/audit/fuzz/auto). The panel is **read-only** over the store — it
+  never creates the store file and never sends traffic (no-auto-run preserved).
+- Impact (other components / project): turns the store into a reviewable dashboard —
+  the results of any crawl/audit/fuzz/auto run (findings, negatives, fingerprint,
+  score, request metrics) are browsable locally. Reads the store written by every
+  other component; no schema change.
+- Risk (level; mitigation): low — read-only and loopback-only (serve() refuses
+  non-loopback). Store opened only when the file already exists (no accidental
+  creation / no cwd pollution). Mitigated by tests: the existing launcher tests
+  (no-auto-run, mode selection, 403 without authorization, injected pipeline) plus
+  `tests/test_web_results.py` (results functions; `/api/runs`; run detail + 404; the
+  run HTML renders findings + score; index runs table; missing-store shows no runs and
+  creates no file). Suite 160 passed / 2 skipped.
+- Deliverables:
+  - [x] `web/results.py` (list_runs / run_detail) — done.
+  - [x] Dashboard + run-detail HTML + `/api/runs[/{id}]` — done.
+  - [x] Manual category surfacing; CLI-based pre-wired commands — done.
+  - [x] Tests (results review; read-only/no-create invariant) — done.
+  - [ ] Live use on the host (`fuzzlab web`, review real runs) — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests and a rendered preview — runs
+  list, run detail shows the score/fingerprint/findings/negatives/metrics, and the
+  panel stays read-only and loopback-only.
+
 ### CC-UI-0006 — No-ground-truth fail-safe for automatic runs (spec) (2026-09-21)
 - Change: added FR-UI-nogt (D15). An automatic run against a target with no
   ground-truth contract must not auto-select or test everything; it requires an
