@@ -16,6 +16,19 @@ why, across the whole project. The component change-control logs are
 fixed set of assessments (below). A single project change may produce one root
 CHANGELOG line and several component change-control entries.
 
+## Update both logs on every change (required)
+
+Every change updates **both** levels of log:
+
+1. the root `CHANGELOG.md` — one high-level dated line (what changed and why); and
+2. the change-control log of **each affected component** — a full controlled entry
+   with all the required fields below.
+
+Neither substitutes for the other. If a change touches more than one component,
+add an entry to each affected component's `change-control.md`. If a change alters
+the project architecture, also update `docs/ARCHITECTURE.md` (its maintenance
+rule). Do this as part of making the change, not afterward.
+
 ## Required fields for every change-control entry
 
 Every time a component changes, add an entry with all of these:

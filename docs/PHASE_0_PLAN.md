@@ -9,10 +9,15 @@ the payloads.
 
 ## Goal
 
-One command brings up a pinned, containerized lab and runs the existing tools
-against it, all writing to a single SQLite store, and an integration harness
-confirms the lab's known vulnerabilities from a machine-readable label contract.
-Runs are reproducible and record the exact config and environment they ran under.
+One command brings up a pinned, containerized lab and then **presents a user
+interface that lets the user choose how to proceed** — it never starts running
+tools against the container on its own. The two modes are: **automatic**, which
+runs the existing tools in sequence (all writing to a single SQLite store) and an
+integration harness that confirms the lab's known vulnerabilities from a
+machine-readable label contract; and **manual**, which leaves the lab running and
+makes the tools available for hand-driven use, sending nothing to the target until
+the user invokes a tool. Runs are reproducible and record the exact config and
+environment they ran under.
 
 ## Environment approach: containerized (decided)
 
@@ -72,12 +77,12 @@ out-of-band by the tools and harness; never served by the target.
   consumes them.
 
 ### T0.7 — Integration harness
-An assert-known-vulns run that brings up the container, runs crawler → auditor →
-fuzzer, compares results against `expectedresults.csv`, and reports
-TP/FP/TN/FN. One command; deterministic where feasible; time-based checks
-quarantined.
-- **Accept:** the harness confirms the known vulnerabilities and runs from one
-  command.
+The **automatic mode's** run, invoked from the launcher (T0.9), not on bring-up:
+an assert-known-vulns run that runs crawler → auditor → fuzzer, compares results
+against `expectedresults.csv`, and reports TP/FP/TN/FN. Deterministic where
+feasible; time-based checks quarantined.
+- **Accept:** when the user selects automatic mode, the harness confirms the known
+  vulnerabilities; it does not run until that mode is selected.
 
 ### T0.8 — Migrate tools onto the store
 Crawler and auditor write to the unified store; the fuzzer reads candidates and
@@ -85,12 +90,28 @@ writes attempts and findings. Tools remain standalone-runnable.
 - **Accept:** a full run populates `page`, `endpoint`, `parameter`, `candidate`,
   `attempt`, and `finding`.
 
+### T0.9 — Launcher with run-mode selection (no auto-run)
+After the container is up, present a user interface that offers the two run modes
+and does nothing to the target until the user chooses. In Phase 0 this is a
+minimal launcher (a clear menu / prompt); the full `textual` TUI is component #12,
+elaborated later.
+- **Automatic:** run the discovery → fuzz pipeline and the integration harness
+  (T0.7) against the lab.
+- **Manual:** leave the lab running and make the tools available for hand-driven
+  use — print ready-to-run commands (and/or drop into an interactive shell) for
+  each tool with the right target/store already wired — and send nothing to the
+  container until the user runs a tool.
+- **Accept:** bringing up the environment stops at the launcher; no request
+  reaches the lab until the user selects automatic mode or manually runs a tool.
+
 ## Exit criterion
 
-One command runs the tools against the containerized, pinned lab, all writing to
-one store; the harness confirms the known vulnerabilities from the machine-
-readable labels; each run records its config hash and environment; and the
-golden/determinism tests pass.
+One command brings up the containerized, pinned lab and stops at a launcher that
+never auto-runs tools; **automatic** mode runs the tools against the lab (all
+writing to one store) and the harness confirms the known vulnerabilities from the
+machine-readable labels; **manual** mode leaves the lab up with the tools ready to
+invoke by hand and sends nothing until asked; each run records its config hash and
+environment; and the golden/determinism tests pass.
 
 ## Out of scope for Phase 0 (deferred)
 

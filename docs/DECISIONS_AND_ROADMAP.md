@@ -171,6 +171,11 @@ the ZAP team maintains; Juice Shop for the realism tier).
 - **Security hygiene even in the lab.** Credentials in the OS keyring, redaction
   on write to the store, automatic scope enforcement, and a default-off gate on
   destructive payloads. The habits outlive the lab.
+- **No auto-run against the target.** Bringing up the environment never starts
+  tool traffic on its own. A launcher presents a run-mode choice — automatic (the
+  tools run in sequence) or manual (the tools are made available for hand-driven
+  use) — and nothing is sent to the target until the user chooses automatic mode
+  or invokes a tool by hand.
 
 ## Roadmap (phased)
 

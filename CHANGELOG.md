@@ -6,8 +6,23 @@ changed, and the reason. Reference the commit hash where useful.
 
 Format per entry: `- <area>: <what changed> — <why>` (commit `<hash>`).
 
+**Every change updates both logs:** this high-level CHANGELOG *and* the
+change-control log of each affected component under `docs/components/`. This file
+is the project-level history; the component logs are the lower-level controlled
+records (see `docs/components/README.md`).
+
 ## 2026-09-21
 
+- Planning: added a **no-auto-run** requirement — bring-up presents a launcher
+  offering automatic vs manual operation and never starts tools against the
+  container on its own. Recorded in `docs/PHASE_0_PLAN.md` (Goal, T0.7, new T0.9,
+  exit criterion), `docs/DECISIONS_AND_ROADMAP.md` (cross-cutting principle),
+  `docs/ARCHITECTURE.md` (integration model, component #12, Security-and-safety),
+  and the component #12 spec + change-control log (CC-UI-0002) — to keep the user
+  in control of when the tools touch the target.
+- Process: made it explicit that **both** logs are updated on every change — this
+  high-level CHANGELOG and each affected component's change-control log — noted in
+  this file's header and in `docs/components/README.md`.
 - Planning: updated `docs/ARCHITECTURE.md` to reflect the settled decisions — a
   standing maintenance rule (keep the doc in sync whenever the architecture
   changes; each component now also has its own spec and change-control log),

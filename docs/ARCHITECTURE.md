@@ -25,6 +25,12 @@ components only write scores and uncertainty (the oracle/advisory split). The
 target lab runs in a container with pinned PHP/Apache/MySQL/libxml versions (D7),
 so labels stay valid across upgrades and runs are reproducible.
 
+**No auto-run:** bringing up the lab never starts tool traffic on its own. A
+launcher (see component #12) presents a run-mode choice — **automatic** (the tools
+run in sequence against the lab) or **manual** (the tools are made available for
+hand-driven use) — and nothing is sent to the target until the user chooses
+automatic mode or invokes a tool by hand.
+
 ## Component map
 
 ```
@@ -191,12 +197,15 @@ tracked in the requirements files, not here.
   history, but timing-sensitive traffic does not (D5).
 
 ### 12. Diagnostics and UI `[planned]`
-- **Subcomponents:** a `textual` TUI for live interception and runs; Datasette
-  over the store for exploration; a `run_metrics` table; structured audit and
-  debug logs; a `--dry-run` mode.
-- **Depends on (components):** `core/` (store and logging).
+- **Subcomponents:** a **launcher with run-mode selection** (automatic vs manual;
+  no auto-run — nothing is sent to the target until the user chooses); a `textual`
+  TUI for live interception and runs; Datasette over the store for exploration; a
+  `run_metrics` table; structured audit and debug logs; a `--dry-run` mode.
+- **Depends on (components):** `core/` (store and logging); in automatic mode the
+  launcher invokes the tools (crawler, auditor, fuzzer, harness).
 - **Purpose:** the research-platform diagnostics from decision D2, to verify
-  functionality and locate bugs.
+  functionality and locate bugs; and to keep the user in control of when the tools
+  touch the target (the no-auto-run principle).
 
 ### 13. Plugin system `[planned]` (Phase 10)
 - **Subcomponents:** `importlib.metadata` entry points; a hook registry
@@ -292,8 +301,10 @@ replays and edits, including a raw byte path for malformed-traffic study.
   golden-file feature tests, deterministic ML-pipeline tests, an
   assert-N-known-vulns integration suite, and oracle precision tests.
 - **Security and safety:** credentials in the OS keyring, redaction on write,
-  automatic scope enforcement, a default-off destructive-payload gate, and a
-  lab-only posture throughout.
+  automatic scope enforcement, a default-off destructive-payload gate, a lab-only
+  posture throughout, and **no auto-run** — bring-up presents a launcher and no
+  tool sends traffic to the container until the user selects automatic mode or
+  runs a tool by hand.
 
 ## Build-status snapshot
 
