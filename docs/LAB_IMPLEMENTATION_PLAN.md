@@ -1,6 +1,7 @@
 # Lab generator — implementation plan for the remaining work
 
-**Status: active — 15 of 16 flagged items decided, 2026-09-21.** This is a
+**Status: active, building — 15 of 16 flagged items decided, Phases 0-3
+fully task-broken-down with a parallel lane map, 2026-09-21.** This is a
 task-level plan, in the style of `docs/LAB_PHASE_0_PLAN.md`, covering
 everything **after** the point Phase 0 has actually reached (as of
 `CC-LAB-0028`) through the rest of `CR-LAB-0001` §8's phase list. It does
@@ -13,8 +14,11 @@ prompt); their findings, plus the project owner's decisions on every
 resulting and originally-flagged judgment call, are recorded inline in the
 relevant sections and summarized in §6. One item remains genuinely open
 (Phase 4's SSRF/GraphQL design passes, deliberately left unresearched as
-premature) — see §6's "Still
-open" list.
+premature) — see §6's "Still open" list. §7 maps every Phase 0-3 task to a
+build lane with real dependencies and a wave number, sized for maximum
+concurrent agent dispatch under this project's standing multi-lane
+orchestration policy — Phase 4 is excluded from that map, per §5's own
+reasoning for staying at milestone granularity.
 
 Companion documents this plan assumes you have open: `CR-LAB-0001` (the
 approved change request, including Addenda A-E), `docs/DECISIONS_AND_ROADMAP.md`
@@ -36,13 +40,16 @@ plan's first section:
 | T-LAB0.9 | Not started | Flagged, not built: it changes `expectedresults.csv`'s schema, a contract `fuzzlab/labels/contract.py` and the FUZZ harness already consume. |
 | T-LAB0.10 | Not started | Low risk, blocked only on confirming the CLI subcommand shape (§7 decision 5 of the plan doc, never explicitly confirmed in this conversation). |
 
-Everything in Phase 1-4 below is **not started** — CR-LAB-0001 §8 records
-them at phase granularity only ("task-level detail deferred to the
-implementation plan"). This document is that detail, one level down from §8,
-for Phase 1 (most of it) and at milestone granularity for Phases 2-4 (full
-task breakdowns for those are better written closer to when Phase 1 actually
-finishes, since Phase 1's own results — the leakage-probe threshold, the
-authoring-hours actuals — feed directly into how Phase 2-4 get scoped).
+Everything in Phase 1-3 below is **not started** but now has an executable
+task breakdown (§2-4) plus a lane/dependency map (§7) — CR-LAB-0001 §8
+records these at phase granularity only ("task-level detail deferred to the
+implementation plan"); this document is that detail. Phase 4 is deliberately
+left at milestone granularity (§5) — writing it out further before Phases
+1-3 land and the race-condition/business-logic gap-class decision is
+revisited would mostly be guessing, per §5's own reasoning. Where a task's
+exact design is still underdetermined (e.g. Phase 2's identity schema),
+this document commits to a concrete first draft rather than leaving a
+placeholder, flagged as revisable during implementation, not as blocking.
 
 ---
 
@@ -401,8 +408,115 @@ tools are pointed at a multi-identity-aware lab for actual IDOR/BOLA
 testing — but that class of cell stays deferred indefinitely (Addendum E)
 regardless, so it is not on Phase 2's own critical path.
 
-With both open questions now resolved, write `docs/LAB_PHASE_2_PLAN.md` at
-the same granularity as Phase 0/1 above before starting implementation.
+With both open questions now resolved, task breakdown follows, at the same
+granularity as Phase 0/1 above.
+
+### 3.1 Identity/ownership schema — `lab/identities/identities.yaml`
+
+New file, new loader module. First-draft concrete schema (this is genuinely
+novel ground per the research above — refine field names during
+implementation if a cleaner shape emerges, but do not skip writing one down
+before starting):
+
+```yaml
+schema_version: 1
+identities:
+  - id: user_a
+    role: standard_user
+  - id: user_b
+    role: standard_user
+  - id: admin_a
+    role: admin
+resources:
+  - resource_id: profile_user_a
+    owner: user_a
+    cell_ids: [LABGEN-...]      # which generated cells this resource maps to
+authz_expectations:
+  - cell_id: LABGEN-...
+    endpoint: /profile/{id}
+    accessing_identity: user_b   # the identity making the request
+    target_resource: profile_user_a
+    expected_outcome: denied     # allowed | denied — binary, matches D20's
+                                  # binary-verdict convention
+```
+
+- New module `fuzzlab/labgen/identity.py`: `Identity`, `Resource`,
+  `AuthzExpectation` frozen dataclasses; `load_identities(path) ->
+  IdentityGraph`; JSON-Schema-validated the same way `schema.py` validates
+  manifests (`lab/schemas/identities.schema.json`). Deliberately reads
+  nothing the manifest cells reference and is never imported by
+  `verdict.py` — mirrors `provenance.yaml`'s separation, per the decision
+  above.
+- Tests: schema validation (missing/malformed fields raise
+  `ManifestError`-style typed errors, not raw `KeyError`); a round-trip
+  load of the example above; a duplicate-`id`/`resource_id` check (fail
+  loud, matching `load_labels`'s duplicate-`case_id` convention).
+
+### 3.2 LAB-owned session helper — `fuzzlab/labgen/identity_session.py`
+
+- A small session-holder: named test identities from `identities.yaml` +
+  one cookie jar per identity, with a `login(identity_id) -> Session`
+  method the build-time oracle confirmation code calls. Mirrors
+  `oracle_wrapper.py`'s `refresh_session` callback shape (a `Callable[[],
+  Mapping[str, str]]`) rather than inventing a new session-management
+  pattern.
+- Explicitly out of scope: re-auth on expiry, JWT handling, auto-exclusion
+  of auth endpoints — those are the toolkit's own Session-manager
+  concerns, not this helper's, per the decision above.
+- Tests: fake HTTP layer (no real server needed, same convention as
+  `oracle_wrapper.py`'s injected-runner tests) proving two identities'
+  cookies stay isolated from each other across sequential logins.
+
+### 3.3 `sink_endpoint` distinct from `injection_endpoint`
+
+- Extend `fuzzlab.labgen.schema.Cell` with an optional `sink_endpoint:
+  Route | None` (reuses the existing `Route` type `schema.py` already
+  defines for the injection-point route) — `None` for a same-endpoint
+  cell (today's entire corpus), populated only for stored/second-order
+  cells.
+- No change to `verdict.py`'s derivation logic — `sink_endpoint` is
+  render/tracking metadata, the same category as `identity.py`'s data,
+  not a verdict input.
+- `php_current`'s module registry gains a `read_stored_field`-style source
+  already built (`CC-LAB-0022`) — confirm it composes with a `sink_endpoint`
+  cell without new module categories; only add a new module if composing
+  reveals a genuine gap, per this project's own "extend, don't rebuild"
+  convention.
+- Tests: a hand-built stored-XSS cell (write endpoint ≠ sink endpoint) round
+  trips through `schema.py` and renders correctly with `php_current`.
+
+### 3.4 Parameter location/encoding axis
+
+- Extend `SinkContext` or add a new `Cell`-level field (decide during
+  implementation which is the better fit — `SinkContext` if the encoding
+  affects what neutralizes it, a separate `Cell` field if it's orthogonal)
+  for parameter location (`query | body | header | cookie | json`) and
+  encoding (`raw | url_encoded | double_url_encoded | base64`).
+- Wire as a new resolver axis (reuses 2.1's axis-range mechanism directly
+  — this task is much smaller if 2.1 has already landed, though it does
+  not strictly require it: a small manifest can still list encoding
+  variants explicitly, the way Phase 0 manifests list everything
+  explicitly today).
+- Tests: an encoded-parameter cell's oracle confirmation still succeeds
+  (the oracle wrapper must decode/re-encode correctly — check
+  `oracle_wrapper.py`'s existing header/cookie handling before assuming
+  new code is needed here).
+
+### 3.5 `context_depth` axis (0-4) wired into the manifest/`Cell` IR
+
+- Addendum B already named the values (`direct`, `same_file_helper`,
+  `cross_file`, `stored_second_order`, `cross_service`) and T-LAB0.9 (§1.1)
+  already added `flow_variant` to the **ground-truth** `Case` — this task
+  is the matching addition to the **generator-input** `Cell` IR, so a
+  manifest can declare which depth a cell should be generated at, not just
+  record it after the fact.
+- On the single-stack PHP corpus, only `direct`/`same_file_helper`/
+  `cross_file`/`stored_second_order` are reachable (`cross_service` needs
+  ≥2 stacks — Phase 3). Scope this task to those four; a `cross_service`
+  cell type is Phase 3's concern once a second stack exists.
+- Tests: one cell per reachable depth value, each rendering and confirming
+  correctly; a value outside the four reachable ones raises rather than
+  silently rendering something meaningless for a single-stack corpus.
 
 ---
 
@@ -598,56 +712,143 @@ not pinned down by this research (would need empirical confirmation against
 real generated cells) — flagged as a small follow-up spike when Phase 3's
 first non-PHP emitter is being validated, not before.
 
-Once the pacing decision above is made, the task breakdown is, per stack (in
-whatever order the decision picks):
-1. `StackEnv` + scaffold files for the new stack (Addendum D's schema).
-2. Port/author the module inventory for that stack's shapes (per the pacing
-   decision: full class coverage, or Tier-A-only).
-3. A conformance-suite pass against the new emitter (T-LAB0.7's suite is
-   already stack-agnostic by design — this is the first real test of that
-   claim).
-4. Digest-pinned base image + lockfile + SBOM for that stack's container.
-   **[research complete, 2026-09-21]:** tooling now settled rather than
-   left open. **Generate SBOMs with Syft** (Anchore) — mature, CLI-first,
-   non-interactive (clean JSON to stdout/file, standard exit codes), scans
-   both images and lockfiles, and emits both CycloneDX and SPDX from one
-   scan. `docker sbom`/`docker scout sbom` were checked and rejected: the
-   old `docker sbom` plugin is deprecated (its repo archived), and
-   `docker scout sbom` requires Docker Hub authentication — a real conflict
-   with this project's no-cloud-dependency, loopback-only posture. `cdxgen`
-   was also checked as an alternative (wider raw ecosystem coverage, newer
-   reachability features) but is CycloneDX-only, foreclosing format
-   flexibility for no offsetting benefit here. **Record as CycloneDX**
-   (not SPDX) — more compact, application-security-oriented rather than
-   license-compliance-oriented, and Syft can still emit SPDX later from the
-   same scan if ever needed, so nothing is foreclosed by defaulting to
-   CycloneDX now. **Digest-pin freshness**: skip Renovate/Dependabot (both
-   are CI-service/bot-oriented — genuine overkill for a solo, low-frequency-
-   rebuild project with no CI service); instead, use a small local script,
-   run on the same quarterly cadence already established for the pattern
-   corpus refresh (`docs/LAB_PATTERN_CORPUS_SOURCING_PLAN.md` §3 step 8):
-   `docker pull <image>:<tag>`, diff the resulting digest against the pinned
-   one, and surface a manual-review reminder rather than auto-bumping —
-   consistent with this project's existing "reviewed, not automated" refresh
-   philosophy, and documented as a runbook step
-   (`docs/ON_HOST_RUNBOOK.md`-style) rather than infrastructure. **Design
-   gap surfaced; decided (2026-09-21) to defer, not design now:** no
-   existing tool distinguishes "this vulnerable dependency version is the
-   deliberate point of a lab cell" from "this SBOM entry is a real,
-   unintended supply-chain regression." Nothing in this plan currently
-   points a vulnerability scanner at these SBOMs as a build gate — this
-   task is scoped to recording the SBOM only. Do **not** design the
-   allowlist/expected-findings file preemptively; only build it if and when
-   a scanning-based build gate is actually proposed, since no comparable
-   project's convention exists to borrow from and speculative design here
-   would be pure overhead against a hypothetical.
-5. Wire the fingerprint-independence gate as required once ≥2 stacks exist
-   (its own minimum precondition, `min_stacks_per_class >= 2`).
-6. For the PHP/Laravel emitter specifically: the migration step (D20 §7.2)
-   — reproduce every remaining real `puppy-fort-factory/` page (T-LAB0.7's
-   own whole-manifest Tier-3 regression pattern, `PA-0024`, is the exact
-   tool for proving this byte-for-byte before retiring the hand-built app),
-   then retire `puppy-fort-factory/` as a separate fixture.
+**Working assignment of "stack 1" (the one decision (b) leaves unnamed):
+PHP/Laravel.** The pacing decision says "stack 1 to full depth, stacks 2-3
+Tier-A-only" without naming which is which — resolved here as a working
+default, not a new open decision: PHP/Laravel is already mandated to reach
+full page coverage regardless (D20 §7.2's migration requirement means every
+real `puppy-fort-factory/` page, hard shapes included, must eventually be
+reproduced before the hand-built app can be retired), so assigning it "full
+depth" costs nothing extra — the work was required either way. Node/Express
+and Python/FastAPI take Tier-A-only depth. Override this assignment before
+starting if a different stack should go first for some other reason (e.g.
+wanting Node/Express's full depth sooner) — nothing below depends on this
+particular choice except which stack's task list says "full" vs "Tier-A."
+
+**Each stack below is a fully independent build lane.** All three share
+only read-only inputs already built (the `Emitter` ABC, `EmittedFiles`,
+`fuzzlab.labgen.schema`'s `Cell`/`SinkContext` IR, the conformance suite) —
+no stack's emitter package imports another's, and each gets its own
+`fuzzlab/labgen/emitters/<stack>/` directory, its own test files, and its
+own manifest. They can be built in parallel, in any order, by separate
+agents, with zero coordination needed between them beyond not editing
+shared read-only files (`emitter.py`, `schema.py`, `conformance/`) at the
+same time without checking for conflicts.
+
+### 4.1 Node/Express emitter (Tier-A depth)
+
+1. `StackEnv` for `node_express` (Addendum D's schema): `language="node"`,
+   `framework="express"`, a pinned `framework_version`, a digest-pinned
+   Node base image, `is_multi_file=True`, a `route` accumulator module
+   (`app.js`'s route-registration lines, sorted by cell ID at render time
+   per Addendum D's determinism rule).
+2. Module inventory, **Tier-A scope only**: port the well-documented
+   value-context shapes already proven on `php_current`
+   (`sql_numeric_literal`, `sql_string_literal`, `html_body` XSS) —
+   explicitly **not** identifier/alias/connector-position SQLi or
+   escaping-context-mismatch XSS on this stack yet (those stay deferred
+   per the pacing decision). Reuse `php_current`'s module *shapes*
+   (source/transform/sink categories) as the porting template; the actual
+   JS/Express code is new.
+3. Conformance-suite pass: Tier 0 (lint — use `node --check` in place of
+   `php -l`, same skip-guarded-when-absent convention) + Tier 3
+   (whole-manifest regenerate-and-diff) against a new
+   `lab/manifests/phase3_node_express_sample.yaml`.
+4. Digest-pinned base image + lockfile (`package-lock.json`) + Syft-
+   generated CycloneDX SBOM (per the tooling decision above).
+5. Tests: per-module unit tests (mirroring `test_labgen_modules.py`'s
+   convention) + an end-to-end test per cell (supports/determinism/
+   verdict-cross-check/`node --check`), mirroring
+   `test_labgen_php_current_real_pages.py`'s shape.
+
+### 4.2 Python/FastAPI emitter (Tier-A depth)
+
+1. `StackEnv` for `python_fastapi`: `language="python"`,
+   `framework="fastapi"`, a pinned `framework_version`, a digest-pinned
+   Python base image, `is_multi_file=True`. **Per the FastAPI research
+   above, use the static-discovery-scaffold approach, not a `route`
+   accumulator**: a one-time, static `main.py` using
+   `pkgutil.iter_modules()`/`importlib` to walk a `routers/` package and
+   call `include_router()` on every discovered module — written once as
+   part of this `StackEnv`'s scaffold files, never touched per generated
+   cell. Also disable `/docs`, `/redoc`, `/openapi.json`
+   (`docs_url=None, redoc_url=None, openapi_url=None`) in that same
+   scaffold, per the framework-debug-page research above — this is a
+   correctness requirement for this task, not a follow-up.
+2. Module inventory, **Tier-A scope only**: same three shapes as 4.1
+   (`sql_numeric_literal`, `sql_string_literal`, `html_body` XSS), ported
+   to FastAPI + SQLAlchemy + Jinja2 idiom.
+3. Conformance-suite pass: Tier 0 (lint — `python -m py_compile`, same
+   skip-guarded convention) + Tier 3, against a new
+   `lab/manifests/phase3_python_fastapi_sample.yaml`.
+4. Digest-pinned base image + lockfile (`requirements.txt`/`poetry.lock` —
+   pick whichever this project's own Python tooling convention favors,
+   check `pyproject.toml`) + Syft-generated CycloneDX SBOM.
+5. Tests: same shape as 4.1's tests, adapted to pytest/FastAPI's
+   `TestClient` for any in-process assertions Tier 0/3 need.
+
+### 4.3 PHP/Laravel emitter (full depth + app migration)
+
+This is the largest of the three lanes and the one most likely to benefit
+from its own internal sub-lanes (see the lane map below) — the migration
+step in particular (4.3.6) decomposes cleanly into independent per-page
+groups once the base emitter exists.
+
+1. `StackEnv` for `php_laravel`: `language="php"`, `framework="laravel"`,
+   a pinned `framework_version`, a digest-pinned PHP base image,
+   `is_multi_file=True`, a `route` accumulator module
+   (`routes/web.php`'s route-registration lines, sorted by cell ID).
+   Disable debug mode in the scaffold (`APP_DEBUG=false`,
+   `APP_ENV=production`) per the framework-debug-page research — same
+   correctness requirement as 4.2's `/docs` disable.
+2. Module inventory, **full depth**: every shape `php_current` already
+   supports (ported to Laravel/Eloquent/Blade idiom) **plus** the
+   identifier/alias/connector-position SQLi and escaping-context-mismatch
+   XSS shapes from Phase 1 (§2.2) — this is why "stack 1 = full depth"
+   costs nothing extra assigned to Laravel: Phase 1's hard-shape work on
+   `php_current` is directly portable here once it exists, whereas
+   assigning full depth to Node/Express or FastAPI would mean re-deriving
+   those shapes from scratch on an unrelated stack.
+3. Conformance-suite pass: Tier 0 (`php -l`, already proven) + Tier 3,
+   against a new `lab/manifests/phase3_php_laravel_sample.yaml`.
+4. Digest-pinned base image + lockfile (`composer.lock`) + Syft-generated
+   CycloneDX SBOM.
+5. Tests: same shape as 4.1/4.2's tests.
+6. **Migration** (D20 §7.2): reproduce every remaining real
+   `puppy-fort-factory/` page not already covered by `php_current`'s
+   existing real-pages sample (`CC-LAB-0022`'s four pages) through the new
+   `php_laravel` emitter instead. Decompose into independent per-page (or
+   small per-page-group) sub-lanes — each page's migration is a self-
+   contained diff against a known real file, verified via the same
+   whole-manifest Tier-3 regeneration pattern that caught `BUG-0022`
+   (`PA-0024`'s own standing test). Once **every** real page is
+   reproduced and its Tier-3 test passes, retire `puppy-fort-factory/` as
+   a separate fixture (delete it, update `docs/ARCHITECTURE.md` and this
+   project's README to point at the generator as the sole source of the
+   PHP lab) — do not retire it page-by-page; the cutover is one atomic
+   step once full coverage is proven, per D20's own framing ("the
+   generator becomes the single source... not an additional target
+   alongside a permanently-kept original").
+
+### 4.4 Cross-cutting: `stack` field + fingerprint-independence gate
+
+**Depends on:** at least one of 4.1/4.2/4.3 landing (needs a second stack
+name to exist before "stack" is a meaningful axis at all); the
+fingerprint-independence gate specifically needs **two** stacks landed
+(`min_stacks_per_class >= 2`), so this task's second half depends on
+whichever two of 4.1/4.2/4.3 land first, not all three.
+
+1. Add `stack` (or `stack_profile`) to `Cell` and to `labels.json`'s
+   per-case output — **inline**, per the research decision above, not a
+   separate file.
+2. Once two stacks exist: wire `fingerprint_gate.py` into `--check`
+   (T-LAB0.10) as a required step, with `expected_classes`/
+   `expected_stacks` populated from whichever stacks/classes actually
+   exist at that point (not hand-waved placeholders).
+3. Tests: a two-stack corpus fixture proving the gate both passes on a
+   balanced sample and fails on a deliberately confounded one — reuse
+   `fingerprint_gate.py`'s own existing test fixtures/patterns
+   (`test_labgen_fingerprint_gate.py`), don't re-author them.
 
 ---
 
@@ -819,3 +1020,73 @@ open.
     research premature this far out ("anything decided today would likely
     be stale by the time it matters"); revisit when Phase 3 is close to
     landing, not before.
+
+---
+
+## 7. Lane map — parallel build assignment (Phases 0-3 only)
+
+Every atomic task above, given a lane ID, its real dependencies (not phase
+order — per this project's own standing policy, a lane builds as soon as
+its actual prerequisites exist, regardless of which `CR-LAB-0001` phase
+number it's filed under), and a wave number. **A lane in wave *N* becomes
+eligible the moment every lane it depends on is merged and verified — not
+when wave *N-1* as a whole finishes.** Waves are a planning aid for reading
+this table, not a synchronization barrier: if three of wave 2's five
+dependencies land early, that lane starts immediately, it does not wait for
+the other four wave-1 lanes to finish. No lane should ever sit idle while
+its dependencies are satisfied and an agent is free — reassign the moment
+either condition changes.
+
+| Lane | Task (§ ref) | Depends on | Wave | Notes |
+|---|---|---|---|---|
+| L-P0.9 | T-LAB0.9 regression gate (§1.1) | — | 1 | FUZZ-consumer sweep + `Case` extension + gate + tests |
+| L-P0.10 | T-LAB0.10 CLI (§1.2) | — (soft: L-P0.9 for full `--check`) | 1 | Land now; add the regression-gate line to `--check` in a small follow-up once L-P0.9 merges |
+| L-P1.1 | Wire covering-array resolver (§2.1) | — | 1 | |
+| L-P1.2a | Sqlmap spot-check + identifier-context oracle prober (§2.2, oracle half) | — | 1 | Spot-check first, then build the prober module regardless of result (fallback needed either way per the research) |
+| L-P1.2b | Harder SQLi/XSS shapes: matrix rows + `php_current` modules (§2.2, module half) | L-P1.2a | 2 | Soft-benefits from L-P1.1 for scale, not blocked by it |
+| L-P1.3 | Wire χ²/leakage gates as required (§2.3) | L-P1.1, L-P1.2b | 3 | Needs real cell-count variation to check |
+| L-P1.4 | Stratified splits + dedup + diversity report (§2.4) | L-P1.1 | 2 | Parallel with L-P1.2b |
+| L-P2.1 | Identity/ownership schema + loader (§3.1) | — | 1 | |
+| L-P2.2 | LAB-owned session helper (§3.2) | — | 1 | Independent of L-P2.1; may be built by the same agent as a sub-lane if one agent takes both |
+| L-P2.3 | `sink_endpoint` distinct from `injection_endpoint` (§3.3) | — | 1 | |
+| L-P2.4 | Parameter location/encoding axis (§3.4) | — | 1 | Soft-benefits from L-P1.1's axis mechanism, not blocked by it |
+| L-P2.5 | `context_depth` axis wired into `Cell` IR (§3.5) | L-P0.9, L-P2.3 | 2 | Needs `flow_variant` (L-P0.9) and `sink_endpoint` (L-P2.3) both to exist first |
+| L-P3.1 | Node/Express emitter, Tier-A (§4.1) | — | 1 | Fully independent stack; internally sub-lane-able (StackEnv vs. module authoring vs. tests) |
+| L-P3.2 | Python/FastAPI emitter, Tier-A (§4.2) | — | 1 | Same as above |
+| L-P3.3a | PHP/Laravel `StackEnv` + accumulator + conformance harness (§4.3, steps 1/3/4/5) | — | 1 | |
+| L-P3.3b | PHP/Laravel full module inventory incl. hard shapes (§4.3, step 2) | L-P1.2b, L-P3.3a | 2 | This is *why* Laravel was assigned "full depth" — the hard-shape modules port directly from L-P1.2b's `php_current` work |
+| L-P3.3c | PHP/Laravel app migration, per-page sub-lanes (§4.3, step 6) | L-P3.3b | 3 | Decompose into one sub-lane per remaining real page (or small page group) once the base emitter is validated — an ideal candidate for the migrating agent to spawn its own sub-agents, per the standing policy |
+| L-P3.4 | `stack` field + fingerprint-gate wiring (§4.4) | any 2 of {L-P3.1, L-P3.2, L-P3.3a} | 2 | Needs a second stack name to exist; the gate half needs exactly two stacks landed, not all three |
+
+**Wave 1 (12 lanes, zero dependencies — dispatch all of them now):** L-P0.9,
+L-P0.10, L-P1.1, L-P1.2a, L-P2.1, L-P2.2, L-P2.3, L-P2.4, L-P3.1, L-P3.2,
+L-P3.3a, plus the T-LAB0.8 mechanical refresh-report prep (§1.3) if you want
+it running in the background too — it was deliberately scheduled last for
+its own *authoring* step, but the mechanical prep has no such restriction
+and needs no one waiting on it.
+
+**Wave 2 (5 lanes, unlocked incrementally as wave 1 lanes land):** L-P1.2b
+(needs L-P1.2a), L-P1.4 (needs L-P1.1), L-P2.5 (needs L-P0.9 + L-P2.3),
+L-P3.3b (needs L-P1.2b + L-P3.3a — so effectively wave 3 in practice, listed
+here for its nominal position), L-P3.4 (needs any two stack lanes).
+
+**Wave 3+:** L-P1.3 (needs L-P1.1 + L-P1.2b), L-P3.3c (needs L-P3.3b,
+itself sub-lane-able per-page once unlocked).
+
+**Cross-lane coordination notes (the only real coupling in this table):**
+- `fuzzlab/labgen/schema.py`'s `Cell`/`SinkContext` dataclasses are touched
+  by L-P2.3, L-P2.4, and L-P2.5 (and indirectly by L-P1.1's manifest-schema
+  work). These are field *additions*, not restructuring, so conflicts
+  should be limited to merge-order bookkeeping (the renumbering pattern
+  already used repeatedly this session for `CC-LAB-NNNN`/`FR-LAB-N`
+  collisions applies here too) — not a reason to serialize these lanes.
+- `fuzzlab/labgen/__init__.py` gets a new submodule import for every new
+  top-level module (`identity.py`, `identity_session.py`, each new emitter
+  package) — expect a merge-order collision here on nearly every lane and
+  resolve it the same way (keep both additions, alphabetize).
+- No lane in this table modifies `verdict.py`'s derivation logic — every
+  new field across every lane is additive metadata, matching this
+  project's own repeated convention. If any lane's implementation finds
+  itself needing to change `verdict()`'s actual logic (not just its
+  inputs), stop and flag it rather than proceeding — that would be a
+  genuine cross-cutting change this map doesn't anticipate.

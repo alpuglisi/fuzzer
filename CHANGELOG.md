@@ -14,6 +14,21 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Docs: fleshed `docs/LAB_IMPLEMENTATION_PLAN.md`'s Phase 2 (§3) and Phase 3 (§4)
+  from milestone-level bullets into full task breakdowns matching Phase 0/1's
+  granularity, and added a new §7 lane/dependency map covering every Phase 0-3
+  task (Phase 4 excluded, per its own milestone-only rationale). Phase 2 gets a
+  concrete first-draft identity/ownership schema (`lab/identities/identities.yaml`),
+  a LAB-owned session-helper design, and task breakdowns for the
+  `sink_endpoint`/parameter-location-encoding/`context_depth` axes. Phase 3 is
+  split into three fully independent per-stack lanes (Node/Express and
+  Python/FastAPI at Tier-A depth, PHP/Laravel at full depth including the D20
+  app migration, working-assigned as "stack 1" since its hard-shape work is
+  directly portable from Phase 1's own SQLi/XSS hardening), plus a cross-cutting
+  `stack`-field/fingerprint-gate lane. §7 assigns every task a lane ID, real
+  dependency (not phase order), and wave number, sized for maximum concurrent
+  agent dispatch under the project's standing multi-lane orchestration policy —
+  12 lanes are immediately dispatchable with zero dependencies.
 - Docs: recorded the final open decision in `docs/LAB_IMPLEMENTATION_PLAN.md` —
   Spring Boot's near-term scope (whether to formally drop the optional fourth
   stack, or leave it an undecided line item) is left deliberately open, a
