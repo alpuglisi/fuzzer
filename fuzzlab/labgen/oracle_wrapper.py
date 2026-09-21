@@ -1,4 +1,5 @@
-"""Reusable, importable wrapper around independent tool-oracles (sqlmap, commix).
+"""Reusable, importable wrapper around independent tool-oracles (sqlmap, commix,
+SSTImap).
 
 This is **generator-build-time validation tooling**: given a plain description of
 an endpoint and a declared injection parameter, it shells out to a mature,
@@ -19,18 +20,26 @@ callback) rather than a "manifest cell" type, since that schema is designed and
 owned elsewhere (see ``docs/change-requests/CR-LAB-0001-manifest-generator-realism-and-variation.md``
 Addendum E and ``docs/LAB_SEED_AUTHORING_PLAYBOOK.md``).
 
-Design notes, tracing directly to the two spikes that motivated this module
-(``docs/spikes/SPIKE-001-sqlmap-vs-vapi.md``, ``docs/spikes/SPIKE-002-commix-vs-dvwa.md``):
+Design notes, tracing directly to the three spikes that motivated this module
+(``docs/spikes/SPIKE-001-sqlmap-vs-vapi.md``, ``docs/spikes/SPIKE-002-commix-vs-dvwa.md``,
+``docs/spikes/SPIKE-003-sstimap-vs-ssti-flask-hacking-playground.md``):
 
 * **sqlmap treats a 401/403 as an auth failure and refuses to test past it.**
   ``SqlInjectionOracleRequest.secure_status_codes`` is translated automatically
   into sqlmap's ``--ignore-code``; callers never need to know sqlmap's flag
-  syntax (Spike 001).
+  syntax (Spike 001). SSTImap has no equivalent status-code special-casing
+  (verified by reading its source, Spike 003), so its request type has no
+  such field.
 * **commix must be scoped to the declared parameter only**, never a blind sweep
   of every form field — both request dataclasses always pass ``-p
   <param_name>`` (commix's own parameter-selection flag, the same convention
   sqlmap uses) rather than letting the tool discover parameters on its own
-  (Spike 002).
+  (Spike 002). SSTImap has no ``-p`` flag; the equivalent scoping mechanism is
+  its own **marker**, substituted into the declared parameter's exact value
+  in the URL/body/header, combined with restricting ``-P`` to that one
+  location category — this wrapper builds that marked request instead of
+  ever letting SSTImap sweep every query/body/header/cookie field on its own
+  (Spike 003).
 * **A hung tool must never block the caller indefinitely.** Every invocation
   runs under a hard subprocess timeout (never sqlmap's/commix's own, less
   reliable, internal timeout flags) via an injected runner, and a timeout is
@@ -59,7 +68,7 @@ import time
 from enum import Enum
 from pathlib import Path
 from typing import Callable, Mapping, Optional, Sequence
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 __all__ = [
     "VulnClass",
@@ -75,8 +84,10 @@ __all__ = [
     "locate_tool",
     "SqlInjectionOracleRequest",
     "CommandInjectionOracleRequest",
+    "ServerSideTemplateInjectionOracleRequest",
     "run_sql_injection_oracle",
     "run_command_injection_oracle",
+    "run_server_side_template_injection_oracle",
     "run_oracle",
 ]
 
@@ -86,10 +97,11 @@ _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 class VulnClass(str, Enum):
-    """The two independent-tool-oracle-validated classes (Addendum E §1)."""
+    """The independent-tool-oracle-validated classes (Addendum E §1)."""
 
     SQL_INJECTION = "sql-injection"
     COMMAND_INJECTION = "command-injection"
+    SERVER_SIDE_TEMPLATE_INJECTION = "server-side-template-injection"
 
 
 class ParamLocation(str, Enum):
@@ -291,6 +303,44 @@ class CommandInjectionOracleRequest:
     )
 
 
+@dataclasses.dataclass
+class ServerSideTemplateInjectionOracleRequest:
+    """Everything needed to run SSTImap headlessly against one endpoint.
+
+    No ``secure_status_codes``/``--ignore-code``-equivalent field: SSTImap has
+    no sqlmap-style "treat 401/403 as an unrecoverable auth failure" behavior
+    (verified by reading its source, `docs/spikes/SPIKE-003-sstimap-vs-ssti-flask-hacking-playground.md`).
+
+    Unlike sqlmap/commix, SSTImap has no ``-p``-style "test only this
+    parameter" flag; scoping instead works by placing SSTImap's own
+    ``marker`` string at the declared parameter's exact value (in the URL,
+    body, or header, depending on `param_location`) and restricting SSTImap's
+    ``-P`` injection-point flag to that one location category -- built
+    automatically by `run_server_side_template_injection_oracle`, never left
+    to SSTImap's own default, un-marked, all-locations sweep (Spike 003).
+    """
+
+    target_url: str
+    param_name: str
+    param_location: ParamLocation = ParamLocation.QUERY
+    method: str = "GET"
+    data: Optional[str] = None
+    cookie: Optional[str] = None
+    headers: Optional[Mapping[str, str]] = None
+    refresh_session: Optional[SessionRefresh] = None
+    timeout_s: float = 300.0
+    max_attempts: int = 1
+    tool_path: Optional[str] = None
+    marker: str = "*"
+    extra_args: Sequence[str] = ()
+    vulnerable_marker: "re.Pattern[str]" = dataclasses.field(
+        default_factory=lambda: re.compile(r"identified the following injection point", re.I)
+    )
+    secure_marker: "re.Pattern[str]" = dataclasses.field(
+        default_factory=lambda: re.compile(r"appear(?:s)? to be not injectable", re.I)
+    )
+
+
 def _resolve_session(request) -> tuple[Optional[str], dict]:
     """Apply `refresh_session` (if any) for the current attempt, splitting a
     returned "Cookie" key out into the dedicated cookie slot."""
@@ -345,6 +395,87 @@ def _build_commix_argv(tool_path: str, request: CommandInjectionOracleRequest,
         argv += ["--cookie", cookie]
     if headers:
         argv += ["--headers", _headers_flag_value(headers)]
+    argv += list(request.extra_args)
+    return argv
+
+
+def _mark_query_param(url: str, param_name: str, marker: str) -> str:
+    """Return `url` with `param_name`'s query value replaced by `marker` (or
+    `param_name=marker` appended if it wasn't already present)."""
+    parsed = urlparse(url)
+    pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    marked = False
+    new_pairs = []
+    for key, value in pairs:
+        if key == param_name:
+            new_pairs.append((key, marker))
+            marked = True
+        else:
+            new_pairs.append((key, value))
+    if not marked:
+        new_pairs.append((param_name, marker))
+    return urlunparse(parsed._replace(query=urlencode(new_pairs)))
+
+
+def _mark_body_param(data: Optional[str], param_name: str, marker: str) -> str:
+    """Return a `key=value&...` body string with `param_name`'s value
+    replaced by `marker` (or `param_name=marker` appended if absent)."""
+    pairs = parse_qsl(data or "", keep_blank_values=True)
+    marked = False
+    new_pairs = []
+    for key, value in pairs:
+        if key == param_name:
+            new_pairs.append((key, marker))
+            marked = True
+        else:
+            new_pairs.append((key, value))
+    if not marked:
+        new_pairs.append((param_name, marker))
+    return urlencode(new_pairs)
+
+
+_SSTIMAP_LOCATION_FLAG = {
+    ParamLocation.QUERY: "Q",
+    ParamLocation.BODY: "B",
+    ParamLocation.HEADER: "H",
+}
+
+
+def _build_sstimap_argv(tool_path: str, request: ServerSideTemplateInjectionOracleRequest,
+                         cookie: Optional[str], headers: Mapping[str, str]) -> list:
+    # SSTImap has no `-p`-style parameter selector (Spike 003): scoping is
+    # done by placing its marker at the declared parameter's exact value and
+    # restricting `-P` to that one location category, never its default
+    # un-marked, all-locations (`QBHC`) sweep.
+    target_url = request.target_url
+    data = request.data
+    headers = dict(headers)
+    if request.param_location == ParamLocation.QUERY:
+        target_url = _mark_query_param(target_url, request.param_name, request.marker)
+    elif request.param_location == ParamLocation.BODY:
+        data = _mark_body_param(data, request.param_name, request.marker)
+    elif request.param_location == ParamLocation.HEADER:
+        headers[request.param_name] = request.marker
+
+    argv = [
+        sys.executable, tool_path,
+        "-u", target_url,
+        "-P", _SSTIMAP_LOCATION_FLAG[request.param_location],
+    ]
+    if request.marker != "*":
+        argv += ["-M", request.marker]
+    if request.method.upper() != "GET":
+        argv += ["-m", request.method.upper()]
+    if data is not None:
+        argv += ["-d", data]
+    if cookie:
+        # SSTImap's -C is one 'Field=Value' pair per flag, stackable.
+        for part in cookie.split(";"):
+            part = part.strip()
+            if part:
+                argv += ["-C", part]
+    for key, value in headers.items():
+        argv += ["-H", f"{key}: {value}"]
     argv += list(request.extra_args)
     return argv
 
@@ -431,18 +562,34 @@ def run_command_injection_oracle(
     return _classify(run, VulnClass.COMMAND_INJECTION, request.vulnerable_marker, request.secure_marker)
 
 
+def run_server_side_template_injection_oracle(
+    request: ServerSideTemplateInjectionOracleRequest, runner: Runner = default_runner
+) -> OracleVerdict:
+    """Run SSTImap headlessly against `request.target_url` and return a
+    structured verdict. Same fail-closed contract as `run_sql_injection_oracle`.
+    """
+    assert_loopback(request.target_url)
+    run = _run_bounded(_build_sstimap_argv, "sstimap", request, runner)
+    return _classify(run, VulnClass.SERVER_SIDE_TEMPLATE_INJECTION,
+                      request.vulnerable_marker, request.secure_marker)
+
+
 def run_oracle(
     request, runner: Runner = default_runner
 ) -> OracleVerdict:
     """Dispatch to the right tool based on the request's own type. A thin
-    convenience for callers that already have a `SqlInjectionOracleRequest` or
-    `CommandInjectionOracleRequest` in hand and don't want an if/else of their
-    own; does not accept or assume any manifest/schema type."""
+    convenience for callers that already have a `SqlInjectionOracleRequest`,
+    `CommandInjectionOracleRequest`, or `ServerSideTemplateInjectionOracleRequest`
+    in hand and don't want an if/else of their own; does not accept or assume
+    any manifest/schema type."""
     if isinstance(request, SqlInjectionOracleRequest):
         return run_sql_injection_oracle(request, runner)
     if isinstance(request, CommandInjectionOracleRequest):
         return run_command_injection_oracle(request, runner)
+    if isinstance(request, ServerSideTemplateInjectionOracleRequest):
+        return run_server_side_template_injection_oracle(request, runner)
     raise TypeError(
-        f"run_oracle() only accepts SqlInjectionOracleRequest or "
-        f"CommandInjectionOracleRequest, got {type(request).__name__}"
+        f"run_oracle() only accepts SqlInjectionOracleRequest, "
+        f"CommandInjectionOracleRequest, or ServerSideTemplateInjectionOracleRequest, "
+        f"got {type(request).__name__}"
     )

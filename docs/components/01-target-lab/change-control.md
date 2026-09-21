@@ -3,6 +3,98 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0016 — SSTImap oracle support: Spike 003 + wrapper extension (2026-09-21)
+- Change: two parts, following this project's established "spike, then wrap" rigor
+  (per `LAB_SEED_AUTHORING_PLAYBOOK.md`'s "SSTImap/Nuclei/ZAP remain unintegrated" line
+  and `CR-LAB-0001`'s tool-mapping table, "SSTI / code injection → SSTImap").
+  (1) `docs/spikes/SPIKE-003-sstimap-vs-ssti-flask-hacking-playground.md` — cloned
+  `vladko312/SSTImap` (GPL-3.0, license read directly, cite-only per this project's
+  existing posture) and `filipkarc/ssti-flask-hacking-playground` (Apache-2.0, license
+  read directly) into the session scratchpad, ran the app natively (loopback-only), and
+  confirmed a real Jinja2 SSTI (`?user={{7*7}}` → `Hi 49`) manually with curl before
+  ever touching the tool, per this project's established discipline. Authored a minimal
+  secure twin (`secure_app.py`, scratchpad only, not committed) differing only in the
+  one transform that matters (`user` passed as a Jinja2 context variable and referenced
+  via `{{ user }}`, instead of `.format()`-ed into the template source before
+  compilation) since the demo app ships no secure twin of its own. Ran `sstimap.py`
+  headlessly against both: correct positive (Jinja2 engine, rendered technique, full
+  capabilities) on the vulnerable endpoint; correct "Tested parameters appear to be not
+  injectable" on the secure twin; both in under 2 seconds, no hang, no interactive
+  prompt. Two design-relevant findings, neither a defect: SSTImap has no `-p`-style
+  parameter selector — the equivalent scoping mechanism is its own marker substituted at
+  the declared parameter's exact value plus its `-P` location-category restriction
+  (verified directly: a marked run ignored an irrelevant static field in well under a
+  second, and even an *unmarked* run with every field present tested only the one
+  reflected parameter, thanks to SSTImap's own reflection/stability pre-check — a real
+  negative finding, not relied upon as a substitute for explicit scoping); and SSTImap
+  has no sqlmap-style 401/403 auth-abort behavior (`core/matcher.py` read directly: the
+  status code is only ever one of several boolean-blind matching signals, never a hard
+  gate), so no `--ignore-code`-equivalent field was needed. No hang, crash, or
+  status-code mishandling was found, so nothing was logged to `ERROR_LOG.md` for the
+  spike itself (contrast Spikes 001/002, each of which surfaced a real workaround-worthy
+  defect in the tool/target interaction being validated).
+  (2) Extended `fuzzlab/labgen/oracle_wrapper.py` (from `CC-LAB-0015`) with SSTI support,
+  reusing the existing pattern exactly: `VulnClass.SERVER_SIDE_TEMPLATE_INJECTION`,
+  `ServerSideTemplateInjectionOracleRequest` (no `secure_status_codes` field — see the
+  spike finding above), and `run_server_side_template_injection_oracle`, dispatched from
+  the existing `run_oracle`. New helpers `_mark_query_param`/`_mark_body_param` build the
+  marked URL/body; `_build_sstimap_argv` places the marker in the right location
+  (query/body/header) and sets `-P`/`-M` accordingly, splits a `;`-joined cookie string
+  into SSTImap's stackable `-C Field=Value` flags, and reuses `assert_loopback`,
+  `locate_tool`, `_resolve_session` (the `refresh_session` callback), and `_run_bounded`
+  (the bounded timeout × `max_attempts` safety valve) completely unchanged — no parallel
+  design was introduced. Verdict markers tuned against SSTImap's real output
+  (`"identified the following injection point"` / `"appear(?:s)? to be not injectable"`),
+  confirmed correct against both the real vulnerable and real secure endpoint through the
+  wrapper itself before writing the offline test suite.
+- Impact (other components / project): extends `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`'s
+  validated tool-oracle set from {SQL injection, OS command injection} to {SQL injection,
+  OS command injection, server-side template injection}; the playbook's "SSTImap/Nuclei/
+  ZAP remain unintegrated" line now reads "SSTImap integrated; Nuclei/ZAP remain
+  unintegrated." `requirements.md` FR-LAB-11 amended in place (not superseded — it already
+  described a per-class, per-tool contract; this generalizes points (a)/(c)/(d) to state
+  which parts are SQLi-specific vs. shared, and lists the new dataclass/function). No
+  other component's contracts change; `fuzzlab/oracle/`, `fuzzlab/harness/`, and
+  `fuzzlab/web/` are untouched; no overlap with Lane B's concurrently-developed
+  `lab/generator/`, `lab/safety_matrix.yaml`, `lab/patterns/`, or `lab/manifests/` paths.
+- Risk (level; mitigation): medium (same class as `CC-LAB-0015`: a defect here could make
+  a generated cell's ground-truth label wrong). Mitigated by: reusing the already-tested
+  `assert_loopback`/`locate_tool`/`_resolve_session`/`_run_bounded`/`_classify` machinery
+  unchanged rather than re-implementing it for a third tool; the manual curl confirmation
+  of both twins before the tool was ever invoked; 12 new offline unit tests (loopback
+  refusal, missing-binary, marker+`-P` construction for all three `ParamLocation` values
+  incl. that untouched fields are never swept, custom-marker `-M`, cookie→stackable-`-C`
+  splitting, absence of a `secure_status_codes` field, vulnerable/secure/timeout
+  classification, `run_oracle` dispatch) plus 1 new real, skip-guarded integration test
+  (PA-0005) that shells out to the real cloned `sstimap.py` against the same non-vulnerable
+  echo endpoint the sqlmap/commix integration tests already use. Neither SSTImap nor the
+  demo app is a declared project dependency; the integration test skips cleanly, not
+  fails, when the binary isn't reachable (`PATH` or `FUZZLAB_SSTIMAP_PATH`).
+- Deliverables:
+  - [x] `docs/spikes/SPIKE-003-sstimap-vs-ssti-flask-hacking-playground.md` — done.
+  - [x] `VulnClass.SERVER_SIDE_TEMPLATE_INJECTION`,
+        `ServerSideTemplateInjectionOracleRequest`,
+        `run_server_side_template_injection_oracle`, `run_oracle` dispatch — done.
+  - [x] Marker + `-P`/`-M` scoping (Spike 003's `-p`-equivalent) for all three
+        `ParamLocation` values — done.
+  - [x] 12 new offline tests + 1 new skip-guarded real-binary integration test — done
+        (all pass; also verified manually end to end against the real vulnerable/secure
+        Flask apps before the test suite was written).
+  - [x] `docs/LAB_SEED_AUTHORING_PLAYBOOK.md` "SSTImap/Nuclei/ZAP remain unintegrated"
+        line and "Recommended next action" step 1 updated — done.
+  - [x] `requirements.md` FR-LAB-11 amended in place — done.
+  - [ ] An original Tier-A seed whose security assertion actually calls this wrapper
+        (playbook step 2) — not started, tracked there (unchanged from `CC-LAB-0015`).
+- Effectiveness (assessed 2026-09-21): effective against its own test suite — full suite
+  546 passed / 5 skipped (3 of the skips are this change's + the prior change's
+  integration tests skipping cleanly without the real binaries on `PATH`; 2 pre-existing),
+  plus the 2 known pre-existing, unrelated `test_mutation_operators.py` failures (untouched,
+  out of scope). All 48 labgen-oracle-wrapper tests (33 sqlmap/commix + 12 SSTI offline + 3
+  integration) pass with the three real binaries wired in via
+  `FUZZLAB_SQLMAP_PATH`/`FUZZLAB_COMMIX_PATH`/`FUZZLAB_SSTIMAP_PATH`. Full effectiveness (a
+  real seed's label correctly confirmed by this wrapper against a real vulnerable/secure
+  twin pair) is assessed once playbook step 2 is attempted, same as `CC-LAB-0015`.
+
 ### CC-LAB-0015 — Reusable sqlmap/commix oracle wrapper (Lane A, `LAB_SEED_AUTHORING_PLAYBOOK.md` step 1) (2026-09-21)
 - Change: added `fuzzlab/labgen/oracle_wrapper.py` (+ minimal `fuzzlab/labgen/__init__.py`
   re-exporting only its own public API) — the reusable, importable wrapper the playbook's
