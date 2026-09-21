@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 5 (T5.4): added a **gradient-boosted-trees** detection model
+  (`fuzzlab/ml/gbt.py`) — a pure-Python logistic-loss GBT over shallow weighted
+  regression trees (class-balanced, deterministic, no numpy/sklearn), behind the same
+  `fit`/`predict_proba` interface. `train_and_score(model_kind="logistic"|"gbt"|"auto")`;
+  `auto` out-of-fold-selects the better of logistic/GBT and deploys the winner
+  (`fuzzlab auto --score` uses it). A test shows GBT beats logistic and both baselines on
+  a non-linear boundary. Still advisory (scores, never labels). +4 tests (196 passed /
+  2 skipped). Change-control: CC-ML-0004.
 - Phase 5 (T5.2 + T5.3): the detection ML now trains on the store. `build_dataset`
   assembles examples from candidates (label = a matching oracle finding), grouped by
   endpoint, with a versioned feature vector; `train_and_score` runs honest out-of-fold

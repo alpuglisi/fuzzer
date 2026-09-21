@@ -70,6 +70,28 @@ def test_train_and_score_writes_scores_model_and_metrics(tmp_path):
             "SELECT COUNT(*) c FROM finding WHERE run_id=?", (run_id,)).fetchone()["c"] == 6
 
 
+def test_train_and_score_with_gbt(tmp_path):
+    with Store(tmp_path / "u.db") as store:
+        run_id = _seed_rich(store)
+        result = train_and_score(store, run_id, model_kind="gbt")
+        assert result["model"] == "gbt" and result["fallback"] is False
+        assert store.conn.execute(
+            "SELECT COUNT(*) c FROM model WHERE name='gbt'").fetchone()["c"] == 1
+        assert store.conn.execute(
+            "SELECT COUNT(*) c FROM candidate WHERE run_id=? AND score IS NOT NULL",
+            (run_id,)).fetchone()["c"] == 20
+
+
+def test_train_and_score_auto_selects_a_model(tmp_path):
+    with Store(tmp_path / "u.db") as store:
+        run_id = _seed_rich(store)
+        result = train_and_score(store, run_id, model_kind="auto")
+        assert result["model"] in ("logistic", "gbt")          # deployed the OOF winner
+        assert set(result["model_selection"]) == {"logistic", "gbt"}   # both compared
+        assert result["model"] == max(result["model_selection"],
+                                       key=lambda m: result["model_selection"][m])
+
+
 def test_train_and_score_falls_back_when_thin(tmp_path):
     with Store(tmp_path / "u.db") as store:
         run_id = store.start_run("auto", "h")

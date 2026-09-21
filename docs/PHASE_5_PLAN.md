@@ -61,9 +61,13 @@ false-flag / false-drop rates are bounded by `alpha`.
   the OOF metrics to `run_metrics`; a **prevalence fallback** covers thin data. Wired as
   `fuzzlab auto --score`, and the web panel's run-detail surfaces the top scored
   candidates with their flag/abstain/drop decision.
-- **T5.4 — Gradient-boosted trees (optional).** Add a GBT model (numpy/sklearn) behind
-  the same `fit`/`predict_proba` interface, class-balanced + calibrated, when the
-  dependency is acceptable.
+- **T5.4 — Gradient-boosted trees (done, offline).** `fuzzlab/ml/gbt.py::GradientBoostedTrees`
+  — a **pure-Python** logistic-loss GBT over shallow weighted regression trees
+  (class-balanced, deterministic), behind the same `fit`/`predict_proba` interface (no
+  numpy/sklearn dependency). `train_and_score(model_kind="gbt"|"auto")` uses it;
+  `"auto"` out-of-fold-selects the better of logistic/GBT and deploys the winner
+  (`fuzzlab auto --score` uses `auto`). A test shows GBT beats logistic and both
+  baselines on a non-linear (checkerboard) boundary.
 - **T5.5 — Held-out exit.** Show held-out PR-AUC beats both baselines and the conformal
   abstain rate is calibrated, on the store's real dataset.
 

@@ -91,7 +91,9 @@ def main(argv: list[str]) -> int:
         ml = None
         if args.score:
             from fuzzlab.ml.train import train_and_score
-            ml = train_and_score(store, run_id)  # advisory scores + model; never labels
+            # advisory scores + model (best of logistic/GBT by out-of-fold PR-AUC);
+            # never labels.
+            ml = train_and_score(store, run_id, model_kind="auto")
         _print_summary(args, counts, result, ml)
     return 0
 

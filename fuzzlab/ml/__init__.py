@@ -17,8 +17,9 @@ Gradient-boosted trees (needs numpy/sklearn) and the store-trained pipeline come
 
 from fuzzlab.ml.baselines import PrevalenceBaseline, SigmaBaseline
 from fuzzlab.ml.conformal import ConformalGate
+from fuzzlab.ml.gbt import GradientBoostedTrees
 from fuzzlab.ml.logistic import LogisticRegression
 from fuzzlab.ml.metrics import group_kfold, pr_auc
 
 __all__ = ["PrevalenceBaseline", "SigmaBaseline", "LogisticRegression",
-           "ConformalGate", "group_kfold", "pr_auc"]
+           "GradientBoostedTrees", "ConformalGate", "group_kfold", "pr_auc"]

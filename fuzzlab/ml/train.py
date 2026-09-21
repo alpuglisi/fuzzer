@@ -14,8 +14,11 @@ import json
 from fuzzlab.ml.baselines import PrevalenceBaseline, SigmaBaseline
 from fuzzlab.ml.conformal import ConformalGate
 from fuzzlab.ml.dataset import build_dataset
+from fuzzlab.ml.gbt import GradientBoostedTrees
 from fuzzlab.ml.logistic import LogisticRegression
 from fuzzlab.ml.metrics import group_kfold, pr_auc
+
+_MODELS = {"logistic": LogisticRegression, "gbt": GradientBoostedTrees}
 
 
 def _oof_scores(ds, model_factory, k: int) -> list[float]:
@@ -33,8 +36,12 @@ def _next_version(store, name: str) -> int:
     return int(row["v"]) + 1 if row and row["v"] is not None else 1
 
 
-def train_and_score(store, run_id: int | None = None, *, min_rows: int = 20,
-                    min_positives: int = 5, k: int = 5, alpha: float = 0.1) -> dict:
+def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logistic",
+                    min_rows: int = 20, min_positives: int = 5, k: int = 5,
+                    alpha: float = 0.1) -> dict:
+    """Train and write advisory scores. ``model_kind``: ``logistic``, ``gbt``, or
+    ``auto`` (out-of-fold-select the better of the two). Falls back to the prevalence
+    baseline on thin data."""
     ds = build_dataset(store, run_id)
     n, pos = len(ds), ds.positives
     result: dict = {"rows": n, "positives": pos}
@@ -46,14 +53,21 @@ def train_and_score(store, run_id: int | None = None, *, min_rows: int = 20,
         gate, name = None, "prevalence-fallback"
         result.update(model=name, fallback=True)
     else:
-        oof = _oof_scores(ds, LogisticRegression, k)
-        prauc = pr_auc(ds.y, oof)
+        if model_kind == "auto":
+            oof_by = {k2: _oof_scores(ds, f, k) for k2, f in _MODELS.items()}
+            praucs = {k2: pr_auc(ds.y, s) for k2, s in oof_by.items()}
+            name = max(praucs, key=lambda m: praucs[m])   # deploy the OOF winner
+            oof, prauc = oof_by[name], praucs[name]
+            result["model_selection"] = {k2: round(v, 6) for k2, v in praucs.items()}
+        else:
+            name = model_kind if model_kind in _MODELS else "logistic"
+            oof = _oof_scores(ds, _MODELS[name], k)
+            prauc = pr_auc(ds.y, oof)
         prevalence = pr_auc(ds.y, _oof_scores(ds, PrevalenceBaseline, k))
         sigma = pr_auc(ds.y, _oof_scores(ds, SigmaBaseline, k))
         gate = ConformalGate.calibrate(oof, ds.y, alpha=alpha)
-        model = LogisticRegression().fit(ds.X, ds.y)     # deploy: fit on all data
+        model = _MODELS[name]().fit(ds.X, ds.y)          # deploy: fit on all data
         scores = model.predict_proba(ds.X)
-        name = "logistic"
         result.update(model=name, fallback=False, pr_auc=prauc,
                       baseline_prevalence=prevalence, baseline_sigma=sigma,
                       beats_baselines=prauc > prevalence and prauc > sigma)

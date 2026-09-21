@@ -3,6 +3,31 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0004 — Gradient-boosted trees + model auto-selection (T5.4) (2026-09-21)
+- Change: added `fuzzlab/ml/gbt.py::GradientBoostedTrees` — a pure-Python logistic-loss
+  gradient-boosting model over shallow **weighted** regression trees (class-balanced,
+  deterministic), behind the same `fit`/`predict_proba` interface as the logistic model
+  (no numpy/sklearn dependency, so it runs and is tested in-sandbox). `train_and_score`
+  gained `model_kind` (`logistic` | `gbt` | `auto`); `auto` out-of-fold-selects the
+  better of the two on PR-AUC and deploys the winner (reported as `model_selection`).
+  `fuzzlab auto --score` uses `auto`.
+- Impact (other components / project): the detection layer can now capture non-linear
+  feature interactions the linear model misses, chosen honestly per dataset. Still
+  advisory (scores only); the deployed model is persisted in the `model` table as
+  before. No new dependency.
+- Risk (level; mitigation): low — pure logic, advisory-only, deterministic. Mitigated by
+  tests (`tests/test_gbt.py`: probabilities in range; GBT beats logistic + both
+  baselines on a non-linear boundary under GroupKFold; `tests/test_ml_train.py`:
+  `model_kind="gbt"` persists a gbt model + scores; `auto` compares both and deploys the
+  winner). Suite 196 passed / 2 skipped.
+- Deliverables:
+  - [x] `GradientBoostedTrees` (weighted trees, logistic loss, class-balanced) — done.
+  - [x] `train_and_score` model_kind logistic/gbt/auto; `auto --score` uses auto — done.
+  - [x] Tests (beats logistic + baselines nonlinear; gbt/auto persistence) — done.
+  - [ ] Held-out exit on real lab data (T5.5) — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — GBT beats the linear model
+  on non-linear data and auto picks the OOF winner; real-lab held-out exit is on-host.
+
 ### CC-ML-0003 — Store-trained dataset + train/score/persist (T5.2/T5.3) (2026-09-21)
 - Change: `fuzzlab/ml/dataset.py::build_dataset` assembles a trainable dataset from the
   store — one example per candidate, label = a matching oracle finding exists, grouped
