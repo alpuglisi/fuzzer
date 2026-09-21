@@ -62,6 +62,19 @@ class ThompsonBandit:
             raise ValueError("select() needs at least one arm")
         return best
 
+    def order(self, context: str, arms: Iterable[str]) -> list[str]:
+        """A full ordering: Thompson-sample each arm once, best draw first.
+
+        Used to order the oracle's applicable mechanisms so the productive one is tried
+        first (fewer probes). Exploration still happens via the sampled draws.
+        """
+        scored = []
+        for arm in arms:
+            p = self._posterior(context, arm)
+            scored.append((self._rng.betavariate(p.alpha, p.beta), arm))
+        scored.sort(key=lambda t: t[0], reverse=True)
+        return [arm for _sample, arm in scored]
+
     def update(self, context: str, arm: str, reward: float) -> None:
         self._posterior(context, arm).update(reward)
 

@@ -57,7 +57,7 @@ def _dedup(points: list[InjectionPoint], pages_html: dict[str, str]) -> list[Inj
 def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                  plan: RunPlan, ground_truth=None,
                  pages_html: dict[str, str] | None = None, budget=None,
-                 browser=None) -> PipelineResult:
+                 browser=None, scheduler=None) -> PipelineResult:
     if pages_html:
         points = _dedup(points, pages_html)
 
@@ -78,7 +78,7 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     counts = evaluate(points, store, run_id, categories=plan.categories)
 
     # Confirm each candidate with the oracle (sole finding-writer).
-    oracle = Oracle(store=store, run_id=run_id, browser=browser)
+    oracle = Oracle(store=store, run_id=run_id, browser=browser, scheduler=scheduler)
     rows = store.conn.execute(
         "SELECT evidence FROM candidate WHERE run_id=?", (run_id,)).fetchall()
     for row in rows:

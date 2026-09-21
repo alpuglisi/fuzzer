@@ -45,6 +45,9 @@ def main(argv: list[str]) -> int:
                    help="Authenticated run as this identity (else anonymous)")
     p.add_argument("--browser", action="store_true",
                    help="Enable M6 browser execution (stored/DOM XSS) via Playwright")
+    p.add_argument("--bandit", action="store_true",
+                   help="Order oracle mechanisms with the Thompson bandit (Phase 4); "
+                        "posteriors persist in the store across runs")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
     args = p.parse_args(argv)
@@ -65,14 +68,22 @@ def main(argv: list[str]) -> int:
         if args.browser:
             from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
             browser = PlaywrightBrowserExecutor()
+        scheduler = None
+        if args.bandit:
+            from fuzzlab.oracle.strategies import default_strategies
+            from fuzzlab.scheduler import ThompsonBandit, arm_priors
+            scheduler = ThompsonBandit(priors=arm_priors(default_strategies()))
+            scheduler.load(store)                # resume posteriors from prior runs
         try:
             result = run_auto(base_url=args.base_url, store=store, run_id=run_id,
                               sender=sender, mode=args.mode, ground_truth=ground_truth,
                               selected_categories=selected, points_source=args.points,
-                              browser=browser)
+                              browser=browser, scheduler=scheduler)
         except RunModeError as exc:
             p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
 
+        if scheduler is not None:
+            scheduler.save(store)                # persist what this run learned
         _print_summary(args, counts, result)
     return 0
 

@@ -3,6 +3,34 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0015 — Bandit orders oracle mechanisms in the confirm loop (T4.3) (2026-09-21)
+- Change: `Oracle` takes an optional `scheduler`; `confirm` now orders its **applicable
+  mechanisms** via `scheduler.order(context, arms)` (arm = `vuln_class:mechanism`,
+  context = `category:sink|location`) and `update`s the scheduler per tried mechanism
+  (1.0 on confirm, 0.0 on a tried-but-failed one), stopping at the first confirmation.
+  So the productive mechanism is front-loaded and its confirmation short-circuits the
+  expensive ones (e.g. skip the timing probes when error/boolean confirm). Threaded
+  through `run_pipeline`/`run_auto`; `fuzzlab auto --bandit` constructs a
+  `ThompsonBandit` (priors from `arm_priors`), loads posteriors from the store before
+  the run and saves them after (persisted learning across runs). `ConfirmationStrategy`
+  gained the `arm` id. Default (no scheduler) is unchanged (fixed cheapest-first order).
+- Impact (other components / project): the Phase 4 request-reduction lever — fewer
+  oracle probes once the bandit learns which mechanism confirms per context. No effect
+  unless `--bandit`/a scheduler is passed. Posteriors live in `bandit_posteriors`.
+- Risk (level; mitigation): low/medium — reordering changes which probes run, but the
+  oracle stays fail-closed (ordering never changes *whether* something is confirmable,
+  only the order tried) so no FP. Mitigated by tests: a trained bandit reaches the
+  confirming mechanism with fewer probes than a fresh one; the oracle updates the
+  scheduler; no-scheduler keeps the fixed order; `run_auto --scheduler` learns and
+  persists. Suite 179 passed / 2 skipped.
+- Deliverables:
+  - [x] `Oracle` scheduler ordering + per-arm updates; `strategy.arm` — done.
+  - [x] `run_pipeline`/`run_auto` scheduler passthrough; `auto --bandit` load/save — done.
+  - [x] Tests (fewer probes when trained; updates; no-scheduler unchanged; persistence) — done.
+  - [ ] On-lab exit (T4.6): bandit vs uniform on hits-per-1000-requests — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — a trained bandit cuts wasted
+  probes and posteriors persist; the live request-reduction measurement is on-host.
+
 ### CC-FUZZ-0014 — Stored-XSS auto-wiring (source_url → store endpoint) (2026-09-21)
 - Change: `auto`'s ground-truth sourcing now also emits **stored-XSS** observe points,
   taken from the ground-truth *cases* (`vuln_class=xss-stored` with a `source_url`),

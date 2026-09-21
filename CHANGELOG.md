@@ -13,6 +13,17 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 4 (T4.2 + T4.3): context buckets, priors, and the bandit wired into the confirm
+  loop. Added `context_for` (bucket = `category:sink|location`), `arm_priors` (cost/
+  reliability warm starts for oracle mechanisms), and a `references/`-derived
+  `catalog_families`/`catalog_priors` reader (for the future payload-family bandit).
+  `Oracle.confirm` now orders its applicable mechanisms via an optional scheduler and
+  updates it per outcome, so the productive mechanism is front-loaded and its
+  confirmation skips the expensive probes; threaded through `run_pipeline`/`run_auto`
+  and `fuzzlab auto --bandit` (posteriors load/save around the run). A test shows a
+  trained bandit reaches the confirming mechanism with fewer probes than a fresh one.
+  Default (no scheduler) unchanged. +10 tests (179 passed / 2 skipped). Change-control:
+  CC-SCHED-0003, CC-FUZZ-0015.
 - Phase 4 groundwork: added `fuzzlab/scheduler/` — a `ThompsonBandit` (Beta-Bernoulli
   Thompson sampling per (context, arm), catalog priors, posteriors persisted in the
   reserved `bandit_posteriors` table) and a `UniformScheduler` control. Consumes the

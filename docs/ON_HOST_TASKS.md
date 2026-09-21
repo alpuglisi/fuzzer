@@ -73,6 +73,16 @@ injected-source seams (17 tests). What remains needs the instrumented lab:
   produces a distinguishable (higher) reward; error-based SQLi separates from benign
   traffic via `db_fault`.
 
+## Phase 4 — bandit scheduler exit measurement
+
+The scheduler core, context/priors, and the oracle-mechanism ordering are built and
+offline-tested; `fuzzlab auto --bandit` wires it in and persists posteriors. On the
+lab:
+- [ ] **T4.6 exit:** run `fuzzlab auto --bandit` repeatedly (posteriors accumulate) and
+  compare against a uniform control on **hits-per-1000-requests** / requests-per-finding
+  over held-out pages — the bandit must beat uniform. Also wire cost-normalization
+  (T4.4) and hierarchical backoff (T4.5) if the live numbers call for them.
+
 ## How to pick these up
 
 Step-by-step commands for all of the above are in **`docs/ON_HOST_RUNBOOK.md`**.

@@ -17,6 +17,13 @@ later, on-lab parts of Phase 4.
 """
 
 from fuzzlab.scheduler.bandit import Beta, ThompsonBandit
+from fuzzlab.scheduler.context import (
+    arm_priors,
+    catalog_families,
+    catalog_priors,
+    context_for,
+)
 from fuzzlab.scheduler.uniform import UniformScheduler
 
-__all__ = ["Beta", "ThompsonBandit", "UniformScheduler"]
+__all__ = ["Beta", "ThompsonBandit", "UniformScheduler", "context_for", "arm_priors",
+           "catalog_families", "catalog_priors"]

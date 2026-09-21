@@ -17,14 +17,20 @@ posteriors that persist across runs.
 
 ## Status (2026-09-21)
 
-`[in progress — learning core built offline]`. The schema already reserves
+`[in progress — learning core + oracle wiring built offline]`. The schema reserves
 `bandit_posteriors` (context, arm, alpha, beta). Built and unit-tested
-(`fuzzlab/scheduler/`, 7 tests):
-- `ThompsonBandit` — Beta-Bernoulli Thompson sampling per (context, arm), catalog
-  priors, `select`/`update`/`mean`/`best_arm`, and `load`/`save` to `bandit_posteriors`;
-- `UniformScheduler` — the control (ignores feedback);
-- a deterministic beat-uniform simulation (the bandit finds the good arm and beats
-  uniform on hits) — the Phase 4 exit in miniature, offline.
+(`fuzzlab/scheduler/` + oracle wiring, ~20 tests):
+- **T4.1** `ThompsonBandit` (per-(context, arm) Beta, `select`/`order`/`update`/
+  `best_arm`, `load`/`save`), `UniformScheduler` control, beat-uniform simulation.
+- **T4.2** context buckets (`context_for` = `category:sink|location`), mechanism warm
+  starts (`arm_priors`, cheap/strong mechanisms ahead), and a `references/`-derived
+  payload-family reader (`catalog_families`/`catalog_priors`) for the future
+  payload-level bandit.
+- **T4.3** the bandit **orders the oracle's applicable mechanisms** per context in
+  `Oracle.confirm` (productive mechanism first → the confirmation short-circuits the
+  expensive ones), updating on outcome; threaded through `run_pipeline`/`run_auto` and
+  `fuzzlab auto --bandit`, with posteriors loaded/saved around the run. A test shows a
+  trained bandit reaches the confirming mechanism with **fewer probes** than a fresh one.
 
 ## Principles (this phase)
 
@@ -44,14 +50,17 @@ posteriors that persist across runs.
 
 - **T4.1 — Learning core (done, offline).** `ThompsonBandit` + `UniformScheduler` +
   posterior persistence + the beat-uniform simulation. `fuzzlab/scheduler/`.
-- **T4.2 — Context buckets & catalog priors.** Define the context key (vuln class +
-  sink, coarse enough to share evidence, fine enough to matter) and derive per-family
-  priors from the `references/` payload catalogs (families that historically pay off
-  start ahead). Offline-testable from the catalogs.
-- **T4.3 — Wire into the fuzz/auto loop.** Replace the fuzzer's fixed payload order with
-  `scheduler.select(context, families)` → send → `update(context, family, reward)`,
-  loading/saving posteriors around the run. Behind the existing seams; the live request
-  reduction is measured on the lab.
+- **T4.2 — Context buckets & catalog priors (done, offline).** `context_for` buckets by
+  `category:sink|location`; `arm_priors` warm-starts the oracle mechanisms from a
+  cost/reliability model (cheap+strong ahead); `catalog_families`/`catalog_priors` read
+  the `references/` payload catalogs for the future payload-level bandit.
+- **T4.3 — Wire into the confirm loop (done, offline).** `Oracle.confirm` orders its
+  applicable mechanisms via `scheduler.order(context, arms)` and `update`s on outcome,
+  so the productive mechanism is front-loaded and a confirmation skips the expensive
+  ones. Threaded through `run_pipeline`/`run_auto` and `fuzzlab auto --bandit`;
+  posteriors load/save around the run. The live request reduction is measured on the lab
+  (T4.6). (The payload-family selection *within* a mechanism, using `catalog_priors`, is
+  the later fuzzer-loop application.)
 - **T4.4 — Cost-normalized selection.** Weight by reward-per-second (a `sleep`-heavy
   timing family costs more wall-clock than an error probe), so the bandit prefers cheap
   informative arms. Offline-testable with synthetic costs.

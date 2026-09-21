@@ -84,6 +84,20 @@ def test_posteriors_persist_across_stores(tmp_path):
         assert n == 2
 
 
+def test_bandit_order_puts_learned_arm_first():
+    bandit = ThompsonBandit(rng=random.Random(0))
+    for _ in range(40):
+        bandit.update("ctx", "win", 1.0)
+        bandit.update("ctx", "lose", 0.0)
+    order = bandit.order("ctx", ["lose", "win"])
+    assert order[0] == "win" and set(order) == {"lose", "win"}
+
+
+def test_uniform_order_is_a_permutation():
+    order = UniformScheduler(rng=random.Random(0)).order("ctx", ["a", "b", "c"])
+    assert sorted(order) == ["a", "b", "c"]
+
+
 def test_uniform_selects_from_arms_and_ignores_feedback():
     u = UniformScheduler(rng=random.Random(3))
     picks = {u.select("ctx", ["a", "b"]) for _ in range(20)}

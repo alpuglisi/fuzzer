@@ -21,6 +21,12 @@ class UniformScheduler:
             raise ValueError("select() needs at least one arm")
         return self._rng.choice(arms)
 
+    def order(self, context: str, arms: Iterable[str]) -> list[str]:
+        """A random ordering (control): learns nothing, just shuffles."""
+        arms = list(arms)
+        self._rng.shuffle(arms)
+        return arms
+
     def update(self, context: str, arm: str, reward: float) -> None:
         """Control: learns nothing from feedback (by design)."""
         return None

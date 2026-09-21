@@ -110,7 +110,8 @@ class _CountingSender:
 
 def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automatic",
              ground_truth=None, selected_categories=None, points_source: str = "auto",
-             pages_html: dict[str, str] | None = None, browser=None) -> PipelineResult:
+             pages_html: dict[str, str] | None = None, browser=None,
+             scheduler=None) -> PipelineResult:
     """Resolve the plan (D14/D15) and run the Phase 2 pipeline.
 
     ``points_source``: ``"ground-truth"`` audits the enumerated contract points (a
@@ -144,7 +145,7 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     counting = _CountingSender(sender)
     result = run_pipeline(points, store, run_id, counting, plan,
                           ground_truth=ground_truth, pages_html=pages_html,
-                          budget=counting, browser=browser)
+                          budget=counting, browser=browser, scheduler=scheduler)
     result.metrics["points_source"] = source
     result.metrics["skipped_points"] = skipped
     return result

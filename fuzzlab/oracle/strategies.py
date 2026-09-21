@@ -79,6 +79,11 @@ class ConfirmationStrategy:
     mechanism: str = ""
     category: str = ""
 
+    @property
+    def arm(self) -> str:
+        """Stable scheduler arm id (unique even when a mechanism spans classes)."""
+        return f"{self.vuln_class}:{self.mechanism}"
+
     def applies(self, candidate: Candidate) -> bool:
         # Prefer category scoping (a candidate's category can have several strategies,
         # e.g. reflected/stored/DOM XSS); fall back to vuln_class for direct use.

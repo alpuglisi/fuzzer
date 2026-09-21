@@ -188,6 +188,24 @@ def test_points_from_ground_truth_stored_needs_browser():
     assert stored and stored[0].store_url == "http://h/edit_profile.php"
 
 
+def test_run_auto_with_bandit_learns_and_persists(tmp_path):
+    from fuzzlab.oracle.strategies import default_strategies
+    from fuzzlab.scheduler import ThompsonBandit, arm_priors
+    gt = contract.load(GT_DIR)
+    bandit = ThompsonBandit(priors=arm_priors(default_strategies()))
+    with Store(tmp_path / "u.db") as store:
+        run_id = store.start_run("auto", "h")
+        _seed_crawl(store, run_id)
+        run_auto(base_url="http://localhost", store=store, run_id=run_id,
+                 sender=AutoSender(), mode="automatic", ground_truth=gt,
+                 points_source="crawl", scheduler=bandit)
+        # The oracle consulted + updated the bandit; posteriors persist to the store.
+        assert bandit.mean("sql-injection:query", "sqli:error-signature") != 0.5
+        bandit.save(store)
+        n = store.conn.execute("SELECT COUNT(*) c FROM bandit_posteriors").fetchone()["c"]
+        assert n > 0
+
+
 def test_run_auto_no_ground_truth_requires_categories(tmp_path):
     with Store(tmp_path / "u.db") as store:
         run_id = store.start_run("auto", "h")

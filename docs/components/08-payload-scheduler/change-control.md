@@ -3,6 +3,29 @@
 Component code: **SCHED**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SCHED-0003 — Context buckets, priors, catalog reader, arm ordering (T4.2) (2026-09-21)
+- Change: added `fuzzlab/scheduler/context.py` — `context_for` (bucket =
+  `category:sink|location`), `arm_priors` (cost/reliability warm starts for the oracle
+  mechanisms — cheap/strong mechanisms like error-signature start ahead of expensive
+  ones like differential-timing), and `catalog_families`/`catalog_priors` that read the
+  `references/<category>/payloads/*.txt` catalogs (payload-family arms + weak
+  size-scaled priors) for the future payload-level bandit. Added `ThompsonBandit.order`
+  and `UniformScheduler.order` (a full arm ordering) to drive the oracle's mechanism
+  ordering (T4.3).
+- Impact (other components / project): gives the bandit its context keys and warm
+  starts, and honestly incorporates the `references/` catalogs (T4.2's literal ask).
+  No traffic; pure/offline.
+- Risk (level; mitigation): low — pure functions + a filesystem read of the repo's
+  `references/`. Mitigated by tests (`tests/test_scheduler_context.py`: buckets, priors
+  favor cheap mechanisms, catalog families read, size-scaled priors; order tests in
+  `test_scheduler.py`). Suite 179 passed / 2 skipped.
+- Deliverables:
+  - [x] `context_for`, `arm_priors`, `catalog_families`/`catalog_priors` — done.
+  - [x] `order()` on both schedulers — done.
+  - [ ] Payload-family bandit wired into the fuzzer loop using `catalog_priors` — later.
+- Effectiveness (assessed 2026-09-21): effective — contexts/priors feed the oracle
+  bandit (CC-FUZZ-0015) and the catalog reader returns real families from `references/`.
+
 ### CC-SCHED-0002 — Bandit learning core (Phase 4 groundwork, offline) (2026-09-21)
 - Change: added `fuzzlab/scheduler/` — `ThompsonBandit` (Beta-Bernoulli Thompson
   sampling per (context, arm), catalog priors, `select`/`update`/`mean`/`best_arm`,
