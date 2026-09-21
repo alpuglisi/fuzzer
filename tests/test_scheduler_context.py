@@ -6,7 +6,14 @@ from fuzzlab.scheduler import (
     catalog_families,
     catalog_priors,
     context_for,
+    context_parents,
 )
+
+
+def test_context_parents_specific_to_root():
+    assert context_parents("sql-injection:html") == ["sql-injection", ""]
+    assert context_parents("sql-injection") == [""]
+    assert context_parents("") == []
 
 
 def test_context_for_buckets():

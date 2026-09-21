@@ -3,6 +3,19 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0011 — Migration 5: bandit cost columns (Phase 4 T4.4) (2026-09-21)
+- Change: migration 5 adds `cost_sum`/`cost_n` to `bandit_posteriors` (append-only
+  registry; head → 5), so the bandit's per-(context, arm) mean cost persists next to the
+  reward posterior for cost-normalized selection.
+- Impact (other components / project): the SCHED bandit's `load`/`save` now round-trip
+  cost; no other reads change. Version-pinning tests derive the head from
+  `migrations.MIGRATIONS` (PA-0001), so nothing hardcodes 5.
+- Risk (level; mitigation): low — additive columns with defaults. Suite 183 passed / 2 skipped.
+- Deliverables:
+  - [x] Migration 5 (`cost_sum`, `cost_n`) — done.
+- Effectiveness (assessed 2026-09-21): effective — cost persists across runs
+  (`tests/test_scheduler.py::test_cost_persists_across_stores`).
+
 ### CC-CORE-0010 — Headless credential backend on `cryptography` (BUG-0005) (2026-09-21)
 - Change: reimplemented the D12 encrypted-file credential backend in
   `fuzzlab/core/credentials.py`. It was `keyrings.alt.file.EncryptedKeyring` (needs

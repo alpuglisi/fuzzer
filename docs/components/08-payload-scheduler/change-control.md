@@ -3,6 +3,30 @@
 Component code: **SCHED**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SCHED-0004 — Cost-normalized selection (T4.4) + hierarchical backoff (T4.5) (2026-09-21)
+- Change: `ThompsonBandit` gained two opt-in refinements. **Cost-normalized** (T4.4):
+  `update(context, arm, reward, cost=…)` records a running mean cost; with
+  `cost_normalized`, `order`/`select` divide the sampled reward by the arm's mean cost
+  (reward-per-cost), so a cheap informative arm beats an expensive one of equal reward.
+  Costs persist in `bandit_posteriors` (`cost_sum`/`cost_n`, migration 5). **Backoff**
+  (T4.5): with `backoff`, a fresh (context, arm) is seeded from the first coarser
+  context that has data (`context_parents`), borrowing strength. The oracle passes each
+  mechanism's probe count as its cost; `fuzzlab auto --bandit` enables both.
+- Impact (other components / project): the bandit now prefers cheap, productive
+  mechanisms (fewer/faster probes) and warms up cold contexts from related ones — both
+  improve the Phase 4 request-reduction. Defaults off (existing callers unchanged).
+- Risk (level; mitigation): low — opt-in, pure logic. Mitigated by tests
+  (`test_scheduler.py`: cost-normalized prefers the cheaper arm; cost persists; backoff
+  inherits parent strength; `test_scheduler_context.py`: `context_parents`). Suite 183
+  passed / 2 skipped.
+- Deliverables:
+  - [x] Cost tracking + cost-normalized ordering; migration-5 persistence — done.
+  - [x] `context_parents` + backoff prior seeding — done.
+  - [x] Oracle passes mechanism cost; `auto --bandit` enables both — done.
+  - [ ] On-lab: confirm cost-normalization/backoff help the live numbers (T4.6) — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — cheaper arms win under equal
+  reward and cold contexts inherit parent tendency; live tuning pending the lab.
+
 ### CC-SCHED-0003 — Context buckets, priors, catalog reader, arm ordering (T4.2) (2026-09-21)
 - Change: added `fuzzlab/scheduler/context.py` — `context_for` (bucket =
   `category:sink|location`), `arm_priors` (cost/reliability warm starts for the oracle

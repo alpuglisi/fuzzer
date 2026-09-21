@@ -27,6 +27,6 @@ class UniformScheduler:
         self._rng.shuffle(arms)
         return arms
 
-    def update(self, context: str, arm: str, reward: float) -> None:
+    def update(self, context: str, arm: str, reward: float, cost: float = 1.0) -> None:
         """Control: learns nothing from feedback (by design)."""
         return None

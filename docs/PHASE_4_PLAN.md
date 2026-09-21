@@ -61,11 +61,14 @@ posteriors that persist across runs.
   posteriors load/save around the run. The live request reduction is measured on the lab
   (T4.6). (The payload-family selection *within* a mechanism, using `catalog_priors`, is
   the later fuzzer-loop application.)
-- **T4.4 — Cost-normalized selection.** Weight by reward-per-second (a `sleep`-heavy
-  timing family costs more wall-clock than an error probe), so the bandit prefers cheap
-  informative arms. Offline-testable with synthetic costs.
-- **T4.5 — Hierarchical backoff.** Fall back from a specific context to a coarser one
-  when a bucket has little data, so cold contexts borrow strength. Offline-testable.
+- **T4.4 — Cost-normalized selection (done, offline).** Each observation records a cost
+  (the oracle passes the mechanism's probe count); with `cost_normalized`, ordering
+  divides the sampled reward by the arm's mean cost, so a cheap informative arm beats an
+  expensive one of equal reward. Costs persist in `bandit_posteriors` (migration 5).
+- **T4.5 — Hierarchical backoff (done, offline).** With `backoff`, a fresh (context,
+  arm) is seeded from the first coarser context that has data (`context_parents`:
+  `cat:facet` → `cat` → root), so a cold bucket borrows strength, then specializes.
+  Both are enabled on the live `fuzzlab auto --bandit`.
 - **T4.6 — Exit measurement (on-lab).** Plot the bandit vs `UniformScheduler` on
   hits-per-1000-requests over held-out pages; the bandit must win.
 

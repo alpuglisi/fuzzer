@@ -42,6 +42,20 @@ def context_for(category: str | None, location: str | None = None,
     return f"{category or 'unknown'}:{facet}"
 
 
+def context_parents(context: str) -> list[str]:
+    """Coarser contexts to back off to, specific→root (excluding ``context`` itself).
+
+    ``"sql-injection:html"`` → ``["sql-injection", ""]``; ``"sql-injection"`` → ``[""]``.
+    A cold (context, arm) borrows strength from the first parent that has data (T4.5).
+    """
+    out: list[str] = []
+    if ":" in context:
+        out.append(context.split(":", 1)[0])     # drop the facet
+    if context != "":
+        out.append("")                            # the global root
+    return [c for c in dict.fromkeys(out) if c != context]
+
+
 def arm_priors(strategies: Iterable) -> dict[str, tuple[float, float]]:
     """Per-arm priors for the oracle-mechanism bandit, from the mechanism cost model.
 

@@ -17,6 +17,22 @@ from fuzzlab.oracle.strategies import ConfirmationStrategy, default_strategies
 from fuzzlab.scheduler.context import context_for
 
 
+class _CostCounter:
+    """Wrap a sender to count the probes one strategy makes (its cost, for the bandit)."""
+
+    def __init__(self, inner: Sender):
+        self._inner = inner
+        self.count = 0
+
+    def send(self, url, param, value, timing: bool = False,
+             method: str = "GET", location: str = "query"):
+        self.count += 1
+        if method == "GET" and location == "query":
+            return self._inner.send(url, param, value, timing=timing)
+        return self._inner.send(url, param, value, timing=timing,
+                                method=method, location=location)
+
+
 class Oracle:
     def __init__(self, strategies: list[ConfirmationStrategy] | None = None,
                  store=None, run_id: int | None = None, browser=None, scheduler=None):
@@ -40,10 +56,15 @@ class Oracle:
             ctx, ordered = None, applicable
 
         for strategy in ordered:
-            verdict = strategy.confirm(candidate, sender)
+            if self.scheduler is not None:
+                probe = _CostCounter(sender)             # measure this mechanism's cost
+                verdict = strategy.confirm(candidate, probe)
+            else:
+                verdict = strategy.confirm(candidate, sender)
             confirmed = verdict is not None and verdict.confirmed
-            if self.scheduler is not None:               # reward only the tried arms
-                self.scheduler.update(ctx, strategy.arm, 1.0 if confirmed else 0.0)
+            if self.scheduler is not None:               # reward+cost only the tried arms
+                self.scheduler.update(ctx, strategy.arm, 1.0 if confirmed else 0.0,
+                                      cost=max(1, probe.count))
             if confirmed:
                 self._write_finding(candidate, verdict)
                 return verdict

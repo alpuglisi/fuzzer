@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 4 (T4.4 + T4.5): **cost-normalized selection** and **hierarchical backoff** for
+  the bandit. Each observation records a cost (the oracle passes the mechanism's probe
+  count); with `cost_normalized`, ordering divides sampled reward by mean cost so a cheap
+  informative mechanism beats an expensive one of equal reward (costs persist via
+  migration 5). With `backoff`, a fresh (context, arm) is seeded from the first coarser
+  context that has data (`context_parents`), so cold buckets borrow strength. Both are
+  enabled on `fuzzlab auto --bandit`; defaults off elsewhere. +5 tests (183 passed / 2
+  skipped). Change-control: CC-SCHED-0004, CC-CORE-0011.
 - Phase 4 (T4.2 + T4.3): context buckets, priors, and the bandit wired into the confirm
   loop. Added `context_for` (bucket = `category:sink|location`), `arm_priors` (cost/
   reliability warm starts for oracle mechanisms), and a `references/`-derived

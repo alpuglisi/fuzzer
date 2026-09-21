@@ -227,12 +227,21 @@ CREATE INDEX idx_evaluation_run ON evaluation(run_id);
 CREATE INDEX idx_evaluation_fired ON evaluation(run_id, fired);
 """
 
+# --- migration 5: bandit cost tracking (Phase 4 T4.4) ------------------------
+# Cost-normalized selection needs the mean cost per (context, arm). Persist the
+# running sum/count next to the reward posterior so cost learning survives runs.
+_M0005 = """
+ALTER TABLE bandit_posteriors ADD COLUMN cost_sum REAL NOT NULL DEFAULT 0;
+ALTER TABLE bandit_posteriors ADD COLUMN cost_n INTEGER NOT NULL DEFAULT 0;
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
     (2, _M0002),
     (3, _M0003),
     (4, _M0004),
+    (5, _M0005),
 ]
 
 

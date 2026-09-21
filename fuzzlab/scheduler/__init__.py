@@ -22,8 +22,9 @@ from fuzzlab.scheduler.context import (
     catalog_families,
     catalog_priors,
     context_for,
+    context_parents,
 )
 from fuzzlab.scheduler.uniform import UniformScheduler
 
-__all__ = ["Beta", "ThompsonBandit", "UniformScheduler", "context_for", "arm_priors",
-           "catalog_families", "catalog_priors"]
+__all__ = ["Beta", "ThompsonBandit", "UniformScheduler", "context_for",
+           "context_parents", "arm_priors", "catalog_families", "catalog_priors"]

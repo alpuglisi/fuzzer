@@ -72,8 +72,9 @@ def main(argv: list[str]) -> int:
         if args.bandit:
             from fuzzlab.oracle.strategies import default_strategies
             from fuzzlab.scheduler import ThompsonBandit, arm_priors
-            scheduler = ThompsonBandit(priors=arm_priors(default_strategies()))
-            scheduler.load(store)                # resume posteriors from prior runs
+            scheduler = ThompsonBandit(priors=arm_priors(default_strategies()),
+                                       cost_normalized=True, backoff=True)
+            scheduler.load(store)                # resume posteriors + costs from prior runs
         try:
             result = run_auto(base_url=args.base_url, store=store, run_id=run_id,
                               sender=sender, mode=args.mode, ground_truth=ground_truth,

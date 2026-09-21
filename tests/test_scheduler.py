@@ -98,6 +98,39 @@ def test_uniform_order_is_a_permutation():
     assert sorted(order) == ["a", "b", "c"]
 
 
+def test_cost_normalized_prefers_the_cheaper_arm(tmp_path):
+    b = ThompsonBandit(rng=random.Random(0), cost_normalized=True)
+    for _ in range(30):
+        b.update("ctx", "cheap", 1.0, cost=2)      # equal reward...
+        b.update("ctx", "dear", 1.0, cost=20)      # ...10x the cost
+    assert b.order("ctx", ["dear", "cheap"])[0] == "cheap"
+    assert b.cost_mean("ctx", "dear") > b.cost_mean("ctx", "cheap")
+
+
+def test_cost_persists_across_stores(tmp_path):
+    path = tmp_path / "c.db"
+    with Store(path) as store:
+        b = ThompsonBandit()
+        b.update("ctx", "a", 1.0, cost=7)
+        b.save(store)
+    with Store(path) as store:
+        b2 = ThompsonBandit().load(store)
+        assert b2.cost_mean("ctx", "a") == 7.0
+
+
+def test_backoff_inherits_parent_strength():
+    backoff = ThompsonBandit(backoff=True)
+    for _ in range(10):
+        backoff.update("sql-injection", "x", 1.0)          # parent learns x is good
+    child = backoff.mean("sql-injection:html", "x")        # fresh child inherits it
+
+    flat = ThompsonBandit(backoff=False)
+    for _ in range(10):
+        flat.update("sql-injection", "x", 1.0)
+    assert flat.mean("sql-injection:html", "x") == 0.5     # no inheritance
+    assert child > 0.5 and child > flat.mean("sql-injection:html", "x")
+
+
 def test_uniform_selects_from_arms_and_ignores_feedback():
     u = UniformScheduler(rng=random.Random(3))
     picks = {u.select("ctx", ["a", "b"]) for _ in range(20)}
