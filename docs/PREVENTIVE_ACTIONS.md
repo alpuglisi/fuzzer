@@ -179,3 +179,12 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   assumption still holds for the new component's actual callers — e.g. an ASGI test client
   used without its context-manager form spins up a fresh thread per top-level call, which
   is enough to break it. (from BUG-0021)
+- **PA-0024** — Whenever an emitter's (or any capability-registry-driven component's)
+  "supports this shape" declaration is widened to accept a new case, the same change must
+  exercise **every** existing record (manifest cell, config entry, etc.) that could newly
+  match that shape — not only the new record the change was written for — as a standing
+  test, not a one-time manual check. A per-shape capability registry and a per-record
+  metadata registry that must stay in lockstep is a recurring shape of this bug class:
+  before landing such a widening, add or extend a whole-collection regression test (e.g. a
+  "render every cell of every existing manifest" test) rather than relying on tests scoped
+  to the new record alone. (from BUG-0022)

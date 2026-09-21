@@ -14,6 +14,39 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (LAB, `CC-LAB-0027`, T-LAB0.7): added `fuzzlab/labgen/conformance/`, the
+  stack-agnostic tiered emitter conformance suite any future emitter must pass, per
+  `docs/LAB_PHASE_0_PLAN.md` T-LAB0.7: **Tier 0** (lint + minimal-pair diff, fully
+  exercised offline — real `php -l`, and a minimal-pair check that upgrades
+  automatically to the real, sibling-owned `fuzzlab.labgen.minimal_pair` now that it
+  has landed, per `get_minimal_pair_checker()`'s own no-caller-change-needed design);
+  **Tier 1** (in-process functional + security assertion, built as an honestly-labeled
+  `[design]` interface — no live app/DB in this offline session, tested only against
+  synthetic responses via a fake client); **Tier 2** (the full container-based oracle,
+  "the only tier that actually confirms a label," also `[design]` — no offline stand-in
+  is meaningful, tests only prove the on-host-required guard and result-plumbing); **Tier
+  3** (whole-lab regeneration, fully exercised offline — two full renders of a real
+  emitter's output, byte-diffed, run against both existing Phase-0 manifests in full,
+  not a hand-picked subset). Also adds `static_precheck.py`, the `informative |
+  uninformative` static-checker flag mechanism (`CR-LAB-0001` Addendum C point 4). A
+  Tier-0/1 pass is never recorded as oracle confirmation — only a real Tier-2 run is.
+  Found and fixed a real regression while building this (`BUG-0022`): running Tier 3
+  against the *entire* illustrative manifest for the first time revealed
+  `CC-LAB-0022`'s real-page extension had widened `php_current.supports()` to accept
+  `(xss, html_body)` without a page profile for the pre-existing illustrative cell of
+  that shape, so `render()` crashed instead of honoring the documented
+  supports-then-render contract. Fixed with a one-line `_PAGE_PARAMS` addition; the real
+  fix is the new standing whole-manifest Tier-3 tests that guard against this class of
+  regression going forward (`PA-0024`). 31 new tests. This lane's worktree was based on
+  a commit predating several later Phase 0 merges (including the sibling `minimal_pair`
+  lane); its files were verified independently (read in full, re-run against current
+  trunk — its own Tier-0 "naive fallback" tests were updated to call the fallback
+  directly, since `get_minimal_pair_checker()` now always resolves to the real,
+  landed `minimal_pair.check_minimal_pair`) and copied in, with fresh bookkeeping
+  (`CC-LAB-0027`, `FR-LAB-25`, `BUG-0022`/`PA-0024` — renumbered from this lane's own
+  worktree-local `BUG-0021`/`PA-0023`, which collided with the already-merged
+  `CC-PROXY-0016` PROXY fix's numbers) written here. Full suite 842 passed / 6 skipped
+  / 2 pre-existing unrelated `test_mutation_operators.py` failures.
 - Feature (LAB, `CC-LAB-0026`, `CR-LAB-0001` §3): added `fuzzlab/labgen/fingerprint_gate.py`,
   the mandatory fingerprint-independence build gate for once the generator goes
   multi-stack (Phase 3) — guards against a stack becoming a de facto proxy for a

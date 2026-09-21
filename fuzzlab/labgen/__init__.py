@@ -14,15 +14,19 @@ that a cell's vulnerable/secure twins differ only within their declared
 transform/sink region), and the fingerprint-independence build gate
 (``fingerprint_gate``, `CR-LAB-0001` §3 — a chi-square test of independence
 between stack and vuln_class/verdict, guarding against a stack becoming a
-de facto proxy for a class once the generator goes multi-stack) — all
-generator-build-time security-assertion tooling, unrelated to and never
-imported by ``fuzzlab.oracle``. None of these depends on any other. This
-re-exports all of them. ``fingerprint_gate`` imports ``scipy`` lazily inside
-its chi-square functions (the optional ``labgen-stats`` extra), so importing
-this package does not require it.
+de facto proxy for a class once the generator goes multi-stack), and the
+tiered emitter conformance suite (``conformance``, T-LAB0.7 — Tiers 0/3
+fully exercised offline, Tiers 1/2 built as honestly-labeled ``[design]``
+interfaces requiring on-host resources) — all generator-build-time
+security-assertion tooling, unrelated to and never imported by
+``fuzzlab.oracle``. None of these depends on any other. This re-exports all
+of them. ``fingerprint_gate`` imports ``scipy`` lazily inside its chi-square
+functions (the optional ``labgen-stats`` extra), so importing this package
+does not require it.
 """
 
 from . import (
+    conformance,
     denylist,
     emitter,
     emitters,
@@ -61,6 +65,7 @@ from .zap_oracle import (
 )
 
 __all__ = [
+    "conformance",
     "denylist",
     "emitter",
     "emitters",

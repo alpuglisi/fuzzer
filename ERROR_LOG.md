@@ -18,6 +18,27 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — `php_current.supports()` accepted a shape whose illustrative-manifest cell had no page profile
+
+- **Symptom:** `PhpCurrentEmitter.render()` raised `ValueError` for
+  `lab/manifests/example_phase0_scaffold.yaml`'s `LABGEN-EX-0004` cell
+  (`xss`/`html_body`, route `/example/profile.php`), even though
+  `PhpCurrentEmitter.supports()` returned `True` for that shape — violating
+  the `Emitter` interface's own documented supports-then-render contract.
+- **Root cause:** `CC-LAB-0022`'s real-page extension widened
+  `PhpCurrentEmitter._MODULE_SET_BY_SHAPE` to accept `(xss, html_body)` (for
+  the real `/profile.php` page) without adding a matching `_PAGE_PARAMS`
+  entry for the pre-existing illustrative manifest's cell of the same shape
+  — no test exercised a whole manifest's cell list through the now-widened
+  `supports()`/`render()` pair, only individually hand-picked cells.
+- **Remediation:** added the missing `_PAGE_PARAMS["/example/profile.php"]`
+  entry; new whole-manifest Tier-3 regeneration tests
+  (`tests/test_labgen_conformance_tier3.py`) now render every cell of both
+  existing Phase-0 manifests, not a hand-picked subset. Full RCA:
+  `docs/bugs/BUG-0022-php-current-supports-true-render-crashes-missing-page-profile.md`;
+  preventive action `PA-0024`.
+- **Status:** Fixed.
+
 ## 2026-09-21 — LAB lane worktree created from a stale/unrelated branch lineage
 
 - **Symptom:** on session start for the T-LAB0.6 (Gitleaks secret-scanner) lane,

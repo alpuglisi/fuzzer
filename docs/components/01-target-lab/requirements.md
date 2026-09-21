@@ -276,6 +276,24 @@ and measured. Authorized, lab-only.
   `MissingStatsDependencyError`, never a raw `ImportError`. Not yet wired
   into a build gate/CLI — there is no real multi-stack corpus to run it
   against until Phase 3. (`CR-LAB-0001` §3/§4, `CC-LAB-0026`)
+- **FR-LAB-25** (Lab track, T-LAB0.7) A stack-agnostic, tiered conformance suite
+  (`fuzzlab.labgen.conformance`) any emitter must pass for every `(class,
+  sink_context)` it declares support for, structured fastest-first: **Tier 0**
+  (lint + minimal-pair diff, fully offline) and **Tier 3** (whole-lab
+  regeneration, byte-diffed across a full manifest, fully offline) are real,
+  exercised checks; **Tier 1** (in-process functional/security assertion) and
+  **Tier 2** (the full container-based oracle — the only tier that actually
+  confirms a label) are honestly-labeled `[design]` interfaces requiring a
+  real app/DB/oracle this offline session cannot provide, and both raise
+  `OnHostRequiredError` rather than silently no-op-passing without one. A
+  Tier-0/1 pass is never recorded as oracle confirmation — only a real Tier-2
+  run is. Each `(vuln_class, sink_context.family)` shape also carries a
+  `static_precheck: informative | uninformative` flag
+  (`fuzzlab.labgen.conformance.static_precheck`, `CR-LAB-0001` Addendum C
+  point 4) so a static/taint-style checker's clean scan on a shape it is
+  structurally blind to (e.g. identifier-position SQL injection) is never
+  mistaken for confirmation. (`docs/LAB_PHASE_0_PLAN.md` T-LAB0.7,
+  `CR-LAB-0001` Addendum C, `CC-LAB-0027`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

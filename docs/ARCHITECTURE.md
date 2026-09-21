@@ -197,7 +197,13 @@ tracked in the requirements files, not here.
   (`fuzzlab/labgen/fingerprint_gate.py`, `CC-LAB-0026`) chi-square-tests
   stack against vuln_class/verdict, schema-independent, so a stack can never
   become a de facto proxy for a class; not yet wired in, as there is no
-  real multi-stack corpus yet. A manifest reproducing today's real ~30-page PHP
+  real multi-stack corpus yet. A stack-agnostic tiered conformance suite
+  (`fuzzlab/labgen/conformance/`, `CC-LAB-0027`) any emitter must pass: Tier
+  0 (lint + minimal-pair diff) and Tier 3 (whole-lab regeneration) are real,
+  fully exercised offline; Tier 1 (in-process functional/security) and
+  Tier 2 (the container-based oracle — the only tier that confirms a label)
+  are honestly-labeled `[design]` interfaces awaiting on-host wiring. A
+  manifest reproducing today's real ~30-page PHP
   app byte-identically (the actual Phase 0 exit criterion) remains planned.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, et al. — see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

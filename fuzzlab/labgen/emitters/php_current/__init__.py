@@ -72,6 +72,12 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
 _PAGE_PARAMS: dict[str, dict[str, Any]] = {
     # The original T-LAB0.4 illustrative pair (unchanged, kept working).
     "/example/product.php": {"var_name": "id", "param_name": "id", "table": "products", "column": "id"},
+    # BUG-0022 fix: the illustrative manifest's xss/html_body cell
+    # (LABGEN-EX-0004) predates php_current's xss/html_body support
+    # (added in CC-LAB-0020/CC-LAB-0022's real-pages extension) but was
+    # never given a page profile, so supports() started returning True
+    # for it while render() still raised -- see docs/bugs/BUG-0022-*.md.
+    "/example/profile.php": {"var_name": "bio", "stored_expr": "$currentUser['bio']", "css_class": "bio"},
     # Real puppy-fort-factory/ pages (see module docstring above).
     "/product.php": {"var_name": "id", "param_name": "id", "table": "products", "column": "id"},
     "/blog_post.php": {"var_name": "id", "param_name": "id", "table": "posts", "column": "id"},

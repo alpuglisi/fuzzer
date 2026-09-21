@@ -3,6 +3,103 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0027 — T-LAB0.7: tiered emitter conformance suite (2026-09-21)
+*(Numbered `CC-LAB-0027` rather than `CC-LAB-0023` at merge time — this lane's worktree
+was based on a commit predating `CC-LAB-0024`-`0026` landing (including the sibling
+`minimal_pair` lane, `CC-LAB-0025`), so it independently claimed `0023` too. Its own
+`BUG-0021`/`PA-0023` bug-protocol IDs also collided with the already-merged
+`CC-PROXY-0016` fix's numbers and were renumbered to `BUG-0022`/`PA-0024` — see that bug
+doc for the full note. Its files were verified independently (read in full, re-run
+against current trunk) and copied in; its Tier-0 test file's "naive fallback" tests were
+updated in this reconciliation to call `_naive_minimal_pair_check` directly rather than
+through `get_minimal_pair_checker()`, since that function now always resolves to the
+real, landed `fuzzlab.labgen.minimal_pair.check_minimal_pair` in this branch — exactly
+the upgrade-with-no-caller-change the module's own design anticipated, just exercised
+sooner than this lane's own authoring context assumed. No other content changed.)*
+- Change: added `fuzzlab/labgen/conformance/`, the stack-agnostic, HTTP-level tiered
+  conformance suite `docs/LAB_PHASE_0_PLAN.md` T-LAB0.7 requires any future emitter to
+  pass, for every `(class, sink_context)` it declares support for. Four tiers, fastest
+  first, per `CR-LAB-0001` Addendum C:
+  - **Tier 0** (`tier0.py`) — lint (real `php -l`, skip-guarded per PA-0005) + a
+    minimal-pair diff check. `get_minimal_pair_checker()` prefers the real, sibling-owned
+    `fuzzlab.labgen.minimal_pair.check_minimal_pair` (now landed as `CC-LAB-0025`) over a
+    naive, deliberately conservative positional fallback — comparing twins by position,
+    not path, since `php_current` names one output file per `cell_id`, not per page.
+    Fully exercised offline for real.
+  - **Tier 1** (`tier1.py`) — in-process functional + security assertion. Built as an
+    honestly-labeled `[design]` interface, not exercised against a live app/DB: this
+    session is offline-only, and T-LAB0.7's own rule against an in-memory-SQLite
+    substitute (dialect-dependent false passes for SQLi cells) means there is no
+    meaningful offline stand-in. `Tier1Case`/`Tier1Client` (a `Protocol`) plus the
+    decision logic (`evaluate_tier1_response`) are tested only against synthetic,
+    hand-written response strings via a `FakeTier1Client` test double; `run_tier1_case`
+    raises `OnHostRequiredError` when no client is supplied, rather than a silent no-op
+    pass.
+  - **Tier 2** (`tier2.py`) — the full container-based oracle, "the only tier that
+    actually confirms a label." Also `[design]` — no offline stand-in is meaningful at
+    all; tests only prove the on-host-required guard and the result-plumbing wiring via a
+    test double, never a live confirmation (the module's own docstring says this
+    explicitly).
+  - **Tier 3** (`tier3.py`) — whole-lab regeneration. Fully exercised offline for real:
+    `regenerate_and_diff_emitter()` renders every supported cell of a manifest via a real
+    `Emitter` twice and byte-diffs the whole tree — run against **both** existing Phase-0
+    manifests (`example_phase0_scaffold.yaml`, `phase0_real_pages_sample.yaml`) in full,
+    not a hand-picked subset (this is what surfaced `BUG-0022` below).
+  - **`static_precheck.py`** — the `informative | uninformative` flag mechanism
+    (`CR-LAB-0001` Addendum C point 4), kept as its own small registry rather than in
+    `lab/safety_matrix.yaml` (that schema field hasn't landed there yet, and that file is
+    owned by a sibling lane). `run_static_precheck()` never calls a checker on an
+    uninformative shape, and raises rather than silently passing/skipping an informative
+    shape with no checker supplied.
+  A Tier-0 or Tier-1 pass is never recorded as oracle confirmation — only a real Tier-2
+  run is (T-LAB0.7's own rule).
+- Bug found and fixed while building this (`BUG-0022`, see that doc for the full RCA):
+  running Tier 3 against the *entire* illustrative manifest for the first time revealed
+  that `CC-LAB-0022`'s real-page extension had widened `php_current.supports()` to
+  accept `(xss, html_body)` without adding the page profile the pre-existing illustrative
+  manifest's matching cell (`LABGEN-EX-0004`, `/example/profile.php`) needs — `render()`
+  raised instead of the documented supports-then-render contract holding. Fixed with a
+  one-line `_PAGE_PARAMS` addition to `fuzzlab/labgen/emitters/php_current/__init__.py`.
+  Full bug protocol: `ERROR_LOG.md`, `docs/bugs/BUG-0022-*.md` (five-whys RCA; recurrence
+  review checked BUG-0009/PA-0008-9 and BUG-0016/PA-0017, found neither shares this exact
+  root cause), `PA-0024` (an emitter capability-registry extension must exercise every
+  existing manifest cell that could newly match, as a standing test — the new
+  whole-manifest Tier-3 tests are that standing test going forward).
+- Impact (other components / project): none outside LAB. Read-only against
+  `fuzzlab.labgen.emitter`'s types, `fuzzlab.labgen.schema.Cell`, and (via
+  `get_minimal_pair_checker()`) `fuzzlab.labgen.minimal_pair` — no other component's
+  contracts change. The one production-code change is the `BUG-0022` one-line fix in
+  `emitters/php_current/__init__.py`.
+- Risk (level; mitigation): low. New, additive test-suite/interface code; the one real
+  production fix is a one-line, additive `_PAGE_PARAMS` entry verified by a new
+  whole-manifest regression test that would have caught the original defect.
+  Tier 1/2's `[design]`-only status is stated explicitly in each module's own docstring
+  and enforced by their own tests (both raise `OnHostRequiredError` rather than
+  no-op-passing without a real client/oracle) — a future caller cannot mistake a green
+  Tier 1/2 test in this suite for a live confirmation.
+- Deliverables:
+  - [x] Tier 0 (`tier0.py`) — real lint + minimal-pair diff (auto-upgrading to the real
+        checker) — done, fully exercised offline.
+  - [x] Tier 1 (`tier1.py`) — interface + decision logic, `[design]`, tested via a fake
+        client — done.
+  - [x] Tier 2 (`tier2.py`) — interface, `[design]`, tested via a test double proving
+        wiring and the on-host-required guard only — done.
+  - [x] Tier 3 (`tier3.py`) — whole-lab regeneration, byte-diffed across both existing
+        Phase-0 manifests in full — done, fully exercised offline.
+  - [x] `static_precheck.py` — `informative | uninformative` flag mechanism — done.
+  - [x] 31 new tests across 5 test files — done, all pass.
+  - [x] `BUG-0022` found, fixed, and given the full bug protocol — done.
+  - [ ] Wiring a real in-process app + real DB container (Tier 1) and a real
+        container-based oracle (Tier 2) — on-host work, explicitly out of scope for this
+        session.
+- Effectiveness (assessed 2026-09-21): met this delivery's own bar — Tiers 0/3 proven for
+  real against both existing manifests; Tiers 1/2's interfaces are honestly labeled and
+  refuse to run without their real on-host dependencies rather than silently no-op
+  passing; the suite caught a real, previously-undiscovered defect (`BUG-0022`) the first
+  time it was run against a whole manifest rather than hand-picked cells. Full suite 842
+  passed / 6 skipped / 2 pre-existing unrelated `test_mutation_operators.py` failures
+  (baseline before this change: 811 passed, same 2 failures, 6 skipped).
+
 ### CC-LAB-0026 — fingerprint-independence build gate (`CR-LAB-0001` §3/§4) (2026-09-21)
 *(Numbered `CC-LAB-0026` rather than `CC-LAB-0022` at merge time — this lane's worktree
 was based on a commit predating `CC-LAB-0020`-`0025` landing, so it independently
