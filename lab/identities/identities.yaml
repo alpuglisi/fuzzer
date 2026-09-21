@@ -1,0 +1,52 @@
+# Identity/ownership graph (Phase 2, CR-LAB-0001 §8, L-P2.1).
+#
+# Named test identities, the resources they own, and the authz_expectations
+# that connect an accessing identity to a target resource and a binary
+# expected outcome (allowed | denied, D20). Loaded and validated by
+# fuzlab.labgen.identity.load_identities() against
+# lab/schemas/identities.schema.json.
+#
+# Deliberately decoupled from the manifest/Cell IR fuzzlab.labgen.verdict
+# consumes, the same way lab/patterns/provenance.yaml is decoupled from
+# manifest cells (CR-LAB-0001 Addendum A). fuzzlab.labgen.verdict.verdict()
+# never reads this file or imports fuzzlab.labgen.identity.
+#
+# This is a Phase 2 scaffold: illustrative identities/resources/expectations
+# proving the shape end to end (mirroring lab/patterns/provenance.yaml's own
+# "scaffold, not the real corpus" framing). The cell_ids/cell_id references
+# below are placeholders (no real manifest cell with these IDs exists yet) —
+# real cross-manifest cell_ids will be wired in once IDOR/BOLA-relevant
+# cells exist (Addendum E currently defers that cell authoring indefinitely;
+# this file's job today is groundwork, per docs/LAB_IMPLEMENTATION_PLAN.md
+# §3).
+schema_version: 1
+
+identities:
+  - id: user_a
+    role: standard_user
+  - id: user_b
+    role: standard_user
+  - id: admin_a
+    role: admin
+
+resources:
+  - resource_id: profile_user_a
+    owner: user_a
+    cell_ids: [LABGEN-EX-IDENTITY-0001]
+
+authz_expectations:
+  - cell_id: LABGEN-EX-IDENTITY-0001
+    endpoint: /profile/{id}
+    accessing_identity: user_b
+    target_resource: profile_user_a
+    expected_outcome: denied
+  - cell_id: LABGEN-EX-IDENTITY-0001
+    endpoint: /profile/{id}
+    accessing_identity: user_a
+    target_resource: profile_user_a
+    expected_outcome: allowed
+  - cell_id: LABGEN-EX-IDENTITY-0001
+    endpoint: /profile/{id}
+    accessing_identity: admin_a
+    target_resource: profile_user_a
+    expected_outcome: allowed

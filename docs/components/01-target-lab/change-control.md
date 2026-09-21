@@ -3,6 +3,73 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0029 — Identity/ownership graph schema + loader (L-P2.1, `CR-LAB-0001` §8) (2026-09-21)
+- Change: added the Phase 2 identity/ownership graph — `lab/identities/identities.yaml`
+  (named test identities, resource ownership, and `authz_expectations` connecting an
+  accessing identity to a target resource and a binary `allowed | denied` outcome, D20's
+  binary-verdict convention), its JSON Schema (`lab/schemas/identities.schema.json`), and
+  a new loader module `fuzzlab/labgen/identity.py`: frozen dataclasses `Identity`,
+  `Resource`, `AuthzExpectation`, a small container dataclass `IdentityGraph` (flat lists
+  plus `identity_by_id`/`resource_by_id`/`expectations_for_cell` lookup helpers, mirroring
+  `fuzzlab.labels.contract.GroundTruth`'s shape), and `load_identities(path) ->
+  IdentityGraph`. Validates against the JSON Schema the same way
+  `fuzzlab.labgen.schema.validate_manifest` validates manifests, raising a typed
+  `IdentityGraphError` (never a raw `KeyError`/`jsonschema.ValidationError`/YAML error) —
+  matching this project's `ManifestError`/`ContractError` naming convention. Adds
+  duplicate-`identities[].id`/`resources[].resource_id` checks mirroring
+  `fuzzlab.labels.contract.load_labels`'s duplicate-`case_id` pattern, plus
+  dangling-reference checks (`resources[].owner`,
+  `authz_expectations[].accessing_identity`/`target_resource` must resolve to a
+  declared identity/resource) that the JSON Schema alone cannot express. This is
+  genuinely novel schema ground for the project (no external prior-art schema to adapt
+  — crAPI/vAPI leave ownership implicit, AuthProbe discovers it at runtime; see
+  `docs/LAB_IMPLEMENTATION_PLAN.md` §3.1 for the full research trail already recorded
+  before this task began) — the concrete first-draft field shape from that doc was
+  implemented as-is with no deviation (see Effectiveness below for the one addition:
+  cross-reference validation, which the plan's schema sketch did not explicitly call out
+  but is a natural extension of "fail loud on a duplicate ID").
+  **Critical constraint honored:** decoupled from the manifest/`Cell` IR the verdict
+  engine consumes, the same way `lab/patterns/provenance.yaml` is decoupled from
+  manifest cells (`CR-LAB-0001` Addendum A) — `fuzzlab/labgen/verdict.py` carries zero
+  reference to `identity.py` or this file's content, and is never imported by it. Added
+  `fuzzlab/labgen/identity.py` to `fuzzlab/labgen/__init__.py`'s re-exports, matching the
+  existing docstring/`__all__` convention.
+- Impact (other components / project): none on existing components — this is new,
+  additive schema/loader code with no caller yet. The plan names L-P2.2 (a LAB-owned
+  session helper, a separate concurrent lane) as the next consumer of `Identity`; this
+  lane's dataclasses are kept simple/stable (plain frozen dataclasses, no behavior) so
+  L-P2.2 can import `Identity` without coupling to this loader's internals. No change to
+  `fuzzlab.labgen.verdict`'s input contract or to any existing manifest/schema file.
+- Risk (level; mitigation or accepted-risk justification): low. New, isolated files;
+  the one architecturally load-bearing constraint (verdict-engine decoupling) is
+  enforced by both a substring test and an AST-import test
+  (`tests/test_labgen_identity.py::test_verdict_module_never_imports_identity` /
+  `test_verdict_module_has_no_ast_import_of_identity`), mirroring the existing
+  `provenance.yaml` leak-check convention (`test_labgen_gates.py`).
+- Deliverables:
+  - [x] `lab/schemas/identities.schema.json` — JSON Schema for the identity graph
+  - [x] `lab/identities/identities.yaml` — first-draft example data (Phase 2 scaffold,
+        illustrative `cell_id`s; no real IDOR/BOLA cell exists yet per Addendum E's
+        indefinite deferral)
+  - [x] `fuzzlab/labgen/identity.py` — dataclasses + `load_identities()` + validation +
+        duplicate/dangling-reference checks + `IdentityGraphError`
+  - [x] `fuzzlab/labgen/__init__.py` — re-export `identity`
+  - [x] `tests/test_labgen_identity.py` — schema validation, round-trip load,
+        duplicate-ID checks, dangling-reference checks, verdict-decoupling proof (17
+        tests, all passing)
+  - [x] `CHANGELOG.md`, this change-control entry, `requirements.md` FR-LAB-27
+- Effectiveness (assessed 2026-09-21): met. `python -m pytest -q
+  tests/test_labgen_identity.py` — 17 passed. Full suite:
+  `python -m pytest -q` — 886 passed, 8 skipped, 2 pre-existing failures in
+  `tests/test_mutation_operators.py` (confirmed pre-existing on trunk before this
+  change via a stash-and-rerun check, unrelated to `fuzzlab.labgen` — not touched or
+  introduced by this change). One deviation from the plan doc's literal first-draft
+  schema: `expected_outcome` values are hyphen-free `allowed`/`denied` strings exactly
+  as specified (no deviation there), but the loader adds cross-reference validation
+  (owner/accessing_identity/target_resource must resolve) beyond what the plan's YAML
+  sketch showed — a natural extension of "fail loud on a duplicate ID" the task
+  description asked for, not a field-shape change.
+
 ### CC-LAB-0028 — Nuclei path-traversal/LFI oracle wrapper (Addendum E, Spike 004) (2026-09-21)
 *(Numbered `CC-LAB-0028` rather than `CC-LAB-0017` at merge time — this lane's worktree
 diverged onto a stale, unrelated branch lineage before starting, self-diagnosed and

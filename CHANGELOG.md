@@ -14,6 +14,18 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- LAB: added `lab/identities/identities.yaml` (identity/ownership graph — named test
+  identities, resource ownership, and binary `allowed|denied` authz expectations,
+  D20/CR-LAB-0001 §8), its JSON Schema (`lab/schemas/identities.schema.json`), and a
+  new loader module `fuzzlab.labgen.identity` (`load_identities()` → `IdentityGraph`,
+  with duplicate-ID and dangling-reference checks and a typed `IdentityGraphError`,
+  mirroring `fuzzlab.labgen.schema`/`fuzzlab.labels.contract.load_labels`'s
+  conventions) — L-P2.1, genuinely novel schema ground per the Phase 2 research
+  already recorded in `docs/LAB_IMPLEMENTATION_PLAN.md` §3.1. Deliberately decoupled
+  from the manifest/`Cell` IR the same way `lab/patterns/provenance.yaml` is
+  decoupled from it (CR-LAB-0001 Addendum A): `fuzzlab.labgen.verdict` never imports
+  `identity.py`, asserted by a new test mirroring
+  `test_labgen_gates.py::test_provenance_is_one_directional_no_leak_into_verdict_source`.
 - Docs: fleshed `docs/LAB_IMPLEMENTATION_PLAN.md`'s Phase 2 (§3) and Phase 3 (§4)
   from milestone-level bullets into full task breakdowns matching Phase 0/1's
   granularity, and added a new §7 lane/dependency map covering every Phase 0-3

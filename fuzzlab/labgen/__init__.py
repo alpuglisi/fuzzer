@@ -21,12 +21,17 @@ interfaces requiring on-host resources), and a second, independent tool
 oracle for Nuclei (``nuclei_oracle``, path traversal/LFI only — a separate
 module from ``oracle_wrapper`` since Nuclei has no auto-detection against a
 declared parameter the way sqlmap/commix/SSTImap do; it matches
-hand-authored templates instead) — all generator-build-time
-security-assertion tooling, unrelated to and never imported by
-``fuzzlab.oracle``. None of these depends on any other. This re-exports all
-of them. ``fingerprint_gate`` imports ``scipy`` lazily inside its chi-square
-functions (the optional ``labgen-stats`` extra), so importing this package
-does not require it.
+hand-authored templates instead), and the identity/ownership graph loader
+(``identity``, Phase 2, CR-LAB-0001 §8, L-P2.1 — named test identities,
+resource ownership, and binary authz expectations, loaded from
+``lab/identities/identities.yaml``; deliberately decoupled from the
+manifest/``Cell`` IR the same way ``lab/patterns/provenance.yaml`` is
+decoupled from it, and never imported by ``verdict``) — all
+generator-build-time security-assertion tooling, unrelated to and never
+imported by ``fuzzlab.oracle``. None of these depends on any other. This
+re-exports all of them. ``fingerprint_gate`` imports ``scipy`` lazily inside
+its chi-square functions (the optional ``labgen-stats`` extra), so
+importing this package does not require it.
 """
 
 from . import (
@@ -36,6 +41,7 @@ from . import (
     emitters,
     fingerprint_gate,
     gates,
+    identity,
     minimal_pair,
     modules,
     resolver,
@@ -84,6 +90,7 @@ __all__ = [
     "emitters",
     "fingerprint_gate",
     "gates",
+    "identity",
     "minimal_pair",
     "modules",
     "resolver",
