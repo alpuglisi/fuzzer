@@ -22,7 +22,18 @@ Secondary architecture documents:
 
 *Last updated: 2026-09-21.*
 
-Status legend: `[built]`, `[partial]`, `[planned]`.
+Status legend: `[built]`, `[partial]`, `[planned]`. "Built" means implemented and
+unit-tested offline (suite: 196 passed / 2 skipped); where a component's exit
+criterion or validation must run against the live containerized lab, that is called
+out inline and tracked in `docs/ON_HOST_TASKS.md`.
+
+**Where the build is (2026-09-21).** Phases 0–2 are built (foundations, session
+manager, deterministic wins). Phase 3 (grey-box) has its offline consumer layer
+built; its live coverage/DB-fault sources are on-host. Phase 4 (bandit) and Phase 5
+(detection classifier) have their learning cores built offline; their
+beats-the-control exits run on the lab. Next up is Phase 6 (the intercepting proxy);
+Phases 7–10 (ranker/active-learning, mutation engine, protocol depth, plugin system)
+are planned.
 
 ## Integration model
 
@@ -88,19 +99,28 @@ components only. Python package dependencies (for example `h11`, `sqlglot`, or
 LightGBM) are implementation details, mentioned within the subcomponents and
 tracked in the requirements files, not here.
 
-### 1. Target lab and ground truth `[built app; planned instrumentation]`
+### 1. Target lab and ground truth `[built app; grey-box offline layer built; generator planned]`
 - **Puppy Fort Factory** `[built app]`: PHP/MySQL/Apache app; ~30 pages, ~10
   JavaScript-rendered; documented mix of vulnerable and secure pages. Runs
-  containerized with pinned PHP/Apache/MySQL/libxml versions (D7).
-- **Ground-truth labels** `[partial]`: a machine-readable, out-of-band contract
-  (`labels.json`, `expectedresults.csv`, and a separate `injection-points.json`),
-  read from disk by the tools and the harness, never served by the target, with
-  opaque case IDs (D9). Hand-authored initially; later emitted by the
-  manifest-driven lab generator (D8), at which point `VULNERABILITIES.md` becomes
-  a generated, human-facing artifact. The lab grows into two tiers (dense "range",
-  realistic "shop") with annotated / blind / all-secure build profiles.
-- **Grey-box instrumentation** `[planned]` (D7): line coverage (Xdebug/pcov), a
-  database error hook, and snapshot/restore for state reset.
+  containerized with pinned PHP/Apache/MySQL/libxml versions (D7); brought up via
+  `lab/labctl.sh` (probes for a working docker/podman compose provider).
+- **Ground-truth labels** `[built contract; labels hand-authored]`: a
+  machine-readable, out-of-band contract (`labels.json`, `expectedresults.csv`, and a
+  separate `injection-points.json`), read from disk by the tools and the harness,
+  never served by the target, with opaque case IDs (D9). The loader/consumer is built
+  (`fuzzlab/labels/contract.py`) and drives the `fuzzlab auto --ground-truth` scoring.
+  Labels are hand-authored initially; later emitted by the manifest-driven lab
+  generator (D8), at which point `VULNERABILITIES.md` becomes a generated, human-facing
+  artifact. The lab grows into two tiers (dense "range", realistic "shop") with
+  annotated / blind / all-secure build profiles.
+- **Grey-box instrumentation** `[partial — offline consumer built; live sources on-host]`
+  (D7): the consumer layer is built and unit-tested (`fuzzlab/greybox/`): coverage and
+  DB-fault readers behind injected seams (`CoverageSource`/`InMemoryCoverageSource`,
+  `DbFaultSource`/`InMemoryDbFaultSource`), the shaped multi-tier reward
+  (`CoverageFrontier`, `shaped_reward`), the confirm hook, and state-reset call points.
+  The **live sources** — Xdebug/pcov line coverage per request, the database error
+  hook/query-log reader, and DB snapshot/restore — must run against the container and
+  are on-host (`docs/ON_HOST_TASKS.md`).
 - **Manifest-driven generator** `[planned]` (D8): the "lab as a compiler" — one
   manifest plus a safety matrix, seed, and env-profile generate the app, labels,
   docs, and oracle tests, with verdicts derived from `(transform, sink context)`.
@@ -108,19 +128,24 @@ tracked in the requirements files, not here.
 - **Depends on (components):** none (it is the system under test).
 - **Consumed by:** crawler, auditor, fuzzer, proxy, and the reward path.
 
-### 2. `core/` shared library `[planned]`
-- **HTTP client**: one send helper; requires a session context; records raw
-  bytes.
-- **Store**: SQLite access, schema, and numbered migrations.
-- **Features**: one versioned extractor (`extract_vN`), `features_json` +
-  `feature_version`.
-- **Request budget + concurrency**: per-component caps, and a per-host mutex so
-  timing measurements run at concurrency 1.
-- **Logging** (structured) and **config** (layered, hashed onto the run).
-- **Credential store**: keyring-abstracted, with OS Secret Service and an
-  encrypted-file headless/CI fallback (D12); secrets by reference only, never in
-  the project store.
-- **Plugin registry**: entry points plus hooks.
+### 2. `core/` shared library `[built; plugin registry planned]`
+- **HTTP client** `[built]`: one send helper behind an injectable seam; requires a
+  session context; records raw bytes (`core/http.py`).
+- **Store** `[built]`: SQLite access, schema, and numbered forward-only migrations
+  (`core/store.py`, `core/migrations.py`; head = migration 5 — core, finding
+  url/method/param, session_state, evaluation, bandit cost columns).
+- **Features** `[built]`: one versioned extractor with golden-file tests
+  (`core/features.py`, `features_json` + `feature_version`).
+- **Request budget + concurrency** `[built]`: per-component caps, and a per-host mutex
+  so timing measurements run at concurrency 1 (`core/budget.py`).
+- **Logging** (structured, `core/obs.py`) and **config** (layered, hashed onto the
+  run, `core/config.py`) `[built]`. Also `core/urls.py` (single home of path
+  normalization), `core/dedup.py`, `core/fingerprint.py`, `core/hybrid.py`, and
+  `core/runmode.py` (the D14/D15 run-mode + no-ground-truth fail-safe).
+- **Credential store** `[built]`: keyring-abstracted, with an encrypted-file
+  headless/CI fallback on `cryptography` Fernet (PBKDF2, 0600, atomic write; D12);
+  secrets by reference only, never in the project store (`core/credentials.py`).
+- **Plugin registry** `[planned]` (Phase 10): entry points plus hooks.
 - **Depends on (components):** none (foundational layer; it manages the project store).
 - **Consumed by:** every tool and ML component.
 
@@ -154,9 +179,11 @@ tracked in the requirements files, not here.
 - **Writes:** `page`, `endpoint`, discovered `parameter` rows.
 
 ### 5. Auditor / fetcher `[built; to harden]`
-- **Subcomponents:** rule registry (moving to rules-as-data), candidate emission
-  with full per-rule evaluation logging, canary reflection probing with context
-  typing, target fingerprinting (DBMS/framework/WAF).
+- **Subcomponents:** rules-as-data registry (`audit/rules_data/default_rules.json`,
+  category-scoped), candidate emission with full per-rule evaluation logging (every
+  evaluation recorded, not just hits — the `evaluation` table feeds negatives),
+  canary reflection probing with context typing, target fingerprinting
+  (DBMS/framework/WAF).
 - **Depends on (components):** `core/`, session manager, crawler, indicator DB & catalogs.
 - **Writes:** `candidate` rows (rule evidence, features), fingerprint data.
 
@@ -167,17 +194,26 @@ tracked in the requirements files, not here.
 - **Depends on (components):** none (static data).
 - **Consumed by:** auditor (indicators), scheduler and fuzzer (payloads/families).
 
-### 7. Fuzzing harness and oracle `[built fuzzer; harness+oracle planned]`
-- **Fuzzing harness** `[partial]`: generalize `blind_sqli_fuzzer.py` toward
-  `template + injection_point + payload_source + oracle`, so one harness serves
-  multiple vulnerability classes.
-- **Oracle** `[planned]`: a **class-pluggable** deterministic confirmer — the
-  **only** writer of `finding` labels — covering as many web-app attack vectors as
-  possible, not just time-based SQLi. It is built from a small set of confirmation
-  mechanisms (differential timing, error signature, boolean/response differential,
-  evaluation marker, reflected-canary-in-context, browser execution, file-content
-  marker, out-of-band callback, redirect-target control, and grey-box when on);
-  each injection class registers the mechanism(s) that prove it. Full mechanism set
+### 7. Fuzzing harness and oracle `[built; grey-box/OOB mechanisms partial]`
+- **Fuzzing harness** `[built]`: the generalized `template + injection_point +
+  payload_source + oracle` pipeline (`harness/pipeline.py`, `harness/auto.py`,
+  `harness/scoring.py`, `harness/integration.py`), so one harness serves multiple
+  vulnerability classes. Driven end-to-end by `fuzzlab auto` (`harness/auto_cli.py`),
+  which consolidates a crawl, runs scoped rules + oracle confirmation, and — with a
+  ground-truth contract — scores TP/FP. The legacy `tools/blind_sqli_fuzzer.py`
+  remains as the original single-class fuzzer.
+- **Oracle** `[built; M8/M10 pending]`: a **class-pluggable** deterministic confirmer
+  (`oracle/oracle.py`, `oracle/strategies.py`, `oracle/probe.py`) — the **only**
+  writer of `finding` labels — over 7 vuln classes (sqli, reflected/DOM/stored XSS,
+  open-redirect, SSTI, file-inclusion, command-injection). Built mechanisms:
+  M1 differential timing, M2 error signature, M3 boolean/response differential,
+  M4 SSTI evaluation marker, M5 reflected-canary-in-context, M6 browser execution
+  (stored/DOM XSS via an injected `BrowserExecutor` — `oracle/browser.py`,
+  `tools/browserexec.py`), M7 file-content marker (LFI/traversal), and M9
+  redirect-target control. **Pending:** M8 out-of-band callback and M10 grey-box
+  (the grey-box reward hook is wired via `greybox/confirm.py`; its live signal is
+  on-host). Findings are written in path-normalized form via `core/urls.to_path`.
+  Each injection class registers the mechanism(s) that prove it; full mechanism set
   and the injection-class → mechanism mapping (derived from `references/`):
   `architecture/oracle-confirmation.md`.
 - **Depends on (components):** `core/`, session manager, scheduler, oracle,
@@ -186,13 +222,19 @@ tracked in the requirements files, not here.
   available.)
 - **Writes:** `attempt` rows (features, reward), `finding` rows (labels).
 
-### 8. Payload scheduler (bandit) `[planned]` (Phase 4)
-- **Subcomponents:** payload-family arms, discrete context buckets, hierarchical
-  Thompson sampling with backoff, catalog-derived priors, cost-normalized
-  selection, persisted posteriors, and a uniform-selection control.
+### 8. Payload scheduler (bandit) `[built; on-lab exit pending]` (Phase 4)
+- **Subcomponents** `[built]`: `ThompsonBandit` (Beta-Bernoulli) over
+  (context, arm) — context = `category:sink|location`, arm = `vuln_class:mechanism`
+  (`scheduler/bandit.py`); discrete context buckets and catalog-derived priors
+  (`scheduler/context.py`); hierarchical backoff and cost-normalized selection
+  (reward per second, migration 5's `cost_sum`/`cost_n`); persisted posteriors
+  (load/save); and a `UniformScheduler` control condition (`scheduler/uniform.py`).
+  Ordered the oracle's applicable mechanisms in the confirm loop; wired as
+  `fuzzlab auto --bandit`.
 - **Depends on (components):** `core/`, auditor (candidates), fuzzing harness and
   oracle (rewards), grey-box instrumentation (coverage reward).
 - **Reads/writes:** `bandit_posteriors`; chooses the next family per candidate.
+- **Pending (on-host):** the beats-uniform-on-hits-per-1000-requests exit (T4.6).
 
 ### 9. Mutation engine `[planned]` (Phase 8)
 - **Subcomponents:** `sqlglot` AST parsing, typed semantics-preserving operators,
@@ -204,15 +246,25 @@ tracked in the requirements files, not here.
   component dependency.)
 - **Writes:** new payload candidates back into the catalog/attempts.
 
-### 10. ML components `[planned]` (Phases 5, 7, 10)
-- **Detection classifier** (A.1): gradient-boosted trees + calibration +
-  conformal flag/abstain/drop; reads `attempt.features_json`, writes scores.
-- **Candidate ranker** (A.2): learning-to-rank over parameters/forms; reads
-  candidate features, writes `candidate.score`; costs zero requests.
-- **Anomaly detector** (A.5): ECOD/Isolation Forest tripwire, later XGBOD-style
-  hybrid features.
-- **Active learner** (A.6.5): allocates oracle budget by uncertainty and
-  committee disagreement.
+### 10. ML components `[partial — detection classifier built; rest planned]` (Phases 5, 7, 10)
+- **Detection classifier** (A.1) `[built; held-out exit on-host]`: the `fuzzlab/ml/`
+  package (pure Python — no numpy/sklearn). Honest evaluation (`metrics.py`: PR-AUC +
+  leakage-free GroupKFold), the baselines a model must beat (`baselines.py`:
+  prevalence, mean+kσ), two models behind one `fit`/`predict_proba` interface
+  (`logistic.py`; `gbt.py` — class-balanced gradient-boosted trees), split-conformal
+  flag/abstain/drop (`conformal.py`), a store-trained dataset (`dataset.py`), and
+  `train.py::train_and_score` (`model_kind` logistic/gbt/auto, OOF selection, advisory
+  `candidate.score`, `model` row + OOF metrics, prevalence fallback on thin data).
+  **Advisory only** — scores/uncertainty, never `finding` labels. Wired as
+  `fuzzlab auto --score`; the panel surfaces the top scored candidates. The
+  beats-both-baselines exit on the store's real dataset (T5.5) is on-host.
+- **Candidate ranker** (A.2) `[planned]` (Phase 7): learning-to-rank over
+  parameters/forms; reads candidate features, writes `candidate.score`; costs zero
+  requests.
+- **Anomaly detector** (A.5) `[planned]` (Phase 10): ECOD/Isolation Forest tripwire,
+  later XGBOD-style hybrid features.
+- **Active learner** (A.6.5) `[planned]` (Phase 7): allocates oracle budget by
+  uncertainty and committee disagreement.
 - **Depends on (components):** `core/`, the oracle (labels), and the component
   that produces each model's inputs (auditor for the ranker, fuzzing harness for
   the classifier, proxy/flows for the anomaly detector).
@@ -231,13 +283,16 @@ tracked in the requirements files, not here.
 - **Role:** optional observer; other tools may route through it for unified
   history, but timing-sensitive traffic does not (D5).
 
-### 12. Diagnostics and UI `[planned]`
-- **Subcomponents:** a **local web application** (D11) — a control panel that hosts
-  the **launcher with run-mode selection** (automatic vs manual; no auto-run —
-  nothing is sent to the target until the user chooses) and a dashboard for live
-  runs, interception, and results; Datasette over the store for deep exploration; a
-  `run_metrics` table; structured audit and debug logs; a `--dry-run` mode; and a
-  plain CLI entry point per tool for headless/automation use.
+### 12. Diagnostics and UI `[built control panel; Datasette/depth pending]`
+- **Subcomponents:** a **local web application** (D11, `fuzzlab/web/`) `[built]` — a
+  FastAPI control panel (loopback-only, read-only over the store, no auto-run) that
+  hosts the **launcher with run-mode selection** (automatic vs manual; nothing is sent
+  to the target until the user chooses) and a dashboard + run-detail view for live
+  runs and results, surfacing oracle findings and the advisory model scores with their
+  flag/abstain/drop decision (`web/app.py`, `web/results.py`). The `run_metrics` table
+  and structured audit/debug logs are built. **Pending:** Datasette over the store for
+  deep exploration, interception views (await Phase 6), a `--dry-run` mode, and a plain
+  CLI entry point per tool for headless/automation use (`fuzzlab auto` exists today).
 - **Depends on (components):** `core/` (store and logging); in automatic mode the
   web app invokes the tools (crawler, auditor, fuzzer, harness).
 - **Purpose:** the research-platform diagnostics from decision D2, made easy to
@@ -352,14 +407,44 @@ replays and edits, including a raw byte path for malformed-traffic study.
 
 ## Build-status snapshot
 
-- `[built]`: target lab (app + containerized), crawler, auditor, indicator DB +
-  catalogs, blind SQLi fuzzer, deploy script, logs, planning docs; `core/` + unified
-  store + migrations + config/logging/budget/HTTP-seam/features + per-host
-  credential store (Phase 0 + T1.1); ground-truth label contract; integration
-  harness; local web launcher; the session manager (Phase 1, unit-tested — live
-  two-lab validation pending).
-- `[planned, near-term]`: deterministic hardening (Phase 2), grey-box
-  instrumentation (Phase 3); migrate tool HTTP onto the seam + session for live
-  per-identity runs (T1.10).
-- `[planned, later]`: bandit, classifier, proxy, ranker/active learning, mutation
-  engine, protocol depth, plugin system, second target.
+Suite: 196 passed / 2 skipped (the 2 skips are the credential-store tests that need a
+working `cryptography` build, unavailable in the sandbox). Everything below is
+offline-complete unless an on-host item is named.
+
+- `[built]` (offline-complete, unit-tested):
+  - **Foundations (Phase 0 + T1.1):** `core/` — unified store + forward-only
+    migrations (head = 5), config, structured logging, request budget + per-host
+    timing mutex, HTTP seam, versioned features (golden-file), path normalization,
+    dedup, fingerprint, run-mode + D15 fail-safe, and the per-host credential store
+    (`cryptography` Fernet fallback).
+  - **Session manager (Phase 1):** detection-based login/session handling with
+    per-identity state and non-secret state persistence (live two-lab validation
+    pending, on-host).
+  - **Discovery + audit:** crawler/spider, auditor (rules-as-data + full evaluation
+    logging), indicator DB + payload catalogs, ground-truth label contract, and the
+    integration harness.
+  - **Deterministic wins (Phase 2):** the generalized fuzzing harness and the
+    class-pluggable **oracle** (mechanisms M1–M7 + M9 across 7 vuln classes; the sole
+    finding-writer), driven by `fuzzlab auto` with TP/FP scoring against ground truth.
+  - **Bandit scheduler (Phase 4):** Thompson sampling with context buckets,
+    catalog priors, cost-normalized selection, hierarchical backoff, persisted
+    posteriors, and a uniform control (`fuzzlab auto --bandit`).
+  - **Detection classifier (Phase 5):** the advisory `fuzzlab/ml/` core — honest
+    eval, prevalence/sigma baselines, logistic + gradient-boosted-tree models,
+    conformal flag/abstain/drop, store-trained dataset, train/score/persist
+    (`fuzzlab auto --score`); scores only, never labels.
+  - **Diagnostics/UI:** the loopback FastAPI control panel + dashboard/run-detail
+    (findings + advisory scores).
+- `[partial]`:
+  - **Grey-box (Phase 3):** offline consumer layer (coverage/DB-fault readers,
+    shaped reward, reset call points) built; **live sources on-host** (Xdebug/pcov,
+    DB error hook, snapshot/restore).
+  - **Oracle mechanisms:** M8 (out-of-band) and M10 (grey-box) still to build.
+- `[on-host]` (offline pieces done; the exit/validation runs on the live lab):
+  Phase 3 live capture; Phase 4 beats-uniform exit (T4.6); Phase 5 held-out exit
+  (T5.5); live `--browser`/`--bandit`/`--score` runs and stored-XSS
+  session-to-browser wiring — all tracked in `docs/ON_HOST_TASKS.md`.
+- `[planned]`: the intercepting proxy (Phase 6, next), candidate ranker + active
+  learning (Phase 7), mutation engine (Phase 8), protocol depth (Phase 9), anomaly
+  detector + plugin system + a second target (Phase 10), and the manifest-driven lab
+  generator (Lab track).

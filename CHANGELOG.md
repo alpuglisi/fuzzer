@@ -13,6 +13,12 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Docs: refreshed `docs/ARCHITECTURE.md` to reflect the true build status — `core/`,
+  the session manager, the fuzzing harness + oracle (M1–M7, M9), the bandit scheduler,
+  the detection classifier (logistic + GBT + conformal, advisory), and the web control
+  panel are marked **built**; grey-box (Phase 3) is **partial** (offline consumer layer
+  built, live sources on-host); the intercepting proxy (Phase 6) is next. Rewrote the
+  build-status snapshot (suite: 196 passed / 2 skipped) and per-subcomponent statuses.
 - Phase 5 (T5.4): added a **gradient-boosted-trees** detection model
   (`fuzzlab/ml/gbt.py`) — a pure-Python logistic-loss GBT over shallow weighted
   regression trees (class-balanced, deterministic, no numpy/sklearn), behind the same
