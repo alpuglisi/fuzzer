@@ -314,6 +314,45 @@ and measured. Authorized, lab-only.
   signal). XXE, open redirect, and known-CVE templates remain unintegrated — a separate,
   larger undertaking. (`CR-LAB-0001` tool-mapping table,
   `docs/spikes/SPIKE-004-nuclei-vs-dvwa.md`, `CC-LAB-0028`)
+- **FR-LAB-27** (Lab track, Phase 3, Tier-A depth) A second module-composition
+  emitter, `fuzzlab.labgen.emitters.python_fastapi` (`PythonFastapiEmitter`),
+  implements the `Emitter` ABC for FastAPI + SQLAlchemy + Jinja2, covering the
+  same three Tier-A shapes `php_current` proves (`sql_numeric_literal`/
+  `sql_string_literal` SQLi, `html_body` XSS) — deliberately not
+  identifier/alias/connector-position SQLi or escaping-context-mismatch XSS
+  (deferred per the Phase 3 stack-pacing decision, `CR-LAB-0001` Addendum C).
+  Its own module-composition system (`SOURCES`/`TRANSFORMS`/`SINKS`/
+  `COMPLEXITIES` registries + Jinja2 templates under
+  `fuzzlab/labgen/emitters/python_fastapi/templates/`) is a fully independent
+  implementation, not an extension of `fuzzlab.labgen.modules` — reuses only
+  the stack-agnostic op-name vocabulary (`identity`/`param_bind`/
+  `html_entity_escape`) `lab/safety_matrix.yaml` and `verdict()` already define,
+  so no new safety-matrix entries were needed. Instead of a `route` accumulator
+  module (`CR-LAB-0001` Addendum D's default multi-file-routing shape), this
+  emitter uses a one-time **static discovery scaffold**
+  (`app/main.py`, `pkgutil.iter_modules()`/`importlib` over a `routers/`
+  package, sorted by module name) rendered once per build via
+  `STACK_ENV.scaffold_files`/`render_scaffold_files()` — `render(cell)` itself
+  returns exactly one per-cell router file. That same scaffold constructs
+  `FastAPI(docs_url=None, redoc_url=None, openapi_url=None)`, a correctness
+  requirement (not a follow-up): FastAPI serves `/docs`/`/redoc`/`/openapi.json`
+  by default regardless of any debug flag, unlike Laravel/Express, which have a
+  single "production mode" flag that also covers this. A package-local
+  `StackEnv` dataclass (Addendum D's schema) carries a digest-pinned base image
+  (`python:3.12-slim-bookworm@sha256:...`, fetched live against the Docker Hub
+  registry API) and an exact-pinned `requirements.txt` lockfile for the
+  generated app's own dependencies — `fuzzlab.labgen.schema` has no shared
+  `StackEnv` yet (a future cross-cutting task once more Phase-3 stack lanes
+  land and can agree a shared location; `schema.py` is treated as a
+  "shared read-only file" no single stack lane edits unilaterally). Passes the
+  Tier 0/Tier 3 conformance suite (FR-LAB-25) against
+  `lab/manifests/phase3_python_fastapi_sample.yaml`; Tier 0's lint step gained a
+  sibling to `lint_php`/`php_available` (`lint_python`/`python_available`,
+  `python -m py_compile`, same skip-guarded convention), and its minimal-pair
+  check uses `fuzzlab.labgen.minimal_pair`'s naive fallback directly rather than
+  its real (PHP-comment-syntax-specific) checker, per that module's own
+  documented, not-yet-attempted non-PHP extension point. (`CR-LAB-0001` Addenda
+  C/D, `docs/LAB_IMPLEMENTATION_PLAN.md` Phase 3 §4.2/L-P3.2, `CC-LAB-0029`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
@@ -360,6 +399,14 @@ refresh`) which reads/writes only `lab/patterns/sourcing/` and
 `lab/patterns/refresh/`/`REFRESH_LOG.md`; it takes no dependency on and does
 not write `lab/patterns/cards/` or `lab/patterns/provenance.yaml` — see
 FR-LAB-18.
+(Lab track, generator-build-time) `fuzzlab.labgen.emitters.python_fastapi`
+exposes `PythonFastapiEmitter` (the `Emitter` ABC), plus `STACK_ENV`
+(a package-local `StackEnv`) and `render_scaffold_files()` for this stack's
+one-time scaffold output (`app/main.py`, `app/db.py`, package `__init__.py`
+files, `requirements.txt`, `Dockerfile`) — a build driver calls
+`render_scaffold_files()` (or reads `STACK_ENV.scaffold_files`) exactly once
+per build, separately from `render(cell)`, since `Emitter`'s ABC has no
+per-stack-scaffold method yet — see FR-LAB-27.
 
 ## 6. Dependencies (components)
 None (it is the system under test).

@@ -1,0 +1,78 @@
+# Phase-3 Python/FastAPI sample manifest (L-P3.2, Tier-A depth).
+#
+# Unlike lab/manifests/phase0_real_pages_sample.yaml (a small REAL sample of
+# Ryder's Puppy Fort Factory's actual PHP pages), this manifest describes an
+# ILLUSTRATIVE sample of synthetic FastAPI routes -- python_fastapi has no
+# real hand-built app to migrate (unlike php_laravel, Phase 3's other PHP
+# lane, per D20 §7.2). It proves fuzzlab.labgen.emitters.python_fastapi's
+# module inventory generalizes across all three Tier-A shapes it supports:
+#
+#   - /products (sqli, sql_numeric_literal, GET  `id`)
+#   - /login    (sqli, sql_string_literal,  POST `username`)
+#   - /profile  (xss,  html_body,           stored `bio`)
+#
+# Deliberately does NOT cover identifier/alias/connector-position SQLi or
+# escaping-context-mismatch XSS -- Tier-A scope only, per the Phase 3 pacing
+# decision (CR-LAB-0001 Addendum C; docs/LAB_IMPLEMENTATION_PLAN.md Phase 3
+# §4.2). Cell IDs are prefixed LABGEN-PY- to keep them out of both the
+# illustrative LABGEN-EX- namespace and the real-page LABGEN-RP-/PFF-
+# namespaces.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # --- /products: raw concat into a numeric SQL literal -----------------
+  - cell_id: LABGEN-PY-0001
+    class: sqli
+    stack_profile: python_fastapi
+    route: { method: GET, path: /products }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  - cell_id: LABGEN-PY-0002
+    class: sqli
+    stack_profile: python_fastapi
+    route: { method: GET, path: /products }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
+
+  # --- /login: raw concat into a quoted string SQL literal ---------------
+  - cell_id: LABGEN-PY-0003
+    class: sqli
+    stack_profile: python_fastapi
+    route: { method: POST, path: /login }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  - cell_id: LABGEN-PY-0004
+    class: sqli
+    stack_profile: python_fastapi
+    route: { method: POST, path: /login }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
+
+  # --- /profile: stored-value HTML-body echo -----------------------------
+  - cell_id: LABGEN-PY-0005
+    class: xss
+    stack_profile: python_fastapi
+    route: { method: GET, path: /profile }
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: []
+
+  - cell_id: LABGEN-PY-0006
+    class: xss
+    stack_profile: python_fastapi
+    route: { method: GET, path: /profile }
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: [html_entity_escape]

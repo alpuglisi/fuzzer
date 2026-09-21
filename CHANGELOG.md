@@ -14,6 +14,33 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- LAB: added the Python/FastAPI emitter, Tier-A depth (`fuzzlab/labgen/emitters/python_fastapi/`,
+  lane L-P3.2, `CC-LAB-0029`) — the second Phase-3 stack lane to land, alongside
+  `php_current`. Ports the same three Tier-A shapes (`sql_numeric_literal`/
+  `sql_string_literal` SQLi, `html_body` XSS) to FastAPI + SQLAlchemy + Jinja2
+  idiom via a fully independent module-composition system (own registries,
+  own Jinja2 templates — no cross-import with `php_current`/`fuzzlab.labgen.modules`,
+  per the Phase 3 lane map's "no stack's emitter package imports another's" rule).
+  Uses a one-time static discovery scaffold (`pkgutil.iter_modules()`/`importlib`
+  over a `routers/` package) instead of a `route` accumulator, per `CR-LAB-0001`
+  Addendum D's FastAPI-specific research, and disables `/docs`/`/redoc`/`/openapi.json`
+  in that same scaffold (a correctness requirement, not a follow-up — FastAPI
+  serves these by default regardless of any debug flag). Digest-pinned base
+  image (`python:3.12-slim-bookworm@sha256:392307...`, fetched live against the
+  Docker Hub registry API), an exact-pinned `requirements.txt` lockfile for the
+  generated app's own dependencies, and a documented (not yet run — `syft` isn't
+  installed in this build environment) SBOM-generation command. New sample
+  manifest `lab/manifests/phase3_python_fastapi_sample.yaml`; passes Tier 0
+  (`python -m py_compile` lint, added to `fuzzlab.labgen.conformance.tier0`
+  alongside the existing `php -l` check; minimal-pair diff via the naive
+  fallback, since the real checker is PHP-comment-syntax-specific) and Tier 3
+  (whole-manifest regenerate-and-diff). No changes to `emitter.py`'s ABC,
+  `php_current`, `fuzzlab.labgen.modules`, or `fuzzlab.labgen.schema` — fully
+  additive, per this lane's scope discipline. Full suite after this change:
+  929 passed / 8 skipped, same 2 pre-existing unrelated
+  `test_mutation_operators.py` failures already present before this change
+  (last logged baseline, `CC-LAB-0028`: 868 passed / 9 skipped / same 2
+  failures) — no reduction in the pre-existing baseline, only additions.
 - Docs: fleshed `docs/LAB_IMPLEMENTATION_PLAN.md`'s Phase 2 (§3) and Phase 3 (§4)
   from milestone-level bullets into full task breakdowns matching Phase 0/1's
   granularity, and added a new §7 lane/dependency map covering every Phase 0-3

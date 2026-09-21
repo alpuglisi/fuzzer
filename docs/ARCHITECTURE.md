@@ -151,7 +151,7 @@ tracked in the requirements files, not here.
   `generalizes` verdict — the generalization evidence. The live run against an external
   validation lab is on-host; the manifest-generated second target plugs in as a
   `TargetSpec`.
-- **Manifest-driven generator** `[Phase 0 foundation + first emitter built; real app reproduction planned]` (D8, target shape pinned by **D20**/
+- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- two emitters (php_current, python_fastapi) built, Tier-A depth for the second; real app reproduction planned]` (D8, target shape pinned by **D20**/
   `CR-LAB-0001`): the "lab as a compiler" — one manifest plus a safety matrix,
   seed, and env-profile generate the app, labels, docs, and oracle tests, with a
   **binary** verdict derived from `(transform, sink context)` (a partially
@@ -202,8 +202,18 @@ tracked in the requirements files, not here.
   0 (lint + minimal-pair diff) and Tier 3 (whole-lab regeneration) are real,
   fully exercised offline; Tier 1 (in-process functional/security) and
   Tier 2 (the container-based oracle — the only tier that confirms a label)
-  are honestly-labeled `[design]` interfaces awaiting on-host wiring. A
-  manifest reproducing today's real ~30-page PHP
+  are honestly-labeled `[design]` interfaces awaiting on-host wiring. A second
+  Phase-3 stack emitter (`fuzzlab/labgen/emitters/python_fastapi/`, Tier-A
+  depth per `CR-LAB-0001` Addendum C's stack-pacing decision, `CC-LAB-0029`)
+  is built: FastAPI + SQLAlchemy + Jinja2, the same three value-context
+  shapes `php_current` proves, via its own fully independent
+  module-composition system (no cross-import with `php_current`/
+  `fuzzlab.labgen.modules`); uses a one-time static discovery scaffold
+  (`pkgutil.iter_modules()`/`importlib` over a `routers/` package) instead of
+  a `route` accumulator, per Addendum D's FastAPI-specific research, and
+  disables `/docs`/`/redoc`/`/openapi.json` in that scaffold (FastAPI serves
+  them by default regardless of any debug flag); passes Tier 0/Tier 3 against
+  its own sample manifest. A manifest reproducing today's real ~30-page PHP
   app byte-identically (the actual Phase 0 exit criterion) remains planned.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,

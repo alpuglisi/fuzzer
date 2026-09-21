@@ -18,7 +18,9 @@ from fuzzlab.labgen.conformance.tier0 import (
     get_minimal_pair_checker,
     lint_emitted_files,
     lint_php,
+    lint_python,
     php_available,
+    python_available,
 )
 from fuzzlab.labgen.emitter import EmittedFile
 from fuzzlab.labgen.emitters.php_current import PhpCurrentEmitter
@@ -97,6 +99,24 @@ def test_naive_minimal_pair_check_rejects_byte_identical_twins() -> None:
     same = (EmittedFile(path="a.php", content=b"<?php\necho 1;\n"),)
     result = _naive_minimal_pair_check(same, same)
     assert result.is_minimal_pair is False
+
+
+@pytest.mark.skipif(not python_available(), reason="python interpreter not available on this build host (PA-0005)")
+def test_lint_python_passes_on_valid_python_source() -> None:
+    result = lint_python("x.py", b"def f():\n    return 1\n")
+    assert result.ok is True
+
+
+@pytest.mark.skipif(not python_available(), reason="python interpreter not available on this build host (PA-0005)")
+def test_lint_python_fails_on_deliberately_broken_python() -> None:
+    result = lint_python("broken.py", b"def f(:\n    return 1\n")  # syntax error
+    assert result.ok is False
+
+
+def test_lint_python_without_interpreter_raises_rather_than_false_passing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("fuzzlab.labgen.conformance.tier0.shutil.which", lambda _name: None)
+    with pytest.raises(RuntimeError):
+        lint_python("x.py", b"pass\n")
 
 
 def test_get_minimal_pair_checker_prefers_the_real_sibling_module_now_that_it_has_landed() -> None:
