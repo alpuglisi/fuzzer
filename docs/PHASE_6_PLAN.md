@@ -53,9 +53,11 @@ the raw path forwards it byte-for-byte.
   `fuzzlab/proxy/matchreplace.py::MatchReplaceEngine` applies ordered byte-level
   rules to the request line / a header / the body (literal or regex).
 - **T6.3 — Flow history `[done, offline]`.** Migration 6 extends `flow` with raw
-  request/response bytes (content-addressed via `body`), a `host` column, and an FTS5
-  index; adds `repeater_tab`. `fuzzlab/proxy/history.py::HistoryWriter` batches
-  non-blocking writes, content-addresses bodies + raw bytes, and offers FTS search.
+  request/response bytes (content-addressed via `body`), `host`/`in_scope` columns, and
+  an FTS5 index; adds `repeater_tab`. `fuzzlab/proxy/history.py::HistoryWriter` batches
+  non-blocking writes into one transaction, content-addresses bodies + raw bytes,
+  redacts secrets on write (`redact.py`, NFR-PROXY-safe), and offers punctuation-safe
+  FTS search + byte-exact raw retrieval.
 - **T6.4 — Interception (awaited future) + repeater `[done, offline]`.**
   `fuzzlab/proxy/intercept.py` models interactive interception as an `asyncio.Future`
   (hold → edit → release/drop). `fuzzlab/proxy/repeater.py` persists tabs to

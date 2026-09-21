@@ -3,6 +3,22 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0012 — Migration 6: proxy flow history (Phase 6 T6.3) (2026-09-21)
+- Change: migration 6 extends `flow` with `host`, `in_scope`, and byte-exact
+  `req_raw_sha`/`resp_raw_sha` (raw wire bytes content-addressed via `body`), adds the
+  `flow_fts` FTS5 index and a `repeater_tab` table (append-only registry; head → 6).
+- Impact (other components / project): gives the PROXY component the store contract for
+  FR-PROXY-3/FR-PROXY-4 (searchable history with raw bytes; persisted repeater tabs)
+  without changing any existing table's rows. Version-pinning tests derive the head from
+  `migrations.MIGRATIONS` (PA-0001), so nothing hardcodes a number.
+- Risk (level; mitigation): low — additive columns/tables with NULL defaults (ADD
+  COLUMN … REFERENCES is valid because the default is NULL). Mitigated by
+  `tests/test_proxy_history.py::test_migration_6_schema`. Suite 224 passed / 2 skipped.
+- Deliverables:
+  - [x] Migration 6 (`flow` raw bytes + FTS5 + `repeater_tab`) — done.
+- Effectiveness (assessed 2026-09-21): effective — the proxy history writer round-trips
+  byte-exact raw bytes and FTS search works over the new index.
+
 ### CC-CORE-0011 — Migration 5: bandit cost columns (Phase 4 T4.4) (2026-09-21)
 - Change: migration 5 adds `cost_sum`/`cost_n` to `bandit_posteriors` (append-only
   registry; head → 5), so the bandit's per-(context, arm) mean cost persists next to the

@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 6 (T6.3): the proxy now records **flow history**. Migration 6 extends `flow`
+  with `host`/`in_scope`/byte-exact raw request+response bytes (content-addressed via
+  `body`), adds a `flow_fts` FTS5 index and a `repeater_tab` table (head → 6).
+  `fuzzlab/proxy/history.py::HistoryWriter` batches writes into one transaction
+  (non-blocking data path), content-addresses raw bytes + bodies, indexes head text for
+  search, and **redacts secrets on write** (`fuzzlab/proxy/redact.py`) so credentials
+  never hit the store or FTS index — while the wire path stays byte-exact. +7 tests
+  (224 passed / 2 skipped). Change-control: CC-PROXY-0004, CC-CORE-0012.
 - Phase 6 (T6.1/T6.2): started the **intercepting proxy** (`fuzzlab/proxy/`) with the
   offline-testable dual-path core (D4). `RawMessage` is a **byte-exact** container that
   round-trips received bytes and edits by byte surgery (untouched lines stay verbatim);

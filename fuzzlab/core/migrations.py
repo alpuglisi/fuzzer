@@ -235,6 +235,36 @@ ALTER TABLE bandit_posteriors ADD COLUMN cost_sum REAL NOT NULL DEFAULT 0;
 ALTER TABLE bandit_posteriors ADD COLUMN cost_n INTEGER NOT NULL DEFAULT 0;
 """
 
+# --- migration 6: proxy flow history (Phase 6 T6.3) --------------------------
+# The intercepting proxy records flows with BYTE-EXACT raw request/response bytes
+# (content-addressed via `body`, like decoded bodies), plus the host and an in-scope
+# flag, and an FTS5 index for searchable history. `repeater_tab` persists repeater
+# tabs (a saved raw request + its target) so they survive across sessions.
+_M0006 = """
+ALTER TABLE flow ADD COLUMN host TEXT;
+ALTER TABLE flow ADD COLUMN in_scope INTEGER;
+ALTER TABLE flow ADD COLUMN req_raw_sha TEXT REFERENCES body(sha256);
+ALTER TABLE flow ADD COLUMN resp_raw_sha TEXT REFERENCES body(sha256);
+
+-- Standalone FTS5 index over the searchable head fields; the proxy's history
+-- writer is the sole populator (batched), so no content-sync triggers are needed.
+CREATE VIRTUAL TABLE flow_fts USING fts5(
+    url, method, host, req_head, resp_head,
+    flow_id UNINDEXED
+);
+
+CREATE TABLE repeater_tab (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER REFERENCES run(id),
+    name        TEXT,
+    host        TEXT,
+    port        INTEGER,
+    use_tls     INTEGER NOT NULL DEFAULT 0,
+    raw_request BLOB NOT NULL,
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -242,6 +272,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (3, _M0003),
     (4, _M0004),
     (5, _M0005),
+    (6, _M0006),
 ]
 
 

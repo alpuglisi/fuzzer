@@ -3,6 +3,35 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0004 — Flow history: migration 6 + batched writer + FTS5 (T6.3) (2026-09-21)
+- Change: added the proxy's shared history. **Migration 6** extends `flow` with a
+  `host`, an `in_scope` flag, and byte-exact `req_raw_sha`/`resp_raw_sha` (raw wire
+  bytes content-addressed via `body`, like decoded bodies), adds a standalone `flow_fts`
+  FTS5 index, and a `repeater_tab` table (registry head → 6).
+  `fuzzlab/proxy/history.py::HistoryWriter` buffers `FlowRecord`s and flushes them in
+  **one transaction** (batched, non-blocking data path — NFR-PROXY-nonblocking),
+  content-addressing raw bytes + bodies, indexing the head text for search, and
+  offering `search()` (FTS5, punctuation-safe phrase queries) and byte-exact
+  `raw_request`/`raw_response` retrieval. Persisted bytes are **redacted** first
+  (`fuzzlab/proxy/redact.py`) so secrets never land in the store or the FTS index
+  (NFR-PROXY-safe); the wire path stays byte-exact.
+- Impact (other components / project): realizes FR-PROXY-3 — flows land in searchable
+  shared history with raw bytes the anomaly detector, UI, and analysis read (D5). Adds
+  the store columns/tables the proxy contract needs without touching existing rows
+  (append-only migration). `repeater_tab` is the persistence for T6.4's repeater.
+- Risk (level; mitigation): low — additive schema, batched writes, redaction on write.
+  Mitigated by 7 tests (`tests/test_proxy_history.py`): migration-6 schema; batching
+  defers then auto-flushes; byte-exact raw round-trip when no secrets; secret
+  redaction (not stored, not searchable); FTS search by url/host/header; content-
+  addressed dedup of identical raw. Suite 224 passed / 2 skipped.
+- Deliverables:
+  - [x] Migration 6 (flow raw bytes + FTS5 + `repeater_tab`) — done.
+  - [x] Batched `HistoryWriter` + redaction + FTS search (T6.3) — done.
+  - [ ] Interception + repeater (T6.4); session capture (T6.5); CA + server (T6.6) — next.
+- Effectiveness (assessed 2026-09-21): effective in tests — flows persist with
+  byte-exact raw bytes, secrets are redacted, and history is searchable; the live
+  capture-while-browsing path is on-host.
+
 ### CC-PROXY-0003 — Dual-path core: message model, parsers, scope, match-and-replace (T6.1/T6.2) (2026-09-21)
 - Change: began Phase 6 with the offline-testable heart of the proxy — the **dual
   path** (D4). `fuzzlab/proxy/message.py::RawMessage` is a byte-exact container: it
