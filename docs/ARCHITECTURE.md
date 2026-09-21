@@ -9,6 +9,12 @@ changes — a component added, removed, or split, or its responsibilities,
 interfaces, or dependencies changed. Each primary component below also has its own
 requirement specification and change-control log under `docs/components/`.
 
+**Splitting rule:** if this document grows too complex as the project builds out,
+move detailed material into **secondary architecture documents** under
+`docs/architecture/` and reference them from here. This document then stays the
+high-level map and index; each secondary document owns the depth for its area
+(and is itself kept in sync under the maintenance rule). None exist yet.
+
 *Last updated: 2026-09-21.*
 
 Status legend: `[built]`, `[partial]`, `[planned]`.

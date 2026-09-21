@@ -200,6 +200,17 @@ choice and touches the target only when the user acts.
   tools run in sequence) or manual (the tools are made available for hand-driven
   use) — and nothing is sent to the target until the user chooses automatic mode
   or invokes a tool by hand.
+- **Bug investigation + preventive actions.** Every bug discovered in the code
+  gets a bug investigation document under `docs/bugs/` (description, where
+  encountered, what failed, what the bug was, a root-cause analysis, the
+  corrective action, and a preventive action derived from the root cause). Every
+  preventive action is also added to `docs/PREVENTIVE_ACTIONS.md` — a single,
+  context-free rule list that is consulted and followed while working. See
+  `docs/bugs/README.md`.
+- **Documentation stays legible.** The architecture document is kept in sync with
+  the build (its maintenance rule); if it grows too complex, detail moves into
+  secondary architecture documents under `docs/architecture/` referenced from it
+  (its splitting rule).
 
 ## Roadmap (phased)
 

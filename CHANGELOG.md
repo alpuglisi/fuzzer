@@ -13,6 +13,18 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Process: adopted a **bug-investigation** requirement — every bug discovered in
+  the code gets a root-cause-analysis document under `docs/bugs/` (description,
+  where, what failed, what it was, RCA, corrective action, preventive action), and
+  every preventive action is maintained in `docs/PREVENTIVE_ACTIONS.md`, a single
+  context-free rule list to follow while working. Added `docs/bugs/README.md`, the
+  first investigation `BUG-0001` (schema version hardcoded in tests, fixed in
+  `30ea97d`/CC-CORE-0003), and `PREVENTIVE_ACTIONS.md` with PA-0001. Recorded as a
+  cross-cutting principle in `docs/DECISIONS_AND_ROADMAP.md`.
+- Process: added a **splitting rule** to `docs/ARCHITECTURE.md` — if it grows too
+  complex, detailed material moves into secondary architecture documents under
+  `docs/architecture/` referenced from the primary map. Recorded as a cross-cutting
+  principle too.
 - Docs: rewrote the root `README.md` to reflect the `fuzzlab` package layout, the
   CLI, the containerized lab, the launcher, and the lab-only/no-auto-run posture —
   the old README described only the standalone fuzzer.

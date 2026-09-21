@@ -84,4 +84,7 @@ pytest        # 30 tests: store/migrations, config, budget, features, labels,
 - `docs/PHASE_0_PLAN.md` — the foundations plan and current status.
 - `docs/components/` — a requirement spec and an append-only change-control log
   per component.
+- `docs/bugs/` — bug investigation documents (root-cause analysis per bug).
+- `docs/PREVENTIVE_ACTIONS.md` — the context-free rule list to follow while
+  working (every rule derives from a bug investigation).
 - `puppy-fort-factory/VULNERABILITIES.md` — the lab's vulnerability map.
