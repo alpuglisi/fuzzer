@@ -198,6 +198,92 @@ independently claimed `0016` too. No content changed; purely a numbering fix.)*
   wrapper against a real vulnerable/secure twin pair) is assessed once playbook step 2
   is attempted.
 
+### CC-LAB-0018 — T-LAB0.3: real covering-array resolver over `covertable` (2026-09-21)
+*(Numbered `CC-LAB-0018` rather than `CC-LAB-0017` at merge time — this lane's worktree
+was based on a commit that predated `CC-LAB-0017` (SSTImap support) landing, so it
+independently claimed `0017` too. No content changed; purely a numbering fix.)*
+- Change: added `fuzzlab/labgen/resolver.py`, the real covering-array expansion
+  engine called for by `docs/LAB_PHASE_0_PLAN.md` T-LAB0.3 (previously
+  "deliberately dormant" in `fuzzlab/labgen/schema.py`, which is unchanged by
+  this entry — this is new, additive, self-contained code, not a rewrite of
+  the manifest IR).
+  - Uses `covertable` 3.2.0 (Apache-2.0), exact-pinned in `pyproject.toml`
+    (`covertable==3.2.0`, not a range) — a version bump is treated as a
+    `manifest_version` bump per the plan's own rule, documented in the
+    module's docstring rather than mechanically enforced (no corpus depends
+    on this yet to enforce it against).
+  - `validate_covering_array_config()` validates a raw `{factors, strength?,
+    sub_models?, constraints?}` mapping against an **explicit allowlist**
+    before any of it reaches `covertable.make()`. Verified directly against
+    the installed 3.2.0 package's source (`covertable/main.py`) and with a
+    live reproduction in `tests/test_labgen_resolver.py` that
+    `covertable.make(..., some_bogus_kwarg=True)` runs successfully and
+    silently ignores the bogus kwarg via its own `**params` — exactly the
+    "wrong-granularity/silently-wrong-answer" failure mode
+    `docs/PREVENTIVE_ACTIONS.md` PA-0010 warns about. The adapter raises
+    `CoveringArrayError` for any key outside `{factors, strength, sub_models,
+    constraints}` instead.
+  - `expand()` always calls `covertable.make()` with `sorter=covertable.sorters.hash`
+    passed explicitly — never the library's default — per the plan's own
+    instruction that array-stability across covertable releases isn't
+    documented. `sorter` is deliberately excluded from the allowlist so a
+    caller cannot override the pin even accidentally.
+  - Supports pairwise (default `strength=2`) and mixed-strength expansion via
+    `sub_models`, and declarative, JSON-serializable `constraints` (validated
+    via `json.dumps()` round-trip, which also rejects covertable's own `"fn"`
+    constraint operator since a Python callable isn't JSON-serializable — an
+    intentional restriction, not an oversight, since the whole point of this
+    allowlist is a manifest-embeddable, non-code representation).
+  - Snapshot-tested (`tests/golden/labgen_covering_array_v1.json`) against a
+    synthetic 3-axis model (class/stack_profile/sink_context_family) — not the
+    real Phase 0/1 corpus, which doesn't need this yet — plus a determinism
+    check that spawns three separate subprocesses under different
+    `PYTHONHASHSEED` values and asserts byte-identical output (the pinned
+    `sorters.hash` is FNV-1a32-based, not Python's randomized string hash, so
+    this is a real, not merely same-process, determinism guarantee).
+  - Added `resolver` to `fuzzlab/labgen/__init__.py`'s re-exports (additive
+    only — `oracle_wrapper.py` untouched).
+- Impact (other components / project): none yet — `resolver.py` is new,
+  self-contained, and is not called from `fuzzlab.labgen.schema`'s manifest
+  loading or from any other component. Wiring it into manifest loading (so a
+  manifest can declare axis sets instead of enumerating cells) is separate,
+  later work, per the task brief for this entry and per the plan's own
+  phasing (Phase 1 is where covering-array expansion actually turns on for
+  the real corpus).
+- Risk (level; mitigation): **low**. New dependency (`covertable`) is
+  Apache-2.0, exact-pinned, and used only by this new module; its
+  `sorters.hash` sort is FNV-1a32 (a fixed, documented, unsalted hash) rather
+  than anything cryptographic or randomized, so no salt/secret-handling risk.
+  Main risk accepted: `covertable`'s own array-construction algorithm
+  (greedy + backtracking + optional constraint propagation) is third-party
+  code this project does not re-verify at that level — mitigated by treating
+  its output as opaque and testing only the *properties* this project
+  actually depends on (every pairwise combination covered at least once,
+  determinism, constraint satisfaction), not its internal implementation.
+- Deliverables:
+  - [x] `fuzzlab/labgen/resolver.py`: `validate_covering_array_config()` +
+        `expand()` — done.
+  - [x] `covertable==3.2.0` declared in `pyproject.toml` — done.
+  - [x] Snapshot test + PA-0010 kwargs-allowlist test + determinism-across-processes
+        test + sub_models/constraints behavioral tests
+        (`tests/test_labgen_resolver.py`, 16 tests) — done.
+  - [x] `FR-LAB-17` added to `requirements.md`; status line and interfaces
+        section updated — done.
+  - [ ] Wiring `expand()` into `fuzzlab.labgen.schema`'s manifest loading (so
+        a manifest can declare axis sets instead of enumerating cells) — not
+        started; explicitly out of scope for this entry, tracked for Phase 1.
+- Effectiveness (assessed 2026-09-21): met this delivery's own bar — 16 new
+  tests pass, including a live reproduction of the exact silent-swallow
+  failure mode this module exists to prevent, and a cross-process determinism
+  check (stronger than a same-process one, since `PYTHONHASHSEED`
+  randomization is invisible within one process). Full suite: 610 passed, 4
+  skipped, 2 pre-existing unrelated `test_mutation_operators.py` failures
+  (baseline was 594/4/2 before this entry — the delta is exactly the 16 new
+  tests). Not yet assessable: whether `covertable`'s array sizes actually
+  match or beat ACTS's published reference sizes for this project's real
+  Phase-1 axis model, since that model doesn't exist yet — deferred to
+  Phase 1's own CC entry when `expand()` is actually wired in.
+
 ### CC-LAB-0016 — Phase 0 foundation: pipeline verdict engine, safety matrix, determinism + name-leak gates, patterns/ scaffold (2026-09-21)
 *(Renumbered from `CC-LAB-0015` at merge time — both this entry and the one above were
 authored concurrently from the same base commit and independently numbered themselves

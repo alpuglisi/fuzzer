@@ -160,13 +160,16 @@ tracked in the requirements files, not here.
   into the generator** at Phase 3 (not kept as a separate permanent fixture).
   A pattern-provenance corpus (`patterns/`, OSV/GHSA-sourced, informs scenarios
   in original words only — never inlined as code) lives under this component.
-  Phase 0's foundation is built (`CC-LAB-0015`): `fuzzlab/labgen/` (manifest
+  Phase 0's foundation is built (`CC-LAB-0016`): `fuzzlab/labgen/` (manifest
   IR, the pure/versioned/snapshot-tested `verdict()`, sub-seed derivation +
   canonical serialization, the regenerate-and-diff and name-leak build gates)
   plus `lab/schemas/*.schema.json`, `lab/safety_matrix.yaml`, and a
-  `lab/patterns/` scaffold (3 example cards, not the full corpus). The real
-  covering-array resolver, the per-stack module-composition emitter, and a
-  manifest reproducing today's PHP app byte-identically remain planned.
+  `lab/patterns/` scaffold (3 example cards, not the full corpus). A real
+  covering-array resolver (`fuzzlab/labgen/resolver.py`, over `covertable`
+  3.2.0, pairwise/mixed-strength/constrained) is also built (`CC-LAB-0018`)
+  but not yet wired into manifest loading. The per-stack module-composition
+  emitter and a manifest reproducing today's PHP app byte-identically remain
+  planned.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, et al. — see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not
   hand-authored exploit code, for every class with a mature oracle; the three

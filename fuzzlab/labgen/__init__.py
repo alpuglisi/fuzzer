@@ -8,7 +8,7 @@ security-assertion tooling, unrelated to and never imported by
 ``fuzzlab.oracle``). Neither depends on the other. This re-exports both.
 """
 
-from . import denylist, gates, schema, subseed, verdict
+from . import denylist, gates, resolver, schema, subseed, verdict
 from .oracle_wrapper import (
     CommandInjectionOracleRequest,
     OracleRunResult,
@@ -32,6 +32,7 @@ from .oracle_wrapper import (
 __all__ = [
     "denylist",
     "gates",
+    "resolver",
     "schema",
     "subseed",
     "verdict",

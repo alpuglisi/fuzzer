@@ -28,6 +28,17 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   has no `-p` flag) and, per Spike 003, no `--ignore-code` equivalent (verified by reading
   its source: no 401/403 special-casing exists). 12 new offline tests + 1 new skip-guarded
   real-`sstimap` integration test, all passing.
+- Feature (LAB, T-LAB0.3, CR-LAB-0001/D20): `fuzzlab/labgen/resolver.py` — a real
+  covering-array expansion engine over `covertable` 3.2.0 (exact-pinned), with an
+  explicit kwargs allowlist (an unrecognized/mistyped option raises instead of
+  being silently ignored by `covertable.make()`'s own `**params`, per PA-0010)
+  and the sorter always pinned to `covertable.sorters.hash`. Supports pairwise
+  (default) and mixed-strength (`sub_models`) expansion plus declarative,
+  JSON-serializable `constraints`. Snapshot-tested against a synthetic axis-set
+  model and verified deterministic across separate processes/`PYTHONHASHSEED`
+  values. Not yet wired into manifest loading — Phase 0's manifest still lists
+  cells explicitly. `CC-LAB-0018` (renumbered from a same-base `CC-LAB-0017`
+  collision with the SSTImap change above, no content changed).
 - Decision (LAB, D20 clarification): resolved a conflict between D20 ("migrate the
   hand-built app") and an earlier draft of `docs/LAB_PHASE_0_PLAN.md` (which had read a
   separate "additive-only" instruction as "never remove the hand-built app," and
