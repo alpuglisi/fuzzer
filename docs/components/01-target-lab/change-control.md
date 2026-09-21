@@ -428,6 +428,121 @@ numbers.)*
   too (reproduced on a clean stash of this worktree's diff) and are unrelated
   to LAB/`identity_session` — out of this lane's scope to fix.
 
+### CC-LAB-0034 — `fuzzlab lab-generate` CLI (T-LAB0.10, L-P0.10) (2026-09-21)
+*(Numbered `CC-LAB-0034` rather than `CC-LAB-0029` at merge time — this lane
+independently claimed `CC-LAB-0029` too, colliding with lanes L-P2.1, L-P0.9,
+L-P1.1, L-P1.2a, and L-P2.2, all of which merged first. Reconciled per this
+project's standing multi-lane policy: keep all entries' full content, renumber
+this later-landing one to the next free number. At merge time, confirmed the
+resolver-hook gap this entry names below is already closed (transparent, no
+CLI change needed, since L-P1.1 moved axis-range expansion into
+`Manifest.from_dict()` itself); the regression-gate gap is deliberately left
+open — see the updated Deliverables below.)*
+- Change: added `fuzzlab/labgen/cli.py` (`main(argv) -> int`, parsing `--manifest
+  <path> --out <dir> [--emitter NAME] [--check]`) and a one-line `lab-generate`
+  branch in `fuzzlab/cli.py`'s existing subcommand dispatch, following the exact
+  pattern every other subcommand (`web`/`session`/`crawl`/.../`report`) already
+  uses. `--manifest`/`--out` load a manifest via `fuzzlab.labgen.schema
+  .load_manifest` and render every cell the selected emitter supports via
+  `fuzzlab.labgen.conformance.tier3.render_whole_sample` (the existing helper
+  that already drives a real `Emitter` over a whole cell set), writing the
+  result to `--out`. The emitter is looked up by name from a small
+  `EMITTER_REGISTRY: dict[str, type[Emitter]]` (default `"php_current"`), never
+  hardcoded, so a future emitter (Phase 3, built by parallel lanes) registers
+  itself without a CLI rewrite. `--check` runs, in order: the name-leak scanner
+  (`gates.scan_generated_tree_for_name_leaks`), the secret scanner
+  (`secret_scanner.scan_tree_for_secrets`, Gitleaks-backed), a real-emitter
+  regenerate-and-diff determinism check
+  (`conformance.tier3.regenerate_and_diff_emitter`), the minimal-pair checker
+  (`minimal_pair.check_minimal_pair`), and conformance Tier 0 (lint +
+  minimal-pair diff) and Tier 3 (whole-lab regeneration) again as their own
+  registered step, per the task's explicit instruction to register both
+  separately from the standalone minimal-pair/determinism steps. Every gate
+  failure is collected (not fail-fast) and printed with `--check` returning
+  exit code 1 naming every failing gate; a clean tree exits 0.
+- Design notes/deviations from the literal task brief, made explicit rather than
+  silently substituted:
+  - **Resolver wiring (L-P1.1) not yet landed as of this lane's own authoring** --
+    `fuzzlab.labgen.schema.load_manifest` did no axis-range expansion at that time.
+    By merge time, L-P1.1 had landed and moved that expansion *into*
+    `Manifest.from_dict()` itself (not a separate hook this CLI needs to call) --
+    so `load_manifest` now expands `axis_ranges` transparently and this CLI needed
+    no code change at all to pick it up, exactly the "upgrades automatically"
+    convention this lane's own docstring anticipated (mirroring
+    `conformance.tier0.get_minimal_pair_checker`'s same convention). Confirmed by
+    a new merge-time test loading a manifest with an `axis_ranges` block through
+    this CLI's own `render_manifest`.
+  - **Minimal-pair checker wired against a generic self-pair, not manifest-declared
+    twins.** `fuzzlab.labgen.minimal_pair`'s own test module explicitly documents that
+    it does not attempt "manifest-level twin pairing" (two different cell_ids, e.g.
+    the example manifest's `LABGEN-EX-0001`/`0002`, legitimately emit different
+    handler names and are not a valid input to it). This CLI instead pairs each
+    supported cell against `dataclasses.replace(cell, transform=Pipeline(()))` --
+    the *same* cell identity with its transform pipeline emptied, exactly the
+    fixture shape `tests/test_labgen_minimal_pair.py`'s own positive fixture uses --
+    so the check works for any manifest, not only one that happens to author
+    explicit vulnerable/secure twin cells.
+  - **Regenerate-and-diff wired against the real emitter (Tier 3), not
+    `gates.regenerate_and_diff`.** `gates.regenerate_and_diff` only proves
+    determinism for the Phase-0 *scaffold* renderer
+    (`fuzzlab.labgen.subseed.render_cell_stub`), not a real `Emitter` -- it is not
+    meaningful against this CLI's actual output. `conformance.tier3
+    .regenerate_and_diff_emitter` is the emitter-level counterpart that already
+    exists for exactly this purpose and is used instead; it doubles as this
+    change's Tier 3 registration (item 4 of the task brief), so it is invoked once
+    as the named "regenerate-and-diff determinism check" step and again as the
+    explicit "conformance Tier 3" step, both real, non-redundant in intent (the
+    task brief lists them as two separate line items).
+  - **`fingerprint_gate.py` deliberately not wired**, per the task brief's own
+    instruction: it needs a real multi-stack corpus (Phase 3) to mean anything.
+  - **The regression/additive-only gate (L-P0.9) was not wired as of this lane's
+    own authoring** (its module did not exist in this worktree yet) and **remains
+    deliberately unwired at merge time**, even though L-P0.9's
+    `fuzzlab.labgen.regression_gate.check_no_regression` has since landed on
+    trunk: that function needs a *candidate ground-truth directory*
+    (`labels.json`/`injection-points.json`/`expectedresults.csv`-shaped, per
+    `fuzzlab.labels.contract.load`'s cross-validated contract), and no
+    Cell-to-GroundTruth converter exists yet to derive that shape from a
+    rendered manifest's cells. Building one under time pressure inside this
+    merge, rather than as its own reviewed deliverable, is exactly the kind of
+    improvisation this project's process is meant to prevent -- so the lane's
+    `# TODO(L-P0.9)` marker is kept (renamed `# TODO(L-P0.9-integration)` to
+    reflect that L-P0.9 itself has landed and only the CLI-side wiring remains),
+    and this is flagged here as a real, still-open follow-up rather than
+    silently built or silently dropped.
+- Impact (other components / project): none outside this component -- pure
+  addition of a CLI entry point over already-built, already-tested pieces. No
+  change to `fuzzlab.labgen.schema`, `.gates`, `.secret_scanner`, `.minimal_pair`,
+  `.emitter`, `.emitters.php_current`, or `.conformance` (all read-only imports).
+- Risk (level; mitigation): low. The CLI is read-only with respect to the target
+  (D11 unaffected -- it writes local files only, sends no traffic) and every gate
+  it calls already has its own dedicated test coverage; this change adds
+  end-to-end coverage of the wiring itself, not the gates' own logic.
+- Deliverables:
+  - [x] `fuzzlab/labgen/cli.py` (`main`, `EMITTER_REGISTRY`, `render_manifest`,
+    `run_checks`) — done.
+  - [x] `fuzzlab/cli.py` `lab-generate` dispatch branch + usage line — done.
+  - [x] 11 end-to-end tests (`tests/test_labgen_cli.py`): clean-tree pass, one
+    per wired gate's own known-bad fixture (name-leak, secret, determinism,
+    minimal-pair, Tier 0 lint), unknown-emitter/missing-manifest error paths,
+    and a generic-weakened-twin-pairing check against a hand-built cell reusing
+    `tests/test_labgen_minimal_pair.py`'s own `_base_cell` helper — done.
+  - [x] Resolver wiring (L-P1.1) — confirmed transparent at merge time, no CLI
+    code change needed (`Manifest.from_dict()` expands `axis_ranges` internally).
+  - [ ] Regression/additive-only gate (L-P0.9) — genuinely still open at merge
+    time: needs a Cell-to-GroundTruth converter that does not exist yet (see the
+    design-notes paragraph above); flagged as a real follow-up, not silently
+    built or dropped. Marker renamed `# TODO(L-P0.9-integration)`.
+- Effectiveness (assessed 2026-09-21): effective for the gates actually wired —
+  `fuzzlab lab-generate --check` passes clean on the real example manifest and
+  fails loud (exit 1, naming the gate) when any wired gate's own known-bad
+  fixture is injected via a test-double emitter wrapper; full repo test suite
+  green after merge (see the merge commit for the exact pass count). 2
+  pre-existing failures in `tests/test_mutation_operators.py` confirmed
+  unrelated to this change and present before it, in a different lane's
+  component. The regression-gate integration gap above is real and open, not
+  assessed as met.
+
 ### CC-LAB-0028 — Nuclei path-traversal/LFI oracle wrapper (Addendum E, Spike 004) (2026-09-21)
 *(Numbered `CC-LAB-0028` rather than `CC-LAB-0017` at merge time — this lane's worktree
 diverged onto a stale, unrelated branch lineage before starting, self-diagnosed and

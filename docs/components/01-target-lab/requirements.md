@@ -448,6 +448,43 @@ lane) can submit a payload as
   auto-exclusion of auth endpoints): this helper only ever talks to identities the
   generator itself declared, and none of re-auth/JWT/auto-exclusion/unknown-target
   defenses are in scope here. (`CC-LAB-0033`)
+- **FR-LAB-32** (Lab track, T-LAB0.10) *(Numbered `FR-LAB-32` rather than `FR-LAB-27`
+  at merge time — this lane independently claimed `FR-LAB-27`, colliding with lane
+  L-P2.1's identity/ownership requirement above; reconciled per this project's
+  standing multi-lane policy: keep both entries' full content, renumber this
+  later-landing one, fix its own `CC-LAB` cross-reference to `CC-LAB-0034` below.
+  The resolver gap named below closed at merge time (transparent, no CLI change
+  needed); the regression-gate gap remains genuinely open — see `CC-LAB-0034`'s
+  updated Deliverables.)* A
+  `fuzzlab lab-generate --manifest <path>
+  --out <dir> [--emitter NAME] [--check]` CLI (`fuzzlab.labgen.cli`), dispatched
+  from `fuzzlab/cli.py` following the same thin-subcommand-branch convention every
+  other `fuzzlab <command>` already uses. Loads a manifest (`fuzzlab.labgen.schema
+  .load_manifest`) and renders every cell the selected emitter declares support
+  for; the emitter is looked up by name in a small registry
+  (`EMITTER_REGISTRY: dict[str, type[Emitter]]`, default `"php_current"`) rather
+  than hardcoded, so a future emitter (Phase 3) needs no CLI change to become
+  selectable. `--check` runs the offline build-gate suite this component already
+  built against the rendered output, collecting every failure rather than
+  stopping at the first: the name-leak scanner (FR-LAB-15), the secret scanner
+  (FR-LAB-22), a real-emitter regenerate-and-diff determinism check
+  (`conformance.tier3.regenerate_and_diff_emitter`), the minimal-pair checker
+  (FR-LAB-23) — paired generically against each cell's own transform-emptied twin
+  (`dataclasses.replace(cell, transform=Pipeline(()))`), so it applies to any
+  manifest, not only one that authors explicit vulnerable/secure twin cell pairs
+  — and conformance Tier 0/Tier 3 (FR-LAB-25). Exits 1 and names every failing
+  gate on a `--check` failure, 0 on a clean pass. Axis-range manifest expansion
+  (`resolver.py`, FR-LAB-29) is transparent to this CLI — `Manifest.from_dict()`
+  expands `axis_ranges` internally, so no separate resolver-wiring hook was ever
+  needed here. Two things this CLI still does **not** do, flagged rather than
+  silently built or dropped: it does not run the regression/additive-only gate
+  (FR-LAB-28) — that needs a Cell-to-GroundTruth converter (deriving
+  `labels.json`/`injection-points.json`/`expectedresults.csv`-shaped data from a
+  rendered manifest) that does not exist yet, a genuine separate follow-up, left
+  as a `# TODO(L-P0.9-integration)` in `run_checks()`; and `fingerprint_gate.py`
+  is deliberately not wired (needs a real multi-stack corpus, Phase 3, to mean
+  anything against a single-stack corpus).
+  (`docs/LAB_IMPLEMENTATION_PLAN.md` §1.2 T-LAB0.10, `CC-LAB-0034`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

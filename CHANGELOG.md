@@ -72,6 +72,28 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   narrow helper, deliberately not the toolkit's own separate Session-manager
   component (`CC-LAB-0033`, renumbered from a concurrently-claimed
   `CC-LAB-0029` which collided with lanes L-P2.1/L-P0.9/L-P1.1/L-P1.2a).
+- Lab (L-P0.10, T-LAB0.10): added the `fuzzlab lab-generate --manifest <path> --out
+  <dir> [--emitter NAME] [--check]` CLI (`fuzzlab/labgen/cli.py`), wired into
+  `fuzzlab/cli.py`'s existing subcommand dispatch. Renders a manifest's supported
+  cells via a registry-looked-up emitter (default `php_current`, so Phase 3's
+  additional emitters need no CLI rewrite) and, with `--check`, runs the name-leak
+  scanner, secret scanner, a real-emitter regenerate-and-diff determinism check,
+  the minimal-pair checker (against a generic transform-emptied twin of each
+  cell, so it works for any manifest, not only one authoring explicit twin
+  pairs), and conformance Tier 0/Tier 3 -- all offline gates that already existed.
+  This lane's own worktree predated L-P1.1/L-P0.9 landing. At merge time,
+  confirmed the resolver wiring (L-P1.1) is already transparent to this CLI --
+  `Manifest.from_dict()` expands `axis_ranges` internally now, so `load_manifest`
+  needed no CLI-side change at all. The regression/additive-only gate (L-P0.9)
+  is intentionally left as the lane's own `# TODO(L-P0.9-integration)` marker
+  (renamed from `# TODO(L-P0.9)` since L-P0.9 itself has landed): wiring it for
+  real needs a Cell-to-GroundTruth converter (deriving `labels.json`/
+  `injection-points.json`/`expectedresults.csv`-shaped data from a rendered
+  manifest's cells) that does not exist yet -- a separate, real deliverable,
+  not something to improvise inside this merge. 11 new end-to-end tests
+  (`tests/test_labgen_cli.py`), reusing each gate's own known-bad fixtures from
+  `tests/test_labgen_gates.py`, `tests/test_labgen_secret_scanner.py`, and
+  `tests/test_labgen_minimal_pair.py` rather than re-authoring them.
 - Docs: fleshed `docs/LAB_IMPLEMENTATION_PLAN.md`'s Phase 2 (§3) and Phase 3 (§4)
   from milestone-level bullets into full task breakdowns matching Phase 0/1's
   granularity, and added a new §7 lane/dependency map covering every Phase 0-3
