@@ -131,9 +131,12 @@ tracked in the requirements files, not here.
 - **Interface:** `prepare(request, identity)`, `observe(request, response,
   identity)`, `ensure(identity)`, resolved by the request's host. Internally the
   detected mechanism maps to an auth handler (cookie/form, JSON+token, Basic,
-  header-key) — implementation detail, not user config.
+  header-key) — implementation detail, not user config. Post-Phase 6, logins
+  detection can't crack are handled by **adopting a session the proxy captures
+  from a manual browser login** (FR-SESS-11), still without per-host config.
 - **Depends on (components):** `core/` (config, store, HTTP seam, credential
-  store); crawler (discovered forms help locate the login).
+  store); crawler (discovered forms help locate the login); proxy (post-Phase 6,
+  for manual-login session capture).
 - **Consumed by:** crawler, auditor, fuzzer, and the proxy (as an addon). This is
   the most load-bearing dependency; everything authenticated flows through it, on
   every host — the Puppy Fort Factory and the external validation labs (D10).
@@ -209,7 +212,10 @@ tracked in the requirements files, not here.
   byte path (byte-exact, single-use connections); CONNECT + TLS interception with
   a local CA and cached leaf certs; history (FTS5, batched writes, content-
   addressed bodies); repeater (DB-persisted tabs); match-and-replace; scope
-  engine; interception-as-awaited-future workflow.
+  engine; interception-as-awaited-future workflow; manual-login **session
+  capture** (hand the session established by a human browser login to the session
+  manager to adopt — FR-PROXY-9 — the escape hatch for logins detection can't
+  crack: MFA, CAPTCHA, multi-step).
 - **Depends on (components):** `core/`, session manager (attached as an addon).
 - **Role:** optional observer; other tools may route through it for unified
   history, but timing-sensitive traffic does not (D5).

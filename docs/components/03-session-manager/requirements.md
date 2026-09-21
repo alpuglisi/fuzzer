@@ -53,6 +53,12 @@ data. Shared by all tools; a hard dependency for external validation (D10).
   cookies/tokens/credentials in cleartext.
 - **FR-SESS-10** Be usable standalone (print a ready-to-use cookie/header/token
   for a given identity on a given host).
+- **FR-SESS-11** `[planned, post-Phase 6]` **Adopt a captured manual session.**
+  For hosts whose login detection can't parse (the FR-SESS-6 fail-loud cases),
+  accept an authenticated session captured by the proxy from a manual browser login
+  (FR-PROXY-9) and use it as the live session state for `(host, identity)` — no
+  per-host config. On expiry of an interactive login, prompt for re-capture rather
+  than attempting an automated re-login. Depends on the proxy (component #11).
 
 ## 4. Non-functional requirements
 - **NFR-SESS-single-flight** Concurrent expiry triggers exactly one re-auth.
@@ -90,6 +96,9 @@ help locate the login, though the manager can also probe on its own).
 
 ## 8. Open questions
 - Detection heuristics for multi-form pages (which form is the login) and for
-  SPA logins where the login is an XHR, not an HTML form.
-- MFA/TOTP (out of scope for detection-only; revisit if a target needs it).
+  SPA logins where the login is an XHR, not an HTML form. (Cases detection still
+  can't crack are covered post-Phase 6 by proxy session capture, FR-SESS-11.)
+- MFA/TOTP: out of scope for automated detection; handled post-Phase 6 by adopting
+  a manual browser login captured through the proxy (FR-SESS-11).
 - How aggressively to probe for a login when the crawler has not yet found a form.
+- Re-capture UX when an adopted interactive session expires (FR-SESS-11).

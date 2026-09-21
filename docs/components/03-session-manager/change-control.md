@@ -3,6 +3,26 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0004 — Planned: adopt proxy-captured manual sessions (spec) (2026-09-21)
+- Change: added FR-SESS-11 `[planned, post-Phase 6]` — for logins detection can't
+  parse (the FR-SESS-6 fail-loud cases: MFA, CAPTCHA, multi-step, exotic SPA), the
+  session manager adopts a session captured by the proxy from a manual browser
+  login (FR-PROXY-9) as the live session state for `(host, identity)`, still with
+  no per-host config; interactive-login expiry prompts for re-capture. Resolves the
+  MFA/SPA open questions as "handled post-Phase 6." Spec only — no code.
+- Impact (other components / project): closes the accepted detection-only gap
+  without reintroducing per-host profiles. Adds a post-Phase 6 dependency on the
+  proxy (component #11, FR-PROXY-9). Recorded in D13 and the Phase 6 roadmap;
+  `ARCHITECTURE.md` #3 updated.
+- Risk (level; mitigation): low (planning). When built, captured cookies/tokens are
+  secrets — mitigated by the existing redaction and no-cleartext-persistence rules
+  (NFR-SESS-redaction, FR-SESS-9). Interactive re-auth can't be automated; mitigated
+  by prompting for re-capture rather than silently failing.
+- Deliverables:
+  - [x] FR-SESS-11 recorded; open questions resolved to post-Phase 6 — done.
+  - [ ] Implement session adoption from a proxy capture — todo (post-Phase 6).
+- Effectiveness (assessed or pending): pending — depends on the proxy (Phase 6).
+
 ### CC-SESS-0003 — Detection-only auth + per-host credentials (spec) (2026-09-21)
 - Change: per user direction, superseded the profile-first framing of CC-SESS-0002.
   Auth is now **detection-only** (D13, revised): the session manager detects each

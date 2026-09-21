@@ -208,6 +208,11 @@ mechanism dynamically** and handles it, passing that host's saved credentials
   (multi-step, CAPTCHA, exotic SPA) **fails loudly with diagnostics** rather than
   falling back to a hand-written profile; the remedy is to improve detection. This
   trade-off is accepted deliberately to keep the toolkit zero-config per host.
+- **Manual-capture escape hatch (post-Phase 6).** Once the proxy exists, the
+  fail-loud cases are handled without per-host config by letting a human log in
+  through the proxy in a real browser; the proxy captures the established session
+  and the session manager adopts it (FR-PROXY-9 / FR-SESS-11). This covers MFA,
+  CAPTCHA, and multi-step logins that automated detection cannot.
 
 Internally the detected mechanism maps to an auth handler (cookie/form,
 JSON+token, Basic, header-key); these are implementation detail selected by
@@ -351,6 +356,9 @@ Goal: browse the lab through it and inspect exact bytes on the wire.
 - Local web control panel and dashboard (D11), with Datasette for deep store
   exploration.
 - Session manager as a proxy addon.
+- Capture the session from a manual browser login and hand it to the session
+  manager to adopt (FR-PROXY-9 / FR-SESS-11) — the escape hatch for logins
+  detection can't crack (MFA, CAPTCHA, multi-step), no per-host config.
 - Property-test the parser with `hypothesis`.
 - **Exit:** browse the lab, hand-edit a request with a duplicate
   `Content-Length`, and see the exact bytes sent.

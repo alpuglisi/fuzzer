@@ -13,6 +13,13 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Planning: recorded a **manual-login session capture** capability (post-Phase 6):
+  once the proxy exists, a human logs in through it in a real browser, the proxy
+  captures the established session (FR-PROXY-9), and the session manager adopts it
+  (FR-SESS-11) — the escape hatch for logins detection can't crack (MFA, CAPTCHA,
+  multi-step), still with no per-host config. Reflected in D13, the Phase 6
+  roadmap, `ARCHITECTURE.md` (#3, #11), and both component specs. Change-control:
+  CC-SESS-0004, CC-PROXY-0002.
 - Planning: refined the session manager to **detection-only** auth with
   **per-host credentials** (revised D12/D13, per user direction), superseding the
   profile-first framing. The manager now detects each host's login/session

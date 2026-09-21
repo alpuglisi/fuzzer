@@ -3,6 +3,24 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0002 — Planned: manual-login session capture (spec) (2026-09-21)
+- Change: added FR-PROXY-9 — capture the authenticated session (cookies/tokens)
+  from a **manual browser login** performed through the proxy and hand it to the
+  session manager to adopt (FR-SESS-11). This is the escape hatch for logins the
+  session manager's detection can't parse (MFA, CAPTCHA, multi-step, exotic SPA),
+  with no per-host config. Spec only — no code (proxy is Phase 6).
+- Impact (other components / project): gives the session manager (component #3) a
+  way to stay authenticated on hosts detection can't handle; recorded in D13 and
+  the Phase 6 roadmap; `ARCHITECTURE.md` #11 updated. No change to the store
+  contract beyond the flows the proxy already records.
+- Risk (level; mitigation): low (planning). Captured secrets are sensitive;
+  mitigated by the proxy's existing redaction-on-write and lab-only/scope rules
+  (NFR-PROXY-safe) and by not persisting them in cleartext.
+- Deliverables:
+  - [x] FR-PROXY-9 recorded — done.
+  - [ ] Implement session capture + handoff to the session manager — todo (Phase 6).
+- Effectiveness (assessed or pending): pending — built in Phase 6.
+
 ### CC-PROXY-0001 — Baseline (2026-09-21)
 - Change: specify the component (requirements written). Not yet implemented.
   Decision D4 sets the build-from-scratch hybrid (sans-I/O parsed path + raw byte

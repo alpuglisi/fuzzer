@@ -34,6 +34,13 @@ that shares the store, never a mandatory pipeline (D5).
   traffic gets the same auth handling.
 - **FR-PROXY-8** Remain optional: tools may route through it for unified history,
   but timing-sensitive traffic bypasses it (D5).
+- **FR-PROXY-9 (session capture)** Capture the authenticated session from a
+  **manual browser login** performed through the proxy — extract the established
+  cookies/tokens for the `(host, identity)` and hand them to the session manager to
+  adopt. This is the path for logins the session manager's detection can't parse
+  (MFA, CAPTCHA, multi-step, exotic SPA), keeping the toolkit authenticated without
+  a per-host config file. Captured secrets are redacted on write and never
+  persisted in cleartext.
 
 ## 4. Non-functional requirements
 - **NFR-PROXY-byte-exact** The raw path preserves bytes exactly (no reserializing).
