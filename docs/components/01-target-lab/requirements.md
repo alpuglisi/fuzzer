@@ -1,6 +1,6 @@
 # Target Lab and Ground Truth — Requirement Specification
 
-Component code: **LAB** · Status: `[built app; generator Phase 0 foundation built (schema, verdict engine, determinism/name-leak gates, patterns/ scaffold, covering-array resolver); rest planned]`
+Component code: **LAB** · Status: `[built app; generator Phase 0 foundation built (schema, verdict engine, determinism/name-leak gates, patterns/ scaffold, covering-array resolver, T-LAB0.8 mechanical sourcing tool); rest planned]`
 · Last updated: 2026-09-21
 
 Related: `ARCHITECTURE.md` #1; `DECISIONS_AND_ROADMAP.md` (D7, D8, D9, D10);
@@ -144,6 +144,21 @@ and measured. Authorized, lab-only.
   vulnerable/secure SQLi pair; reproducing today's real PHP app is separate,
   later scope. (`CR-LAB-0001` §3/Addenda C/D, `docs/LAB_PHASE_0_PLAN.md`
   T-LAB0.4, `CC-LAB-0019`)
+- **FR-LAB-19** (Lab track, T-LAB0.8, mechanical tooling only) A pull/index/
+  scope/rank/cluster pipeline (`fuzzlab/tools/pattern_corpus_sourcing.py`)
+  produces a structured **candidate list** for human triage from
+  `github/advisory-database` (git-clone pull, per
+  `docs/LAB_PATTERN_CORPUS_SOURCING_PLAN.md` Revision 2 §2 — never the OSV/
+  GHSA APIs), scoped by a versioned CWE/keyword crosswalk
+  (`lab/patterns/sourcing/crosswalk.yaml`) covering the ten first-wave
+  classes. This pipeline **never authors a card, never writes to
+  `lab/patterns/cards/`, and never touches `provenance.yaml`** — card
+  authoring (writing `root_cause`, judging licensing, deciding inclusion)
+  stays separate, human-supervised work, per that plan's step 6. Idempotent:
+  re-running against an unchanged upstream commit overwrites the current
+  quarter's candidate/report files with identical content and does not
+  duplicate a `lab/patterns/REFRESH_LOG.md` entry. (`CR-LAB-0001`, D20,
+  `docs/LAB_PHASE_0_PLAN.md` T-LAB0.8, `CC-LAB-0020`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
@@ -174,6 +189,12 @@ to share the word "oracle".
 takes a `{factors, strength?, sub_models?, constraints?}` mapping and returns
 a list of `{axis_name: level_value}` rows — see FR-LAB-17. Not yet called
 from `fuzzlab.labgen.schema`'s manifest loading.
+(Lab track, dev tooling, not runtime) `fuzzlab.tools.pattern_corpus_sourcing`
+exposes `run_refresh()` (also `python -m fuzzlab.tools.pattern_corpus_sourcing
+refresh`) which reads/writes only `lab/patterns/sourcing/` and
+`lab/patterns/refresh/`/`REFRESH_LOG.md`; it takes no dependency on and does
+not write `lab/patterns/cards/` or `lab/patterns/provenance.yaml` — see
+FR-LAB-18.
 
 ## 6. Dependencies (components)
 None (it is the system under test).

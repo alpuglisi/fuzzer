@@ -1,0 +1,61 @@
+# CWE-to-class crosswalk for the T-LAB0.8 mechanical sourcing pipeline.
+#
+# Data, not code — edited by a human as the sourcing plan's scope evolves
+# (docs/LAB_PATTERN_CORPUS_SOURCING_PLAN.md Revision 2, section 5). This is
+# the "first-wave" 10-class scope the plan settled on; the mechanical pull
+# script (fuzzlab/tools/pattern_corpus_sourcing.py) reads it to scope, rank,
+# and cluster candidate advisories — it does not decide the crosswalk itself.
+#
+# `target_count` is each class's first-wave card target (used only to sort
+# refresh-report output by "how far under target," never to auto-select
+# cards — card authoring stays human, per step 6/7 of the sourcing plan).
+#
+# `precedence` resolves a multi-CWE advisory (~24% of the corpus, per the
+# plan) to exactly one class: the first class in this list whose CWE/keyword
+# rule matches wins; every other class the advisory also matched is recorded
+# as a losing match, never silently dropped (surfaced in each candidate's
+# `other_matches`).
+version: 1
+classes:
+  - id: idor_bola
+    cwes: [CWE-639]
+    target_count: 3
+  - id: authz_bypass
+    cwes: [CWE-863, CWE-284]
+    target_count: 4
+  - id: sqli_orm
+    cwes: [CWE-89]
+    target_count: 4
+  - id: deserialization
+    cwes: [CWE-502]
+    target_count: 4
+  - id: proto_pollution
+    cwes: [CWE-1321]
+    target_count: 3
+  - id: ssti
+    cwes: [CWE-1336, CWE-917]
+    # CWE-94 alone is far too broad (any code injection); per the plan's own
+    # correction, only count a CWE-94 advisory toward ssti when the prose
+    # also mentions a template-engine keyword — this recovers the ~27%
+    # under-count the plain CWE-1336/917 crosswalk misses.
+    keyword_gated_cwes:
+      CWE-94: [template, jinja, twig, handlebars, freemarker, velocity, "template engine", ejs, pug, mustache]
+    target_count: 3
+  - id: mass_assignment
+    cwes: [CWE-915]
+    target_count: 2
+  - id: xss_context
+    cwes: [CWE-79]
+    target_count: 3
+  - id: ssrf
+    cwes: [CWE-918]
+    target_count: 3
+  - id: race_condition
+    cwes: [CWE-362]
+    target_count: 2
+
+# The plan's target ecosystems (Go/RubyGems deferred to a later wave).
+ecosystems: [npm, PyPI, Packagist, Maven]
+
+# The plan's currency window.
+currency_window_months: 24
