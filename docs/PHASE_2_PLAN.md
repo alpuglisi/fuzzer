@@ -164,12 +164,15 @@ Phase-1 baseline run.
   (CC-AUD-0009 / BUG-0006). Remaining: **run it against the running lab and compare
   requests-per-finding to a Phase-1 baseline** (on-host). **POST-body injection is
   now supported** (CC-FUZZ-0011): the benchmark audits the GET/query and POST points;
-  the oracle probes POST params over POST with a form body. **Remaining detection gap**
-  (scored as fn until built, not a bug): browser-execution **M6** for stored/DOM XSS
-  (`profile.php` stored, `reviews.php#author`, `feedback.php?ref`). DOM-skeleton dedup
-  for distinct-URL same-template pages (needs the crawler to store rendered HTML) is a
-  request-efficiency follow-up — endpoint-keying already collapses query-param variants
-  for this lab.
+  the oracle probes POST params over POST with a form body. **Browser execution (M6)
+  is now built** (CC-FUZZ-0013): with `auto --browser`, DOM XSS (`reviews.php#author`,
+  `feedback.php?ref`) is confirmed by real execution behind an injected
+  `BrowserExecutor` (live Playwright executor on-host). **Remaining:** stored-XSS
+  auto-wiring (the M6 stored strategy exists, but `store_url` needs a point→case
+  source_url mapping the contract's points file lacks — a small follow-up); and the
+  live `--browser` run on the host. DOM-skeleton dedup for distinct-URL same-template
+  pages (needs the crawler to store rendered HTML) is a request-efficiency follow-up —
+  endpoint-keying already collapses query-param variants for this lab.
 
 ### T2.9 — Injection-category selection by run mode (D14)
 Scope which categories run by launcher mode: **automatic** (against our lab)

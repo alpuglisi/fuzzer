@@ -3,6 +3,21 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0012 — R-XSS-REFLECT also nominates on `fragment` (DOM XSS) (2026-09-21)
+- Change: added `fragment` to `R-XSS-REFLECT`'s `location_in`, so URL-fragment
+  parameters (client-side DOM sinks, e.g. `reviews.php#author`) get an XSS candidate
+  the M6 browser strategy can confirm (CC-FUZZ-0013). SQLi stays query/body (a fragment
+  never reaches the server).
+- Impact (other components / project): enables DOM-XSS confirmation for fragment
+  points under `auto --browser`; no effect without a browser (the points aren't
+  audited) or on non-fragment behavior.
+- Risk (level; mitigation): low — data-only rule edit; oracle fail-closed. Covered by
+  the auto browser-path test. Suite 154 passed / 2 skipped.
+- Deliverables:
+  - [x] `fragment` added to R-XSS-REFLECT — done.
+- Effectiveness (assessed 2026-09-21): effective — fragment DOM points are nominated
+  and confirmed via M6 in tests.
+
 ### CC-AUD-0011 — R-SSTI nominates on location (parity with XSS) (2026-09-21)
 - Change: `R-SSTI`'s `when` changed from `sink_context_in [html]` to
   `location_in [query, body]`, so it nominates a candidate on what discovery knows

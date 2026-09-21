@@ -18,8 +18,9 @@ from fuzzlab.oracle.strategies import ConfirmationStrategy, default_strategies
 
 class Oracle:
     def __init__(self, strategies: list[ConfirmationStrategy] | None = None,
-                 store=None, run_id: int | None = None):
-        self.strategies = list(strategies) if strategies is not None else default_strategies()
+                 store=None, run_id: int | None = None, browser=None):
+        self.strategies = (list(strategies) if strategies is not None
+                           else default_strategies(browser=browser))
         self.store = store
         self.run_id = run_id
 

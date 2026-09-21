@@ -13,6 +13,17 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Oracle vectors (M6): **browser execution for stored + DOM XSS**. Added an injected
+  `BrowserExecutor` seam (`fuzzlab/oracle/browser.py`) with a `FakeBrowserExecutor` for
+  offline tests and a live `PlaywrightBrowserExecutor` (`fuzzlab/tools/browserexec.py`,
+  on-host). New `DomXssStrategy`/`StoredXssStrategy` confirm only when a tokened payload
+  actually *fires* in the browser (execution, not reflection; fail-closed). Strategies
+  are now scoped by `Candidate.category`, so the `xss` category fans out to reflected +
+  DOM + stored. Threaded the browser through `Oracle`/`run_pipeline`/`run_auto` and
+  `fuzzlab auto --browser`; `R-XSS-REFLECT` also nominates on `fragment`. With
+  `--browser`, `auto` confirms `reviews.php#author` and `feedback.php?ref`; without it
+  nothing changes. Stored-XSS auto-wiring (source_url) is a follow-up. +9 tests (154
+  passed / 2 skipped). Change-control: CC-FUZZ-0013, CC-AUD-0012.
 - Oracle vectors: added four more deterministic confirmers — **open redirect** (M9
   redirect-target-control), **SSTI** (M4 evaluation marker), **path traversal/LFI** (M7
   `/etc/passwd` content marker), and **command injection** (M1 differential timing) —

@@ -12,7 +12,7 @@
       "id": "R-XSS-REFLECT",
       "category": "xss",
       "transaction_type": "Reflected Input",
-      "when": { "location_in": ["query", "body"] },
+      "when": { "location_in": ["query", "body", "fragment"] },
       "reference": "xss"
     },
     {

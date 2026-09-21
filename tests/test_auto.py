@@ -136,6 +136,26 @@ def test_post_body_candidate_probed_via_post():
     assert sender.calls and all(m == "POST" and loc == "body" for m, loc in sender.calls)
 
 
+def test_run_auto_with_browser_confirms_dom_points(tmp_path):
+    from fuzzlab.oracle.browser import FakeBrowserExecutor
+    gt = contract.load(GT_DIR)
+    # Live-like fake: only the genuinely client-vulnerable DOM pages "execute".
+    browser = FakeBrowserExecutor(
+        vulnerable=lambda req: "/reviews.php" in req.url or "/feedback.php" in req.url)
+    with Store(tmp_path / "u.db") as store:
+        run_id = store.start_run("auto", "h")
+        _seed_crawl(store, run_id)
+        result = run_auto(base_url="http://localhost", store=store, run_id=run_id,
+                          sender=AutoSender(), mode="automatic", ground_truth=gt,
+                          points_source="ground-truth", browser=browser)
+        # DOM points are now audited (not skipped) and confirmed as xss-dom.
+        assert result.metrics["skipped_points"] == []
+        assert result.report is not None and result.report.fp == 0
+        classes = {r["vuln_class"] for r in store.conn.execute(
+            "SELECT vuln_class FROM finding WHERE run_id=?", (run_id,))}
+        assert "xss-dom" in classes                       # M6 confirmed the DOM XSS
+
+
 def test_run_auto_no_ground_truth_requires_categories(tmp_path):
     with Store(tmp_path / "u.db") as store:
         run_id = store.start_run("auto", "h")

@@ -43,6 +43,8 @@ def main(argv: list[str]) -> int:
                    help="Comma-separated categories (manual, or D15 fail-safe)")
     p.add_argument("--identity", default=None,
                    help="Authenticated run as this identity (else anonymous)")
+    p.add_argument("--browser", action="store_true",
+                   help="Enable M6 browser execution (stored/DOM XSS) via Playwright")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
     args = p.parse_args(argv)
@@ -59,10 +61,15 @@ def main(argv: list[str]) -> int:
         counts = import_spider(args.spider_db, store, run_id) if \
             os.path.exists(args.spider_db) else {}
         sender = make_probe_sender(args.base_url, args.identity)
+        browser = None
+        if args.browser:
+            from fuzzlab.tools.browserexec import PlaywrightBrowserExecutor
+            browser = PlaywrightBrowserExecutor()
         try:
             result = run_auto(base_url=args.base_url, store=store, run_id=run_id,
                               sender=sender, mode=args.mode, ground_truth=ground_truth,
-                              selected_categories=selected, points_source=args.points)
+                              selected_categories=selected, points_source=args.points,
+                              browser=browser)
         except RunModeError as exc:
             p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
 

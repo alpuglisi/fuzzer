@@ -11,6 +11,13 @@ import re
 import secrets
 
 from fuzzlab.oracle.baseline import build_baseline
+from fuzzlab.oracle.browser import (
+    SENTINEL,
+    BrowserExecutor,
+    ExecObservation,
+    ExecRequest,
+    StoreStep,
+)
 from fuzzlab.oracle.context import breakout_for, is_unescaped, type_reflection
 from fuzzlab.oracle.probe import Candidate, Sender, Verdict
 
@@ -70,8 +77,13 @@ def _token() -> str:
 class ConfirmationStrategy:
     vuln_class: str = ""
     mechanism: str = ""
+    category: str = ""
 
     def applies(self, candidate: Candidate) -> bool:
+        # Prefer category scoping (a candidate's category can have several strategies,
+        # e.g. reflected/stored/DOM XSS); fall back to vuln_class for direct use.
+        if candidate.category is not None:
+            return candidate.category == self.category
         return candidate.vuln_class in (None, self.vuln_class)
 
     def confirm(self, candidate: Candidate, sender: Sender) -> Verdict | None:  # pragma: no cover
@@ -133,6 +145,7 @@ class ConfirmationStrategy:
 class SqliErrorStrategy(ConfirmationStrategy):
     vuln_class = "sqli"
     mechanism = "error-signature"
+    category = "sql-injection"
     _probes = ("'", '"', "')", "1'")
 
     def confirm(self, candidate, sender):
@@ -150,6 +163,7 @@ class SqliErrorStrategy(ConfirmationStrategy):
 class SqliBooleanStrategy(ConfirmationStrategy):
     vuln_class = "sqli"
     mechanism = "boolean-differential"
+    category = "sql-injection"
 
     @staticmethod
     def _similar(a: str, b: str, rel: float = 0.05, absolute: int = 24) -> bool:
@@ -170,6 +184,7 @@ class SqliBooleanStrategy(ConfirmationStrategy):
 class SqliTimingStrategy(ConfirmationStrategy):
     vuln_class = "sqli"
     mechanism = "differential-timing"
+    category = "sql-injection"
 
     def confirm(self, candidate, sender):
         return self._confirm_timing(candidate, sender, _TIMING_TEMPLATES)
@@ -178,6 +193,7 @@ class SqliTimingStrategy(ConfirmationStrategy):
 class ReflectedXssStrategy(ConfirmationStrategy):
     vuln_class = "xss-reflected"
     mechanism = "reflected-context"
+    category = "xss"
 
     def confirm(self, candidate, sender):
         token = _token()
@@ -201,6 +217,7 @@ class OpenRedirectStrategy(ConfirmationStrategy):
     """M9: the parameter controls the redirect target (Location or meta refresh)."""
     vuln_class = "open-redirect"
     mechanism = "redirect-target-control"
+    category = "open-redirect"
 
     @staticmethod
     def _header(probe, name):
@@ -224,6 +241,7 @@ class SstiStrategy(ConfirmationStrategy):
     """M4: a template expression is evaluated server-side (product appears, not the literal)."""
     vuln_class = "ssti"
     mechanism = "evaluation-marker"
+    category = "server-side-template-injection"
 
     def confirm(self, candidate, sender):
         a, b = secrets.randbelow(900) + 100, secrets.randbelow(900) + 100
@@ -240,6 +258,7 @@ class PathTraversalStrategy(ConfirmationStrategy):
     """M7: a file-content marker (/etc/passwd) appears in the response."""
     vuln_class = "file-inclusion"
     mechanism = "file-content-marker"
+    category = "file-inclusion"
 
     def confirm(self, candidate, sender):
         for payload in _TRAVERSAL_PAYLOADS:
@@ -252,20 +271,88 @@ class CommandInjectionStrategy(ConfirmationStrategy):
     """M1 (timing): a shell `sleep` executes, latency rising with the requested delay."""
     vuln_class = "command-injection"
     mechanism = "differential-timing"
+    category = "command-injection"
 
     def confirm(self, candidate, sender):
         return self._confirm_timing(candidate, sender, _CMDI_TIMING_TEMPLATES)
 
 
-def default_strategies() -> list[ConfirmationStrategy]:
-    """Cheapest/strongest first, per class. `applies()` scopes each to its vuln_class."""
+# --- browser-execution XSS (M6): stored + DOM. Need an injected BrowserExecutor. ---
+def _xss_exec_payloads(token: str) -> list[str]:
+    """Payloads that, if they execute, call the sentinel with the token."""
+    call = f"{SENTINEL}('{token}')"
+    return [
+        f"<img src=x onerror=\"{call}\">",
+        f"\"><img src=x onerror=\"{call}\">",
+        f"<svg onload=\"{call}\">",
+        f"<script>{call}</script>",
+    ]
+
+
+class _BrowserXssStrategy(ConfirmationStrategy):
+    """Shared M6 logic: place a tokened payload, execute in a browser, confirm on fire."""
+    category = "xss"
+
+    def __init__(self, executor: BrowserExecutor | None = None):
+        self._executor = executor
+
+    def _observe(self, candidate: Candidate, payload: str, token: str) -> ExecObservation:
+        raise NotImplementedError
+
+    def confirm(self, candidate, sender):
+        if self._executor is None:
+            return None                       # no browser available -> cannot confirm
+        for payload in _xss_exec_payloads((token := _token())):
+            obs = self._observe(candidate, payload, token)
+            if obs.executed:
+                return Verdict(True, self.vuln_class, self.mechanism,
+                               {"payload": payload, "detail": obs.detail})
+        return None
+
+
+class DomXssStrategy(_BrowserXssStrategy):
+    """M6: payload in the URL (query/fragment) executes client-side (no server round-trip)."""
+    vuln_class = "xss-dom"
+    mechanism = "browser-execution"
+
+    def _observe(self, candidate, payload, token):
+        location = candidate.location if candidate.location in ("query", "fragment") else "query"
+        return self._executor.run(
+            ExecRequest(url=candidate.url, param=candidate.param, value=payload,
+                        location=location), token)
+
+
+class StoredXssStrategy(_BrowserXssStrategy):
+    """M6: payload stored via one request, executes when the render page is loaded."""
+    vuln_class = "xss-stored"
+    mechanism = "browser-execution"
+
+    def _observe(self, candidate, payload, token):
+        if not candidate.store_url:
+            return ExecObservation(False)     # need the store endpoint (source_url)
+        store = StoreStep(url=candidate.store_url, param=candidate.store_param or candidate.param,
+                          value=payload, method=candidate.store_method,
+                          location=candidate.store_location)
+        return self._executor.run(ExecRequest(url=candidate.url, store=store), token)
+
+
+def default_strategies(browser: BrowserExecutor | None = None) -> list[ConfirmationStrategy]:
+    """Cheapest/strongest first, per category. `applies()` scopes each to its category.
+
+    The M6 browser strategies are included with the injected ``browser`` (or without,
+    in which case they no-op — stored/DOM XSS stays unconfirmed until a browser is set).
+    """
     return [SqliErrorStrategy(), SqliBooleanStrategy(), SqliTimingStrategy(),
-            ReflectedXssStrategy(), OpenRedirectStrategy(), SstiStrategy(),
+            ReflectedXssStrategy(), DomXssStrategy(browser), StoredXssStrategy(browser),
+            OpenRedirectStrategy(), SstiStrategy(),
             PathTraversalStrategy(), CommandInjectionStrategy()]
 
 
 # Reference-style category -> the oracle vuln_class we have a strategy for.
 # Categories absent here have no confirmer yet (candidate emitted, not confirmed).
+# Categories the oracle can confirm -> a representative class (the value is a hint;
+# the pipeline scopes strategies by `category`, and 'xss' fans out to reflected +
+# stored + DOM). A category absent here has no confirmer yet.
 _CATEGORY_TO_CLASS = {
     "sql-injection": "sqli",
     "xss": "xss-reflected",

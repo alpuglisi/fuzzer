@@ -3,6 +3,49 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0013 — M6 browser execution: stored + DOM XSS (2026-09-21)
+- Change: added the browser-execution mechanism (M6). New `fuzzlab/oracle/browser.py`
+  seam — `BrowserExecutor` protocol, `ExecRequest`/`StoreStep`/`ExecObservation`, a
+  shared `SENTINEL`, and a `FakeBrowserExecutor` for offline tests. New strategies
+  `DomXssStrategy` (`xss-dom`) and `StoredXssStrategy` (`xss-stored`), category `xss`,
+  that build a tokened payload calling the sentinel and confirm only when the token
+  actually *fires* in the browser (execution, not reflection — fail-closed). The live
+  `PlaywrightBrowserExecutor` is `fuzzlab/tools/browserexec.py` (on-host; lazy import).
+  Strategies are now scoped by `Candidate.category` (a category can have several
+  strategies; `applies()` falls back to `vuln_class` for direct use), so the `xss`
+  category fans out to reflected + DOM + stored. `Oracle(browser=...)`,
+  `run_pipeline(browser=...)`, `run_auto(browser=...)`, and `fuzzlab auto --browser`
+  thread the executor through; `Candidate` gained `category` and stored-XSS
+  `store_url`/`store_param`. `auto`'s ground-truth sourcing includes the DOM points
+  when a browser is present (else they stay skipped), and `R-XSS-REFLECT` now nominates
+  on `fragment` too (CC-AUD-0012) so DOM fragment points get candidates.
+- Impact (other components / project): closes the DOM-XSS detection gap — `auto
+  --browser --ground-truth` now confirms `reviews.php#author` and `feedback.php?ref`.
+  Without `--browser` nothing changes (M6 no-ops → those stay fn), so the existing
+  benchmark is unaffected. Stored XSS (`profile.php` via `edit_profile`) has a working
+  strategy but needs the point→case source_url to populate `store_url`; auto-wiring
+  that is a follow-up (the injection-points contract has no source_url), so stored XSS
+  is still fn in auto for now.
+- Risk (level; mitigation): medium — M6 drives a real browser and, when enabled, runs
+  a DOM probe on every non-reflecting xss candidate (the oracle tries reflected first,
+  so server-reflected params short-circuit). The oracle stays fail-closed (only a
+  fired token confirms → no FP on escaped pages). Mitigated by the injected seam
+  (offline-tested), lab-only/loopback usage, and tests: DOM confirm/fail-closed/no-
+  browser/ fragment-placement, stored store-then-observe + needs-store-endpoint,
+  oracle-with-browser writes an `xss-dom` finding, and `auto --browser` confirms the
+  DOM points with fp=0. Suite 154 passed / 2 skipped.
+- Deliverables:
+  - [x] `oracle/browser.py` seam + fake; DomXss/StoredXss strategies — done.
+  - [x] Category-scoped `applies`; `Candidate.category`/store fields — done.
+  - [x] browser threaded through Oracle/pipeline/auto + `--browser`; live executor — done.
+  - [x] Tests (`tests/test_oracle_browser.py`, auto browser path) — done.
+  - [ ] Live run with `--browser` on the host (Playwright) — on-host.
+  - [ ] Stored-XSS auto-wiring: map points→cases to fill `store_url` — follow-up.
+- Effectiveness (assessed 2026-09-21): effective in tests — DOM XSS confirms via a
+  fired sentinel and writes an `xss-dom` finding; escaped pages are not confirmed; the
+  `auto --browser` benchmark picks up the DOM points with fp=0. Live Playwright run and
+  stored-XSS wiring pending.
+
 ### CC-FUZZ-0012 — Four more deterministic oracle vectors (2026-09-21)
 - Change: added `ConfirmationStrategy` classes for four more injection classes, each
   fail-closed and confirming on a positive marker: **open redirect** (M9 —

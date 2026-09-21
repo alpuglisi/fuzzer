@@ -18,32 +18,33 @@ from fuzzlab.core.runmode import RunModeError, categories_from_vuln_classes, res
 from fuzzlab.harness.pipeline import PipelineResult, run_pipeline
 
 
-def points_from_ground_truth(ground_truth, base_url: str):
+def points_from_ground_truth(ground_truth, base_url: str, browser_available: bool = False):
     """Injection points from the enumerated ground-truth contract (detection benchmark).
 
     Returns ``(points, skipped)``. Server-rendered **GET query** and **POST body**
-    params are audited (the probe sender handles both). Client-only/DOM and
-    non-query/body points are returned as ``skipped`` (path, method, param, reason) —
-    they need browser execution (M6), so the gap is explicit rather than a silent
-    miss and they score as false negatives until M6 lands.
+    params are always audited. Client-only/DOM points (fragment, ``client_only``, or
+    ``rendering=js``) are audited only when a **browser** is available (M6); otherwise
+    they are returned as ``skipped`` (path, method, param, reason) so the gap is
+    explicit and they score as false negatives until a browser is provided.
     """
     base = base_url.rstrip("/")
     points: list[InjectionPoint] = []
     skipped: list[tuple[str, str, str, str]] = []
     for gp in ground_truth.points:
         path = gp.url if gp.url.startswith("/") else "/" + gp.url
-        testable = (gp.method.upper() in ("GET", "POST")
-                    and gp.location in ("query", "body")
-                    and not gp.client_only and (gp.rendering or "") != "js")
-        if testable:
+        is_dom = (gp.client_only or (gp.rendering or "") == "js"
+                  or gp.location == "fragment")
+        if not is_dom and gp.method.upper() in ("GET", "POST") \
+                and gp.location in ("query", "body"):
             points.append(InjectionPoint(url=base + path, param=gp.param,
                                          method=gp.method.upper(), location=gp.location))
+        elif is_dom and browser_available:
+            loc = gp.location if gp.location in ("query", "fragment") else "query"
+            points.append(InjectionPoint(url=base + path, param=gp.param,
+                                         method="GET", location=loc))
         else:
-            if gp.client_only or (gp.rendering or "") == "js":
-                reason = "client-only/DOM (needs browser execution, M6)"
-            else:
-                reason = f"location={gp.location} (needs browser execution, M6)"
-            skipped.append((path, gp.method, gp.param, reason))
+            skipped.append((path, gp.method, gp.param,
+                            "client-only/DOM (needs browser execution, M6)"))
     return points, skipped
 
 
@@ -94,13 +95,14 @@ class _CountingSender:
 
 def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automatic",
              ground_truth=None, selected_categories=None, points_source: str = "auto",
-             pages_html: dict[str, str] | None = None) -> PipelineResult:
+             pages_html: dict[str, str] | None = None, browser=None) -> PipelineResult:
     """Resolve the plan (D14/D15) and run the Phase 2 pipeline.
 
     ``points_source``: ``"ground-truth"`` audits the enumerated contract points (a
     detection benchmark, decoupled from crawl coverage); ``"crawl"`` audits what the
     crawl discovered (a discovery run); ``"auto"`` (default) picks ground-truth when a
-    contract is present, else crawl.
+    contract is present, else crawl. ``browser`` (a `BrowserExecutor`) enables M6
+    stored/DOM XSS confirmation and, for ground-truth sourcing, the DOM points.
     """
     source = points_source
     if source == "auto":
@@ -110,7 +112,8 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     if source == "ground-truth":
         if ground_truth is None:
             raise RunModeError("points_source='ground-truth' requires a ground-truth contract")
-        points, skipped = points_from_ground_truth(ground_truth, base_url)
+        points, skipped = points_from_ground_truth(
+            ground_truth, base_url, browser_available=browser is not None)
     else:
         points = injection_points_from_store(store, run_id, base_url)
 
@@ -126,7 +129,7 @@ def run_auto(*, base_url: str, store, run_id: int, sender, mode: str = "automati
     counting = _CountingSender(sender)
     result = run_pipeline(points, store, run_id, counting, plan,
                           ground_truth=ground_truth, pages_html=pages_html,
-                          budget=counting)
+                          budget=counting, browser=browser)
     result.metrics["points_source"] = source
     result.metrics["skipped_points"] = skipped
     return result

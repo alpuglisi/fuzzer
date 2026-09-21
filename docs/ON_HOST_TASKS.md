@@ -45,9 +45,13 @@ The `fuzzlab auto --ground-truth` benchmark tests all enumerated points and list
 it can't yet confirm. These are scoped capabilities, not bugs:
 - [x] **POST-body injection** in the probe sender/oracle (CC-FUZZ-0011) — the benchmark
   now audits the 16 POST points; the oracle probes them over POST with a form body.
-- [ ] **Browser-execution (M6)** for stored + DOM XSS (`profile.php` stored via
-  `edit_profile`, `reviews.php#author`, `feedback.php?ref`) — needs Playwright
-  execution in the oracle (planned with Phase 3 grey-box or as an oracle M6 addition).
+- [x] **Browser-execution (M6)** built (CC-FUZZ-0013): DOM + stored XSS strategies
+  behind an injected `BrowserExecutor`, offline-tested. Live pieces remain:
+  - [ ] Run `fuzzlab auto --browser` on the host (drives the live
+    `PlaywrightBrowserExecutor`) to confirm `reviews.php#author` + `feedback.php?ref`.
+  - [ ] **Stored-XSS auto-wiring:** map ground-truth points→cases to fill the
+    candidate's `store_url`/`store_param` (source_url), so `profile.php` stored XSS is
+    confirmed (the strategy already works given the store endpoint).
 
 ## Phase 3 — grey-box live sources + validation
 

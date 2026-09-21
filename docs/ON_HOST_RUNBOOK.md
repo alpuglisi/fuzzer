@@ -124,6 +124,16 @@ negatives → oracle confirm → target fingerprint → score → request metric
    add_to_cart), so `./labctl.sh reset` between benchmark runs for clean, comparable
    results. For a **discovery run** (measures the whole tool incl. crawl coverage) use
    `--points crawl`.
+
+   **DOM/stored XSS (M6):** add `--browser` to also audit the client-only/DOM points
+   via a real headless browser (Playwright):
+   ```bash
+   fuzzlab auto --base-url http://127.0.0.1:8080 --spider-db spider_results.db \
+                --store auto.db --ground-truth lab/ground-truth --browser --authorized
+   ```
+   This confirms `reviews.php#author` and `feedback.php?ref` (xss-dom); the "not
+   audited" list should then be empty. (Stored XSS on `profile.php` still needs the
+   point→case store-endpoint wiring — a follow-up.)
 2. **Fail-safe check (D15):** point automatic mode at a target with **no**
    `--ground-truth` and no `--categories` — it must refuse loudly:
    ```bash

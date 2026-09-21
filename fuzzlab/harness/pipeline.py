@@ -56,7 +56,8 @@ def _dedup(points: list[InjectionPoint], pages_html: dict[str, str]) -> list[Inj
 
 def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                  plan: RunPlan, ground_truth=None,
-                 pages_html: dict[str, str] | None = None, budget=None) -> PipelineResult:
+                 pages_html: dict[str, str] | None = None, budget=None,
+                 browser=None) -> PipelineResult:
     if pages_html:
         points = _dedup(points, pages_html)
 
@@ -77,18 +78,20 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     counts = evaluate(points, store, run_id, categories=plan.categories)
 
     # Confirm each candidate with the oracle (sole finding-writer).
-    oracle = Oracle(store=store, run_id=run_id)
+    oracle = Oracle(store=store, run_id=run_id, browser=browser)
     rows = store.conn.execute(
         "SELECT evidence FROM candidate WHERE run_id=?", (run_id,)).fetchall()
     for row in rows:
         ev = json.loads(row["evidence"])
-        oracle_class = category_to_oracle_class(ev.get("category", ""))
-        if oracle_class is None:
-            continue                                     # no confirmer for this class yet
+        category = ev.get("category", "")
+        if category_to_oracle_class(category) is None:
+            continue                                     # no confirmer for this category yet
         oracle.confirm(Candidate(url=ev["url"], param=ev["param"],
                                  method=ev.get("method", "GET"),
                                  location=ev.get("location", "query"),
-                                 vuln_class=oracle_class), sender)
+                                 category=category,
+                                 store_url=ev.get("store_url"),
+                                 store_param=ev.get("store_param")), sender)
 
     findings = store.conn.execute(
         "SELECT COUNT(*) c FROM finding WHERE run_id=?", (run_id,)).fetchone()["c"]

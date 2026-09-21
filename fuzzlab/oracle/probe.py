@@ -21,9 +21,15 @@ class Candidate:
     url: str
     param: str
     method: str = "GET"
-    location: str = "query"                    # query | body | ...
+    location: str = "query"                    # query | body | fragment | ...
     vuln_class: str | None = None              # hint; None -> strategies self-select
     sink_context: str | None = None            # from the auditor's typing, if known
+    category: str | None = None                # reference category; scopes strategies
+    # Stored-XSS: where the payload is planted before it renders on `url` (M6).
+    store_url: str | None = None
+    store_param: str | None = None
+    store_method: str = "POST"
+    store_location: str = "body"
 
 
 @dataclass
