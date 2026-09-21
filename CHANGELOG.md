@@ -21,6 +21,8 @@ Format per entry: `- <area>: <what changed> — <why>` (commit `<hash>`).
   and ML with cell/transform splits and a blind holdout), added env pinning to
   D7, added a parallel Lab track to the roadmap, and updated the ground-truth
   component and evaluation principle in the architecture and roadmap docs.
+- Planning: added `docs/PHASE_0_PLAN.md` (foundations task breakdown) and chose a
+  containerized lab environment for reproducibility and easy resets.
 
 ## 2026-09-20
 
