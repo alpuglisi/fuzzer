@@ -53,6 +53,43 @@ class CookieLoginFetcher:
         return dict(self._cookies)
 
 
+class AnonCookieLoginFetcher:
+    """Models PHP's session_start(): a PHPSESSID cookie is set on the FIRST GET,
+    before any login, so the fetcher's jar is non-empty even when login FAILS.
+
+    This is the real-world shape that BUG-0008 exposed and that CookieLoginFetcher
+    did not model (it only set a cookie inside a *successful* post). A rejected login
+    re-renders the login form (HTTP 200, password field present); a successful login
+    leaves the login page (here: a welcome page)."""
+
+    def __init__(self):
+        self.logged_in = False
+        self._cookies: dict[str, str] = {}
+        self.post_count = 0
+
+    def get(self, url, headers=None):
+        self._cookies.setdefault("PHPSESSID", "anon-sess")   # set on EVERY page
+        if url.endswith("/login.php"):
+            return FetchResponse(200, {}, LOGIN_HTML)
+        if self.logged_in:
+            return FetchResponse(200, {}, "<html>welcome admin</html>")
+        return FetchResponse(200, {}, "<html>home</html>")    # base_url is public
+
+    def post(self, url, data=None, headers=None):
+        self.post_count += 1
+        self._cookies.setdefault("PHPSESSID", "anon-sess")
+        data = data or {}
+        if (data.get("username") == "admin" and data.get("password") == "admin123"
+                and data.get("user_token") == "abc123"):
+            self.logged_in = True
+            self._cookies["PHPSESSID"] = "authed-sess"        # session fixation aside
+            return FetchResponse(200, {}, "<html>welcome</html>")
+        return FetchResponse(200, {}, LOGIN_HTML)             # re-render on bad creds
+
+    def cookies(self):
+        return dict(self._cookies)
+
+
 class BearerLoginFetcher:
     def __init__(self, token):
         self.token = token
@@ -114,6 +151,30 @@ def test_wrong_credentials_fail_loud():
                          fetch_factory=_factory(CookieLoginFetcher()))
     with pytest.raises(SessionAuthError):
         mgr.ensure("localhost", "admin", "http://localhost")
+
+
+def test_anon_cookie_does_not_mask_failed_login():
+    """BUG-0008: an anonymous session cookie set before login must NOT be mistaken
+    for a successful authentication. With wrong creds the login POST re-renders the
+    login form, so ensure() must fail loud even though the jar holds a PHPSESSID."""
+    store = CredentialStore(backend=FakeBackend())
+    store.set("localhost", "admin", "admin", "WRONG")
+    fetcher = AnonCookieLoginFetcher()
+    mgr = SessionManager(store, scope_hosts=["localhost"],
+                         fetch_factory=_factory(fetcher))
+    with pytest.raises(SessionAuthError):
+        mgr.ensure("localhost", "admin", "http://localhost")
+    assert fetcher.cookies() == {"PHPSESSID": "anon-sess"}   # only the anon cookie
+
+
+def test_anon_cookie_still_allows_real_login():
+    """The BUG-0008 guard must not break a genuine login that happens to have an
+    anonymous cookie in the jar first: correct creds still authenticate."""
+    mgr = SessionManager(_store(), scope_hosts=["localhost"],
+                         fetch_factory=_factory(AnonCookieLoginFetcher()))
+    state = mgr.ensure("localhost", "admin", "http://localhost")
+    assert state.valid and state.kind == "cookie"
+    assert state.cookies == {"PHPSESSID": "authed-sess"}     # the post-login cookie
 
 
 def test_no_login_form_fails_loud():

@@ -40,3 +40,12 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   point) to make a downstream step succeed — that masks a wiring gap. A rule or step
   keys only on what is available at its stage; anything derived later belongs to the
   stage that derives it. (from BUG-0006)
+- **PA-0007** — Never infer authentication or authorization success from the mere
+  presence of an *ambient* credential the server also issues to anonymous users (a
+  session cookie set by `session_start()`, an ambient CSRF/anti-forgery token, etc.).
+  Require a *positive differential* signal that the protected action actually succeeded
+  — the login response left the login page behind, a page that is `401/403` when
+  anonymous now returns `2xx`, or an identity-specific marker is present. Test fixtures
+  for auth/detection code must reproduce the server's ambient state (e.g. a pre-login
+  anonymous cookie), not only the happy path, or a broken success path looks healthy
+  (a recurrence vector of PA-0006). (from BUG-0008)

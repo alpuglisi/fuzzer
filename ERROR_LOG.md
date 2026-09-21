@@ -14,6 +14,26 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — Any credentials "authenticated" (BUG-0008): login success inferred from an anonymous cookie
+
+- **Symptom:** `fuzzlab session print`/`crawl --identity admin` reported a `PHPSESSID`
+  cookie and "authenticated as admin (1 cookie(s))" for *any* username/password —
+  including a nonexistent user and mismatched identities (`broken_auth.txt`).
+- **Root cause:** `SessionManager._login` treated the presence of a session cookie as
+  proof of login. PHP's `session_start()` sets an anonymous `PHPSESSID` on the first
+  GET (before login), so the jar was non-empty even on a *failed* login; and
+  `_verify_authenticated` only checked that `base_url` (the public homepage) was "not a
+  login page", which is always true. So auth success was inferred from an *ambient*
+  credential the server hands to anonymous users too — a toolkit false-positive, **not**
+  the lab's intended (SQLi-based) auth bypass, which plain wrong creds do not trigger.
+- **Remediation:** `_login` now fails loud when the login POST response is still a login
+  page (`is_login_page`) or is `401/403`, before inspecting cookies — a positive
+  differential signal is required. On the lab, wrong creds now error (form re-rendered)
+  and correct creds still succeed (redirect to `profile.php`). Regression tests model
+  `session_start()`'s pre-login cookie (`AnonCookieLoginFetcher`). Full RCA in
+  `docs/bugs/BUG-0008-login-success-inferred-from-anonymous-cookie.md`; rule PA-0007.
+- **Status:** Fixed (this commit). See CC-SESS-0008. Suite 394 passed / 4 skipped.
+
 ## 2026-09-21 — Credential host-key mismatch (BUG-0007) + ground-truth path traceback
 
 - **Symptom (1):** `fuzzlab crawl --identity admin` failed with `CredentialError: no

@@ -217,6 +217,17 @@ class SessionManager:
                 f"capture via the proxy post-Phase 6)"
             )
         resp = fetcher.post(form.action_url, data=form.fill(cred.username, cred.password))
+        # A rejected login re-renders the login form (or answers 401/403). The mere
+        # presence of a session cookie is NOT proof of authentication: servers hand an
+        # anonymous session cookie to everyone (e.g. PHP's session_start() runs on every
+        # page, so the fetcher's jar already holds a PHPSESSID from _discover_login_form's
+        # GET, before any credentials are sent). Require a positive signal that the login
+        # response left the login page behind before trusting the cookie. (BUG-0008)
+        if resp.status in (401, 403) or detect.is_login_page(resp.text):
+            raise SessionAuthError(
+                f"login for {identity}@{host} was rejected: credentials wrong, or the "
+                f"login response was still a login page (status {resp.status})"
+            )
         detected = detect.detect_session_credential(
             resp.status, resp.headers, resp.text, cookies=fetcher.cookies())
         if detected is None:
@@ -263,7 +274,16 @@ class SessionManager:
 
     def _verify_authenticated(self, fetcher: Fetcher, base_url: str,
                               state: SessionState) -> bool:
-        """Differential success: a protected probe is no longer a login page."""
+        """Secondary sanity check that the session is usable.
+
+        The primary login-success decision is made in ``_login`` from the login
+        POST response (a rejected login re-renders the login form / answers
+        401/403). This is a follow-up probe with the established session: it must
+        not bounce to an auth challenge or land back on a login page. It probes
+        ``base_url`` (often public), so it is a guard against an outright-broken
+        session, not proof of authentication on its own — hence the POST-response
+        check upstream carries the weight (BUG-0008).
+        """
         probe = fetcher.get(base_url, headers=state.headers or None)
         if probe.status in (401, 403):
             return False

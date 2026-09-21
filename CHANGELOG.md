@@ -13,6 +13,17 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Fix (BUG-0008, auth correctness): the session manager no longer treats the presence of
+  a session cookie as proof of login. PHP's `session_start()` issues an anonymous
+  `PHPSESSID` on the first GET, so the login fetcher's jar was non-empty even on a *failed*
+  login and any credentials "authenticated" (the crawler logged "authenticated as admin"
+  for a nonexistent user). `SessionManager._login` now fails loud when the login POST
+  response is still a login page or is `401/403`, before inspecting cookies — a positive
+  differential signal is required (`fuzzlab/session/manager.py`). This is a toolkit
+  false-positive, not the lab's intended SQLi auth-bypass (plain wrong creds don't trigger
+  that). Regression tests model the pre-login anonymous cookie. RCA
+  `docs/bugs/BUG-0008-login-success-inferred-from-anonymous-cookie.md`; rule PA-0007; see
+  CC-SESS-0008. Suite 394 passed / 4 skipped.
 - Docs: expanded `docs/ON_HOST_RUNBOOK.md` — rewrote **Part E** (Phase 3 grey-box) into a
   concrete, followable implementation guide (pcov + coverage shim snippets, the reader
   seams to back, reset, M10 wiring, the exit query), and added **Parts F–L** for the

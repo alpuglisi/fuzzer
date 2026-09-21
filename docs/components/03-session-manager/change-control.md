@@ -3,6 +3,36 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0008 — Fix (BUG-0008): require a positive login-success signal, not an ambient cookie (2026-09-21)
+- Change: `SessionManager._login` now fails loud when the login POST response is still a
+  login page (`detect.is_login_page`) or is `401/403`, **before** inspecting cookies. The
+  mere presence of a session cookie is no longer treated as proof of authentication —
+  PHP's `session_start()` hands an anonymous `PHPSESSID` to everyone on the first GET, so
+  the jar is non-empty even on a failed login. `_verify_authenticated`'s docstring is
+  corrected to describe it as a secondary sanity check (it probes `base_url`, often
+  public); the primary success decision is the POST-response check.
+- Impact (other components / project): closes a high-severity auth-correctness hole where
+  any credentials "authenticated" and tools ran anonymously while logging
+  "authenticated as <id>". The crawler (`spider.py`) and auditor (`fetcher.py`) obtain
+  sessions via `manager.ensure(...)`, so both now inherit the fail-loud behavior with no
+  change of their own. Not the lab's intended (SQLi) auth bypass — a toolkit false
+  positive that would also mis-fire against a secure app. Restores the FR-SESS-6
+  "fail loud, never a silent unauthenticated run" contract for the wrong-credentials case.
+- Risk (level; mitigation): low — the change only *adds* a rejection path; the correct-
+  credentials path is unchanged (the lab redirects to `profile.php`, not a login page).
+  Mitigated by two regression tests (`AnonCookieLoginFetcher` models the pre-login anon
+  cookie: wrong creds fail loud despite the cookie, correct creds still authenticate) and
+  the existing wrong-creds/bearer/basic tests. Suite 394 passed / 4 skipped.
+- Deliverables:
+  - [x] POST-response login-rejection check in `_login` (BUG-0008) — done.
+  - [x] Corrected `_verify_authenticated` docstring — done.
+  - [x] Regression tests for the pre-login anonymous cookie — done.
+  - [x] RCA (`docs/bugs/BUG-0008-*`), PA-0007, ERROR_LOG entry — done.
+- Effectiveness (assessed 2026-09-21): effective in tests — a wrong password no longer
+  authenticates when an anonymous cookie is present, and a correct password still does.
+  Live re-run on the host (wrong creds should now error; `admin`/`admin123` should still
+  authenticate) pending user confirmation.
+
 ### CC-SESS-0007 — Adopt proxy-captured manual sessions (FR-SESS-11) (Phase 6 T6.5) (2026-09-21)
 - Change: implemented `SessionManager.adopt(state)` — the session manager can now take
   a `SessionState` captured by the proxy from a **manual browser login**
