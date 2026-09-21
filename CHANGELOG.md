@@ -14,6 +14,16 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (LAB, T-LAB0.3, CR-LAB-0001/D20): `fuzzlab/labgen/resolver.py` — a real
+  covering-array expansion engine over `covertable` 3.2.0 (exact-pinned), with an
+  explicit kwargs allowlist (an unrecognized/mistyped option raises instead of
+  being silently ignored by `covertable.make()`'s own `**params`, per PA-0010)
+  and the sorter always pinned to `covertable.sorters.hash`. Supports pairwise
+  (default) and mixed-strength (`sub_models`) expansion plus declarative,
+  JSON-serializable `constraints`. Snapshot-tested against a synthetic axis-set
+  model and verified deterministic across separate processes/`PYTHONHASHSEED`
+  values. Not yet wired into manifest loading — Phase 0's manifest still lists
+  cells explicitly. `CC-LAB-0017`.
 - Decision (LAB, D20 clarification): resolved a conflict between D20 ("migrate the
   hand-built app") and an earlier draft of `docs/LAB_PHASE_0_PLAN.md` (which had read a
   separate "additive-only" instruction as "never remove the hand-built app," and

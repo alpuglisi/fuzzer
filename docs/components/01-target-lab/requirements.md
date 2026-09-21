@@ -1,6 +1,6 @@
 # Target Lab and Ground Truth — Requirement Specification
 
-Component code: **LAB** · Status: `[built app; generator Phase 0 foundation built (schema, verdict engine, determinism/name-leak gates, patterns/ scaffold); rest planned]`
+Component code: **LAB** · Status: `[built app; generator Phase 0 foundation built (schema, verdict engine, determinism/name-leak gates, patterns/ scaffold, covering-array resolver); rest planned]`
 · Last updated: 2026-09-21
 
 Related: `ARCHITECTURE.md` #1; `DECISIONS_AND_ROADMAP.md` (D7, D8, D9, D10);
@@ -105,6 +105,18 @@ and measured. Authorized, lab-only.
   verdict module's source — mechanically enforced. Each card validates
   against `lab/schemas/pattern_card.schema.json` and its `class` must exist
   in the versioned taxonomy. (`CR-LAB-0001` Addendum A, `CC-LAB-0016`)
+- **FR-LAB-17** (Lab track, Phase 0/1 foundation) `fuzzlab.labgen.resolver.expand()`
+  provides real covering-array expansion (pairwise by default, mixed
+  strength via `sub_models`, declarative JSON-serializable `constraints`)
+  over `covertable` 3.2.0, exact-pinned; its own kwargs to `covertable.make()`
+  are validated against an explicit allowlist so an unrecognized/mistyped
+  option raises rather than being silently ignored (`covertable.make()`'s
+  own `**params` behavior), and its sorter is always pinned to
+  `covertable.sorters.hash` rather than relying on the library's default.
+  Deterministic across processes and `PYTHONHASHSEED` values. Not yet wired
+  into manifest loading — the Phase 0 manifest still lists cells explicitly,
+  one axis level each. (`CR-LAB-0001` §3, `docs/LAB_PHASE_0_PLAN.md` T-LAB0.3,
+  `CC-LAB-0017`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
@@ -130,6 +142,10 @@ output/exit info) — see FR-LAB-11. It takes no dependency on and is never
 imported by `fuzzlab.oracle` (the unrelated runtime detection oracle, FUZZ
 component #7); the two are separate tools with separate purposes that happen
 to share the word "oracle".
+(Lab track, generator-build-time) `fuzzlab.labgen.resolver.expand(raw_config)`
+takes a `{factors, strength?, sub_models?, constraints?}` mapping and returns
+a list of `{axis_name: level_value}` rows — see FR-LAB-17. Not yet called
+from `fuzzlab.labgen.schema`'s manifest loading.
 
 ## 6. Dependencies (components)
 None (it is the system under test).

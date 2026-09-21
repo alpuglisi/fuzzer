@@ -23,6 +23,13 @@ dependencies = [
     # imported directly by fuzzlab/labgen/schema.py and verdict.py (PA-0005 —
     # every runtime-imported library must be a declared dependency).
     "PyYAML>=6.0,<7",
+    # Covering-array expansion for the lab generator (T-LAB0.3,
+    # fuzzlab/labgen/resolver.py). Exact-pinned, not a range: a covertable
+    # release can change its array output (sort/tie-break behavior is not a
+    # documented stability guarantee), and this project treats a covertable
+    # version bump as a manifest_version bump (docs/LAB_PHASE_0_PLAN.md
+    # T-LAB0.3) rather than something that should float in silently.
+    "covertable==3.2.0",
     # Credential store (D12): OS keyring + encrypted-file headless fallback.
     # The headless encrypted-file backend is implemented on `cryptography`
     # (Fernet), not PyCrypto; declared explicitly since we import it directly.

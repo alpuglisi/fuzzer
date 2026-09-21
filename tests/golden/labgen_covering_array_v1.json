@@ -1,0 +1,57 @@
+[
+  {
+    "class": "sqli",
+    "sink_context_family": "html_attribute_unquoted",
+    "stack_profile": "php_current"
+  },
+  {
+    "class": "ssrf",
+    "sink_context_family": "sql_string_literal",
+    "stack_profile": "python_fastapi"
+  },
+  {
+    "class": "xss",
+    "sink_context_family": "sql_string_literal",
+    "stack_profile": "node_express"
+  },
+  {
+    "class": "xss",
+    "sink_context_family": "html_body",
+    "stack_profile": "python_fastapi"
+  },
+  {
+    "class": "sqli",
+    "sink_context_family": "html_body",
+    "stack_profile": "node_express"
+  },
+  {
+    "class": "ssrf",
+    "sink_context_family": "html_attribute_unquoted",
+    "stack_profile": "node_express"
+  },
+  {
+    "class": "ssrf",
+    "sink_context_family": "html_body",
+    "stack_profile": "php_current"
+  },
+  {
+    "class": "xss",
+    "sink_context_family": "html_attribute_unquoted",
+    "stack_profile": "python_fastapi"
+  },
+  {
+    "class": "sqli",
+    "sink_context_family": "sql_string_literal",
+    "stack_profile": "php_current"
+  },
+  {
+    "class": "sqli",
+    "sink_context_family": "sql_string_literal",
+    "stack_profile": "python_fastapi"
+  },
+  {
+    "class": "xss",
+    "sink_context_family": "sql_string_literal",
+    "stack_profile": "php_current"
+  }
+]
