@@ -14,6 +14,16 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Process/governance: strengthened the bug protocol with a **recurrence-escalation** step.
+  Before deciding a preventive action, the investigation must now review the other
+  `docs/bugs/` logs and `docs/PREVENTIVE_ACTIONS.md` for a prior occurrence of the same bug
+  or the same root cause; if one is found, it must first document **why the earlier
+  preventive action did not prevent the recurrence** (too narrow / wrong layer / not
+  followed / not enforced) and then choose a new PA that fixes that failure mode and
+  strengthens or supersedes the prior one. Added the two new sections to the required
+  contents + template in `docs/bugs/README.md` and to the bug workflow in `CLAUDE.md`
+  (distinct from PA-0002's codebase sweep: this sweeps the bug history). Governance change
+  — recorded here per the CLAUDE.md convention.
 - Fix (BUG-0010/BUG-0011, on-host proxy): HTTPS interception failed on-host with "Missing
   Authority Key Identifier" and `scripts/proxy_e2e.sh` hung on shutdown. `LocalCA` now
   mints certs strict OpenSSL/browsers accept (CA SKI + keyCertSign; leaf SKI, AKI→CA,

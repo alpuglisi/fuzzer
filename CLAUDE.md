@@ -67,16 +67,25 @@ spec edited in place. Likewise `docs/ARCHITECTURE.md` is kept current, while the
 
 ## Bug workflow (when you fix a code defect)
 
-A single bug produces **all three**, linked to each other:
+A single bug produces the three linked artifacts below (ERROR_LOG ↔ BUG-NNNN ↔ PA-NNNN),
+with a recurrence review (step 3) gating the preventive action:
 
 1. **`ERROR_LOG.md`** — one dated line (symptom / root cause / remediation / status).
 2. **`docs/bugs/BUG-NNNN-<slug>.md`** — the rigorous RCA: description, where encountered,
    what it caused to fail, what the defect was, root-cause analysis (e.g. Five Whys ending
-   in the root cause), corrective action (reference the commit / CC entry), preventive
-   action. See `docs/bugs/README.md` for the required contents.
-3. **`docs/PREVENTIVE_ACTIONS.md`** — add the preventive rule(s) derived from the root
-   cause, and then **sweep the codebase for other instances of that bug class and
-   remediate them** (that sweep is itself a rule, PA-0002).
+   in the root cause), corrective action (reference the commit / CC entry), then the
+   recurrence review and preventive action below. See `docs/bugs/README.md` for the full
+   required contents.
+3. **Recurrence review (before deciding the preventive action).** Review the other
+   `docs/bugs/` logs **and** `docs/PREVENTIVE_ACTIONS.md` for a prior occurrence of the
+   same bug, or a different bug with the same root cause. If you find one, first write a
+   **prior-preventive-action failure analysis** in the bug doc — why the earlier PA did
+   not prevent this recurrence (too narrow / wrong layer / not followed / not enforced),
+   naming the prior BUG-NNNN and PA-NNNN — and only then decide the new PA, which must fix
+   that failure mode and **strengthen or supersede** the prior PA, not restate it.
+4. **`docs/PREVENTIVE_ACTIONS.md`** — add the preventive rule(s) derived from the root
+   cause (and, on a recurrence, from step 3), and then **sweep the codebase for other
+   instances of that bug class and remediate them** (that sweep is itself a rule, PA-0002).
 
 The three cross-reference each other (ERROR_LOG ↔ BUG-NNNN ↔ PA-NNNN). Do not stop at the
 ERROR_LOG line — that is the exact corner that has been cut before.
