@@ -3,6 +3,28 @@
 Component code: **PLUG**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PLUG-0004 — register_payload_source consumer (payload pool) (2026-09-21)
+- Change: wired the last hook end-to-end. `fuzzlab/mutation/payloads.py::PayloadPool`
+  aggregates seed payloads per vuln class from a small built-in catalog plus any plugin
+  **payload sources** (`register_payload_source`, objects with `payloads_for(vuln_class,
+  sink_context)`), deduped and contained (a bad source is skipped). `PayloadPool.from_plugins`
+  folds in `PluginManager.payload_sources()`, and `MutationSearch.search_pool(pool, …)`
+  consumes it — plugin-contributed payloads become the bases the mutation engine evolves
+  against a filter. This closes the T10.2 follow-up: all seven FR-PLUG-2 hooks now have a
+  consumer.
+- Impact (other components / project): a plugin can now extend the toolkit's payload
+  catalog without core edits, feeding the Phase 8 mutation search. Built-ins keep the pool
+  useful with zero plugins. No store or dependency change.
+- Risk (level; mitigation): low — additive, contained (bad sources skipped), advisory.
+  Mitigated by 5 tests (`tests/test_mutation_payloads.py`): built-ins present + unknown
+  class empty; sources merge + dedupe (built-ins first); a raising source is skipped;
+  `from_plugins` collects `register_payload_source`; `search_pool` runs one search per
+  seed. Suite 390 passed / 4 skipped.
+- Deliverables:
+  - [x] `PayloadPool` + `from_plugins` + `MutationSearch.search_pool` — done.
+- Effectiveness (assessed 2026-09-21): effective in tests — plugin payload sources flow
+  through the pool into the mutation search; all seven hooks are now consumed.
+
 ### CC-PLUG-0003 — Hooks wired into the pipeline (T10.2) (2026-09-21)
 - Change: attached the hooks at their real seams, all no-ops with zero plugins (D6).
   `core/http.py::HttpClient` takes an optional `plugins` and fires **on_request** (folded,

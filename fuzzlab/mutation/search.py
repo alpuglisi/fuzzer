@@ -105,3 +105,14 @@ class MutationSearch:
                 best.steps = step
                 break
         return best
+
+    def search_pool(self, pool, vuln_class: str = "sql-injection",
+                    sink_context: str | None = None) -> list["SearchResult"]:
+        """Run the search over every seed payload a `PayloadPool` provides for the class.
+
+        This is the consumer for the `register_payload_source` plugin hook: plugin-
+        contributed payloads (plus the built-ins) become the bases the mutation engine
+        evolves against the filter. Returns one result per seed.
+        """
+        return [self.search(seed, vuln_class)
+                for seed in pool.payloads(vuln_class, sink_context)]

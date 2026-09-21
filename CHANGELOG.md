@@ -13,6 +13,12 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 10 (follow-up): wired the last plugin hook — `register_payload_source` — end to
+  end. `mutation/payloads.py::PayloadPool` aggregates seed payloads per vuln class from
+  built-ins + plugin payload sources (deduped, bad sources skipped); `PayloadPool.from_plugins`
+  folds in `PluginManager.payload_sources()`, and `MutationSearch.search_pool` evolves each
+  seed against the filter. All seven FR-PLUG-2 hooks now have a consumer. +5 tests
+  (390 passed / 4 skipped). Change-control: CC-PLUG-0004.
 - Phase 10 (T10.5): added the **multi-target evaluation harness**
   (`fuzzlab/harness/multitarget.py`). `run_targets` runs the pipeline against several
   `TargetSpec`s (base-url + ground-truth) via an injected `sender_for` seam;

@@ -379,7 +379,7 @@ tracked in the requirements files, not here.
   separated from the vulnerable target (different origin/port; never in the
   target's web root), so the control plane is never itself an attack surface.
 
-### 13. Plugin system `[built; register_payload_source consumer pending]` (Phase 10)
+### 13. Plugin system `[built]` (Phase 10)
 - **Registry + hooks** `[built]` (`fuzzlab/plugins/`): `importlib.metadata` entry-point
   discovery, a `HookRegistry` with the seven hooks (`on_request`, `on_response`,
   `on_candidate`, `on_finding`, `register_rules`, `register_payload_source`,
@@ -390,8 +390,8 @@ tracked in the requirements files, not here.
 - **Pipeline attachment** `[built]` (T10.2): `on_request`/`on_response` at the HTTP seam
   (`core/http.py`), `register_rules`/`on_candidate` in the auditor, `register_oracle`/
   `on_finding` in the oracle; `plugins` threads through `run_pipeline`/`run_auto`
-  (`fuzzlab auto --plugins`). `register_payload_source` is collectable; its fuzz/mutation
-  payload-pool consumer is a follow-up.
+  (`fuzzlab auto --plugins`). `register_payload_source` is consumed by the mutation
+  engine's `PayloadPool` (`MutationSearch.search_pool`) — all seven hooks are wired.
 - **Depends on (components):** `core/`.
 - **Consumed by:** ML components, extra rules, and custom oracles.
 
@@ -491,7 +491,7 @@ replays and edits, including a raw byte path for malformed-traffic study.
 
 ## Build-status snapshot
 
-Suite: 385 passed / 4 skipped (the skips need a native build unavailable in the sandbox:
+Suite: 390 passed / 4 skipped (the skips need a native build unavailable in the sandbox:
 2 credential-store tests, the proxy real-CA minting test, and the mutation engine's
 `sqlglot` AST test). Everything below is offline-complete unless an on-host item is named.
 
@@ -548,8 +548,8 @@ Suite: 385 passed / 4 skipped (the skips need a native build unavailable in the 
   - **Plugin system (Phase 10):** the `HookRegistry` (7 hooks, priority, contain-log-
     disable isolation, oracle/advisory-split guard), entry-point discovery, `PluginManager`,
     `run_plugin` recording (migration 10), and the pipeline wiring (T10.2 — HTTP seam,
-    auditor, oracle; `fuzzlab auto --plugins`) are built; a `register_payload_source`
-    consumer remains (and the live transfer run, T10.6, is on-host).
+    auditor, oracle; `fuzzlab auto --plugins`) and the `register_payload_source` consumer
+    (mutation `PayloadPool`) are built — all seven hooks wired.
   - **Oracle mechanisms:** M8 (out-of-band) and M10 (grey-box) still to build.
   - **Intercepting proxy (Phase 6):** the full offline stack is built — byte-exact
     dual-path core (`RawMessage` + `h11`), scope, match-and-replace, flow history
@@ -564,5 +564,5 @@ Suite: 385 passed / 4 skipped (the skips need a native build unavailable in the 
   desync exit (T9.6); Phase 10 live transfer run against a second/external target (T10.6);
   live `--browser`/`--bandit`/`--score`/`--rank` runs and stored-XSS session-to-browser
   wiring — all tracked in `docs/ON_HOST_TASKS.md`.
-- `[planned]`: a `register_payload_source` consumer (fuzz/mutation payload pool) and the
-  manifest-driven lab generator (Lab track, the eventual option-C second target).
+- `[planned]`: the manifest-driven lab generator (Lab track, the eventual option-C second
+  target).

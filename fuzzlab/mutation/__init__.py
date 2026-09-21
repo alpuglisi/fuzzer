@@ -18,6 +18,7 @@ from fuzzlab.mutation.learn import Bypass, FilterLearner
 from fuzzlab.mutation.llm import LlmExpander
 from fuzzlab.mutation.operators import (MutationOperator, apply_chain,
                                         default_operators)
+from fuzzlab.mutation.payloads import PayloadPool, PayloadSource
 from fuzzlab.mutation.search import MutationSearch, SearchResult
 from fuzzlab.mutation.semantics import SemanticsValidator, canonicalize
 from fuzzlab.mutation.xss import context_from_sink, xss_payloads
@@ -36,6 +37,8 @@ __all__ = [
     "Bypass",
     "MutationSearch",
     "SearchResult",
+    "PayloadPool",
+    "PayloadSource",
     "record_variant",
     "record_search_result",
     "list_variants",
