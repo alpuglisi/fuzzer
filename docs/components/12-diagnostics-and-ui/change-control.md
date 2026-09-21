@@ -3,6 +3,46 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0022 — Launch view rebuilt as the approved master-detail (2026-09-21)
+- Change: rebuilt the Launcher section inside the R0 shell to match the **approved mockup**
+  (`docs/UI_LAYOUT_REDESIGN.md`), replacing the old stacked cards (Target/Scope/Mode,
+  Automatic, Manual, one card per activity). Brought forward from R1 at the user's request so
+  the Launch view they reviewed is what ships now.
+  - **Master-detail layout** (`.launch` grid): a left **activity picker** (`.actlist`) listing
+    every activity grouped (Discovery / Attack / Analysis / Other), each row carrying compact
+    **gate tags** (`traffic` / `auth` / `destr`) and an accent bar when selected; a right
+    **detail** (`.lform`) that shows the selected activity's configurable form. All activity
+    forms render server-side; `initLaunchNav()` shows one at a time (no-JS shows all — same
+    progressive-enhancement rule as the tabs). Default selection is `auto`.
+  - Detail form: a `.lform-head` (name + `sends traffic` / `--authorized` /
+    `--allow-destructive` tags + Dry-run / Run / Stop), the tool's fields as `.frow` rows,
+    bool flags folded into one inline `.optck` row, the D14 category picker as checkbox pills,
+    and the plugins panel (`.plugpanel`) on `auto`. The dry-run **preview** and live SSE
+    **console** are retokenized.
+  - `auto` keeps a one-click **Run full pipeline** action (`POST /api/run/automatic`) above
+    its flag form; the Manual/CLI prewired-command reference moved into a collapsed
+    `<details>` below the grid.
+  - Server: `_group_activities()` buckets activities into the ordered launcher groups
+    (unknown tools fall into "Other"); `activity_groups` added to the index context.
+- Impact (other components / project): UI only; no schema, contract, route, or CLI change.
+  The command-spec-driven form contract is unchanged — every control still carries the same
+  `data-dest` / `data-type` / `data-catgroup` hooks, so the runner, dry-run, gating, and SSE
+  are untouched. Realizes the Launch portion of FR-UI-8 (the rest of R1 — per-section routes +
+  Overview — still pending).
+- Risk (level; mitigation): low. The forms and their JS are the same; only their container
+  markup and CSS changed. Mitigation: full suite green (499 passed / 6 skipped), the
+  whitespace-fragile gate assertion rewritten to match the stable gate title, the real-browser
+  launcher test updated to select the activity first (dry-run + gated Run + SSE still verified
+  end-to-end), and screenshots of the rebuilt view in light and dark.
+- Deliverables:
+  - [x] Master-detail Launch markup (activity picker + detail) — done.
+  - [x] `initLaunchNav()` selection + retokenized launch CSS — done.
+  - [x] `_group_activities()` + `activity_groups` context — done.
+  - [x] Tests updated (gate title, browser select-first) + full suite green — done.
+  - [x] Real-browser screenshot verification (light + dark) — done.
+- Effectiveness (assessed 2026-09-21): effective. The Launch view now matches the reviewed
+  mockup (verified by screenshots), the launcher behavior is unchanged, and the suite is green.
+
 ### CC-UI-0021 — App shell + design tokens (layout redesign R0) (2026-09-21)
 - Change: implemented **R0** of the layout redesign (`docs/UI_LAYOUT_REDESIGN.md`,
   CC-UI-0020): replaced the top hash-tab masthead with a persistent **app shell** and a

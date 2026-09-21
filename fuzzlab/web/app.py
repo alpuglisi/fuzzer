@@ -131,6 +131,33 @@ def _activities() -> list[dict]:
         return []
 
 
+# Launcher master-list grouping: an ordered, human-meaningful grouping of activities for
+# the Launch view's activity picker. Names not listed fall into "Other" (so a new tool still
+# appears). Order within a group follows this list, then registry order for the remainder.
+_ACTIVITY_GROUPS: list[tuple[str, tuple[str, ...]]] = [
+    ("Discovery", ("crawl", "audit")),
+    ("Attack", ("auto", "fuzz", "greybox-run", "mutate-run", "proxy")),
+    ("Analysis", ("report", "session")),
+]
+
+
+def _group_activities(activities: list[dict]) -> list[dict]:
+    """Bucket activities into the ordered launcher groups; drop empty groups, and append an
+    'Other' group for any activity not named above so nothing is ever hidden from the picker."""
+    by_name = {a["name"]: a for a in activities}
+    grouped: list[dict] = []
+    claimed: set[str] = set()
+    for label, names in _ACTIVITY_GROUPS:
+        acts = [by_name[n] for n in names if n in by_name]
+        claimed.update(a["name"] for a in acts)
+        if acts:
+            grouped.append({"label": label, "acts": acts})
+    rest = [a for a in activities if a["name"] not in claimed]
+    if rest:
+        grouped.append({"label": "Other", "acts": rest})
+    return grouped
+
+
 def _active_plugins() -> list[dict]:
     """The entry-point plugins that a run with ``--plugins`` would attach."""
     try:
@@ -153,12 +180,14 @@ def _shell_context(cfg: Config) -> dict[str, Any]:
 
 
 def _index_context(cfg: Config, state: LauncherState, runs: list[dict]) -> dict[str, Any]:
+    activities = _activities()
     return {
         **_shell_context(cfg),
         "mode": state.mode,
         "categories": _known_categories(),
         "commands": _tool_commands(cfg),
-        "activities": _activities(),
+        "activities": activities,
+        "activity_groups": _group_activities(activities),
         "plugins": _active_plugins(),
         "runs": runs,
         "last_result": None if state.last_result is None else str(state.last_result),

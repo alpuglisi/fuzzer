@@ -486,8 +486,11 @@ tracked in the requirements files, not here.
   scope / authorized / proxy chips) — over a **design-token** system (`web/static/tokens.css`:
   light / dark / system theme + compact density, persisted per-viewer, no-FOUC). Delivered as
   **R0** (`base.html` shell, retokenized `app.css`, `initShell()`; chrome-only, no behavior
-  change, hash-based section switching preserved; CC-UI-0021, FR-UI-8). R1 adds deep-linkable
-  per-section routes + an Overview dashboard, R2 a Findings workbench, R3 a Proxy rebuild.
+  change, hash-based section switching preserved; CC-UI-0021, FR-UI-8). The **Launch view** was
+  then rebuilt as the approved **master-detail** — a grouped, gate-tagged activity picker →
+  the selected activity's command-spec form (`initLaunchNav()`; CC-UI-0022), brought forward
+  from R1. R1 still adds deep-linkable per-section routes + an Overview dashboard, R2 a Findings
+  workbench, R3 a Proxy rebuild.
   **Pending:** the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
   `metric_series` time-series table (Phase 4), Datasette-style store exploration, a
   `--dry-run` mode, and a plain CLI entry point per tool for headless use

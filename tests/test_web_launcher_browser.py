@@ -92,6 +92,9 @@ def test_launcher_dry_run_and_run_in_browser(tmp_path):
             page.goto(base)
 
             report = 'form.launch-form[data-command="report"]'
+            # Launch is a master-detail view: pick the activity to reveal its form.
+            page.click('.actlist .act[data-for="report"]')
+            page.locator(f"{report} [data-dest='store']").wait_for(state="visible")
             # Dry-run: fill --store, preview shows the exact command, sends nothing.
             page.fill(f"{report} [data-dest='store']", "x.db")
             page.click(f"{report} [data-action='dry-run']")
