@@ -132,6 +132,15 @@ and Phase 3 can build against it without touching this phase's code.
    / `fuzz`), since it's core tooling, not a one-off lab-ops script like
    `labctl.sh`. *Confirm.*
 
+**Superseded detail (2026-09-21):** T-LAB0.8's sourcing methodology below is
+superseded by `LAB_PATTERN_CORPUS_SOURCING_PLAN.md` Revision 2 (git-clone
+pull instead of API queries, cluster-then-sample triage, trigger-driven
+authoring, 10 classes/~31 cards) — see that document and `CR-LAB-0001`
+Addendum A. That revision also corrects T-LAB0.1 below: the manifest loader
+must not expose any provenance/card reference to the code path `verdict()`
+runs on — provenance lives in a separate `lab/patterns/provenance.yaml`
+keyed by `cell_id`, never inside a manifest cell.
+
 ## Architecture (Phase 0 slice of the full design)
 
 ```

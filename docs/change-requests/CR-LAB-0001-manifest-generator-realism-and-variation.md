@@ -254,3 +254,37 @@ update the Lab-track phase list; (2) update `docs/ARCHITECTURE.md` §1 and
 recording this decision (status: decided, deliverables in progress); (4) then,
 per your instruction, we move to discussing the actual implementation plan for
 Phase 0.
+
+---
+
+## Addendum A (2026-09-21) — provenance architecture correction
+
+This CR is append-only per this project's own change-control convention, so
+this is a dated addition, not an edit to §6's original text above.
+
+A follow-on research pass validating `LAB_PATTERN_CORPUS_SOURCING_PLAN.md`
+(the T-LAB0.8 methodology) found that §6's manifest sketch is built the wrong
+way round. §6's example has each cell carry `id_ref: pattern://ghsa-...`
+— a reference **from** the functional manifest **to** the provenance corpus.
+Provenance-separation prior art (the in-toto attestation model, SLSA
+provenance) is explicit that an artifact must be unchanged by whether
+provenance for it exists; a manifest cell that carries a card reference,
+even one `verdict()` is written to ignore, means the verdict engine's input
+type is not actually independent of the provenance corpus — a future
+refactor could break that separation without any test noticing, since
+nothing stops a later change from reading the field.
+
+**Correction:** provenance moves to a separate, one-directional index,
+`lab/patterns/provenance.yaml`, mapping `cell_id → [card_id, ...]`. The
+manifest the verdict engine reads carries no card reference at all. A build
+gate asserts no card ID or `pattern://`-style string appears anywhere in the
+manifest or in the verdict module's source — the same shape as the existing
+name-leak scanner (§3's other build gates are unaffected).
+
+This changes §6's illustrative YAML only — it does not change §3's core
+change (pipeline verdict model, structured sink contexts), §5's risk
+assessment, or §8's phase-level deliverables, beyond T-LAB0.1's manifest
+loader now needing to not expose a provenance field to the verdict path (a
+detail-level addition to that deliverable, not a new one). See
+`LAB_PATTERN_CORPUS_SOURCING_PLAN.md` §0 and §4 for the full reasoning and
+the revised file layout.
