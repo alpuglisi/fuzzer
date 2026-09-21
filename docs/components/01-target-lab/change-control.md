@@ -3,6 +3,30 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0007 — Opt-in h2→h1 downgrade front-end (Phase 9 T9.5, D17) (2026-09-21)
+- Change: added a **default-off** front-end reverse proxy to the lab as a desync research
+  target. `lab/downgrade/nginx.conf` accepts HTTP/2 (h2c) and proxies **HTTP/1.1** to
+  `web:80` (`http2 on;` + `proxy_http_version 1.1;`) — the h2→h1 downgrade topology. A new
+  `frontend` compose service (nginx 1.27) is gated behind the **`desync` compose profile**,
+  so a plain `up` never starts it and the default lab is unchanged; loopback-only host
+  port (`PFF_DOWNGRADE_PORT`, default 8081). Recorded as decision **D17**.
+- Impact (other components / project): gives the PROXY component's raw-frame HTTP/2 client
+  (T9.3) a self-owned target for the Phase 9 desync exit (T9.6). Off by default → D7
+  reproducibility and all prior phases unaffected. Lab-only, never exposed.
+- Risk (level; mitigation): medium (a desync target is security-sensitive) — mitigated by
+  default-off profile gating, loopback-only binding, lab-only posture, and it being
+  infrastructure we own. Mitigated for correctness by 7 tests (`tests/test_lab_downgrade.py`,
+  incl. a `docker compose config` profile-gating check when the CLI is present): the
+  frontend is profile-gated, loopback-only, mounts the config, depends on web; the default
+  services are unchanged; the nginx config does the h2→h1 downgrade; `.env.example`
+  documents the port. Suite 348 passed / 4 skipped.
+- Deliverables:
+  - [x] nginx h2→h1 config + profile-gated compose service + env (T9.5) — done.
+  - [ ] Bring it up on-host and demonstrate an h2→h1 desync primitive (T9.6) — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — the front-end is off by
+  default and, when the `desync` profile is enabled, downgrades HTTP/2 to HTTP/1.1 to the
+  app; the live desync demonstration is on-host.
+
 ### CC-LAB-0006 — Configurable lab WAF (Phase 8 prerequisite, D16) (2026-09-21)
 - Change: added a **configurable, deliberately naive request prefilter** to the lab
   (`puppy-fort-factory/includes/waf.php` + `config/waf-rules.json`), wired globally via

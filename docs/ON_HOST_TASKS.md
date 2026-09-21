@@ -136,6 +136,26 @@ gated LLM scaffold. On the lab, with the D16 WAF enabled (`PFF_WAF=on`):
 - [ ] **Wire variants into the fuzzer's attempt path** so bypasses are actually sent and
   confirmed by the oracle, and recorded in `payload_variant`.
 
+## Phase 9 — protocol depth: live WS/HTTP-2 + the desync exit
+
+The WebSocket codec, the HTTP/2 frame layer + minimal HPACK, and the raw-frame client are
+built and offline-tested (`fuzzlab/proxy/ws.py`, `h2frames.py`, `hpack.py`, `h2client.py`).
+The opt-in h2→h1 downgrade front-end ships as config (`lab/downgrade/`, `desync` profile).
+On the host:
+- [ ] **T9.4 parsed path:** with `wsproto`/`h2` installed, wire the parsed convenience path
+  through the proxy and confirm it intercepts/replays normal WebSocket and HTTP/2 traffic;
+  confirm `test_proxy_h2.py`'s Huffman-decode and any `h2`-gated tests pass on-host.
+- [ ] **T9.6 exit:** bring up the downgrade front-end
+  (`docker compose --profile desync up -d`, or `./labctl.sh` with the profile), point the
+  `H2RawClient` at `127.0.0.1:${PFF_DOWNGRADE_PORT:-8081}` (h2c), and show: (a) a normal
+  HTTP/2 request is served through the h2→h1 downgrade; (b) a **byte-exact / arbitrary**
+  HTTP/2 request the parsed path would normalize goes on the wire as built; and (c) a
+  documented **h2→h1 desync primitive** (e.g. arbitrary header bytes / a length-desync
+  frame) behaves as a smuggling test against the front-end — lab-only, on our own
+  infrastructure.
+- [ ] **Record** WS/HTTP-2 flows in history (they carry the `flow.protocol` tag) and replay
+  them via the repeater.
+
 ## How to pick these up
 
 Step-by-step commands for all of the above are in **`docs/ON_HOST_RUNBOOK.md`**.

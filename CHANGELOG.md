@@ -13,6 +13,13 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 9 (T9.5, D17): added the opt-in **h2→h1 downgrade front-end** to the lab — a
+  self-owned desync research target. `lab/downgrade/nginx.conf` accepts HTTP/2 (h2c) and
+  proxies HTTP/1.1 to the app (`http2 on;` + `proxy_http_version 1.1;`); a `frontend`
+  compose service (nginx) is gated behind the **`desync` profile**, so a plain `up` never
+  starts it and the default lab is unchanged (loopback-only, `PFF_DOWNGRADE_PORT`). +7
+  tests (config-only, incl. a `docker compose config` profile-gating check; 348 passed /
+  4 skipped). Change-control: CC-LAB-0007.
 - Phase 9 (T9.2/T9.3): from-scratch **HTTP/2**. `proxy/h2frames.py` (byte-exact frame
   encode/decode, the preface, and a declared-length override = a length-desync primitive),
   `proxy/hpack.py` (minimal HPACK — integer/string primitives, static table, literal reps;

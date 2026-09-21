@@ -86,7 +86,7 @@ lab-only, on our own infrastructure.
 - **T9.4 — Parsed-path integration `[planned, mostly on-host]`.** Wire the `wsproto`/`h2`
   convenience path through the proxy so it intercepts/replays normal WS and HTTP/2
   (acceptance criteria); declared deps, skip-guarded offline, validated live.
-- **T9.5 — Lab downgrade front-end `[planned, on-host]`.** Add the opt-in, default-off
+- **T9.5 — Lab downgrade front-end `[done — config; live on-host]`.** Add the opt-in, default-off
   h2→h1 front-end (nginx) to `lab/compose.yaml` behind a profile, documented as the
   self-owned desync research target; recorded as a decision.
 - **T9.6 — Exit `[on-host]`.** Intercept/replay WS + HTTP/2 through the proxy; send a

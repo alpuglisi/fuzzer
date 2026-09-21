@@ -282,6 +282,24 @@ defeat-the-filter exit have a real, controllable target.
 
 Because it is off by default, D7 reproducibility and all prior phases are unaffected.
 
+### D17 — Opt-in h2→h1 downgrade front-end (Phase 9 desync target)
+
+The lab ships an **opt-in, default-off** front-end reverse proxy that terminates HTTP/2
+(cleartext h2c, prior knowledge) and forwards **HTTP/1.1** to the Puppy Fort Factory app
+— the classic topology where HTTP/2-to-HTTP/1.1 desync/smuggling primitives live — as a
+**legitimate, self-owned research target** for the toolkit's raw-frame HTTP/2 client.
+
+- **Default off, profile-gated.** A `frontend` service (nginx, pinned) under the
+  `desync` compose profile; a plain `docker compose up` never starts it, so the default
+  lab is unchanged. Enable only for protocol-desync experiments
+  (`docker compose --profile desync up`).
+- **Config only, no app change.** nginx does `http2 on;` at the front and
+  `proxy_http_version 1.1;` to `web:80` — the downgrade. The app and all ground-truth
+  labels are untouched.
+- **Lab-only posture.** Loopback-only (`127.0.0.1`), never exposed; it exists to
+  *exercise* desync in the lab, on infrastructure we run ourselves — never a technique
+  aimed at third parties. This is the counterpart, for protocol depth, of the D16 WAF.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the

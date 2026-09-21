@@ -129,6 +129,10 @@ tracked in the requirements files, not here.
   labels stay valid; modes `block`/`sanitize`/`log`. It is the **Phase 8 filter-evasion
   target** the mutation engine learns to bypass — realistic but bypassable, not real
   protection.
+- **h2→h1 downgrade front-end** `[built config; default off]` (D17, `lab/downgrade/`): an
+  opt-in nginx front-end that terminates HTTP/2 and proxies HTTP/1.1 to the app — the
+  **Phase 9 desync research target** for the raw-frame HTTP/2 client. Gated behind the
+  `desync` compose profile (a plain `up` never starts it), loopback-only, lab-only.
 - **Grey-box instrumentation** `[partial — offline consumer built; live sources on-host]`
   (D7): the consumer layer is built and unit-tested (`fuzzlab/greybox/`): coverage and
   DB-fault readers behind injected seams (`CoverageSource`/`InMemoryCoverageSource`,
@@ -497,6 +501,8 @@ Suite: 328 passed / 4 skipped (the skips need a native build unavailable in the 
     (findings + advisory scores).
   - **Lab WAF (D16):** a configurable, default-off, deliberately bypassable request
     prefilter — the Phase 8 filter-evasion target.
+  - **h2→h1 downgrade front-end (D17):** an opt-in, default-off (profile-gated) nginx
+    front-end that downgrades HTTP/2 to HTTP/1.1 — the Phase 9 desync research target.
 - `[partial]`:
   - **Grey-box (Phase 3):** offline consumer layer (coverage/DB-fault readers,
     shaped reward, reset call points) built; **live sources on-host** (Xdebug/pcov,
