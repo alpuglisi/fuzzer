@@ -1,0 +1,10 @@
+{% if bound %}
+row = db.execute(
+    text("SELECT * FROM {{ table }} WHERE {{ column }} = :{{ column }}"),
+    {"{{ column }}": {{ value_expr }}},
+).mappings().first()
+{% else %}
+row = db.execute(
+    text("SELECT * FROM {{ table }} WHERE {{ column }} = " + str({{ value_expr }}))
+).mappings().first()
+{% endif %}

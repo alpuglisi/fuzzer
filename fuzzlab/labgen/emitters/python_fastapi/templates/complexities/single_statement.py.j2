@@ -1,0 +1,3 @@
+async def {{ handler_name }}(request: Request, db: Session = Depends(get_db)):
+{{ body }}
+    return dict(row) if row else {}

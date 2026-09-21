@@ -67,6 +67,22 @@ labgen = ["scikit-learn>=1.3,<2", "numpy>=1.24,<3"]
 # the gate (PA-0005: never assumed present; a missing install raises a typed
 # `MissingStatsDependencyError` naming this extra, not a raw ImportError).
 labgen-stats = ["scipy>=1.11,<2"]
+# Lab-generator Python/FastAPI emitter, Tier-A depth (L-P3.2,
+# fuzzlab/labgen/emitters/python_fastapi/): this emitter's own module-render
+# code only imports jinja2 (already a main dependency, see above) -- these
+# are needed only to actually EXECUTE a rendered app (the TestClient-backed
+# end-to-end tests, tests/test_labgen_python_fastapi_*.py), which are
+# skip-guarded (PA-0005) when this extra isn't installed, matching
+# php_current's `php_available()`/`php -l` convention for the same reason.
+# Versions pinned to match the generated app's own requirements.txt lockfile
+# (fuzzlab.labgen.emitters.python_fastapi.FASTAPI_VERSION etc.) as of
+# 2026-09-21.
+labgen-python-fastapi = [
+    "fastapi>=0.110,<1",
+    "uvicorn>=0.27,<1",
+    "sqlalchemy>=2.0,<3",
+    "httpx>=0.27,<1",
+]
 # Developer tooling.
 dev = ["pytest>=8,<9"]
 
@@ -84,6 +100,13 @@ include = ["fuzzlab*"]
 "fuzzlab.audit.rules_data" = ["*.json"]
 "fuzzlab.web" = ["templates/*.html", "static/*"]
 "fuzzlab.labgen.modules" = ["sources/*.j2", "transforms/*.j2", "sinks/*.j2", "complexities/*.j2"]
+"fuzzlab.labgen.emitters.python_fastapi" = [
+    "templates/sources/*.j2",
+    "templates/transforms/*.j2",
+    "templates/sinks/*.j2",
+    "templates/complexities/*.j2",
+    "templates/scaffold/*.j2",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

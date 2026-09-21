@@ -2,23 +2,33 @@
 
 The fast tier: seconds, no container, no live app. Two independent checks:
 
-1. :func:`lint_php` -- a real syntax check (``php -l``) of one emitted
-   file's content. Skip-guarded when the ``php`` CLI isn't on the build
-   host (:func:`php_available`, matching this project's PA-0005 pattern).
+1. A real syntax check of one emitted file's content -- :func:`lint_php`
+   (``php -l``) or :func:`lint_python` (``python -m py_compile``), each
+   skip-guarded when its interpreter/CLI isn't on the build host
+   (:func:`php_available`/:func:`python_available`, matching this project's
+   PA-0005 pattern).
 2. Minimal-pair diff -- checks that a vulnerable/secure twin's
    ``EmittedFiles`` differ only in the transform region. The real checker
-   is ``fuzzlab.labgen.minimal_pair`` (owned by a concurrently-developed
-   sibling lane and not yet landed as of this module's authoring);
-   :func:`get_minimal_pair_checker` imports it if present and falls back to
-   :func:`_naive_minimal_pair_check` otherwise, so this module works today
-   and upgrades automatically once that sibling lane merges -- no further
-   change needed here.
+   is ``fuzzlab.labgen.minimal_pair`` (owned by a sibling lane) -- **PHP-
+   oriented only**, by that module's own documented scope (it parses a
+   ``// Module composition: ...`` line and PHP ``$var``/``function NAME(``
+   identifiers): :func:`get_minimal_pair_checker` prefers it whenever it can
+   import, which is correct for ``php_current``/``php_laravel`` but not yet
+   meaningful for a non-PHP emitter's output (a documented, not-yet-attempted
+   extension point per that module's own docstring). A non-PHP emitter's own
+   Tier-0 tests should therefore call :func:`_naive_minimal_pair_check`
+   directly rather than through :func:`get_minimal_pair_checker`, until a
+   future cross-cutting task extends the real checker's comment-syntax/
+   identifier-pattern detection per language (see
+   ``fuzzlab.labgen.emitters.python_fastapi``'s own Tier-0 tests for the
+   worked example).
 """
 
 from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,6 +76,46 @@ def lint_php(path: str, content: bytes, *, timeout: float = 10.0) -> LintResult:
 def lint_emitted_files(files: EmittedFiles) -> list[LintResult]:
     """Lint every file an emitter produced for one cell."""
     return [lint_php(f.path, f.content) for f in files]
+
+
+def python_available() -> bool:
+    """Whether a ``python`` (or ``python3``) interpreter capable of running
+    ``-m py_compile`` is on this build host. Always true in this project's
+    own CI/dev environment (it runs on Python), but callers still guard with
+    this per PA-0005's own convention -- mirrors :func:`php_available`
+    exactly, for the same "never silently report a pass when the tool that
+    would have found a failure isn't even present" reason, and so a future
+    host that only ships a Python this interpreter can't shell out to still
+    fails loud rather than false-passing."""
+    return shutil.which(sys.executable) is not None or shutil.which("python3") is not None
+
+
+def lint_python(path: str, content: bytes, *, timeout: float = 10.0) -> LintResult:
+    """Syntax-check one Python file's content with ``python -m py_compile``.
+
+    Raises :class:`RuntimeError` if no usable interpreter is available --
+    callers must guard with :func:`python_available` first, mirroring
+    :func:`lint_php`'s own contract exactly.
+    """
+    if not python_available():
+        raise RuntimeError("python interpreter not available on this host -- guard with python_available() first")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        py_path = Path(tmpdir) / "cell.py"
+        py_path.write_bytes(content)
+        result = subprocess.run(
+            [sys.executable, "-m", "py_compile", str(py_path)],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return LintResult(path=path, ok=result.returncode == 0, detail=result.stdout + result.stderr)
+
+
+def lint_python_emitted_files(files: EmittedFiles) -> list[LintResult]:
+    """Lint every ``.py`` file an emitter produced for one cell (non-``.py``
+    scaffold outputs like ``requirements.txt``/``Dockerfile`` are not
+    Python source and are skipped, not silently reported as passing)."""
+    return [lint_python(f.path, f.content) for f in files if f.path.endswith(".py")]
 
 
 @dataclass(frozen=True)

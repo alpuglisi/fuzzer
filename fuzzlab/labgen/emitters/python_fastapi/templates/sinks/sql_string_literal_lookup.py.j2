@@ -1,0 +1,17 @@
+{{ password_var }} = hashlib.sha256((await request.form()).get("{{ password_param }}", "").encode("utf-8")).hexdigest()
+{% if bound %}
+row = db.execute(
+    text("SELECT id, {{ column }} FROM {{ table }} WHERE {{ column }} = :{{ column }} AND password = :password"),
+    {"{{ column }}": {{ value_expr }}, "password": {{ password_var }}},
+).mappings().first()
+{% else %}
+row = db.execute(
+    text(
+        "SELECT id, {{ column }} FROM {{ table }} WHERE {{ column }} = '"
+        + str({{ value_expr }})
+        + "' AND password = '"
+        + {{ password_var }}
+        + "'"
+    )
+).mappings().first()
+{% endif %}

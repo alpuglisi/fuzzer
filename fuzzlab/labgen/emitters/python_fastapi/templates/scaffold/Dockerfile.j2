@@ -1,0 +1,24 @@
+# Target-lab web tier: Python + FastAPI serving the generated python_fastapi
+# stack (Tier-A depth, CR-LAB-0001 Addendum C's "stacks 2-3 to Tier-A-only"
+# pacing decision -- see docs/LAB_IMPLEMENTATION_PLAN.md Phase 3 L-P3.2).
+#
+# Digest-pinned per decision D7's convention (see lab/web.Dockerfile): the tag
+# ({{ base_image_tag }}) is kept alongside the digest for readability, but the
+# `@sha256:...` digest is what's actually resolved at pull time, so a rebuild
+# always gets byte-identical Python/Debian userland. Digest fetched live
+# against the Docker Hub registry API on 2026-09-21 (docker-content-digest
+# header for the {{ base_image_tag }} multi-arch manifest list); re-fetch and
+# update at the next scheduled base-image refresh, the same convention
+# REFRESH_LOG.md already uses for the pattern corpus.
+FROM {{ base_image }}
+
+WORKDIR {{ workdir }}
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 8000
+
+CMD {{ entrypoint_cmd_json }}

@@ -615,6 +615,130 @@ beyond the numbers.)*
   explicitly out of this lane's scope per the task) — those remain
   `[design]`-tier claims until a lane with on-host resources exercises them.
 
+### CC-LAB-0036 — Python/FastAPI emitter, Tier-A depth (L-P3.2) (2026-09-21)
+*(Numbered `CC-LAB-0036` rather than `CC-LAB-0029` at merge time — this lane
+independently claimed `CC-LAB-0029` too, colliding with lanes L-P2.1, L-P0.9,
+L-P1.1, L-P1.2a, L-P2.2, L-P0.10, and L-P3.1, all of which merged first.
+Reconciled per this project's standing multi-lane policy: keep all entries'
+full content, renumber this later-landing one to the next free number. No
+content changed beyond the number.)*
+- Change: added `fuzzlab/labgen/emitters/python_fastapi/`, the second Phase-3
+  stack emitter (alongside `php_current`), Tier-A depth per `CR-LAB-0001` Addendum
+  C's stack-pacing decision. Covers the same three well-documented value-context
+  shapes `php_current` proves (`sql_numeric_literal`/`sql_string_literal` SQLi,
+  `html_body` XSS), ported to FastAPI + SQLAlchemy + Jinja2 idiom, deliberately
+  excluding identifier/alias/connector-position SQLi and escaping-context-mismatch
+  XSS (deferred, per the pacing decision). Architecture:
+  - A fully independent module-composition system
+    (`fuzzlab/labgen/emitters/python_fastapi/modules.py` + its own
+    `templates/{sources,transforms,sinks,complexities,scaffold}/*.j2`), mirroring
+    `fuzzlab.labgen.modules`'s architecture but not extending it — no cross-import
+    between this and `php_current`/`fuzzlab.labgen.modules`, per the Phase 3 lane
+    map's "no stack's emitter package imports another's" rule. Op-name vocabulary
+    (`identity`/`param_bind`/`html_entity_escape`) is intentionally shared with
+    `lab/safety_matrix.yaml` and `php_current` — the safety matrix is stack-agnostic
+    by design, so no new matrix entries were needed.
+  - `StackEnv` (Addendum D's schema: `language`/`framework`/`framework_version`/
+    digest-pinned `base_image`/`workdir`/`entrypoint_cmd`/`is_multi_file`/
+    `scaffold_files`/`accumulators`/`file_roles`) defined package-locally
+    (`fuzzlab.labgen.schema` does not yet have a shared `StackEnv` as of this
+    lane's build; `schema.py` is a lane-map "shared read-only file" other Phase-3
+    lanes should not edit concurrently without coordinating, so promoting this to
+    a shared location is left to a future cross-cutting task, not this lane).
+  - **No `route` accumulator module** — per `CR-LAB-0001` Addendum D's
+    FastAPI-specific research, a one-time static discovery scaffold
+    (`app/main.py`, using `pkgutil.iter_modules()`/`importlib` over a `routers/`
+    package, sorted by module name for determinism) is used instead; `render()`
+    returns exactly one per-cell router file, and the scaffold is a separate,
+    once-per-build output (`STACK_ENV.scaffold_files` / `render_scaffold_files()`),
+    since `fuzzlab.labgen.emitter.Emitter`'s ABC has no per-stack-scaffold method
+    yet (a real interface gap, not closed here — `emitter.py` is out of this
+    lane's scope per the task brief).
+  - **FastAPI debug-page correctness requirement, met**: the scaffold constructs
+    `FastAPI(docs_url=None, redoc_url=None, openapi_url=None)` — FastAPI serves
+    these by default regardless of any debug flag (`docs/LAB_IMPLEMENTATION_PLAN.md`
+    Phase 3's framework-debug-page research), so this is asserted by a live
+    `TestClient`-backed test (404 on all three routes), not left as an
+    unverified docstring claim.
+  - Digest-pinned base image: `python:3.12-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e`,
+    fetched live against the Docker Hub registry API's `docker-content-digest`
+    response header on 2026-09-21 (this environment's egress allowlist covers
+    `registry-1.docker.io`/`auth.docker.io`). Exact-pinned `requirements.txt`
+    lockfile for the generated app's own dependencies (fastapi 0.141.1, uvicorn
+    0.53.0, sqlalchemy 2.0.54, jinja2 3.1.6, pydantic 2.13.5 — versions confirmed
+    current against PyPI's JSON API the same day), per this task's own brief
+    ("a `requirements.txt` with pinned versions is fine if this project doesn't
+    otherwise standardize on Poetry/pip-tools" — it doesn't; `pyproject.toml` uses
+    compatible-release ranges for fuzzlab's own deps, a different artifact).
+    CycloneDX SBOM generation via `syft` is documented (intended command in this
+    package's module docstring) but not run — `syft` isn't installed in this
+    build environment and this task does not install new system tools to get one,
+    per the task brief's own "skip, don't block" instruction.
+  - New sample manifest `lab/manifests/phase3_python_fastapi_sample.yaml` (six
+    cells, three vulnerable/secure pairs, illustrative synthetic routes — this
+    stack has no real hand-built app to migrate, unlike `php_laravel`).
+  - Conformance: passes Tier 0 (`python -m py_compile` lint — new
+    `lint_python`/`python_available` added to `fuzzlab.labgen.conformance.tier0`
+    alongside the existing `lint_php`/`php_available`, same skip-guarded
+    convention; minimal-pair diff via `_naive_minimal_pair_check` directly,
+    since `fuzzlab.labgen.minimal_pair`'s real checker is PHP-comment-syntax-
+    specific by its own documented scope — not yet extended to other languages,
+    a documented, not-yet-attempted extension point, not a defect) and Tier 3
+    (whole-manifest regenerate-and-diff, via the existing stack-agnostic
+    `fuzzlab.labgen.conformance.tier3` machinery, unmodified).
+  - New optional dependency extra `labgen-python-fastapi` in `pyproject.toml`
+    (`fastapi`/`uvicorn`/`sqlalchemy`/`httpx`) for the `TestClient`-backed
+    end-to-end tests, skip-guarded when absent (PA-0005) — this emitter's own
+    render/module code needs no new fuzzlab dependency (only `jinja2`, already a
+    main dependency).
+- Impact (other components / project): none outside LAB. No changes to
+  `fuzzlab/labgen/emitter.py`'s ABC, `fuzzlab/labgen/emitters/php_current/`, any
+  existing file under `fuzzlab/labgen/modules/`, or `fuzzlab/labgen/schema.py` —
+  fully additive, per this lane's scope discipline and the Phase 3 lane map's
+  cross-lane coordination notes. `lab/safety_matrix.yaml` required no new entries
+  (op vocabulary already covers this stack's shapes). `docs/ARCHITECTURE.md`
+  updated to record the second emitter landing.
+- Risk (level; mitigation): low. New, isolated package; no shared file touched
+  except additive entries in `pyproject.toml` (`[project.optional-dependencies]`,
+  `[tool.setuptools.package-data]`) and `fuzzlab/labgen/conformance/tier0.py`
+  (two new functions, existing ones untouched). Verified with a live
+  `TestClient` smoke test (not just source inspection) that the rendered app
+  actually starts, routes resolve, `/docs`/`/redoc`/`/openapi.json` 404, and the
+  vulnerable/secure sink pairs behave as their derived verdicts say.
+- Deliverables:
+  - [x] `fuzzlab/labgen/emitters/python_fastapi/` (`__init__.py`, `modules.py`,
+        `templates/{sources,transforms,sinks,complexities,scaffold}/*.j2`) — done.
+  - [x] `StackEnv` + static-discovery scaffold (`app/main.py`) with
+        `/docs`/`/redoc`/`/openapi.json` disabled — done, test-asserted live.
+  - [x] Digest-pinned base image + `requirements.txt` lockfile — done.
+  - [x] SBOM generation command documented; not run (`syft` unavailable) — done
+        (documented), generation itself a follow-up.
+  - [x] `lab/manifests/phase3_python_fastapi_sample.yaml` — done.
+  - [x] Tier 0 (`python -m py_compile` + minimal-pair) and Tier 3 (whole-manifest
+        regenerate-and-diff) conformance passes — done.
+  - [x] Per-module unit tests (`tests/test_labgen_python_fastapi_modules.py`) +
+        end-to-end/`TestClient` tests (`tests/test_labgen_python_fastapi_sample.py`)
+        + conformance-suite tests (`tests/test_labgen_python_fastapi_conformance.py`)
+        — done, 60 new tests, all passing (2 skip-guarded on the optional
+        `labgen-python-fastapi` extra, which is installed in this build
+        environment so they ran and passed here).
+  - [ ] Real puppy-fort-factory-style page migration — not applicable to this
+        stack (no real hand-built FastAPI app exists to migrate; only
+        `php_laravel`, Phase 3's other PHP lane, has a migration deliverable,
+        per D20 §7.2).
+  - [ ] Identifier/alias/connector-position SQLi, escaping-context-mismatch XSS
+        on this stack — explicitly deferred per the Tier-A pacing decision.
+- Effectiveness (assessed 2026-09-21): met this delivery's own bar. Every sample
+  cell's derived verdict matches its intended label via the same shared
+  `verdict()`/`lab/safety_matrix.yaml` every other stack's cells go through (no
+  stack-specific verdict logic exists or was added); a live `TestClient` run
+  confirms the generated app actually starts and serves; `python -m py_compile`
+  confirms every generated `.py` file (per-cell and scaffold) is syntactically
+  valid; Tier 3 confirms byte-identical regeneration across the whole sample
+  manifest. Full suite: 929 passed / 8 skipped, same 2 pre-existing unrelated
+  `test_mutation_operators.py` failures (last logged baseline, `CC-LAB-0028`:
+  868 passed / 9 skipped / same 2 failures) — no reduction, only additions.
+
 ### CC-LAB-0028 — Nuclei path-traversal/LFI oracle wrapper (Addendum E, Spike 004) (2026-09-21)
 *(Numbered `CC-LAB-0028` rather than `CC-LAB-0017` at merge time — this lane's worktree
 diverged onto a stale, unrelated branch lineage before starting, self-diagnosed and
