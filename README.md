@@ -1,60 +1,87 @@
-# fuzzer
+# fuzzlab
 
-Time-based blind SQL injection detector and dataset builder.
+A modular, **lab-only** injection security-testing toolkit and research platform,
+exercised against a self-hosted, deliberately vulnerable web app (Ryder's Puppy
+Fort Factory). Crawler, auditor, and a time-based blind SQLi fuzzer share one
+SQLite store; an integration harness scores runs against a machine-readable
+ground-truth contract; a local web launcher drives it all.
 
 ## Authorized use only
 
-Run this **only** against systems you own or have explicit, written
-permission to test, such as a local [DVWA](https://github.com/digininja/DVWA)
-or [Mutillidae](https://github.com/webpwnized/mutillidae) lab. The tool has
-**no default target**: you must pass `--url` and the `--authorized` flag, so it
-can never fire at a host by accident.
+Run this **only** against systems you own or have explicit permission to test.
+The whole project is **lab-only**: the target app is served on loopback and must
+never be exposed, tools that send traffic require an explicit `--authorized`
+flag, and **nothing runs against the target until you ask it to** (no auto-run,
+decision D11).
 
-## What it does
+## Layout
 
-`blind_sqli_fuzzer.py` sends a small catalog of payloads to a single request
-parameter, measures response latency against a per-target baseline, and writes
-the observations to a CSV. Detection is derived purely from measured timing, so
-the ground-truth signal is independent of the payload's own label. That makes
-the output usable for training or evaluating a response classifier without the
-label leaking into the feature it is meant to predict.
-
-Each row records the payload, its family, HTTP status, response size, median
-latency, the latency and size deltas from baseline, the input label
-(`is_malicious_payload`), the timing-only signal (`time_delay_detected`), and
-the evaluation outcome (true/false positive/negative).
+```
+fuzzlab/            the package
+  core/             shared library: store + migrations, config, logging,
+                    request budget + timing mutex, HTTP seam, versioned features
+  tools/            crawler (spider), auditor (fetcher), blind SQLi fuzzer,
+                    indicator-DB builder, and the unified-store adapter
+  labels/           ground-truth label contract loader + JSON schemas
+  harness/          integration harness: scoring + assert-known-vulns
+  web/              local web control panel / launcher (loopback only)
+lab/                containerized target (compose, Dockerfile, labctl.sh)
+lab/ground-truth/   labels.json, injection-points.json, expectedresults.csv
+puppy-fort-factory/ the deliberately vulnerable PHP/MySQL app
+docs/               architecture, decisions/roadmap, per-component specs + logs
+```
 
 ## Install
 
 ```bash
-pip install -r requirements.txt
+pip install -e ".[web,dev]"      # add ",browser" for JavaScript-rendered crawling
 ```
 
-## Usage
+## Run (Phase 0)
+
+Bring up the containerized lab (needs Docker or Podman):
 
 ```bash
-python blind_sqli_fuzzer.py \
-  --url http://localhost:8080/api/users \
-  --param id \
-  --authorized \
-  --output blind_sqli_dataset.csv
+cd lab && cp .env.example .env && ./labctl.sh up     # serves http://127.0.0.1:8080/
 ```
 
-Key options:
+Open the launcher (loopback only) and choose automatic or manual — it sends
+nothing to the target until you do:
 
-| Flag | Default | Meaning |
-| --- | --- | --- |
-| `--url` | required | Target URL to test |
-| `--param` | `id` | Request parameter to fuzz |
-| `--authorized` | required | Affirms you are authorized to test the target |
-| `--repeats` | `2` | Measurements per payload; the median is used |
-| `--sigma` | `3` | Jitter band width, in standard deviations |
-| `--min-delay` | `2` | Minimum absolute added delay (s) to count as a hit |
-| `--timeout` | `15` | Per-request timeout (s); keep it above the max sleep |
+```bash
+fuzzlab web                                           # http://127.0.0.1:8787/
+```
 
-## Notes
+Or run the tools directly (manual mode), consolidating into the shared store:
 
-- The benign payloads are controls. If they are ever flagged, the threshold is
-  too low or the target is unstable; raise `--sigma` or `--min-delay`.
-- Timing signals are noisy over a real network. Increase `--repeats` and
-  `--baseline-iterations` for a more stable baseline.
+```bash
+fuzzlab crawl --start http://127.0.0.1:8080 --store fuzzlab.db
+fuzzlab audit --store fuzzlab.db
+fuzzlab fuzz  --url http://127.0.0.1:8080/product.php --param id --authorized --store fuzzlab.db
+```
+
+Each tool is also runnable as `python -m fuzzlab.tools.<name>`.
+
+## The blind SQLi fuzzer
+
+Sends a small payload catalog to one parameter, measures latency against a
+per-target baseline, and records observations. Detection is derived purely from
+timing, so the ground-truth signal is independent of the payload's own label —
+usable for training/evaluating a classifier without label leakage. Benign
+payloads are controls; if they are ever flagged, raise `--sigma`/`--min-delay`.
+
+## Tests
+
+```bash
+pytest        # 30 tests: store/migrations, config, budget, features, labels,
+              # harness scoring, store consolidation, and the web launcher
+```
+
+## Documentation
+
+- `docs/ARCHITECTURE.md` — components, the store-as-contract, dependencies.
+- `docs/DECISIONS_AND_ROADMAP.md` — settled decisions (D1–D11) and the phased plan.
+- `docs/PHASE_0_PLAN.md` — the foundations plan and current status.
+- `docs/components/` — a requirement spec and an append-only change-control log
+  per component.
+- `puppy-fort-factory/VULNERABILITIES.md` — the lab's vulnerability map.

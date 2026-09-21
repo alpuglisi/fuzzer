@@ -13,6 +13,9 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Docs: rewrote the root `README.md` to reflect the `fuzzlab` package layout, the
+  CLI, the containerized lab, the launcher, and the lab-only/no-auto-run posture —
+  the old README described only the standalone fuzzer.
 - Phase 0 build (cont.): migrated the tools onto the unified store (T0.8) via a
   `store_adapter` and an opt-in `--store` flag on each tool. The crawler writes
   `page`/`endpoint`/`parameter`, the auditor writes `candidate`, and the fuzzer
