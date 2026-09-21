@@ -3,6 +3,19 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0008 — Panel surfaces advisory model scores (Phase 5) (2026-09-21)
+- Change: `web/results.py::run_detail` now includes the latest `model` and the run's
+  top advisory-scored candidates with their conformal flag/abstain/drop decision; the
+  run-detail page renders a "Model scores (advisory)" card. Read-only.
+- Impact (other components / project): the scores/triage the classifier writes
+  (CC-ML-0003) are visible in the panel, clearly marked advisory (never findings).
+- Risk (level; mitigation): low — read-only rendering. Mitigated by
+  `tests/test_web_results.py::test_run_page_surfaces_model_scores`. Suite 192 passed / 2 skipped.
+- Deliverables:
+  - [x] `run_detail` model + scored candidates + decision; run-page card — done.
+- Effectiveness (assessed 2026-09-21): effective — the run page shows scored candidates
+  and their decision after a `--score` run.
+
 ### CC-UI-0007 — Web control panel: results review + full dashboard (D11) (2026-09-21)
 - Change: built out the local web control panel beyond the Phase-0 launcher. Added
   `fuzzlab/web/results.py` (pure, store-backed `list_runs` / `run_detail` / `store_exists`)

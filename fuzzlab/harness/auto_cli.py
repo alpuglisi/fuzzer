@@ -48,6 +48,9 @@ def main(argv: list[str]) -> int:
     p.add_argument("--bandit", action="store_true",
                    help="Order oracle mechanisms with the Thompson bandit (Phase 4); "
                         "posteriors persist in the store across runs")
+    p.add_argument("--score", action="store_true",
+                   help="After the run, train the detection classifier and write advisory "
+                        "candidate scores (Phase 5; never labels)")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
     args = p.parse_args(argv)
@@ -85,11 +88,15 @@ def main(argv: list[str]) -> int:
 
         if scheduler is not None:
             scheduler.save(store)                # persist what this run learned
-        _print_summary(args, counts, result)
+        ml = None
+        if args.score:
+            from fuzzlab.ml.train import train_and_score
+            ml = train_and_score(store, run_id)  # advisory scores + model; never labels
+        _print_summary(args, counts, result, ml)
     return 0
 
 
-def _print_summary(args, counts, result) -> None:
+def _print_summary(args, counts, result, ml=None) -> None:
     plan = result.plan
     m = result.metrics
     print(f"\nauto run ({plan.mode}, {'scored' if plan.scored else 'unscored'}; "
@@ -116,3 +123,9 @@ def _print_summary(args, counts, result) -> None:
               f"capability; they score as false negatives):")
         for path, method, param, reason in skipped:
             print(f"    - {method} {path} [{param}]: {reason}")
+    if ml is not None:
+        line = f"  ml ({ml['model']}): scored {ml.get('scored', 0)} candidate(s)"
+        if not ml.get("fallback"):
+            line += (f"; PR-AUC={ml.get('pr_auc')} vs prevalence "
+                     f"{ml.get('baseline_prevalence')} / sigma {ml.get('baseline_sigma')}")
+        print(line + "  (advisory — never labels)")

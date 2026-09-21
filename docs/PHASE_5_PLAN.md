@@ -49,13 +49,18 @@ false-flag / false-drop rates are bounded by `alpha`.
 - **T5.1 — Honest-eval + models core (done, offline).** `metrics` (PR-AUC,
   GroupKFold), `baselines` (prevalence, mean+kσ), `logistic`, `conformal`; the
   beat-both-baselines + calibrated-abstention tests. `fuzzlab/ml/`.
-- **T5.2 — Store-trained dataset.** Assemble `(X, y, groups)` from the store — positives
-  from oracle findings, negatives from rejected candidates / non-fired evaluations,
-  grouped by endpoint; dedup positives before splitting; a fallback when the model is
-  absent or data is thin. Feature vectors from the recorded `features_json`.
-- **T5.3 — Train + score + persist.** Fit on the store's dataset, write advisory
-  `score`/`uncertainty` to `candidate`/`attempt`, persist the model row (`model`
-  table), and surface scores + the conformal decision in the web panel.
+- **T5.2 — Store-trained dataset (done, offline).** `fuzzlab/ml/dataset.py::build_dataset`
+  assembles `(X, y, groups, ids)` from the store — one example per candidate, label =
+  whether a matching oracle finding exists, grouped by endpoint (path), with a fixed
+  versioned feature vector (location/method/sink/category flags, param-name signals,
+  rules-fired). Robust to missing features; empty store → empty dataset.
+- **T5.3 — Train + score + persist (done, offline).** `fuzzlab/ml/train.py::train_and_score`
+  runs honest out-of-fold GroupKFold (logistic vs both baselines), calibrates a
+  `ConformalGate` on the OOF scores, fits the final model on all data, writes advisory
+  `candidate.score` (never labels), persists a `model` row (with the calibration) and
+  the OOF metrics to `run_metrics`; a **prevalence fallback** covers thin data. Wired as
+  `fuzzlab auto --score`, and the web panel's run-detail surfaces the top scored
+  candidates with their flag/abstain/drop decision.
 - **T5.4 — Gradient-boosted trees (optional).** Add a GBT model (numpy/sklearn) behind
   the same `fit`/`predict_proba` interface, class-balanced + calibrated, when the
   dependency is acceptable.

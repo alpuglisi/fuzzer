@@ -92,6 +92,27 @@ def test_index_shows_runs_table(tmp_path):
     assert "Review runs" in body and "/runs/1" in body
 
 
+def test_run_page_surfaces_model_scores(tmp_path):
+    from fuzzlab.ml.train import train_and_score
+    path = tmp_path / "r.db"
+    with Store(path) as store:
+        run_id = store.start_run("auto", "127.0.0.1:8080")
+        for i in range(8):
+            ev = json.dumps({"url": f"http://h/p{i}.php", "param": "id",
+                             "category": "sql-injection", "method": "GET",
+                             "location": "query"})
+            store.conn.execute(
+                "INSERT INTO candidate (run_id, rule, evidence, sink_context) "
+                "VALUES (?,?,?,?)", (run_id, "sql-injection", ev, "html" if i < 3 else None))
+        store.conn.commit()
+        train_and_score(store, run_id)                 # thin -> fallback, still scores
+    r = _client(path).get(f"/runs/{run_id}")
+    assert r.status_code == 200
+    body = r.text
+    assert "Model scores (advisory)" in body           # the panel surfaces scores
+    assert "/p0.php" in body
+
+
 def test_panel_without_store_shows_no_runs(tmp_path):
     # A store that does not exist must not be created by the read-only panel.
     path = tmp_path / "missing.db"

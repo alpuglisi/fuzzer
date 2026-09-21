@@ -10,8 +10,39 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from fuzzlab.core.urls import to_path
+
 # Score keys the harness records (report.as_dict); surfaced as a group in the UI.
 _SCORE_KEYS = ("tp", "fp", "tn", "fn", "precision", "recall", "mcc")
+
+
+def _scored_candidates(store, run_id: int, limit: int = 10) -> tuple[dict | None, list[dict]]:
+    """The latest model + this run's top advisory-scored candidates (with the conformal
+    decision). Advisory only — these are scores, never findings."""
+    row = store.conn.execute(
+        "SELECT name, version, calibration FROM model ORDER BY id DESC LIMIT 1").fetchone()
+    model = gate = None
+    if row is not None:
+        try:
+            calib = json.loads(row["calibration"] or "{}")
+        except (ValueError, TypeError):
+            calib = {}
+        model = {"name": row["name"], "version": row["version"], "calibration": calib}
+        if "t_lo" in calib and "t_hi" in calib:
+            from fuzzlab.ml.conformal import ConformalGate
+            gate = ConformalGate(t_lo=calib["t_lo"], t_hi=calib["t_hi"])
+    scored = []
+    for c in store.conn.execute(
+        "SELECT evidence, score FROM candidate WHERE run_id=? AND score IS NOT NULL "
+        "ORDER BY score DESC LIMIT ?", (run_id, limit)).fetchall():
+        try:
+            ev = json.loads(c["evidence"] or "{}")
+        except (ValueError, TypeError):
+            ev = {}
+        scored.append({"url": to_path(ev.get("url", "")), "param": ev.get("param", ""),
+                       "category": ev.get("category", ""), "score": round(c["score"], 4),
+                       "decision": gate.decide(c["score"]) if gate else "n/a"})
+    return model, scored
 
 
 def store_exists(store_path: str | Path) -> bool:
@@ -68,6 +99,7 @@ def run_detail(store, run_id: int) -> dict | None:
     ).fetchone()
 
     score = {k: metrics[k] for k in _SCORE_KEYS if k in metrics} or None
+    model, scored = _scored_candidates(store, run_id)
 
     return {
         "id": run["id"], "tool": run["tool"], "target": run["config_hash"],
@@ -83,4 +115,6 @@ def run_detail(store, run_id: int) -> dict | None:
         "target_fingerprint": dict(target) if target else None,
         "metrics": metrics,
         "score": score,
+        "model": model,
+        "scored": scored,
     }

@@ -13,6 +13,15 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 5 (T5.2 + T5.3): the detection ML now trains on the store. `build_dataset`
+  assembles examples from candidates (label = a matching oracle finding), grouped by
+  endpoint, with a versioned feature vector; `train_and_score` runs honest out-of-fold
+  GroupKFold (logistic vs prevalence + sigma baselines), calibrates a conformal gate,
+  writes **advisory** `candidate.score` (never labels), persists a `model` row + the
+  OOF metrics, and falls back to the prevalence baseline on thin data. Wired as
+  `fuzzlab auto --score`; the web panel surfaces the top scored candidates with their
+  flag/abstain/drop decision. +4 tests (192 passed / 2 skipped). Change-control:
+  CC-ML-0003, CC-UI-0008.
 - Phase 5 groundwork (T5.1): added `fuzzlab/ml/` — a dependency-light (pure-Python)
   detection-classifier + honest-evaluation core, strictly **advisory** (scores/triage,
   never `finding` labels). `metrics` (`pr_auc`, leakage-free `group_kfold`), `baselines`

@@ -3,6 +3,32 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0003 — Store-trained dataset + train/score/persist (T5.2/T5.3) (2026-09-21)
+- Change: `fuzzlab/ml/dataset.py::build_dataset` assembles a trainable dataset from the
+  store — one example per candidate, label = a matching oracle finding exists, grouped
+  by endpoint, with a fixed versioned feature vector. `fuzzlab/ml/train.py::train_and_score`
+  runs honest out-of-fold GroupKFold (logistic vs prevalence + sigma baselines),
+  calibrates a `ConformalGate` on the OOF scores, fits the final model on all data,
+  writes **advisory** `candidate.score` (never labels), persists a `model` row (with the
+  conformal calibration) and the OOF metrics (`ml_pr_auc*`) to `run_metrics`, and falls
+  back to the prevalence baseline on thin data. Wired as `fuzzlab auto --score`.
+- Impact (other components / project): turns the ML core into a real scorer over the
+  store's dataset — advisory scores rank candidates and the conformal gate triages them,
+  while the oracle remains the sole label authority. The panel surfaces the scores
+  (CC-UI-0008). No schema change (uses the reserved `candidate.score` + `model` table).
+- Risk (level; mitigation): low — advisory-only writes; a fallback for thin data; honest
+  OOF evaluation avoids leakage. Mitigated by tests (`tests/test_ml_train.py`: dataset
+  labels/groups; train writes scores + model + metrics and writes no findings;
+  thin-store fallback). Suite 192 passed / 2 skipped.
+- Deliverables:
+  - [x] `build_dataset` (labels from findings, grouped by endpoint) — done.
+  - [x] `train_and_score` (OOF eval, conformal, advisory scores, model persist, fallback) — done.
+  - [x] `fuzzlab auto --score` wiring; panel surfacing — done.
+  - [ ] Optional gradient-boosted trees (T5.4); held-out exit on real lab data (T5.5) — later.
+- Effectiveness (assessed 2026-09-21): effective in tests — scores + model + metrics are
+  written, no labels leak, and thin data falls back cleanly; the real-lab held-out exit
+  is on-host.
+
 ### CC-ML-0002 — Detection classifier + conformal groundwork (Phase 5 T5.1) (2026-09-21)
 - Change: added `fuzzlab/ml/` (pure Python, no numpy/sklearn): `metrics` (`pr_auc`
   average precision + leakage-free `group_kfold`), `baselines` (`PrevalenceBaseline`,

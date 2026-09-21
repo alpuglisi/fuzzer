@@ -213,8 +213,33 @@ def _run_page(detail: dict) -> str:
  </div>
  <div class="card"><h2>Findings ({len(detail['findings'])})</h2>
    {_finding_rows(detail['findings'])}</div>
+ {_scores_card(detail)}
  <div class="card"><h2>Metrics</h2><ul>{metrics or '<li class=muted>none</li>'}</ul></div>"""
     return _doc(f"fuzzlab run #{detail['id']}", body)
+
+
+def _scores_card(detail: dict) -> str:
+    scored = detail.get("scored") or []
+    model = detail.get("model")
+    if not model and not scored:
+        return ""
+    name = f"{model['name']} v{model['version']}" if model else "none"
+    if not scored:
+        return (f"<div class='card'><h2>Model scores (advisory)</h2>"
+                f"<p class='muted'>Model: <code>{html.escape(name)}</code>. "
+                f"No scored candidates for this run.</p></div>")
+    rows = "".join(
+        f"<tr><td><code>{html.escape(s['url'] or '')}</code></td>"
+        f"<td>{html.escape(s['param'] or '')}</td>"
+        f"<td>{html.escape(s['category'] or '')}</td>"
+        f"<td>{s['score']}</td><td>{html.escape(s['decision'])}</td></tr>"
+        for s in scored)
+    return (f"<div class='card'><h2>Model scores (advisory)</h2>"
+            f"<p class='muted'>Model: <code>{html.escape(name)}</code>. Scores rank "
+            f"candidates and the conformal gate triages them (flag / abstain / drop); "
+            f"they never confirm — the oracle owns findings.</p>"
+            f"<table><thead><tr><th>url</th><th>param</th><th>category</th>"
+            f"<th>score</th><th>decision</th></tr></thead><tbody>{rows}</tbody></table></div>")
 
 
 def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None):
