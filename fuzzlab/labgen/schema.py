@@ -161,6 +161,28 @@ class ParamSpec:
         return {"location": self.location, "encoding": self.encoding}
 
 
+#: Context-depth levels a manifest may actually declare today (§3.5, L-P2.5) --
+#: how far the tainted value travels from the injection point to the sink.
+#: These four are the *reachable* subset of the five names CR-LAB-0001
+#: Addendum B gave the ground-truth `Case.flow_variant` field: the vocabulary
+#: is deliberately identical in both directions (`context_depth` *declares*
+#: the depth to generate at; `flow_variant` *records* the depth a case was
+#: generated at), so `flow_variant_for()` below is a pure identity mapping
+#: rather than a translation table that could drift.
+CONTEXT_DEPTHS = ("direct", "same_file_helper", "cross_file", "stored_second_order")
+
+#: Depth levels Addendum B names for `Case.flow_variant` but which no manifest
+#: can be generated at yet. `cross_service` needs real ≥2-service wiring (one
+#: service's sink reached through another service's request path); Phase 3's
+#: multiple stack emitters are a necessary but not sufficient condition for it,
+#: so declaring it must fail loud rather than render something meaningless
+#: (docs/LAB_IMPLEMENTATION_PLAN.md §3.5, which scopes this lane to the four
+#: reachable values).
+UNREACHABLE_CONTEXT_DEPTHS = ("cross_service",)
+
+DEFAULT_CONTEXT_DEPTH = "direct"
+
+
 @dataclass(frozen=True)
 class Route:
     method: str
@@ -195,10 +217,77 @@ class Cell:
     ``identity.py``'s data -- ``fuzzlab.labgen.verdict`` never reads it (see
     docs/LAB_IMPLEMENTATION_PLAN.md §3.3 / CC-LAB-0038)."""
     param: ParamSpec = ParamSpec()
+    context_depth: str = DEFAULT_CONTEXT_DEPTH
+    """How far the tainted value travels from the injection point to the sink
+    -- one of :data:`CONTEXT_DEPTHS` (§3.5, L-P2.5). The generator-input
+    counterpart of the ground-truth ``Case.flow_variant`` field (L-P0.9): this
+    *declares* the depth to generate at, ``flow_variant`` *records* the depth a
+    case was generated at, and :func:`flow_variant_for` is the one shared
+    function that maps one to the other (PA-0003/PA-0021).
+
+    ``"direct"`` (the default) means source and sink in the same function --
+    today's entire corpus, so every pre-existing manifest keeps its exact
+    meaning. Not a verdict input: a depth hop is a pure pass-through of the
+    tainted value and neutralizes nothing, so ``fuzzlab.labgen.verdict`` never
+    reads this field, exactly like ``sink_endpoint``/``param``.
+
+    ``"stored_second_order"`` is, by definition, precisely the case where the
+    payload executes on a *different* endpoint than the one it was submitted
+    to, which is what ``sink_endpoint`` already expresses -- so the two fields
+    are kept biconditionally consistent (see :meth:`__post_init__`) rather than
+    duplicating each other's purpose: ``context_depth`` names the flow shape,
+    ``sink_endpoint`` names the second endpoint that shape requires."""
+
+    def __post_init__(self) -> None:
+        if self.context_depth in UNREACHABLE_CONTEXT_DEPTHS:
+            raise ManifestError(
+                f"{self.cell_id}: context_depth {self.context_depth!r} is a known depth level "
+                "but is not reachable by any emitter yet (it needs real cross-service wiring, "
+                "which having several single-service stack emitters does not provide) -- "
+                f"declare one of {CONTEXT_DEPTHS} instead "
+                "(docs/LAB_IMPLEMENTATION_PLAN.md §3.5)"
+            )
+        if self.context_depth not in CONTEXT_DEPTHS:
+            raise ManifestError(
+                f"{self.cell_id}: context_depth must be one of {CONTEXT_DEPTHS}, "
+                f"got {self.context_depth!r}"
+            )
+        # `stored_second_order` <=> `sink_endpoint` differs from `route`. Both
+        # directions are enforced so the IR can never carry a half-declared
+        # second-order cell (a depth with no second endpoint to reach, or a
+        # second endpoint with no flow shape that explains it).
+        if self.context_depth == "stored_second_order":
+            if self.sink_endpoint is None:
+                raise ManifestError(
+                    f"{self.cell_id}: context_depth 'stored_second_order' requires a "
+                    "sink_endpoint distinct from route -- that is exactly what makes a cell "
+                    "second-order (the payload is submitted to one endpoint and executes on "
+                    "another)"
+                )
+            if self.sink_endpoint == self.route:
+                raise ManifestError(
+                    f"{self.cell_id}: context_depth 'stored_second_order' requires "
+                    f"sink_endpoint != route, but both are {self.route!r}"
+                )
+        elif self.sink_endpoint is not None:
+            raise ManifestError(
+                f"{self.cell_id}: sink_endpoint is set (a payload that executes on a "
+                f"different endpoint) but context_depth is {self.context_depth!r} -- a cell "
+                "with a distinct sink_endpoint is a 'stored_second_order' cell by definition; "
+                "omit context_depth to have it derived, or declare it explicitly"
+            )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Cell":
         sink_endpoint_data = data.get("sink_endpoint")
+        # An omitted `context_depth` is *derived*, not blindly defaulted: a
+        # cell that declares a distinct `sink_endpoint` is a second-order cell
+        # by definition, so pre-existing stored/second-order manifests and
+        # fixtures (written before this axis existed) stay valid and mean what
+        # they always meant.
+        context_depth = data.get("context_depth") or (
+            "stored_second_order" if sink_endpoint_data else DEFAULT_CONTEXT_DEPTH
+        )
         return cls(
             cell_id=data["cell_id"],
             vuln_class=data["class"],
@@ -208,7 +297,34 @@ class Cell:
             transform=Pipeline.from_list(data.get("transform", [])),
             sink_endpoint=Route.from_dict(sink_endpoint_data) if sink_endpoint_data else None,
             param=ParamSpec.from_dict(data.get("param")),
+            context_depth=context_depth,
         )
+
+
+def flow_variant_for(cell: Cell) -> str:
+    """The ground-truth ``Case.flow_variant`` value a cell generated at this
+    ``context_depth`` must be labelled with (§3.5, L-P2.5).
+
+    The one shared place this mapping lives (PA-0003/PA-0021), so the
+    generator-input axis and the ground-truth label can never drift apart. It
+    is an identity mapping *by construction*: :data:`CONTEXT_DEPTHS` is
+    deliberately the same vocabulary Addendum B gave ``flow_variant`` (a test
+    asserts every level here is accepted by
+    ``fuzzlab/labels/schemas/labels.schema.json``'s own ``flow_variant`` enum,
+    rather than restating that enum here, per PA-0001).
+
+    **Not yet called by any production path, and deliberately so:** no
+    Cell-to-GroundTruth converter exists in this codebase today --
+    ``fuzzlab.labgen.cli.run_checks`` records that gap explicitly as
+    ``# TODO(L-P0.9-integration)`` (see FR-LAB-32's own "two things this CLI
+    still does not do"), and building a whole ground-truth emission pipeline
+    speculatively is out of §3.5's scope. This function exists so that the
+    converter, when it is built, has exactly one obvious call to make instead
+    of re-deriving the mapping locally.
+    """
+    if cell.context_depth not in CONTEXT_DEPTHS:  # pragma: no cover - __post_init__ guards
+        raise ManifestError(f"{cell.cell_id}: unknown context_depth {cell.context_depth!r}")
+    return cell.context_depth
 
 
 # Axis names an axis_range's `factors` may use, and the Cell-dict field each
@@ -218,7 +334,15 @@ class Cell:
 # granularity failure mode PA-0010 warns about, so both are asserted to
 # agree in tests/test_labgen_schema.py.
 AXIS_RANGE_FACTOR_NAMES = frozenset(
-    {"class", "stack_profile", "sink_context_family", "transform", "route_method", "route_path"}
+    {
+        "class",
+        "stack_profile",
+        "sink_context_family",
+        "transform",
+        "route_method",
+        "route_path",
+        "context_depth",
+    }
 )
 
 
@@ -235,6 +359,20 @@ def _expand_axis_range(block: dict[str, Any]) -> list[dict[str, Any]]:
     """
     prefix = block["cell_id_prefix"]
     factors = block["factors"]
+
+    # A fixed `sink_endpoint` on a block is only meaningful for a
+    # `stored_second_order` level; declared without one it would be silently
+    # dropped from every generated cell, which is exactly the
+    # silently-ignored-config failure mode PA-0010 warns about. Checked before
+    # expansion, so the error names the real authoring mistake.
+    depth_levels = list(factors.get("context_depth") or ())
+    if block.get("context_depth") is not None:
+        depth_levels.append(block["context_depth"])
+    if block.get("sink_endpoint") is not None and "stored_second_order" not in depth_levels:
+        raise ManifestError(
+            f"axis_ranges block {prefix!r}: a fixed 'sink_endpoint' is only used by a "
+            "'stored_second_order' context_depth level, which this block never produces"
+        )
 
     resolver_config: dict[str, Any] = {"factors": factors}
     for key in ("strength", "sub_models", "constraints"):
@@ -288,16 +426,30 @@ def _expand_axis_range(block: dict[str, Any]) -> list[dict[str, Any]]:
 
         transform = row.get("transform", block.get("transform", []))
 
-        cells.append(
-            {
-                "cell_id": f"{prefix}{index:04d}",
-                "class": cls,
-                "stack_profile": stack_profile,
-                "route": {"method": method, "path": path},
-                "sink_context": sink_context,
-                "transform": transform,
-            }
-        )
+        cell: dict[str, Any] = {
+            "cell_id": f"{prefix}{index:04d}",
+            "class": cls,
+            "stack_profile": stack_profile,
+            "route": {"method": method, "path": path},
+            "sink_context": sink_context,
+            "transform": transform,
+        }
+
+        # `context_depth` (§3.5) may be a factor or this block's fixed value;
+        # absent from both, it is simply omitted and `Cell.from_dict` derives
+        # it, so an axis-range block written before this axis existed expands
+        # byte-for-byte as before. A `stored_second_order` level additionally
+        # needs the block's fixed `sink_endpoint` (the axis itself cannot
+        # invent a second endpoint); Cell.__post_init__ fails loud if it is
+        # missing, and it is carried here whenever the block declares one.
+        context_depth = row.get("context_depth", block.get("context_depth"))
+        if context_depth is not None:
+            cell["context_depth"] = context_depth
+        fixed_sink_endpoint = block.get("sink_endpoint")
+        if fixed_sink_endpoint is not None and context_depth == "stored_second_order":
+            cell["sink_endpoint"] = fixed_sink_endpoint
+
+        cells.append(cell)
     return cells
 
 

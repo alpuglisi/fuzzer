@@ -3,8 +3,8 @@
 Per Addendum C's architecture correction, an emitter is built as **module
 composition, not one template per cell**: a small inventory of independently
 authored, independently testable ``source``/``transform``/``sink``/
-``complexity`` fragments (following NIST VTSG's schema, not its PHP code)
-that an emitter assembles per :class:`~fuzzlab.labgen.schema.Cell`. This
+``complexity``/``depth`` fragments (following NIST VTSG's schema, not its PHP
+code) that an emitter assembles per :class:`~fuzzlab.labgen.schema.Cell`. This
 keeps the unit of authoring effort at "a handful of modules" rather than
 "one template per ``(class, sink_context, stack)`` combination."
 
@@ -19,6 +19,13 @@ string-literal SQL lookup, and a stored-value HTML-body echo), to prove the
 module set generalizes beyond one illustrative pair. It is still not
 exhaustive coverage of every vulnerability class -- authoring the rest of
 the inventory for the full ~30-page app is separate, later work.
+
+A fifth category, ``depth`` (``depths/``, registry :data:`DEPTHS`), was added
+for the ``context_depth`` axis (§3.5, L-P2.5): the helper definition and call
+site a ``same_file_helper``/``cross_file`` cell's tainted value travels
+through. Deliberately its own category rather than extra ``transform`` ops --
+``transform`` op names are the verdict-relevant vocabulary
+``fuzzlab.labgen.verdict`` walks, and a depth hop must never appear there.
 
 Every module is a small Jinja2-rendered unit. Per the Phase-0 plan's own
 determinism rule, every :class:`jinja2.Environment` here sets
@@ -57,6 +64,7 @@ _SOURCE_ENV = _make_env("sources")
 _TRANSFORM_ENV = _make_env("transforms")
 _SINK_ENV = _make_env("sinks")
 _COMPLEXITY_ENV = _make_env("complexities")
+_DEPTH_ENV = _make_env("depths")
 
 
 @dataclass(frozen=True)
@@ -266,6 +274,45 @@ class RenderOnlyComplexity(TemplateModule):
         return RenderResult(code=code, context=dict(ctx))
 
 
+class PassthroughHelperDepth(TemplateModule):
+    """The function definition a ``same_file_helper``/``cross_file`` cell's
+    tainted value travels through (§3.5, L-P2.5).
+
+    A deliberately *pure pass-through*: it adds a hop to the flow (the shape
+    the ``context_depth`` axis exists to vary, and the shape a taint-tracking
+    tool has to follow) without adding a neutralization, so a cell's derived
+    verdict stays a function of ``(transform, sink_context, safety_matrix)``
+    alone (D20) at every depth. Its own category rather than a ``transform``
+    module precisely because ``transform`` op names are the verdict-relevant
+    vocabulary ``fuzzlab.labgen.verdict`` walks -- a depth hop must never
+    appear there.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("passthrough_helper", "depth", _DEPTH_ENV, "passthrough_helper.php.j2")
+
+
+class HelperCallDepth(TemplateModule):
+    """The call site that routes the tainted value through the helper
+    :class:`PassthroughHelperDepth` defines -- rendered between the source and
+    the cell's own transform pipeline, so the value reaching the sink has
+    provably passed through the helper."""
+
+    def __init__(self) -> None:
+        super().__init__("helper_call", "depth", _DEPTH_ENV, "helper_call.php.j2")
+
+
+class CrossFileRequireDepth(TemplateModule):
+    """The ``require_once`` that pulls in a ``cross_file`` cell's helper file.
+    The only difference between ``same_file_helper`` and ``cross_file`` is
+    where the helper definition lands (one file or two) -- the flow itself is
+    identical, which is exactly what makes them a clean pair of depth levels
+    for measuring a tool's cross-file reach."""
+
+    def __init__(self) -> None:
+        super().__init__("cross_file_require", "depth", _DEPTH_ENV, "cross_file_require.php.j2")
+
+
 SOURCES: dict[str, Module] = {
     "get_param": GetParamSource(),
     "post_param": PostParamSource(),
@@ -284,4 +331,16 @@ SINKS: dict[str, Module] = {
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),
     "render_only": RenderOnlyComplexity(),
+}
+#: Depth-hop fragments (§3.5, L-P2.5). Keyed by fragment, not by depth level:
+#: `same_file_helper` and `cross_file` share the same helper definition and
+#: call site and differ only in file placement, and `direct`/
+#: `stored_second_order` need no fragment at all (the first is today's inline
+#: body; the second is already expressed by `Cell.sink_endpoint` routing
+#: php_current to the sink page). Which fragments each level composes lives in
+#: the emitter, next to the file-assembly decision it drives.
+DEPTHS: dict[str, Module] = {
+    "passthrough_helper": PassthroughHelperDepth(),
+    "helper_call": HelperCallDepth(),
+    "cross_file_require": CrossFileRequireDepth(),
 }

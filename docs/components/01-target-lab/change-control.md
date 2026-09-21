@@ -1021,6 +1021,146 @@ each lane designed them.)*
   confirming both `confirmed_vulnerable` and `confirmed_secure` outcomes
   still classify correctly through the new marking/encoding path.
 
+### CC-LAB-0040 — `context_depth` axis wired into the manifest/`Cell` IR (§3.5, lane L-P2.5) (2026-09-21)
+*(Numbered `CC-LAB-0040` as the next free number in this log at authoring time. This
+lane's worktree was also created onto a stale, unrelated UI-redesign branch lineage with
+no `fuzzlab/labgen/` directory present at all — self-diagnosed via this task's own sync
+check and recovered with `git fetch . claude/trusting-noether-heon0n:refs/remotes/origin/
+claude/trusting-noether-heon0n` + `git reset --hard` onto the live branch tip before any
+work began, the same stale-worktree condition `CC-LAB-0030`/`CC-LAB-0038` record. Other
+lanes (L-P1.2b, L-P1.4, L-P3.4) were building concurrently against the same files, so a
+merge-time renumber of this entry and its `FR-LAB-38` is expected and normal.)*
+- Change: added the `context_depth` axis from `docs/LAB_IMPLEMENTATION_PLAN.md` §3.5 —
+  the **generator-input** counterpart of the ground-truth `Case.flow_variant` field
+  L-P0.9/`CC-LAB-0030` already added. `flow_variant` records, after the fact, the depth
+  a case was generated at; `context_depth` lets a manifest *declare* the depth to
+  generate at, before generation.
+  1. **`fuzzlab/labgen/schema.py`**: new module constants `CONTEXT_DEPTHS`
+     (`direct | same_file_helper | cross_file | stored_second_order` — the four
+     reachable levels this lane is scoped to), `UNREACHABLE_CONTEXT_DEPTHS`
+     (`cross_service`, named by Addendum B but generatable by nothing yet) and
+     `DEFAULT_CONTEXT_DEPTH`; a new optional `Cell.context_depth: str = "direct"` field
+     (minimal and additive, same pattern as `sink_endpoint`/`param`, to keep merges with
+     the concurrent lanes easy as instructed); and a `Cell.__post_init__` validator that
+     raises `ManifestError` — never a raw `ValueError` — on an unknown level, and raises
+     a *distinct, actionable* error for a known-but-unreachable level (`cross_service`),
+     naming why it is unreachable and which four levels are reachable, rather than
+     silently rendering something meaningless.
+  2. **Consistency with `sink_endpoint` (L-P2.3/`CC-LAB-0038`), not duplication of it**:
+     `stored_second_order` is *by definition* exactly the case where the payload executes
+     on a different endpoint than the one it was submitted to — which `sink_endpoint`
+     already expresses. So the two fields are kept **biconditionally** consistent in
+     `__post_init__`: that depth requires a `sink_endpoint` distinct from `route`, and a
+     cell carrying such a `sink_endpoint` may not declare any other depth.
+     `context_depth` names the flow shape; `sink_endpoint` names the second endpoint that
+     shape requires. Backward compatibility is handled by *derivation*, not by
+     loosening: `Cell.from_dict` derives `stored_second_order` when `context_depth` is
+     omitted and a distinct `sink_endpoint` is declared, so every pre-existing stored
+     cell and L-P2.3 fixture stays valid and means exactly what it meant.
+  3. **Ground-truth side**: checked for an existing Cell-to-GroundTruth path before
+     building anything — there is none (`fuzzlab.labgen.cli.run_checks` records the gap
+     as `# TODO(L-P0.9-integration)`; FR-LAB-32 states it), so no ground-truth pipeline
+     was built speculatively. Instead the *mapping* was put in one shared place,
+     `schema.flow_variant_for(cell) -> str` (PA-0003/PA-0021), documented as having no
+     production caller yet and existing so the converter has one obvious call to make.
+     It is an identity mapping by construction (the two vocabularies are deliberately
+     the same), and a test asserts every `CONTEXT_DEPTHS` level is accepted by
+     `fuzzlab/labels/schemas/labels.schema.json`'s own `flow_variant` enum (derived from
+     that schema, not restated — PA-0001), so the two sides cannot drift.
+  4. **Not a verdict input**: a depth hop is a pure pass-through that neutralizes
+     nothing, so `fuzzlab.labgen.verdict` is untouched and a cell's verdict stays a
+     function of `(transform, sink_context, safety_matrix)` alone (D20) at every depth —
+     the same render/tracking-metadata category as `sink_endpoint`/`param`. A test
+     asserts the vulnerable sink line is byte-present at both `direct` and
+     `same_file_helper`.
+  5. **`lab/schemas/manifest.schema.json`**: a new `$defs/context_depth` enum (the four
+     reachable levels only, so `cross_service` fails at validation time too), referenced
+     from the cell definition (needed: the cell schema is `additionalProperties: false`),
+     from `axis_range.factors` (as a covering-array axis), and as an `axis_range`
+     block-level fixed value — plus a block-level fixed `sink_endpoint` for a
+     `stored_second_order` level.
+  6. **Resolver axis wiring** (possible now that L-P1.1 has merged, unlike L-P2.4's
+     `param` which had to defer it): `context_depth` added to
+     `AXIS_RANGE_FACTOR_NAMES` and placed by `_expand_axis_range`, omitted from the
+     generated cell dict when neither a factor nor a fixed value so an axis-range block
+     written before this axis expands byte-for-byte as before. A block-level fixed
+     `sink_endpoint` is carried onto `stored_second_order` cells, and a fixed
+     `sink_endpoint` on a block whose levels never include that depth is **rejected**
+     before expansion rather than silently dropped (PA-0010).
+  7. **`php_current` rendering** — a new `depth` module category
+     (`fuzzlab/labgen/modules/depths/` + registry `DEPTHS`:
+     `passthrough_helper`, `helper_call`, `cross_file_require`), deliberately its own
+     category and *not* a `transform` op, since `transform` op names are the
+     verdict-relevant vocabulary `verdict()` walks. `direct` adds nothing (today's
+     inline body, byte-identical); `same_file_helper` routes the tainted value through a
+     pass-through helper defined in the same file (Juliet's own same-file-helper flow
+     shape); `cross_file` renders the *identical* flow with the helper in a second
+     emitted file (`EmittedFile(role="helper")`, pulled in by `require_once`), so the
+     two levels differ only in file placement — exactly the distinction the axis exists
+     to measure; `stored_second_order` needs no fragment, its depth already being
+     expressed structurally by `sink_endpoint` routing the emitter to the sink page,
+     where the value is read from storage rather than from the request. Keyed by
+     fragment rather than by level, with the placement decision in the emitter next to
+     the file-assembly it drives.
+- Bug found: none — pure additive feature work, no defect fixed, so no `ERROR_LOG.md` /
+  `docs/bugs/` / `docs/PREVENTIVE_ACTIONS.md` entries are required (checked against
+  `ERROR_LOG.md`'s own literal scope line per PA-0019: nothing broke and was fixed here;
+  the stale-worktree condition was a known, already-documented environment condition this
+  task's brief anticipated and gave the recovery for).
+- Impact (other components / project): LAB only. `verdict.py` untouched (see above).
+  Other emitters (`node_express`, `python_fastapi`, `php_laravel`) untouched, per this
+  lane's scope discipline — they still render every cell as if `context_depth` were
+  `direct`; wiring depth into them is future work, flagged here rather than claimed.
+  `cross_service` deliberately not attempted (it needs real ≥2-service wiring, which
+  several single-service stack emitters do not by themselves provide) and made to fail
+  loud in two places instead. No other component's contracts change; no FUZZ-side change
+  (the ground-truth field `flow_variant` was already added by `CC-LAB-0030`).
+- Risk (level; mitigation): low-to-moderate. The `Cell` field itself is a minimal,
+  additive, safely-defaulted field. The one genuinely opinionated choice is the
+  **biconditional** `stored_second_order` ⇔ distinct-`sink_endpoint` invariant, which
+  makes a previously-legal in-memory shape (`Cell(sink_endpoint=…)` constructed directly
+  with the default depth) illegal; mitigated by the `from_dict` derivation (every
+  manifest/dict path is unaffected) and verified by sweeping the codebase for direct
+  `Cell(...)` constructions that set `sink_endpoint` — there are none outside
+  `from_dict`. The new render paths only activate for a non-`direct` cell, which no
+  existing manifest declares, and a whole-corpus regression test asserts every cell of
+  every existing manifest still renders as one file with no depth machinery (PA-0024).
+- Deliverables:
+  - [x] `CONTEXT_DEPTHS`/`UNREACHABLE_CONTEXT_DEPTHS`/`DEFAULT_CONTEXT_DEPTH` +
+        `Cell.context_depth` + `__post_init__` validation, `fuzzlab/labgen/schema.py` — done
+  - [x] `Cell.from_dict` derivation from a distinct `sink_endpoint` — done
+  - [x] `schema.flow_variant_for(cell)` shared depth → `flow_variant` mapping — done
+  - [x] `lab/schemas/manifest.schema.json`: `$defs/context_depth` + cell property +
+        axis-range factor + block-level fixed `context_depth`/`sink_endpoint` — done
+  - [x] Axis-range wiring (`AXIS_RANGE_FACTOR_NAMES`, `_expand_axis_range`) — done
+  - [x] `fuzzlab/labgen/modules/depths/` (3 templates) + `DEPTHS` registry +
+        `php_current` depth composition and second-file emission — done
+  - [x] Tests: `tests/test_labgen_context_depth.py` (30 tests) — done
+  - [x] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-38` + §5
+        interface note for `flow_variant_for` — done
+  - [x] `CHANGELOG.md` line — done
+  - [ ] Depth rendering in the Phase 3 emitters (`node_express`, `python_fastapi`,
+        `php_laravel`) — deliberately out of this lane's scope (the brief limits emitter
+        work to `php_current`); they accept the field and ignore it today.
+  - [ ] `cross_service` depth — out of scope per §3.5; fails loud in both the dataclass
+        and the JSON Schema until real cross-service wiring exists.
+  - [ ] A `flow_variant_for()` production caller — blocked on the Cell-to-GroundTruth
+        converter that does not exist (FR-LAB-32's `# TODO(L-P0.9-integration)`); not
+        built speculatively.
+- Effectiveness (assessed 2026-09-21): meets §3.5's own acceptance bar — one cell per
+  reachable depth level round-trips through the full validated `load_manifest()`/
+  `Manifest.from_dict(validate=True)` path and renders through `php_current` with the
+  depth confirmable in the rendered PHP (helper defined in the same file / in a second
+  `role="helper"` file pulled in by `require_once` / the sink page reading from storage),
+  and both an unreachable (`cross_service`) and an unknown level raise at the dataclass
+  *and* at the JSON-Schema layer. Renders are asserted deterministic at every level
+  (NFR-LAB-reproducible). Full suite (`python -m pytest -q`): **1187 passed, 8 skipped**,
+  plus the same 2 pre-existing, unrelated `tests/test_mutation_operators.py` failures
+  (`test_every_surface_variant_preserves_semantics`,
+  `test_sql_equivalent_needs_trusted_provenance`) that `CC-LAB-0038`/`CC-LAB-0039`
+  already recorded as present before and outside this lane's scope — a MUT-component
+  concern, not touched here.
+
 ### CC-LAB-0028 — Nuclei path-traversal/LFI oracle wrapper (Addendum E, Spike 004) (2026-09-21)
 *(Numbered `CC-LAB-0028` rather than `CC-LAB-0017` at merge time — this lane's worktree
 diverged onto a stale, unrelated branch lineage before starting, self-diagnosed and

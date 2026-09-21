@@ -694,6 +694,60 @@ lane) can submit a payload as
   every cell as if `param` were its `query`/`raw` default). (`docs/LAB_IMPLEMENTATION_PLAN.md`
   §3.4, `CC-LAB-0039`)
 
+- **FR-LAB-38** (Lab track, §3.5, lane L-P2.5) *(Number claimed as the next free
+  `FR-LAB-N` at authoring time; several lanes merged concurrently, so a merge-time
+  renumber per this project's standing multi-lane policy is expected and does not
+  change this requirement's content.)* A `context_depth` axis on the
+  **generator-input** IR: `fuzzlab.labgen.schema.Cell.context_depth` (a validated
+  string, one of `CONTEXT_DEPTHS = direct | same_file_helper | cross_file |
+  stored_second_order`, default `direct`) declaring how far a cell's tainted value
+  travels from the injection point to the sink — the counterpart of the ground-truth
+  `Case.flow_variant` field (FR-LAB-28), which *records* after the fact what
+  `context_depth` *declares* before generation. The two vocabularies are deliberately
+  identical, so `fuzzlab.labgen.schema.flow_variant_for(cell) -> str` is the single
+  shared mapping between them (PA-0003/PA-0021) rather than a per-caller re-derivation;
+  a test asserts every `CONTEXT_DEPTHS` level is accepted by
+  `fuzzlab/labels/schemas/labels.schema.json`'s own `flow_variant` enum (PA-0001).
+  `flow_variant_for()` has no production caller yet, and deliberately so: no
+  Cell-to-GroundTruth converter exists (FR-LAB-32 records that gap as
+  `# TODO(L-P0.9-integration)` in `fuzzlab.labgen.cli.run_checks`), and building a
+  ground-truth emission pipeline speculatively is out of §3.5's scope — the converter,
+  when built, calls this function instead of re-deriving the label.
+  Addendum B's fifth level, `cross_service`, is **not** reachable and is listed
+  separately as `UNREACHABLE_CONTEXT_DEPTHS`: declaring it raises `ManifestError`
+  naming why (real cross-service wiring, which several single-service stack emitters do
+  not by themselves provide) and naming the four levels that are reachable, rather than
+  silently rendering something meaningless; `lab/schemas/manifest.schema.json` omits it
+  from the `context_depth` enum too, so it also fails at validation time.
+  `context_depth` and `sink_endpoint` (FR-LAB-36) are kept **biconditionally**
+  consistent rather than duplicating each other: `stored_second_order` is by definition
+  exactly the case where the payload executes on a different endpoint than the one it
+  was submitted to, so that depth requires a `sink_endpoint` distinct from `route`, and
+  a cell carrying such a `sink_endpoint` may not declare any other depth —
+  `Cell.from_dict` *derives* `stored_second_order` when `context_depth` is omitted and
+  a distinct `sink_endpoint` is declared, so every pre-`context_depth` stored cell stays
+  valid and unchanged in meaning. Not a verdict input: a depth hop is a pure
+  pass-through that neutralizes nothing, so `fuzzlab.labgen.verdict` never reads the
+  field and a cell's verdict stays a function of `(transform, sink_context,
+  safety_matrix)` alone (D20) at every depth. Wired as a covering-array axis
+  (`AXIS_RANGE_FACTOR_NAMES` + the manifest schema's `axis_range.factors`, FR-LAB-29),
+  with an optional block-level fixed `sink_endpoint` for a `stored_second_order` level;
+  a fixed `sink_endpoint` on a block no level uses is rejected rather than silently
+  dropped (PA-0010). Rendered by `php_current` via a new `depth` module category
+  (`fuzzlab/labgen/modules/depths/`, registry `DEPTHS`: `passthrough_helper`,
+  `helper_call`, `cross_file_require`) — its own category, never a `transform` op, since
+  `transform` op names are the verdict-relevant vocabulary `verdict()` walks:
+  `direct` renders today's inline body byte-identically; `same_file_helper` routes the
+  value through a pass-through helper defined in the same file; `cross_file` renders the
+  identical flow with the helper in a second emitted file (`role="helper"`, pulled in by
+  `require_once`), so the two differ only in file placement — exactly the distinction the
+  axis exists to measure; `stored_second_order` needs no fragment, its depth being
+  expressed structurally by `sink_endpoint` routing the emitter to the sink page, where
+  the value is read from storage rather than from the request. Other emitters
+  (`node_express`, `python_fastapi`, `php_laravel`) are untouched and still render every
+  cell as if `context_depth` were `direct`. (`docs/LAB_IMPLEMENTATION_PLAN.md` §3.5,
+  `CC-LAB-0040`)
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.
@@ -753,6 +807,12 @@ FR-LAB-28. `fuzzlab.labels.contract.Case` gained `primary_endpoint`, `primary_ro
 `"direct"`) — all additive/defaulted; `fuzzlab.labels.schemas.labels.schema.json`'s
 `case` definition and `lab/ground-truth/expectedresults.csv` extended to match, see
 FR-LAB-28.
+(Lab track, generator-build-time) `fuzzlab.labgen.schema.flow_variant_for(cell) -> str`
+is the one shared mapping from a `Cell.context_depth` (generator input) to the
+ground-truth `Case.flow_variant` value a case generated at that depth must carry
+(identity by construction — the two vocabularies are the same). No production caller
+yet: the Cell-to-GroundTruth converter it exists for does not exist (see FR-LAB-32's
+`# TODO(L-P0.9-integration)`). See FR-LAB-38.
 (Lab track, generator-build-time) `fuzzlab.labgen.identity.load_identities(path) ->
 IdentityGraph` reads `lab/identities/identities.yaml`, validated against
 `lab/schemas/identities.schema.json` — see FR-LAB-27. Reads nothing the manifest
