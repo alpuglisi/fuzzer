@@ -1,0 +1,5 @@
+// An *unquoted* HTML attribute value: the attribute boundary is whitespace, which
+// htmlspecialchars() does not escape -- so an upstream HTML-entity escape is
+// correct escaping for the wrong context here (escaping-context mismatch).
+echo '<div class="{{ css_class }}" data-{{ attr_name }}=' . {{ value_expr }} . '>';
+echo '</div>';

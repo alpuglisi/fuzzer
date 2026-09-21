@@ -18,6 +18,28 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — `lab-generate --check` gate tests stopped exercising their gate when an emitter's supported shapes were widened
+
+- **Symptom:** while landing lane L-P1.2b (the harder SQLi/XSS shapes, which widen
+  `php_current`'s supported shapes by four and therefore make the example manifest's
+  long-skipped `LABGEN-EX-0003` renderable),
+  `tests/test_labgen_cli.py::test_check_fails_loud_on_nondeterministic_render` failed:
+  `--check` still exited 1, but the *determinism* gate it exists to exercise no longer
+  tripped at all.
+- **Root cause:** that test (and its minimal-pair sibling) injected its fault on the
+  parity of a **global** counter incremented once per rendered cell, so which parity a
+  given cell's render lands on depends on how many *other* supported cells precede it —
+  at an even supported-cell count the corruption applied to both whole-tree renders
+  identically and the regenerate-and-diff comparison saw no difference. The same file
+  also hardcoded the supported-cell set that `PhpCurrentEmitter.supports()` computes.
+- **Remediation:** both fault injections now count renders per `cell_id` (invariant under
+  cell count), and `SUPPORTED_CELL_IDS` is derived from `supports()`. PA-0002 sweep done
+  across `tests/`: the whole-tree counters in `test_labgen_gates.py` /
+  `test_labgen_conformance_tier3.py` are at the correct granularity and left as-is. Full
+  RCA: `docs/bugs/BUG-0025-check-gate-fault-injection-coupled-to-supported-cell-count.md`;
+  rule: PA-0027.
+- **Status:** Fixed (`CC-LAB-0040`).
+
 ## 2026-09-21 — Covering-array resolver silently returns zero cells when `strength` exceeds the factor count
 
 - **Symptom:** while wiring `fuzzlab.labgen.resolver.expand()` into manifest loading

@@ -1,0 +1,12 @@
+{% if bound %}
+// A prepared statement can bind the WHERE *value*, but no SQL dialect can bind an
+// ORDER BY *identifier* -- so the tainted identifier is still concatenated into the
+// statement text (safety matrix: param_bind has no_effect at sql_identifier).
+$stmt = $pdo->prepare("SELECT id, {{ column }} FROM {{ table }} WHERE active = ? ORDER BY " . {{ value_expr }});
+$stmt->execute([1]);
+$row = $stmt->fetch(PDO::FETCH_ASSOC);
+{% else %}
+$sql = "SELECT id, {{ column }} FROM {{ table }} ORDER BY " . {{ value_expr }};
+$result = $pdo->query($sql);
+$row = $result ? $result->fetch(PDO::FETCH_ASSOC) : null;
+{% endif %}

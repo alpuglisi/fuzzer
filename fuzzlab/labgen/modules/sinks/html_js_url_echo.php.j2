@@ -1,0 +1,4 @@
+// The tainted value lands inside a `javascript:` URL -- an HTML attribute whose
+// content is JavaScript source. Whether it was HTML-escaped upstream is exactly
+// what the cell's transform decides; this sink never escapes anything itself.
+echo '<a class="{{ css_class }}" href="javascript:' . {{ value_expr }} . '">continue</a>';

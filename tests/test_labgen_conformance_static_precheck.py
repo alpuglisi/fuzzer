@@ -21,9 +21,27 @@ def test_xss_html_body_shape_is_informative() -> None:
     assert static_precheck_status("xss", "html_body") is StaticPrecheckStatus.INFORMATIVE
 
 
+def test_harder_shapes_are_uninformative() -> None:
+    """L-P1.2b: identifier/alias-position SQLi and escaping-context-mismatch
+    XSS are both shapes a taint engine is structurally blind to -- the latter
+    notably so, since the escaping it looks for is *present* and only the
+    context is wrong (see STATIC_PRECHECK_BY_SHAPE's own comments)."""
+    for shape in (
+        ("sqli", "sql_identifier"),
+        ("sqli", "sql_join_alias"),
+        ("xss", "url_javascript_scheme"),
+        ("xss", "html_attribute_unquoted"),
+    ):
+        assert static_precheck_status(*shape) is StaticPrecheckStatus.UNINFORMATIVE
+
+
 def test_unregistered_shape_fails_loud() -> None:
+    # Deliberately a shape no lane has authored a module set for (an LDAP
+    # filter sink); the previous stand-in here, (xss, html_attribute_unquoted),
+    # became a *registered* shape in L-P1.2b, which is exactly why this test
+    # now names something the registry does not cover at all.
     with pytest.raises(KeyError):
-        static_precheck_status("xss", "html_attribute_unquoted")
+        static_precheck_status("ldapi", "ldap_filter")
 
 
 def test_uninformative_shape_is_skipped_and_checker_is_never_called() -> None:

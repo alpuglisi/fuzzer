@@ -175,6 +175,27 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
         "password_param": "password",
     },
     "html_body_echo": {"value_expr": "$bio", "css_class": "bio"},
+    # --- L-P1.2b harder-shape modules -------------------------------------
+    "identifier_charset_filter": {"value_expr": "$sort"},
+    "identifier_allowlist": {"value_expr": "$sort", "allowed_identifiers": ("id", "name")},
+    "url_scheme_allowlist": {"value_expr": "$link"},
+    "attr_value_allowlist": {"value_expr": "$theme", "attr_default": "default"},
+    "sql_identifier_order_by": {
+        "value_expr": "$sort",
+        "bound": False,
+        "table": "products",
+        "column": "name",
+    },
+    "sql_join_alias_lookup": {
+        "value_expr": "$alias",
+        "bound": False,
+        "table": "inventory",
+        "join_table": "inventory",
+        "column": "sku",
+        "join_column": "parent_id",
+    },
+    "html_js_url_echo": {"value_expr": "$link", "css_class": "share"},
+    "html_attribute_unquoted_echo": {"value_expr": "$theme", "css_class": "theme", "attr_name": "theme"},
     "single_statement": {"body": "    // x\n", "handler_name": "handle_x"},
     "render_only": {"body": "    // x\n", "handler_name": "handle_x"},
 }

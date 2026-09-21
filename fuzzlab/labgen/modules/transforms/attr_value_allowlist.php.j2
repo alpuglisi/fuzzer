@@ -1,0 +1,4 @@
+// attr_value_allowlist transform: {{ value_expr }} is used only if it matches a
+// strict value allowlist (^[A-Za-z0-9_-]+$), otherwise a safe default. Admits no
+// whitespace, backtick or '<' -- the characters that break an *unquoted* HTML
+// attribute boundary and that htmlspecialchars() leaves untouched.

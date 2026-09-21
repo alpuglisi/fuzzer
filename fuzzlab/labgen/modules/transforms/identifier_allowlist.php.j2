@@ -1,0 +1,5 @@
+// identifier_allowlist transform: {{ value_expr }} is used only if it is a member of
+// a fixed allowlist of real identifiers ({{ allowed_identifiers_php }}), otherwise it
+// collapses to {{ fallback_identifier_php }}. Unlike a character filter, this leaves
+// the query's structure entirely generator-chosen -- the only transform that closes
+// an identifier/alias position, since no dialect can bind an identifier placeholder.

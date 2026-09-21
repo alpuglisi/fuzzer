@@ -1,0 +1,4 @@
+// url_scheme_allowlist transform: {{ value_expr }} is used only if its URL scheme is
+// http/https; anything else (javascript:, data:, vbscript:) collapses to an inert
+// '#'. This is the escaping-context-correct fix for a `javascript:`-URL sink --
+// HTML-entity escaping is not (see the safety matrix's url_javascript_scheme rows).

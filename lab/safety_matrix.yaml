@@ -18,6 +18,12 @@
 #   sql_syntax_break — attacker input can terminate/alter SQL syntax
 #   html_tag_break    — attacker input can open a new HTML tag/context
 #   error_based_disclosure — a pipeline leaks raw query/error text on failure
+#   sql_identifier_substitution — attacker input chooses *which* column/table/
+#     alias the query names, without needing to break SQL syntax at all
+#     (identifier/alias/connector-position injection; added L-P1.2b)
+#   js_context_break — attacker input reaches a JavaScript execution context
+#     (e.g. the body of a `javascript:` URL), where HTML-entity escaping is
+#     the wrong escaping (added L-P1.2b)
 version: 1
 entries:
   # --- SQL sinks -----------------------------------------------------
@@ -98,3 +104,115 @@ entries:
   - op: param_bind
     sink_family: html_body
     effect: no_effect
+
+  # --- L-P1.2b: the harder shapes (docs/LAB_IMPLEMENTATION_PLAN.md §2.2) ---
+  # All entries below are brand-new (op, sink_family) pairs — new ops and/or
+  # new sink families — so, per this file's own append-only rule, they are
+  # additions under the SAME `version: 1`, not a version bump: no existing
+  # pair's meaning changes, and a corpus generated under v1 before these
+  # landed re-derives identically.
+
+  # --- identifier/alias/connector-position SQL sinks ---------------------
+  # `sql_identifier`: the tainted value *is* a column/table identifier
+  # (e.g. `ORDER BY $sort`), not a literal value. `sql_join_alias`: it is a
+  # JOIN alias — a connector position, typically substituted more than once
+  # in one statement (alias declaration + ON clause). Both families require
+  # two concerns: the classic `sql_syntax_break` AND
+  # `sql_identifier_substitution`, the concern that distinguishes this shape
+  # — an attacker who can only supply legal identifier characters still
+  # chooses which column/table the query reads.
+  - op: raw_concat
+    sink_family: sql_identifier
+    effect: no_effect
+  - op: raw_concat
+    sink_family: sql_join_alias
+    effect: no_effect
+
+  # Parameterization does NOT help at an identifier position: no SQL dialect
+  # lets a bound placeholder stand in for a column/table/alias name, so a
+  # prepared statement still concatenates the identifier. This is the single
+  # most important row of this group — the shape's whole point is that the
+  # textbook fix is inapplicable, not merely omitted.
+  - op: param_bind
+    sink_family: sql_identifier
+    effect: no_effect
+  - op: param_bind
+    sink_family: sql_join_alias
+    effect: no_effect
+
+  # A bare-identifier *character* allowlist (`^[A-Za-z0-9_]+$`): blocks the
+  # quotes/spaces/parens/comments a syntax-break payload needs, but leaves
+  # the real defect untouched — any identifier-shaped string still reaches
+  # the query, so `secret` can be swapped in for `name`. Credited `partial`
+  # (still VULNERABLE, just harder — D20), not `neutralises`, deliberately:
+  # (a) the defining concern `sql_identifier_substitution` is not addressed
+  # at all, and (b) at a connector position the same filtered value can be
+  # substituted into several places in one statement, so even the syntax
+  # story is not fully closed. This is the exact shape a real sqlmap 1.8.4
+  # spot-check could not detect — see
+  # fuzzlab/labgen/identifier_sqli_oracle.py's docstring, finding #3.
+  - op: identifier_charset_filter
+    sink_family: sql_identifier
+    effect: partial
+    neutralizes: [sql_syntax_break]
+  - op: identifier_charset_filter
+    sink_family: sql_join_alias
+    effect: partial
+    neutralizes: [sql_syntax_break]
+
+  # A real allowlist of *known identifiers* (membership in a fixed list of
+  # actual column/table/alias names, with a safe default) is the only
+  # transform that closes this shape: the query's structure can no longer be
+  # chosen by input, and no attacker-supplied character reaches the SQL text.
+  - op: identifier_allowlist
+    sink_family: sql_identifier
+    effect: neutralises
+    neutralizes: [sql_identifier_substitution, sql_syntax_break]
+  - op: identifier_allowlist
+    sink_family: sql_join_alias
+    effect: neutralises
+    neutralizes: [sql_identifier_substitution, sql_syntax_break]
+
+  # --- escaping-context-mismatch XSS sinks -------------------------------
+  # `url_javascript_scheme`: the tainted value is placed inside a
+  # `javascript:` URL (`<a href="javascript:VALUE">`), i.e. an HTML
+  # attribute whose content is *JavaScript source*. The family's required
+  # concern is `js_context_break`, not `html_tag_break`: the value sits
+  # inside a quoted attribute, so tag breakout is not what makes this shape
+  # interesting — reaching a script context is.
+  - op: raw_concat
+    sink_family: url_javascript_scheme
+    effect: no_effect
+
+  # The escaping-context mismatch itself: htmlspecialchars() is *correct
+  # escaping for the wrong context*. It escapes `<`, `>`, `&` and (ENT_QUOTES
+  # by default since PHP 8.1) quotes, which does block the subset of
+  # JavaScript payloads that need a quote to break out of a string literal —
+  # hence `partial`, which keeps the cell VULNERABLE and raises its
+  # difficulty tier (D20) — but a payload like `alert(1)` or
+  # `fetch('/x')` needs none of those characters, because the entire
+  # attribute value after `javascript:` is already executable.
+  - op: html_entity_escape
+    sink_family: url_javascript_scheme
+    effect: partial
+    neutralizes: [js_context_break]
+
+  # The right fix for this context: allowlist the URL *scheme* (http/https
+  # only, anything else replaced with an inert `#`), so no attacker-supplied
+  # value can select a script-executing scheme in the first place.
+  - op: url_scheme_allowlist
+    sink_family: url_javascript_scheme
+    effect: neutralises
+    neutralizes: [js_context_break]
+
+  # The second escaping-context-mismatch shape's secure twin. The
+  # (html_entity_escape, html_attribute_unquoted) `partial` row above
+  # already encodes the mismatch itself; until now the family had no
+  # transform that closed it, so no SECURE twin for it was expressible. A
+  # strict value allowlist (`^[A-Za-z0-9_-]+$`, safe default otherwise) is
+  # the transform-only fix that does — it admits no whitespace, backtick or
+  # `<`, the characters that break an unquoted attribute boundary.
+  - op: attr_value_allowlist
+    sink_family: html_attribute_unquoted
+    effect: neutralises
+    neutralizes: [html_tag_break]
