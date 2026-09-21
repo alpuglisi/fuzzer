@@ -24,6 +24,12 @@ dependencies = [
     "keyring>=24,<26",
     "keyrings.alt>=5,<6",
     "cryptography>=42,<51",
+    # Intercepting proxy (#11): the parsed path is a sans-I/O h11 view over raw bytes.
+    "h11>=0.14,<1",
+    # Mutation engine (#9): SQL-AST parsing for semantics-preserving operators and the
+    # AST-equivalence semantics check. Its use is skip-guarded where the build is absent;
+    # the string-level operators need no dependency.
+    "sqlglot>=20,<30",
     # Note: JWT `exp` is read by decoding the payload directly (base64url); we never
     # verify or trust the token, only time its refresh, so no JWT/crypto dependency.
 ]

@@ -13,6 +13,16 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 8 (T8.1): started the **mutation engine** (`fuzzlab/mutation/`).
+  `operators.py` — typed, **semantics-preserving** operators (url-encode, whitespace
+  alternates, SQL inline comments, case-toggle, and vetted-equivalent SQL rewrites),
+  deterministic, class-scoped, composable via `apply_chain`. `semantics.py` — a validator
+  that refutes meaning-changing mutations via canonicalization, with an `sqlglot`
+  AST-equivalence path (skip-guarded where absent); vetted tautology swaps are trusted by
+  provenance. Migration 8 adds the `payload_variant` provenance table (head → 8). Declared
+  `sqlglot` and the previously-missing `h11` in `pyproject.toml` (PA-0005). Wrote
+  `docs/PHASE_8_PLAN.md`. +11 tests, 1 skipped for absent sqlglot (289 passed / 4 skipped).
+  Change-control: CC-MUT-0002, CC-CORE-0014.
 - Lab (D16, Phase 8 prerequisite): added a **configurable lab WAF** — a deliberately
   naive request prefilter (`puppy-fort-factory/includes/waf.php` + `config/waf-rules.json`)
   wired globally via PHP `auto_prepend_file` (`web.Dockerfile`), with `PFF_WAF`/

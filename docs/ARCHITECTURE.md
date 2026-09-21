@@ -37,8 +37,11 @@ history, repeater, interception, manual-login session capture, the flow engine, 
 local-CA leaf cache — leaving only live CONNECT/TLS socket serving and browser trust
 on-host. Phase 7 (candidate ranker + active learning) is built offline — the pointwise
 ranker (NDCG@k/Precision@k vs random), uncertainty sampling, and query-by-committee —
-with the real-lab held-out exit on-host. Phases 8–10 (mutation engine, protocol depth,
-plugin system + anomaly detector + second target) are planned.
+with the real-lab held-out exit on-host. Phase 8 (mutation engine) has begun: the lab
+WAF (D16) is the filter-evasion target, and the semantics-preserving operator framework
++ validator are built; context-typed XSS, filter learning, and bandit/coverage search
+remain. Phases 9–10 (protocol depth, plugin system + anomaly detector + second target)
+are planned.
 
 ## Integration model
 
@@ -247,11 +250,17 @@ tracked in the requirements files, not here.
 - **Reads/writes:** `bandit_posteriors`; chooses the next family per candidate.
 - **Pending (on-host):** the beats-uniform-on-hits-per-1000-requests exit (T4.6).
 
-### 9. Mutation engine `[planned]` (Phase 8)
-- **Subcomponents:** `sqlglot` AST parsing, typed semantics-preserving operators,
-  context-typed XSS generation, filter-transformation learning from canaries,
-  bandit-scheduled operator selection, coverage-guided hill climbing, optional
-  gated offline LLM catalog expansion.
+### 9. Mutation engine `[partial — operators + semantics validator built]` (Phase 8)
+- **Operator framework + semantics validator** `[built]` (`fuzzlab/mutation/`): typed,
+  meaning-preserving operators (`operators.py` — url-encode, whitespace alternates, SQL
+  inline comments, case-toggle, vetted-equivalent rewrites) and a validator
+  (`semantics.py`) that refutes meaning changes via canonicalization + an `sqlglot`
+  AST-equivalence path (skip-guarded). The D16 lab WAF is the filter-evasion target;
+  migration 8's `payload_variant` table records variant provenance.
+- **Subcomponents** `[planned — this phase]`: context-typed XSS generation (keyed on the
+  auditor's sink context), filter-transformation learning from canaries (against the D16
+  WAF), bandit-scheduled operator selection, coverage-guided hill climbing, and an
+  optional gated offline LLM catalog expansion.
 - **Depends on (components):** `core/`, indicator DB & catalogs, scheduler,
   oracle, grey-box instrumentation. (A lab WAF is a prerequisite decision, not a
   component dependency.)
@@ -438,13 +447,13 @@ replays and edits, including a raw byte path for malformed-traffic study.
 
 ## Build-status snapshot
 
-Suite: 273 passed / 3 skipped (the 3 skips need a working `cryptography` build,
-unavailable in the sandbox: 2 credential-store tests + the proxy real-CA minting test).
-Everything below is offline-complete unless an on-host item is named.
+Suite: 289 passed / 4 skipped (the skips need a native build unavailable in the sandbox:
+2 credential-store tests, the proxy real-CA minting test, and the mutation engine's
+`sqlglot` AST test). Everything below is offline-complete unless an on-host item is named.
 
 - `[built]` (offline-complete, unit-tested):
   - **Foundations (Phase 0 + T1.1):** `core/` — unified store + forward-only
-    migrations (head = 7), config, structured logging, request budget + per-host
+    migrations (head = 8), config, structured logging, request budget + per-host
     timing mutex, HTTP seam, versioned features (golden-file), path normalization,
     dedup, fingerprint, run-mode + D15 fail-safe, and the per-host credential store
     (`cryptography` Fernet fallback).
@@ -471,10 +480,16 @@ Everything below is offline-complete unless an on-host item is named.
     allocate the oracle budget; advisory only.
   - **Diagnostics/UI:** the loopback FastAPI control panel + dashboard/run-detail
     (findings + advisory scores).
+  - **Lab WAF (D16):** a configurable, default-off, deliberately bypassable request
+    prefilter — the Phase 8 filter-evasion target.
 - `[partial]`:
   - **Grey-box (Phase 3):** offline consumer layer (coverage/DB-fault readers,
     shaped reward, reset call points) built; **live sources on-host** (Xdebug/pcov,
     DB error hook, snapshot/restore).
+  - **Mutation engine (Phase 8):** the semantics-preserving operator framework and the
+    semantics validator (canonical + `sqlglot` AST) are built (migration 8's
+    `payload_variant` table ready); context-typed XSS, filter learning against the WAF,
+    and bandit/coverage-guided search remain.
   - **Oracle mechanisms:** M8 (out-of-band) and M10 (grey-box) still to build.
   - **Intercepting proxy (Phase 6):** the full offline stack is built — byte-exact
     dual-path core (`RawMessage` + `h11`), scope, match-and-replace, flow history
@@ -487,6 +502,5 @@ Everything below is offline-complete unless an on-host item is named.
   NDCG@k/Precision@k exit + active-learning-budget-vs-random (T7.4); live
   `--browser`/`--bandit`/`--score`/`--rank` runs and stored-XSS session-to-browser
   wiring — all tracked in `docs/ON_HOST_TASKS.md`.
-- `[planned]`: mutation engine (Phase 8), protocol depth (Phase 9), anomaly detector +
-  plugin system + a second target (Phase 10), and the manifest-driven lab generator
-  (Lab track).
+- `[planned]`: protocol depth (Phase 9), anomaly detector + plugin system + a second
+  target (Phase 10), and the manifest-driven lab generator (Lab track).

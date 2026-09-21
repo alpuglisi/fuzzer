@@ -3,6 +3,23 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0014 — Migration 8: mutation-engine payload variants (Phase 8 T8.1) (2026-09-21)
+- Change: migration 8 adds the `payload_variant` table (append-only registry; head → 8):
+  the provenance of each accepted mutation — `base_payload`, `variant`, the `operators`
+  chain (JSON), `sink_context`, `bypassed_rule`, the `semantics_ok` verdict, and any
+  `coverage_gain`. Variants are still sent through the `attempt` path; this is for reuse
+  and analysis (decision 3 of the Phase 8 plan).
+- Impact (other components / project): gives the MUT component its write-back target
+  (FR-MUT-6) without touching existing rows. Version-pinning tests derive the head from
+  `migrations.MIGRATIONS` (PA-0001).
+- Risk (level; mitigation): low — additive table + index. Mitigated by
+  `tests/test_mutation_operators.py::test_migration_8_adds_payload_variant`. Suite 289
+  passed / 4 skipped.
+- Deliverables:
+  - [x] Migration 8 (`payload_variant`) — done.
+- Effectiveness (assessed 2026-09-21): effective — the table is present for T8.5's
+  variant write-back.
+
 ### CC-CORE-0013 — Migration 7: candidate ranker scores (Phase 7 T7.2) (2026-09-21)
 - Change: migration 7 adds advisory `rank_score` and `rank_uncertainty` columns to
   `candidate` (append-only registry; head → 7), kept separate from the Phase-5

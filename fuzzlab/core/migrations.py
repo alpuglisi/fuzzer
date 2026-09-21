@@ -275,6 +275,28 @@ ALTER TABLE candidate ADD COLUMN rank_score REAL;
 ALTER TABLE candidate ADD COLUMN rank_uncertainty REAL;
 """
 
+# --- migration 8: mutation-engine payload variants (Phase 8 T8.5) ------------
+# The mutation engine records the PROVENANCE of each accepted variant: which operator
+# chain produced it, which WAF rule it bypassed, the semantics-validator verdict, and
+# any grey-box coverage gain. Variants are still sent through the `attempt` path; this
+# table is for reuse and analysis. Additive; no existing row changes.
+_M0008 = """
+CREATE TABLE payload_variant (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id        INTEGER REFERENCES run(id),
+    vuln_class    TEXT,
+    base_payload  TEXT NOT NULL,
+    variant       TEXT NOT NULL,
+    operators     TEXT,              -- JSON list of operator ids (the chain applied)
+    sink_context  TEXT,
+    bypassed_rule TEXT,              -- WAF rule id it evaded, if any
+    semantics_ok  INTEGER,          -- semantics-validator verdict (1/0)
+    coverage_gain REAL,             -- grey-box coverage delta, if measured
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_payload_variant_run ON payload_variant(run_id);
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -284,6 +306,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (5, _M0005),
     (6, _M0006),
     (7, _M0007),
+    (8, _M0008),
 ]
 
 
