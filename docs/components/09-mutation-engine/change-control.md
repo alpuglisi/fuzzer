@@ -3,6 +3,38 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0003 — Context-typed XSS + filter model & bypass learning (T8.2/T8.3) (2026-09-21)
+- Change: `fuzzlab/mutation/xss.py` generates **context-typed** XSS candidates keyed on
+  the auditor's sink context (`html`/`html-attribute`/`url-attribute`/`js`, from
+  `oracle/context.py`), and is **filter-aware** — given the blocked signatures it drops
+  caught candidates and keeps working ones (e.g. `<svg onfocus=…>` when `<script>`/
+  `onerror=` are filtered), falling back to the full list if all are blocked.
+  `fuzzlab/mutation/filtermodel.py::FilterModel` mirrors the PHP lab WAF from the
+  **shared** `waf-rules.json` (block/sanitize/log) so filter learning is testable offline
+  (one ruleset, two consumers). `fuzzlab/mutation/learn.py::FilterLearner` observes what
+  the filter blocks/strips and runs a bounded BFS over operator chains for a
+  **semantics-preserving** variant the filter does not catch (`learn_bypass`,
+  shallowest-first, preserving over trusted).
+- Impact (other components / project): realizes FR-MUT-2 (context-typed generation) and
+  FR-MUT-3 (filter-transformation learning) against the D16 WAF, offline. The `Filter`
+  protocol lets the same learner run live (canary round-trips through the HTTP/proxy seam)
+  later. Feeds the bandit/coverage search (T8.4) and the write-back (T8.5). No store
+  change.
+- Risk (level; mitigation): low — pure logic over the shared ruleset; advisory; nothing
+  sent. Mitigated by 14 tests (`tests/test_mutation_xss.py`, `tests/test_mutation_filter.py`):
+  context mapping; context-appropriate + filter-aware payloads (drop blocked, keep working,
+  all-blocked fallback); PHP→regex; filter catches naive / misses classic bypass; the
+  three modes; evading operators found; `learn_bypass` yields a shallow semantics-preserving
+  evasion, no-ops when already uncaught; sanitize-mode transform observation. Suite 303
+  passed / 4 skipped.
+- Deliverables:
+  - [x] Context-typed, filter-aware XSS generator (T8.2) — done.
+  - [x] Offline `FilterModel` + `FilterLearner` bypass discovery (T8.3) — done.
+  - [ ] Bandit/coverage search (T8.4); write-back (T8.5); LLM scaffold (T8.6); exit (T8.7) — next.
+- Effectiveness (assessed 2026-09-21): effective in tests — the generator yields
+  filter-avoiding context-typed payloads and the learner finds semantics-preserving
+  bypasses of the lab WAF; live canary learning + the coverage exit are on-host.
+
 ### CC-MUT-0002 — Operator framework + semantics validator (T8.1) (2026-09-21)
 - Change: started the mutation engine. `fuzzlab/mutation/operators.py` defines typed,
   **semantics-preserving** operators (`url-encode`, `ws-alt`, `sql-comment`,

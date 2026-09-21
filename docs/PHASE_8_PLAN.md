@@ -72,11 +72,11 @@ transformations; generated payloads respect the destructive gate and lab-only po
   constructs), each declaring the classes/contexts it applies to.
   `fuzzlab/mutation/semantics.py` — a validator: AST-equivalence for SQL via `sqlglot`
   (skip-guarded), conservative rule-based checks for the string paths. Bounded, seeded.
-- **T8.2 — Context-typed XSS generator `[planned]` (FR-MUT-2).**
+- **T8.2 — Context-typed XSS generator `[done, offline]` (FR-MUT-2).**
   `fuzzlab/mutation/xss.py` — generate break-outs matched to the auditor's recorded sink
   context (`html`/`html-attribute`/`url-attribute`/`js`, from `oracle/context.py`),
   preferring constructs that avoid currently-blocked signatures.
-- **T8.3 — Filter model + transformation learning `[planned]` (FR-MUT-3).**
+- **T8.3 — Filter model + transformation learning `[done, offline]` (FR-MUT-3).**
   `fuzzlab/mutation/filtermodel.py` (the shared-ruleset seam) + `learn.py`: send canaries,
   infer what the filter strips/encodes/blocks, and prefer operators that evade it.
 - **T8.4 — Bandit-scheduled, coverage-guided search `[planned]` (FR-MUT-4).**

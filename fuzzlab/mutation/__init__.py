@@ -11,9 +11,12 @@ T8.1 ships the offline-testable heart: the typed, meaning-preserving operator fr
 
 from __future__ import annotations
 
+from fuzzlab.mutation.filtermodel import FilterModel, FilterResult
+from fuzzlab.mutation.learn import Bypass, FilterLearner
 from fuzzlab.mutation.operators import (MutationOperator, apply_chain,
                                         default_operators)
 from fuzzlab.mutation.semantics import SemanticsValidator, canonicalize
+from fuzzlab.mutation.xss import context_from_sink, xss_payloads
 
 __all__ = [
     "MutationOperator",
@@ -21,4 +24,10 @@ __all__ = [
     "apply_chain",
     "SemanticsValidator",
     "canonicalize",
+    "xss_payloads",
+    "context_from_sink",
+    "FilterModel",
+    "FilterResult",
+    "FilterLearner",
+    "Bypass",
 ]

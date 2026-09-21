@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 8 (T8.2/T8.3): context-typed XSS + filter learning. `mutation/xss.py` generates
+  XSS candidates keyed on the auditor's sink context and drops ones the filter blocks
+  (keeping working break-outs like `<svg onfocus=…>`); `mutation/filtermodel.py` mirrors
+  the lab WAF from the shared `waf-rules.json` (block/sanitize/log) as the offline seam;
+  `mutation/learn.py::FilterLearner` observes what the filter blocks/strips and does a
+  bounded search for a semantics-preserving operator chain the filter doesn't catch
+  (`learn_bypass`). Offline; the same learner runs live via canary round-trips later.
+  +14 tests (303 passed / 4 skipped). Change-control: CC-MUT-0003.
 - Phase 8 (T8.1): started the **mutation engine** (`fuzzlab/mutation/`).
   `operators.py` — typed, **semantics-preserving** operators (url-encode, whitespace
   alternates, SQL inline comments, case-toggle, and vetted-equivalent SQL rewrites),

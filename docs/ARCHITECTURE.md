@@ -257,10 +257,13 @@ tracked in the requirements files, not here.
   (`semantics.py`) that refutes meaning changes via canonicalization + an `sqlglot`
   AST-equivalence path (skip-guarded). The D16 lab WAF is the filter-evasion target;
   migration 8's `payload_variant` table records variant provenance.
-- **Subcomponents** `[planned — this phase]`: context-typed XSS generation (keyed on the
-  auditor's sink context), filter-transformation learning from canaries (against the D16
-  WAF), bandit-scheduled operator selection, coverage-guided hill climbing, and an
-  optional gated offline LLM catalog expansion.
+- **Context-typed XSS + filter learning** `[built]`: `xss.py` generates context-typed,
+  filter-aware XSS candidates; `filtermodel.py` mirrors the D16 WAF from the shared
+  ruleset (offline seam); `learn.py::FilterLearner` learns what the filter blocks/strips
+  and finds semantics-preserving bypasses.
+- **Subcomponents** `[planned — this phase]`: bandit-scheduled operator selection,
+  coverage-guided hill climbing (grey-box seam), variant write-back to `payload_variant`
+  + the attempt path, and an optional gated offline LLM catalog expansion.
 - **Depends on (components):** `core/`, indicator DB & catalogs, scheduler,
   oracle, grey-box instrumentation. (A lab WAF is a prerequisite decision, not a
   component dependency.)
@@ -486,10 +489,10 @@ Suite: 289 passed / 4 skipped (the skips need a native build unavailable in the 
   - **Grey-box (Phase 3):** offline consumer layer (coverage/DB-fault readers,
     shaped reward, reset call points) built; **live sources on-host** (Xdebug/pcov,
     DB error hook, snapshot/restore).
-  - **Mutation engine (Phase 8):** the semantics-preserving operator framework and the
-    semantics validator (canonical + `sqlglot` AST) are built (migration 8's
-    `payload_variant` table ready); context-typed XSS, filter learning against the WAF,
-    and bandit/coverage-guided search remain.
+  - **Mutation engine (Phase 8):** the semantics-preserving operator framework +
+    validator (canonical + `sqlglot` AST), the context-typed filter-aware XSS generator,
+    and the filter model + bypass learner are built (migration 8's `payload_variant`
+    table ready); bandit/coverage-guided search and variant write-back remain.
   - **Oracle mechanisms:** M8 (out-of-band) and M10 (grey-box) still to build.
   - **Intercepting proxy (Phase 6):** the full offline stack is built — byte-exact
     dual-path core (`RawMessage` + `h11`), scope, match-and-replace, flow history
