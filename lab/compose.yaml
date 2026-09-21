@@ -1,0 +1,52 @@
+# Target lab: Puppy Fort Factory (PHP/Apache + MariaDB), containerized (D7).
+#
+# Safety: the web tier is published on LOOPBACK ONLY (127.0.0.1) and the database
+# is not published at all. This deliberately vulnerable app must never be exposed
+# on a shared or public network.
+#
+# One-command up:    ./labctl.sh up        (or: docker compose up -d --build)
+# One-command reset: ./labctl.sh reset      (drops the DB volume and re-seeds)
+#
+# SELinux (Fedora): bind mounts use :Z / :ro,Z so the container can read them.
+name: pff-lab
+
+services:
+  db:
+    image: mariadb:11.4
+    environment:
+      MARIADB_DATABASE: ${PFF_DB_NAME:-puppy_fort}
+      MARIADB_USER: ${PFF_DB_USER:-pff}
+      MARIADB_PASSWORD: ${PFF_DB_PASS:-pff_lab_pw}
+      MARIADB_ROOT_PASSWORD: ${PFF_DB_ROOT_PASS:-root_lab_pw}
+    volumes:
+      # Fresh install needs only schema.sql (it creates + seeds everything,
+      # including posts). Mounted read-only under the init hook.
+      - ../puppy-fort-factory/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro,Z
+      - pff-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    # No host port: the database is never reachable from outside the compose net.
+
+  web:
+    build:
+      context: .
+      dockerfile: web.Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PFF_DB_HOST: db
+      PFF_DB_USER: ${PFF_DB_USER:-pff}
+      PFF_DB_PASS: ${PFF_DB_PASS:-pff_lab_pw}
+      PFF_DB_NAME: ${PFF_DB_NAME:-puppy_fort}
+    volumes:
+      - ../puppy-fort-factory:/var/www/html:Z
+    ports:
+      # Loopback only. Change the host port with PFF_WEB_PORT; never bind 0.0.0.0.
+      - "127.0.0.1:${PFF_WEB_PORT:-8080}:80"
+
+volumes:
+  pff-db-data:

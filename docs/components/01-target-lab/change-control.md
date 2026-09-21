@@ -3,6 +3,34 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0003 — Containerized lab (2026-09-21)
+- Change: added `lab/` — a `compose.yaml` (PHP/Apache `web` + `mariadb:11.4` `db`),
+  `web.Dockerfile` (`php:8.3-apache` + `mysqli`, room for pcov/Xdebug later), a
+  `.env.example`, a `labctl.sh` (up/down/reset/status/logs/pin), and a README.
+  The app is bind-mounted (live edits); the DB is seeded on first start from
+  `schema.sql`. Realizes Phase 0 T0.2 and decision D7.
+- Impact (other components / project): gives every tool a reproducible, pinned
+  target and one-command up/reset; the integration harness (T0.7) will run against
+  it in automatic mode. No code change to the app; it reads `PFF_DB_*` from the
+  environment, which compose supplies.
+- Risk (level; mitigation): medium — a deliberately vulnerable app must never be
+  exposed. Mitigated by publishing the web tier on `127.0.0.1` only and not
+  publishing the DB at all; local-only lab credentials in `.env` (real secrets
+  stay in the keyring); SELinux `:Z` bind-mount options documented for Fedora.
+  Reproducibility risk (floating tags) mitigated by a documented digest-pin step
+  (`labctl.sh pin`), to be locked during build.
+- Deliverables:
+  - [x] `compose.yaml`, `web.Dockerfile`, `.env.example`, `labctl.sh`, README — done.
+  - [x] `docker compose config` validates (syntax + env interpolation) — done.
+  - [ ] Actual bring-up + `curl` smoke test — todo (run in the user's Fedora/Podman
+    environment; this sandbox has the docker CLI but no daemon).
+  - [ ] Pin base images to digests — todo (build-time, `labctl.sh pin`).
+  - [ ] Grey-box coverage (pcov/Xdebug) in the image — todo (Phase 3).
+- Effectiveness (assessed 2026-09-21): partially verified — the compose file
+  validates and the init ordering was checked against `schema.sql` (fresh install
+  seeds everything incl. `posts`). End-to-end bring-up is pending in an environment
+  with a running container daemon.
+
 ### CC-LAB-0002 — Ground-truth label contract implemented (2026-09-21)
 - Change: authored the machine-readable, out-of-band ground-truth contract for the
   current lab under `lab/ground-truth/` — `labels.json` (8 vulnerable cases + true

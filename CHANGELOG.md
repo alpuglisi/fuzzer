@@ -13,6 +13,12 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 0 build (cont.): containerized the target lab (T0.2, D7) under `lab/` —
+  `compose.yaml` (PHP/Apache + MariaDB), `web.Dockerfile`, `.env.example`,
+  `labctl.sh` (up/down/reset), and a README. Web tier published on loopback only,
+  DB not published; app bind-mounted, DB seeded from `schema.sql`. `docker compose
+  config` validates; actual bring-up runs in an environment with a container
+  daemon. Change-control: CC-LAB-0003.
 - Phase 0 build (cont.): added the ground-truth label contract (T0.6) —
   `lab/ground-truth/{labels.json,injection-points.json,expectedresults.csv}` with
   JSON Schemas and a validating loader that cross-checks the files; the integration
