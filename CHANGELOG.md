@@ -94,6 +94,15 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   (`tests/test_labgen_cli.py`), reusing each gate's own known-bad fixtures from
   `tests/test_labgen_gates.py`, `tests/test_labgen_secret_scanner.py`, and
   `tests/test_labgen_minimal_pair.py` rather than re-authoring them.
+- LAB: added the Node/Express emitter (`fuzzlab/labgen/emitters/node_express/`),
+  Tier-A depth (L-P3.1) — the second stack after `php_current`, covering the
+  same three well-documented SQLi/XSS shapes, with its own self-contained JS
+  module inventory, this component's first `StackEnv` and `route`-category
+  accumulator (`CR-LAB-0001` Addendum D), a digest-pinned Node 22 LTS
+  Dockerfile, a real npm-resolved lockfile, and a new sample manifest
+  (`lab/manifests/phase3_node_express_sample.yaml`) proven through Tier 0/3
+  of the conformance suite (`CC-LAB-0035`, renumbered from a concurrently-claimed
+  `CC-LAB-0029` which collided with lanes L-P2.1/L-P0.9/L-P1.1/L-P1.2a/L-P2.2/L-P0.10).
 - Docs: fleshed `docs/LAB_IMPLEMENTATION_PLAN.md`'s Phase 2 (§3) and Phase 3 (§4)
   from milestone-level bullets into full task breakdowns matching Phase 0/1's
   granularity, and added a new §7 lane/dependency map covering every Phase 0-3

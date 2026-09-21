@@ -1,0 +1,8 @@
+{% if bound %}
+const [{{ handler_name }}Rows] = await pool.query('SELECT * FROM {{ table }} WHERE {{ column }} = ?', [{{ value_expr }}]);
+const row = {{ handler_name }}Rows[0] || null;
+{% else %}
+const sql = 'SELECT * FROM {{ table }} WHERE {{ column }} = ' + {{ value_expr }};
+const [{{ handler_name }}Rows] = await pool.query(sql);
+const row = {{ handler_name }}Rows[0] || null;
+{% endif %}

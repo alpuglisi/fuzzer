@@ -485,6 +485,58 @@ lane) can submit a payload as
   is deliberately not wired (needs a real multi-stack corpus, Phase 3, to mean
   anything against a single-stack corpus).
   (`docs/LAB_IMPLEMENTATION_PLAN.md` §1.2 T-LAB0.10, `CC-LAB-0034`)
+- **FR-LAB-33** (Lab track, Phase 3, L-P3.1, Tier-A depth) *(Numbered `FR-LAB-33`
+  rather than `FR-LAB-27` at merge time — this lane independently claimed
+  `FR-LAB-27`, colliding with lane L-P2.1's identity/ownership requirement above;
+  reconciled per this project's standing multi-lane policy: keep both entries'
+  full content, renumber this later-landing one, fix its own `CC-LAB`
+  cross-reference to `CC-LAB-0035` below.)* A second emitter,
+  `fuzzlab.labgen.emitters.node_express`, implements
+  `fuzzlab.labgen.emitter.Emitter` for Node/Express via its own,
+  self-contained module-composition inventory
+  (`fuzzlab.labgen.emitters.node_express.modules` — the same source/
+  transform/sink/complexity category shape as `php_current`'s, ported to
+  JS, not sharing `fuzzlab.labgen.modules`'s registries). Per the pacing
+  decision in `docs/LAB_IMPLEMENTATION_PLAN.md` §4 ("stack 1 to full depth,
+  stacks 2-3 to Tier-A-only depth"), it supports exactly the three
+  well-documented, value-context shapes `php_current` also proves —
+  `sqli`/`sql_numeric_literal`, `sqli`/`sql_string_literal`,
+  `xss`/`html_body` — and declares every other `(vuln_class,
+  sink_context.family)` pair unsupported via `supports()`, never raising.
+  Introduces this component's first `StackEnv`
+  (`fuzzlab.labgen.emitters.node_express.stack_env.NODE_EXPRESS_STACK_ENV`,
+  `CR-LAB-0001` Addendum D's schema: `language`, `framework`,
+  `framework_version`, a digest-pinned `base_image`, `workdir`,
+  `entrypoint_cmd`, `is_multi_file`, `scaffold_files`, `accumulators`,
+  `file_roles`) and this component's first `route`-category accumulator
+  module: `NodeExpressEmitter.render_route_accumulator(cells)` builds
+  `app.js`'s route-registration lines from the **whole** supported-cell set
+  at once, sorted by `cell_id` at render time — never by append/iteration
+  order — so adding one cell cannot reshuffle the file (the whole-lab
+  regeneration determinism gate). This is deliberately **not** part of
+  `Emitter.render(cell)` (the ABC's per-cell contract, unmodified): a
+  routed, multi-file emitter's accumulator has a genuinely different
+  cardinality (fed by every cell, not one), which a single `render(cell)`
+  call cannot express — `render()` returns only the per-cell controller
+  file, keeping `fuzzlab.labgen.conformance.tier3.render_whole_sample`'s
+  "no two cells emit the same path" invariant meaningful. Any future routed
+  emitter (e.g. Laravel's `routes/web.php`, L-P3.3a) is expected to follow
+  the same split. Ships a real, npm-registry-resolved `package-lock.json`
+  (`express@4.22.3`, `mysql2@3.24.4`) and a digest-pinned `Dockerfile`
+  (Node 22 LTS "Jod", `NODE_ENV=production` set per the framework-debug-page
+  research in `docs/LAB_IMPLEMENTATION_PLAN.md` §4) as per-stack
+  `scaffold_files`. A CycloneDX SBOM was not generated — `syft` is not
+  installed in this build environment; the intended command
+  (`syft dir:fuzzlab/labgen/emitters/node_express/scaffold
+  -o cyclonedx-json`) is documented as a follow-up rather than skipped
+  silently. Proven against `lab/manifests/phase3_node_express_sample.yaml`
+  via Tier 0 (`node --check`, skip-guarded when `node` isn't on the build
+  host, mirroring FR-LAB-25's `php_available()`/`lint_php` convention) and
+  Tier 3 (whole-manifest regenerate-and-diff, both per-cell controllers via
+  the shared `conformance.tier3` module and the accumulator separately,
+  since its cardinality doesn't fit that module's per-cell harness).
+  (`CR-LAB-0001` Addendum D, `docs/LAB_IMPLEMENTATION_PLAN.md` §4.1,
+  `CC-LAB-0035`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
