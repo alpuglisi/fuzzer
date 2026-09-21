@@ -13,6 +13,10 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Planning: added `docs/PHASE_1_PLAN.md` — the session-manager task breakdown
+  (T1.1–T1.8) with acceptance checks, grounded in the lab's actual auth (PHP
+  session cookies; no CSRF/JWT). Scope decision recorded: CSRF/JWT built to spec
+  and fixture-tested now, live-validated later. Referenced from the roadmap.
 - Process: adopted a **bug-investigation** requirement — every bug discovered in
   the code gets a root-cause-analysis document under `docs/bugs/` (description,
   where, what failed, what it was, RCA, corrective action, preventive action), and

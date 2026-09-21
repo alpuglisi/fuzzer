@@ -229,7 +229,8 @@ store.
 - **Exit:** existing tools run from one entry point and share one database.
 
 ### Phase 1 — Session manager `[planned]`
-Goal: tools stay authenticated through a full run.
+Goal: tools stay authenticated through a full run. Task breakdown in
+`docs/PHASE_1_PLAN.md`.
 - Cookie jar, identity model, `prepare` / `observe` / `ensure`, single-flight
   re-auth.
 - CSRF token extraction from the preceding response; JWT `exp` handling.
