@@ -312,7 +312,11 @@ Format per entry:
 - **Remediation (2):** `contract.load` raises an actionable `ContractError` (naming the
   expected path and the repo-root/absolute-path options) and `fuzzlab auto` exits cleanly
   on it; the runbook now states to run `fuzzlab` from the repo root.
-- **Status:** Fixed.
+- **Status:** Fixed. Full RCA (backfilled during a bookkeeping reconciliation pass — this
+  entry and CC-CORE-0017 existed but the investigation doc and PA did not) in
+  `docs/bugs/BUG-0007-credential-host-key-mismatch-and-ground-truth-path-traceback.md`;
+  rule PA-0021 (recurrence of the BUG-0003/PA-0003 class on a different field). See
+  CC-CORE-0017.
 
 ## 2026-09-21 — Automatic mode never nominated XSS (rule keyed on a post-detection label)
 
@@ -384,6 +388,35 @@ Format per entry:
   convention; the oracle and `store_adapter` both call it. Full RCA in
   `docs/bugs/BUG-0003-oracle-stored-full-urls-not-path-form.md`; rule PA-0003.
 - **Status:** Fixed (this commit).
+
+## 2026-09-21 — Schema-version assertion hardcoded, recurrence (BUG-0002)
+
+- **Symptom:** `tests/test_harness.py::test_score_from_store_and_metrics` failed
+  (`assert 3 == 2`) after adding migration 3 (T1.7) — a correct, intended schema change
+  turned green tests red.
+- **Root cause:** another test hardcoded the schema head version instead of deriving it
+  from the migration registry — the same class BUG-0001 fixed, but BUG-0001's fix only
+  touched the tests failing at the time and never swept for other instances, leaving this
+  one latent until migration 3 tripped it.
+- **Remediation:** derived the assertion from `migrations.MIGRATIONS`
+  (`max(v for v, _ in migrations.MIGRATIONS)`); swept `tests/` for other hardcoded
+  schema-version literals (none remained). Full RCA in
+  `docs/bugs/BUG-0002-schema-version-hardcoded-recurrence.md`; rule PA-0002 (sweep the
+  codebase for a bug class's other instances whenever a preventive action is added).
+- **Status:** Fixed (commit `30ea97d`+ range). Suite 71/71 passed.
+
+## 2026-09-21 — Schema-version assertions hardcoded in tests (BUG-0001)
+
+- **Symptom:** `tests/test_core_foundations.py::test_migrations_are_idempotent` and
+  `test_store_run_and_body_roundtrip` failed (`assert 2 == 1`) after adding migration 2
+  (self-describing findings, T0.7) — a correct, intended schema change turned green tests
+  red.
+- **Root cause:** both tests asserted the schema head version as the literal `1` instead of
+  deriving it from the `MIGRATIONS` registry, the value's actual source of truth.
+- **Remediation:** both assertions now derive the head from the registry. Full RCA in
+  `docs/bugs/BUG-0001-schema-version-hardcoded-in-tests.md`; rule PA-0001 (don't hardcode a
+  value a source-of-truth constant/registry already defines).
+- **Status:** Fixed (commit `30ea97d`, CC-CORE-0003). Suite 30/30 passed.
 
 ## 2026-09-18 — `build_sql_db.py` / auditor coverage
 

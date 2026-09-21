@@ -153,3 +153,12 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   incident-shaped (a new/modified `docs/spikes/` or `docs/bugs/` doc, or `fail`/`hang`/
   `workaround`/`killed`/`timed out`/`crash`/`broken`/`regress` added to the diff) but
   `ERROR_LOG.md` was not touched. (from BUG-0019)
+- **PA-0021** — PA-0003's obligation (a storage/serialization convention shared by more than
+  one writer or reader lives in exactly one shared function every participant calls) applies
+  to **every** such convention in the codebase, not only the one it was originally written
+  against. Before adding a second, independent derivation of a value another path already
+  stores or parses (credential keys, cache keys, identifiers, normalized hosts/URLs/paths),
+  check whether a shared normalization function already exists for it. And a validation
+  module that raises a typed error for some failure modes must raise that same typed error
+  for every foreseeable failure at its boundary (e.g. a missing file/directory) — never let
+  the underlying OS/library exception propagate raw. (from BUG-0007)

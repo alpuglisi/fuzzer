@@ -14,6 +14,18 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Docs (process, bookkeeping reconciliation): audited `ERROR_LOG.md` against every
+  `docs/bugs/BUG-NNNN-*.md` investigation and `docs/PREVENTIVE_ACTIONS.md` rule in both
+  directions. Found two gaps and closed them: (1) the `ERROR_LOG.md` entry for "Credential
+  host-key mismatch (BUG-0007) + ground-truth path traceback" and its change-control entry
+  (CC-CORE-0017) existed, but the required `docs/bugs/BUG-0007-*.md` investigation and
+  preventive action did not — backfilled the RCA (a recurrence of the BUG-0003/PA-0003
+  shared-normalization-convention class, plus a narrower typed-error-boundary gap) and
+  added PA-0021, strengthening PA-0003 to a general obligation rather than one scoped to
+  the example it was written against. (2) BUG-0001 and BUG-0002 (hardcoded schema-version
+  test assertions) had investigation docs and PA-0001/PA-0002 but no `ERROR_LOG.md` line —
+  added both. Every `BUG-NNNN` now has all three linked artifacts (`ERROR_LOG.md` line,
+  investigation doc, preventive action) in both directions; no other gaps found.
 - Fix (BUG-0019, tooling/process): PA-0019 (BUG-0018's fix) was an advisory rule with no
   enforcement path independent of remembering to apply it — the same recall failure it was
   meant to prevent. Added a Claude Code Stop hook, `.claude/hooks/check-error-log-bookkeeping.sh`
