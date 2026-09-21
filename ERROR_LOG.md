@@ -18,6 +18,27 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — Grey-box "new-code reward" starved by the global frontier (BUG-0016)
+
+- **Symptom:** `greybox-run` step 5 reported `new-code max: 0.000` + a NOTE "is the cov.php
+  shim installed?" while step 6 said PASS and 338 novel lines were captured — a
+  self-contradiction. The coverage-reward property (T3.7) wasn't actually demonstrated
+  (payloads scored higher only via db_fault).
+- **Root cause:** novelty was measured against a single **global** frontier and the benign
+  baseline ran first per point, consuming that point's coverage — so every attack showed
+  `novel=0`, `newcode_reward` was ~always 0, the baseline earned a novelty-only reward, and
+  the NOTE inferred "shim broken" from that artifact.
+- **Recurrence:** same class as the Part F metric (`requests_per_finding` can't show the
+  bandit's oracle-probe savings) and BUG-0014 — a metric/self-test that passes/fires
+  without measuring the capability. PA-0015 didn't prevent it (a self-test can pass while
+  measuring the wrong thing).
+- **Remediation:** `run_greybox` now uses a **per-point differential** (attack coverage vs
+  its own baseline) for the reward novelty and `newcode_reward`; the global frontier is kept
+  only for the run-wide exploration total; the NOTE fires only when `coverage_lines_seen==0`.
+  Part F's runbook exit reframed to verify via posteriors with a metric caveat. Full RCA +
+  recurrence/prior-PA analysis in `docs/bugs/BUG-0016-*`; rule PA-0017. See CC-FUZZ-0017.
+- **Status:** Fixed (this commit). Suite 416 passed / 6 skipped.
+
 ## 2026-09-21 — `labctl.sh up` exits non-zero on success without a profile (BUG-0015)
 
 - **Symptom:** `scripts/waf_evasion_e2e.sh` printed step 1 "lab up" then exited silently

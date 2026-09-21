@@ -131,10 +131,11 @@ def _print_summary(args, source, counts, points, skipped, summary, run_id) -> No
     print(f"  M10 would-confirm (advisory; oracle stays sole writer): "
           f"{summary['m10_would_confirm']}")
     print(f"  reward — baseline max: {summary['baseline_reward']:.3f}   "
-          f"new-code max: {summary['newcode_reward']:.3f}   "
+          f"new-code (payload vs its baseline) max: {summary['newcode_reward']:.3f}   "
           f"overall max: {summary['max_reward']:.3f}")
-    if summary["newcode_reward"] <= summary["baseline_reward"]:
-        print("  NOTE: new-code reward did not exceed baseline — is the cov.php shim "
+    print(f"  app coverage lines seen: {summary.get('coverage_lines_seen', 0)}")
+    if summary.get("coverage_lines_seen", 0) == 0:
+        print("  NOTE: no application coverage was captured — is the cov.php shim "
               "installed and is --cov-dir the bind-mounted side channel?")
     if skipped:
         print(f"  skipped (need a browser, M6): {len(skipped)} point(s)")

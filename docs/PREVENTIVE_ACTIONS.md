@@ -115,3 +115,10 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   script's own harness (control flow, exit codes on every path) must be verified, not just
   its exit assertion, since a fail-loud self-test cannot catch an abort that happens before
   it runs. (from BUG-0015)
+- **PA-0017** — An exit criterion or self-test metric must **isolate and measure the
+  specific capability it claims to prove**, via a controlled comparison (e.g. an
+  attack-vs-its-own-baseline differential), not a proxy dominated by unrelated work (a
+  global frontier the control fills first; a total-requests count dominated by discovery).
+  A passing self-test is not sufficient if the metric doesn't reflect the capability, and a
+  diagnostic/NOTE must key on the actual condition it names (e.g. "no coverage captured" ⇒
+  coverage-seen == 0), not a derived artifact. (from BUG-0016)

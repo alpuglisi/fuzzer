@@ -14,6 +14,16 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Fix (BUG-0016): `greybox-run`'s "new-code reward" was starved by a global coverage
+  frontier (the benign baseline, sent first per point, consumed the novelty), so every
+  attack showed `novel=0`, `newcode_reward` read 0, and a false "shim not installed?" NOTE
+  contradicted the step-6 PASS. `run_greybox` now credits an attack's coverage as a
+  **per-point differential** (attack vs its own baseline); the global frontier is kept only
+  for the run-wide exploration total; the NOTE fires only when no coverage was captured. The
+  Part F runbook exit was reframed (verify the bandit via posteriors; `requests_per_finding`
+  can't show its oracle-probe savings) — same class. Recurrence review + prior-PA-0015
+  analysis in the RCA; new rule PA-0017 (an exit metric must isolate the capability it
+  claims). RCA `docs/bugs/BUG-0016-*`; see CC-FUZZ-0017. Suite 416 passed / 6 skipped.
 - Fix (BUG-0015, on-host): `scripts/waf_evasion_e2e.sh` exited silently after step 1 because
   `labctl.sh up` returned non-zero on success when no profile was set — its `up)` case ended
   with `[ -n "$PFF_PROFILE" ] && echo ...`, a trailing `A && B` that fails (and, as the last

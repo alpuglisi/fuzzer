@@ -116,8 +116,8 @@ class DictFault:
 
 
 def test_run_greybox_writes_enriched_attempts_and_reward_ordering(tmp_path):
-    # One point, two probes: baseline reaches product.php (novel), the SQLi '\'' probe
-    # reaches the error branch (more novel lines) AND faults the DB.
+    # One point, two probes: the benign baseline is the control (reward ~0), the SQLi '\''
+    # probe reaches the error branch BEYOND the baseline (per-point new lines) AND faults.
     app = "/var/www/html/product.php"
     probes = (ProbeSpec("baseline", "1", "baseline"),
               ProbeSpec("sqli-error", "'", "sqli"))
@@ -148,6 +148,12 @@ def test_run_greybox_writes_enriched_attempts_and_reward_ordering(tmp_path):
     assert fam["sqli-error"]["db_fault"] == 1
     assert fam["baseline"]["db_fault"] == 0
     assert fam["sqli-error"]["reward"] > fam["baseline"]["reward"]
+    # BUG-0016: the benign baseline is the control — it must NOT earn reward from
+    # global-frontier novelty; new-code reward comes from the attack's per-point diff.
+    assert fam["baseline"]["reward"] == 0.0
+    assert summary["newcode_reward"] == fam["sqli-error"]["reward"] > 0
+    assert summary["baseline_reward"] == 0.0
+    assert summary["coverage_lines_seen"] == 7          # 2 (baseline) + 5 (sqli)
     # Coverage blob persisted for both.
     assert json.loads(fam["baseline"]["coverage"])["n_lines"] == 2
     # M10 (advisory) confirms the sqli case (sink file covered + db_fault).
@@ -155,6 +161,41 @@ def test_run_greybox_writes_enriched_attempts_and_reward_ordering(tmp_path):
     # Grey-box run_metrics recorded.
     assert metrics["greybox_attempts"] == 2
     assert metrics["greybox_db_faults"] == 1
+
+
+def test_attack_novelty_is_per_point_not_global_frontier(tmp_path):
+    """BUG-0016 regression: an attack's new-code credit is measured against its OWN
+    point's baseline, so a second point's attack still shows new lines even when those
+    lines were already globally seen by the first point (the global frontier must not
+    starve per-point novelty, and benign baselines must never consume it)."""
+    a1, a2, db = ("/var/www/html/search.php", "/var/www/html/product.php",
+                  "/var/www/html/db.php")
+    probes = (ProbeSpec("baseline", "1", "baseline"),
+              ProbeSpec("sqli-error", "'", "sqli"))
+    sender = FakeSender([
+        (Probe(200, "ok"), {a1: [10]}, False),                       # p1 baseline
+        (Probe(500, "SQL syntax"), {a1: [10], db: [99]}, True),      # p1 sqli -> +db:99
+        (Probe(200, "ok"), {a2: [20]}, False),                       # p2 baseline
+        (Probe(500, "SQL syntax"), {a2: [20], db: [99]}, True),      # p2 sqli -> +db:99
+    ])
+    cov, fault = DictCoverage(sender), DictFault(sender)
+    pts = [GreyboxPoint("http://h/search.php", "q", "GET", "query", "sqli-error"),
+           GreyboxPoint("http://h/product.php", "id", "GET", "query", "sqli-error")]
+    with Store(tmp_path / "u.db") as store:
+        rid = store.start_run("greybox", "h")
+        summary = run_greybox(base_url="http://h", store=store, run_id=rid, points=pts,
+                              sender=sender, coverage_source=cov, dbfault_source=fault,
+                              probes=probes)
+        rows = store.conn.execute(
+            "SELECT payload_family, "
+            "json_extract(features_json,'$.new_lines_vs_baseline') AS nl "
+            "FROM attempt WHERE run_id=? ORDER BY id", (rid,)).fetchall()
+
+    sqli = [r for r in rows if r["payload_family"] == "sqli-error"]
+    assert len(sqli) == 2 and all(r["nl"] == 1 for r in sqli)   # BOTH show +1 vs baseline
+    assert summary["newcode_reward"] > 0
+    assert summary["baseline_reward"] == 0.0                    # controls earn nothing
+    assert summary["coverage_lines_seen"] > 0                   # shim clearly produced data
 
 
 def test_run_greybox_resets_between_stateful_points(tmp_path):
