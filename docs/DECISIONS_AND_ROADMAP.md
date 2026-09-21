@@ -382,7 +382,9 @@ remain).
   held-out pages.
 
 ### Phase 5 — Detection classifier + conformal `[planned]`
-Goal: beat the dumb baselines on held-out endpoints with calibrated abstention.
+Goal: beat the dumb baselines on held-out endpoints with calibrated abstention. Task
+breakdown in `docs/PHASE_5_PLAN.md` (honest-eval + models core built; store-training
+and the real-data exit remain).
 - Logistic-regression and mean + 7σ baselines, honestly evaluated with
   GroupKFold.
 - Gradient-boosted trees with class-balanced loss and calibration.

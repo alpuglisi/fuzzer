@@ -13,6 +13,15 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 5 groundwork (T5.1): added `fuzzlab/ml/` — a dependency-light (pure-Python)
+  detection-classifier + honest-evaluation core, strictly **advisory** (scores/triage,
+  never `finding` labels). `metrics` (`pr_auc`, leakage-free `group_kfold`), `baselines`
+  (prevalence, mean+kσ), `logistic` (standardized/L2/class-balanced), and `conformal`
+  (flag/abstain/drop at a target error rate). A test proves the exit in miniature: the
+  model beats **both** baselines on held-out GroupKFold PR-AUC and the conformal gate's
+  error rates are bounded. Wrote `docs/PHASE_5_PLAN.md`; roadmap points to it.
+  Store-training + persistence + optional GBT remain. +5 tests (188 passed / 2 skipped).
+  Change-control: CC-ML-0002.
 - Phase 4 (T4.4 + T4.5): **cost-normalized selection** and **hierarchical backoff** for
   the bandit. Each observation records a cost (the oracle passes the mechanism's probe
   count); with `cost_normalized`, ordering divides sampled reward by mean cost so a cheap
