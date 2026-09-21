@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block body %}
+<header class="masthead">
+  <h1>fuzzlab &mdash; control panel</h1>
+  <p class="muted">Local, lab-only. Nothing is sent to the target until you act
+    (no auto-run). This panel reads results the tools wrote.</p>
+  <nav class="tabs">
+    <a href="#launcher" data-tab="launcher">Launcher</a>
+    <a href="#proxy" data-tab="proxy">Proxy</a>
+    <a href="#results" data-tab="results">Results</a>
+    <a href="#ml" data-tab="ml">ML</a>
+    <a href="#diagnostics" data-tab="diagnostics">Diagnostics</a>
+  </nav>
+</header>
+
+<section class="panel" id="tab-launcher">
+  <div class="card">
+    <div>Target: <code>{{ target }}</code></div>
+    <div>Scope: <code>{{ scope }}</code></div>
+    <div>Mode: <code>{{ mode }}</code></div>
+  </div>
+
+  {% if not authorized %}
+  <p class="warn">Not authorized: set <code>authorized: true</code> in config to enable
+    automatic mode and traffic-sending tools. Lab-only.</p>
+  {% endif %}
+
+  <div class="card">
+    <h2>Automatic</h2>
+    <p>Run the discovery &rarr; oracle-confirm pipeline against the lab, then review
+      results in the Results tab.</p>
+    <form method="post" action="/api/run/automatic">
+      <button type="submit" {% if not authorized %}disabled{% endif %}>Run automatically</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Manual</h2>
+    <p>Leave the lab running and use the tools by hand. Selectable categories (D14):
+      <code>{{ categories | join(', ') }}</code> &mdash; add
+      <code>--categories &lt;list&gt;</code> to scope.</p>
+    <ul>
+      {% for c in commands %}
+      <li><b>{{ c.name }}</b>: <code>{{ c.cmd }}</code></li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Activities</h2>
+    <p class="muted">Every launchable tool and its flags, read from the tool's own
+      parser. Run controls (forms, dry-run, live output) arrive in Phase 1; this is a
+      read-only preview.</p>
+    {% for a in activities %}
+    <div class="card">
+      <h3>{{ a.name }}
+        {% if a.sends_traffic %}<span class="pill traffic">sends traffic</span>{% endif %}
+        {% if a.needs_authorized %}<span class="pill authz">--authorized</span>{% endif %}
+        {% if a.destructive_gate %}<span class="pill destructive">--allow-destructive</span>{% endif %}
+      </h3>
+      <p class="muted">{{ a.summary }}</p>
+      {% if a.options %}
+      <ul class="spec-flags">
+        {% for o in a.options %}
+        <li><code>{{ o.name }}</code>
+          <span class="muted">{{ o.type }}{% if o.required %}, required{% endif %}{% if o.choices %} [{{ o.choices | join('|') }}]{% endif %}{% if o.default is not none and not o.required %} (default {{ o.default }}){% endif %}</span>
+          {% if o.help %}&mdash; {{ o.help }}{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% elif a.subcommands %}
+      <ul class="spec-flags">
+        {% for sub, opts in a.subcommands.items() %}
+        <li><code>{{ sub }}</code>: {{ opts | map(attribute='name') | join(', ') }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted">No flags.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if last_result is not none %}
+  <div class="card"><h2>Last result</h2><pre class="result">{{ last_result }}</pre></div>
+  {% endif %}
+</section>
+
+<section class="panel" id="tab-proxy">
+  <div class="card">
+    <h2>Proxy workbench</h2>
+    <p class="muted">History, live intercept (edit / drop / forward), repeater, and
+      scope / match-replace. Arrives in Phase 2 (the proxy backend already exists;
+      this tab will surface it).</p>
+  </div>
+</section>
+
+<section class="panel" id="tab-results">
+  <div class="card">
+    <h2>Review runs</h2>
+    {% if runs %}
+    <table>
+      <thead><tr><th>run</th><th>tool</th><th>target</th><th>started</th><th>findings</th></tr></thead>
+      <tbody>
+        {% for r in runs %}
+        <tr>
+          <td><a href="/runs/{{ r.id }}">#{{ r.id }}</a></td>
+          <td>{{ r.tool }}</td>
+          <td><code>{{ r.target or '' }}</code></td>
+          <td>{{ r.started_at or '' }}</td>
+          <td>{{ r.findings }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No runs recorded yet. Run a tool with <code>--store</code>, or use
+      automatic mode, then refresh.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="panel" id="tab-ml">
+  <div class="card">
+    <h2>Machine learning</h2>
+    <p class="muted">Classifier, ranker, conformal triage, anomaly detector, active
+      learning, the Thompson bandit, and mutation variants &mdash; kept separate from the
+      primary panel. Arrives in Phase 3 (the data already lives in the store).</p>
+  </div>
+</section>
+
+<section class="panel" id="tab-diagnostics">
+  <div class="card">
+    <h2>Diagnostics</h2>
+    <p class="muted">A TensorBoard-like view: cross-run metric trends, intra-run reward
+      / coverage / latency series, bandit arm state, and a store explorer. Arrives in
+      Phase 4; time-series charts need the new metric-series instrumentation.</p>
+  </div>
+</section>
+{% endblock %}

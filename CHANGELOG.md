@@ -14,6 +14,17 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (UI, Phase 0.2): frontend foundation for the revamp. Reworked `fuzzlab/web/app.py`
+  from hand-rendered HTML to **jinja2 templates** (`web/templates/`) + a **static asset
+  pipeline** (`web/static/app.css`, `app.js` mounted at `/static`); the index is now a
+  **tabbed shell** (Launcher / Proxy / Results / ML / Diagnostics) rendered server-side with
+  a vanilla-JS toggler (no-JS shows all panels). The Launcher previews every activity from
+  the command-spec registry; Results keeps the runs dashboard; Proxy/ML/Diagnostics are
+  stubs for Phases 2–4. Added `fuzzlab/web/sse.py` (SSE plumbing for later live streams).
+  No JSON-API/behavior/schema change; read-only + loopback + no-auto-run invariants intact.
+  jinja2 (a declared `web` extra) is now used; templates/static added to package-data. New
+  tests: `test_web_frontend.py` (10) + `test_web_sse.py` (5); suite 443 passed / 6 skipped.
+  See CC-UI-0012, FR-UI-7. (uPlot charting deferred to first use in Phase 4.)
 - Feature (UI, Phase 0.1): added `fuzzlab/web/commandspec.py`, a registry that introspects
   each launchable activity's own `argparse` parser into a machine-readable form schema
   (name/type/required/default/choices/multiple; per-command sends-traffic + derived

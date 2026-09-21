@@ -3,6 +3,41 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0012 — Frontend foundation: jinja2 + static assets + tab shell + SSE (Phase 0.2) (2026-09-21)
+- Change: reworked `fuzzlab/web/app.py` from hand-rendered HTML f-strings to **jinja2
+  templates** (`fuzzlab/web/templates/`: `base.html`, `index.html`, `run.html`,
+  `not_found.html`; autoescaped) served alongside a **static asset pipeline**
+  (`fuzzlab/web/static/app.css`, `app.js`) mounted at `/static`. The index is now a
+  **tabbed shell** — Launcher / Proxy / Results / ML / Diagnostics — with all panels
+  rendered server-side and a small vanilla-JS module toggling them (progressive
+  enhancement: no-JS shows every panel). The Launcher tab previews every activity from the
+  command-spec registry (CC-UI-0011) with gate pills; Results holds the existing runs
+  dashboard; Proxy/ML/Diagnostics are stubs for Phases 2–4. Added `fuzzlab/web/sse.py`
+  (`format_event`, `sse_response`) as the SSE plumbing for later live streams (first
+  consumer: the Phase 0.3 runner). `jinja2` (already a declared `web` extra) is now used;
+  FastAPI is imported at module scope so route `Request` annotations resolve. Templates and
+  static files added to `[tool.setuptools.package-data]`.
+- Impact (other components / project): UI-internal. No route/behavior change to the JSON
+  API, no schema change, no traffic, and the read-only + loopback + no-auto-run invariants
+  are unchanged (the only interactive form is still gated automatic mode). Sets up the
+  Phase-1 launcher UI and the Phase-2/3/4 tabs.
+- Risk (level; mitigation): low–medium — a rendering refactor of every panel. Mitigated by
+  the unchanged launcher/results suites (13 tests: mode selection, 403-without-auth,
+  injected-pipeline-not-run-on-load, loopback refusal, run-detail strings, empty-store
+  no-create) plus new `tests/test_web_frontend.py` (10: static assets served, tab shell,
+  activities preview, single-form invariant) and `tests/test_web_sse.py` (SSE formatting).
+  Suite 443 passed / 6 skipped.
+- Deliverables:
+  - [x] jinja2 templates + `/static` pipeline; tab shell (5 tabs) — done.
+  - [x] `fuzzlab/web/sse.py` + client `subscribe()` helper — done.
+  - [x] Package-data for templates/static — done.
+  - [x] Tests (frontend shell + SSE); existing web suites green — done.
+  - [ ] Vendored charting lib (uPlot) — deferred to first use (Phase 4 diagnostics).
+  - [ ] Launcher run controls (forms/dry-run/live output) — Phase 1 (needs the runner).
+- Effectiveness (assessed 2026-09-21): effective — the panel renders as a tabbed shell with
+  external CSS/JS, previews all activities from their parsers, and keeps every prior
+  invariant; SSE plumbing is in place for the runner.
+
 ### CC-UI-0011 — Command-spec registry + `build_parser()` convention (Phase 0.1) (2026-09-21)
 - Change: added `fuzzlab/web/commandspec.py` — a registry that introspects each launchable
   activity's own `argparse` parser into a machine-readable form schema

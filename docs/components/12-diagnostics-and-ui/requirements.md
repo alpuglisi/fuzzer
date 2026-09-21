@@ -63,6 +63,13 @@ bugs — the research-platform diagnostics of decision D2.
   acts and stays behind the `authorized` gate (no-auto-run, NFR-UI-no-auto-run).
   *(Realized incrementally: Phase 0.1 adds the command-spec registry that introspects the
   parsers; the launcher UI and runner follow.)*
+- **FR-UI-7** The panel is organized as a **tabbed shell**: **Launcher** (run controls),
+  **Proxy** (traffic review/edit/drop/forward/repeat), **Results** (runs dashboard),
+  **ML** (classifier/ranker/conformal/anomaly/active-learning/bandit/mutation — kept
+  **separate** from the primary panel), and **Diagnostics** (a TensorBoard-like view for
+  performance review and deep troubleshooting). Panels render server-side and degrade
+  without JavaScript. *(Realized incrementally: Phase 0.2 builds the shell + Results;
+  Proxy/ML/Diagnostics fill in Phases 2–4.)*
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

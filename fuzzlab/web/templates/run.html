@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}fuzzlab run #{{ detail.id }}{% endblock %}
+{% block body %}
+<p><a href="/">&larr; all runs</a></p>
+<h1>Run #{{ detail.id }} &mdash; {{ detail.tool }}</h1>
+<p class="muted">Target <code>{{ detail.target or '' }}</code>,
+  started {{ detail.started_at or '' }}.</p>
+
+<div class="card">
+  {% set score = detail.score %}
+  {% if score %}
+    {% set cls = 'ok' if (score.fp|int) == 0 else 'bad' %}
+    <p class="{{ cls }}">Score: TP={{ score.tp|int }} FP={{ score.fp|int }}
+      FN={{ score.fn|int }} TN={{ score.tn|int }}
+      (precision={{ score.get('precision', '?') }}, recall={{ score.get('recall', '?') }})</p>
+  {% else %}
+    <p class="muted">Unscored (no ground truth).</p>
+  {% endif %}
+  {% set fp = detail.target_fingerprint or {} %}
+  <div>Fingerprint: DBMS <code>{{ fp.get('dbms') or '?' }}</code>,
+    framework <code>{{ fp.get('framework') or '?' }}</code>,
+    WAF <code>{{ fp.get('waf') or '?' }}</code></div>
+  {% set c = detail.counts %}
+  <div class="muted">candidates {{ c.candidates }} &middot; negatives {{ c.negatives }}
+    &middot; evaluations {{ c.evaluations }} &middot; attempts {{ c.attempts }}
+    &middot; pages {{ c.pages }}</div>
+</div>
+
+<div class="card">
+  <h2>Findings ({{ detail.findings | length }})</h2>
+  {% if detail.findings %}
+  <table>
+    <thead><tr><th>class</th><th>url</th><th>method</th><th>param</th><th>mechanism</th></tr></thead>
+    <tbody>
+      {% for f in detail.findings %}
+      <tr><td>{{ f.vuln_class or '' }}</td><td><code>{{ f.url or '' }}</code></td>
+        <td>{{ f.method or '' }}</td><td>{{ f.param or '' }}</td>
+        <td>{{ f.confidence or '' }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No findings for this run.</p>
+  {% endif %}
+</div>
+
+{% set model = detail.model %}
+{% set scored = detail.scored or [] %}
+{% if model or scored %}
+<div class="card">
+  <h2>Model scores (advisory)</h2>
+  {% set name = (model.name ~ ' v' ~ model.version) if model else 'none' %}
+  {% if scored %}
+  <p class="muted">Model: <code>{{ name }}</code>. Scores rank candidates and the
+    conformal gate triages them (flag / abstain / drop); they never confirm &mdash;
+    the oracle owns findings.</p>
+  <table>
+    <thead><tr><th>url</th><th>param</th><th>category</th><th>score</th><th>decision</th></tr></thead>
+    <tbody>
+      {% for s in scored %}
+      <tr><td><code>{{ s.url or '' }}</code></td><td>{{ s.param or '' }}</td>
+        <td>{{ s.category or '' }}</td><td>{{ s.score }}</td><td>{{ s.decision }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Model: <code>{{ name }}</code>. No scored candidates for this run.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Metrics</h2>
+  <ul>
+  {% for k, v in detail.metrics | dictsort %}
+    <li><code>{{ k }}</code>: {{ v }}</li>
+  {% else %}
+    <li class="muted">none</li>
+  {% endfor %}
+  </ul>
+</div>
+{% endblock %}
