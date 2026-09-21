@@ -197,6 +197,20 @@ and measured. Authorized, lab-only.
   always `inconclusive`, never guessed as secure. (`CR-LAB-0001`
   tool-mapping table, `docs/spikes/SPIKE-005-zap-vs-ssti-flask-hacking-playground.md`,
   `CC-LAB-0021`)
+- **FR-LAB-21** (Lab track, Phase 0/1 foundation, reference implementation — not
+  build-gating yet) `fuzzlab.labgen.leakage_probe.probe_leakage()` detects whether a
+  corpus's non-payload metadata (status code, response length, header count, latency,
+  param-name length, path depth, content-type — a closed allowlist) statistically leaks
+  the vulnerability label, via a deliberately weak classifier, `StratifiedGroupKFold`
+  grouped by generating-rule ID (never a random split), and a permutation-null AUC
+  threshold (not a fixed constant). Per-class feature exclusions (e.g. `latency_ms` for
+  time-based-blind-SQLi/race-condition classes, where timing *is* the signal) each carry
+  a written justification and are always reported, never silently applied. Requires the
+  optional `labgen` extras (`scikit-learn`, `numpy`); not imported eagerly by
+  `fuzzlab.labgen.__init__`, so the rest of the package has no hard dependency on it. Not
+  wired into any build gate — full build-gating starts once real variation exists
+  (Phase 1), per `docs/LAB_PHASE_0_PLAN.md` T-LAB0.11. (`docs/LAB_PHASE_0_PLAN.md`
+  T-LAB0.11, `CC-LAB-0023`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

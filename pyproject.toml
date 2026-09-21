@@ -56,6 +56,11 @@ dependencies = [
 browser = ["playwright>=1.40,<2"]
 # Local web control panel + launcher (component #12, decision D11).
 web = ["fastapi>=0.110,<1", "uvicorn>=0.27,<1", "jinja2>=3.1,<4"]
+# Lab generator: the metadata leakage-probe reference implementation
+# (T-LAB0.11, fuzzlab/labgen/leakage_probe.py) — not needed for the rest of
+# fuzzlab/labgen/, so kept optional rather than a main dependency (PA-0005:
+# declared where it's actually imported).
+labgen = ["scikit-learn>=1.3,<2", "numpy>=1.24,<3"]
 # Developer tooling.
 dev = ["pytest>=8,<9"]
 

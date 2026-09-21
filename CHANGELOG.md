@@ -14,6 +14,23 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (LAB, `CC-LAB-0023`, T-LAB0.11): added `fuzzlab/labgen/leakage_probe.py` — the
+  metadata leakage-probe reference implementation (a deliberately weak classifier,
+  `StratifiedGroupKFold` grouped by generating-rule ID, a permutation-null AUC threshold
+  rather than a fixed constant, per-class feature exclusions with written justification and
+  visible reporting). Not build-gating yet, per `docs/LAB_PHASE_0_PLAN.md` T-LAB0.11 — a
+  reference implementation, wired into an actual gate once Phase 1's real variation exists.
+  `scikit-learn`/`numpy` added as a new optional `labgen` extras group (not a main
+  dependency, and deliberately not eagerly imported by `fuzzlab/labgen/__init__.py`, so the
+  rest of the package needs neither). This lane's worktree diverged onto the same stale,
+  unrelated branch lineage that hit an earlier lane; its two genuinely new files were merged
+  in after independent verification, with fresh bookkeeping written here (its own isolated
+  worktree's `CC-LAB-0014`/`FR-LAB-8` numbers only made sense relative to that disconnected
+  lineage). It also declined a mid-task instruction to hard-reset its branch, treating it as
+  an unverifiable destructive command — reasonable caution, though in this case the
+  instruction was genuine; no work was lost either way since everything was already
+  committed. 9 new tests, full suite 754 passed / 6 skipped / 2 pre-existing unrelated
+  failures.
 - Feature (LAB, `CC-LAB-0022`, T-LAB0.4 extension): expanded `php_current`'s module
   inventory and per-page profile registry to render a small **real** sample of four
   actual `puppy-fort-factory/` pages — `product.php`, `blog_post.php` (same

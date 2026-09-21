@@ -3,6 +3,74 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0023 — T-LAB0.11: leakage-probe reference implementation (2026-09-21)
+*(This lane's worktree diverged onto the same stale, unrelated UI-redesign branch lineage
+that hit a sibling lane earlier — a harness/environment quirk, confirmed via `git cat-file`
+that the correct trunk commit was reachable from its object store despite its checked-out
+branch being wrong. The agent's own verification (checking for LAB-related commit names in
+its history) was reasonable but insufficient — it found some LAB-adjacent docs commits from
+a different point in project history and judged its lineage acceptable, missing that
+`fuzzlab/labgen/` itself (with `oracle_wrapper.py`, `resolver.py`, `emitter.py`, etc.) was
+entirely absent. It also, appropriately, declined a mid-task instruction to `git reset
+--hard` onto a named branch, treating an unverifiable destructive command from an
+in-conversation message as suspicious — sound instinct in general, though in this
+particular case the instruction was genuine and correct. Its work was fully committed
+regardless, so nothing was lost: only its two genuinely new files
+(`fuzzlab/labgen/leakage_probe.py`, `tests/test_labgen_leakage_probe.py`) were copied into
+this branch, verified independently, with fresh bookkeeping written here rather than
+carrying over its isolated-worktree `CC-LAB-0014`/`FR-LAB-8` numbers, which only made sense
+relative to that disconnected lineage.)*
+- Change: added `fuzzlab/labgen/leakage_probe.py`, the T-LAB0.11 reference implementation
+  (design already settled by `docs/LAB_PHASE_0_PLAN.md`, not build-gating yet per that
+  plan): `probe_leakage(cells, ...)` detects whether a corpus's non-payload metadata
+  (status code, response length, header count, latency, param-name length, path depth,
+  content-type — a closed `FEATURE_ALLOWLIST`, `ValueError` on any key outside it) leaks the
+  vulnerability label — i.e. whether a classifier could cheat on superficial fingerprints
+  instead of the real signal. Uses a deliberately weak `LogisticRegression` +
+  `StandardScaler`/`OneHotEncoder` pipeline, `StratifiedGroupKFold` grouped by
+  generating-rule ID (never a random split — near-duplicate cells from the same rule must
+  land on the same side), and a **permutation-null threshold** (200 label shuffles, 99th
+  percentile of the resulting AUC distribution — not a fixed constant). `PER_CLASS_FEATURE_
+  EXCLUSIONS` lets `latency_ms` be excluded for `sqli_blind_time`/`race_condition` (timing
+  *is* the vulnerability there), each with a written one-line justification; every
+  `LeakageResult` reports the exclusion count so the mechanism can't quietly launder a red
+  result green. Returns data (`LeakageResult.leaks`), never raises on a leaky corpus — only
+  on malformed input. `scikit-learn`/`numpy` added as a new, **optional** `labgen` extras
+  group in `pyproject.toml` (not a main dependency — nothing else in `fuzzlab/labgen/` needs
+  it, so it's declared where it's actually imported, per PA-0005, without forcing the
+  dependency on everyone). Deliberately **not** added to `fuzzlab/labgen/__init__.py`'s
+  eager imports for the same reason — eagerly importing it there would make `scikit-learn` a
+  hard requirement just to `import fuzzlab.labgen` at all; it's reached via
+  `from fuzzlab.labgen import leakage_probe` instead, which only needs `scikit-learn`
+  installed at the point it's actually used.
+- Impact (other components / project): a standalone reference implementation with no
+  callers yet and no wiring into `gates.py` or any build step — per the plan, full
+  build-gating starts in Phase 1 once real variation exists. No other component's contracts
+  change; `oracle_wrapper.py`, `zap_oracle.py`, `resolver.py`, `schema.py`, `verdict.py`,
+  `subseed.py`, `gates.py`, `denylist.py`, `emitter.py`, `modules/`, `emitters/` untouched.
+- Risk (level; mitigation): low — unused by any other code path yet, so a defect here
+  affects nothing currently running. Mitigated by: the closed feature allowlist (raises
+  rather than silently accepting a payload-derived field); the permutation-null threshold
+  instead of a guessed constant; 9 new tests (a synthetic corpus with status code
+  deterministically tied to the label — must flag `leaks=True` above threshold; a synthetic
+  clean corpus with independent features — must flag `leaks=False`; generating-rule grouping
+  sanity; per-class exclusion application and reporting; allowlist closure; exclusion
+  justification presence; input-validation error paths).
+- Deliverables:
+  - [x] `fuzzlab/labgen/leakage_probe.py` (`probe_leakage`, `LeakageResult`,
+        `FEATURE_ALLOWLIST`, `PER_CLASS_FEATURE_EXCLUSIONS`) — done.
+  - [x] Permutation-null threshold (not a fixed constant) — done.
+  - [x] `StratifiedGroupKFold` grouped by generating-rule ID — done.
+  - [x] Per-class feature exclusions with written justification + reported count — done.
+  - [x] 9 new tests (leaky/clean synthetic corpora, grouping, exclusions, allowlist,
+        validation) — done, all pass.
+  - [ ] Wiring into an actual build gate — explicitly out of scope per the plan (Phase 1).
+- Effectiveness (assessed 2026-09-21): met this delivery's own bar — 9 new tests pass; full
+  suite 754 passed / 6 skipped / 2 pre-existing unrelated `test_mutation_operators.py`
+  failures (unaffected). Not yet assessable: whether the permutation-null threshold's
+  99th-percentile choice holds up as sensitive-but-not-oversensitive once run against a real,
+  generated corpus rather than small synthetic fixtures — that is Phase 1's real test.
+
 ### CC-LAB-0022 — T-LAB0.4 extension: `php_current` generalizes to a small real-page sample (2026-09-21)
 *(Numbered `CC-LAB-0022` rather than `CC-LAB-0020` at merge time — this lane's worktree
 was based on a commit that predated `CC-LAB-0020`/`CC-LAB-0021` (the OSV/GHSA sourcing
