@@ -14,6 +14,29 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Docs: recorded the project owner's decisions on every judgment/scope call
+  `docs/LAB_IMPLEMENTATION_PLAN.md` had flagged, closing 14 of 16 open items.
+  Decided: T-LAB0.9 sweeps FUZZ consumers alongside its schema change;
+  leakage-probe thresholds are per-class, seeded provisionally from the
+  report's 0.55-0.60 band and recalibrated once Phase 1 has real data; the
+  sqlmap fallback design gets a real-binary spot-check first; Lab-track
+  Phase 2 proceeds independently of the toolkit's Session-manager phase,
+  building its own small session helper rather than waiting (the two serve
+  different consumers — build-time oracle confirmation vs. adversarial
+  tooling); Phase 3 pacing is stack 1 full depth + stacks 2-3 Tier-A-only
+  (confirmed non-blocking to upgrade later, since the module-composition
+  architecture makes that additive, not a rewrite — it defers cost, it
+  doesn't eliminate it); the pattern-card authoring pass is scheduled for
+  after the rest of the build; the pattern corpus versions independently of
+  the manifest (follows directly from the already-adopted provenance-
+  separation principle); and the SBOM vulnerable-dependency allowlist
+  question is deferred, since no scanning-based build gate currently
+  consumes the SBOMs this project will generate. Two items remain open:
+  Spring Boot's near-term scope (a separate question from the Phase 3
+  pacing decision) and Phase 4's SSRF/GraphQL design passes (deliberately
+  left unresearched as premature). The document's status line and §6 were
+  rewritten accordingly to distinguish resolved items from the two still
+  open.
 - Docs: reviewed `docs/LAB_IMPLEMENTATION_PLAN.md` again for areas needing more
   clarity/research/information, identified four new gaps beyond the first pass,
   and dispatched four more parallel web-enabled research agents (each with a

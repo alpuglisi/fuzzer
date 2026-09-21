@@ -1,29 +1,20 @@
 # Lab generator — implementation plan for the remaining work
 
-**Status: draft, for review — eight flagged research items resolved across
-two passes, 2026-09-21.** This is a task-level plan, in the style of
-`docs/LAB_PHASE_0_PLAN.md`, covering everything **after** the point Phase 0
-has actually reached (as of `CC-LAB-0028`) through the rest of `CR-LAB-0001`
-§8's phase list. It does not re-litigate anything already decided (D20,
-Addenda A-E) — it sequences what is left, names what each task actually
-requires, and marks every point that needs a decision or more research
-before it can be built, rather than building through it speculatively. Per
-this project's own convention, items marked **[research needed]** or
-**[decision needed]** are not blocking the rest of the plan unless a
-dependency arrow below says so — most of them gate one phase, not all of
-them. Eight **[research needed]** items — the original four (identifier-
-context SQLi oracle coverage, `authz_expectations` placement, the FastAPI
-route-accumulator question, the complexity-as-file-count-multiplier
-interaction) plus four more surfaced on a follow-up review pass (SBOM/
-digest-pinning tooling, the framework-debug-page false-positive contract,
-`stack` field placement in the label contract, DOM XSS fixture authoring) —
-were each dispatched to a web-enabled research agent with its own
-purpose-built prompt and are now marked **[research complete]** with
-findings folded into the relevant sections and summarized in §6. One item
-(Phase 4's SSRF/GraphQL design passes) was deliberately left undispatched
-both times, since the plan itself judges that research premature this far
-out — see §6 item 15. Every remaining **[decision needed]** item is a
-judgment/scope call research cannot resolve and is still yours to make.
+**Status: active — 14 of 16 flagged items decided, 2026-09-21.** This is a
+task-level plan, in the style of `docs/LAB_PHASE_0_PLAN.md`, covering
+everything **after** the point Phase 0 has actually reached (as of
+`CC-LAB-0028`) through the rest of `CR-LAB-0001` §8's phase list. It does
+not re-litigate anything already decided (D20, Addenda A-E) — it sequences
+what is left, names what each task actually requires, and records every
+decision made along the way rather than building through an open question
+speculatively. Eight research items were dispatched to web-enabled research
+agents across two passes (four per pass, each with its own purpose-built
+prompt); their findings, plus the project owner's decisions on every
+resulting and originally-flagged judgment call, are recorded inline in the
+relevant sections and summarized in §6. Two items remain genuinely open
+(Spring Boot's near-term scope, and Phase 4's SSRF/GraphQL design passes,
+the latter deliberately left unresearched as premature) — see §6's "Still
+open" list.
 
 Companion documents this plan assumes you have open: `CR-LAB-0001` (the
 approved change request, including Addenda A-E), `docs/DECISIONS_AND_ROADMAP.md`
@@ -57,7 +48,7 @@ authoring-hours actuals — feed directly into how Phase 2-4 get scoped).
 
 ## 1. Finish Phase 0
 
-### 1.1 T-LAB0.9 — Regression/additive-only gate **[decision needed before starting]**
+### 1.1 T-LAB0.9 — Regression/additive-only gate **[decided: option (b)]**
 
 **What it is.** A permanent test that diffs the generator's emitted
 `labels.json`/`expectedresults.csv`/`injection-points.json` against the
@@ -82,18 +73,17 @@ case-to-endpoint mapping in a way the new `related_endpoints` shape would
 violate — that requires reading those consumers, which is FUZZ-component
 territory this session was not asked to touch.
 
-**Decision needed:** whether to (a) have a LAB-side agent add the four new
-CSV columns and the regression gate now, on the verified basis that the
-*parser* tolerates them, deferring a FUZZ-consumer sweep to whoever next
-touches the harness; or (b) do the FUZZ-consumer sweep first (a `Case`
-dataclass extension in `fuzzlab/labels/contract.py` plus a read of every
-consumer of `GroundTruth.cases`) as part of this same task, so the schema and
-its consumers land together. **Recommendation: (b)** — CR-LAB-0001 itself
-calls this a FUZZ-touching change, and Addendum B's whole point (the SARIF/
-Juliet one-row-per-finding shape) is only correctly honored if a consumer
-that currently assumes one row = one location doesn't silently mis-score a
-multi-location case once one exists. This is the one item in this plan
-closest to a genuine cross-component review, not just a LAB-internal build.
+**Decided (2026-09-21): option (b).** Do the FUZZ-consumer sweep first (a
+`Case` dataclass extension in `fuzzlab/labels/contract.py` plus a read of
+every consumer of `GroundTruth.cases`) as part of this same task, so the
+schema and its consumers land together — not (a), which would add the four
+CSV columns now and defer the consumer sweep to whoever next touches the
+harness. Rationale: `CR-LAB-0001` itself calls this a FUZZ-touching change,
+and Addendum B's whole point (the SARIF/Juliet one-row-per-finding shape) is
+only correctly honored if a consumer that currently assumes one row = one
+location doesn't silently mis-score a multi-location case once one exists.
+This is the one item in this plan closest to a genuine cross-component
+review, not just a LAB-internal build.
 
 **Task breakdown once decided:**
 1. Read every consumer of `fuzzlab.labels.contract.Case`/`GroundTruth` (grep
@@ -187,12 +177,28 @@ rather than a cold pull. This is a legitimate, low-risk, offline task and
 can be dispatched as its own lane whenever the corpus is due a refresh check
 — it produces no cards, per the pipeline's own separation.
 
-**[decision/scheduling needed]:** when the card-authoring pass itself
-happens is yours to schedule; it is not gated on anything else in this
-plan, and nothing else in this plan is gated on it reaching 25-30 cards
-(Phase 1's `patterns/` consumption is citation-only, never a `verdict()`
-input, so a smaller corpus doesn't block Phase 1's other work — it just
-means fewer cells carry a card citation until more are written).
+**Decided (2026-09-21): schedule the card-authoring pass after the rest of
+the build is done.** It is not gated on anything else in this plan, and
+nothing else in this plan is gated on it reaching 25-30 cards (Phase 1's
+`patterns/` consumption is citation-only, never a `verdict()` input, so a
+smaller corpus doesn't block Phase 1's other work — it just means fewer
+cells carry a card citation until more are written).
+
+**Versioning, decided (2026-09-21): the pattern corpus versions
+independently of the manifest, never in lockstep.** This follows directly
+from a principle already adopted in Addendum A (provenance separation): a
+manifest cell carries zero reference to any pattern card, only a
+one-directional `provenance.yaml` index the verdict engine never reads.
+Coupling the corpus's own version number to the manifest's version number
+would reintroduce a dependency between the two artifacts at the
+version-number level, even though their content is deliberately decoupled
+— and would force a pointless corpus version bump every time the manifest
+schema changes for a reason that has nothing to do with the corpus (e.g.
+Phase 2's identity-model addition). The mechanism for independent
+versioning already exists and needs no new machinery: `REFRESH_LOG.md`
+(commit SHA + date per quarterly pull), each card's own stable ID, and a
+`superseded_by` pointer for corrections. No action item follows from this
+beyond continuing to use what's already built.
 
 ---
 
@@ -277,10 +283,12 @@ attribute).
   uncertainty the research flagged:** the verdict rests partly on
   documentation/issues dating to 2012 with no evidence the core limitation
   was ever closed, and one source (a mailing-list thread) could not be
-  fully fetched due to this environment's network proxy — worth a quick
-  spot-check against the actual installed sqlmap binary before committing
-  to the fallback design, per PA-0005's own "verify against the real tool"
-  convention.
+  fully fetched due to this environment's network proxy. **Decided
+  (2026-09-21): spot-check against the actual installed sqlmap binary
+  before committing to the fallback design**, per PA-0005's own "verify
+  against the real tool" convention — do this check first, as the very
+  first step of this task, before writing `oracle_wrapper.py`'s
+  identifier-context sibling module.
 
 ### 2.3 Wire χ² balance + leakage probe as required build gates
 Both `fingerprint_gate.py` and `leakage_probe.py` exist as reference
@@ -288,13 +296,18 @@ implementations, deliberately not build-gating yet (no real variation to
 check). Once 2.1/2.2 produce a manifest with real cell-count variation
 across classes/transforms:
 - Add both to `--check` (from T-LAB0.10) as required, not optional, steps.
-- **[decision needed]:** the leakage-probe AUC threshold is currently a
-  fixed 0.55-0.60 band per the report's recommendation, accepted as
-  "revisable per class once real corpus data exists" (`CR-LAB-0001` §5,
-  accepted risk). This is the first point real corpus data exists — decide
-  per-class thresholds now, or keep one global threshold until Phase 2. No
-  default is stated in this plan; it is one of the CR's seven originally
-  deferred open questions.
+- **Decided (2026-09-21): per-class thresholds**, not one global 0.55-0.60
+  band. `leakage_probe.py`'s tests already group by generating-rule ID, so
+  per-class thresholds extend the existing structure rather than adding new
+  machinery. Concretely: implement `PER_CLASS_FEATURE_EXCLUSIONS`-style
+  per-class threshold overrides now, but since this phase is the *first*
+  point real corpus data exists to calibrate against, treat the initial
+  per-class values as provisional — set from the report's 0.55-0.60 band as
+  a starting point per class, then revisit each class's number once Phase 1
+  produces enough real cells to compute the permutation-null distribution
+  properly. Document the provisional-vs-calibrated status of each
+  threshold in the gate's own report output so a future pass can tell which
+  numbers still need revisiting.
 
 ### 2.4 Stratified splits + de-duplication + diversity reporting
 - A split function grouping by generating-rule ID (same grouping
@@ -368,20 +381,28 @@ needs today." This reasoning is by analogy to this project's own
 architecture, not an external citation — flagged as such, since no
 external project could actually settle it.
 
-The first question (Session-manager interaction) remains open and is not a
-research question so much as a scheduling one: **[decision needed]** confirm
-whether Lab-track Phase 2 can proceed independently of the toolkit's own
-Session-manager phase landing, or whether identity groundwork should wait
-for it — this needs a look at what Phase 2 actually requires operationally
-(does confirming an authz expectation require staying authenticated as two
-different identities across a run, which is exactly what the Session
-manager provides?) rather than external research, so it's left as a
-decision item, not dispatched to a research agent.
+**Decided (2026-09-21): Lab-track Phase 2 proceeds independently of the
+toolkit's own Session-manager phase.** The two are easily conflated but
+serve different consumers: the toolkit's Session manager is infrastructure
+for *tools attacking the lab* (a crawler/fuzzer staying authenticated as
+`anonymous`/`user`/`admin` across an adversarial run, with re-auth, JWT
+handling, and auto-exclusion of auth endpoints) — Phase 2's actual need is
+narrower: the *build-time oracle* confirming a cell's verdict (e.g. a
+stored-XSS cell submitted as one identity and observed elsewhere) only ever
+needs to hold two or three **known, generator-controlled** test-account
+cookies at once, not defend against an unknown target. This is closer in
+scope to `oracle_wrapper.py`'s existing `refresh_session` callback than to
+the full toolkit Session manager. **Task addition for Phase 2:** build a
+small, Lab-track-owned session helper (named test identities + a cookie
+jar, nothing more) as part of Phase 2's own oracle-confirmation code, rather
+than depending on the toolkit's Session-manager phase landing first. The
+full toolkit Session manager remains relevant later, once the toolkit's own
+tools are pointed at a multi-identity-aware lab for actual IDOR/BOLA
+testing — but that class of cell stays deferred indefinitely (Addendum E)
+regardless, so it is not on Phase 2's own critical path.
 
-With the file-placement question now resolved, write
-`docs/LAB_PHASE_2_PLAN.md` at the same granularity as Phase 0/1 above once
-the Session-manager scheduling question above is settled, before starting
-implementation.
+With both open questions now resolved, write `docs/LAB_PHASE_2_PLAN.md` at
+the same granularity as Phase 0/1 above before starting implementation.
 
 ---
 
@@ -435,25 +456,35 @@ similar dataset — worth a follow-up read from an unblocked environment if
 this needs to be closed out with full rigor, though the recommendation
 above does not depend on it.
 
-**[decision needed before scheduling this phase — carried over from
-Addendum C, unresolved]:** Addendum C's calibrated effort estimate is
-~330h for the first new stack, ~180h/stack after, i.e. ~450-520h disciplined/
-~650-750h unassisted for all three stacks. Three options were given, none
-adopted:
+**Decided (2026-09-21): option (b).** Addendum C's calibrated effort
+estimate is ~330h for the first new stack, ~180h/stack after, i.e.
+~450-520h disciplined/~650-750h unassisted for all three stacks. Three
+options were given:
 - (a) all three stacks to full depth (~8 months solo at 15h/week);
-- (b) stack 1 to full depth, stacks 2-3 to Tier-A-only depth (well-documented
-  classes only, deferring identifier/alias/connector-position cases on those
-  stacks), roughly halving stacks 2-3's cost;
+- **(b) — adopted: stack 1 to full depth, stacks 2-3 to Tier-A-only depth**
+  (well-documented classes only, deferring identifier/alias/connector-
+  position cases on those stacks), roughly halving stacks 2-3's cost;
 - (c) treat the optional fourth stack (Spring Boot) as explicitly out of
   near-term scope.
 
-This plan does not pick one — it is exactly the kind of scope/pace call the
-CR itself reserved for you, and it changes how much of Phase 3's task list
-below is worth writing out now versus after Phase 1's actual authoring-hours
-data comes in (Addendum C's own recommendation: "time three real seed
-authoring sessions before trusting the schedule" — Phase 1's cell-rebuild
-work, §2.2 above, is exactly that timing opportunity, and should inform this
-decision before it's made, not after).
+**(c) was not decided** — the choice of (b) is about how deep stacks 2-3 go,
+not whether the optional fourth (Spring Boot) stack is in scope at all;
+these are separable questions and only (b) was confirmed. Treat Spring
+Boot's near-term status as still open until explicitly decided.
+
+**Consequence of choosing (b), stated plainly per the earlier "does this
+lock us in" question:** it does not — upgrading a Tier-A stack to full
+depth later is additive (new modules/safety-matrix rows/cells layered onto
+what already exists), not a rewrite, per this project's own established
+module-composition convention and the whole-manifest regression tests
+(T-LAB0.7 Tier 3, `PA-0024`) that exist specifically to catch a regression
+when a stack's supported shapes widen. Choosing (b) defers the harder-shape
+authoring and per-dialect oracle work for stacks 2-3, it does not eliminate
+it — budget for that work to still land whenever/if those stacks are
+later upgraded to full depth. Per Addendum C's own recommendation ("time
+three real seed authoring sessions before trusting the schedule"), use
+Phase 1's actual cell-rebuild hours (§2.2 above) to sanity-check this
+pacing once that data exists, rather than treating (b) as unrevisable.
 
 **[research complete, 2026-09-21]:** confirmed whether FastAPI's `APIRouter`
 auto-inclusion means the Python/FastAPI emitter can avoid a `route`-category
@@ -599,15 +630,17 @@ whatever order the decision picks):
    one, and surface a manual-review reminder rather than auto-bumping —
    consistent with this project's existing "reviewed, not automated" refresh
    philosophy, and documented as a runbook step
-   (`docs/ON_HOST_RUNBOOK.md`-style) rather than infrastructure. **One
-   design gap surfaced, not yet resolved:** no existing tool distinguishes
-   "this vulnerable dependency version is the deliberate point of a lab
-   cell" from "this SBOM entry is a real, unintended supply-chain
-   regression" — if a vulnerability scanner is ever pointed at these SBOMs
-   as a build gate, the project will need its own allowlist/expected-
-   findings file (keyed by CVE + component), designed from scratch; flagged
-   here rather than assumed solved, since research found no comparable
-   project's convention to borrow.
+   (`docs/ON_HOST_RUNBOOK.md`-style) rather than infrastructure. **Design
+   gap surfaced; decided (2026-09-21) to defer, not design now:** no
+   existing tool distinguishes "this vulnerable dependency version is the
+   deliberate point of a lab cell" from "this SBOM entry is a real,
+   unintended supply-chain regression." Nothing in this plan currently
+   points a vulnerability scanner at these SBOMs as a build gate — this
+   task is scoped to recording the SBOM only. Do **not** design the
+   allowlist/expected-findings file preemptively; only build it if and when
+   a scanning-based build gate is actually proposed, since no comparable
+   project's convention exists to borrow from and speculative design here
+   would be pure overhead against a hypothetical.
 5. Wire the fingerprint-independence gate as required once ≥2 stacks exist
    (its own minimum precondition, `min_stacks_per_class >= 2`).
 6. For the PHP/Laravel emitter specifically: the migration step (D20 §7.2)
@@ -680,106 +713,102 @@ guessing.
 
 ## 6. Consolidated list of open decisions and research items
 
-Eight research items have now been dispatched to web-enabled research
-agents across two passes (four on 2026-09-21's first pass, four more the
-same day on a second review pass) and are resolved (marked below); their
-findings are folded into the relevant sections above. Items still needing a
-human decision (not resolvable by research — they are judgment/scope calls)
-remain open, in the order they first become load-bearing:
+Eight research items were dispatched to web-enabled research agents across
+two passes on 2026-09-21, and every decision they informed has now been
+made by the project owner (2026-09-21). This section is kept as a durable
+record of what was decided and why, plus the few items still genuinely
+open.
 
-1. **T-LAB0.9 scope** (§1.1) — **[decision needed]** sweep FUZZ consumers
-   before or alongside the schema change? *Recommended: alongside, before
-   landing.*
-2. **Leakage-probe threshold** (§2.3) — **[decision needed]** per-class or
-   one global 0.55-0.60 band, now that Phase 1 will produce the first real
-   data to decide it against.
-3. ~~Identifier/alias/connector-position SQLi oracle coverage~~ (§2.2) —
-   **[research complete]** sqlmap does not reliably detect this shape; build
-   a custom differential-response prober alongside `oracle_wrapper.py`
-   instead. One residual **[decision needed]**: whether to spot-check the
-   verdict against the real installed sqlmap binary before committing to the
-   fallback design (recommended, low cost).
-4. ~~`authz_expectations` placement~~ (§3) — **[research complete]** no
-   external prior art declares ownership/authz as static data at all
-   (crAPI/vAPI leave it fully implicit; AuthProbe, the closest academic
-   tool, discovers it at runtime rather than declaring it) — this is
-   genuinely novel schema ground. Recommendation, by analogy to this
-   project's own `provenance.yaml` precedent (not an external citation):
-   keep it in a **separate side file**, decoupled from the manifest cells
-   the verdict engine consumes.
-5. **Toolkit Session-manager dependency** (§3) — **[decision needed]** does
-   Lab-track Phase 2 need the toolkit's own Session manager to land first
-   (e.g. because confirming an authz expectation requires staying
-   authenticated as two identities across a run), or can identity
-   groundwork proceed independently? This is an operational question about
-   what Phase 2 actually requires, not something further web research can
-   resolve — left as a decision item.
-6. **Phase 3 pacing** (§4) — **[decision needed]** (a) all three stacks full
-   depth, (b) stack 1 full + stacks 2-3 Tier-A, or (c) drop Spring Boot from
-   near-term scope. Inform with Phase 1's actual authoring-hours data before
-   deciding.
-7. ~~FastAPI route-accumulator need~~ (§4) — **[research complete]**
+### Resolved
+
+1. ~~**T-LAB0.9 scope**~~ (§1.1) — **decided: option (b)**, sweep every
+   FUZZ consumer of the label contract alongside the schema change, not
+   deferred.
+2. ~~**Leakage-probe threshold**~~ (§2.3) — **decided: per-class
+   thresholds**, seeded from the report's 0.55-0.60 band as a provisional
+   starting point per class, recalibrated once Phase 1 produces real corpus
+   data.
+3. ~~**Identifier/alias/connector-position SQLi oracle coverage**~~ (§2.2)
+   — **research complete**: sqlmap does not reliably detect this shape;
+   build a custom differential-response prober alongside `oracle_wrapper.py`
+   instead. **Decided: spot-check the real sqlmap binary first**, as the
+   opening step of that task, before committing to the fallback design.
+4. ~~**`authz_expectations` placement**~~ (§3) — **research complete**: no
+   external prior art declares ownership/authz as static data at all;
+   genuinely novel schema ground. **Decided: a separate side file**,
+   decoupled from the manifest cells the verdict engine consumes, by
+   analogy to this project's own `provenance.yaml` precedent.
+5. ~~**Toolkit Session-manager dependency**~~ (§3) — **decided: Lab-track
+   Phase 2 proceeds independently.** Build a small, Lab-track-owned session
+   helper (named test identities + a cookie jar) as part of Phase 2's own
+   oracle-confirmation code, rather than waiting on the toolkit's unrelated
+   Session-manager phase, whose full re-auth/JWT/auto-exclusion feature set
+   is built for a different job (adversarial tools attacking an unknown
+   target) than Phase 2 actually needs (holding a couple of known
+   test-account cookies during build-time confirmation).
+6. ~~**Phase 3 pacing**~~ (§4) — **decided: option (b)** — stack 1 to full
+   depth, stacks 2-3 to Tier-A-only depth. Confirmed this does not lock the
+   project out of upgrading later: a Tier-A stack's later upgrade to full
+   depth is additive (new modules/matrix rows/cells layered onto what
+   exists), not a rewrite, per this project's own module-composition
+   convention and its whole-manifest regression tests. Choosing (b) defers
+   the harder-shape authoring/oracle cost for stacks 2-3, it does not
+   eliminate it. **(c) — dropping Spring Boot from near-term scope — was
+   not decided** and remains open (see below); it is a separable question
+   from the depth pacing that (b) answers.
+7. ~~**FastAPI route-accumulator need**~~ (§4) — **research complete**:
    avoidable via a one-time static discovery scaffold (~15 lines,
    project-owned, not a first-party FastAPI feature); the `route`
-   accumulator module is still needed for Laravel/Express.
-8. ~~Complexity-as-file-count-multiplier interaction~~ (§4) — **[research
-   complete]** no direct prior art exists for this combination;
-   recommendation adopted into the plan: spike with two fixed depth levels
-   before generalizing to a combinable N-valued axis.
-9. **`patterns/` card-authoring schedule** (§1.3) — **[decision needed]**
-   not gating, purely a "when do you want to do this" scheduling call.
-10. ~~SBOM/digest-pinning tooling~~ (§4) — **[research complete]** generate
-    SBOMs with **Syft**, record as **CycloneDX**; pin base-image digests via
-    a small local script on the same quarterly cadence as the pattern-corpus
-    refresh, not a bot (Renovate/Dependabot are overkill for this project's
-    scale). One residual **[decision needed, low priority]**: no comparable
-    project's convention exists for distinguishing a deliberately-vulnerable
-    pinned dependency from a real supply-chain regression in an SBOM-based
-    scan — needs its own allowlist design if a vulnerability scanner is ever
-    wired to these SBOMs as a build gate; not urgent, no such gate is
-    currently planned.
-11. ~~The all-secure-profile false-positive contract around framework debug
-    pages~~ (§4) — **[research complete]** no comparable prior-art project
-    has actually solved this (DVWA runs the opposite of hardened by design;
-    Juice Shop folds it into a graded challenge; OWASP Benchmark sidesteps
-    it structurally) — genuinely unsolved territory, not a known-answer gap.
-    Recommendation adopted: production-mode-by-default for every generated
-    container (with FastAPI's `/docs`/`/redoc`/`/openapi.json` disabled as
-    an explicit separate step, since it's on by default regardless of any
-    debug flag), plus a reviewed ZAP rules-file/Alert-Filter allowlist as a
-    second line of defense. One residual **[decision/verification needed,
-    small]**: the exact ZAP alert/plugin IDs that fire on each framework's
-    debug page need empirical confirmation against real generated cells —
-    a small follow-up spike when Phase 3's first non-PHP emitter is
-    validated, not before.
-12. ~~Whether `stack` belongs in `labels.json` directly vs. a separate
-    file~~ (§4) — **[research complete]** prior art (OWASP Benchmark, the
-    multi-language academic vulnerability-dataset literature) uniformly
-    inlines this kind of metadata, and the general ML shortcut-learning
-    literature actually favors inlining over splitting for this exact
-    reason (group-robustness benchmarks deliberately co-locate a spurious
-    attribute with its class label specifically to enable the kind of
-    conditional audit this project's own χ² gate already performs).
-    Recommendation adopted: keep `stack` inline in `labels.json`.
-13. **Whether the pattern corpus versions with the manifest or
-    independently** (§1.3) — **[decision needed]**, not dispatched for
-    research in this pass (this is a pure project-versioning-policy
-    question with no external prior art to inform it — a design choice,
-    not a research gap). Still open, low priority, no phase currently
-    depends on it.
-14. ~~DOM XSS frontend-code generation~~ (§5) — **[research complete]**
-    confirmed hand-authoring is the field norm (DVWA, Juice Shop, WebGoat
-    all hand-author, no templated approach found in any), validating the
-    plan's tentative call, with one refinement: use a per-sink-type template
-    with an explicit vulnerable/safe swap point (preserving this project's
-    existing minimal-pair discipline at negligible cost, since only ~5-8
-    sink-type cells are needed) rather than fully independent authoring per
-    cell. A concrete 5-8 item sink taxonomy (OWASP's DOM-based XSS
-    Prevention Cheat Sheet) is now specified.
-15. **Phase 4 SSRF target + GraphQL surface design** (§5) — **deliberately
-    not dispatched for research in either pass.** The plan itself states
-    this research would be premature ("Phase 4 is far enough out that
-    anything decided today would likely be stale by the time it matters");
-    spawning a research agent for it now would contradict that reasoning
-    rather than honor it. Flagged here, not silently skipped — revisit when
-    Phase 3 is close to landing.
+   accumulator module is still needed for Laravel/Express. No decision
+   needed beyond adopting the finding.
+8. ~~**Complexity-as-file-count-multiplier interaction**~~ (§4) —
+   **research complete**: no direct prior art exists for this combination;
+   spike with two fixed depth levels before generalizing to a combinable
+   N-valued axis, adopted into the plan.
+9. ~~**`patterns/` card-authoring schedule**~~ (§1.3) — **decided:
+   schedule it after the rest of the build is done.** Not gating anything
+   else in this plan.
+10. ~~**SBOM/digest-pinning tooling**~~ (§4) — **research complete**:
+    generate SBOMs with **Syft**, record as **CycloneDX**; pin base-image
+    digests via a small local script on the pattern-corpus's own quarterly
+    cadence, not a bot. **Decided: defer the vulnerable-dependency-vs-
+    regression allowlist question** — no scanning-based build gate is
+    currently planned to consume these SBOMs, so no allowlist should be
+    designed preemptively; revisit only if such a gate is ever proposed.
+11. ~~**The all-secure-profile false-positive contract around framework
+    debug pages**~~ (§4) — **research complete**: no comparable prior-art
+    project has actually solved this. Adopted: production-mode-by-default
+    for every generated container (with FastAPI's
+    `/docs`/`/redoc`/`/openapi.json` disabled as an explicit separate step),
+    plus a reviewed ZAP rules-file/Alert-Filter allowlist as a second line
+    of defense. One small follow-up remains, not a decision: the exact ZAP
+    alert/plugin IDs need empirical confirmation once Phase 3's first
+    non-PHP emitter exists.
+12. ~~**Whether `stack` belongs in `labels.json` directly vs. a separate
+    file**~~ (§4) — **research complete**: prior art and the general ML
+    shortcut-learning literature both favor inlining. Adopted: keep `stack`
+    inline in `labels.json`.
+13. ~~**Whether the pattern corpus versions with the manifest or
+    independently**~~ (§1.3) — **decided: independently.** Follows directly
+    from the provenance-separation principle already adopted in Addendum A;
+    the mechanism (`REFRESH_LOG.md`, stable card IDs, `superseded_by`)
+    already exists and needs no new machinery.
+14. ~~**DOM XSS frontend-code generation**~~ (§5) — **research complete**:
+    confirmed hand-authoring is the field norm, validating the plan's
+    tentative call, refined to a per-sink-type template with an explicit
+    vulnerable/safe swap point to preserve this project's minimal-pair
+    discipline. A concrete 5-8 item sink taxonomy is now specified.
+
+### Still open
+
+15. **Spring Boot near-term scope** (§4/§5) — whether to explicitly drop
+    the optional fourth stack from near-term planning (previously listed as
+    Phase 3 pacing option (c)) is a separate call from the (b) pacing
+    decision above and was not made. Doesn't block anything else — Phase
+    3's core three-stack work proceeds under decision #6 regardless of how
+    this resolves.
+16. **Phase 4 SSRF target + GraphQL surface design** (§5) — deliberately
+    not dispatched for research in either pass. The plan itself judges this
+    research premature this far out ("anything decided today would likely
+    be stale by the time it matters"); revisit when Phase 3 is close to
+    landing, not before.
