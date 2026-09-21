@@ -157,10 +157,13 @@ choice and touches the target only when the user acts.
   stays deferred." Stack (e.g. FastAPI or Flask + a light frontend, Datasette
   embedded/linked) is a to-confirm-during-build detail.
 
-### D12 — Credential store: OS keyring with an encrypted-file headless fallback
+### D12 — Credential store: per-host, OS keyring with an encrypted-file headless fallback
 
-Credentials are obtained through a `core/` credential-store abstraction over the
-`keyring` library, never stored in the project store or the repo. Backend
+Credentials are **saved associated to the corresponding host** (keyed by host,
+then identity) and obtained through a `core/` credential-store abstraction over the
+`keyring` library, never stored in the project store or the repo. When the session
+manager needs to authenticate to a host, it looks up that host's credentials and
+passes them — no per-host auth config file, just the vault entry. Backend
 resolution, auto-selected and config-overridable:
 
 1. **OS Secret Service** (gnome-keyring/KWallet) when present and unlocked — the
@@ -171,39 +174,44 @@ resolution, auto-selected and config-overridable:
    store at a configured, repo-external path (`$FUZZLAB_KEYRING_PATH`, default
    `~/.config/fuzzlab/credentials.enc`). Only the passphrase ever lives in the
    environment; the credentials stay encrypted at rest.
-3. **Gated, lab-only env fallback** (default off) for ephemeral CI: per-identity
-   `FUZZLAB_CRED_<IDENTITY>`, honored only when `allow_env_credentials` is set
-   **and** the target scope is loopback/lab, with a loud warning. Never for a
+3. **Gated, lab-only env fallback** (default off) for ephemeral CI: per-host
+   `FUZZLAB_CRED_<HOST>_<IDENTITY>`, honored only when `allow_env_credentials` is
+   set **and** the target scope is loopback/lab, with a loud warning. Never for a
    non-lab target.
 
-Config holds only references (service + username / key name); redaction on write
-applies everywhere. This resolves the Phase 1 open question and makes the session
-manager usable on desktops, headless hosts, containers, and CI alike.
+The vault key is `(host, identity)`; the config holds no secrets. Redaction on
+write applies everywhere. This makes the session manager usable on desktops,
+headless hosts, containers, and CI alike, with credentials attached to the host
+they belong to.
 
-### D13 — Multi-target auth: pluggable strategies + per-target profiles
+### D13 — Multi-target auth: dynamic detection, no per-host profiles
 
-The session manager must log in and hold sessions across **many** labs, not just
-the Puppy Fort Factory (this is what D10's external validation on WAVSEP, Juice
-Shop, and others requires). So it is **target-profile-driven** and
-**auth-scheme-pluggable**, not a single hardcoded login macro:
+The session manager must log in and hold sessions across **many** hosts without
+hand-written per-lab configuration. It **detects each host's login/session
+mechanism dynamically** and handles it, passing that host's saved credentials
+(D12) — detection-only, no per-host auth profile or override:
 
-- An **`AuthStrategy`** interface — `authenticate(identity, http) -> SessionState`,
-  `attach(request, session_state)`, `is_expired(...) -> bool`, optional
-  `refresh(...)`. Built-in strategies: **form + cookie** (Puppy Fort Factory,
-  DVWA, Mutillidae, bWAPP — with optional login-form CSRF token pre-fetch),
-  **JSON login + bearer/JWT** (Juice Shop), **HTTP Basic**, **header API key**,
-  and a **scripted/multi-step** strategy for bespoke flows. New schemes register
-  through the plugin system (component #13); built-in for now.
-- A **target profile** (data, one per lab): base URL, scope, the auth strategy and
-  its parameters (login endpoint/method, credential field mapping, token location
-  — cookie name / header / JSON path, success and logout signals, token TTL / JWT
-  `exp` source), and its identities with keyring references. Adding a same-scheme
-  lab is a new profile; a genuinely new scheme is a new strategy.
-- **Session state generalizes** beyond a cookie jar to cookies **and**
-  headers/tokens, per (target, identity); validity/logout detection is per-profile.
+- **Login detection.** Find the login (a form containing a password field; carry
+  its hidden fields — e.g. a CSRF `user_token` — through by re-fetching the form
+  before submit), map the username/password fields, and submit the host's
+  credentials.
+- **Session-credential detection.** Read what the login response establishes and
+  reuse it: `Set-Cookie` → session cookie; a token/JWT in a JSON body →
+  `Authorization: Bearer`; a `WWW-Authenticate` challenge → Basic/Bearer. Session
+  state generalizes to cookies **and** headers/tokens per `(host, identity)`.
+- **Success/expiry detection.** Confirm login by differential behavior (a
+  protected probe stops redirecting to login); detect expiry dynamically (401/403,
+  redirect to the detected login, the login form reappearing, JWT `exp`) and
+  re-authenticate under a single-flight lock.
+- **Detection-only, fail loud.** The detector handles the common shapes
+  (form→cookie, JSON→token/JWT, Basic/Bearer). A login it cannot parse
+  (multi-step, CAPTCHA, exotic SPA) **fails loudly with diagnostics** rather than
+  falling back to a hand-written profile; the remedy is to improve detection. This
+  trade-off is accepted deliberately to keep the toolkit zero-config per host.
 
-This makes the component robust across validation environments and keeps
-per-target quirks in data, not code.
+Internally the detected mechanism maps to an auth handler (cookie/form,
+JSON+token, Basic, header-key); these are implementation detail selected by
+detection, not user-authored profiles.
 
 ### Deferred decisions (revisit at the noted point)
 

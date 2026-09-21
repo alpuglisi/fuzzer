@@ -120,21 +120,23 @@ tracked in the requirements files, not here.
 - **Consumed by:** every tool and ML component.
 
 ### 3. Session manager `[planned]` (Phase 1)
-- **Subcomponents:** target profiles (data, one per lab); identity model;
-  pluggable **auth strategies** (form+cookie, JSON+JWT/bearer, HTTP Basic, header
-  API key, scripted/multi-step) behind one `AuthStrategy` interface (D13);
-  session state (cookies + headers/tokens); token extractors (CSRF, JWT, custom,
-  by profile-declared location); per-profile validity/logout detection; re-auth
-  macro with single-flight lock; credential access via the `core/` credential
-  store (OS keyring + encrypted-file headless fallback, D12).
+- **Subcomponents:** a **login/session detector** (D13) — finds the login form
+  (carrying hidden/CSRF fields fresh), detects the session credential from the
+  response (cookie / JSON token+JWT / Basic-Bearer challenge), confirms success by
+  differential behavior, and detects expiry (401/redirect/form-reappears/JWT
+  `exp`); identity model **per host**; session state (cookies + headers/tokens);
+  re-auth macro with single-flight lock; a **per-host credential vault** via the
+  `core/` credential store (OS keyring + encrypted-file headless fallback, D12).
+  Detection-only: no hand-written per-host profiles; unparseable logins fail loud.
 - **Interface:** `prepare(request, identity)`, `observe(request, response,
-  identity)`, `ensure(identity)`, resolved against the active target profile.
-  Extension points: auth strategies and target profiles.
+  identity)`, `ensure(identity)`, resolved by the request's host. Internally the
+  detected mechanism maps to an auth handler (cookie/form, JSON+token, Basic,
+  header-key) — implementation detail, not user config.
 - **Depends on (components):** `core/` (config, store, HTTP seam, credential
-  store); plugin system (#13) for third-party strategies (built-in until then).
+  store); crawler (discovered forms help locate the login).
 - **Consumed by:** crawler, auditor, fuzzer, and the proxy (as an addon). This is
   the most load-bearing dependency; everything authenticated flows through it, on
-  every target — the Puppy Fort Factory and the external validation labs (D10).
+  every host — the Puppy Fort Factory and the external validation labs (D10).
 
 ### 4. Crawler / spider `[built; to harden]`
 - **Subcomponents:** hybrid fetch (HTTP first, headless on demand), XHR/fetch

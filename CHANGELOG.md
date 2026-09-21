@@ -13,6 +13,16 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Planning: refined the session manager to **detection-only** auth with
+  **per-host credentials** (revised D12/D13, per user direction), superseding the
+  profile-first framing. The manager now detects each host's login/session
+  mechanism dynamically (login form incl. fresh CSRF carry-through; cookie vs
+  JSON-token/JWT vs Basic/Bearer; differential success; dynamic expiry) and passes
+  credentials saved per host; there are no hand-written per-host profiles, and an
+  unparseable login fails loudly (accepted trade-off for zero per-host config).
+  Rewrote FR-SESS-1…10, D12/D13, `ARCHITECTURE.md` #3, and `PHASE_1_PLAN.md`.
+  Change-control: CC-SESS-0003 (supersedes the profile/strategy-authoring parts of
+  CC-SESS-0002; its credential-store backend resolution stands, now per-host).
 - Planning: settled the session manager's **credential store** (D12 — OS keyring
   with an encrypted-file headless/CI fallback and a gated lab-only env fallback)
   and re-architected it for **multi-target auth** (D13 — pluggable `AuthStrategy`

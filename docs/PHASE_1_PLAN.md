@@ -1,10 +1,10 @@
 # Phase 1 — Session manager (plan)
 
 The session manager keeps every tool authenticated consistently **across many
-target labs**, so session expiry never silently poisons crawls, audits, fuzzing,
-or training data. It is the most load-bearing dependency after `core/` —
-everything authenticated flows through it — and a hard dependency for the external
-validation in D10.
+hosts**, so session expiry never silently poisons crawls, audits, fuzzing, or
+training data. It is the most load-bearing dependency after `core/` — everything
+authenticated flows through it — and a hard dependency for the external validation
+in D10.
 
 *Last updated: 2026-09-21. See `DECISIONS_AND_ROADMAP.md` (D3, D10, D12, D13),
 `docs/components/03-session-manager/` (spec + change-control), and
@@ -12,40 +12,39 @@ validation in D10.
 
 ## Goal
 
-The crawler and fuzzer stay authenticated through a whole run — on the Puppy Fort
-Factory **and** on at least one external lab with a different auth scheme — with
-results recorded per identity; concurrent expiry produces exactly one
-re-authentication; fuzzing can never log itself out; and it works headless/CI.
+Point the toolkit at a host; it **detects that host's login dynamically**, logs in
+with the credentials saved for that host, holds the session, and re-authenticates
+on expiry — with **no per-host auth configuration**. The crawler and fuzzer stay
+authenticated through a whole run on the Puppy Fort Factory (cookie) and on an
+external lab with a different scheme (JWT), results per identity, headless-capable.
 
-## Auth landscape (what Phase 1 must handle)
+## Approach: detection-only (D13)
 
-Different labs authenticate differently, so the manager is target-profile-driven
-and scheme-pluggable (D13):
+No hand-written per-host profiles. The manager detects and handles the common
+login shapes; the only per-host input is the credentials in the vault.
 
-| Scheme | Example targets | Session credential |
+| Detected shape | Example | Session credential |
 | --- | --- | --- |
-| Form POST + session cookie | Puppy Fort Factory, DVWA*, Mutillidae, bWAPP | cookie (`PHPSESSID`) |
-| JSON login + bearer/JWT | Juice Shop | `Authorization: Bearer <jwt>` |
-| HTTP Basic | misc | `Authorization: Basic …` |
-| Header API key | misc/REST | custom header |
-| Scripted / multi-step | bespoke | varies |
+| Login form → session cookie | Puppy Fort Factory, DVWA, Mutillidae, bWAPP | cookie (`PHPSESSID`) |
+| JSON login → token/JWT | Juice Shop | `Authorization: Bearer <jwt>` |
+| HTTP Basic / Bearer challenge | misc/REST | `Authorization: …` |
 
-\*DVWA adds a login-form CSRF `user_token` and a security-level cookie — handled by
-the form+cookie strategy's optional CSRF pre-fetch.
-
-The Puppy Fort Factory itself uses **PHP session cookies only** — no CSRF, no JWT.
+Hidden login-form fields (e.g. a DVWA `user_token`) are carried through by
+re-fetching the form immediately before submit. A login detection **cannot** parse
+(multi-step, CAPTCHA, exotic SPA) **fails loudly with diagnostics** — the remedy is
+to improve detection, not to add config (accepted trade-off).
 
 ## Settled scope decisions
 
-- **Credential store (D12).** OS keyring with an encrypted-file headless fallback
-  (passphrase from `FUZZLAB_KEYRING_PASSPHRASE`) and a gated, lab-only env fallback
-  (default off). Config holds only references; secrets never touch the store.
-- **Multi-target auth (D13).** One `AuthStrategy` interface with built-in
-  strategies; per-target profiles as data. Adding a same-scheme lab is a profile,
-  not code.
-- **CSRF/JWT (FR-SESS-3).** Built to spec and fixture-tested now (the JWT path is
-  also exercised live against the external JWT lab in T1.10); the Puppy Fort
-  Factory validates the cookie path.
+- **Credentials (D12).** Saved **per host** (vault keyed by `(host, identity)`) in
+  the `core/` credential store: OS keyring → encrypted-file headless fallback
+  (passphrase from `FUZZLAB_KEYRING_PASSPHRASE`) → gated lab-only env fallback
+  (default off). Config holds no secrets.
+- **Auth (D13).** Detection-only; no per-host profiles/overrides; fail loud on
+  unparseable logins.
+- **CSRF/JWT.** Handled by detection (hidden-field carry-through for CSRF; `exp`
+  read locally for JWT); fixture-tested, and the JWT path exercised live on the
+  external lab in T1.10.
 
 ## Tasks
 
@@ -53,112 +52,119 @@ Ordered; each lists a deliverable and an acceptance check. Follow
 `PREVENTIVE_ACTIONS.md` throughout (e.g. PA-0001: don't hardcode source-of-truth
 values in tests).
 
-### T1.1 — Credential store in `core/` (D12)
-A `CredentialStore` abstraction over `keyring` with backend resolution: OS Secret
-Service → encrypted-file (`keyrings.alt`, passphrase from env/prompt) → gated
-lab-only env fallback. A `fuzzlab session set-credential` helper writes through the
-active backend. Config references only (service/user); redaction on write.
-- **Accept:** a credential set on the encrypted-file backend (headless) is read
-  back; no secret appears in the store, logs, or repo; env fallback is refused
-  outside lab scope.
+### T1.1 — Per-host credential store in `core/` (D12)
+A `CredentialStore` keyed by `(host, identity)` over `keyring`, with backend
+resolution (OS Secret Service → encrypted-file → gated lab-only env). A
+`fuzzlab session set-credential --host <host> --identity <id>` helper writes
+through the active backend; lookups are by host. Redaction on write.
+- **Accept:** a credential set for a host (encrypted-file backend, headless) is
+  read back by host lookup; no secret appears in the store, logs, or repo; env
+  fallback refused outside lab scope.
 
-### T1.2 — Target profiles + identity model (D13)
-A data-driven target profile (base URL, scope, auth strategy + params, identities
-with credential references) and an identity model (`anonymous`/`user`/`admin`)
-scoped per profile, each with its own session state (cookies + headers/tokens) and
-connection pool. Ship a Puppy Fort Factory profile.
-- **Accept:** the PFF profile loads three identities with separate session state;
-  a second profile can be added without code changes.
+### T1.2 — Login detection
+Locate a host's login (from crawler-discovered forms, or probe): pick the form
+containing a password field, map the username/password fields, and re-fetch the
+form immediately before submit so hidden/CSRF fields are carried fresh. Submit the
+host's credentials.
+- **Accept:** against the lab, the login form is found, the fresh hidden fields are
+  carried, and credentials are submitted; on a mock CSRF form, the token is taken
+  fresh each time (never cached).
 
-### T1.3 — `AuthStrategy` interface + registry
-One interface — `authenticate(identity, http) -> SessionState`, `attach(request,
-session_state)`, `is_expired(...) -> bool`, optional `refresh(...)` — plus a
-built-in strategy registry (plugin-extensible later via component #13).
-- **Accept:** a strategy can be selected by name from a profile and drives login.
+### T1.3 — Session-credential detection
+Detect what the login response establishes and reuse it on subsequent requests to
+that host: `Set-Cookie` → cookie jar; a token/JWT in a JSON body →
+`Authorization: Bearer` (decode `exp`); a `WWW-Authenticate` challenge →
+Basic/Bearer. Session state holds cookies **and** headers/tokens per `(host,
+identity)`.
+- **Accept:** against fixtures, a cookie login yields a reused cookie; a JSON+JWT
+  login yields a reused bearer with `exp` parsed; a Basic challenge is satisfied.
 
-### T1.4 — Built-in strategies (incl. CSRF/JWT, fixture-tested)
-Ship: **form+cookie** (with optional login-form CSRF pre-fetch), **JSON+bearer/JWT**
-(read `exp`, refresh proactively), **HTTP Basic**, **header API key**, and a
-**scripted/multi-step** strategy. Token location comes from the profile.
-- **Accept:** against mocks/fixtures, form+cookie logs in and holds a cookie; the
-  JWT strategy attaches a bearer and refreshes near `exp`; CSRF is taken fresh from
-  the preceding response (never cached).
+### T1.4 — Success/expiry detection + single-flight re-auth + fail-loud
+Confirm login by differential behavior (a protected probe stops redirecting to
+login). Detect expiry (401/403, redirect to the detected login, login form
+reappears, JWT `exp`) and re-authenticate under a single-flight lock; cap attempts
+then hard-fail. When detection can't parse a login, **fail loudly** with
+diagnostics (what was found, where it stopped).
+- **Accept:** concurrent expiry triggers exactly one login (call-counting mock);
+  after the cap, `ensure` raises; a deliberately unparseable login produces a clear
+  diagnostic failure, never a silent unauthenticated run.
 
 ### T1.5 — Session API wired into the HTTP seam
-Implement `prepare`/`observe`/`ensure` over the active profile and wire the real
-manager into the `core/` HTTP seam, replacing the Phase 0 addon stub. `prepare`
-applies the strategy's session state; `observe` updates it and watches for logout.
-- **Accept:** a request sent through the seam for an identity carries that
-  identity's session (cookie or token, per scheme); `observe` records updates.
+Implement `prepare`/`observe`/`ensure` resolved by the request's host, and wire the
+real manager into the `core/` HTTP seam (replacing the Phase 0 addon stub).
+`prepare` applies the detected session; `observe` updates it and watches for logout.
+- **Accept:** a request through the seam carries the right session for its host and
+  identity (cookie or bearer, per detection); `observe` records updates.
 
-### T1.6 — Validity detection + single-flight re-auth
-Detect logout/expiry from per-profile signals (status, redirect, body/JSON marker,
-401/403) and re-authenticate via the profile's strategy under a single-flight
-lock; cap attempts then hard-fail loudly.
-- **Accept:** concurrent expiry triggers exactly one login (call-counting mock);
-  after the cap, `ensure` raises rather than looping.
+### T1.6 — Identities per host
+Model `anonymous`/`user`/`admin` per host, each with its own session state and
+connection pool, drawing the right credentials from the vault.
+- **Accept:** two identities on the same host hold independent sessions.
 
 ### T1.7 — Redaction + non-secret session-state persistence
 Redact credentials/cookies/tokens on every write to the store and logs; persist
-only non-secret session state (identity, target, auth status, timestamps) so a
-crashed run resumes, keeping live secrets out of the store in cleartext.
+only non-secret session state (host, identity, auth status, timestamps) so a
+crashed run resumes.
 - **Accept:** a store/log scan finds no cleartext secret; a resumed run reuses the
   persisted non-secret state.
 
 ### T1.8 — Auth-endpoint exclusion from fuzzing
-Auto-exclude each profile's auth endpoints (login/logout/session-destroy) from
+Auto-exclude the detected auth endpoints (login/logout/session-destroy) from
 fuzzing scope so the fuzzer cannot log itself out.
-- **Accept:** the fuzzing scope excludes the profile's auth endpoints; a test
+- **Accept:** the fuzzing scope excludes the detected auth endpoints; a test
   asserts they are never selected as targets.
 
 ### T1.9 — Standalone use
-Print a ready-to-use cookie/header/token for a given identity on a given target
-(e.g. `fuzzlab session --profile pff --identity user --print`) for manual testing.
+Print a ready-to-use cookie/header/token for a given identity on a given host
+(e.g. `fuzzlab session --host <host> --identity user --print`).
 - **Accept:** the command prints a valid credential for the identity and sends
   nothing else.
 
 ### T1.10 — Per-identity runs on PFF + an external lab
 Run the crawler and fuzzer per identity through the session manager against the
-Puppy Fort Factory (cookie) and one external lab with a different scheme (a
-JWT-based app), recording results tagged by identity (add an `identity` column
-where needed via a new, append-only migration, or derive via `flow.identity`).
-- **Accept:** full crawl + fuzz stays authenticated end-to-end on both targets,
-  and results are attributable to the identity that produced them.
+Puppy Fort Factory (cookie) and one external lab with a different scheme (JWT),
+recording results tagged by identity (add an `identity` column where needed via a
+new, append-only migration, or derive via `flow.identity`).
+- **Accept:** full crawl + fuzz stays authenticated end-to-end on both hosts with
+  only saved credentials (no per-host config), and results are attributable to the
+  identity that produced them.
 
 ## Exit criterion
 
-The crawler and fuzzer stay authenticated through a full run on the Puppy Fort
-Factory **and** an external lab with a different auth scheme, with results per
-identity; concurrent expiry produces one re-auth (not many); fuzzing never logs
-itself out; no secret is written in cleartext; and the whole thing runs headless
-via the encrypted-file credential backend.
+With only saved credentials and no per-host auth config, the crawler and fuzzer
+stay authenticated through a full run on a cookie lab **and** a JWT lab, results
+per identity; login/session/success/expiry are all detected dynamically;
+concurrent expiry produces one re-auth; an unparseable login fails loudly; fuzzing
+never logs itself out; no secret is written in cleartext; and it runs headless via
+the encrypted-file credential backend.
 
 ## Out of scope for Phase 1 (deferred)
 
-Attacking authentication (a testing target the tools handle); MFA/TOTP (a
-scripted-strategy step, later); OAuth interactive redirect flows; proxy-addon
-integration (the API is addon-friendly, but the proxy itself is Phase 6).
+Attacking authentication (a testing target the tools handle); MFA/TOTP (out of
+scope for detection-only; revisit if a target needs it); OAuth interactive
+redirect flows; proxy-addon integration (the API is addon-friendly, but the proxy
+itself is Phase 6).
 
 ## To confirm during the build
 
-- **Which validation labs to ship profiles for** (drives which strategies are
-  exercised first — Juice Shop pins the JWT path).
+- Detection heuristics for multi-form pages (which form is the login) and SPA
+  logins where login is an XHR, not an HTML form.
 - Keyring passphrase handling in CI (env vs. prompt) and the encrypted-store path.
-- Exact logout-detection signals per profile.
 - Whether to add an `identity` column to `attempt`/`finding` (a migration) or
   attribute via `flow.identity`.
-- Scripted-strategy configuration format for the most complex logins.
+- How aggressively to probe for a login when the crawler hasn't found a form.
 
 ## Known risks
 
-- **Silent session failure poisons data.** Mitigated by multi-signal validity
-  checks, the single-flight lock, capped-then-hard-fail re-auth, and building this
-  early.
-- **Broader auth surface (multiple schemes/profiles).** Mitigated by keeping
-  per-target quirks in data (profiles) not code, one narrow `AuthStrategy`
-  interface, and validating on the known cookie lab before trusting new schemes.
-- **Storing secrets.** Mitigated by the credential store (keyring/encrypted file),
-  redaction on write, and not persisting live cookies/tokens in cleartext.
+- **Detection can't parse a login.** Accepted trade-off (zero per-host config);
+  mitigated by failing loudly with diagnostics, never running silently
+  unauthenticated, and improving detection over time.
+- **Silent session failure poisons data.** Mitigated by differential success
+  checks, multi-signal expiry detection, the single-flight lock, and
+  capped-then-hard-fail re-auth.
+- **Storing secrets.** Mitigated by the per-host credential store
+  (keyring/encrypted file), redaction on write, and not persisting live
+  cookies/tokens in cleartext.
 - **Fuzzing an auth endpoint and logging out.** Mitigated by auto-exclusion (T1.8).
 - **Re-auth during timing-sensitive fuzzing.** A mid-measurement login distorts
   timing; ensure re-auth happens outside timing windows (coordinate with the
