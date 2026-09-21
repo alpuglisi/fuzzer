@@ -47,10 +47,10 @@ and measured. Authorized, lab-only.
   further decided. (D20, `CR-LAB-0001` Addendum E)
 - **FR-LAB-11** (Lab track) FR-LAB-10's "tool invoked headlessly" is a single
   reusable, importable wrapper (`fuzzlab.labgen.oracle_wrapper`, see
-  `CC-LAB-0015`/`CC-LAB-0016`) shared by every seed's security assertion, not
+  `CC-LAB-0015`/`CC-LAB-0017`) shared by every seed's security assertion, not
   a per-seed ad-hoc CLI invocation. Covers sqlmap (SQL injection), commix
   (OS command injection), and SSTImap (server-side template injection) as of
-  `CC-LAB-0016`; each gets its own request dataclass
+  `CC-LAB-0017`; each gets its own request dataclass
   (`SqlInjectionOracleRequest`, `CommandInjectionOracleRequest`,
   `ServerSideTemplateInjectionOracleRequest`) and `run_*_oracle` function
   (plus a type-dispatching `run_oracle`), all sharing the contract below. Its

@@ -3,7 +3,10 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0016 — SSTImap oracle support: Spike 003 + wrapper extension (2026-09-21)
+### CC-LAB-0017 — SSTImap oracle support: Spike 003 + wrapper extension (2026-09-21)
+*(Numbered `CC-LAB-0017` rather than `CC-LAB-0016` at merge time — this lane's worktree
+was based on a commit that predated `CC-LAB-0016` (Phase 0 foundation) landing, so it
+independently claimed `0016` too. No content changed; purely a numbering fix.)*
 - Change: two parts, following this project's established "spike, then wrap" rigor
   (per `LAB_SEED_AUTHORING_PLAYBOOK.md`'s "SSTImap/Nuclei/ZAP remain unintegrated" line
   and `CR-LAB-0001`'s tool-mapping table, "SSTI / code injection → SSTImap").

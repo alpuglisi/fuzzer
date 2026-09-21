@@ -14,7 +14,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
-- Feature (LAB, `CC-LAB-0016`): validated SSTImap as a third independent tool-oracle
+- Feature (LAB, `CC-LAB-0017`): validated SSTImap as a third independent tool-oracle
   (`docs/spikes/SPIKE-003-sstimap-vs-ssti-flask-hacking-playground.md` — real Jinja2 SSTI
   app, GPL-3.0/Apache-2.0 licenses read directly, manual curl confirmation before ever
   touching the tool) and extended `fuzzlab/labgen/oracle_wrapper.py` with
