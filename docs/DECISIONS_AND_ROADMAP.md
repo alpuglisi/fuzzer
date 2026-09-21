@@ -370,7 +370,9 @@ Goal: a dense, causal reward signal. Task breakdown in `docs/PHASE_3_PLAN.md`.
   reward.
 
 ### Phase 4 — Bandit scheduler `[planned]`
-Goal: find the known vulnerabilities in fewer requests than uniform selection.
+Goal: find the known vulnerabilities in fewer requests than uniform selection. Task
+breakdown in `docs/PHASE_4_PLAN.md` (learning core built; loop-wiring + on-lab exit
+remain).
 - Payload-family arms and discrete context buckets.
 - Hierarchical Thompson sampling with backoff and catalog-derived priors.
 - Shaped multi-tier reward including Phase 3 coverage.

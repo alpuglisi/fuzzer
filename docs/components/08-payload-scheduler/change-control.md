@@ -3,6 +3,33 @@
 Component code: **SCHED**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SCHED-0002 — Bandit learning core (Phase 4 groundwork, offline) (2026-09-21)
+- Change: added `fuzzlab/scheduler/` — `ThompsonBandit` (Beta-Bernoulli Thompson
+  sampling per (context, arm), catalog priors, `select`/`update`/`mean`/`best_arm`,
+  and `load`/`save` to the reserved `bandit_posteriors` table) and `UniformScheduler`
+  (the control that ignores feedback). The RNG is injected so the method is stochastic
+  but the tests are deterministic. Consumes a reward in [0, 1] (the Phase 3 shaped
+  reward). Wrote `docs/PHASE_4_PLAN.md` and pointed the roadmap at it.
+- Impact (other components / project): gives Phase 4 its learning core and control,
+  ready to wire into the fuzz/auto loop (T4.3) to spend fewer requests. Fills the
+  reserved `bandit_posteriors` (no migration). No live traffic; the scheduler only
+  orders payloads the run plan already permits.
+- Risk (level; mitigation): low — pure, dependency-light logic, no I/O beyond the
+  posterior table. Mitigated by 7 tests (Beta update math incl. fractional/clamped
+  reward; learning + best_arm; catalog priors; deterministic seeded select; a
+  beat-uniform simulation where the bandit finds the good arm and beats the control on
+  hits; posterior persistence round-trip with UNIQUE upsert). Suite 169 passed / 2 skipped.
+- Deliverables:
+  - [x] `ThompsonBandit` + `UniformScheduler` + `bandit_posteriors` persistence — done.
+  - [x] Beat-uniform simulation (exit-in-miniature) + tests — done.
+  - [x] `docs/PHASE_4_PLAN.md`; roadmap pointer — done.
+  - [ ] Context buckets + catalog-derived priors (T4.2) — next.
+  - [ ] Wire into the fuzz/auto loop + cost-normalization + backoff (T4.3–T4.5) — later.
+  - [ ] On-lab exit: beat uniform on hits-per-1000-requests (T4.6) — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — the bandit learns the
+  paying arm and beats uniform on hits in simulation, and posteriors persist; live
+  request-reduction pending the loop wiring + lab.
+
 ### CC-SCHED-0001 — Baseline (2026-09-21)
 - Change: specify the component (requirements written). Not yet implemented;
   payload selection today is fixed/enumerated by the fuzzer.

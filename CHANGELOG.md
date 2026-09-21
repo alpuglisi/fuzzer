@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 4 groundwork: added `fuzzlab/scheduler/` — a `ThompsonBandit` (Beta-Bernoulli
+  Thompson sampling per (context, arm), catalog priors, posteriors persisted in the
+  reserved `bandit_posteriors` table) and a `UniformScheduler` control. Consumes the
+  Phase 3 shaped reward; the RNG is injected so the method is stochastic but tests are
+  deterministic — incl. a beat-uniform simulation (the bandit finds the paying arm and
+  beats the control on hits). Wrote `docs/PHASE_4_PLAN.md`; roadmap points to it.
+  Loop-wiring + cost-normalization + backoff + the on-lab exit remain. +7 tests (169
+  passed / 2 skipped). Change-control: CC-SCHED-0002.
 - Stored-XSS auto-wiring: `auto` now emits the stored-XSS observe point from the
   ground-truth *cases* (the enumerated points file lacks `source_url`), carrying the
   store endpoint via `InjectionPoint.store_url`/`store_param` (new) into the candidate;
