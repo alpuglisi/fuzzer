@@ -104,6 +104,22 @@ PER_CLASS_FEATURE_EXCLUSIONS: dict[str, dict[str, str]] = {
 }
 
 
+def grouped_cv(*, n_splits: int, random_state: int) -> StratifiedGroupKFold:
+    """The one place this package constructs its generating-rule-grouped
+    cross-validator (module docstring, point 3: grouped by generating-rule ID,
+    never a random split).
+
+    Extracted so a second consumer reuses this exact construction instead of
+    re-deriving a grouping strategy of its own (PA-0003/PA-0021: a convention
+    shared by more than one participant lives in one shared function). Used
+    here by `_cross_val_auc` and by
+    `fuzzlab.labgen.corpus_analysis.stratified_split`
+    (`docs/LAB_IMPLEMENTATION_PLAN.md` §2.4, which names this reuse
+    explicitly).
+    """
+    return StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+
+
 @dataclass(frozen=True)
 class LeakageResult:
     """Outcome of one leakage-probe run against a corpus."""
@@ -216,7 +232,7 @@ def _cross_val_auc(
 ) -> float:
     classes = np.unique(y)
     pipeline = _build_pipeline(features_used, random_state)
-    cv = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+    cv = grouped_cv(n_splits=n_splits, random_state=random_state)
     with warnings.catch_warnings():
         # Small synthetic/fixture corpora can trigger benign convergence or
         # class-imbalance warnings from sklearn; they don't affect the AUC

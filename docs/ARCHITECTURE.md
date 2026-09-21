@@ -209,7 +209,16 @@ tracked in the requirements files, not here.
   explicit printed reason, since the check is ill-defined for one stack rather
   than merely unhelpful. Per-case `stack` is also carried in the ground-truth
   `labels.json` contract (optional, inline) so the axis reaches the artifact
-  downstream analysis reads, not just the manifest. A stack-agnostic tiered conformance suite
+  downstream analysis reads, not just the manifest. Read-only corpus-analysis
+  tooling (`fuzzlab/labgen/corpus_analysis.py`, `CC-LAB-0041`, plan §2.4) sits
+  alongside those gates but is deliberately **not** one: a train/holdout
+  split grouped by generating-rule ID (reusing `leakage_probe.grouped_cv`,
+  the one shared `StratifiedGroupKFold` construction in the package) so
+  near-duplicate cells cannot span a split; a near-duplicate rate over an
+  explicit `(vuln_class, sink_context, transform-shape)` signature; and a
+  class x transform x verdict diversity **artifact**, written by
+  `fuzzlab lab-generate --corpus-report <path>` on a path independent of
+  `--check` so it can never fail a build. A stack-agnostic tiered conformance suite
   (`fuzzlab/labgen/conformance/`, `CC-LAB-0027`) any emitter must pass: Tier
   0 (lint + minimal-pair diff) and Tier 3 (whole-lab regeneration) are real,
   fully exercised offline; Tier 1 (in-process functional/security) and

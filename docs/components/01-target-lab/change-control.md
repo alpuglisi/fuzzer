@@ -1028,6 +1028,132 @@ closing this entry's own flagged schema gap.)*
   multi-stack manifest ships as a lab artifact (today the gate's live path is exercised
   only by tests, since every sample manifest is single-stack by design).
 
+### CC-LAB-0041 — Stratified splits + de-duplication + diversity artifact (§2.4, lane L-P1.4) (2026-09-21)
+*(Numbered `CC-LAB-0041` rather than `CC-LAB-0040` at merge time — this lane
+independently claimed `CC-LAB-0040`, colliding with lane L-P3.4's stack/fingerprint-gate
+entry above, which merged first. Reconciled per this project's standing multi-lane
+policy: keep both entries' full content, renumber this later-landing one, fix its own
+internal `FR-LAB-38` cross-reference (see below, now `FR-LAB-39`). This lane's worktree
+also started on a stale, unrelated UI-redesign branch lineage; self-diagnosed via the
+sync check in the task brief and recovered by re-fetching and hard-resetting onto the
+live branch tip, confirming `fuzzlab/labgen/resolver.py`'s merged axis-range/
+covering-array wiring, before any other work began.)*
+- Change: added `fuzzlab/labgen/corpus_analysis.py`, read-only corpus-analysis tooling
+  over an already-built cell set, implementing all three pieces of
+  `docs/LAB_IMPLEMENTATION_PLAN.md` §2.4:
+  1. `stratified_split()` — a train/holdout `CorpusSplit` stratified by `vuln_class`
+     and **grouped by generating-rule ID**, so near-duplicate cells never land on both
+     sides. Per §2.4's explicit instruction it **reuses** `leakage_probe`'s own
+     cross-validation grouping rather than re-deriving one: that construction
+     (`StratifiedGroupKFold(n_splits=..., shuffle=True, random_state=...)`) was
+     extracted from `leakage_probe._cross_val_auc` into a new
+     `leakage_probe.grouped_cv()`, which `_cross_val_auc` now calls — so the package has
+     exactly one grouped-CV constructor with two callers (PA-0003/PA-0021), not a copy.
+     `fold` selects which of `n_splits` folds is the holdout so the whole fold set is
+     reachable. The "no group on both sides" property is re-checked as a post-condition
+     and raised on (`CorpusSplitError`) rather than trusted.
+  2. `duplication_report()` — the corpus's near-duplicate definition, made explicit as
+     `DuplicateSignature`: `(vuln_class, sink_context.family,
+     sorted(required_neutralizations), ordered transform-shape)`, **regardless of cell
+     ID** (and of `route`/`sink_endpoint`/`param`/`stack_profile`) — plus the
+     duplicate/near-duplicate rate, the redundant-cell count, and every duplicate
+     group's cell IDs.
+  3. `diversity_report()` / `corpus_report()` / `write_corpus_report()` — class ×
+     transform × verdict counts plus marginals, emitted as a deterministic,
+     key-sorted-JSON build **ARTIFACT**. `fuzzlab lab-generate` gained
+     `--corpus-report <path>` (plus `write_corpus_report_artifact()`), on a code path
+     deliberately independent of `--check`'s pass/fail suite so an informative report
+     can never fail a build.
+- Design decisions (judgement calls, stated because they are not facts):
+  - **Why a new module** rather than an addition to `gates.py` or `fingerprint_gate.py`:
+    the three pieces share one concept (the generating-rule group) that no existing
+    module owns, and two of the three are deliberately non-gating, so folding them into
+    a gate module would blur exactly the gate-vs-artifact distinction §2.4 draws.
+    `leakage_probe.py` is the (non-gating) metadata-leakage probe and is owned by
+    another lane; it is *reused*, not extended into.
+  - **Generating-rule ID is derived from the near-duplicate signature.** No `Cell` field
+    records which rule produced a cell (`Cell` is out of this lane's scope by
+    instruction) and `cell_id` prefixes are per-manifest namespaces (`LABGEN-RP-`), too
+    coarse to group by — every cell in a manifest would be one group and no split would
+    be possible. The signature is the best available proxy and is exactly the right one
+    here: grouping by it makes "no near-duplicate spans the split" true by construction.
+    Documented as the single place to change if `Cell` ever gains a real `rule_id`.
+  - **`transform-shape` is the ordered op tuple**, not a multiset/length:
+    `verdict.verdict()` is explicitly order-sensitive over `Pipeline.ops`, so
+    order-differing pipelines are different cells. Conversely
+    `required_neutralizations` is sorted, being a set of concerns, so authoring order
+    cannot split one group in two.
+  - **`stack_profile` and `route` are excluded** from the signature, matching §2.4's
+    candidate tuple. Excluding `stack_profile` makes groups larger, the conservative
+    direction for a split (it can only reduce leakage); stack-vs-class balance stays
+    `fingerprint_gate.py`'s job. Excluding `route` is what makes the existing corpus's
+    real near-duplicates visible at all — `phase0_real_pages_sample.yaml`'s
+    `/product.php` and `/blog_post.php` cells are deliberately the same shape on two
+    different real pages; a route-sensitive definition would report a 0% duplicate rate
+    and say nothing.
+  - **An `(op, sink_family)` pair the safety matrix does not cover** is recorded as
+    `UNDERIVABLE_VERDICT` and counted, not raised. `verdict()` fails loud by design and
+    a *gate* should let that propagate, but an informative artifact must not take a
+    build down — while an authoring gap must still be visible rather than silently
+    dropped from the counts. The matrix is an explicit optional argument, never loaded
+    implicitly, so the artifact cannot report verdicts derived under a different matrix
+    than the corpus was built with.
+  - Typed errors at the boundary per PA-0021: `CorpusSplitError` for an unsplittable
+    corpus, `MissingSplitDependencyError` (mirroring
+    `fingerprint_gate.MissingStatsDependencyError`) instead of a raw `ImportError` when
+    scikit-learn is absent. scikit-learn is imported lazily *inside*
+    `stratified_split()`, so the de-duplication and diversity reports — the parts a
+    build artifact needs — work without it.
+- Impact (other components / project): none outside `fuzzlab/labgen/`. New module plus
+  two small, additive edits: `leakage_probe.py` (one extracted `grouped_cv()` helper;
+  `probe_leakage`'s behavior is byte-for-byte unchanged — the same construction, same
+  arguments, now via a named function) and `cli.py` (one new opt-in flag, default off;
+  omitting it leaves the CLI's behavior identical). Nothing reads or writes a `Cell`,
+  the verdict engine, or any emitter — read-only analysis, per this lane's scope
+  discipline. `docs/ARCHITECTURE.md` updated (the Phase-0/1 generator-tooling
+  paragraph).
+- Risk (level; mitigation or accepted-risk justification): low. The new module is
+  additive and has no callers in any build gate; the one behavior-adjacent edit
+  (`leakage_probe.grouped_cv` extraction) is a pure refactor covered by the existing
+  `tests/test_labgen_leakage_probe.py` suite, which still passes unchanged. `cli.py` is
+  touched by concurrent lanes, so the edit was kept to one flag, one import line, and
+  one small function to keep merges easy. Accepted risk, named rather than designed
+  around: with today's tiny fixture corpora, `StratifiedGroupKFold` emits sklearn's
+  "least populated class in y has only N members" `UserWarning` (the real-pages
+  manifest has only 2 `xss` cells in 2 groups). It is not suppressed — the warning is
+  true and informative, and `CorpusSplit` carries per-side class counts so a caller can
+  see exactly how far stratification actually held. It will stop firing once §2.1/§2.2
+  produce a corpus with real per-class volume, which is also when the split's fold
+  count becomes worth calibrating.
+- Deliverables:
+  - [x] `fuzzlab/labgen/corpus_analysis.py` (split + dedup + diversity artifact) — done
+  - [x] `fuzzlab/labgen/leakage_probe.py` `grouped_cv()` extraction (one shared
+        grouped-CV construction, two callers) — done
+  - [x] `fuzzlab/labgen/cli.py` `--corpus-report <path>` artifact wiring, independent of
+        `--check` — done
+  - [x] Tests: `tests/test_labgen_corpus_analysis.py` (46 new tests, fixtures = the real
+        `lab/manifests/*.yaml` example manifests, with the whole-collection sweeps
+        parametrized over `glob("*.yaml")` so a newly-added manifest is covered
+        automatically per PA-0024) — done, all passing. Full suite
+        (`python -m pytest -q`): **1203 passed, 8 skipped**, plus the 2 pre-existing
+        `tests/test_mutation_operators.py` failures, confirmed pre-existing by running
+        that file in a detached checkout at this branch's HEAD *without* this change
+        (identical failures) — a MUT-component concern in
+        `fuzzlab.mutation.semantics.SemanticsValidator.preserves`, not touched here, and
+        already recorded as pre-existing by `CC-LAB-0039`.
+  - [x] `docs/components/01-target-lab/requirements.md` `FR-LAB-39` — done
+  - [x] `docs/ARCHITECTURE.md` generator-tooling paragraph — done
+  - [x] CHANGELOG.md line — done
+- Effectiveness (assessed 2026-09-21): validated against the real corpus, not only
+  synthetic fixtures. On `lab/manifests/phase0_real_pages_sample.yaml` the dedup report
+  finds exactly the two deliberate near-duplicate pairs the manifest's own comments
+  describe (`LABGEN-RP-0001`/`0003` and `0002`/`0004`, the `/product.php` and
+  `/blog_post.php` cells) — 8 cells, 6 distinct signatures, a 25% near-duplicate rate —
+  and a 3-fold split provably keeps each of those pairs on one side. The diversity
+  artifact shows both `VULNERABLE` and `SECURE` verdicts across the manifest's
+  minimal-pair structure with zero underivable verdicts, and the same artifact bytes are
+  produced on a re-run.
+
 ### CC-LAB-0039 — Parameter location/encoding axis (§3.4, lane L-P2.4) (2026-09-21)
 *(Numbered `CC-LAB-0039` rather than `CC-LAB-0029` at merge time — this lane
 independently claimed `CC-LAB-0029` too, colliding with nine other concurrently
