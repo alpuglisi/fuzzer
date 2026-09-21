@@ -14,6 +14,12 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Docs (UI): added `docs/UI_REVAMP_PLAN.md`, the tracked design plan to grow the read-only
+  web control panel into a full local control plane — an activity launcher (per-tool flag
+  forms, dry-run, live output), a proxy workbench (history/intercept/repeater/scope), a
+  dedicated ML tab, and a TensorBoard-like diagnostics tab — with the Phase-0 foundations,
+  the exists-vs-needs-building split, and the invariants (no-auto-run/loopback/authorized/
+  read-only/redaction) each phase must preserve. Design only; see CC-UI-0010.
 - Fix (BUG-0017, on-host): `scripts/greybox_e2e.sh` step 1 (`labctl.sh reset`) failed under
   podman-compose (`exit status 125`, "cannot remove … as it is running") and wedged the
   stack, blocking Part E. A **recurrence of BUG-0013**: that fix made `labctl.sh up`

@@ -3,6 +3,33 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0010 — Web UI revamp implementation plan (design record) (2026-09-21)
+- Change: added `docs/UI_REVAMP_PLAN.md` — the tracked design plan to take the read-only
+  control panel to a full local control plane: (1) an activity launcher with per-tool
+  flag forms, dry-run preview, and live output; (2) a proxy workbench (history, intercept
+  edit/drop/forward, repeater, scope/match-replace); (3) a dedicated ML tab; (4) a
+  TensorBoard-like diagnostics tab. Records the target tab architecture, the Phase-0
+  foundations (jinja2 + vendored static assets + SSE; an argparse-introspecting command
+  spec; a subprocess runner; a unified serve mode that hosts an in-process proxy for live
+  interception), the honest exists-vs-needs-building split (most proxy/ML backends exist;
+  time-series charts need a new `metric_series` table + per-step emitters), and how every
+  new capability preserves the no-auto-run / loopback / authorized / read-only / redaction
+  invariants.
+- Impact (other components / project): design only — no code, no schema change. Scopes
+  upcoming work across UI (#12), the intercepting proxy (#11 — a response-intercept hook),
+  and core (#2 — a `metric_series` migration). New FR-UI entries and the two Phase-0
+  decisions (UI-launches-tools-as-gated-subprocesses; unified-serve-in-process-proxy) will
+  be recorded when Phase 0 lands.
+- Risk (level; mitigation): none (documentation). The plan itself calls out the invariants
+  each phase must preserve and the tests each ships with.
+- Deliverables:
+  - [x] `docs/UI_REVAMP_PLAN.md` recorded — done.
+  - [ ] Phase 0 foundations (command spec, runner, frontend stack, unified serve) — next.
+  - [ ] Phases 1–4 (launcher, proxy workbench, ML tab, diagnostics) — planned.
+- Effectiveness (assessed 2026-09-21): effective as a design record — the plan is grounded
+  in a full survey of the web/proxy/ML/instrumentation code and preserves the component's
+  requirements (D11/D14/D15, NFR-UI-*).
+
 ### CC-UI-0009 — Reproducible evaluation report + `fuzzlab report` (T10.4) (2026-09-21)
 - Change: added `fuzzlab/report/` — `build_report(store, run_id)` assembles a
   **deterministic** report from a stored run (run/config identity, target fingerprint,
