@@ -36,6 +36,13 @@ Component code: **LAB**. Entry format and required fields: see
 - Effectiveness (assessed 2026-09-21): pending live confirmation on the host — the script's
   step-3 self-test asserts coverage is recorded and an error-based SQLi sets db_fault
   before the run proceeds. Offline, the readers/driver are covered by CC-FUZZ-0016's tests.
+- Follow-up fix (2026-09-21, same day): first live run recorded an *empty* coverage file.
+  Two causes: the shim gated pcov on `function_exists('\pcov\start')` (unreliable
+  leading-backslash form) — now `extension_loaded('pcov')`; and `pecl install pcov` ran
+  without `$PHPIZE_DEPS`, so the build could no-op — now installs the build deps and
+  asserts `php -m | grep pcov` at build time (a broken layer fails the build). Added
+  `labctl.sh exec` and a pcov-loaded precheck in the script. See ERROR_LOG (grey-box
+  self-test entry).
 
 ### CC-LAB-0008 — Multi-target evaluation harness (Phase 10 T10.5) (2026-09-21)
 - Change: `fuzzlab/harness/multitarget.py` runs the full pipeline against several targets

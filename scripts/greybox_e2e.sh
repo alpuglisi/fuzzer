@@ -64,7 +64,7 @@ chmod 777 "${COV_DIR}" 2>/dev/null || true      # the container (www-data) must 
 say "2/6  Waiting for ${BASE_URL}/ to come up"
 ok=0
 for _ in $(seq 1 60); do
-  if curl -fsS -o /dev/null "${BASE_URL}/"; then ok=1; break; fi
+  if curl -fs -o /dev/null "${BASE_URL}/"; then ok=1; break; fi   # -s (no -S): quiet retries
   sleep 2
 done
 [ "${ok}" = 1 ] || die "lab did not become reachable at ${BASE_URL}/ (see: cd lab && ./labctl.sh logs)"
@@ -72,6 +72,15 @@ echo "lab is up."
 
 # --- 3. side-channel self-test ----------------------------------------------
 say "3/6  Self-testing the coverage / db_fault side channel with curl"
+# First, a definitive check that pcov is actually loaded in the running container —
+# an empty coverage file otherwise looks like a wiring bug but is really a missing ext.
+if ( cd lab && ./labctl.sh exec web php -m 2>/dev/null ) | grep -qi '^pcov$'; then
+  echo "  pcov: loaded in the web container."
+else
+  die "pcov is NOT loaded in the web container. Force a clean rebuild:
+       (cd lab && ./labctl.sh down && podman-compose build --no-cache web && ./labctl.sh up)
+     then re-run this script. (web.Dockerfile installs pcov + \$PHPIZE_DEPS.)"
+fi
 rm -f "${COV_DIR}/selftest_cov" "${COV_DIR}/selftest_fault" 2>/dev/null || true
 # benign request -> should record covered app lines
 curl -fsS -o /dev/null -H "X-Fzl-Cov: selftest_cov" "${BASE_URL}/product.php?id=1" || true
@@ -79,7 +88,7 @@ curl -fsS -o /dev/null -H "X-Fzl-Cov: selftest_cov" "${BASE_URL}/product.php?id=
 curl -fsS -o /dev/null -H "X-Fzl-Cov: selftest_fault" \
   --data-urlencode "username='" --data-urlencode "password=x" \
   "${BASE_URL}/login.php" || true
-sleep "${SETTLE}"
+sleep 0.5                         # let the shim's shutdown handler flush both files
 
 python - "$COV_DIR" <<'PY' || die "side-channel self-test failed (see hints above the traceback)"
 import json, sys, pathlib

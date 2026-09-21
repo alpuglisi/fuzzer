@@ -16,10 +16,17 @@ RUN docker-php-ext-install mysqli \
 # Grey-box line coverage (Phase 3 T3.1): pcov, enabled but idle. The shim
 # (includes/cov.php) only calls \pcov\start()/collect() when a request carries the
 # X-Fzl-Cov header, so instrumented runs are opt-in and the default app is unchanged.
-RUN pecl install pcov \
+# $PHPIZE_DEPS (autoconf/gcc/make) is required to compile the PECL extension; without
+# it `pecl install pcov` can no-op/fail and pcov never loads. The build verifies the
+# extension is actually loadable so a broken layer fails the build, not a live run.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends $PHPIZE_DEPS \
+    && pecl install pcov \
     && docker-php-ext-enable pcov \
+    && rm -rf /var/lib/apt/lists/* \
     && { echo 'pcov.enabled=1'; echo 'pcov.directory=/var/www/html'; } \
-       > /usr/local/etc/php/conf.d/zz-pcov.ini
+       > /usr/local/etc/php/conf.d/zz-pcov.ini \
+    && php -m | grep -qi '^pcov$'
 
 # Global auto_prepend chain (decision D16 WAF + Phase 3 coverage). `auto_prepend_file`
 # is single-valued, so both are chained through includes/prepend.php rather than each

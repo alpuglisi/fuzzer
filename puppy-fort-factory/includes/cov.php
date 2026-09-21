@@ -26,7 +26,7 @@ if ($__fzl_cid !== '') {
     $__fzl_dir = getenv('FZL_COV_DIR') ?: '/tmp/fzl-cov';
     @mkdir($__fzl_dir, 0777, true);
 
-    if (function_exists('\pcov\start')) {
+    if (extension_loaded('pcov')) {
         \pcov\start();
     }
 
@@ -48,7 +48,7 @@ if ($__fzl_cid !== '') {
     register_shutdown_function(function () use ($__fzl_cid, $__fzl_dir) {
         $out = ['files' => new stdClass(), 'db_fault' => false, 'db_error' => ''];
 
-        if (function_exists('\pcov\collect')) {
+        if (extension_loaded('pcov')) {
             \pcov\stop();
             $cov = \pcov\collect(\pcov\inclusive, ['/var/www/html']);
             $files = [];

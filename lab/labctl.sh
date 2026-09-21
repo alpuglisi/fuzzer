@@ -55,6 +55,11 @@ case "${1:-}" in
   logs)
     "${COMPOSE[@]}" logs -f
     ;;
+  exec)
+    # Passthrough: ./labctl.sh exec <service> <cmd...>  (e.g. exec web php -m)
+    shift
+    "${COMPOSE[@]}" exec -T "$@"
+    ;;
   snapshot)
     # Fast DB snapshot for deterministic resets between fuzzing iterations (T3.5).
     # Not a container rebuild — just a mariadb-dump into lab/.snapshots/.

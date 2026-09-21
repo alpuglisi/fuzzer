@@ -204,6 +204,14 @@ Knobs (all optional env vars): `PFF_WEB_PORT`, `FZL_COV_DIR` (default `/tmp/fzl-
 `GB_STORE` (default `greybox.db`), `GB_POINTS` (`ground-truth` | `crawl` | `auto`),
 `GB_SPIDER_DB`, `GB_GROUND_TRUTH`, `GB_SETTLE`.
 
+**If step 3 says pcov is not loaded** (an empty coverage file), a stale image layer is
+the usual cause. Force a clean rebuild of the web image, then re-run the script:
+```bash
+( cd lab && ./labctl.sh down && podman-compose build --no-cache web && ./labctl.sh up )
+```
+(`web.Dockerfile` installs pcov with `$PHPIZE_DEPS` and asserts `php -m | grep pcov` at
+build time, so a genuinely broken build now fails loudly instead of at run time.)
+
 ### E.2 What was built (so you can trust/inspect it)
 
 - **Image (T3.1)** — `lab/web.Dockerfile` installs pcov (`pcov.enabled=1`,

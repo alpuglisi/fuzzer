@@ -14,6 +14,25 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — Grey-box self-test: coverage file written but empty (pcov not collecting)
+
+- **Symptom:** `scripts/greybox_e2e.sh` step 3 failed with "benign request recorded no
+  covered lines — is pcov installed/enabled?" The side-channel file *was* written (the
+  shim ran and the host↔container mount worked), but its `files` map was empty.
+- **Root cause:** two compounding issues. (1) The `cov.php` shim gated pcov on
+  `function_exists('\pcov\start')`, whose leading-backslash string form is unreliable —
+  it can be false even when pcov is loaded, so the shim never called `\pcov\start()`/
+  `collect()`. (2) `lab/web.Dockerfile` ran `pecl install pcov` without `$PHPIZE_DEPS`
+  (autoconf/gcc/make); on a rebuild the PECL build can no-op/fail so pcov never loads,
+  and a stale cached layer hid it.
+- **Remediation:** the shim now gates on `extension_loaded('pcov')` (unambiguous); the
+  Dockerfile installs `$PHPIZE_DEPS` before `pecl install pcov` and asserts
+  `php -m | grep -qi pcov` at build time so a broken layer fails the build (and the
+  changed RUN line invalidates the suspect cache). `labctl.sh exec` was added and the
+  script now checks pcov is loaded in the container before the curl self-test, printing
+  the exact `build --no-cache web` command if not.
+- **Status:** Fixed (this commit); live re-run on the host to confirm. See CC-LAB-0009 update.
+
 ## 2026-09-21 — Any credentials "authenticated" (BUG-0008): login success inferred from an anonymous cookie
 
 - **Symptom:** `fuzzlab session print`/`crawl --identity admin` reported a `PHPSESSID`
