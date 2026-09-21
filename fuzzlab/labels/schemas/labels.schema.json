@@ -53,6 +53,11 @@
             }
           }
         },
+        "stack": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Which stack profile this case's code belongs to (e.g. php_current, node_express, python_fastapi, php_laravel) -- the same meaning as fuzzlab.labgen.schema.Cell.stack_profile / CR-LAB-0001 §4's `stack_profile`. Inline per the settled research decision in docs/LAB_IMPLEMENTATION_PLAN.md §4, not a separate analysis-only file. Optional and additive: absent on single-stack (pre-multi-stack) ground truth, and no scorer keys on it -- it is analysis metadata, chiefly the `stack` axis the fingerprint-independence gate (fuzzlab.labgen.fingerprint_gate) tests for independence from vuln_class/verdict."
+        },
         "flow_variant": {
           "enum": ["direct", "same_file_helper", "cross_file", "stored_second_order", "cross_service"],
           "description": "How far the flow travels between source and sink (Juliet naming). Defaults to 'direct' when absent."

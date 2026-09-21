@@ -11,16 +11,23 @@ reused from each gate's own test module rather than re-authored here.
 from __future__ import annotations
 
 import dataclasses
+import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from fuzzlab.labgen import cli as labgen_cli
+from fuzzlab.labgen.fingerprint_gate import FingerprintIndependenceError, run_fingerprint_gate
 from fuzzlab.labgen.denylist import VULN_CLASS_DENYLIST
 from fuzzlab.labgen.emitter import EmittedFile, Emitter
 from fuzzlab.labgen.emitters.php_current import PhpCurrentEmitter
 from fuzzlab.labgen.schema import Manifest, Pipeline, load_manifest
 
+from tests.test_labgen_fingerprint_gate import (
+    _balanced_independent_corpus,
+    _skewed_but_covered_corpus,
+)
 from tests.test_labgen_gates import EXAMPLE_MANIFEST
 from tests.test_labgen_minimal_pair import _base_cell
 from tests.test_labgen_secret_scanner import GITLEAKS_AVAILABLE, SHOULD_FLAG as SECRET_SHOULD_FLAG
@@ -247,3 +254,188 @@ def test_run_checks_generic_weakened_twin_pairing_passes_for_an_arbitrary_cell()
     tree = labgen_cli.render_manifest(emitter, manifest)
     failures = labgen_cli.run_checks(emitter, manifest, tree)
     assert failures == []
+
+
+# ---------------------------------------------------------------------------
+# --check step 8: the fingerprint-independence gate (L-P3.4 /
+# docs/LAB_IMPLEMENTATION_PLAN.md §4.4).
+#
+# The two-stack corpus fixtures below are built by *relabelling* the real
+# php_current real-pages sample manifest's cells onto a second stack --
+# reusing real, renderable cells rather than hand-authoring a synthetic
+# emitter-incompatible manifest -- and the record-shaped balanced/confounded
+# corpora come from tests/test_labgen_fingerprint_gate.py's own fixtures, per
+# this lane's scope discipline ("reuse fingerprint_gate.py's own existing test
+# fixtures/patterns, don't re-author them").
+# ---------------------------------------------------------------------------
+
+REAL_PAGES_MANIFEST = "lab/manifests/phase0_real_pages_sample.yaml"
+SECOND_STACK = "node_express"
+
+
+def _real_pages_cells():
+    return load_manifest(REAL_PAGES_MANIFEST).cells
+
+
+def _restacked(cell, stack: str):
+    """The same cell on another stack, with a distinct cell_id (php_current
+    derives handler names from cell_id, so two cells sharing one id would not
+    be a legitimate corpus)."""
+    return dataclasses.replace(
+        cell, cell_id=cell.cell_id.replace("LABGEN-RP-", "LABGEN-FP-"), stack_profile=stack
+    )
+
+
+def _two_stack_balanced_manifest() -> Manifest:
+    """Every cell of the real php_current sample, plus an exact copy of each on
+    a second stack: both stacks carry both classes in the same proportion, so
+    stack and vuln_class are perfectly independent (the gate must pass)."""
+    cells = _real_pages_cells()
+    return Manifest(
+        manifest_version=1,
+        safety_matrix_version=1,
+        cells=tuple(cells) + tuple(_restacked(c, SECOND_STACK) for c in cells),
+    )
+
+
+def _two_stack_confounded_manifest(replicas: int = 4) -> Manifest:
+    """The same cells split so that every php_current cell is sqli and every
+    second-stack cell is xss -- CR-LAB-0001 §3's exact leakage shape ("every
+    Flask cell is SSTI"), one stack per class.
+
+    Replicated ``replicas`` times (each replica re-suffixed to a unique
+    cell_id) purely for sample size: at the sample manifest's own 8 cells the
+    2x2 table is so small that scipy's Yates continuity correction leaves
+    p just above 0.05, so a single copy would exercise only the gate's
+    coverage half. Four copies make the *statistical* half fire too, which is
+    the point of having both.
+    """
+    cells = _real_pages_cells()
+    split = tuple(c for c in cells if c.vuln_class == "sqli") + tuple(
+        _restacked(c, SECOND_STACK) for c in cells if c.vuln_class == "xss"
+    )
+    replicated = tuple(
+        dataclasses.replace(c, cell_id=f"{c.cell_id}-R{n}") for n in range(replicas) for c in split
+    )
+    return Manifest(manifest_version=1, safety_matrix_version=1, cells=replicated)
+
+
+def test_corpus_records_from_manifest_uses_every_cell_and_the_gate_key_names():
+    manifest = _two_stack_balanced_manifest()
+    records = labgen_cli.corpus_records_from_manifest(manifest)
+    assert len(records) == len(manifest.cells)
+    assert all(set(r) == {"stack", "vuln_class"} for r in records)
+    assert {r["stack"] for r in records} == {"php_current", SECOND_STACK}
+    # No `verdict` key: deliberately not derived here (see the function's
+    # docstring), which is exactly the gate's documented skip path.
+    report = run_fingerprint_gate(records, **labgen_cli.fingerprint_gate_config(records))
+    assert report.chi2_stack_verdict is None
+
+
+def test_fingerprint_gate_config_derives_expectations_from_the_actual_corpus():
+    records = labgen_cli.corpus_records_from_manifest(_two_stack_balanced_manifest())
+    config = labgen_cli.fingerprint_gate_config(records)
+    assert config["expected_stacks"] == sorted({r["stack"] for r in records})
+    assert config["expected_classes"] == sorted({r["vuln_class"] for r in records})
+    assert config["min_stacks_per_class"] == labgen_cli.MIN_STACKS_FOR_FINGERPRINT_GATE
+    # Ceiling, not a flat requirement: this corpus authors only 2 classes.
+    assert config["min_classes_per_stack"] == len(config["expected_classes"])
+    assert config["min_classes_per_stack"] <= labgen_cli.CANONICAL_MIN_CLASSES_PER_STACK
+
+
+def test_fingerprint_gate_config_caps_min_classes_at_the_canonical_value():
+    # Reuses the gate module's own balanced fixture (3 stacks x 3 classes), so
+    # the cap -- not the corpus size -- is what binds here.
+    records = _balanced_independent_corpus()
+    config = labgen_cli.fingerprint_gate_config(records)
+    assert config["min_classes_per_stack"] == labgen_cli.CANONICAL_MIN_CLASSES_PER_STACK
+
+
+def test_run_checks_fingerprint_gate_passes_on_a_balanced_two_stack_manifest():
+    manifest = _two_stack_balanced_manifest()
+    emitter = PhpCurrentEmitter()
+    tree = labgen_cli.render_manifest(emitter, manifest)
+    failures = labgen_cli.run_checks(emitter, manifest, tree)
+    assert not [f for f in failures if "fingerprint-independence" in f]
+
+
+def test_run_checks_fingerprint_gate_fails_loud_on_a_confounded_two_stack_manifest():
+    manifest = _two_stack_confounded_manifest()
+    emitter = PhpCurrentEmitter()
+    tree = labgen_cli.render_manifest(emitter, manifest)
+    failures = labgen_cli.run_checks(emitter, manifest, tree)
+    gate_failures = [f for f in failures if "fingerprint-independence" in f]
+    assert len(gate_failures) == 1
+    message = gate_failures[0]
+    assert "'sqli'" in message and "'xss'" in message
+    assert "NOT independent" in message
+
+
+def test_cli_gate_config_still_catches_a_covered_but_skewed_corpus():
+    # Reuses the gate module's own "coverage passes, chi-square must still
+    # catch it" fixture, run through the CLI's derived config -- proving the
+    # CLI's min_classes_per_stack ceiling does not defang the statistical half.
+    records = _skewed_but_covered_corpus()
+    with pytest.raises(FingerprintIndependenceError) as exc_info:
+        run_fingerprint_gate(records, **labgen_cli.fingerprint_gate_config(records))
+    assert "NOT independent" in str(exc_info.value)
+
+
+def test_run_checks_skips_the_gate_on_a_single_stack_manifest_with_a_printed_reason(capsys):
+    manifest = load_manifest(REAL_PAGES_MANIFEST)
+    assert len({c.stack_profile for c in manifest.cells}) == 1
+    emitter = PhpCurrentEmitter()
+    tree = labgen_cli.render_manifest(emitter, manifest)
+    failures = labgen_cli.run_checks(emitter, manifest, tree)
+    assert not [f for f in failures if "fingerprint-independence" in f]
+    out = capsys.readouterr().out
+    assert "fingerprint-independence gate SKIPPED" in out
+    assert "php_current" in out
+
+
+def test_run_checks_fingerprint_gate_fails_closed_when_scipy_is_missing(monkeypatch):
+    # Same simulated-absence pattern tests/test_labgen_fingerprint_gate.py uses
+    # (scipy is installed in this dev environment), asserting the CLI turns the
+    # typed MissingStatsDependencyError into a --check failure rather than an
+    # uncaught traceback or a silent pass.
+    monkeypatch.setitem(sys.modules, "scipy.stats", None)
+    manifest = _two_stack_balanced_manifest()
+    emitter = PhpCurrentEmitter()
+    tree = labgen_cli.render_manifest(emitter, manifest)
+    failures = labgen_cli.run_checks(emitter, manifest, tree)
+    gate_failures = [f for f in failures if "fingerprint-independence" in f]
+    assert len(gate_failures) == 1
+    assert "missing dependency" in gate_failures[0]
+    assert "labgen-stats" in gate_failures[0]
+
+
+def test_lab_generate_check_end_to_end_fails_on_a_confounded_two_stack_manifest(
+    out_dir: Path, tmp_path: Path, capsys
+):
+    """The gate is wired into the real CLI, not only into `run_checks`: a
+    confounded two-stack manifest on disk must make `--check` exit nonzero."""
+    manifest = _two_stack_confounded_manifest()
+    manifest_path = tmp_path / "confounded.yaml"
+    manifest_path.write_text(
+        yaml.safe_dump(
+            {
+                "manifest_version": manifest.manifest_version,
+                "safety_matrix_version": manifest.safety_matrix_version,
+                "cells": [
+                    {
+                        "cell_id": c.cell_id,
+                        "class": c.vuln_class,
+                        "stack_profile": c.stack_profile,
+                        "route": c.route.to_dict(),
+                        "sink_context": c.sink_context.to_dict(),
+                        "transform": list(c.transform.ops),
+                    }
+                    for c in manifest.cells
+                ],
+            }
+        ),
+        "utf-8",
+    )
+    rc = labgen_cli.main(["--manifest", str(manifest_path), "--out", str(out_dir), "--check"])
+    assert rc == 1
+    assert "fingerprint-independence gate" in capsys.readouterr().err
