@@ -16,10 +16,14 @@ GT_DIR = "lab/ground-truth"
 
 
 class AutoSender:
-    """URL-aware fake: product/blog_post SQL-error on quotes; search reflects."""
+    """URL-aware fake: product/blog_post SQL-error on quotes; search reflects.
+
+    Accepts method/location (POST body points are now audited) — this fake treats
+    them all the same, so POST controls simply don't confirm (as they should).
+    """
     HEADERS = {"Server": "Apache", "X-Powered-By": "PHP/8.3"}
 
-    def send(self, url, param, value, timing=False):
+    def send(self, url, param, value, timing=False, method="GET", location="query"):
         if "/search.php" in url:
             return Probe(200, f"<html><body>Results for {value}</body></html>",
                          headers=dict(self.HEADERS))
@@ -80,17 +84,18 @@ def test_run_auto_scored_against_ground_truth(tmp_path):
 def test_points_from_ground_truth_filters_to_testable():
     gt = contract.load(GT_DIR)
     points, skipped = points_from_ground_truth(gt, "http://127.0.0.1:8080")
-    tested = {(p.url, p.param) for p in points}
-    # GET/query, server-rendered points are audited...
-    assert ("http://127.0.0.1:8080/product.php", "id") in tested
-    assert ("http://127.0.0.1:8080/search.php", "q") in tested
-    assert ("http://127.0.0.1:8080/blog_post.php", "id") in tested
-    # ...POST body, fragment, and client-only/DOM points are skipped with a reason.
+    tested = {(p.url, p.param, p.method) for p in points}
+    # GET/query AND POST/body, server-rendered points are audited...
+    assert ("http://127.0.0.1:8080/product.php", "id", "GET") in tested
+    assert ("http://127.0.0.1:8080/search.php", "q", "GET") in tested
+    assert ("http://127.0.0.1:8080/login.php", "username", "POST") in tested   # POST body
+    # ...only client-only/DOM (fragment / js) points are skipped, needing M6.
     skipped_keys = {(path, param) for path, _m, param, _r in skipped}
-    assert ("/login.php", "username") in skipped_keys        # POST body
     assert ("/reviews.php", "author") in skipped_keys        # fragment / DOM
     assert ("/feedback.php", "ref") in skipped_keys          # client-only DOM
+    assert ("/login.php", "username") not in skipped_keys    # now testable via POST
     assert all("?" not in p.url for p in points)
+    assert all(r.endswith("M6)") for _p, _m, _pm, r in skipped)   # only DOM gaps remain
 
 
 def test_run_auto_ground_truth_points_beats_crawl_coverage(tmp_path):
@@ -107,6 +112,28 @@ def test_run_auto_ground_truth_points_beats_crawl_coverage(tmp_path):
         assert result.report is not None and result.report.fp == 0
         assert result.report.tp >= 3          # product/blog SQLi + search XSS at least
         assert result.metrics["skipped_points"]   # POST/DOM gaps reported
+
+
+class _RecordingSender:
+    """Records transport used; SQL error on a quote regardless of method."""
+    def __init__(self):
+        self.calls = []
+
+    def send(self, url, param, value, timing=False, method="GET", location="query"):
+        self.calls.append((method, location))
+        if "'" in value or '"' in value:
+            return Probe(500, "You have an error in your SQL syntax", headers={})
+        return Probe(200, "ok", headers={})
+
+
+def test_post_body_candidate_probed_via_post():
+    from fuzzlab.oracle import Candidate, Oracle
+    sender = _RecordingSender()
+    verdict = Oracle().confirm(
+        Candidate(url="http://h/login.php", param="username", method="POST",
+                  location="body", vuln_class="sqli"), sender)
+    assert verdict is not None and verdict.confirmed
+    assert sender.calls and all(m == "POST" and loc == "body" for m, loc in sender.calls)
 
 
 def test_run_auto_no_ground_truth_requires_categories(tmp_path):

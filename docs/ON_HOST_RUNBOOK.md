@@ -111,14 +111,18 @@ negatives → oracle confirm → target fingerprint → score → request metric
                  --store auto.db --ground-truth lab/ground-truth --authorized
    ```
    The summary prints the plan, points source, candidates/negatives, oracle findings,
-   `tp/fp/fn/tn`, request cost, and a **"not audited"** list. Expect roughly
-   `tp≈4 fp=0` — the GET/query SQLi + reflected XSS (`product.php?id`, `blog_post.php?id`,
-   `search.php?q` SQLi + XSS) — with the remaining positives listed as scoped gaps:
-   `login.php` (POST-body injection) and the stored/DOM-XSS points (browser execution,
-   M6). `fp=0` on the secure controls is the key correctness signal. Add `--identity
-   admin` to run authenticated.
+   `tp/fp/fn/tn`, request cost, and a **"not audited"** list. It now audits the GET/query
+   **and POST-body** points; only the client-only/DOM points (`reviews.php#author`,
+   `feedback.php?ref`) are skipped, pending browser execution (M6). Expect `fp=0` on all
+   secure controls (the key correctness signal) and `tp≈4–5`: the GET SQLi + reflected
+   XSS (`product.php?id`, `blog_post.php?id`, `search.php?q` SQLi + XSS), and possibly
+   `login.php` POST auth-bypass SQLi if it confirms via the quoted timing payloads. The
+   remaining `fn` are the stored/DOM-XSS points (M6). Add `--identity admin` to run
+   authenticated.
 
-   For a **discovery run** (measures the whole tool incl. crawl coverage) use
+   **Note:** POST probing is state-changing on some endpoints (register/checkout/
+   add_to_cart), so `./labctl.sh reset` between benchmark runs for clean, comparable
+   results. For a **discovery run** (measures the whole tool incl. crawl coverage) use
    `--points crawl`.
 2. **Fail-safe check (D15):** point automatic mode at a target with **no**
    `--ground-truth` and no `--categories` — it must refuse loudly:

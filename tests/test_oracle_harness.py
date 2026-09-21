@@ -11,7 +11,7 @@ GT_DIR = "lab/ground-truth"
 
 class ConfirmSqliSender:
     """Confirms SQLi via error signature (any quote payload -> a DB error)."""
-    def send(self, url, param, value, timing=False):
+    def send(self, url, param, value, timing=False, method="GET", location="query"):
         if "'" in value or '"' in value:
             return Probe(500, "You have an error in your SQL syntax; check the manual")
         return Probe(200, "ok")

@@ -13,6 +13,15 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 2 build: **POST-body injection**. The oracle can now test POST body params, not
+  just GET query — a backward-compatible `_send` helper threads `method`/`location`
+  through, and `RequestsProbeSender`/`SeamProbeSender` issue a POST with a form-encoded
+  body. The pipeline builds POST candidates from the evaluation evidence (now carrying
+  method/location), and `auto`'s ground-truth benchmark audits the 16 POST points too
+  (only client-only/DOM points remain, pending M6). Unlocks `login.php` auth-bypass
+  SQLi and turns the POST controls into real negatives. POST probing is state-changing
+  — reset the lab between runs. Change-control: CC-FUZZ-0011, CC-AUD-0010. Suite 135
+  passed / 2 skipped.
 - Bug fix (BUG-0006): automatic mode never nominated XSS — `R-XSS-REFLECT` required
   `sink_context`, a post-detection label the pipeline's discovery never sets, so no XSS
   candidate reached the oracle (the `test_pipeline` fixture masked it by hand-setting

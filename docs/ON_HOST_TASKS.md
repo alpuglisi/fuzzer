@@ -43,8 +43,8 @@ measurement/validation remains.
 
 The `fuzzlab auto --ground-truth` benchmark tests all enumerated points and lists what
 it can't yet confirm. These are scoped capabilities, not bugs:
-- [ ] **POST-body injection** in the probe sender/oracle (e.g. `login.php` auth-bypass
-  SQLi, register/edit_profile params) — currently GET/query only.
+- [x] **POST-body injection** in the probe sender/oracle (CC-FUZZ-0011) — the benchmark
+  now audits the 16 POST points; the oracle probes them over POST with a form body.
 - [ ] **Browser-execution (M6)** for stored + DOM XSS (`profile.php` stored via
   `edit_profile`, `reviews.php#author`, `feedback.php?ref`) — needs Playwright
   execution in the oracle (planned with Phase 3 grey-box or as an oracle M6 addition).

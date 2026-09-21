@@ -86,6 +86,8 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
         if oracle_class is None:
             continue                                     # no confirmer for this class yet
         oracle.confirm(Candidate(url=ev["url"], param=ev["param"],
+                                 method=ev.get("method", "GET"),
+                                 location=ev.get("location", "query"),
                                  vuln_class=oracle_class), sender)
 
     findings = store.conn.execute(

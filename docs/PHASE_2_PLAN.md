@@ -162,11 +162,14 @@ Phase-1 baseline run.
   **ground-truth points** by default (detection benchmark, `--points`; CC-FUZZ-0010)
   and `R-XSS-REFLECT` now nominates on location so XSS is actually detected
   (CC-AUD-0009 / BUG-0006). Remaining: **run it against the running lab and compare
-  requests-per-finding to a Phase-1 baseline** (on-host). **Known detection gaps**
-  (scored as fn until built, not bugs): POST-body injection (e.g. `login.php`
-  auth-bypass SQLi) and browser-execution **M6** for stored/DOM XSS; DOM-skeleton
-  dedup for distinct-URL same-template pages (needs the crawler to store rendered HTML
-  — endpoint-keying already collapses query-param variants for this lab).
+  requests-per-finding to a Phase-1 baseline** (on-host). **POST-body injection is
+  now supported** (CC-FUZZ-0011): the benchmark audits the GET/query and POST points;
+  the oracle probes POST params over POST with a form body. **Remaining detection gap**
+  (scored as fn until built, not a bug): browser-execution **M6** for stored/DOM XSS
+  (`profile.php` stored, `reviews.php#author`, `feedback.php?ref`). DOM-skeleton dedup
+  for distinct-URL same-template pages (needs the crawler to store rendered HTML) is a
+  request-efficiency follow-up — endpoint-keying already collapses query-param variants
+  for this lab.
 
 ### T2.9 — Injection-category selection by run mode (D14)
 Scope which categories run by launcher mode: **automatic** (against our lab)

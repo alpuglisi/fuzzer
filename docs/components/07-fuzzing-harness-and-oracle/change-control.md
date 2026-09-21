@@ -3,6 +3,40 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0011 — POST-body injection through the oracle + senders (2026-09-21)
+- Change: the oracle can now test **POST body** params, not just GET query. Threaded
+  `method`/`location` (already on `Candidate`) into confirmation: a `_send` helper on
+  `ConfirmationStrategy` routes every probe and passes `method`/`location` only for
+  non-default (POST/body) candidates, so existing GET/query senders and test fakes are
+  unaffected. `RequestsProbeSender` and `SeamProbeSender` now issue a POST with a
+  form-encoded body when `location="body"` (via `session.request` / a seam `Request`
+  with body + `Content-Type`). The pipeline builds candidates with `method`/`location`
+  from the evaluation evidence, and `auto`'s ground-truth sourcing now includes POST
+  points (only client-only/DOM points remain skipped, pending M6). `_CountingSender`
+  forwards the new kwargs.
+- Impact (other components / project): the ground-truth benchmark now audits the 16
+  POST points too (mostly secure controls → richer negatives; the one POST positive is
+  `login.php` auth-bypass SQLi, which may confirm via the quoted timing templates). The
+  finding writer already records `method`, so POST findings score against the POST
+  ground-truth cases. Only browser-execution (M6) points (stored/DOM XSS) remain out of
+  reach. Note: POST probing is state-changing on some endpoints (register/checkout/
+  add_to_cart) — reset the lab between runs; destructive payload classes stay off.
+- Risk (level; mitigation): medium — POST requests mutate lab state and add traffic.
+  Mitigated by lab-only scope + `--authorized`, the oracle staying fail-closed (secure
+  POST controls are not confirmed → no FP), the backward-compatible `_send` (GET/query
+  senders unchanged), and tests: RequestsProbeSender/SeamProbeSender POST-body
+  (form-encoded body, no query string), oracle-threads-POST, and the GT filter now
+  including POST. Suite 135 passed / 2 skipped.
+- Deliverables:
+  - [x] `_send` helper threads method/location; senders issue POST body — done.
+  - [x] Pipeline candidate carries method/location; auto GT filter includes POST — done.
+  - [x] Tests (probe senders POST; oracle POST threading; GT filter) — done.
+  - [ ] Live run: confirm the 16 POST controls stay fp=0 and whether `login.php`
+    auth-bypass SQLi confirms (timing) — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — POST candidates are probed
+  over POST with a form body and the secure POST controls are not confirmed; live
+  numbers (and whether login confirms) pending on the host.
+
 ### CC-FUZZ-0010 — `auto`: ground-truth point sourcing + oracle-rejection negatives (2026-09-21)
 - Change: `fuzzlab auto` can source injection points from the enumerated ground-truth
   contract (`points_from_ground_truth`), not only the crawl. A new `--points`

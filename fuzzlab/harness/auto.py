@@ -21,28 +21,28 @@ from fuzzlab.harness.pipeline import PipelineResult, run_pipeline
 def points_from_ground_truth(ground_truth, base_url: str):
     """Injection points from the enumerated ground-truth contract (detection benchmark).
 
-    Returns ``(points, skipped)``. Only points the current pipeline can test are
-    audited — server-rendered **GET query** params — because the probe sender is
-    GET/query and the oracle has no browser-execution (M6) or POST-body injection
-    yet. The rest are returned as ``skipped`` (path, method, param, reason) so the
-    coverage gap is explicit rather than a silent miss; they score as false negatives
-    until those capabilities land.
+    Returns ``(points, skipped)``. Server-rendered **GET query** and **POST body**
+    params are audited (the probe sender handles both). Client-only/DOM and
+    non-query/body points are returned as ``skipped`` (path, method, param, reason) —
+    they need browser execution (M6), so the gap is explicit rather than a silent
+    miss and they score as false negatives until M6 lands.
     """
     base = base_url.rstrip("/")
     points: list[InjectionPoint] = []
     skipped: list[tuple[str, str, str, str]] = []
     for gp in ground_truth.points:
         path = gp.url if gp.url.startswith("/") else "/" + gp.url
-        if gp.method.upper() == "GET" and gp.location == "query" and not gp.client_only:
+        testable = (gp.method.upper() in ("GET", "POST")
+                    and gp.location in ("query", "body")
+                    and not gp.client_only and (gp.rendering or "") != "js")
+        if testable:
             points.append(InjectionPoint(url=base + path, param=gp.param,
-                                         method="GET", location="query"))
+                                         method=gp.method.upper(), location=gp.location))
         else:
             if gp.client_only or (gp.rendering or "") == "js":
                 reason = "client-only/DOM (needs browser execution, M6)"
-            elif gp.method.upper() != "GET":
-                reason = f"{gp.method} body (needs POST-body injection)"
             else:
-                reason = f"location={gp.location} (unsupported yet)"
+                reason = f"location={gp.location} (needs browser execution, M6)"
             skipped.append((path, gp.method, gp.param, reason))
     return points, skipped
 
@@ -80,9 +80,13 @@ class _CountingSender:
         self._inner = inner
         self.count = 0
 
-    def send(self, url, param, value, timing: bool = False):
+    def send(self, url, param, value, timing: bool = False,
+             method: str = "GET", location: str = "query"):
         self.count += 1
-        return self._inner.send(url, param, value, timing=timing)
+        if method == "GET" and location == "query":
+            return self._inner.send(url, param, value, timing=timing)
+        return self._inner.send(url, param, value, timing=timing,
+                                method=method, location=location)
 
     def used(self, component: str | None = None) -> int:
         return self.count

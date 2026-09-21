@@ -38,8 +38,12 @@ class Sender:
     """Duck-typed HTTP sender the oracle uses. Injected so tests need no network.
 
     Implementations return a :class:`Probe`. ``timing=True`` marks a
-    timing-sensitive send (the real seam serializes those per host).
+    timing-sensitive send (the real seam serializes those per host). ``method`` and
+    ``location`` (``query``/``body``) place the payload; they default to GET/query so
+    a sender that only handles that case can omit them (the oracle passes them only
+    for non-default candidates, e.g. POST body).
     """
 
-    def send(self, url: str, param: str, value: str, timing: bool = False) -> Probe:  # pragma: no cover - interface
+    def send(self, url: str, param: str, value: str, timing: bool = False,
+             method: str = "GET", location: str = "query") -> Probe:  # pragma: no cover - interface
         raise NotImplementedError

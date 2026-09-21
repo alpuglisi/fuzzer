@@ -3,6 +3,20 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0010 — Candidate evidence carries method/location (POST support) (2026-09-21)
+- Change: the rules engine now records `method` and `location` in each `candidate`
+  row's evidence JSON (previously only `url`/`param`), so the pipeline can reconstruct
+  a POST/body candidate and the oracle can probe it over the right transport
+  (supports CC-FUZZ-0011).
+- Impact (other components / project): enables POST-body injection end to end; no
+  schema change (evidence is JSON). GET/query behavior unchanged.
+- Risk (level; mitigation): low — an additive evidence field. Covered by the existing
+  audit-rules tests and the auto/pipeline POST tests. Suite 135 passed / 2 skipped.
+- Deliverables:
+  - [x] `method`/`location` added to candidate evidence — done.
+- Effectiveness (assessed 2026-09-21): effective — the pipeline builds POST candidates
+  from the evidence and the oracle probes them over POST.
+
 ### CC-AUD-0009 — R-XSS-REFLECT nominates on location, oracle confirms context (BUG-0006) (2026-09-21)
 - Change: changed the `R-XSS-REFLECT` rule's `when` from `sink_context_in [...]` to
   `location_in [query, body]` (symmetric with `R-SQLI-PARAM`). `sink_context` is a

@@ -53,7 +53,8 @@ def evaluate(points: list[InjectionPoint], store, run_id: int,
                     "VALUES (?,?,?,?)",
                     (run_id, rule.transaction_type,
                      json.dumps({"rule_id": rule.id, "category": rule.category,
-                                 "url": point.url, "param": point.param}),
+                                 "url": point.url, "param": point.param,
+                                 "method": point.method, "location": point.location}),
                      point.sink_context),
                 )
                 counts["candidate"] += 1

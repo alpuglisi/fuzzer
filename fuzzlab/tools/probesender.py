@@ -20,10 +20,19 @@ class SeamProbeSender:
         self._client = client
         self._identity = identity
 
-    def send(self, url: str, param: str, value: str, timing: bool = False) -> Probe:
+    def send(self, url: str, param: str, value: str, timing: bool = False,
+             method: str = "GET", location: str = "query") -> Probe:
+        from urllib.parse import urlencode
+
         from fuzzlab.core.http import Request
-        req = Request("GET", with_query_param(url, param, value),
-                      identity=self._identity, timing=timing, component="oracle")
+        if location == "body":
+            req = Request(method.upper(), url,
+                          headers={"Content-Type": "application/x-www-form-urlencoded"},
+                          body=urlencode({param: value}).encode(),
+                          identity=self._identity, timing=timing, component="oracle")
+        else:
+            req = Request(method.upper(), with_query_param(url, param, value),
+                          identity=self._identity, timing=timing, component="oracle")
         r = self._client.send(req)
         return Probe(status=r.status, text=r.body.decode("utf-8", "replace"),
                      elapsed=r.elapsed_ms / 1000.0, headers=dict(r.headers))
@@ -37,11 +46,17 @@ class RequestsProbeSender:
         self._session = session or requests.Session()
         self._timeout = timeout
 
-    def send(self, url: str, param: str, value: str, timing: bool = False) -> Probe:
+    def send(self, url: str, param: str, value: str, timing: bool = False,
+             method: str = "GET", location: str = "query") -> Probe:
         import requests
+        kwargs = {"timeout": self._timeout}
+        if location == "body":
+            kwargs["data"] = {param: value}          # form-encoded body
+        else:
+            kwargs["params"] = {param: value}        # query string
         start = time.perf_counter()
         try:
-            r = self._session.get(url, params={param: value}, timeout=self._timeout)
+            r = self._session.request(method.upper(), url, **kwargs)
             return Probe(status=r.status_code, text=r.text,
                          elapsed=time.perf_counter() - start, headers=dict(r.headers))
         except requests.Timeout:

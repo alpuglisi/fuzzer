@@ -48,6 +48,21 @@ class ConfirmationStrategy:
     def confirm(self, candidate: Candidate, sender: Sender) -> Verdict | None:  # pragma: no cover
         raise NotImplementedError
 
+    @staticmethod
+    def _send(sender: Sender, candidate: Candidate, value: str,
+              timing: bool = False):
+        """Send a probe for the candidate, honoring its method/location.
+
+        Backward-compatible: a plain GET/query candidate uses the old
+        ``send(url, param, value, timing=)`` signature (so existing senders and test
+        fakes are unaffected); only a POST/body (or other non-default) candidate
+        passes ``method``/``location`` through.
+        """
+        if candidate.method == "GET" and candidate.location == "query":
+            return sender.send(candidate.url, candidate.param, value, timing=timing)
+        return sender.send(candidate.url, candidate.param, value, timing=timing,
+                           method=candidate.method, location=candidate.location)
+
 
 class SqliErrorStrategy(ConfirmationStrategy):
     vuln_class = "sqli"
@@ -56,7 +71,7 @@ class SqliErrorStrategy(ConfirmationStrategy):
 
     def confirm(self, candidate, sender):
         for payload in self._probes:
-            probe = sender.send(candidate.url, candidate.param, payload)
+            probe = self._send(sender, candidate, payload)
             for rx, dbms in SQL_ERROR_SIGNATURES:
                 match = rx.search(probe.text or "")
                 if match:
@@ -75,9 +90,9 @@ class SqliBooleanStrategy(ConfirmationStrategy):
         return abs(len(a) - len(b)) <= max(absolute, rel * max(len(a), len(b), 1))
 
     def confirm(self, candidate, sender):
-        benign = sender.send(candidate.url, candidate.param, "1")
-        true_p = sender.send(candidate.url, candidate.param, "1 AND 1=1")
-        false_p = sender.send(candidate.url, candidate.param, "1 AND 1=2")
+        benign = self._send(sender, candidate, "1")
+        true_p = self._send(sender, candidate, "1 AND 1=1")
+        false_p = self._send(sender, candidate, "1 AND 1=2")
         # A true condition looks like the benign page; a false condition does not.
         if self._similar(benign.text, true_p.text) and not self._similar(true_p.text, false_p.text):
             return Verdict(True, self.vuln_class, self.mechanism,
@@ -97,14 +112,13 @@ class SqliTimingStrategy(ConfirmationStrategy):
 
     def confirm(self, candidate, sender):
         base = build_baseline([
-            sender.send(candidate.url, candidate.param, "1", timing=True).elapsed
+            self._send(sender, candidate, "1", timing=True).elapsed
             for _ in range(self.baseline_samples)
         ])
         for template in _TIMING_TEMPLATES:
             measured, ok = {}, True
             for d in self.delays:
-                probe = sender.send(candidate.url, candidate.param,
-                                    template.format(d=d), timing=True)
+                probe = self._send(sender, candidate, template.format(d=d), timing=True)
                 measured[d] = probe.elapsed
                 if not base.exceeds(probe.elapsed, k=self.k, floor=self.floor):
                     ok = False
@@ -128,7 +142,7 @@ class ReflectedXssStrategy(ConfirmationStrategy):
     def confirm(self, candidate, sender):
         token = _token()
         marker = f"zqxm{token}"
-        first = sender.send(candidate.url, candidate.param, marker)
+        first = self._send(sender, candidate, marker)
         context = candidate.sink_context or type_reflection(first.text, marker)
         if context == "none":
             return None
@@ -136,7 +150,7 @@ class ReflectedXssStrategy(ConfirmationStrategy):
         if breakout is None:
             return None
         fragment, signature = breakout
-        second = sender.send(candidate.url, candidate.param, fragment)
+        second = self._send(sender, candidate, fragment)
         if is_unescaped(second.text, signature):
             return Verdict(True, self.vuln_class, self.mechanism,
                            {"context": context, "signature": signature})
