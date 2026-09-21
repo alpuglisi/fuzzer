@@ -19,18 +19,24 @@ Format per entry:
 - **Symptom:** `scripts/greybox_e2e.sh` step 3 failed with "benign request recorded no
   covered lines — is pcov installed/enabled?" The side-channel file *was* written (the
   shim ran and the host↔container mount worked), but its `files` map was empty.
-- **Root cause:** two compounding issues. (1) The `cov.php` shim gated pcov on
+- **Root cause:** three independent causes, each producing empty coverage, fixed in
+  sequence (the step-3 self-test caught each). (1) The `cov.php` shim gated pcov on
   `function_exists('\pcov\start')`, whose leading-backslash string form is unreliable —
   it can be false even when pcov is loaded, so the shim never called `\pcov\start()`/
   `collect()`. (2) `lab/web.Dockerfile` ran `pecl install pcov` without `$PHPIZE_DEPS`
   (autoconf/gcc/make); on a rebuild the PECL build can no-op/fail so pcov never loads,
-  and a stale cached layer hid it.
-- **Remediation:** the shim now gates on `extension_loaded('pcov')` (unambiguous); the
+  and a stale cached layer hid it. (3) **Decisive:** even with pcov loaded, the shim
+  called `\pcov\collect(\pcov\inclusive, ['/var/www/html'])` — but pcov's inclusive
+  filter is a list of *files*, not directories, so a directory matched nothing and
+  `collect()` returned empty.
+- **Remediation:** the shim now gates on `extension_loaded('pcov')` (unambiguous) and
+  calls `\pcov\collect()` (no directory filter), keeping app files by path prefix; the
   Dockerfile installs `$PHPIZE_DEPS` before `pecl install pcov` and asserts
   `php -m | grep -qi pcov` at build time so a broken layer fails the build (and the
   changed RUN line invalidates the suspect cache). `labctl.sh exec` was added and the
   script now checks pcov is loaded in the container before the curl self-test, printing
-  the exact `build --no-cache web` command if not.
+  the exact `build --no-cache web` command if not. (cov.php is bind-mounted, so this last
+  fix needs no image rebuild — just re-run the script.)
 - **Remediation (sweep, PA-0002):** the `mysqli` install now carries the same build-time
   load check; no other fragile `function_exists('\ns\fn')` guards or unverified extension
   installs remain.

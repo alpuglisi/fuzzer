@@ -60,3 +60,10 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   same step** — e.g. `pecl install x && … && php -m | grep -qi '^x$'` — so a broken or
   cache-stale layer fails the build, not a later run. Install the toolchain the build
   needs (e.g. `$PHPIZE_DEPS` for PECL) rather than assuming it is present. (from BUG-0009)
+- **PA-0010** — When an API takes a filter/selector argument, confirm the expected
+  **granularity** (file vs directory vs prefix vs glob) before passing it — a
+  wrong-granularity argument commonly returns a silently-empty result rather than an
+  error (e.g. handing pcov's file-list filter a directory). And verify the actual
+  produced **signal** end to end, not just that the dependency is present: "loads ≠
+  works" — a self-test that inspects the real output catches what a presence check
+  cannot. (from BUG-0009)

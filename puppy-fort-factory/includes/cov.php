@@ -50,10 +50,16 @@ if ($__fzl_cid !== '') {
 
         if (extension_loaded('pcov')) {
             \pcov\stop();
-            $cov = \pcov\collect(\pcov\inclusive, ['/var/www/html']);
+            // Collect everything pcov recorded (pcov.directory already scopes it to the
+            // app), then keep only app files by PATH PREFIX. Do NOT pass a directory as
+            // pcov's inclusive filter — that filter is a list of FILE paths, so a
+            // directory matches nothing and collect() returns empty.
+            $cov = \pcov\collect();
             $files = [];
             foreach ($cov as $file => $lines) {
-                $files[$file] = array_keys($lines);
+                if (strpos($file, '/var/www/html/') === 0) {
+                    $files[$file] = array_keys($lines);
+                }
             }
             if ($files) {
                 $out['files'] = $files;

@@ -103,8 +103,10 @@ def load(name):
 cov = load("selftest_cov")
 files = cov.get("files") or {}
 if not files:
-    raise SystemExit("  FAIL: benign request recorded no covered lines — is pcov "
-                     "installed/enabled in the image? (lab/web.Dockerfile)")
+    raise SystemExit("  FAIL: benign request recorded no covered lines. pcov is loaded "
+                     "(checked above), so this points at the shim's collection logic in "
+                     "puppy-fort-factory/includes/cov.php (e.g. \\pcov\\collect() filter "
+                     "or the app path prefix), not the image.")
 fault = load("selftest_fault")
 if not fault.get("db_fault"):
     raise SystemExit("  FAIL: error-based SQLi did not set db_fault — check that the "
