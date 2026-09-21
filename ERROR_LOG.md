@@ -14,6 +14,21 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — Headless credential store crashed (`No module named 'Crypto'`)
+
+- **Symptom:** `fuzzlab session set-credential` with `FUZZLAB_KEYRING_PATH`/
+  `FUZZLAB_KEYRING_PASSPHRASE` set crashed with
+  `ModuleNotFoundError: No module named 'Crypto'` (after trying `Cryptodome`).
+- **Root cause:** the encrypted-file backend used `keyrings.alt`'s `EncryptedKeyring`,
+  which needs PyCrypto/pycryptodome — an undeclared, uninstalled dependency. The
+  intended library, `cryptography` (already installed), was never actually wired up;
+  the store's tests inject a fake backend, so the real path was never exercised.
+- **Remediation:** reimplemented the backend on `cryptography` (Fernet + PBKDF2),
+  declared `cryptography` as a dependency, added real round-trip tests (skip when the
+  native lib is broken). Full RCA in
+  `docs/bugs/BUG-0005-headless-keyring-depended-on-pycrypto.md`; rule PA-0005.
+- **Status:** Fixed (this commit; verified on the host after `pip install -e .`).
+
 ## 2026-09-21 — `labctl.sh up` failed: no Compose provider
 
 - **Symptom:** on a Fedora host, `./labctl.sh up` dumped

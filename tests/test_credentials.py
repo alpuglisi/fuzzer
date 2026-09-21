@@ -73,3 +73,53 @@ def test_backend_takes_precedence_when_env_absent():
                             scope_hosts=["localhost"], environ={})
     store.set("localhost", "admin", "admin", "kbpw")
     assert store.get("localhost", "admin") == Credential("admin", "kbpw")
+
+
+def _crypto_or_skip():
+    """Skip (not fail) when `cryptography` can't be imported/used — e.g. a broken
+    build in CI/sandbox — since this test exercises the real backend. The rust
+    bindings load lazily on first use and can raise a pyo3 ``PanicException`` (a
+    ``BaseException``, not ``Exception``), so force a real op and catch broadly."""
+    try:
+        from cryptography.fernet import Fernet
+        Fernet(Fernet.generate_key()).encrypt(b"probe")
+    except BaseException as exc:  # noqa: BLE001 - broken native build panics, not raises
+        pytest.skip(f"cryptography unavailable/broken: {exc}")
+
+
+def _enc_backend(path):
+    from fuzzlab.core.credentials import _encrypted_file_backend
+    return _encrypted_file_backend(str(path), {"FUZZLAB_KEYRING_PASSPHRASE": "lab-pass"})
+
+
+def test_encrypted_file_backend_roundtrip_and_persistence(tmp_path):
+    _crypto_or_skip()
+    path = tmp_path / "keyring.cfg"
+    # A store over the real encrypted-file backend persists across instances.
+    store = CredentialStore(backend=_enc_backend(path))
+    store.set("127.0.0.1:8080", "admin", "admin", "admin123")
+    assert store.get("127.0.0.1:8080", "admin") == Credential("admin", "admin123")
+    assert path.exists()
+    # Secrets are not stored in cleartext on disk.
+    assert b"admin123" not in path.read_bytes()
+    # A fresh backend instance (same file + passphrase) reads it back.
+    reopened = CredentialStore(backend=_enc_backend(path))
+    assert reopened.get("127.0.0.1:8080", "admin") == Credential("admin", "admin123")
+    reopened.delete("127.0.0.1:8080", "admin")
+    assert reopened.get("127.0.0.1:8080", "admin") is None
+
+
+def test_encrypted_file_backend_wrong_passphrase_fails_loud(tmp_path):
+    _crypto_or_skip()
+    path = tmp_path / "keyring.cfg"
+    CredentialStore(backend=_enc_backend(path)).set("h", "admin", "u", "pw")
+    from fuzzlab.core.credentials import _encrypted_file_backend
+    wrong = _encrypted_file_backend(str(path), {"FUZZLAB_KEYRING_PASSPHRASE": "nope"})
+    with pytest.raises(CredentialError):
+        wrong.get_password("fuzzlab", "h|admin")
+
+
+def test_encrypted_file_backend_requires_passphrase(tmp_path):
+    from fuzzlab.core.credentials import _encrypted_file_backend
+    with pytest.raises(CredentialError):
+        _encrypted_file_backend(str(tmp_path / "k.cfg"), {})

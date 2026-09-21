@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Bug fix (BUG-0005): the headless encrypted-credential backend used `keyrings.alt`'s
+  `EncryptedKeyring`, which needs PyCrypto/pycryptodome (undeclared, uninstalled) — so
+  `fuzzlab session set-credential` crashed with `No module named 'Crypto'` on a fresh
+  host, blocking every authenticated run. Reimplemented it on `cryptography` (Fernet +
+  PBKDF2, `0600`, atomic, loud on wrong passphrase), declared `cryptography` as a
+  dependency, and added real round-trip tests (skippable when the native lib is
+  broken). The store's fake-backed tests never exercised the real path — preventive
+  rule PA-0005. Change-control: CC-CORE-0010. Suite 126 passed / 2 skipped.
 - Lab tooling: `labctl.sh` now probes for a *working* Compose provider
   (`docker compose` / `podman compose` / `docker-compose` / `podman-compose`) instead
   of assuming a `docker`/`podman` CLI implies one, and prints an install hint if none

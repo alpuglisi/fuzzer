@@ -26,3 +26,11 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   when an incident is resolved only by an environment workaround (an `ERROR_LOG` entry
   marked `Environment`), still fix the repo default that caused it, so a fresh checkout
   does not reproduce it. (from BUG-0004)
+- **PA-0005** — Every library imported at runtime — including one pulled in by a
+  third-party backend the code instantiates — must be a **declared** dependency; never
+  assume a different installed library satisfies another's requirement (e.g.
+  `cryptography` does not provide PyCrypto's `Crypto`). And a real code path that test
+  doubles bypass everywhere must still have at least one test exercising the real
+  implementation (skippable when it needs an environment feature) or a documented
+  on-host smoke check, so fresh-install / first-use failures are caught before a user
+  hits them. (from BUG-0005)

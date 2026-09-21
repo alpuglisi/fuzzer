@@ -3,6 +3,33 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0010 — Headless credential backend on `cryptography` (BUG-0005) (2026-09-21)
+- Change: reimplemented the D12 encrypted-file credential backend in
+  `fuzzlab/core/credentials.py`. It was `keyrings.alt.file.EncryptedKeyring` (needs
+  PyCrypto/pycryptodome, undeclared and absent → crash on first use). It is now
+  `_CryptographyFileBackend`: a single AES-Fernet-encrypted JSON file, key derived
+  from `FUZZLAB_KEYRING_PASSPHRASE` via PBKDF2-HMAC-SHA256 over a random per-file
+  salt, `0600` perms, atomic write, loud failure on a wrong passphrase — built on
+  `cryptography` (the intended lib, already present). Declared `cryptography>=42,<51`
+  in `pyproject.toml`.
+- Impact (other components / project): fixes BUG-0005, which blocked every headless
+  authenticated run (`fuzzlab session set-credential` / `--identity`). The session
+  manager (component 03) consumes the store unchanged; the injectable-backend seam and
+  the OS-keyring/env-fallback paths are unchanged. File format is new (`FZLB1` magic);
+  no prior headless store existed to migrate.
+- Risk (level; mitigation): medium — credentials are high-impact. Mitigated by
+  encryption at rest (Fernet/AES128-CBC+HMAC), `0600` perms, ciphertext-verified in a
+  test, password-masked `repr`, and new real-backend tests (round-trip, persistence,
+  wrong-passphrase) that exercise the actual `cryptography` path and skip only when the
+  native lib is unavailable. Suite 126 passed / 2 skipped.
+- Deliverables:
+  - [x] `_CryptographyFileBackend` (Fernet+PBKDF2, atomic, 0600) — done.
+  - [x] `cryptography` declared; `keyrings.alt` EncryptedKeyring dependency dropped — done.
+  - [x] Real round-trip/wrong-passphrase tests (skippable) — done.
+  - [ ] Confirmed on the host: `set-credential` + `session print` + `--identity` run — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests where `cryptography` works;
+  to be confirmed on the Fedora host (where the crash was seen) after `pip install -e .`.
+
 ### CC-CORE-0009 — Grey-box consumer layer (offline scaffolding, Phase 3) (2026-09-21)
 - Change: added `fuzzlab/greybox/` — the consumer side of Phase 3 grey-box
   instrumentation, built behind injected-source protocols so it is fully testable
