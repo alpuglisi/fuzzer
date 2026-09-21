@@ -38,13 +38,18 @@ def _next_version(store, name: str) -> int:
 
 def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logistic",
                     min_rows: int = 20, min_positives: int = 5, k: int = 5,
-                    alpha: float = 0.1) -> dict:
+                    alpha: float = 0.1, hybrid: bool = False) -> dict:
     """Train and write advisory scores. ``model_kind``: ``logistic``, ``gbt``, or
-    ``auto`` (out-of-fold-select the better of the two). Falls back to the prevalence
-    baseline on thin data."""
+    ``auto`` (out-of-fold-select the better of the two). ``hybrid=True`` appends the
+    unsupervised ECOD anomaly score as an extra feature (XGBOD-style; label-free, so no
+    leakage). Falls back to the prevalence baseline on thin data."""
     ds = build_dataset(store, run_id)
+    if hybrid and len(ds):
+        from fuzzlab.ml.anomaly import ECOD, augment
+        ds.X = augment(ds.X, ECOD().fit(ds.X))       # append anomaly score (no labels used)
+        ds.feature_names = list(ds.feature_names) + ["anomaly_ecod"]
     n, pos = len(ds), ds.positives
-    result: dict = {"rows": n, "positives": pos}
+    result: dict = {"rows": n, "positives": pos, "hybrid": hybrid}
 
     if n < min_rows or pos < min_positives or (n - pos) < 1:
         # Fallback: not enough labelled data for a model — score with the base rate.

@@ -76,7 +76,7 @@ metrics deterministically; and the toolkit produces results on a second lab targ
   `on_request`/`on_response` at the HTTP seam, `on_candidate`/`register_rules` in the
   auditor, `on_finding`/`register_oracle` in the oracle, `register_payload_source` in the
   scheduler — all no-ops with zero plugins (D6). Offline-tested with a sample plugin.
-- **T10.3 — Anomaly detector (A.5) `[planned]`.** `fuzzlab/ml/anomaly.py` — pure-Python
+- **T10.3 — Anomaly detector (A.5) `[done, offline]`.** `fuzzlab/ml/anomaly.py` — pure-Python
   ECOD tripwire (advisory scores/flags) + the XGBOD-style hybrid (anomaly score as a
   classifier feature). A test shows it flags synthetic outliers and beats a naive
   baseline; it never writes labels.

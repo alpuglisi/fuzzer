@@ -43,8 +43,9 @@ WAF (D16) is the filter-evasion target, and the semantics-preserving operator fr
 remain. Phase 9 (protocol depth) is well underway — the from-scratch WebSocket codec and the
 byte-exact HTTP/2 frame layer + minimal HPACK + raw-frame client are built; the parsed
 `wsproto`/`h2` path, live ALPN/socket, and the opt-in h2→h1 desync lab front-end remain.
-Phase 10 (polish + generalization) has begun — the plugin registry/hooks are built; the
-anomaly detector, the reproducible report, and the multi-target transfer test remain.
+Phase 10 (polish + generalization) is underway — the plugin system (registry + pipeline
+wiring) and the ECOD anomaly detector are built; the reproducible report and the
+multi-target transfer test remain.
 
 ## Integration model
 
@@ -277,7 +278,7 @@ tracked in the requirements files, not here.
   component dependency.)
 - **Writes:** new payload candidates back into the catalog/attempts.
 
-### 10. ML components `[partial — classifier + ranker + active learner built; anomaly detector planned]` (Phases 5, 7, 10)
+### 10. ML components `[built — classifier, ranker, active learner, anomaly detector; held-out exits on-host]` (Phases 5, 7, 10)
 - **Detection classifier** (A.1) `[built; held-out exit on-host]`: the `fuzzlab/ml/`
   package (pure Python — no numpy/sklearn). Honest evaluation (`metrics.py`: PR-AUC +
   leakage-free GroupKFold), the baselines a model must beat (`baselines.py`:
@@ -301,8 +302,11 @@ tracked in the requirements files, not here.
   oracle budget by uncertainty sampling (reusing `rank_uncertainty`) and query-by-
   committee (a bootstrap `Committee` of rankers) — `active.py::propose_queries` returns
   the candidates to confirm next. Advisory: it proposes; the oracle confirms.
-- **Anomaly detector** (A.5) `[planned]` (Phase 10): ECOD/Isolation Forest tripwire,
-  later XGBOD-style hybrid features.
+- **Anomaly detector** (A.5) `[built; held-out flow eval on-host]` (Phase 10): a
+  parameter-free, pure-Python **ECOD** tripwire (`ml/anomaly.py`) over the store's feature
+  vectors — advisory scores/flags (`detect_anomalies` records `anomaly_flagged`), never
+  labels — plus the **XGBOD-style hybrid** (`augment` / `train_and_score(hybrid=True)`)
+  that feeds the anomaly score into the classifier.
 - **Depends on (components):** `core/`, the oracle (labels), and the component
   that produces each model's inputs (auditor for the ranker, fuzzing harness for
   the classifier, proxy/flows for the anomaly detector).
@@ -475,7 +479,7 @@ replays and edits, including a raw byte path for malformed-traffic study.
 
 ## Build-status snapshot
 
-Suite: 360 passed / 4 skipped (the skips need a native build unavailable in the sandbox:
+Suite: 375 passed / 4 skipped (the skips need a native build unavailable in the sandbox:
 2 credential-store tests, the proxy real-CA minting test, and the mutation engine's
 `sqlglot` AST test). Everything below is offline-complete unless an on-host item is named.
 
@@ -506,6 +510,9 @@ Suite: 360 passed / 4 skipped (the skips need a native build unavailable in the 
     writing advisory `candidate.rank_score` at zero request cost (`fuzzlab auto --rank`,
     migration 7), and active learning (uncertainty sampling + query-by-committee) to
     allocate the oracle budget; advisory only.
+  - **Anomaly detector (Phase 10):** a pure-Python ECOD tripwire (`ml/anomaly.py`,
+    advisory scores/flags) + the XGBOD-style hybrid feature for the classifier
+    (`train_and_score(hybrid=True)`); never labels.
   - **Diagnostics/UI:** the loopback FastAPI control panel + dashboard/run-detail
     (findings + advisory scores).
   - **Lab WAF (D16):** a configurable, default-off, deliberately bypassable request
@@ -529,8 +536,8 @@ Suite: 360 passed / 4 skipped (the skips need a native build unavailable in the 
     disable isolation, oracle/advisory-split guard), entry-point discovery, `PluginManager`,
     `run_plugin` recording (migration 10), and the pipeline wiring (T10.2 — HTTP seam,
     auditor, oracle; `fuzzlab auto --plugins`) are built; a `register_payload_source`
-    consumer, the anomaly detector (T10.3), the reproducible report (T10.4), and the
-    multi-target transfer test (T10.5) remain.
+    consumer, the reproducible report (T10.4), and the multi-target transfer test (T10.5)
+    remain.
   - **Oracle mechanisms:** M8 (out-of-band) and M10 (grey-box) still to build.
   - **Intercepting proxy (Phase 6):** the full offline stack is built — byte-exact
     dual-path core (`RawMessage` + `h11`), scope, match-and-replace, flow history
@@ -544,6 +551,5 @@ Suite: 360 passed / 4 skipped (the skips need a native build unavailable in the 
   variants-bypass-the-WAF-and-reach-new-code exit (T8.7); live
   `--browser`/`--bandit`/`--score`/`--rank` runs and stored-XSS session-to-browser
   wiring — all tracked in `docs/ON_HOST_TASKS.md`.
-- `[planned]`: the rest of Phase 10 — pipeline hook wiring, the anomaly detector, the
-  reproducible report, and the multi-target transfer test — and the manifest-driven lab
-  generator (Lab track).
+- `[planned]`: the rest of Phase 10 — the reproducible evaluation report and the
+  multi-target transfer test — and the manifest-driven lab generator (Lab track).

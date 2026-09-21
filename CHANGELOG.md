@@ -13,6 +13,13 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 10 (T10.3): added the **anomaly-detection tripwire** (`fuzzlab/ml/anomaly.py`).
+  `ECOD` — a parameter-free, pure-Python Empirical-CDF outlier detector (no numpy/sklearn,
+  no labels); `flag_top` flags the top contamination fraction; `detect_anomalies` runs it
+  over the run's candidate vectors and records `anomaly_flagged`; `augment` +
+  `train_and_score(hybrid=True)` feed the anomaly score into the classifier (XGBOD-style).
+  **Advisory only** — scores/flags/a feature, never labels. +8 tests (375 passed / 4
+  skipped). Change-control: CC-ML-0008.
 - Phase 10 (T10.2): wired the plugin hooks into the pipeline (all no-ops with zero
   plugins). `HttpClient` fires `on_request` (folded, may edit the request) + `on_response`
   (observe); `audit.evaluate` gains `register_rules` + `on_candidate`; `Oracle` gains

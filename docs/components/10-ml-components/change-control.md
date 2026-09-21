@@ -3,6 +3,32 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0008 — Anomaly detector (ECOD) + XGBOD-style hybrid (T10.3) (2026-09-21)
+- Change: added the anomaly-detection tripwire (A.5). `fuzzlab/ml/anomaly.py::ECOD` is a
+  parameter-free, pure-Python Empirical-CDF outlier detector (per-feature left/right/skew-
+  auto tail aggregates, score = their max; no numpy/sklearn, no labels). `flag_top`
+  flags the top contamination fraction; `augment` appends the ECOD score as an extra
+  feature (the XGBOD-style hybrid); `detect_anomalies(store, run_id)` fits over the run's
+  candidate vectors, flags outliers, and records `anomaly_flagged` in `run_metrics`.
+  `train_and_score(hybrid=True)` augments the classifier's features with the (label-free)
+  anomaly score.
+- Impact (other components / project): a tripwire over the store's feature vectors and a
+  hybrid feature for the Phase 5 classifier — the last ML piece. **Advisory only**: it
+  produces scores/flags and a feature, never `finding` labels (the oracle/advisory split
+  holds). No schema change (records a metric; hybrid appends an in-memory feature). No new
+  dependency.
+- Risk (level; mitigation): low — pure logic, advisory, no labels. Mitigated by 8 tests
+  (`tests/test_ml_anomaly.py`): same-direction outliers score highest; determinism;
+  empty/degenerate handling; `flag_top`; `augment` appends the score; `detect_anomalies`
+  flags + records a metric + writes no findings; empty store; and the hybrid path
+  augments features, scores every candidate, and writes no labels. Suite 375 passed / 4 skipped.
+- Deliverables:
+  - [x] `ECOD` tripwire + `flag_top` + `detect_anomalies` (A.5) — done.
+  - [x] XGBOD-style hybrid (`augment`, `train_and_score(hybrid=True)`) — done.
+  - [ ] Held-out anomaly evaluation on real lab flows — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — ECOD flags outliers advisory-
+  only and the hybrid feature is wired into the classifier; the real-flow evaluation is on-host.
+
 ### CC-ML-0007 — Active learning: uncertainty sampling + query-by-committee (T7.3) (2026-09-21)
 - Change: implemented the active learner (A.6.5). `fuzzlab/ml/active.py`:
   `uncertainty_sampling` picks candidates nearest the 0.5 decision boundary (reusing the
