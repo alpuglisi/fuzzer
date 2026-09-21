@@ -173,7 +173,11 @@ tracked in the requirements files, not here.
   output), a composable `fuzzlab/labgen/modules/` Jinja2-template inventory
   (Addendum C), and the first (`php_current`) emitter — proven end to end for
   one illustrative vulnerable/secure SQLi pair via a real, byte-deterministic,
-  `php -l`-checked render. A mechanical pull/index/scope/rank/cluster tool
+  `php -l`-checked render, then generalized to a small real sample of four
+  actual pages (`product.php`, `blog_post.php`, `login.php`, `profile.php` —
+  two vuln classes, three sink-context families — `CC-LAB-0022`), proving
+  the module inventory isn't a one-cell special case; the remaining ~26 real
+  pages remain a separate, later task. A mechanical pull/index/scope/rank/cluster tool
   for the pattern-provenance corpus (`fuzzlab/tools/pattern_corpus_sourcing.py`,
   over `github/advisory-database` via git — `CC-LAB-0020`) produces a
   candidate list for human triage; it never authors a card and never writes

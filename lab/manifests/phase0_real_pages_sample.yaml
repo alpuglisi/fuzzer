@@ -1,0 +1,109 @@
+# Phase-0 real-page sample manifest.
+#
+# Unlike lab/manifests/example_phase0_scaffold.yaml (an illustrative pair,
+# routed under /example/ and kept separate on purpose), this manifest
+# describes a small, REAL sample of Ryder's Puppy Fort Factory's actual
+# pages, chosen to prove fuzzlab.labgen.emitters.php_current's module
+# inventory generalizes beyond one illustrative shape -- not a migration of
+# the full ~30-page app (T-LAB0.7/Phase 3, separate, larger, later work).
+#
+# Sample selection (per puppy-fort-factory/VULNERABILITIES.md and
+# lab/ground-truth/labels.json's PFF-0001/0004/0005/0006): four real pages,
+# two vulnerability classes, three sink-context shapes:
+#   - product.php    (sqli, sql_numeric_literal, GET `id`)   -- PFF-0001
+#   - blog_post.php  (sqli, sql_numeric_literal, GET `id`)   -- PFF-0006
+#     (same shape as product.php on a different real page/table -- proves
+#     the module set is reused, not re-authored, across pages; this
+#     manifest does not model blog_post.php's error-suppression nuance,
+#     see fuzzlab.labgen.emitters.php_current's module docstring)
+#   - login.php      (sqli, sql_string_literal, POST `username`) -- PFF-0004
+#   - profile.php    (xss, html_body, stored `bio`)          -- PFF-0005
+#
+# Cell IDs are prefixed LABGEN-RP- ("real pages") to keep them out of both
+# the illustrative LABGEN-EX- namespace and the real PFF- ground-truth
+# namespace; this manifest is not wired to any build that touches
+# puppy-fort-factory/ or lab/ground-truth/.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # --- product.php (PFF-0001): raw concat into a numeric SQL literal ----
+  - cell_id: LABGEN-RP-0001
+    class: sqli
+    stack_profile: php_current
+    route: { method: GET, path: /product.php }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  - cell_id: LABGEN-RP-0002
+    class: sqli
+    stack_profile: php_current
+    route: { method: GET, path: /product.php }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
+
+  # --- blog_post.php (PFF-0006): same shape as product.php, different ---
+  # --- real page/table -- proves module reuse across pages, not just  ---
+  # --- within one illustrative pair.                                  ---
+  - cell_id: LABGEN-RP-0003
+    class: sqli
+    stack_profile: php_current
+    route: { method: GET, path: /blog_post.php }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  - cell_id: LABGEN-RP-0004
+    class: sqli
+    stack_profile: php_current
+    route: { method: GET, path: /blog_post.php }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
+
+  # --- login.php (PFF-0004): raw concat into a quoted string-literal ----
+  # --- SQL position (POST `username`) -- a distinct sink_context     ----
+  # --- family and a distinct source (POST, not GET).                 ----
+  - cell_id: LABGEN-RP-0005
+    class: sqli
+    stack_profile: php_current
+    route: { method: POST, path: /login.php }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  - cell_id: LABGEN-RP-0006
+    class: sqli
+    stack_profile: php_current
+    route: { method: POST, path: /login.php }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
+
+  # --- profile.php (PFF-0005): stored XSS -- a distinct vulnerability ---
+  # --- class, a distinct source (a stored field, not a request       ---
+  # --- parameter), and a distinct sink (HTML body echo).             ---
+  - cell_id: LABGEN-RP-0007
+    class: xss
+    stack_profile: php_current
+    route: { method: GET, path: /profile.php }
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: []
+
+  - cell_id: LABGEN-RP-0008
+    class: xss
+    stack_profile: php_current
+    route: { method: GET, path: /profile.php }
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: [html_entity_escape]

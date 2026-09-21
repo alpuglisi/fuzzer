@@ -1,0 +1,10 @@
+${{ password_var }} = md5(isset($_POST['{{ password_param }}']) ? $_POST['{{ password_param }}'] : '');
+{% if bound %}
+$stmt = $pdo->prepare("SELECT id, {{ column }} FROM {{ table }} WHERE {{ column }} = ? AND password = ?");
+$stmt->execute([{{ value_expr }}, ${{ password_var }}]);
+$row = $stmt->fetch(PDO::FETCH_ASSOC);
+{% else %}
+$sql = "SELECT id, {{ column }} FROM {{ table }} WHERE {{ column }} = '" . {{ value_expr }} . "' AND password = '" . ${{ password_var }} . "'";
+$result = $pdo->query($sql);
+$row = $result ? $result->fetch(PDO::FETCH_ASSOC) : null;
+{% endif %}
