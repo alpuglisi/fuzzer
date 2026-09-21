@@ -14,6 +14,17 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (UI, Phase 2.3): Proxy Repeater — persisted replay tabs. Added a `RepeaterController`
+  over the existing `Repeater` backend (own SocketSender + lazily-opened store; list/create/
+  from-flow/send) and routes `GET|POST /api/proxy/repeater/tabs`, `POST
+  /api/proxy/repeater/from-flow/{id}`, `POST /api/proxy/repeater/tabs/{id}/send` (byte-exact
+  replay, `authorized`-gated). The Proxy tab's Repeater card has a tabs dropdown, new-tab form,
+  editable raw request, Send, and a response viewer; a History flow gains "→ Repeater". Fixed
+  a CRLF bug: a `<textarea>` normalizes newlines to LF (breaking HTTP framing) — the client now
+  restores CRLF (`toWire`) for edited requests in both repeater and intercept-forward; the API
+  stays byte-exact. Tests: `test_web_repeater.py` (controller + routes incl. a real over-socket
+  send) and a real-browser regression `test_web_repeater_browser.py`. Suite 490 passed /
+  6 skipped. See CC-UI-0018.
 - Feature (UI + proxy, Phase 2.2): live Intercept — pause / edit / drop / forward. Added a
   gated **response-intercept hook** to `ProxyEngine` + `Interceptor.intercept_responses`
   (default off, so the default path stays byte-exact); request interception unchanged

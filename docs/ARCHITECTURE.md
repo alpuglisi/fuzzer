@@ -383,7 +383,10 @@ tracked in the requirements files, not here.
   **Proxy tab's read-only flow History** (`web/proxyview.py`; `/api/proxy/flows[/{id}]`;
   cross-process store reads, DOM-safe rendering of untrusted flow fields). Phase 2.2 added
   **live Intercept** — request/response toggles, a polled pending queue, and edit / forward
-  / drop over the in-process proxy (verified over real sockets). **Pending:** the proxy
+  / drop over the in-process proxy (verified over real sockets). Phase 2.3 added the
+  **Repeater** (`RepeaterController`; `/api/proxy/repeater/*`) — persisted replay tabs,
+  byte-exact send (authorized-gated), and "→ Repeater" from a History flow. **Pending:** the
+  proxy
   workbench (Phase 2), the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
   `metric_series` time-series table (Phase 4), Datasette-style store exploration, a
   `--dry-run` mode, and a plain CLI entry point per tool for headless use

@@ -3,6 +3,39 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0018 — Proxy tab: Repeater (replay tabs) (Phase 2.3) (2026-09-21)
+- Change: added a `RepeaterController` (web) over the existing `Repeater` backend — its own
+  `SocketSender` + lazily-opened store (created only on first write), `list_tabs` (all tabs,
+  newest first, read-only), `create_tab`, `create_from_flow`, and `send` (byte-exact replay,
+  `authorized`-gated by the route). Routes: `GET /api/proxy/repeater/tabs`, `POST
+  /api/proxy/repeater/tabs`, `POST /api/proxy/repeater/from-flow/{flow_id}` (seed a tab from
+  a History flow), `POST /api/proxy/repeater/tabs/{id}/send` (403 unless authorized; 404 for
+  an unknown tab). These handlers are async so the controller's persistent SQLite connection
+  is only touched from the event-loop thread. The Proxy tab's **Repeater** card renders a
+  tabs dropdown, a new-tab form, an editable raw request, Send, and a response viewer; a
+  History flow gains a "→ Repeater" button. **Bug fixed:** a `<textarea>` normalizes
+  newlines to LF, which breaks HTTP framing — the client now restores CRLF (`toWire`) before
+  sending an edited request (repeater **and** intercept-forward); the API stays byte-exact.
+- Impact (other components / project): replay is available whenever authorized, independent
+  of the in-process proxy; tabs persist in `repeater_tab` across sessions. Consumes the proxy
+  `Repeater`/`SocketSender` unchanged; no schema change. Sending is the only traffic path and
+  is gated.
+- Risk (level; mitigation): low–medium — replay sends traffic. Mitigated by the authorized
+  gate, and tests: `tests/test_web_repeater.py` (controller create/list/send-with-injected-
+  sender/from-flow; routes list/create, send 403 gate + a real over-socket send to a threaded
+  upstream + 404, from-flow 404) and a real-browser regression `tests/test_web_repeater_browser.py`
+  (create + edit in a textarea + Send → the upstream echoes the edited target, proving the
+  CRLF fix). Suite 490 passed / 6 skipped.
+- Deliverables:
+  - [x] `RepeaterController` + routes (tabs/create/from-flow/send) — done.
+  - [x] Repeater UI (tabs, new-tab, editor, Send, response) + History "→ Repeater" — done.
+  - [x] CRLF (`toWire`) fix for textarea-edited raw (repeater + intercept) — done.
+  - [x] Controller/route tests + real-browser regression — done.
+  - [ ] Scope / match-replace (Phase 2.4) — next.
+- Effectiveness (assessed 2026-09-21): effective — verified in a real browser: create a tab,
+  edit the raw request, Send, and see the upstream's response; and a flow seeds a tab via
+  "→ Repeater". Screenshot captured.
+
 ### CC-UI-0017 — Proxy tab: live Intercept (pause/edit/drop/forward) (Phase 2.2) (2026-09-21)
 - Change: added the intercept control surface. `ProxyController` gained `pending_view()`
   (JSON-safe held flows: id/direction/host/method/target + raw text), `forward(id, raw?)`

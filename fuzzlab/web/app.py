@@ -32,6 +32,7 @@ from fastapi.templating import Jinja2Templates
 
 from fuzzlab.core.config import Config, load_config
 from fuzzlab.web import commandspec, results
+from fuzzlab.web.proxycontrol import RepeaterController
 from fuzzlab.web.runner import Runner, build_argv, display_command
 from fuzzlab.web.sse import sse_response
 
@@ -166,6 +167,7 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     cfg = cfg or load_config()
     state = LauncherState()
     runner = Runner()
+    repeater_ctl = RepeaterController(cfg)
 
     @asynccontextmanager
     async def _lifespan(_app):
@@ -351,6 +353,45 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         if proxy is None:
             return _need_proxy()
         return {"dropped": proxy.drop(flow_id)}
+
+    # --- repeater (replay tabs; independent of the in-process proxy) -----------
+
+    # These handlers are async so they run on the event-loop thread; the controller
+    # holds a persistent SQLite connection, which must be touched from one thread only
+    # (sync handlers would run in Starlette's threadpool).
+    @app.get("/api/proxy/repeater/tabs")
+    async def repeater_tabs():
+        return {"tabs": repeater_ctl.list_tabs()}
+
+    @app.post("/api/proxy/repeater/tabs")
+    async def repeater_create(request: Request):
+        b = await request.json()
+        return repeater_ctl.create_tab(b.get("name", ""), b.get("host", "127.0.0.1"),
+                                       b.get("port", 80), b.get("raw", ""),
+                                       bool(b.get("use_tls")))
+
+    @app.post("/api/proxy/repeater/from-flow/{flow_id}")
+    async def repeater_from_flow(flow_id: int):
+        tab = repeater_ctl.create_from_flow(flow_id)
+        if tab is None:
+            return JSONResponse({"error": f"flow {flow_id} not found"}, status_code=404)
+        return tab
+
+    @app.post("/api/proxy/repeater/tabs/{tab_id}/send")
+    async def repeater_send(tab_id: int, request: Request):
+        if not cfg.get("authorized"):     # replay sends traffic to the target
+            return JSONResponse(
+                {"error": "not authorized; set authorized:true (lab-only)"},
+                status_code=403)
+        raw = None
+        try:
+            raw = (await request.json()).get("raw")
+        except Exception:  # noqa: BLE001 - empty/non-JSON body → send the saved request
+            pass
+        out = repeater_ctl.send(tab_id, raw)
+        if out is None:
+            return JSONResponse({"error": f"tab {tab_id} not found"}, status_code=404)
+        return out
 
     return app
 

@@ -158,3 +158,102 @@ class ProxyController:
             return False
         self.interceptor.drop(flow_id)
         return True
+
+
+class RepeaterController:
+    """Replay tabs for the Repeater sub-tab (Phase 2.3).
+
+    Independent of the in-process proxy: a saved raw request can be replayed against a
+    target from the panel whether or not interception is running. Tabs persist in
+    ``repeater_tab``; listing reads every tab (cross-session), while creating/sending
+    open a persistent store + one ``repeater`` run on first write (creating the store
+    file only on that explicit user action). Sending forwards to a real upstream, so the
+    caller gates it on ``authorized``. A ``sender`` may be injected for tests.
+    """
+
+    def __init__(self, cfg, sender=None) -> None:
+        self.cfg = cfg
+        self._sender = sender
+        self._store = None
+        self._rep = None
+
+    def _path(self) -> str:
+        return self.cfg.get("store_path", "fuzzlab.db")
+
+    def _writer(self):
+        """Persistent store + Repeater, created lazily on first write."""
+        if self._rep is None:
+            from fuzzlab.core.store import Store
+            from fuzzlab.proxy.history import HistoryWriter
+            from fuzzlab.proxy.repeater import Repeater
+            sender = self._sender
+            if sender is None:
+                from fuzzlab.proxy.socketsender import SocketSender
+                sender = SocketSender(verify_tls=False)
+            self._store = Store(self._path())
+            run_id = self._store.start_run("repeater", self.cfg.get("target_base_url", ""))
+            self._rep = Repeater(self._store, run_id, sender,
+                                 history=HistoryWriter(self._store, run_id, batch_size=1))
+        return self._rep
+
+    @staticmethod
+    def _tab_dict(row) -> dict[str, Any]:
+        return {
+            "id": row["id"], "name": row["name"], "host": row["host"],
+            "port": row["port"], "use_tls": bool(row["use_tls"]),
+            "raw": bytes(row["raw_request"]).decode("latin-1", "replace"),
+        }
+
+    def list_tabs(self) -> list[dict[str, Any]]:
+        """All saved tabs, newest first. Read-only; never creates the store."""
+        from fuzzlab.web import results
+        if self._store is None and not results.store_exists(self._path()):
+            return []
+        from fuzzlab.core.store import Store
+        own = self._store or Store(self._path())
+        try:
+            rows = own.conn.execute(
+                "SELECT id, name, host, port, use_tls, raw_request FROM repeater_tab "
+                "ORDER BY id DESC").fetchall()
+            return [self._tab_dict(r) for r in rows]
+        finally:
+            if own is not self._store:
+                own.close()
+
+    def create_tab(self, name: str, host: str, port: int, raw: str,
+                   use_tls: bool = False) -> dict[str, Any]:
+        tab = self._writer().create_tab(name or "tab", host, int(port),
+                                        raw.encode("latin-1"), use_tls=bool(use_tls))
+        return {"id": tab.id, "name": tab.name, "host": tab.host, "port": tab.port,
+                "use_tls": tab.use_tls, "raw": tab.raw_request.decode("latin-1", "replace")}
+
+    def create_from_flow(self, flow_id: int) -> dict[str, Any] | None:
+        """Seed a tab from a recorded flow's request (redacted bytes; edit to re-add auth)."""
+        from fuzzlab.web import results
+        if self._store is None and not results.store_exists(self._path()):
+            return None
+        from fuzzlab.core.store import Store
+        own = self._store or Store(self._path())
+        try:
+            row = own.conn.execute(
+                "SELECT url, host, req_raw_sha FROM flow WHERE id=?", (flow_id,)).fetchone()
+            if row is None:
+                return None
+            raw = own.get_body(row["req_raw_sha"]) if row["req_raw_sha"] else b""
+        finally:
+            if own is not self._store:
+                own.close()
+        host, _, port_s = (row["host"] or "").partition(":")
+        use_tls = str(row["url"] or "").startswith("https")
+        port = int(port_s) if port_s.isdigit() else (443 if use_tls else 80)
+        name = f"flow #{flow_id}"
+        return self.create_tab(name, host or "127.0.0.1", port,
+                               raw.decode("latin-1", "replace"), use_tls=use_tls)
+
+    def send(self, tab_id: int, raw: str | None = None) -> dict[str, Any] | None:
+        """Replay a tab (optionally edited); returns the raw response as text."""
+        rep = self._writer()
+        if rep.get_tab(tab_id) is None:
+            return None
+        resp = rep.send(tab_id, raw.encode("latin-1") if raw is not None else None)
+        return {"response": resp.decode("latin-1", "replace")}

@@ -46,6 +46,13 @@ export function subscribe(url, onMessage, onError) {
   return es;
 }
 
+// A <textarea> normalizes newlines to LF, but HTTP framing needs CRLF. Restore CRLF
+// before sending an edited raw request/response (the API itself stays byte-exact — for
+// deliberate LF-only / malformed framing use the CLI or API directly).
+function toWire(s) {
+  return s.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
+}
+
 async function postJSON(url, body) {
   const r = await fetch(url, {
     method: "POST",
@@ -135,16 +142,26 @@ function initProxy() {
   const empty = document.getElementById("flow-empty");
   const search = document.getElementById("flow-search");
   const detail = document.getElementById("flow-detail");
+  let currentFlowId = null;
 
   async function showFlow(id) {
     const r = await fetch(`/api/proxy/flows/${id}`);
     if (!r.ok) return;
     const f = await r.json();
+    currentFlowId = f.id;
     document.getElementById("flow-detail-id").textContent = "#" + f.id;
     document.getElementById("flow-req").textContent = f.raw_request || "(none)";
     document.getElementById("flow-resp").textContent = f.raw_response || "(none)";
     detail.hidden = false;
   }
+
+  const toRep = document.getElementById("flow-to-repeater");
+  if (toRep) toRep.addEventListener("click", async () => {
+    if (currentFlowId == null) return;
+    const { status, data } = await postJSON(`/api/proxy/repeater/from-flow/${currentFlowId}`, {});
+    if (status === 200) document.dispatchEvent(
+      new CustomEvent("repeater-select", { detail: data.id }));
+  });
 
   async function load() {
     const q = search && search.value.trim();
@@ -233,7 +250,7 @@ function initIntercept() {
 
   document.getElementById("pending-forward").addEventListener("click", async () => {
     if (selectedId == null) return;
-    await postJSON(`/api/proxy/intercept/${selectedId}/forward`, { raw: rawArea.value });
+    await postJSON(`/api/proxy/intercept/${selectedId}/forward`, { raw: toWire(rawArea.value) });
     detail.hidden = true; selectedId = null; poll();
   });
   document.getElementById("pending-drop").addEventListener("click", async () => {
@@ -252,6 +269,62 @@ function initIntercept() {
   }).catch(() => {});
 }
 
+// --- Proxy tab: Repeater (replay tabs) ---
+function initRepeater() {
+  const card = document.getElementById("repeater-card");
+  if (!card) return;
+  const select = document.getElementById("rep-tab-select");
+  const editor = document.getElementById("rep-editor");
+  const rawArea = document.getElementById("rep-raw");
+  const respPre = document.getElementById("rep-resp");
+  const sendBtn = document.getElementById("rep-send");
+  let tabs = [];
+
+  function selectId(id) {
+    const tab = tabs.find((t) => String(t.id) === String(id));
+    if (!tab) { editor.hidden = true; return; }
+    select.value = String(id);
+    rawArea.value = tab.raw;
+    respPre.textContent = "";
+    editor.hidden = false;
+  }
+
+  async function loadTabs(thenSelect) {
+    tabs = ((await (await fetch("/api/proxy/repeater/tabs")).json()).tabs) || [];
+    select.replaceChildren(new Option("— select a tab —", ""));
+    for (const t of tabs) {
+      select.appendChild(new Option(`#${t.id} ${t.name} — ${t.host}:${t.port}`, String(t.id)));
+    }
+    if (thenSelect != null) selectId(thenSelect);
+  }
+
+  select.addEventListener("change", () => selectId(select.value));
+  document.getElementById("rep-refresh").addEventListener("click", () => loadTabs());
+
+  document.getElementById("rep-create").addEventListener("click", async () => {
+    const { data } = await postJSON("/api/proxy/repeater/tabs", {
+      name: document.getElementById("rep-new-name").value,
+      host: document.getElementById("rep-new-host").value || "127.0.0.1",
+      port: parseInt(document.getElementById("rep-new-port").value || "80", 10),
+      use_tls: document.getElementById("rep-new-tls").checked,
+      raw: document.getElementById("rep-new-raw").value,
+    });
+    await loadTabs(data.id);
+  });
+
+  if (sendBtn) sendBtn.addEventListener("click", async () => {
+    const id = select.value;
+    if (!id) return;
+    const { status, data } = await postJSON(`/api/proxy/repeater/tabs/${id}/send`,
+      { raw: toWire(rawArea.value) });
+    respPre.textContent = status === 200 ? (data.response || "(empty)")
+      : "error: " + (data.error || status);
+  });
+
+  document.addEventListener("repeater-select", (e) => loadTabs(e.detail));
+  loadTabs();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
-  initTabs(); initLaunchForms(); initProxy(); initIntercept();
+  initTabs(); initLaunchForms(); initProxy(); initIntercept(); initRepeater();
 });

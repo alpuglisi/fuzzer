@@ -156,7 +156,8 @@
       and drive traffic through it.</p>
     <div id="flow-detail" hidden>
       <h3>Flow <span id="flow-detail-id"></span>
-        <span class="muted">— stored bytes are redacted</span></h3>
+        <span class="muted">— stored bytes are redacted</span>
+        <button type="button" id="flow-to-repeater">&rarr; Repeater</button></h3>
       <h4>Request</h4><pre class="flow-raw" id="flow-req"></pre>
       <h4>Response</h4><pre class="flow-raw" id="flow-resp"></pre>
     </div>
@@ -191,10 +192,46 @@
     </div>
   </div>
 
+  <div class="card" id="repeater-card">
+    <h2>Repeater</h2>
+    <p class="muted">Save a raw request as a tab and replay it byte-exact. Use
+      &ldquo;&rarr; Repeater&rdquo; on a History flow to seed one.
+      {% if not authorized %}Sending is disabled until <code>authorized: true</code>.{% endif %}</p>
+    <div class="field">
+      <label for="rep-tab-select">Tabs</label>
+      <select id="rep-tab-select"><option value="">— select a tab —</option></select>
+      <button type="button" id="rep-refresh">Refresh</button>
+    </div>
+    <details>
+      <summary>New tab</summary>
+      <div class="field"><label for="rep-new-name">name</label>
+        <input type="text" id="rep-new-name" placeholder="tab"></div>
+      <div class="field"><label for="rep-new-host">host</label>
+        <input type="text" id="rep-new-host" placeholder="127.0.0.1"></div>
+      <div class="field"><label for="rep-new-port">port</label>
+        <input type="number" id="rep-new-port" placeholder="8080"></div>
+      <div class="field"><label for="rep-new-tls">TLS</label>
+        <input type="checkbox" id="rep-new-tls"></div>
+      <div class="field"><label for="rep-new-raw">raw request</label>
+        <textarea id="rep-new-raw" class="pending-raw" rows="6"
+                  placeholder="GET / HTTP/1.1&#10;Host: 127.0.0.1&#10;&#10;"></textarea></div>
+      <div class="actions"><button type="button" id="rep-create">Create tab</button></div>
+    </details>
+    <div id="rep-editor" hidden>
+      <h4>Request</h4>
+      <textarea id="rep-raw" class="pending-raw" rows="10" spellcheck="false"></textarea>
+      <div class="actions">
+        <button type="button" id="rep-send"
+          {% if not authorized %}disabled title="set authorized:true to replay"{% endif %}>Send</button>
+      </div>
+      <h4>Response</h4>
+      <pre class="flow-raw" id="rep-resp"></pre>
+    </div>
+  </div>
+
   <div class="card">
-    <h2>Repeater · Scope</h2>
-    <p class="muted">Replay tabs and scope / match-replace controls arrive in the next
-      Phase 2 increments.</p>
+    <h2>Scope · Match-Replace</h2>
+    <p class="muted">Scope and ordered match-replace controls arrive in Phase 2.4.</p>
   </div>
 </section>
 
