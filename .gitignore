@@ -17,3 +17,6 @@ dist/
 *.db-shm
 # grey-box DB snapshots (lab-only, regenerated on demand — T3.5)
 lab/.snapshots/
+# background-agent scratch git worktrees (isolated checkouts for in-progress
+# parallel work; never a deliverable, never committed)
+.claude/worktrees/

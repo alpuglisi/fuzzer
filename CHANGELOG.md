@@ -14,6 +14,10 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Tooling: gitignored `.claude/worktrees/` — background-agent scratch git worktrees for
+  in-progress parallel work (e.g. the Lane A/B oracle-wrapper and lab-generator-Phase-0
+  builds) showed up as untracked and tripped the git-status Stop hook; they're never a
+  deliverable and should never be committed.
 - Fix (BUG-0020, tooling/process): `.claude/hooks/check-error-log-bookkeeping.sh`'s
   keyword regex matched `hang` as an unanchored substring of `change`/`changed`/`changes` —
   words this project's own changelog convention uses constantly — false-positiving on its
