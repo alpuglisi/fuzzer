@@ -18,6 +18,31 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — LAB lane worktree created from a stale/unrelated branch lineage
+
+- **Symptom:** on session start for the T-LAB0.6 (Gitleaks secret-scanner) lane,
+  `git log --oneline -5` showed only unrelated UI-redesign commits (a master-detail
+  Launch view rebuild, app-shell/design tokens, Proxy Scope/Match-Replace) with no
+  mention of "LAB"/"CC-LAB-00"/"labgen"/"D20", and `fuzzlab/labgen/` did not exist
+  anywhere in the checkout at all (no `denylist.py`, `gates.py`, `resolver.py`, etc.).
+  A sibling lane (`CC-LAB-0019`) hit the identical symptom independently.
+- **Root cause:** a worktree-creation quirk in this session's harness — the worktree
+  was materialized from a stale/unrelated branch lineage instead of the actual current
+  trunk, even though the correct branch (holding the merged Phase 0 LAB lanes) was
+  fully present in the shared git object store the whole time. Not a missing-history
+  problem and not something either lane did wrong.
+- **Remediation:** stopped and reported the discrepancy instead of working around it
+  (e.g. manually re-importing files), per this project's explicit guidance for this
+  exact failure mode. Confirmed via a fresh worktree that `claude/trusting-noether-heon0n`
+  was reachable as a local branch and `git reset --hard claude/trusting-noether-heon0n`
+  (working tree was clean, so no destructive-command safeguard was overridden) recovered
+  the correct tree in one step — `git log` then showed the expected LAB merge-lane
+  history and `fuzzlab/labgen/` existed with all expected modules.
+- **Status:** Environment (fixed outside the repo — no repo-level change needed; the
+  underlying worktree-provisioning quirk is a harness/session-infrastructure issue, not
+  a defect in this codebase). See `docs/components/01-target-lab/change-control.md`
+  `CC-LAB-0019`'s and `CC-LAB-0020`'s notes for the per-lane detail.
+
 ## 2026-09-21 — `test_web_repeater.py` flakes with a cross-thread SQLite error
 
 - **Symptom:** found incidentally while verifying an unrelated lab-generator lane's full-suite
@@ -27,15 +52,22 @@ Format per entry:
   thread` (a different one of the two failing each time). Reproduced twice independently
   (each time with different specific test(s) failing, consistent with a genuine race rather
   than one bad test); not reliably reproducible on demand afterward — order/timing-dependent.
-- **Root cause:** not yet investigated. The error itself points at `fuzzlab/proxy/repeater.py`
-  (or its `SocketSender`/store-adapter path) obtaining a SQLite connection/cursor on one
-  thread and using it from another — Python's `sqlite3` module rejects this by default. Full
-  RCA not yet done.
-- **Remediation:** not yet fixed. Unrelated to the lab-generator (LAB component) work in
-  progress this session; owned by PROXY/UI. Tracked as follow-up work (a full
-  `docs/bugs/BUG-NNNN` investigation + fix is still owed per this log's own scope note —
-  logging the finding now, in the turn it was found, rather than only once it's fixed).
-- **Status:** Open.
+- **Root cause:** `fuzzlab/web/proxycontrol.py::RepeaterController` (not `Repeater`/
+  `SocketSender` themselves) cached one persistent `Store`/`sqlite3` connection as shared
+  instance state (`self._store`/`self._rep`) and reused it for every request regardless of
+  which OS thread was calling. `fastapi.testclient.TestClient`, when not used as a context
+  manager, spins up a fresh `anyio` portal thread per top-level `client.get()`/`client.post()`
+  call; whether the bug fires depends on whether Linux happens to reuse the same low-level
+  thread id for the next ephemeral thread, which is why it was order/timing-dependent rather
+  than deterministic. Full RCA in `docs/bugs/BUG-0021-repeater-controller-cross-thread-sqlite.md`.
+- **Remediation:** `RepeaterController` now keeps its `Store`/`Repeater` per calling thread
+  (`threading.local()`) instead of as one shared attribute, while still sharing a single
+  `repeater` run row across threads (`self._run_id` under a lock). See `CC-PROXY-0016`.
+  Reproduced reliably under thread-churn stress testing (100s of failures per few hundred
+  iterations) before the fix, 0 failures across 600+ iterations after; full suite green
+  (642 passed / 5 skipped; the 2 `test_mutation_operators.py` failures are pre-existing and
+  unrelated).
+- **Status:** Fixed.
 
 ## 2026-09-21 — sqlmap/commix exit non-zero on a legitimate negative finding, not only on a crash
 

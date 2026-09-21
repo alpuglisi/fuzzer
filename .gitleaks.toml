@@ -1,0 +1,38 @@
+# Gitleaks configuration for the secret-scanner build gate (T-LAB0.6, LAB
+# component). See docs/LAB_PHASE_0_PLAN.md T-LAB0.6 and
+# fuzzlab/labgen/secret_scanner.py, the thin wrapper that runs this config
+# headlessly (`gitleaks detect --no-git -c .gitleaks.toml`) against a
+# generated lab output tree.
+#
+# This extends Gitleaks' own default ruleset (see [extend] below) rather than
+# replacing it -- Phase 0 has no reason to narrow detection coverage, only to
+# add one allowlist for a false-positive class specific to this project.
+
+title = "fuzzlab lab-generator secret scan"
+
+[extend]
+useDefault = true
+
+# --- Allowlist: seeded fake/example credentials -----------------------------
+#
+# The lab generator legitimately emits hardcoded-looking secrets as
+# *vulnerable-code content* -- e.g. a hardcoded fake DB password or API key
+# used to demonstrate a real vulnerability class (CWE-798 hardcoded
+# credentials, or as incidental context in an SQLi/SSRF/etc. cell). Those are
+# not real secrets and must not fail the build. Convention: any such
+# generator-authored fake secret's value MUST contain one of the markers
+# below (case-insensitive) -- FAKE, EXAMPLE, PLACEHOLDER, NOTREAL, or
+# CHANGEME -- so it reads unambiguously as non-live to a human or another
+# scanner, and so this allowlist can suppress it precisely instead of
+# disabling a whole rule class. A real, accidentally-committed secret will
+# not carry one of these markers and is still caught (see
+# tests/test_labgen_secret_scanner.py's should_flag fixtures).
+#
+# This also covers vendor-documented example values that already embed such
+# a marker (e.g. AWS's own docs example access key
+# "AKIAIOSFODNN7EXAMPLE", which ends in "EXAMPLE").
+[allowlist]
+description = "obviously-fake/example secrets seeded by the lab generator as vulnerable-code content"
+regexes = [
+  '''(?i)(FAKE|EXAMPLE|PLACEHOLDER|NOTREAL|CHANGEME)''',
+]

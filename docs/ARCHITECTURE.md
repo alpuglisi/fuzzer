@@ -182,7 +182,13 @@ tracked in the requirements files, not here.
   over `github/advisory-database` via git — `CC-LAB-0020`) produces a
   candidate list for human triage; it never authors a card and never writes
   `lab/patterns/cards/` or `provenance.yaml`, so the corpus itself is still
-  only the 3 scaffold cards. A manifest reproducing today's real ~30-page PHP
+  only the 3 scaffold cards. A second, complementary build gate
+  (`fuzzlab/labgen/secret_scanner.py`, `CC-LAB-0024`) wraps the Gitleaks
+  binary against the generated output tree, separate from the name-leak
+  scanner above — a `.gitleaks.toml` at the repo root allowlists explicitly
+  `FAKE`/`EXAMPLE`/`PLACEHOLDER`-marked seeded credentials the generator may
+  legitimately emit as vulnerable-code content, while an unmarked real-shaped
+  secret still fails the build. A manifest reproducing today's real ~30-page PHP
   app byte-identically (the actual Phase 0 exit criterion) remains planned.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, et al. — see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

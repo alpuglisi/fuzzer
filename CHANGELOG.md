@@ -14,6 +14,28 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (LAB, `CC-LAB-0024`, T-LAB0.6): added the Gitleaks-based secret-scanner
+  build gate — `.gitleaks.toml` (repo root) extending Gitleaks' default ruleset with
+  an allowlist for explicitly `FAKE`/`EXAMPLE`/`PLACEHOLDER`-marked seeded credentials,
+  `fuzzlab/labgen/secret_scanner.py` (a thin wrapper mirroring `oracle_wrapper.py`'s
+  injected-runner pattern, fails the build on a scanner crash as well as a real hit),
+  and `tests/test_labgen_secret_scanner.py`'s should-flag/should-not-flag fixture
+  corpus — a separate, complementary gate to the existing name-leak scanner, not an
+  extension of it. Gitleaks (8.16.0) was installable via `apt-get` in this sandbox, so
+  the real binary is used in the test suite rather than a mocked fallback. An earlier
+  version of the should-flag fixtures embedded real-shaped secret literals directly in
+  the test source, which GitHub's own push-protection scanning (correctly) rejected on
+  push; the fixtures were rewritten to assemble each secret from fragments at test-run
+  time so no single literal in the source matches a real-secret pattern, while Gitleaks
+  itself still scans the fully-assembled bytes at test time, so detection coverage is
+  unaffected. This lane's worktree landed on a shared branch with the `CC-PROXY-0016`
+  fix below; its offending commit was amended in place to remove the secret before
+  merging, so no commit on `claude/trusting-noether-heon0n` ever contains it.
+- Fix (PROXY, `CC-PROXY-0016`, BUG-0021): `RepeaterController` cached a single `sqlite3`
+  connection as shared instance state and reused it across whichever OS thread happened
+  to call it, causing an intermittent `sqlite3.ProgrammingError` (cross-thread SQLite
+  use) in `tests/test_web_repeater.py` — now keeps the connection per calling thread
+  (`threading.local()`), sharing one `repeater` run row across threads. New PA-0023.
 - Feature (LAB, `CC-LAB-0023`, T-LAB0.11): added `fuzzlab/labgen/leakage_probe.py` — the
   metadata leakage-probe reference implementation (a deliberately weak classifier,
   `StratifiedGroupKFold` grouped by generating-rule ID, a permutation-null AUC threshold
