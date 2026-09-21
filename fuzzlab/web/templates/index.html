@@ -48,9 +48,25 @@
 
   <div class="card">
     <h2>Activities</h2>
-    <p class="muted">Every launchable tool and its flags, read from the tool's own
-      parser. Run controls (forms, dry-run, live output) arrive in Phase 1; this is a
-      read-only preview.</p>
+    <p class="muted">Launch any tool: fill the flags, <b>Dry-run</b> to preview the exact
+      command (sends nothing), then <b>Run</b> — gated by <code>authorized</code> for
+      traffic tools — and watch the output stream live. Fields come straight from each
+      tool's own parser.</p>
+
+    <div class="card">
+      <h3>Plugins</h3>
+      {% if plugins %}
+      <ul class="spec-flags">
+        {% for p in plugins %}
+        <li><code>{{ p.name }}</code> v{{ p.version }} <span class="muted">(priority {{ p.priority }})</span></li>
+        {% endfor %}
+      </ul>
+      <p class="muted">Attach these with the <code>--plugins</code> flag on <code>auto</code>.</p>
+      {% else %}
+      <p class="muted">No entry-point plugins installed; runs use no plugins by default.</p>
+      {% endif %}
+    </div>
+
     {% for a in activities %}
     <div class="card">
       <h3>{{ a.name }}
@@ -59,23 +75,52 @@
         {% if a.destructive_gate %}<span class="pill destructive">--allow-destructive</span>{% endif %}
       </h3>
       <p class="muted">{{ a.summary }}</p>
-      {% if a.options %}
-      <ul class="spec-flags">
-        {% for o in a.options %}
-        <li><code>{{ o.name }}</code>
-          <span class="muted">{{ o.type }}{% if o.required %}, required{% endif %}{% if o.choices %} [{{ o.choices | join('|') }}]{% endif %}{% if o.default is not none and not o.required %} (default {{ o.default }}){% endif %}</span>
-          {% if o.help %}&mdash; {{ o.help }}{% endif %}
-        </li>
-        {% endfor %}
-      </ul>
-      {% elif a.subcommands %}
-      <ul class="spec-flags">
-        {% for sub, opts in a.subcommands.items() %}
-        <li><code>{{ sub }}</code>: {{ opts | map(attribute='name') | join(', ') }}</li>
-        {% endfor %}
-      </ul>
+
+      {% if a.subcommands %}
+      <p class="muted">Subcommands
+        {% for sub in a.subcommands %}<code>{{ sub }}</code> {% endfor %}&mdash; run from the
+        CLI (<code>fuzzlab {{ a.name }} &lt;sub&gt;</code>); its interactive prompts aren't
+        launched from the panel.</p>
       {% else %}
-      <p class="muted">No flags.</p>
+      <form class="launch-form" data-command="{{ a.name }}">
+        {% for o in a.options %}
+        <div class="field">
+          <label for="f-{{ a.name }}-{{ o.dest }}">{{ o.name }}{% if o.required %} *{% endif %}</label>
+          {% if o.dest == 'categories' and categories %}
+          <span class="catgroup" data-catgroup="{{ o.dest }}">
+            {% for c in categories %}
+            <label class="cat"><input type="checkbox" value="{{ c }}"> {{ c }}</label>
+            {% endfor %}
+          </span>
+          {% elif o.type == 'bool' %}
+          <input type="checkbox" id="f-{{ a.name }}-{{ o.dest }}" data-dest="{{ o.dest }}"
+                 data-type="bool"{% if (o.dest == 'authorized' and authorized) or o.default %} checked{% endif %}>
+          {% elif o.type == 'choice' %}
+          <select id="f-{{ a.name }}-{{ o.dest }}" data-dest="{{ o.dest }}" data-type="choice">
+            {% for c in o.choices %}<option{% if c == (o.default|string) %} selected{% endif %}>{{ c }}</option>{% endfor %}
+          </select>
+          {% elif o.multiple %}
+          <textarea id="f-{{ a.name }}-{{ o.dest }}" data-dest="{{ o.dest }}" data-type="{{ o.type }}"
+                    data-multiple="true" rows="2" placeholder="one per line"></textarea>
+          {% elif o.type in ('int', 'float') %}
+          <input type="number" id="f-{{ a.name }}-{{ o.dest }}" data-dest="{{ o.dest }}"
+                 data-type="{{ o.type }}"{% if o.default is not none %} placeholder="{{ o.default }}"{% endif %}>
+          {% else %}
+          <input type="text" id="f-{{ a.name }}-{{ o.dest }}" data-dest="{{ o.dest }}"
+                 data-type="str"{% if o.default is not none %} placeholder="{{ o.default }}"{% endif %}>
+          {% endif %}
+          {% if o.help %}<span class="muted"> {{ o.help }}</span>{% endif %}
+        </div>
+        {% endfor %}
+        <div class="actions">
+          <button type="button" data-action="dry-run">Dry-run</button>
+          <button type="button" data-action="run"
+            {% if a.sends_traffic and not authorized %}disabled title="set authorized:true to run traffic tools"{% endif %}>Run</button>
+          <button type="button" data-action="stop" disabled>Stop</button>
+        </div>
+        <pre class="launch-preview" hidden></pre>
+        <pre class="launch-output" hidden></pre>
+      </form>
       {% endif %}
     </div>
     {% endfor %}

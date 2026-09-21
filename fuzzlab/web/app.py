@@ -102,11 +102,21 @@ def _read_detail(cfg: Config, run_id: int) -> dict | None:
 # --- template context builders (rendering lives in templates/, via jinja2) ----
 
 def _activities() -> list[dict]:
-    """Every launchable activity's spec, for the Launcher preview. Read-only."""
+    """Every launchable activity's spec, for the Launcher forms."""
     try:
         from fuzzlab.web.commandspec import all_specs
         return [s.to_dict() for s in all_specs()]
     except Exception:  # noqa: BLE001 - the panel must render even if a spec fails
+        return []
+
+
+def _active_plugins() -> list[dict]:
+    """The entry-point plugins that a run with ``--plugins`` would attach."""
+    try:
+        from fuzzlab.plugins.manager import PluginManager
+        return [{"name": p.name, "version": p.version, "priority": p.priority}
+                for p in PluginManager.from_entry_points().active()]
+    except Exception:  # noqa: BLE001 - discovery must never break the panel
         return []
 
 
@@ -119,6 +129,7 @@ def _index_context(cfg: Config, state: LauncherState, runs: list[dict]) -> dict[
         "categories": _known_categories(),
         "commands": _tool_commands(cfg),
         "activities": _activities(),
+        "plugins": _active_plugins(),
         "runs": runs,
         "last_result": None if state.last_result is None else str(state.last_result),
     }
@@ -258,6 +269,10 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     @app.post("/api/launch/{token}/stop")
     async def launch_stop(token: str):
         return {"stopped": runner.stop(token)}
+
+    @app.get("/api/plugins")
+    def plugins():
+        return {"plugins": _active_plugins()}
 
     # --- in-process proxy status/control (Phase 0.4; full workbench in Phase 2) ---
 

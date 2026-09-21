@@ -63,7 +63,26 @@ nav.tabs a.active { background: #8882; border-color: #8884; font-weight: 600; }
 .panel.hidden { display: none; }
 
 .field { margin: .35rem 0; }
-.field label { display: inline-block; min-width: 11rem; font-size: .9rem; }
+.field > label { display: inline-block; min-width: 11rem; font-size: .9rem; vertical-align: top; }
+.field input[type="text"], .field input[type="number"], .field select, .field textarea {
+  font: inherit; padding: .25rem .4rem; border: 1px solid #8886; border-radius: 6px;
+  min-width: 18rem; max-width: 100%; background: #8881;
+}
+.field textarea { vertical-align: top; }
 .badge-row { margin: .2rem 0 .4rem; }
 .spec-flags { font-size: .85rem; }
 .spec-flags li { margin: .1rem 0; }
+
+.launch-form { margin-top: .4rem; }
+.catgroup { display: inline-flex; flex-wrap: wrap; gap: .1rem .8rem; max-width: 100%; }
+.catgroup .cat { min-width: auto; font-size: .85rem; }
+.actions { margin: .6rem 0 .2rem; }
+.actions button { margin-right: .4rem; }
+.launch-preview {
+  background: #8882; padding: .5rem; border-radius: 8px; white-space: pre-wrap;
+  overflow-x: auto;
+}
+.launch-output {
+  background: #0b0b0bdd; color: #d8d8d8; padding: .6rem; border-radius: 8px;
+  white-space: pre-wrap; max-height: 22rem; overflow: auto; font-size: .85rem;
+}

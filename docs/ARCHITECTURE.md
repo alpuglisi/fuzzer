@@ -375,7 +375,10 @@ tracked in the requirements files, not here.
   argv, no shell), and a **unified serve mode** (`web/proxycontrol.py`, `fuzzlab web
   --with-proxy`) that runs the intercepting proxy in the panel's own event loop so live
   interception's futures work (D19; opt-in, `--authorized`-gated, loopback-only, separate
-  port). **Pending:** the launcher run controls (Phase 1), the proxy
+  port). Phase 1 built the **Activity Launcher UI**: per-tool forms rendered from each
+  command spec, a dry-run preview, gated Run with live SSE output + Stop, a D14 category
+  picker, and a plugins panel (verified end-to-end in a real browser). **Pending:** the
+  proxy
   workbench (Phase 2), the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
   `metric_series` time-series table (Phase 4), Datasette-style store exploration, a
   `--dry-run` mode, and a plain CLI entry point per tool for headless use

@@ -14,6 +14,15 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (UI, Phase 1): Activity Launcher. The read-only preview is now an interactive
+  launcher — a form per activity rendered server-side from each command spec (widget per
+  flag type, keyed by argparse dest), with **Dry-run** (previews the exact command, sends
+  nothing), gated **Run** streaming the child's output live over SSE, and **Stop**. Traffic
+  tools' Run is disabled unless `authorized` (and `--authorized` is pre-checked when the
+  panel is authorized). Adds a D14 **category picker** (`--categories` as checkboxes from the
+  known categories) and a **Plugins** panel + `GET /api/plugins`. Verified end-to-end in a
+  real browser (`test_web_launcher_browser.py`: dry-run preview + a run streaming to
+  `[exit …]`), plus extended frontend tests. Suite 467 passed / 6 skipped. See CC-UI-0015.
 - Feature (UI, Phase 0.4): unified serve mode with an in-process proxy — completes the
   Phase-0 foundations. Added `fuzzlab/web/proxycontrol.py` (`ProxyConfig`/`ProxyController`)
   that builds the proxy engine (Scope + MatchReplace + Interceptor + SocketSender + optional

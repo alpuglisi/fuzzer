@@ -61,8 +61,9 @@ bugs — the research-platform diagnostics of decision D2.
   tool's own `argparse` parser** (single source of truth — never hand-mirrored), so a new
   tool flag appears in the UI automatically. Launching still sends nothing until the user
   acts and stays behind the `authorized` gate (no-auto-run, NFR-UI-no-auto-run).
-  *(Realized incrementally: Phase 0.1 adds the command-spec registry that introspects the
-  parsers; the launcher UI and runner follow.)*
+  *(Realized: Phase 0.1 the command-spec registry, Phase 0.3 the dry-run/gated-run/SSE
+  runner, Phase 1 the launcher UI — per-tool forms, dry-run preview, live output, the D14
+  category picker, and the plugins panel.)*
 - **FR-UI-7** The panel is organized as a **tabbed shell**: **Launcher** (run controls),
   **Proxy** (traffic review/edit/drop/forward/repeat), **Results** (runs dashboard),
   **ML** (classifier/ranker/conformal/anomaly/active-learning/bandit/mutation — kept

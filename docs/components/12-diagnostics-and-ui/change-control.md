@@ -3,6 +3,42 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0015 — Activity Launcher UI: forms + dry-run + live output (Phase 1) (2026-09-21)
+- Change: turned the read-only activity preview into an interactive **launcher**. The
+  Launcher tab now renders a form per non-subcommand activity, server-side from each
+  command spec — a widget per flag by type (text / number / `<select>` for choices /
+  checkbox for bools / textarea for repeatables), keyed by argparse `dest`. `app.js` gained
+  `collectValues` + `initLaunchForms`: **Dry-run** (`POST /api/launch/dry-run`) shows the
+  exact command and sends nothing; **Run** (`POST /api/launch`) streams the child's output
+  live via a named-event `EventSource` (`output`/`done`), with **Stop**. Traffic tools' Run
+  is disabled unless `authorized`, and `--authorized` is pre-checked when the panel is
+  authorized. Added a **D14 category picker** — the `--categories` flag renders as
+  checkboxes from `known_categories()`, joined to a comma value. Added a **Plugins** panel +
+  `GET /api/plugins` (the active entry-point set that `--plugins` would attach). Session
+  (subparsers) renders as a CLI note, not a form.
+- Impact (other components / project): realizes FR-UI-6 (launcher) and FR-UI-5 (dry-run) in
+  the browser, and the D14 manual category selection. Consumes the Phase-0 endpoints and the
+  command spec; no backend behavior/schema change beyond the read-only `/api/plugins`. The
+  no-auto-run / loopback / authorized / read-only invariants hold (launch is explicit and
+  gated; the UI writes no results).
+- Risk (level; mitigation): low–medium — new client JS driving real launches. Mitigated by
+  the gate (traffic Run disabled/refused without `authorized`), the declared-flags-only +
+  no-shell runner (CC-UI-0013), and tests: `tests/test_web_frontend.py` extended (form per
+  activity, dest-keyed fields, Run-button gating by authorization, category picker, plugins
+  panel/endpoint, session-as-note) and a real-browser end-to-end smoke
+  `tests/test_web_launcher_browser.py` (Chromium + uvicorn: fills the report form, asserts
+  the dry-run preview `fuzzlab report --store x.db`, then Runs and sees output stream to
+  `[exit …]` over SSE — skip-guarded when no browser). Suite 467 passed / 6 skipped.
+- Deliverables:
+  - [x] Per-activity forms (server-rendered from specs) + dry-run/run/stop wiring — done.
+  - [x] Live SSE output in the browser; Run gated by authorization — done.
+  - [x] D14 category picker; Plugins panel + `/api/plugins` — done.
+  - [x] Frontend tests + real-browser end-to-end smoke — done.
+  - [ ] Phase 2 proxy workbench; Phase 3 ML tab; Phase 4 diagnostics — next.
+- Effectiveness (assessed 2026-09-21): effective — verified in real Chromium: the launcher
+  builds each command from its parser, previews it on dry-run without traffic, and streams a
+  gated run's output to completion. Screenshot captured for review.
+
 ### CC-UI-0014 — Unified serve mode: in-process proxy controller (Phase 0.4; D19) (2026-09-21)
 - Change: added `fuzzlab/web/proxycontrol.py` (`ProxyConfig` + `ProxyController`) — it
   builds the proxy engine (Scope + `MatchReplaceEngine` + `Interceptor` + `SocketSender` +
