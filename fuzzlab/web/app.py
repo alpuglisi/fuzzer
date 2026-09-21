@@ -30,7 +30,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from fuzzlab.core.config import Config, load_config
-from fuzzlab.web import results
+from fuzzlab.web import commandspec, results
+from fuzzlab.web.runner import Runner, build_argv, display_command
+from fuzzlab.web.sse import sse_response
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _TEMPLATES_DIR = os.path.join(_HERE, "templates")
@@ -122,9 +124,17 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     """Build the FastAPI app (loopback-only, read-only over the store)."""
     cfg = cfg or load_config()
     state = LauncherState()
+    runner = Runner()
     app = FastAPI(title="fuzzlab control panel", docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
+
+    def _resolve(name: str):
+        """Look up a launchable activity's spec, or None if unknown."""
+        try:
+            return commandspec.spec(name)
+        except KeyError:
+            return None
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
@@ -181,6 +191,51 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
             return templates.TemplateResponse(
                 request, "not_found.html", {"run_id": run_id}, status_code=404)
         return templates.TemplateResponse(request, "run.html", {"detail": detail})
+
+    # --- launcher: dry-run preview, gated execution, live output (Phase 0.3) ---
+
+    @app.post("/api/launch/dry-run")
+    async def launch_dry_run(request: Request):
+        body = await request.json()
+        spec = _resolve(body.get("command"))
+        if spec is None:
+            return JSONResponse({"error": f"unknown command {body.get('command')!r}"},
+                                status_code=400)
+        values = body.get("values") or {}
+        # A dry run plans and reports the exact command and never sends traffic (FR-UI-5).
+        return {
+            "command": spec.name,
+            "argv": build_argv(spec, values),
+            "display": display_command(spec, values),
+            "sends_traffic": spec.sends_traffic,
+            "needs_authorized": spec.needs_authorized,
+            "would_execute": not (spec.sends_traffic and not cfg.get("authorized")),
+        }
+
+    @app.post("/api/launch")
+    async def launch(request: Request):
+        body = await request.json()
+        spec = _resolve(body.get("command"))
+        if spec is None:
+            return JSONResponse({"error": f"unknown command {body.get('command')!r}"},
+                                status_code=400)
+        # No-auto-run gate: a traffic-sending activity runs only when authorized.
+        if spec.sends_traffic and not cfg.get("authorized"):
+            return JSONResponse(
+                {"error": "not authorized; set authorized:true (lab-only)"},
+                status_code=403)
+        argv = build_argv(spec, body.get("values") or {})
+        token = await runner.launch(argv)
+        state.history.append(f"launched {spec.name}")
+        return {"token": token, "argv": argv}
+
+    @app.get("/api/launch/{token}/stream")
+    async def launch_stream(token: str):
+        return sse_response(runner.stream(token))
+
+    @app.post("/api/launch/{token}/stop")
+    async def launch_stop(token: str):
+        return {"stopped": runner.stop(token)}
 
     return app
 

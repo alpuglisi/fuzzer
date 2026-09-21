@@ -3,6 +3,42 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0013 — Launcher runner: dry-run + gated execution + SSE output (Phase 0.3) (2026-09-21)
+- Change: added `fuzzlab/web/runner.py` and four launcher endpoints. `build_flags`/
+  `build_argv`/`display_command` turn a `CommandSpec` + submitted flag values into an argv
+  (`python -m fuzzlab.cli <name> <flags>`, mirroring the real CLI); `Runner` launches it
+  with `asyncio.create_subprocess_exec` and streams stdout/stderr as SSE (`output` events
+  then a `done` event with the return code), with `stop()` to terminate. Endpoints:
+  `POST /api/launch/dry-run` (plans + returns the exact argv/display, sends nothing —
+  FR-UI-5), `POST /api/launch` (no-auto-run gate: a `sends_traffic` activity is refused
+  with 403 unless `authorized:true`), `GET /api/launch/{token}/stream` (SSE), and
+  `POST /api/launch/{token}/stop`. Two safety properties by construction: **only flags the
+  spec declares reach argv** (unknown `values` keys are ignored — no arbitrary-arg
+  injection), and **no shell** is used (`create_subprocess_exec` with an argv list, so
+  values can't be shell-interpreted).
+- Impact (other components / project): the execution backbone for the Phase-1 launcher UI
+  (forms → dry-run → gated run → live output). Runs each tool as its own subprocess, so the
+  tools keep writing their own results (the UI writes none). No schema change. The UI does
+  not send traffic on its own — only an explicit, authorized `POST /api/launch` of a
+  traffic tool does.
+- Risk (level; mitigation): medium — the panel can now spawn tools. Mitigated by the
+  authorized gate (mirrors automatic mode), the declared-flags-only + no-shell properties,
+  dry-run-first, and tests: `tests/test_web_runner.py` (12) — argv type mapping,
+  unknown-key rejection, CLI-targeted argv, a real child-process stream asserting output +
+  exit code, unknown-token stream, dry-run without executing, 400 unknown command, the 403
+  traffic gate, launch returns a token, and stop of an unknown token. Suite 455 passed /
+  6 skipped.
+- Deliverables:
+  - [x] `runner.py` (build_argv + async `Runner` + SSE stream + stop) — done.
+  - [x] `/api/launch/dry-run`, `/api/launch`, `/api/launch/{token}/stream|stop` — done.
+  - [x] Tests (pure argv, real-subprocess stream, endpoint gate) — done.
+  - [ ] Launcher UI forms wired to these endpoints — Phase 1.
+- Effectiveness (assessed 2026-09-21): effective — dry-run previews the exact command
+  without traffic, the gate blocks unauthorized traffic tools, and a real child's output +
+  exit code stream over SSE. HTTP-level SSE draining is validated live/in Phase 1 (reading
+  an event-stream synchronously through TestClient is avoided; the Runner stream is tested
+  directly).
+
 ### CC-UI-0012 — Frontend foundation: jinja2 + static assets + tab shell + SSE (Phase 0.2) (2026-09-21)
 - Change: reworked `fuzzlab/web/app.py` from hand-rendered HTML f-strings to **jinja2
   templates** (`fuzzlab/web/templates/`: `base.html`, `index.html`, `run.html`,

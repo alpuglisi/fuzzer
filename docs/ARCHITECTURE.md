@@ -367,8 +367,10 @@ tracked in the requirements files, not here.
   full control plane over a **tabbed shell** (Launcher / Proxy / Results / ML /
   Diagnostics; jinja2 templates + a `/static` asset pipeline). Phase 0 foundations built:
   a **command-spec registry** (`web/commandspec.py`) that derives per-tool flag forms from
-  each tool's own `argparse` parser (every tool exposes `build_parser()`), and **SSE
-  plumbing** (`web/sse.py`). **Pending:** the launcher run controls (Phase 1), the proxy
+  each tool's own `argparse` parser (every tool exposes `build_parser()`), **SSE plumbing**
+  (`web/sse.py`), and a **subprocess runner** (`web/runner.py`) with dry-run preview,
+  authorized-gated execution, and live SSE output (`/api/launch*`; only declared flags reach
+  argv, no shell). **Pending:** the launcher run controls (Phase 1), the proxy
   workbench (Phase 2), the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
   `metric_series` time-series table (Phase 4), Datasette-style store exploration, a
   `--dry-run` mode, and a plain CLI entry point per tool for headless use

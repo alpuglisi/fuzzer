@@ -14,6 +14,16 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (UI, Phase 0.3): launcher runner + dry-run + live output. Added
+  `fuzzlab/web/runner.py` (`build_argv`/`display_command`; an async `Runner` that spawns a
+  tool as `python -m fuzzlab.cli <name> <flags>` and streams stdout/stderr as SSE, with
+  stop) and four endpoints: `POST /api/launch/dry-run` (previews the exact command, sends
+  nothing — FR-UI-5), `POST /api/launch` (no-auto-run gate: a traffic tool is 403 unless
+  `authorized:true`), `GET /api/launch/{token}/stream` (SSE), `POST /api/launch/{token}/stop`.
+  Safe by construction: only flags the command spec declares reach argv (no arbitrary-arg
+  injection) and no shell is used. 12 new tests (`test_web_runner.py`) incl. a real
+  child-process stream; suite 455 passed / 6 skipped. See CC-UI-0013. (Launcher UI forms
+  wired to these endpoints land in Phase 1.)
 - Feature (UI, Phase 0.2): frontend foundation for the revamp. Reworked `fuzzlab/web/app.py`
   from hand-rendered HTML to **jinja2 templates** (`web/templates/`) + a **static asset
   pipeline** (`web/static/app.css`, `app.js` mounted at `/static`); the index is now a
