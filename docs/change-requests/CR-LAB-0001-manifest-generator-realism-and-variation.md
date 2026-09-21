@@ -93,7 +93,7 @@ recommendations, which this CR proposes to adopt as-is:
   the identity model, and the covering-array/leakage-probe build gates.
   `docs/ARCHITECTURE.md` §1 and the Lab-track phase list in
   `docs/DECISIONS_AND_ROADMAP.md` need updating to reflect this as the concrete
-  shape of D8 (proposed as a new decision, D18 — see §6).
+  shape of D8 (proposed as a new decision, D20 — see §6).
 - **FUZZ (`07-fuzzing-harness-and-oracle/`):** the label-contract schema gains
   `stack_profile`, `sink_endpoint` (distinct from `injection_endpoint`), and the
   `identity_model`/`authz_expectations` blocks. The harness and oracle, which
@@ -153,13 +153,13 @@ resolving it perfectly up front.
 
 ## 6. Proposed new decision record
 
-Recommend adding **D18** to `docs/DECISIONS_AND_ROADMAP.md` (only on approval),
+Recommend adding **D20** to `docs/DECISIONS_AND_ROADMAP.md` (only on approval),
 stating: *the manifest-driven generator (D8) is realized as a polyglot core with
 per-stack emitters (Node/TS+Express, Python+FastAPI, PHP+Laravel, +Spring Boot
 optional), a pipeline-valued transform model with a structured sink-context safety
 matrix, an OSV/GHSA-sourced provenance corpus, and mandatory covering-array,
 minimal-pair, and leakage-probe build gates — order and scope per CR-LAB-0001.*
-This keeps D8 itself intact (it's the "why"), while D18 pins down the "what,"
+This keeps D8 itself intact (it's the "why"), while D20 pins down the "what,"
 consistent with how D16/D17 already record specific built mechanisms (WAF, h2→h1
 downgrade) under the same lab track.
 
@@ -247,7 +247,7 @@ complete, per the standard change-control process.
 ## On approval
 
 Once you approve (all of it, or a subset — tell me which phases/decisions to
-adjust), I will, in order: (1) add D18 to `docs/DECISIONS_AND_ROADMAP.md` and
+adjust), I will, in order: (1) add D20 to `docs/DECISIONS_AND_ROADMAP.md` and
 update the Lab-track phase list; (2) update `docs/ARCHITECTURE.md` §1 and
 `01-target-lab/requirements.md` to reflect the new target shape; (3) add a
 `CHANGELOG.md` line and the first real `CC-LAB-0011` change-control entry

@@ -9,7 +9,7 @@ the rest of the toolkit: lab-only, loopback-only, on infrastructure we own.
 
 *Draft for review — nothing built yet. Component **LAB** (#1), with schema
 touch-points in **FUZZ** (#7, label-contract consumer). See
-`docs/DECISIONS_AND_ROADMAP.md` (D7–D10, proposed D18) and
+`docs/DECISIONS_AND_ROADMAP.md` (D7–D10, proposed D20) and
 `CR-LAB-0001` (§5, §6, §8 Phase 0).*
 
 ## Two decisions this document resolves (per your last message)
