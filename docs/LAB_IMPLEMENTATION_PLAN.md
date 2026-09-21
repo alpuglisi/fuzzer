@@ -1,6 +1,7 @@
 # Lab generator — implementation plan for the remaining work
 
-**Status: draft, for review.** This is a task-level plan, in the style of
+**Status: draft, for review — four flagged research items resolved
+2026-09-21.** This is a task-level plan, in the style of
 `docs/LAB_PHASE_0_PLAN.md`, covering everything **after** the point Phase 0
 has actually reached (as of `CC-LAB-0028`) through the rest of `CR-LAB-0001`
 §8's phase list. It does not re-litigate anything already decided (D20,
@@ -10,7 +11,14 @@ before it can be built, rather than building through it speculatively. Per
 this project's own convention, items marked **[research needed]** or
 **[decision needed]** are not blocking the rest of the plan unless a
 dependency arrow below says so — most of them gate one phase, not all of
-them.
+them. Four of the original **[research needed]** items were dispatched to
+web-enabled research agents and are now marked **[research complete,
+2026-09-21]** with findings folded into the relevant sections and
+summarized in §6; the fifth (Phase 4's SSRF/GraphQL design passes) was
+deliberately left undispatched, since the plan itself judged that research
+premature this far out — see §6 item 11. Every remaining
+**[decision needed]** item is a judgment/scope call research cannot resolve
+and is still yours to make.
 
 Companion documents this plan assumes you have open: `CR-LAB-0001` (the
 approved change request, including Addenda A-E), `docs/DECISIONS_AND_ROADMAP.md`
@@ -225,15 +233,49 @@ attribute).
 - New `modules/{sources,transforms,sinks}` fragments for `php_current`
   covering the new shapes, following the module-composition convention
   already established (Addendum C).
-- **[research needed, small]:** identifier/alias/connector-position SQLi
-  needs its own tool-oracle validation — `oracle_wrapper.py`'s existing
-  sqlmap wrapper was validated (Spike 001) against value-context injection;
-  confirm sqlmap's `-p`/technique flags actually detect identifier-context
-  injection before assuming the existing oracle wrapper "just works" for
-  the new shape. If it doesn't, this needs either a sqlmap technique-flag
-  change (additive to `oracle_wrapper.py`) or a fallback plan before the new
-  cells can be confirmed at all — worth a short spike before authoring more
-  than one or two seed cells of this shape.
+- **[research complete, 2026-09-21]:** identifier/alias/connector-position
+  SQLi needs its own tool-oracle validation, and the research confirms it
+  cannot reuse the existing sqlmap wrapper as-is.
+  **Verdict: sqlmap does not reliably detect identifier/alias/connector-
+  context injection, and this is a long-documented, unresolved limitation,
+  not a flag/configuration gap.** sqlmap's `--technique=` option (current
+  stable ~1.10) only exposes the six classic value-context techniques
+  (`B`/`E`/`U`/`S`/`T`/`Q` — boolean-blind, error-based, UNION, stacked,
+  time-based, inline) and has no identifier-aware technique; `-p` and the
+  `*` custom-injection-point marker both still assume the marked position
+  holds a mutable *value* sqlmap can wrap with a prefix/suffix boundary, not
+  a bare identifier token. Documented evidence of this gap: sqlmap GitHub
+  issue #97 (2012, still open — a user's working manual `CASE WHEN` ORDER-BY
+  payload was not found automatically at `--level 3`), issue #2459 (ORDER BY
+  column-count heuristic is fragile), and issue #490 (an ORDER BY case was
+  only caught because the vulnerable parameter happened to be a numeric
+  column index — i.e. it degenerated to value-context, not true identifier
+  substitution).
+  **Recommended fallback, to build as a small addition alongside
+  `oracle_wrapper.py`, not inside it:** a custom differential-response
+  prober using the boolean-differential CASE-WHEN technique already
+  referenced above — fire two requests (or two direct DB calls if testing
+  offline), one with a TRUE-condition substitution
+  (`ORDER BY (CASE WHEN <condition> THEN <col_a> ELSE <col_b> END)`) and one
+  FALSE, and diff the observable output (row order/count, HTTP status, or a
+  `SLEEP()`/`pg_sleep()`/`BENCHMARK()` timing signal for a blind variant).
+  This is DBMS-dialect-specific (MySQL/Postgres/SQLite phrase it
+  differently) and needs at least one known real column-name pair per
+  dialect to construct the probe. Map to the existing fail-closed contract:
+  both responses differ as expected and consistently →
+  `confirmed_vulnerable`; both identical (parameterization/allowlisting
+  holds) → `confirmed_secure`; ambiguous/inconsistent → `inconclusive`,
+  matching `oracle_wrapper.py`'s existing three-outcome shape so this can be
+  wired in the same way `nuclei_oracle.py` was — a sibling module reusing
+  only the generic safety/lookup helpers, not a change to
+  `oracle_wrapper.py`'s sqlmap/commix/SSTImap-specific code. **Residual
+  uncertainty the research flagged:** the verdict rests partly on
+  documentation/issues dating to 2012 with no evidence the core limitation
+  was ever closed, and one source (a mailing-list thread) could not be
+  fully fetched due to this environment's network proxy — worth a quick
+  spot-check against the actual installed sqlmap binary before committing
+  to the fallback design, per PA-0005's own "verify against the real tool"
+  convention.
 
 ### 2.3 Wire χ² balance + leakage probe as required build gates
 Both `fingerprint_gate.py` and `leakage_probe.py` exist as reference
@@ -280,26 +322,61 @@ location/encoding axis; the `context_depth` axis (0-4, already named via
 Addendum B's `flow_variant` values).
 
 This phase's task-level breakdown is deliberately not written out to the
-same depth as Phase 1 above — **[research needed before detailed
-planning]:** Phase 2 is the first phase where the manifest schema itself
-grows new top-level concepts (`identities`, `authz_expectations`), not just
-new axis values within the existing `Cell`/`SinkContext` shape. Before
-writing a task breakdown, confirm:
+same depth as Phase 1 above. Phase 2 is the first phase where the manifest
+schema itself grows new top-level concepts (`identities`,
+`authz_expectations`), not just new axis values within the existing
+`Cell`/`SinkContext` shape, so two questions needed resolving before a task
+breakdown could be written responsibly:
+
 - How `identities` interacts with the existing single-target,
   no-session-manager-yet lab (the toolkit's own Session manager is Phase 1
-  of the *toolkit* roadmap, a different track — check whether Phase 2 of the
-  Lab track can proceed independently of that landing, or needs it).
+  of the *toolkit* roadmap, a different track).
 - Whether `authz_expectations` belongs in the manifest (verdict-adjacent) or
   in a separate identity-graph file analogous to `provenance.yaml`'s
-  separation principle (Addendum A) — an authz expectation is arguably
-  closer to ground truth than to provenance, which would put it in the
-  manifest/labels contract rather than a side file. This is a real design
-  question, not a research gap, but it should be answered before schema
-  work starts, the same way Addendum A caught the provenance-direction
-  mistake before it shipped.
+  separation principle (Addendum A).
 
-Once those are answered, write `docs/LAB_PHASE_2_PLAN.md` at the same
-granularity as Phase 0/1 above, before starting implementation.
+**[research complete, 2026-09-21]** on the second question. No prior-art
+project surveyed (crAPI, vAPI, or the closest academic tool found,
+**AuthProbe**, arXiv:2607.20574, a 2026 spec-driven multi-identity BOLA
+detector) declares "identity X owns resource Y" as a static, hand-authored
+ground-truth artifact at all. crAPI and vAPI both leave ownership entirely
+implicit in seeded database rows and exploit-script/Postman-collection
+steps — there is no schema to adapt from either. AuthProbe comes closer
+(it keeps identity credentials in an operator-supplied config, separate
+from the OpenAPI spec it tests against — a config listing named identities
+each with their own auth headers) but even AuthProbe **discovers ownership
+dynamically at runtime** (querying each identity's own list endpoints, then
+cross-testing) rather than declaring it as data — because it targets
+already-running third-party APIs, not a synthetic corpus it controls, it
+has no need to. **Conclusion: `identities`/`authz_expectations` is
+genuinely novel schema ground for this project; there is no external schema
+to adapt wholesale, only a directional precedent.** The one transferable
+idea, present in both AuthProbe's identity-config split and this project's
+own `provenance.yaml` precedent, is to keep identity/ownership data in a
+**separate side file**, decoupled from the manifest cells the verdict
+engine consumes — recommended for the same reason `provenance.yaml` is
+decoupled: the verdict-deriving code path should not gain a dependency on
+data that isn't part of the vulnerable/secure code-generation contract
+itself, and ownership metadata is closer to "annotation feeding future test
+classes and audit tooling" than to "input the generator or verdict engine
+needs today." This reasoning is by analogy to this project's own
+architecture, not an external citation — flagged as such, since no
+external project could actually settle it.
+
+The first question (Session-manager interaction) remains open and is not a
+research question so much as a scheduling one: **[decision needed]** confirm
+whether Lab-track Phase 2 can proceed independently of the toolkit's own
+Session-manager phase landing, or whether identity groundwork should wait
+for it — this needs a look at what Phase 2 actually requires operationally
+(does confirming an authz expectation require staying authenticated as two
+different identities across a run, which is exactly what the Session
+manager provides?) rather than external research, so it's left as a
+decision item, not dispatched to a research agent.
+
+With the file-placement question now resolved, write
+`docs/LAB_PHASE_2_PLAN.md` at the same granularity as Phase 0/1 above once
+the Session-manager scheduling question above is settled, before starting
+implementation.
 
 ---
 
@@ -336,21 +413,77 @@ authoring sessions before trusting the schedule" — Phase 1's cell-rebuild
 work, §2.2 above, is exactly that timing opportunity, and should inform this
 decision before it's made, not after).
 
-**[research needed, per Addendum D, ~10 minutes, low cost]:** confirm whether
-FastAPI's `APIRouter` auto-inclusion means the Python/FastAPI emitter can
-avoid a `route`-category accumulator module entirely, or whether it needs
-one like Laravel/Express will. Addendum D flags this explicitly as
-"unconfirmed, worth ten minutes to check before Phase 3 starts" — do this
-check first, since it affects whether the `route` accumulator module
-(already designed, Addendum D) needs to be built for two stacks or just one.
+**[research complete, 2026-09-21]:** confirmed whether FastAPI's `APIRouter`
+auto-inclusion means the Python/FastAPI emitter can avoid a `route`-category
+accumulator module entirely. **Verdict: by default FastAPI needs the same
+accumulator treatment as Laravel/Express, but a project-authored, one-time
+discovery scaffold can avoid it.** FastAPI's own documented multi-file
+pattern ("Bigger Applications - Multiple Files",
+fastapi.tiangolo.com/tutorial/bigger-applications/) requires one new
+`import` plus one new `include_router()` line in a central `main.py` per
+router module — architecturally identical to Laravel's `routes/web.php` or
+Express's `app.js`, confirmed via FastAPI's own GitHub discussion #6903
+("Split router across multiple files"), where the community treats
+directory-based auto-registration as something you build yourself, not a
+first-party feature. **However**, it is straightforward to write a small
+(~15-line), static "scaffold" `main.py` using `pkgutil.iter_modules()`/
+`importlib` to walk a `routers/` package at import time and call
+`include_router()` on everything found — this scaffold is rendered once per
+build and never touched per generated cell, so it carries none of the
+reshuffling/non-determinism risk an accumulator exists to guard against.
+**Decision this research resolves:** treat the FastAPI case as "avoidable
+via a one-time static discovery scaffold," not "no accumulator needed by
+the framework itself" — i.e., the `route` accumulator module (Addendum D)
+still needs to be built for Laravel and Express, but the FastAPI emitter can
+skip it by using this static-scaffold approach instead, at the cost of
+~15 lines of project-owned (unofficial, not FastAPI-supported) directory-
+walking glue whose import-order/error-handling/route-collision behavior the
+project itself must define and test.
 
-**[research needed]:** Addendum D also flags the `complexity`-as-file-count-
-multiplier interaction with the accumulator and covering array as
-"the first place to expect an implementation surprise, not asserted as
-settled" — this should get a small design spike (a few cells rendered by
-hand against the design, not a full stack) before it's built into the second
-emitter for real, the same way T-LAB0.4's module-composition schema itself
-was validated against NISTIR 8493 before implementation rather than after.
+**[research complete, 2026-09-21]:** Addendum D's `complexity`-as-file-
+count-multiplier interaction, flagged as "the first place to expect an
+implementation surprise." **No directly relevant prior art was found** —
+this appears to be a genuinely novel combination, not a documented pattern,
+and the research says so plainly rather than stretching tangential material.
+The closest analogues: the **Juliet Test Suite**'s flow variants (01-22
+control-flow wrappers, 31+ data-flow variants that do span a primary +
+secondary file) use the same "wrapper as a difficulty knob" idea this
+project's own module-composition design already generalizes from, but
+Juliet never turns file-count into a combinable axis with an ordinal/
+continuous dial. **SecCodePLT** and **BaxBench** were also checked and
+confirmed off-point (SecCodePLT has no depth axis; BaxBench generates whole
+multi-file apps per task via an LLM with no fragment composition, so it has
+no complexity axis at all — consistent with this project's own prior
+differentiation research). One independent, tangentially supporting data
+point: an unrelated benchmark-analysis paper found real-world vulnerabilities
+distribute roughly 35% zero-hop / 24% one-hop / 13% two-hop / 7% three-hop
+in taint-path length — external validation that "hop count" is a natural
+difficulty axis in principle, even though no generator builds it as a
+compositional knob today.
+**Pitfalls flagged from general multi-file code-generation literature**
+(not vulnerability-generator-specific, since none exists on this exact
+point): cross-file identifier/naming consistency degrades sharply as file
+count grows (one cited study found multi-file edit success dropping from
+~19% at one file to ~5% at three-plus); a per-cell explicit symbol/alias map
+(the tainted variable's name or its mapping) should be generated once and
+passed to every file template for that cell, not left to ad hoc per-file
+naming; interface-contract mismatches across layer boundaries (a sanitizer
+applied in one file but not visible to a check in another) are a documented
+failure mode and argue for a post-generation, per-hop signature/contract
+validation pass; accumulator ordering must be sorted by a stable key
+(cell ID) at render time, never by append/iteration order.
+**Recommendation, adopted into this plan:** do not launch straight into a
+continuous file-count-multiplier axis under full covering-array treatment.
+**Spike first with two fixed depth levels** (e.g. "shallow":
+controller→model, "deep": controller→service→repository→model) for one
+vulnerability class/sink/transform combination, specifically to validate
+the riskiest new mechanism — a shared taint-plan/symbol-consistency
+intermediate representation (materializing the intended file path and the
+variable name carried at each hop *before* rendering any file template,
+rather than generating files independently and reconciling after) and the
+accumulator's deterministic ordering — before generalizing to an N-valued
+combinable axis. If the two-level spike is clean, extending to more depth
+levels is a parameter change, not a redesign.
 
 Once the pacing decision above is made, the task breakdown is, per stack (in
 whatever order the decision picks):
@@ -401,34 +534,64 @@ guessing.
 
 ## 6. Consolidated list of open decisions and research items
 
-For quick reference — everything marked **[decision needed]** or **[research
-needed]** above, in the order it first becomes load-bearing:
+Four research items were dispatched to web-enabled research agents on
+2026-09-21 and are now resolved (marked below); their findings are folded
+into the relevant sections above. Items still needing a human decision (not
+resolvable by research — they are judgment/scope calls) remain open, in the
+order they first become load-bearing:
 
-1. **T-LAB0.9 scope** (§1.1) — sweep FUZZ consumers before or alongside the
-   schema change? *Recommended: alongside, before landing.*
-2. **Leakage-probe threshold** (§2.3) — per-class or one global 0.55-0.60
-   band, now that Phase 1 will produce the first real data to decide it against.
-3. **Identifier/alias/connector-position SQLi oracle coverage** (§2.2) — does
-   sqlmap's existing wrapper detect this shape, or does `oracle_wrapper.py`
-   need a technique-flag addition? Short spike, one or two cells, before
-   authoring more.
-4. **`authz_expectations` placement** (§3) — manifest/labels-contract vs. a
-   separate identity file, before Phase 2 schema work starts.
-5. **Toolkit Session-manager dependency** (§3) — does Lab-track Phase 2 need
-   it, or can identity groundwork proceed independently?
-6. **Phase 3 pacing** (§4) — (a) all three stacks full depth, (b) stack 1
-   full + stacks 2-3 Tier-A, or (c) drop Spring Boot from near-term scope.
-   Inform with Phase 1's actual authoring-hours data before deciding.
-7. **FastAPI route-accumulator need** (§4) — ~10-minute check, before Phase 3
-   starts.
-8. **Complexity-as-file-count-multiplier interaction** (§4) — small design
-   spike before building the second emitter's complexity modules for real.
-9. **`patterns/` card-authoring schedule** (§1.3) — not gating, purely a
-   "when do you want to do this" scheduling call.
+1. **T-LAB0.9 scope** (§1.1) — **[decision needed]** sweep FUZZ consumers
+   before or alongside the schema change? *Recommended: alongside, before
+   landing.*
+2. **Leakage-probe threshold** (§2.3) — **[decision needed]** per-class or
+   one global 0.55-0.60 band, now that Phase 1 will produce the first real
+   data to decide it against.
+3. ~~Identifier/alias/connector-position SQLi oracle coverage~~ (§2.2) —
+   **[research complete, 2026-09-21]** sqlmap does not reliably detect this
+   shape; build a custom differential-response prober alongside
+   `oracle_wrapper.py` instead. One residual **[decision needed]**: whether
+   to spot-check the verdict against the real installed sqlmap binary before
+   committing to the fallback design (recommended, low cost).
+4. ~~`authz_expectations` placement~~ (§3) — **[research complete,
+   2026-09-21]** no external prior art declares ownership/authz as static
+   data at all (crAPI/vAPI leave it fully implicit; AuthProbe, the closest
+   academic tool, discovers it at runtime rather than declaring it) — this
+   is genuinely novel schema ground. Recommendation, by analogy to this
+   project's own `provenance.yaml` precedent (not an external citation):
+   keep it in a **separate side file**, decoupled from the manifest cells
+   the verdict engine consumes.
+5. **Toolkit Session-manager dependency** (§3) — **[decision needed]** does
+   Lab-track Phase 2 need the toolkit's own Session manager to land first
+   (e.g. because confirming an authz expectation requires staying
+   authenticated as two identities across a run), or can identity
+   groundwork proceed independently? This is an operational question about
+   what Phase 2 actually requires, not something further web research can
+   resolve — left as a decision item.
+6. **Phase 3 pacing** (§4) — **[decision needed]** (a) all three stacks full
+   depth, (b) stack 1 full + stacks 2-3 Tier-A, or (c) drop Spring Boot from
+   near-term scope. Inform with Phase 1's actual authoring-hours data before
+   deciding.
+7. ~~FastAPI route-accumulator need~~ (§4) — **[research complete,
+   2026-09-21]** avoidable via a one-time static discovery scaffold
+   (~15 lines, project-owned, not a first-party FastAPI feature); the
+   `route` accumulator module is still needed for Laravel/Express.
+8. ~~Complexity-as-file-count-multiplier interaction~~ (§4) — **[research
+   complete, 2026-09-21]** no direct prior art exists for this combination;
+   recommendation adopted into the plan: spike with two fixed depth levels
+   before generalizing to a combinable N-valued axis.
+9. **`patterns/` card-authoring schedule** (§1.3) — **[decision needed]**
+   not gating, purely a "when do you want to do this" scheduling call.
 10. Everything in `CR-LAB-0001` §7's remaining deferred list not already
     resolved by an addendum (stack in `labels.json` vs. a separate file;
     the all-secure-profile false-positive contract around framework debug
     pages; whether the pattern corpus versions with the manifest or
-    independently; DOM XSS frontend-code generation) — none of these gate
-    Phase 1, but each should be resolved before the phase that first needs
-    it, per the CR's own original framing.
+    independently; DOM XSS frontend-code generation) — **[decision
+    needed]**, none of these gate Phase 1, but each should be resolved
+    before the phase that first needs it, per the CR's own original framing.
+11. **Phase 4 SSRF target + GraphQL surface design** (§5) — **deliberately
+    not dispatched for research in this pass.** The plan itself states this
+    research would be premature ("Phase 4 is far enough out that anything
+    decided today would likely be stale by the time it matters"); spawning
+    a research agent for it now would contradict that reasoning rather than
+    honor it. Flagged here, not silently skipped — revisit when Phase 3 is
+    close to landing.

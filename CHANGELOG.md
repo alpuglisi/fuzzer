@@ -14,6 +14,27 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Docs: dispatched four parallel web-enabled research agents against the four
+  genuine **[research needed]** items flagged in `docs/LAB_IMPLEMENTATION_PLAN.md`
+  (identifier/alias/connector-position SQLi oracle coverage; `authz_expectations`
+  placement prior art; FastAPI route-accumulator necessity; complexity-as-file-
+  count-multiplier prior art) and folded their findings into the document.
+  Headline results: sqlmap does not reliably detect identifier-context SQLi
+  (documented, long-standing limitation — a custom differential-response prober
+  is recommended instead, alongside `oracle_wrapper.py`, not inside it); no
+  external project declares ownership/authz as static ground-truth data, so
+  `identities`/`authz_expectations` is novel schema ground, recommended (by
+  analogy to this project's own `provenance.yaml` precedent, not an external
+  citation) to live in a separate side file; FastAPI's `APIRouter` needs the
+  same central-registration accumulator as Laravel/Express by default, but a
+  one-time static discovery scaffold can avoid it; no prior art exists for
+  file-depth as a combinable generator axis, so a two-fixed-depth-level spike is
+  recommended before generalizing it. The fifth originally-flagged item (Phase
+  4's SSRF/GraphQL design passes) was deliberately left undispatched, since the
+  plan itself judged that research premature this far from the phase it serves —
+  noted explicitly in the consolidated list rather than silently skipped. All
+  remaining `[decision needed]` items are judgment/scope calls research cannot
+  resolve and stay open for the project owner.
 - Docs: added `docs/LAB_IMPLEMENTATION_PLAN.md` — a task-level implementation plan
   for the lab generator's remaining work, covering Phase 0's two open tasks
   (T-LAB0.9, flagged for a FUZZ-consumer review before the ground-truth schema
