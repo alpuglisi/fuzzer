@@ -15,6 +15,7 @@ listener but sends nothing until a proxied client drives in-scope traffic throug
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -232,20 +233,38 @@ class RepeaterController:
     open a persistent store + one ``repeater`` run on first write (creating the store
     file only on that explicit user action). Sending forwards to a real upstream, so the
     caller gates it on ``authorized``. A ``sender`` may be injected for tests.
+
+    ``sqlite3`` connections are thread-affine (``check_same_thread=True``): a connection
+    may only be used from the OS thread that created it (BUG-0018). This controller is a
+    single long-lived object shared across requests, and requests are not guaranteed to
+    land on the same thread every time (e.g. an ASGI test client that spins up a fresh
+    event-loop thread per call, or any future multi-threaded serving setup) — so the
+    persistent store/``Repeater`` are kept **per calling thread** (``threading.local``)
+    rather than as one shared instance attribute. All threads still share a single
+    ``repeater`` run row (``self._run_id``, created once under ``self._run_lock``) so
+    tabs created from any thread appear together.
     """
 
     def __init__(self, cfg, sender=None) -> None:
         self.cfg = cfg
         self._sender = sender
-        self._store = None
-        self._rep = None
+        self._run_id = None
+        self._run_lock = threading.Lock()
+        self._local = threading.local()
 
     def _path(self) -> str:
         return self.cfg.get("store_path", "fuzzlab.db")
 
+    def _thread_store(self):
+        """This calling thread's persistent store, if one was already created (else None)."""
+        return getattr(self._local, "store", None)
+
     def _writer(self):
-        """Persistent store + Repeater, created lazily on first write."""
-        if self._rep is None:
+        """Persistent store + Repeater for the *calling thread*, created lazily on first
+        write. See the class docstring for why this is per-thread rather than shared.
+        """
+        rep = getattr(self._local, "rep", None)
+        if rep is None:
             from fuzzlab.core.store import Store
             from fuzzlab.proxy.history import HistoryWriter
             from fuzzlab.proxy.repeater import Repeater
@@ -253,11 +272,17 @@ class RepeaterController:
             if sender is None:
                 from fuzzlab.proxy.socketsender import SocketSender
                 sender = SocketSender(verify_tls=False)
-            self._store = Store(self._path())
-            run_id = self._store.start_run("repeater", self.cfg.get("target_base_url", ""))
-            self._rep = Repeater(self._store, run_id, sender,
-                                 history=HistoryWriter(self._store, run_id, batch_size=1))
-        return self._rep
+            store = Store(self._path())
+            with self._run_lock:
+                if self._run_id is None:
+                    self._run_id = store.start_run(
+                        "repeater", self.cfg.get("target_base_url", ""))
+            run_id = self._run_id
+            rep = Repeater(store, run_id, sender,
+                           history=HistoryWriter(store, run_id, batch_size=1))
+            self._local.store = store
+            self._local.rep = rep
+        return rep
 
     @staticmethod
     def _tab_dict(row) -> dict[str, Any]:
@@ -270,17 +295,18 @@ class RepeaterController:
     def list_tabs(self) -> list[dict[str, Any]]:
         """All saved tabs, newest first. Read-only; never creates the store."""
         from fuzzlab.web import results
-        if self._store is None and not results.store_exists(self._path()):
+        thread_store = self._thread_store()
+        if thread_store is None and not results.store_exists(self._path()):
             return []
         from fuzzlab.core.store import Store
-        own = self._store or Store(self._path())
+        own = thread_store or Store(self._path())
         try:
             rows = own.conn.execute(
                 "SELECT id, name, host, port, use_tls, raw_request FROM repeater_tab "
                 "ORDER BY id DESC").fetchall()
             return [self._tab_dict(r) for r in rows]
         finally:
-            if own is not self._store:
+            if own is not thread_store:
                 own.close()
 
     def create_tab(self, name: str, host: str, port: int, raw: str,
@@ -293,10 +319,11 @@ class RepeaterController:
     def create_from_flow(self, flow_id: int) -> dict[str, Any] | None:
         """Seed a tab from a recorded flow's request (redacted bytes; edit to re-add auth)."""
         from fuzzlab.web import results
-        if self._store is None and not results.store_exists(self._path()):
+        thread_store = self._thread_store()
+        if thread_store is None and not results.store_exists(self._path()):
             return None
         from fuzzlab.core.store import Store
-        own = self._store or Store(self._path())
+        own = thread_store or Store(self._path())
         try:
             row = own.conn.execute(
                 "SELECT url, host, req_raw_sha FROM flow WHERE id=?", (flow_id,)).fetchone()
@@ -304,7 +331,7 @@ class RepeaterController:
                 return None
             raw = own.get_body(row["req_raw_sha"]) if row["req_raw_sha"] else b""
         finally:
-            if own is not self._store:
+            if own is not thread_store:
                 own.close()
         host, _, port_s = (row["host"] or "").partition(":")
         use_tls = str(row["url"] or "").startswith("https")

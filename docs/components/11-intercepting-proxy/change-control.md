@@ -3,6 +3,37 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0016 — Fix (BUG-0021): `RepeaterController` per-thread SQLite connection (2026-09-21)
+- Change: `fuzzlab/web/proxycontrol.py::RepeaterController` no longer caches one shared
+  `Store`/`Repeater` on `self`. It now keeps them per calling OS thread
+  (`threading.local()`), created lazily on that thread's first write, while a single
+  `repeater` run row (`self._run_id`) is created once under a lock and shared by every
+  thread's `Repeater` so tabs from any thread still appear together. `list_tabs()` and
+  `create_from_flow()` use a new `_thread_store()` helper in place of the old shared
+  `self._store` for their "open a throwaway connection when nothing persistent exists
+  yet" read path.
+- Impact (other components / project): fixes an intermittent
+  `sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that
+  same thread` in `tests/test_web_repeater.py`'s route tests (found incidentally by
+  another lane; see `ERROR_LOG.md` 2026-09-21 and `docs/bugs/BUG-0021-*`). No change to
+  `Repeater`/`HistoryWriter`/`Store` themselves, to any HTTP route contract, or to
+  `ProxyController` (the in-process proxy-engine controller, which remains correctly
+  single-threaded by construction — its cached `self._store` is safe and unchanged).
+- Risk (level; mitigation): low — internal correctness fix, no interface/schema change.
+  Mitigated by: reproduced the race directly (a thread-churn stress harness driving the
+  same route-handler path showed ~50-75% failure rates across 300-400 iterations before
+  the fix; 0 failures across 600+ iterations after); `tests/test_web_repeater.py` (5
+  tests) still green; full suite green (642 passed / 5 skipped across repeated runs; the
+  2 `test_mutation_operators.py` failures are pre-existing and unrelated).
+- Deliverables:
+  - [x] Per-thread `Store`/`Repeater` in `RepeaterController` (`threading.local()`) — done.
+  - [x] Shared `run_id` across threads under a lock — done.
+  - [x] `list_tabs()`/`create_from_flow()` updated to the per-thread store helper — done.
+  - [x] Stress-reproduced pre-fix, verified fixed post-fix; full suite re-run — done.
+- Effectiveness (assessed 2026-09-21): effective — the same stress harness that
+  reliably reproduced the cross-thread error pre-fix shows zero failures post-fix across
+  600+ iterations, and the full suite is stable across repeated runs.
+
 ### CC-PROXY-0015 — Optional response interception (engine hook + Interceptor flag) (2026-09-21)
 - Change: `ProxyEngine.handle_request` now runs an **awaited response-intercept hook** after
   the byte-exact forward: if the interceptor opts in, the response is wrapped as a

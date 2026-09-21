@@ -169,3 +169,13 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   before being trusted to run unattended — e.g. grep the heuristic's own keyword list
   against a sample of ordinary, incident-free commit messages/diffs and confirm zero
   matches. (from BUG-0020)
+- **PA-0023** — Any object wrapping a `sqlite3` connection (or another thread-affine OS
+  handle) that is held as shared state on an object reachable from more than one call path
+  must not assume its calls always land on the same OS thread — either confine it to a
+  component that is provably single-threaded by construction (state that invariant in the
+  docstring), or make the cached handle per-thread (`threading.local()`), never a single
+  shared instance attribute reused blindly. Do not copy a "cache one connection on `self`"
+  pattern from one component into a new one without re-checking whether the single-thread
+  assumption still holds for the new component's actual callers — e.g. an ASGI test client
+  used without its context-manager form spins up a fresh thread per top-level call, which
+  is enough to break it. (from BUG-0021)

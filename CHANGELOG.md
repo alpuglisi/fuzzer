@@ -14,6 +14,20 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (LAB, `CC-LAB-0020`, T-LAB0.6): added the Gitleaks-based secret-scanner
+  build gate — `.gitleaks.toml` (repo root) extending Gitleaks' default ruleset with
+  an allowlist for explicitly `FAKE`/`EXAMPLE`/`PLACEHOLDER`-marked seeded credentials,
+  `fuzzlab/labgen/secret_scanner.py` (a thin wrapper mirroring `oracle_wrapper.py`'s
+  injected-runner pattern, fails the build on a scanner crash as well as a real hit),
+  and `tests/test_labgen_secret_scanner.py`'s should-flag/should-not-flag fixture
+  corpus — a separate, complementary gate to the existing name-leak scanner, not an
+  extension of it. Gitleaks (8.16.0) was installable via `apt-get` in this sandbox, so
+  the real binary is used in the test suite rather than a mocked fallback.
+- Fix (PROXY, `CC-PROXY-0016`, BUG-0021): `RepeaterController` cached a single `sqlite3`
+  connection as shared instance state and reused it across whichever OS thread happened
+  to call it, causing an intermittent `sqlite3.ProgrammingError` (cross-thread SQLite
+  use) in `tests/test_web_repeater.py` — now keeps the connection per calling thread
+  (`threading.local()`), sharing one `repeater` run row across threads. New PA-0023.
 - Feature (LAB, `CC-LAB-0019`, T-LAB0.4): `fuzzlab/labgen/emitter.py` (the `Emitter` ABC —
   `render(cell) -> EmittedFiles`, `supports()`; `EmittedFiles` a tuple, never assumed
   single-file, for future routed/multi-file stacks per `CR-LAB-0001` Addendum D), a

@@ -27,15 +27,22 @@ Format per entry:
   thread` (a different one of the two failing each time). Reproduced twice independently
   (each time with different specific test(s) failing, consistent with a genuine race rather
   than one bad test); not reliably reproducible on demand afterward — order/timing-dependent.
-- **Root cause:** not yet investigated. The error itself points at `fuzzlab/proxy/repeater.py`
-  (or its `SocketSender`/store-adapter path) obtaining a SQLite connection/cursor on one
-  thread and using it from another — Python's `sqlite3` module rejects this by default. Full
-  RCA not yet done.
-- **Remediation:** not yet fixed. Unrelated to the lab-generator (LAB component) work in
-  progress this session; owned by PROXY/UI. Tracked as follow-up work (a full
-  `docs/bugs/BUG-NNNN` investigation + fix is still owed per this log's own scope note —
-  logging the finding now, in the turn it was found, rather than only once it's fixed).
-- **Status:** Open.
+- **Root cause:** `fuzzlab/web/proxycontrol.py::RepeaterController` (not `Repeater`/
+  `SocketSender` themselves) cached one persistent `Store`/`sqlite3` connection as shared
+  instance state (`self._store`/`self._rep`) and reused it for every request regardless of
+  which OS thread was calling. `fastapi.testclient.TestClient`, when not used as a context
+  manager, spins up a fresh `anyio` portal thread per top-level `client.get()`/`client.post()`
+  call; whether the bug fires depends on whether Linux happens to reuse the same low-level
+  thread id for the next ephemeral thread, which is why it was order/timing-dependent rather
+  than deterministic. Full RCA in `docs/bugs/BUG-0021-repeater-controller-cross-thread-sqlite.md`.
+- **Remediation:** `RepeaterController` now keeps its `Store`/`Repeater` per calling thread
+  (`threading.local()`) instead of as one shared attribute, while still sharing a single
+  `repeater` run row across threads (`self._run_id` under a lock). See `CC-PROXY-0016`.
+  Reproduced reliably under thread-churn stress testing (100s of failures per few hundred
+  iterations) before the fix, 0 failures across 600+ iterations after; full suite green
+  (642 passed / 5 skipped; the 2 `test_mutation_operators.py` failures are pre-existing and
+  unrelated).
+- **Status:** Fixed.
 
 ## 2026-09-21 — sqlmap/commix exit non-zero on a legitimate negative finding, not only on a crash
 
