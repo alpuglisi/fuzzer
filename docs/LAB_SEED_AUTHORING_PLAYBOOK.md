@@ -185,9 +185,16 @@ labels.json / expectedresults.csv / injection-points.json
 - **The 5–20% expected LLM-draft error rate** (Addendum C §2.2) has no
   measurement yet specific to framework-idiomatic web code, only adjacent
   analogues from other artifact types.
-- **No tool-oracle has actually been wired up yet** — sqlmap/commix/
-  SSTImap/Nuclei/ZAP are recommended but unintegrated; §"Recommended next
-  action" below is exactly the step that closes this gap.
+- **sqlmap-as-oracle is validated (`docs/spikes/SPIKE-001-sqlmap-vs-vapi.md`,
+  2026-09-21):** headless `sqlmap --batch` correctly confirmed a real
+  SQLi-vulnerable endpoint and correctly cleared its properly-parameterized
+  twin, with zero original exploit code written by anyone. **One concrete
+  correction the spike surfaced:** sqlmap treats a `401`/`403` "no
+  vulnerability" response as an auth failure and refuses to test past it by
+  default — the oracle wrapper must pass the matching `--ignore-code` for
+  any cell whose secure-twin response is 401/403, or it will silently
+  under-test rather than confirm secure. commix/SSTImap/Nuclei/ZAP remain
+  unintegrated.
 - **AutoBaxBuilder's self-bias question is contested** (paper vs. project
   site) and unresolved — don't attribute full independence to its exploits
   until arXiv:2512.21132 §4.4 has been read and its verdicts cross-checked
@@ -196,27 +203,29 @@ labels.json / expectedresults.csv / injection-points.json
   business logic, race conditions) has not been decided or budgeted** —
   this needs your call, not a default assumption.
 
-## Recommended next action (revised, Addendum E)
+## Recommended next action (revised again, post-Spike-001)
 
-The original recommendation here — "author three real seeds with a
-stopwatch," which assumed someone writes original exploit code — is
-superseded by a cheaper, no-exploit-authoring-required first step:
+The sqlmap half of the original "wrap sqlmap and commix, validate against a
+known-vulnerable seed app" action is **done** — see
+`docs/spikes/SPIKE-001-sqlmap-vs-vapi.md`. What's left before attempting an
+original seed:
 
-**Wrap sqlmap and commix as headless pass/fail oracles, and validate them
-against a known-vulnerable permissive seed app (e.g. vAPI or DVWA) and its
-secure counterpart.** Concretely: stand up one of those apps, point sqlmap
-(or commix) at a known-SQLi (or known-command-injection) endpoint and its
-secure equivalent, and confirm the tool correctly returns
-vulnerable-on-one, clean-on-the-other. This requires **no original exploit
-authoring from anyone** — the tools already encode the expertise this
-project was missing — and it validates the core architectural thesis
-(independent tool-oracle confirms a label) at near-zero cost before this
-project attempts an original seed on its own generated code.
+1. **Do the same validation for commix** (OS command injection) against a
+   known-vulnerable/secure pair — same method as Spike 001, same near-zero
+   cost, no original exploit authoring.
+2. **Build the actual reusable oracle wrapper**, not just an ad-hoc CLI
+   invocation — a small function that runs sqlmap/commix headlessly against
+   a given endpoint and returns a clean pass/fail, encoding the
+   `--ignore-code` lesson from Spike 001 (read the cell's declared "secure"
+   HTTP status from the manifest and pass it automatically) and the
+   loopback-only/oracle-never-matches-SUT constraints from Addendum E.
+3. Only after that wrapper exists does it make sense to attempt an original
+   Tier-A seed on this project's own (eventual) generated code — the
+   security assertion for it is now a call to that wrapper, not hand-written
+   exploit logic.
+4. Separately, decide whether to pursue the three gap classes (IDOR/BOLA,
+   business logic, race conditions) via a paid one-off consultation or defer
+   them — still your call, still not decided.
 
-Only after that's proven does it make sense to attempt an original Tier-A
-seed (still low-risk, since its security assertion is now a tool-oracle
-call, not hand-written exploit logic) and, later, decide whether to pursue
-the three gap classes via a paid one-off consultation or defer them. None
-of this requires Phase 0 to be finished first, but the sqlmap/commix
-validation step is cheap enough that it can reasonably happen in parallel
-with Phase 0's implementation.
+None of this requires Phase 0 to be finished first, and steps 1–2 are cheap
+enough to run in parallel with Phase 0's implementation.
