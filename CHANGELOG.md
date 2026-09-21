@@ -13,6 +13,13 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 2 build (T2.5/T2.6/T2.7 algorithms): added the fewer-requests building
+  blocks as pure, tested `core/` modules — `fingerprint.py` (server/framework/DBMS/
+  WAF from headers/cookies/errors), `dedup.py` (DOM-skeleton MinHash +
+  `TemplateClusterer` so near-duplicate pages are audited once), and `hybrid.py`
+  (`needs_browser` — static-first, browser-on-demand). +10 tests (94/94 green).
+  Loop-wiring into the crawler/auditor and the live request-reduction measurement
+  ride with T2.8. Change-control: CC-CRAWL-0005, CC-AUD-0006.
 - Phase 2 build (T2.1 wiring): the **oracle is now the sole finding-writer**. Added
   `fuzzlab/tools/probesender.py` (authenticated + standalone probe senders adapting
   tool HTTP to the oracle's `Sender`); the fuzzer's `--store` path confirms its

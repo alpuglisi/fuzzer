@@ -3,6 +3,32 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0005 — Template dedup + hybrid-crawl decision (algorithms) (2026-09-21)
+- Change: built two Phase 2 crawler algorithms as pure, tested `core/` modules.
+  `core/dedup.py` (T2.6): DOM-skeleton MinHash + `TemplateClusterer` — near-duplicate
+  pages (same structure, different data) get the same `template_cluster_id` so they
+  are audited once. `core/hybrid.py` (T2.7): `needs_browser(html)` — decides whether
+  a statically fetched page is client-rendered and must escalate to Playwright
+  (conservative: escalate on doubt).
+- Impact (other components / project): these reduce requests when wired into the
+  crawl loop (audit-once-per-cluster; static-first, browser-on-demand). The
+  algorithms are in `core/` (shared, dependency-light). Wiring into `spider.py`'s
+  fetch loop — computing `template_cluster_id` from the fetched HTML and switching
+  engines per page — is the next step (needs the live browser/lab to validate, and
+  is measured by T2.8).
+- Risk (level; mitigation): low (pure functions, tested). Dedup hiding a distinct
+  page mitigated by clustering on skeleton (not content) with a tunable threshold;
+  hybrid mis-classifying a JS page mitigated by conservative escalation. 6 unit
+  tests (same-template clusters together; different templates separate; SPA/noscript
+  escalate; static page does not).
+- Deliverables:
+  - [x] `dedup.py` (MinHash + clusterer) + tests (T2.6) — done.
+  - [x] `hybrid.py` (`needs_browser`) + tests (T2.7) — done.
+  - [ ] Wire into `spider.py` fetch loop (cluster id from HTML; engine switch) — todo (with T2.8).
+- Effectiveness (assessed 2026-09-21): effective in unit tests — 5 same-template
+  pages collapse to one cluster; SPA/noscript shells escalate while a text-rich page
+  does not. Live request reduction measured in T2.8.
+
 ### CC-CRAWL-0004 — Authenticated Playwright crawl (cookie injection) (2026-09-21)
 - Change: the crawler's Playwright engine now authenticates by injecting the
   session into the browser context. `LocalSpider` gained `session_manager`/

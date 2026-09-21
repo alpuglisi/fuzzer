@@ -32,9 +32,14 @@ Build started. Done so far:
   only; the provisional timing-only finding path is removed. An oracle→harness test
   scores oracle findings.
 
-Next: T2.5 fingerprint, T2.6 MinHash dedup, T2.3 rules-as-data + negatives, T2.7
-hybrid crawl, T2.9 category selection, T2.10 fail-safe, T2.8 request-efficiency
-measurement (live). 84/84 tests green.
+- **T2.5/T2.6/T2.7** (algorithms) — `core/fingerprint.py` (server/framework/DBMS/WAF),
+  `core/dedup.py` (DOM-skeleton MinHash + `TemplateClusterer`), and `core/hybrid.py`
+  (`needs_browser`) built and unit-tested. Loop-wiring into the crawler/auditor
+  (cluster-id from HTML, engine switch, fingerprint→`target` row) rides with T2.8.
+
+Next: T2.3 rules-as-data + negatives, T2.9 category selection, T2.10 fail-safe, then
+T2.8 wire the fewer-requests trio into the loops + measure request reduction (live).
+94/94 tests green.
 
 ## Principles (this phase)
 

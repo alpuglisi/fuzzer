@@ -3,6 +3,26 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0006 — Target fingerprinting (algorithm) (2026-09-21)
+- Change: built `core/fingerprint.py` (T2.5) — a pure, accumulative fingerprinter
+  that identifies server / framework / DBMS / WAF from response headers, cookies,
+  and error text (`Fingerprint.merge` accumulates over responses). Fingerprint-
+  before-fuzz lets the scheduler/oracle scope payloads to the target.
+- Impact (other components / project): the auditor will accumulate a fingerprint
+  over its fetches and write the `target` row (dbms/framework/waf), which the
+  scheduler (#8) and oracle (#7) read. The module is in `core/` (shared). Wiring it
+  into the auditor's fetch loop + `target` write is the next step (needs live
+  responses to validate end-to-end).
+- Risk (level; mitigation): low (pure function, tested). Mis-fingerprint is
+  non-fatal (payloads just aren't scoped); mitigated by first-observation-wins merge
+  and signature specificity. 3 unit tests (PHP/MySQL from headers+error; framework
+  from cookie; WAF + merge).
+- Deliverables:
+  - [x] `fingerprint.py` + tests (T2.5) — done.
+  - [ ] Accumulate in the auditor loop and write the `target` row — todo (with T2.8).
+- Effectiveness (assessed 2026-09-21): effective in unit tests — server/framework/
+  DBMS/WAF identified from representative responses. Live wiring pending.
+
 ### CC-AUD-0005 — Authenticated Playwright audit (cookie injection) (2026-09-21)
 - Change: the auditor's Playwright engine now authenticates too — `ContentFetcher`
   gained `session_manager`/`auth_base_url`, and `__enter__` injects the session
