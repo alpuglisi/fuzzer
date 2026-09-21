@@ -1,18 +1,6 @@
 {% extends "base.html" %}
-{% block body %}
-<header class="masthead">
-  <h1>fuzzlab &mdash; control panel</h1>
-  <p class="muted">Local, lab-only. Nothing is sent to the target until you act
-    (no auto-run). This panel reads results the tools wrote.</p>
-  <nav class="tabs">
-    <a href="#launcher" data-tab="launcher">Launcher</a>
-    <a href="#proxy" data-tab="proxy">Proxy</a>
-    <a href="#results" data-tab="results">Results</a>
-    <a href="#ml" data-tab="ml">ML</a>
-    <a href="#diagnostics" data-tab="diagnostics">Diagnostics</a>
-  </nav>
-</header>
-
+{% block crumb %}Control panel{% endblock %}
+{% block content %}
 <section class="panel" id="tab-launcher">
   <div class="card">
     <div>Target: <code>{{ target }}</code></div>

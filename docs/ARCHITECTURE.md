@@ -388,6 +388,13 @@ tracked in the requirements files, not here.
   byte-exact send (authorized-gated), and "→ Repeater" from a History flow. Phase 2.4 added
   **Scope + Match-Replace** management (`/api/proxy/scope`, `/api/proxy/matchreplace`),
   **completing the Proxy workbench** (History · Intercept · Repeater · Scope/Match-Replace).
+- **Layout redesign (`docs/UI_LAYOUT_REDESIGN.md`, D-UI-shell):** the panel's five sections
+  now live in a persistent **app shell** — a left-sidebar nav + a top context bar (target /
+  scope / authorized / proxy chips) — over a **design-token** system (`web/static/tokens.css`:
+  light / dark / system theme + compact density, persisted per-viewer, no-FOUC). Delivered as
+  **R0** (`base.html` shell, retokenized `app.css`, `initShell()`; chrome-only, no behavior
+  change, hash-based section switching preserved; CC-UI-0021, FR-UI-8). R1 adds deep-linkable
+  per-section routes + an Overview dashboard, R2 a Findings workbench, R3 a Proxy rebuild.
   **Pending:** the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
   `metric_series` time-series table (Phase 4), Datasette-style store exploration, a
   `--dry-run` mode, and a plain CLI entry point per tool for headless use

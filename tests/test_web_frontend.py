@@ -34,9 +34,45 @@ def test_static_js_is_served():
     assert "subscribe" in r.text and "initTabs" in r.text
 
 
+def test_static_tokens_css_is_served():
+    # R0 design tokens: one source of truth for color/elevation/density.
+    r = _client().get("/static/tokens.css")
+    assert r.status_code == 200
+    assert "text/css" in r.headers["content-type"]
+    # light default + explicit dark override + system-preference dark + density
+    assert "--accent" in r.text
+    assert '[data-theme="dark"]' in r.text
+    assert "prefers-color-scheme: dark" in r.text
+    assert '[data-density="compact"]' in r.text
+
+
+def test_index_renders_the_app_shell():
+    # R0 shell: left sidebar (nav.tabs) + top context bar, tokens linked before app.css,
+    # and a no-FOUC head script that applies the persisted theme before first paint.
+    body = _client().get("/").text
+    assert 'class="sidebar"' in body and 'class="topbar"' in body
+    assert '/static/tokens.css' in body
+    assert body.index('/static/tokens.css') < body.index('/static/app.css')
+    assert 'id="theme-toggle"' in body and 'id="density-toggle"' in body
+    assert 'id="proxy-chip"' in body
+    assert 'localStorage.getItem("fl-theme")' in body  # no-FOUC inline script
+    # the context bar reflects config (authorization state) server-side
+    assert "not authorized" in body
+
+
+def test_shell_context_on_run_and_not_found_pages():
+    # every page carries the same shell chrome (topbar chips need the shell context)
+    client = _client()
+    nf = client.get("/runs/999999")   # no store → not found, still framed by the shell
+    assert nf.status_code == 404
+    assert 'class="sidebar"' in nf.text and 'class="topbar"' in nf.text
+
+
 def test_index_renders_the_tab_shell():
     body = _client().get("/").text
-    assert '<nav class="tabs">' in body
+    # R0: the tab nav moved into the app-shell sidebar (a labelled landmark), but it is
+    # still <nav class="tabs"> switching the same five sections by data-tab/id.
+    assert '<nav class="tabs"' in body
     for tab in ("launcher", "proxy", "results", "ml", "diagnostics"):
         assert f'data-tab="{tab}"' in body
         assert f'id="tab-{tab}"' in body

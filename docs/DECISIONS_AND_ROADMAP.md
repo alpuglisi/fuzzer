@@ -323,6 +323,23 @@ to upstreams), loopback-only, and on a **separate port** from the panel; flow **
 remains readable cross-process from the store. Without `--with-proxy` the tab is dormant
 and the panel is unchanged. See `docs/UI_REVAMP_PLAN.md`.
 
+### D-UI-shell — The web UI is a left-nav app shell over a design-token system (layout redesign R0)
+
+The panel's layout is a persistent **app shell**: a left-**sidebar** navigation (grouped
+Workbench / Analysis sections) plus a **top context bar** (target, scope, authorization,
+proxy status), framing a scrolling content area — replacing the earlier top hash-tab
+masthead (Phase 0.2, CC-UI-0012), whose hash-based section switching it keeps. All color,
+elevation, and density live in one **design-token** stylesheet (`tokens.css`): **light /
+dark / system** theme (system by default, explicit override wins) and a **compact density**,
+each persisted per-viewer in `localStorage` and applied before first paint. Rationale:
+scalability (a sidebar grows to many sections where a tab row does not), a consistent frame
+across pages, and a single retheme point — matching the app-shell + severity-token patterns
+of the VM/DAST tools reviewed in `docs/UI_LAYOUT_REDESIGN.md`. The shell is **chrome only**:
+it preserves no-auto-run (D11), loopback-only, the `authorized` gate, NFR-UI-read-only, and
+redaction; the invariant-bearing markup is unchanged. R0 is the first step of the R0→R3
+migration in `docs/UI_LAYOUT_REDESIGN.md` (R1 deep-linkable per-section routes + Overview,
+R2 Findings workbench, R3 Proxy rebuild). Realizes FR-UI-8; see CC-UI-0021.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the

@@ -3,6 +3,63 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0021 — App shell + design tokens (layout redesign R0) (2026-09-21)
+- Change: implemented **R0** of the layout redesign (`docs/UI_LAYOUT_REDESIGN.md`,
+  CC-UI-0020): replaced the top hash-tab masthead with a persistent **app shell** and a
+  **design-token** system, with **no behavior change** to the launcher / proxy / results.
+  Realizes new requirement **FR-UI-8**.
+  - New `fuzzlab/web/static/tokens.css` — the single source of truth for color, elevation,
+    and density: light default, dark under `@media (prefers-color-scheme: dark)` guarded by
+    `:root:not([data-theme="light"])`, an explicit `:root[data-theme="dark"]` override, and
+    `:root[data-density="compact"]`.
+  - `base.html` rewritten into the shell: a left **sidebar** (`<nav class="tabs">`, grouped
+    Workbench / Analysis) + a **top context bar** with target / scope / authorized / proxy
+    chips and theme / density / collapse controls, over a scrolling `<main class="content">`
+    (`{% block content %}`). A no-FOUC `<head>` script applies persisted theme / density /
+    collapse to `<html>` before first paint (wrapped in try/catch — blocked storage never
+    breaks rendering). `tokens.css` is linked before `app.css`.
+  - `index.html` / `run.html` / `not_found.html` moved from `{% block body %}` to
+    `{% block content %}` (the masthead + top-tabs were dropped from index; the five
+    `.panel` sections and every launcher form are byte-for-byte unchanged). Each adds a
+    `{% block crumb %}`.
+  - `app.css` rewritten as a CSS-grid shell (`grid-template-areas: "side top" "side main"`)
+    with **retokenized** components — every existing class preserved (`.card`, `nav.tabs`,
+    `.panel`/`.hidden`, `.field`, `.launch-form`/`.catgroup`/`.cat`/`.actions`/
+    `.launch-preview`/`.launch-output`, `#flow-table`/`.flow-raw`, `#pending-table`/
+    `.pending-raw`, `.pill`/`.result`, tables) now consuming tokens instead of raw hex.
+  - `app.js`: added `initShell()` (theme cycle system→light→dark, density toggle, sidebar
+    collapse — all persisted in `localStorage` behind try/catch — plus the topbar proxy
+    chip from `/api/proxy/status`); `initTabs()` now no-ops on pages without `.panel`
+    sections (run detail / not-found) so no tab is falsely highlighted. Selectors,
+    `subscribe`, and all proxy/launcher init unchanged.
+  - `app.py`: added `_shell_context(cfg)` (target / scope / authorized) and merged it into
+    the index, run-detail, and not-found `TemplateResponse`s so every page carries identical
+    shell chrome; `_index_context` now spreads it.
+- Impact (other components / project): UI only; no schema, contract, or CLI change. No route
+  added or changed. Supersedes the Phase-0.2 top-tab shell (CC-UI-0012) as the layout, while
+  keeping its hash-based section switching. New static asset `/static/tokens.css`. Adds
+  decision **D-UI-shell** (left-nav app shell + design tokens) to the roadmap.
+- Risk (level; mitigation): low. Chrome-only rewrite; the invariant-bearing markup (launcher
+  forms, gate pills, proxy cards, result tables) is unchanged, so the no-auto-run / loopback /
+  authorized / read-only / redaction invariants are untouched. Mitigation: full suite green
+  (499 passed / 6 skipped) — existing shell tests pass unchanged because `nav.tabs` / `.card`
+  / `initTabs` / `subscribe` were preserved — plus new asset/shell tests, and a real-browser
+  (Playwright) screenshot check of launcher + proxy in light and dark.
+- Deliverables:
+  - [x] `tokens.css` (light / dark / system + density) — done.
+  - [x] `base.html` app shell (sidebar + top context bar + no-FOUC) — done.
+  - [x] `index.html` / `run.html` / `not_found.html` → `{% block content %}` + crumb — done.
+  - [x] `app.css` grid shell + retokenized components (all classes preserved) — done.
+  - [x] `app.js` `initShell()` + `initTabs()` guard — done.
+  - [x] `app.py` `_shell_context()` merged into every page — done.
+  - [x] Tests: tokens served, shell renders, shell context on run/not-found — done.
+  - [x] Full suite + real-browser visual verification — done.
+  - [ ] R1 (routes + Overview), R2 (Findings), R3 (Proxy rebuild) — pending.
+- Effectiveness (assessed 2026-09-21): effective. The shell renders professionally in both
+  themes (verified by screenshots), section switching and all launcher/proxy controls behave
+  exactly as before, and the full suite is green with the design system now centralized in
+  `tokens.css` for R1–R3 to build on.
+
 ### CC-UI-0020 — Web UI layout redesign (design record) (2026-09-21)
 - Change: added `docs/UI_LAYOUT_REDESIGN.md` — a design record for reworking the panel's
   **layout / information architecture** (distinct from the feature revamp in

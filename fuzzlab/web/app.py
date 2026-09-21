@@ -141,12 +141,21 @@ def _active_plugins() -> list[dict]:
         return []
 
 
-def _index_context(cfg: Config, state: LauncherState, runs: list[dict]) -> dict[str, Any]:
+def _shell_context(cfg: Config) -> dict[str, Any]:
+    """Chrome shared by every page (sidebar + top context bar): the target, scope, and
+    authorization state the topbar chips render. Merged into each TemplateResponse so the
+    shell is identical on the index, a run detail, and the not-found page."""
     return {
         "target": cfg.get("target_base_url", ""),
         "scope": ", ".join(cfg.get("scope_hosts", [])),
-        "mode": state.mode,
         "authorized": bool(cfg.get("authorized", False)),
+    }
+
+
+def _index_context(cfg: Config, state: LauncherState, runs: list[dict]) -> dict[str, Any]:
+    return {
+        **_shell_context(cfg),
+        "mode": state.mode,
         "categories": _known_categories(),
         "commands": _tool_commands(cfg),
         "activities": _activities(),
@@ -244,8 +253,10 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         detail = _read_detail(cfg, run_id)
         if detail is None:
             return templates.TemplateResponse(
-                request, "not_found.html", {"run_id": run_id}, status_code=404)
-        return templates.TemplateResponse(request, "run.html", {"detail": detail})
+                request, "not_found.html",
+                {"run_id": run_id, **_shell_context(cfg)}, status_code=404)
+        return templates.TemplateResponse(
+            request, "run.html", {"detail": detail, **_shell_context(cfg)})
 
     # --- launcher: dry-run preview, gated execution, live output (Phase 0.3) ---
 

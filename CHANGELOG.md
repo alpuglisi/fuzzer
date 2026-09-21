@@ -14,6 +14,18 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (UI, layout redesign R0): reframed the web panel in a persistent **app shell** — a
+  left-sidebar nav (grouped Workbench / Analysis) + a top context bar (target / scope /
+  authorized / proxy chips) — over a new **design-token** stylesheet (`web/static/tokens.css`:
+  light / dark / system theme + compact density, persisted per-viewer, applied before first
+  paint). Rewrote `base.html`, retokenized `app.css` as a CSS-grid shell (every component
+  class preserved), added `initShell()` for theme/density/collapse + the proxy chip, and merged
+  a shared `_shell_context` into every page — because the top hash-tab masthead did not scale
+  and the UI needed one retheme point to build R1–R3 on. **Chrome only:** hash-based section
+  switching and all launcher/proxy/results behavior are unchanged; the no-auto-run / loopback /
+  authorized / read-only / redaction invariants are untouched. Full suite green (499 passed /
+  6 skipped) + real-browser screenshot verification (light + dark). D-UI-shell, CC-UI-0021,
+  FR-UI-8.
 - Docs (UI): added `docs/UI_LAYOUT_REDESIGN.md`, a design record for reworking the panel's
   layout/IA — grounded in a cross-tool UX review (Rapid7, Tenable, Qualys VMDR,
   Greenbone/OpenVAS, NodeWare, Burp Suite, OWASP ZAP). Proposes an app shell (left sidebar +

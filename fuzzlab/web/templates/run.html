@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}fuzzlab run #{{ detail.id }}{% endblock %}
-{% block body %}
+{% block crumb %}Run #{{ detail.id }}{% endblock %}
+{% block content %}
 <p><a href="/">&larr; all runs</a></p>
 <h1>Run #{{ detail.id }} &mdash; {{ detail.tool }}</h1>
 <p class="muted">Target <code>{{ detail.target or '' }}</code>,

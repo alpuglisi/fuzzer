@@ -70,7 +70,22 @@ bugs — the research-platform diagnostics of decision D2.
   **separate** from the primary panel), and **Diagnostics** (a TensorBoard-like view for
   performance review and deep troubleshooting). Panels render server-side and degrade
   without JavaScript. *(Realized incrementally: Phase 0.2 builds the shell + Results;
-  Proxy/ML/Diagnostics fill in Phases 2–4.)*
+  Proxy/ML/Diagnostics fill in Phases 2–4. Re-housed in the FR-UI-8 app shell at R0:
+  the five sections became a persistent left-sidebar nav, still switching the same
+  server-rendered `.panel` sections by hash — see D-UI-shell and CC-UI-0021.)*
+- **FR-UI-8** The panel is framed by an **app shell**: a persistent **left-sidebar
+  navigation** (grouped Workbench / Analysis sections) and a **top context bar** showing
+  the current target, scope, authorization state, and proxy status. The shell is shared by
+  every page (index, run detail, not-found) via one base template. A **design-token
+  stylesheet** (`tokens.css`) is the single source of truth for color, elevation, and
+  density; it supports **light / dark / system** theme (system by default, with an explicit
+  override) and a **compact density**, both persisted per-viewer in `localStorage` and
+  applied before first paint (no flash). The shell is chrome only: it changes no launcher /
+  proxy / results behavior and touches none of the NFR-UI invariants.
+  *(Realized: R0 of the layout redesign — `base.html` shell, `tokens.css`, retokenized
+  `app.css`, and `initShell()` for theme/density/collapse persistence + the proxy chip.
+  Deep-linkable per-section routes and the Overview / Findings / Proxy rebuilds follow in
+  R1–R3, per `docs/UI_LAYOUT_REDESIGN.md`.)*
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is
