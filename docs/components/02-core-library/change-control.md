@@ -3,6 +3,29 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0007 — Run-mode category resolver (D14/D15) (2026-09-21)
+- Change: added `core/runmode.py` — the pure decision logic for category selection
+  and the no-ground-truth fail-safe. `resolve_run(mode, ...)` returns a `RunPlan`
+  (categories, scored, source): automatic + ground truth → auto-derived + scored
+  (D14); automatic + no ground truth → explicit selection required or **fail loud**,
+  unscored (D15); manual → user selection, defaulting to all known categories,
+  unscored (D14). `categories_from_vuln_classes` normalizes ground-truth classes
+  (e.g. `sqli`→`sql-injection`, `xss-*`→`xss`) to reference-style categories; unknown
+  categories/modes fail loud. Dependency-light (callers pass the ground-truth and
+  known categories in), so no layering inversion.
+- Impact (other components / project): the launcher/harness and tools call this to
+  scope the auditor rules (T2.3 `categories` filter), payload sources, and oracle
+  strategies (T2.9), and to enforce the D15 fail-safe. No schema change.
+- Risk (level; mitigation): low — pure function; the safety-relevant path (D15) is
+  fail-closed (raises rather than guessing/blasting). 7 unit tests cover D14 lab
+  auto-derive (scored), manual selection/default, D15 fail-loud + unscored, and
+  unknown-category/mode errors.
+- Deliverables:
+  - [x] `runmode.py` resolver + normalization + 7 tests — done.
+  - [ ] Wire into the launcher/harness (scope tools; scored vs unscored) — todo (with T2.8/UI).
+- Effectiveness (assessed 2026-09-21): effective in unit tests — each D14/D15 branch
+  resolves correctly and fails loud on unsafe/unknown input. Suite 105/105.
+
 ### CC-CORE-0006 — Migration 4: rule-evaluation logging (negatives) (2026-09-21)
 - Change: added migration 4 (an `evaluation` table + indexes) recording every
   per-(injection point, rule) evaluation with its outcome (`fired` 0/1), so the

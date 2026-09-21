@@ -47,6 +47,12 @@ def load_rules(path: str | Path | None = None) -> list[Rule]:
                  reference=r.get("reference", "")) for r in data["rules"]]
 
 
+def known_categories(rules: list[Rule] | None = None) -> list[str]:
+    """The set of injection categories the rule set can test (for selection)."""
+    rules = load_rules() if rules is None else rules
+    return sorted({r.category for r in rules})
+
+
 def matches(rule: Rule, point) -> bool:
     """Evaluate a rule's ``when`` predicate against an injection point."""
     when = rule.when

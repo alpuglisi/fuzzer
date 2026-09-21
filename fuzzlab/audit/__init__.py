@@ -6,7 +6,8 @@ injection point and records the outcome of each evaluation — fired and not-fir
 so the store holds negatives, giving later ML a trainable dataset.
 """
 
-from fuzzlab.audit.rules import Rule, load_rules, matches
+from fuzzlab.audit.rules import Rule, load_rules, known_categories, matches
 from fuzzlab.audit.engine import InjectionPoint, evaluate
 
-__all__ = ["Rule", "load_rules", "matches", "InjectionPoint", "evaluate"]
+__all__ = ["Rule", "load_rules", "known_categories", "matches",
+           "InjectionPoint", "evaluate"]

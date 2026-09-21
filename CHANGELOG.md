@@ -13,6 +13,15 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 2 build (T2.9/T2.10): **category selection + no-ground-truth fail-safe**
+  decision logic. `core/runmode.py` `resolve_run` implements D14 (automatic against
+  our lab auto-derives categories from ground truth and is scored; manual selects,
+  defaulting to all) and D15 (automatic against a no-ground-truth target requires an
+  explicit selection or fails loudly, and is unscored); it normalizes ground-truth
+  vuln classes to categories and fails closed on unknown categories/modes.
+  `audit.known_categories()` supplies the selectable set. +7 tests (105/105 green).
+  Wiring into the launcher/harness rides with T2.8. Change-control: CC-CORE-0007,
+  CC-AUD-0008.
 - Phase 2 build (T2.3): **rules-as-data + full evaluation logging**. Added
   `fuzzlab/audit/` — an editable JSON rule set with a declarative `when` predicate,
   a loader, and an engine that records **every** rule evaluation (fired and

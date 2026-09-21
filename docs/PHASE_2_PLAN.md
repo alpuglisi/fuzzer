@@ -43,9 +43,16 @@ Build started. Done so far:
   candidates for fired ones. A `categories` filter is the D14/T2.9 hook. Resolves
   the negatives to-confirm toward a dedicated `evaluation` table.
 
-Next: T2.9 category selection, T2.10 fail-safe, then T2.8 wire the fewer-requests
-trio + rules engine into the crawler/auditor loops and measure request reduction
-(live). 98/98 tests green.
+- **T2.9/T2.10** (decision logic) — `core/runmode.py` `resolve_run` implements
+  category selection (D14: automatic auto-derives from ground truth + scored; manual
+  selects, defaults to all) and the no-ground-truth fail-safe (D15: automatic + no
+  ground truth requires explicit categories or fails loud, unscored). `audit.
+  known_categories()` supplies the selectable set. Fail-closed on unknown
+  categories/modes.
+
+Next (T2.8, live): wire `resolve_run` into the launcher/harness (scope the tools;
+scored vs unscored) and the fewer-requests trio + rules engine into the crawler/
+auditor loops, then measure request reduction against the lab. 105/105 tests green.
 
 ## Principles (this phase)
 

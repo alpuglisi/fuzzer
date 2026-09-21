@@ -3,6 +3,19 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0008 — `known_categories()` for run-mode selection (2026-09-21)
+- Change: added `audit.known_categories()` returning the sorted set of injection
+  categories the rule set can test, so the run-mode resolver (CC-CORE-0007,
+  D14/T2.9) can offer/validate a category selection.
+- Impact (other components / project): consumed by the launcher/harness when
+  building a run plan; no behavior change to the engine itself.
+- Risk (level; mitigation): low — a read-only helper over the loaded rules; covered
+  by the run-mode tests.
+- Deliverables:
+  - [x] `known_categories()` + export — done.
+- Effectiveness (assessed 2026-09-21): effective — returns the rule categories used
+  by the selection tests (105/105).
+
 ### CC-AUD-0007 — Rules-as-data engine + full evaluation logging (T2.3) (2026-09-21)
 - Change: built `fuzzlab/audit/` — a rules-as-data engine. Rules live as JSON
   (`rules_data/default_rules.json`) with a declarative `when` predicate
