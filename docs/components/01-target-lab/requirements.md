@@ -45,6 +45,30 @@ and measured. Authorized, lab-only.
   hand-authored exploit code. IDOR/BOLA, business-logic flaws, and
   race-condition classes (no mature automated oracle) are out of scope until
   further decided. (D20, `CR-LAB-0001` Addendum E)
+- **FR-LAB-11** (Lab track) FR-LAB-10's "tool invoked headlessly" is a single
+  reusable, importable wrapper (`fuzzlab.labgen.oracle_wrapper`, see
+  `CC-LAB-0015`) shared by every seed's security assertion, not a per-seed
+  ad-hoc CLI invocation. Its contract: (a) plain, explicit parameters
+  (target URL, method, injection parameter name/location, vulnerability
+  class, expected "secure" HTTP status code(s), an optional session/token-
+  refresh callback) — independent of the manifest/cell schema, so it can be
+  called before, during, or after that schema exists; (b) a bounded-timeout ×
+  bounded-attempt safety valve so a hung tool invocation can never block the
+  caller indefinitely (encodes Spike 002's rotating-CSRF-token finding);
+  (c) a caller-supplied "secure" status code is translated automatically into
+  the tool's own auth-bypass flag (e.g. sqlmap's `--ignore-code`, encoding
+  Spike 001's finding) so the caller never needs the tool's flag syntax;
+  (d) every invocation is scoped to the one declared injection parameter,
+  never a blind sweep of the target's other fields (encodes Spike 002's
+  parameter-sweep finding); (e) the loopback-only safety check
+  (`assert_loopback`) runs before every invocation and raises rather than
+  silently proceeding on a non-loopback target; (f) the result is one of
+  exactly three verdicts — `confirmed_vulnerable | confirmed_secure |
+  inconclusive` — and a tool crash, timeout, or missing binary is always
+  `inconclusive`, never guessed as secure (fail-closed, matching
+  `NFR-LAB-label-accuracy`'s "labels derived, not hand-asserted" and this
+  project's existing `fuzzlab.oracle` philosophy of never inferring a
+  positive from the absence of a negative signal, PA-0007).
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
@@ -61,6 +85,15 @@ and measured. Authorized, lab-only.
 Serves HTTP to the tools. Publishes ground truth as out-of-band files (above),
 plus `sitemap.xml`/OpenAPI later. Exposes grey-box coverage and fault signals for
 the fuzzer, scheduler, and oracle. Does not write the SQLite store directly.
+(Lab track, generator-build-time) `fuzzlab.labgen.oracle_wrapper` exposes a plain
+Python function per validated class (`run_sql_injection_oracle`,
+`run_command_injection_oracle`, plus a type-dispatching `run_oracle`) taking a
+small request dataclass and returning an `OracleVerdict`
+(`confirmed_vulnerable | confirmed_secure | inconclusive` + raw tool
+output/exit info) — see FR-LAB-11. It takes no dependency on and is never
+imported by `fuzzlab.oracle` (the unrelated runtime detection oracle, FUZZ
+component #7); the two are separate tools with separate purposes that happen
+to share the word "oracle".
 
 ## 6. Dependencies (components)
 None (it is the system under test).
