@@ -13,6 +13,12 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 8 (T8.4): bandit-scheduled, coverage-guided mutation search
+  (`mutation/search.py::MutationSearch`). Operators are chosen with the reused
+  ThompsonBandit (reward = evasion + coverage novelty, zero for any meaning-changing
+  variant), the search hill-climbs, reads coverage through an injected seam (fake offline,
+  grey-box live), and is budget-bounded + reproducible under a fixed seed. +7 tests
+  (310 passed / 4 skipped). Change-control: CC-MUT-0004.
 - Phase 8 (T8.2/T8.3): context-typed XSS + filter learning. `mutation/xss.py` generates
   XSS candidates keyed on the auditor's sink context and drops ones the filter blocks
   (keeping working break-outs like `<svg onfocus=…>`); `mutation/filtermodel.py` mirrors

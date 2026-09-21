@@ -15,6 +15,7 @@ from fuzzlab.mutation.filtermodel import FilterModel, FilterResult
 from fuzzlab.mutation.learn import Bypass, FilterLearner
 from fuzzlab.mutation.operators import (MutationOperator, apply_chain,
                                         default_operators)
+from fuzzlab.mutation.search import MutationSearch, SearchResult
 from fuzzlab.mutation.semantics import SemanticsValidator, canonicalize
 from fuzzlab.mutation.xss import context_from_sink, xss_payloads
 
@@ -30,4 +31,6 @@ __all__ = [
     "FilterResult",
     "FilterLearner",
     "Bypass",
+    "MutationSearch",
+    "SearchResult",
 ]

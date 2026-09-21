@@ -3,6 +3,31 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0004 — Bandit-scheduled, coverage-guided search (T8.4) (2026-09-21)
+- Change: `fuzzlab/mutation/search.py::MutationSearch` searches for a
+  **semantics-preserving** variant that evades the filter and reaches new code. Operators
+  are chosen with the reused `ThompsonBandit` (reward = evasion + coverage novelty, and
+  **zero for any meaning-changing variant**), the search hill-climbs (accepts an improving
+  variant as the new working point), reads coverage through an injected `coverage_fn`
+  (offline fake; live grey-box source), and is budget-bounded + reproducible under a fixed
+  seed (NFR-MUT-bounded). With no `coverage_fn` the objective is pure evasion and it stops
+  at the first preserving bypass.
+- Impact (other components / project): FR-MUT-4 — the search that combines the operators
+  (T8.1), context-typed generation (T8.2), and filter learning (T8.3) under the bandit and
+  the grey-box signal. Reuses the scheduler and the grey-box `CoverageFrontier`; the live
+  coverage-guided run is on-host. Feeds the write-back (T8.5).
+- Risk (level; mitigation): low — pure logic behind seams; the reward structurally
+  refuses meaning-changing variants. Mitigated by 7 tests (`tests/test_mutation_search.py`):
+  reward is zero when meaning changes; pure-evasion finds a preserving bypass; coverage-
+  guided accumulates novelty and evades; determinism under seed; budget bound; the bandit
+  is actually updated; already-uncaught base returns immediately. Suite 310 passed / 4 skipped.
+- Deliverables:
+  - [x] `MutationSearch` (bandit operator selection + coverage hill climbing) (T8.4) — done.
+  - [ ] Variant write-back + destructive gate (T8.5); gated LLM scaffold (T8.6); exit (T8.7) — next.
+- Effectiveness (assessed 2026-09-21): effective in tests — the search finds evading,
+  semantics-preserving, coverage-gaining variants deterministically within budget; the
+  live coverage exit is on-host.
+
 ### CC-MUT-0003 — Context-typed XSS + filter model & bypass learning (T8.2/T8.3) (2026-09-21)
 - Change: `fuzzlab/mutation/xss.py` generates **context-typed** XSS candidates keyed on
   the auditor's sink context (`html`/`html-attribute`/`url-attribute`/`js`, from

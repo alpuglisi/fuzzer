@@ -79,7 +79,7 @@ transformations; generated payloads respect the destructive gate and lab-only po
 - **T8.3 — Filter model + transformation learning `[done, offline]` (FR-MUT-3).**
   `fuzzlab/mutation/filtermodel.py` (the shared-ruleset seam) + `learn.py`: send canaries,
   infer what the filter strips/encodes/blocks, and prefer operators that evade it.
-- **T8.4 — Bandit-scheduled, coverage-guided search `[planned]` (FR-MUT-4).**
+- **T8.4 — Bandit-scheduled, coverage-guided search `[done, offline]` (FR-MUT-4).**
   `fuzzlab/mutation/search.py` — operator arms selected via `ThompsonBandit` (context =
   class + sink/filter-state; reward = evasion + coverage gain), coverage-guided hill
   climbing against the grey-box seam; budget-bounded and reproducible under a fixed seed.
