@@ -39,6 +39,20 @@ def test_require_raises_when_missing():
         store.require("localhost", "admin")
 
 
+def test_host_is_keyed_by_hostname_regardless_of_port_or_scheme():
+    """Save with a port (or a full URL) and look up by bare hostname — they agree
+    (the session layer looks up by urlparse(url).hostname, without a port)."""
+    store = CredentialStore(backend=FakeBackend())
+    store.set("127.0.0.1:8080", "admin", "admin", "admin123")   # saved with a port
+    assert store.get("127.0.0.1", "admin") == Credential("admin", "admin123")
+    assert store.require("127.0.0.1", "admin").username == "admin"
+    # a full URL and a different port also normalize to the same host key
+    assert store.get("http://127.0.0.1:9999/x", "admin") == Credential("admin", "admin123")
+    # and the reverse: saved without a port, fetched with one
+    store.set("example.com", "user", "u", "p")
+    assert store.get("example.com:443", "user") == Credential("u", "p")
+
+
 def test_password_is_not_reprd():
     assert "s3cret" not in repr(Credential("u", "s3cret"))
     assert "***" in repr(Credential("u", "s3cret"))

@@ -54,6 +54,21 @@ def _norm(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "_", value).upper()
 
 
+def _norm_host(host: str) -> str:
+    """Key credentials by the bare hostname (no scheme, no port).
+
+    The session layer looks up credentials by ``urlparse(url).hostname`` (e.g.
+    ``127.0.0.1``), so the store must key the same way regardless of whether the user
+    saved them as ``127.0.0.1``, ``127.0.0.1:8080``, or ``http://127.0.0.1:8080/``.
+    """
+    from urllib.parse import urlparse
+    h = (host or "").strip()
+    if not h:
+        return h
+    parsed = urlparse(h if "://" in h else "//" + h)
+    return parsed.hostname or h
+
+
 class CredentialStore:
     def __init__(self, backend: _Backend | None = None, allow_env: bool = False,
                  scope_hosts: list[str] | None = None,
@@ -76,13 +91,14 @@ class CredentialStore:
 
     @staticmethod
     def _account(host: str, identity: str) -> str:
-        return f"{host}|{identity}"
+        return f"{_norm_host(host)}|{identity}"
 
     def set(self, host: str, identity: str, username: str, password: str) -> None:
         secret = json.dumps({"username": username, "password": password})
         self._backend.set_password(SERVICE, self._account(host, identity), secret)
 
     def get(self, host: str, identity: str) -> Credential | None:
+        host = _norm_host(host)
         # Gated, lab-only env fallback takes precedence when enabled + in scope.
         if self._allow_env and host in self._scope:
             env_cred = self._from_env(host, identity)
@@ -98,8 +114,10 @@ class CredentialStore:
         cred = self.get(host, identity)
         if cred is None:
             raise CredentialError(
-                f"no credentials for identity {identity!r} on host {host!r}; "
-                f"save them with `fuzzlab session set-credential`"
+                f"no credentials for identity {identity!r} on host "
+                f"{_norm_host(host)!r}; save them with `fuzzlab session set-credential "
+                f"--host {_norm_host(host)} --identity {identity} --username <user>` "
+                f"(the host is the hostname, without a port)"
             )
         return cred
 

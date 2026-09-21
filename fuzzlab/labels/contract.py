@@ -141,6 +141,13 @@ def _load_expected_csv(ground_truth_dir: str | Path) -> dict[str, bool]:
 def load(ground_truth_dir: str | Path) -> GroundTruth:
     """Load and validate all three files, cross-checking labels vs expected CSV."""
     gt_dir = Path(ground_truth_dir)
+    if not (gt_dir / "labels.json").is_file():
+        raise ContractError(
+            f"ground-truth directory not found or incomplete: {gt_dir} "
+            f"(expected {gt_dir / 'labels.json'}). Pass a path relative to your current "
+            f"directory — e.g. 'lab/ground-truth' from the repo root, or 'ground-truth' "
+            f"from inside lab/ — or an absolute path."
+        )
     labels_data = json.loads((gt_dir / "labels.json").read_text("utf-8"))
     cases = load_labels(gt_dir)
     points = load_injection_points(gt_dir)

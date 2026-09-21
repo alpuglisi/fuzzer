@@ -9,6 +9,13 @@ from fuzzlab.labels import contract
 GT_DIR = "lab/ground-truth"
 
 
+def test_missing_ground_truth_dir_raises_actionable_error(tmp_path):
+    with pytest.raises(contract.ContractError) as exc:
+        contract.load(tmp_path / "lab" / "ground-truth")   # does not exist
+    msg = str(exc.value)
+    assert "ground-truth directory not found" in msg and "repo root" in msg
+
+
 def test_loads_and_cross_checks_real_ground_truth():
     gt = contract.load(GT_DIR)
     assert gt.target == "puppy-fort-factory"

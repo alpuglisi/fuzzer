@@ -3,6 +3,26 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0017 — Credentials keyed by bare hostname (BUG-0007) (2026-09-21)
+- Change: `CredentialStore` now normalizes the host to its bare hostname
+  (`_norm_host`: strips scheme/port) on `set`/`get`/`require`/`delete`, so credentials
+  saved as `127.0.0.1`, `127.0.0.1:8080`, or `http://127.0.0.1:8080/` all resolve to the
+  same key — matching how the session layer looks them up (`urlparse(url).hostname`). The
+  `require` error message now prints the exact `set-credential` command with the
+  normalized host.
+- Impact (other components / project): fixes the on-host `CredentialError` where
+  `set-credential --host 127.0.0.1:8080` stored a key the crawler's hostname lookup
+  (`127.0.0.1`) missed (BUG-0007). No API change; existing hostname-only usage is
+  unaffected (normalization is a no-op there).
+- Risk (level; mitigation): low — normalization at the store boundary; the session layer
+  and `HttpClient` scope already use `hostname`. Mitigated by
+  `tests/test_credentials.py::test_host_is_keyed_by_hostname_regardless_of_port_or_scheme`.
+  Suite 392 passed / 4 skipped.
+- Deliverables:
+  - [x] `_norm_host` normalization + actionable `require` message — done.
+- Effectiveness (assessed 2026-09-21): effective — save-with-port / look-up-by-hostname
+  now agree; the runbook was corrected to `--host 127.0.0.1`.
+
 ### CC-CORE-0016 — Migration 10: active-plugin recording (Phase 10 T10.1) (2026-09-21)
 - Change: migration 10 adds the `run_plugin` table (append-only registry; head → 10):
   one row per active plugin per run (`run_id, name, version, priority`), so a run records

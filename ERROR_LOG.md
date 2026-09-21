@@ -14,6 +14,27 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — Credential host-key mismatch (BUG-0007) + ground-truth path traceback
+
+- **Symptom (1):** `fuzzlab crawl --identity admin` failed with `CredentialError: no
+  credentials for identity 'admin' on host '127.0.0.1'`, even though the runbook's
+  `set-credential --host 127.0.0.1:8080` had been (or would be) used.
+- **Root cause (1):** the credential store keyed by the exact `--host` string
+  (`127.0.0.1:8080`), but the session/browser-auth path looks credentials up by
+  `urlparse(base_url).hostname` (`127.0.0.1`, no port) — the two never matched.
+- **Remediation (1):** `credentials.py` normalizes the host to its bare hostname
+  (`_norm_host`) on set/get/require/delete, so `127.0.0.1`, `127.0.0.1:8080`, and a full
+  URL all key the same; the `require` error now prints the exact `set-credential` command.
+  Runbook Part C corrected to `--host 127.0.0.1`.
+- **Symptom (2):** `fuzzlab auto --ground-truth lab/ground-truth` (run from inside `lab/`)
+  raised a raw `FileNotFoundError` for `lab/ground-truth/labels.json`.
+- **Root cause (2):** cwd was `lab/`, so the relative path resolved to `lab/lab/...`; the
+  toolkit commands assume the repo root.
+- **Remediation (2):** `contract.load` raises an actionable `ContractError` (naming the
+  expected path and the repo-root/absolute-path options) and `fuzzlab auto` exits cleanly
+  on it; the runbook now states to run `fuzzlab` from the repo root.
+- **Status:** Fixed.
+
 ## 2026-09-21 — Automatic mode never nominated XSS (rule keyed on a post-detection label)
 
 - **Symptom:** the live `fuzzlab auto` scored run missed every reflected/DOM XSS case

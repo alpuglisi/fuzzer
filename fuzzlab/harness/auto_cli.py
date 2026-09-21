@@ -65,7 +65,10 @@ def main(argv: list[str]) -> int:
         p.error("refusing to send probes without --authorized (lab-only)")
 
     selected = [c.strip() for c in args.categories.split(",")] if args.categories else None
-    ground_truth = contract.load(args.ground_truth) if args.ground_truth else None
+    try:
+        ground_truth = contract.load(args.ground_truth) if args.ground_truth else None
+    except contract.ContractError as exc:
+        p.error(str(exc))            # clean message, non-zero exit (no traceback)
     host = urlparse(args.base_url).netloc or args.base_url
 
     with Store(args.store) as store:

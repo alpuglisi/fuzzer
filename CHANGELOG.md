@@ -13,6 +13,15 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Fix (BUG-0007, on-host): credentials are now keyed by the **bare hostname** regardless
+  of whether they were saved as `127.0.0.1`, `127.0.0.1:8080`, or a full URL
+  (`core/credentials.py::_norm_host`), matching how the session layer looks them up
+  (`urlparse(url).hostname`). Previously `set-credential --host 127.0.0.1:8080` stored a
+  key the crawler's hostname lookup (`127.0.0.1`) missed. The `require` error now shows
+  the exact `set-credential` command. Runbook corrected (Part C uses `--host 127.0.0.1`;
+  added a working-directory note — run `fuzzlab` from the repo root). `contract.load` now
+  raises a clear, actionable `ContractError` for a missing ground-truth dir (no raw
+  traceback), and `fuzzlab auto` exits cleanly on it. +3 tests (392 passed / 4 skipped).
 - Phase 10 (follow-up): wired the last plugin hook — `register_payload_source` — end to
   end. `mutation/payloads.py::PayloadPool` aggregates seed payloads per vuln class from
   built-ins + plugin payload sources (deduped, bad sources skipped); `PayloadPool.from_plugins`

@@ -63,19 +63,26 @@ playwright install chromium         # headless browser for JS-rendered pages
 `fuzzlab <command>` is then on your PATH (or use `python -m fuzzlab <command>`).
 Nothing runs against the target until you ask it to (no auto-run, D11).
 
+> **Working directory.** Run `./labctl.sh` from `lab/`, but run the **`fuzzlab`
+> commands from the repo root** (`cd ..` out of `lab/`). The examples below use paths
+> like `lab/ground-truth`, which resolve from the repo root; from inside `lab/` you
+> would instead pass `ground-truth`. When in doubt, an absolute path always works.
+
 ## Part C — Phase 1: authenticated per-identity run
 
 The lab's test accounts are `admin/admin123`, `alice/password1`, `bob/letmein`.
 
 1. **Save credentials per host+identity** (stored in the OS keyring, D12 — never in the
-   repo or the project store; the password is prompted):
+   repo or the project store; the password is prompted). The **host is the hostname,
+   without a port** (`127.0.0.1`, not `127.0.0.1:8080`) — the session layer looks
+   credentials up by hostname; the store normalizes either form to the hostname:
    ```bash
-   fuzzlab session set-credential --host 127.0.0.1:8080 --identity admin --username admin
+   fuzzlab session set-credential --host 127.0.0.1 --identity admin --username admin
    ```
 
 2. **Confirm login detection** prints a usable session header:
    ```bash
-   fuzzlab session print --host 127.0.0.1:8080 --identity admin \
+   fuzzlab session print --host 127.0.0.1 --identity admin \
      --base-url http://127.0.0.1:8080/
    ```
 
