@@ -3,6 +3,42 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0006 — Deterministic oracle implemented (Phase 2 T2.1/T2.2/T2.4) (2026-09-21)
+- Change: built the `fuzzlab/oracle/` package — a class-pluggable deterministic
+  confirmer and sole finding-writer. `baseline.py` (median/MAD robust baselines,
+  T2.2); `context.py` (sink-context typing + break-out signatures, T2.4);
+  `strategies.py` (`ConfirmationStrategy` base + `SqliErrorStrategy` [M2],
+  `SqliBooleanStrategy` [M3], `SqliTimingStrategy` [M1 rising-delay], and
+  `ReflectedXssStrategy` [M5]); `oracle.py` (`Oracle.confirm` runs applicable
+  strategies cheapest/strongest first and writes a `finding` row on a positive,
+  reproducible verdict — fail-closed otherwise). Senders are injected, so the whole
+  thing is unit-tested without a network. Realizes T2.1 (framework + current-lab
+  mechanisms), T2.2, and T2.4.
+- Impact (other components / project): gives the project its deterministic
+  confirmation layer; will supersede the fuzzer's provisional `timing-only`
+  findings (CC-FUZZ-0003) once the harness/fuzzer route confirmation through the
+  oracle (next chunk). Consumes the auditor's sink-context typing (candidate
+  `sink_context`) when present, else types reflection itself. Writes `finding` rows
+  (existing schema). Browser execution (M6, stored/DOM XSS), OOB (M8), and grey-box
+  (M10) are later per `architecture/oracle-confirmation.md`.
+- Risk (level; mitigation): high — the oracle is the label trust anchor. Mitigated
+  by fail-closed labeling (confirm only on a positive reproducible signal),
+  differential/rising-delay timing on median/MAD baselines (resists outliers),
+  boolean confirmation requiring true≈benign and true≠false (avoids FP on secure
+  int-cast params), error signatures cross-checked, escaped reflection rejected,
+  and 10 unit tests incl. fail-closed cases for each mechanism.
+- Deliverables:
+  - [x] median/MAD baseline (T2.2) — done.
+  - [x] sink-context typing + break-out (T2.4) — done.
+  - [x] Strategy interface + M1/M2/M3/M5 + registry — done.
+  - [x] Oracle orchestration + sole finding-writer + 10 tests — done.
+  - [ ] Route the fuzzer/harness confirmation through the oracle (replace
+    timing-only findings) — todo (next Phase 2 chunk).
+  - [ ] M6 browser execution (stored/DOM XSS); new-class strategies as the lab grows — todo.
+- Effectiveness (assessed 2026-09-21): effective in unit tests — each mechanism
+  confirms its positive fixture and fails closed on the secure fixture; the oracle
+  writes exactly one finding on confirmation and none when unconfirmed. Suite 81/81.
+
 ### CC-FUZZ-0005 — Oracle scoped as class-pluggable across attack vectors (spec) (2026-09-21)
 - Change: per direction to expand the project to as many attack vectors as
   possible, re-scoped the oracle from "differential timing + error signatures"

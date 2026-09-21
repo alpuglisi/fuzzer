@@ -13,6 +13,16 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 2 build (T2.1/T2.2/T2.4): implemented the **deterministic oracle** —
+  `fuzzlab/oracle/`: a class-pluggable `Oracle` + `ConfirmationStrategy` registry
+  (sole finding-writer, fail-closed) with the current lab's mechanisms — M1
+  differential timing (rising-delay on median/MAD baselines), M2 error signature,
+  M3 boolean/response differential (SQLi), and M5 reflected-canary-in-context
+  (reflected XSS); plus median/MAD robust baselines (T2.2) and sink-context typing
+  (T2.4). Senders are injected, so it is unit-tested without a network; +10 tests
+  (81/81 green), each mechanism with a fail-closed case. Next: route the
+  fuzzer/harness through the oracle to replace the provisional timing-only findings.
+  Change-control: CC-FUZZ-0006.
 - Planning: added a **no-ground-truth fail-safe** for automatic runs (D15) — an
   automatic test against a validation lab / target whose vulnerabilities we don't
   know must not auto-select or test everything: it requires an explicit category

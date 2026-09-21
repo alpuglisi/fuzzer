@@ -16,6 +16,21 @@ sole writer of `finding` labels (replacing the fuzzer's provisional timing-only
 findings); and a `candidate`/`attempt` dataset that records negatives, not just
 hits, so later ML has something to learn from.
 
+## Status (2026-09-21)
+
+Build started. Done so far:
+- **T2.1** (core) — the `fuzzlab/oracle/` package: class-pluggable `Oracle` +
+  `ConfirmationStrategy` registry, sole finding-writer, fail-closed. Mechanisms for
+  the current lab: M1 differential timing, M2 error signature, M3 boolean, M5
+  reflected-XSS context. (M6 browser XSS, M8 OOB, M10 grey-box: later.)
+- **T2.2** — median/MAD robust baselines.
+- **T2.4** — sink-context typing + break-out signatures.
+
+Next: route the fuzzer/harness confirmation through the oracle (replace timing-only
+findings); then T2.5 fingerprint, T2.6 MinHash dedup, T2.3 rules-as-data +
+negatives, T2.7 hybrid crawl, T2.9 category selection, T2.10 fail-safe, T2.8
+request-efficiency measurement (live). 81/81 tests green.
+
 ## Principles (this phase)
 
 - **Deterministic only.** No ML. Every confirmation is a reproducible rule/measurement.

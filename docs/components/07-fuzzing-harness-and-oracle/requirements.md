@@ -1,6 +1,6 @@
 # Fuzzing Harness and Oracle — Requirement Specification
 
-Component code: **FUZZ** · Status: `[built fuzzer; harness + oracle planned]`
+Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5); harness generalization ongoing]`
 · Last updated: 2026-09-21
 
 Related: `ARCHITECTURE.md` #7; `DECISIONS_AND_ROADMAP.md` (D1, D5, D7, Phase 2/3);
