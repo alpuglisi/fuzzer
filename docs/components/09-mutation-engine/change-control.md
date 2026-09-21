@@ -3,6 +3,34 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0005 — Variant write-back + destructive gate; gated LLM scaffold (T8.5/T8.6) (2026-09-21)
+- Change: `fuzzlab/mutation/catalog.py` records accepted variants' provenance to the
+  `payload_variant` table (operator chain, `bypassed_rule`, `semantics_ok`,
+  `coverage_gain`) via `record_variant`/`record_search_result`, and enforces the
+  **destructive gate** (`is_destructive`): a destructive-looking variant is refused —
+  never persisted or sent — unless `allow_destructive` is explicitly set (default off,
+  matching `core/config.py`; NFR-MUT-safe). `fuzzlab/mutation/llm.py::LlmExpander` is the
+  FR-MUT-5 scaffold: **default off**, **never calls an external service** (an injected
+  offline generator or nothing), and everything it produces is **quarantined for human
+  review** — nothing is trusted until approved (NFR-MUT-offline).
+- Impact (other components / project): FR-MUT-6 write-back (into the new
+  `payload_variant` table; live runs also send variants through the fuzzer's `attempt`
+  path) and the safe, gated expansion path. This completes the mutation engine's
+  **offline** stack; the live filter-bypass + coverage exit (T8.7) is on-host.
+- Risk (level; mitigation): low — additive writes behind the destructive gate; the LLM
+  path is off and offline. Mitigated by 7 tests (`tests/test_mutation_catalog.py`):
+  destructive detection; non-destructive persists; the gate refuses by default and
+  persists only on explicit opt-in; `record_search_result`; LLM default-off and
+  disabled-ignores-generator; enabled quarantines for review and approval moves entries.
+  Suite 317 passed / 4 skipped.
+- Deliverables:
+  - [x] Variant write-back to `payload_variant` + destructive gate (T8.5) — done.
+  - [x] Gated, offline, default-off LLM expansion scaffold (T8.6) — done.
+  - [ ] Exit: variants bypass the live WAF + reach new code vs the catalog (T8.7) — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — variants persist with
+  provenance behind the destructive gate and the LLM path stays off/offline/quarantined;
+  the live coverage + bypass exit is on-host.
+
 ### CC-MUT-0004 — Bandit-scheduled, coverage-guided search (T8.4) (2026-09-21)
 - Change: `fuzzlab/mutation/search.py::MutationSearch` searches for a
   **semantics-preserving** variant that evades the filter and reaches new code. Operators

@@ -119,6 +119,23 @@ real dataset:
   candidates (`active.propose_queries`) captures **more positives per confirmation** than
   a random budget of the same size, over held-out pages.
 
+## Phase 8 — mutation engine: live filter-bypass + coverage exit
+
+The mutation engine is built and offline-tested (`fuzzlab/mutation/`): operators +
+semantics validator, context-typed XSS, the filter model + bypass learner, the
+bandit/coverage-guided search, variant write-back behind the destructive gate, and the
+gated LLM scaffold. On the lab, with the D16 WAF enabled (`PFF_WAF=on`):
+- [ ] **T8.7 exit:** show the engine produces variants that **bypass the live WAF** where
+  the base payload is blocked (`PFF_WAF_MODE=block`) or sanitized (`=sanitize`), **and**
+  reach application code the static catalog did not — measured by live grey-box coverage
+  (Phase 3 live sources). The semantics validator must reject meaning-changing transforms;
+  generated payloads respect the destructive gate.
+- [ ] **Live filter learning:** point `FilterLearner` at the running WAF via real canary
+  round-trips (not the offline `FilterModel`) and confirm it learns the same
+  block/strip behavior and finds working bypasses.
+- [ ] **Wire variants into the fuzzer's attempt path** so bypasses are actually sent and
+  confirmed by the oracle, and recorded in `payload_variant`.
+
 ## How to pick these up
 
 Step-by-step commands for all of the above are in **`docs/ON_HOST_RUNBOOK.md`**.

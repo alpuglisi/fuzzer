@@ -83,10 +83,10 @@ transformations; generated payloads respect the destructive gate and lab-only po
   `fuzzlab/mutation/search.py` — operator arms selected via `ThompsonBandit` (context =
   class + sink/filter-state; reward = evasion + coverage gain), coverage-guided hill
   climbing against the grey-box seam; budget-bounded and reproducible under a fixed seed.
-- **T8.5 — Variant write-back + safety gate `[planned]` (FR-MUT-6, NFR-MUT-safe).**
+- **T8.5 — Variant write-back + safety gate `[done, offline]` (FR-MUT-6, NFR-MUT-safe).**
   `fuzzlab/mutation/catalog.py` — emit accepted variants into the attempt path (and the
   chosen persistence per decision 3), routed through the destructive gate; lab-only.
-- **T8.6 — Gated offline LLM expansion `[planned, scaffold/off]` (FR-MUT-5).**
+- **T8.6 — Gated offline LLM expansion `[done, scaffold/off]` (FR-MUT-5).**
   `fuzzlab/mutation/llm.py` — interface + review/quarantine gate, default off, offline;
   no external calls. Full use deferred.
 - **T8.7 — Exit `[on-host]`.** With the lab WAF enabled: variants bypass the filter where

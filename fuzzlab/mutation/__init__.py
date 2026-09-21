@@ -11,8 +11,11 @@ T8.1 ships the offline-testable heart: the typed, meaning-preserving operator fr
 
 from __future__ import annotations
 
+from fuzzlab.mutation.catalog import (is_destructive, list_variants,
+                                      record_search_result, record_variant)
 from fuzzlab.mutation.filtermodel import FilterModel, FilterResult
 from fuzzlab.mutation.learn import Bypass, FilterLearner
+from fuzzlab.mutation.llm import LlmExpander
 from fuzzlab.mutation.operators import (MutationOperator, apply_chain,
                                         default_operators)
 from fuzzlab.mutation.search import MutationSearch, SearchResult
@@ -33,4 +36,9 @@ __all__ = [
     "Bypass",
     "MutationSearch",
     "SearchResult",
+    "record_variant",
+    "record_search_result",
+    "list_variants",
+    "is_destructive",
+    "LlmExpander",
 ]

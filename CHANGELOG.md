@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 8 (T8.5/T8.6): variant write-back + gated LLM scaffold — completes the mutation
+  engine's offline stack. `mutation/catalog.py` records accepted variants' provenance to
+  the `payload_variant` table and enforces the **destructive gate** (`is_destructive`):
+  destructive-looking variants are refused (never persisted or sent) unless
+  `allow_destructive` is explicitly set (default off). `mutation/llm.py::LlmExpander` is
+  the FR-MUT-5 scaffold — default off, never calls an external service, quarantines
+  everything for human review. +7 tests (317 passed / 4 skipped). Change-control:
+  CC-MUT-0005. Remaining: the on-host T8.7 exit (bypass the live WAF + reach new code).
 - Phase 8 (T8.4): bandit-scheduled, coverage-guided mutation search
   (`mutation/search.py::MutationSearch`). Operators are chosen with the reused
   ThompsonBandit (reward = evasion + coverage novelty, zero for any meaning-changing

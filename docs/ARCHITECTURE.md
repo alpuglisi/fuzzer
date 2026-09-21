@@ -250,20 +250,21 @@ tracked in the requirements files, not here.
 - **Reads/writes:** `bandit_posteriors`; chooses the next family per candidate.
 - **Pending (on-host):** the beats-uniform-on-hits-per-1000-requests exit (T4.6).
 
-### 9. Mutation engine `[partial — operators + semantics validator built]` (Phase 8)
-- **Operator framework + semantics validator** `[built]` (`fuzzlab/mutation/`): typed,
-  meaning-preserving operators (`operators.py` — url-encode, whitespace alternates, SQL
-  inline comments, case-toggle, vetted-equivalent rewrites) and a validator
-  (`semantics.py`) that refutes meaning changes via canonicalization + an `sqlglot`
-  AST-equivalence path (skip-guarded). The D16 lab WAF is the filter-evasion target;
-  migration 8's `payload_variant` table records variant provenance.
-- **Context-typed XSS + filter learning** `[built]`: `xss.py` generates context-typed,
-  filter-aware XSS candidates; `filtermodel.py` mirrors the D16 WAF from the shared
-  ruleset (offline seam); `learn.py::FilterLearner` learns what the filter blocks/strips
-  and finds semantics-preserving bypasses.
-- **Subcomponents** `[planned — this phase]`: bandit-scheduled operator selection,
-  coverage-guided hill climbing (grey-box seam), variant write-back to `payload_variant`
-  + the attempt path, and an optional gated offline LLM catalog expansion.
+### 9. Mutation engine `[partial — full offline stack built; live coverage exit on-host]` (Phase 8)
+- **Operators + semantics validator** `[built]` (`fuzzlab/mutation/`): typed,
+  meaning-preserving operators (`operators.py`) and a validator (`semantics.py`) that
+  refutes meaning changes via canonicalization + an `sqlglot` AST path (skip-guarded).
+- **Context-typed XSS + filter learning** `[built]`: `xss.py` (filter-aware, context-typed
+  candidates), `filtermodel.py` (mirrors the D16 WAF from the shared ruleset — offline
+  seam), `learn.py::FilterLearner` (learns block/strip behavior, finds semantics-
+  preserving bypasses).
+- **Bandit/coverage search + write-back** `[built]`: `search.py::MutationSearch`
+  (ThompsonBandit operator selection + coverage-guided hill climbing against the grey-box
+  seam, budget-bounded/seeded); `catalog.py` records variant provenance to
+  `payload_variant` (migration 8) behind the **destructive gate** (NFR-MUT-safe);
+  `llm.py::LlmExpander` is the gated, default-off, offline expansion scaffold.
+- **Exit** `[on-host]`: against the enabled D16 WAF, variants bypass the filter where the
+  base is blocked **and** reach new code (grey-box coverage) vs the static catalog.
 - **Depends on (components):** `core/`, indicator DB & catalogs, scheduler,
   oracle, grey-box instrumentation. (A lab WAF is a prerequisite decision, not a
   component dependency.)
@@ -489,10 +490,11 @@ Suite: 289 passed / 4 skipped (the skips need a native build unavailable in the 
   - **Grey-box (Phase 3):** offline consumer layer (coverage/DB-fault readers,
     shaped reward, reset call points) built; **live sources on-host** (Xdebug/pcov,
     DB error hook, snapshot/restore).
-  - **Mutation engine (Phase 8):** the semantics-preserving operator framework +
-    validator (canonical + `sqlglot` AST), the context-typed filter-aware XSS generator,
-    and the filter model + bypass learner are built (migration 8's `payload_variant`
-    table ready); bandit/coverage-guided search and variant write-back remain.
+  - **Mutation engine (Phase 8):** the full offline stack is built — operators +
+    semantics validator (canonical + `sqlglot` AST), context-typed filter-aware XSS, the
+    filter model + bypass learner, the bandit/coverage-guided search, variant write-back
+    to `payload_variant` (migration 8) behind the destructive gate, and the gated
+    default-off LLM scaffold; only the live filter-bypass + coverage exit (T8.7) remains.
   - **Oracle mechanisms:** M8 (out-of-band) and M10 (grey-box) still to build.
   - **Intercepting proxy (Phase 6):** the full offline stack is built — byte-exact
     dual-path core (`RawMessage` + `h11`), scope, match-and-replace, flow history
@@ -502,7 +504,8 @@ Suite: 289 passed / 4 skipped (the skips need a native build unavailable in the 
 - `[on-host]` (offline pieces done; the exit/validation runs on the live lab):
   Phase 3 live capture; Phase 4 beats-uniform exit (T4.6); Phase 5 held-out exit
   (T5.5); Phase 6 live CONNECT/TLS serving + browser trust; Phase 7 held-out
-  NDCG@k/Precision@k exit + active-learning-budget-vs-random (T7.4); live
+  NDCG@k/Precision@k exit + active-learning-budget-vs-random (T7.4); Phase 8
+  variants-bypass-the-WAF-and-reach-new-code exit (T8.7); live
   `--browser`/`--bandit`/`--score`/`--rank` runs and stored-XSS session-to-browser
   wiring — all tracked in `docs/ON_HOST_TASKS.md`.
 - `[planned]`: protocol depth (Phase 9), anomaly detector + plugin system + a second
