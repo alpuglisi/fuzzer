@@ -1,0 +1,9 @@
+{
+    "name": "fuzzlab/php-laravel-stack-env",
+    "type": "project",
+    "require": {
+        "php": "^8.3",
+        "laravel/framework": "^13.0"
+    },
+    "config": {"platform": {"php": "8.3.33"}}
+}

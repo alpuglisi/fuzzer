@@ -314,6 +314,47 @@ and measured. Authorized, lab-only.
   signal). XXE, open redirect, and known-CVE templates remain unintegrated — a separate,
   larger undertaking. (`CR-LAB-0001` tool-mapping table,
   `docs/spikes/SPIKE-004-nuclei-vs-dvwa.md`, `CC-LAB-0028`)
+- **FR-LAB-27** (Lab track, `CR-LAB-0001` Addendum D, lane L-P3.3a — foundation only)
+  A second PHP emitter, `fuzzlab.labgen.emitters.php_laravel`, targeting
+  Laravel/Eloquent/Blade idiom (distinct from `php_current`'s plain-PHP idiom;
+  neither reuses the other's modules). Introduces `StackEnv`
+  (`fuzzlab.labgen.emitters.php_laravel.stack_env`), the per-stack record
+  Addendum D's multi-file-routing extension adds: `language`, `framework`,
+  a pinned `framework_version`, a digest-pinned `base_image` (never a bare
+  mutable tag), `is_multi_file`, `scaffold_files` (rendered once per build,
+  never per cell), `accumulators`, and `file_roles`. The scaffold's generated
+  `.env` **forces `APP_DEBUG=false`/`APP_ENV=production`** — a correctness
+  requirement, not optional: Laravel's Ignition debug page discloses full
+  stack traces plus every environment variable (DB/API credentials included)
+  when debug mode is on, which would otherwise contaminate every cell's
+  single, labeled vulnerability class with an unlabeled, unintended one.
+  Also introduces the `route` module category Addendum D adds (cardinality
+  `accumulator`, one fragment per cell merged into `routes/web.php`):
+  `fuzzlab.labgen.emitters.php_laravel.route_accumulator.RouteAccumulator`
+  **always sorts fragments by cell ID at render time**, never by
+  append/iteration order, so adding one cell never reshuffles the file (the
+  invariant Addendum D calls out as the concrete trap for this category).
+  `LaravelEmitter` itself supports exactly one shape in this lane
+  (`sqli`/`sql_numeric_literal`) — the full module inventory (harder
+  identifier/alias/connector-position SQLi and escaping-context-mismatch
+  XSS shapes, ported from `php_current`'s Phase-1 work) and the
+  `puppy-fort-factory/` migration are explicitly out of scope here, tracked
+  as lanes L-P3.3b and L-P3.3c respectively (§4.3 steps 2 and 6). Proven
+  against a new, deliberately minimal `lab/manifests/phase3_php_laravel_sample.yaml`
+  via the existing stack-agnostic conformance suite (FR-LAB-25): Tier 0
+  (`php -l`) and Tier 3 (whole-lab regeneration via
+  `fuzzlab.labgen.conformance.tier3.regenerate_and_diff_emitter`) both pass
+  for real; the accumulator file itself is assembled and determinism-checked
+  by this lane's own `assemble_routes_file()` rather than through Tier 3's
+  shared `render_whole_sample` (which does not yet support more than one
+  cell targeting the same output path — a documented, not silently
+  worked-around, gap for a future accumulator-bearing stack lane to close).
+  A real `composer.lock` (74 packages) was generated against Packagist for
+  the stack's base dependency set; a CycloneDX SBOM via `syft` was not
+  generated (`syft` unavailable on this build host — the intended command is
+  documented in `fuzzlab/labgen/emitters/php_laravel/stack/README.md`).
+  (`docs/LAB_IMPLEMENTATION_PLAN.md` §4.3 steps 1/3/4/5, `CR-LAB-0001`
+  Addendum D, `CC-LAB-0029`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
