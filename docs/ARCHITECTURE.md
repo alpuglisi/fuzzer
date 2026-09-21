@@ -43,7 +43,8 @@ WAF (D16) is the filter-evasion target, and the semantics-preserving operator fr
 remain. Phase 9 (protocol depth) is well underway — the from-scratch WebSocket codec and the
 byte-exact HTTP/2 frame layer + minimal HPACK + raw-frame client are built; the parsed
 `wsproto`/`h2` path, live ALPN/socket, and the opt-in h2→h1 desync lab front-end remain.
-Phase 10 (plugin system + anomaly detector + second target) is planned.
+Phase 10 (polish + generalization) has begun — the plugin registry/hooks are built; the
+anomaly detector, the reproducible report, and the multi-target transfer test remain.
 
 ## Integration model
 
@@ -362,11 +363,16 @@ tracked in the requirements files, not here.
   separated from the vulnerable target (different origin/port; never in the
   target's web root), so the control plane is never itself an attack surface.
 
-### 13. Plugin system `[planned]` (Phase 10)
-- **Subcomponents:** `importlib.metadata` entry points; a hook registry
-  (`on_request`, `on_response`, `on_candidate`, `on_finding`, `register_rules`,
-  `register_payload_source`, `register_oracle`); per-plugin isolation and
-  priority.
+### 13. Plugin system `[partial — registry built; pipeline wiring pending]` (Phase 10)
+- **Registry + hooks** `[built]` (`fuzzlab/plugins/`): `importlib.metadata` entry-point
+  discovery, a `HookRegistry` with the seven hooks (`on_request`, `on_response`,
+  `on_candidate`, `on_finding`, `register_rules`, `register_payload_source`,
+  `register_oracle`), per-plugin **priority** ordering, contain-log-**disable** isolation,
+  and the oracle/advisory-split guard (observation returns ignored; only `register_oracle`
+  reaches the finding-writer). `PluginManager` records the active set to `run_plugin`
+  (migration 10). Zero plugins is a full no-op (D6).
+- **Pipeline attachment** `[planned — T10.2]`: wiring the hooks into the HTTP seam,
+  auditor, oracle, and scheduler.
 - **Depends on (components):** `core/`.
 - **Consumed by:** ML components, extra rules, and custom oracles.
 
@@ -466,13 +472,13 @@ replays and edits, including a raw byte path for malformed-traffic study.
 
 ## Build-status snapshot
 
-Suite: 328 passed / 4 skipped (the skips need a native build unavailable in the sandbox:
+Suite: 360 passed / 4 skipped (the skips need a native build unavailable in the sandbox:
 2 credential-store tests, the proxy real-CA minting test, and the mutation engine's
 `sqlglot` AST test). Everything below is offline-complete unless an on-host item is named.
 
 - `[built]` (offline-complete, unit-tested):
   - **Foundations (Phase 0 + T1.1):** `core/` — unified store + forward-only
-    migrations (head = 9), config, structured logging, request budget + per-host
+    migrations (head = 10), config, structured logging, request budget + per-host
     timing mutex, HTTP seam, versioned features (golden-file), path normalization,
     dedup, fingerprint, run-mode + D15 fail-safe, and the per-host credential store
     (`cryptography` Fernet fallback).
@@ -516,6 +522,11 @@ Suite: 328 passed / 4 skipped (the skips need a native build unavailable in the 
     `flow.protocol` tag (migration 9), and the byte-exact HTTP/2 frame layer + minimal
     HPACK + raw-frame client are built; the parsed `wsproto`/`h2` path, live ALPN/socket,
     and the opt-in h2→h1 desync lab front-end remain.
+  - **Plugin system (Phase 10):** the `HookRegistry` (7 hooks, priority, contain-log-
+    disable isolation, oracle/advisory-split guard), entry-point discovery, `PluginManager`,
+    and `run_plugin` recording (migration 10) are built; wiring the hooks into the pipeline
+    (T10.2), the anomaly detector (T10.3), the reproducible report (T10.4), and the
+    multi-target transfer test (T10.5) remain.
   - **Oracle mechanisms:** M8 (out-of-band) and M10 (grey-box) still to build.
   - **Intercepting proxy (Phase 6):** the full offline stack is built — byte-exact
     dual-path core (`RawMessage` + `h11`), scope, match-and-replace, flow history
@@ -529,5 +540,6 @@ Suite: 328 passed / 4 skipped (the skips need a native build unavailable in the 
   variants-bypass-the-WAF-and-reach-new-code exit (T8.7); live
   `--browser`/`--bandit`/`--score`/`--rank` runs and stored-XSS session-to-browser
   wiring — all tracked in `docs/ON_HOST_TASKS.md`.
-- `[planned]`: anomaly detector + plugin system + a second target (Phase 10), and the
-  manifest-driven lab generator (Lab track).
+- `[planned]`: the rest of Phase 10 — pipeline hook wiring, the anomaly detector, the
+  reproducible report, and the multi-target transfer test — and the manifest-driven lab
+  generator (Lab track).

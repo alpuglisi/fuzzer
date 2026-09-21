@@ -13,6 +13,17 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 10 (T10.1): built the **plugin system** (`fuzzlab/plugins/`, D6). A `HookRegistry`
+  with the seven FR-PLUG-2 hooks (mutation `on_request`; observation
+  `on_response`/`on_candidate`/`on_finding`; registration `register_rules`/
+  `register_payload_source`/`register_oracle`), per-plugin priority ordering, and
+  contain-log-**disable** isolation (a failing plugin never aborts a run). Entry-point
+  discovery via `importlib.metadata` (injectable for tests); `PluginManager` is the
+  pipeline-facing surface and records the active set to migration 10's `run_plugin`
+  (head → 10). The oracle/advisory split holds through plugins — observation returns are
+  ignored, so only a `register_oracle` plugin reaches the finding-writer. **Zero plugins
+  is a full no-op** (NFR-PLUG-optional). Wrote `docs/PHASE_10_PLAN.md`. +12 tests
+  (360 passed / 4 skipped). Change-control: CC-PLUG-0002, CC-CORE-0016.
 - Phase 9 (T9.5, D17): added the opt-in **h2→h1 downgrade front-end** to the lab — a
   self-owned desync research target. `lab/downgrade/nginx.conf` accepts HTTP/2 (h2c) and
   proxies HTTP/1.1 to the app (`http2 on;` + `proxy_http_version 1.1;`); a `frontend`

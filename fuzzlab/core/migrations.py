@@ -305,6 +305,22 @@ _M0009 = """
 ALTER TABLE flow ADD COLUMN protocol TEXT;
 """
 
+# --- migration 10: active-plugin recording (Phase 10 T10.1) ------------------
+# The plugin manager records exactly which plugins/versions were active on a run
+# (NFR-PLUG-reproducible), so a reproducible report can name what produced a result.
+# Additive; a run with zero plugins simply writes no rows.
+_M0010 = """
+CREATE TABLE run_plugin (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id     INTEGER REFERENCES run(id),
+    name       TEXT NOT NULL,
+    version    TEXT,
+    priority   INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_run_plugin_run ON run_plugin(run_id);
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -316,6 +332,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (7, _M0007),
     (8, _M0008),
     (9, _M0009),
+    (10, _M0010),
 ]
 
 

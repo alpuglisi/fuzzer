@@ -3,6 +3,38 @@
 Component code: **PLUG**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PLUG-0002 — Plugin registry, hooks, discovery, isolation (T10.1) (2026-09-21)
+- Change: implemented the plugin system. `fuzzlab/plugins/` — `hooks.py` (the seven
+  FR-PLUG-2 hooks classified as mutation/observation/registration), `registry.py`
+  (`HookRegistry`: priority ordering, `chain`/`notify`/`collect` dispatch, and
+  contain-log-**disable** isolation so one plugin's error never aborts a run),
+  `discovery.py` (`importlib.metadata` entry-point discovery in the `fuzzlab.plugins`
+  group, injectable for tests, bad plugins skipped), and `manager.py` (`PluginManager`:
+  the pipeline-facing dispatch surface + `record()` onto migration 10's `run_plugin`).
+  The oracle/advisory split holds through plugins (FR-PLUG-5): observation-hook returns
+  are ignored, so only a `register_oracle` plugin reaches the finding-writer. Zero
+  plugins is a full no-op (D6/NFR-PLUG-optional).
+- Impact (other components / project): gives the toolkit its extension surface — ML
+  models, extra rules, custom oracles, payload sources attach here without core edits
+  (T10.2 wires the attachment points into the pipeline). Adds migration 10's `run_plugin`
+  for reproducible plugin recording (see CC-CORE-0016). No behavior change with no plugins.
+- Risk (level; mitigation): low — additive, optional, contained; nothing runs unless a
+  plugin is installed/registered. Mitigated by 12 tests (`tests/test_plugins.py`):
+  migration-10 schema; priority ordering + mutation fold (None keeps prior); observation
+  returns ignored (advisory split) and oracle-only writer path; registration collectors;
+  a failing plugin is disabled not fatal; zero-plugin no-op; entry-point discovery
+  (incl. a factory and a contained load failure); `record` writes only active plugins;
+  bare-plugin defaults. Suite 360 passed / 4 skipped.
+- Deliverables:
+  - [x] Registry + 7 hooks + priority + isolation (FR-PLUG-1..5) — done.
+  - [x] Entry-point discovery + `PluginManager` + `run_plugin` recording — done.
+  - [ ] Wire hooks into the pipeline (T10.2); anomaly detector (T10.3); report (T10.4);
+        multi-target transfer (T10.5); exit (T10.6) — next/on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — plugins dispatch in priority
+  order, a failing one is contained, only oracles reach the writer, and zero plugins is a
+  no-op; the sample-plugin-extends-without-core-change exit follows once the hooks are
+  wired in (T10.2).
+
 ### CC-PLUG-0001 — Baseline (2026-09-21)
 - Change: specify the component (requirements written). Not yet implemented. The
   hook set is defined so later components (ML, extra rules, custom oracles) can be

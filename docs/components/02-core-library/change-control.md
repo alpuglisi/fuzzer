@@ -3,6 +3,20 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0016 — Migration 10: active-plugin recording (Phase 10 T10.1) (2026-09-21)
+- Change: migration 10 adds the `run_plugin` table (append-only registry; head → 10):
+  one row per active plugin per run (`run_id, name, version, priority`), so a run records
+  exactly which plugins/versions produced its results (NFR-PLUG-reproducible).
+- Impact (other components / project): the PLUG component's `PluginManager.record()`
+  writes here; the reproducibility report (T10.4) reads it. Additive; a zero-plugin run
+  writes no rows. Version-pinning tests derive the head from `migrations.MIGRATIONS` (PA-0001).
+- Risk (level; mitigation): low — one additive table + index. Mitigated by
+  `tests/test_plugins.py::test_migration_10_adds_run_plugin` and `test_record_writes_active_plugins`.
+  Suite 360 passed / 4 skipped.
+- Deliverables:
+  - [x] Migration 10 (`run_plugin`) — done.
+- Effectiveness (assessed 2026-09-21): effective — active plugins persist per run.
+
 ### CC-CORE-0015 — Migration 9: flow protocol tag (Phase 9 T9.1) (2026-09-21)
 - Change: migration 9 adds a `protocol` column to `flow` (append-only registry; head → 9)
   so history distinguishes `http/1.1` / `h2` / `ws` flows. Additive; existing rows read as
