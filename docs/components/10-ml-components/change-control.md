@@ -3,6 +3,31 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0007 — Active learning: uncertainty sampling + query-by-committee (T7.3) (2026-09-21)
+- Change: implemented the active learner (A.6.5). `fuzzlab/ml/active.py`:
+  `uncertainty_sampling` picks candidates nearest the 0.5 decision boundary (reusing the
+  ranker's advisory `rank_uncertainty`, no retraining); `query_by_committee` +
+  `Committee` (a bootstrap committee of rankers) pick the candidates members most
+  disagree on (score variance); `propose_queries(store, run_id, budget, method)` returns
+  the top-`budget` candidate ids for the oracle to confirm next. Advisory only — it
+  proposes what to confirm; the oracle alone confirms.
+- Impact (other components / project): lets a run spend its scarce oracle budget where a
+  label is most informative — the active-learning half of Phase 7. Composes with the
+  ranker (uncertainty) and needs only stored candidates (committee). No store change; no
+  new dependency.
+- Risk (level; mitigation): low — pure logic, advisory, no writes. Mitigated by 7 tests
+  (`tests/test_ml_active.py`): boundary uncertainty; uncertainty sampling order + budget
+  bounds + id mapping; committee disagreement math + selection; committee training/shape
+  on the store dataset; `propose_queries` uncertainty (descending order) and committee
+  (valid budget of ids). Suite 273 passed / 3 skipped.
+- Deliverables:
+  - [x] `uncertainty_sampling` + `query_by_committee` + `Committee` — done.
+  - [x] `propose_queries` store-facing helper — done.
+  - [ ] Held-out exit: AL budget captures more positives per confirmation than random
+        (T7.4) — on-host.
+- Effectiveness (assessed 2026-09-21): effective in tests — both strategies select the
+  most-informative candidates; the live budget-vs-random exit is on-host.
+
 ### CC-ML-0006 — Pointwise candidate ranker + train/rank/persist (T7.2) (2026-09-21)
 - Change: implemented the candidate ranker (A.2). `fuzzlab/ml/ranker.py::Ranker`
   augments the Phase-5 structural feature vector with char n-gram TF-IDF over the

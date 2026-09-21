@@ -106,6 +106,19 @@ cache. The **live last mile** needs a real browser + TLS (the sandbox has no wor
   the session (`SessionCapture`), `adopt_into` the `SessionManager`, and confirm a
   subsequent authenticated tool run reuses it — no per-host config.
 
+## Phase 7 — candidate ranker + active-learning exit
+
+The ranker (NDCG@k/Precision@k vs random, `fuzzlab auto --rank`) and the active learner
+(uncertainty sampling + query-by-committee) are built and offline-tested. On the lab's
+real dataset:
+- [ ] **T7.4 ranker exit:** on a **uniformly-sampled held-out** set of endpoints, show the
+  ranker's NDCG@k and Precision@k beat the random-order baseline (GroupKFold by
+  endpoint) — run `fuzzlab auto --rank` on a real crawl and read `rank_ndcg` vs
+  `rank_ndcg_random` in `run_metrics`.
+- [ ] **T7.4 active-learning exit:** show a fixed uncertainty/committee budget of *b*
+  candidates (`active.propose_queries`) captures **more positives per confirmation** than
+  a random budget of the same size, over held-out pages.
+
 ## How to pick these up
 
 Step-by-step commands for all of the above are in **`docs/ON_HOST_RUNBOOK.md`**.

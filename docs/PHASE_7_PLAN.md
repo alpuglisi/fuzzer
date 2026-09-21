@@ -48,7 +48,7 @@ per confirmation than a random budget — all advisory, oracle still the sole la
   GroupKFold, reports NDCG@k/Precision@k vs a random baseline, writes advisory
   `candidate.rank_score` (migration 7), persists a `model` row + metrics, and falls back
   on thin data. Wired as `fuzzlab auto --rank`.
-- **T7.3 — Active learning `[planned]`.** `fuzzlab/ml/active.py`:
+- **T7.3 — Active learning `[done, offline]`.** `fuzzlab/ml/active.py`:
   `uncertainty_sampling` (score nearest the 0.5 decision boundary) and
   `query_by_committee` (a bootstrap committee's disagreement), each returning the top-*b*
   candidate ids to hand the oracle. A `Committee` helper trains N bootstrapped members

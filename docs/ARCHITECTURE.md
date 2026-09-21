@@ -35,8 +35,10 @@ beats-the-control exits run on the lab. Phase 6 (the intercepting proxy) has its
 **offline** stack built — byte-exact dual-path core, scope, match-and-replace, flow
 history, repeater, interception, manual-login session capture, the flow engine, and the
 local-CA leaf cache — leaving only live CONNECT/TLS socket serving and browser trust
-on-host. Phases 7–10 (ranker/active-learning, mutation engine, protocol depth, plugin
-system) are planned.
+on-host. Phase 7 (candidate ranker + active learning) is built offline — the pointwise
+ranker (NDCG@k/Precision@k vs random), uncertainty sampling, and query-by-committee —
+with the real-lab held-out exit on-host. Phases 8–10 (mutation engine, protocol depth,
+plugin system + anomaly detector + second target) are planned.
 
 ## Integration model
 
@@ -249,7 +251,7 @@ tracked in the requirements files, not here.
   component dependency.)
 - **Writes:** new payload candidates back into the catalog/attempts.
 
-### 10. ML components `[partial — detection classifier built; rest planned]` (Phases 5, 7, 10)
+### 10. ML components `[partial — classifier + ranker + active learner built; anomaly detector planned]` (Phases 5, 7, 10)
 - **Detection classifier** (A.1) `[built; held-out exit on-host]`: the `fuzzlab/ml/`
   package (pure Python — no numpy/sklearn). Honest evaluation (`metrics.py`: PR-AUC +
   leakage-free GroupKFold), the baselines a model must beat (`baselines.py`:
@@ -261,13 +263,20 @@ tracked in the requirements files, not here.
   **Advisory only** — scores/uncertainty, never `finding` labels. Wired as
   `fuzzlab auto --score`; the panel surfaces the top scored candidates. The
   beats-both-baselines exit on the store's real dataset (T5.5) is on-host.
-- **Candidate ranker** (A.2) `[planned]` (Phase 7): learning-to-rank over
-  parameters/forms; reads candidate features, writes `candidate.score`; costs zero
-  requests.
+- **Candidate ranker** (A.2) `[built; held-out exit on-host]` (Phase 7): a pointwise
+  learning-to-rank over candidate features augmented with char n-gram TF-IDF
+  (`ranking.py`, `text_features.py`, `ranker.py`, `rank_train.py`). Reads candidate
+  features, writes advisory `candidate.rank_score`/`rank_uncertainty` (migration 7; kept
+  separate from the classifier's `candidate.score`) at **zero request cost**, with
+  per-candidate explanations. Evaluated by NDCG@k/Precision@k vs a random-order baseline
+  (GroupKFold); wired as `fuzzlab auto --rank`. The real-lab held-out exit (T7.4) is
+  on-host.
+- **Active learner** (A.6.5) `[built; live budget exit on-host]` (Phase 7): allocates
+  oracle budget by uncertainty sampling (reusing `rank_uncertainty`) and query-by-
+  committee (a bootstrap `Committee` of rankers) — `active.py::propose_queries` returns
+  the candidates to confirm next. Advisory: it proposes; the oracle confirms.
 - **Anomaly detector** (A.5) `[planned]` (Phase 10): ECOD/Isolation Forest tripwire,
   later XGBOD-style hybrid features.
-- **Active learner** (A.6.5) `[planned]` (Phase 7): allocates oracle budget by
-  uncertainty and committee disagreement.
 - **Depends on (components):** `core/`, the oracle (labels), and the component
   that produces each model's inputs (auditor for the ranker, fuzzing harness for
   the classifier, proxy/flows for the anomaly detector).
@@ -423,13 +432,13 @@ replays and edits, including a raw byte path for malformed-traffic study.
 
 ## Build-status snapshot
 
-Suite: 196 passed / 2 skipped (the 2 skips are the credential-store tests that need a
-working `cryptography` build, unavailable in the sandbox). Everything below is
-offline-complete unless an on-host item is named.
+Suite: 273 passed / 3 skipped (the 3 skips need a working `cryptography` build,
+unavailable in the sandbox: 2 credential-store tests + the proxy real-CA minting test).
+Everything below is offline-complete unless an on-host item is named.
 
 - `[built]` (offline-complete, unit-tested):
   - **Foundations (Phase 0 + T1.1):** `core/` — unified store + forward-only
-    migrations (head = 5), config, structured logging, request budget + per-host
+    migrations (head = 7), config, structured logging, request budget + per-host
     timing mutex, HTTP seam, versioned features (golden-file), path normalization,
     dedup, fingerprint, run-mode + D15 fail-safe, and the per-host credential store
     (`cryptography` Fernet fallback).
@@ -449,6 +458,11 @@ offline-complete unless an on-host item is named.
     eval, prevalence/sigma baselines, logistic + gradient-boosted-tree models,
     conformal flag/abstain/drop, store-trained dataset, train/score/persist
     (`fuzzlab auto --score`); scores only, never labels.
+  - **Candidate ranker + active learning (Phase 7):** per-page ranking metrics
+    (NDCG@k/Precision@k), char n-gram TF-IDF, a pointwise ranker with explanations
+    writing advisory `candidate.rank_score` at zero request cost (`fuzzlab auto --rank`,
+    migration 7), and active learning (uncertainty sampling + query-by-committee) to
+    allocate the oracle budget; advisory only.
   - **Diagnostics/UI:** the loopback FastAPI control panel + dashboard/run-detail
     (findings + advisory scores).
 - `[partial]`:
@@ -463,9 +477,10 @@ offline-complete unless an on-host item is named.
     serving and browser trust remain (on-host).
 - `[on-host]` (offline pieces done; the exit/validation runs on the live lab):
   Phase 3 live capture; Phase 4 beats-uniform exit (T4.6); Phase 5 held-out exit
-  (T5.5); Phase 6 live CONNECT/TLS serving + browser trust; live
-  `--browser`/`--bandit`/`--score` runs and stored-XSS session-to-browser wiring —
-  all tracked in `docs/ON_HOST_TASKS.md`.
-- `[planned]`: candidate ranker + active learning (Phase 7), mutation engine
-  (Phase 8), protocol depth (Phase 9), anomaly detector + plugin system + a second
-  target (Phase 10), and the manifest-driven lab generator (Lab track).
+  (T5.5); Phase 6 live CONNECT/TLS serving + browser trust; Phase 7 held-out
+  NDCG@k/Precision@k exit + active-learning-budget-vs-random (T7.4); live
+  `--browser`/`--bandit`/`--score`/`--rank` runs and stored-XSS session-to-browser
+  wiring — all tracked in `docs/ON_HOST_TASKS.md`.
+- `[planned]`: mutation engine (Phase 8), protocol depth (Phase 9), anomaly detector +
+  plugin system + a second target (Phase 10), and the manifest-driven lab generator
+  (Lab track).

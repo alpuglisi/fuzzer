@@ -13,6 +13,12 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 7 (T7.3): added **active learning** (`ml/active.py`): `uncertainty_sampling`
+  (candidates nearest the 0.5 boundary, reusing the ranker's `rank_uncertainty`) and
+  `query_by_committee` over a bootstrap `Committee` of rankers (highest score variance),
+  with `propose_queries(store, run_id, budget, method)` returning the top-budget
+  candidate ids to confirm next. Advisory only — it proposes what to confirm; the oracle
+  alone confirms. +7 tests (273 passed / 3 skipped). Change-control: CC-ML-0007.
 - Phase 7 (T7.2): implemented the **pointwise candidate ranker**. `ml/ranker.py::Ranker`
   augments the structural features with char n-gram TF-IDF and fits a logistic pointwise
   scorer with per-candidate explanations; `ml/rank_train.py::train_and_rank` runs OOF
