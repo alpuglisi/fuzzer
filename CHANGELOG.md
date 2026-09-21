@@ -14,6 +14,19 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (LAB, Phase 0 foundation, CR-LAB-0001/D20): built the lab-generator
+  foundation — `fuzzlab/labgen/` (`schema.py` manifest IR, `verdict.py` the
+  versioned/snapshot-tested binary-verdict engine, `subseed.py` sub-seed
+  derivation + canonical serialization, `gates.py` the regenerate-and-diff and
+  name-leak build gates); `lab/schemas/manifest.schema.json` and
+  `safety_matrix.schema.json` (pipeline-valued transform + structured
+  sink-context safety matrix, per CR-LAB-0001 §3); `lab/safety_matrix.yaml` v1
+  and an illustrative `lab/manifests/example_phase0_scaffold.yaml`; and a
+  `lab/patterns/` provenance-corpus scaffold (3 example cards, taxonomy,
+  one-directional `provenance.yaml`, per Addendum A). Full 25-30-card corpus
+  authoring, the real per-stack emitter (T-LAB0.4), and the covering-array
+  resolver (T-LAB0.3) remain separate follow-up work — this delivery proves
+  the pipe, it does not migrate the existing PHP app. `CC-LAB-0015`.
 - Fix (BUG-0020, tooling/process): `.claude/hooks/check-error-log-bookkeeping.sh`'s
   keyword regex matched `hang` as an unanchored substring of `change`/`changed`/`changes` —
   words this project's own changelog convention uses constantly — false-positiving on its

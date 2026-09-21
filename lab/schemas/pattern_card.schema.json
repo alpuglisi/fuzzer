@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fuzzlab.local/schemas/pattern_card.schema.json",
+  "title": "fuzzlab pattern card (provenance corpus, T-LAB0.8)",
+  "description": "Schema for one lab/patterns/cards/pc-*.yaml provenance card, per docs/LAB_PATTERN_CORPUS_SOURCING_PLAN.md §4. A card documents *why* a cell exists (a real, cited disclosure); it is provenance only and is never read by fuzzlab.labgen.verdict.",
+  "type": "object",
+  "required": ["schema_version", "id", "class", "sink_family", "stack", "root_cause", "source_url", "published_date", "confidence"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "id": { "type": "string", "pattern": "^pc-[a-z0-9_-]+-[0-9]{4}$" },
+    "class": { "type": "string", "minLength": 1 },
+    "sink_family": { "type": "string", "minLength": 1 },
+    "stack": { "type": "string", "minLength": 1 },
+    "root_cause": { "type": "string", "minLength": 1 },
+    "source_url": { "type": "string", "format": "uri" },
+    "published_date": { "type": "string", "format": "date" },
+    "confidence": { "enum": ["observed", "plausible"] },
+    "triage_hint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "date": { "type": "string", "format": "date" }
+      }
+    },
+    "notes": { "type": "string" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "confidence": { "const": "plausible" } } },
+      "then": { "required": ["notes"] }
+    }
+  ]
+}

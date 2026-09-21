@@ -1,0 +1,20 @@
+schema_version: 1
+id: pc-sqli-identifier-0002
+class: sqli_identifier
+sink_family: sql_identifier
+stack: python-fastapi
+root_cause: >
+  An ORM query builder accepted a caller-supplied field name for a dynamic
+  filter and passed it through a code path that ORM binds values but not
+  column names, so the identifier was formatted straight into the
+  generated SQL string. Because the surrounding code otherwise binds every
+  literal value correctly, a taint scanner tuned to literal-context
+  injection reports the file clean.
+source_url: https://github.com/advisories/GHSA-3333-3333-3333
+published_date: "2024-11-02"
+confidence: plausible
+notes: >
+  Illustrative placeholder source_url (Phase 0 scaffold card). confidence
+  is "plausible" (a generalized shape from public ORM-injection writeups,
+  not one specific disclosure), which is why this card carries this notes
+  field per the schema's confidence-requires-notes rule.

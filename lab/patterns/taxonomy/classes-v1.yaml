@@ -1,0 +1,21 @@
+# Pattern-card class vocabulary — v1 (scaffold)
+#
+# Every lab/patterns/cards/pc-*.yaml `class` value must appear here. This is
+# a Phase 0 scaffold covering only the classes the example cards use; the
+# full ~10-class first-wave taxonomy from
+# docs/LAB_PATTERN_CORPUS_SOURCING_PLAN.md §5 is a separate, human-triaged
+# follow-up (see lab/patterns/README.md).
+version: 1
+classes:
+  - id: sqli_identifier
+    cwe: CWE-89
+    description: >
+      SQL injection via an identifier/alias position (table/column name,
+      ORDER BY target) rather than a string/numeric literal — escaping
+      functions built for literal contexts do not apply here.
+  - id: xss_context_mismatch
+    cwe: CWE-79
+    description: >
+      Cross-site scripting where an escaping function is applied but does
+      not match the actual output context (e.g. HTML-entity escaping used
+      in an unquoted-attribute position).

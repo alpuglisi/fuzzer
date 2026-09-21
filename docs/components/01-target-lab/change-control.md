@@ -3,6 +3,113 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0015 — Phase 0 foundation: pipeline verdict engine, safety matrix, determinism + name-leak gates, patterns/ scaffold (2026-09-21)
+- Change: first real code delivery for `CR-LAB-0001`/D20's Phase 0 ("Foundation").
+  Built:
+  - `lab/schemas/manifest.schema.json` and `lab/schemas/safety_matrix.schema.json`
+    (JSON Schema) — `transform` as an ordered pipeline of ops (never a single enum)
+    and `sink_context` as a structured `{family, required_neutralizations}` object
+    (never a bare string), per `CR-LAB-0001` §3. Sanity-checked (not migrated)
+    against two real `puppy-fort-factory/VULNERABILITIES.md` shapes (`product.php`'s
+    raw-concat numeric-context SQLi; `profile.php`'s stored-XSS shape recast as an
+    escaping-context mismatch) via `lab/manifests/example_phase0_scaffold.yaml`.
+  - `fuzzlab/labgen/verdict.py` (T-LAB0.1/T-LAB0.2): `SafetyMatrix` loader/validator
+    for `lab/safety_matrix.yaml` (v1, an open append-only registry) and the pure,
+    versioned `verdict(pipeline, sink_context, matrix)` function implementing D20's
+    **binary** verdict — a `partial` effect stays VULNERABLE and only raises a
+    `difficulty` tier, never a third verdict value. Snapshot-tested against
+    `tests/golden/labgen_verdict_v1.json` (same convention as
+    `tests/test_features_golden.py`), plus 13 behavioral tests covering the
+    escaping-context-mismatch and pipeline-order-sensitivity shapes.
+  - `fuzzlab/labgen/schema.py` (T-LAB0.3 foundation, deliberately dormant): manifest
+    loader/validator + the `Pipeline`/`SinkContext`/`Cell`/`Manifest` IR. No
+    covering-array expansion yet — Phase 0's manifest lists cells explicitly, one
+    axis level each, per `docs/LAB_PHASE_0_PLAN.md`'s own allowance for this task.
+  - `fuzzlab/labgen/subseed.py` (T-LAB0.5 scaffold): `derive_subseed()`
+    (`HMAC-SHA256(root_seed, cell_id\|transform\|sink_family\|stack_profile)`),
+    `canonical_json()` (sorted keys, no floats, stdlib `json` only — no formatter,
+    per that task's own rule), and `render_cell_stub()`, a minimal deterministic
+    per-cell renderer built only to give the determinism gate something real to
+    regenerate — explicitly **not** T-LAB0.4's real per-stack/module-composition
+    emitter.
+  - `fuzzlab/labgen/gates.py` + `denylist.py` (T-LAB0.5/T-LAB0.6): `regenerate_and_diff()`
+    (runs the scaffold generator twice from the same manifest+seed, raises on any
+    byte difference) and `scan_name_leaks()`/`scan_generated_tree_for_name_leaks()`
+    (NFR-LAB-no-leak), matching on vulnerability-class-name substrings with a
+    letter-boundary rule (rejects `xss` inside `maxssl`, accepts `xss_payload`) and
+    validated against a should-flag/should-not-flag fixture set per
+    `docs/LAB_PHASE_0_PLAN.md` T-LAB0.6's own requirement that a scanner's
+    no-false-negatives property be established by testing, not code review.
+  - `lab/patterns/` provenance-corpus **scaffold**: `taxonomy/classes-v1.yaml` (2
+    classes), 3 example `cards/pc-*.yaml` (schema: `lab/schemas/pattern_card.schema.json`),
+    and a one-directional `provenance.yaml` (`cell_id -> [card_id]`) per Addendum A —
+    the manifest carries no card reference, mechanically enforced by
+    `tests/test_labgen_gates.py::test_provenance_is_one_directional_no_leak_into_verdict_source`.
+    **The full 25-30-card first-wave corpus is explicitly out of scope for this
+    entry** — it requires human OSV/GHSA triage per
+    `docs/LAB_PATTERN_CORPUS_SOURCING_PLAN.md` and is tracked as a separate,
+    human-supervised follow-up task (see `lab/patterns/README.md`).
+  - Added `PyYAML>=6.0,<7` to `pyproject.toml` (PA-0005: it is imported directly by
+    `fuzzlab/labgen/schema.py` and `verdict.py` and was previously present only
+    transitively).
+  - **Location decision (documented per `docs/LAB_PHASE_0_PLAN.md`'s own open
+    "confirm paths" review point):** Python code lives under `fuzzlab/labgen/`, not
+    `lab/generator/` as that plan tentatively proposed, because `lab/` is not in
+    `pyproject.toml`'s `[tool.setuptools.packages.find]` include list (not an
+    importable package root) and a sibling, concurrently-developed module
+    (`fuzzlab/labgen/oracle_wrapper.py`, the sqlmap/commix oracle wrapper, a
+    separate work item) already lives there — splitting Phase 0's code across two
+    import roots would cost more at merge time than it would gain. Data/config
+    assets (`manifests/`, `safety_matrix.yaml`, `patterns/`) live under `lab/` as
+    that plan specifies, since they are data, not import targets.
+  - **Explicitly not built here** (separate follow-up tasks, not attempted):
+    T-LAB0.3's real covering-array expansion; T-LAB0.4's per-stack,
+    module-composition emitter (`sources`/`transforms`/`sinks`/`complexities`
+    modules per NIST VTSG's schema); T-LAB0.7's tiered conformance suite; the full
+    pattern-card corpus; migrating or reproducing `puppy-fort-factory/`'s real ~30
+    pages (this delivery sits alongside it, unchanged, per the additive-only
+    mandate — nothing in `puppy-fort-factory/` or `lab/ground-truth/` was touched).
+- Impact (other components / project): none yet on other components' contracts —
+  `fuzzlab/labgen/` is new, self-contained, and imports nothing from `fuzzlab.oracle`,
+  `fuzzlab.web`, or the not-yet-existing `oracle_wrapper.py`. FUZZ's label-contract
+  schema (`fuzzlab/labels/`) is untouched; the CR-LAB-0001 §4 FUZZ-schema impact
+  (`stack_profile`, `sink_endpoint`, identity model) lands in Phase 2, not here.
+- Risk (level; mitigation): **low**. The scaffold renderer/regenerate-diff gate is
+  self-contained test infrastructure, not wired into any build that touches the
+  real lab; a bug there cannot affect `puppy-fort-factory/`'s served behavior. The
+  main risk accepted: the safety-matrix v1 entries and example manifest are
+  illustrative (sanity-checked against real page shapes, not migrated from them),
+  so Phase 1's real rebuild may need additional matrix entries not yet anticipated
+  here — expected and additive, not a defect in this delivery.
+- Deliverables:
+  - [x] `lab/schemas/manifest.schema.json` + `safety_matrix.schema.json` — done.
+  - [x] `fuzzlab/labgen/verdict.py`: versioned, snapshot-tested `verdict()` — done.
+  - [x] `fuzzlab/labgen/schema.py`: manifest IR (resolver dormant, per plan) — done.
+  - [x] `fuzzlab/labgen/subseed.py`: sub-seed derivation + canonical serialization
+        scaffold — done.
+  - [x] `fuzzlab/labgen/gates.py`: regenerate-and-diff + name-leak scanner build
+        gates, wired as pytest tests (`tests/test_labgen_gates.py`) — done.
+  - [x] `lab/patterns/` scaffold: taxonomy + 3 example cards + one-directional
+        `provenance.yaml` — done.
+  - [ ] Full 25-30-card pattern corpus — **not started, separate human-supervised
+        follow-up task** (out of scope for this entry).
+  - [ ] T-LAB0.3 covering-array machinery, T-LAB0.4 module-composition emitter,
+        T-LAB0.7 tiered conformance suite — not started, tracked in
+        `docs/LAB_PHASE_0_PLAN.md`.
+  - [ ] Real Phase-0 manifest reproducing today's ~30 PHP pages byte-identically —
+        not started; this entry's example manifest is illustrative only.
+- Effectiveness (assessed 2026-09-21): met this delivery's own bar — 60 new tests
+  (schema validation incl. rejecting the pre-D20 bare-string/single-enum shapes;
+  13 verdict behavioral tests + a golden-file snapshot; sub-seed determinism;
+  regenerate-and-diff catching an injected nondeterminism bug in a monkeypatched
+  generator; the name-leak scanner's should-flag/should-not-flag fixture set,
+  including the `xss`-inside-`maxssl` collision case; the pattern-corpus shape)
+  all pass; full suite otherwise green (561 passed, 2 skipped, 2 pre-existing
+  unrelated `test_mutation_operators.py` failures, unaffected). Not yet assessable:
+  whether the safety-matrix/manifest schema holds up unchanged once Phase 1
+  actually rebuilds real cells against it — that is this delivery's real test and
+  is deferred to the Phase 1 CC entry.
+
 ### CC-LAB-0014 — D20: manifest-driven generator target shape decided (2026-09-21)
 - Change: approved `docs/change-requests/CR-LAB-0001-manifest-generator-realism-and-variation.md`
   and recorded **D20** in `docs/DECISIONS_AND_ROADMAP.md`. Three scope-gating decisions:

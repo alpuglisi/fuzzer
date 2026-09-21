@@ -1,0 +1,15 @@
+# cell_id -> [card_id, ...]
+#
+# The ONLY link between a manifest cell and its pattern-card provenance
+# (CR-LAB-0001 Addendum A). The manifest fuzzlab.labgen.verdict reads never
+# carries a card reference, and no card ID / `pattern://`-style string may
+# appear anywhere in the manifest or in fuzzlab/labgen/verdict.py — see
+# tests/test_labgen_gates.py::test_provenance_is_one_directional_no_leak_into_verdict_source.
+#
+# This is a Phase 0 scaffold: two illustrative cell IDs from the example
+# manifest (lab/manifests/example_phase0_scaffold.yaml), proving the shape
+# end to end. It is NOT the real Phase-0 manifest's provenance (Phase 0's
+# real manifest, migrating today's PHP pages, is a separate follow-up task —
+# see lab/patterns/README.md).
+LABGEN-EX-0001: [pc-sqli-identifier-0001, pc-sqli-identifier-0002]
+LABGEN-EX-0003: [pc-xss-context-mismatch-0001]

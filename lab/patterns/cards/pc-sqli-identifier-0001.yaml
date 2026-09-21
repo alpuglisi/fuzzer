@@ -1,0 +1,20 @@
+schema_version: 1
+id: pc-sqli-identifier-0001
+class: sqli_identifier
+sink_family: sql_identifier
+stack: php
+root_cause: >
+  A user-controlled sort-column name was interpolated directly into an
+  ORDER BY clause. The application's escaping helper only quoted and
+  escaped string *literals*, so it never ran on this value at all — the
+  column name is not a literal, it's an identifier, and identifiers cannot
+  be parameter-bound with a standard prepared-statement placeholder. The
+  fix required an explicit allow-list of known column names rather than any
+  form of escaping.
+source_url: https://github.com/advisories/GHSA-2222-2222-2222
+published_date: "2024-03-11"
+confidence: observed
+notes: >
+  Illustrative placeholder source_url (Phase 0 scaffold card, not yet
+  triaged against a real OSV/GHSA advisory) — full corpus sourcing per
+  docs/LAB_PATTERN_CORPUS_SOURCING_PLAN.md is a separate follow-up task.
