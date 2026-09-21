@@ -14,6 +14,13 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Docs: recorded the final open decision in `docs/LAB_IMPLEMENTATION_PLAN.md` —
+  Spring Boot's near-term scope (whether to formally drop the optional fourth
+  stack, or leave it an undecided line item) is left deliberately open, a
+  conscious deferral rather than an oversight, separate from the Phase 3
+  pacing decision already made for the three required stacks. 15 of 16
+  flagged items are now decided; only Phase 4's SSRF/GraphQL design research
+  (deliberately deferred as premature) remains open.
 - Docs: recorded the project owner's decisions on every judgment/scope call
   `docs/LAB_IMPLEMENTATION_PLAN.md` had flagged, closing 14 of 16 open items.
   Decided: T-LAB0.9 sweeps FUZZ consumers alongside its schema change;

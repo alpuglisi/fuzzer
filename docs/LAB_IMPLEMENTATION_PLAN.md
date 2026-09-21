@@ -1,6 +1,6 @@
 # Lab generator — implementation plan for the remaining work
 
-**Status: active — 14 of 16 flagged items decided, 2026-09-21.** This is a
+**Status: active — 15 of 16 flagged items decided, 2026-09-21.** This is a
 task-level plan, in the style of `docs/LAB_PHASE_0_PLAN.md`, covering
 everything **after** the point Phase 0 has actually reached (as of
 `CC-LAB-0028`) through the rest of `CR-LAB-0001` §8's phase list. It does
@@ -11,9 +11,9 @@ speculatively. Eight research items were dispatched to web-enabled research
 agents across two passes (four per pass, each with its own purpose-built
 prompt); their findings, plus the project owner's decisions on every
 resulting and originally-flagged judgment call, are recorded inline in the
-relevant sections and summarized in §6. Two items remain genuinely open
-(Spring Boot's near-term scope, and Phase 4's SSRF/GraphQL design passes,
-the latter deliberately left unresearched as premature) — see §6's "Still
+relevant sections and summarized in §6. One item remains genuinely open
+(Phase 4's SSRF/GraphQL design passes, deliberately left unresearched as
+premature) — see §6's "Still
 open" list.
 
 Companion documents this plan assumes you have open: `CR-LAB-0001` (the
@@ -658,9 +658,13 @@ Per `CR-LAB-0001` §8: the shop tier (6 business objects, ownership graph,
 network policy, limit-overrun/race-condition counters, OpenAPI + GraphQL
 surfaces, hand-written Next.js fixture cells, optional Spring Boot emitter.
 
-**[decision needed]:** whether Spring Boot proceeds at all is folded into
-the Phase 3 pacing decision above (option (c)) — don't schedule Phase 4's
-Spring Boot line independently of that call.
+**Decided (2026-09-21): explicitly left open, not dropped.** Given the
+choice between formally dropping Spring Boot from near-term scope now
+(previously option (c)) or leaving it as an undecided, optional line item
+the way `CR-LAB-0001` originally framed it, the project owner chose to
+leave it open — a deliberate deferral, not an oversight. Don't schedule
+Phase 4's Spring Boot line without a fresh decision at that point; nothing
+else in this plan depends on which way this eventually resolves.
 
 **[research complete, 2026-09-21]:** DOM-based XSS/frontend-code-generation
 approach (`CR-LAB-0001` §7, "lean toward hand-written fixtures per the
@@ -754,8 +758,9 @@ open.
    convention and its whole-manifest regression tests. Choosing (b) defers
    the harder-shape authoring/oracle cost for stacks 2-3, it does not
    eliminate it. **(c) — dropping Spring Boot from near-term scope — was
-   not decided** and remains open (see below); it is a separable question
-   from the depth pacing that (b) answers.
+   decided separately: deliberately left open** (see item 15 below), not
+   dropped; it is a separable question from the depth pacing that (b)
+   answers.
 7. ~~**FastAPI route-accumulator need**~~ (§4) — **research complete**:
    avoidable via a one-time static discovery scaffold (~15 lines,
    project-owned, not a first-party FastAPI feature); the `route`
@@ -798,15 +803,17 @@ open.
     tentative call, refined to a per-sink-type template with an explicit
     vulnerable/safe swap point to preserve this project's minimal-pair
     discipline. A concrete 5-8 item sink taxonomy is now specified.
+15. ~~**Spring Boot near-term scope**~~ (§4/§5) — **decided: left open,
+    deliberately.** Given the choice between formally dropping the optional
+    fourth stack from near-term planning now, or leaving it an undecided,
+    optional line item the way `CR-LAB-0001` originally framed it, the
+    project owner chose the latter — a conscious deferral, not an
+    oversight. Revisit only if/when a fresh decision is actually needed
+    (e.g. when Phase 3 is being scheduled in detail); nothing else in this
+    plan depends on which way it eventually resolves.
 
 ### Still open
 
-15. **Spring Boot near-term scope** (§4/§5) — whether to explicitly drop
-    the optional fourth stack from near-term planning (previously listed as
-    Phase 3 pacing option (c)) is a separate call from the (b) pacing
-    decision above and was not made. Doesn't block anything else — Phase
-    3's core three-stack work proceeds under decision #6 regardless of how
-    this resolves.
 16. **Phase 4 SSRF target + GraphQL surface design** (§5) — deliberately
     not dispatched for research in either pass. The plan itself judges this
     research premature this far out ("anything decided today would likely
