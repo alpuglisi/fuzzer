@@ -314,6 +314,28 @@ and measured. Authorized, lab-only.
   signal). XXE, open redirect, and known-CVE templates remain unintegrated — a separate,
   larger undertaking. (`CR-LAB-0001` tool-mapping table,
   `docs/spikes/SPIKE-004-nuclei-vs-dvwa.md`, `CC-LAB-0028`)
+- **FR-LAB-27** (Lab track, Phase 2, `CR-LAB-0001` §8, L-P2.1) An identity/ownership
+  graph, `lab/identities/identities.yaml` (schema `lab/schemas/identities.schema.json`),
+  declares named test identities (`id`, `role`), the resources they own
+  (`resource_id`, `owner`, `cell_ids`), and `authz_expectations` connecting an
+  accessing identity to a target resource and a binary `expected_outcome`
+  (`allowed | denied`, D20's binary-verdict convention) per manifest cell. Loaded by
+  `fuzzlab.labgen.identity.load_identities(path) -> IdentityGraph` (frozen
+  `Identity`/`Resource`/`AuthzExpectation` dataclasses plus lookup helpers), schema-
+  validated the same way FR-LAB-1's manifest loader validates manifests, raising a
+  typed `IdentityGraphError` for any schema violation, duplicate `identities[].id` /
+  `resources[].resource_id`, or dangling reference (an `owner`, `accessing_identity`,
+  or `target_resource` that does not resolve to a declared identity/resource) — never
+  a raw `KeyError`/`jsonschema.ValidationError`. This is genuinely novel schema
+  ground for the project (no external prior-art project declares static
+  identity/ownership data this way; see `docs/LAB_IMPLEMENTATION_PLAN.md` §3.1).
+  **Deliberately decoupled from the manifest/`Cell` IR the same way
+  `lab/patterns/provenance.yaml` is decoupled from it (`CR-LAB-0001` Addendum A):**
+  `fuzzlab.labgen.verdict` never imports `fuzzlab.labgen.identity` and carries no
+  reference to this file's content — ownership/authz-expectation data is annotation
+  feeding future test classes and audit tooling, not a verdict-engine input. Unlocks
+  IDOR/BOLA *mechanically* only; the cells themselves stay deferred indefinitely per
+  Addendum E. (`docs/LAB_IMPLEMENTATION_PLAN.md` §3.1, `CC-LAB-0029`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
@@ -360,6 +382,11 @@ refresh`) which reads/writes only `lab/patterns/sourcing/` and
 `lab/patterns/refresh/`/`REFRESH_LOG.md`; it takes no dependency on and does
 not write `lab/patterns/cards/` or `lab/patterns/provenance.yaml` — see
 FR-LAB-18.
+(Lab track, generator-build-time) `fuzzlab.labgen.identity.load_identities(path) ->
+IdentityGraph` reads `lab/identities/identities.yaml`, validated against
+`lab/schemas/identities.schema.json` — see FR-LAB-27. Reads nothing the manifest
+cells reference and is never imported by `fuzzlab.labgen.verdict` or
+`fuzzlab.labgen.schema`.
 
 ## 6. Dependencies (components)
 None (it is the system under test).
@@ -376,6 +403,10 @@ None (it is the system under test).
   manifest; the name-leak scanner passes its should-flag/should-not-flag
   fixture set; every `patterns/` card validates and every `provenance.yaml`
   reference resolves. See `tests/test_labgen_*.py`.
+- (Lab track, Phase 2, L-P2.1 — met) `identities.yaml` validates against its JSON
+  Schema; every `resources[].owner` and `authz_expectations[].accessing_identity`/
+  `target_resource` resolves to a declared identity/resource; `verdict.py` carries no
+  reference to `fuzzlab.labgen.identity`. See `tests/test_labgen_identity.py`.
 
 ## 8. Open questions
 - Database isolation strategy (per-run schema, dump reload, or rollback).

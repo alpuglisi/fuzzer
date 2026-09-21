@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fuzzlab.local/schemas/identities.schema.json",
+  "title": "fuzzlab identity/ownership graph (Phase 2, CR-LAB-0001 §8, L-P2.1)",
+  "description": "Named test identities, the resources they own, and the authz expectations that connect an accessing identity to a target resource and a binary expected outcome (D20's binary-verdict convention: allowed | denied). Deliberately decoupled from the manifest/Cell IR the same way lab/patterns/provenance.yaml is decoupled from it (CR-LAB-0001 Addendum A) — fuzzlab.labgen.verdict.verdict() never reads this file or its loader, fuzzlab.labgen.identity.",
+  "type": "object",
+  "required": ["schema_version", "identities", "resources", "authz_expectations"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Version of this file's shape, independent of manifest_version/safety_matrix_version — this file is never read by the verdict engine."
+    },
+    "identities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/identity" }
+    },
+    "resources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/resource" }
+    },
+    "authz_expectations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/authz_expectation" }
+    }
+  },
+  "$defs": {
+    "identity": {
+      "type": "object",
+      "required": ["id", "role"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Opaque identity ID, unique within this file, e.g. user_a, admin_a."
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The identity's role, e.g. standard_user, admin. Not an enum: new roles may be added without a schema change."
+        }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "required": ["resource_id", "owner", "cell_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "resource_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Opaque resource ID, unique within this file, e.g. profile_user_a."
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The identity id that owns this resource. Cross-referenced against identities[].id at load time (fuzzlab.labgen.identity), not enforced by this schema alone."
+        },
+        "cell_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Which generated manifest cells this resource maps to. A one-directional annotation only: the manifest/Cell IR carries no reference back to this file, mirroring provenance.yaml's one-directional cell_id -> [card_id, ...] shape."
+        }
+      }
+    },
+    "authz_expectation": {
+      "type": "object",
+      "required": [
+        "cell_id",
+        "endpoint",
+        "accessing_identity",
+        "target_resource",
+        "expected_outcome"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "cell_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The manifest cell this authz expectation is about."
+        },
+        "endpoint": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The endpoint path being accessed, e.g. /profile/{id}."
+        },
+        "accessing_identity": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The identity id making the request. Cross-referenced against identities[].id at load time."
+        },
+        "target_resource": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The resource id being accessed. Cross-referenced against resources[].resource_id at load time."
+        },
+        "expected_outcome": {
+          "enum": ["allowed", "denied"],
+          "description": "Binary verdict, matching this project's binary-verdict convention (D20)."
+        }
+      }
+    }
+  }
+}
