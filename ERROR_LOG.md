@@ -18,6 +18,51 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — commix oracle hangs on ambient defenses and non-target form fields (Spike 002)
+
+- **Symptom:** during `docs/spikes/SPIKE-002-commix-vs-dvwa.md` (validating commix as an
+  independent security-assertion oracle for the lab generator, per `CR-LAB-0001` Addendum
+  E), a headless `commix --batch` run against a properly-secured target (DVWA's
+  `impossible.php`) first hung indefinitely against the real `ip` parameter because its
+  anti-CSRF token rotates every page load and a captured token was stale by the second
+  request; after that was worked around, commix moved on to sweep the irrelevant static
+  `Submit` form field and entered a runaway false-positive-verification retry loop that
+  never concluded on its own and had to be killed manually.
+- **Root cause:** no fuzzlab code exists yet for this — this is a design gap, not a code
+  defect. Nothing in the (not-yet-built) oracle wrapper scopes a tool invocation to the
+  cell's declared injection parameter, and nothing accounts for a target's ambient defenses
+  (rotating CSRF tokens, rate limiting) that are unrelated to the vulnerability class
+  actually under test.
+- **Remediation:** for the spike itself, the CSRF check was disabled in a local, reverted
+  copy of `impossible.php` to isolate the command-injection defense from the unrelated CSRF
+  defense, and the runaway `Submit`-field sweep was stopped by killing the process once the
+  real parameter's clean result was already captured. The actual fix — scoping oracle
+  invocations to the cell's declared parameter and giving the wrapper session/token-refresh
+  awareness (or scoping each security assertion to just the transform under test) — is
+  recorded as a requirement in `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`, not yet implemented.
+- **Status:** Open (design requirement recorded; no oracle-wrapper code exists yet to fix).
+
+## 2026-09-21 — sqlmap oracle refuses to test past a 401/403 "secure" response (Spike 001)
+
+- **Symptom:** during `docs/spikes/SPIKE-001-sqlmap-vs-vapi.md` (validating sqlmap as an
+  independent security-assertion oracle for the lab generator, per `CR-LAB-0001` Addendum
+  E), a headless `sqlmap --batch` run against vAPI's properly-parameterized secure endpoint
+  aborted immediately with `[CRITICAL] not authorized` instead of testing and reporting a
+  clean negative, because the endpoint's "wrong credentials" response is `HTTP 401`, which
+  sqlmap treats as an authentication failure by default.
+- **Root cause:** no fuzzlab code exists yet for this — this is a design gap, not a code
+  defect. The generator's planned oracle wrapper (`CR-LAB-0001` Addendum E) does not yet
+  exist, so nothing reads a cell's declared "secure" HTTP status and passes it to sqlmap as
+  `--ignore-code`.
+- **Remediation:** re-ran manually with `--ignore-code=401`, which let sqlmap test both
+  parameters and correctly report "does not seem to be injectable" with no false positive.
+  The actual fix — the oracle wrapper reading the cell's expected secure-response status
+  from the manifest and passing the matching `--ignore-code` automatically — is recorded as
+  a requirement in `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`, not yet implemented.
+- **Status:** Open (design requirement recorded; no oracle-wrapper code exists yet to fix).
+
+---
+
 ## 2026-09-21 — `labctl.sh reset` not self-healing under podman-compose (BUG-0017, recurrence of BUG-0013)
 
 - **Symptom:** `scripts/greybox_e2e.sh` step 1 (`labctl.sh reset`) failed on the host with

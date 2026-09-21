@@ -14,6 +14,15 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Docs (LAB, lab-generator program): recorded two oracle-tool design gaps found while
+  validating the manifest generator's planned tool-oracle architecture (`CR-LAB-0001`
+  Addendum E) against real vulnerable targets — sqlmap refusing to test past a 401/403
+  "secure" response (Spike 001, vAPI) and commix hanging on an ambient rotating CSRF
+  token then looping on an irrelevant form field (Spike 002, DVWA). Neither is a fuzzlab
+  code defect (no oracle-wrapper code exists yet), so logged in `ERROR_LOG.md` as Open
+  design requirements per its own scope note, not a full `BUG-NNNN`/`PA-NNNN` — both are
+  cross-referenced to `docs/spikes/SPIKE-001-*`/`SPIKE-002-*` and the fix requirement
+  already tracked in `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`.
 - Feature (UI, Phase 0.4): unified serve mode with an in-process proxy — completes the
   Phase-0 foundations. Added `fuzzlab/web/proxycontrol.py` (`ProxyConfig`/`ProxyController`)
   that builds the proxy engine (Scope + MatchReplace + Interceptor + SocketSender + optional
