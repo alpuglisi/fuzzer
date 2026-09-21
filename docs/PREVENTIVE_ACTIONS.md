@@ -4,6 +4,10 @@ The active rules to follow while working on this project. Each is a preventive
 action from a bug investigation (`docs/bugs/`). No background here by design —
 read this list and follow it. Consult it before and during changes.
 
+**Following this list is mandatory, not advisory.** It is one step in the full
+change process; see `CLAUDE.md` (the session-start checklist) for how it fits with the
+changelog, change-control, error-log, and bug-report requirements.
+
 Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
 
 - **PA-0001** — In tests, do not hardcode a value that a source-of-truth constant

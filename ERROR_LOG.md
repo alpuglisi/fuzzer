@@ -5,6 +5,10 @@ A record of identified errors (bugs, deployment failures, environment issues) an
 something breaks and is fixed, so the same problem is easy to recognize and
 resolve next time.
 
+A **code** defect also needs a full bug report (`docs/bugs/BUG-NNNN-*.md`) and one or
+more preventive-action rules (`docs/PREVENTIVE_ACTIONS.md`) — this log alone is not
+enough. See `CLAUDE.md` for the full change process.
+
 Format per entry:
 - **Date / component**
 - **Symptom:** what was observed

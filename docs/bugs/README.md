@@ -2,7 +2,9 @@
 
 Every time a bug is discovered in the code, we generate a **bug investigation
 document** here and add its preventive action to `docs/PREVENTIVE_ACTIONS.md`.
-This is a required process for the project.
+This is a required process for the project. See `CLAUDE.md` for how it fits the full
+change process (the error-log line, the bug report, and the preventive-action rules
+together — not just one of them).
 
 ## When
 

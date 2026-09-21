@@ -9,10 +9,21 @@ Format per entry: `- <area>: <what changed> — <why>` (commit `<hash>`).
 **Every change updates both logs:** this high-level CHANGELOG *and* the
 change-control log of each affected component under `docs/components/`. This file
 is the project-level history; the component logs are the lower-level controlled
-records (see `docs/components/README.md`).
+records (see `docs/components/README.md`). For the full change process — bookkeeping,
+bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-21
 
+- Process/governance: added `CLAUDE.md` — an auto-loaded, session-start checklist that
+  makes the engineering bookkeeping impossible to overlook: the preventive-action rules
+  (mandatory), CHANGELOG + per-component change-control, the living `requirements.md` and
+  `docs/ARCHITECTURE.md` specs, the error log, and the full bug protocol (ERROR_LOG ↔
+  BUG-NNNN ↔ PA-NNNN + the PA-0002 sweep). Added a prominent "Engineering process" section
+  to `README.md` and umbrella pointers from `CHANGELOG.md`, `ERROR_LOG.md`,
+  `docs/PREVENTIVE_ACTIONS.md`, `docs/bugs/README.md`, and `docs/components/README.md` back
+  to `CLAUDE.md`. Motivated by two process misses this session (a bug fixed with only an
+  ERROR_LOG line; instrumentation not spec-tracked). Project-level governance change — no
+  single component owner, so recorded here per the CLAUDE.md convention.
 - Feature (Phase 3 live last mile, T3.2–T3.7): grey-box instrumentation is now runnable end
   to end. Built `greybox/coverage.py::FileCoverageSource` + `greybox/dbfault.py::
   FileDbFaultSource` (read the lab shim's per-request side channel — covered lines *and* a

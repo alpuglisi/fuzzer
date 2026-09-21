@@ -1,5 +1,8 @@
 # Component documentation
 
+See `CLAUDE.md` for the full change process this fits into (bookkeeping, the living specs,
+the bug protocol, and the mandatory preventive-action rules).
+
 Each primary component in `docs/ARCHITECTURE.md` has two documents in its folder
 here:
 

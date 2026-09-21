@@ -14,6 +14,27 @@ never be exposed, tools that send traffic require an explicit `--authorized`
 flag, and **nothing runs against the target until you ask it to** (no auto-run,
 decision D11).
 
+## Engineering process (required reading before you change anything)
+
+This project keeps a deliberate paper trail, and **following it is part of every change,
+not optional cleanup.** Start with **[`CLAUDE.md`](CLAUDE.md)** — the mandatory,
+session-start checklist that every contributor (human or AI agent) follows. In short,
+every change:
+
+- complies with the rules in **`docs/PREVENTIVE_ACTIONS.md`** (read and follow them —
+  they are authoritative, each derived from a past bug);
+- adds a line to **`CHANGELOG.md`** and a full entry to each affected component's
+  **`docs/components/<n>-*/change-control.md`** (append-only);
+- keeps the **living specs** current: the affected component's
+  **`docs/components/<n>-*/requirements.md`** (edited in place) and, when structure or
+  contracts change, **`docs/ARCHITECTURE.md`**;
+- and, if it fixes a code defect, gets the full bug protocol: an **`ERROR_LOG.md`** line,
+  a **`docs/bugs/BUG-NNNN-*.md`** root-cause analysis, and one or more new
+  **`docs/PREVENTIVE_ACTIONS.md`** rules (plus the PA-0002 sweep for other instances).
+
+The canonical detail lives in `CLAUDE.md`, `docs/components/README.md`, and
+`docs/bugs/README.md`.
+
 ## Layout
 
 ```
@@ -79,6 +100,8 @@ pytest        # 30 tests: store/migrations, config, budget, features, labels,
 
 ## Documentation
 
+- `CLAUDE.md` — **start here**: the mandatory engineering-process checklist (bookkeeping,
+  bug protocol, preventive-action rules) for every change, human or AI agent.
 - `docs/ARCHITECTURE.md` — components, the store-as-contract, dependencies.
 - `docs/DECISIONS_AND_ROADMAP.md` — settled decisions (D1–D11) and the phased plan.
 - `docs/PHASE_0_PLAN.md` — the foundations plan and current status.
