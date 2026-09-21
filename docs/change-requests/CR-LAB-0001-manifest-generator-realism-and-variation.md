@@ -436,3 +436,114 @@ None of this changes Phase 0's scope (still single-stack, still reproducing
 today's PHP lab) — it changes how T-LAB0.4's internals should be designed
 now so Phase 1/3 authoring doesn't hit a module-vs-template rework later,
 and it sets honest expectations for Phase 3's timeline per point 2 above.
+
+---
+
+## Addendum D (2026-09-21) — module schema extended for multi-file routing; licensing correction; differentiation record
+
+A research pass closing the multi-file-routing unknown flagged in Addendum C
+also corrected a licensing assumption and produced an evidenced
+differentiation record (now `docs/LAB_GENERATOR_DIFFERENTIATION_RECORD.md`).
+Both are recorded here since they touch §3's architecture and this
+program's due-diligence posture.
+
+**1. Licensing correction: two cited "spirit" precedents are not open
+source at all, and are more restrictive than GPL.** bWAPP (CC BY-NC-ND 4.0)
+and Google Gruyere (CC BY-ND 3.0 US) both carry **NoDerivatives** terms —
+stricter than the GPL-2.0/GPL-3.0 projects also cited (OWASP Benchmark,
+DVWA, Mutillidae II, WebGoat, XVWA), which at least permit derivation under
+copyleft. Both are commonly described, including by bWAPP's own README, as
+"free and open source"; under the OSI definition they are not, since
+NoDerivatives fails the modification requirement. **Posture, recorded
+explicitly:** cite bWAPP and Gruyere as inspiration only, derive nothing
+from either — not even with attribution — a stricter posture than the
+already-adopted "never copy GPL code" rule for the others. This changes no
+prior decision (nothing was ever adapted from either project) but corrects
+how they should be characterized in any differentiation writing this
+project does going forward.
+
+**2. Differentiation confirmed, precisely.** Read directly (cloned and
+inspected, not just characterized): OWASP Benchmark, DVWA, WebGoat,
+Mutillidae II, and XVWA. None of the seven cited precedents derives a
+verdict (all assert it — by filename, session-level switch, in-app check,
+or a literal CSV column); none declares a minimal pair mechanically (OWASP
+Benchmark has *latent* near-twins at adjacent IDs — measured up to 98.7%
+similarity — but no pairing field in its contract; DVWA's difficulty ladder
+differs by more than a transform and is undeclared); and only OWASP
+Benchmark ships any machine-readable ground truth at all (a 4-column CSV,
+asserted, not derived). **Two claims to avoid making, because the evidence
+contradicts them:** "existing benchmarks have no machine-readable ground
+truth" (OWASP Benchmark does — say *asserted*, not *absent*) and "existing
+benchmarks have no vulnerable/secure pairs" (say *undeclared and
+unconstrained*, not *absent*). The defensible claim: no cited precedent
+derives its verdict, declares minimal pairs, or combines an out-of-band
+contract with an out-of-band dynamic oracle; our design does all three, and
+none of its code, templates, or text is derived from any of them. Full
+tables in `docs/LAB_GENERATOR_DIFFERENTIATION_RECORD.md`.
+
+**3. The multi-file-routing unknown (Addendum C) is resolved: extend the
+module schema, don't rewrite it.** No project solves composition-from-
+reusable-modules *and* multi-file framework-routed output together — VTSG
+solves the first (single file only), and BaxBench (ETH SRI Lab, MIT-
+licensed) solves the second (`Scenario` × per-framework `Env`, with
+`is_multi_file`, `manifest_files`, and a `dict[Path, str]` output type) but
+generates each app via an LLM rather than composing from fragments.
+OpenAPI Generator (Apache-2.0, not a security project) supplies the missing
+vocabulary: templates classified by **cardinality** (`per-API`, `per-model`,
+`SupportingFiles`). Three additions to T-LAB0.4's module schema, adopted:
+
+- **`StackEnv`** (per stack, adapted from BaxBench's `Env`): `language`,
+  `framework`, `framework_version`, digest-pinned `base_image`, `workdir`,
+  `entrypoint_cmd`, `is_multi_file`, `scaffold_files` (rendered once per
+  stack), `accumulators` (files fed by one fragment per cell — e.g.
+  `routes/web.php`, `app.js`), and `file_roles` (path templates per
+  per-cell artifact type).
+- **A `file_role` and cardinality class on every module** — `per_cell`
+  (controller/model/view/middleware fragments), `per_stack` (scaffold
+  files, once per build), `accumulator` (once per stack, fed by every
+  cell), `per_fixture` (a migration/seed fragment per cell that needs one,
+  adapting WebGoat's per-lesson Flyway-migration pattern).
+- **Two new module categories VTSG doesn't have**: **`view`** (the sink for
+  every markup-context class — escaping-context-mismatch XSS, SSTI, Blade
+  `{!! !!}` misuse — lives here, not in the controller, and needs its own
+  safety-matrix rows since the same transform neutralizes different
+  contexts in a view than in a controller) and **`route`** (cardinality
+  `accumulator` — one fragment per cell merged into the stack's routing
+  file).
+
+**One real semantic change flagged, not yet validated:** in VTSG,
+`complexity` is a control-flow wrapper inside one function. For a routed
+cell, the natural complexity axis is *how many files the tainted value
+traverses* (controller → service → repository → model) — complexity becomes
+a **file-count multiplier**, which interacts with the accumulator and the
+covering array in ways nothing surveyed has tested. Flagged as the first
+place to expect an implementation surprise, not asserted as settled.
+
+**Determinism and minimal-pair invariants extend accordingly:** accumulator
+fragments must be sorted by cell ID before rendering (unsorted, adding one
+cell reshuffles the routes file and breaks the byte-identical-source gate);
+the minimal-pair diff assertion must run across a twin's **whole file set**,
+not one file; and — a direct lesson from Juliet's own documented labeling
+defect, where a generic `helperGood` name made false positives
+unattributable to the correct variant — **per-cell identifiers are derived
+from the cell ID, and a vulnerable/secure twin must produce identical
+identifiers**, since the transform is the only permitted difference.
+
+**Tier-B authoring rule added** (from SecCodePLT's documented seed
+methodology, §3.2 of the underlying report): a hand-authored seed's brief
+must **not name the vulnerability or the required mitigation** — stating
+"the transform fails to neutralize the identifier context" in the brief
+leaks the answer into the artifact, and anything downstream (including an
+LLM port, per Addendum C's workflow) pattern-matches on the leak rather than
+reasoning about it. This is additive to Addendum C's authoring-workflow
+rule, not a replacement.
+
+**What stays Phase-0 scoped:** today's PHP lab is filesystem-routed (one
+page per file, like DVWA/Mutillidae's pattern) and has no central routes
+file, so T-LAB0.4's Phase-0 emitter (`php_current`) needs none of the
+accumulator/view/route machinery to hit its byte-identical reproduction
+exit criterion. This extension is designed now, proven in Phase 3 when the
+Laravel and Express emitters need a real `routes/web.php`/`app.js`
+accumulator (FastAPI may avoid needing one at all via `APIRouter`
+auto-inclusion — unconfirmed, worth ten minutes to check before Phase 3
+starts).

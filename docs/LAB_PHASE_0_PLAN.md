@@ -235,7 +235,14 @@ until you decide (a later, separate decision) to cut over.
   This is the architecture correction from `CR-LAB-0001` Addendum C: it
   changes the unit of authoring from "one template per `(class,
   sink_context)`" to "a handful of composable modules," which is what makes
-  Phase 1/3 authoring volume tractable. `lab/generator/emitters/php_current/`
+  Phase 1/3 authoring volume tractable. **Schema left room for two more
+  module categories and a per-stack `StackEnv`** per `CR-LAB-0001` Addendum D
+  (`view` and `route` module types, `file_role`/cardinality on every module,
+  an `accumulator` file concept for routes files fed one fragment per cell) —
+  not needed for Phase 0's exit criterion, since today's PHP app is
+  filesystem-routed with no central routes file, but the interface shouldn't
+  assume single-file output when Phase 3's Laravel/Express emitters will
+  need multi-file, routed output from day one. `lab/generator/emitters/php_current/`
   implements this to emit exactly today's `puppy-fort-factory/` pages from
   the Phase-0 manifest, via **Jinja2** (BSD; `trim_blocks=True,
   lstrip_blocks=True, keep_trailing_newline=True` set explicitly, never left
