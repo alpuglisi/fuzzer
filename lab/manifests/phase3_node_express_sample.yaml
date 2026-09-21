@@ -1,0 +1,101 @@
+# Phase-3 node_express sample manifest (L-P3.1).
+#
+# Proves fuzzlab.labgen.emitters.node_express's Tier-A module inventory
+# (sql_numeric_literal SQLi, sql_string_literal SQLi, html_body XSS -- the
+# same three shapes php_current proves on its real-page sample) against a
+# small, self-contained set of cells. Not a migration of any real app --
+# node_express is a new stack with no pre-existing hand-built pages to
+# reproduce (that requirement is php/Laravel's alone, per D20 §7.2). Cell
+# IDs are prefixed LABGEN-NE- ("node/express") to keep them out of both the
+# php_current LABGEN-EX-/LABGEN-RP- namespaces and the real PFF- ground-truth
+# namespace.
+#
+# Eight cells, four vulnerable/secure pairs, three sink-context families,
+# two routes sharing one shape (/api/products, /api/posts) to prove module
+# reuse across routes -- the same structure as
+# lab/manifests/phase0_real_pages_sample.yaml's product.php/blog_post.php
+# pair, ported to this stack.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # --- /api/products: raw concat into a numeric SQL literal position ----
+  - cell_id: LABGEN-NE-0001
+    class: sqli
+    stack_profile: node_express
+    route: { method: GET, path: /api/products }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  - cell_id: LABGEN-NE-0002
+    class: sqli
+    stack_profile: node_express
+    route: { method: GET, path: /api/products }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
+
+  # --- /api/posts: same shape as /api/products, different route/table ---
+  # --- -- proves the module set is reused, not re-authored, across    ---
+  # --- routes.                                                        ---
+  - cell_id: LABGEN-NE-0003
+    class: sqli
+    stack_profile: node_express
+    route: { method: GET, path: /api/posts }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  - cell_id: LABGEN-NE-0004
+    class: sqli
+    stack_profile: node_express
+    route: { method: GET, path: /api/posts }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
+
+  # --- /api/login: raw concat into a quoted string-literal SQL position -
+  # --- (POST username) -- a distinct sink-context family and a distinct-
+  # --- source (POST body, not GET query).                              -
+  - cell_id: LABGEN-NE-0005
+    class: sqli
+    stack_profile: node_express
+    route: { method: POST, path: /api/login }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  - cell_id: LABGEN-NE-0006
+    class: sqli
+    stack_profile: node_express
+    route: { method: POST, path: /api/login }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
+
+  # --- /api/profile: stored XSS -- a distinct vulnerability class, a  ---
+  # --- distinct source (a stored field, not a request parameter), and ---
+  # --- a distinct sink (HTML body echo).                              ---
+  - cell_id: LABGEN-NE-0007
+    class: xss
+    stack_profile: node_express
+    route: { method: GET, path: /api/profile }
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: []
+
+  - cell_id: LABGEN-NE-0008
+    class: xss
+    stack_profile: node_express
+    route: { method: GET, path: /api/profile }
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: [html_entity_escape]

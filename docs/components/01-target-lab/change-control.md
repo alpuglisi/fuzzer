@@ -3,6 +3,71 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0029 — Node/Express emitter, Tier-A depth (L-P3.1) (2026-09-21)
+- Change: added `fuzzlab/labgen/emitters/node_express/` — the second concrete
+  `Emitter` implementation (after `php_current`), covering Tier-A scope only
+  (`sqli`/`sql_numeric_literal`, `sqli`/`sql_string_literal`,
+  `xss`/`html_body` — the same three shapes `php_current` proves), per the
+  Phase-3 pacing decision ("stack 1 full depth, stacks 2-3 Tier-A-only") in
+  `docs/LAB_IMPLEMENTATION_PLAN.md` §4. Introduces a self-contained JS
+  module-composition inventory (`node_express/modules.py` + `templates/`),
+  this component's first `StackEnv` (`node_express/stack_env.py`, per
+  `CR-LAB-0001` Addendum D) with a digest-pinned Node 22 LTS base image, and
+  this component's first `route`-category accumulator
+  (`NodeExpressEmitter.render_route_accumulator`, building `app.js` from the
+  whole supported-cell set sorted by `cell_id`, deliberately separate from
+  `Emitter.render(cell)`'s per-cell contract — see the emitter module's own
+  docstring for why). Ships a real npm-registry-resolved
+  `package-lock.json` (`express@4.22.3`, `mysql2@3.24.4`) and a digest-pinned
+  `Dockerfile` (`NODE_ENV=production` set per the framework-debug-page
+  research). New manifest `lab/manifests/phase3_node_express_sample.yaml`
+  (8 cells, 4 vulnerable/secure pairs). Did not touch `emitter.py`'s ABC,
+  `php_current`, or any existing file under `fuzzlab/labgen/modules/`, per
+  this lane's scope discipline — `node_express` owns its entire module
+  registry independently.
+- Impact (other components / project): none outside LAB. No change to
+  `verdict.py`'s derivation logic, `fuzzlab.labgen.schema`'s `Cell`/
+  `SinkContext` IR, or any other lane's files. Establishes the accumulator/
+  per-cell-render split future routed emitters (Laravel's `routes/web.php`,
+  L-P3.3a) are expected to follow — flagged in both this entry and
+  `requirements.md`'s FR-LAB-27 for whichever lane next needs it, since the
+  generic `fuzzlab.labgen.conformance.tier3` module (a sibling lane's file,
+  not modified here) has no built-in concept of an accumulator's
+  whole-corpus cardinality yet.
+- Risk (level; mitigation or accepted-risk justification): low. The base
+  image digest was read from a Docker Hub image-layer page during authoring
+  (2026-09-21) rather than confirmed via a live `docker pull` (no Docker
+  daemon in this build environment) — the Dockerfile documents the exact
+  re-pin command to run before a real build, so this cannot silently drift
+  unnoticed. A CycloneDX SBOM was not generated (`syft` not installed in
+  this environment) — the intended command is documented in
+  `requirements.md` rather than skipped silently, and no image build
+  actually happened, so nothing ships without an SBOM that wasn't already
+  going to need re-verification before a real build anyway.
+- Deliverables:
+  - [x] `StackEnv` for `node_express` (digest-pinned base image,
+    `is_multi_file=True`, `route` accumulator) — done
+  - [x] Tier-A module inventory (3 shapes, ported from `php_current`'s
+    categories) — done
+  - [x] Conformance pass: Tier 0 (`node --check`, skip-guarded) + Tier 3
+    (whole-manifest regenerate-and-diff, per-cell + accumulator) against
+    `lab/manifests/phase3_node_express_sample.yaml` — done
+  - [x] Digest-pinned base image + real `package-lock.json` — done
+  - [ ] CycloneDX SBOM via `syft` — blocked: `syft` not installed in this
+    build environment; command documented, not run
+  - [x] Per-module unit tests + end-to-end per-cell tests (supports/
+    determinism/verdict-cross-check/`node --check`) — done, 68 new tests,
+    full suite green
+- Effectiveness (assessed 2026-09-21): all 68 new tests pass, including the
+  real `node --check` lint pass (node v22.22.2 available in this build
+  environment) and the real Tier-3 whole-manifest regenerate-and-diff for
+  both per-cell controllers and the route accumulator. The full project
+  test suite was re-run and stayed green with only additions (see
+  `CHANGELOG.md` for the exact count). Not yet assessed: real container
+  build/boot (no Docker daemon here) and live oracle confirmation (Tier 1/2,
+  explicitly out of this lane's scope per the task) — those remain
+  `[design]`-tier claims until a lane with on-host resources exercises them.
+
 ### CC-LAB-0028 — Nuclei path-traversal/LFI oracle wrapper (Addendum E, Spike 004) (2026-09-21)
 *(Numbered `CC-LAB-0028` rather than `CC-LAB-0017` at merge time — this lane's worktree
 diverged onto a stale, unrelated branch lineage before starting, self-diagnosed and

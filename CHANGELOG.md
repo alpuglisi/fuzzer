@@ -14,6 +14,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- LAB: added the Node/Express emitter (`fuzzlab/labgen/emitters/node_express/`),
+  Tier-A depth (L-P3.1) — the second stack after `php_current`, covering the
+  same three well-documented SQLi/XSS shapes, with its own self-contained JS
+  module inventory, this component's first `StackEnv` and `route`-category
+  accumulator (`CR-LAB-0001` Addendum D), a digest-pinned Node 22 LTS
+  Dockerfile, a real npm-resolved lockfile, and a new sample manifest
+  (`lab/manifests/phase3_node_express_sample.yaml`) proven through Tier 0/3
+  of the conformance suite (`CC-LAB-0029`).
 - Docs: fleshed `docs/LAB_IMPLEMENTATION_PLAN.md`'s Phase 2 (§3) and Phase 3 (§4)
   from milestone-level bullets into full task breakdowns matching Phase 0/1's
   granularity, and added a new §7 lane/dependency map covering every Phase 0-3

@@ -1,0 +1,9 @@
+const {{ password_var }} = require('crypto').createHash('md5').update(req.body.{{ password_param }} || '').digest('hex');
+{% if bound %}
+const [{{ handler_name }}Rows] = await pool.query('SELECT id, {{ column }} FROM {{ table }} WHERE {{ column }} = ? AND password = ?', [{{ value_expr }}, {{ password_var }}]);
+const row = {{ handler_name }}Rows[0] || null;
+{% else %}
+const sql = "SELECT id, {{ column }} FROM {{ table }} WHERE {{ column }} = '" + {{ value_expr }} + "' AND password = '" + {{ password_var }} + "'";
+const [{{ handler_name }}Rows] = await pool.query(sql);
+const row = {{ handler_name }}Rows[0] || null;
+{% endif %}
