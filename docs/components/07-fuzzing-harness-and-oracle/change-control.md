@@ -3,6 +3,39 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0012 — Four more deterministic oracle vectors (2026-09-21)
+- Change: added `ConfirmationStrategy` classes for four more injection classes, each
+  fail-closed and confirming on a positive marker: **open redirect** (M9 —
+  redirect-target-control: the param controls a `Location` header or meta-refresh
+  target), **SSTI** (M4 — evaluation-marker: `${a*b}` / `{{a*b}}` / `<%= a*b %>` etc.
+  evaluate to the product, with the literal expression absent), **path traversal/LFI**
+  (M7 — file-content-marker: an `/etc/passwd` `root:...:0:0:` signature), and **command
+  injection** (M1 timing — shell `sleep` with rising delay). Factored the rising-delay
+  timing logic into a shared `ConfirmationStrategy._confirm_timing` reused by SQLi and
+  command injection. Registered all four in `default_strategies()` and mapped their
+  categories in `category_to_oracle_class`. `R-SSTI` now nominates on location
+  (CC-AUD-0011) so it fires when its category is active.
+- Impact (other components / project): grows the oracle's coverage from 2 classes
+  (SQLi, reflected XSS) to 6. Because categories are scoped by the run plan (D14), the
+  new vectors add zero cost to the SQLi/XSS lab benchmark — they run only when their
+  category is selected (manual `--categories`) or present in a target's ground truth.
+  These classes are not in the puppy-fort lab, so no effect on its score; they extend
+  the toolkit to other targets/labs. Payloads are detection markers (arithmetic,
+  `sleep`, `/etc/passwd` read, a canary redirect), not destructive.
+- Risk (level; mitigation): low — additive, class-scoped via `applies()`, oracle stays
+  fail-closed. Mitigated by 10 tests in `tests/test_oracle_vectors.py` (each vector:
+  confirm the true case + reject a benign/reflection-only case; category wiring) and
+  the refactor keeping SQLi timing green. Suite 145 passed / 2 skipped.
+- Deliverables:
+  - [x] OpenRedirect / SSTI / PathTraversal / CommandInjection strategies — done.
+  - [x] Shared `_confirm_timing`; `default_strategies` + category map updated — done.
+  - [x] Tests (confirm + fail-closed per vector; category mapping) — done.
+  - [ ] Live confirmation against a lab that has these classes (e.g. a validation lab
+    or added puppy-fort cases) — on-host / Lab track.
+- Effectiveness (assessed 2026-09-21): effective in tests — each vector confirms its
+  positive and stays fail-closed on the benign case; live confirmation pending a target
+  with these vulns.
+
 ### CC-FUZZ-0011 — POST-body injection through the oracle + senders (2026-09-21)
 - Change: the oracle can now test **POST body** params, not just GET query. Threaded
   `method`/`location` (already on `Candidate`) into confirmation: a `_send` helper on

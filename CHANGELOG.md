@@ -13,6 +13,15 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Oracle vectors: added four more deterministic confirmers — **open redirect** (M9
+  redirect-target-control), **SSTI** (M4 evaluation marker), **path traversal/LFI** (M7
+  `/etc/passwd` content marker), and **command injection** (M1 differential timing) —
+  taking the oracle from 2 classes to 6. Each is a fail-closed `ConfirmationStrategy`
+  scoped to its vuln_class; the rising-delay timing logic is now shared by SQLi and
+  command injection. Categories are scoped by the run plan (D14), so these cost nothing
+  on the SQLi/XSS lab benchmark and run only when selected or present in a target's
+  ground truth. `R-SSTI` now nominates on location (like XSS). +10 tests (145 passed /
+  2 skipped). Change-control: CC-FUZZ-0012, CC-AUD-0011.
 - Phase 2 build: **POST-body injection**. The oracle can now test POST body params, not
   just GET query — a backward-compatible `_send` helper threads `method`/`location`
   through, and `RequestsProbeSender`/`SeamProbeSender` issue a POST with a form-encoded

@@ -3,6 +3,22 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0011 — R-SSTI nominates on location (parity with XSS) (2026-09-21)
+- Change: `R-SSTI`'s `when` changed from `sink_context_in [html]` to
+  `location_in [query, body]`, so it nominates a candidate on what discovery knows
+  (like `R-XSS-REFLECT`, CC-AUD-0009); the oracle's SSTI strategy (evaluation-marker)
+  confirms precisely. Without this the rule was dead in automatic mode (sink_context is
+  never set pre-detection — the BUG-0006 class).
+- Impact (other components / project): SSTI candidates are now nominated when the SSTI
+  category is active (scoped by the run plan, D14), enabling CC-FUZZ-0012's SSTI
+  confirmer. No effect on the SQLi/XSS lab benchmark.
+- Risk (level; mitigation): low — data-only rule edit; oracle fail-closed (no FP).
+  Covered by updated `test_audit_rules`. Suite 145 passed / 2 skipped.
+- Deliverables:
+  - [x] R-SSTI location-based nomination — done.
+- Effectiveness (assessed 2026-09-21): effective — SSTI is nominated when selected;
+  the oracle confirms by evaluation marker.
+
 ### CC-AUD-0010 — Candidate evidence carries method/location (POST support) (2026-09-21)
 - Change: the rules engine now records `method` and `location` in each `candidate`
   row's evidence JSON (previously only `url`/`param`), so the pipeline can reconstruct

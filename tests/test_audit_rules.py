@@ -24,8 +24,8 @@ def test_matches_predicate():
     assert not matches(rules["R-XSS-REFLECT"], hdr)          # not a query/body point
     redir = InjectionPoint(url="/go.php", param="returnUrl", location="query")
     assert matches(rules["R-OPEN-REDIRECT"], redir)
-    html = InjectionPoint(url="/s.php", param="q", location="query", sink_context="html")
-    assert matches(rules["R-SSTI"], html)                    # SSTI still keys on sink context
+    # SSTI, like XSS, nominates on location (the oracle confirms by evaluation marker).
+    assert matches(rules["R-SSTI"], q)
 
 
 def test_evaluate_logs_negatives_and_candidates(tmp_path):
@@ -57,7 +57,7 @@ def test_evaluate_logs_negatives_and_candidates(tmp_path):
         outcomes = {r["rule_id"]: r["fired"] for r in rows}
         assert outcomes["R-SQLI-PARAM"] == 1
         assert outcomes["R-XSS-REFLECT"] == 1                # nominated on location
-        assert outcomes["R-SSTI"] == 0                       # no sink context -> negative
+        assert outcomes["R-OPEN-REDIRECT"] == 0             # name 'id' doesn't match -> negative
 
 
 def test_evaluate_category_filter_scopes_rules(tmp_path):

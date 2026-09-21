@@ -40,7 +40,7 @@
       "id": "R-SSTI",
       "category": "server-side-template-injection",
       "transaction_type": "Template Injection",
-      "when": { "sink_context_in": ["html"] },
+      "when": { "location_in": ["query", "body"] },
       "reference": "server-side-template-injection"
     }
   ]

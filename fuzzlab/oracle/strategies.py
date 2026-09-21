@@ -33,6 +33,35 @@ _TIMING_TEMPLATES = [
     "1' OR SLEEP({d})-- -",
 ]
 
+# Command-injection timing templates (shell separators; {d} = delay seconds).
+_CMDI_TIMING_TEMPLATES = [
+    "; sleep {d}",
+    "| sleep {d}",
+    "|| sleep {d}",
+    "& sleep {d}",
+    "&& sleep {d}",
+    "$(sleep {d})",
+    "`sleep {d}`",
+    "1; sleep {d}",
+]
+
+# Open-redirect body sinks (meta refresh) and /etc/passwd content marker (M7).
+_META_REFRESH = re.compile(r"http-equiv=[\"']?refresh[\"']?[^>]*url=([^\"'>\s]+)", re.I)
+_PASSWD_MARKER = re.compile(r"root:.*?:0:0:", re.M)
+_TRAVERSAL_PAYLOADS = [
+    "../../../../../../../../etc/passwd",
+    "....//....//....//....//etc/passwd",
+    "..%2f..%2f..%2f..%2f..%2fetc%2fpasswd",
+    "/etc/passwd",
+    "../../../../etc/passwd%00",
+]
+
+
+def _ssti_payloads(expr: str) -> list[str]:
+    """Payloads that evaluate `expr` across common template engines."""
+    return ["${" + expr + "}", "{{" + expr + "}}", "<%= " + expr + " %>",
+            "#{" + expr + "}", "${{" + expr + "}}"]
+
 
 def _token() -> str:
     return secrets.token_hex(4)
@@ -62,6 +91,43 @@ class ConfirmationStrategy:
             return sender.send(candidate.url, candidate.param, value, timing=timing)
         return sender.send(candidate.url, candidate.param, value, timing=timing,
                            method=candidate.method, location=candidate.location)
+
+    # --- shared rising-delay timing confirmation (M1) ------------------------
+    delays = (2, 4)
+    baseline_samples = 3
+    k = 3.0
+    floor = 1.5           # seconds of added delay required above baseline
+    tolerance = 0.6       # measured latency may fall this far short of the request
+
+    def _confirm_timing(self, candidate: Candidate, sender: Sender,
+                        templates: list[str]) -> Verdict | None:
+        """Confirm a time-based injection: latency must rise with the requested delay.
+
+        Shared by SQLi (SQL SLEEP) and command injection (shell sleep). Robust
+        baseline (median/MAD), a floor above jitter, and a rising-delay check across
+        two requested delays — never one slow response.
+        """
+        base = build_baseline([
+            self._send(sender, candidate, "1", timing=True).elapsed
+            for _ in range(self.baseline_samples)
+        ])
+        for template in templates:
+            measured, ok = {}, True
+            for d in self.delays:
+                probe = self._send(sender, candidate, template.format(d=d), timing=True)
+                measured[d] = probe.elapsed
+                if not base.exceeds(probe.elapsed, k=self.k, floor=self.floor):
+                    ok = False
+                    break
+                if probe.elapsed < d - self.tolerance:      # latency tracks the request
+                    ok = False
+                    break
+            if ok and measured[self.delays[-1]] > measured[self.delays[0]]:
+                return Verdict(True, self.vuln_class, self.mechanism,
+                               {"baseline_median": round(base.median, 4),
+                                "measured": {str(k): round(v, 4) for k, v in measured.items()},
+                                "template": template})
+        return None
 
 
 class SqliErrorStrategy(ConfirmationStrategy):
@@ -104,35 +170,9 @@ class SqliBooleanStrategy(ConfirmationStrategy):
 class SqliTimingStrategy(ConfirmationStrategy):
     vuln_class = "sqli"
     mechanism = "differential-timing"
-    delays = (2, 4)
-    baseline_samples = 3
-    k = 3.0
-    floor = 1.5           # seconds of added delay required above baseline
-    tolerance = 0.6       # measured latency may fall this far short of the request
 
     def confirm(self, candidate, sender):
-        base = build_baseline([
-            self._send(sender, candidate, "1", timing=True).elapsed
-            for _ in range(self.baseline_samples)
-        ])
-        for template in _TIMING_TEMPLATES:
-            measured, ok = {}, True
-            for d in self.delays:
-                probe = self._send(sender, candidate, template.format(d=d), timing=True)
-                measured[d] = probe.elapsed
-                if not base.exceeds(probe.elapsed, k=self.k, floor=self.floor):
-                    ok = False
-                    break
-                if probe.elapsed < d - self.tolerance:      # latency tracks the request
-                    ok = False
-                    break
-            # Rising-delay: more requested delay -> more measured latency.
-            if ok and measured[self.delays[-1]] > measured[self.delays[0]]:
-                return Verdict(True, self.vuln_class, self.mechanism,
-                               {"baseline_median": round(base.median, 4),
-                                "measured": {str(k): round(v, 4) for k, v in measured.items()},
-                                "template": template})
-        return None
+        return self._confirm_timing(candidate, sender, _TIMING_TEMPLATES)
 
 
 class ReflectedXssStrategy(ConfirmationStrategy):
@@ -157,15 +197,83 @@ class ReflectedXssStrategy(ConfirmationStrategy):
         return None
 
 
+class OpenRedirectStrategy(ConfirmationStrategy):
+    """M9: the parameter controls the redirect target (Location or meta refresh)."""
+    vuln_class = "open-redirect"
+    mechanism = "redirect-target-control"
+
+    @staticmethod
+    def _header(probe, name):
+        return next((v for k, v in probe.headers.items() if k.lower() == name), "")
+
+    def confirm(self, candidate, sender):
+        canary = f"https://oracle{_token()}.example/cb"
+        probe = self._send(sender, candidate, canary)
+        location = self._header(probe, "location")
+        if location.startswith(canary):
+            return Verdict(True, self.vuln_class, self.mechanism,
+                           {"sink": "location-header", "location": location[:200]})
+        m = _META_REFRESH.search(probe.text or "")
+        if m and m.group(1).startswith(canary):
+            return Verdict(True, self.vuln_class, self.mechanism,
+                           {"sink": "meta-refresh", "url": m.group(1)[:200]})
+        return None
+
+
+class SstiStrategy(ConfirmationStrategy):
+    """M4: a template expression is evaluated server-side (product appears, not the literal)."""
+    vuln_class = "ssti"
+    mechanism = "evaluation-marker"
+
+    def confirm(self, candidate, sender):
+        a, b = secrets.randbelow(900) + 100, secrets.randbelow(900) + 100
+        expr, product = f"{a}*{b}", str(a * b)
+        for payload in _ssti_payloads(expr):
+            text = self._send(sender, candidate, payload).text or ""
+            if product in text and expr not in text:      # evaluated, not just reflected
+                return Verdict(True, self.vuln_class, self.mechanism,
+                               {"payload": payload, "product": product})
+        return None
+
+
+class PathTraversalStrategy(ConfirmationStrategy):
+    """M7: a file-content marker (/etc/passwd) appears in the response."""
+    vuln_class = "file-inclusion"
+    mechanism = "file-content-marker"
+
+    def confirm(self, candidate, sender):
+        for payload in _TRAVERSAL_PAYLOADS:
+            if _PASSWD_MARKER.search(self._send(sender, candidate, payload).text or ""):
+                return Verdict(True, self.vuln_class, self.mechanism, {"payload": payload})
+        return None
+
+
+class CommandInjectionStrategy(ConfirmationStrategy):
+    """M1 (timing): a shell `sleep` executes, latency rising with the requested delay."""
+    vuln_class = "command-injection"
+    mechanism = "differential-timing"
+
+    def confirm(self, candidate, sender):
+        return self._confirm_timing(candidate, sender, _CMDI_TIMING_TEMPLATES)
+
+
 def default_strategies() -> list[ConfirmationStrategy]:
-    """Cheapest/strongest first: error signature, boolean, timing, then XSS."""
+    """Cheapest/strongest first, per class. `applies()` scopes each to its vuln_class."""
     return [SqliErrorStrategy(), SqliBooleanStrategy(), SqliTimingStrategy(),
-            ReflectedXssStrategy()]
+            ReflectedXssStrategy(), OpenRedirectStrategy(), SstiStrategy(),
+            PathTraversalStrategy(), CommandInjectionStrategy()]
 
 
-# Reference-style category -> the oracle vuln_class we currently have a strategy for.
+# Reference-style category -> the oracle vuln_class we have a strategy for.
 # Categories absent here have no confirmer yet (candidate emitted, not confirmed).
-_CATEGORY_TO_CLASS = {"sql-injection": "sqli", "xss": "xss-reflected"}
+_CATEGORY_TO_CLASS = {
+    "sql-injection": "sqli",
+    "xss": "xss-reflected",
+    "open-redirect": "open-redirect",
+    "server-side-template-injection": "ssti",
+    "file-inclusion": "file-inclusion",
+    "command-injection": "command-injection",
+}
 
 
 def category_to_oracle_class(category: str) -> str | None:

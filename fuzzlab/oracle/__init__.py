@@ -6,10 +6,17 @@ confirmation *mechanisms* (see `docs/architecture/oracle-confirmation.md`); a
 it. Ambiguity is "not confirmed", never a guess (fail-closed). ML never writes
 labels.
 
-Phase 2 ships the mechanisms the current lab needs: differential timing (M1),
-error signature (M2), boolean/response differential (M3) for SQLi, and
-reflected-canary-in-executable-context (M5) for reflected XSS. Browser execution
-(M6, stored/DOM XSS), out-of-band (M8), and grey-box (M10) come later.
+Implemented mechanisms: differential timing (M1) for SQLi *and* command injection,
+error signature (M2) and boolean/response differential (M3) for SQLi,
+evaluation-marker (M4) for SSTI, reflected-canary-in-executable-context (M5) for
+reflected XSS, file-content-marker (M7) for path traversal/LFI, and
+redirect-target-control (M9) for open redirect. Browser execution (M6, stored/DOM
+XSS), out-of-band (M8), and grey-box (M10) come later.
+
+Each class is one `ConfirmationStrategy`; `applies()` scopes it to its vuln_class, so
+adding a vector is adding a strategy (+ a `category_to_oracle_class` mapping). Which
+categories actually run is scoped by the run plan (D14), so vectors beyond the
+target's ground truth cost nothing unless selected.
 """
 
 from fuzzlab.oracle.probe import Probe, Candidate, Verdict
