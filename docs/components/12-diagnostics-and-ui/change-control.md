@@ -3,6 +3,34 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0019 — Proxy tab: Scope + Match-Replace (Phase 2.4; completes the workbench) (2026-09-21)
+- Change: `ProxyController` gained live `scope_view` / `scope_add(host, path_regex?, exclude)`
+  / `scope_remove(index)` over the engine's default-deny `Scope`, and `matchreplace_view` /
+  `matchreplace_add(target, match, replace, header_name?, is_regex)` / `matchreplace_remove` /
+  `matchreplace_toggle` over the ordered `MatchReplaceEngine`. Routes: `GET|POST
+  /api/proxy/scope`, `DELETE /api/proxy/scope/{index}`, `GET|POST /api/proxy/matchreplace`,
+  `DELETE /api/proxy/matchreplace/{index}`, `POST /api/proxy/matchreplace/{index}/toggle`
+  (all 409 without the in-process proxy; a bad match-replace target / missing header_name →
+  400). The Proxy tab's **Scope · Match-Replace** card lists/add/removes scope rules
+  (host + optional path-regex, include/exclude) and match-replace rules (target, header,
+  match→replace, regex, enable toggle); rows are DOM-built. Changes apply to subsequent
+  proxied requests on the same event loop.
+- Impact (other components / project): **completes the Proxy workbench** (History,
+  Intercept, Repeater, Scope/Match-Replace) — realizing ask #2 of the revamp. Consumes the
+  proxy `Scope`/`MatchReplaceEngine` unchanged; no schema change. Available only under
+  `fuzzlab web --with-proxy` (else the card shows a start hint).
+- Risk (level; mitigation): low — edits an opt-in, loopback, authorized proxy's config.
+  Mitigated by tests: `tests/test_web_scope.py` (controller scope add/remove + in_scope
+  effect; match-replace add/view/toggle/remove + a real rewrite via `engine.matchreplace.apply`;
+  add-validation raises; routes 409 without proxy, scope add/remove + host-required 400,
+  match-replace add/toggle/remove + bad-target 400). Suite 496 passed / 6 skipped.
+- Deliverables:
+  - [x] Controller scope + match-replace methods; routes — done.
+  - [x] Scope / Match-Replace UI (list/add/remove/toggle) — done.
+  - [x] Tests (controller effects + routes) — done; verified in a real browser (screenshot).
+- Effectiveness (assessed 2026-09-21): effective — scope include/exclude and ordered byte
+  rewrites are manageable live and take effect on the engine; the Proxy workbench is complete.
+
 ### CC-UI-0018 — Proxy tab: Repeater (replay tabs) (Phase 2.3) (2026-09-21)
 - Change: added a `RepeaterController` (web) over the existing `Repeater` backend — its own
   `SocketSender` + lazily-opened store (created only on first write), `list_tabs` (all tabs,

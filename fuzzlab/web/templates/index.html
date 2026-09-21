@@ -135,9 +135,9 @@
   <div class="card">
     <h2>Proxy workbench</h2>
     <p class="muted" id="proxy-status">Proxy: checking…</p>
-    <p class="muted">History (recorded flows) and live Intercept (pause / edit / drop /
-      forward) are live below. Repeater and scope / match-replace arrive in the next
-      Phase 2 increments.</p>
+    <p class="muted">History, live Intercept (pause / edit / drop / forward), Repeater, and
+      Scope / Match-Replace are all below. Intercept, Repeater sends, and Scope /
+      Match-Replace need the in-process proxy (<code>fuzzlab web --with-proxy --authorized</code>).</p>
   </div>
 
   <div class="card">
@@ -229,9 +229,43 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" id="scope-card">
     <h2>Scope · Match-Replace</h2>
-    <p class="muted">Scope and ordered match-replace controls arrive in Phase 2.4.</p>
+    <p class="muted" id="scope-unavailable" hidden>Not running in-process. Start with
+      <code>fuzzlab web --with-proxy --authorized</code> to manage scope and rewrites.</p>
+    <div id="scope-controls" hidden>
+      <h3>Scope <span class="muted">— default-deny; an exclude always wins</span></h3>
+      <table id="scope-table">
+        <thead><tr><th>#</th><th>host</th><th>path regex</th><th>type</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="field"><label for="scope-host">host</label>
+        <input type="text" id="scope-host" placeholder="127.0.0.1:8080 · .lab.local · *"></div>
+      <div class="field"><label for="scope-path">path regex</label>
+        <input type="text" id="scope-path" placeholder="(optional)"></div>
+      <div class="field"><label for="scope-exclude">exclude</label>
+        <input type="checkbox" id="scope-exclude"></div>
+      <div class="actions"><button type="button" id="scope-add">Add scope rule</button></div>
+
+      <h3>Match-Replace <span class="muted">— ordered byte rewrites</span></h3>
+      <table id="mr-table">
+        <thead><tr><th>#</th><th>target</th><th>header</th><th>match &rarr; replace</th>
+          <th>regex</th><th>on</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="field"><label for="mr-target">target</label>
+        <select id="mr-target">
+          <option>request_line</option><option>status_line</option>
+          <option>header</option><option>body</option>
+        </select></div>
+      <div class="field"><label for="mr-header">header name</label>
+        <input type="text" id="mr-header" placeholder="(when target = header)"></div>
+      <div class="field"><label for="mr-match">match</label><input type="text" id="mr-match"></div>
+      <div class="field"><label for="mr-replace">replace</label><input type="text" id="mr-replace"></div>
+      <div class="field"><label for="mr-regex">regex</label><input type="checkbox" id="mr-regex"></div>
+      <div class="actions"><button type="button" id="mr-add">Add rewrite rule</button></div>
+      <p class="warn" id="mr-error"></p>
+    </div>
   </div>
 </section>
 

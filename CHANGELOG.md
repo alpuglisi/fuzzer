@@ -14,6 +14,17 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (UI, Phase 2.4): Proxy Scope + Match-Replace — completes the Proxy workbench.
+  `ProxyController` gained live scope (default-deny include/exclude) and ordered
+  match-replace (byte rewrites) management, exposed via `GET|POST /api/proxy/scope`, `DELETE
+  /api/proxy/scope/{index}`, `GET|POST /api/proxy/matchreplace`, `DELETE
+  /api/proxy/matchreplace/{index}`, `POST /api/proxy/matchreplace/{index}/toggle` (409
+  without the in-process proxy; bad target / missing header_name → 400). The Proxy tab's
+  Scope · Match-Replace card lists/adds/removes both rule kinds (with a match-replace enable
+  toggle). With History + Intercept + Repeater, the Proxy workbench (revamp ask #2) is now
+  complete. Tests: `test_web_scope.py` (controller effects incl. a real rewrite via
+  `engine.matchreplace.apply`; routes + validation). Suite 496 passed / 6 skipped. See
+  CC-UI-0019.
 - Feature (UI, Phase 2.3): Proxy Repeater — persisted replay tabs. Added a `RepeaterController`
   over the existing `Repeater` backend (own SocketSender + lazily-opened store; list/create/
   from-flow/send) and routes `GET|POST /api/proxy/repeater/tabs`, `POST

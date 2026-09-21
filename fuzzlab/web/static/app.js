@@ -64,6 +64,13 @@ async function postJSON(url, body) {
   return { status: r.status, data };
 }
 
+async function delJSON(url) {
+  const r = await fetch(url, { method: "DELETE" });
+  let data = {};
+  try { data = await r.json(); } catch (_) { /* empty */ }
+  return { status: r.status, data };
+}
+
 // Read a launch form into a {dest: value} map the /api/launch* endpoints expect.
 function collectValues(form) {
   const values = {};
@@ -325,6 +332,86 @@ function initRepeater() {
   loadTabs();
 }
 
+// --- Proxy tab: Scope + Match-Replace ---
+function initScope() {
+  const card = document.getElementById("scope-card");
+  if (!card) return;
+  const unavailable = document.getElementById("scope-unavailable");
+  const controls = document.getElementById("scope-controls");
+  const scopeBody = document.querySelector("#scope-table tbody");
+  const mrBody = document.querySelector("#mr-table tbody");
+  const mrError = document.getElementById("mr-error");
+
+  function actionCell(label, fn) {
+    const td = document.createElement("td");
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.textContent = label;
+    btn.addEventListener("click", fn);
+    td.appendChild(btn);
+    return td;
+  }
+  function row(cells) {
+    const tr = document.createElement("tr");
+    for (const c of cells) {
+      if (c instanceof HTMLElement) { tr.appendChild(c); continue; }
+      const td = document.createElement("td");
+      td.textContent = c == null ? "" : String(c);
+      tr.appendChild(td);
+    }
+    return tr;
+  }
+
+  function renderScope(rules) {
+    scopeBody.replaceChildren();
+    for (const r of rules) {
+      scopeBody.appendChild(row([r.index, r.host, r.path_regex || "",
+        r.exclude ? "exclude" : "include",
+        actionCell("Remove", async () => renderScope(
+          (await delJSON(`/api/proxy/scope/${r.index}`)).data.scope || []))]));
+    }
+  }
+  function renderMR(rules) {
+    mrBody.replaceChildren();
+    for (const r of rules) {
+      mrBody.appendChild(row([r.index, r.target, r.header_name || "",
+        `${r.match} → ${r.replace}`, r.is_regex ? "yes" : "",
+        actionCell(r.enabled ? "on" : "off", async () => renderMR(
+          (await postJSON(`/api/proxy/matchreplace/${r.index}/toggle`,
+            { enabled: !r.enabled })).data.rules || [])),
+        actionCell("Remove", async () => renderMR(
+          (await delJSON(`/api/proxy/matchreplace/${r.index}`)).data.rules || []))]));
+    }
+  }
+
+  document.getElementById("scope-add").addEventListener("click", async () => {
+    const { data } = await postJSON("/api/proxy/scope", {
+      host: document.getElementById("scope-host").value,
+      path_regex: document.getElementById("scope-path").value,
+      exclude: document.getElementById("scope-exclude").checked,
+    });
+    if (data.scope) renderScope(data.scope);
+  });
+  document.getElementById("mr-add").addEventListener("click", async () => {
+    mrError.textContent = "";
+    const { status, data } = await postJSON("/api/proxy/matchreplace", {
+      target: document.getElementById("mr-target").value,
+      header_name: document.getElementById("mr-header").value,
+      match: document.getElementById("mr-match").value,
+      replace: document.getElementById("mr-replace").value,
+      is_regex: document.getElementById("mr-regex").checked,
+    });
+    if (status === 200) renderMR(data.rules || []);
+    else mrError.textContent = data.error || ("error " + status);
+  });
+
+  fetch("/api/proxy/status").then((r) => r.json()).then(async (s) => {
+    if (!s.configured) { unavailable.hidden = false; return; }
+    controls.hidden = false;
+    renderScope(((await (await fetch("/api/proxy/scope")).json()).scope) || []);
+    renderMR(((await (await fetch("/api/proxy/matchreplace")).json()).rules) || []);
+  }).catch(() => {});
+}
+
 document.addEventListener("DOMContentLoaded", () => {
-  initTabs(); initLaunchForms(); initProxy(); initIntercept(); initRepeater();
+  initTabs(); initLaunchForms(); initProxy(); initIntercept(); initRepeater(); initScope();
 });

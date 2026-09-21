@@ -385,9 +385,10 @@ tracked in the requirements files, not here.
   **live Intercept** — request/response toggles, a polled pending queue, and edit / forward
   / drop over the in-process proxy (verified over real sockets). Phase 2.3 added the
   **Repeater** (`RepeaterController`; `/api/proxy/repeater/*`) — persisted replay tabs,
-  byte-exact send (authorized-gated), and "→ Repeater" from a History flow. **Pending:** the
-  proxy
-  workbench (Phase 2), the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
+  byte-exact send (authorized-gated), and "→ Repeater" from a History flow. Phase 2.4 added
+  **Scope + Match-Replace** management (`/api/proxy/scope`, `/api/proxy/matchreplace`),
+  **completing the Proxy workbench** (History · Intercept · Repeater · Scope/Match-Replace).
+  **Pending:** the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
   `metric_series` time-series table (Phase 4), Datasette-style store exploration, a
   `--dry-run` mode, and a plain CLI entry point per tool for headless use
   (`fuzzlab auto` exists today).

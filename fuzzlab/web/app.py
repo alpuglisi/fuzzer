@@ -354,6 +354,64 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
             return _need_proxy()
         return {"dropped": proxy.drop(flow_id)}
 
+    # --- scope + match-replace (in-process proxy only) ------------------------
+
+    @app.get("/api/proxy/scope")
+    def scope_list():
+        if proxy is None:
+            return _need_proxy()
+        return {"scope": proxy.scope_view()}
+
+    @app.post("/api/proxy/scope")
+    async def scope_add(request: Request):
+        if proxy is None:
+            return _need_proxy()
+        b = await request.json()
+        if not b.get("host"):
+            return JSONResponse({"error": "host required"}, status_code=400)
+        proxy.scope_add(b["host"], b.get("path_regex") or None, bool(b.get("exclude")))
+        return {"scope": proxy.scope_view()}
+
+    @app.delete("/api/proxy/scope/{index}")
+    def scope_remove(index: int):
+        if proxy is None:
+            return _need_proxy()
+        return {"removed": proxy.scope_remove(index), "scope": proxy.scope_view()}
+
+    @app.get("/api/proxy/matchreplace")
+    def mr_list():
+        if proxy is None:
+            return _need_proxy()
+        return {"rules": proxy.matchreplace_view()}
+
+    @app.post("/api/proxy/matchreplace")
+    async def mr_add(request: Request):
+        if proxy is None:
+            return _need_proxy()
+        b = await request.json()
+        try:
+            proxy.matchreplace_add(b.get("target", ""), b.get("match", ""),
+                                   b.get("replace", ""), b.get("header_name") or None,
+                                   bool(b.get("is_regex")))
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return {"rules": proxy.matchreplace_view()}
+
+    @app.delete("/api/proxy/matchreplace/{index}")
+    def mr_remove(index: int):
+        if proxy is None:
+            return _need_proxy()
+        return {"removed": proxy.matchreplace_remove(index),
+                "rules": proxy.matchreplace_view()}
+
+    @app.post("/api/proxy/matchreplace/{index}/toggle")
+    async def mr_toggle(index: int, request: Request):
+        if proxy is None:
+            return _need_proxy()
+        b = await request.json()
+        return {"toggled": proxy.matchreplace_toggle(index, bool(b.get("enabled"))),
+                "rules": proxy.matchreplace_view()}
+
     # --- repeater (replay tabs; independent of the in-process proxy) -----------
 
     # These handlers are async so they run on the event-loop thread; the controller

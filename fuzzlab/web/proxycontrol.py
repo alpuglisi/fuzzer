@@ -159,6 +159,69 @@ class ProxyController:
         self.interceptor.drop(flow_id)
         return True
 
+    # --- scope (which hosts are intercepted vs transparently bypassed) --------
+    def scope_view(self) -> list[dict[str, Any]]:
+        if self.engine is None:
+            return []
+        return [{"index": i, "host": r.host, "path_regex": r.path_regex,
+                 "exclude": r.exclude} for i, r in enumerate(self.engine.scope.rules)]
+
+    def scope_add(self, host: str, path_regex: str | None = None,
+                  exclude: bool = False) -> bool:
+        if self.engine is None:
+            return False
+        if exclude:
+            self.engine.scope.exclude(host, path_regex or None)
+        else:
+            self.engine.scope.include(host, path_regex or None)
+        return True
+
+    def scope_remove(self, index: int) -> bool:
+        if self.engine is None or not (0 <= index < len(self.engine.scope.rules)):
+            return False
+        del self.engine.scope.rules[index]
+        return True
+
+    # --- match-replace (ordered byte rewrites) -------------------------------
+    @staticmethod
+    def _text(v) -> str:
+        return v.decode("latin-1", "replace") if isinstance(v, (bytes, bytearray)) else str(v)
+
+    def matchreplace_view(self) -> list[dict[str, Any]]:
+        if self.engine is None or self.engine.matchreplace is None:
+            return []
+        out = []
+        for i, r in enumerate(self.engine.matchreplace.rules):
+            out.append({"index": i, "target": r.target, "match": self._text(r.match),
+                        "replace": self._text(r.replace), "header_name": r.header_name,
+                        "is_regex": r.is_regex, "enabled": r.enabled})
+        return out
+
+    def matchreplace_add(self, target: str, match: str, replace: str = "",
+                         header_name: str | None = None, is_regex: bool = False) -> bool:
+        """Append a rule. Raises ValueError on a bad target / missing header_name."""
+        if self.engine is None or self.engine.matchreplace is None:
+            return False
+        from fuzzlab.proxy.matchreplace import MatchReplaceRule
+        self.engine.matchreplace.add(MatchReplaceRule(
+            target=target, match=match, replace=replace,
+            header_name=header_name or None, is_regex=bool(is_regex)))
+        return True
+
+    def matchreplace_remove(self, index: int) -> bool:
+        mr = self.engine.matchreplace if self.engine else None
+        if mr is None or not (0 <= index < len(mr.rules)):
+            return False
+        del mr.rules[index]
+        return True
+
+    def matchreplace_toggle(self, index: int, enabled: bool) -> bool:
+        mr = self.engine.matchreplace if self.engine else None
+        if mr is None or not (0 <= index < len(mr.rules)):
+            return False
+        mr.rules[index].enabled = bool(enabled)
+        return True
+
 
 class RepeaterController:
     """Replay tabs for the Repeater sub-tab (Phase 2.3).
