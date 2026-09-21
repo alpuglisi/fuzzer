@@ -132,6 +132,23 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   `test_mutation_operators.py` failures already present before this change
   (last logged baseline, `CC-LAB-0028`: 868 passed / 9 skipped / same 2
   failures) — no reduction in the pre-existing baseline, only additions.
+- LAB (lane L-P3.3a): added `fuzzlab/labgen/emitters/php_laravel/`, the second PHP
+  emitter (Laravel/Eloquent idiom, distinct from `php_current`'s plain-PHP idiom) —
+  a `StackEnv` (pinned `laravel/framework` 13.32.0, digest-pinned
+  `php:8.3-fpm-alpine` base image, `.env` scaffold with `APP_DEBUG=false`/
+  `APP_ENV=production` forced), a `route`-category accumulator module for
+  `routes/web.php` sorted by cell ID at render time (`CR-LAB-0001` Addendum D),
+  and `LaravelEmitter` supporting one trivial shape (`sqli`/`sql_numeric_literal`)
+  against a new, deliberately minimal `lab/manifests/phase3_php_laravel_sample.yaml`
+  — proven via Tier 0 (`php -l`) and Tier 3 (whole-lab regeneration) of the
+  existing conformance suite plus a dedicated accumulator-determinism test. A real
+  `composer.lock` (74 packages) was generated against Packagist; a CycloneDX SBOM
+  was not (no `syft` on this build host — intended command documented instead).
+  Foundation-only, by design: the full module inventory (harder SQLi/XSS shapes,
+  lane L-P3.3b) and the `puppy-fort-factory/` migration (lane L-P3.3c) are separate,
+  later lanes this work unblocks — see `CC-LAB-0037` (renumbered from a
+  concurrently-claimed `CC-LAB-0029` which collided with lanes
+  L-P2.1/L-P0.9/L-P1.1/L-P1.2a/L-P2.2/L-P0.10/L-P3.1/L-P3.2).
 - Docs: fleshed `docs/LAB_IMPLEMENTATION_PLAN.md`'s Phase 2 (§3) and Phase 3 (§4)
   from milestone-level bullets into full task breakdowns matching Phase 0/1's
   granularity, and added a new §7 lane/dependency map covering every Phase 0-3

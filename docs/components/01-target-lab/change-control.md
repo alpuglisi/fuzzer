@@ -739,6 +739,118 @@ content changed beyond the number.)*
   `test_mutation_operators.py` failures (last logged baseline, `CC-LAB-0028`:
   868 passed / 9 skipped / same 2 failures) — no reduction, only additions.
 
+### CC-LAB-0037 — `php_laravel` StackEnv + route accumulator + conformance pass (lane L-P3.3a) (2026-09-21)
+*(Numbered `CC-LAB-0037` rather than `CC-LAB-0029` at merge time — this lane
+independently claimed `CC-LAB-0029` too, colliding with lanes L-P2.1, L-P0.9,
+L-P1.1, L-P1.2a, L-P2.2, L-P0.10, L-P3.1, and L-P3.2, all of which merged
+first. Reconciled per this project's standing multi-lane policy: keep all
+entries' full content, renumber this later-landing one to the next free
+number. No content changed beyond the number.)*
+- Change: added `fuzzlab/labgen/emitters/php_laravel/`, the second PHP emitter
+  (`docs/LAB_IMPLEMENTATION_PLAN.md` §4.3 steps 1/3/4/5 — steps 2 and 6 are
+  separate later lanes, L-P3.3b and L-P3.3c, explicitly not attempted here):
+  - `stack_env.py` — `StackEnv` (`CR-LAB-0001` Addendum D's schema):
+    `language="php"`, `framework="laravel"`, `framework_version="13.32.0"`,
+    `base_image="php:8.3-fpm-alpine@sha256:62f4c401dc970c352223dd018e4f2c9d1c480e07f67351cd31bec2d1f8a8fb42"`
+    (both resolved for real, not guessed — `laravel/framework` via a real
+    `composer update --no-dev --no-scripts --no-install` against Packagist,
+    the base image digest via `docker buildx imagetools inspect
+    php:8.3-fpm-alpine`, both run 2026-09-21), `is_multi_file=True`,
+    `scaffold_files`/`accumulators`/`file_roles`. `StackEnv.env_file_content()`
+    forces `APP_DEBUG=false`/`APP_ENV=production` in the generated `.env` —
+    a correctness requirement per the task brief and D20 (Laravel's Ignition
+    debug page leaks full stack traces plus every env var, including DB/API
+    credentials, when debug mode is on; mirrors the FastAPI lane's `/docs`
+    disable), not an optional follow-up.
+  - `route_accumulator.py` — the `route`-category accumulator module
+    (`routes/web.php`), cardinality `accumulator` per Addendum D:
+    `RouteAccumulator.render_file()` always sorts fragments by cell ID at
+    call time, regardless of the input mapping's own iteration order, per
+    Addendum D's explicit "never by append/iteration order" rule. Kept
+    outside `Emitter.render()`'s own per-cell return value and out of
+    `fuzzlab/labgen/conformance/tier3.py`'s shared `render_whole_sample`
+    (which raises on two cells emitting the same path — correct for
+    `php_current`'s one-file-per-cell model, but structurally unable to
+    merge multiple cells into one accumulator path without a change that
+    belongs with whichever lane needs it for a second accumulator-bearing
+    stack); `assemble_routes_file()` is this lane's own whole-manifest
+    assembly step, exercised directly by this lane's tests. See that
+    module's docstring for the full reasoning and the flagged gap.
+  - `__init__.py` — `LaravelEmitter(Emitter)`, supporting exactly one shape
+    (`sqli`/`sql_numeric_literal`, Eloquent `DB::select()` idiom, raw
+    concatenation vs. `param_bind`) — deliberately not the full module
+    inventory (that is L-P3.3b, which ports `php_current`'s shapes plus
+    Phase 1's harder identifier/alias/connector-position SQLi and
+    escaping-context-mismatch XSS shapes once this foundation exists).
+    Every module here is new to this directory; nothing is imported from or
+    added to `fuzzlab/labgen/modules/` (that package is `php_current`'s
+    plain-PHP idiom) and `php_current`'s own files are untouched, per this
+    lane's scope discipline.
+  - `stack/composer.json` + `stack/composer.lock` — a real lockfile (74
+    packages, generated against Packagist, not hand-written) pinning the
+    stack's base Laravel dependency set. `stack/README.md` records the SBOM
+    gap: `syft` was not available on this build host (`which syft` — not
+    found), so CycloneDX SBOM generation was skipped per this task's own
+    documented fallback; the intended command is recorded there.
+  - `lab/manifests/phase3_php_laravel_sample.yaml` — a new, deliberately
+    minimal manifest (one vulnerable/secure twin pair, mirroring
+    `example_phase0_scaffold.yaml`'s illustrative SQLi pair shape) — enough
+    to prove the scaffold renders and passes the conformance suite, not a
+    real page and not the full shape inventory, per the task brief's own
+    "keep this manifest deliberately minimal" instruction.
+  - `tests/test_labgen_php_laravel.py` — 19 new tests: `StackEnv` pinning/
+    debug-mode assertions, basic render/determinism/unsupported-shape
+    checks mirroring `test_labgen_php_current.py`'s shape, route-accumulator
+    sort-order determinism, Tier 0 (`php -l`, skip-guarded per PA-0005) and
+    Tier 3 (`regenerate_and_diff_emitter`) conformance passes against the
+    new sample manifest, plus a dedicated accumulator-regeneration
+    determinism test (the accumulator-specific extension of the Tier-3
+    pattern noted above).
+- Impact (other components / project): none outside LAB. Read-only against
+  `fuzzlab.labgen.emitter`'s types, `fuzzlab.labgen.schema`, and
+  `fuzzlab.labgen.conformance.{tier0,tier3}` (used, not modified) — no other
+  component's contracts change. `php_current` and `fuzzlab/labgen/modules/`
+  are untouched, per scope discipline. Unblocks lane L-P3.3b (module
+  inventory) and, downstream of that, L-P3.3c (real-app migration); also
+  gives L-P3.4 (`stack` field + fingerprint-gate wiring) a second real stack
+  name (`php_laravel`) once one more Phase-3 stack lane lands alongside it.
+- Risk (level; mitigation): low. New, additive emitter/manifest/test code in
+  a new directory; no shared module, schema, or conformance-suite file was
+  modified. The one structural gap flagged rather than silently worked
+  around — `conformance/tier3.py`'s `render_whole_sample` cannot yet merge
+  multiple cells into one accumulator path — is fully documented in
+  `route_accumulator.py`'s docstring and worked around locally (this lane's
+  own `assemble_routes_file`/dedicated test) rather than papered over; a
+  future accumulator-bearing stack lane (or a dedicated follow-up) should
+  extend `tier3.py` itself once a second such stack needs it, rather than
+  each stack re-inventing its own workaround indefinitely.
+- Deliverables:
+  - [x] `StackEnv` for `php_laravel` (pinned framework version, digest-pinned
+        base image, `is_multi_file=True`, debug mode forced off) — done.
+  - [x] `route`-category accumulator module, sorted by cell ID at render
+        time — done.
+  - [x] Conformance-suite pass: Tier 0 (lint) + Tier 3 (whole-lab
+        regeneration) against a new minimal manifest — done, fully
+        exercised offline for real.
+  - [x] Digest-pinned base image + `composer.lock` — done (real lockfile,
+        74 packages).
+  - [ ] CycloneDX SBOM via `syft` — not done; `syft` unavailable on this
+        build host, intended command documented in `stack/README.md`.
+  - [x] Tests (19 new, all passing) mirroring `test_labgen_php_current.py`'s
+        shape, scaled to this lane's foundation-only scope — done.
+  - [ ] Full module inventory (harder SQLi/XSS shapes) — explicitly out of
+        scope for this lane (L-P3.3b).
+  - [ ] `puppy-fort-factory/` migration — explicitly out of scope for this
+        lane (L-P3.3c).
+- Effectiveness (assessed 2026-09-21): met this lane's own foundation-only
+  bar — `StackEnv`, the route accumulator, and one trivial shape render,
+  lint clean, and regenerate byte-identically (both the per-cell files via
+  the shared Tier-3 driver and the accumulator file via this lane's own
+  dedicated determinism test); debug mode is verifiably off in the
+  generated `.env`. Full suite: 888 passed / 8 skipped / 2 pre-existing,
+  unrelated `test_mutation_operators.py` failures (same 2 as `CC-LAB-0027`'s
+  own recorded baseline) — 19 new tests added, zero regressions.
+
 ### CC-LAB-0028 — Nuclei path-traversal/LFI oracle wrapper (Addendum E, Spike 004) (2026-09-21)
 *(Numbered `CC-LAB-0028` rather than `CC-LAB-0017` at merge time — this lane's worktree
 diverged onto a stale, unrelated branch lineage before starting, self-diagnosed and

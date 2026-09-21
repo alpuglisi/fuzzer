@@ -218,6 +218,22 @@ tracked in the requirements files, not here.
   them by default regardless of any debug flag); passes Tier 0/Tier 3 against
   its own sample manifest. A manifest reproducing today's real ~30-page PHP
   app byte-identically (the actual Phase 0 exit criterion) remains planned.
+  A **second, Laravel/Eloquent/Blade-idiom PHP emitter**
+  (`fuzzlab/labgen/emitters/php_laravel/`, `CC-LAB-0029`, lane L-P3.3a) is now
+  built as a **foundation only**: a `StackEnv` (`stack_env.py`) carrying a
+  pinned `laravel/framework` version (13.32.0, resolved for real against
+  Packagist), a digest-pinned `php:8.3-fpm-alpine` base image, and a
+  generated `.env` with `APP_DEBUG=false`/`APP_ENV=production` forced (the
+  Laravel-Ignition-debug-page correctness requirement D20 flags); a `route`
+  accumulator module (`route_accumulator.py`) for `routes/web.php`, sorted
+  by cell ID at render time per Addendum D's determinism rule; and
+  `LaravelEmitter` supporting exactly one trivial shape
+  (`sqli`/`sql_numeric_literal`), proven against a new minimal
+  `lab/manifests/phase3_php_laravel_sample.yaml` via the existing Tier 0/
+  Tier 3 conformance suite. The full module inventory (harder shapes ported
+  from `php_current`'s Phase-1 work) and the `puppy-fort-factory/` migration
+  onto this emitter are separate, later lanes (L-P3.3b, L-P3.3c) this
+  foundation unblocks but does not itself attempt.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

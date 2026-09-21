@@ -1,0 +1,41 @@
+# Phase-3 php_laravel sample manifest -- lane L-P3.3a, foundation ONLY.
+#
+# Deliberately minimal, per this lane's own scope: two cells (one
+# vulnerable/secure twin pair), proving the php_laravel StackEnv/emitter
+# scaffold renders and passes the conformance suite (Tier 0 lint + Tier 3
+# whole-lab regeneration) -- NOT a real puppy-fort-factory/ page, and NOT
+# the full module inventory (harder identifier/alias/connector-position
+# SQLi and escaping-context-mismatch XSS shapes). Both of those are later,
+# separate lanes (L-P3.3b module inventory, L-P3.3c real-page migration)
+# that build on this manifest's proof that the scaffold works, not on this
+# manifest's own content, which they are expected to replace/extend.
+#
+# Mirrors lab/manifests/example_phase0_scaffold.yaml's illustrative pair
+# shape (sqli / sql_numeric_literal / GET) so the two PHP emitters'
+# foundations are directly comparable -- same shape, two different idioms
+# (php_current: plain PHP/PDO; php_laravel: Eloquent DB facade).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: raw concatenation into a SQL numeric-literal position.
+  - cell_id: LABGEN-PL-0001
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /example/product }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  # The secure twin: the only permitted difference is the transform region
+  # (param_bind instead of raw concatenation) -- same minimal-pair
+  # invariant example_phase0_scaffold.yaml's pair demonstrates for
+  # php_current.
+  - cell_id: LABGEN-PL-0002
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /example/product }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
