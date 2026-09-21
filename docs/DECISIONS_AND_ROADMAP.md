@@ -357,6 +357,20 @@ business-logic flaws, race conditions; see `CR-LAB-0001` Addendum E) are
 ships without them. This keeps D8 itself intact (the "why") while D20 pins the
 "what," per `CR-LAB-0001` §6/§7.
 
+**Migrate confirmed, conflicting draft corrected (2026-09-21):** an earlier
+draft of `docs/LAB_PHASE_0_PLAN.md` had read a separate "additive-only, never
+reduce functionality or capability" instruction as applying to the hand-built
+app itself (concluding it should be kept forever, never migrated) — a
+misreading. That instruction is about the **toolkit's own capabilities,
+robustness, and stack breadth never regressing**, not about any one hand-built
+artifact's continued existence once the generator can reproduce and supersede
+it. Confirmed: the hand-built `puppy-fort-factory/` app is retired once Phase
+0/1 prove byte-identical reproduction and the Phase 3 PHP/Laravel emitter
+lands — the generator becomes the single source of the PHP lab, not an
+additional target alongside a permanently-kept original. `LAB_PHASE_0_PLAN.md`
+corrected to match; nothing about Phase 0's own exit criterion changes (it
+still just proves reproduction, not cutover).
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the

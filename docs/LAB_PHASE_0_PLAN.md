@@ -19,15 +19,27 @@ program to **never reduce functionality or capability — additive only.**
 Those aren't just principles below; they resolve two things CR-LAB-0001 left
 open:
 
-1. **The existing hand-built PHP app is never removed or replaced.** §7.2 of
-   the CR asked whether to migrate it into the generator or keep it as a
-   permanent fixture. Under an additive-only mandate, the answer is: it stays
-   exactly as it is, indefinitely usable standalone, for as long as you want
-   it. When the PHP/Laravel emitter is eventually built (Phase 3), it is a
-   **new, additional** target — generated Laravel cells — not a replacement
-   for `puppy-fort-factory/`. If you ever *do* want to fold the hand-built
-   app's content into the generator later, that is a separate, explicit,
-   future decision — not a side-effect of this plan.
+1. **Corrected (2026-09-21, see D20 in `docs/DECISIONS_AND_ROADMAP.md`): the
+   existing hand-built PHP app is migrated into the generator, not kept as a
+   permanent separate fixture.** An earlier draft of this document read the
+   "additive-only" mandate as applying to the *target app's* continued
+   hand-authored existence, and concluded item 1 below. That was a
+   misreading: the additive-only mandate is about the **toolkit's own
+   capabilities, robustness, and stack breadth never regressing** — no
+   detection class, no vulnerability coverage, no working feature is ever
+   removed to make room for new work — not about keeping any one hand-built
+   artifact around forever once the generator can reproduce and supersede it.
+   §7.2 of the CR is resolved as **migrate**: once Phase 0/1 prove the
+   generator reproduces today's PHP lab byte-for-byte (this document's own
+   exit criterion) and Phase 3's PHP/Laravel emitter is built, the hand-built
+   `puppy-fort-factory/` is retired in favor of the generated equivalent — the
+   generator becomes the single source of the PHP lab, not an additional one
+   alongside it. This does not change Phase 0's own exit criterion or
+   anything else in this document: Phase 0 still ships nothing that removes
+   or changes `puppy-fort-factory/`'s current behavior — it proves the
+   generator *can* reproduce it, as the prerequisite for the later cutover,
+   which remains a distinct, later step (Phase 3+), not something Phase 0 or
+   Phase 1 does.
 2. **Architecture Option A (single core, per-stack emitter plugins)** — the
    report's own recommendation — is confirmed, specifically *because* it is
    the modular choice: adding a stack means writing one emitter against a

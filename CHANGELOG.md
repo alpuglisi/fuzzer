@@ -14,6 +14,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Decision (LAB, D20 clarification): resolved a conflict between D20 ("migrate the
+  hand-built app") and an earlier draft of `docs/LAB_PHASE_0_PLAN.md` (which had read a
+  separate "additive-only" instruction as "never remove the hand-built app," and
+  concluded the opposite). Confirmed with the user: additive-only governs the toolkit's
+  own capabilities/robustness/stack breadth, not any one hand-built artifact's permanence
+  — the app is retired once the generator reproduces it and the Phase 3 PHP/Laravel
+  emitter lands. `LAB_PHASE_0_PLAN.md` and `docs/DECISIONS_AND_ROADMAP.md` (D20)
+  corrected; Phase 0's own exit criterion is unaffected either way.
 - Tooling: gitignored `.claude/worktrees/` — background-agent scratch git worktrees for
   in-progress parallel work (e.g. the Lane A/B oracle-wrapper and lab-generator-Phase-0
   builds) showed up as untracked and tripped the git-status Stop hook; they're never a
