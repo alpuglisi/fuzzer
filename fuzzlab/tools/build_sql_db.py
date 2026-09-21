@@ -104,7 +104,10 @@ INDICATORS = [
 ]
 
 
-def build_indicator_database(db_name="php_indicators.db"):
+def build_indicator_database(db_name=None):
+    if db_name is None:
+        from fuzzlab.tools import paths
+        db_name = str(paths.INDICATOR_DB)
     conn = sqlite3.connect(db_name)
     cursor = conn.cursor()
 

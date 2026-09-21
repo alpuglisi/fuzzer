@@ -6,6 +6,8 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
+from fuzzlab.core import get_logger
+
 # Configure logging for production-ready output
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -314,6 +316,8 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    get_logger("crawler").info("crawler starting",
+                               extra={"start": args.start, "engine": args.engine})
     spider = LocalSpider(
         args.start,
         max_depth=args.max_depth,

@@ -3,6 +3,21 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0002 — Moved into the `fuzzlab` package (2026-09-21)
+- Change: `spider.py` moved to `fuzzlab/tools/spider.py` and now imports `core/`
+  (`get_logger`), emitting a structured startup line. Still writes its own SQLite
+  file for now (T0.8 migrates it to the shared store). Part of Phase 0 T0.1.
+- Impact (other components / project): the crawler is now a package module
+  (`python -m fuzzlab.tools.spider`) importing the shared library; no behavior or
+  output-format change yet.
+- Risk (level; mitigation): low — a move plus one import; verified the module
+  imports and `--help` runs.
+- Deliverables:
+  - [x] Move into package; import `core/` (T0.1) — done.
+  - [ ] Write to the shared store (T0.8) — todo.
+- Effectiveness (assessed 2026-09-21): effective — imports cleanly and runs as a
+  package module.
+
 ### CC-CRAWL-0001 — Baseline (2026-09-21)
 - Change: record the component at its current state — `spider.py` renders
   JavaScript via Playwright, captures fetch/XHR endpoints, resets/reuses its own

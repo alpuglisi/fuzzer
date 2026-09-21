@@ -4,3 +4,12 @@ __pycache__/
 venv/
 # generated datasets
 *.csv
+# python build / test artifacts
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+# local run store (the shared SQLite project store)
+/fuzzlab.db
+*.db-wal
+*.db-shm

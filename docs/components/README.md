@@ -29,6 +29,14 @@ add an entry to each affected component's `change-control.md`. If a change alter
 the project architecture, also update `docs/ARCHITECTURE.md` (its maintenance
 rule). Do this as part of making the change, not afterward.
 
+**Change-control logs are append-only.** Add a new entry for every change; never
+edit or delete an existing entry. All historical entries are kept as the record of
+what was decided and when. When a change supersedes an earlier decision, say so in
+the new entry (reference the superseded entry ID) rather than rewriting the old
+one. The living requirement specifications (`requirements.md`) are updated in place
+to reflect current truth; the change-control log is the immutable history behind
+them.
+
 ## Required fields for every change-control entry
 
 Every time a component changes, add an entry with all of these:

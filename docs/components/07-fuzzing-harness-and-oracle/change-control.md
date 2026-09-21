@@ -3,6 +3,21 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0002 — Moved into the `fuzzlab` package (2026-09-21)
+- Change: `blind_sqli_fuzzer.py` moved to `fuzzlab/tools/blind_sqli_fuzzer.py`;
+  imports `core/` (`get_logger`, structured startup line after the `--authorized`
+  gate). Behavior unchanged; still writes a labeled CSV (T0.8 moves it onto the
+  store). Phase 0 T0.1.
+- Impact (other components / project): the fuzzer is now a package module; the
+  `--authorized` safety gate and detection logic are unchanged.
+- Risk (level; mitigation): low — move + one import placed after the authorization
+  check so the gate still fires first; verified the module imports and `--help` runs.
+- Deliverables:
+  - [x] Move into package; import `core/` (T0.1) — done.
+  - [ ] Read candidates / write attempts+findings to the shared store (T0.8) — todo.
+- Effectiveness (assessed 2026-09-21): effective — runs as a package module with
+  the authorization gate intact.
+
 ### CC-FUZZ-0001 — Baseline (2026-09-21)
 - Change: record the component at its current state — `blind_sqli_fuzzer.py`
   performs time-based blind SQLi detection (median of repeats), requires `--url`

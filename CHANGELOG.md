@@ -13,6 +13,19 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 0 build: created the `fuzzlab` Python package with a `core/` shared
+  library and implemented the foundations — the SQLite project store with a
+  numbered, idempotent migration runner and the core-contract tables (T0.3);
+  layered config with a run hash + redaction, structured JSON logging, the request
+  budget + per-host timing mutex, and a scope-enforcing session-aware HTTP seam
+  (T0.4); and a versioned feature extractor with golden tests (T0.5). Moved the
+  existing tools (spider/fetcher/fuzzer/build_sql_db) into `fuzzlab/tools/` so each
+  imports `core/` and runs as a package module, with the indicator DB relocated to
+  packaged data (T0.1). Added `pyproject.toml`. Foundation test suite: 12/12 green.
+- Process: made explicit in `docs/components/README.md` that change-control logs
+  are **append-only** — every change adds a new entry, all historical entries are
+  kept, and a superseding change references the entry it supersedes rather than
+  rewriting it (the living `requirements.md` specs are what get updated in place).
 - Planning: decided the primary UI is a **local web application** (control panel +
   dashboard on localhost), not a `textual` TUI (new decision D11) — results and
   output are far easier to review in a browser and it composes with the planned

@@ -3,6 +3,22 @@
 Component code: **IND**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-IND-0002 — Relocated to packaged data path (2026-09-21)
+- Change: `php_indicators.db` moved to `fuzzlab/tools/data/php_indicators.db` and
+  `build_sql_db.py` (now `fuzzlab/tools/build_sql_db.py`) defaults its output to
+  that packaged path (via `fuzzlab.tools.paths`). `references/` catalogs unchanged.
+  Phase 0 T0.1.
+- Impact (other components / project): the auditor resolves the indicator DB from
+  the package (CC-AUD-0002); regeneration writes back to the same packaged file.
+  Data content unchanged (still 28 indicator types with reference categories).
+- Risk (level; mitigation): low — a relocation plus default-path change; verified
+  by regenerating the DB to the packaged path and loading it from the auditor.
+- Deliverables:
+  - [x] Move DB into packaged data dir; builder writes there by default (T0.1) — done.
+  - [ ] Per-payload metadata + versioning recorded on the run — todo.
+- Effectiveness (assessed 2026-09-21): effective — `python -m
+  fuzzlab.tools.build_sql_db` regenerates the packaged DB and the auditor loads it.
+
 ### CC-IND-0001 — Baseline (2026-09-21)
 - Change: record the component at its current state — `build_sql_db.py` generates
   `php_indicators.db` with all 28 indicator types, each mapped to a `references/`

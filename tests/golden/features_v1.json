@@ -1,0 +1,38 @@
+{
+  "benign_longer": {
+    "body_entropy": 4.2373,
+    "content_length": 44,
+    "elapsed_delta_ms": 1.0,
+    "elapsed_ms": 11.0,
+    "has_sql_error": 0,
+    "len_delta": 11,
+    "num_tags": 4,
+    "status": 200,
+    "status_changed": 0,
+    "status_class": 2
+  },
+  "no_baseline": {
+    "body_entropy": 2.7255,
+    "content_length": 9,
+    "elapsed_delta_ms": 0.0,
+    "elapsed_ms": 8.0,
+    "has_sql_error": 0,
+    "len_delta": 0,
+    "num_tags": 0,
+    "status": 404,
+    "status_changed": 0,
+    "status_class": 4
+  },
+  "sql_error": {
+    "body_entropy": 3.8311,
+    "content_length": 44,
+    "elapsed_delta_ms": 2.0,
+    "elapsed_ms": 12.0,
+    "has_sql_error": 1,
+    "len_delta": 11,
+    "num_tags": 0,
+    "status": 500,
+    "status_changed": 1,
+    "status_class": 5
+  }
+}

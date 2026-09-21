@@ -3,6 +3,23 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0002 — Moved into the `fuzzlab` package (2026-09-21)
+- Change: `fetcher.py` moved to `fuzzlab/tools/fetcher.py`; imports `core/`
+  (`get_logger`, structured startup line) and now defaults `--indicator-db` to the
+  packaged `php_indicators.db` (via `fuzzlab.tools.paths`) so it runs from
+  anywhere. Still writes its own SQLite file (T0.8 migrates it). Phase 0 T0.1.
+- Impact (other components / project): the auditor is now a package module and
+  resolves its indicator DB from the package rather than the working directory;
+  depends on the IND component's packaged data path (CC-IND-0002). No rule or
+  output-format change.
+- Risk (level; mitigation): low — move + path default + one import; verified the
+  module imports, `--help` shows the packaged default, and the indicator DB loads.
+- Deliverables:
+  - [x] Move into package; import `core/`; packaged indicator-db default (T0.1) — done.
+  - [ ] Write candidates to the shared store (T0.8) — todo.
+- Effectiveness (assessed 2026-09-21): effective — runs as a package module with
+  the packaged indicator DB resolved automatically.
+
 ### CC-AUD-0001 — Baseline (2026-09-21)
 - Change: record the component at its current state — `fetcher.py` renders dynamic
   content, evaluates 28 injection-point rules against discovered parameters, probes

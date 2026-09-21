@@ -32,6 +32,8 @@ try:
 except ImportError:
     sys.exit("This tool requires the 'requests' package: pip install requests")
 
+from fuzzlab.core import get_logger
+
 
 # --- Payload catalog -------------------------------------------------------
 # expected_delay is the sleep (seconds) the payload attempts to induce.
@@ -198,6 +200,8 @@ def main(argv=None):
     args = parse_args(argv)
     if not args.authorized:
         sys.exit("Refusing to run without --authorized. Only test systems you own or may test.")
+
+    get_logger("fuzzer").info("fuzzer starting", extra={"url": args.url, "param": args.param})
 
     session = requests.Session()
     try:

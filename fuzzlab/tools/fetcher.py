@@ -8,6 +8,9 @@ from urllib.parse import urlparse, urljoin, parse_qsl
 import requests
 from bs4 import BeautifulSoup
 
+from fuzzlab.core import get_logger
+from fuzzlab.tools import paths
+
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 
 # Optional JavaScript rendering. When Playwright is available the auditor can
@@ -755,7 +758,8 @@ def parse_args():
                     "a headless browser when Playwright is available."
     )
     p.add_argument("--spider-db", default="spider_results.db", help="Spider results database")
-    p.add_argument("--indicator-db", default="php_indicators.db", help="Indicator rules database")
+    p.add_argument("--indicator-db", default=str(paths.INDICATOR_DB),
+                   help="Indicator rules database (default: packaged php_indicators.db)")
     p.add_argument("--out", default="audit_results.db", help="Output findings database")
     p.add_argument(
         "--engine", choices=["auto", "playwright", "requests"], default="auto",
@@ -791,6 +795,9 @@ def print_summary(conn, out_name):
 
 if __name__ == "__main__":
     args = parse_args()
+    log = get_logger("auditor")
+    log.info("auditor starting", extra={"indicator_db": args.indicator_db,
+                                        "spider_db": args.spider_db})
     targets = load_urls(args.spider_db)
     rules = load_indicators(args.indicator_db)
 

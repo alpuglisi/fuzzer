@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fuzzlab"
+version = "0.0.0"
+description = "Lab-only, modular injection security-testing toolkit and research platform"
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "Proprietary — lab/research use only" }
+
+# Runtime dependencies for the Phase 0 foundations. Bounded (compatible-release
+# lower bound + next-major cap) rather than exact-pinned; the reproducible
+# environment that matters for labels is the containerized target lab, whose
+# PHP/Apache/MySQL/libxml versions are pinned in lab/ (decision D7).
+dependencies = [
+    "requests>=2.31,<3",
+    "beautifulsoup4>=4.12,<5",
+    "jsonschema>=4.20,<5",
+]
+
+[project.optional-dependencies]
+# JavaScript-rendering crawl (spider/fetcher dynamic mode).
+browser = ["playwright>=1.40,<2"]
+# Local web control panel + launcher (component #12, decision D11).
+web = ["fastapi>=0.110,<1", "uvicorn>=0.27,<1", "jinja2>=3.1,<4"]
+# Developer tooling.
+dev = ["pytest>=8,<9"]
+
+[project.scripts]
+# Single entry point; `fuzzlab <command>` dispatches (crawler, auditor, fuzzer,
+# harness, web, ...). Each tool also stays runnable as `python -m fuzzlab.tools.<name>`.
+fuzzlab = "fuzzlab.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["fuzzlab*"]
+
+[tool.setuptools.package-data]
+"fuzzlab.tools" = ["data/*.db"]
+"fuzzlab.labels" = ["schemas/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
