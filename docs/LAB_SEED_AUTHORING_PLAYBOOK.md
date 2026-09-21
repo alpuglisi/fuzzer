@@ -229,7 +229,36 @@ labels.json / expectedresults.csv / injection-points.json
   signals, never a hard gate), so its request type carries no
   `--ignore-code`-equivalent field. **SSTImap/Nuclei/ZAP remain
   unintegrated** narrows to: **SSTImap integrated; Nuclei/ZAP remain
-  unintegrated.**
+  unintegrated**, and (below) further to **SSTImap and ZAP integrated;
+  Nuclei remains unintegrated** (Nuclei is a separate, concurrent lane's
+  work — Spike 004, not documented in this playbook by this lane).
+- **ZAP-as-a-whole-app-safety-net-oracle is now validated too**
+  (`docs/spikes/SPIKE-005-zap-vs-ssti-flask-hacking-playground.md`,
+  2026-09-21), per `CR-LAB-0001`'s "Whole-app safety net → OWASP ZAP daemon
+  mode / Automation Framework — Supplementary" mapping: ZAP's own headless
+  "Automation Framework" (`zap.sh -cmd -autorun <plan.yaml>`, a single
+  bounded subprocess call — no daemon/API-polling loop needed) correctly
+  raised a dedicated **"Server Side Template Injection"** active-scan alert
+  (High risk/confidence) plus a **"Cross Site Scripting (Reflected)"** alert
+  against the Spike 003 vulnerable endpoint reused as the target, and raised
+  neither against its secure twin — incidentally also validating
+  `CR-LAB-0001`'s separate "ZAP active scan ... for reflected/stored XSS"
+  path for free. Unlike sqlmap/commix/SSTImap, **ZAP is a whole-app scanner
+  with no single declared parameter** — it crawls a target and attacks
+  everything it finds with its whole active-scan rule set at once, so
+  scoping means restricting the *verdict* to one declared alert-name pattern
+  (e.g. `r"Server Side Template Injection"`), not one parameter. The secure
+  twin still raised five unrelated, routine alert types (missing security
+  headers, version disclosure, etc.) — a real finding that an *unscoped*
+  "any ZAP alert at all" verdict would flag every target, secure ones
+  included, on noise unrelated to the class under test; the default,
+  recommended usage is always scoped to the class being confirmed, with an
+  explicit unscoped "whole-app safety-net" mode available for genuinely
+  supplementary spot-checks. Also: **ZAP's own process exit code is not
+  trusted for the verdict** (same "the tool's opaque exit status isn't the
+  signal; its detailed output is" lesson already applied to sqlmap/commix,
+  generalized to a fourth tool) — the wrapper always parses the Automation
+  Framework's structured JSON report instead.
 - **AutoBaxBuilder's self-bias question is contested** (paper vs. project
   site) and unresolved — don't attribute full independence to its exploits
   until arXiv:2512.21132 §4.4 has been read and its verdicts cross-checked
@@ -238,20 +267,22 @@ labels.json / expectedresults.csv / injection-points.json
   business logic, race conditions) has not been decided or budgeted** —
   this needs your call, not a default assumption.
 
-## Recommended next action (revised again, post-Spike-003)
+## Recommended next action (revised again, post-Spike-005)
 
-The sqlmap, commix, and SSTImap validations from the original "wrap sqlmap
-and commix, validate against a known-vulnerable seed app" action (later
-extended to a third tool) are **done** — see
+The sqlmap, commix, SSTImap, and ZAP validations from the original "wrap
+sqlmap and commix, validate against a known-vulnerable seed app" action
+(later extended to a third and fourth tool) are **done** — see
 `docs/spikes/SPIKE-001-sqlmap-vs-vapi.md`,
-`docs/spikes/SPIKE-002-commix-vs-dvwa.md`, and
-`docs/spikes/SPIKE-003-sstimap-vs-ssti-flask-hacking-playground.md`. What's
-left before attempting an original seed:
+`docs/spikes/SPIKE-002-commix-vs-dvwa.md`,
+`docs/spikes/SPIKE-003-sstimap-vs-ssti-flask-hacking-playground.md`, and
+`docs/spikes/SPIKE-005-zap-vs-ssti-flask-hacking-playground.md` (Nuclei is a
+separate, concurrent lane's Spike 004, not covered here). What's left before
+attempting an original seed:
 
-1. **Done (2026-09-21; extended to SSTImap 2026-09-21).** The reusable oracle
-   wrapper — not ad-hoc CLI invocations — lives at
-   `fuzzlab/labgen/oracle_wrapper.py` (`fuzzlab.labgen.oracle_wrapper`,
-   re-exported from `fuzzlab.labgen`). Call
+1. **Done (2026-09-21; extended to SSTImap 2026-09-21; extended to ZAP
+   2026-09-21).** The reusable per-parameter oracle wrapper — not ad-hoc CLI
+   invocations — lives at `fuzzlab/labgen/oracle_wrapper.py`
+   (`fuzzlab.labgen.oracle_wrapper`, re-exported from `fuzzlab.labgen`). Call
    `run_sql_injection_oracle(SqlInjectionOracleRequest(...))`,
    `run_command_injection_oracle(CommandInjectionOracleRequest(...))`, or
    `run_server_side_template_injection_oracle(ServerSideTemplateInjectionOracleRequest(...))`
@@ -260,17 +291,18 @@ left before attempting an original seed:
    location, (for SQLi) the expected "secure" HTTP status code(s), and an
    optional `refresh_session` callback — never a manifest/cell object (that
    schema is a separate, concurrently-developed concern; this wrapper takes
-   no dependency on it). It encodes all three spikes' lessons: a given
-   `secure_status_codes` list is translated into sqlmap's `--ignore-code`
-   automatically (Spike 001); every invocation is scoped to the one declared
-   parameter — via `-p` for sqlmap/commix, via SSTImap's own marker mechanism
-   plus its `-P` location restriction for SSTImap, which has no `-p` flag —
-   never a blind sweep (Spike 002 part 1, Spike 003); and a bounded
-   per-attempt timeout × bounded `max_attempts` loop (refreshing the session
-   on each attempt when a `refresh_session` callback is given) guarantees a
-   hung tool can never block the caller indefinitely, regardless of cause
-   (Spike 002 part 2) — see `docs/components/01-target-lab/change-control.md`
-   `CC-LAB-0015`/`CC-LAB-0016` for why a bounded timeout/retry was chosen as
+   no dependency on it). It encodes all three per-parameter spikes' lessons:
+   a given `secure_status_codes` list is translated into sqlmap's
+   `--ignore-code` automatically (Spike 001); every invocation is scoped to
+   the one declared parameter — via `-p` for sqlmap/commix, via SSTImap's own
+   marker mechanism plus its `-P` location restriction for SSTImap, which has
+   no `-p` flag — never a blind sweep (Spike 002 part 1, Spike 003); and a
+   bounded per-attempt timeout × bounded `max_attempts` loop (refreshing the
+   session on each attempt when a `refresh_session` callback is given)
+   guarantees a hung tool can never block the caller indefinitely, regardless
+   of cause (Spike 002 part 2) — see
+   `docs/components/01-target-lab/change-control.md`
+   `CC-LAB-0016`/`CC-LAB-0017` for why a bounded timeout/retry was chosen as
    the safety valve over building generic per-request session-refresh
    machinery into each tool's own request loop. The loopback-only constraint
    from Addendum E is enforced before every invocation (`assert_loopback`, no
@@ -279,8 +311,19 @@ left before attempting an original seed:
    `inconclusive`, never guessed as secure. 45 offline tests (every branch,
    injected fake runner) + 3 skip-guarded tests against the real cloned
    `sqlmap`/`commix`/`sstimap` binaries (`tests/test_labgen_oracle_wrapper.py`,
-   `tests/test_labgen_oracle_wrapper_integration.py`). Nuclei and ZAP remain
-   unintegrated — one tool at a time, same discipline as the first two.
+   `tests/test_labgen_oracle_wrapper_integration.py`).
+   **Separately, the whole-app safety-net oracle** lives at
+   `fuzzlab/labgen/zap_oracle.py` (`ZapWholeAppScanRequest` /
+   `run_zap_whole_app_scan`, kept out of `oracle_wrapper.py` since ZAP has no
+   single declared parameter to scope by — see `CC-LAB-0019`): scope a scan
+   to one declared alert-name pattern (or opt into an unscoped whole-app
+   "safety net" mode) and it invokes ZAP's Automation Framework as one
+   bounded subprocess call, parsing its own structured JSON report — never
+   its opaque exit code — for the same three-outcome fail-closed verdict. 22
+   offline tests + 1 skip-guarded real-ZAP integration test
+   (`tests/test_labgen_zap_oracle.py`,
+   `tests/test_labgen_zap_oracle_integration.py`). **Nuclei remains
+   unintegrated** — a separate, concurrent lane's work.
 2. Only after that wrapper exists does it make sense to attempt an original
    Tier-A seed on this project's own (eventual) generated code — the
    security assertion for it is now a call to that wrapper, not hand-written

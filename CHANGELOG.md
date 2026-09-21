@@ -14,6 +14,25 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (LAB, `CC-LAB-0019`): validated OWASP ZAP as a fourth independent tool-oracle
+  and a structurally different one (`docs/spikes/SPIKE-005-zap-vs-ssti-flask-hacking-playground.md`
+  — real official ZAP 2.16.1 release, reused Spike 003's Flask SSTI twin pair as the
+  target, ZAP's own headless "Automation Framework" run as one bounded subprocess call)
+  per `CR-LAB-0001`'s "Whole-app safety net → OWASP ZAP daemon mode / Automation
+  Framework — Supplementary" mapping, and added a new, separate module
+  `fuzzlab/labgen/zap_oracle.py` (`ZapWholeAppScanRequest` /
+  `run_zap_whole_app_scan`) — because ZAP is a whole-app active scanner with no single
+  declared parameter (unlike sqlmap/commix/SSTImap), so it needed its own request/verdict
+  shape (scope by declared alert-name pattern instead of parameter) rather than being
+  merged into `oracle_wrapper.py`, while reusing that module's loopback-safety/typed-error/
+  bounded-timeout machinery directly. Key finding: ZAP correctly raised a dedicated
+  "Server Side Template Injection" alert (plus reflected XSS) on the vulnerable endpoint
+  and neither on the secure twin, but also raised several routine header/info-disclosure
+  alerts on *both* — confirming the wrapper must always classify against the caller's
+  declared scope, never "any alert at all," and must never trust ZAP's own opaque exit
+  code for the verdict. 22 new offline tests + 1 new skip-guarded real-ZAP integration
+  test, all passing. Completes the playbook's four-tool integration list (SSTImap and ZAP
+  integrated; Nuclei remains a separate, concurrent lane's work).
 - Feature (LAB, `CC-LAB-0017`): validated SSTImap as a third independent tool-oracle
   (`docs/spikes/SPIKE-003-sstimap-vs-ssti-flask-hacking-playground.md` — real Jinja2 SSTI
   app, GPL-3.0/Apache-2.0 licenses read directly, manual curl confirmation before ever

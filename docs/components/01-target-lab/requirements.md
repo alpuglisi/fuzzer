@@ -130,6 +130,39 @@ and measured. Authorized, lab-only.
   into manifest loading — the Phase 0 manifest still lists cells explicitly,
   one axis level each. (`CR-LAB-0001` §3, `docs/LAB_PHASE_0_PLAN.md` T-LAB0.3,
   `CC-LAB-0018`)
+- **FR-LAB-18** (Lab track) A separate, importable wrapper,
+  `fuzzlab.labgen.zap_oracle` (kept out of `oracle_wrapper.py` deliberately —
+  see `CC-LAB-0019`), covers the fourth tool-oracle class named in
+  `CR-LAB-0001`'s tool-mapping table: **"Whole-app safety net → OWASP ZAP
+  daemon mode / Automation Framework — Supplementary."** Unlike FR-LAB-11's
+  per-parameter contract (sqlmap/commix/SSTImap), ZAP is a whole-app active
+  scanner with no single declared parameter, so its contract is: (a) a
+  `target_url` (the whole app, or a parameterized URL to seed the crawl) plus
+  an optional `alert_name_pattern` that plays FR-LAB-11's "scope to the one
+  thing under test" role at the *alert* level rather than the *parameter*
+  level — leaving it unset opts into genuine unscoped whole-app "safety net"
+  mode (any alert at/above `risk_threshold` counts), which is coarser and
+  noisier by design and not the default a caller confirming one cell's class
+  should reach for; (b) ZAP's own Automation Framework
+  (`zap.sh -cmd -autorun <plan>`) is invoked as a **single bounded subprocess
+  call** (never a `-daemon` + REST-API-polling design — see the spike for why
+  that was rejected as unneeded complexity for this use case), reusing the
+  same loopback-only enforcement, typed-error-not-raw-exception, and
+  bounded-timeout×bounded-attempt safety valve as FR-LAB-11's tools;
+  (c) the verdict is always derived from parsing the Automation Framework's
+  own structured JSON report (`traditional-json-plus` template) against the
+  caller's declared scope — **never from ZAP's own process exit code**, which
+  reflects ZAP's opaque, unscoped policy and would conflate the class under
+  test with routine header/info-disclosure noise present on almost any
+  target; (d) each invocation gets its own isolated, temporary ZAP home/
+  report directory (cleaned up afterward unless the caller supplies its own),
+  so no invocation can be misled by another's stale state; (e) same
+  fail-closed three-outcome verdict contract as FR-LAB-11
+  (`confirmed_vulnerable | confirmed_secure | inconclusive`) — a timeout,
+  crash, missing/unreadable report, or a stale pre-existing report file is
+  always `inconclusive`, never guessed as secure. (`CR-LAB-0001`
+  tool-mapping table, `docs/spikes/SPIKE-005-zap-vs-ssti-flask-hacking-playground.md`,
+  `CC-LAB-0019`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
@@ -156,6 +189,13 @@ output/exit info) — see FR-LAB-11. It takes no dependency on and is never
 imported by `fuzzlab.oracle` (the unrelated runtime detection oracle, FUZZ
 component #7); the two are separate tools with separate purposes that happen
 to share the word "oracle".
+(Lab track, generator-build-time) `fuzzlab.labgen.zap_oracle.run_zap_whole_app_scan`
+takes a `ZapWholeAppScanRequest` (`target_url`, optional `alert_name_pattern`,
+`risk_threshold`, timeouts) and returns a `ZapScanVerdict` — same three-outcome
+contract as `OracleVerdict` above, plus the matching/all alert lists — see
+FR-LAB-18. Kept in its own module rather than `oracle_wrapper.py` since ZAP's
+whole-app, no-single-parameter shape doesn't fit that module's per-parameter
+request contract; also unrelated to and never imported by `fuzzlab.oracle`.
 (Lab track, generator-build-time) `fuzzlab.labgen.resolver.expand(raw_config)`
 takes a `{factors, strength?, sub_models?, constraints?}` mapping and returns
 a list of `{axis_name: level_value}` rows — see FR-LAB-17. Not yet called
