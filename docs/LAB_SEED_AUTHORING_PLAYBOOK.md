@@ -185,15 +185,30 @@ labels.json / expectedresults.csv / injection-points.json
 - **The 5–20% expected LLM-draft error rate** (Addendum C §2.2) has no
   measurement yet specific to framework-idiomatic web code, only adjacent
   analogues from other artifact types.
-- **sqlmap-as-oracle is validated (`docs/spikes/SPIKE-001-sqlmap-vs-vapi.md`,
-  2026-09-21):** headless `sqlmap --batch` correctly confirmed a real
-  SQLi-vulnerable endpoint and correctly cleared its properly-parameterized
-  twin, with zero original exploit code written by anyone. **One concrete
-  correction the spike surfaced:** sqlmap treats a `401`/`403` "no
-  vulnerability" response as an auth failure and refuses to test past it by
-  default — the oracle wrapper must pass the matching `--ignore-code` for
-  any cell whose secure-twin response is 401/403, or it will silently
-  under-test rather than confirm secure. commix/SSTImap/Nuclei/ZAP remain
+- **sqlmap-as-oracle and commix-as-oracle are both validated**
+  (`docs/spikes/SPIKE-001-sqlmap-vs-vapi.md`,
+  `docs/spikes/SPIKE-002-commix-vs-dvwa.md`, 2026-09-21): headless `sqlmap
+  --batch` and `commix --batch` each correctly confirmed a real vulnerable
+  endpoint (SQLi, OS command injection respectively) and correctly cleared
+  its paired secure twin, with zero original exploit code written by
+  anyone. **Two concrete corrections the spikes surfaced, both the same
+  underlying lesson:** sqlmap treats a `401`/`403` "no vulnerability"
+  response as an auth failure and refuses to test past it
+  (`--ignore-code` needed); commix gets stuck against a target whose secure
+  twin has an unrelated rotating anti-CSRF token, because the token is
+  stale by the second request; commix separately got stuck in a runaway
+  false-positive-verification loop after also sweeping the target's
+  irrelevant static `Submit` field, not just the parameter actually under
+  test. **General rule for the oracle wrapper, two parts: (1) it must
+  handle a target's ambient defenses that aren't the class under test**
+  (auth-style status codes, CSRF tokens, rate limiting) — either by
+  scoping each security assertion to just the one transform under test, or
+  by giving the wrapper session/token-refresh awareness; **(2) it must
+  scope the tool invocation to the one parameter the cell declares as the
+  injection point** (e.g. sqlmap's/commix's own parameter-selection flags),
+  never a blind sweep of every form field, both for correctness and to
+  bound runtime — or it will
+  silently under-test rather than fail loudly. SSTImap/Nuclei/ZAP remain
   unintegrated.
 - **AutoBaxBuilder's self-bias question is contested** (paper vs. project
   site) and unresolved — don't attribute full independence to its exploits
@@ -203,23 +218,25 @@ labels.json / expectedresults.csv / injection-points.json
   business logic, race conditions) has not been decided or budgeted** —
   this needs your call, not a default assumption.
 
-## Recommended next action (revised again, post-Spike-001)
+## Recommended next action (revised again, post-Spike-002)
 
-The sqlmap half of the original "wrap sqlmap and commix, validate against a
-known-vulnerable seed app" action is **done** — see
-`docs/spikes/SPIKE-001-sqlmap-vs-vapi.md`. What's left before attempting an
+Both the sqlmap and commix validations from the original "wrap sqlmap and
+commix, validate against a known-vulnerable seed app" action are **done** —
+see `docs/spikes/SPIKE-001-sqlmap-vs-vapi.md` and
+`docs/spikes/SPIKE-002-commix-vs-dvwa.md`. What's left before attempting an
 original seed:
 
-1. **Do the same validation for commix** (OS command injection) against a
-   known-vulnerable/secure pair — same method as Spike 001, same near-zero
-   cost, no original exploit authoring.
-2. **Build the actual reusable oracle wrapper**, not just an ad-hoc CLI
-   invocation — a small function that runs sqlmap/commix headlessly against
-   a given endpoint and returns a clean pass/fail, encoding the
-   `--ignore-code` lesson from Spike 001 (read the cell's declared "secure"
-   HTTP status from the manifest and pass it automatically) and the
-   loopback-only/oracle-never-matches-SUT constraints from Addendum E.
-3. Only after that wrapper exists does it make sense to attempt an original
+1. **Build the actual reusable oracle wrapper**, not just ad-hoc CLI
+   invocations — a small function that runs sqlmap/commix headlessly against
+   a given endpoint and returns a clean pass/fail, encoding both spikes'
+   lessons: read the cell's declared "secure" HTTP status from the manifest
+   and pass the matching `--ignore-code` automatically (Spike 001), and
+   either scope each security assertion to just the transform under test or
+   give the wrapper session/token-refresh awareness so an unrelated ambient
+   defense (like a rotating CSRF token) doesn't silently defeat the probe
+   (Spike 002) — plus the loopback-only/oracle-never-matches-SUT constraints
+   from Addendum E.
+2. Only after that wrapper exists does it make sense to attempt an original
    Tier-A seed on this project's own (eventual) generated code — the
    security assertion for it is now a call to that wrapper, not hand-written
    exploit logic.
