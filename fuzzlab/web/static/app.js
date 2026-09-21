@@ -126,4 +126,55 @@ function initLaunchForms() {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => { initTabs(); initLaunchForms(); });
+// --- Proxy tab: flow history (read-only) ---
+// Flow url/host/head come from recorded traffic (untrusted), so rows are built with
+// DOM APIs and textContent — never string-interpolated HTML.
+function initProxy() {
+  const table = document.querySelector("#flow-table tbody");
+  if (!table) return; // not the index page
+  const empty = document.getElementById("flow-empty");
+  const search = document.getElementById("flow-search");
+  const detail = document.getElementById("flow-detail");
+
+  async function showFlow(id) {
+    const r = await fetch(`/api/proxy/flows/${id}`);
+    if (!r.ok) return;
+    const f = await r.json();
+    document.getElementById("flow-detail-id").textContent = "#" + f.id;
+    document.getElementById("flow-req").textContent = f.raw_request || "(none)";
+    document.getElementById("flow-resp").textContent = f.raw_response || "(none)";
+    detail.hidden = false;
+  }
+
+  async function load() {
+    const q = search && search.value.trim();
+    const r = await fetch("/api/proxy/flows" + (q ? "?q=" + encodeURIComponent(q) : ""));
+    const flows = (await r.json()).flows || [];
+    table.replaceChildren();
+    for (const f of flows) {
+      const tr = document.createElement("tr");
+      tr.className = "flow-row";
+      for (const v of [f.id, f.method, f.url, f.host, f.status, f.elapsed_ms, f.protocol]) {
+        const td = document.createElement("td");
+        td.textContent = v == null ? "" : String(v);
+        tr.appendChild(td);
+      }
+      tr.addEventListener("click", () => showFlow(f.id));
+      table.appendChild(tr);
+    }
+    if (empty) empty.hidden = flows.length > 0;
+  }
+
+  document.getElementById("flow-refresh").addEventListener("click", load);
+  if (search) search.addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
+  fetch("/api/proxy/status").then((r) => r.json()).then((s) => {
+    const el = document.getElementById("proxy-status");
+    if (!el) return;
+    el.textContent = !s.configured ? "Proxy: not running in-process (history is still readable)."
+      : s.running ? `Proxy: running on ${s.host}:${s.port} · intercept ${s.intercept ? "ON" : "off"} · ${s.pending} pending`
+      : "Proxy: configured but not started.";
+  }).catch(() => {});
+  load();
+}
+
+document.addEventListener("DOMContentLoaded", () => { initTabs(); initLaunchForms(); initProxy(); });

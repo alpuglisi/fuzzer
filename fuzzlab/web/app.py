@@ -99,6 +99,26 @@ def _read_detail(cfg: Config, run_id: int) -> dict | None:
         return results.run_detail(store, run_id)
 
 
+def _read_flows(cfg: Config, query: str | None = None) -> list[dict]:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return []
+    from fuzzlab.core.store import Store
+    from fuzzlab.web import proxyview
+    with Store(path) as store:
+        return proxyview.list_flows(store, query=query)
+
+
+def _read_flow(cfg: Config, flow_id: int) -> dict | None:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return None
+    from fuzzlab.core.store import Store
+    from fuzzlab.web import proxyview
+    with Store(path) as store:
+        return proxyview.flow_detail(store, flow_id)
+
+
 # --- template context builders (rendering lives in templates/, via jinja2) ----
 
 def _activities() -> list[dict]:
@@ -281,6 +301,17 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         if proxy is None:
             return {"configured": False, "running": False}
         return proxy.status()
+
+    @app.get("/api/proxy/flows")
+    def proxy_flows(q: str | None = None):
+        return {"flows": _read_flows(cfg, query=q or None)}
+
+    @app.get("/api/proxy/flows/{flow_id}")
+    def proxy_flow(flow_id: int):
+        detail = _read_flow(cfg, flow_id)
+        if detail is None:
+            return JSONResponse({"error": f"flow {flow_id} not found"}, status_code=404)
+        return detail
 
     @app.post("/api/proxy/intercept")
     async def proxy_intercept(request: Request):

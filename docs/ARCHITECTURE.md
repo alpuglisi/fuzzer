@@ -377,7 +377,9 @@ tracked in the requirements files, not here.
   interception's futures work (D19; opt-in, `--authorized`-gated, loopback-only, separate
   port). Phase 1 built the **Activity Launcher UI**: per-tool forms rendered from each
   command spec, a dry-run preview, gated Run with live SSE output + Stop, a D14 category
-  picker, and a plugins panel (verified end-to-end in a real browser). **Pending:** the
+  picker, and a plugins panel (verified end-to-end in a real browser). Phase 2.1 added the
+  **Proxy tab's read-only flow History** (`web/proxyview.py`; `/api/proxy/flows[/{id}]`;
+  cross-process store reads, DOM-safe rendering of untrusted flow fields). **Pending:** the
   proxy
   workbench (Phase 2), the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
   `metric_series` time-series table (Phase 4), Datasette-style store exploration, a

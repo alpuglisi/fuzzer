@@ -14,6 +14,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Feature (UI, Phase 2.1): Proxy tab flow History (read-only). Added `fuzzlab/web/proxyview.py`
+  (store-backed `list_flows` + `flow_detail` over `flow`/`body`/`flow_fts`; newest-first, FTS
+  search, redacted raw request/response) and routes `GET /api/proxy/flows[?q=]` +
+  `/api/proxy/flows/{id}`. The Proxy tab renders a History sub-panel (search, flows table,
+  req/resp viewer) and a live proxy-status line; rows come from recorded traffic so they're
+  built with DOM `textContent` (no stored-XSS). Read-only, cross-process, never creates the
+  store. Tests: `test_web_proxy_history.py` (7) + the browser smoke extended to the Proxy tab.
+  Suite 474 passed / 6 skipped. See CC-UI-0016.
 - Feature (UI, Phase 1): Activity Launcher. The read-only preview is now an interactive
   launcher — a form per activity rendered server-side from each command spec (widget per
   flag type, keyed by argparse dest), with **Dry-run** (previews the exact command, sends

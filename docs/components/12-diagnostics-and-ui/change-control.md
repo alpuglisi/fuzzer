@@ -3,6 +3,32 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0016 — Proxy tab: read-only flow History (Phase 2.1) (2026-09-21)
+- Change: added `fuzzlab/web/proxyview.py` (pure, store-backed `list_flows` + `flow_detail`
+  over `flow`/`body`/`flow_fts`; newest-first, FTS search, and raw request/response decoded
+  for display) and read routes `GET /api/proxy/flows[?q=]` and `GET /api/proxy/flows/{id}`
+  (404 for a missing flow). The Proxy tab now renders a **History** sub-panel — a search
+  box, a flows table (method/url/host/status/ms/protocol), and a req/resp viewer — plus a
+  live proxy-status line. Flow url/host/head come from recorded traffic (untrusted), so the
+  rows are built with DOM APIs + `textContent`, never interpolated HTML.
+- Impact (other components / project): surfaces the proxy component's flow history in the
+  panel; works cross-process (reads the store a running `fuzzlab proxy` / `web --with-proxy`
+  writes). Read-only — never creates the store, sends no traffic, writes no results. No
+  schema change; the proxy component is consumed unchanged.
+- Risk (level; mitigation): low — read-only store reads and DOM-safe rendering (redacted
+  bytes on write; `textContent` blocks stored-XSS from flow fields). Mitigated by
+  `tests/test_web_proxy_history.py` (7: list newest-first, FTS query hit/miss, detail decode
+  + 404, API list/search, API detail/404, missing-store empty + no-create, tab renders) and
+  the real-browser smoke extended to switch to the Proxy tab, see a seeded flow, and open
+  its detail. Suite 474 passed / 6 skipped.
+- Deliverables:
+  - [x] `web/proxyview.py` (list_flows / flow_detail) — done.
+  - [x] `/api/proxy/flows[/{id}]` routes; Proxy-tab History UI + status line — done.
+  - [x] Tests (view + routes + read-only invariant) + browser smoke — done.
+  - [ ] Live intercept (edit/drop/forward), repeater, scope/match-replace (Phase 2.2+) — next.
+- Effectiveness (assessed 2026-09-21): effective — recorded flows list and are searchable,
+  and a flow's redacted raw request/response render; verified in a real browser.
+
 ### CC-UI-0015 — Activity Launcher UI: forms + dry-run + live output (Phase 1) (2026-09-21)
 - Change: turned the read-only activity preview into an interactive **launcher**. The
   Launcher tab now renders a form per non-subcommand activity, server-side from each

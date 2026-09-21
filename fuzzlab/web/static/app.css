@@ -86,3 +86,14 @@ nav.tabs a.active { background: #8882; border-color: #8884; font-weight: 600; }
   background: #0b0b0bdd; color: #d8d8d8; padding: .6rem; border-radius: 8px;
   white-space: pre-wrap; max-height: 22rem; overflow: auto; font-size: .85rem;
 }
+
+/* proxy history */
+#flow-table td { font-size: .85rem; }
+#flow-table tbody tr.flow-row { cursor: pointer; }
+#flow-table tbody tr.flow-row:hover { background: #8881; }
+#flow-table td:nth-child(3) { max-width: 34rem; overflow-wrap: anywhere; }
+.flow-raw {
+  background: #0b0b0bdd; color: #d8d8d8; padding: .6rem; border-radius: 8px;
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 20rem; overflow: auto;
+  font-size: .82rem;
+}

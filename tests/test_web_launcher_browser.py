@@ -51,11 +51,27 @@ class _Server:
         self._thread.join(timeout=5)
 
 
+def _seed_flow(path):
+    from fuzzlab.core.store import Store
+    from fuzzlab.proxy.history import FlowRecord, HistoryWriter
+    with Store(path) as store:
+        rid = store.start_run("proxy", "127.0.0.1")
+        hw = HistoryWriter(store, rid, batch_size=1)
+        hw.record(FlowRecord(
+            method="GET", url="http://127.0.0.1:8080/product.php?id=1", host="127.0.0.1",
+            status=200, elapsed_ms=9.0,
+            raw_request=b"GET /product.php?id=1 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n",
+            raw_response=b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi"))
+        hw.flush()
+
+
 def test_launcher_dry_run_and_run_in_browser(tmp_path):
     port = _free_port()
+    store = tmp_path / "s.db"
+    _seed_flow(store)                       # a recorded flow for the Proxy History tab
     cfg = load_config(overrides={"authorized": True,
                                  "target_base_url": "http://127.0.0.1",
-                                 "store_path": str(tmp_path / "s.db")}, environ={})
+                                 "store_path": str(store)}, environ={})
     server = _Server(create_app(cfg), port)
     server.start()
     base = f"http://127.0.0.1:{port}/"
@@ -93,6 +109,16 @@ def test_launcher_dry_run_and_run_in_browser(tmp_path):
                 "el => el.textContent.includes('[exit')",
                 arg=output.element_handle(), timeout=20000)
             assert "[exit" in output.inner_text()
+
+            # Proxy tab (Phase 2.1): switch tabs, see the seeded flow, open its detail.
+            page.click('nav.tabs a[data-tab="proxy"]')
+            row = page.locator("#flow-table tbody tr").first
+            row.wait_for(state="visible")
+            assert "/product.php" in row.inner_text()
+            row.click()
+            detail = page.locator("#flow-req")
+            detail.wait_for(state="visible")
+            assert "GET /product.php?id=1" in detail.inner_text()
             browser.close()
     finally:
         server.stop()
