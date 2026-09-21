@@ -28,10 +28,23 @@ and measured. Authorized, lab-only.
 - **FR-LAB-4** Run in a container with pinned PHP/Apache/MySQL/libxml, with
   one-command up and reset. (D7)
 - **FR-LAB-5** (Lab track) Generate app, labels, docs, and oracle tests from one
-  manifest + safety matrix + seed + env-profile, with verdicts derived from
-  `(transform, sink context)`. (D8)
+  manifest + safety matrix + seed + env-profile, with a **binary** verdict
+  derived from `(transform, sink context)` — a partially neutralized case is
+  VULNERABLE-but-harder (a `difficulty` tier), not a third verdict value. (D8, D20)
 - **FR-LAB-6** (Lab track) Support build profiles: annotated, blind, all-secure.
 - **FR-LAB-7** (Lab track) Support two tiers: dense range and realistic shop.
+- **FR-LAB-8** (Lab track) Migrate the existing hand-built Puppy Fort Factory
+  app's content into the generator (Phase 3) rather than keep it as a
+  permanent separate fixture. (D20)
+- **FR-LAB-9** (Lab track) Own the pattern-provenance corpus (`patterns/`,
+  OSV/GHSA-sourced pattern cards informing scenario briefs in original words
+  only, never inlined as code) as a LAB subcomponent, not an IND catalog. (D20)
+- **FR-LAB-10** (Lab track) For every vulnerability class with a mature,
+  independently-authored exploitation tool (sqlmap, commix, et al.), the
+  generator's security assertion is that tool invoked headlessly, not
+  hand-authored exploit code. IDOR/BOLA, business-logic flaws, and
+  race-condition classes (no mature automated oracle) are out of scope until
+  further decided. (D20, `CR-LAB-0001` Addendum E)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

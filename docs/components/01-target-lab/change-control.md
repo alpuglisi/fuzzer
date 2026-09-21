@@ -3,6 +3,34 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0014 — D20: manifest-driven generator target shape decided (2026-09-21)
+- Change: approved `docs/change-requests/CR-LAB-0001-manifest-generator-realism-and-variation.md`
+  and recorded **D20** in `docs/DECISIONS_AND_ROADMAP.md`. Three scope-gating decisions:
+  (1) binary verdict model (a partially neutralized case is VULNERABLE-but-harder via a
+  `difficulty` tier, not a third `hardened` verdict value); (2) the existing hand-built
+  Puppy Fort Factory app is migrated into the generator at Phase 3, not kept as a
+  permanent separate fixture; (3) the pattern-provenance corpus (`patterns/`) lives under
+  LAB, not IND. Also decided: the three vulnerability classes with no mature automated
+  security-assertion oracle (IDOR/BOLA, business-logic flaws, race conditions) are
+  deferred indefinitely — no paid expert consultation for now. No code changed; this is a
+  decision-of-record entry. `docs/ARCHITECTURE.md` §"Components and subcomponents" #1 and
+  this component's `requirements.md` (new FR-LAB-8/9/10) updated to match.
+- Impact (other components / project): pins the target shape for all future LAB-track
+  implementation work (Phase 0 onward, per `CR-LAB-0001` §8); no other component's
+  contracts change yet. `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`'s gap-classes question
+  marked decided.
+- Risk (level; mitigation): none — decision-of-record only, no code delivered.
+- Deliverables:
+  - [x] `CR-LAB-0001` §7 decisions recorded, status flipped to APPROVED — done.
+  - [x] D20 added to `docs/DECISIONS_AND_ROADMAP.md`; lab-track phase-list pointer
+        corrected to reference `CR-LAB-0001` §8 as authoritative (the two had drifted
+        apart) — done.
+  - [x] `docs/ARCHITECTURE.md` and `01-target-lab/requirements.md` updated — done.
+  - [ ] Phase 0 implementation (schema, safety matrix, generator scaffolding) — not
+        started; tracked separately per `CR-LAB-0001` §8.
+- Effectiveness (assessed 2026-09-21): not yet assessable — this entry records a
+  decision, not a built capability; effectiveness lands with Phase 0's own CC entry.
+
 ### CC-LAB-0013 — Fix (BUG-0017): self-healing `labctl.sh reset` (recurrence of BUG-0013) (2026-09-21)
 - Change: the BUG-0013 self-heal (force-clear a wedged podman stack) was inlined in the
   `up)` case only; `reset)` still recreated with a bare `compose down -v` + `up` and hit the

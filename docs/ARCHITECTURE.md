@@ -151,10 +151,22 @@ tracked in the requirements files, not here.
   `generalizes` verdict — the generalization evidence. The live run against an external
   validation lab is on-host; the manifest-generated second target plugs in as a
   `TargetSpec`.
-- **Manifest-driven generator** `[planned]` (D8): the "lab as a compiler" — one
-  manifest plus a safety matrix, seed, and env-profile generate the app, labels,
-  docs, and oracle tests, with verdicts derived from `(transform, sink context)`.
-  Built as the parallel Lab track after the toolkit foundations.
+- **Manifest-driven generator** `[planned]` (D8, target shape pinned by **D20**/
+  `CR-LAB-0001`): the "lab as a compiler" — one manifest plus a safety matrix,
+  seed, and env-profile generate the app, labels, docs, and oracle tests, with a
+  **binary** verdict derived from `(transform, sink context)` (a partially
+  neutralized case is VULNERABLE-but-harder, feeding a `difficulty` tier, not a
+  third verdict value). The **existing hand-built PHP app above is migrated
+  into the generator** at Phase 3 (not kept as a separate permanent fixture).
+  A pattern-provenance corpus (`patterns/`, OSV/GHSA-sourced, informs scenarios
+  in original words only — never inlined as code) lives under this component.
+  Security assertions are **independent third-party tools invoked headlessly**
+  (sqlmap, commix, et al. — see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not
+  hand-authored exploit code, for every class with a mature oracle; the three
+  classes without one (IDOR/BOLA, business logic, race conditions) are
+  **deferred indefinitely** and not in scope for now. Built as the parallel Lab
+  track after the toolkit foundations; phase-level deliverables in
+  `CR-LAB-0001` §8.
 - **Depends on (components):** none (it is the system under test).
 - **Consumed by:** crawler, auditor, fuzzer, proxy, and the reward path.
 

@@ -55,7 +55,7 @@ suspect_paths=$(echo "$changed_files" | grep -E '^docs/(spikes|bugs)/.*\.md$')
 
 # Heuristic 2: incident-shaped language added anywhere in the diff, excluding
 # ERROR_LOG.md itself (already checked above) and this hook's own file.
-keyword_regex='fail|hang|workaround|killed|timed out|timeout|crash|broken|regress'
+keyword_regex='\bfail(s|ed|ing|ure)?\b|\bhang(s|ing)?\b|\bworkaround(s|ed)?\b|\bkilled\b|\btimed out\b|\btimeout(s|ed)?\b|\bcrash(es|ed|ing)?\b|\bbroken\b|\bregress(es|ed|ion)?\b'
 keyword_hits=""
 {
   git diff -U0 -- . ":(exclude)$error_log" ":(exclude).claude/hooks/check-error-log-bookkeeping.sh"

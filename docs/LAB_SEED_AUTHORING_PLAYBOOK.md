@@ -240,9 +240,9 @@ original seed:
    Tier-A seed on this project's own (eventual) generated code — the
    security assertion for it is now a call to that wrapper, not hand-written
    exploit logic.
-4. Separately, decide whether to pursue the three gap classes (IDOR/BOLA,
-   business logic, race conditions) via a paid one-off consultation or defer
-   them — still your call, still not decided.
+4. **Decided (2026-09-21, `CR-LAB-0001`):** the three gap classes (IDOR/BOLA,
+   business logic, race conditions) are deferred indefinitely — no paid
+   consultation for now. The generator ships without them.
 
 None of this requires Phase 0 to be finished first, and steps 1–2 are cheap
 enough to run in parallel with Phase 0's implementation.

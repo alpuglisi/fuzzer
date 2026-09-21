@@ -1,10 +1,11 @@
 # CR-LAB-0001 — Manifest generator: real-world grounding, modern stacks, maximal variation
 
-**Status: PROPOSED — pending your approval.** Nothing in this document has been
-implemented. This is a change-control-format change request, not a change-control
-log entry — it does not get appended to `docs/components/01-target-lab/change-control.md`
-until approved and work actually lands (per component, per landed increment, as
-`CC-LAB-0011` onward — see "On approval" at the end).
+**Status: APPROVED (2026-09-21).** All three scope-gating decisions (§7) accepted
+as recommended; gap classes deferred indefinitely. Recorded as `D20` in
+`docs/DECISIONS_AND_ROADMAP.md` and `CC-LAB-0014` in
+`docs/components/01-target-lab/change-control.md`. Nothing in this document is
+implemented yet — this records the decision, not the build; implementation lands
+per phase as further `CC-LAB-NNNN` entries.
 
 **Date:** 2026-09-21 · **Primary component:** LAB (`01-target-lab/`) · **Secondary
 components touched:** FUZZ (`07-fuzzing-harness-and-oracle/`, label-contract
@@ -175,14 +176,16 @@ like your call now, since they change what Phase 0/1 actually build:
    consequential open call in the report — it shapes the oracle, the CSV schema,
    and every metric downstream. **Recommend: accept the binary-verdict
    recommendation** (simpler, keeps existing binary-detector scoring intact);
-   flag if you'd rather explore three-valued.
+   flag if you'd rather explore three-valued. **Decided (2026-09-21): binary.**
 2. **Fate of the existing hand-built PHP app.** Migrate its content into the
    generator (Phase 3.6, loses its hand-authored character) vs. keep it
    permanently as a Tier-0 fixture alongside generated tiers (more honest, costs
    maintaining two things). **Recommend: migrate** — consistent with D8's original
    "stop hand-adding pages" consequence — but this is genuinely your call.
+   **Decided (2026-09-21): migrate**, per Phase 3.6.
 3. **Does `patterns/` live under LAB or IND?** See §4. **Recommend: LAB**, since
-   it's generator-design provenance, not a runtime payload catalog.
+   it's generator-design provenance, not a runtime payload catalog. **Decided
+   (2026-09-21): LAB.**
 
 The remaining seven (deferrable to the implementation-planning stage or to the
 phase that first touches them): whether `stack` belongs in `labels.json` directly
@@ -194,6 +197,15 @@ all-secure-profile false-positive contract around framework debug pages; whether
 the pattern corpus versions with the manifest or independently; and whether/how
 to generate frontend code for DOM XSS (lean toward hand-written fixtures per the
 report, final call later).
+
+**Gap classes (Addendum E) — decided (2026-09-21): defer indefinitely.** The three
+classes with no mature automated oracle (IDOR/BOLA, business-logic flaws, race
+conditions) will not be pursued via a paid one-off expert consultation at this
+time; the generator ships without them until/unless that changes. This is not a
+technical constraint — it's a scope call, revisit if priorities change.
+
+**Approved (2026-09-21).** All decisions above accepted as recommended; see "On
+approval" for what this triggers.
 
 ## 8. Deliverables (phase-level; task-level detail deferred to the implementation plan)
 

@@ -18,6 +18,21 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — ERROR_LOG hook's keyword regex false-positives on "change" (BUG-0020)
+
+- **Symptom:** the first real use of `.claude/hooks/check-error-log-bookkeeping.sh` (added
+  in BUG-0019) after an incident-free, decision-only commit (D20/`CR-LAB-0001` approval)
+  fired a false positive, blocking the stop.
+- **Root cause:** the keyword regex matched `hang` as an unanchored substring, and `hang`
+  is a substring of `change`/`changed`/`changes` — words this changelog-heavy project's
+  own conventions use in nearly every commit. Full RCA in `docs/bugs/BUG-0020-*`.
+- **Remediation:** anchored every keyword with `\b` word boundaries and explicit inflection
+  groups; verified the real false-positive diff now passes, a synthetic true positive still
+  blocks, and a synthetic change/changed/changes-only diff no longer matches on keywords.
+  Rule PA-0022 (check a keyword heuristic against the project's own routine vocabulary
+  before trusting it unattended).
+- **Status:** Fixed (this commit).
+
 ## 2026-09-21 — PA-0019 was advisory-only, not mechanically enforced (BUG-0019)
 
 - **Symptom:** asked to make PA-0019 (BUG-0018's fix) actually prevent recurrence rather

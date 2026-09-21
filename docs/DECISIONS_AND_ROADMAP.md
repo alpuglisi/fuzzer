@@ -340,6 +340,23 @@ redaction; the invariant-bearing markup is unchanged. R0 is the first step of th
 migration in `docs/UI_LAYOUT_REDESIGN.md` (R1 deep-linkable per-section routes + Overview,
 R2 Findings workbench, R3 Proxy rebuild). Realizes FR-UI-8; see CC-UI-0021.
 
+### D20 — Manifest-driven generator: binary verdict, migrate the hand-built app, `patterns/` under LAB
+
+Per `CR-LAB-0001` (approved 2026-09-21), the manifest-driven lab generator (D8) is
+realized as: a **binary verdict** model (a `partial`-neutralization case is
+VULNERABLE-but-harder, feeding a `difficulty` tier, rather than a third
+`hardened` verdict value) — simpler, and keeps existing binary-detector scoring
+intact; the **existing hand-built PHP app is migrated** into the generator at
+Phase 3.6, rather than kept permanently as a separate Tier-0 fixture, consistent
+with D8's original "stop hand-adding pages" consequence; and the **pattern-
+provenance corpus (`patterns/`) lives under LAB** (`01-target-lab/`), since it is
+generator-design provenance, not a runtime payload catalog for IND. The three
+classes with no mature automated security-assertion oracle (IDOR/BOLA,
+business-logic flaws, race conditions; see `CR-LAB-0001` Addendum E) are
+**deferred indefinitely** — no paid expert consultation for now; the generator
+ships without them. This keeps D8 itself intact (the "why") while D20 pins the
+"what," per `CR-LAB-0001` §6/§7.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the
@@ -530,29 +547,17 @@ web platform (the near-term UI is a lean, localhost-only web app — D11).
 ## Lab track (parallel to the toolkit roadmap)
 
 Per D8, the lab grows via a manifest-driven generator, as its own track that
-starts after the toolkit foundations (Phases 0–1 above). High-level phases,
-adapted from the scaling research:
-
-- **Lab Phase 0 — Schema and import (no new pages).** JSON Schema for the
-  manifest and an initial safety matrix covering only the transforms and sink
-  contexts the current pages use; write manifest entries for the existing pages;
-  make the generator reproduce today's app; diff generated docs against the
-  hand-written map and explain every discrepancy; pin the environment.
-- **Lab Phase 1 — Oracles and label pipeline (still no new pages).** Positive,
-  negative (paired-secure), and contamination oracles; a Psalm taint backstop;
-  environment assertions; a byte-identical regeneration gate; emit
-  `labels.json`, `expectedresults.csv`, `injection-points.json`, `sitemap.xml`;
-  a loopback-only database reset.
-- **Lab Phase 2 — Scale within known classes.** Expand cells for SQLi and XSS
-  with hard caps per cell and surface-feature variation; add difficulty tiers;
-  generate the benign corpus (including apostrophe-rich, safely-reflected, and
-  slow-but-benign true negatives); add the `blind` and `all-secure` build
-  profiles.
-- **Lab Phase 3 — Realism.** Auth states and roles; IDOR/BOLA; multi-step, stored,
-  and second-order cases; a REST surface with generated OpenAPI.
-- **Lab Phase 4+ — Class breadth (cheapest oracle first).** Open redirect, path
-  traversal/LFI, SSTI, CSRF, XXE, then SSRF (loopback canary only); command
-  injection and deserialization last, behind a disabled-by-default profile.
+starts after the toolkit foundations (Phases 0–1 above). Per **D20**, the
+authoritative phase-level deliverable breakdown is `CR-LAB-0001` §8 (Phase 0
+foundation → Phase 1 variation-on-existing-stack → Phase 2 identity/depth →
+Phase 3 multi-stack, incl. migrating the existing hand-built app per §7.2 →
+Phase 4 realism tier and beyond) — read it there rather than here, so this
+summary and that phase list don't drift apart again. Notable per D20: Phase 2's
+`authz_expectations` groundwork unlocks IDOR/BOLA *mechanically*, but building
+actual IDOR/BOLA cells on top of it is one of the three gap classes deferred
+indefinitely (no automated oracle, no paid consult for now) — the groundwork is
+still worth building since Phase 2 needs it for other things (stored/
+second-order cases), IDOR/BOLA cells themselves just don't get scheduled.
 
 The two tracks share the label contract (D9) and the pinned environment, so the
 toolkit can consume lab labels from the first lab phase onward.

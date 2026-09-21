@@ -162,3 +162,10 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   module that raises a typed error for some failure modes must raise that same typed error
   for every foreseeable failure at its boundary (e.g. a missing file/directory) — never let
   the underlying OS/library exception propagate raw. (from BUG-0007)
+- **PA-0022** — Any keyword/substring match used as a mechanical heuristic (a hook, a lint
+  rule, a build gate) must anchor on word boundaries (`\b`) unless a bare substring is
+  specifically intended, and must be checked against the project's own routine vocabulary
+  (changelog/commit-message conventions, common English words) for accidental collisions
+  before being trusted to run unattended — e.g. grep the heuristic's own keyword list
+  against a sample of ordinary, incident-free commit messages/diffs and confirm zero
+  matches. (from BUG-0020)

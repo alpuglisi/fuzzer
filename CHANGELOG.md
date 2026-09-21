@@ -14,6 +14,19 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Fix (BUG-0020, tooling/process): `.claude/hooks/check-error-log-bookkeeping.sh`'s
+  keyword regex matched `hang` as an unanchored substring of `change`/`changed`/`changes` —
+  words this project's own changelog convention uses constantly — false-positiving on its
+  first real, incident-free use. Anchored all keywords with `\b` word boundaries and
+  inflection groups; new rule PA-0022 (check a keyword heuristic against the project's own
+  routine vocabulary before trusting it unattended). See `docs/bugs/BUG-0020-*`.
+- Decision (LAB, D20): approved `CR-LAB-0001` — binary verdict model, migrate the
+  existing hand-built app into the generator (Phase 3), `patterns/` corpus lives under
+  LAB not IND. The three no-oracle gap classes (IDOR/BOLA, business logic, race
+  conditions) are deferred indefinitely, no paid consult for now. `docs/ARCHITECTURE.md`,
+  `01-target-lab/requirements.md` (new FR-LAB-8/9/10), and the lab-track phase list in
+  `docs/DECISIONS_AND_ROADMAP.md` (which had drifted from `CR-LAB-0001` §8's more
+  detailed breakdown) updated to match. See CC-LAB-0014.
 - Docs (process, bookkeeping reconciliation): audited `ERROR_LOG.md` against every
   `docs/bugs/BUG-NNNN-*.md` investigation and `docs/PREVENTIVE_ACTIONS.md` rule in both
   directions. Found two gaps and closed them: (1) the `ERROR_LOG.md` entry for "Credential
