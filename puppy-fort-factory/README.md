@@ -24,23 +24,42 @@ which pages are vulnerable and which are secure.
 Copy `puppy-fort-factory/` under your Apache `DocumentRoot`, e.g.
 `/var/www/html/puppy-fort-factory`, or use the built-in PHP server (below).
 
-### 2. Create the database
+### 2. Create the database and the application user
+
+Import the schema as an administrative account (this creates the `puppy_fort`
+database with `users`, `products`, `posts`, and `cart_items` tables and seed
+data):
 
 ```bash
-mysql -u root -p < sql/schema.sql
+sudo mysql < sql/schema.sql          # or: mysql -u admin -p < sql/schema.sql
 ```
 
-This creates the `puppy_fort` database with `users`, `products`, and
-`cart_items` tables and seed data.
+Then create the dedicated **application user** the app connects as. Do **not**
+use the database `root` account: on modern MariaDB/MySQL `root` authenticates
+over the unix socket, so a TCP login as `root` is refused (you would get
+`Access denied for user 'root'`). Least privilege is also good practice.
+
+```sql
+CREATE USER IF NOT EXISTS 'pff'@'127.0.0.1' IDENTIFIED BY 'pff_lab_pw';
+CREATE USER IF NOT EXISTS 'pff'@'localhost' IDENTIFIED BY 'pff_lab_pw';
+GRANT ALL PRIVILEGES ON puppy_fort.* TO 'pff'@'127.0.0.1';
+GRANT ALL PRIVILEGES ON puppy_fort.* TO 'pff'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+(The **containerized** lab in `lab/` provisions this `pff` user automatically —
+see `lab/README.md` — so these manual steps are only for a bare LAMP setup.)
 
 ### 3. Configure the DB connection
 
-Edit `config/config.php`, or set environment variables:
+`config/config.php` already defaults to the `pff` user above, so no change is
+needed if you used those lab credentials. To override, edit `config/config.php`
+or set environment variables (never point the app at `root`):
 
 ```bash
 export PFF_DB_HOST=127.0.0.1
-export PFF_DB_USER=root
-export PFF_DB_PASS=yourpassword
+export PFF_DB_USER=pff
+export PFF_DB_PASS=pff_lab_pw
 export PFF_DB_NAME=puppy_fort
 ```
 

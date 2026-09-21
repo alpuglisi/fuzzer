@@ -1,5 +1,8 @@
 -- Ryder's Puppy Fort Factory - database schema and seed data.
--- Import with:  mysql -u root -p < sql/schema.sql
+-- Import as an admin account:  sudo mysql < sql/schema.sql
+--   (on modern MariaDB the admin `root` account uses socket auth, so `sudo
+--    mysql` works where `mysql -u root -p` is refused). The app itself connects
+--    as the least-privilege `pff` user, never root - see README.md / lab/.
 --
 -- NOTE: passwords are stored as unsalted MD5. That is itself a weakness, kept
 -- deliberately so the classic SQL-injection login works. It is documented in

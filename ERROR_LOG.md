@@ -14,6 +14,20 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — App DB config defaulted to `root` (repo default fixed)
+
+- **Symptom:** `config.php` defaulted the DB user to `root`/empty; with no PFF_DB_*
+  env, `mysqli_connect` died with `Access denied for user 'root'@'localhost'`. Same
+  failure as the 2026-09-18 "Environment" entry below, but this is the repo default.
+- **Root cause:** the committed default selected `root`, which modern MariaDB
+  authenticates over the unix socket (TCP login refused), and which also disagreed
+  with the lab's own dedicated `pff` user (compose/.env). The earlier incident was
+  worked around only in the environment, so the repo default stayed broken.
+- **Remediation:** defaulted `config.php` to the `pff` app user (never root); updated
+  the app README manual setup to create `pff` and the schema import note. Full RCA in
+  `docs/bugs/BUG-0004-config-defaults-to-db-root.md`; rule PA-0004.
+- **Status:** Fixed (this commit; live DB connect to be confirmed on the host).
+
 ## 2026-09-21 — Oracle stored findings with full URLs (path-form mismatch)
 
 - **Symptom:** the T2.8 scored pipeline reported `tp=0, fp=3` — every genuine,

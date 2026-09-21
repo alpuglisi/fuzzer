@@ -20,3 +20,9 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   stated only in prose. New writers of the same column/field go through that shared
   function (e.g. result URLs are stored in path form via `fuzzlab.core.urls.to_path`).
   (from BUG-0003)
+- **PA-0004** — A committed default that selects an external identity, credential, or
+  endpoint must be a value the target actually accepts **and** must match what the lab
+  provisions (compose / `.env` / schema) — not a developer's local assumption. And
+  when an incident is resolved only by an environment workaround (an `ERROR_LOG` entry
+  marked `Environment`), still fix the repo default that caused it, so a fresh checkout
+  does not reproduce it. (from BUG-0004)

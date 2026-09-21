@@ -13,6 +13,13 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Bug fix (BUG-0004): the lab app's `config.php` defaulted the DB user to `root`
+  (empty password), which modern MariaDB authenticates over the unix socket and
+  refuses over TCP — so any run without the PFF_DB_* env failed with "Access denied
+  for user 'root'". Defaulted to the dedicated least-privilege `pff` user instead
+  (matching `lab/.env.example`/compose); updated the app README manual setup to
+  create `pff` and stop using root, and aligned the `schema.sql` import note to
+  `sudo mysql`. Preventive rule PA-0004. Change-control: CC-LAB-0004.
 - Phase 3 build (offline scaffolding): added `fuzzlab/greybox/` — the grey-box
   **consumer** layer behind injected-source seams, fully testable without a lab:
   `CoverageSource`/frontier + `app_lines` filtering, `DbFaultSource`, a multi-tier

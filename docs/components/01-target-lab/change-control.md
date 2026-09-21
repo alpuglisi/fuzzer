@@ -3,6 +3,31 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0004 — App DB defaults to the `pff` user, not `root` (BUG-0004) (2026-09-21)
+- Change: `puppy-fort-factory/config/config.php` now defaults `DB_USER`/`DB_PASS` to
+  the dedicated lab application user (`pff` / `pff_lab_pw`) instead of `root` / empty.
+  Updated the app README manual-setup steps to create the least-privilege `pff` user
+  (with the exact SQL) and to stop pointing the app at `root`; aligned the
+  `schema.sql` import comment to `sudo mysql` (socket auth). No change to the
+  containerized path's behavior (compose already supplies `PFF_DB_USER=pff`).
+- Impact (other components / project): fixes BUG-0004 — the shipped default targeted
+  the DB `root` account, which modern MariaDB authenticates over the unix socket and
+  refuses over TCP (`Access denied for user 'root'`), so any run where the PFF_DB_*
+  env was not supplied (a manual LAMP setup, or env not propagated) failed to
+  connect. The repo default now matches what the lab actually provisions. Unblocks
+  the on-host Phase 1/2/3 activities. `config.php` lints clean (`php -l`).
+- Risk (level; mitigation): low — a defaults-only change; env vars still override and
+  the container path is unchanged. Lab-only throwaway credentials (already present in
+  `lab/.env.example`); the DB is never published and the web tier is loopback-only.
+- Deliverables:
+  - [x] `config.php` defaults → `pff` (never root); explanatory comment — done.
+  - [x] App README manual setup creates `pff`, drops root; schema.sql import note — done.
+  - [x] `php -l` clean; sole `root` literal removed — done.
+  - [ ] Live connect verified on the host (container `labctl.sh up` and/or manual) — on-host.
+- Effectiveness (assessed 2026-09-21): expected effective — the only `root` literal in
+  the app is removed and the default now matches the provisioned `pff` user; live DB
+  connection to be confirmed on the host.
+
 ### CC-LAB-0003 — Containerized lab (2026-09-21)
 - Change: added `lab/` — a `compose.yaml` (PHP/Apache `web` + `mariadb:11.4` `db`),
   `web.Dockerfile` (`php:8.3-apache` + `mysqli`, room for pcov/Xdebug later), a
