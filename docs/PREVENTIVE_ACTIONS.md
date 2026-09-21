@@ -49,3 +49,14 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   for auth/detection code must reproduce the server's ambient state (e.g. a pre-login
   anonymous cookie), not only the happy path, or a broken success path looks healthy
   (a recurrence vector of PA-0006). (from BUG-0008)
+- **PA-0008** — Gate optional behavior on the **authoritative capability probe**, not on
+  a fragile name string. To detect a native extension use `extension_loaded('x')` (not
+  `function_exists('\x\fn')`, whose leading-backslash namespaced form is unreliable);
+  likewise prefer the direct capability check over stringly-typed name lookups elsewhere.
+  A misfiring guard silently degrades to "feature off / no signal", which is hard to spot.
+  (from BUG-0009)
+- **PA-0009** — A build or deploy step that provisions a runtime capability (compiling/
+  installing an extension, a package, a binary) must **verify it is actually usable in the
+  same step** — e.g. `pecl install x && … && php -m | grep -qi '^x$'` — so a broken or
+  cache-stale layer fails the build, not a later run. Install the toolchain the build
+  needs (e.g. `$PHPIZE_DEPS` for PECL) rather than assuming it is present. (from BUG-0009)

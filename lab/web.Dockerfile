@@ -11,7 +11,8 @@ FROM php:8.3-apache-bookworm
 # version is part of what the pinned tag/digest locks, relevant to XML/entity
 # behavior that affects some labels).
 RUN docker-php-ext-install mysqli \
-    && a2enmod rewrite
+    && a2enmod rewrite \
+    && php -m | grep -qi '^mysqli$'    # fail the build if the app's DB ext didn't load (PA-0009)
 
 # Grey-box line coverage (Phase 3 T3.1): pcov, enabled but idle. The shim
 # (includes/cov.php) only calls \pcov\start()/collect() when a request carries the

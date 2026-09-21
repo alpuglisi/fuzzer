@@ -41,8 +41,10 @@ Component code: **LAB**. Entry format and required fields: see
   leading-backslash form) — now `extension_loaded('pcov')`; and `pecl install pcov` ran
   without `$PHPIZE_DEPS`, so the build could no-op — now installs the build deps and
   asserts `php -m | grep pcov` at build time (a broken layer fails the build). Added
-  `labctl.sh exec` and a pcov-loaded precheck in the script. See ERROR_LOG (grey-box
-  self-test entry).
+  `labctl.sh exec` and a pcov-loaded precheck in the script. The `mysqli` install got the
+  same build-time load check (PA-0002 sweep). Full RCA in
+  `docs/bugs/BUG-0009-greybox-coverage-empty-fragile-pcov-guard.md`; rules PA-0008/PA-0009;
+  see ERROR_LOG (grey-box self-test entry).
 
 ### CC-LAB-0008 — Multi-target evaluation harness (Phase 10 T10.5) (2026-09-21)
 - Change: `fuzzlab/harness/multitarget.py` runs the full pipeline against several targets

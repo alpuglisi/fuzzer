@@ -31,7 +31,12 @@ Format per entry:
   changed RUN line invalidates the suspect cache). `labctl.sh exec` was added and the
   script now checks pcov is loaded in the container before the curl self-test, printing
   the exact `build --no-cache web` command if not.
-- **Status:** Fixed (this commit); live re-run on the host to confirm. See CC-LAB-0009 update.
+- **Remediation (sweep, PA-0002):** the `mysqli` install now carries the same build-time
+  load check; no other fragile `function_exists('\ns\fn')` guards or unverified extension
+  installs remain.
+- **Status:** Fixed (this commit); live re-run on the host to confirm. Full RCA in
+  `docs/bugs/BUG-0009-greybox-coverage-empty-fragile-pcov-guard.md`; rules PA-0008,
+  PA-0009. See CC-LAB-0009 update.
 
 ## 2026-09-21 — Any credentials "authenticated" (BUG-0008): login success inferred from an anonymous cookie
 
