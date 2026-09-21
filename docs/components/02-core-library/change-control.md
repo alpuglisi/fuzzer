@@ -3,6 +3,21 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0006 — Migration 4: rule-evaluation logging (negatives) (2026-09-21)
+- Change: added migration 4 (an `evaluation` table + indexes) recording every
+  per-(injection point, rule) evaluation with its outcome (`fired` 0/1), so the
+  store holds negatives, not just hits. Supports the auditor's T2.3 rules-as-data
+  engine.
+- Impact (other components / project): the auditor writes here; the ranker/ML
+  (later) train on the negatives. Schema head is now version 4; additive.
+- Risk (level; mitigation): low — additive table + indexes; idempotent migration
+  runner + tests. (The version-pinning tests already derive the head from the
+  registry per PA-0001/PA-0002, so migration 4 needed no test edits.)
+- Deliverables:
+  - [x] Migration 4 (`evaluation` table + indexes) — done.
+- Effectiveness (assessed 2026-09-21): effective — fresh store reports version 4;
+  the auditor engine writes fired + not-fired evaluations (98/98 tests green).
+
 ### CC-CORE-0005 — Migration 3 + session-state store methods (2026-09-21)
 - Change: added migration 3 (a `session_state` table for **non-secret** session
   metadata — host, identity, kind, valid, login/logout URLs, token_exp) and Store

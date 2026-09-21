@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "R-SQLI-PARAM",
+      "category": "sql-injection",
+      "transaction_type": "SQL Injection",
+      "when": { "location_in": ["query", "body"] },
+      "reference": "sql-injection"
+    },
+    {
+      "id": "R-XSS-REFLECT",
+      "category": "xss",
+      "transaction_type": "Reflected Input",
+      "when": { "sink_context_in": ["html", "html-attribute", "url-attribute", "js"] },
+      "reference": "xss"
+    },
+    {
+      "id": "R-OPEN-REDIRECT",
+      "category": "open-redirect",
+      "transaction_type": "Open Redirect",
+      "when": { "name_regex": "url|next|redirect|return|dest|goto|continue|target" },
+      "reference": "open-redirect"
+    },
+    {
+      "id": "R-FILE-INCLUSION",
+      "category": "file-inclusion",
+      "transaction_type": "File Inclusion / Traversal",
+      "when": { "name_regex": "file|path|page|include|template|doc|folder|dir|load" },
+      "reference": "file-inclusion"
+    },
+    {
+      "id": "R-COMMAND-INJECTION",
+      "category": "command-injection",
+      "transaction_type": "Command Injection",
+      "when": { "name_regex": "cmd|exec|command|ping|host|dns|domain|ip" },
+      "reference": "command-injection"
+    },
+    {
+      "id": "R-SSTI",
+      "category": "server-side-template-injection",
+      "transaction_type": "Template Injection",
+      "when": { "sink_context_in": ["html"] },
+      "reference": "server-side-template-injection"
+    }
+  ]
+}

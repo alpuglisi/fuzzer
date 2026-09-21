@@ -37,9 +37,15 @@ Build started. Done so far:
   (`needs_browser`) built and unit-tested. Loop-wiring into the crawler/auditor
   (cluster-id from HTML, engine switch, fingerprint→`target` row) rides with T2.8.
 
-Next: T2.3 rules-as-data + negatives, T2.9 category selection, T2.10 fail-safe, then
-T2.8 wire the fewer-requests trio into the loops + measure request reduction (live).
-94/94 tests green.
+- **T2.3** — `fuzzlab/audit/`: rules-as-data (JSON rule set + declarative `when`
+  predicate + loader) and an engine that logs **every** rule evaluation (fired and
+  not-fired → negatives in a dedicated `evaluation` table, migration 4) and emits
+  candidates for fired ones. A `categories` filter is the D14/T2.9 hook. Resolves
+  the negatives to-confirm toward a dedicated `evaluation` table.
+
+Next: T2.9 category selection, T2.10 fail-safe, then T2.8 wire the fewer-requests
+trio + rules engine into the crawler/auditor loops and measure request reduction
+(live). 98/98 tests green.
 
 ## Principles (this phase)
 
@@ -168,8 +174,9 @@ signatures); grey-box confirmation is layered on in Phase 3.
 
 ## To confirm during the build
 
-- Whether negatives live as extra `candidate` rows (a `fired`/`outcome` column, a
-  new migration) or a dedicated `evaluation` table.
+- ~~Whether negatives live as extra `candidate` rows or a dedicated `evaluation`
+  table.~~ **Resolved (T2.3):** a dedicated `evaluation` table (migration 4) records
+  every evaluation with a `fired` flag; `candidate` stays the fired subset.
 - MinHash parameters (shingle size, permutations) and the cluster-distance threshold.
 - The "is this page client-rendered?" heuristic for hybrid-crawl escalation
   (empty-body / script-density / known-shell signals).

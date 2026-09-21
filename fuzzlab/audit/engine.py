@@ -1,0 +1,64 @@
+"""Evaluate rules over injection points, logging every evaluation (T2.3).
+
+For each (injection point, rule) pair the engine records an `evaluation` row with
+its outcome (fired / not-fired) — so negatives are in the store, not just hits —
+and emits a `candidate` row for each fired evaluation. An optional `categories`
+filter scopes which rules run (used by category selection, D14 / T2.9).
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+
+from fuzzlab.audit.rules import Rule, load_rules, matches
+
+
+@dataclass
+class InjectionPoint:
+    url: str
+    param: str
+    method: str = "GET"
+    location: str = "query"
+    sink_context: str | None = None
+
+
+def evaluate(points: list[InjectionPoint], store, run_id: int,
+             rules: list[Rule] | None = None,
+             categories: list[str] | None = None) -> dict[str, int]:
+    """Evaluate every rule against every point; record all evaluations + candidates.
+
+    ``categories`` (None = all) scopes the active rules — the hook for D14/T2.9
+    category selection.
+    """
+    rules = load_rules() if rules is None else rules
+    active = [r for r in rules if categories is None or r.category in categories]
+    counts = {"evaluation": 0, "candidate": 0, "negative": 0}
+
+    for point in points:
+        for rule in active:
+            fired = matches(rule, point)
+            store.conn.execute(
+                "INSERT INTO evaluation (run_id, url, method, param, location, "
+                "rule_id, category, transaction_type, fired, sink_context, evidence) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (run_id, point.url, point.method, point.param, point.location,
+                 rule.id, rule.category, rule.transaction_type, 1 if fired else 0,
+                 point.sink_context, json.dumps({"when": rule.when})),
+            )
+            counts["evaluation"] += 1
+            if fired:
+                store.conn.execute(
+                    "INSERT INTO candidate (run_id, rule, evidence, sink_context) "
+                    "VALUES (?,?,?,?)",
+                    (run_id, rule.transaction_type,
+                     json.dumps({"rule_id": rule.id, "category": rule.category,
+                                 "url": point.url, "param": point.param}),
+                     point.sink_context),
+                )
+                counts["candidate"] += 1
+            else:
+                counts["negative"] += 1
+
+    store.conn.commit()
+    return counts

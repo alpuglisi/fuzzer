@@ -13,6 +13,14 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Phase 2 build (T2.3): **rules-as-data + full evaluation logging**. Added
+  `fuzzlab/audit/` — an editable JSON rule set with a declarative `when` predicate,
+  a loader, and an engine that records **every** rule evaluation (fired and
+  not-fired → negatives) in a new `evaluation` table (migration 4), emitting
+  candidates for fired ones; a `categories` filter is the D14/T2.9 hook. This gives
+  the trainable-dataset-with-negatives half of the Phase 2 exit. Resolved the
+  negatives to-confirm toward a dedicated `evaluation` table. +4 tests (98/98
+  green). Change-control: CC-CORE-0006, CC-AUD-0007.
 - Phase 2 build (T2.5/T2.6/T2.7 algorithms): added the fewer-requests building
   blocks as pure, tested `core/` modules — `fingerprint.py` (server/framework/DBMS/
   WAF from headers/cookies/errors), `dedup.py` (DOM-skeleton MinHash +

@@ -3,6 +3,34 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0007 — Rules-as-data engine + full evaluation logging (T2.3) (2026-09-21)
+- Change: built `fuzzlab/audit/` — a rules-as-data engine. Rules live as JSON
+  (`rules_data/default_rules.json`) with a declarative `when` predicate
+  (always/location_in/method_in/sink_context_in/name_regex), loaded by `rules.py`;
+  `engine.evaluate` runs every rule against every injection point and writes an
+  `evaluation` row for **each** evaluation (fired and not-fired), emitting a
+  `candidate` row for fired ones. Recording negatives gives a trainable dataset
+  (Phase 2 exit half). An optional `categories` filter scopes active rules — the
+  hook for D14/T2.9 category selection. Resolves the plan's to-confirm toward a
+  dedicated `evaluation` table (negatives there; `candidate` stays the fired subset).
+- Impact (other components / project): the store now holds negatives (via CORE
+  migration 4, CC-CORE-0006). The rule set is editable data, not code. Wiring the
+  fetcher to feed real discovered injection points (with sink-context from T2.4)
+  into the engine is the next step (needs the live crawl/lab).
+- Risk (level; mitigation): low–medium — a data rule language is new surface; the
+  predicate set is small, safe (no code eval), and ANDed with a "no conditions =>
+  never fires" guard. 4 unit tests (rules load as data; predicate matching; engine
+  logs negatives + candidates with correct counts; category filter scopes rules).
+- Deliverables:
+  - [x] Rule schema + JSON rule set + loader (rules-as-data) — done.
+  - [x] Engine: full evaluation logging (negatives) + candidate emission — done.
+  - [x] Category filter hook (D14/T2.9) + 4 tests — done.
+  - [ ] Wire the fetcher to feed real injection points into the engine — todo (live).
+  - [ ] Port the existing 28 in-code reflection rules to data incrementally — todo.
+- Effectiveness (assessed 2026-09-21): effective in unit tests — every (point, rule)
+  pair is logged; negatives are present (fired=0) and candidates match fired=1;
+  category filter restricts the active rules. Live fetcher wiring pending.
+
 ### CC-AUD-0006 — Target fingerprinting (algorithm) (2026-09-21)
 - Change: built `core/fingerprint.py` (T2.5) — a pure, accumulative fingerprinter
   that identifies server / framework / DBMS / WAF from response headers, cookies,

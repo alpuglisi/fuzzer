@@ -203,11 +203,36 @@ CREATE TABLE session_state (
 );
 """
 
+# --- migration 4: full rule-evaluation logging (negatives) -------------------
+# The auditor's rules-as-data engine records EVERY per-(injection point, rule)
+# evaluation — fired and not-fired — so the store holds negatives, not just hits
+# (a trainable dataset). Fired evaluations also emit a `candidate` row as before.
+_M0004 = """
+CREATE TABLE evaluation (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id           INTEGER NOT NULL REFERENCES run(id),
+    url              TEXT NOT NULL,
+    method           TEXT NOT NULL DEFAULT 'GET',
+    param            TEXT,
+    location         TEXT,
+    rule_id          TEXT NOT NULL,
+    category         TEXT,
+    transaction_type TEXT,
+    fired            INTEGER NOT NULL,        -- 1 emitted a candidate, 0 negative
+    sink_context     TEXT,
+    evidence         TEXT,
+    created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_evaluation_run ON evaluation(run_id);
+CREATE INDEX idx_evaluation_fired ON evaluation(run_id, fired);
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
     (2, _M0002),
     (3, _M0003),
+    (4, _M0004),
 ]
 
 
