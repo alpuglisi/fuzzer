@@ -361,7 +361,7 @@ negatives. Task breakdown in `docs/PHASE_2_PLAN.md`.
   negatives.
 
 ### Phase 3 — Grey-box instrumentation `[planned]`
-Goal: a dense, causal reward signal.
+Goal: a dense, causal reward signal. Task breakdown in `docs/PHASE_3_PLAN.md`.
 - Xdebug/pcov line coverage read per request, filtered to app files.
 - Database-level fault signal (query log or a proxy/DB error hook).
 - Lab state reset (DB snapshot/restore) between iterations.

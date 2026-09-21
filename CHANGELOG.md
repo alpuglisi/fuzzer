@@ -13,6 +13,12 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Docs: added `docs/PHASE_3_PLAN.md` — the Phase 3 (grey-box instrumentation) plan:
+  per-request pcov line coverage (app-filtered), a DB-fault signal, deterministic
+  lab reset between iterations, coverage-novelty folded into `attempt.reward`, and
+  the grey-box M10 mechanism into the oracle — all behind injected-source seams
+  (offline-testable) with live capture on the host. Fills the schema's reserved
+  `attempt.coverage`/`attempt.db_fault`; no ML this phase. Roadmap points to it.
 - Docs: added `docs/ON_HOST_TASKS.md` — one place tracking the deferred **on-host**
   work that needs a real lab/browser/container daemon (Phase 1 live two-lab run +
   runbook; Phase 2 T2.8 live crawler/auditor wiring + request-reduction
