@@ -14,6 +14,18 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Fix (BUG-0017, on-host): `scripts/greybox_e2e.sh` step 1 (`labctl.sh reset`) failed under
+  podman-compose (`exit status 125`, "cannot remove … as it is running") and wedged the
+  stack, blocking Part E. A **recurrence of BUG-0013**: that fix made `labctl.sh up`
+  self-healing but left `reset` recreating containers with a bare `down -v` + `up` and no
+  force-clean fallback. Factored the force-clean into one shared `_force_clean()` helper and
+  routed every lifecycle path — `up` (keep-volume), `reset` (drop-volume), and `down`
+  (keep-volume, from the sweep) — through it. Recurrence review +
+  prior-PA-failure analysis (PA-0014 was scoped to the *trigger* env/profile change, the
+  PA-0002 sweep inherited that framing, and PA-0003 wasn't applied so the self-heal was
+  duplicated-by-omission) in `docs/bugs/BUG-0017-*`; new rule PA-0018 re-keys the self-heal to
+  the *mechanism* and to all container-recreate paths. See CC-LAB-0013. Verified statically
+  (mocked podman/compose; `up`/`reset` both branches exit 0). Suite 416 passed / 6 skipped.
 - Fix (BUG-0016): `greybox-run`'s "new-code reward" was starved by a global coverage
   frontier (the benign baseline, sent first per point, consumed the novelty), so every
   attack showed `novel=0`, `newcode_reward` read 0, and a false "shim not installed?" NOTE

@@ -122,3 +122,13 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   A passing self-test is not sufficient if the metric doesn't reflect the capability, and a
   diagnostic/NOTE must key on the actual condition it names (e.g. "no coverage captured" ⇒
   coverage-seen == 0), not a derived artifact. (from BUG-0016)
+- **PA-0018** — Container-lifecycle self-heal is a cross-path convention. Every
+  orchestration path that creates, removes, or recreates containers on a possibly-running
+  or wedged podman stack must route through the **one shared force-clean helper** (per
+  PA-0003) — never reimplement it per subcommand and never leave a path without it. When a
+  container-lifecycle fix is added, the PA-0002 sweep must enumerate call sites by the
+  **operation** (recreate / remove / tear-down) — every relevant subcommand (`up`, `reset`,
+  `down`, and any future one) — not by the **trigger** that first surfaced it (e.g. an
+  env/profile change). This re-keys PA-0014 from the trigger to the mechanism
+  (podman-compose cannot remove or recreate a running/wedged stack) so a sibling path with
+  the same cause but a different trigger cannot slip through the sweep. (from BUG-0017)

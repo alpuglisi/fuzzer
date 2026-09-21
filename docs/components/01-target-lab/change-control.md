@@ -3,6 +3,42 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0013 — Fix (BUG-0017): self-healing `labctl.sh reset` (recurrence of BUG-0013) (2026-09-21)
+- Change: the BUG-0013 self-heal (force-clear a wedged podman stack) was inlined in the
+  `up)` case only; `reset)` still recreated with a bare `compose down -v` + `up` and hit the
+  same podman-compose limitation ("cannot remove … as it is running", `exit status 125`),
+  wedging the stack and blocking `scripts/greybox_e2e.sh` step 1. Factored the force-clean
+  sequence into one shared helper `_force_clean()` (`podman rm -f` of the three project
+  containers — force-removes running/wedged ones — then `podman pod prune -f`,
+  `podman network rm`, and an optional `podman volume rm` on `drop-volume`; no-op without
+  podman) and routed **both** subcommands through it: `up` → `_force_clean keep-volume` on
+  failure (data preserved); `reset` → `_force_clean drop-volume` before the recreate and
+  again + retry if the recreate fails. The PA-0018 sweep (enumerating lifecycle paths by
+  operation) also hardened `down` to `_force_clean keep-volume` on failure, so even a wedged
+  teardown succeeds; `status`/`logs`/`exec`/`snapshot`/`restore`/`pin` don't touch container
+  lifecycle and stay out of scope.
+- Impact (other components / project): unblocks Part E on-host — `labctl.sh reset` now
+  produces a clean, freshly-seeded stack and recovers a wedged one, so
+  `scripts/greybox_e2e.sh` proceeds. docker compose (which recreates/tears down in place)
+  is unaffected. No Python code changed.
+- Risk (level; mitigation): low–medium — `reset` intentionally drops the DB volume; the
+  extra force-clean only removes containers/pod/network (and the volume it already drops).
+  Guarded: `|| true` on each cleanup, podman-only, a final `up` that fails loudly if
+  recovery didn't work. Verified statically (the sandbox has no podman): a mocked
+  podman/compose harness exercises `up` and `reset` on both the happy path and the
+  first-`up`-fails fallback and asserts every path exits 0 (6/6); `bash -n` clean.
+- Deliverables:
+  - [x] Shared `_force_clean()` helper; `up` + `reset` + `down` all routed through it — done.
+  - [x] Static exit-code verification (mocked podman/compose, both branches) — done.
+  - [x] RCA `docs/bugs/BUG-0017-*` incl. recurrence review (BUG-0013) + prior-PA-failure
+    analysis (PA-0014 trigger-scoped, PA-0002 swept the narrow framing, PA-0003 not
+    applied); rule PA-0018 — done.
+- Effectiveness (assessed 2026-09-21): both container-recreate paths now self-heal via one
+  helper; the recurrence review re-keyed the self-heal from the *trigger* (env/profile
+  change) to the *mechanism* (podman can't remove/recreate a running stack) and to all
+  recreate paths (PA-0018). Suite 416 passed / 6 skipped. On-host re-run of
+  `greybox_e2e.sh` pending with the user.
+
 ### CC-LAB-0012 — Fix (BUG-0015): `labctl.sh up` exit status 0 on success without a profile (2026-09-21)
 - Change: the `up)` case's profile notice was `[ -n "${PFF_PROFILE:-}" ] && echo ...`, a
   trailing `A && B` that returns non-zero when no profile is set — making `labctl.sh up`

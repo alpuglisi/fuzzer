@@ -18,6 +18,28 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — `labctl.sh reset` not self-healing under podman-compose (BUG-0017, recurrence of BUG-0013)
+
+- **Symptom:** `scripts/greybox_e2e.sh` step 1 (`labctl.sh reset`) failed on the host with
+  `executing /usr/bin/podman-compose up -d --build: exit status 125` and "cannot remove
+  container … as it is running" / "container state improper" — the stack was wedged and
+  Part E could not start.
+- **Root cause:** `reset` recreated containers with a bare `compose down -v` + `up` and no
+  force-clean fallback. podman-compose cannot remove/recreate a running/wedged stack — the
+  exact limitation fixed in BUG-0013, but that fix (CC-LAB-0011) was applied only to the
+  `up` subcommand. A **recurrence of BUG-0013**: PA-0014 was scoped to the *trigger*
+  (env/profile change) not the *mechanism*, the PA-0002 sweep inherited that narrow framing
+  and missed the sibling recreate path, and the self-heal was inlined in `up` instead of a
+  shared helper (PA-0003 not applied).
+- **Remediation:** factored the force-clean sequence into one shared `_force_clean()` helper
+  and routed **both** `up` (keep-volume, on failure) and `reset` (drop-volume, before +
+  after with retry) through it. Full RCA incl. recurrence + prior-PA-failure analysis in
+  `docs/bugs/BUG-0017-*`; new rule PA-0018 (re-keys the self-heal to the mechanism and to
+  all container-recreate paths). See CC-LAB-0013.
+- **Status:** Fixed (this commit). labctl `up`/`reset` exit-code paths verified statically
+  (mocked podman/compose, both success and fallback branches exit 0); suite 416 passed /
+  6 skipped.
+
 ## 2026-09-21 — Grey-box "new-code reward" starved by the global frontier (BUG-0016)
 
 - **Symptom:** `greybox-run` step 5 reported `new-code max: 0.000` + a NOTE "is the cov.php
