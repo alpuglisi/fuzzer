@@ -58,6 +58,8 @@ injected-source seams (17 tests). What remains needs the instrumented lab:
 
 ## How to pick these up
 
+Step-by-step commands for all of the above are in **`docs/ON_HOST_RUNBOOK.md`**.
+
 1. Bring up the containerized lab on the host (see `docs/components/01-target-lab/`).
 2. Save credentials per host with `fuzzlab session set-credential`.
 3. Run the tools with `--identity` (and `--authorized` for the fuzzer); for

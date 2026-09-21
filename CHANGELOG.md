@@ -13,6 +13,11 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Docs: added `docs/ON_HOST_RUNBOOK.md` — step-by-step for running the toolkit on a
+  host with a container daemon: bring up the lab and verify the DB fix, install the
+  toolkit, Phase 1 authenticated per-identity crawl→audit→fuzz (+ two-lab), Phase 2
+  automatic run + request-reduction measurement, and the Phase 3 grey-box live wiring.
+  Delivers the parked Phase 1 runbook TODO; linked from `ON_HOST_TASKS.md`.
 - Bug fix (BUG-0004): the lab app's `config.php` defaulted the DB user to `root`
   (empty password), which modern MariaDB authenticates over the unix socket and
   refuses over TCP — so any run without the PFF_DB_* env failed with "Access denied

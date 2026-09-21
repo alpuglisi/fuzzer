@@ -36,11 +36,12 @@ Phase 1 is **built and unit-tested** (session package 17 tests; suite 60 green).
 Remaining to close Phase 1 end-to-end: the live two-lab per-identity run (the last
 item; all tool code paths and persistence are done).
 
-**TODO (revisit):** write a short **runbook** for the live two-lab validation —
-how to save per-host credentials (`fuzzlab session set-credential`), bring up the
-lab, and run per-identity crawl→audit→fuzz against the containerized lab (cookie)
-and an external JWT lab, with the expected checks. Deferred until we run it on a
-host with a container daemon / browser. Tracked in `docs/ON_HOST_TASKS.md`.
+**Runbook: written.** The short runbook for the live two-lab validation — saving
+per-host credentials (`fuzzlab session set-credential`), bringing up the lab, and
+running per-identity crawl→audit→fuzz against the containerized lab (cookie) and an
+external JWT lab, with the expected checks — is now `docs/ON_HOST_RUNBOOK.md` (Part
+C). Executing it is the on-host step, deferred until we run it on a host with a
+container daemon / browser. Tracked in `docs/ON_HOST_TASKS.md`.
 
 ## Goal
 
