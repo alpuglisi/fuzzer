@@ -3,6 +3,42 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0005 — Oracle scoped as class-pluggable across attack vectors (spec) (2026-09-21)
+- Change: per direction to expand the project to as many attack vectors as
+  possible, re-scoped the oracle from "differential timing + error signatures"
+  (SQLi-leaning) to a **class-pluggable deterministic confirmer**. Reviewed the
+  `references/` catalogs (63 categories) and defined a small set of confirmation
+  **mechanisms** (M1–M10: differential timing, error signature, boolean differential,
+  evaluation marker, reflected-canary-in-context, browser execution, file-content
+  marker, out-of-band callback, redirect-target control, grey-box) with a
+  `ConfirmationStrategy` per class selecting mechanisms by `(vuln_class,
+  sink_context)`. Added the secondary architecture doc
+  `docs/architecture/oracle-confirmation.md` (mechanisms + full injection-class →
+  mechanism mapping + sequencing tiers + out-of-scope non-injection categories).
+  Updated FR-FUZZ-3/3a/4/5 and the scope; Phase 2 T2.1 + exit criterion reframed.
+  Spec/plan only — no code.
+- Impact (other components / project): broadens the oracle's remit to the whole
+  injection surface, sequenced by tier (Tier 1 black-box in Phase 2; Tier 2 browser
+  execution via Playwright; Tier 3 out-of-band with a lab loopback listener; Tier 4
+  grey-box in Phase 3). Ties to the auditor's sink-context typing (AUD Phase 2), the
+  Lab track's class-breadth order, and the plugin system's `register_oracle` hook
+  (#13). First secondary architecture doc created under the splitting rule;
+  `ARCHITECTURE.md` #7 + splitting-rule index updated.
+- Risk (level; mitigation): medium — a much larger confirmation surface risks
+  false labels across classes. Mitigated by fail-closed labeling (confirm only on a
+  positive reproducible signal), preferring stronger mechanisms over timing,
+  per-class strategies validated against lab ground truth, the default-off
+  destructive gate, and OOB restricted to a loopback canary. Breadth is sequenced
+  by tier so each confirmer is validated as its lab class is added.
+- Deliverables:
+  - [x] Review `references/`; define mechanisms + class mapping (secondary doc) — done.
+  - [x] Re-scope FR-FUZZ-3/4/5, scope, Phase 2 T2.1 + exit — done.
+  - [ ] Implement the pluggable oracle + current-lab confirmers (Phase 2 T2.1) — todo.
+  - [ ] Add confirmers per new class as the Lab track generates them — todo (ongoing).
+- Effectiveness (assessed or pending): pending — spec/design. Judged in Phase 2 by
+  confirming the lab's 8 cases via their per-class mechanisms and by a new class
+  being addable as one `ConfirmationStrategy`.
+
 ### CC-FUZZ-0004 — Fuzzer HTTP migrated onto the auth seam (2026-09-21)
 - Change: the fuzzer's HTTP now goes through a sender abstraction — `RequestsSender`
   (standalone, unchanged raw-requests behavior) or `SeamSender` (routes through the

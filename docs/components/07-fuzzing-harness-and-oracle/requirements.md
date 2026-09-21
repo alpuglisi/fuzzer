@@ -14,9 +14,9 @@ rewards) derives from it.
 
 ## 2. Scope
 - **In:** the generalized harness (`template + injection_point + payload_source +
-  oracle`); attempt feature/reward extraction; the deterministic oracle
-  (differential timing, error-signature checks, grey-box coverage/DB-fault
-  signals).
+  oracle`); attempt feature/reward extraction; the **class-pluggable** deterministic
+  oracle covering the web-app attack vectors in `references/` (mechanisms +
+  injection-class mapping in `../../architecture/oracle-confirmation.md`).
 - **Out:** choosing the next payload family (scheduler) and scoring/screening
   attempts (ML classifier). The oracle does not guess; ML never writes labels.
 
@@ -26,14 +26,26 @@ rewards) derives from it.
   serves multiple vulnerability classes.
 - **FR-FUZZ-2** For each send, record an `attempt` row with a versioned feature
   vector and a reward signal.
-- **FR-FUZZ-3** Confirm timing-based blind vulnerabilities with a **differential**
-  oracle (compare against a control; use median of repeats; require a separating
-  threshold), not a single absolute measurement.
-- **FR-FUZZ-4** Confirm via error-signature checks where applicable, and via
-  grey-box coverage / DB-fault signals when instrumentation is on (D7).
+- **FR-FUZZ-3** The oracle is **class-pluggable** across web-app attack vectors,
+  not time-based only: a `ConfirmationStrategy` per vulnerability class selects from
+  a shared set of deterministic **mechanisms** — differential timing, error
+  signature, boolean/response differential, evaluation marker, reflected-canary-in-
+  context, browser execution, file-content marker, out-of-band callback,
+  redirect-target control, and grey-box (when on). Strategy is chosen by
+  `(vuln_class, sink_context)`. The mechanism set and the injection-class →
+  mechanism mapping (from `references/`) are specified in
+  `../../architecture/oracle-confirmation.md`.
+- **FR-FUZZ-3a** Timing confirmation is **differential** (rising-delay across
+  several requested delays; median/MAD baseline), never a single absolute
+  measurement.
+- **FR-FUZZ-4** Confirm via the mechanism(s) each class registers (e.g. error
+  signature for error-based SQLi, evaluation marker for SSTI, browser execution for
+  stored/DOM XSS), and via grey-box coverage / DB-fault signals when instrumentation
+  is on (D7). Ambiguity is "not confirmed," never a guess (fail-closed).
 - **FR-FUZZ-5** The oracle is the **only** writer of `finding` labels; keep
   detection (the measurement) decoupled from the payload's label to avoid circular
-  labeling.
+  labeling. New classes register via a built-in strategy registry now, and the
+  plugin system's `register_oracle` hook (component #13) later.
 - **FR-FUZZ-6** Require an explicit `--authorized` flag and lab-only scope before
   sending anything.
 - **FR-FUZZ-7** Serialize timing-sensitive sends at concurrency 1 per host via the

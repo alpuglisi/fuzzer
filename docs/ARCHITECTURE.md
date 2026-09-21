@@ -13,7 +13,12 @@ requirement specification and change-control log under `docs/components/`.
 move detailed material into **secondary architecture documents** under
 `docs/architecture/` and reference them from here. This document then stays the
 high-level map and index; each secondary document owns the depth for its area
-(and is itself kept in sync under the maintenance rule). None exist yet.
+(and is itself kept in sync under the maintenance rule).
+
+Secondary architecture documents:
+- `architecture/oracle-confirmation.md` — the class-pluggable oracle: confirmation
+  mechanisms and the injection-class → mechanism mapping across the `references/`
+  attack-vector catalogs (component #7).
 
 *Last updated: 2026-09-21.*
 
@@ -166,9 +171,15 @@ tracked in the requirements files, not here.
 - **Fuzzing harness** `[partial]`: generalize `blind_sqli_fuzzer.py` toward
   `template + injection_point + payload_source + oracle`, so one harness serves
   multiple vulnerability classes.
-- **Oracle** `[planned]`: deterministic confirmation (differential timing,
-  error-signature checks, and coverage/DB-fault signals when grey-box is on). The
-  **only** writer of `finding` labels.
+- **Oracle** `[planned]`: a **class-pluggable** deterministic confirmer — the
+  **only** writer of `finding` labels — covering as many web-app attack vectors as
+  possible, not just time-based SQLi. It is built from a small set of confirmation
+  mechanisms (differential timing, error signature, boolean/response differential,
+  evaluation marker, reflected-canary-in-context, browser execution, file-content
+  marker, out-of-band callback, redirect-target control, and grey-box when on);
+  each injection class registers the mechanism(s) that prove it. Full mechanism set
+  and the injection-class → mechanism mapping (derived from `references/`):
+  `architecture/oracle-confirmation.md`.
 - **Depends on (components):** `core/`, session manager, scheduler, oracle,
   indicator DB & catalogs; grey-box instrumentation for reward and labels. (The
   oracle itself depends on `core/` and the target lab, plus grey-box signals when

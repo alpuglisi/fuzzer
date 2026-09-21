@@ -35,16 +35,28 @@ Ordered; each lists a deliverable and an acceptance check. Follow
 source-of-truth constants; PA-0002: when a bug adds a preventive action, sweep the
 whole class).
 
-### T2.1 — Standalone deterministic oracle (sole finding-writer)
-A `core`/harness oracle that confirms a candidate deterministically: **differential
-timing** (probe at several requested delays; require latency to rise monotonically
-with the delay) and **error-signature** checks (DB error fingerprints for
-error-based SQLi). It is the **only** writer of `finding` rows, replacing the
-fuzzer's `timing-only` findings (CC-FUZZ-0003). Grey-box confirmation is added in
-Phase 3.
-- **Accept:** on the lab's blind-SQLi points, the oracle confirms via rising-delay
-  and writes a `finding` with evidence; secure controls produce no finding;
-  re-running reproduces the verdict.
+### T2.1 — Class-pluggable deterministic oracle (sole finding-writer)
+Build the oracle as a **class-pluggable** confirmer — the **only** writer of
+`finding` rows — not a time-based-only check. It is a small set of confirmation
+**mechanisms** with a `ConfirmationStrategy` per vulnerability class selecting the
+mechanism(s) that prove it; the auditor's `(vuln_class, sink_context)` picks the
+strategy. Full mechanism set and the injection-class → mechanism mapping across the
+`references/` attack-vector catalogs live in
+`architecture/oracle-confirmation.md`. This phase builds the framework plus the
+mechanisms the **current lab's 8 cases** need:
+- **M1 differential timing** (rising-delay, median/MAD), **M2 error signature**,
+  **M3 boolean/response differential** — SQLi (blind/error/boolean).
+- **M5 reflected-canary-in-executable-context** — reflected XSS (uses T2.4 typing).
+- **M6 browser execution** (Playwright) — stored + DOM XSS.
+
+Replaces the fuzzer's provisional `timing-only` findings (CC-FUZZ-0003). New
+classes (SSTI, LFI/traversal, SSRF, command injection, XXE, …) plug in as the Lab
+track adds them (their mechanisms — M4/M7/M8 — are specified in the secondary doc);
+grey-box (M10) is layered in Phase 3.
+- **Accept:** each of the lab's 8 known vulns is confirmed via its appropriate
+  mechanism (SQLi ×4 by M1/M2/M3; reflected XSS by M5; stored + DOM XSS by M6),
+  with evidence and no false positives on the secure controls; re-running
+  reproduces every verdict; a new class can be added as one `ConfirmationStrategy`.
 
 ### T2.2 — Median/MAD rolling baselines
 Replace the fuzzer's mean/σ jitter band with a **median / MAD** rolling baseline
@@ -94,10 +106,14 @@ Phase-1 baseline run.
 
 ## Exit criterion
 
-The deterministic oracle confirms the lab's known vulnerabilities (differential
-timing + error signatures) as the sole finding-writer, with no false positives on
-the secure controls; a full run uses **measurably fewer requests** than Phase 1 for
-the same findings; and the store holds a trainable dataset **with negatives**. No ML.
+The class-pluggable deterministic oracle confirms **all** the lab's known
+vulnerabilities — SQLi (timing/error/boolean), reflected XSS (context), and
+stored/DOM XSS (browser execution) — via the appropriate per-class mechanism, as
+the sole finding-writer, with no false positives on the secure controls; a new
+attack class can be added as one `ConfirmationStrategy` (mapping in
+`architecture/oracle-confirmation.md`); a full run uses **measurably fewer
+requests** than Phase 1 for the same findings; and the store holds a trainable
+dataset **with negatives**. No ML.
 
 ## Out of scope for Phase 2 (deferred)
 

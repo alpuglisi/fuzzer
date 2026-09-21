@@ -13,6 +13,15 @@ records (see `docs/components/README.md`).
 
 ## 2026-09-21
 
+- Planning: scoped the deterministic oracle as a **class-pluggable confirmer across
+  attack vectors** (not time-based only), per direction to expand coverage. Reviewed
+  the `references/` catalogs (63 categories) and wrote a secondary architecture doc
+  `docs/architecture/oracle-confirmation.md` — a small set of confirmation
+  mechanisms (M1–M10) and the full injection-class → mechanism mapping, sequenced by
+  tier (black-box → browser → out-of-band → grey-box), with non-injection
+  categories marked out of scope for the oracle. Updated the FUZZ spec (FR-FUZZ-3/4/5),
+  `ARCHITECTURE.md` #7 + the splitting-rule index (first secondary doc), and
+  `PHASE_2_PLAN.md` (T2.1 + exit criterion). Change-control: CC-FUZZ-0005.
 - Planning: added `docs/PHASE_2_PLAN.md` — the deterministic-hardening (no-ML) task
   breakdown (T2.1–T2.8): a standalone deterministic oracle (differential timing +
   error signatures) as the sole finding-writer, median/MAD baselines, rules-as-data
