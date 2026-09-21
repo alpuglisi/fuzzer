@@ -3,6 +3,30 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0011 — Fix (BUG-0013): self-healing `labctl.sh up` under podman-compose (2026-09-21)
+- Change: `lab/labctl.sh` `up` is now self-healing. podman-compose cannot recreate a
+  running stack in place when env/profile change (it errors on existing container names /
+  dependent containers and can wedge the pod), so on `up` failure labctl runs `down`
+  (keeping the DB volume), force-clears any wedged podman containers/pod/network
+  (`podman rm -f pff-lab_{frontend,web,db}_1`, `podman pod rm -f`, `podman network rm`), and
+  retries `up`. The happy path is unchanged; the fallback runs only on failure and only
+  force-cleans when `podman` is present.
+- Impact (other components / project): unblocks Parts J and K on-host —
+  `PFF_WAF=on ./labctl.sh up` and `PFF_PROFILE=desync ./labctl.sh up` now apply on a
+  running stack and recover a wedged one, so `scripts/waf_evasion_e2e.sh` /
+  `scripts/h2_desync_e2e.sh` proceed. docker compose (which recreates in place) is
+  unaffected.
+- Risk (level; mitigation): low–medium — the force-clean removes the lab's containers (data
+  is in the named volume, kept by `down`). Guarded: fallback only on failure, podman-only
+  force-clean, `|| true` on each cleanup, and a final `up` that fails loudly if recovery
+  didn't work. `tests/test_lab_downgrade.py` still validates the compose/profile config.
+- Deliverables:
+  - [x] Self-healing `up` (down + force-clean + retry) in `labctl.sh` — done.
+  - [x] RCA `docs/bugs/BUG-0013-*` incl. recurrence + prior-PA-failure analysis; PA-0014 — done.
+- Effectiveness (assessed 2026-09-21): recovers a wedged stack and applies env/profile
+  changes on-host; the recurrence review captured the previously-unguarded "assumed compose
+  capability" class as PA-0014.
+
 ### CC-LAB-0010 — `labctl.sh` compose-profile support (h2→h1 desync front-end) (Phase 9 on-host) (2026-09-21)
 - Change: `lab/labctl.sh` now honors `PFF_PROFILE` and passes `--profile <name>` as a
   **top-level** compose flag (before the subcommand) on `up`, so

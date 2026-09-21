@@ -18,6 +18,27 @@ Format per entry:
 
 ---
 
+## 2026-09-21 — On-host script defects: proxy self-test premise (BUG-0012) + compose recreate (BUG-0013)
+
+- **Symptom (1):** `scripts/proxy_e2e.sh` step 5 reported `FAIL: the parsed path did not
+  reject the duplicate Content-Length`, even though the proxy forwarded byte-exact correctly.
+- **Root cause (1):** the self-test used two *identical* `Content-Length: 0` headers;
+  duplicate-identical CL is valid per RFC 7230 (h11 accepts it) — only *conflicting* values
+  are rejected. The script diverged from the offline unit test, which used 5/6.
+- **Remediation (1):** the script now sends conflicting values (0 and 5); runbook Part I.4
+  clarified. RCA `docs/bugs/BUG-0012-*`; rule PA-0013.
+- **Symptom (2):** `scripts/waf_evasion_e2e.sh` / `h2_desync_e2e.sh` step 1 failed under
+  podman-compose (`container name ... already in use ... use --replace`; dependent-container
+  errors) and left the stack wedged.
+- **Root cause (2):** the orchestration assumed `compose up` recreates a running stack in
+  place on an env/profile change (a docker-compose behavior); podman-compose cannot. Same
+  *class* as the earlier "no Compose provider" entry (assuming a compose capability podman
+  lacks) — which was fixed in place and never captured as a PA, so the class recurred.
+- **Remediation (2):** `lab/labctl.sh up` is now self-healing — on failure it `down`s (keeps
+  the DB volume), force-clears wedged podman containers/pod/network, and retries `up`. Full
+  RCA + recurrence/prior-PA-failure analysis in `docs/bugs/BUG-0013-*`; rule PA-0014.
+- **Status:** Fixed (this commit). See CC-PROXY-0013, CC-LAB-0011. Suite 415 passed / 6 skipped.
+
 ## 2026-09-21 — Proxy on-host: leaf cert rejected (BUG-0010) + shutdown hang (BUG-0011)
 
 - **Symptom (1):** on the host, `pytest ...test_connect_tls_tunnel_forwards_byte_exact`

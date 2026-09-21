@@ -43,7 +43,23 @@ PROFILE_ARGS=()
 
 case "${1:-}" in
   up)
-    "${COMPOSE[@]}" "${PROFILE_ARGS[@]}" up -d --build
+    # podman-compose cannot recreate a running stack in place when the env or profile
+    # changes (it errors on existing container names / dependent containers, and can leave
+    # the pod half-torn-down and wedged). If `up` fails, bring the stack down — the DB
+    # volume is kept — force-clear any wedged containers/pod/network (podman), and
+    # recreate. Makes `PFF_WAF=on ./labctl.sh up` and profile changes robust + self-healing.
+    if ! "${COMPOSE[@]}" "${PROFILE_ARGS[@]}" up -d --build; then
+      echo "up failed (in-place recreate not supported here); recreating cleanly..." >&2
+      "${COMPOSE[@]}" down >/dev/null 2>&1 || true
+      if command -v podman >/dev/null 2>&1; then
+        for c in pff-lab_frontend_1 pff-lab_web_1 pff-lab_db_1; do
+          podman rm -f "$c" >/dev/null 2>&1 || true
+        done
+        podman pod rm -f pff-lab pod_pff-lab >/dev/null 2>&1 || true
+        podman network rm pff-lab_default >/dev/null 2>&1 || true
+      fi
+      "${COMPOSE[@]}" "${PROFILE_ARGS[@]}" up -d --build
+    fi
     echo "lab up: http://127.0.0.1:${PORT}/  (loopback only)"
     [ -n "${PFF_PROFILE:-}" ] && echo "profile '${PFF_PROFILE}' enabled"
     ;;

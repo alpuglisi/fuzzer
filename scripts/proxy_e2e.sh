@@ -82,13 +82,16 @@ say "5/6  Forwarding a duplicate-Content-Length request byte-exact through the p
 python - "$PROXY_PORT" "$PORT" <<'PY'
 import socket, sys
 proxy_port, lab_port = int(sys.argv[1]), int(sys.argv[2])
+# Two CONFLICTING Content-Length values: duplicate *identical* CL is valid per RFC 7230
+# (a parser may accept it), so only conflicting values are guaranteed to be rejected by
+# the parsed path. The proxy reads the first (0 -> no body) and forwards byte-exact.
 req = (f"POST http://127.0.0.1:{lab_port}/product.php?id=1 HTTP/1.1\r\n"
        f"Host: 127.0.0.1:{lab_port}\r\n"
        f"Content-Length: 0\r\n"
-       f"Content-Length: 0\r\n\r\n").encode()
+       f"Content-Length: 5\r\n\r\n").encode()
 s = socket.create_connection(("127.0.0.1", proxy_port), timeout=10)
 s.sendall(req); s.recv(65536); s.close()
-print("  sent a request carrying two Content-Length headers through the proxy")
+print("  sent a request carrying two conflicting Content-Length headers through the proxy")
 PY
 
 # stop the proxy, then read the recorded bytes back. Flows are persisted per-record

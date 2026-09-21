@@ -84,3 +84,16 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   in-flight connection tasks on stop and wrap the final wait in a timeout. Persist
   important state as it is produced (not only on graceful shutdown), so a forced/abrupt
   stop loses nothing. (from BUG-0011)
+- **PA-0013** — A self-test assertion must reflect the **true contract of the system under
+  test**, not an intuitive-but-wrong premise (e.g. only *conflicting* Content-Length is
+  invalid; duplicate-*identical* is valid per RFC 7230). An on-host / integration self-test
+  must use the same construction the validated offline test proved — never a weaker or
+  hand-rolled variant that asserts something the offline test did not establish. (from
+  BUG-0012)
+- **PA-0014** — Do not rely on compose behaviors that differ between `docker compose` and
+  `podman-compose` — chiefly in-place recreate on a config/env change, which
+  podman-compose cannot do. Orchestration that changes env/profile on a running stack must
+  be self-healing: on failure, tear the stack down (keep data volumes), force-clear wedged
+  containers/pod/network under podman, and retry. And when a provider/environment incident
+  is fixed in place, still record a PA for the *class* — closing it as a one-off leaves the
+  class unguarded and it recurs. (from BUG-0013)

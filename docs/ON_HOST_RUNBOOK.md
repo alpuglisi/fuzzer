@@ -401,10 +401,11 @@ pytest tests/test_proxy_server.py::test_real_ca_mints_signed_leaf \
 ### I.4 Exit (byte-exact malformed forwarding)
 
 The script proves it automatically (step 5). By hand: with the proxy running, intercept a
-request, hand-edit it to carry a **duplicate `Content-Length`**, forward it, and confirm
-the recorded flow's raw request has both headers verbatim while
-`fuzzlab.proxy.parser.is_valid_request` returns `False` — the raw path forwards what the
-parsed path would reject.
+request, hand-edit it to carry **two conflicting `Content-Length` headers** (duplicate
+*identical* values are valid per RFC 7230 and a parser may accept them, so use conflicting
+values, e.g. `0` and `5`), forward it, and confirm the recorded flow's raw request has both
+headers verbatim while `fuzzlab.proxy.parser.is_valid_request` returns `False` — the raw
+path forwards what the parsed path would reject.
 
 ## Part J — Phase 8: mutation engine vs the lab WAF (T8.7) `[run]`
 

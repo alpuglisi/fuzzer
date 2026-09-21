@@ -14,6 +14,15 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- Fix (BUG-0012/BUG-0013, on-host scripts): `scripts/proxy_e2e.sh` step 5 gave a false FAIL
+  because it asserted the parsed path rejects a duplicate-*identical* Content-Length, which
+  is valid per RFC 7230 — now it sends *conflicting* values (0 and 5), matching the offline
+  test (PA-0013). And `lab/labctl.sh up` is now self-healing under podman-compose (which
+  can't recreate a running stack in place on an env/profile change): on failure it downs,
+  force-clears wedged podman containers/pod/network, and retries — unblocking
+  `waf_evasion_e2e.sh` / `h2_desync_e2e.sh`. BUG-0013's recurrence review found this is the
+  same class as the earlier "no Compose provider" incident, which had been fixed in place
+  without a PA; captured now as PA-0014. See CC-PROXY-0013, CC-LAB-0011. Suite 415 passed / 6 skipped.
 - Process/governance: strengthened the bug protocol with a **recurrence-escalation** step.
   Before deciding a preventive action, the investigation must now review the other
   `docs/bugs/` logs and `docs/PREVENTIVE_ACTIONS.md` for a prior occurrence of the same bug
