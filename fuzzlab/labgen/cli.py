@@ -5,6 +5,7 @@ against the rendered output (T-LAB0.10).
 Usage::
 
     fuzzlab lab-generate --manifest <path> --out <dir> [--emitter NAME] [--check]
+                         [--corpus-report <path>]
 
 This is a thin CLI over already-built pieces:
 
@@ -20,6 +21,11 @@ This is a thin CLI over already-built pieces:
   conformance checks (``fuzzlab.labgen.conformance``). The regression/
   additive-only gate (``fuzzlab.labgen.regression_gate``, T-LAB0.9) is not
   yet wired here -- see the ``# TODO(L-P0.9-integration)`` in ``run_checks``.
+- ``--corpus-report <path>``, which writes the corpus-analysis **artifact**
+  (``corpus_analysis.corpus_report``: near-duplicate rate + class x transform x
+  verdict diversity counts, plan §2.4). Deliberately independent of
+  ``--check`` and never able to fail the build -- it is informative output,
+  not a gate, so it must not share the gate suite's pass/fail path.
 
 Resolver note (axis-range expansion, T-LAB2.1/"L-P1.1"): ``fuzzlab.labgen
 .schema.Manifest.from_dict`` now expands an ``axis_ranges`` block internally
@@ -36,11 +42,12 @@ import dataclasses
 import sys
 from pathlib import Path
 
-from fuzzlab.labgen import gates, minimal_pair, secret_scanner
+from fuzzlab.labgen import corpus_analysis, gates, minimal_pair, secret_scanner
 from fuzzlab.labgen.conformance import tier0, tier3
 from fuzzlab.labgen.emitter import Emitter
 from fuzzlab.labgen.emitters.php_current import PhpCurrentEmitter
 from fuzzlab.labgen.schema import Cell, Manifest, ManifestError, Pipeline, load_manifest
+from fuzzlab.labgen.verdict import SafetyMatrix, SafetyMatrixError, load_safety_matrix
 
 #: Emitter name -> factory. Looked up by name (``--emitter``, default
 #: ``"php_current"``) rather than hardcoded, so a future emitter (Phase 3)
@@ -73,6 +80,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--check",
         action="store_true",
         help="run the offline build-gate suite against the rendered output",
+    )
+    parser.add_argument(
+        "--corpus-report",
+        metavar="PATH",
+        default=None,
+        help=(
+            "write the corpus-analysis ARTIFACT (de-duplication rate + class x transform x "
+            "verdict diversity counts) as JSON to PATH. Informative only -- never fails the "
+            "build, independent of --check (see fuzzlab.labgen.corpus_analysis, plan SS2.4)"
+        ),
     )
     return parser
 
@@ -214,6 +231,24 @@ def run_checks(emitter: Emitter, manifest: Manifest, tree: dict[str, bytes]) -> 
     return failures
 
 
+def write_corpus_report_artifact(manifest: Manifest, path: str | Path) -> Path:
+    """Write the `--corpus-report` artifact for `manifest` (plan §2.4).
+
+    Deliberately reports over **every** cell in the manifest, not only the
+    cells the selected emitter supports: this describes the authored corpus,
+    not one emitter's rendering of it. The safety matrix is loaded
+    best-effort -- if it is missing or invalid the artifact is still written,
+    with every verdict recorded as
+    `corpus_analysis.UNDERIVABLE_VERDICT`, because an informative artifact
+    must never take a build down (`corpus_analysis`'s own doctrine).
+    """
+    try:
+        matrix: SafetyMatrix | None = load_safety_matrix()
+    except SafetyMatrixError:
+        matrix = None
+    return corpus_analysis.write_corpus_report(path, corpus_analysis.corpus_report(manifest.cells, matrix))
+
+
 def main(argv: list[str]) -> int:
     args = build_parser().parse_args(argv)
 
@@ -233,6 +268,10 @@ def main(argv: list[str]) -> int:
     out_dir = Path(args.out)
     write_tree(out_dir, tree)
     print(f"lab-generate: wrote {len(tree)} file(s) to {out_dir} ({len(manifest.cells)} cell(s) in manifest)")
+
+    if args.corpus_report:
+        report_path = write_corpus_report_artifact(manifest, args.corpus_report)
+        print(f"lab-generate: wrote corpus-analysis artifact (informative, not a gate) to {report_path}")
 
     if args.check:
         failures = run_checks(emitter, manifest, tree)

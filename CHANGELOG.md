@@ -14,6 +14,16 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-21
 
+- LAB: added `fuzzlab.labgen.corpus_analysis` (plan §2.4, lane L-P1.4, `CC-LAB-0040`,
+  `FR-LAB-38`) — read-only corpus tooling: a train/holdout split grouped by
+  generating-rule ID (reusing `leakage_probe`'s own `StratifiedGroupKFold` grouping, now
+  extracted as the one shared `grouped_cv()`) so near-duplicate cells can never span a
+  split; an explicit near-duplicate definition (`(vuln_class, sink_context,
+  ordered transform-shape)`, regardless of cell ID) and duplicate-rate report; and a
+  class × transform × verdict diversity **artifact**, written by the new
+  `fuzzlab lab-generate --corpus-report <path>` on a path independent of `--check` — so
+  the corpus can be measured and split honestly for ML work, while staying clearly
+  distinct from the χ²-balance *gate* (`fingerprint_gate.py`) it sits alongside.
 - LAB: built T-LAB0.9, the regression/additive-only build gate
   (`fuzzlab.labgen.regression_gate.check_no_regression`) that diffs a candidate
   ground-truth snapshot against the hand-authored `lab/ground-truth/` by case ID and

@@ -694,6 +694,62 @@ lane) can submit a payload as
   every cell as if `param` were its `query`/`raw` default). (`docs/LAB_IMPLEMENTATION_PLAN.md`
   §3.4, `CC-LAB-0039`)
 
+- **FR-LAB-38** (Lab track, `docs/LAB_IMPLEMENTATION_PLAN.md` §2.4, lane L-P1.4)
+  Read-only corpus-analysis tooling over an already-built cell set,
+  `fuzzlab.labgen.corpus_analysis` — three pieces sharing one concept, the
+  *generating-rule group* a cell belongs to:
+  1. **Near-duplicate definition + rate.** "Near-duplicate" for this corpus is an
+     identical `DuplicateSignature` — `(vuln_class, sink_context.family,
+     sorted(sink_context.required_neutralizations), transform-shape)` — **regardless
+     of cell ID**, and also regardless of `route`, `sink_endpoint`, `param`, and
+     `stack_profile`. `transform-shape` is the *ordered* op tuple, because
+     `fuzzlab.labgen.verdict.verdict()` is order-sensitive over `Pipeline.ops`, so two
+     cells whose pipelines differ only in order are genuinely different cells;
+     `required_neutralizations` is order-*insensitive* (sorted) because it is a set of
+     concerns, not a pipeline, and authoring order must not split one group in two.
+     `duplication_report()` returns the signature count, the redundant-cell count, the
+     rate, and every duplicate group's cell IDs. Informative: it raises nothing, and an
+     empty corpus is a valid all-zero report.
+  2. **Stratified, rule-grouped split.** `stratified_split()` returns a train/holdout
+     `CorpusSplit` stratified by `vuln_class` and grouped by generating-rule ID, so no
+     near-duplicate pair spans the split — true by construction, and re-checked as a
+     post-condition that raises `CorpusSplitError` rather than being trusted. It
+     **reuses** `fuzzlab.labgen.leakage_probe.grouped_cv()` (FR-LAB-8's own
+     `StratifiedGroupKFold(shuffle=True)` construction, extracted into that one shared
+     function for this purpose per PA-0003/PA-0021) rather than deriving a second
+     grouping strategy. `fold` selects which of `n_splits` folds is the holdout, so the
+     whole fold set is reachable (k-fold CV), not only one 1/k holdout. Fails loud with
+     `CorpusSplitError` on fewer than two classes, on `n_splits` exceeding the
+     generating-rule-group count, or on out-of-range `n_splits`/`fold`; with
+     `MissingSplitDependencyError` (typed, never a raw `ImportError`) when scikit-learn
+     is absent. Only this piece needs scikit-learn — (1) and (3) are pure Python.
+  3. **Diversity report as a build ARTIFACT, never a gate.** `diversity_report()`
+     returns class × transform × verdict counts plus class/transform/verdict/stack/
+     sink-family marginals, and `corpus_report()`/`write_corpus_report()` bundle (1) and
+     (3) into deterministic, key-sorted JSON (byte-stable, so the artifact itself cannot
+     break NFR-LAB-reproducible). Explicitly distinct from FR-LAB-9's χ²-balance gate
+     (`fingerprint_gate.py`): that gate asks "is stack↔class dependence significant —
+     fail the build if so"; this only describes what is in the corpus. It carries no
+     thresholds, states its own `gating` status in the artifact text, and never raises
+     about the corpus's shape: a cell whose `(op, sink_family)` pair the safety matrix
+     does not cover is recorded as `UNDERIVABLE_VERDICT` and **counted**
+     (`n_underivable_verdicts`) rather than allowed to propagate `verdict()`'s
+     by-design `SafetyMatrixError` into a build. The safety matrix is an explicit,
+     optional argument — never loaded implicitly — so the report cannot silently derive
+     verdicts under a different matrix than the corpus was built with; without one, the
+     class × transform half is still fully usable.
+  Generating-rule ID is derived from the signature (`generating_rule_id()`), because no
+  `Cell` field records which rule produced a cell (`Cell` is deliberately untouched by
+  this lane) and `cell_id` prefixes are per-manifest namespaces (`LABGEN-RP-`), too
+  coarse to group by — every cell in a manifest would be one group, making a split
+  impossible. Excluding `stack_profile` from the signature makes groups *larger*, which
+  is the conservative direction for a split (it can only reduce train/holdout leakage);
+  stack-vs-class balance remains FR-LAB-9's concern. If a future `Cell` gains a real
+  `rule_id`, `generating_rule_id()` is the single place to change. Wired into
+  `fuzzlab lab-generate` as `--corpus-report <path>`, on a code path independent of
+  `--check` so an informative artifact can never fail a build.
+  (`docs/LAB_IMPLEMENTATION_PLAN.md` §2.4, `CC-LAB-0040`)
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.
