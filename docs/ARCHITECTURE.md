@@ -59,6 +59,11 @@ components only write scores and uncertainty (the oracle/advisory split).
 
 ## Components and subcomponents
 
+Throughout this section, **Depends on (components)** lists other project
+components only. Python package dependencies (for example `h11`, `sqlglot`, or
+LightGBM) are implementation details, mentioned within the subcomponents and
+tracked in the requirements files, not here.
+
 ### 1. Target lab and ground truth `[built app; planned instrumentation]`
 - **Puppy Fort Factory** `[built]`: PHP/MySQL/Apache app; ~30 pages, ~10
   JavaScript-rendered; documented mix of vulnerable and secure pages.
@@ -67,7 +72,7 @@ components only write scores and uncertainty (the oracle/advisory split).
   app-scaling work).
 - **Grey-box instrumentation** `[planned]` (D7): line coverage (Xdebug/pcov), a
   database error hook, and snapshot/restore for state reset.
-- **Depends on:** nothing (it is the system under test).
+- **Depends on (components):** none (it is the system under test).
 - **Consumed by:** crawler, auditor, fuzzer, proxy, and the reward path.
 
 ### 2. `core/` shared library `[planned]`
@@ -80,7 +85,7 @@ components only write scores and uncertainty (the oracle/advisory split).
   timing measurements run at concurrency 1.
 - **Logging** (structured) and **config** (layered, hashed onto the run).
 - **Plugin registry**: entry points plus hooks.
-- **Depends on:** the store.
+- **Depends on (components):** none (foundational layer; it manages the project store).
 - **Consumed by:** every tool and ML component.
 
 ### 3. Session manager `[planned]` (Phase 1)
@@ -89,7 +94,7 @@ components only write scores and uncertainty (the oracle/advisory split).
   access via OS keyring.
 - **Interface:** `prepare(request, identity)`, `observe(request, response,
   identity)`, `ensure(identity)`.
-- **Depends on:** `core/` (store, http client, config).
+- **Depends on (components):** `core/`.
 - **Consumed by:** crawler, auditor, fuzzer, and the proxy (as an addon). This is
   the most load-bearing dependency; everything authenticated flows through it.
 
@@ -97,21 +102,21 @@ components only write scores and uncertainty (the oracle/advisory split).
 - **Subcomponents:** hybrid fetch (HTTP first, headless on demand), XHR/fetch
   capture, JS endpoint extraction, DOM-skeleton template dedup, state-aware
   navigation, URL normalization, crawl budget.
-- **Depends on:** `core/`, session manager, the target lab.
+- **Depends on (components):** `core/`, session manager, target lab.
 - **Writes:** `page`, `endpoint`, discovered `parameter` rows.
 
 ### 5. Auditor / fetcher `[built; to harden]`
 - **Subcomponents:** rule registry (moving to rules-as-data), candidate emission
   with full per-rule evaluation logging, canary reflection probing with context
   typing, target fingerprinting (DBMS/framework/WAF).
-- **Depends on:** `core/`, session manager, crawler output, the indicator DB.
+- **Depends on (components):** `core/`, session manager, crawler, indicator DB & catalogs.
 - **Writes:** `candidate` rows (rule evidence, features), fingerprint data.
 
 ### 6. Indicator database and payload catalogs `[built; to extend]`
 - **Subcomponents:** `build_sql_db.py` + `php_indicators.db` (28 indicator types
   mapped to `references/` categories); the `references/` payload catalogs;
   payload metadata (family, DBMS, context prerequisites, destructive flag).
-- **Depends on:** nothing at runtime (data).
+- **Depends on (components):** none (static data).
 - **Consumed by:** auditor (indicators), scheduler and fuzzer (payloads/families).
 
 ### 7. Fuzzing harness and oracle `[built fuzzer; harness+oracle planned]`
@@ -121,16 +126,18 @@ components only write scores and uncertainty (the oracle/advisory split).
 - **Oracle** `[planned]`: deterministic confirmation (differential timing,
   error-signature checks, and coverage/DB-fault signals when grey-box is on). The
   **only** writer of `finding` labels.
-- **Depends on:** `core/`, session manager, scheduler, payload catalogs, and (for
-  reward/labels) grey-box instrumentation.
+- **Depends on (components):** `core/`, session manager, scheduler, oracle,
+  indicator DB & catalogs; grey-box instrumentation for reward and labels. (The
+  oracle itself depends on `core/` and the target lab, plus grey-box signals when
+  available.)
 - **Writes:** `attempt` rows (features, reward), `finding` rows (labels).
 
 ### 8. Payload scheduler (bandit) `[planned]` (Phase 4)
 - **Subcomponents:** payload-family arms, discrete context buckets, hierarchical
   Thompson sampling with backoff, catalog-derived priors, cost-normalized
   selection, persisted posteriors, and a uniform-selection control.
-- **Depends on:** `core/`, the candidate queue, reward signals from the
-  fuzzer/oracle and (ideally) coverage.
+- **Depends on (components):** `core/`, auditor (candidates), fuzzing harness and
+  oracle (rewards), grey-box instrumentation (coverage reward).
 - **Reads/writes:** `bandit_posteriors`; chooses the next family per candidate.
 
 ### 9. Mutation engine `[planned]` (Phase 8)
@@ -138,8 +145,9 @@ components only write scores and uncertainty (the oracle/advisory split).
   context-typed XSS generation, filter-transformation learning from canaries,
   bandit-scheduled operator selection, coverage-guided hill climbing, optional
   gated offline LLM catalog expansion.
-- **Depends on:** payload catalogs, scheduler, oracle/coverage feedback, and a
-  lab WAF decision.
+- **Depends on (components):** `core/`, indicator DB & catalogs, scheduler,
+  oracle, grey-box instrumentation. (A lab WAF is a prerequisite decision, not a
+  component dependency.)
 - **Writes:** new payload candidates back into the catalog/attempts.
 
 ### 10. ML components `[planned]` (Phases 5, 7, 10)
@@ -151,7 +159,9 @@ components only write scores and uncertainty (the oracle/advisory split).
   hybrid features.
 - **Active learner** (A.6.5): allocates oracle budget by uncertainty and
   committee disagreement.
-- **Depends on:** `core/` (features, store) and the oracle for labels.
+- **Depends on (components):** `core/`, the oracle (labels), and the component
+  that produces each model's inputs (auditor for the ranker, fuzzing harness for
+  the classifier, proxy/flows for the anomaly detector).
 - **Attach as:** plugins on `core/` hooks. Shipping without ML is a config change.
 
 ### 11. Intercepting proxy `[planned]` (Phase 6)
@@ -160,7 +170,7 @@ components only write scores and uncertainty (the oracle/advisory split).
   a local CA and cached leaf certs; history (FTS5, batched writes, content-
   addressed bodies); repeater (DB-persisted tabs); match-and-replace; scope
   engine; interception-as-awaited-future workflow.
-- **Depends on:** `core/` (store, logging), session manager (as an addon).
+- **Depends on (components):** `core/`, session manager (attached as an addon).
 - **Role:** optional observer; other tools may route through it for unified
   history, but timing-sensitive traffic does not (D5).
 
@@ -168,7 +178,7 @@ components only write scores and uncertainty (the oracle/advisory split).
 - **Subcomponents:** a `textual` TUI for live interception and runs; Datasette
   over the store for exploration; a `run_metrics` table; structured audit and
   debug logs; a `--dry-run` mode.
-- **Depends on:** the store and `core/` logging.
+- **Depends on (components):** `core/` (store and logging).
 - **Purpose:** the research-platform diagnostics from decision D2, to verify
   functionality and locate bugs.
 
@@ -177,6 +187,7 @@ components only write scores and uncertainty (the oracle/advisory split).
   (`on_request`, `on_response`, `on_candidate`, `on_finding`, `register_rules`,
   `register_payload_source`, `register_oracle`); per-plugin isolation and
   priority.
+- **Depends on (components):** `core/`.
 - **Consumed by:** ML components, extra rules, and custom oracles.
 
 ## The store as the contract
