@@ -33,11 +33,18 @@ from tests.test_labgen_minimal_pair import _base_cell
 from tests.test_labgen_secret_scanner import GITLEAKS_AVAILABLE, SHOULD_FLAG as SECRET_SHOULD_FLAG
 
 EXAMPLE_CELL_IDS = {"LABGEN-EX-0001", "LABGEN-EX-0002", "LABGEN-EX-0003", "LABGEN-EX-0004"}
-# php_current only declares support for sqli/sql_numeric_literal and
-# xss/html_body (see fuzzlab/labgen/emitters/php_current's
-# `_MODULE_SET_BY_SHAPE`) -- LABGEN-EX-0003 (xss/html_attribute_unquoted) is
-# correctly skipped ("declare unsupported and skip"), not an error.
-SUPPORTED_CELL_IDS = {"LABGEN-EX-0001", "LABGEN-EX-0002", "LABGEN-EX-0004"}
+#: Which of the example manifest's cells this emitter renders, **derived from
+#: the emitter's own `supports()`** rather than hardcoded (PA-0001): the set
+#: changes as `_MODULE_SET_BY_SHAPE` is widened -- e.g. L-P1.2b added
+#: (xss, html_attribute_unquoted), so LABGEN-EX-0003 (skipped since Phase 0
+#: as "declare unsupported and skip") now renders too. A hardcoded literal
+#: here would have to be edited by hand on every such widening, which is
+#: exactly the per-shape/per-record lockstep drift PA-0024 was written about.
+SUPPORTED_CELL_IDS = {
+    cell.cell_id
+    for cell in load_manifest(EXAMPLE_MANIFEST).cells
+    if PhpCurrentEmitter().supports(cell.vuln_class, cell.sink_context)
+}
 
 
 class _WrappedEmitter(Emitter):
@@ -155,11 +162,18 @@ def test_check_fails_loud_on_a_secret_leak(out_dir: Path, monkeypatch: pytest.Mo
 
 
 def test_check_fails_loud_on_nondeterministic_render(out_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys):
-    call_count = {"n": 0}
+    # Corrupt every *second* render of each individual cell, counted per
+    # cell_id rather than globally: a single global counter only alternates
+    # between two consecutive whole-tree renders when the manifest happens to
+    # hold an odd number of *supported* cells, so it silently stopped
+    # detecting nondeterminism when L-P1.2b widened php_current's supported
+    # shapes from 3 of the example manifest's cells to 4. Per-cell counting is
+    # independent of the cell count. See docs/bugs/BUG-0025-*.md and PA-0027.
+    render_counts: dict[str, int] = {}
 
     def flaky_fault(cell, files):
-        call_count["n"] += 1
-        if call_count["n"] % 2 == 0:
+        render_counts[cell.cell_id] = render_counts.get(cell.cell_id, 0) + 1
+        if render_counts[cell.cell_id] % 2 == 0:
             first = files[0]
             files = (dataclasses.replace(first, content=first.content + b" "), *files[1:])
         return files
@@ -189,11 +203,16 @@ def test_check_fails_loud_on_a_minimal_pair_violation(out_dir: Path, monkeypatch
     # the identical failure mode tests/test_labgen_minimal_pair.py's own
     # "unrelated identifier rename" fixture exercises -- must be caught by
     # this checker exactly as it is there.
-    call_count = {"n": 0}
+    # Counted per cell_id, not globally, for the same reason as
+    # `flaky_fault` above (PA-0027): a global counter's parity at any one
+    # cell's render depends on how many *other* supported cells precede it in
+    # the pass, so it silently stops (or starts) injecting the fault whenever
+    # the emitter's supported-shape set changes.
+    render_counts: dict[str, int] = {}
 
     def rename_fault(cell, files):
-        call_count["n"] += 1
-        if cell.cell_id != "LABGEN-EX-0001" or call_count["n"] % 2 != 0:
+        render_counts[cell.cell_id] = render_counts.get(cell.cell_id, 0) + 1
+        if cell.cell_id != "LABGEN-EX-0001" or render_counts[cell.cell_id] % 2 != 0:
             return files
         return tuple(
             dataclasses.replace(f, content=f.content + b"\n// unrelated content change, not a transform/sink edit\n")

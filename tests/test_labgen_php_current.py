@@ -44,19 +44,28 @@ def test_supports_the_example_manifest_sqli_cells() -> None:
     assert emitter.supports(_SECURE_TWIN_CELL.vuln_class, _SECURE_TWIN_CELL.sink_context) is True
 
 
-def test_does_not_support_xss_cells_yet_and_a_caller_would_skip() -> None:
+def test_does_not_support_an_unauthored_shape_and_a_caller_would_skip() -> None:
+    """The "declare unsupported and skip" contract, exercised on a shape no
+    lane has authored modules for.
+
+    This used to be asserted against ``(xss, html_attribute_unquoted)``,
+    which L-P1.2b made a *supported* shape (see
+    ``test_supports_the_escaping_context_mismatch_shapes`` in
+    tests/test_labgen_harder_shapes.py) -- so the contract is now checked
+    against an LDAP-filter sink, which genuinely has no module set.
+    """
     emitter = PhpCurrentEmitter()
-    xss_cell = Cell(
-        cell_id="LABGEN-EX-0003",
-        vuln_class="xss",
+    unsupported_cell = Cell(
+        cell_id="LABGEN-EX-9999",
+        vuln_class="ldapi",
         stack_profile="php_current",
-        route=Route(method="GET", path="/example/profile.php"),
-        sink_context=SinkContext(family="html_attribute_unquoted", required_neutralizations=("html_tag_break",)),
-        transform=Pipeline.from_list(["html_entity_escape"]),
+        route=Route(method="GET", path="/example/directory.php"),
+        sink_context=SinkContext(family="ldap_filter", required_neutralizations=("ldap_filter_break",)),
+        transform=Pipeline.from_list([]),
     )
-    assert emitter.supports(xss_cell.vuln_class, xss_cell.sink_context) is False
+    assert emitter.supports(unsupported_cell.vuln_class, unsupported_cell.sink_context) is False
     with pytest.raises(ValueError):
-        emitter.render(xss_cell)
+        emitter.render(unsupported_cell)
 
 
 def test_render_produces_exactly_one_page_file() -> None:

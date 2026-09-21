@@ -37,6 +37,7 @@ already-computed, already-ordered values (never asked to iterate a raw
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -210,6 +211,139 @@ class HtmlEntityEscapeTransform(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+def _php_string_list(values: tuple[str, ...]) -> str:
+    """Render an already-ordered tuple of identifiers as a PHP single-quoted
+    list literal body (``'id', 'name'``).
+
+    Deliberately takes a *tuple* and never sorts or de-duplicates: the
+    determinism rule in this module's docstring is that templates are given
+    already-computed, already-ordered values, and the author's own allowlist
+    order is meaningful (its first element is the fallback identifier).
+    Rejects a value that is not a bare identifier rather than emitting PHP
+    that would need escaping -- an authoring gap fails loud here, exactly as
+    it does in ``fuzzlab.labgen.verdict.SafetyMatrix.lookup``.
+    """
+    if not values:
+        raise ValueError(
+            "identifier allowlist is empty -- an allowlist transform with nothing "
+            "allowed has no safe fallback to fall back to; supply the real "
+            "identifiers in the emitter's page profile"
+        )
+    for value in values:
+        if not re.fullmatch(r"[A-Za-z0-9_]+", value):
+            raise ValueError(
+                f"identifier allowlist entry {value!r} is not a bare identifier "
+                "([A-Za-z0-9_]+) -- allowlisted identifiers are emitted into PHP "
+                "source verbatim and are never escaped or quoted for you"
+            )
+    return ", ".join(f"'{value}'" for value in values)
+
+
+class IdentifierCharsetFilterTransform(TemplateModule):
+    """The ``identifier_charset_filter`` op: emits a guard *statement* (a
+    ``preg_match`` bare-identifier check that 400s on mismatch) and leaves
+    ``value_expr`` untouched.
+
+    A third module-composition shape, alongside
+    :class:`ParamBindTransform` (flags the sink) and
+    :class:`HtmlEntityEscapeTransform` (wraps the expression): a transform
+    whose whole effect is a guard emitted *before* the sink. That shape is
+    what makes this op's ``partial`` safety-matrix effect legible in the
+    generated code -- the filter is plainly there, and plainly does not
+    restrict *which* identifier is used.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "identifier_charset_filter", "transform", _TRANSFORM_ENV, "identifier_charset_filter.php.j2"
+        )
+
+
+class IdentifierAllowlistTransform(TemplateModule):
+    """The ``identifier_allowlist`` op: rewrites ``value_expr`` into an
+    ``in_array``-guarded expression that can only ever evaluate to one of
+    the page profile's real identifiers (falling back to the first).
+
+    Requires ``allowed_identifiers`` in the assembly context (an ordered
+    tuple supplied by the emitter's own page profile -- render-only metadata
+    the :class:`~fuzzlab.labgen.schema.Cell` IR deliberately does not
+    carry). Raises rather than inventing a default allowlist: guessing which
+    columns an endpoint may expose is precisely the decision this transform
+    exists to make explicit.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("identifier_allowlist", "transform", _TRANSFORM_ENV, "identifier_allowlist.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        try:
+            allowed = tuple(ctx["allowed_identifiers"])
+        except KeyError as exc:
+            raise ValueError(
+                "identifier_allowlist transform needs an 'allowed_identifiers' context "
+                "value (an ordered tuple of the real identifiers this endpoint may use) "
+                "-- the emitter's page profile must supply it; there is no safe default"
+            ) from exc
+        allowed_php = _php_string_list(allowed)
+        fallback_php = f"'{allowed[0]}'"
+        value_expr = ctx["value_expr"]
+        new_ctx = dict(ctx)
+        new_ctx["allowed_identifiers_php"] = allowed_php
+        new_ctx["fallback_identifier_php"] = fallback_php
+        result = TemplateModule.render(self, new_ctx)
+        new_ctx["value_expr"] = (
+            f"(in_array((string) {value_expr}, [{allowed_php}], true) ? {value_expr} : {fallback_php})"
+        )
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class UrlSchemeAllowlistTransform(TemplateModule):
+    """The ``url_scheme_allowlist`` op: rewrites ``value_expr`` so a value
+    whose URL scheme is not ``http``/``https`` collapses to an inert ``'#'``
+    -- the escaping-context-*correct* fix for a ``javascript:``-URL sink,
+    where :class:`HtmlEntityEscapeTransform` is the mismatch."""
+
+    def __init__(self) -> None:
+        super().__init__("url_scheme_allowlist", "transform", _TRANSFORM_ENV, "url_scheme_allowlist.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        value_expr = ctx["value_expr"]
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = (
+            "(in_array(strtolower((string) parse_url((string) "
+            f"{value_expr}, PHP_URL_SCHEME)), ['http', 'https'], true) ? {value_expr} : '#')"
+        )
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class AttrValueAllowlistTransform(TemplateModule):
+    """The ``attr_value_allowlist`` op: rewrites ``value_expr`` so only a
+    strict ``^[A-Za-z0-9_-]+$`` value survives (otherwise a safe default
+    from the page profile's ``attr_default``) -- the transform-only fix for
+    an *unquoted* HTML attribute, whose boundary htmlspecialchars() does not
+    protect."""
+
+    def __init__(self) -> None:
+        super().__init__("attr_value_allowlist", "transform", _TRANSFORM_ENV, "attr_value_allowlist.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        default = ctx.get("attr_default", "default")
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", str(default)):
+            raise ValueError(
+                f"attr_default {default!r} does not itself satisfy the allowlist this "
+                "transform enforces (^[A-Za-z0-9_-]+$) -- a fallback that would be "
+                "rejected by the very check it backstops is an authoring error"
+            )
+        value_expr = ctx["value_expr"]
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = (
+            f"(preg_match('/^[A-Za-z0-9_-]+$/', (string) {value_expr}) ? {value_expr} : '{default}')"
+        )
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 class SqlNumericLookupSink(TemplateModule):
     """A single-row lookup by a numeric-literal-position column. Branches on
     ``bound`` (published by a transform) to render either a raw
@@ -240,6 +374,61 @@ class HtmlBodyEchoSink(TemplateModule):
 
     def __init__(self) -> None:
         super().__init__("html_body_echo", "sink", _SINK_ENV, "html_body_echo.php.j2")
+
+
+class SqlIdentifierOrderBySink(TemplateModule):
+    """An ``ORDER BY <identifier>`` lookup: the tainted value *is* a column
+    identifier, not a literal value (L-P1.2b / plan §2.2).
+
+    Branches on ``bound`` like the literal-position sinks, but for the
+    opposite reason: its ``bound`` branch shows a prepared statement binding
+    an unrelated WHERE *value* while the identifier is still concatenated --
+    the generated-code evidence for the safety matrix's
+    ``(param_bind, sql_identifier) -> no_effect`` row. No dialect can bind an
+    identifier placeholder, so "use a prepared statement" is inapplicable
+    here rather than merely omitted.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("sql_identifier_order_by", "sink", _SINK_ENV, "sql_identifier_order_by.php.j2")
+
+
+class SqlJoinAliasLookupSink(TemplateModule):
+    """A JOIN-alias (connector-position) lookup: the tainted value is a table
+    alias, substituted **three** times in one statement (projection, alias
+    declaration, ``ON`` clause).
+
+    The multi-substitution shape is the point: it is what makes a
+    comment-based escape degenerate into ordinary statement truncation (see
+    ``fuzzlab.labgen.identifier_sqli_oracle``'s spot-check finding #2) and
+    what keeps a character filter only ``partial`` at this family.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("sql_join_alias_lookup", "sink", _SINK_ENV, "sql_join_alias_lookup.php.j2")
+
+
+class HtmlJsUrlEchoSink(TemplateModule):
+    """Echoes ``value_expr`` into the body of a ``javascript:`` URL inside a
+    quoted ``href`` attribute -- the escaping-context-mismatch XSS shape
+    (plan §2.2): the value sits in an HTML attribute but is *JavaScript
+    source*, so HTML-entity escaping is correct escaping for the wrong
+    context. Like every sink here it escapes nothing itself; the cell's
+    transform decides."""
+
+    def __init__(self) -> None:
+        super().__init__("html_js_url_echo", "sink", _SINK_ENV, "html_js_url_echo.php.j2")
+
+
+class HtmlAttributeUnquotedEchoSink(TemplateModule):
+    """Echoes ``value_expr`` into an **unquoted** HTML attribute value, whose
+    boundary is whitespace -- the second escaping-context-mismatch shape
+    (the safety matrix has had its ``(html_entity_escape,
+    html_attribute_unquoted) -> partial`` row since Phase 0; this is the
+    module that finally renders it)."""
+
+    def __init__(self) -> None:
+        super().__init__("html_attribute_unquoted_echo", "sink", _SINK_ENV, "html_attribute_unquoted_echo.php.j2")
 
 
 class SingleStatementComplexity(TemplateModule):
@@ -322,11 +511,26 @@ TRANSFORMS: dict[str, Module] = {
     "identity": IdentityTransform(),
     "param_bind": ParamBindTransform(),
     "html_entity_escape": HtmlEntityEscapeTransform(),
+    # L-P1.2b (plan §2.2): the harder shapes' transform ops. Each name here
+    # must also have a row for every sink family it is authored against in
+    # lab/safety_matrix.yaml -- an op the emitter can render but the matrix
+    # cannot score would derive no verdict at all (verdict() raises), which
+    # tests/test_labgen_harder_shapes.py asserts against for real.
+    "identifier_charset_filter": IdentifierCharsetFilterTransform(),
+    "identifier_allowlist": IdentifierAllowlistTransform(),
+    "url_scheme_allowlist": UrlSchemeAllowlistTransform(),
+    "attr_value_allowlist": AttrValueAllowlistTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
     "sql_string_literal_lookup": SqlStringLiteralLookupSink(),
     "html_body_echo": HtmlBodyEchoSink(),
+    # L-P1.2b: identifier/alias/connector-position SQL and
+    # escaping-context-mismatch XSS sinks.
+    "sql_identifier_order_by": SqlIdentifierOrderBySink(),
+    "sql_join_alias_lookup": SqlJoinAliasLookupSink(),
+    "html_js_url_echo": HtmlJsUrlEchoSink(),
+    "html_attribute_unquoted_echo": HtmlAttributeUnquotedEchoSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

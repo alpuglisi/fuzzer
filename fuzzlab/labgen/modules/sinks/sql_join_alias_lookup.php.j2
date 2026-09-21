@@ -1,0 +1,13 @@
+{% if bound %}
+// As at any identifier position, binding the WHERE value leaves the alias itself
+// concatenated -- and a connector position substitutes the tainted value more than
+// once (projection + alias declaration + ON clause), so there is nothing a single
+// placeholder could stand in for.
+$stmt = $pdo->prepare("SELECT i1.id, " . {{ value_expr }} . ".{{ column }} FROM {{ table }} i1 JOIN {{ join_table }} " . {{ value_expr }} . " ON i1.{{ join_column }} = " . {{ value_expr }} . ".id WHERE i1.active = ?");
+$stmt->execute([1]);
+$row = $stmt->fetch(PDO::FETCH_ASSOC);
+{% else %}
+$sql = "SELECT i1.id, " . {{ value_expr }} . ".{{ column }} FROM {{ table }} i1 JOIN {{ join_table }} " . {{ value_expr }} . " ON i1.{{ join_column }} = " . {{ value_expr }} . ".id";
+$result = $pdo->query($sql);
+$row = $result ? $result->fetch(PDO::FETCH_ASSOC) : null;
+{% endif %}

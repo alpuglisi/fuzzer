@@ -1,0 +1,10 @@
+// identifier_charset_filter transform: {{ value_expr }} must match a bare-identifier
+// character allowlist before it reaches the query. This blocks every character a
+// syntax-break payload needs (quotes, spaces, parens, comment markers) -- and
+// nothing else: any *identifier-shaped* string still reaches the SQL text, so the
+// column/table/alias the query names is still chosen by input. Safety matrix:
+// effect=partial (still VULNERABLE, just harder -- D20), never neutralises.
+if (!preg_match('/^[A-Za-z0-9_]+$/', (string) {{ value_expr }})) {
+    http_response_code(400);
+    return null;
+}

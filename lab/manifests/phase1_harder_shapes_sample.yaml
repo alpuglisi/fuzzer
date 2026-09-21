@@ -1,0 +1,171 @@
+# Phase-1 "harder shapes" sample manifest (lane L-P1.2b,
+# docs/LAB_IMPLEMENTATION_PLAN.md §2.2).
+#
+# The plan's highest value-per-hour finding: move the corpus off textbook
+# `?id=1` value-context cells and onto the two shapes real tools struggle
+# with --
+#
+#   1. identifier/alias/connector-position SQLi: the tainted value IS a
+#      column identifier (`ORDER BY $sort`) or a JOIN alias, not a literal
+#      value. A real sqlmap 1.8.4 spot-check (lane L-P1.2a; see
+#      fuzzlab/labgen/identifier_sqli_oracle.py's docstring) could not detect
+#      the allowlist-respecting case of this at all, which is why that lane's
+#      custom differential prober exists -- and why this manifest's
+#      identifier cells are the ones it is wired to as a build-time security
+#      assertion (fuzzlab/labgen/identifier_sqli_assertion.py).
+#   2. escaping-context-mismatch XSS: *correct* escaping applied for the
+#      *wrong* context -- htmlspecialchars() around a value that lands in a
+#      `javascript:` URL, or in an unquoted HTML attribute whose boundary is
+#      whitespace (which htmlspecialchars() does not escape).
+#
+# These are illustrative NEW lab pages (/catalog.php, /inventory.php,
+# /share_link.php, /theme.php), not reproductions of real
+# puppy-fort-factory/ pages: that app has no identifier-position or
+# `javascript:`-URL page to reproduce. Cell IDs are prefixed LABGEN-HS-
+# ("harder shapes") to stay out of both the illustrative LABGEN-EX- and real
+# PFF- ground-truth namespaces; nothing here is wired to a build that
+# touches puppy-fort-factory/ or lab/ground-truth/.
+#
+# Each shape is authored as a *triple* rather than a pair, because these
+# shapes have a genuine middle case the safety matrix scores as `partial`
+# (D20: still VULNERABLE, just harder -- never a third verdict value):
+#   - no transform                 -> VULNERABLE (trivial)
+#   - the plausible-but-wrong fix  -> VULNERABLE (harder: `partial`)
+#   - the context-correct fix      -> SECURE
+# Verdicts are never asserted here; they are derived by
+# fuzzlab.labgen.verdict.verdict() from (transform, sink_context) against
+# lab/safety_matrix.yaml v1, and tests/test_labgen_harder_shapes.py asserts
+# the derivation for every cell below.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # --- catalog.php (sqli, sql_identifier): ORDER BY column identifier -----
+  - cell_id: LABGEN-HS-0001
+    class: sqli
+    stack_profile: php_current
+    route: { method: GET, path: /catalog.php }
+    sink_context:
+      family: sql_identifier
+      required_neutralizations: [sql_syntax_break, sql_identifier_substitution]
+    transform: []
+
+  # The plausible-but-wrong fix: a bare-identifier CHARACTER filter. Blocks
+  # every syntax-break payload; leaves the actual defect (any identifier-
+  # shaped string still selects a column) wide open.
+  - cell_id: LABGEN-HS-0002
+    class: sqli
+    stack_profile: php_current
+    route: { method: GET, path: /catalog.php }
+    sink_context:
+      family: sql_identifier
+      required_neutralizations: [sql_syntax_break, sql_identifier_substitution]
+    transform: [identifier_charset_filter]
+
+  # The textbook fix that does NOT apply here, kept as an explicit cell
+  # because "use a prepared statement" is the first thing any reader (or
+  # model) will reach for: no dialect can bind an identifier, so the
+  # identifier stays concatenated and the verdict stays VULNERABLE.
+  - cell_id: LABGEN-HS-0003
+    class: sqli
+    stack_profile: php_current
+    route: { method: GET, path: /catalog.php }
+    sink_context:
+      family: sql_identifier
+      required_neutralizations: [sql_syntax_break, sql_identifier_substitution]
+    transform: [param_bind]
+
+  # The context-correct fix: membership in a real identifier allowlist.
+  - cell_id: LABGEN-HS-0004
+    class: sqli
+    stack_profile: php_current
+    route: { method: GET, path: /catalog.php }
+    sink_context:
+      family: sql_identifier
+      required_neutralizations: [sql_syntax_break, sql_identifier_substitution]
+    transform: [identifier_allowlist]
+
+  # --- inventory.php (sqli, sql_join_alias): connector position -----------
+  - cell_id: LABGEN-HS-0005
+    class: sqli
+    stack_profile: php_current
+    route: { method: GET, path: /inventory.php }
+    sink_context:
+      family: sql_join_alias
+      required_neutralizations: [sql_syntax_break, sql_identifier_substitution]
+    transform: []
+
+  - cell_id: LABGEN-HS-0006
+    class: sqli
+    stack_profile: php_current
+    route: { method: GET, path: /inventory.php }
+    sink_context:
+      family: sql_join_alias
+      required_neutralizations: [sql_syntax_break, sql_identifier_substitution]
+    transform: [identifier_charset_filter]
+
+  - cell_id: LABGEN-HS-0007
+    class: sqli
+    stack_profile: php_current
+    route: { method: GET, path: /inventory.php }
+    sink_context:
+      family: sql_join_alias
+      required_neutralizations: [sql_syntax_break, sql_identifier_substitution]
+    transform: [identifier_allowlist]
+
+  # --- share_link.php (xss, url_javascript_scheme) ------------------------
+  - cell_id: LABGEN-HS-0008
+    class: xss
+    stack_profile: php_current
+    route: { method: GET, path: /share_link.php }
+    sink_context:
+      family: url_javascript_scheme
+      required_neutralizations: [js_context_break]
+    transform: []
+
+  # The escaping-context mismatch itself: htmlspecialchars() is real
+  # escaping, correctly applied -- for an HTML context this value is not in.
+  - cell_id: LABGEN-HS-0009
+    class: xss
+    stack_profile: php_current
+    route: { method: GET, path: /share_link.php }
+    sink_context:
+      family: url_javascript_scheme
+      required_neutralizations: [js_context_break]
+    transform: [html_entity_escape]
+
+  - cell_id: LABGEN-HS-0010
+    class: xss
+    stack_profile: php_current
+    route: { method: GET, path: /share_link.php }
+    sink_context:
+      family: url_javascript_scheme
+      required_neutralizations: [js_context_break]
+    transform: [url_scheme_allowlist]
+
+  # --- theme.php (xss, html_attribute_unquoted) --------------------------
+  - cell_id: LABGEN-HS-0011
+    class: xss
+    stack_profile: php_current
+    route: { method: GET, path: /theme.php }
+    sink_context:
+      family: html_attribute_unquoted
+      required_neutralizations: [html_tag_break]
+    transform: []
+
+  - cell_id: LABGEN-HS-0012
+    class: xss
+    stack_profile: php_current
+    route: { method: GET, path: /theme.php }
+    sink_context:
+      family: html_attribute_unquoted
+      required_neutralizations: [html_tag_break]
+    transform: [html_entity_escape]
+
+  - cell_id: LABGEN-HS-0013
+    class: xss
+    stack_profile: php_current
+    route: { method: GET, path: /theme.php }
+    sink_context:
+      family: html_attribute_unquoted
+      required_neutralizations: [html_tag_break]
+    transform: [attr_value_allowlist]

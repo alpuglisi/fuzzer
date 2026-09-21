@@ -3,6 +3,163 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0043 — L-P1.2b: the harder SQLi/XSS shapes + identifier-SQLi oracle wiring (2026-09-21)
+*(Numbered `CC-LAB-0043` rather than the `CC-LAB-0040` this lane claimed "from the top of
+this log at authoring time" — by merge time, lanes L-P3.4 (`CC-LAB-0040`), L-P1.4
+(`CC-LAB-0041`), and L-P2.5 (`CC-LAB-0042`) had already landed and taken the numbers this
+lane also reached for. Reconciled per this project's standing multi-lane policy: keep this
+entry's full content, renumber it to the next free number, fix its own internal
+`FR-LAB-38` cross-reference (see below, now `FR-LAB-41`); BUG-0025/PA-0027 needed no
+renumbering (genuinely free at merge time). This lane's worktree was created from a stale
+UI-redesign branch lineage and was recovered onto the live branch tip (fetch + hard reset,
+per the sync check in this task's brief) before any work began.)*
+- Change: built the "module half" of `docs/LAB_IMPLEMENTATION_PLAN.md` §2.2 (its oracle
+  half is `CC-LAB-0032`/L-P1.2a), moving the corpus off textbook `?id=1` value-context
+  cells and onto the two shapes the plan's research identified as highest
+  value-per-hour, in four pieces:
+  1. **New `sink_context.family` values + additive safety-matrix rows.**
+     `sql_identifier` (the tainted value *is* a column identifier, e.g.
+     `ORDER BY $sort`), `sql_join_alias` (a JOIN alias — a connector position,
+     substituted three times in one statement), and `url_javascript_scheme` (a value
+     inside a `javascript:` URL). Two new concern IDs — `sql_identifier_substitution`
+     (an attacker chooses *which* identifier the query names, needing no syntax break at
+     all) and `js_context_break` — and four new ops: `identifier_charset_filter`,
+     `identifier_allowlist`, `url_scheme_allowlist`, `attr_value_allowlist`. All 15 rows
+     are brand-new `(op, sink_family)` pairs, so per `lab/safety_matrix.yaml`'s own
+     append-only rule they land under the **same `version: 1`** — no existing pair's
+     meaning changes and a v1 corpus re-derives identically. **`verdict()`'s derivation
+     logic is untouched** (task constraint), as is `lab/schemas/safety_matrix.schema.json`
+     (the new rows need no schema change — `op`/`sink_family` are open strings by design).
+     The two rows that carry the most teaching weight: `(param_bind, sql_identifier) ->
+     no_effect` (no dialect can bind an identifier placeholder — the textbook fix is
+     *inapplicable*, not omitted) and `(html_entity_escape, url_javascript_scheme) ->
+     partial` (correct escaping, wrong context: still VULNERABLE, difficulty raised —
+     the D20 binary-verdict mechanism, never a third verdict value).
+     `(identifier_charset_filter, *) -> partial` is deliberately not `neutralises`: it
+     blocks every syntax-break character and none of the real defect.
+  2. **Eight new `php_current` module fragments** (`fuzzlab/labgen/modules/`), following
+     Addendum C's composition convention exactly — transforms
+     `identifier_charset_filter` (a *guard-statement* transform, a third composition
+     shape alongside the `bound`-flag and expression-wrapping ones),
+     `identifier_allowlist`, `url_scheme_allowlist`, `attr_value_allowlist`; sinks
+     `sql_identifier_order_by`, `sql_join_alias_lookup`, `html_js_url_echo`,
+     `html_attribute_unquoted_echo`. Both new SQL sinks branch on `bound` to render a
+     real prepared statement that binds an unrelated WHERE value *while the identifier
+     stays concatenated* — the generated-code evidence for the matrix row above.
+     `_MODULE_SET_BY_SHAPE` gains the four shapes; `_PAGE_PARAMS` gains four illustrative
+     pages (`/catalog.php`, `/inventory.php`, `/share_link.php`, `/theme.php`), which are
+     **not** claimed as real `puppy-fort-factory/` pages (that app has no
+     identifier-position or `javascript:`-URL page to reproduce) and are wired to no
+     `lab/ground-truth/` label. One minimal emitter addition: a page profile may set
+     `source_override`, because one `(class, family)` shape can be reached by two taint
+     origins on two pages (`?theme=` on `/theme.php` vs the stored `bio` on
+     `/example/profile.php`) — kept as render-only metadata rather than forking the
+     verdict-relevant shape vocabulary. Side effect worth naming: the illustrative
+     manifest's `LABGEN-EX-0003` (`xss`/`html_attribute_unquoted`), skipped as unsupported
+     since Phase 0, now renders.
+  3. **Manifest + conformance.** `lab/manifests/phase1_harder_shapes_sample.yaml`, 13
+     cells: each shape authored as a *triple* (no transform → VULNERABLE/trivial; the
+     plausible-but-wrong fix → VULNERABLE/easy via `partial`; the context-correct fix →
+     SECURE), plus the `param_bind`-at-an-identifier cell. Verdicts are derived, never
+     asserted. `fuzzlab lab-generate --check` passes end to end over all 13 (name-leak
+     scanner, secret scanner, determinism, minimal pair, Tier 0 `php -l` — `php` is
+     present on this host so the lint ran for real, not skipped — and Tier 3 whole-sample
+     regeneration). `STATIC_PRECHECK_BY_SHAPE` gains all four shapes as
+     **uninformative**; the escaping-mismatch ones are the interesting entries — unlike
+     `(xss, html_body)`, where a *missing* `htmlspecialchars()` is a textbook static
+     finding, here the escaping is present and only the context is wrong, so a taint
+     engine reports clean and its clean scan is evidence of nothing.
+  4. **Oracle wiring (the point of L-P1.2a existing).** New
+     `fuzzlab/labgen/identifier_sqli_assertion.py`: `build_identifier_sqli_request()` /
+     `assert_identifier_sqli_cell()` turn a resolved `Cell` plus the emitter's
+     render-only probe metadata into an `IdentifierSqliOracleRequest`, run
+     `run_identifier_sqli_oracle()`, and compare its outcome against the cell's
+     **derived** verdict (`verdict()` against the pinned matrix — never a hand-asserted
+     expectation, NFR-LAB-label-accuracy). Fail-closed with no escape hatch: a mismatch
+     *and* an `inconclusive` probe both raise. Plus `IdentifierSqliTier2Oracle`, a
+     structurally-typed `conformance.tier2.Tier2Oracle` adapter so these cells run through
+     the existing tiered harness rather than a parallel one; it raises rather than
+     collapsing `inconclusive` into `False`, which Tier 2's boolean `confirm()` contract
+     would otherwise turn into a fail-open. `oracle_wrapper.py` is untouched (task
+     constraint); `identifier_sqli_oracle.py` is used as-is, unmodified.
+- Impact (other components / project): LAB-internal plus two test-side fixes. No other
+  component imports `fuzzlab.labgen` (the oracle/assertion modules are generator-build-time
+  tooling, never `fuzzlab.oracle`). `fuzzlab/labgen/__init__.py` re-exports the seven new
+  assertion names. No emitter other than `php_current` is touched (node_express,
+  python_fastapi, php_laravel and their modules are untouched, per task constraint), and
+  `schema.py`'s `Cell` dataclass is **structurally unchanged** — no field added, removed or
+  reordered (the log was checked first: L-P2.3's `sink_endpoint` and L-P2.4's `param` had
+  already landed, and both are *read* by the new assertion module rather than extended).
+  Three existing test files changed: `tests/test_labgen_cli.py` (BUG-0025, below) and
+  `tests/test_labgen_php_current.py` + `tests/test_labgen_conformance_static_precheck.py`,
+  whose "this shape is unsupported/unregistered" stand-ins were
+  `(xss, html_attribute_unquoted)` — now a supported, registered shape — and were moved
+  onto an LDAP-filter shape no lane has authored.
+- Risk (medium; mitigations): four risks, named rather than implied.
+  1. **The `identifier_charset_filter` cells cannot be oracle-confirmed today** (see
+     `requirements.md` §8). The filter 400s the CASE-WHEN payload, so both probes come back
+     unhealthy and L-P1.2a's prober correctly returns `inconclusive`; confirming them needs
+     an *identifier-swap* differential (two bare, legal identifiers, diff the responses) —
+     exactly the strategy no sqlmap technique implements. That is a small additive
+     `DifferentialMode` on `identifier_sqli_oracle.py`, deliberately **not** done here
+     (another lane's module, and this lane has no mandate to change its interface).
+     Mitigation: the gap is asserted as a test
+     (`test_the_charset_filtered_cell_is_the_documented_case_when_blind_spot`, plus a
+     real-HTTP reproduction), the failure message names the cause, and the gate fails
+     closed rather than passing the cell.
+  2. **The difficulty tier for `param_bind` at an identifier position is `trivial`** even
+     though that cell is one of the subtlest in the corpus: `verdict()`'s difficulty score
+     counts partially-credited missing concerns plus pipeline length, and a `no_effect` op
+     contributes neither. Accepted for now (changing it means changing `verdict()`'s
+     derivation, which this task forbids); recorded as an open question, since difficulty
+     tiers are corpus metadata later ML work may lean on.
+  3. **No oracle covers the escaping-context-mismatch XSS cells.** Assessed rather than
+     assumed: `oracle_wrapper` is sqlmap/commix/SSTImap (SQLi/cmdi/SSTI), `nuclei_oracle`
+     is path-traversal templates only, so the only existing mechanism that could apply is
+     `zap_oracle`'s whole-app scan (which already filters alerts by name). Whether ZAP's
+     active scanner recognizes a `javascript:`-URL or unquoted-attribute context at all is
+     unknown and must be checked **against the real binary** (PA-0005's convention) — it is
+     on-host Tier-2 work, and ZAP is not installed here. No new XSS oracle was written
+     speculatively; documented in `identifier_sqli_assertion.py`'s docstring and §8.
+  4. **Illustrative, not real, pages** for all four shapes — flagged in the manifest, the
+     emitter docstring and here, so a later reader cannot mistake them for reproductions.
+- Deliverables:
+  - [x] New families + 15 additive safety-matrix rows under v1, `verdict()` untouched — done.
+  - [x] Eight module fragments + registry entries + `_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS`
+        wiring + `source_override` — done.
+  - [x] `lab/manifests/phase1_harder_shapes_sample.yaml` (13 cells) renders, `--check`
+        green, Tier 0 (real `php -l`) and Tier 3 pass — done.
+  - [x] `static_precheck` flags for all four shapes — done.
+  - [x] `identifier_sqli_assertion.py` + `IdentifierSqliTier2Oracle` + `__init__` exports
+        — done.
+  - [x] Tests: `tests/test_labgen_harder_shapes.py` (matrix rows, derived verdicts per
+        cell, emitter shapes/content, module authoring-gap guards, the PA-0024
+        whole-collection "every php_current cell of every manifest renders" regression,
+        Tier 0/3, real `--check`) and `tests/test_labgen_identifier_sqli_assertion.py`
+        (wiring and every fail-closed path against an injected fake runner, plus four
+        *unmocked* real-HTTP end-to-end assertions over local servers modelling the
+        vulnerable, allowlisted and charset-filtered pages, per PA-0005) — done.
+  - [x] BUG-0025 (a real defect this lane surfaced and fixed) — full protocol done:
+        `ERROR_LOG.md` line, `docs/bugs/BUG-0025-*.md` with recurrence review and
+        prior-PA failure analysis for PA-0001/PA-0024, new PA-0027, and the PA-0002
+        codebase sweep for the class (two instances fixed in `tests/test_labgen_cli.py`;
+        the whole-tree counters in `test_labgen_gates.py`/`test_labgen_conformance_tier3.py`
+        assessed as correct-granularity and recorded as deliberately unchanged).
+  - [ ] An identifier-swap `DifferentialMode` on `identifier_sqli_oracle.py` — out of
+        scope here (that module belongs to L-P1.2a); see risk 1 / `requirements.md` §8.
+  - [ ] On-host Tier-1/Tier-2 confirmation of any of these cells against the live
+        containerized lab, and the ZAP-vs-`javascript:`-URL question — on-host work, out of
+        scope for an offline session.
+- Effectiveness (assessed 2026-09-21): met this delivery's bar. The two harder shapes are
+  now expressible, derivable and renderable end to end, with both halves of every shape
+  present (a family that only ever appeared as VULNERABLE would make the family itself the
+  label — asserted as a test), and the identifier cells are the first in this project whose
+  label is checked at build time by a *tool* oracle rather than by hand — including a real,
+  unmocked HTTP pass. Full suite: 1225 passed / 8 skipped / 2 pre-existing unrelated
+  `tests/test_mutation_operators.py` failures (confirmed pre-existing by extracting the
+  branch tip into a scratch directory and re-running that file there with none of this
+  lane's changes present: the same 2 fail, 10 pass).
+
 ### CC-LAB-0030 — T-LAB0.9: regression/additive-only build gate + multi-artifact ground-truth columns (Addendum B) (2026-09-21)
 *(Numbered `CC-LAB-0030` rather than `CC-LAB-0029` at merge time — this lane's worktree
 also diverged onto a stale, unrelated UI-redesign branch lineage before starting;

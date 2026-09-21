@@ -213,3 +213,19 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   count, uncaught by an adapter that had already defended the kwarg-key and sorter-
   default surfaces). Applies to every existing PA-0010-motivated adapter, per PA-0002's
   sweep obligation. (from BUG-0024)
+- **PA-0027** — Strengthens PA-0001 and complements PA-0024. A test's expectations **and
+  its fault injection** must be functions of the specific record under test, never of the
+  collection's cardinality or a record's iteration position. (a) A fixture that perturbs
+  "every other"/"the second" invocation keys its counter on the identity of the thing it
+  perturbs (a `cell_id`, a path, a request), never on a global per-record call counter
+  whose parity depends on how many *other* records the run includes — that silently stops
+  (or starts) injecting the fault when the collection or the component's supported set
+  grows. (b) PA-0001 extends to **derived** sources of truth: when a predicate or registry
+  in the code can compute the set a test asserts on (e.g. `Emitter.supports()` over a
+  manifest's cells), the test computes it from that predicate rather than restating it as
+  a literal — PA-0001's "value a constant or registry already defines" was read too
+  narrowly to cover a set no constant states but a predicate computes, which is how a
+  hand-maintained `SUPPORTED_CELL_IDS` literal survived alongside it. PA-0024 obliges a
+  capability widening to exercise every newly-matching record; this rule covers the
+  inverse direction — the *existing* tests must still test what they claim once the
+  record count moves. (from BUG-0025)

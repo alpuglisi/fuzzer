@@ -48,6 +48,29 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   Addendum B's unreachable `cross_service` level failing loud rather than rendering
   something meaningless (`CC-LAB-0042`, `FR-LAB-40`, renumbered from a concurrently-claimed
   `CC-LAB-0040`/`FR-LAB-38` which collided with lanes L-P3.4/L-P1.4, lane L-P2.5).
+- LAB: built lane L-P1.2b (`docs/LAB_IMPLEMENTATION_PLAN.md` §2.2) — the corpus's harder
+  shapes: new `sink_context.family` values `sql_identifier`, `sql_join_alias` (injection
+  into a column identifier or JOIN alias, not a literal value) and `url_javascript_scheme`
+  (escaping-context-mismatch XSS), their additive `lab/safety_matrix.yaml` v1 rows (new
+  ops `identifier_charset_filter`, `identifier_allowlist`, `url_scheme_allowlist`,
+  `attr_value_allowlist`; new concerns `sql_identifier_substitution`, `js_context_break`;
+  no change to `verdict()`), eight new `php_current` module fragments, a 13-cell manifest
+  `lab/manifests/phase1_harder_shapes_sample.yaml`, and `fuzzlab.labgen
+  .identifier_sqli_assertion` — which wires lane L-P1.2a's `run_identifier_sqli_oracle`
+  in as the real build-time security assertion for the identifier cells (fail-closed:
+  a verdict mismatch *or* an inconclusive probe fails the build). Why: the plan's
+  highest value-per-hour finding — textbook `?id=1` cells are detected by every tool,
+  these two shapes are not (a real sqlmap 1.8.4 spot-check missed the identifier-swap
+  case entirely). Also renders the illustrative manifest's `LABGEN-EX-0003`, skipped as
+  unsupported since Phase 0. See `docs/components/01-target-lab/change-control.md`
+  `CC-LAB-0043` and `FR-LAB-41` (renumbered from a concurrently-claimed
+  `CC-LAB-0040`/`FR-LAB-38` which collided with lanes L-P3.4/L-P1.4/L-P2.5).
+- LAB: fixed BUG-0025 — the `lab-generate --check` gate tests injected their fault on a
+  *global* per-cell-render counter's parity, so widening an emitter's supported shapes
+  (above) silently stopped the determinism gate's own regression test from exercising it;
+  fault injection is now keyed per `cell_id` and the supported-cell set is derived from
+  `Emitter.supports()` instead of hardcoded. New rule PA-0027 (strengthens PA-0001,
+  complements PA-0024); see `docs/bugs/BUG-0025-check-gate-fault-injection-coupled-to-supported-cell-count.md`.
 - LAB: built T-LAB0.9, the regression/additive-only build gate
   (`fuzzlab.labgen.regression_gate.check_no_regression`) that diffs a candidate
   ground-truth snapshot against the hand-authored `lab/ground-truth/` by case ID and

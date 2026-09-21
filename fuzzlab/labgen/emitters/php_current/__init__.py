@@ -24,13 +24,37 @@ Phase 3). It renders:
   ``PFF-0005``, ``PFF-0006``) -- see
   ``lab/manifests/phase0_real_pages_sample.yaml``.
 
-Since `CC-LAB-0040` it also renders a cell's ``context_depth`` (§3.5): a
+Since `CC-LAB-0042` it also renders a cell's ``context_depth`` (§3.5): a
 ``same_file_helper``/``cross_file`` cell's tainted value travels through a
 pass-through helper (defined in this page, or in a second emitted
 ``role="helper"`` file pulled in by ``require_once``) before reaching the
 sink, while ``direct`` renders the inline body unchanged and
 ``stored_second_order``'s depth is already expressed by ``sink_endpoint``
 routing this emitter to the sink page.
+
+**L-P1.2b extension (``docs/LAB_IMPLEMENTATION_PLAN.md`` §2.2).** Four
+harder shapes were added on top of the above, per the plan's
+"highest value-per-hour" finding -- moving off textbook ``?id=1`` cells:
+
+- ``(sqli, sql_identifier)`` -- ``/catalog.php?sort=``: the tainted value is
+  an ``ORDER BY`` *column identifier*.
+- ``(sqli, sql_join_alias)`` -- ``/inventory.php?alias=``: a JOIN alias, a
+  connector position substituted three times in one statement.
+- ``(xss, url_javascript_scheme)`` -- ``/share_link.php?url=``: the value is
+  echoed inside a ``javascript:`` URL, where HTML-entity escaping is
+  correct escaping for the *wrong* context.
+- ``(xss, html_attribute_unquoted)`` -- ``/theme.php?theme=`` and the
+  illustrative manifest's long-unrenderable ``LABGEN-EX-0003`` (stored
+  ``bio`` into an unquoted attribute).
+
+For the two identifier shapes, ``fuzzlab.labgen.identifier_sqli_assertion``
+wires lane L-P1.2a's ``run_identifier_sqli_oracle`` in as the real
+build-time security assertion (which is what that oracle exists for); see
+that module for what it can and cannot confirm. These four shapes are
+rendered on **illustrative** pages (``/catalog.php`` etc.), not claimed as
+real ``puppy-fort-factory/`` pages -- today's PHP app has no
+identifier-position or ``javascript:``-URL page to reproduce, so these are
+new lab cells, and no ``lab/ground-truth/`` label claims otherwise.
 
 Two things this emitter does **not** attempt, deliberately, for this real
 sample: it does not model ``blog_post.php``'s error-suppression nuance
@@ -68,6 +92,18 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("sqli", "sql_numeric_literal"): _ModuleSet("get_param", "sql_numeric_lookup", "single_statement"),
     ("sqli", "sql_string_literal"): _ModuleSet("post_param", "sql_string_literal_lookup", "single_statement"),
     ("xss", "html_body"): _ModuleSet("read_stored_field", "html_body_echo", "render_only"),
+    # --- L-P1.2b: the harder shapes (docs/LAB_IMPLEMENTATION_PLAN.md §2.2) ---
+    # Identifier/alias/connector-position SQLi: the tainted value is a
+    # column identifier or a JOIN alias, never a literal value.
+    ("sqli", "sql_identifier"): _ModuleSet("get_param", "sql_identifier_order_by", "single_statement"),
+    ("sqli", "sql_join_alias"): _ModuleSet("get_param", "sql_join_alias_lookup", "single_statement"),
+    # Escaping-context-mismatch XSS: correct escaping applied for the wrong
+    # context -- a value HTML-escaped into a `javascript:` URL, or into an
+    # unquoted attribute whose boundary htmlspecialchars() does not protect.
+    ("xss", "url_javascript_scheme"): _ModuleSet("get_param", "html_js_url_echo", "render_only"),
+    ("xss", "html_attribute_unquoted"): _ModuleSet(
+        "get_param", "html_attribute_unquoted_echo", "render_only"
+    ),
 }
 
 #: Per-real-page static context (table/column/param names, or the stored
@@ -85,7 +121,20 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
     # (added in CC-LAB-0020/CC-LAB-0022's real-pages extension) but was
     # never given a page profile, so supports() started returning True
     # for it while render() still raised -- see docs/bugs/BUG-0022-*.md.
-    "/example/profile.php": {"var_name": "bio", "stored_expr": "$currentUser['bio']", "css_class": "bio"},
+    # L-P1.2b: this page's stored `bio` is now also rendered into an
+    # *unquoted attribute* cell (LABGEN-EX-0003, which the illustrative
+    # manifest has carried since Phase 0 while php_current could not render
+    # it at all). Its taint is a stored field, not a request parameter, so it
+    # overrides the (xss, html_attribute_unquoted) shape's default
+    # `get_param` source -- see `_SOURCE_OVERRIDE_KEY`.
+    "/example/profile.php": {
+        "var_name": "bio",
+        "stored_expr": "$currentUser['bio']",
+        "css_class": "bio",
+        "attr_name": "bio",
+        "attr_default": "empty",
+        "source_override": "read_stored_field",
+    },
     # Real puppy-fort-factory/ pages (see module docstring above).
     "/product.php": {"var_name": "id", "param_name": "id", "table": "products", "column": "id"},
     "/blog_post.php": {"var_name": "id", "param_name": "id", "table": "posts", "column": "id"},
@@ -98,7 +147,60 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
         "password_param": "password",
     },
     "/profile.php": {"var_name": "bio", "stored_expr": "$currentUser['bio']", "css_class": "bio"},
+    # --- L-P1.2b harder-shape pages (lab/manifests/phase1_harder_shapes_sample.yaml) ---
+    # catalog.php: `?sort=` selects an ORDER BY *column identifier*.
+    # `allowed_identifiers` is what the `identifier_allowlist` transform
+    # allows (first entry doubles as its safe fallback); `column_a`/`column_b`
+    # are the two real, value-differing columns the build-time
+    # identifier-SQLi oracle probes with (see
+    # fuzzlab.labgen.identifier_sqli_assertion) -- render/probe metadata the
+    # Cell IR deliberately does not carry.
+    "/catalog.php": {
+        "var_name": "sort",
+        "param_name": "sort",
+        "table": "products",
+        "column": "name",
+        "allowed_identifiers": ("id", "name", "price"),
+        "column_a": "name",
+        "column_b": "price",
+    },
+    # inventory.php: `?alias=` names a JOIN alias -- a connector position,
+    # substituted three times in one statement.
+    "/inventory.php": {
+        "var_name": "alias",
+        "param_name": "alias",
+        "table": "inventory",
+        "join_table": "inventory",
+        "column": "sku",
+        "join_column": "parent_id",
+        "allowed_identifiers": ("i2", "i3"),
+        "column_a": "i2",
+        "column_b": "i3",
+    },
+    # share_link.php: `?url=` is echoed inside a `javascript:` URL.
+    "/share_link.php": {"var_name": "link", "param_name": "url", "css_class": "share"},
+    # theme.php: `?theme=` is echoed into an unquoted HTML attribute.
+    "/theme.php": {
+        "var_name": "theme",
+        "param_name": "theme",
+        "css_class": "theme",
+        "attr_name": "theme",
+        "attr_default": "default",
+    },
 }
+
+#: Page-profile key that overrides a shape's default *source* module. Needed
+#: because one ``(vuln_class, sink_context.family)`` shape can be reached by
+#: two different taint origins on two different real pages (a request
+#: parameter on one, an already-stored field on another) -- e.g.
+#: ``(xss, html_attribute_unquoted)`` is a ``?theme=`` GET parameter on
+#: ``/theme.php`` but the stored ``bio`` on ``/example/profile.php``. Keeping
+#: this as a page-profile override, rather than splitting the shape key,
+#: keeps the verdict-relevant shape vocabulary (``class`` x
+#: ``sink_context.family``) exactly as the safety matrix and
+#: ``fuzzlab.labgen.verdict`` define it -- source origin is render-only
+#: metadata and must not fork it.
+_SOURCE_OVERRIDE_KEY = "source_override"
 
 
 class PhpCurrentEmitter(Emitter):
@@ -141,7 +243,13 @@ class PhpCurrentEmitter(Emitter):
         ctx: dict[str, Any] = dict(_PAGE_PARAMS[render_route.path])
         ctx["handler_name"] = f"handle_{cell.cell_id.lower().replace('-', '_')}"
 
-        source_result = SOURCES[modules.source].render(ctx)
+        source_name = ctx.pop(_SOURCE_OVERRIDE_KEY, modules.source)
+        if source_name not in SOURCES:
+            raise ValueError(
+                f"{cell.cell_id}: php_current page profile for {render_route.path!r} names an "
+                f"unknown source module {source_name!r} -- known sources: {sorted(SOURCES)}"
+            )
+        source_result = SOURCES[source_name].render(ctx)
         ctx = source_result.context
 
         # An empty transform pipeline means "identity" (the raw value is
@@ -184,7 +292,7 @@ class PhpCurrentEmitter(Emitter):
         depth_modules = ("passthrough_helper", "helper_call") if depth_prelude else ()
         composition = " -> ".join(
             (
-                modules.source,
+                source_name,
                 *depth_modules,
                 *applied_ops,
                 modules.sink,

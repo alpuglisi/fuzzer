@@ -50,6 +50,27 @@ STATIC_PRECHECK_BY_SHAPE: dict[tuple[str, str], StaticPrecheckStatus] = {
     ("sqli", "sql_numeric_literal"): StaticPrecheckStatus.UNINFORMATIVE,
     ("sqli", "sql_string_literal"): StaticPrecheckStatus.UNINFORMATIVE,
     ("xss", "html_body"): StaticPrecheckStatus.INFORMATIVE,
+    # --- L-P1.2b harder shapes (docs/LAB_IMPLEMENTATION_PLAN.md §2.2) ------
+    # Identifier/alias/connector-position SQLi: UNINFORMATIVE for the same
+    # (now empirically confirmed) reason as every other SQL shape here -- and
+    # more sharply. A real sqlmap 1.8.4 spot-check could not detect the
+    # allowlist-respecting identifier-swap case at all (see
+    # fuzzlab/labgen/identifier_sqli_oracle.py's docstring, finding #3); a
+    # taint engine has strictly less to go on than that, since the code
+    # contains a visible input filter and no unescaped-string-concatenation
+    # tell it keys on.
+    ("sqli", "sql_identifier"): StaticPrecheckStatus.UNINFORMATIVE,
+    ("sqli", "sql_join_alias"): StaticPrecheckStatus.UNINFORMATIVE,
+    # Escaping-context-mismatch XSS: UNINFORMATIVE, and this is the
+    # interesting case -- ("xss", "html_body") above is INFORMATIVE precisely
+    # because a *missing* htmlspecialchars() is a textbook static finding. In
+    # these two shapes the escaping is *present* and correct-looking; what is
+    # wrong is the context it was chosen for. A taint engine that treats
+    # htmlspecialchars() as a sanitizer (they all do) reports clean, so its
+    # clean scan is evidence of nothing here and must be skipped, never
+    # recorded as confirmation.
+    ("xss", "url_javascript_scheme"): StaticPrecheckStatus.UNINFORMATIVE,
+    ("xss", "html_attribute_unquoted"): StaticPrecheckStatus.UNINFORMATIVE,
 }
 
 

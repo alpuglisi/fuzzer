@@ -848,6 +848,55 @@ lane) can submit a payload as
   cell as if `context_depth` were `direct`. (`docs/LAB_IMPLEMENTATION_PLAN.md` §3.5,
   `CC-LAB-0042`)
 
+- **FR-LAB-41** *(L-P1.2b; numbered `FR-LAB-41` rather than the `FR-LAB-38` this lane
+  claimed at authoring time — by merge time, lanes L-P3.4 (`FR-LAB-38`), L-P1.4
+  (`FR-LAB-39`), and L-P2.5 (`FR-LAB-40`) had already landed and taken the numbers this
+  lane also reached for; reconciled per this project's standing multi-lane policy — this
+  affects nothing but the cross-references.)* The corpus's **harder shapes**
+  (`docs/LAB_IMPLEMENTATION_PLAN.md`
+  §2.2), in four parts:
+  1. **Three new `sink_context.family` values**, each with additive `lab/safety_matrix.yaml`
+     rows under the existing `version: 1` (new `(op, sink_family)` pairs only — no existing
+     pair's meaning changes, so a corpus generated before they landed re-derives
+     identically, and `fuzzlab.labgen.verdict.verdict()`'s derivation logic is unchanged):
+     - `sql_identifier` — the tainted value **is** a column/table identifier (e.g.
+       `ORDER BY $sort`), not a literal value;
+     - `sql_join_alias` — a JOIN alias (a connector position, substituted more than once
+       in one statement);
+     - `url_javascript_scheme` — the value is inside a `javascript:` URL, i.e. an HTML
+       attribute whose content is JavaScript source.
+     Two new concern IDs: `sql_identifier_substitution` (an attacker chooses *which*
+     identifier the query names, needing no syntax break at all) and `js_context_break`.
+     Four new transform ops: `identifier_charset_filter` (a bare-identifier character
+     allowlist — `partial`: blocks every syntax-break character and none of the real
+     defect), `identifier_allowlist` (membership in a fixed list of real identifiers —
+     the only transform that closes an identifier position), `url_scheme_allowlist`, and
+     `attr_value_allowlist` (which gives the pre-existing `html_attribute_unquoted`
+     family its first expressible SECURE twin). Two rows carry the shapes' whole point:
+     `(param_bind, sql_identifier|sql_join_alias) -> no_effect` (no SQL dialect can bind
+     an identifier placeholder, so the textbook fix is *inapplicable*, not omitted) and
+     `(html_entity_escape, url_javascript_scheme) -> partial` (correct escaping, wrong
+     context — VULNERABLE-but-harder, per D20, never a third verdict value).
+  2. **`php_current` renders all four harder shapes** — `(sqli, sql_identifier)`,
+     `(sqli, sql_join_alias)`, `(xss, url_javascript_scheme)` and
+     `(xss, html_attribute_unquoted)` (the last of which had a safety-matrix row since
+     Phase 0 but no module set, leaving `LABGEN-EX-0003` permanently skipped) — via eight
+     new `fuzzlab.labgen.modules` fragments, and each shape's `static_precheck` flag is
+     registered as `uninformative`. A page profile may now set `source_override` to select
+     a non-default source module, since one `(class, family)` shape can be reached by two
+     taint origins (a request parameter on one page, an already-stored field on another);
+     this is render-only metadata and does not fork the verdict-relevant shape vocabulary.
+  3. **A manifest exercising them**, `lab/manifests/phase1_harder_shapes_sample.yaml` (13
+     cells, each shape as a no-transform / plausible-but-wrong-fix / context-correct-fix
+     triple), passing `fuzzlab lab-generate --check` end to end, including Tier 0 (`php -l`)
+     and Tier 3 (whole-sample byte-identical regeneration). These are illustrative new lab
+     pages, not reproductions of real `puppy-fort-factory/` pages, and carry no
+     `lab/ground-truth/` label.
+  4. **A build-time security assertion for the identifier shapes**,
+     `fuzzlab.labgen.identifier_sqli_assertion` (see §5), which runs lane L-P1.2a's
+     `run_identifier_sqli_oracle` against a cell and fails closed unless its outcome
+     matches the cell's **derived** verdict. (`CC-LAB-0043`)
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.
@@ -912,7 +961,7 @@ is the one shared mapping from a `Cell.context_depth` (generator input) to the
 ground-truth `Case.flow_variant` value a case generated at that depth must carry
 (identity by construction — the two vocabularies are the same). No production caller
 yet: the Cell-to-GroundTruth converter it exists for does not exist (see FR-LAB-32's
-`# TODO(L-P0.9-integration)`). See FR-LAB-38.
+`# TODO(L-P0.9-integration)`). See FR-LAB-40.
 (Lab track, generator-build-time) `fuzzlab.labgen.identity.load_identities(path) ->
 IdentityGraph` reads `lab/identities/identities.yaml`, validated against
 `lab/schemas/identities.schema.json` — see FR-LAB-27. Reads nothing the manifest
@@ -926,6 +975,25 @@ files, `requirements.txt`, `Dockerfile`) — a build driver calls
 `render_scaffold_files()` (or reads `STACK_ENV.scaffold_files`) exactly once
 per build, separately from `render(cell)`, since `Emitter`'s ABC has no
 per-stack-scaffold method yet — see FR-LAB-34.
+
+(Lab track, generator-build-time) `fuzzlab.labgen.identifier_sqli_assertion` wires lane
+L-P1.2a's identifier-SQLi differential prober in as a build gate — see FR-LAB-41:
+`is_identifier_sqli_cell(cell) -> bool` (the `IDENTIFIER_SINK_FAMILIES` filter);
+`build_identifier_sqli_request(cell, *, target_base_url, param_name, column_a, column_b,
+...) -> IdentifierSqliOracleRequest`, which probes `cell.sink_endpoint` when present and
+`cell.route` otherwise (mirroring `php_current.render()`'s own choice) and refuses — rather
+than silently mis-probing — a non-identifier sink family or a `param` that is not
+`query`/`raw`; `assert_identifier_sqli_cell(cell, matrix, *, runner=default_http_runner,
+**request_kwargs) -> IdentifierSqliAssertionResult`, which derives the expected verdict with
+`verdict()` (never a hand-asserted expectation) and raises `IdentifierSqliAssertionError`
+on a mismatch **or** an `inconclusive` probe (fail-closed, PA-0025; there is deliberately no
+"allow inconclusive" switch); and `IdentifierSqliTier2Oracle`, a structurally-typed
+`conformance.tier2.Tier2Oracle` adapter (`confirm(case) -> (bool, str)`) that raises rather
+than collapsing an inconclusive probe into `False`. The probe metadata it needs
+(`param_name`, `column_a`, `column_b`) is supplied by the caller from the emitter's own page
+profile, not read off the `Cell` — the same render-only/verdict-relevant split
+`conformance.tier1.build_tier1_case` uses. Imports `identifier_sqli_oracle` and `verdict`
+only; never `oracle_wrapper`'s sqlmap/commix/SSTImap code.
 
 ## 6. Dependencies (components)
 None (it is the system under test).
@@ -951,8 +1019,34 @@ None (it is the system under test).
   Schema; every `resources[].owner` and `authz_expectations[].accessing_identity`/
   `target_resource` resolves to a declared identity/resource; `verdict.py` carries no
   reference to `fuzzlab.labgen.identity`. See `tests/test_labgen_identity.py`.
+- (Lab track, Phase 1, L-P1.2b — met) every cell of
+  `lab/manifests/phase1_harder_shapes_sample.yaml` derives its expected verdict against
+  matrix v1, renders through `php_current`, and passes `lab-generate --check` (Tier 0
+  `php -l` + Tier 3 regeneration included); every `php_current`-targeting cell of *every*
+  manifest in `lab/manifests/` renders (the PA-0024 whole-collection guard); and the
+  identifier-position cells' labels are confirmed by lane L-P1.2a's oracle through
+  `identifier_sqli_assertion`, including four unmocked real-HTTP end-to-end assertions. See
+  `tests/test_labgen_harder_shapes.py` and `tests/test_labgen_identifier_sqli_assertion.py`.
 
 ## 8. Open questions
+- (L-P1.2b) **The `identifier_charset_filter` cells cannot be oracle-confirmed yet.**
+  L-P1.2a's prober always wraps the probe value in `CASE WHEN ... END`, which a
+  bare-identifier character filter rejects (HTTP 400), so the oracle correctly returns
+  `inconclusive` and the build assertion fails closed. Confirming them needs an
+  *identifier-swap* differential mode (two bare, legal identifiers — e.g. `name` vs
+  `secret` — diffed), which is precisely the strategy no sqlmap technique implements and a
+  small additive `DifferentialMode` on `fuzzlab.labgen.identifier_sqli_oracle`. Not built
+  here: that module is lane L-P1.2a's deliverable.
+- (L-P1.2b) **Whether any existing oracle can confirm the escaping-context-mismatch XSS
+  cells.** `oracle_wrapper` is SQLi/command-injection/SSTI and `nuclei_oracle` is
+  path-traversal templates, so `zap_oracle`'s whole-app scan is the only candidate; whether
+  ZAP's active scanner recognizes a `javascript:`-URL or unquoted-attribute context must be
+  checked against the real binary (PA-0005) on-host before any new XSS oracle is written.
+- (L-P1.2b) **Whether `verdict()`'s difficulty score should account for an inapplicable
+  fix.** A `param_bind` pipeline at `sql_identifier` scores `trivial` (a `no_effect` op adds
+  neither partial credit nor length beyond one op) although it is among the subtlest cells
+  in the corpus — code that looks parameterized and is not. Changing it means changing
+  `verdict()`'s derivation, deliberately out of L-P1.2b's scope.
 - Database isolation strategy (per-run schema, dump reload, or rollback).
 - Whether to expose source (annotated build only, if at all).
 - Exact pinned versions and error-surfacing behavior, recorded in the

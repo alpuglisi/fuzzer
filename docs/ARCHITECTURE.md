@@ -183,7 +183,15 @@ tracked in the requirements files, not here.
   actual pages (`product.php`, `blog_post.php`, `login.php`, `profile.php` —
   two vuln classes, three sink-context families — `CC-LAB-0022`), proving
   the module inventory isn't a one-cell special case; the remaining ~26 real
-  pages remain a separate, later task. A mechanical pull/index/scope/rank/cluster tool
+  pages remain a separate, later task. As of Phase 1 (L-P1.2b, `CC-LAB-0040`)
+  the inventory also covers the corpus's **harder shapes**: three new
+  sink-context families (`sql_identifier`, `sql_join_alias` — injection into a
+  column identifier or JOIN alias rather than a literal value — and
+  `url_javascript_scheme`, escaping-context-mismatch XSS), four new transform
+  ops and eight new module fragments, all additive to `lab/safety_matrix.yaml`
+  v1 with `verdict()` unchanged, exercised by
+  `lab/manifests/phase1_harder_shapes_sample.yaml` (13 cells) — so the
+  corpus is no longer only textbook value-position cells. A mechanical pull/index/scope/rank/cluster tool
   for the pattern-provenance corpus (`fuzzlab/tools/pattern_corpus_sourcing.py`,
   over `github/advisory-database` via git — `CC-LAB-0020`) produces a
   candidate list for human triage; it never authors a card and never writes
@@ -261,7 +269,13 @@ tracked in the requirements files, not here.
   (`CC-LAB-0029`) confirmed it does not reliably detect this shape, so
   `fuzzlab/labgen/identifier_sqli_oracle.py` is a fourth, custom
   differential-response prober (CASE-WHEN boolean differential, MySQL dialect
-  implemented) filling that gap rather than a fifth wrapped third-party tool.
+  implemented) filling that gap rather than a fifth wrapped third-party tool;
+  `fuzzlab/labgen/identifier_sqli_assertion.py` (L-P1.2b, `CC-LAB-0040`) is the
+  gate that drives it per manifest cell, failing closed unless the prober's
+  outcome matches the cell's derived verdict — and it also carries this
+  program's honest statement of what that prober still cannot confirm (a
+  character-filtered identifier position needs an identifier-swap differential,
+  not a CASE-WHEN one).
   The three classes without any oracle at all (IDOR/BOLA, business logic, race
   conditions) are **deferred indefinitely** and not in scope for now. Built as
   the parallel Lab track after the toolkit foundations; phase-level

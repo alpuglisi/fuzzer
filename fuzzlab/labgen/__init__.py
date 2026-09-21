@@ -30,7 +30,10 @@ decoupled from it, and never imported by ``verdict``), a third, independent
 oracle for identifier/alias/connector-position SQL injection
 (``identifier_sqli_oracle``, L-P1.2a — a custom differential-response
 prober, since a real sqlmap spot-check confirmed it does not reliably
-detect this class; see that module's docstring for the spot-check findings),
+detect this class; see that module's docstring for the spot-check findings)
+and its build-gate wiring (``identifier_sqli_assertion``, L-P1.2b — turns a
+manifest cell plus render-only probe metadata into that prober's request and
+fails closed unless its outcome matches the cell's *derived* verdict),
 and a small LAB-owned session helper (``identity_session``, L-P2.2 — one
 cookie jar per known, generator-controlled test identity, for build-time
 oracle confirmation of stored/second-order cells; deliberately not the
@@ -96,6 +99,15 @@ from .nuclei_oracle import (
     TraversalVulnClass,
     default_nuclei_runner,
     run_path_traversal_oracle,
+)
+from .identifier_sqli_assertion import (
+    IDENTIFIER_SINK_FAMILIES,
+    IdentifierSqliAssertionError,
+    IdentifierSqliAssertionResult,
+    IdentifierSqliTier2Oracle,
+    assert_identifier_sqli_cell,
+    build_identifier_sqli_request,
+    is_identifier_sqli_cell,
 )
 from .identifier_sqli_oracle import (
     DialectNotImplementedError,
@@ -164,4 +176,11 @@ __all__ = [
     "SqlDialect",
     "default_http_runner",
     "run_identifier_sqli_oracle",
+    "IDENTIFIER_SINK_FAMILIES",
+    "IdentifierSqliAssertionError",
+    "IdentifierSqliAssertionResult",
+    "IdentifierSqliTier2Oracle",
+    "assert_identifier_sqli_cell",
+    "build_identifier_sqli_request",
+    "is_identifier_sqli_cell",
 ]
