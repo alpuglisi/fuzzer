@@ -1,9 +1,9 @@
 @org.springframework.web.bind.annotation.RestController
 public class {{ class_name }} {
 
-    @org.springframework.web.bind.annotation.GetMapping("{{ route_path }}")
+    @org.springframework.web.bind.annotation.{{ mapping_annotation }}("{{ route_path }}")
     public org.springframework.http.ResponseEntity<String> {{ handler_name }}(
-            jakarta.servlet.http.HttpServletRequest request) {
+            jakarta.servlet.http.HttpServletRequest request) throws java.io.IOException {
 {{ body }}
     }
 }

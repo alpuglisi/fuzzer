@@ -49,15 +49,25 @@ class _ModuleSet(NamedTuple):
 #: `cell.transform.ops`'s one op (see `modules.py`'s own docstring for why).
 _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("ssti", "template_render"): _ModuleSet("query_param", "single_handler"),
+    ("xxe", "xml_parse_input"): _ModuleSet("raw_body", "single_handler"),
 }
 
 #: Per-route static render context, the same "render-only information, not
 #: verdict-relevant" split every other stack's emitter uses.
 _PAGE_PARAMS: dict[str, dict[str, Any]] = {
     "/wiki/pages/render": {"var_name": "macroExpr", "param_name": "macroExpr"},
+    "/issues/import": {"var_name": "xmlBody"},
 }
 
 _CLASS_NAME_SANITIZE_RE = re.compile(r"[^A-Za-z0-9]+")
+
+#: Spring's per-HTTP-method mapping annotations (`CC-LAB-0091`: the first
+#: entry to need anything but GET -- the XXE cell's `/issues/import` is a
+#: POST).
+_MAPPING_ANNOTATION_BY_METHOD: dict[str, str] = {
+    "GET": "GetMapping",
+    "POST": "PostMapping",
+}
 
 
 def _class_name_for(cell_id: str) -> str:
@@ -99,6 +109,13 @@ class SpringBootEmitter(Emitter):
         ctx["class_name"] = class_name
         ctx["route_path"] = cell.route.path
         ctx["handler_name"] = f"handle_{cell.cell_id.lower().replace('-', '_')}"
+        method = cell.route.method.upper()
+        if method not in _MAPPING_ANNOTATION_BY_METHOD:
+            raise ValueError(
+                f"{cell.cell_id}: spring_boot has no mapping annotation for HTTP method "
+                f"{method!r} -- known methods: {sorted(_MAPPING_ANNOTATION_BY_METHOD)}"
+            )
+        ctx["mapping_annotation"] = _MAPPING_ANNOTATION_BY_METHOD[method]
 
         source_result = SOURCES[modules.source].render(ctx)
         ctx = source_result.context

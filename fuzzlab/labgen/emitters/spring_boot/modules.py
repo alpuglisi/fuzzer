@@ -126,6 +126,45 @@ class FileLoadedTemplateNameSink(TemplateModule):
         super().__init__("file_loaded_template_name", "sink", SINK_ENV, "file_loaded_template_name.java.j2")
 
 
+class RawBodySource(TemplateModule):
+    """Reads the entire raw request body as a UTF-8 string
+    (`CC-LAB-0091`) -- for a cell whose tainted value (e.g. an XML document
+    with a DOCTYPE) cannot be a query parameter."""
+
+    def __init__(self) -> None:
+        super().__init__("raw_body", "source", SOURCE_ENV, "raw_body.java.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = ctx["var_name"]
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class XmlExternalEntitiesEnabledSink(TemplateModule):
+    """The vulnerable op (`CC-LAB-0091`): parses the tainted XML body with a
+    default-configured ``DocumentBuilderFactory`` -- external entities and
+    DOCTYPE declarations are resolved, matching `lab/safety_matrix.yaml`'s
+    `xml_external_entities_enabled` op (CWE-611)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "xml_external_entities_enabled", "sink", SINK_ENV, "xml_external_entities_enabled.java.j2"
+        )
+
+
+class XmlExternalEntitiesDisabledSink(TemplateModule):
+    """The secure twin (`CC-LAB-0091`): the same parse, but with Xerces/
+    JAXP's `disallow-doctype-decl` feature set first -- the real, standard
+    Java XXE fix, matching `lab/safety_matrix.yaml`'s
+    `xml_external_entities_disabled` neutralizing op."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "xml_external_entities_disabled", "sink", SINK_ENV, "xml_external_entities_disabled.java.j2"
+        )
+
+
 class SingleHandlerComplexity(TemplateModule):
     def __init__(self) -> None:
         super().__init__("single_handler", "complexity", COMPLEXITY_ENV, "single_handler.java.j2")
@@ -136,6 +175,7 @@ class SingleHandlerComplexity(TemplateModule):
             class_name=ctx["class_name"],
             route_path=ctx["route_path"],
             handler_name=ctx["handler_name"],
+            mapping_annotation=ctx["mapping_annotation"],
             body=ctx["body"],
         )
         return RenderResult(code=code, context=dict(ctx))
@@ -143,6 +183,7 @@ class SingleHandlerComplexity(TemplateModule):
 
 SOURCES: dict[str, Module] = {
     "query_param": QueryParamSource(),
+    "raw_body": RawBodySource(),
 }
 #: Keyed by the op name that selects this sink (see this module's own
 #: docstring for why the op selects the sink here, not a pre-sink
@@ -150,6 +191,8 @@ SOURCES: dict[str, Module] = {
 SINKS: dict[str, Module] = {
     "user_supplied_template_compile": UserSuppliedTemplateCompileSink(),
     "file_loaded_template_name": FileLoadedTemplateNameSink(),
+    "xml_external_entities_enabled": XmlExternalEntitiesEnabledSink(),
+    "xml_external_entities_disabled": XmlExternalEntitiesDisabledSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_handler": SingleHandlerComplexity(),

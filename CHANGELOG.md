@@ -13,6 +13,19 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- `fuzzlab/labgen/emitters/spring_boot/`: TrackerNest's second cell, XXE
+  (`POST /issues/import`, real `javax.xml.parsers.DocumentBuilderFactory`
+  parse of the raw request body) — a new, additive
+  `xml_external_entities_disabled` entry in `lab/safety_matrix.yaml` (this
+  sink family's first secure counterpart), a body-capable
+  `SpringBootLiveBootHarness.post()`, and a per-HTTP-method mapping-
+  annotation lookup in the emitter (this stack's first POST cell). Real
+  `mvn package` + `java -jar` boot + real HTTP POST proves the payload
+  differential: the vulnerable twin resolves a DOCTYPE-declared external
+  entity into a real, harness-owned fixture file's contents; the secure
+  twin returns a real HTTP 400 rejecting any DOCTYPE while still parsing
+  an ordinary document correctly. 13 new tests (26 total for this stack),
+  all passing. `CC-LAB-0091`/`FR-LAB-65`.
 - `fuzzlab/labgen/emitters/spring_boot/` (new): the project's fourth
   emitter and first JVM stack, TrackerNest (category 3's Atlassian pick) —
   a real, checked-in minimal Spring Boot skeleton, a `SpringBootEmitter`

@@ -1873,6 +1873,30 @@ lane) can submit a payload as
   beyond the one proven live-boot cell, matching `python_fastapi`/
   `node_express`'s own stated status for a newly-built stack.
 
+- **FR-LAB-65** *(`spring_boot`: TrackerNest's second cell, XXE; `CC-LAB-0091`,
+  2026-09-22).* Extends `FR-LAB-64`'s `spring_boot` emitter with a second
+  supported shape, `(vuln_class="xxe", sink_context.family="xml_parse_input")`
+  — `POST /issues/import`, a real Java `javax.xml.parsers.
+  DocumentBuilderFactory` parse of the raw request body (CWE-611). The
+  vulnerable twin (`xml_external_entities_enabled`, already in
+  `lab/safety_matrix.yaml` since `CC-LAB-0063`) leaves external-entity/
+  DOCTYPE resolution at its default-permissive setting; the secure twin
+  uses a **new, additive** safety-matrix entry this requirement also adds,
+  `xml_external_entities_disabled` (Xerces/JAXP's `disallow-doctype-decl`
+  feature — the real, standard Java XXE fix), giving this sink family the
+  secure counterpart it lacked since `CC-LAB-0063`. Also adds
+  `SpringBootLiveBootHarness.post()` (a raw-body-capable POST — the SSTI
+  cell only ever needed `get()`) and a per-HTTP-method mapping-annotation
+  lookup in `SpringBootEmitter` (`GetMapping`/`PostMapping` — this is the
+  stack's first POST cell). Live-boot-proven: the vulnerable twin resolves
+  a DOCTYPE-declared external entity into a real, harness-owned fixture
+  file's contents (never a real host path); the secure twin returns a real
+  HTTP 400 rejecting any DOCTYPE while still correctly parsing an ordinary
+  document. **Still deferred** (per `CC-LAB-0090`'s original "Out of scope"
+  section, restated here rather than left ambiguous): TrackerNest's third
+  designed cell, insecure deserialization; ground truth; `multitarget.py`
+  wiring.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

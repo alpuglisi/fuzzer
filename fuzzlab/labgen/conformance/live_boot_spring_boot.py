@@ -271,18 +271,39 @@ class SpringBootLiveBootHarness:
         assert self._port is not None
         return f"http://127.0.0.1:{self._port}"
 
-    def request(self, method: str, path: str, *, params: dict[str, str] | None = None) -> HttpResponse:
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+        data: bytes | None = None,
+        content_type: str | None = None,
+    ) -> HttpResponse:
         """A real HTTP request against the booted app. Never follows a
-        redirect (matching ``live_boot.py``'s own convention, `BUG-0028`)."""
+        redirect (matching ``live_boot.py``'s own convention, `BUG-0028`).
+
+        ``data``/``content_type`` (`CC-LAB-0091`): a raw request body for a
+        cell whose payload cannot travel as a query parameter (e.g. an XML
+        document with a DOCTYPE) -- sent exactly as given, never form-
+        encoded, unlike ``live_boot.py``'s own ``post()`` (which is
+        form-body-only, matching `php_laravel`'s cells; this stack's first
+        POST cell needs a raw body instead)."""
         url = self._base_url() + path
         if params:
             url += "?" + urllib.parse.urlencode(params)
-        req = urllib.request.Request(url, method=method.upper())
+        headers = {"Content-Type": content_type} if content_type else {}
+        req = urllib.request.Request(url, data=data, method=method.upper(), headers=headers)
         with _NO_REDIRECT_OPENER.open(req, timeout=REQUEST_TIMEOUT_S) as resp:
             return HttpResponse(status=resp.status, body=resp.read().decode("utf-8", errors="replace"))
 
     def get(self, path: str, *, params: dict[str, str] | None = None) -> HttpResponse:
         return self.request("GET", path, params=params)
+
+    def post(self, path: str, *, data: bytes, content_type: str = "application/xml") -> HttpResponse:
+        """A real HTTP POST with a raw request body (`CC-LAB-0091`) -- e.g.
+        an XML document, sent byte-for-byte, never form-encoded."""
+        return self.request("POST", path, data=data, content_type=content_type)
 
     # -- lifecycle ---------------------------------------------------------------
 
