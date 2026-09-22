@@ -45,6 +45,18 @@ Revision history:
   corresponding `CHANGELOG.md` lines (fixed, consolidated entry added); and
   U3's dual-use safety-posture note is now promoted to the Known Risks list,
   not just stated inline in U3's own entry.
+- v6 (2026-09-22): revised after review round 5 (three reviewers; 1 approve,
+  1 needs-revision, 1 approve with minor notes). Fixed: **D0a was missing
+  bookkeeping numbers for four of the five non-UI components it touches**
+  (`CRAWL`, `AUD`, `FUZZ`, `MUT`, `PROXY` — it only reserved a UI number),
+  a real PA-0031 gap. Added the missing numbers and, because D0a is Wave 1a
+  but touches components B0's emitters (Wave 1b) and U3 (Wave 2) also touch,
+  renumbered the full FUZZ (`C1=0019 → D0a=0020 → B0-coverage=0021 →
+  D0b=0022 → C2=0023`), MUT (`C1=0009 → D0a=0010 → B0-MutationSearch=0011`),
+  and PROXY (`D0a=0017 → U3=0018`) sequences to slot D0a in correctly. Also
+  fixed a stale reference in Wave A1's exception-path text that would have
+  had a future G7…Gn lane collide with T1/T2/A2's already-claimed
+  `CC-LAB-0060`–`0062` (corrected to `CC-LAB-0063`+).
 
 Scope: the three backlog groups called out as "safe to build now (offline, no
 missing precondition)" — lab track / manifest generator, UI/diagnostics, and
@@ -137,8 +149,9 @@ discrepancy either way.
 - If A0 instead finds real, currently-undocumented remaining Layer-A scope
   (e.g. new pages added to the app since this plan was written), it should
   enumerate those specific pages/cases and size them the way G1–G6 were
-  sized, reserving the next LAB numbers (`CC-LAB-0060`+) for that work — but
-  this is the exception path, not the expected one.
+  sized, reserving the next LAB numbers **after T1/T2/A2 below**
+  (`CC-LAB-0063`+, not `0060` — T1, T2, and A2 already claim `0060`–`0062`)
+  for that work — but this is the exception path, not the expected one.
 - This lane also **does not** need to resolve a "duplicate `CC-LAB-0056`"
   claim from an earlier draft of this plan — that was checked and is a false
   positive (a cross-reference inside `CC-LAB-0058`'s prose, not a second
@@ -151,7 +164,9 @@ entirely** — there is nothing to dispatch here. If A0 finds real remaining
 pages, they become G7…Gn lanes sized like G1–G6 (S ≈ 1–2 pages/no shared
 module, M ≈ needs a small shared module or a stored pair, L ≈ touches a
 genuinely shared file like `lab/safety_matrix.yaml` and must be the sole
-lane touching it that wave), reserving `CC-LAB-0060` onward.
+lane touching it that wave), reserving `CC-LAB-0063` onward (**not** `0060`
+— T1, T2, and A2 below already claim `0060`–`0062`; an earlier draft of this
+plan had this wrong).
 
 **T1 — Tier1 conformance-suite live wiring** *(does not depend on A0/A1 — dispatch independently)*
 - Reserved: `CC-LAB-0060`
@@ -230,11 +245,12 @@ layer, below.
   - GBT/logistic emitter → `CC-ML-0009`
   - Bandit-loop emitter → `CC-SCHED-0005` (current confirmed highest is
     `CC-SCHED-0004`, in `docs/components/08-payload-scheduler/change-control.md`)
-  - Coverage-frontier emitter → `CC-FUZZ-0020` (reserved after C1's
-    `CC-FUZZ-0019` below; verify no other lane claimed it first) — **see the
-    B0/C1 file-overlap risk below before dispatching this specific sub-lane**
-  - `MutationSearch` reward/novelty emitter → `CC-MUT-0010` (reserved after
-    C1's `CC-MUT-0009` below)
+  - Coverage-frontier emitter → `CC-FUZZ-0021` (after C1's `CC-FUZZ-0019` and
+    D0a's `CC-FUZZ-0020` — see Lane group B's D0 entry for the full sequence;
+    verify no other lane claimed it first) — **see the B0/C1 file-overlap
+    risk below before dispatching this specific sub-lane**
+  - `MutationSearch` reward/novelty emitter → `CC-MUT-0011` (after C1's
+    `CC-MUT-0009` and D0a's `CC-MUT-0010`)
 - **Sub-lane sequencing, made explicit**: per `docs/UI_IMPLEMENTATION_PLAN.md`
   §3 (B0, line 284), it's "table first, **then** one emitter per component in
   parallel" — the migration landing in `core/store.py` is a real serial
@@ -284,7 +300,8 @@ number, and `CC-UI-0025` (U0, below) is still correctly the next-free one.
 - Reserved: `CC-UI-0028`
 
 **U3 — Proxy workbench rebuild** *(the R3 "Proxy rebuild" item from the original backlog)*
-- Reserved: `CC-UI-0029` + `CC-PROXY-0017`
+- Reserved: `CC-UI-0029` + `CC-PROXY-0018` (after D0a's `CC-PROXY-0017` —
+  D0a is Wave 1a, dispatched before this Wave-2 lane)
 - Note the safety posture: proxy/desync tooling stays default-off and
   lab-only per CLAUDE.md; this lane must not flip that default (also
   promoted to **Known risks** below — easy to miss on a skim of just the
@@ -315,20 +332,41 @@ bookkeeping files — follow the **merge protocol** above.
   (`greybox_cli.py`, `mutation/cli.py`, etc.), each with its own
   `build_parser()`/`main()`. So the flag has to be added **per tool module**,
   not in one shared place.
-- **D0a — non-greybox tools** *(dispatch in Wave 1, file-disjoint from C1)*
-  - Reserved: `CC-UI-0032` (if surfaced/documented through the web UI).
+- **D0a — non-greybox tools** *(dispatch in Wave 1a, file-disjoint from C1;
+  a single change touching six commands across five other components — each
+  gets its own reserved number, per PA-0031, not just a UI one)*
+  - Reserved: `CC-UI-0032` (if surfaced/documented through the web UI) +
+    `CC-CRAWL-0007` (`crawl`, current highest `CC-CRAWL-0006`) +
+    `CC-AUD-0015` (`audit`, current highest `CC-AUD-0014`) +
+    `CC-FUZZ-0020` (`fuzz` + `auto` — both land in the FUZZ component; one
+    entry covers both since it's one lane/commit) + `CC-MUT-0010`
+    (`mutate-run`) + `CC-PROXY-0017` (`proxy`).
+  - **Numbering note**: because D0a is Wave 1a (dispatched alongside C1) but
+    touches FUZZ/MUT/PROXY, it slots in *ahead of* Wave 1b's B0 emitter
+    sub-lanes and Wave 2's U3 in those components' sequences — this shifted
+    several numbers from earlier drafts of this plan. The full FUZZ sequence
+    is now C1=`0019` → D0a=`0020` → B0's coverage-frontier emitter
+    (Wave 1b)=`0021` → D0b (Wave 2)=`0022` → C2 (Wave 3, conditional)=`0023`.
+    The MUT sequence is C1=`0009` → D0a=`0010` → B0's `MutationSearch`
+    emitter (Wave 1b)=`0011`. The PROXY sequence is D0a (Wave 1a)=`0017` →
+    U3 (Wave 2)=`0018`. **Re-verify this ordering at dispatch time** — if
+    lanes fire in a different order than this plan assumes, re-derive the
+    next-free number per component rather than trusting these blindly (see
+    Known Risks).
   - Scope: add `--dry-run` to every CLI entry point **except**
-    `fuzzlab/greybox/greybox_cli.py` — e.g. `crawl`, `audit`, `fuzz`,
+    `fuzzlab/greybox/greybox_cli.py` — `crawl`, `audit`, `fuzz`,
     `mutate-run`, `proxy`, `auto`. Reuse the web dry-run's plan/report logic
     rather than reimplementing it. None of these touch the files C1 (Wave
-    C1, below) is editing, so this sub-lane needs no gate.
+    C1, below) is editing, so this sub-lane needs no *file* gate — only the
+    numbering ordering above.
 - **D0b — `greybox-run --dry-run`** *(sequenced after Wave C1 — genuine file overlap)*
-  - Reserved: `CC-FUZZ-0021`.
+  - Reserved: `CC-FUZZ-0022` (see the renumbered FUZZ sequence above).
   - Scope: same flag, but on `fuzzlab/greybox/greybox_cli.py`'s parser/
     `main()` specifically — the one entry point that **does** overlap with
     **M8-wiring** (Wave C1), which also edits that module's run loop. Treat
     as sequenced after Wave C1 lands, not a same-wave parallel lane; this is
-    the only piece of D0 that needs the gate.
+    the only piece of D0 that needs a *file* gate (as opposed to D0a's
+    numbering-order-only dependency).
 
 ---
 
@@ -356,17 +394,18 @@ areas below.
   T8.7's on-host exit criterion stays out of scope here.
 - This lane, not lane group B's `D0b` dry-run sub-lane, is the primary owner
   of the fuzzer's attempt-path files for this wave — see the D0 note above.
-  `CC-FUZZ-0019` belongs to this lane only (`D0b` reserves `CC-FUZZ-0021`,
-  B0's coverage emitter reserves `CC-FUZZ-0020` — verify no collision at
-  dispatch time regardless).
+  `CC-FUZZ-0019` belongs to this lane only. The full FUZZ sequence, in
+  dispatch order, is: this lane (`0019`) → D0a (`0020`, Wave 1a, no file
+  overlap — just claims the next number) → B0's coverage-frontier emitter
+  (`0021`, Wave 1b) → D0b (`0022`, Wave 2) → C2/M10 (`0023`, Wave 3,
+  conditional). Verify no collision at dispatch time regardless.
 
 ### Wave C2 (conditional — do not dispatch until a human/orchestrator confirms scope)
 
 **M10 offline slice — hook/interface layer against a stub coverage source**
 - Reserved (on confirmation): `CC-CORE-0019` (after B0's table/migration
-  claims `CC-CORE-0018` above) + `CC-FUZZ-0022` (after B0's coverage emitter
-  claims `CC-FUZZ-0020` and D0 claims `CC-FUZZ-0021` — verify ordering at
-  dispatch time).
+  claims `CC-CORE-0018` above) + `CC-FUZZ-0023` (last in the FUZZ sequence —
+  see C1's entry above — verify ordering at dispatch time).
 - Scope: `fuzzlab/greybox/confirm.py` already holds the pure decision logic
   (`docs/PHASE_3_PLAN.md` T3.6/T3.7); both `docs/components/02-core-library/change-control.md`
   and `docs/components/07-fuzzing-harness-and-oracle/change-control.md` note
@@ -425,12 +464,25 @@ merges.
   truly simultaneous edits — serialize the emitter after C1, or have the two
   lanes agree on disjoint functions within the file before dispatch (see
   Lane group B's B0 entry).
-- The FUZZ-number sequencing across B0 (coverage emitter, `CC-FUZZ-0020`),
-  C1 (M8-wiring, `CC-FUZZ-0019`), D0b (`greybox-run --dry-run`,
-  `CC-FUZZ-0021`), and C2 (M10, `CC-FUZZ-0022`) depends on dispatch order
-  matching this plan's assumed order (C1 first, since it's Wave 1a) — if any
-  of these lanes dispatch out of the order this plan assumes, re-verify the
-  next-free `CC-FUZZ-NNNN` rather than trusting the numbers above blindly.
+- **D0a touches five components (CRAWL, AUD, FUZZ, MUT, PROXY) beyond
+  UI — each now has its own reserved number** (`CC-CRAWL-0007`,
+  `CC-AUD-0015`, `CC-FUZZ-0020`, `CC-MUT-0010`, `CC-PROXY-0017`); an earlier
+  draft of this plan only reserved a UI number for D0a, which would have let
+  it collide with B0's/U3's numbers in those same components. Fixed, but
+  flagging since it's the kind of gap PA-0031 exists to prevent.
+- The FUZZ-number sequencing depends on dispatch order matching this plan's
+  assumed order: C1 (`CC-FUZZ-0019`) → D0a (`CC-FUZZ-0020`) → B0's
+  coverage-frontier emitter (`CC-FUZZ-0021`) → D0b (`CC-FUZZ-0022`) → C2/M10
+  (`CC-FUZZ-0023`, conditional). The MUT sequence is C1 (`CC-MUT-0009`) →
+  D0a (`CC-MUT-0010`) → B0's `MutationSearch` emitter (`CC-MUT-0011`). The
+  PROXY sequence is D0a (`CC-PROXY-0017`) → U3 (`CC-PROXY-0018`). If any of
+  these lanes dispatch out of the order this plan assumes, re-verify the
+  next-free number per component rather than trusting the numbers above
+  blindly.
+- An earlier draft of Wave A1's exception-path text incorrectly said its
+  G7…Gn lanes (if they ever dispatch) should reserve `CC-LAB-0060` onward —
+  that collides with T1/T2/A2, which already claim `0060`–`0062`. Fixed to
+  `CC-LAB-0063` onward; re-verify at dispatch time regardless, per PA-0031.
 - M10's offline-buildability is an open scoping question, not yet confirmed
   by anyone — Wave C2 stays provisional until a scoping lane or a human
   explicitly resolves it.

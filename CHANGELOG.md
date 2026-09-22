@@ -19,17 +19,19 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   wiring, UI/diagnostics tabs, M8/M10 mutation-oracle wiring) into pre-numbered,
   file-disjoint build lanes/waves for concurrent dispatch — no lane executed
   yet, plan only, per `docs/MULTI_AGENT_ORCHESTRATION.md`.
-- Planning: revised `docs/PARALLEL_LANE_BUILD_PLAN.md` through v2–v5 after
-  four independent review rounds — fixed a bookkeeping-number collision, a
+- Planning: revised `docs/PARALLEL_LANE_BUILD_PLAN.md` through v2–v6 after
+  five independent review rounds — fixed a bookkeeping-number collision, a
   false "UI route-split already done" premise, a false "Layer-A ~26-page
   migration backlog" premise (it was already closed out by the existing
   G1–G6 lanes per decision D-open-1), a duplicated-vs.-authoritative UI lane
   structure (now defers to `docs/UI_IMPLEMENTATION_PLAN.md`'s own
   U0–U6/B0/X0 map), an arithmetic error, a real file-overlap risk between
   the `metric_series` coverage-frontier emitter and the mutation-engine
-  wiring lane in `fuzzlab/greybox/run.py`, and a stale "X0 still pending"
-  claim (X0 was already shipped as `CC-UI-0024`, dropped from dispatch).
-  Still plan-only — no lane executed.
+  wiring lane in `fuzzlab/greybox/run.py`, a stale "X0 still pending" claim
+  (X0 was already shipped as `CC-UI-0024`, dropped from dispatch), and a
+  lane (`--dry-run` CLI flag) that was missing pre-assigned bookkeeping
+  numbers for four of the five non-UI components it touches. Still
+  plan-only — no lane executed.
 - Research: Phase 3 CWE mapping for the "file handling" corpus cell
   (`docs/research/corpus-examples/file-handling/{php,node,python}/manifest.yaml`,
   12 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each
