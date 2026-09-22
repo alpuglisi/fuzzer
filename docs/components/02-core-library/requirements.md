@@ -1,6 +1,10 @@
 # core/ Shared Library — Requirement Specification
 
-Component code: **CORE** · Status: `[planned]` (Phase 0) · Last updated: 2026-09-21
+Component code: **CORE** · Status: `[built — store + migrations 1-12, config, structured
+logging, budget+mutex, versioned features, the HTTP send seam, plugin registry,
+per-host credential store, and metric_series/log_scalar/MetricLogger]` (Phase 0,
+extended through Phases 1-10 as later phases needed new store contracts) ·
+Last updated: 2026-09-22 · see CC-CORE-0019
 
 Related: `ARCHITECTURE.md` #2; `DECISIONS_AND_ROADMAP.md` (D5, D6); the store
 contract; `./change-control.md`.

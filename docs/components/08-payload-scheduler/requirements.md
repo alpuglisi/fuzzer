@@ -1,6 +1,10 @@
 # Payload Scheduler (Bandit) — Requirement Specification
 
-Component code: **SCHED** · Status: `[planned]` (Phase 4) · Last updated: 2026-09-21
+Component code: **SCHED** · Status: `[built — contextual hierarchical-Thompson-sampling
+bandit over payload families, catalog-derived priors, cost-normalized selection,
+hierarchical backoff, persisted/reloaded posteriors, and a uniform-control arm;
+on-lab lift-vs-uniform measurement still open, on-host]` (Phase 4) ·
+Last updated: 2026-09-22 · see CC-SCHED-0004
 
 Related: `ARCHITECTURE.md` #8; `DECISIONS_AND_ROADMAP.md` (D1, D5, Phase 4);
 `./change-control.md`.

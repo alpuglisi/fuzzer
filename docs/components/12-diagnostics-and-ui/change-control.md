@@ -3,6 +3,23 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0033 — Doc-currency fix: requirements.md said "planned" (2026-09-22)
+- Change: `docs/components/12-diagnostics-and-ui/requirements.md`'s Status header
+  read `[planned]`, stale against this log's 32 entries of built work — the FR list
+  itself (FR-UI-1…18) already carried accurate "Realized: CC-UI-NNNN" annotations
+  through CC-UI-0032, only the top-line header hadn't been updated to match.
+  Corrected to `[built — ...]`, itemizing the shipped surface. Documentation only;
+  no code or behavior change.
+- Impact (other components / project): none functionally — corrects a
+  living-spec/reality mismatch; `docs/ARCHITECTURE.md` #12 was checked and was
+  already accurate, so it needed no change.
+- Risk (level; mitigation): none — text-only, cross-checked against the FR list's
+  own "Realized" notes and this log's entries before writing.
+- Deliverables:
+  - [x] `requirements.md` Status header corrected — done.
+- Effectiveness (assessed 2026-09-22): effective — header now reads `[built]`
+  consistent with the FR list's existing realization notes.
+
 ### CC-UI-0032 — Surface the reproducible evaluation report in the web panel (CC-UI-0009 follow-up) (2026-09-22)
 - Change: a run's detail page (`/runs/{run_id}`) now renders a "Reproducibility
   report" card — schema version, config hash, feature version(s), deployed models,

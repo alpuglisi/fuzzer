@@ -310,7 +310,7 @@ tracked in the requirements files, not here.
 - **Depends on (components):** none (it is the system under test).
 - **Consumed by:** crawler, auditor, fuzzer, proxy, and the reward path.
 
-### 2. `core/` shared library `[built; plugin registry planned]`
+### 2. `core/` shared library `[built]`
 - **HTTP client** `[built]`: one send helper behind an injectable seam; requires a
   session context; records raw bytes (`core/http.py`).
 - **Store** `[built]`: SQLite access, schema, and numbered forward-only migrations
@@ -327,7 +327,9 @@ tracked in the requirements files, not here.
 - **Credential store** `[built]`: keyring-abstracted, with an encrypted-file
   headless/CI fallback on `cryptography` Fernet (PBKDF2, 0600, atomic write; D12);
   secrets by reference only, never in the project store (`core/credentials.py`).
-- **Plugin registry** `[planned]` (Phase 10): entry points plus hooks.
+- **Plugin registry** `[built]` (Phase 10): entry-point discovery, the seven-hook
+  registry wired at every real seam, per-plugin isolation/priority, and active-plugin
+  recording on the run (`core/`, `fuzzlab/plugins/`; CC-CORE-0016, CC-PLUG-0002…0004).
 - **Depends on (components):** none (foundational layer; it manages the project store).
 - **Consumed by:** every tool and ML component.
 

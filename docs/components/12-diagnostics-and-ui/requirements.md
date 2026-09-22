@@ -1,6 +1,11 @@
 # Diagnostics and UI — Requirement Specification
 
-Component code: **UI** · Status: `[planned]` · Last updated: 2026-09-21
+Component code: **UI** · Status: `[built — command-spec-driven launcher, control-plane
+hardening middleware, the app shell (sidebar nav + theme/density), Overview,
+Findings workbench + saved views, the Proxy workbench (shared message-editor +
+splitter), a read-only advisory ML tab, a Diagnostics chart tab + read-only store
+explorer, and a per-run reproducibility report]` · Last updated: 2026-09-22 ·
+see CC-UI-0032
 
 Related: `ARCHITECTURE.md` #12; `DECISIONS_AND_ROADMAP.md` (D2, D5, D11);
 `./change-control.md`.

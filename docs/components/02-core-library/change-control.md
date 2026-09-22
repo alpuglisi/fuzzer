@@ -3,6 +3,27 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0020 — Doc-currency fix: requirements.md/ARCHITECTURE.md said "planned" (2026-09-22)
+- Change: `docs/components/02-core-library/requirements.md`'s Status header read
+  `[planned] (Phase 0)`, and `docs/ARCHITECTURE.md` #2 read `[built; plugin registry
+  planned]` — both stale against this log, which already shows 19 entries of built
+  work through migration 12 (store, config, logging, budget+mutex, versioned
+  features, HTTP seam, plugin registry CC-CORE-0016, credential store, metric_series
+  CC-CORE-0018). Corrected both to `[built — ...]`, itemizing the shipped surface.
+  Documentation only; no code, schema, or behavior change.
+- Impact (other components / project): none functionally. Anyone reading this
+  component's living spec or the architecture doc now sees its actual build state
+  instead of Phase-0-planning-era text, avoiding wasted effort re-deriving what's
+  already built or, worse, re-building it.
+- Risk (level; mitigation): none — text-only. Mitigated by cross-checking every
+  claim in the new header against this log's own entries (CC-CORE-0002…0019) before
+  writing it.
+- Deliverables:
+  - [x] `requirements.md` Status header corrected — done.
+  - [x] `docs/ARCHITECTURE.md` #2 header + plugin-registry line corrected — done.
+- Effectiveness (assessed 2026-09-22): effective — both docs now read `[built]` with
+  an accurate itemization, matching this log.
+
 ### CC-CORE-0019 — Add `saved_views` table (migration 12) (2026-09-22)
 - Change: additive migration 12 creates `saved_views(id, table_key, name, spec_json,
   is_pinned, created_at, updated_at)` — a UI-owned view-preference table (facet/filter/

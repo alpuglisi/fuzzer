@@ -14,6 +14,15 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Docs: corrected five components' `requirements.md` Status headers
+  (CORE, SCHED, ML, UI, PLUG) that still read `[planned]` despite each
+  component's change-control log showing extensive built work — a "living
+  doc, kept current" gap this project's own bookkeeping policy requires
+  fixed. Also corrected `docs/ARCHITECTURE.md` #2's matching "plugin registry
+  planned" line. No code or behavior change; a documentation-currency sweep
+  triggered by finding a stale checklist item elsewhere while surveying open
+  work (see the corresponding change-control entries for what each header now
+  says and the evidence behind it).
 - CRAWL: `fuzzlab crawl` now computes and persists a `template_cluster_id`
   per page (DOM-skeleton MinHash) for every engine, and adds a new opt-in
   `--engine hybrid` that fetches static-first and escalates a page to

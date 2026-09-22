@@ -3,6 +3,25 @@
 Component code: **PLUG**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PLUG-0005 — Doc-currency fix: requirements.md said "planned" (2026-09-22)
+- Change: `docs/components/13-plugin-system/requirements.md`'s Status header read
+  `[planned] (Phase 10)`, stale against this log's 4 entries of built work (entry-
+  point discovery, the seven-hook registry wired at every real seam, per-plugin
+  isolation/priority, and CC-PLUG-0004 giving the last hook, `register_payload_source`,
+  its consumer). Corrected to `[built — ...]` and added a "Realized" note to
+  FR-PLUG-2 pointing at CC-PLUG-0003/0004. Documentation only; no code or behavior
+  change.
+- Impact (other components / project): none functionally — corrects a
+  living-spec/reality mismatch; `docs/ARCHITECTURE.md` #13 was checked and already
+  read `[built]`, so it needed no change.
+- Risk (level; mitigation): none — text-only, cross-checked against
+  CC-PLUG-0001…0004 before writing.
+- Deliverables:
+  - [x] `requirements.md` Status header corrected — done.
+  - [x] FR-PLUG-2 "Realized" annotation added — done.
+- Effectiveness (assessed 2026-09-22): effective — header now reads `[built]`,
+  consistent with `docs/ARCHITECTURE.md` #13.
+
 ### CC-PLUG-0004 — register_payload_source consumer (payload pool) (2026-09-21)
 - Change: wired the last hook end-to-end. `fuzzlab/mutation/payloads.py::PayloadPool`
   aggregates seed payloads per vuln class from a small built-in catalog plus any plugin

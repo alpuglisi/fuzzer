@@ -1,6 +1,9 @@
 # Plugin System — Requirement Specification
 
-Component code: **PLUG** · Status: `[planned]` (Phase 10) · Last updated: 2026-09-21
+Component code: **PLUG** · Status: `[built — entry-point discovery, the seven-hook
+registry wired at every real seam (HTTP, auditor, oracle, mutation payload pool),
+per-plugin isolation/priority, and active-plugin-set recording on the run]`
+(Phase 10) · Last updated: 2026-09-22 · see CC-PLUG-0004
 
 Related: `ARCHITECTURE.md` #13; `DECISIONS_AND_ROADMAP.md` (D6, Phase 10);
 `./change-control.md`.
@@ -19,7 +22,11 @@ sources — without changing core code, via a registry of hooks on `core/`.
 - **FR-PLUG-1** Discover plugins via `importlib.metadata` entry points.
 - **FR-PLUG-2** Provide a hook registry: `on_request`, `on_response`,
   `on_candidate`, `on_finding`, `register_rules`, `register_payload_source`,
-  `register_oracle`.
+  `register_oracle`. *(Realized: all seven hooks attached at their real seams —
+  `core/http.py` (on_request/on_response), `audit/engine.py` (register_rules/
+  on_candidate), `oracle/oracle.py` (register_oracle/on_finding), and
+  `mutation/payloads.py::PayloadPool.from_plugins` (register_payload_source),
+  the last of the seven to gain a consumer. CC-PLUG-0003, CC-PLUG-0004.)*
 - **FR-PLUG-3** Isolate plugins so one plugin's failure does not crash a run
   (errors are contained and logged).
 - **FR-PLUG-4** Support deterministic ordering via per-plugin priority.

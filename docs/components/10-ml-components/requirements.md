@@ -1,6 +1,11 @@
 # ML Components — Requirement Specification
 
-Component code: **ML** · Status: `[planned]` (Phases 5, 7, 10) · Last updated: 2026-09-21
+Component code: **ML** · Status: `[built — GBDT/logreg detection classifier with
+calibration + conformal abstain/drop, char n-gram TF-IDF ranking groundwork, a
+pointwise candidate ranker, uncertainty + query-by-committee active learning, an
+ECOD/XGBOD-style anomaly detector, plugin-hook attachment, and training-curve
+metric_series; held-out exit on real lab data still open, on-host]`
+(Phases 5, 7, 10) · Last updated: 2026-09-22 · see CC-ML-0009
 
 Related: `ARCHITECTURE.md` #10; `DECISIONS_AND_ROADMAP.md` (D1, D2, D10);
 `./change-control.md`.

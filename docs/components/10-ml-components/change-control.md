@@ -3,6 +3,23 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0010 — Doc-currency fix: requirements.md said "planned" (2026-09-22)
+- Change: `docs/components/10-ml-components/requirements.md`'s Status header read
+  `[planned] (Phases 5, 7, 10)`, stale against this log's 9 entries of built work
+  (GBDT/logreg classifier + calibration/conformal, ranking groundwork, pointwise
+  ranker, active learning, ECOD/XGBOD anomaly detector, training-curve metrics).
+  Corrected to `[built — ...]`, naming what shipped and the one genuinely open
+  item (held-out exit on real lab data, on-host). Documentation only; no code or
+  behavior change.
+- Impact (other components / project): none functionally — corrects a
+  living-spec/reality mismatch.
+- Risk (level; mitigation): none — text-only, cross-checked against
+  CC-ML-0001…0009 before writing.
+- Deliverables:
+  - [x] `requirements.md` Status header corrected — done.
+- Effectiveness (assessed 2026-09-22): effective — header now reads `[built]`
+  with an accurate itemization and names the remaining on-host item.
+
 ### CC-ML-0009 — Emit training-curve metric_series from the deploy fit (2026-09-22)
 - Change: `GradientBoostedTrees.fit`/`LogisticRegression.fit` (`fuzzlab/ml/gbt.py`,
   `fuzzlab/ml/logistic.py`) gain additive `on_round`/`on_epoch` callback parameters.

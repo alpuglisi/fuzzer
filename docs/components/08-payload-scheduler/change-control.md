@@ -3,6 +3,22 @@
 Component code: **SCHED**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SCHED-0005 — Doc-currency fix: requirements.md said "planned" (2026-09-22)
+- Change: `docs/components/08-payload-scheduler/requirements.md`'s Status header
+  read `[planned] (Phase 4)`, stale against this log's 4 entries of built work
+  (bandit core, context buckets/priors, cost-normalization, hierarchical backoff).
+  Corrected to `[built — ...]`, naming what shipped and noting the one item that
+  is genuinely still open (on-lab lift-vs-uniform measurement, on-host).
+  Documentation only; no code or behavior change.
+- Impact (other components / project): none functionally — corrects a
+  living-spec/reality mismatch so the component isn't mistaken for unbuilt.
+- Risk (level; mitigation): none — text-only, cross-checked against
+  CC-SCHED-0001…0004 before writing.
+- Deliverables:
+  - [x] `requirements.md` Status header corrected — done.
+- Effectiveness (assessed 2026-09-22): effective — header now reads `[built]`
+  with an accurate itemization and names the remaining on-host item.
+
 ### CC-SCHED-0004 — Cost-normalized selection (T4.4) + hierarchical backoff (T4.5) (2026-09-21)
 - Change: `ThompsonBandit` gained two opt-in refinements. **Cost-normalized** (T4.4):
   `update(context, arm, reward, cost=…)` records a running mean cost; with
