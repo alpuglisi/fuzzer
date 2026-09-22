@@ -1,0 +1,110 @@
+# Real-page reproduction manifest: the AUTH pages, `php_laravel` idiom.
+#
+# Lane L-P3.3c-G3 (`docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6, row `G3` of
+# §4.3.6.4's table): `puppy-fort-factory/login.php` and
+# `puppy-fort-factory/register.php`, reproduced as `php_laravel` cells so the
+# generator -- not the hand-built directory -- becomes the source of those two
+# pages (D20 §7.2). Unlike `lab/manifests/phase3_php_laravel_sample.yaml`,
+# whose routes are illustrative and extension-less, every cell here reproduces
+# a REAL page and is therefore served at that page's **exact** URL.
+#
+# Ground truth reproduced (lab/ground-truth/labels.json /
+# expectedresults.csv, cross-checked against
+# puppy-fort-factory/VULNERABILITIES.md §3 and the two source files):
+#
+#   PFF-0004  POST /login.php     param `username`  sqli   expected_vulnerable=true
+#             "$username concatenated raw; classic auth bypass" --
+#             VULNERABILITIES.md §3's
+#             `WHERE username = '$username' AND password = '<md5>'`.
+#   PFF-1008  POST /login.php     param `password`  none   expected_vulnerable=false
+#             "md5-hashed before use; not an injection point" -- the password
+#             position is a true negative on the SAME page, and it is rendered
+#             as such in BOTH login cells below (the sink's second, non-tainted
+#             condition), exactly as the real page has one page with one
+#             injectable and one non-injectable parameter.
+#   PFF-1004  POST /register.php  param `username`  none   expected_vulnerable=false
+#             "prepared statements + escaped output" -- register.php's
+#             duplicate-username check (`SELECT id FROM users WHERE
+#             username = ?`) plus its prepared INSERT.
+#
+# Verdicts are never asserted here: they are derived by
+# fuzzlab.labgen.verdict.verdict() from (transform, sink_context) against
+# lab/safety_matrix.yaml v1, and
+# tests/test_labgen_php_laravel_real_pages_auth.py asserts that each derived
+# verdict equals the `expected_vulnerable` value labels.json already carries
+# for the case above it (§4.3.6.6 point 2's acceptance criterion).
+#
+# Two authoring constraints this manifest exists to honor:
+#
+# * **The `.php` suffix is load-bearing** (§4.3.6.6a). T-LAB0.9's
+#   additive-only regression gate (`fuzzlab.labgen.regression_gate`) fails a
+#   candidate ground truth that *relocates* an existing case, so
+#   `route.path` is `/login.php` and `/register.php` verbatim -- never
+#   Laravel's idiomatic `/login`. The emitter registers the real path and the
+#   real HTTP method for a real page (see `real_page` in
+#   `fuzzlab.labgen.emitters.php_laravel._PAGE_PROFILES`).
+# * **The Laravel safe/raw default is inverted** (§4.3.6.3a). The secure twin
+#   below differs from its vulnerable partner ONLY in the binding
+#   (`whereRaw("username = '$u'")` -> a bound `where('username', $u)` on the
+#   same `DB::table(...)` statement), never by re-constructing the query --
+#   a whole-statement rewrite would (correctly) be rejected by
+#   `fuzzlab.labgen.minimal_pair`, which is asserted directly rather than
+#   assumed.
+#
+# Cell IDs are in the LABGEN-PLA- ("php_laravel auth") namespace, out of the
+# illustrative LABGEN-EX-/LABGEN-HS-/LABGEN-PL- namespaces and out of the real
+# PFF- ground-truth namespace. Nothing here is wired to a build that touches
+# puppy-fort-factory/ or lab/ground-truth/: the cutover that re-points those
+# is lane L-P3.3c-CUT, deliberately last (§4.3.6.5).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # --- login.php (PFF-0004 / PFF-1008) ------------------------------------
+  # Vulnerable: the POST `username` is spliced raw into a quoted SQL string
+  # literal. The password condition in the same statement is the PFF-1008
+  # true negative -- already hashed, never this cell's injection point.
+  #
+  # This is the cell that owns the real `/login.php` URL (the `canonical_cell_id`
+  # of the emitter's `/login.php` page profile), because PFF-0004 -- the case
+  # labels.json places at that URL -- is the vulnerable one.
+  - cell_id: LABGEN-PLA-0001
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: POST, path: /login.php }
+    param: { location: body }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  # The secure twin: same page, same statement, same sink module, same
+  # session-establishing controller tail -- the ONLY difference is that the
+  # username reaches the query layer as a bound parameter. Authored (like
+  # phase0_real_pages_sample.yaml's twins) as this lane's own addition for
+  # training value; labels.json carries no case at this variant URL, so it
+  # relocates nothing.
+  - cell_id: LABGEN-PLA-0002
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: POST, path: /login.php }
+    param: { location: body }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
+
+  # --- register.php (PFF-1004) -------------------------------------------
+  # A secure-only cell -- legal per §4.3.6.3 ("secure-only cells are legal";
+  # `minimal_pair.py` is a checker over two rendered results, not a schema
+  # constraint) and correct here: register.php has no vulnerable twin in the
+  # real app, and its safety comes from `param_bind`, the op the safety matrix
+  # models, so it is emitted rather than exempted.
+  - cell_id: LABGEN-PLA-0003
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: POST, path: /register.php }
+    param: { location: body }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]

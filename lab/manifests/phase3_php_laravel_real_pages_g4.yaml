@@ -1,0 +1,88 @@
+# Phase-3 php_laravel REAL-page manifest -- lane L-P3.3c-G4, the stored
+# second-order pair (docs/LAB_IMPLEMENTATION_PLAN.md §4.3.6, G4 row of
+# §4.3.6.3's inventory table).
+#
+# Unlike lab/manifests/phase3_php_laravel_sample.yaml (illustrative Laravel
+# pages, extension-less idiomatic routes), the cells here reproduce two ACTUAL
+# puppy-fort-factory/ pages through the php_laravel emitter:
+#
+#   edit_profile.php  (POST, the WRITE endpoint -- `Cell.route`)
+#        |  the `bio` value is stored verbatim (prepared statement: no SQLi)
+#        v
+#   profile.php       (GET, the READ/SINK endpoint -- `Cell.sink_endpoint`)
+#           the stored `bio` is rendered into an HTML body
+#
+# §4.3.6.3's third finding: this is ONE cell pair, not two pages. It is exactly
+# L-P2.3's `stored_second_order` flow variant, so `context_depth` is declared
+# explicitly and `sink_endpoint` names the read endpoint --
+# fuzzlab.labgen.schema.Cell.__post_init__ enforces the two biconditionally (a
+# 'stored_second_order' depth requires a sink_endpoint distinct from route, and
+# a distinct sink_endpoint requires that depth).
+#
+# ROUTES KEEP THE `.php` SUFFIX -- §4.3.6.6a, the single most likely way to get
+# this lane wrong. Laravel's idiomatic route would be /edit_profile and
+# /profile; using those would RELOCATE PFF-0005 and PFF-1007 away from the
+# pages lab/ground-truth/labels.json records for them, and
+# fuzzlab.labgen.regression_gate.diff_ground_truth would correctly fail the
+# build (it diffs `url` per case_id). Laravel routes are arbitrary strings, so
+# keeping the real URLs costs nothing technically.
+#
+# Ground truth these two cells reproduce (lab/ground-truth/labels.json):
+#   PFF-0005 -- url /profile.php,      expected_vulnerable: true   -> cell 0401
+#   PFF-1007 -- url /edit_profile.php, expected_vulnerable: false  -> cell 0402
+# Verdicts are never asserted here: they are DERIVED by
+# fuzzlab.labgen.verdict.verdict() from (transform, sink_context) against
+# lab/safety_matrix.yaml v1, and
+# tests/test_labgen_php_laravel_real_pages_g4.py asserts each derivation
+# against the label above, read from labels.json rather than restated (PA-0001).
+#
+# Minimal-pair shape (§4.3.6.3a, the Laravel authoring hazard): the two cells
+# differ ONLY in the transform region -- `html_entity_escape` applies Laravel's
+# e() helper, the same htmlspecialchars() call Blade's {{ }} echo makes, while
+# the Blade sink fragment (`{!! $value !!}`) and the whole rendering
+# construction are shared. That is L-P3.3b's own resolution of the `{{ }}` vs
+# `{!! !!}` choice (fuzzlab/labgen/emitters/php_laravel/modules.py's module
+# docstring, decision 2): it keeps the security-relevant difference inside the
+# declared transform region, which is strictly stronger than moving it into the
+# view file, and is what fuzzlab.labgen.minimal_pair checks for real.
+#
+# Cell IDs are prefixed LABGEN-PLRP- ("php_laravel real pages") to keep them
+# out of the illustrative LABGEN-PL-/LABGEN-EX-/LABGEN-HS- namespaces and out
+# of the real PFF- ground-truth namespace. The 04xx block is G4's; sibling
+# sub-lanes G1/G2/G3/G5/G6 own their own blocks.
+#
+# The owning identity for the stored `bio` is declared in
+# lab/identities/identities.yaml (resource `profile_bio_user_a`, owner
+# `user_a`), which references both cell IDs below -- the one-directional
+# annotation fuzzlab.labgen.identity defines. Per CR-LAB-0001 Addendum A that
+# reference is never followed the other way: no field here points back at it,
+# and fuzzlab.labgen.verdict never reads it.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # --- VULNERABLE (PFF-0005): the stored `bio` reaches the HTML body raw ---
+  - cell_id: LABGEN-PLRP-0401
+    class: xss
+    stack_profile: php_laravel
+    route: { method: POST, path: /edit_profile.php }
+    param: { location: body }
+    sink_endpoint: { method: GET, path: /profile.php }
+    context_depth: stored_second_order
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: []
+
+  # --- SECURE twin (PFF-1007): the only permitted difference is the ---------
+  # --- transform region (html_entity_escape), never the construction. ------
+  - cell_id: LABGEN-PLRP-0402
+    class: xss
+    stack_profile: php_laravel
+    route: { method: POST, path: /edit_profile.php }
+    param: { location: body }
+    sink_endpoint: { method: GET, path: /profile.php }
+    context_depth: stored_second_order
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: [html_entity_escape]

@@ -1,0 +1,10 @@
+{# A *quoted* HTML attribute value -- the reflected search box
+   (puppy-fort-factory/search.php's `value="<?= $q ?>"`), rendered as a Blade
+   view body. Unlike the unquoted sibling sink, entity escaping IS the
+   context-correct fix here, so this family's secure twin is the escaped one.
+   Blade's RAW echo is used on purpose: a sink never escapes anything itself,
+   so both twins share this fragment (see modules.py's docstring, decision 2). #}
+<form class="{{ css_class }}" method="get" action="">
+  <input type="text" name="{{ attr_name }}" value="{!! $value !!}">
+  <button class="btn" type="submit">Search</button>
+</form>

@@ -284,17 +284,35 @@ tracked in the requirements files, not here.
   `html_entity_escape` transform applies `e()` in the controller). The widened
   `lab/manifests/phase3_php_laravel_sample.yaml` (20 cells) passes
   `fuzzlab lab-generate --check` end to end through the CLI's
-  `EMITTER_REGISTRY`, which `php_laravel` is now registered in. Not carried:
-  the `context_depth` axis (non-`direct` cells are refused, never flattened).
-  The `puppy-fort-factory/` migration onto this emitter (lane L-P3.3c) is
-  **under way, one page group at a time**: `contact.php` and `newsletter.php`
-  (`PFF-1005`/`PFF-1006`) are reproduced as secure-only escaped-echo cells in
-  `lab/manifests/phase3_laravel_real_pages_forms.yaml` (`CC-LAB-0050`,
-  FR-LAB-48), whose generated routes keep the real app's exact `.php`-suffixed
-  URLs so T-LAB0.9's additive-only regression gate does not see those cases
-  *relocate*. The remaining page groups, the DOM-XSS sink class
-  (`PFF-0007`/`PFF-0008` — no sink family exists yet) and the atomic cutover
-  that deletes the hand-built directory are still pending.
+  `EMITTER_REGISTRY`, which `php_laravel` is now registered in. Not carried: the `same_file_helper`/`cross_file` pass-through-helper depths
+  (still refused, never flattened) -- `stored_second_order` is now carried, see
+  below.
+  The `puppy-fort-factory/` migration onto this emitter (lane L-P3.3c) landed
+  **six page groups (G1-G6) plus a consolidation pass** in one combined
+  change: `product.php`/`blog_post.php` (G1, `FR-LAB-44`),
+  `products.php`/`api/products.php` and the JSON `view` module category (G2,
+  `FR-LAB-45`), `login.php`/`register.php` and session/insert complexity tails
+  (G3, `FR-LAB-46`), the stored second-order pair
+  `edit_profile.php`->`profile.php` and this emitter's first **write**
+  endpoint (`WRITES` module category; G4, `FR-LAB-47` -- `context_depth ==
+  "stored_second_order"` is now rendered, `SUPPORTED_CONTEXT_DEPTHS`),
+  `contact.php`/`newsletter.php` (G5, `CC-LAB-0050`/`FR-LAB-48`, merged
+  earlier), and `search.php` plus the `html_attribute_quoted` shape (G6,
+  `FR-LAB-49` -- **deliberately left with no canonical cell**, open for
+  `L-P3.3c-CUT`). Because the six sub-lanes built five independent,
+  incompatible URL-pinning mechanisms concurrently, a consolidation pass
+  (`CC-LAB-0052`/`FR-LAB-50`) replaced all of them with **one**:
+  `_REAL_PAGE_KEY`/`_CANONICAL_CELL_KEY` page-profile keys (generalizing G3's
+  design -- canonical-cell-per-page, a `.php`-suffixed twin-URL convention for
+  every other cell of that page, and a `None` canonical for a page whose cell
+  choice is still an open policy question) plus one shared `served_url_for()`
+  derivation and one `route_accumulator.fragment_for_cell(method=, action=)`
+  signature, so every migrated page's real route keeps the app's exact
+  `.php`-suffixed URL (T-LAB0.9's additive-only regression gate does not see
+  those cases *relocate*) through a single mechanism rather than five. The
+  DOM-XSS sink class (`PFF-0007`/`PFF-0008` -- no sink family exists yet,
+  `D-open-2`) and the atomic cutover that deletes the hand-built directory
+  (`D-open-1`) are still pending and unrelated to this consolidation.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

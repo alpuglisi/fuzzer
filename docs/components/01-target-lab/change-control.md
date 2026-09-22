@@ -3,10 +3,350 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0052 — L-P3.3c consolidation: one unified URL-pinning mechanism replacing five independent ones (2026-09-22)
+- Change: six sub-lanes (L-P3.3c-G1..G6) were dispatched concurrently against
+  `fuzzlab/labgen/emitters/php_laravel/__init__.py` and `route_accumulator.py`. Because they
+  ran without seeing each other's code, each built its own, mutually-incompatible mechanism
+  for keeping a migrated real page at its real `.php`-suffixed URL (§4.3.6.6a): G5 (merged,
+  `CC-LAB-0050`) a `url_path` pin + an instance-level double-claim guard; G1 a
+  `served_url_for`/`ground_truth_url_cell_id` pair; G2 its own, differently-shaped
+  `url_path` key plus a `DuplicateRouteError` whole-file scan; G3 `real_page`/
+  `canonical_cell_id` with an explicit twin-URL convention and HTTP-method support; G4 a
+  hand-authored `_REAL_URL_ROUTES` registry plus its own `stored_second_order`/write-endpoint
+  axis; G6 left `search.php` deliberately unpinned and flagged the decision for
+  `L-P3.3c-CUT`. This entry replaces all five mechanisms (G5's included) with **one**:
+  1. **`_REAL_PAGE_KEY`/`_CANONICAL_CELL_KEY`**, generalizing G3's design (chosen as the
+     target shape because it is the most complete — canonical-cell-per-page, HTTP-method
+     support, and an explicit twin-URL convention — and because G5's already-merged
+     single-cell case is exactly the trivial case of "canonical cell, no twins"). A page
+     profile carrying `real_page: True` names, via `canonical_cell_id`, the one cell served
+     at the page's real URL and method; every other cell of that page is served at
+     `_twin_url_for()`'s distinct, still-`.php`-suffixed variant (e.g.
+     `/login.labgen-pla-0002.php`); `canonical_cell_id: None` (explicit) is the legal,
+     flagged-open state G6's `search.php` needs — every cell of such a page falls back to
+     the plain illustrative `/cell/<slug>` URL until `L-P3.3c-CUT` resolves it.
+  2. **One shared derivation, `_served_route_for()`/`served_url_for()`** (PA-0003/PA-0021):
+     called by `route_fragment_for()` (which registers the route),
+     `identifier_sqli.probe_cell_for()` and `auth_session.login_url_for()` (which probe or
+     post to it) — never re-derived. Applied *twice* for a `stored_second_order` cell (once
+     for its read page, once for its write page), which is what let G4's
+     `/profile.php`/`/edit_profile.php` pair fold into the same mechanism as every other
+     lane's single-page real pages, without its own registry.
+  3. **One `route_accumulator.fragment_for_cell` signature**, reconciling G3's
+     (`method: str = "GET"`, an uppercase `_METHOD_HELPERS` dict including PUT/PATCH/DELETE)
+     and G4's (`http_method`/`action`, lowercase, a smaller GET/POST set) shapes into
+     `fragment_for_cell(*, cell_id, controller_class, url_path, method="GET",
+     action="show")`. `RouteAccumulator.render_file`'s duplicate-URL guard (G2's
+     `DuplicateRouteError`, kept as the shared safety net) now scans every `Route::` line
+     of a fragment (`re.finditer`, not `re.search`) rather than only the first, since a
+     `stored_second_order` cell's fragment now legitimately carries two lines.
+  4. **Content migrated onto the unified mechanism, nothing discarded:** G1's
+     `product.php`/`blog_post.php` pages and bound-parameter twins; G2's
+     `products.php`/`api/products.php` pages and the `json_view` module category
+     (`JSON_FIELD_CASTS`, `VIEWS`) unchanged (a different axis than URL pinning); G3's
+     `login.php`/`register.php` pages, `_SESSION_LOGIN_KEY`/`_REGISTER_INSERT_KEY` complexity
+     tails, and `auth_session.py` (updated to call `served_url_for` under its new name);
+     G4's `stored_second_order` support (`SUPPORTED_CONTEXT_DEPTHS`), the `WRITES` module
+     category and `stored_field_write.php.j2`, and the real `/profile.php`/`/edit_profile.php`
+     pair, now expressed as two ordinary real-page profiles instead of `_REAL_URL_ROUTES`;
+     G6's `search.php` six-cell page, the `html_attribute_quoted`/`sql_string_literal_like`
+     sinks, the `(raw_concat, html_attribute_quoted)` safety-matrix row, and its
+     deliberately-unpinned flag, preserved verbatim. G1's naming-safety finding (a
+     `LABGEN-PFF-<case-id>` cell name would leak a ground-truth case ID into generated
+     provenance, an FR-LAB-2 violation) is generalized into `_GROUND_TRUTH_CASE_KEY`, an
+     optional, always-popped page-profile field every real-page profile now carries and a
+     standing test (in each migrated lane's own test file) asserts never reaches a rendered
+     file. Every lane's own manifest cell IDs are kept as authored (`LABGEN-PLRP-`,
+     `LABGEN-RPL-`, `LABGEN-PLA-`, `LABGEN-PL-RP-`, ...) — the prefix mismatch is noted, not a
+     mechanism collision, and not fixed here.
+  5. **G2's route-line-sorted test fix lands, not a reverted version**:
+     `tests/test_labgen_php_laravel_harder_shapes.py`'s
+     `test_the_routes_file_carries_one_sorted_line_per_cell` continues to assert
+     `route_lines == sorted(route_lines)` (a text-sort that happens to still coincide with
+     cell-ID order for the illustrative-only sample manifest it runs over), and this lane's
+     dedicated `test_labgen_php_laravel_real_pages_*` files instead assert the sorted-cell-ID
+     invariant directly wherever a `.php`-suffixed URL no longer embeds the cell's slug.
+     `SingleStatementComplexity.render()` now passes the whole context (`template.render(
+     **ctx)`, G3's fix) rather than two hand-picked keys, so `session_login`/
+     `register_insert` reach their template without a second place having to learn every new
+     key.
+- Design decision made autonomously (Auto Mode: the URL-naming bikeshed was blocking four
+  lanes' merges, and a reasonable call was preferred to stalling): the twin-URL suffix
+  convention (`/login.labgen-pla-0002.php`, embedding the cell slug before the `.php`
+  suffix) is G3's own choice, adopted unchanged rather than redesigned. **A human reviewer
+  may want to revisit this specifically** — an alternative (e.g. a query-string discriminator,
+  or a `/variants/<slug>/login.php` prefix) was not evaluated against it. Flagged in
+  `requirements.md` §8 as open for review, not as a defect.
+- Impact (other components / project): none outside LAB. `fuzzlab/labgen/modules/__init__.py`
+  (php_current) and `fuzzlab/labgen/conformance/static_precheck.py` gained G6's two sinks and
+  static-precheck row (`php_current`'s own `_MODULE_SET_BY_SHAPE` is unchanged — that emitter
+  is not the migration target, §4.3.6.6b). `lab/safety_matrix.yaml` gained G6's
+  `(raw_concat, html_attribute_quoted)` row (additive, same `version: 1`).
+  `lab/identities/identities.yaml` gained G4's `profile_bio_user_a` resource and its three
+  authz expectations. Five worktree branches (`worktree-agent-a416d1ea63045d177` [G1],
+  `-a4352a9e9c3535d45` [G2], `-a96cec86a7cb390b6` [G3], `-a41d184fd5b052e71` [G4],
+  `-ab0e87dc363eec472` [G6]) are now superseded by this consolidation and should not be
+  merged separately.
+- Risk (level; mitigation or accepted-risk justification): **low**. (a) *The twin-URL naming
+  convention is a judgment call, not a verified-safe default* — mitigated by flagging it
+  explicitly here and in `requirements.md` for human review, and by the mechanism being
+  structurally reversible (renaming the convention touches `_twin_url_for()` alone). (b)
+  *`search.php`'s canonical-cell decision remains unresolved* — accepted, per G6's own
+  finding: it is explicitly `L-P3.3c-CUT`'s call, not this pass's, and resolving it here
+  would have been inventing a policy decision rather than consolidating five existing ones.
+  (c) *Five branches' worth of manifests/tests/templates were re-authored from their
+  `git diff`s rather than merged mechanically* — mitigated by the full suite passing (see
+  below) with every migrated manifest exercised by both a dedicated test file and the
+  cross-manifest `PA-0024` sweeps in `test_labgen_php_laravel_harder_shapes.py`.
+- Deliverables:
+  - [x] Unified `_REAL_PAGE_KEY`/`_CANONICAL_CELL_KEY` mechanism in
+        `emitters/php_laravel/__init__.py`, replacing G5's `_pinned_url_claims` and every
+        unmerged lane's own key — done
+  - [x] `route_accumulator.fragment_for_cell(method=, action=)` unified signature;
+        multi-line-aware `DuplicateRouteError` scan — done
+  - [x] `WRITES`/`stored_field_write.php.j2` (G4), `VIEWS`/`json_view.php.j2` (G2),
+        `html_attribute_quoted_echo`/`sql_string_literal_like` sinks (G6) merged into
+        `modules.py`/`stack_env.py`/`templates/` — done
+  - [x] Five manifests migrated: `phase3_php_laravel_real_pages_{numeric,g2,auth,g4,search}
+        .yaml` — done
+  - [x] Five dedicated test files rewritten against the unified mechanism, plus
+        `tests/test_labgen_php_laravel_real_pages_forms.py` (G5) and
+        `tests/test_labgen_php_laravel_harder_shapes.py` updated for it — done
+  - [x] `CC-LAB-0046`/`0047`/`0048`/`0049`/`0051` and `FR-LAB-44`/`45`/`46`/`47`/`49` entries
+        (below), describing the final unified mechanism rather than each lane's discarded
+        plumbing — done
+  - [x] `docs/ARCHITECTURE.md`, `requirements.md` §8 open-questions update — done
+  - [ ] Not this pass: resolving `search.php`'s canonical cell (`L-P3.3c-CUT`); the
+        twin-URL-naming human review; D-open-1/D-open-2 (unrelated, unresolved) — pending
+- Effectiveness (assessed 2026-09-22): full suite **1494 passed / 8 skipped / 0 failed**.
+  The two `test_mutation_operators.py` MUT failures this task's brief flagged as
+  pre-existing/out-of-scope (`test_every_surface_variant_preserves_semantics`,
+  `test_sql_equivalent_needs_trusted_provenance`) were confirmed failing on trunk before
+  this pass started, and confirmed fixed — independently of this pass, by `BUG-0026`
+  (commit `c6953c4`, already on this branch) — by the time this pass finished; this pass
+  touches neither `fuzzlab/mutation/` nor `tests/test_mutation_operators.py`. Every migrated
+  lane's manifest cells render, pass Tier-0 `php -l`
+  (skip-guarded), Tier-3 byte-identical regeneration, minimal-pair, and (for G1/G2/G3/G4) the
+  real regression gate both ways (pinned URLs accepted, idiomatic ones rejected).
+
+### CC-LAB-0051 — L-P3.3c-G6: `search.php` (three sinks x vulnerable/secure) + the `html_attribute_quoted` shape, deliberately left unpinned (2026-09-22)
+- Change: executed group **G6** of `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6's per-page
+  migration table — `puppy-fort-factory/search.php`, one `?q=` reaching three sinks (a
+  `LIKE '%q%'` SQL string literal, an HTML body reflection, and a quoted attribute
+  reflection), as six cells in `lab/manifests/phase3_php_laravel_real_pages_search.yaml`
+  (`LABGEN-PL-RP-0001`..`0006`, reproducing `PFF-0002`/`PFF-0003`) — plus the
+  `(raw_concat, html_attribute_quoted)` safety-matrix row this page's third sink needed, the
+  first shape on which `php_laravel`'s inventory is a strict superset of `php_current`'s
+  (`test_laravel_carries_every_shape_php_current_supports` relaxed from equality to `>=`
+  accordingly; `php_current`'s own `_MODULE_SET_BY_SHAPE` is untouched — it is not the
+  migration target, §4.3.6.6b). New sink modules `html_attribute_quoted_echo` and
+  `sql_string_literal_like` (the latter a second *rendering* of the existing
+  `sql_string_literal` family, not a new one — search.php's `LIKE` filter has no
+  login-style password condition to fold in) were registered in both `php_laravel`'s and
+  `php_current`'s sink registries (for the shared minimal-pair vocabulary), with a
+  `sink_override_by_family` page-profile key so one profile can pick a different sink
+  rendering per sink family on the same page.
+
+  **`search.php` is deliberately left with no canonical cell.** Its page profile carries
+  `real_page: True` but `canonical_cell_id: None` (explicit) — the unified mechanism's
+  legal, flagged-open state (see `CC-LAB-0052`): Laravel cannot register six
+  `GET /search.php` routes for six cells (three sink behaviors x vulnerable/secure), and
+  which cell should own that URL — or whether the `Cell` IR needs a multi-sink page
+  composition that does not exist today — is a policy decision this lane, and the
+  consolidation pass that followed it, both decline to make. **Still open for
+  `L-P3.3c-CUT`.** Every cell of this page is served at its plain, illustrative
+  cell-ID-derived `/cell/<slug>` URL in the meantime; only `cell.route.path` (which the
+  regression gate diffs by `case_id`, never by what a route actually serves) carries the
+  real `/search.php` string.
+- Impact (other components / project): `fuzzlab/labgen/modules/__init__.py` (php_current) and
+  `fuzzlab/labgen/conformance/static_precheck.py` gained the two new sinks and an
+  `(xss, html_attribute_quoted) -> INFORMATIVE` precheck row respectively; both additive,
+  neither widens `php_current`'s own supported-shape map. `lab/safety_matrix.yaml` gained one
+  row under the existing `version: 1` (additive per the file's own append-only rule).
+- Risk (level; mitigation or accepted-risk justification): **low**, with one **accepted, open**
+  risk: `search.php`'s real URL is not served by any generated route, so a build that later
+  needs to fingerprint or crawl the real `/search.php` path against this stack's output would
+  find nothing there. Accepted because inventing a canonical-cell choice (or a multi-sink page
+  composition) is explicitly out of scope for a migration lane and belongs to `L-P3.3c-CUT`,
+  which owns emitting the candidate ground truth the regression gate runs against.
+- Deliverables:
+  - [x] `lab/manifests/phase3_php_laravel_real_pages_search.yaml` (6 cells) — done
+  - [x] `html_attribute_quoted_echo`/`sql_string_literal_like` sinks in both emitters'
+        registries; `sink_override_by_family` page-profile mechanism — done
+  - [x] `(raw_concat, html_attribute_quoted)` safety-matrix row — done
+  - [x] `tests/test_labgen_php_laravel_search_page.py` (11 tests: shape registration/scoring,
+        the deliberately-unpinned flag read from the profile itself, six-distinct-URL route
+        registration, minimal pair, Tier-0/Tier-3, `lab-generate --check`) — done
+  - [x] Bookkeeping: this entry, `FR-LAB-49`, `docs/ARCHITECTURE.md`, `CHANGELOG.md` — done
+  - [ ] Not this lane: resolving the canonical-cell decision — pending, `L-P3.3c-CUT`
+- Effectiveness (assessed 2026-09-22): all six cells render and derive both verdicts per
+  sink family; the new shape scores `VULNERABLE`/`SECURE` correctly against the matrix; full
+  suite green (see `CC-LAB-0052` for the exact pass/skip count).
+
+### CC-LAB-0049 — L-P3.3c-G4: `edit_profile.php` -> `profile.php`, the stored second-order pair, and the first write endpoint (2026-09-22)
+- Change: executed group **G4** of `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.3's per-page
+  inventory — the stored second-order pair (`PFF-0005` vulnerable / `PFF-1007` secure),
+  the first `context_depth == "stored_second_order"` cells `php_laravel` renders
+  (`SUPPORTED_CONTEXT_DEPTHS = ("direct", "stored_second_order")`; `same_file_helper`/
+  `cross_file` remain refused, since those need pass-through-helper *fragments* this lane's
+  axis does not) and the first **write** endpoint any emitter in this project emits (no
+  emitter previously reproduced the real app's write page for a stored cell —
+  `php_current._render_depth` returns no fragments for this depth at all). New `WRITES`
+  module category (`stored_field_write.php.j2`): an Eloquent attribute assignment plus
+  `save()`, persisting the tainted parameter **verbatim** (Eloquent binds it, so the write
+  itself is not an injection point — the vulnerability is decided at the read endpoint,
+  where the cell's transform pipeline applies). Two cells in
+  `lab/manifests/phase3_php_laravel_real_pages_g4.yaml` (`LABGEN-PLRP-0401`/`0402`), each a
+  three-file cell (read controller + Blade view + write controller). `lab/identities/
+  identities.yaml` gained the owning identity for the stored `bio` (resource
+  `profile_bio_user_a`, owner `user_a`) plus three authz expectations, since a stored
+  second-order payload is written by, and read back as, some identity.
+
+  **URL mechanism migrated from this lane's own `_REAL_URL_ROUTES` registry onto the
+  unified mechanism** (see `CC-LAB-0052`): `/profile.php` (the read page) and
+  `/edit_profile.php` (the write page) are now two ordinary `real_page` profiles, each with
+  its own `canonical_cell_id` (`LABGEN-PLRP-0401` owns `/profile.php`, matching where
+  `PFF-0005` is labelled; `LABGEN-PLRP-0402` owns `/edit_profile.php`, matching `PFF-1007`).
+  The non-owning cell of each page now gets the same `.php`-suffixed twin-URL every other
+  lane's twin gets (`/edit_profile.labgen-plrp-0401.php`,
+  `/profile.labgen-plrp-0402.php`), rather than this lane's original fallback to the plain
+  cell-ID-derived `/cell/<slug>` — so every cell still answers both its read and write
+  endpoints, just via the same mechanism as G1/G2/G3/G5 rather than a fourth one.
+- Impact (other components / project): none outside LAB. `StackEnv.file_roles` gained one
+  additive `write_controller` path template; every pre-existing (`direct`-depth) cell's
+  emitted file set, route line and content are unchanged.
+- Risk (level; mitigation or accepted-risk justification): **low**. The write endpoint
+  carries no transform (identical between a vulnerable cell and its secure twin by
+  construction), so it cannot itself introduce a minimal-pair violation; a dedicated test
+  confirms the two cells' write controllers are byte-identical outside their per-cell
+  identifiers.
+- Deliverables:
+  - [x] `SUPPORTED_CONTEXT_DEPTHS`, `_render_write_controller`, `WRITES`/
+        `stored_field_write.php.j2` — done
+  - [x] `lab/manifests/phase3_php_laravel_real_pages_g4.yaml` (2 cells) — done
+  - [x] `lab/identities/identities.yaml` additions — done
+  - [x] `tests/test_labgen_php_laravel_real_pages_g4.py` (12 tests: three-file rendering,
+        write-controller content/parity, both read+write routes per cell via the unified
+        mechanism, real-URL-owner-matches-label, unknown-verb refusal, identity graph,
+        Tier-0/Tier-3, `lab-generate --check`) — done
+  - [x] Bookkeeping: this entry, `FR-LAB-47`, `docs/ARCHITECTURE.md`, `CHANGELOG.md` — done
+- Effectiveness (assessed 2026-09-22): both cells derive the verdict their `PFF-` case
+  labels, both routes (read+write) resolve for both cells, and the write controllers are
+  confirmed identical outside per-cell identifiers; full suite green (see `CC-LAB-0052` for the exact pass/skip count).
+
+### CC-LAB-0048 — L-P3.3c-G3: `login.php` (vulnerable + secure twin) + `register.php`, the auth pages (2026-09-22)
+- Change: executed group **G3** of `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.3's per-page
+  inventory — `login.php` (`PFF-0004` vulnerable `username` + `PFF-1008` true-negative
+  `password` condition, plus an authored secure twin) and `register.php` (`PFF-1004`,
+  secure-only), in `lab/manifests/phase3_php_laravel_real_pages_auth.yaml`
+  (`LABGEN-PLA-0001`/`0002`/`0003`). The first two-cell (canonical + twin) real page in this
+  emitter, and the source of the **unified URL-pinning mechanism** the consolidation pass
+  (`CC-LAB-0052`) generalized project-wide: `real_page`/`canonical_cell_id` page-profile
+  keys, the `.php`-suffixed twin-URL convention (`/login.labgen-pla-0002.php`), and
+  `route_accumulator.fragment_for_cell`'s HTTP-method parameter (`login.php`/`register.php`
+  are POST pages; the pre-existing accumulator hardcoded `Route::get`, an accepted risk
+  `CC-LAB-0050` flagged and this lane's own contribution resolves). Two new complexity-tail
+  flags on the existing `single_statement` template (never new composition modules, so
+  `minimal_pair`'s shared vocabulary stays untouched): `session_login` (the real login page's
+  session-establishment + redirect tail) and `register_insert` (the real register page's
+  prepared `INSERT` after its duplicate-username check). New
+  `emitters/php_laravel/auth_session.py`: a thin, offline-testable adapter over the
+  LAB-owned `fuzzlab.labgen.identity_session.IdentitySessionStore` (lane L-P2.2) that builds
+  a login POST from this stack's own page profile and URL — no session-holding logic is
+  reinvented (PA-0001/PA-0021).
+- Impact (other components / project): none outside LAB. `fuzzlab.labgen.identity_session`
+  is read, not modified. `SingleStatementComplexity.render()` now passes its whole context
+  to the template (`**ctx`) rather than two hand-picked keys, so every pre-existing profile
+  (which declares neither `session_login` nor `register_insert`) renders byte-identically.
+- Risk (level; mitigation or accepted-risk justification): **low**. The login pair's
+  security-relevant difference is confirmed to sit only in the transform region via the
+  shared minimal-pair checker (run against each cell's own weakened twin, since that checker
+  pairs strictly by file path and cannot itself compare two distinctly-named cells).
+- Deliverables:
+  - [x] `_SESSION_LOGIN_KEY`/`_REGISTER_INSERT_KEY` complexity-tail flags — done
+  - [x] `route_accumulator.fragment_for_cell(method=)` — done
+  - [x] `emitters/php_laravel/auth_session.py` — done
+  - [x] `lab/manifests/phase3_php_laravel_real_pages_auth.yaml` (3 cells) — done
+  - [x] `tests/test_labgen_php_laravel_real_pages_auth.py` (14 tests: label agreement,
+        canonical/twin URL split, session/insert tail content, `auth_session` adapter
+        round-trip, minimal pair, regression gate both ways, Tier-0/Tier-3,
+        `lab-generate --check`) — done
+  - [x] Bookkeeping: this entry, `FR-LAB-46`, `docs/ARCHITECTURE.md`, `CHANGELOG.md` — done
+- Effectiveness (assessed 2026-09-22): both `login.php` cells derive their labelled verdicts,
+  `register.php` derives SECURE, the routes file registers the real URL plus the twin's
+  variant with no collision, and `auth_session` successfully drives a fake login POST end to
+  end; full suite green (see `CC-LAB-0052` for the exact pass/skip count).
+
+### CC-LAB-0047 — L-P3.3c-G2: `products.php` + `api/products.php`, the JSON `view` module category (2026-09-22)
+- Change: executed group **G2** of `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.3's per-page
+  inventory — the catalog listing (`PFF-1001`) and its JSON feed (`PFF-1003`), both
+  secure-only, same SQL position, differing only in presentation. New `view` module category
+  (`CR-LAB-0001` Addendum D names it; nothing had needed it before this page):
+  `JsonViewModule`/`json_view.php.j2` renders a Laravel Eloquent API Resource class from the
+  page profile's declared `json_fields` (an ordered `(name, cast)` tuple; `JSON_FIELD_CASTS`
+  is a closed, validated set), with the controller-side bridge statement
+  (`view_bridge_code`) rebinding `$rows` so the existing `single_statement` complexity closes
+  the method unchanged. A view module's name is recorded on its own `// View category: ...`
+  provenance line, never in `// Module composition: ...` (the same reason the `route`
+  category is never in that line — `minimal_pair` classifies every composition-line name
+  through the shared registries and raises for one it cannot find).
+- Impact (other components / project): none outside LAB. `StackEnv.file_roles` gained one
+  additive `json_view` path template.
+- Risk (level; mitigation or accepted-risk justification): **low**. `json_fields` is
+  required and validated (bare-identifier field names, a closed cast set) rather than
+  defaulted, so a page profile naming an unknown or malformed field fails loud at build time
+  rather than reaching PHP source unvalidated.
+- Deliverables:
+  - [x] `VIEWS`/`JsonViewModule`/`json_view.php.j2`/`JSON_FIELD_CASTS` — done
+  - [x] `lab/manifests/phase3_php_laravel_real_pages_g2.yaml` (2 cells) — done
+  - [x] `tests/test_labgen_php_laravel_real_pages_g2.py` (13 tests: label agreement, view
+        category presence/absence, resource-class content and field casts, a validation
+        failure case, the shared route-accumulator duplicate-URL guard, regression gate,
+        minimal pair, Tier-0/Tier-3, `lab-generate --check`) — done
+  - [x] Bookkeeping: this entry, `FR-LAB-45`, `docs/ARCHITECTURE.md`, `CHANGELOG.md` — done
+- Effectiveness (assessed 2026-09-22): both cells derive SECURE matching their true-negative
+  labels, the JSON resource emits the real endpoint's exact field set/order/casts, and the
+  bare listing's controller carries no resource collection call; full suite green (see
+  `CC-LAB-0052` for the exact pass/skip count).
+
+### CC-LAB-0046 — L-P3.3c-G1: `product.php` + `blog_post.php`, numeric-literal SQLi on two real tables (2026-09-22)
+- Change: executed group **G1** of `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.3's per-page
+  inventory — the two real numeric-literal-SQLi pages (`PFF-0001`/`PFF-0006`), plus an
+  authored bound-parameter twin for each, in
+  `lab/manifests/phase3_php_laravel_real_pages_numeric.yaml`. One module set, two page
+  profiles, no new modules — the real pages' only documented difference (verbose vs.
+  suppressed DB errors) is an observability axis, not a `(transform, sink_context)` fact, so
+  it is recorded and deliberately not modelled (the same omission `php_current`'s own
+  real-pages sample already makes for this pair). This lane's own contribution to the
+  unified mechanism (`CC-LAB-0052`) is the public name `served_url_for()` and the finding
+  that a case-ID-derived cell name (`LABGEN-PFF-<case-id>`) would leak ground-truth
+  provenance into generated files (an FR-LAB-2 violation) — resolved by a page-derived
+  naming convention instead (`LABGEN-RPL-<PAGE>`) and, in the unified mechanism, by the
+  always-popped `_GROUND_TRUTH_CASE_KEY` metadata field every real-page profile now carries.
+- Impact (other components / project): none outside LAB.
+- Risk (level; mitigation or accepted-risk justification): **low**. No new module, sink
+  family or safety-matrix row.
+- Deliverables:
+  - [x] `lab/manifests/phase3_php_laravel_real_pages_numeric.yaml` (4 cells) — done
+  - [x] `tests/test_labgen_php_laravel_real_pages_numeric.py` (10 tests: label agreement,
+        `real_page`/`canonical_cell_id` self-declaration, the case-ID-never-leaks guard,
+        `served_url_for` agreement with the registered route, regression gate both ways,
+        minimal pair, Tier-3, `lab-generate --check`) — done
+  - [x] Bookkeeping: this entry, `FR-LAB-44`, `docs/ARCHITECTURE.md`, `CHANGELOG.md` — done
+- Effectiveness (assessed 2026-09-22): both canonical cells derive the verdict their `PFF-`
+  case labels, both twins are served at distinct suffixed URLs, and no ground-truth case ID
+  reaches a generated file; full suite green (see `CC-LAB-0052` for the exact pass/skip count).
+
 ### CC-LAB-0050 — L-P3.3c-G5: `contact.php` + `newsletter.php` reproduced as `php_laravel` cells, with `.php`-pinned routes (2026-09-22)
 *(`CC-LAB-0050` and `FR-LAB-48` were pre-assigned to this sub-lane by the orchestrating
 session, with `CC-LAB-0046`..`0049`/`0051` and `FR-LAB-44`..`0047`/`49` reserved for the five
 concurrent sibling sub-lanes G1–G4/G6 — so no merge-time renumbering should be needed.)*
+*(Addendum, `CC-LAB-0052`, 2026-09-22: the `url_path` pin and instance-level double-claim
+guard this entry describes below were superseded by the unified
+`_REAL_PAGE_KEY`/`_CANONICAL_CELL_KEY` mechanism the consolidation pass introduced —
+`contact.php`/`newsletter.php` are the trivial, single-cell case of that mechanism and their
+served behavior is unchanged; only the plumbing moved. This entry is left as written per the
+append-only rule; see `CC-LAB-0052` for the current mechanism.)*
 - Change: executed group **G5** of `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6's per-page
   migration table — the two real **escaped-echo form pages** of `puppy-fort-factory/`,
   reproduced in Laravel/Blade idiom on the `php_laravel` emitter, in four pieces:

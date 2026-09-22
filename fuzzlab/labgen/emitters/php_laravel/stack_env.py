@@ -149,6 +149,18 @@ PHP_LARAVEL_STACK_ENV = StackEnv(
         # per cell, named from the cell ID like every other per-cell artifact
         # here, so a minimal pair's twins never share a view file.
         "view": "resources/views/cells/{cell_slug}.blade.php",
+        # The `json_view` view category's artifact (L-P3.3c-G2): an Eloquent
+        # API Resource class, which is Laravel's view layer for a JSON
+        # response. Keyed by the view module's own name, so a second view
+        # category added later declares its own path template here rather than
+        # overloading the Blade `view` entry.
+        "json_view": "app/Http/Resources/{cell_slug}Resource.php",
+        # A `stored_second_order` cell (L-P3.3c-G4) has two endpoints and so a
+        # second controller: the *write* endpoint the payload is submitted to,
+        # alongside the read/sink controller above. Additive -- a `direct`
+        # cell never reaches this role, so every pre-existing cell's emitted
+        # file set is unchanged.
+        "write_controller": "app/Http/Controllers/{cell_slug}WriteController.php",
         "route": "routes/web.php",
     },
 )

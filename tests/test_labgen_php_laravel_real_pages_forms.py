@@ -27,8 +27,9 @@ import pytest
 from fuzzlab.labels import contract
 from fuzzlab.labgen.conformance import static_precheck, tier0, tier3
 from fuzzlab.labgen.emitters.php_laravel import (
+    _CANONICAL_CELL_KEY,
     _PAGE_PROFILES,
-    _URL_PATH_KEY,
+    _REAL_PAGE_KEY,
     LaravelEmitter,
 )
 from fuzzlab.labgen.emitters.php_laravel.route_accumulator import assemble_routes_file
@@ -165,19 +166,22 @@ def test_every_shape_has_a_static_precheck_flag(manifest) -> None:
 
 def test_each_migrated_page_pins_the_real_apps_exact_url(manifest) -> None:
     for cell in manifest.cells:
-        assert _PAGE_PROFILES[cell.route.path][_URL_PATH_KEY] == cell.route.path
+        profile = _PAGE_PROFILES[cell.route.path]
+        assert profile[_REAL_PAGE_KEY] is True
+        assert profile[_CANONICAL_CELL_KEY] == cell.cell_id
         assert cell.route.path.endswith(".php")
 
 
 def test_the_routes_file_registers_the_real_php_suffixed_paths(emitter, manifest, cases) -> None:
-    """`Route::get('/contact.php', ...)`, not Laravel's idiomatic
-    extension-less style: the URL the generated app serves is the URL
-    `labels.json` labels the case at."""
+    """`Route::post('/contact.php', ...)`, not Laravel's idiomatic
+    extension-less style: the URL (and, per the unified mechanism, the real
+    HTTP method) the generated app serves is what `labels.json` labels the
+    case at."""
     fragments = {c.cell_id: emitter.route_fragment_for(c) for c in manifest.cells}
     content = assemble_routes_file(fragments).content.decode("utf-8")
     for cell in manifest.cells:
-        url = cases[CELL_TO_CASE[cell.cell_id]].url
-        assert f"Route::get('{url}'," in content, cell.cell_id
+        case = cases[CELL_TO_CASE[cell.cell_id]]
+        assert f"Route::{case.method.lower()}('{case.url}'," in content, cell.cell_id
         # ...and *not* at this stack's default cell-ID-derived URL.
         assert f"/cell/{cell.cell_id.lower()}" not in content, cell.cell_id
 
@@ -214,16 +218,27 @@ def test_the_regression_gate_accepts_the_migrated_urls_and_rejects_idiomatic_one
         assert_no_regression(baseline, candidate_for(idiomatic))
 
 
-def test_a_second_cell_cannot_claim_a_pinned_page_url(emitter, manifest) -> None:
-    """The guard that makes a pinned URL safe: a pinned page is owned by
-    exactly one cell, so a page that later needed a vulnerable cell *and* a
-    secure twin fails loudly here rather than emitting two `Route::get` lines
-    for one path."""
+def test_a_twin_added_later_to_a_pinned_page_gets_a_distinct_suffixed_url(emitter, manifest) -> None:
+    """The unified mechanism (consolidating L-P3.3c-G1..G6, generalizing
+    G3's design) does not need a page to stay a single-cell page forever: a
+    pinned page is owned by exactly one *canonical* cell (this manifest's
+    `LABGEN-PLRP-1005`), and any other cell of that page -- a vulnerable twin
+    added later -- coexists as its own, still-`.php`-suffixed route rather
+    than colliding with it or being refused outright. This is the trivial
+    (single-cell) case of the same mechanism `/login.php`'s vulnerable cell
+    and secure twin already exercise for real (lane G3)."""
     cell = _cell(manifest, "LABGEN-PLRP-1005")
-    emitter.route_fragment_for(cell)
+    canonical_fragment = emitter.route_fragment_for(cell)
+    assert "'/contact.php'" in canonical_fragment
+
     twin = dataclasses.replace(cell, cell_id="LABGEN-PLRP-9999")
-    with pytest.raises(ValueError, match="already claims"):
-        emitter.route_fragment_for(twin)
+    twin_fragment = emitter.route_fragment_for(twin)
+    assert "'/contact.labgen-plrp-9999.php'" in twin_fragment
+    assert "'/contact.php'" not in twin_fragment
+
+    fragments = {cell.cell_id: canonical_fragment, twin.cell_id: twin_fragment}
+    content = assemble_routes_file(fragments).content.decode("utf-8")
+    assert content.count("'/contact.php'") == 1
 
 
 def test_a_cell_on_an_unpinned_page_still_gets_its_cell_id_derived_url(emitter) -> None:

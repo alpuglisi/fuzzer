@@ -31,13 +31,14 @@ import pytest
 
 from fuzzlab.labgen.conformance import static_precheck, tier0, tier3
 from fuzzlab.labgen.emitters.php_laravel import (
+    SUPPORTED_CONTEXT_DEPTHS,
     _MODULE_SET_BY_SHAPE,
     _PAGE_PROFILES,
     LaravelEmitter,
 )
 from fuzzlab.labgen.emitters.php_laravel.modules import SINKS, TRANSFORMS, VIEW_SINKS
 from fuzzlab.labgen.emitters.php_laravel.route_accumulator import assemble_routes_file
-from fuzzlab.labgen.schema import Cell, Pipeline, Route, SinkContext, load_manifest
+from fuzzlab.labgen.schema import CONTEXT_DEPTHS, Cell, Pipeline, Route, SinkContext, load_manifest
 from fuzzlab.labgen.verdict import load_safety_matrix, verdict
 
 MANIFEST_PATH = "lab/manifests/phase3_php_laravel_sample.yaml"
@@ -103,7 +104,17 @@ def test_laravel_carries_every_shape_php_current_supports() -> None:
         "php_current's shape set moved; php_laravel is the stack the plan assigns FULL depth, "
         "so this lane's inventory must move with it"
     )
-    assert set(_MODULE_SET_BY_SHAPE) == set(PHP_CURRENT_SHAPES)
+    # A *superset*, not equality (relaxed by L-P3.3c-G6). "Full depth" means
+    # php_laravel carries every shape php_current supports; it has never meant
+    # php_current must carry every shape php_laravel gains. The migration lanes
+    # add shapes to the Laravel stack only -- `html_attribute_quoted` is the
+    # first -- because php_current is explicitly not the migration target
+    # (plan §4.3.6.6b) and its emitter is out of those lanes' scope. Equality
+    # here would have forced every migration lane to widen an emitter the plan
+    # tells it not to touch.
+    assert set(_MODULE_SET_BY_SHAPE) >= set(PHP_CURRENT_SHAPES), (
+        "php_laravel lost a shape php_current supports -- 'full depth' is a floor, not a ceiling"
+    )
 
 
 @pytest.mark.parametrize("shape", sorted(REQUIRED_SHAPES))
@@ -200,14 +211,25 @@ def test_every_cell_of_the_widened_manifest_derives_its_expected_verdict(manifes
         assert (derived.verdict, derived.difficulty) == EXPECTED_VERDICTS[cell.cell_id], cell.cell_id
 
 
-def test_each_shape_has_a_vulnerable_and_a_secure_cell(manifest, matrix) -> None:
+def test_each_shape_has_a_vulnerable_and_a_secure_cell(matrix) -> None:
     """Both halves of every shape are present -- a corpus of only-vulnerable
     cells for a family would teach a detector the family itself is the label
-    (the fingerprint-independence concern, CR-LAB-0001 §3)."""
+    (the fingerprint-independence concern, CR-LAB-0001 §3).
+
+    Read over **every** manifest's `php_laravel` cells rather than this lane's
+    sample alone (L-P3.3c-G6): the migration lanes author real pages in their
+    own manifests, so a shape's two halves may legitimately live outside
+    `phase3_php_laravel_sample.yaml` -- `html_attribute_quoted`'s do. Scoping
+    this to one file would have made the invariant silently unenforceable for
+    every shape a later lane adds.
+    """
     by_family: dict[str, set[str]] = {}
-    for cell in manifest.cells:
-        derived = verdict(cell.transform, cell.sink_context, matrix)
-        by_family.setdefault(cell.sink_context.family, set()).add(derived.verdict)
+    for path in ALL_MANIFEST_PATHS:
+        for cell in load_manifest(path).cells:
+            if cell.stack_profile != "php_laravel":
+                continue
+            derived = verdict(cell.transform, cell.sink_context, matrix)
+            by_family.setdefault(cell.sink_context.family, set()).add(derived.verdict)
     assert set(by_family) == {family for _, family in _MODULE_SET_BY_SHAPE}
     for family, verdicts in by_family.items():
         assert verdicts == {"VULNERABLE", "SECURE"}, family
@@ -451,14 +473,22 @@ def test_a_page_this_emitter_has_no_profile_for_fails_loud(emitter) -> None:
         emitter.render(cell)
 
 
-def test_a_non_direct_context_depth_is_refused_rather_than_flattened(emitter, manifest) -> None:
-    """The depth axis is not ported to Laravel yet; rendering a
-    `same_file_helper` cell as `direct` would mislabel the depth its corpus
-    record claims, so the emitter refuses loudly (see the emitter docstring's
-    "deliberately not carried" list)."""
-    cell = dataclasses.replace(_cell(manifest, "LABGEN-PL-0001"), context_depth="same_file_helper")
-    with pytest.raises(ValueError, match="context_depth 'direct' only"):
-        emitter.render(cell)
+def test_an_unported_context_depth_is_refused_rather_than_flattened(emitter, manifest) -> None:
+    """Rendering a depth this emitter has no fragments for as `direct` would
+    mislabel the depth its corpus record claims, so the emitter refuses loudly.
+
+    The unported set is derived from the emitter's own
+    `SUPPORTED_CONTEXT_DEPTHS` against the schema's `CONTEXT_DEPTHS`, never
+    restated as a literal (PA-0001/PA-0027) -- lane L-P3.3c-G4 added
+    `stored_second_order` to that tuple (`CC-LAB-0049`), and this test must
+    follow the code rather than pin the moment it was written.
+    """
+    unported = set(CONTEXT_DEPTHS) - set(SUPPORTED_CONTEXT_DEPTHS)
+    assert unported, "every depth is supported -- this test no longer has a subject"
+    for depth in sorted(unported):
+        cell = dataclasses.replace(_cell(manifest, "LABGEN-PL-0001"), context_depth=depth)
+        with pytest.raises(ValueError, match="renders context_depth"):
+            emitter.render(cell)
 
 
 # ---------------------------------------------------------------------------
@@ -484,6 +514,12 @@ def test_every_cell_of_every_manifest_that_targets_php_laravel_renders(emitter) 
             if cell.stack_profile != "php_laravel":
                 continue
             if not emitter.supports(cell.vuln_class, cell.sink_context):
+                continue
+            # The depth axis is the emitter's second support predicate, and it
+            # is read from the emitter rather than assumed (PA-0027(b)) -- so a
+            # later lane adding an as-yet-unported depth does not make this
+            # test fail for the wrong reason.
+            if cell.context_depth not in SUPPORTED_CONTEXT_DEPTHS:
                 continue
             files = emitter.render(cell)  # must not raise
             assert files and files[0].content.startswith(b"<?php\n"), f"{path}:{cell.cell_id}"

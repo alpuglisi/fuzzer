@@ -431,6 +431,55 @@ class HtmlAttributeUnquotedEchoSink(TemplateModule):
         super().__init__("html_attribute_unquoted_echo", "sink", _SINK_ENV, "html_attribute_unquoted_echo.php.j2")
 
 
+class HtmlAttributeQuotedEchoSink(TemplateModule):
+    """Echoes ``value_expr`` into a **quoted** HTML attribute value -- the
+    reflected search-box shape (``puppy-fort-factory/search.php``'s
+    ``value="<?= $q ?>"``), added by lane L-P3.3c-G6 alongside the
+    ``(raw_concat, html_attribute_quoted)`` safety-matrix row that finally
+    makes the unescaped end of this family scorable.
+
+    The opposite of its unquoted sibling in one important way: here
+    ``htmlspecialchars()`` is the *context-correct* escaping (the quote that
+    would close the attribute is escaped), which is why the matrix scores
+    ``(html_entity_escape, html_attribute_quoted)`` as ``neutralises`` and
+    ``(html_entity_escape, html_attribute_unquoted)`` only as ``partial``.
+    Like every sink here it escapes nothing itself.
+
+    Registered in :data:`SINKS` so the shared composition vocabulary (which
+    :mod:`fuzzlab.labgen.minimal_pair` classifies every emitter's composition
+    positions against, and *raises* for a name it cannot find) knows it.
+    ``php_current``'s own ``_MODULE_SET_BY_SHAPE`` is deliberately **not**
+    widened to this shape -- that emitter's supported set is unchanged by
+    L-P3.3c-G6; the Laravel emitter is the one that renders it.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("html_attribute_quoted_echo", "sink", _SINK_ENV, "html_attribute_quoted_echo.php.j2")
+
+
+class SqlStringLiteralLikeSink(TemplateModule):
+    """A ``LIKE '%<value>%'`` lookup: a quoted-string-literal SQL position
+    reached through a search filter rather than an equality lookup
+    (``puppy-fort-factory/search.php``'s ``WHERE name LIKE '%$q%'``).
+
+    Same ``sql_string_literal`` *family* as
+    :class:`SqlStringLiteralLookupSink` -- the ``LIKE`` wildcards are not
+    verdict-relevant to ``sql_syntax_break``, per the plan's §4.3.6.2 shape-gap
+    analysis, so this is a second rendering of one family, never a new family
+    or a new matrix row. It exists because the equality sink folds in a
+    login-style password condition as boilerplate, which a catalogue search
+    page does not have; forcing search.php through it would have emitted a
+    password check on a search form.
+
+    Registered here for the same shared-vocabulary reason as
+    :class:`HtmlAttributeQuotedEchoSink`; ``php_current``'s shape map is
+    unchanged.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("sql_string_literal_like", "sink", _SINK_ENV, "sql_string_literal_like.php.j2")
+
+
 class SingleStatementComplexity(TemplateModule):
     """The simplest complexity wrapper: the composed source/transform/sink
     body as the entire body of one function. Later complexity modules
@@ -531,6 +580,13 @@ SINKS: dict[str, Module] = {
     "sql_join_alias_lookup": SqlJoinAliasLookupSink(),
     "html_js_url_echo": HtmlJsUrlEchoSink(),
     "html_attribute_unquoted_echo": HtmlAttributeUnquotedEchoSink(),
+    # L-P3.3c-G6: search.php's two sink renderings -- a quoted attribute
+    # (new safety-matrix pair) and a LIKE-pattern string literal (existing
+    # family, second rendering). Registered in the shared vocabulary so
+    # minimal_pair can classify them; php_current's _MODULE_SET_BY_SHAPE is
+    # deliberately not widened to either.
+    "html_attribute_quoted_echo": HtmlAttributeQuotedEchoSink(),
+    "sql_string_literal_like": SqlStringLiteralLikeSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

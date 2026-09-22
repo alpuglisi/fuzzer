@@ -1,0 +1,133 @@
+# Phase-3 php_laravel REAL-PAGE reproductions: the numeric-literal pages.
+#
+# Lane L-P3.3c-G1 (docs/LAB_IMPLEMENTATION_PLAN.md §4.3 step 6, §4.3.6.3's
+# per-page inventory, row group G1). Unlike
+# lab/manifests/phase3_php_laravel_sample.yaml -- which is deliberately
+# ILLUSTRATIVE Laravel pages (/example/product, /catalog, /theme ...) and says
+# so in its own header -- every cell here reproduces a REAL
+# puppy-fort-factory/ page through the php_laravel emitter, in Laravel/
+# Eloquent/Blade idiom, as the migration D20 §7.2 calls for.
+#
+# Kept as its own file rather than appended to the illustrative sample for two
+# reasons: that file's header states it contains no real-page reproductions
+# (and it is a cross-lane shared file five sibling sub-lanes are editing
+# concurrently), and "illustrative" vs "carries a lab/ground-truth/ case" is a
+# real distinction a reader should not have to infer per cell. The standing
+# PA-0024 tests glob lab/manifests/*.yaml, so a new manifest file is picked up
+# automatically rather than needing to be registered anywhere.
+#
+# Scope of this group -- both real pages of the `sqli`/`sql_numeric_literal`
+# shape, which is why they are one sub-lane (one module set, two page
+# profiles, NO new modules -- re-verified against php_laravel's own registries
+# before authoring, not assumed from the plan):
+#
+#   - product.php    -> PFF-0001  (GET `id` concatenated into
+#                                  "... FROM products WHERE id = $id";
+#                                  verbose DB errors surfaced, so error-based
+#                                  as well as boolean/union/time)
+#   - blog_post.php  -> PFF-0006  (the same concatenation into
+#                                  "... FROM posts WHERE id = $id", with DB
+#                                  errors suppressed by `@` -> blind only)
+#
+# The two real pages' only documented difference is error verbosity, which is
+# an observability/nuisance axis rather than a `(transform, sink_context)`
+# fact: it cannot change a derived verdict, and inventing an op for it would
+# fork the shape vocabulary lab/safety_matrix.yaml is keyed on. So it is
+# recorded here and in the emitter's page profile, and deliberately not
+# modeled -- the same omission php_current's own real-pages sample already
+# records for the same pair of pages.
+#
+# URLs: `route.path` keeps the real app's exact `.php` suffix. This is plan
+# §4.3.6.6a, a hard constraint and the single most likely way to get this lane
+# wrong: T-LAB0.9's additive-only regression gate
+# (fuzzlab/labgen/regression_gate.py) treats a ground-truth case that appears
+# at a different `url` as RELOCATED, i.e. a build-breaking regression. An
+# idiomatic Laravel `/product` route would therefore invalidate every PFF-
+# case at cutover, along with the URLs in labels.json, injection-points.json
+# and expectedresults.csv and every downstream FUZZ/AUD consumer. Laravel
+# routes are arbitrary strings, so the suffix costs nothing technically.
+#
+# Cell IDs: LABGEN-RPL-<PAGE> ("real pages, Laravel") for the cell that
+# reproduces that page's ground-truth case, plus `-BOUND` for its secure twin.
+# Named by PAGE rather than numbered, for two reasons: pages are disjoint
+# across the six sibling sub-lanes, so a page-named ID cannot collide with
+# theirs the way a shared sequential counter would; and the ID deliberately
+# does NOT encode the `PFF-` case it reproduces. An earlier draft used
+# LABGEN-PFF-<case-number>, which reads nicely but writes the ground-truth case
+# ID into every generated file, since the emitter stamps the cell ID into each
+# artifact's provenance comment -- a needless widening of what an annotated
+# build discloses about out-of-band ground truth (FR-LAB-2). The cell -> case
+# mapping that L-P3.3c-CUT's coverage gate needs (§4.3.6.6 point 3) is instead
+# declared in the emitter's page profile (`ground_truth_case`), which is build
+# metadata and never reaches a template -- so the mapping stays mechanical
+# without being served.
+#
+# The secure twins are this manifest's own addition -- labels.json carries no
+# secure case at either page, and §4.3.6.3 records that secure-only/
+# vulnerable-only cells are legal. They are authored because they carry real
+# training value that is specific to THIS stack: per §4.3.6.3a Laravel inverts
+# plain PHP's safe/raw default, so the pair worth generating is the one whose
+# twins keep the *same raw-statement shape* and differ only in the binding
+# (`DB::select("... = ?", [$id])` vs `DB::select("... = " . $id)`), not the one
+# that swaps the whole statement construction for `->where('id', $id)`, which
+# minimal_pair.py would correctly reject. That the pair IS expressible that way
+# is the check §4.3.6.3a asks each sub-lane to make; it holds here, and the
+# tests assert it against the real shared checker.
+#
+# Verdicts are never asserted in a manifest; they are derived by
+# fuzzlab.labgen.verdict.verdict() from (transform, sink_context) against
+# lab/safety_matrix.yaml. tests/test_labgen_php_laravel_real_pages_numeric.py
+# asserts, for each labeled cell, that the derived verdict equals the verdict
+# lab/ground-truth/labels.json already carries for that PFF- case -- read from
+# labels.json itself, never restated here as a literal.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # --- product.php / PFF-0001 -------------------------------------------
+  # The real page: `$id = $_GET['id'] ?? '1';` spliced straight into
+  # "SELECT id, name, description, price, category, stock FROM products
+  #  WHERE id = $id". Laravel idiom: DB::select() with the value
+  # concatenated into the statement text -- the real framework footgun,
+  # not a transliterated mysqli_query().
+  - cell_id: LABGEN-RPL-PRODUCT
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /product.php }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  # The secure twin: same raw DB::select() statement shape, differing only
+  # in the binding (§4.3.6.3a). Not a labels.json case -- see the header.
+  - cell_id: LABGEN-RPL-PRODUCT-BOUND
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /product.php }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
+
+  # --- blog_post.php / PFF-0006 -----------------------------------------
+  # The same shape on a different real page and table (posts), which is the
+  # evidence that this module set is REUSED across pages rather than
+  # re-authored per page -- the same property php_current's real-pages
+  # sample was chosen to demonstrate.
+  - cell_id: LABGEN-RPL-BLOGPOST
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /blog_post.php }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  - cell_id: LABGEN-RPL-BLOGPOST-BOUND
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /blog_post.php }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]

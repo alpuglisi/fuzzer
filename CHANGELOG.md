@@ -14,6 +14,23 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB: consolidated lane L-P3.3c's six concurrent sub-lanes (G1–G6, migrating real
+  `puppy-fort-factory/` pages onto the `php_laravel` emitter) onto one unified
+  URL-pinning mechanism (`_REAL_PAGE_KEY`/`_CANONICAL_CELL_KEY`, generalizing G3's
+  design, of which the already-merged G5 mechanism is the trivial single-cell case),
+  replacing five independent, mutually-incompatible mechanisms the sub-lanes built
+  without seeing each other's code — because the URL-naming bikeshed was blocking four
+  lanes' merges. Migrated every lane's manifests, tests and genuine findings (G1's
+  numeric-page twins, G2's `json_view` module category, G3's session/register-insert
+  auth pages + `auth_session.py` adapter, G4's `stored_second_order`/write-endpoint
+  support, G6's `search.php` + `html_attribute_quoted` shape — left deliberately
+  unpinned, open for `L-P3.3c-CUT`) onto the single mechanism; reconciled
+  `route_accumulator.fragment_for_cell`'s method/action parameter shape and its
+  duplicate-URL guard into one. Full suite: 1494 passed / 8 skipped, 0 failed (the two
+  `test_mutation_operators.py` MUT failures flagged as pre-existing/out-of-scope by this
+  task's brief were independently fixed by `BUG-0026` (commit `c6953c4`), already on this
+  branch before this change landed) (`CC-LAB-0046`..`0049`/`0051`/`0052`, `FR-LAB-44`..
+  `47`/`49`/`50`).
 - MUT: fixed `SemanticsValidator` (`fuzzlab/mutation/semantics.py`) failing open on an
   untrusted SQL `--` comment-append (accepted as semantics-preserving without vetted
   provenance) and failing closed on a case-insensitive SQL `case-toggle` (AST equality

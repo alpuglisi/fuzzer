@@ -1,7 +1,7 @@
 """``php_laravel``: the second PHP emitter, Laravel/Eloquent/Blade idiom
 (``docs/LAB_IMPLEMENTATION_PLAN.md`` §4.3).
 
-Built in two lanes:
+Built in four lanes:
 
 * **L-P3.3a (foundation, steps 1/3/4/5)** --
   :class:`~fuzzlab.labgen.emitters.php_laravel.stack_env.StackEnv` (pinned
@@ -11,10 +11,10 @@ Built in two lanes:
   (:mod:`fuzzlab.labgen.emitters.php_laravel.route_accumulator`, sorted by
   cell ID per ``CR-LAB-0001`` Addendum D), and a deliberately minimal
   one-shape emitter proving the scaffold renders and passes Tier 0 + Tier 3.
-* **L-P3.3b (this lane, step 2)** -- the **full-depth module inventory**.
-  Laravel is the one stack that gets *every* shape ``php_current`` supports,
-  per the plan's own reasoning ("Phase 1's hard-shape work on
-  ``php_current`` is directly portable here once it exists"):
+* **L-P3.3b (step 2)** -- the **full-depth module inventory**. Laravel is
+  the one stack that gets *every* shape ``php_current`` supports, per the
+  plan's own reasoning ("Phase 1's hard-shape work on ``php_current`` is
+  directly portable here once it exists"):
 
   =========================================  ======================================
   ``(vuln_class, sink_context.family)``      Laravel/Eloquent/Blade rendering
@@ -26,7 +26,15 @@ Built in two lanes:
   ``xss``  / ``html_body``                   Blade view, raw echo
   ``xss``  / ``url_javascript_scheme``       Blade view, ``javascript:`` URL
   ``xss``  / ``html_attribute_unquoted``     Blade view, unquoted attribute
+  ``xss``  / ``html_attribute_quoted``       Blade view, quoted attribute
   =========================================  ======================================
+
+  The last row is **L-P3.3c-G6**'s addition, not L-P3.3b's original set: it
+  is the one shape this emitter carries that ``php_current`` does not (its
+  matrix pair ``(raw_concat, html_attribute_quoted)`` did not exist until
+  that lane), so this stack's inventory is a strict superset of
+  ``php_current``'s rather than equal to it. ``php_current`` is not the
+  migration target (§4.3.6.6b).
 
   Rendering is **module composition**, per ``CR-LAB-0001`` Addendum C, over
   this emitter's *own* registries
@@ -40,30 +48,58 @@ Built in two lanes:
   ``fuzzlab.labgen.modules``' registries and raises for a name it cannot
   find), and why the HTML sinks echo raw in Blade while the
   ``html_entity_escape`` transform applies ``e()`` in the controller.
+* **L-P3.3c (step 6, migration) -- six concurrent sub-lanes (G1/G2/G3/G4/G5/G6)
+  and one consolidation pass.** Real ``puppy-fort-factory/`` pages are
+  reproduced through this emitter, each keeping the real app's exact
+  ``.php``-suffixed URL (§4.3.6.6a: T-LAB0.9's additive-only regression gate,
+  :mod:`fuzzlab.labgen.regression_gate`, treats a ``PFF-`` case that moves to
+  a different URL as a build-breaking relocation). Because the six sub-lanes
+  ran concurrently against the same two files, each built its own,
+  mutually-incompatible URL-pinning mechanism; **this module now carries the
+  one, unified mechanism** the consolidation pass replaced all five with --
+  see :data:`_REAL_PAGE_KEY`/:data:`_CANONICAL_CELL_KEY` below and
+  ``docs/components/01-target-lab/change-control.md``'s consolidation entry
+  for the design choice and its rationale (a human reviewer may want to
+  revisit the twin-URL naming convention specifically).
 
-An HTML-sink cell is a **two-file cell** on this stack: a controller
-(``role="controller"``) plus its own Blade view (``role="view"``), which is
-what "ported to Laravel idiom" actually means for an XSS shape -- a Laravel
-controller returns a view, it does not ``echo``. Both files carry the same
-``// Module composition: ...`` provenance line, so
-:mod:`fuzzlab.labgen.minimal_pair` can evaluate the pair invariant on each
-of them (the view file's provenance block is a raw ``<?php`` comment header,
-which Blade passes through, rather than a ``{{-- --}}`` Blade comment, since
-that checker looks for a ``//`` comment line).
+  * **G1** -- ``/product.php`` (PFF-0001), ``/blog_post.php`` (PFF-0006):
+    the numeric-literal SQLi shape on two real tables.
+  * **G2** -- ``/products.php`` (PFF-1001), ``/api/products.php`` (PFF-1003):
+    the catalog listing and its JSON feed, and this emitter's ``view``
+    module category (:data:`~fuzzlab.labgen.emitters.php_laravel.modules.VIEWS`,
+    first member ``json_view``) for a response whose sink produces data
+    rather than markup.
+  * **G3** -- ``/login.php`` (PFF-0004 vulnerable / PFF-1008 true-negative),
+    ``/register.php`` (PFF-1004): the real auth pages, the first two-cell
+    (canonical + twin) real page and the session-establishing/insert-tail
+    complexity flags (:data:`_SESSION_LOGIN_KEY`/:data:`_REGISTER_INSERT_KEY`).
+  * **G4** -- ``/edit_profile.php`` -> ``/profile.php`` (PFF-0005/PFF-1007):
+    the stored second-order pair, the first ``stored_second_order`` cells
+    this emitter renders (:data:`SUPPORTED_CONTEXT_DEPTHS`) and the first
+    **write** endpoint (:data:`~fuzzlab.labgen.emitters.php_laravel.modules.WRITES`)
+    any emitter in this project emits.
+  * **G5** -- ``/contact.php`` (PFF-1005), ``/newsletter.php`` (PFF-1006):
+    the two secure-only escaped-echo form pages -- the trivial case of the
+    unified mechanism (a page with exactly one cell, no twin).
+  * **G6** -- ``/search.php`` (PFF-0002/PFF-0003): one ``?q=`` reaching three
+    sinks across six cells. **Deliberately left with no canonical cell** --
+    see :data:`_CANONICAL_CELL_KEY` for why that is a legal, explicitly
+    flagged state rather than an oversight, open for ``L-P3.3c-CUT`` to
+    resolve.
+
+  Real ``puppy-fort-factory/`` page reproduction depends on L-P3.3b; every
+  *other* route in :data:`_PAGE_PROFILES` remains an illustrative Laravel
+  page, and no ``lab/ground-truth/`` label claims otherwise.
 
 **Deliberately not carried by this lane, named rather than glossed over:**
 
-* ``Cell.context_depth`` other than ``"direct"`` (``same_file_helper``,
-  ``cross_file``, ``stored_second_order``) and, with it, ``sink_endpoint``.
-  ``php_current`` renders those (``CC-LAB-0042``); porting the depth
-  fragments to Laravel is a separate axis from this lane's shape inventory,
-  so :meth:`LaravelEmitter.render` **raises** for a non-``direct`` cell
-  rather than silently rendering it as ``direct`` and mislabelling the depth
-  a corpus record claims. Tracked as an open question in
-  ``docs/components/01-target-lab/requirements.md`` §8.
-* Real ``puppy-fort-factory/`` page reproduction (§4.3 step 6) -- lane
-  L-P3.3c, which depends on this one. Every route below is an *illustrative*
-  Laravel page, and no ``lab/ground-truth/`` label claims otherwise.
+* ``Cell.context_depth`` ``"same_file_helper"``/``"cross_file"``.
+  ``php_current`` renders those (``CC-LAB-0042``) with the pass-through-helper
+  fragments in :data:`fuzzlab.labgen.modules.DEPTHS`; porting those fragments
+  to Laravel idiom is a separate axis from this lane's shape inventory, so
+  :meth:`LaravelEmitter.render` **raises** for either depth rather than
+  silently rendering it as ``direct`` and mislabelling the depth a corpus
+  record claims. See :data:`SUPPORTED_CONTEXT_DEPTHS`.
 """
 
 from __future__ import annotations
@@ -78,12 +114,37 @@ from fuzzlab.labgen.emitters.php_laravel.modules import (
     SOURCES,
     TRANSFORMS,
     VIEW_SINKS,
+    VIEWS,
+    WRITES,
 )
 from fuzzlab.labgen.emitters.php_laravel.route_accumulator import RouteAccumulator
 from fuzzlab.labgen.emitters.php_laravel.stack_env import PHP_LARAVEL_STACK_ENV, StackEnv
-from fuzzlab.labgen.schema import Cell, SinkContext
+from fuzzlab.labgen.schema import Cell, Route, SinkContext
 
-__all__ = ["LaravelEmitter", "PHP_LARAVEL_STACK_ENV", "StackEnv"]
+__all__ = [
+    "LaravelEmitter",
+    "PHP_LARAVEL_STACK_ENV",
+    "SUPPORTED_CONTEXT_DEPTHS",
+    "StackEnv",
+    "served_url_for",
+]
+
+#: The ``Cell.context_depth`` levels this emitter renders (§3.5). Public and
+#: read by tests rather than restated as a literal there, per PA-0001/PA-0027
+#: ("when a predicate or registry in the code can compute the set a test
+#: asserts on, the test computes it from that predicate"): the whole-manifest
+#: regeneration test derives its cell set from :meth:`LaravelEmitter.supports`
+#: *and* this tuple, so widening either one cannot leave that test asserting
+#: on a stale subset.
+#:
+#: ``"stored_second_order"`` was added by lane L-P3.3c-G4 (``CC-LAB-0049``).
+#: ``"same_file_helper"``/``"cross_file"`` are still refused: those two depths
+#: need the pass-through-helper *fragments* ``php_current`` carries in
+#: :data:`fuzzlab.labgen.modules.DEPTHS`, ported to Laravel idiom, which no
+#: lane has done. ``stored_second_order`` needs no such fragment -- its depth
+#: is expressed structurally, by ``sink_endpoint`` naming a second endpoint --
+#: which is exactly why it could be carried here and they could not.
+SUPPORTED_CONTEXT_DEPTHS: tuple[str, ...] = ("direct", "stored_second_order")
 
 
 class _ModuleSet(NamedTuple):
@@ -100,7 +161,7 @@ class _ModuleSet(NamedTuple):
 
 #: (vuln_class, sink_context.family) -> which modules render this shape. Any
 #: pair not listed here is declared unsupported via :meth:`supports`. This is
-#: the full-depth inventory (L-P3.3b): every shape ``php_current`` supports.
+#: the full-depth inventory (L-P3.3b), widened once by L-P3.3c-G6.
 _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("sqli", "sql_numeric_literal"): _ModuleSet("get_param", "sql_numeric_lookup", "single_statement"),
     ("sqli", "sql_string_literal"): _ModuleSet("post_param", "sql_string_literal_lookup", "single_statement"),
@@ -114,29 +175,86 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     # unquoted attribute whose whitespace boundary escaping does not protect.
     ("xss", "url_javascript_scheme"): _ModuleSet("get_param", "html_js_url_echo", "render_only"),
     ("xss", "html_attribute_unquoted"): _ModuleSet("get_param", "html_attribute_unquoted_echo", "render_only"),
+    # L-P3.3c-G6 (search.php's third sink): a *quoted* HTML attribute. The
+    # family existed since Phase 0 but only ever with an `html_entity_escape`
+    # op; `lab/safety_matrix.yaml`'s new `(raw_concat, html_attribute_quoted)`
+    # row is what makes the unescaped end of it scorable, and this is the
+    # first module set on any stack to render it. This shape is the one place
+    # php_laravel's inventory is a strict *superset* of php_current's rather
+    # than equal to it (php_current is not the migration target; §4.3.6.6b).
+    ("xss", "html_attribute_quoted"): _ModuleSet("get_param", "html_attribute_quoted_echo", "render_only"),
 }
 
-#: Page-profile key that **pins** the URL a cell of that page is served at,
-#: instead of this stack's default cell-ID-derived ``/cell/<slug>`` URL.
+# ---------------------------------------------------------------------------
+# Page-profile keys
+# ---------------------------------------------------------------------------
+
+#: Page-profile key marking a profile as the reproduction of a **real**
+#: ``puppy-fort-factory/`` page rather than an illustrative Laravel one.
 #:
-#: Exists for exactly one reason (``docs/LAB_IMPLEMENTATION_PLAN.md``
-#: §4.3.6.6a, lane L-P3.3c): a *migrated* real ``puppy-fort-factory/`` page
-#: must keep the real app's exact URL, ``.php`` suffix included, because
+#: Its only effect is on route registration, and that effect is the single
+#: most load-bearing constraint of the migration lane (plan §4.3.6.6a):
 #: T-LAB0.9's additive-only regression gate
-#: (:mod:`fuzzlab.labgen.regression_gate`) treats a ``PFF-`` case that moves to
-#: a different ``url`` as a build-breaking *relocation*. Laravel routes are
-#: arbitrary strings, so ``Route::get('/contact.php', ...)`` costs nothing
-#: technically and keeps every URL in ``lab/ground-truth/labels.json``,
-#: ``injection-points.json`` and ``expectedresults.csv`` valid unchanged.
+#: (:mod:`fuzzlab.labgen.regression_gate`) fails a candidate ground truth that
+#: *relocates* an existing case, so a migrated page must be served at the real
+#: app's exact URL -- ``.php`` suffix and real HTTP method included -- not at
+#: the cell-ID-derived ``/cell/<slug>`` an illustrative cell gets. Laravel
+#: routes are arbitrary strings, so this costs nothing technically and keeps
+#: every ``PFF-`` URL in ``labels.json``/``injection-points.json``/
+#: ``expectedresults.csv`` valid unchanged.
 #:
-#: A pinned URL is only safe where one cell owns the page -- which is what
-#: makes it usable for the secure-only migrated cells (§4.3.6.3's
-#: "secure-only cells are legal" finding) and why
-#: :meth:`LaravelEmitter.route_fragment_for` refuses a second cell claiming
-#: the same pinned URL rather than emitting two ``Route::get`` lines for one
-#: path. Illustrative pages pin nothing and keep the cell-ID-derived URL, so a
-#: vulnerable cell and its secure twin still coexist as two distinct routes.
-_URL_PATH_KEY = "url_path"
+#: **Consolidation history.** Six concurrent sub-lanes (L-P3.3c-G1..G6) each
+#: built an independent URL-pinning mechanism against the same two files
+#: before any of them could see the others' code. This key, together with
+#: :data:`_CANONICAL_CELL_KEY`, is the *single* mechanism the consolidation
+#: pass replaced all five with -- generalizing lane G3's design (the most
+#: complete: canonical-cell-per-page, HTTP-method support, and an explicit
+#: twin-URL convention), of which the already-merged G5 mechanism (a page
+#: with exactly one cell) is simply the trivial case. See
+#: ``docs/components/01-target-lab/change-control.md``'s consolidation entry
+#: for the full rationale.
+_REAL_PAGE_KEY = "real_page"
+
+#: Page-profile key naming the one cell on a real page that owns that page's
+#: exact URL: the cell whose verdict matches the ``PFF-`` case ``labels.json``
+#: places there (the vulnerable cell for ``login.php``, the secure cell for
+#: ``register.php``). Required on every ``real_page`` profile -- a profile
+#: declaring :data:`_REAL_PAGE_KEY` but omitting this key entirely is a
+#: authoring bug and :func:`_served_route_for` raises loud rather than
+#: silently leaving the real URL unserved.
+#:
+#: Two legal values:
+#:
+#: * **A cell ID.** That cell is served at the page's exact URL and method.
+#:   Every *other* cell on the same real page is an authored twin that no
+#:   ``labels.json`` case refers to, and is served at a distinct, still-
+#:   ``.php``-suffixed variant URL derived from its own cell ID (e.g.
+#:   ``/login.labgen-pla-0002.php``) -- so twins coexist in one build without
+#:   two routes claiming one path and without inventing a URL a ``PFF-`` case
+#:   would then disagree with. This is the twin-URL convention a human
+#:   reviewer may want to revisit (see the consolidation change-control
+#:   entry); it was an autonomous call made to unblock four lanes' merges,
+#:   not a settled design.
+#: * **``None``, explicitly.** The page is real but the mechanism
+#:   deliberately claims no cell for its exact URL yet -- L-P3.3c-G6's
+#:   ``search.php``, whose six cells (three sink behaviors x
+#:   vulnerable/secure) cannot all answer ``GET /search.php`` and whose
+#:   canonical-cell choice is a policy decision this consolidation pass does
+#:   not make, left for ``L-P3.3c-CUT`` (which owns emitting the candidate
+#:   ground truth the regression gate runs against). Every cell of such a
+#:   page keeps the illustrative cell-ID-derived ``/cell/<slug>`` URL, exactly
+#:   as if :data:`_REAL_PAGE_KEY` were absent.
+_CANONICAL_CELL_KEY = "canonical_cell_id"
+
+#: Page-profile key: the ``lab/ground-truth/`` case ID a real-page profile
+#: reproduces (e.g. ``"PFF-0001"``). Purely descriptive provenance metadata --
+#: never read by :func:`_served_route_for` or any other routing/rendering
+#: decision -- kept here (rather than only in a manifest comment) so a test
+#: can assert it never reaches a generated file (FR-LAB-2: emitted artifacts
+#: must not leak ground-truth case IDs). Popped from the render context like
+#: :data:`_SOURCE_OVERRIDE_KEY`, so no template ever sees it. Optional: an
+#: illustrative page profile carries none.
+_GROUND_TRUTH_CASE_KEY = "ground_truth_case"
 
 #: Page-profile key that overrides a shape's default *source* module -- the
 #: same mechanism (and the same reasoning) as ``php_current``'s: one
@@ -146,6 +264,72 @@ _URL_PATH_KEY = "url_path"
 #: metadata that must never fork the verdict-relevant shape vocabulary
 #: (``class`` x ``sink_context.family``) the safety matrix is keyed on.
 _SOURCE_OVERRIDE_KEY = "source_override"
+
+#: Page-profile key that overrides a shape's default *sink* module, keyed by
+#: ``sink_context.family`` (L-P3.3c-G6). Keyed by family rather than page-wide
+#: because one page profile is shared by every cell of that page, which on
+#: ``/search.php`` means three different families: a page-wide override would
+#: redirect the HTML cells' sinks too.
+#:
+#: Same reasoning as :data:`_SOURCE_OVERRIDE_KEY`, applied to the other end of
+#: the pipeline: one ``(vuln_class, sink_context.family)`` shape can be
+#: *rendered* two ways on two real pages -- ``sql_string_literal`` is an
+#: equality lookup with a password condition on ``login.php`` and a
+#: ``LIKE '%...%'`` catalogue filter on ``search.php`` -- and which rendering a
+#: page uses is render-only metadata that must never fork the verdict-relevant
+#: shape vocabulary (``class`` x ``sink_context.family``) the safety matrix is
+#: keyed on. Both renderings score against exactly the same matrix rows.
+_SINK_OVERRIDE_KEY = "sink_override_by_family"
+
+#: Page-profile key naming this page's ``view``-category module (see
+#: :data:`fuzzlab.labgen.emitters.php_laravel.modules.VIEWS`). Optional: a page
+#: whose sink already renders its own view body (the Blade HTML sinks), or
+#: whose complexity returns the composed result directly, names no view
+#: category. Selected per page rather than per shape for exactly the reason
+#: :data:`_SOURCE_OVERRIDE_KEY` is: presentation is render-only metadata and
+#: must never fork the verdict-relevant ``class`` x ``sink_context.family``
+#: vocabulary the safety matrix is keyed on -- ``products.php`` and
+#: ``api/products.php`` are the same shape at the same SQL position, and
+#: differ only in how the result is presented.
+_VIEW_CATEGORY_KEY = "view_category"
+
+#: Page-profile key: render the real login page's session-establishment tail
+#: in the controller method (``session()->put(...)`` + redirect on a matched
+#: row, an error response otherwise) instead of the default
+#: ``return response()->json($rows);``.
+#:
+#: This is what makes the emitted page a *login* page rather than a query that
+#: happens to read the users table, and it is deliberately a flag on an
+#: existing complexity module's template rather than a new module: the shared
+#: minimal-pair checker classifies every name in a cell's ``// Module
+#: composition:`` line through :mod:`fuzzlab.labgen.modules`' registries and
+#: raises for a name it cannot find, so inventing a ``login_session`` module
+#: name here would make this stack's own cells unclassifiable. Both twins of
+#: the login pair render the identical tail, so the pair still differs only in
+#: its transform region.
+#:
+#: The build-time (Python) side of "a login page establishes a session" is
+#: **not** reinvented here either: it is
+#: :mod:`fuzzlab.labgen.emitters.php_laravel.auth_session`, a thin adapter over
+#: the LAB-owned :mod:`fuzzlab.labgen.identity_session` helper (lane L-P2.2),
+#: per PA-0001/PA-0021.
+_SESSION_LOGIN_KEY = "session_login"
+
+#: Page-profile key: render the real register page's prepared ``INSERT`` tail
+#: after the duplicate-username check. Same layering rationale as
+#: :data:`_SESSION_LOGIN_KEY` (a flag on the existing ``single_statement``
+#: complexity, never a new composition name).
+_REGISTER_INSERT_KEY = "register_insert"
+
+#: Page-profile keys that describe a **write** endpoint (a
+#: ``stored_second_order`` cell's ``cell.route``, looked up by
+#: ``cell.route.path``) rather than the render/sink endpoint every other
+#: profile key above is looked up by. Named explicitly so
+#: :meth:`LaravelEmitter._render_write_controller` can fail loud when a
+#: ``stored_second_order`` cell names a write route this emitter has no write
+#: profile for, instead of handing a half-populated context to Jinja2's
+#: ``StrictUndefined`` and reporting the gap as an opaque template error.
+_WRITE_PROFILE_KEYS = frozenset({"stored_model", "stored_field", "owner_param", "write_param_name"})
 
 #: Per-page static context (table/column/parameter names, the stored-field
 #: expression an HTML cell reads, the identifier allowlist and the two
@@ -163,9 +347,10 @@ _SOURCE_OVERRIDE_KEY = "source_override"
 #:   read.
 #: * **Migrated real ``puppy-fort-factory/`` pages** (lane L-P3.3c) keep the
 #:   real app's exact ``.php``-suffixed path, both as the profile key and, via
-#:   :data:`_URL_PATH_KEY`, as the URL the generated route serves -- because
-#:   the ``PFF-`` ground-truth cases those cells reproduce are labelled at
-#:   those URLs and T-LAB0.9's gate forbids relocating them (§4.3.6.6a).
+#:   :data:`_REAL_PAGE_KEY`/:data:`_CANONICAL_CELL_KEY`, as the URL the
+#:   canonical cell's generated route serves -- because the ``PFF-``
+#:   ground-truth cases those cells reproduce are labelled at those URLs and
+#:   T-LAB0.9's gate forbids relocating them (§4.3.6.6a).
 _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # The original L-P3.3a illustrative pair (unchanged, kept rendering).
     "/example/product": {"var_name": "id", "param_name": "id", "table": "products", "column": "id"},
@@ -226,16 +411,167 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "attr_name": "theme",
         "attr_default": "default",
     },
-    # --- migrated real puppy-fort-factory pages (lane L-P3.3c-G5) ----------
-    # The two secure-only escaped-echo form pages, reproduced in Laravel/Blade
-    # idiom: `PFF-1005` (`contact.php`, POST `message`) and `PFF-1006`
+    # =======================================================================
+    # Migrated REAL puppy-fort-factory/ pages (lane L-P3.3c). Every profile
+    # below carries `real_page` and, per :data:`_CANONICAL_CELL_KEY`, names
+    # (or explicitly declines to name) the one cell that owns the page's real
+    # URL. `.php` suffixes are load-bearing (§4.3.6.6a), not cosmetic.
+    # =======================================================================
+    # --- L-P3.3c-G1: numeric-literal SQLi on two real tables ---------------
+    "/product.php": {
+        "var_name": "id",
+        "param_name": "id",
+        "table": "products",
+        "column": "id",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-RPL-PRODUCT",
+        "ground_truth_case": "PFF-0001",
+    },
+    # The real page's extra nuance -- it suppresses DB errors with `@`, making
+    # it a blind-only target where product.php is also error-based -- is not
+    # modeled here: error verbosity is a nuisance/observability axis, not a
+    # `(transform, sink_context)` fact, so it cannot change this cell's
+    # derived verdict and inventing an op for it would fork the shape
+    # vocabulary the safety matrix is keyed on. Same deliberate omission
+    # `php_current`'s own real-pages sample records.
+    "/blog_post.php": {
+        "var_name": "id",
+        "param_name": "id",
+        "table": "posts",
+        "column": "id",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-RPL-BLOGPOST",
+        "ground_truth_case": "PFF-0006",
+    },
+    # --- L-P3.3c-G2: catalog listing + its JSON feed -----------------------
+    # Both are secure-only cells (PFF-1001 / PFF-1003 are true negatives),
+    # both filter `products.category` at a quoted-string-literal SQL position
+    # with a bound parameter, and differ only in presentation.
+    "/products.php": {
+        "var_name": "category",
+        "param_name": "category",
+        "table": "products",
+        "column": "category",
+        # The real page reads `$_GET['category']`, so the shape's default
+        # `post_param` source is overridden (the same mechanism
+        # `/example/profile` uses for a stored source).
+        "source_override": "get_param",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-PLRP-G2-0001",
+        "ground_truth_case": "PFF-1001",
+    },
+    # The JSON feed the fetch-based JS pages (`deals.php` and friends)
+    # consume. Same SQL position and same binding as `/products.php`; the
+    # difference is the response, which is JSON with a declared field shape
+    # and casts -- the `json_view` view category. `json_fields` mirrors the
+    # real endpoint's own projection, in the real endpoint's own field order,
+    # casts included.
+    "/api/products.php": {
+        "var_name": "category",
+        "param_name": "category",
+        "table": "products",
+        "column": "category",
+        "source_override": "get_param",
+        "view_category": "json_view",
+        "json_fields": (
+            ("id", "int"),
+            ("name", None),
+            ("price", "float"),
+            ("description", None),
+            ("category", None),
+        ),
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-PLRP-G2-0002",
+        "ground_truth_case": "PFF-1003",
+    },
+    # --- L-P3.3c-G3: the real auth pages ------------------------------------
+    # login.php (PFF-0004 vulnerable `username` + PFF-1008 true-negative
+    # `password`). `password_var`/`password_param` render the PFF-1008
+    # position: an already-hashed secret folded into the same statement,
+    # never a second injection point. `session_login` renders the real page's
+    # session-establishment tail.
+    "/login.php": {
+        "var_name": "username",
+        "param_name": "username",
+        "table": "users",
+        "column": "username",
+        "password_var": "password",
+        "password_param": "password",
+        "password_hash_fn": "md5",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-PLA-0001",
+        "ground_truth_case": "PFF-0004",
+        "session_login": {
+            "id_column": "id",
+            "name_column": "username",
+            "redirect_to": "/profile.php",
+            "error_message": "Invalid username or password.",
+        },
+    },
+    # register.php (PFF-1004, secure-only). The modeled sink is the real
+    # page's prepared duplicate-username check; `register_insert` renders the
+    # prepared INSERT that follows it. No `password_var`: the real duplicate
+    # check is `SELECT id FROM users WHERE username = ?` with no second
+    # condition (the sink's password condition is optional for exactly this
+    # reason).
+    "/register.php": {
+        "var_name": "username",
+        "param_name": "username",
+        "table": "users",
+        "column": "username",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-PLA-0003",
+        "ground_truth_case": "PFF-1004",
+        "register_insert": {
+            "columns": ("username", "email", "password", "full_name", "bio"),
+            "email_param": "email",
+            "password_param": "password",
+            "full_name_param": "full_name",
+            "password_hash_fn": "md5",
+            "taken_message": "That username is already taken.",
+        },
+    },
+    # --- L-P3.3c-G4: the stored second-order pair --------------------------
+    # profile.php is the READ/sink endpoint: the stored `bio` is rendered
+    # into an HTML body. The taint origin is storage, so this profile
+    # overrides the (xss, html_body) shape's default `get_param` source,
+    # exactly as /example/profile does.
+    "/profile.php": {
+        "var_name": "bio",
+        "stored_model": "\\App\\Models\\User",
+        "owner_param": "user",
+        "stored_expr": "$storedOwner->bio",
+        "css_class": "bio",
+        "source_override": "read_stored_field",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-PLRP-0401",
+        "ground_truth_case": "PFF-0005",
+    },
+    # edit_profile.php is the WRITE endpoint (`Cell.route`): the POSTed `bio`
+    # is persisted verbatim through Eloquent. The write-only keys
+    # (`_WRITE_PROFILE_KEYS`) are consumed by the `stored_field_write` write
+    # module, not by the read path's composition -- this profile is looked up
+    # by `cell.route.path`, while every other profile in this registry is
+    # looked up by the render (sink) path.
+    "/edit_profile.php": {
+        "stored_model": "\\App\\Models\\User",
+        "stored_field": "bio",
+        "owner_param": "user",
+        "write_param_name": "bio",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-PLRP-0402",
+        "ground_truth_case": "PFF-1007",
+    },
+    # --- L-P3.3c-G5: the two secure-only escaped-echo form pages -----------
+    # `PFF-1005` (`contact.php`, POST `message`) and `PFF-1006`
     # (`newsletter.php`, POST `email`). Both real pages echo the submitted
     # value straight back through the app's `e()` helper and write nothing to
     # the database, so the shape is `xss`/`html_body` reached from a POST body
     # parameter -- hence the `post_param` source override (the shape's default
-    # source, `read_stored_field`, is the stored-XSS origin, which neither page
-    # has). They carry `url_path`, so each is served at the real app's exact
-    # `.php` URL (see :data:`_URL_PATH_KEY`).
+    # source, `read_stored_field`, is the stored-XSS origin, which neither
+    # page has). The trivial case of the unified mechanism: a page with
+    # exactly one cell has a canonical cell and no twins to derive a variant
+    # URL for.
     "/contact.php": {
         "var_name": "message",
         "param_name": "message",
@@ -245,7 +581,9 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         # body position -- is what the safety matrix is keyed on).
         "css_class": "bio",
         "source_override": "post_param",
-        "url_path": "/contact.php",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-PLRP-1005",
+        "ground_truth_case": "PFF-1005",
     },
     "/newsletter.php": {
         "var_name": "email",
@@ -254,7 +592,39 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         # <?= e($email) ?>.</p>`.
         "css_class": "notice ok",
         "source_override": "post_param",
-        "url_path": "/newsletter.php",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-PLRP-1006",
+        "ground_truth_case": "PFF-1006",
+    },
+    # --- L-P3.3c-G6: search.php, a REAL page left DELIBERATELY UNPINNED ----
+    # puppy-fort-factory/search.php, the largest single page of the
+    # migration: ONE query parameter (`q`) reaching THREE sinks -- a
+    # `LIKE '%q%'` SQL string literal (PFF-0002), an HTML body reflection
+    # (PFF-0003), and a quoted `value="..."` attribute reflection (the page's
+    # third documented sink, which labels.json folds into its XSS case rather
+    # than numbering separately). One profile serves all six cells of the
+    # page (three sink behaviors x vulnerable/secure).
+    #
+    # `canonical_cell_id: None` is the explicit, flagged-open state (see
+    # :data:`_CANONICAL_CELL_KEY`): Laravel cannot register six
+    # `GET /search.php` routes, and which cell should be canonical -- or
+    # whether the `Cell` IR needs a multi-sink page composition that does not
+    # exist today -- is a policy decision this consolidation pass does not
+    # make. **Still open for L-P3.3c-CUT**, which owns emitting the candidate
+    # ground truth the regression gate runs against. Every cell here keeps
+    # the illustrative cell-ID-derived URL until that decision lands.
+    "/search.php": {
+        "var_name": "q",
+        "param_name": "q",
+        "table": "products",
+        "column": "name",
+        "css_class": "search",
+        "attr_name": "q",
+        "source_override": "get_param",
+        "sink_override_by_family": {"sql_string_literal": "sql_string_literal_like"},
+        "real_page": True,
+        "canonical_cell_id": None,  # still open for L-P3.3c-CUT -- see above
+        "ground_truth_case": None,  # spans PFF-0002/PFF-0003; no single case per cell
     },
 }
 
@@ -263,6 +633,10 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
 #: .check_identifier_stability``'s rule): per-cell identity is carried by the
 #: per-cell controller *class* and route URL, both derived from the cell ID.
 _METHOD_NAME = "show"
+
+#: The write controller's action name (L-P3.3c-G4). Fixed across a minimal
+#: pair's twins for the same reason :data:`_METHOD_NAME` is.
+_WRITE_METHOD_NAME = "store"
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
@@ -285,26 +659,129 @@ def _controller_class_for(cell_id: str) -> str:
     return "".join(p.capitalize() for p in parts if p) + "Controller"
 
 
-def _url_path_for(cell_id: str, route_path: str | None = None) -> str:
-    """The route URL this cell is served at.
+def _resource_class_for(cell_id: str) -> str:
+    """PascalCase Eloquent API Resource class name for a ``json_view`` cell,
+    derived from ``cell_id`` like every other per-cell identifier on this
+    stack (Addendum D's per-cell-identifier rule)."""
+    return _controller_class_for(cell_id)[: -len("Controller")] + "Resource"
 
-    Derived from ``cell_id`` by default, not ``cell.route.path`` verbatim --
-    see ``fuzzlab.labgen.emitters.php_laravel.route_accumulator``'s module
-    docstring for why a twin needs its own URL to coexist in one build (and
-    ``identifier_sqli.py`` for the one place that difference matters to an
-    oracle).
 
-    The one exception, and the reason ``route_path`` exists: a page profile may
-    **pin** the URL via :data:`_URL_PATH_KEY`, which the migrated real pages do
-    so their ``PFF-`` cases stay at the URLs ``lab/ground-truth/`` labels them
-    at (§4.3.6.6a). Callers pass the cell's logical page so this function can
-    look that pin up; passing nothing keeps the pre-L-P3.3c behavior exactly.
+def _url_path_for(cell_id: str) -> str:
+    """The **illustrative**, cell-ID-derived route URL -- ``/cell/<slug>``.
+
+    The default for every cell that is not the canonical cell of a migrated
+    real page: see :func:`_served_route_for` for the one function that
+    decides where a cell is actually served, and
+    ``fuzzlab.labgen.emitters.php_laravel.route_accumulator``'s module
+    docstring for why a twin needs its own URL to coexist in one build.
     """
-    if route_path is not None:
-        pinned = _PAGE_PROFILES.get(route_path, {}).get(_URL_PATH_KEY)
-        if pinned is not None:
-            return str(pinned)
     return f"/cell/{_cell_slug(cell_id)}"
+
+
+def _twin_url_for(real_url: str, cell_id: str) -> str:
+    """The distinct, still-``.php``-suffixed URL a non-canonical cell of a
+    real page is served at, e.g. ``/login.php`` + ``LABGEN-PLA-0002`` ->
+    ``/login.labgen-pla-0002.php``.
+
+    Never the plain cell-ID-derived ``/cell/<slug>``: keeping the ``.php``
+    suffix on every route of a real page (canonical or not) is itself part of
+    what makes this a *migration*, not a fresh illustrative page next to it --
+    and it is the one design choice in the unified mechanism most likely to
+    be revisited (see :data:`_CANONICAL_CELL_KEY`'s docstring)."""
+    stem, dot, suffix = real_url.rpartition(".")
+    if not dot:  # pragma: no cover - every real page path is `.php`-suffixed
+        return f"{real_url}.{_cell_slug(cell_id)}"
+    return f"{stem}.{_cell_slug(cell_id)}.{suffix}"
+
+
+def _served_route_for(page_path: str, cell_id: str, method: str) -> tuple[str, str]:
+    """The ``(url_path, http_method)`` this cell is actually served at, for
+    the page profile named ``page_path``.
+
+    **The one shared derivation of that fact** (PA-0003/PA-0021) -- the single
+    mechanism that replaced the five sub-lanes' independent ones. Called with
+    a cell's render/sink page for its main route, and (for a
+    ``stored_second_order`` cell) again with its write page for the write
+    route, since those can be two different real pages each with their own
+    canonical claim (L-P3.3c-G4's ``/profile.php``/``/edit_profile.php``
+    pair).
+
+    Three cases:
+
+    * **Illustrative page** (no :data:`_REAL_PAGE_KEY`): the cell-ID-derived
+      ``/cell/<slug>`` URL, method ``GET`` -- the pre-L-P3.3c behavior,
+      unchanged.
+    * **Real page, no canonical cell yet** (:data:`_CANONICAL_CELL_KEY` is
+      ``None``): the deliberately-unpinned state (L-P3.3c-G6's
+      ``search.php``). Every cell of that page falls back to the
+      illustrative behavior above until ``L-P3.3c-CUT`` resolves it.
+    * **Real page with a canonical cell**: the canonical cell is served at
+      the page's own path and ``method``; every other cell of that page gets
+      :func:`_twin_url_for`'s variant URL, at its own ``method``.
+    """
+    profile = _PAGE_PROFILES.get(page_path, {})
+    if not profile.get(_REAL_PAGE_KEY):
+        return _url_path_for(cell_id), "GET"
+    if _CANONICAL_CELL_KEY not in profile:
+        raise ValueError(
+            f"php_laravel page profile for {page_path!r} declares {_REAL_PAGE_KEY!r} but names no "
+            f"{_CANONICAL_CELL_KEY!r} -- a real page must either name the cell that owns its real "
+            "URL, or explicitly set it to None to flag the decision as still open (fail loud "
+            "rather than silently leave the page unserved or arbitrarily pick a cell)"
+        )
+    canonical = profile[_CANONICAL_CELL_KEY]
+    if canonical is None:
+        # Deliberately unpinned -- see the docstring above and
+        # `_CANONICAL_CELL_KEY`'s own docstring for why this is a legal,
+        # flagged-open state (L-P3.3c-CUT), not a bug.
+        return _url_path_for(cell_id), "GET"
+    if cell_id == canonical:
+        return page_path, method.upper()
+    return _twin_url_for(page_path, cell_id), method.upper()
+
+
+def _render_route_for(cell: Cell) -> Route:
+    """The page the tainted value actually executes on -- ``sink_endpoint``
+    when the cell has a distinct one, otherwise ``route``.
+
+    Mirrors ``php_current.render()``'s own ``render_route`` choice. For a
+    same-endpoint (``direct``) cell that is ``route``; for a
+    ``stored_second_order`` cell it is ``sink_endpoint`` -- the read page
+    where the stored payload executes, while ``route`` is the write page the
+    payload was submitted to (rendered separately, see
+    :meth:`LaravelEmitter._render_write_controller`). Factored out so
+    :meth:`LaravelEmitter.render`, :meth:`LaravelEmitter.route_fragment_for`
+    and :func:`served_url_for` cannot disagree about it (PA-0003/PA-0021: one
+    shared derivation, not three)."""
+    return cell.sink_endpoint if cell.sink_endpoint is not None else cell.route
+
+
+def _profile_for(cell: Cell) -> dict[str, Any]:
+    """This cell's page profile (its render/sink page), or a loud failure.
+    Never a silent default -- guessing a page's table/column/parameter names
+    is exactly the decision the profile exists to make explicit."""
+    render_route = _render_route_for(cell)
+    if render_route.path not in _PAGE_PROFILES:
+        raise ValueError(
+            f"{cell.cell_id}: php_laravel has no page profile for route {render_route.path!r} "
+            f"-- known routes: {sorted(_PAGE_PROFILES)}"
+        )
+    return dict(_PAGE_PROFILES[render_route.path])
+
+
+def served_url_for(cell: Cell) -> str:
+    """The URL this build actually serves ``cell``'s render/sink page at.
+
+    The one function :meth:`LaravelEmitter.route_fragment_for` (which
+    registers the route) and
+    :func:`fuzzlab.labgen.emitters.php_laravel.identifier_sqli.probe_cell_for`
+    /:mod:`fuzzlab.labgen.emitters.php_laravel.auth_session` (which probe or
+    post to it) all call -- a second, independent copy of this rule is
+    precisely how an oracle ends up probing a URL no generated route serves.
+    """
+    render_route = _render_route_for(cell)
+    url, _method = _served_route_for(render_route.path, cell.cell_id, render_route.method)
+    return url
 
 
 def _view_name_for(cell_id: str) -> str:
@@ -321,9 +798,10 @@ def _indent_block(text: str, prefix: str) -> str:
 
 class LaravelEmitter(Emitter):
     """Renders a :class:`Cell` to a Laravel controller (plus, for an
-    HTML-sink cell, its own Blade view) by composing this stack's own
-    module registries, and to a ``routes/web.php`` fragment for the
-    accumulator.
+    HTML-sink cell, its own Blade view, and for a ``json_view`` cell, its own
+    API Resource, and for a ``stored_second_order`` cell, its own write
+    controller) by composing this stack's own module registries, and to a
+    ``routes/web.php`` fragment for the accumulator.
 
     Like ``php_current``, :meth:`render` never falls back to a default
     shape/transform/page profile silently -- a shape, op, page or depth this
@@ -334,11 +812,6 @@ class LaravelEmitter(Emitter):
 
     def __init__(self) -> None:
         self._route_accumulator = RouteAccumulator()
-        #: ``pinned url_path -> the cell_id that claimed it``, so two cells of
-        #: one migrated real page cannot silently register two ``Route::get``
-        #: lines at the same path (see :data:`_URL_PATH_KEY`). Cell-ID-derived
-        #: URLs are unique by construction and are not tracked here.
-        self._pinned_url_claims: dict[str, str] = {}
 
     def supports(self, vuln_class: str, sink_context: SinkContext) -> bool:
         return (vuln_class, sink_context.family) in _MODULE_SET_BY_SHAPE
@@ -351,34 +824,26 @@ class LaravelEmitter(Emitter):
                 "-- callers must check supports() before calling render(), per T-LAB0.4's "
                 "declare-unsupported-and-skip rule"
             )
-        if cell.context_depth != "direct":
+        if cell.context_depth not in SUPPORTED_CONTEXT_DEPTHS:
             raise ValueError(
-                f"{cell.cell_id}: php_laravel renders context_depth 'direct' only, got "
-                f"{cell.context_depth!r} -- the depth-hop fragments (pass-through helper, "
-                "cross-file helper, stored/second-order routing) are not ported to Laravel "
-                "idiom yet, and rendering this cell as 'direct' would mislabel the depth its "
-                "corpus record claims (fail loud rather than silently flatten the axis)"
+                f"{cell.cell_id}: php_laravel renders context_depth "
+                f"{list(SUPPORTED_CONTEXT_DEPTHS)} only, got {cell.context_depth!r} -- the "
+                "pass-through-helper depth fragments (same_file_helper, cross_file) are not "
+                "ported to Laravel idiom yet, and rendering this cell as 'direct' would "
+                "mislabel the depth its corpus record claims (fail loud rather than silently "
+                "flatten the axis)"
             )
         modules = _MODULE_SET_BY_SHAPE[(cell.vuln_class, cell.sink_context.family)]
+        render_route = _render_route_for(cell)
 
-        # Mirrors php_current.render()'s own `render_route` choice: the page
-        # the tainted value actually executes on. Since this emitter accepts
-        # `direct` cells only, `sink_endpoint` is always None here (the schema
-        # makes a distinct sink_endpoint biconditional with
-        # `stored_second_order`); the expression is kept so the choice is made
-        # in one place if/when the depth axis is ported.
-        render_route = cell.sink_endpoint if cell.sink_endpoint is not None else cell.route
-
-        if render_route.path not in _PAGE_PROFILES:
-            raise ValueError(
-                f"{cell.cell_id}: php_laravel has no page profile for route {render_route.path!r} "
-                f"-- known routes: {sorted(_PAGE_PROFILES)}"
-            )
-        ctx: dict[str, Any] = dict(_PAGE_PROFILES[render_route.path])
-        # Routing metadata, not rendering context: the pinned URL is consumed by
-        # route_fragment_for(), never by a template (same reason
-        # `source_override` is popped below).
-        ctx.pop(_URL_PATH_KEY, None)
+        ctx: dict[str, Any] = _profile_for(cell)
+        # Routing/provenance metadata, never template values -- popped so no
+        # template can accidentally render a ground-truth case ID into a
+        # served artifact (FR-LAB-2 keeps emitted IDs opaque) or see a routing
+        # flag it has no business reading.
+        ctx.pop(_REAL_PAGE_KEY, None)
+        ctx.pop(_CANONICAL_CELL_KEY, None)
+        ctx.pop(_GROUND_TRUTH_CASE_KEY, None)
         ctx["method_name"] = _METHOD_NAME
         ctx["view_name"] = _view_name_for(cell.cell_id)
 
@@ -390,6 +855,25 @@ class LaravelEmitter(Emitter):
             )
         source_result = SOURCES[source_name].render(ctx)
         ctx = source_result.context
+
+        # Which *rendering* of this shape's sink this page uses (L-P3.3c-G6).
+        # Popped before any template renders, so a profile key that is a
+        # mapping never reaches a Jinja2 context.
+        sink_overrides = dict(ctx.pop(_SINK_OVERRIDE_KEY, {}) or {})
+        sink_name = sink_overrides.get(cell.sink_context.family, modules.sink)
+        if sink_name not in SINKS:
+            raise ValueError(
+                f"{cell.cell_id}: php_laravel page profile for {render_route.path!r} names an "
+                f"unknown sink module {sink_name!r} for family {cell.sink_context.family!r} "
+                f"-- known sinks: {sorted(SINKS)}"
+            )
+
+        # The `view` category (L-P3.3c-G2): a page whose response has a
+        # presentation layer the sink cannot carry, because the sink produced
+        # data rather than markup -- a JSON endpoint. Selected by the page
+        # profile, and fail-loud on an unknown name exactly like the source
+        # override above.
+        view_name = ctx.pop(_VIEW_CATEGORY_KEY, None)
 
         # An empty transform pipeline means "identity" (the raw value is used
         # as-is); every op in a non-empty pipeline runs in order, each free to
@@ -410,14 +894,52 @@ class LaravelEmitter(Emitter):
             ctx = transform_result.context
             transform_code_blocks.append(transform_result.code)
 
-        sink_result = SINKS[modules.sink].render(ctx)
-        renders_view = modules.sink in VIEW_SINKS
+        sink_result = SINKS[sink_name].render(ctx)
+        renders_view = sink_name in VIEW_SINKS
 
-        composition = " -> ".join((source_name, *applied_ops, modules.sink, modules.complexity))
+        view_result = None
+        if view_name is not None:
+            if view_name not in VIEWS:
+                raise ValueError(
+                    f"{cell.cell_id}: php_laravel page profile for {render_route.path!r} names an "
+                    f"unknown view module {view_name!r} -- known views: {sorted(VIEWS)}"
+                )
+            if renders_view:
+                raise ValueError(
+                    f"{cell.cell_id}: page profile for {render_route.path!r} names view category "
+                    f"{view_name!r}, but sink {sink_name!r} already renders its own view body -- "
+                    "a cell has exactly one presentation layer, and emitting two would put two "
+                    "files at the one 'view' role with no defined precedence"
+                )
+            view_result = VIEWS[view_name].render({**ctx, "resource_class": _resource_class_for(cell.cell_id)})
+
+        composition = " -> ".join((source_name, *applied_ops, sink_name, modules.complexity))
+        # A `direct` cell's provenance block is byte-identical to what this
+        # emitter produced before the depth axis was carried here -- the whole
+        # pre-existing corpus regenerates unchanged (and is regression-tested
+        # to), the same guarantee php_current's own `depth_comment` gives.
+        depth_comment = (
+            ""
+            if cell.context_depth == "direct"
+            else (
+                f"// Context depth: {cell.context_depth}\n"
+                f"// Sink endpoint (where the stored value executes): "
+                f"{render_route.method} {render_route.path}\n"
+            )
+        )
         provenance = (
             f"// Generated by fuzzlab.labgen.emitters.php_laravel for cell {cell.cell_id}\n"
             f"// Manifest cell.route.path: {cell.route.path}\n"
-            f"// Module composition: {composition}\n"
+            f"{depth_comment}"
+            # A view-category module's name is recorded on its own line rather
+            # than in the composition line (fuzzlab.labgen.minimal_pair
+            # classifies every composition-line name through the shared,
+            # cross-stack registries and raises for one it cannot find; the
+            # `route` category sets the precedent). Identical between a
+            # minimal pair's twins, so it lands in the checker's common
+            # prefix.
+            + (f"// View category: {view_name}\n" if view_name is not None else "")
+            + f"// Module composition: {composition}\n"
         )
 
         # For a view-rendering cell the sink's code *is* the Blade view body,
@@ -426,6 +948,12 @@ class LaravelEmitter(Emitter):
         body_fragments = [source_result.code, *transform_code_blocks]
         if not renders_view:
             body_fragments.append(sink_result.code)
+        if view_result is not None:
+            # One controller statement, from the view module's own context --
+            # the analogue of `render_only`'s `return view(...)` line. It
+            # rebinds `$rows`, which is what lets the complexity module close
+            # the method unchanged.
+            body_fragments.append(view_result.context["view_bridge_code"])
         body = _indent_block("\n".join(body_fragments), "        ")
         method_code = COMPLEXITIES[modules.complexity].render({**ctx, "body": body}).code
 
@@ -464,32 +992,108 @@ class LaravelEmitter(Emitter):
             files.append(
                 EmittedFile(path=view_path, content=view_source.encode("utf-8"), role="view")
             )
+        if view_result is not None:
+            # A `view`-category artifact is an ordinary PHP class file, so its
+            # provenance is a plain header (no `?>` needed, unlike a Blade
+            # view, whose body is template text after the PHP block).
+            resource_class = _resource_class_for(cell.cell_id)
+            resource_source = "<?php\n" + provenance + "\n" + view_result.code
+            resource_path = self.stack_env.file_roles[str(view_name)].format(
+                cell_slug=resource_class[: -len("Resource")]
+            )
+            files.append(
+                EmittedFile(path=resource_path, content=resource_source.encode("utf-8"), role="view")
+            )
+        if cell.context_depth == "stored_second_order":
+            files.append(self._render_write_controller(cell, provenance))
         return tuple(files)
+
+    def _render_write_controller(self, cell: Cell, provenance: str) -> EmittedFile:
+        """The **write** half of a ``stored_second_order`` cell: the endpoint
+        ``cell.route`` names, which persists the tainted parameter into the
+        stored field the read/sink endpoint later renders.
+
+        Emitted as its own controller file rather than a second method on the
+        read controller, so each endpoint's route registration points at a
+        controller whose whole job is that endpoint -- and so the write half
+        carries the same ``// Module composition:`` provenance line the read
+        half does, which is what lets :mod:`fuzzlab.labgen.minimal_pair`
+        evaluate the pair invariant on this file too. Its body holds no
+        transform, so it is identical between a vulnerable cell and its secure
+        twin by construction.
+        """
+        profile = _PAGE_PROFILES.get(cell.route.path)
+        if profile is None or not _WRITE_PROFILE_KEYS.issubset(profile):
+            missing = sorted(_WRITE_PROFILE_KEYS - set(profile or {}))
+            raise ValueError(
+                f"{cell.cell_id}: php_laravel has no write page profile for the stored-write "
+                f"route {cell.route.path!r} (missing {missing}) -- a 'stored_second_order' cell "
+                "reproduces two real endpoints, so the write endpoint needs its own profile "
+                "naming the model/field the payload is persisted into; there is no safe default"
+            )
+        write_ctx: dict[str, Any] = dict(profile)
+        write_ctx.pop(_REAL_PAGE_KEY, None)
+        write_ctx.pop(_CANONICAL_CELL_KEY, None)
+        write_ctx.pop(_GROUND_TRUTH_CASE_KEY, None)
+        write_ctx["write_method_name"] = _WRITE_METHOD_NAME
+        # Redirect to wherever THIS cell's own read route lives -- canonical
+        # or twin, decided the same way every other served URL is.
+        write_ctx["sink_url_path"] = served_url_for(cell)
+        method_code = WRITES["stored_field_write"].render(write_ctx).code
+
+        base = _controller_class_for(cell.cell_id)[: -len("Controller")]
+        controller_class = f"{base}WriteController"
+        source = (
+            "<?php\n"
+            + provenance
+            + f"// Write endpoint (where the payload is submitted): {cell.route.method} "
+            f"{cell.route.path}\n"
+            "\n"
+            "namespace App\\Http\\Controllers;\n"
+            "\n"
+            "use Illuminate\\Http\\Request;\n"
+            "\n"
+            f"class {controller_class} extends Controller\n"
+            "{\n"
+            f"{method_code}"
+            "}\n"
+        )
+        path = self.stack_env.file_roles["write_controller"].format(cell_slug=base)
+        return EmittedFile(path=path, content=source.encode("utf-8"), role="write_controller")
 
     def route_fragment_for(self, cell: Cell) -> str:
         """This cell's ``routes/web.php`` fragment (accumulator category, one
-        per cell -- see ``route_accumulator.py``'s module docstring for why
-        this is not part of :meth:`render`'s own return value)."""
+        or two lines per cell -- see ``route_accumulator.py``'s module
+        docstring for why this is not part of :meth:`render`'s own return
+        value). A ``stored_second_order`` cell registers two routes (read +
+        write); every other cell registers one."""
         if not self.supports(cell.vuln_class, cell.sink_context):
             raise ValueError(f"{cell.cell_id}: unsupported for php_laravel -- see render() for the same check")
         controller_class = _controller_class_for(cell.cell_id)
-        render_route = cell.sink_endpoint if cell.sink_endpoint is not None else cell.route
-        url_path = _url_path_for(cell.cell_id, render_route.path)
-        if url_path != f"/cell/{_cell_slug(cell.cell_id)}":
-            claimant = self._pinned_url_claims.setdefault(url_path, cell.cell_id)
-            if claimant != cell.cell_id:
-                raise ValueError(
-                    f"{cell.cell_id}: page profile for {render_route.path!r} pins the route URL "
-                    f"{url_path!r}, which cell {claimant!r} already claims -- a pinned URL (a "
-                    "migrated real page keeping its real `.php` URL, §4.3.6.6a) can be owned by "
-                    "exactly one cell, so a page needing a vulnerable cell *and* a secure twin "
-                    "must not pin one (both twins would register the same Route::get path)"
+        render_route = _render_route_for(cell)
+        read_url, read_method = _served_route_for(render_route.path, cell.cell_id, render_route.method)
+        lines = [
+            self._route_accumulator.fragment_for_cell(
+                cell_id=cell.cell_id,
+                controller_class=controller_class,
+                url_path=read_url,
+                method=read_method,
+                action=_METHOD_NAME,
+            )
+        ]
+        if cell.context_depth == "stored_second_order":
+            write_controller_class = f"{controller_class[: -len('Controller')]}WriteController"
+            write_url, write_method = _served_route_for(cell.route.path, cell.cell_id, cell.route.method)
+            lines.append(
+                self._route_accumulator.fragment_for_cell(
+                    cell_id=cell.cell_id,
+                    controller_class=write_controller_class,
+                    url_path=write_url,
+                    method=write_method,
+                    action=_WRITE_METHOD_NAME,
                 )
-        return self._route_accumulator.fragment_for_cell(
-            cell_id=cell.cell_id,
-            controller_class=controller_class,
-            url_path=url_path,
-        )
+            )
+        return "\n".join(lines)
 
     def render_scaffold(self) -> EmittedFiles:
         """The per-stack scaffold files (rendered once per build, never per

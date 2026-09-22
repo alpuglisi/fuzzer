@@ -33,6 +33,17 @@ resources:
   - resource_id: profile_user_a
     owner: user_a
     cell_ids: [LABGEN-EX-IDENTITY-0001]
+  # The stored `bio` of the migrated puppy-fort-factory profile pair (lane
+  # L-P3.3c-G4, CC-LAB-0049). Unlike profile_user_a above, this resource is NOT
+  # a placeholder: both cell_ids are real cells in
+  # lab/manifests/phase3_php_laravel_real_pages_g4.yaml, and the resource is
+  # what the plan (§4.3.6.4) means by "profile.php/edit_profile.php need an
+  # owning identity for the stored `bio` to belong to" -- a stored
+  # second-order payload is written by, and read back as, some identity, so the
+  # write endpoint's `?user=` owner parameter denotes this resource's owner.
+  - resource_id: profile_bio_user_a
+    owner: user_a
+    cell_ids: [LABGEN-PLRP-0401, LABGEN-PLRP-0402]
 
 authz_expectations:
   - cell_id: LABGEN-EX-IDENTITY-0001
@@ -49,4 +60,23 @@ authz_expectations:
     endpoint: /profile/{id}
     accessing_identity: admin_a
     target_resource: profile_user_a
+    expected_outcome: allowed
+  # L-P3.3c-G4: the migrated pair's two real endpoints, `.php` suffix included
+  # (§4.3.6.6a). The owner may write and read their own bio; another standard
+  # user may not write it -- which is what makes the stored payload attributable
+  # to one identity rather than ambient.
+  - cell_id: LABGEN-PLRP-0401
+    endpoint: /edit_profile.php
+    accessing_identity: user_a
+    target_resource: profile_bio_user_a
+    expected_outcome: allowed
+  - cell_id: LABGEN-PLRP-0401
+    endpoint: /edit_profile.php
+    accessing_identity: user_b
+    target_resource: profile_bio_user_a
+    expected_outcome: denied
+  - cell_id: LABGEN-PLRP-0401
+    endpoint: /profile.php
+    accessing_identity: user_a
+    target_resource: profile_bio_user_a
     expected_outcome: allowed

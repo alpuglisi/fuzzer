@@ -1,0 +1,87 @@
+# Phase-3 php_laravel REAL-PAGE manifest, lane L-P3.3c-G2
+# (docs/LAB_IMPLEMENTATION_PLAN.md §4.3 step 6 / §4.3.6, group G2:
+# "catalog/listing + JSON feed").
+#
+# Unlike lab/manifests/phase3_php_laravel_sample.yaml (illustrative Laravel
+# pages, routed extension-less under /example/, /catalog, ...), every cell
+# here reproduces a REAL page of Ryder's Puppy Fort Factory in Laravel/
+# Eloquent idiom, and is therefore routed at the real app's exact
+# `.php`-suffixed URL -- see §4.3.6.6a and this emitter's `_URL_PATH_KEY`:
+# T-LAB0.9's additive-only regression gate treats a `PFF-` case that moves to
+# a different URL as a build-breaking RELOCATION, so Laravel's idiomatic
+# extension-less routes would fail the whole cutover. Laravel routes are
+# arbitrary strings, so keeping `.php` costs nothing technically and keeps
+# every URL in lab/ground-truth/ valid unchanged.
+#
+# This group's two pages (§4.3.6.3's inventory table):
+#
+#   products.php      -- PFF-1001, secure sql_string_literal (GET `category`)
+#   api/products.php  -- PFF-1003, secure sql_string_literal (GET `category`)
+#                        plus the new `json_view` view category
+#
+# Both are SECURE-ONLY cells, with no vulnerable twin. That is deliberate and
+# legal: PFF-1001 and PFF-1003 are true negatives in
+# lab/ground-truth/labels.json (`expected_vulnerable: false`), the real app
+# has no vulnerable variant of either page, and §4.3.6.3 established that
+# `fuzzlab/labgen/minimal_pair.py` is a standalone checker over two rendered
+# results rather than a schema constraint -- nothing requires a twin, and
+# inventing a vulnerable products.php would add a `PFF-` case the hand-authored
+# ground truth does not have. The minimal-pair invariant is still exercised for
+# both cells, against each cell's own transform-emptied weakened twin (the same
+# `_weakened_twin` convention `fuzzlab.labgen.cli --check` uses).
+#
+# Verdicts are never asserted here; they are derived by
+# fuzzlab.labgen.verdict.verdict() from (transform, sink_context) against
+# lab/safety_matrix.yaml, and
+# tests/test_labgen_php_laravel_real_pages_g2.py asserts that derivation
+# agrees with the label lab/ground-truth/labels.json already carries for each
+# `PFF-` case -- read from labels.json itself, never restated here (PA-0001).
+#
+# Deliberately NOT modelled, named rather than glossed over (the same
+# convention phase0_real_pages_sample.yaml uses for blog_post.php's
+# error-suppression nuance):
+#
+#   * The real pages apply the category filter ONLY when `category` is
+#     non-empty, falling back to an unfiltered listing. That branch is
+#     realism, not verdict-relevant: the injection point is the
+#     string-literal position the filter occupies, and the empty-parameter
+#     branch reaches no sink at all. The cells model the filtered statement.
+#   * products.php's own presentation layer (an escaped Blade catalog grid,
+#     plus the category-link strip) carries no labelled case -- its output is
+#     `e()`-escaped throughout per puppy-fort-factory/VULNERABILITIES.md -- so
+#     it is Layer-B realism surface (§4.3.6.1), not an emitted cell. Its
+#     controller returns the rows, exactly as php_current's login.php cell
+#     returns a row rather than an HTML login form.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # --- products.php (PFF-1001) ------------------------------------------
+  # The shop listing's optional `?category=` filter, applied with a bound
+  # parameter: the quoted-string-literal SQL position is real, and
+  # `param_bind` is what makes it SECURE. Rendered in Laravel idiom as the
+  # query builder's `where()` (which binds for you) rather than `whereRaw()`.
+  - cell_id: LABGEN-PLRP-G2-0001
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /products.php }
+    param: { location: query }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
+
+  # --- api/products.php (PFF-1003) --------------------------------------
+  # The same shape at the same SQL position on a different real page -- which
+  # is the point of authoring both: they differ only in PRESENTATION, and the
+  # presentation is what needed the new `json_view` view category (a Laravel
+  # Eloquent API Resource: the field set, field order and casts the real
+  # endpoint publishes to the fetch-based JS pages).
+  - cell_id: LABGEN-PLRP-G2-0002
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /api/products.php }
+    param: { location: query }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
