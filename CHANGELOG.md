@@ -14,6 +14,15 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- FUZZ (`CC-FUZZ-0021`, `FR-FUZZ-9`, build lane B0's coverage-frontier
+  emitter, Wave 1b): `fuzzlab/greybox/run.py::run_greybox()` now emits the
+  run-wide `CoverageFrontier`'s per-attempt growth to `core/store.py`'s
+  `metric_series` table (`source="coverage"`, `key="coverage/lines"`) via a
+  buffered `MetricLogger`, additive alongside the existing
+  `greybox_frontier_size` `run_metrics` total — enables a future UI reader to
+  chart coverage growth over a run. Landed after lane C1's `CC-FUZZ-0019`
+  M8-wiring, per the build plan's flagged file-overlap in this same
+  attempt/summary loop.
 - LAB (`CC-LAB-0060`, `FR-LAB-57`, build lane T1): wired `fuzzlab.labgen
   .conformance.tier1`'s public API (`build_tier1_case`/`run_tier1_case`/
   `evaluate_tier1_response`) against a real in-process app+DB for the first

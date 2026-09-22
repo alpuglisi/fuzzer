@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import Callable, Iterable, Sequence
 from urllib.parse import urlparse
 
+from fuzzlab.core.store import MetricLogger
 from fuzzlab.greybox.confirm import greybox_confirms
 from fuzzlab.greybox.coverage import (CoverageFrontier, app_lines, encode_coverage)
 from fuzzlab.greybox.recorder import record_attempt_signals
@@ -231,6 +232,22 @@ def _record_accepted_variant(store, run_id: int, spec: ProbeSpec, mutation_class
         allow_destructive=allow_destructive)
 
 
+def _record_coverage_metric(logger: MetricLogger, step: int, frontier: CoverageFrontier) -> None:
+    """Emit the run-wide coverage frontier's current size to `metric_series`
+    (B0's coverage-frontier emitter, CC-FUZZ-0021), keyed by attempt count so
+    frontier growth over the run is visible at read time (LTTB downsampling
+    per `docs/UI_IMPLEMENTATION_PLAN.md` R-05's `coverage/lines` example key).
+
+    Purely additive alongside the existing `greybox_frontier_size` run_metrics
+    total (`_record_metric`, below) -- it does not replace or alter that path,
+    it just adds a per-step series `log_scalar` cannot express as a single
+    end-of-run total. `logger` is buffered (`MetricLogger`); the caller flushes
+    it once at the end of the run, same as `mutation_variant_probes` /
+    `_record_accepted_variant` above slot into this same attempt loop for T8.5.
+    """
+    logger.log("coverage/lines", step, float(frontier.size))
+
+
 def run_greybox(*, base_url: str, store, run_id: int,
                 points: Sequence[GreyboxPoint], sender,
                 coverage_source, dbfault_source, lab_control=None,
@@ -255,6 +272,7 @@ def run_greybox(*, base_url: str, store, run_id: int,
     probes = tuple(probes)
     include = (app_root.rstrip("/") + "/",)
     frontier = CoverageFrontier()          # run-wide exploration total only (a metric)
+    coverage_metrics = MetricLogger(store, run_id, source="coverage")  # B0 coverage emitter
     summary = {"points": len(points), "attempts": 0, "db_faults": 0,
                "novel_lines": 0, "m10_would_confirm": 0, "max_reward": 0.0,
                "baseline_reward": 0.0, "newcode_reward": 0.0, "coverage_lines_seen": 0,
@@ -321,6 +339,7 @@ def run_greybox(*, base_url: str, store, run_id: int,
                 db_fault=fault.faulted, reward=reward)
 
             summary["attempts"] += 1
+            _record_coverage_metric(coverage_metrics, summary["attempts"], frontier)
             summary["coverage_lines_seen"] += len(cov_lines)
             summary["max_reward"] = max(summary["max_reward"], reward)
             if spec.kind == "baseline":
@@ -348,6 +367,7 @@ def run_greybox(*, base_url: str, store, run_id: int,
                 and pt.method.upper() != "GET"):
             lab_control.reset("baseline")
 
+    coverage_metrics.flush()               # B0 coverage emitter: commit any buffered rows
     summary["novel_lines"] = frontier.size
     _record_metric(store, run_id, "greybox_attempts", summary["attempts"])
     _record_metric(store, run_id, "greybox_db_faults", summary["db_faults"])

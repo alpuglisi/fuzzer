@@ -740,7 +740,7 @@ detail):
 | `model` (versions, calibration) | ML training | ML inference |
 | `request_budget` | all tools | budget manager, UI |
 | coverage / fault signals | grey-box hooks | fuzzer, scheduler, mutation |
-| `metric_series` (cross-run scalars: `run_id, source, key, step, ts, value`; migration 11) | per-step emitters (GBT/logistic, bandit loop, coverage frontier, `MutationSearch`, stage timing — landing as later, separate lanes) via `core.store.log_scalar`/`MetricLogger` | diagnostics UI (U5) |
+| `metric_series` (cross-run scalars: `run_id, source, key, step, ts, value`; migration 11) | per-step emitters via `core.store.log_scalar`/`MetricLogger`: coverage frontier (`greybox/run.py::run_greybox`, `source="coverage"`, landed `CC-FUZZ-0021`) landed; GBT/logistic, bandit loop, `MutationSearch`, stage timing still pending as later, separate lanes | diagnostics UI (U5) |
 
 ## Dependency ordering
 
