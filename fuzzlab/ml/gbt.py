@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Callable, Sequence
 
 
 def _sigmoid(z: float) -> float:
@@ -111,7 +111,17 @@ class GradientBoostedTrees:
         self._f0 = 0.0
         self._w: list[float] = []
 
-    def fit(self, X: Sequence[Sequence[float]], y: Sequence[int]) -> "GradientBoostedTrees":
+    def fit(
+        self,
+        X: Sequence[Sequence[float]],
+        y: Sequence[int],
+        on_round: "Callable[[int, dict[str, float]], None] | None" = None,
+    ) -> "GradientBoostedTrees":
+        """Fit by gradient boosting. ``on_round``, if given, is called after every
+        boosting round as ``on_round(step, {\"train/loss\": ..., \"train/leaf_gain\": ...})``
+        with the (class-weighted) training log-loss under the current ensemble and that
+        round's tree's total weighted split gain — purely observational (metric
+        emission), never touching the optimization path."""
         n = len(y)
         pos = sum(1 for v in y if v) or 1
         neg = (n - pos) or 1
@@ -122,12 +132,24 @@ class GradientBoostedTrees:
         self._f0 = math.log(p0 / (1.0 - p0))
         F = [self._f0] * n
         self._trees = []
-        for _ in range(self.n_estimators):
+        wsum_all = sum(self._w) or 1.0
+        for step in range(self.n_estimators):
             resid = [y[i] - _sigmoid(F[i]) for i in range(n)]        # -gradient of logloss
             tree = _RegressionTree(self.max_depth, self.min_leaf).fit(X, resid, self._w)
+            updates = [tree.predict_one(X[i]) for i in range(n)]
             for i in range(n):
-                F[i] += self.lr * tree.predict_one(X[i])
+                F[i] += self.lr * updates[i]
             self._trees.append(tree)
+            if on_round is not None:
+                loss = 0.0
+                for i in range(n):
+                    p = min(1 - 1e-12, max(1e-12, _sigmoid(F[i])))
+                    loss += self._w[i] * -(y[i] * math.log(p) + (1 - y[i]) * math.log(1 - p))
+                mean_abs_update = sum(abs(u) for u in updates) / n if n else 0.0
+                on_round(step, {
+                    "train/loss": loss / wsum_all,
+                    "train/mean_abs_update": mean_abs_update,
+                })
         return self
 
     def _raw(self, x) -> float:

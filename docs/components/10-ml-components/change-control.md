@@ -3,6 +3,65 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0009 — GBT/logistic per-step metric_series emitter (build lane B0, Wave 1b) (2026-09-22)
+- Change: wired the classifier training loops into B0-table's cross-run
+  `metric_series` sink (`CC-CORE-0018`, `fuzzlab/core/store.py`'s
+  `log_scalar`/`MetricLogger`). `GradientBoostedTrees.fit` (`fuzzlab/ml/gbt.py`)
+  gained an optional `on_round(step, {"train/loss", "train/mean_abs_update"})`
+  callback fired once per boosting round; `LogisticRegression.fit`
+  (`fuzzlab/ml/logistic.py`) gained an optional `on_epoch(step, {"train/loss",
+  "train/l2_norm"})` callback fired once per gradient-descent epoch. Both
+  models stay dependency-free of `core/store` — the callback is a plain
+  `Callable`, not a `MetricLogger` reference, so `fuzzlab/ml/gbt.py`/
+  `logistic.py` do not import `core.store`. `fuzzlab/ml/train.py` adds
+  `_fit_with_metrics(model, X, y, store, run_id, name)`, which wraps the
+  deploy fit (the final "fit on all data" call in `train_and_score`, not the
+  per-fold out-of-fold fits used only for model selection/calibration) in a
+  `MetricLogger(store, run_id, source)` when `run_id is not None`, with
+  `source="gbt"` or `source="logreg"` per the B0-table schema note (`source`
+  = subsystem bucket mirroring existing prefixes). With `run_id is None`, or
+  for the `prevalence-fallback` path (no GBT/logistic model is fit at all),
+  no rows are written — purely additive, opt-in instrumentation.
+- Impact (other components / project): none on CORE (consumes B0-table's
+  already-landed, unmodified `log_scalar`/`MetricLogger` API/schema — no
+  migration change). No change to `train_and_score`'s return value, to
+  `candidate.score`/`model`/`run_metrics` writes, or to model outputs
+  (`predict_proba` is bit-identical with/without the callback — see the
+  `*_fit_without_on_*_is_unaffected` tests). Populates `metric_series` for
+  U4 (ML tab) and U5 (metric_series/store-exploration tab), both later Wave-2
+  UI lanes that read this table; no coordination needed since those lanes
+  only read.
+- Risk (level; mitigation): low — additive-only optional callback parameters,
+  no existing call site invoked without `run_id` changes behavior, and the
+  callback path is exercised by dedicated tests. Mitigated by 8 new tests:
+  `tests/test_ml.py`'s `test_logistic_on_epoch_callback_fires_once_per_epoch_
+  with_finite_loss`, `test_logistic_fit_without_on_epoch_is_unaffected`,
+  `test_gbt_on_round_callback_fires_once_per_round_with_finite_loss`,
+  `test_gbt_fit_without_on_round_is_unaffected` (unit-level: callback arity,
+  step sequencing, finite values, and non-interference with `predict_proba`);
+  `tests/test_ml_train.py`'s `test_train_and_score_logistic_emits_metric_
+  series`, `test_train_and_score_gbt_emits_metric_series` (end-to-end: real
+  rows land in `metric_series` with the right `source`/`key`/monotonic
+  `step`), `test_train_and_score_no_run_id_emits_no_metric_series`,
+  `test_train_and_score_fallback_emits_no_metric_series` (negative cases —
+  no orphaned rows). Full suite green; see project CHANGELOG for pass/skip
+  counts at time of landing.
+- Deliverables:
+  - [x] `GradientBoostedTrees.fit(on_round=...)` emitting `train/loss` +
+    `train/mean_abs_update` — done.
+  - [x] `LogisticRegression.fit(on_epoch=...)` emitting `train/loss` +
+    `train/l2_norm` — done.
+  - [x] `fuzzlab/ml/train.py::_fit_with_metrics` wiring the deploy fit to a
+    `MetricLogger` with `source="gbt"`/`"logreg"` — done.
+  - [x] Tests confirming rows land in `metric_series` — done.
+  - [ ] U4/U5 UI consumption of these rows — out of scope for this lane (later
+    Wave-2 UI lanes).
+- Effectiveness (assessed 2026-09-22): effective in tests — training curves
+  for both models are now recorded per-step in `metric_series` under the
+  correct `source`, with no change to deployed model behavior or scores;
+  real-world usefulness (debugging convergence, spotting overfitting) is
+  best judged once U4/U5 render this data, which is out of this lane's scope.
+
 ### CC-ML-0008 — Anomaly detector (ECOD) + XGBOD-style hybrid (T10.3) (2026-09-21)
 - Change: added the anomaly-detection tripwire (A.5). `fuzzlab/ml/anomaly.py::ECOD` is a
   parameter-free, pure-Python Empirical-CDF outlier detector (per-feature left/right/skew-
