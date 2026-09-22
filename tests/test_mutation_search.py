@@ -1,5 +1,6 @@
 """Phase 8 T8.4: bandit-scheduled, coverage-guided mutation search."""
 
+from fuzzlab.core.store import Store
 from fuzzlab.mutation.filtermodel import FilterModel
 from fuzzlab.mutation.search import MutationSearch, _reward
 
@@ -65,3 +66,29 @@ def test_returns_best_even_when_base_uncaught():
     fm = FilterModel.from_lab()
     res = MutationSearch(fm, seed=1, budget=10).search("golden retriever fort")
     assert res.evaded is True and res.semantics_ok is True   # already passes
+
+
+# --- B0: mutation reward/novelty emitter -----------------------------------
+def test_search_emits_reward_and_novelty_series_when_store_given(tmp_path):
+    fm = FilterModel.from_lab()
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("test", "h")
+        s = MutationSearch(fm, seed=1, budget=10, coverage_fn=_cov,
+                           store=store, run_id=run_id)
+        res = s.search(SQLI, "sql-injection")
+        rows = store.conn.execute(
+            "SELECT source, key, step, value FROM metric_series WHERE run_id=? "
+            "ORDER BY step, key", (run_id,)).fetchall()
+        assert rows
+        assert {r["source"] for r in rows} == {"mutation"}
+        assert {r["key"] for r in rows} == {"reward", "novelty"}
+        assert max(r["step"] for r in rows) <= 10  # bounded by the search budget
+        assert all(r["value"] == r["value"] for r in rows)  # no NaN
+
+
+def test_search_emits_nothing_without_store(tmp_path):
+    fm = FilterModel.from_lab()
+    with Store(tmp_path / "s.db") as store:
+        MutationSearch(fm, seed=1, budget=10, coverage_fn=_cov).search(SQLI)
+        assert store.conn.execute(
+            "SELECT COUNT(*) c FROM metric_series").fetchone()["c"] == 0

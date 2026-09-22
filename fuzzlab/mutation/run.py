@@ -58,7 +58,8 @@ def run_mutation(*, url: str, param: str, store, run_id: int, sender,
     summary = {"bases": 0, "blocked": 0, "bypasses": 0, "recorded": 0, "results": []}
     for base in bases:
         base_blocked = flt.caught(base)
-        search = MutationSearch(flt, coverage_fn=coverage_fn, seed=seed, budget=budget)
+        search = MutationSearch(flt, coverage_fn=coverage_fn, seed=seed, budget=budget,
+                                store=store, run_id=run_id)
         res = search.search(base, vuln_class)
         bypass = bool(res.evaded and res.semantics_ok and base_blocked)
         recorded = None

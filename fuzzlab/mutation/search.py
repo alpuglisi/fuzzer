@@ -14,9 +14,11 @@ With no ``coverage_fn`` the objective is pure evasion.
 from __future__ import annotations
 
 import random
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import Callable, Mapping
 
+from fuzzlab.core.store import MetricLogger
 from fuzzlab.greybox.coverage import CoverageFrontier
 from fuzzlab.mutation.learn import Filter
 from fuzzlab.mutation.operators import MutationOperator, default_operators
@@ -54,7 +56,8 @@ class MutationSearch:
                  scheduler: ThompsonBandit | None = None,
                  coverage_fn: CoverageFn | None = None,
                  operators: list[MutationOperator] | None = None,
-                 seed: int = 0, budget: int = 40):
+                 seed: int = 0, budget: int = 40,
+                 store=None, run_id: int | None = None):
         self.filter = flt
         self.validator = validator or SemanticsValidator()
         self.scheduler = scheduler or ThompsonBandit(rng=random.Random(seed))
@@ -62,6 +65,11 @@ class MutationSearch:
         self.operators = operators
         self.budget = budget
         self.frontier = CoverageFrontier()
+        # B0: when a store + run_id are given, emit per-step reward/novelty (this
+        # class) into `metric_series`; purely additive — no store means no emission,
+        # matching every existing (offline/test) call site unchanged.
+        self._store = store
+        self._run_id = run_id
 
     def _novelty(self, payload: str) -> int:
         if self.coverage_fn is None:
@@ -77,33 +85,44 @@ class MutationSearch:
         best = SearchResult(base, [], not self.filter.caught(base), True,
                             self._novelty(base), 0)
         current, chain = base, []
-        for step in range(1, self.budget + 1):
-            arm = self.scheduler.select(ctx, arms)
-            op = op_by_id[arm]
-            variants = op.apply(current)
-            if not variants:
-                self.scheduler.update(ctx, arm, 0.0)     # no-op operator here
-                continue
-            step_reward = 0.0
-            accepted = None
-            for v in variants:
-                evaded = not self.filter.caught(v)
-                preserving = self.validator.preserves(base, v, vuln_class,
-                                                      trusted=not op.surface)
-                novel = self._novelty(v)
-                step_reward = max(step_reward, _reward(evaded, preserving, novel))
-                cand = SearchResult(v, chain + [arm], evaded, preserving, novel, step)
-                if cand._key() > best._key():
-                    best = cand
-                if preserving and (evaded or novel > 0) and accepted is None:
-                    accepted = v                          # hill-climb toward this variant
-            self.scheduler.update(ctx, arm, step_reward)
-            if accepted is not None:
-                current, chain = accepted, chain + [arm]
-            # pure-evasion objective: stop once we have a preserving bypass
-            if self.coverage_fn is None and best.evaded and best.semantics_ok:
-                best.steps = step
-                break
+        cm = (MetricLogger(self._store, self._run_id, "mutation")
+             if self._store is not None and self._run_id is not None else nullcontext())
+        with cm as logger:
+            for step in range(1, self.budget + 1):
+                arm = self.scheduler.select(ctx, arms)
+                op = op_by_id[arm]
+                variants = op.apply(current)
+                if not variants:
+                    self.scheduler.update(ctx, arm, 0.0)     # no-op operator here
+                    if logger is not None:
+                        logger.log("reward", step, 0.0)
+                        logger.log("novelty", step, 0.0)
+                    continue
+                step_reward = 0.0
+                step_novel = 0
+                accepted = None
+                for v in variants:
+                    evaded = not self.filter.caught(v)
+                    preserving = self.validator.preserves(base, v, vuln_class,
+                                                          trusted=not op.surface)
+                    novel = self._novelty(v)
+                    step_novel = max(step_novel, novel)
+                    step_reward = max(step_reward, _reward(evaded, preserving, novel))
+                    cand = SearchResult(v, chain + [arm], evaded, preserving, novel, step)
+                    if cand._key() > best._key():
+                        best = cand
+                    if preserving and (evaded or novel > 0) and accepted is None:
+                        accepted = v                          # hill-climb toward this variant
+                self.scheduler.update(ctx, arm, step_reward)
+                if logger is not None:
+                    logger.log("reward", step, step_reward)
+                    logger.log("novelty", step, float(step_novel))
+                if accepted is not None:
+                    current, chain = accepted, chain + [arm]
+                # pure-evasion objective: stop once we have a preserving bypass
+                if self.coverage_fn is None and best.evaded and best.semantics_ok:
+                    best.steps = step
+                    break
         return best
 
     def search_pool(self, pool, vuln_class: str = "sql-injection",
