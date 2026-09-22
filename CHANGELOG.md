@@ -19,6 +19,10 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   to `fuzzlab/web/app.py`, guarding every current and future POST/PUT/DELETE route; pinned
   `starlette>=1.0.1,<2` (CVE-2026-48710 "BadHost"), a hard prerequisite since the hardening
   keys off Host/path validation (`CC-UI-0026`, `FR-UI-10`).
+- UI/CORE: added the Findings workbench (`/findings`, `/findings/{id}`) — faceted
+  sidebar, saved views (new `saved_views` table, migration 12), and the shared
+  `js/datatable.js` module U1/U5 also reuse — plus a Post/Redirect/Get "send to
+  Repeater" pivot (`CC-UI-0028`/`CC-CORE-0019`, `FR-UI-12`/`FR-UI-13`/`FR-CORE-9`).
 - UI: retired the hash-tab single-page shell for real per-section MPA routes (`/`,
   `/proxy`, `/results`, `/ml`, `/diagnostics`) — the Wave-0 enabling refactor Wave-1 lanes
   (U1–U5) build on. Split `templates`/`static/app.js`/`static/app.css` per section, with

@@ -47,6 +47,11 @@ plugin registry. It is the layer that makes the store the integration bus.
   10s driver-level connect timeout; every writer loop uses one dedicated long-lived
   connection pinned to its thread, and every read-then-write transaction uses `BEGIN
   IMMEDIATE` (never relies on `busy_timeout` alone to rescue a DEFERRED-to-write upgrade).
+- **FR-CORE-9** Provide a `saved_views(id, table_key, name, spec_json, is_pinned,
+  created_at, updated_at)` table (migration 12) — a UI-owned view-preference store
+  (named filter/sort/column presets a viewer can save and reuse), explicitly not a
+  result table (`finding`/`attempt`/`candidate`); the UI writing it does not violate
+  NFR-UI-read-only.
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers

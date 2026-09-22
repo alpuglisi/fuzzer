@@ -3,6 +3,23 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0019 — Add `saved_views` table (migration 12) (2026-09-22)
+- Change: additive migration 12 creates `saved_views(id, table_key, name, spec_json,
+  is_pinned, created_at, updated_at)` — a UI-owned view-preference table (facet/filter/
+  sort/column state a viewer names and reuses), immediately after B0's migration 11
+  (`metric_series`). Applies cleanly on top: migrations 1–12 run in one call with no
+  conflict; migration 12 only adds a new table/index and touches nothing migration 11
+  created.
+- Impact (other components / project): consumed by UI lane U2's Findings workbench
+  (`CC-UI-0028`) via `GET/POST/PUT/DELETE /api/views?table=`. Not a result table
+  (`finding`/`attempt`/`candidate`) — writing it does not violate NFR-UI-read-only.
+- Risk (level; mitigation): low — additive, new table only. Mitigated by the unchanged
+  full suite and `tests/test_web_findings.py`'s saved-view CRUD/round-trip coverage.
+- Deliverables:
+  - [x] Migration 12 (`saved_views` + index) — done.
+- Effectiveness (assessed 2026-09-22): effective — applies cleanly after migration 11;
+  saved-view create/read/update/delete round-trips correctly in the new tests.
+
 ### CC-CORE-0018 — Add `metric_series` table + `open_store()`/WAL + `log_scalar`/`MetricLogger` (2026-09-22)
 - Change: additive migration 11 creates `metric_series(id, run_id, source, key, step, ts,
   value)` — per-step time-series metrics (training curves, bandit posterior/regret,

@@ -48,6 +48,49 @@ Newest first.
   regressed, and the repeater's unrestricted-destination finding is now on record for a
   deliberate follow-up decision instead of silently unnoticed.
 
+### CC-UI-0028 — Lane U2: Findings workbench (facets, saved views, shared DataTable) (2026-09-22)
+- Change: new `/findings` + `/findings/{id}` routes (`fuzzlab/web/findingsview.py`) render
+  a faceted workbench over `finding`/`attempt`: a collapsible left facet sidebar
+  (multi-select, live counts; OR within a group, AND across groups — vuln class,
+  severity, method, confidence/mechanism, endpoint), a debounced quick-filter, applied-
+  filter chips + "Clear all", and a saved-view chip row. Saved views are server-side in a
+  new `saved_views(id, table_key, name, spec_json, is_pinned, created_at, updated_at)`
+  table (migration 12, `fuzzlab/core/migrations.py`) via `GET/POST/PUT/DELETE
+  /api/views?table=` (`fuzzlab/web/savedviews.py`); `spec_json =
+  {version, name, pinned, filter:{text, facets, predicates}, sort, columns}`.
+  `localStorage` (try/catch) holds only throwaway per-viewer state (last view id, draft
+  filter text, collapsed groups). Detail view (`/findings/{id}`) exposes the raw
+  `case_id` and an explicit `ground_truth_fields_available: False` flag rather than
+  fabricating `primary_endpoint`/`primary_role`/`related_endpoints`/`flow_variant` —
+  those fields live only on the out-of-band ground-truth `Case` dataclass
+  (`fuzzlab/labels/contract.py`), not on `finding`/`attempt`; not added here (out of
+  scope). "Send to Repeater" is a Post/Redirect/Get: `POST` → 303 to
+  `/proxy?repeater_tab=ID` (a narrow, additive query-hint on the existing `/proxy` route,
+  never required). Added the shared, hand-rolled `js/datatable.js` (in-memory
+  filter→sort→fragment-render, `textContent`-only cells, scheme-checked links via
+  `isSafeHref`/`makeSafeLink`, capped at 2000 rows) that U1 and U5 also import —
+  `createDataTable({container, columns, data, onRowClick, rowActions, textFilterKeys,
+  cap, emptyMessage})`.
+- Impact (other components / project): defines the shared `DataTable` API U1 (recent-
+  runs) and U5 (store explorer) depend on — stable, exported per the above signature.
+  Read-only over `finding`/`attempt`; writes only the new UI-owned `saved_views` table
+  (not a result table — NFR-UI-read-only unaffected). Consumes CORE migration 12
+  (CC-CORE-0019).
+- Risk (level; mitigation): medium (new routes + a new store table + a shared module
+  three lanes depend on) — mitigated by `tests/test_web_findings.py`,
+  `tests/test_web_findings_browser.py`, `tests/test_datatable_js.py` (pure-logic
+  `node --test` coverage of `compareValues`/DataTable filtering), a DOM-safety test
+  confirming `textContent`-only rendering and `javascript:`-scheme link rejection, and
+  the unchanged full suite.
+- Deliverables:
+  - [x] Facet sidebar + quick-filter + filter chips — done.
+  - [x] `saved_views` table + `/api/views` CRUD — done.
+  - [x] Shared `js/datatable.js` (stable API for U1/U5) — done.
+  - [x] Detail view + send-to-Repeater PRG/303 pivot — done.
+- Effectiveness (assessed 2026-09-22): effective — filter/saved-view round-trips verified,
+  DOM-safety tests pass, and the DataTable module's API is documented and stable for the
+  two sibling lanes that import it.
+
 ### CC-UI-0025 — Lane U0: MPA routes + asset split (retire hash-tab shell) (2026-09-22)
 - Change: replaced the single-page hash-switched shell (`templates/index.html`,
   `static/app.js`, `static/app.css`, client-side `initTabs()`) with five real routes —

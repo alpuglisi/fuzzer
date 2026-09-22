@@ -113,6 +113,34 @@ bugs — the research-platform diagnostics of decision D2.
   existing `authorized` no-auto-run gate (FR-UI-5 et al.), which stays sourced only from
   server-side `Config`. *(Realized: Wave-0 lane U6, CC-UI-0026; prerequisite: Starlette
   `>=1.0.1,<2`, CVE-2026-48710 "BadHost".)*
+- **FR-UI-12** Findings workbench (`/findings`, `/findings/{id}`): a collapsible left facet
+  sidebar (multi-select, live counts; OR within a group, AND across groups — vuln class,
+  severity, method, confidence/mechanism, endpoint), a debounced quick-filter over
+  url/param/endpoint, applied-filter chips with a "Clear all", and a saved-view chip row.
+  Every cell renders via `textContent` only (never `innerHTML` — url/param/payload fields
+  are untrusted) and any rendered link is scheme-checked (http/https only) to block
+  `javascript:`/`data:`. The detail view exposes ground-truth fields
+  (`primary_endpoint`/`primary_role`/`related_endpoints`/`flow_variant`) only when the
+  store actually carries them for that finding — never fabricated; today they live only
+  on the out-of-band `Case` dataclass, not on `finding`/`attempt`, so the detail view
+  shows the raw `case_id` and an explicit "ground truth not available" state instead. A
+  "send to Repeater" pivot uses Post/Redirect/Get (a `POST` handoff, then a 303 redirect
+  to a GET); it never carries payload bytes in the URL. The workbench is built on a
+  shared, hand-rolled `DataTable` module (`static/js/datatable.js`,
+  `createDataTable({container, columns, data, onRowClick, rowActions, textFilterKeys,
+  cap, emptyMessage})`) that provides in-memory filter→sort→fragment-render with no
+  virtualization (a fixed row cap, default 2000, is the only escalation lever) — the
+  single implementation any other section needing a row-oriented table (e.g. Overview's
+  recent-runs, Diagnostics' store explorer) is expected to reuse rather than
+  re-implementing table behavior per lane. *(Realized: Wave-1 lane U2, CC-UI-0028.)*
+- **FR-UI-13** Saved views are named, durable, per-table filter/sort/column presets stored
+  server-side (`saved_views(id, table_key, name, spec_json, is_pinned, created_at,
+  updated_at)`, CORE migration 12 / FR-CORE-9), exposed via `GET/POST/PUT/DELETE
+  /api/views?table=`. `spec_json` is `{version, name, pinned, filter:{text, facets,
+  predicates}, sort, columns}`. `localStorage` (wrapped in try/catch, degrading silently
+  if unavailable) holds only throwaway per-viewer convenience state — last selected view
+  id, an in-progress filter draft, which facet groups are collapsed — never durable or
+  shared data. *(Realized: Wave-1 lane U2, CC-UI-0028.)*
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is
