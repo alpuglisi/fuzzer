@@ -14,6 +14,13 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Docs: added `docs/VULN_CORPUS_EXPANSION_PLAN_SITE_ARCHETYPES.md` — a
+  proposed extension to `docs/VULN_CORPUS_EXPANSION_PLAN.md` that sources
+  corpus collection from concrete popular-website categories and their
+  real architectures/tech stacks (rather than a generic feature catalog
+  alone), reusing the base plan's Phase 3 CWE-mapping/pair-manufacturing/
+  validation methodology unchanged. **Planning only — not executed**; per
+  explicit instruction, dispatch awaits separate human go-ahead.
 - Research: Phase 3 CWE mapping for the "file handling" corpus cell
   (`docs/research/corpus-examples/file-handling/{php,node,python}/manifest.yaml`,
   12 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each
