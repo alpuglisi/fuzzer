@@ -1,0 +1,131 @@
+/* fuzzlab control panel — Findings workbench (U2).
+ * Relies on shell.css for .card/.chip/.muted/table; this partial adds the
+ * facet-sidebar layout, severity badges (tokens.css --crit/--high/--med/--low/
+ * --info), filter chips, saved-view chips, and the shared DataTable's own
+ * look (js/datatable.js is markup-agnostic — styling lives here so U1/U5 can
+ * layer their own page chrome around the same table without inheriting this
+ * file).
+ */
+
+.findings-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .findings-layout { grid-template-columns: 1fr; }
+}
+
+.facet-sidebar {
+  position: sticky;
+  top: 12px;
+}
+
+.facet-sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.facet-sidebar[data-collapsed="1"] #facet-groups { display: none; }
+
+.facet-group {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.facet-group summary {
+  cursor: pointer;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.facet-options {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.facet-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .9rem;
+}
+
+.facet-option .count {
+  color: var(--muted);
+  margin-left: auto;
+}
+
+.findings-main { display: flex; flex-direction: column; gap: 16px; }
+
+.findings-toolbar { display: flex; flex-direction: column; gap: 10px; }
+
+.findings-search input { width: 100%; max-width: 420px; }
+
+.views-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.chip-row { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.filter-chip, .view-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: .82rem;
+}
+
+.view-chip.pinned { border-color: var(--accent); }
+.view-chip.active { background: var(--accent-weak); border-color: var(--accent); }
+
+.filter-chip button, .view-chip .chip-remove {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: .9rem;
+  line-height: 1;
+  padding: 0;
+}
+
+/* Severity badges — ZAP/CVSS convention: Critical=red, High=deep-orange,
+ * Medium=orange, Low=amber, Info=blue. Colors come only from tokens.css so a
+ * retheme (light/dark) recolors these automatically. */
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: .78rem;
+  font-weight: 600;
+  color: #fff;
+  vertical-align: middle;
+}
+.badge.sev-critical { background: var(--crit); }
+.badge.sev-high { background: var(--high); }
+.badge.sev-medium { background: var(--med); }
+.badge.sev-low { background: var(--low); color: #1a1d21; }
+.badge.sev-info { background: var(--info); }
+
+/* Shared DataTable look (js/datatable.js emits this markup structure). */
+.dt-table { border-collapse: collapse; width: 100%; }
+.dt-table th, .dt-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.dt-sortable { cursor: pointer; user-select: none; }
+.dt-sortable:hover { color: var(--accent); }
+.dt-row.dt-clickable { cursor: pointer; }
+.dt-row.dt-clickable:hover { background: var(--surface2); }
+.dt-actions { display: flex; gap: 6px; }
+.dt-status { padding: 8px 0; }

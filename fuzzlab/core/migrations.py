@@ -343,6 +343,32 @@ CREATE INDEX idx_metric_series_series ON metric_series(run_id, source, key, step
 CREATE INDEX idx_metric_series_overlay ON metric_series(source, key, run_id, step);
 """
 
+# --- migration 12: saved views (U2) — a UI VIEW-PREFERENCE table, not a result
+# table -------------------------------------------------------------------
+#
+# `finding`/`attempt`/etc. stay tool-written only (the invariant in
+# docs/UI_IMPLEMENTATION_PLAN.md §2: "UI writes no result tables"). A saved
+# view is not a result — it is a named filter/sort/column preset a person
+# saves over a DataTable-backed section (the Findings workbench first;
+# reusable by any other section keyed by its own `table_key`, e.g. a future
+# "recent-runs" or "store-explorer" view). The control panel is the sole
+# writer of this table, same footing as `repeater_tab` (migration 6). One row
+# per saved view; `spec_json` is the opaque `{version, name, pinned,
+# filter:{text, facets, predicates}, sort, columns}` shape the UI defines and
+# owns end to end (fuzzlab/web/savedviews.py) — the store just persists it.
+_M0012 = """
+CREATE TABLE saved_views (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_key  TEXT NOT NULL,             -- which section/table this view is for
+    name       TEXT NOT NULL,
+    spec_json  TEXT NOT NULL,             -- opaque UI-owned filter/sort/column spec
+    is_pinned  INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_saved_views_table ON saved_views(table_key, is_pinned DESC, id DESC);
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -356,6 +382,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (9, _M0009),
     (10, _M0010),
     (11, _M0011),
+    (12, _M0012),
 ]
 
 

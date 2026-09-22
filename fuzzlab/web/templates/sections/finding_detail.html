@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block crumb %}Finding #{{ finding.id }}{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/findings.css">{% endblock %}
+{% block content %}
+<p><a href="/findings">&larr; all findings</a></p>
+<h1>Finding #{{ finding.id }}
+  <span class="badge sev-{{ finding.severity | lower }}">{{ finding.severity }}</span></h1>
+<p class="muted">Run <a href="/runs/{{ finding.run_id }}">#{{ finding.run_id }}</a>
+  ({{ finding.run_tool or '' }}) &middot; recorded {{ finding.created_at or '' }}</p>
+
+<div class="card">
+  <h2>Location</h2>
+  <div><span class="muted">vuln class</span> <code>{{ finding.vuln_class or '' }}</code></div>
+  <div><span class="muted">method</span> <code>{{ finding.method or '' }}</code></div>
+  <div><span class="muted">url</span> <code>{{ finding.url or '' }}</code></div>
+  <div><span class="muted">param</span> <code>{{ finding.param or '' }}</code></div>
+  <div><span class="muted">mechanism</span> <code>{{ finding.confidence or '' }}</code></div>
+  <div><span class="muted">case id (ground truth)</span> <code>{{ finding.case_id or '—' }}</code></div>
+
+  <form method="post" action="/findings/{{ finding.id }}/send-to-repeater"
+        id="send-to-repeater-form">
+    <button type="submit" id="send-to-repeater-btn">&rarr; Send to Repeater</button>
+  </form>
+  <p class="muted">Seeds a best-effort raw request from this finding's recorded
+    url/method/param (findings don't carry raw bytes) into a new Repeater tab on
+    the Proxy section. Edit it there before sending.</p>
+</div>
+
+<div class="card">
+  <h2>Multi-artifact ground truth</h2>
+  {% if finding.ground_truth_fields_available %}
+    <div><span class="muted">primary endpoint</span> <code>{{ finding.primary_endpoint }}</code></div>
+    <div><span class="muted">primary role</span> <code>{{ finding.primary_role }}</code></div>
+    <div><span class="muted">flow variant</span> <code>{{ finding.flow_variant }}</code></div>
+    <div><span class="muted">related endpoints</span>
+      <ul>{% for e in finding.related_endpoints %}
+        <li><code>{{ e.endpoint }}</code> ({{ e.role }})</li>
+      {% endfor %}</ul>
+    </div>
+  {% else %}
+    <p class="muted">Not available here: <code>primary_endpoint</code>,
+      <code>primary_role</code>, <code>related_endpoints</code>, and
+      <code>flow_variant</code> live on the out-of-band ground-truth
+      <code>Case</code> record (<code>fuzzlab.labels.contract.Case</code>), keyed by
+      the opaque <code>case_id</code> above, and are read only by the scoring
+      harness — <code>finding</code>/<code>attempt</code> do not carry them as
+      columns. Rendering them here would need a schema/store change outside this
+      workbench's scope.</p>
+  {% endif %}
+</div>
+
+{% if finding.attempt %}
+<div class="card">
+  <h2>Attempt #{{ finding.attempt.id }}</h2>
+  <div><span class="muted">payload family</span> <code>{{ finding.attempt.payload_family or '' }}</code></div>
+  <div><span class="muted">score (advisory)</span> {{ finding.attempt.score if finding.attempt.score is not none else '—' }}</div>
+  <div><span class="muted">uncertainty (advisory)</span> {{ finding.attempt.uncertainty if finding.attempt.uncertainty is not none else '—' }}</div>
+  <div><span class="muted">reward</span> {{ finding.attempt.reward if finding.attempt.reward is not none else '—' }}</div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Evidence</h2>
+  {% if finding.evidence %}
+  <pre class="flow-raw">{{ finding.evidence_pretty }}</pre>
+  {% else %}
+  <p class="muted">No evidence recorded.</p>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script type="module" src="/static/js/findings.js"></script>{% endblock %}

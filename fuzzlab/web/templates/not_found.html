@@ -2,5 +2,6 @@
 {% block title %}not found{% endblock %}
 {% block crumb %}Not found{% endblock %}
 {% block content %}
-<p>Run {{ run_id }} not found. <a href="/">Back</a></p>
+<p>{% if finding_id is defined %}Finding {{ finding_id }}{% else %}Run {{ run_id }}{% endif %}
+  not found. <a href="/">Back</a></p>
 {% endblock %}

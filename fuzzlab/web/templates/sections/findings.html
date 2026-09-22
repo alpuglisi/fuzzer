@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block crumb %}Findings{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/findings.css">{% endblock %}
+{% block content %}
+<div class="findings-layout">
+  <aside class="card facet-sidebar" id="facet-sidebar" aria-label="Filter findings">
+    <div class="facet-sidebar-head">
+      <h2>Filters</h2>
+      <button type="button" id="facet-collapse-toggle" class="tbtn"
+              aria-expanded="true" aria-controls="facet-groups">Collapse</button>
+    </div>
+    <div id="facet-groups"></div>
+  </aside>
+
+  <div class="findings-main">
+    <div class="card findings-toolbar">
+      <div class="field findings-search">
+        <label for="findings-quickfilter">Quick filter</label>
+        <input type="text" id="findings-quickfilter"
+               placeholder="search url / param / vuln class&hellip;" autocomplete="off">
+      </div>
+      <div class="views-row" id="views-row" aria-label="Saved views">
+        <span class="muted">Views:</span>
+        <div id="views-chips" class="chip-row"></div>
+        <button type="button" id="view-save" class="tbtn">Save current view</button>
+      </div>
+      <div class="chip-row" id="filter-chips" aria-label="Applied filters"></div>
+    </div>
+
+    <div class="card">
+      <div id="findings-table-mount"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}<script type="module" src="/static/js/findings.js"></script>{% endblock %}

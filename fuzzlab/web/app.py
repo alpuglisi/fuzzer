@@ -26,12 +26,12 @@ from typing import Any, Callable, TYPE_CHECKING
 # annotations resolve under `from __future__ import annotations`. Importing this
 # module implies the web extra; `core` never imports it, so core stays web-free.
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from fuzzlab.core.config import Config, load_config
-from fuzzlab.web import commandspec, results
+from fuzzlab.web import commandspec, findingsview, results, savedviews
 from fuzzlab.web.proxycontrol import RepeaterController
 from fuzzlab.web.runner import Runner, build_argv, display_command
 from fuzzlab.web.sse import sse_response
@@ -299,6 +299,36 @@ def _read_flow(cfg: Config, flow_id: int) -> dict | None:
         return proxyview.flow_detail(store, flow_id)
 
 
+def _read_findings(cfg: Config) -> list[dict]:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return []
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        return findingsview.list_findings(store)
+
+
+def _read_finding(cfg: Config, finding_id: int) -> dict | None:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return None
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        return findingsview.finding_detail(store, finding_id)
+
+
+def _views_store(cfg: Config):
+    """Open (creating if needed) the store for saved-view reads/writes.
+
+    Unlike the read-only helpers above, saved views ARE something this panel
+    itself writes (a UI-view-preference table, not a result table — see
+    fuzzlab/web/savedviews.py), so, unlike ``_read_*``, this may create the
+    store file on first save. Callers use it as a context manager.
+    """
+    from fuzzlab.core.store import Store
+    return Store(cfg.get("store_path", "fuzzlab.db"))
+
+
 # --- template context builders (rendering lives in templates/, via jinja2) ----
 
 def _activities() -> list[dict]:
@@ -372,6 +402,8 @@ NAV: list[dict[str, str]] = [
     {"id": "launcher", "label": "Launcher", "href": "/", "icon": "▸",
      "group": "Workbench"},
     {"id": "proxy", "label": "Proxy", "href": "/proxy", "icon": "⇄",
+     "group": "Workbench"},
+    {"id": "findings", "label": "Findings", "href": "/findings", "icon": "⚑",
      "group": "Workbench"},
     {"id": "results", "label": "Results", "href": "/results", "icon": "▤",
      "group": "Workbench"},
@@ -482,9 +514,40 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
             {**_shell_context(cfg, "launcher"), **_launcher_context(cfg, state)})
 
     @app.get("/proxy", response_class=HTMLResponse)
-    def proxy_page(request: Request):
+    def proxy_page(request: Request, repeater_tab: int | None = None):
+        # `repeater_tab` is a cross-section pivot HINT (R-07: "treat every
+        # ?...=ID as a hint — fall back to default; never 404"), landed here by
+        # the Findings "send to Repeater" PRG redirect (see
+        # POST /findings/{id}/send-to-repeater below). Passed through so a
+        # future Proxy-owned (U3) pass can pre-select that tab; unused today is
+        # not an error — the page still renders normally either way.
+        ctx = {**_shell_context(cfg, "proxy"), "repeater_tab_hint": repeater_tab}
+        return templates.TemplateResponse(request, "sections/proxy.html", ctx)
+
+    @app.get("/findings", response_class=HTMLResponse)
+    def findings_page(request: Request):
         return templates.TemplateResponse(
-            request, "sections/proxy.html", _shell_context(cfg, "proxy"))
+            request, "sections/findings.html", _shell_context(cfg, "findings"))
+
+    @app.get("/findings/{finding_id}", response_class=HTMLResponse)
+    def finding_html(request: Request, finding_id: int):
+        detail = _read_finding(cfg, finding_id)
+        if detail is None:
+            return templates.TemplateResponse(
+                request, "not_found.html",
+                {"finding_id": finding_id, **_shell_context(cfg, "findings")},
+                status_code=404)
+        # Plain Jinja2 (unlike Flask) has no `tojson` filter, and the evidence
+        # blob is untrusted (an oracle-recorded value from the target) —
+        # pre-serialize it here so the template renders it through an ordinary
+        # `{{ }}` (autoescaped: `<`/`&`/etc become entities, matching the
+        # never-innerHTML rule for untrusted fields) rather than any
+        # HTML-unsafe filter.
+        import json as _json
+        detail["evidence_pretty"] = _json.dumps(detail.get("evidence") or {}, indent=2)
+        return templates.TemplateResponse(
+            request, "sections/finding_detail.html",
+            {"finding": detail, **_shell_context(cfg, "findings")})
 
     @app.get("/results", response_class=HTMLResponse)
     def results_page(request: Request):
@@ -544,6 +607,111 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         if detail is None:
             return JSONResponse({"error": f"run {run_id} not found"}, status_code=404)
         return detail
+
+    @app.get("/api/findings")
+    def api_findings() -> dict[str, Any]:
+        return {"findings": _read_findings(cfg)}
+
+    @app.get("/api/findings/{finding_id}")
+    def api_finding(finding_id: int):
+        detail = _read_finding(cfg, finding_id)
+        if detail is None:
+            return JSONResponse({"error": f"finding {finding_id} not found"},
+                                status_code=404)
+        return detail
+
+    # --- send-to-repeater pivot (Findings -> Proxy, R-07 PRG+303) --------------
+    #
+    # Findings have no recorded `flow` (they come from the oracle's own probe
+    # traffic, not the proxy's history), so there is nothing to call
+    # `RepeaterController.create_from_flow` with. Instead this synthesizes a
+    # best-effort raw request from the finding's own recorded url/method/param
+    # (never from the URL bar — real bytes stay server-side, per R-07) and
+    # seeds a tab from it, then 303s to `/proxy?repeater_tab=ID` exactly like
+    # the plan's `/proxy/repeater/from-flow` pattern: a real POST (guarded by
+    # disable-on-submit in findings.js) -> RedirectResponse(303) -> a plain GET
+    # the browser can refresh safely. The request is a SEED to edit before
+    # sending, not a byte-exact replay (findings don't carry raw bytes).
+    @app.post("/findings/{finding_id}/send-to-repeater")
+    async def finding_to_repeater(finding_id: int):
+        detail = _read_finding(cfg, finding_id)
+        if detail is None:
+            return JSONResponse({"error": f"finding {finding_id} not found"},
+                                status_code=404)
+        from urllib.parse import urlparse
+        base = cfg.get("target_base_url", "http://127.0.0.1")
+        parsed = urlparse(base)
+        host = parsed.hostname or "127.0.0.1"
+        use_tls = parsed.scheme == "https"
+        port = parsed.port or (443 if use_tls else 80)
+        method = (detail.get("method") or "GET").upper()
+        path = detail.get("url") or "/"
+        param = detail.get("param")
+        body = ""
+        if method in ("GET", "HEAD", "DELETE") and param:
+            sep = "&" if "?" in path else "?"
+            path = f"{path}{sep}{param}=1"
+        elif param:
+            body = f"{param}=1"
+        raw = (
+            f"{method} {path} HTTP/1.1\r\n"
+            f"Host: {host}\r\n"
+            + (f"Content-Type: application/x-www-form-urlencoded\r\n"
+               f"Content-Length: {len(body)}\r\n" if body else "")
+            + "\r\n" + body
+        )
+        tab = repeater_ctl.create_tab(f"finding #{finding_id}", host, port, raw,
+                                      use_tls=use_tls)
+        return RedirectResponse(f"/proxy?repeater_tab={tab['id']}", status_code=303)
+
+    # --- saved views (U2): per-DataTable filter/sort/column presets, durable ---
+    #
+    # `table` scopes views to one DataTable-backed section (`findings` today;
+    # any future section reuses the same four routes with its own `table`
+    # value). This is the panel's own write surface (saved_views is a
+    # UI-view-preference table — see fuzzlab/web/savedviews.py), so unlike the
+    # read-only `_read_*` helpers, a POST here may create the store file.
+    @app.get("/api/views")
+    def views_list(table: str) -> dict[str, Any]:
+        path = cfg.get("store_path", "fuzzlab.db")
+        if not results.store_exists(path):
+            return {"views": []}
+        with _views_store(cfg) as store:
+            return {"views": savedviews.list_views(store, table)}
+
+    @app.post("/api/views")
+    async def views_create(request: Request, table: str):
+        body = await request.json()
+        name = (body.get("name") or "").strip()
+        if not name:
+            return JSONResponse({"error": "name required"}, status_code=400)
+        spec = body.get("spec") or {}
+        with _views_store(cfg) as store:
+            view = savedviews.create_view(store, table, name, spec,
+                                          bool(body.get("pinned")))
+        return view
+
+    @app.put("/api/views/{view_id}")
+    async def views_update(view_id: int, request: Request):
+        body = await request.json()
+        with _views_store(cfg) as store:
+            view = savedviews.update_view(
+                store, view_id, name=body.get("name"), spec=body.get("spec"),
+                pinned=body.get("pinned"))
+        if view is None:
+            return JSONResponse({"error": f"view {view_id} not found"}, status_code=404)
+        return view
+
+    @app.delete("/api/views/{view_id}")
+    def views_delete(view_id: int):
+        path = cfg.get("store_path", "fuzzlab.db")
+        if not results.store_exists(path):
+            return JSONResponse({"error": f"view {view_id} not found"}, status_code=404)
+        with _views_store(cfg) as store:
+            ok = savedviews.delete_view(store, view_id)
+        if not ok:
+            return JSONResponse({"error": f"view {view_id} not found"}, status_code=404)
+        return {"deleted": view_id}
 
     @app.get("/runs/{run_id}", response_class=HTMLResponse)
     def run_html(request: Request, run_id: int):
