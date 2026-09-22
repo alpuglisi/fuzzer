@@ -116,6 +116,28 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("xss", "html_attribute_unquoted"): _ModuleSet("get_param", "html_attribute_unquoted_echo", "render_only"),
 }
 
+#: Page-profile key that **pins** the URL a cell of that page is served at,
+#: instead of this stack's default cell-ID-derived ``/cell/<slug>`` URL.
+#:
+#: Exists for exactly one reason (``docs/LAB_IMPLEMENTATION_PLAN.md``
+#: §4.3.6.6a, lane L-P3.3c): a *migrated* real ``puppy-fort-factory/`` page
+#: must keep the real app's exact URL, ``.php`` suffix included, because
+#: T-LAB0.9's additive-only regression gate
+#: (:mod:`fuzzlab.labgen.regression_gate`) treats a ``PFF-`` case that moves to
+#: a different ``url`` as a build-breaking *relocation*. Laravel routes are
+#: arbitrary strings, so ``Route::get('/contact.php', ...)`` costs nothing
+#: technically and keeps every URL in ``lab/ground-truth/labels.json``,
+#: ``injection-points.json`` and ``expectedresults.csv`` valid unchanged.
+#:
+#: A pinned URL is only safe where one cell owns the page -- which is what
+#: makes it usable for the secure-only migrated cells (§4.3.6.3's
+#: "secure-only cells are legal" finding) and why
+#: :meth:`LaravelEmitter.route_fragment_for` refuses a second cell claiming
+#: the same pinned URL rather than emitting two ``Route::get`` lines for one
+#: path. Illustrative pages pin nothing and keep the cell-ID-derived URL, so a
+#: vulnerable cell and its secure twin still coexist as two distinct routes.
+_URL_PATH_KEY = "url_path"
+
 #: Page-profile key that overrides a shape's default *source* module -- the
 #: same mechanism (and the same reasoning) as ``php_current``'s: one
 #: ``(vuln_class, sink_context.family)`` shape can be reached by two
@@ -132,10 +154,18 @@ _SOURCE_OVERRIDE_KEY = "source_override"
 #: ``cell.route.path``, since a vulnerable cell and its twins share one
 #: logical page and therefore one profile.
 #:
-#: These are Laravel routes (no ``.php`` suffix -- a Laravel app is
-#: router-dispatched, not filesystem-routed) and illustrative pages, distinct
-#: from ``php_current``'s own ``/catalog.php``-style profiles, which this
-#: emitter deliberately does not read.
+#: Two kinds of page live here, and the difference is deliberate:
+#:
+#: * **Illustrative pages** (the L-P3.3a/L-P3.3b inventory) use idiomatic,
+#:   extension-less Laravel routes -- a Laravel app is router-dispatched, not
+#:   filesystem-routed -- and are distinct from ``php_current``'s own
+#:   ``/catalog.php``-style profiles, which this emitter deliberately does not
+#:   read.
+#: * **Migrated real ``puppy-fort-factory/`` pages** (lane L-P3.3c) keep the
+#:   real app's exact ``.php``-suffixed path, both as the profile key and, via
+#:   :data:`_URL_PATH_KEY`, as the URL the generated route serves -- because
+#:   the ``PFF-`` ground-truth cases those cells reproduce are labelled at
+#:   those URLs and T-LAB0.9's gate forbids relocating them (§4.3.6.6a).
 _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # The original L-P3.3a illustrative pair (unchanged, kept rendering).
     "/example/product": {"var_name": "id", "param_name": "id", "table": "products", "column": "id"},
@@ -196,6 +226,36 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "attr_name": "theme",
         "attr_default": "default",
     },
+    # --- migrated real puppy-fort-factory pages (lane L-P3.3c-G5) ----------
+    # The two secure-only escaped-echo form pages, reproduced in Laravel/Blade
+    # idiom: `PFF-1005` (`contact.php`, POST `message`) and `PFF-1006`
+    # (`newsletter.php`, POST `email`). Both real pages echo the submitted
+    # value straight back through the app's `e()` helper and write nothing to
+    # the database, so the shape is `xss`/`html_body` reached from a POST body
+    # parameter -- hence the `post_param` source override (the shape's default
+    # source, `read_stored_field`, is the stored-XSS origin, which neither page
+    # has). They carry `url_path`, so each is served at the real app's exact
+    # `.php` URL (see :data:`_URL_PATH_KEY`).
+    "/contact.php": {
+        "var_name": "message",
+        "param_name": "message",
+        # The real page wraps the reflected message in
+        # `<blockquote class="bio">`; the sink fragment's element is a `div`,
+        # which is not verdict-relevant (the sink *context family* -- an HTML
+        # body position -- is what the safety matrix is keyed on).
+        "css_class": "bio",
+        "source_override": "post_param",
+        "url_path": "/contact.php",
+    },
+    "/newsletter.php": {
+        "var_name": "email",
+        "param_name": "email",
+        # Real page: `<p class="notice ok">Thanks! We'll send fort news to
+        # <?= e($email) ?>.</p>`.
+        "css_class": "notice ok",
+        "source_override": "post_param",
+        "url_path": "/newsletter.php",
+    },
 }
 
 #: The one controller method name every generated controller uses. Stable
@@ -225,13 +285,25 @@ def _controller_class_for(cell_id: str) -> str:
     return "".join(p.capitalize() for p in parts if p) + "Controller"
 
 
-def _url_path_for(cell_id: str) -> str:
-    """The route URL this cell is served at. Derived from ``cell_id``, not
-    ``cell.route.path`` verbatim -- see
-    ``fuzzlab.labgen.emitters.php_laravel.route_accumulator``'s module
+def _url_path_for(cell_id: str, route_path: str | None = None) -> str:
+    """The route URL this cell is served at.
+
+    Derived from ``cell_id`` by default, not ``cell.route.path`` verbatim --
+    see ``fuzzlab.labgen.emitters.php_laravel.route_accumulator``'s module
     docstring for why a twin needs its own URL to coexist in one build (and
     ``identifier_sqli.py`` for the one place that difference matters to an
-    oracle)."""
+    oracle).
+
+    The one exception, and the reason ``route_path`` exists: a page profile may
+    **pin** the URL via :data:`_URL_PATH_KEY`, which the migrated real pages do
+    so their ``PFF-`` cases stay at the URLs ``lab/ground-truth/`` labels them
+    at (§4.3.6.6a). Callers pass the cell's logical page so this function can
+    look that pin up; passing nothing keeps the pre-L-P3.3c behavior exactly.
+    """
+    if route_path is not None:
+        pinned = _PAGE_PROFILES.get(route_path, {}).get(_URL_PATH_KEY)
+        if pinned is not None:
+            return str(pinned)
     return f"/cell/{_cell_slug(cell_id)}"
 
 
@@ -262,6 +334,11 @@ class LaravelEmitter(Emitter):
 
     def __init__(self) -> None:
         self._route_accumulator = RouteAccumulator()
+        #: ``pinned url_path -> the cell_id that claimed it``, so two cells of
+        #: one migrated real page cannot silently register two ``Route::get``
+        #: lines at the same path (see :data:`_URL_PATH_KEY`). Cell-ID-derived
+        #: URLs are unique by construction and are not tracked here.
+        self._pinned_url_claims: dict[str, str] = {}
 
     def supports(self, vuln_class: str, sink_context: SinkContext) -> bool:
         return (vuln_class, sink_context.family) in _MODULE_SET_BY_SHAPE
@@ -298,6 +375,10 @@ class LaravelEmitter(Emitter):
                 f"-- known routes: {sorted(_PAGE_PROFILES)}"
             )
         ctx: dict[str, Any] = dict(_PAGE_PROFILES[render_route.path])
+        # Routing metadata, not rendering context: the pinned URL is consumed by
+        # route_fragment_for(), never by a template (same reason
+        # `source_override` is popped below).
+        ctx.pop(_URL_PATH_KEY, None)
         ctx["method_name"] = _METHOD_NAME
         ctx["view_name"] = _view_name_for(cell.cell_id)
 
@@ -392,10 +473,22 @@ class LaravelEmitter(Emitter):
         if not self.supports(cell.vuln_class, cell.sink_context):
             raise ValueError(f"{cell.cell_id}: unsupported for php_laravel -- see render() for the same check")
         controller_class = _controller_class_for(cell.cell_id)
+        render_route = cell.sink_endpoint if cell.sink_endpoint is not None else cell.route
+        url_path = _url_path_for(cell.cell_id, render_route.path)
+        if url_path != f"/cell/{_cell_slug(cell.cell_id)}":
+            claimant = self._pinned_url_claims.setdefault(url_path, cell.cell_id)
+            if claimant != cell.cell_id:
+                raise ValueError(
+                    f"{cell.cell_id}: page profile for {render_route.path!r} pins the route URL "
+                    f"{url_path!r}, which cell {claimant!r} already claims -- a pinned URL (a "
+                    "migrated real page keeping its real `.php` URL, §4.3.6.6a) can be owned by "
+                    "exactly one cell, so a page needing a vulnerable cell *and* a secure twin "
+                    "must not pin one (both twins would register the same Route::get path)"
+                )
         return self._route_accumulator.fragment_for_cell(
             cell_id=cell.cell_id,
             controller_class=controller_class,
-            url_path=_url_path_for(cell.cell_id),
+            url_path=url_path,
         )
 
     def render_scaffold(self) -> EmittedFiles:
