@@ -1499,6 +1499,49 @@ lane) can submit a payload as
     boot + real, observable behavior against the real engine and real
     schema, which is a stronger, but still narrower, claim than that.
 
+- **FR-LAB-56** *(applies the site-architecture expansion corpus's
+  `suggested_op`/`suggested_sink_family` proposals to `lab/safety_matrix.yaml`,
+  per `CC-LAB-0059`.)* `lab/safety_matrix.yaml` grows from 25 to 102 entries,
+  covering 20 new `sink_family` values and ~70 new transform `op`s, spanning
+  every cell `docs/research/corpus-examples/` currently holds (the original
+  6 — `access-control`, `auth-session`, `ecommerce-logic`, `file-handling`,
+  `search-export`, `ugc-xss` — plus the 6 added by the same expansion's
+  correction pass — `mass-assignment`, `ssrf`, `insecure-deserialization`,
+  `ssti`, `header-injection`, `webhook-signature`). All additions are new
+  `(op, sink_family)` pairs under the existing `version: 1` (this file's
+  own append-only convention, same as `FR-LAB-41`'s harder-shapes rows): no
+  existing pair's meaning changes, and a corpus generated under `v1` before
+  this landed re-derives identically. 17 new concern IDs were added to the
+  matrix file's header vocabulary comment (one informative name per new
+  vulnerability class, e.g. `ownership_check_bypass`, `mass_assignment`,
+  `ssrf_request_forgery`, `weak_signature_comparison`), following the
+  existing `sql_syntax_break`/`html_tag_break` naming convention. `partial`
+  (D20 — VULNERABLE-but-harder, never a third verdict value) was used,
+  not `neutralises`, wherever a corpus entry's own `pattern`/`notes`/
+  `cwe_rationale` documented a residual, well-known weaker-defense gap:
+  `mime_type_check`/`filename_charset_sanitize` (file-handling — no
+  content/magic-byte inspection), `path_prefix_check` (file-handling — a
+  string-prefix check on an unresolved path is symlink/prefix-bypassable),
+  `hostname_allowlist` (ssrf — DNS-rebinding gap, since the resolved IP
+  isn't itself checked), `driver_escape_string` (search-export — manual
+  driver-level escaping vs. this file's existing parameterization
+  preference), and `naive_string_compare`/`loose_equality_compare`
+  (webhook-signature — a comparison *is* performed, just timing-unsafe
+  and, for PHP `==`, type-juggling-prone, a harder attack than the
+  `no_signature_check`/`trust_post_data` total-bypass rows at the same
+  family). Two corpus-proposed sink families with conceptual overlap
+  (`template_render` from `ssti`, `template_render_pipeline` from
+  `search-export`) were kept as separate, unmerged families — merging is a
+  design decision left to a later change. This requirement is the
+  safety-matrix registry only: **no emitter/module currently implements
+  code generation for any of these 20 new sink families** — that is
+  separate, unstarted future work (the module-template half of the
+  site-architecture plan's own Step 8 handoff), not claimed done here.
+  Verified: `jsonschema.validate()` against
+  `lab/schemas/safety_matrix.schema.json` passes; no duplicate `(op,
+  sink_family)` key across the 102 entries; `tests/test_labgen_verdict.py`
+  (15 tests, pre-existing entries only) stays green, unchanged.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

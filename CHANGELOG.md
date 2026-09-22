@@ -14,6 +14,12 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB: applied the site-architecture corpus's `suggested_op`/
+  `suggested_sink_family` proposals to `lab/safety_matrix.yaml` (Step 8 of
+  `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`) — 102 entries
+  (was 25), 20 new sink families, ~70 new ops, covering all 12 corpus cells
+  (the original 6 plus the 6 added below). Registry-only: no emitter/module
+  yet generates code for the new sink families. `CC-LAB-0059` / `FR-LAB-56`.
 - Research: added 6 brand-new vulnerability-class cells to the corpus
   (`docs/research/corpus-examples/{mass-assignment,ssrf,
   insecure-deserialization,ssti,header-injection,webhook-signature}/`),

@@ -183,8 +183,10 @@ entry are the proposal a later change accepts, renames, or merges.
       real cross-entry ID collision (CWE-367) the first time it ran against
       this pass's work, both fixed.
 - [x] Step 8: `suggested_op`/`suggested_sink_family` proposals recorded for
-      all 6 pairs. Not yet applied to `lab/safety_matrix.yaml` — deliberately
-      out of scope for a corpus-collection pass (see "Step 8 handoff").
+      all pairs across all 12 cells. Applied to `lab/safety_matrix.yaml` per
+      direct instruction (102 entries, was 25; 20 new sink families; see
+      `CC-LAB-0059`/`FR-LAB-56`) — registry-only, no emitter/module yet
+      generates code for the new sink families (separate future work).
 - [x] Scope correction (per direct instruction): waves 1-2 had incorrectly
       confined collection to CWE classes already implemented in
       `lab/safety_matrix.yaml` (SQLi/XSS-adjacent only), defeating the
@@ -210,9 +212,9 @@ entry are the proposal a later change accepts, renames, or merges.
       each, no cross-entry collisions across any touched manifest file);
       `.claude/hooks/check-corpus-cwe-coverage.sh` passes clean
       (`hook_exit=0`) across the full touched set. `suggested_op`/
-      `suggested_sink_family` recorded per entry, not yet applied to
-      `lab/safety_matrix.yaml` (same Step 8 deferral as the original 6
-      pairs).
+      `suggested_sink_family` recorded per entry, applied to
+      `lab/safety_matrix.yaml` together with the original 6 pairs' — see
+      the Step 8 line above (`CC-LAB-0059`/`FR-LAB-56`).
 - [ ] Remaining architecture/function combinations within each of the 6
       original categories (each category's 5 sites can surface more than
       one combination; only one per category has been carried through for
@@ -221,5 +223,7 @@ entry are the proposal a later change accepts, renames, or merges.
       deferred to an environment with a sandboxed execution runtime; every
       pair is `validated: true` at the static/manual-review tier in the
       interim.
-- [ ] `lab/safety_matrix.yaml` integration — its own follow-up component
-      change, not this plan.
+- [x] `lab/safety_matrix.yaml` integration — done per direct instruction,
+      `CC-LAB-0059`/`FR-LAB-56` (see Step 8 above). Registry-only: emitter/
+      module code generation for the 20 new sink families remains a
+      separate, unstarted follow-up.

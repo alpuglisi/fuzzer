@@ -3,6 +3,75 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0059 — apply corpus `suggested_op`/`suggested_sink_family` proposals to `lab/safety_matrix.yaml` (site-architecture expansion Step 8) (2026-09-22)
+- Change: per direct instruction, accepted the `suggested_op`/
+  `suggested_sink_family` proposals recorded on every entry across all 12
+  `docs/research/corpus-examples/*/` cells collected by the site-architecture
+  expansion plan (the original 6: `access-control`, `auth-session`,
+  `ecommerce-logic`, `file-handling`, `search-export`, `ugc-xss`; plus the 6
+  new classes: `mass-assignment`, `ssrf`, `insecure-deserialization`, `ssti`,
+  `header-injection`, `webhook-signature`) into `lab/safety_matrix.yaml`.
+  Added 102 total `(op, sink_family)` entries (up from 25) across 20 new
+  sink families and ~70 new ops, all as brand-new pairs under the existing
+  `version: 1` (append-only, per this file's own convention — see
+  `CC-LAB-0043`/`CC-LAB-0051`'s prior extensions of the same file). Added 17
+  new concern IDs to the header's informative vocabulary comment (e.g.
+  `ownership_check_bypass`, `mass_assignment`, `ssrf_request_forgery`,
+  `insecure_deserialization`, `weak_signature_comparison`), one or two per
+  new vulnerability class, mirroring the existing `sql_syntax_break`/
+  `html_tag_break` style. Effects were assigned from each entry's own
+  `pattern`/`notes`/`cwe_rationale` text, not guessed: e.g.
+  `mime_type_check`/`filename_charset_sanitize`/`path_prefix_check`/
+  `hostname_allowlist`/`naive_string_compare`/`loose_equality_compare` are
+  `partial` (D20 — reduce but do not fully close the gap, per each entry's
+  own documented residual weakness), not `neutralises`. Two corpus-proposed
+  sink families (`template_render` from `ssti`, `template_render_pipeline`
+  from `search-export`) were kept separate rather than merged, despite
+  conceptual overlap, since merging sink families is a design decision for
+  a later change, not this application pass. `search-export`'s and
+  `ugc-xss`'s proposals that reuse already-existing `(op, sink_family)`
+  pairs (`param_bind`/`sql_string_literal`, `raw_concat`/`sql_string_literal`,
+  `raw_concat`/`html_body`, `html_entity_escape`/`html_body`) needed no new
+  entries and were left as-is.
+- Impact (other components / project): purely additive to the matrix `load_
+  safety_matrix()` (`fuzzlab/labgen/verdict.py`) reads; no existing `(op,
+  sink_family)` pair's effect changed, so every previously-generated cell's
+  verdict is unchanged (schema-validated: `jsonschema.validate()` against
+  `lab/schemas/safety_matrix.schema.json` passes; no duplicate `(op,
+  sink_family)` key across the 102 entries). The matrix now covers every
+  shape the site-architecture corpus collected, but no emitter/module
+  (`fuzzlab/labgen/emitters/{php_laravel,python_fastapi}/modules.py`, or a
+  node equivalent) yet implements code generation for any of these 20 new
+  sink families — this change is the registry only (Step 8's own scoping:
+  "a validated pair is eligible to inform `lab/safety_matrix.yaml` **or** a
+  new module template"; the module-template side is separate, unstarted
+  future work, tracked as a new deliverable below, not implied-done by this
+  entry).
+- Risk (level; mitigation): low — additive-only registry entries, verified
+  against the schema and for cross-entry key collisions; no code-generation
+  path currently reads any of the 20 new sink families, so nothing can
+  mis-generate as a result of this change. Residual risk: an effect/concern
+  assignment made from a manifest's prose (rather than re-deriving it from
+  first principles against a live oracle) could be wrong in a way static
+  review misses — flagged, not fully closed; the existing snapshot tests in
+  `tests/test_labgen_verdict.py` continue to pass unchanged since they only
+  exercise the pre-existing entries.
+- Deliverables:
+  - [x] All 12 cells' `suggested_op`/`suggested_sink_family` proposals
+    reviewed and accepted into `lab/safety_matrix.yaml` — done.
+  - [x] New concern-ID vocabulary documented in the file's header comment —
+    done.
+  - [x] Schema validation (`jsonschema.validate`) + duplicate-key check —
+    done, clean.
+  - [x] `tests/test_labgen_verdict.py` still green (15 passed) — done.
+  - [ ] Emitter/module implementations for the 20 new sink families (actual
+    vulnerable/idiomatic code generation for each new op) — todo, separate
+    future work; this entry is the safety-matrix registry only.
+- Effectiveness (assessed 2026-09-22): effective for its stated scope — the
+  matrix now has a registry entry for every `(op, sink_family)` pair the
+  site-architecture corpus proposed, schema-valid and collision-free, with
+  no behavior change to any pre-existing entry.
+
 ### CC-LAB-0058 — real MariaDB-backed live-boot mode + `search.php` canonical-cell resolution (FR-LAB-55) (2026-09-22)
 - Change: two independent, purely additive extensions, both delivered together
   because the second is proven with the first:
