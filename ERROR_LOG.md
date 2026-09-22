@@ -18,6 +18,34 @@ Format per entry:
 
 ---
 
+## 2026-09-22 — LAB: `php_laravel`'s stack-local module names would have failed every minimal-pair gate (found during L-P3.3b, fixed in the same lane)
+
+- **Symptom:** while wiring the Laravel emitter into `fuzzlab lab-generate --check` (§4.3
+  step 3's requirement, lane L-P3.3b), the minimal-pair gate would have reported a
+  `MinimalPairError` **setup** failure — "composition names module `get_query_param` …
+  which is not registered in any of `fuzzlab.labgen.modules`' SOURCES/TRANSFORMS/SINKS/
+  COMPLEXITIES" — for every generated Laravel cell, i.e. a gate that cannot evaluate its
+  invariant rather than one reporting a real finding. Caught by reading
+  `minimal_pair._parse_composition` before wiring, not by a failing build.
+- **Root cause:** `fuzzlab.labgen.minimal_pair` classifies each position of a generated
+  file's `// Module composition: …` provenance line by looking the name up in
+  `fuzzlab.labgen.modules`' registries — `php_current`'s — which is the only category map
+  it has. L-P3.3a's foundation emitter used two stack-local names (`get_query_param`,
+  `db_select_raw`) that no shared registry knows. The gap was invisible until this lane,
+  because that foundation was never run through `--check` (the emitter was not registered
+  in the CLI).
+- **Remediation:** `php_laravel`'s module registry keys are the project's shared
+  composition vocabulary (`get_param`, `sql_numeric_lookup`, …) with Laravel-idiom
+  implementations behind them; the two stack-local names were renamed. A test now asserts
+  every key of every `php_laravel` registry is classifiable by `minimal_pair`'s own map, so
+  a future stack-local name fails at unit level rather than as an unevaluable gate. The
+  general fix — a pluggable category map on `minimal_pair`, so a stack may keep its own
+  names — is recorded as an open question in
+  `docs/components/01-target-lab/requirements.md` §8; it is a sibling lane's shared file
+  and no second stack needs it yet. Not a code defect in shipped behavior (no released
+  path produced a wrong result), so no `BUG-NNNN`/`PA-NNNN` is claimed; see `CC-LAB-0044`.
+- **Status:** Fixed.
+
 ## 2026-09-21 — MUT: two `tests/test_mutation_operators.py` failures pre-existing on the branch tip (found, not fixed)
 
 - **Symptom:** the full suite run for lane L-P3.4 (§4.4, `CC-LAB-0040`) ended

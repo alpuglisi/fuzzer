@@ -1,0 +1,4 @@
+// Already-stored value, written by an earlier request and read back here
+// through Eloquent -- the taint origin is storage, not this request.
+$storedOwner = {{ stored_model }}::findOrFail((int) $request->query('{{ owner_param }}', 1));
+${{ var_name }} = {{ stored_expr }};

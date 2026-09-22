@@ -1,0 +1,4 @@
+{# The value lands inside a `javascript:` URL -- an HTML attribute whose
+   content is JavaScript source, so HTML-entity escaping is correct escaping
+   for the wrong context. Raw echo for the same reason as every sink here. #}
+<a class="{{ css_class }}" href="javascript:{!! $value !!}">continue</a>

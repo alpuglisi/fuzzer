@@ -29,6 +29,19 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   (`path_depth`) — the other six are live-response observations — so on every sample
   manifest shipped today the gate SKIPS with an explicit printed reason rather than
   pretending to measure.
+- LAB: gave the `php_laravel` emitter the **full module inventory** (plan §4.3 step 2, lane
+  L-P3.3b, `CC-LAB-0044`/`FR-LAB-42`) — every shape `php_current` supports, ported to
+  Laravel/Eloquent/Blade idiom via this stack's own module registries (nothing shared with
+  `php_current`'s plain-PHP package): the four SQL shapes through `DB::select`/`whereRaw()`/
+  `orderByRaw()`, and the three HTML shapes as per-cell Blade views, which makes an HTML cell
+  a two-file `controller` + `view` cell here. Laravel is the one stack the plan assigns full
+  depth, because Phase 1's hard-shape work is directly portable to a second PHP stack. The
+  sample manifest grew 2 → 20 cells and `fuzzlab lab-generate --emitter php_laravel --check`
+  passes end to end (Tier 0 `php -l` over all 28 files + Tier 3), which is why the emitter is
+  now registered in the CLI's `EMITTER_REGISTRY`. The identifier-SQLi build assertion reaches
+  these cells through a route-rewrite adapter only — verified, not assumed: that module is
+  stack-agnostic apart from assuming a cell is served at `cell.route.path`, which a
+  router-dispatched stack is not.
 
 ## 2026-09-21
 

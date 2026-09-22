@@ -130,6 +130,122 @@ this entry needed no merge-time renumbering. `FR-LAB-43` likewise.)*
   manifests: it skips on all of them, for the feature-availability reason above. Judge
   again once per-cell observed response metadata exists.
 
+### CC-LAB-0044 — L-P3.3b: the `php_laravel` full module inventory (every shape, Laravel/Eloquent/Blade idiom) (2026-09-22)
+*(Number pre-assigned to this lane by the orchestrating session — `CC-LAB-0044`/`FR-LAB-42`,
+with the concurrent lane L-P1.3 holding `CC-LAB-0045`/`FR-LAB-43` — so, unlike every prior
+lane, no post-merge renumbering was needed and none was done. Both prerequisites were
+confirmed merged in this worktree before work began: L-P3.3a's `StackEnv`/route-accumulator
+foundation (`CC-LAB-0029`) and L-P1.2b's harder shapes on `php_current` (`CC-LAB-0043`).)*
+- Change: built `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3 **step 2** — the full-depth module
+  inventory for the second PHP emitter — in five pieces:
+  1. **This emitter's own module registries**, `fuzzlab/labgen/emitters/php_laravel/modules.py`
+     plus its own Jinja2 template tree (`templates/{sources,transforms,sinks,complexities}/`):
+     three sources (`get_param`, `post_param`, `read_stored_field`), seven transform ops
+     (`identity`, `param_bind`, `html_entity_escape`, `identifier_charset_filter`,
+     `identifier_allowlist`, `url_scheme_allowlist`, `attr_value_allowlist`), seven sinks and
+     two complexities. Mirrors `fuzzlab.labgen.modules`' composition *shape* (Addendum C's
+     porting instruction, the same convention `node_express` follows) with entirely new code:
+     nothing is imported from or added to that package, and `emitters/php_current/` is
+     untouched — verified against the final diff, not assumed.
+  2. **All seven shapes rendered in Laravel idiom**, not transliterated PHP:
+     `sql_numeric_literal` via `DB::select` raw-vs-bound `?`; `sql_string_literal` via the
+     query builder's `whereRaw()` vs. value-binding `where()` (the real Laravel footgun);
+     `sql_identifier` via `orderByRaw()`, whose very existence is the reason an identifier
+     position is not a value position; `sql_join_alias` with the alias substituted three
+     times in one statement; and the three HTML shapes as **Blade views**. An HTML-sink cell
+     is therefore a two-file cell here — a controller (`role="controller"`) plus its own
+     `resources/views/cells/<cell-slug>.blade.php` (`role="view"`, a new
+     `StackEnv.file_roles` entry) — because a Laravel controller returns a view rather than
+     echoing. Both files carry the `// Module composition: ...` provenance line (in the view,
+     as a raw `<?php` header block that Blade passes through) so the minimal-pair invariant is
+     evaluated on each.
+  3. **Two contracts this port discovered and now documents**, both load-bearing for any
+     future emitter that wants the shared checkers rather than the naive fallbacks:
+     (a) *module names are the project's shared composition vocabulary.*
+     `fuzzlab.labgen.minimal_pair` builds its category map from `fuzzlab.labgen.modules`'
+     registries and **raises** for a name it cannot classify, so L-P3.3a's stack-local names
+     (`get_query_param`, `db_select_raw`) would have made every Laravel cell fail the
+     minimal-pair gate with a setup error the moment the emitter was wired into `--check`;
+     they are renamed to the shared vocabulary and a test asserts every registry key is
+     classifiable. (b) *a sink never escapes anything itself* — so the Blade sinks echo
+     `{!! ... !!}` and `html_entity_escape` applies Laravel's `e()` helper in the controller,
+     keeping the security-relevant difference inside the declared transform region instead of
+     moving it into a second file. (Both are recorded as an open question in `requirements.md`
+     §8: the general fix is a pluggable category map on `minimal_pair`, a sibling lane's file,
+     which no second stack needs yet.)
+  4. **Manifest + conformance.** `lab/manifests/phase3_php_laravel_sample.yaml` widened from
+     L-P3.3a's 2 foundation cells to **20** (a vulnerable/secure pair per value-context shape;
+     a triple or quadruple per harder shape — no transform / the plausible-but-wrong fix /
+     the textbook-but-inapplicable `param_bind` / the context-correct fix). Verdicts are
+     derived by `verdict()` against the pinned matrix, never asserted in the manifest, and no
+     safety-matrix row was added or changed (every `(op, family)` pair these cells need
+     already existed — checked, not assumed). `php_laravel` is registered in
+     `fuzzlab/labgen/cli.py`'s `EMITTER_REGISTRY`, which is what makes
+     `fuzzlab lab-generate --manifest … --emitter php_laravel --check` runnable; it passes end
+     to end over all 20 cells / 28 emitted files: name-leak scanner, secret scanner
+     (Gitleaks present on this host, so it ran for real), determinism, minimal pair, Tier 0
+     `php -l` (ran for real — `php` is present — including the `.blade.php` views) and Tier 3
+     whole-sample regeneration.
+  5. **The identifier-SQLi oracle adapter**, `emitters/php_laravel/identifier_sqli.py`. The
+     brief asked whether `fuzzlab.labgen.identifier_sqli_assertion` is reusable as-is for a
+     Laravel-rendered cell; **verified rather than assumed, and the answer is "almost"**. It
+     is genuinely stack-agnostic except for one assumption — that a cell is served at
+     `cell.route.path` — which holds for filesystem-routed `php_current` but not for this
+     router-dispatched stack, where each cell is served at its own `/cell/<slug>` URL
+     precisely so twins can coexist in one build. The adapter is therefore a **route rewrite
+     and nothing else**: it rewrites the cell's route, fills the probe metadata from this
+     emitter's own page profile (PA-0001), and delegates to the shared assertion, so no
+     verdict derivation, oracle call, comparison or fail-closed branch is duplicated
+     (PA-0003/PA-0021) and that shared module is unchanged. A test demonstrates the mismatch
+     the adapter exists for, rather than asserting it in prose only.
+- Reason: `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3 step 2 and its own reasoning for assigning
+  full depth to this stack — "Phase 1's hard-shape work on `php_current` is directly portable
+  here once it exists, whereas assigning full depth to Node/Express or FastAPI would mean
+  re-deriving those shapes from scratch on an unrelated stack". It is also the prerequisite
+  for L-P3.3c (the real `puppy-fort-factory/` migration, §4.3 step 6), which this lane
+  deliberately does not attempt.
+- Scope discipline (per the task brief, checked against the final diff): `fuzzlab/labgen/modules/`,
+  `fuzzlab/labgen/emitters/php_current/`, `node_express`, `python_fastapi` and
+  `fuzzlab/labgen/schema.py` are **all untouched** — the `Cell` IR needed no new field (the
+  render-only metadata this port needs lives in the emitter's page profiles, the same split
+  `php_current` uses). The two shared files this lane does touch are its own stack's
+  (`emitters/php_laravel/*`) plus one additive `EMITTER_REGISTRY` entry in
+  `fuzzlab/labgen/cli.py`, without which §4.3 step 3's `--check` requirement is not
+  demonstrable.
+- Files:
+  - `fuzzlab/labgen/emitters/php_laravel/modules.py` (new), `…/templates/**` (new: 16
+    fragments), `…/identifier_sqli.py` (new)
+  - `fuzzlab/labgen/emitters/php_laravel/__init__.py` (shape map, page profiles, composition
+    assembly, view emission, `context_depth` guard), `…/stack_env.py` (`view` file role)
+  - `fuzzlab/labgen/cli.py` (`EMITTER_REGISTRY` += `php_laravel`)
+  - `lab/manifests/phase3_php_laravel_sample.yaml` (2 → 20 cells)
+  - `tests/test_labgen_php_laravel_harder_shapes.py` (new, 60 tests),
+    `tests/test_labgen_php_laravel.py` (three L-P3.3a tests updated — see below)
+  - `CHANGELOG.md`, `ERROR_LOG.md`, `docs/ARCHITECTURE.md`,
+    `docs/components/01-target-lab/{requirements.md,change-control.md}`
+- Tests: new `tests/test_labgen_php_laravel_harder_shapes.py` mirrors
+  `tests/test_labgen_harder_shapes.py` (L-P1.2b's own file) section for section: inventory
+  (including a test that compares this stack's shape set against `php_current`'s **live
+  registry**, so "full depth" cannot silently lapse when that emitter grows a shape),
+  per-cell derived verdicts, the Laravel idiom each shape renders to, the module fragments'
+  authoring-gap guards, PA-0024's whole-collection "render every `php_laravel` cell of every
+  manifest" standing test, the conformance tiers, and the oracle adapter. Three tests in
+  `tests/test_labgen_php_laravel.py` encoded L-P3.3a's deliberate foundation-only scope and
+  were updated rather than deleted: the "XSS not supported yet" assertion is inverted (and a
+  genuinely-unsupported shape now carries the declare-unsupported-and-skip check), the
+  unknown-op test uses a name that is really unknown (`html_entity_escape` is a registered op
+  now), and the hand-kept cell-ID roster is replaced by the derived invariant per PA-0027(b).
+  Full suite: **1374 passed, 8 skipped, 2 failed** — the two failures are the pre-existing
+  `tests/test_mutation_operators.py` MUT-component ones already logged in `ERROR_LOG.md`
+  (2026-09-21), verified as pre-existing via that entry rather than assumed; baseline before
+  this lane was 1314 passed with the same two failures.
+- Follow-ups (named, not silently deferred): `context_depth` is **not** ported to this stack
+  and non-`direct` cells are refused loudly rather than rendered as `direct`;
+  `minimal_pair`'s single-registry category map should become pluggable when a third stack
+  reaches full depth; `lab-generate` still has no clean CLI error for an emitter/manifest
+  stack mismatch (pre-existing, reproduces with `php_current` too). All three are in
+  `requirements.md` §8.
+
 ### CC-LAB-0043 — L-P1.2b: the harder SQLi/XSS shapes + identifier-SQLi oracle wiring (2026-09-21)
 *(Numbered `CC-LAB-0043` rather than the `CC-LAB-0040` this lane claimed "from the top of
 this log at authoring time" — by merge time, lanes L-P3.4 (`CC-LAB-0040`), L-P1.4

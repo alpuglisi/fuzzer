@@ -87,19 +87,41 @@ def test_supports_the_sample_manifest_sqli_cells() -> None:
     assert emitter.supports(_SECURE_TWIN_CELL.vuln_class, _SECURE_TWIN_CELL.sink_context) is True
 
 
-def test_does_not_support_xss_cells_yet_and_a_caller_would_skip() -> None:
+def test_html_body_cells_are_supported_since_the_full_inventory_landed() -> None:
+    """L-P3.3a deliberately supported one shape and this test asserted the
+    XSS gap; L-P3.3b's full-depth inventory closes it (§4.3 step 2), so the
+    assertion is inverted rather than deleted -- the shape-by-shape coverage
+    now lives in tests/test_labgen_php_laravel_harder_shapes.py."""
     emitter = LaravelEmitter()
     xss_cell = Cell(
-        cell_id="LABGEN-PL-0003",
+        cell_id="LABGEN-PL-0005",
         vuln_class="xss",
         stack_profile="php_laravel",
         route=Route(method="GET", path="/example/profile"),
         sink_context=SinkContext(family="html_body", required_neutralizations=("html_tag_break",)),
         transform=Pipeline.from_list([]),
     )
-    assert emitter.supports(xss_cell.vuln_class, xss_cell.sink_context) is False
-    with pytest.raises(ValueError):
-        emitter.render(xss_cell)
+    assert emitter.supports(xss_cell.vuln_class, xss_cell.sink_context) is True
+    # A controller plus its own Blade view -- an HTML-sink cell is a two-file
+    # cell on this stack.
+    assert [f.role for f in emitter.render(xss_cell)] == ["controller", "view"]
+
+
+def test_a_shape_outside_the_inventory_is_still_declared_unsupported() -> None:
+    """"Declare unsupported and skip" is not weakened by the widening: a
+    family this emitter has no module set for is still refused, loudly."""
+    emitter = LaravelEmitter()
+    unsupported = Cell(
+        cell_id="LABGEN-PL-0098",
+        vuln_class="ssti",
+        stack_profile="php_laravel",
+        route=Route(method="GET", path="/example/product"),
+        sink_context=SinkContext(family="template_expression", required_neutralizations=("template_break",)),
+        transform=Pipeline.from_list([]),
+    )
+    assert emitter.supports(unsupported.vuln_class, unsupported.sink_context) is False
+    with pytest.raises(ValueError, match="unsupported for php_laravel"):
+        emitter.render(unsupported)
 
 
 def test_render_produces_exactly_one_controller_file() -> None:
@@ -158,9 +180,9 @@ def test_unknown_transform_op_raises_rather_than_guessing() -> None:
         stack_profile="php_laravel",
         route=Route(method="GET", path="/example/product"),
         sink_context=SinkContext(family="sql_numeric_literal", required_neutralizations=("sql_syntax_break",)),
-        transform=Pipeline.from_list(["html_entity_escape"]),
+        transform=Pipeline.from_list(["nope_not_a_real_op"]),
     )
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="no transform module for op"):
         emitter.render(cell)
 
 
@@ -210,10 +232,18 @@ def _sample_cells() -> tuple[Cell, ...]:
     return manifest.cells
 
 
-def test_sample_manifest_loads_and_matches_the_hand_built_cells() -> None:
+def test_sample_manifest_is_all_php_laravel_and_fully_renderable() -> None:
+    """The cell-ID list is no longer restated as a literal (PA-0027(b)): the
+    manifest grew from L-P3.3a's two foundation cells to L-P3.3b's full-depth
+    set, so the invariant worth asserting is the *derived* one -- every cell
+    targets this stack and this emitter supports every one of them -- rather
+    than a hand-kept roster that goes stale on the next widening."""
     cells = _sample_cells()
-    assert [c.cell_id for c in cells] == ["LABGEN-PL-0001", "LABGEN-PL-0002"]
+    emitter = LaravelEmitter()
     assert all(c.stack_profile == "php_laravel" for c in cells)
+    assert all(emitter.supports(c.vuln_class, c.sink_context) for c in cells)
+    # The two foundation cells are still present and still the first pair.
+    assert [c.cell_id for c in cells[:2]] == ["LABGEN-PL-0001", "LABGEN-PL-0002"]
 
 
 def test_tier3_whole_sample_regeneration_is_byte_identical() -> None:

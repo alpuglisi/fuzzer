@@ -1,77 +1,220 @@
 """``php_laravel``: the second PHP emitter, Laravel/Eloquent/Blade idiom
-(lane L-P3.3a, ``docs/LAB_IMPLEMENTATION_PLAN.md`` §4.3 steps 1/3/4/5).
+(``docs/LAB_IMPLEMENTATION_PLAN.md`` §4.3).
 
-**Foundation-only lane, stated plainly (mirrors ``php_current``'s own
-module docstring convention).** This emitter does **not** yet carry the
-full module inventory (``php_current``'s ported shapes plus the harder
-identifier/alias/connector-position SQLi and escaping-context-mismatch XSS
-shapes from Phase 1) -- that is lane **L-P3.3b**, which depends on this
-landing first. It does not migrate any real ``puppy-fort-factory/`` page --
-that is lane **L-P3.3c**, which depends on L-P3.3b. What this lane builds,
-per the task brief:
+Built in two lanes:
 
-1. :class:`~fuzzlab.labgen.emitters.php_laravel.stack_env.StackEnv` for
-   ``php_laravel`` (``fuzzlab.labgen.emitters.php_laravel.stack_env``) --
-   pinned framework version, digest-pinned base image, ``is_multi_file``,
-   and the scaffold's ``.env`` with debug mode forced off.
-2. A ``route``-category accumulator module for ``routes/web.php``
-   (:mod:`fuzzlab.labgen.emitters.php_laravel.route_accumulator`), sorted by
-   cell ID at render time per ``CR-LAB-0001`` Addendum D.
-3. :class:`LaravelEmitter` itself -- exactly **one** trivial shape
-   supported (``sqli``/``sql_numeric_literal``, the same shape
-   ``php_current``'s first illustrative pair proves, in Laravel/Eloquent
-   idiom instead of plain PHP/PDO), enough to prove the scaffold renders and
-   the conformance suite (Tier 0 + Tier 3) passes against a deliberately
-   minimal manifest -- not a real page, not the full shape inventory.
+* **L-P3.3a (foundation, steps 1/3/4/5)** --
+  :class:`~fuzzlab.labgen.emitters.php_laravel.stack_env.StackEnv` (pinned
+  framework version, digest-pinned base image, ``is_multi_file``, a scaffold
+  ``.env`` with debug mode forced off), the ``route``-category accumulator
+  for ``routes/web.php``
+  (:mod:`fuzzlab.labgen.emitters.php_laravel.route_accumulator`, sorted by
+  cell ID per ``CR-LAB-0001`` Addendum D), and a deliberately minimal
+  one-shape emitter proving the scaffold renders and passes Tier 0 + Tier 3.
+* **L-P3.3b (this lane, step 2)** -- the **full-depth module inventory**.
+  Laravel is the one stack that gets *every* shape ``php_current`` supports,
+  per the plan's own reasoning ("Phase 1's hard-shape work on
+  ``php_current`` is directly portable here once it exists"):
 
-Every module this emitter composes with is its **own**, new to this
-directory -- nothing is imported from :mod:`fuzzlab.labgen.modules` (that
-package is ``php_current``'s plain-PHP-idiom inventory; Addendum C is
-explicit that Laravel is "not reusable... its PHP is procedural, not
-Laravel/Eloquent/Blade idiom" when describing VTSG, and the same reasoning
-applies to reusing ``php_current``'s own plain-PHP fragments here) and
-nothing is added to that shared package, per this lane's scope discipline.
+  =========================================  ======================================
+  ``(vuln_class, sink_context.family)``      Laravel/Eloquent/Blade rendering
+  =========================================  ======================================
+  ``sqli`` / ``sql_numeric_literal``         ``DB::select`` raw vs. bound ``?``
+  ``sqli`` / ``sql_string_literal``          builder ``whereRaw()`` vs. ``where()``
+  ``sqli`` / ``sql_identifier``              ``orderByRaw()`` (identifier position)
+  ``sqli`` / ``sql_join_alias``              alias substituted 3x in one statement
+  ``xss``  / ``html_body``                   Blade view, raw echo
+  ``xss``  / ``url_javascript_scheme``       Blade view, ``javascript:`` URL
+  ``xss``  / ``html_attribute_unquoted``     Blade view, unquoted attribute
+  =========================================  ======================================
+
+  Rendering is **module composition**, per ``CR-LAB-0001`` Addendum C, over
+  this emitter's *own* registries
+  (:mod:`fuzzlab.labgen.emitters.php_laravel.modules`): nothing is imported
+  from or added to :mod:`fuzzlab.labgen.modules` (``php_current``'s
+  plain-PHP/PDO idiom, another lane's files) and nothing here touches
+  :mod:`fuzzlab.labgen.emitters.php_current`. See that module's docstring for
+  the two load-bearing decisions this port rests on -- why the registry
+  *names* are the project's shared composition vocabulary (the shared
+  minimal-pair checker classifies composition positions through
+  ``fuzzlab.labgen.modules``' registries and raises for a name it cannot
+  find), and why the HTML sinks echo raw in Blade while the
+  ``html_entity_escape`` transform applies ``e()`` in the controller.
+
+An HTML-sink cell is a **two-file cell** on this stack: a controller
+(``role="controller"``) plus its own Blade view (``role="view"``), which is
+what "ported to Laravel idiom" actually means for an XSS shape -- a Laravel
+controller returns a view, it does not ``echo``. Both files carry the same
+``// Module composition: ...`` provenance line, so
+:mod:`fuzzlab.labgen.minimal_pair` can evaluate the pair invariant on each
+of them (the view file's provenance block is a raw ``<?php`` comment header,
+which Blade passes through, rather than a ``{{-- --}}`` Blade comment, since
+that checker looks for a ``//`` comment line).
+
+**Deliberately not carried by this lane, named rather than glossed over:**
+
+* ``Cell.context_depth`` other than ``"direct"`` (``same_file_helper``,
+  ``cross_file``, ``stored_second_order``) and, with it, ``sink_endpoint``.
+  ``php_current`` renders those (``CC-LAB-0042``); porting the depth
+  fragments to Laravel is a separate axis from this lane's shape inventory,
+  so :meth:`LaravelEmitter.render` **raises** for a non-``direct`` cell
+  rather than silently rendering it as ``direct`` and mislabelling the depth
+  a corpus record claims. Tracked as an open question in
+  ``docs/components/01-target-lab/requirements.md`` §8.
+* Real ``puppy-fort-factory/`` page reproduction (§4.3 step 6) -- lane
+  L-P3.3c, which depends on this one. Every route below is an *illustrative*
+  Laravel page, and no ``lab/ground-truth/`` label claims otherwise.
 """
 
 from __future__ import annotations
 
 import re
+from typing import Any, NamedTuple
 
 from fuzzlab.labgen.emitter import EmittedFile, EmittedFiles, Emitter
+from fuzzlab.labgen.emitters.php_laravel.modules import (
+    COMPLEXITIES,
+    SINKS,
+    SOURCES,
+    TRANSFORMS,
+    VIEW_SINKS,
+)
 from fuzzlab.labgen.emitters.php_laravel.route_accumulator import RouteAccumulator
 from fuzzlab.labgen.emitters.php_laravel.stack_env import PHP_LARAVEL_STACK_ENV, StackEnv
 from fuzzlab.labgen.schema import Cell, SinkContext
 
 __all__ = ["LaravelEmitter", "PHP_LARAVEL_STACK_ENV", "StackEnv"]
 
-#: (vuln_class, sink_context.family) -> True this emitter supports. A dict
-#: (not a set) so a later lane (L-P3.3b) can extend it with per-shape
-#: metadata the way ``php_current``'s ``_MODULE_SET_BY_SHAPE`` does, without
-#: changing this dict's shape -- deliberately not built out further here,
-#: per this lane's scope (see module docstring).
-_SUPPORTED_SHAPES: dict[tuple[str, str], bool] = {
-    ("sqli", "sql_numeric_literal"): True,
+
+class _ModuleSet(NamedTuple):
+    """Which source/sink/complexity module a ``(vuln_class,
+    sink_context.family)`` shape renders with. The transform is never fixed
+    here -- it always comes from the cell's own ``transform`` pipeline, per
+    op, exactly like ``fuzzlab.labgen.verdict.verdict()``'s own ordered walk
+    (and exactly like ``php_current``'s ``_MODULE_SET_BY_SHAPE``)."""
+
+    source: str
+    sink: str
+    complexity: str
+
+
+#: (vuln_class, sink_context.family) -> which modules render this shape. Any
+#: pair not listed here is declared unsupported via :meth:`supports`. This is
+#: the full-depth inventory (L-P3.3b): every shape ``php_current`` supports.
+_MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
+    ("sqli", "sql_numeric_literal"): _ModuleSet("get_param", "sql_numeric_lookup", "single_statement"),
+    ("sqli", "sql_string_literal"): _ModuleSet("post_param", "sql_string_literal_lookup", "single_statement"),
+    ("xss", "html_body"): _ModuleSet("read_stored_field", "html_body_echo", "render_only"),
+    # Identifier/alias/connector-position SQL: the tainted value is a column
+    # identifier or a JOIN alias, never a literal value (plan §2.2).
+    ("sqli", "sql_identifier"): _ModuleSet("get_param", "sql_identifier_order_by", "single_statement"),
+    ("sqli", "sql_join_alias"): _ModuleSet("get_param", "sql_join_alias_lookup", "single_statement"),
+    # Escaping-context-mismatch HTML: correct escaping applied for the wrong
+    # context -- an escaped value inside a `javascript:` URL, or inside an
+    # unquoted attribute whose whitespace boundary escaping does not protect.
+    ("xss", "url_javascript_scheme"): _ModuleSet("get_param", "html_js_url_echo", "render_only"),
+    ("xss", "html_attribute_unquoted"): _ModuleSet("get_param", "html_attribute_unquoted_echo", "render_only"),
 }
 
-#: Transform ops this emitter's one sink module knows how to branch on.
-#: Mirrors ``php_current``'s ``bound`` flag -- an empty pipeline means
-#: "identity" (raw, unmediated value), exactly one non-empty op
-#: (``param_bind``) is understood; anything else raises rather than
-#: guessing, matching this project's "fail loud on an authoring gap"
-#: discipline (see ``fuzzlab.labgen.emitters.php_current``).
-_KNOWN_OPS = frozenset({"param_bind"})
+#: Page-profile key that overrides a shape's default *source* module -- the
+#: same mechanism (and the same reasoning) as ``php_current``'s: one
+#: ``(vuln_class, sink_context.family)`` shape can be reached by two
+#: different taint origins on two different pages (a request parameter on
+#: one, an already-stored field on another), and source origin is render-only
+#: metadata that must never fork the verdict-relevant shape vocabulary
+#: (``class`` x ``sink_context.family``) the safety matrix is keyed on.
+_SOURCE_OVERRIDE_KEY = "source_override"
+
+#: Per-page static context (table/column/parameter names, the stored-field
+#: expression an HTML cell reads, the identifier allowlist and the two
+#: value-differing columns the build-time identifier-SQLi oracle probes with)
+#: that an emitter needs beyond the verdict-relevant Cell IR. Keyed by
+#: ``cell.route.path``, since a vulnerable cell and its twins share one
+#: logical page and therefore one profile.
+#:
+#: These are Laravel routes (no ``.php`` suffix -- a Laravel app is
+#: router-dispatched, not filesystem-routed) and illustrative pages, distinct
+#: from ``php_current``'s own ``/catalog.php``-style profiles, which this
+#: emitter deliberately does not read.
+_PAGE_PROFILES: dict[str, dict[str, Any]] = {
+    # The original L-P3.3a illustrative pair (unchanged, kept rendering).
+    "/example/product": {"var_name": "id", "param_name": "id", "table": "products", "column": "id"},
+    # POST string-literal lookup. `password_var`/`password_param` are sink
+    # boilerplate (an already-hashed secret), not a second injection point.
+    "/login": {
+        "var_name": "username",
+        "param_name": "username",
+        "table": "users",
+        "column": "username",
+        "password_var": "password_hash",
+        "password_param": "password",
+    },
+    # Stored value rendered into an HTML body -- the taint origin is storage,
+    # so this profile overrides the shape's default `get_param` source.
+    "/example/profile": {
+        "var_name": "bio",
+        "stored_model": "\\App\\Models\\User",
+        "owner_param": "user",
+        "stored_expr": "$storedOwner->bio",
+        "css_class": "bio",
+        "source_override": "read_stored_field",
+    },
+    # `?sort=` selects an ORDER BY *column identifier*. `allowed_identifiers`
+    # is what the `identifier_allowlist` transform allows (its first entry
+    # doubles as the safe fallback); `column_a`/`column_b` are the two real,
+    # value-differing columns the build-time identifier-SQLi oracle probes
+    # with (see `fuzzlab.labgen.emitters.php_laravel.identifier_sqli`).
+    "/catalog": {
+        "var_name": "sort",
+        "param_name": "sort",
+        "table": "products",
+        "column": "name",
+        "allowed_identifiers": ("id", "name", "price"),
+        "column_a": "name",
+        "column_b": "price",
+    },
+    # `?alias=` names a JOIN alias -- a connector position, substituted three
+    # times in one statement.
+    "/inventory": {
+        "var_name": "alias",
+        "param_name": "alias",
+        "table": "inventory",
+        "join_table": "inventory",
+        "column": "sku",
+        "join_column": "parent_id",
+        "allowed_identifiers": ("i2", "i3"),
+        "column_a": "i2",
+        "column_b": "i3",
+    },
+    # `?url=` is echoed inside a `javascript:` URL.
+    "/share-link": {"var_name": "link", "param_name": "url", "css_class": "share"},
+    # `?theme=` is echoed into an unquoted HTML attribute.
+    "/theme": {
+        "var_name": "theme",
+        "param_name": "theme",
+        "css_class": "theme",
+        "attr_name": "theme",
+        "attr_default": "default",
+    },
+}
+
+#: The one controller method name every generated controller uses. Stable
+#: across a minimal pair's twins on purpose (``minimal_pair
+#: .check_identifier_stability``'s rule): per-cell identity is carried by the
+#: per-cell controller *class* and route URL, both derived from the cell ID.
+_METHOD_NAME = "show"
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
 def _cell_slug(cell_id: str) -> str:
-    """A lowercase, hyphen-free slug derived from ``cell_id``, e.g.
-    ``LABGEN-PL-0001`` -> ``labgen-pl-0001``. Used for both the controller
-    class name and the route URL, so both are traceable to the same cell
-    and, per Addendum D's per-cell-identifier rule, never a generic/shared
-    name -- every cell (including a secure twin, a distinct cell in its own
-    right) gets its own slug from its own ID, the same precedent
-    ``php_current``'s ``handler_name`` already sets."""
+    """A lowercase, hyphen-joined slug derived from ``cell_id``, e.g.
+    ``LABGEN-PL-0001`` -> ``labgen-pl-0001``. Used for the controller class
+    name, the route URL and the Blade view name, so all three are traceable
+    to the same cell and, per Addendum D's per-cell-identifier rule, never a
+    generic/shared name -- every cell (including a secure twin, a distinct
+    cell in its own right) gets its own slug from its own ID, the same
+    precedent ``php_current``'s ``handler_name`` already sets."""
     return _SLUG_RE.sub("-", cell_id.lower()).strip("-")
 
 
@@ -86,17 +229,33 @@ def _url_path_for(cell_id: str) -> str:
     """The route URL this cell is served at. Derived from ``cell_id``, not
     ``cell.route.path`` verbatim -- see
     ``fuzzlab.labgen.emitters.php_laravel.route_accumulator``'s module
-    docstring for why a twin needs its own URL to coexist in one build."""
+    docstring for why a twin needs its own URL to coexist in one build (and
+    ``identifier_sqli.py`` for the one place that difference matters to an
+    oracle)."""
     return f"/cell/{_cell_slug(cell_id)}"
 
 
-class LaravelEmitter(Emitter):
-    """Renders a :class:`Cell` to a Laravel controller (``EmittedFiles``)
-    plus a route fragment for the ``routes/web.php`` accumulator.
+def _view_name_for(cell_id: str) -> str:
+    """The Blade view name (dot notation) for a view-rendering cell."""
+    return f"cells.{_cell_slug(cell_id)}"
 
-    Like ``php_current``, ``render()`` never falls back to a default
-    transform silently -- an op this emitter has no branch for raises
-    rather than guessing.
+
+def _indent_block(text: str, prefix: str) -> str:
+    """Indent every non-blank line of ``text`` by ``prefix``. Deterministic
+    and dependency-free -- no reliance on a Jinja2 filter's own defaults."""
+    lines = text.split("\n")
+    return "\n".join((prefix + line) if line else line for line in lines)
+
+
+class LaravelEmitter(Emitter):
+    """Renders a :class:`Cell` to a Laravel controller (plus, for an
+    HTML-sink cell, its own Blade view) by composing this stack's own
+    module registries, and to a ``routes/web.php`` fragment for the
+    accumulator.
+
+    Like ``php_current``, :meth:`render` never falls back to a default
+    shape/transform/page profile silently -- a shape, op, page or depth this
+    emitter has no module or profile for raises, rather than guessing.
     """
 
     stack_env: StackEnv = PHP_LARAVEL_STACK_ENV
@@ -105,7 +264,7 @@ class LaravelEmitter(Emitter):
         self._route_accumulator = RouteAccumulator()
 
     def supports(self, vuln_class: str, sink_context: SinkContext) -> bool:
-        return (vuln_class, sink_context.family) in _SUPPORTED_SHAPES
+        return (vuln_class, sink_context.family) in _MODULE_SET_BY_SHAPE
 
     def render(self, cell: Cell) -> EmittedFiles:
         if not self.supports(cell.vuln_class, cell.sink_context):
@@ -115,56 +274,121 @@ class LaravelEmitter(Emitter):
                 "-- callers must check supports() before calling render(), per T-LAB0.4's "
                 "declare-unsupported-and-skip rule"
             )
-
-        applied_ops = tuple(cell.transform.ops)
-        if len(applied_ops) > 1 or (applied_ops and applied_ops[0] not in _KNOWN_OPS):
+        if cell.context_depth != "direct":
             raise ValueError(
-                f"{cell.cell_id}: php_laravel has no transform module for pipeline {applied_ops!r} "
-                f"-- known ops: {sorted(_KNOWN_OPS)} (or an empty pipeline)"
+                f"{cell.cell_id}: php_laravel renders context_depth 'direct' only, got "
+                f"{cell.context_depth!r} -- the depth-hop fragments (pass-through helper, "
+                "cross-file helper, stored/second-order routing) are not ported to Laravel "
+                "idiom yet, and rendering this cell as 'direct' would mislabel the depth its "
+                "corpus record claims (fail loud rather than silently flatten the axis)"
             )
-        bound = applied_ops == ("param_bind",)
+        modules = _MODULE_SET_BY_SHAPE[(cell.vuln_class, cell.sink_context.family)]
 
-        controller_class = _controller_class_for(cell.cell_id)
-        composition = "get_query_param -> " + (applied_ops[0] if applied_ops else "identity") + " -> db_select_raw"
+        # Mirrors php_current.render()'s own `render_route` choice: the page
+        # the tainted value actually executes on. Since this emitter accepts
+        # `direct` cells only, `sink_endpoint` is always None here (the schema
+        # makes a distinct sink_endpoint biconditional with
+        # `stored_second_order`); the expression is kept so the choice is made
+        # in one place if/when the depth axis is ported.
+        render_route = cell.sink_endpoint if cell.sink_endpoint is not None else cell.route
 
-        if bound:
-            sink_body = (
-                '        $rows = DB::select("SELECT * FROM products WHERE id = ?", [$id]);\n'
-                "        return response()->json($rows);\n"
+        if render_route.path not in _PAGE_PROFILES:
+            raise ValueError(
+                f"{cell.cell_id}: php_laravel has no page profile for route {render_route.path!r} "
+                f"-- known routes: {sorted(_PAGE_PROFILES)}"
             )
-        else:
-            sink_body = (
-                '        $rows = DB::select("SELECT * FROM products WHERE id = " . $id);\n'
-                "        return response()->json($rows);\n"
-            )
+        ctx: dict[str, Any] = dict(_PAGE_PROFILES[render_route.path])
+        ctx["method_name"] = _METHOD_NAME
+        ctx["view_name"] = _view_name_for(cell.cell_id)
 
-        php_source = (
-            "<?php\n"
+        source_name = ctx.pop(_SOURCE_OVERRIDE_KEY, modules.source)
+        if source_name not in SOURCES:
+            raise ValueError(
+                f"{cell.cell_id}: php_laravel page profile for {render_route.path!r} names an "
+                f"unknown source module {source_name!r} -- known sources: {sorted(SOURCES)}"
+            )
+        source_result = SOURCES[source_name].render(ctx)
+        ctx = source_result.context
+
+        # An empty transform pipeline means "identity" (the raw value is used
+        # as-is); every op in a non-empty pipeline runs in order, each free to
+        # publish new context keys for the next module/the sink -- the same
+        # ordered walk fuzzlab.labgen.verdict.verdict() performs over
+        # pipeline.ops. `identity` is *rendered* rather than skipped so a
+        # cell and its transform-emptied twin occupy the same composition
+        # positions (fuzzlab.labgen.minimal_pair compares them pairwise).
+        applied_ops = list(cell.transform.ops) or ["identity"]
+        transform_code_blocks: list[str] = []
+        for op in applied_ops:
+            if op not in TRANSFORMS:
+                raise ValueError(
+                    f"{cell.cell_id}: php_laravel has no transform module for op {op!r} "
+                    f"-- known ops: {sorted(TRANSFORMS)}"
+                )
+            transform_result = TRANSFORMS[op].render(ctx)
+            ctx = transform_result.context
+            transform_code_blocks.append(transform_result.code)
+
+        sink_result = SINKS[modules.sink].render(ctx)
+        renders_view = modules.sink in VIEW_SINKS
+
+        composition = " -> ".join((source_name, *applied_ops, modules.sink, modules.complexity))
+        provenance = (
             f"// Generated by fuzzlab.labgen.emitters.php_laravel for cell {cell.cell_id}\n"
             f"// Manifest cell.route.path: {cell.route.path}\n"
             f"// Module composition: {composition}\n"
-            "\n"
+        )
+
+        # For a view-rendering cell the sink's code *is* the Blade view body,
+        # so the controller body is source + transforms only and the
+        # complexity module closes it by handing the value to that view.
+        body_fragments = [source_result.code, *transform_code_blocks]
+        if not renders_view:
+            body_fragments.append(sink_result.code)
+        body = _indent_block("\n".join(body_fragments), "        ")
+        method_code = COMPLEXITIES[modules.complexity].render({**ctx, "body": body}).code
+
+        controller_class = _controller_class_for(cell.cell_id)
+        imports = ["use Illuminate\\Http\\Request;"]
+        if not renders_view:
+            imports.append("use Illuminate\\Support\\Facades\\DB;")
+        controller_source = (
+            "<?php\n"
+            + provenance
+            + "\n"
             "namespace App\\Http\\Controllers;\n"
             "\n"
-            "use Illuminate\\Http\\Request;\n"
-            "use Illuminate\\Support\\Facades\\DB;\n"
-            "\n"
+            + "".join(f"{line}\n" for line in imports)
+            + "\n"
             f"class {controller_class} extends Controller\n"
             "{\n"
-            "    public function show(Request $request)\n"
-            "    {\n"
-            "        $id = $request->query('id');\n"
-            f"{sink_body}"
-            "    }\n"
+            f"{method_code}"
             "}\n"
         )
-        path = self.stack_env.file_roles["controller"].format(cell_slug=controller_class[: -len("Controller")])
-        return (EmittedFile(path=path, content=php_source.encode("utf-8"), role="controller"),)
+        controller_path = self.stack_env.file_roles["controller"].format(
+            cell_slug=controller_class[: -len("Controller")]
+        )
+        files = [
+            EmittedFile(
+                path=controller_path, content=controller_source.encode("utf-8"), role="controller"
+            )
+        ]
+        if renders_view:
+            # A raw `<?php ... ?>` provenance header rather than a Blade
+            # `{{-- --}}` comment: Blade passes raw PHP tags through, and
+            # fuzzlab.labgen.minimal_pair needs a `//` comment line to read
+            # this file's composition from (see the class docstring).
+            view_source = "<?php\n" + provenance + "?>\n" + sink_result.code
+            view_path = self.stack_env.file_roles["view"].format(cell_slug=_cell_slug(cell.cell_id))
+            files.append(
+                EmittedFile(path=view_path, content=view_source.encode("utf-8"), role="view")
+            )
+        return tuple(files)
 
     def route_fragment_for(self, cell: Cell) -> str:
-        """This cell's ``routes/web.php`` fragment (accumulator category,
-        one per cell -- see ``route_accumulator.py``'s module docstring for
-        why this is not part of :meth:`render`'s own return value)."""
+        """This cell's ``routes/web.php`` fragment (accumulator category, one
+        per cell -- see ``route_accumulator.py``'s module docstring for why
+        this is not part of :meth:`render`'s own return value)."""
         if not self.supports(cell.vuln_class, cell.sink_context):
             raise ValueError(f"{cell.cell_id}: unsupported for php_laravel -- see render() for the same check")
         controller_class = _controller_class_for(cell.cell_id)

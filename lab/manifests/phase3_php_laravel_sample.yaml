@@ -1,22 +1,46 @@
-# Phase-3 php_laravel sample manifest -- lane L-P3.3a, foundation ONLY.
+# Phase-3 php_laravel sample manifest -- lanes L-P3.3a (foundation) and
+# L-P3.3b (the full-depth module inventory, docs/LAB_IMPLEMENTATION_PLAN.md
+# §4.3 step 2).
 #
-# Deliberately minimal, per this lane's own scope: two cells (one
-# vulnerable/secure twin pair), proving the php_laravel StackEnv/emitter
-# scaffold renders and passes the conformance suite (Tier 0 lint + Tier 3
-# whole-lab regeneration) -- NOT a real puppy-fort-factory/ page, and NOT
-# the full module inventory (harder identifier/alias/connector-position
-# SQLi and escaping-context-mismatch XSS shapes). Both of those are later,
-# separate lanes (L-P3.3b module inventory, L-P3.3c real-page migration)
-# that build on this manifest's proof that the scaffold works, not on this
-# manifest's own content, which they are expected to replace/extend.
+# L-P3.3a authored the first two cells only (one vulnerable/secure twin pair,
+# sqli / sql_numeric_literal), proving the php_laravel StackEnv/emitter
+# scaffold renders and passes the conformance suite. L-P3.3b widens this
+# manifest to every shape php_current supports, ported to Laravel/Eloquent/
+# Blade idiom -- Laravel is the one stack the plan assigns "full depth",
+# because Phase 1's hard-shape work on php_current is directly portable here:
 #
-# Mirrors lab/manifests/example_phase0_scaffold.yaml's illustrative pair
-# shape (sqli / sql_numeric_literal / GET) so the two PHP emitters'
-# foundations are directly comparable -- same shape, two different idioms
-# (php_current: plain PHP/PDO; php_laravel: Eloquent DB facade).
+#   * sqli / sql_numeric_literal   -- DB::select, raw vs. bound `?`
+#   * sqli / sql_string_literal    -- query builder whereRaw() vs. where()
+#   * sqli / sql_identifier        -- orderByRaw(), an ORDER BY identifier
+#   * sqli / sql_join_alias        -- a JOIN alias, substituted 3x per statement
+#   * xss  / html_body             -- a Blade view, raw echo
+#   * xss  / url_javascript_scheme -- a Blade view, inside a `javascript:` URL
+#   * xss  / html_attribute_unquoted -- a Blade view, unquoted attribute
+#
+# These are ILLUSTRATIVE Laravel pages (router-dispatched, so no `.php`
+# suffix), not reproductions of real puppy-fort-factory/ pages: that
+# migration is §4.3 step 6 (lane L-P3.3c), which depends on this lane. Cell
+# IDs stay in the LABGEN-PL- namespace, out of both the illustrative
+# LABGEN-EX-/LABGEN-HS- and the real PFF- ground-truth namespaces; nothing
+# here is wired to a build that touches puppy-fort-factory/ or
+# lab/ground-truth/.
+#
+# The four harder shapes are authored as triples/quadruples rather than pairs,
+# for the same reason lab/manifests/phase1_harder_shapes_sample.yaml is:
+# these shapes have a genuine middle case the safety matrix scores `partial`
+# (D20: still VULNERABLE, just harder -- never a third verdict value):
+#   - no transform                -> VULNERABLE (trivial)
+#   - the plausible-but-wrong fix -> VULNERABLE (harder: `partial`)
+#   - the context-correct fix     -> SECURE
+# Verdicts are never asserted here; they are derived by
+# fuzzlab.labgen.verdict.verdict() from (transform, sink_context) against
+# lab/safety_matrix.yaml v1, and
+# tests/test_labgen_php_laravel_harder_shapes.py asserts the derivation for
+# every cell below.
 manifest_version: 1
 safety_matrix_version: 1
 cells:
+  # --- /example/product (sqli, sql_numeric_literal): a value position ------
   # Vulnerable: raw concatenation into a SQL numeric-literal position.
   - cell_id: LABGEN-PL-0001
     class: sqli
@@ -28,9 +52,8 @@ cells:
     transform: []
 
   # The secure twin: the only permitted difference is the transform region
-  # (param_bind instead of raw concatenation) -- same minimal-pair
-  # invariant example_phase0_scaffold.yaml's pair demonstrates for
-  # php_current.
+  # (param_bind instead of raw concatenation) -- the same minimal-pair
+  # invariant example_phase0_scaffold.yaml demonstrates for php_current.
   - cell_id: LABGEN-PL-0002
     class: sqli
     stack_profile: php_laravel
@@ -39,3 +62,182 @@ cells:
       family: sql_numeric_literal
       required_neutralizations: [sql_syntax_break]
     transform: [param_bind]
+
+  # --- /login (sqli, sql_string_literal): a quoted value position ----------
+  - cell_id: LABGEN-PL-0003
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: POST, path: /login }
+    param: { location: body }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  - cell_id: LABGEN-PL-0004
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: POST, path: /login }
+    param: { location: body }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
+
+  # --- /example/profile (xss, html_body): a stored value in a Blade view ---
+  - cell_id: LABGEN-PL-0005
+    class: xss
+    stack_profile: php_laravel
+    route: { method: GET, path: /example/profile }
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: []
+
+  - cell_id: LABGEN-PL-0006
+    class: xss
+    stack_profile: php_laravel
+    route: { method: GET, path: /example/profile }
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: [html_entity_escape]
+
+  # --- /catalog (sqli, sql_identifier): an ORDER BY column identifier ------
+  - cell_id: LABGEN-PL-0007
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /catalog }
+    sink_context:
+      family: sql_identifier
+      required_neutralizations: [sql_syntax_break, sql_identifier_substitution]
+    transform: []
+
+  # The plausible-but-wrong fix: a bare-identifier CHARACTER filter. Blocks
+  # every statement-breaking payload; leaves the actual defect (any
+  # identifier-shaped string still selects a column) wide open.
+  - cell_id: LABGEN-PL-0008
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /catalog }
+    sink_context:
+      family: sql_identifier
+      required_neutralizations: [sql_syntax_break, sql_identifier_substitution]
+    transform: [identifier_charset_filter]
+
+  # The textbook fix that does NOT apply here: no dialect can bind an
+  # identifier, so on this stack orderByRaw() still takes raw SQL and the
+  # verdict stays VULNERABLE even though the code looks parameterized.
+  - cell_id: LABGEN-PL-0009
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /catalog }
+    sink_context:
+      family: sql_identifier
+      required_neutralizations: [sql_syntax_break, sql_identifier_substitution]
+    transform: [param_bind]
+
+  # The context-correct fix: membership in a real identifier allowlist.
+  - cell_id: LABGEN-PL-0010
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /catalog }
+    sink_context:
+      family: sql_identifier
+      required_neutralizations: [sql_syntax_break, sql_identifier_substitution]
+    transform: [identifier_allowlist]
+
+  # --- /inventory (sqli, sql_join_alias): a connector position -------------
+  - cell_id: LABGEN-PL-0011
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /inventory }
+    sink_context:
+      family: sql_join_alias
+      required_neutralizations: [sql_syntax_break, sql_identifier_substitution]
+    transform: []
+
+  - cell_id: LABGEN-PL-0012
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /inventory }
+    sink_context:
+      family: sql_join_alias
+      required_neutralizations: [sql_syntax_break, sql_identifier_substitution]
+    transform: [identifier_charset_filter]
+
+  - cell_id: LABGEN-PL-0013
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /inventory }
+    sink_context:
+      family: sql_join_alias
+      required_neutralizations: [sql_syntax_break, sql_identifier_substitution]
+    transform: [param_bind]
+
+  - cell_id: LABGEN-PL-0014
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /inventory }
+    sink_context:
+      family: sql_join_alias
+      required_neutralizations: [sql_syntax_break, sql_identifier_substitution]
+    transform: [identifier_allowlist]
+
+  # --- /share-link (xss, url_javascript_scheme) ---------------------------
+  - cell_id: LABGEN-PL-0015
+    class: xss
+    stack_profile: php_laravel
+    route: { method: GET, path: /share-link }
+    sink_context:
+      family: url_javascript_scheme
+      required_neutralizations: [js_context_break]
+    transform: []
+
+  # The escaping-context mismatch itself: Laravel's e() helper is real
+  # escaping, correctly applied -- for an HTML context this value is not in.
+  - cell_id: LABGEN-PL-0016
+    class: xss
+    stack_profile: php_laravel
+    route: { method: GET, path: /share-link }
+    sink_context:
+      family: url_javascript_scheme
+      required_neutralizations: [js_context_break]
+    transform: [html_entity_escape]
+
+  - cell_id: LABGEN-PL-0017
+    class: xss
+    stack_profile: php_laravel
+    route: { method: GET, path: /share-link }
+    sink_context:
+      family: url_javascript_scheme
+      required_neutralizations: [js_context_break]
+    transform: [url_scheme_allowlist]
+
+  # --- /theme (xss, html_attribute_unquoted) ------------------------------
+  - cell_id: LABGEN-PL-0018
+    class: xss
+    stack_profile: php_laravel
+    route: { method: GET, path: /theme }
+    sink_context:
+      family: html_attribute_unquoted
+      required_neutralizations: [html_tag_break]
+    transform: []
+
+  - cell_id: LABGEN-PL-0019
+    class: xss
+    stack_profile: php_laravel
+    route: { method: GET, path: /theme }
+    sink_context:
+      family: html_attribute_unquoted
+      required_neutralizations: [html_tag_break]
+    transform: [html_entity_escape]
+
+  - cell_id: LABGEN-PL-0020
+    class: xss
+    stack_profile: php_laravel
+    route: { method: GET, path: /theme }
+    sink_context:
+      family: html_attribute_unquoted
+      required_neutralizations: [html_tag_break]
+    transform: [attr_value_allowlist]

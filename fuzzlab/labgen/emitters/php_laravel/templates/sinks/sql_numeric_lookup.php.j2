@@ -1,0 +1,5 @@
+{% if bound %}
+$rows = DB::select("SELECT * FROM {{ table }} WHERE {{ column }} = ?", [{{ value_expr }}]);
+{% else %}
+$rows = DB::select("SELECT * FROM {{ table }} WHERE {{ column }} = " . {{ value_expr }});
+{% endif %}

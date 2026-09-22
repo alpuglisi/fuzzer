@@ -1,0 +1,11 @@
+{% if bound %}
+// As at any identifier position, binding the WHERE value leaves the alias
+// itself concatenated -- and a connector position substitutes the tainted
+// value more than once (projection + alias declaration + ON clause), so there
+// is nothing a single placeholder could stand in for.
+$sql = "SELECT i1.id, " . {{ value_expr }} . ".{{ column }} FROM {{ table }} i1 JOIN {{ join_table }} " . {{ value_expr }} . " ON i1.{{ join_column }} = " . {{ value_expr }} . ".id WHERE i1.active = ?";
+$rows = DB::select($sql, [1]);
+{% else %}
+$sql = "SELECT i1.id, " . {{ value_expr }} . ".{{ column }} FROM {{ table }} i1 JOIN {{ join_table }} " . {{ value_expr }} . " ON i1.{{ join_column }} = " . {{ value_expr }} . ".id";
+$rows = DB::select($sql);
+{% endif %}
