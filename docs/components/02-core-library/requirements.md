@@ -44,6 +44,13 @@ plugin registry. It is the layer that makes the store the integration bus.
   Indexed for both a single series within a run and a cross-run overlay of
   the same series. (Added by CC-CORE-0018; per-component emitters that write
   through this API are separate components' scope, not CORE's.)
+- **FR-CORE-9** Provide `saved_views(id, table_key, name, spec_json, is_pinned,
+  created_at, updated_at)`: a durable store for named filter/sort/column specs
+  a faceted UI workbench saves, keyed by `table_key` (the logical dataset the
+  view is over, e.g. `"finding"`) so more than one workbench can share the
+  table. `spec_json` is opaque to CORE — owned and shaped entirely by its
+  caller (`fuzzlab.web.savedviews`); CORE only provides the table and index.
+  (Added by CC-CORE-0019, for the Findings workbench, `CC-UI-0029`.)
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
@@ -61,8 +68,8 @@ plugin registry. It is the layer that makes the store the integration bus.
 
 ## 5. Interfaces and data contracts
 Owns the store schema and migrations. Writes `run`, `schema_version`,
-`request_budget`, `model`, `metric_series`. Exposes Python APIs consumed by
-every tool and ML component.
+`request_budget`, `model`, `metric_series`, `saved_views`. Exposes Python APIs
+consumed by every tool and ML component.
 
 ## 6. Dependencies (components)
 None (foundational layer; it manages the project store).

@@ -66,12 +66,14 @@ bugs — the research-platform diagnostics of decision D2.
   category picker, and the plugins panel.)*
 - **FR-UI-7** The panel is organized as a **multi-page app with real per-section
   routes**: **Overview** (`/`, the landing dashboard), **Launcher** (`/launcher`, run
-  controls), **Proxy** (`/proxy`, traffic review/edit/drop/forward/repeat), **Results**
-  (`/results`, runs dashboard), **ML** (`/ml`,
+  controls), **Proxy** (`/proxy`, traffic review/edit/drop/forward/repeat),
+  **Findings** (`/findings`, the faceted findings workbench — see FR-UI-13),
+  **Results** (`/results`, runs dashboard), **ML** (`/ml`,
   classifier/ranker/conformal/anomaly/active-learning/bandit/mutation — kept
   **separate** from the primary panel), and **Diagnostics** (`/diagnostics`, a
   TensorBoard-like view for performance review and deep troubleshooting), plus
-  `/runs/{id}` (a Results sub-page). Each route is independently deep-linkable, renders
+  `/runs/{id}` (a Results sub-page) and `/findings/{id}` (a Findings sub-page). Each
+  route is independently deep-linkable, renders
   its full section server-side, and degrades fully without JavaScript (a plain GET on any
   route returns the complete section). *(Realized incrementally: Phase 0.2 built the shell
   + Results as hash-switched panels on one page; Proxy/ML/Diagnostics filled in Phases 2–4
@@ -209,6 +211,61 @@ bugs — the research-platform diagnostics of decision D2.
   `uPlot.destroy()`, and drops the chart from the registry — required because the
   observers otherwise hold references and leak across an MPA navigation.
 
+- **FR-UI-13** *(added CC-UI-0029, U2)* The **Findings workbench** (`/findings`,
+  `/findings/{id}`) offers faceted filtering + saved views over `finding`/`attempt`,
+  read-only, plus a "send to Repeater" pivot:
+  - A **left facet sidebar** (severity, vuln class, method, confirmation
+    mechanism, endpoint) with **live counts** (multi-select checkboxes — OR
+    within a group, AND across groups — each group's counts computed against
+    every *other* active group's filter), a debounced quick-filter (substring
+    over url/param/vuln_class/mechanism), **applied-filter chips** (each
+    individually removable, "Clear all"), and a **saved-view chip row**.
+    Filtering/sorting is entirely client-side over one bounded snapshot
+    (`GET /api/findings`) — no server-side faceted-count endpoint, per D4/R-03.
+  - **Severity** is not a store column — the schema has none — so it is a
+    UI-only, advisory band derived from `vuln_class`
+    (`fuzzlab.web.findingsview.derive_severity`), rendered as a text+color
+    badge (never color alone) and never written back to the store.
+  - **Saved views** are named filter/sort/column specs persisted server-side
+    (`saved_views`, FR-CORE-9) via `GET/POST/PUT/DELETE /api/views?table=`,
+    durable and shared across the panel's own readers; only throwaway
+    per-viewer state (collapsed facet groups, last-applied view id, draft
+    quick-filter text) lives in `localStorage`.
+  - The **detail view** (`/findings/{id}`) shows the finding's full record —
+    evidence, the confirming attempt, and, when present, the multi-artifact
+    ground-truth fields (`primary_endpoint`/`primary_role`/`related_endpoints`/
+    `flow_variant`, CR-LAB-0001 Addendum B) carried in its `evidence` — these
+    are additive/optional (no current writer attaches them; the oracle itself
+    must not read ground truth, D9/D10) and are rendered only when present,
+    never invented.
+  - **"Send to Repeater / open request"** follows the same PRG+303 pattern as
+    the Proxy History pivot (FR-UI-7's note): a real `<form method="post">` to
+    `/findings/repeater/from-finding` creates a Repeater tab server-side, then
+    a `303` redirect carries only the opaque tab id
+    (`/proxy?repeater_tab=ID`) — never bytes on the wire. Findings/attempts
+    carry no raw request bytes (only proxy flow history does), so the tab is
+    a best-effort **reconstruction** from the finding's own `url`/`method`/
+    `param`, explicitly labeled as such (never presented as a byte-exact
+    replay).
+  - The list and detail views, and the shared `js/datatable.js` component they
+    use (below), are strictly **read-only** over `finding`/`attempt`; the
+    only write path this section owns is `saved_views` (view *definitions*,
+    not a result table — see NFR-UI-read-only).
+  - **`js/datatable.js`** is a standalone, dependency-free ES module (D3) —
+    a native `<table>` (never `role="grid"`: read-only sort + a row link is
+    not a composite-widget grid), every cell rendered via `textContent`
+    (never `innerHTML` — cell data is target-derived and untrusted), a real
+    `<a href>` in the primary column wrapping JS-rendered content (row-click
+    is an enhancement, never the only path), named row-action buttons, and
+    `safeHref()` scheme-checking (http/https/same-origin-relative only) on
+    every rendered pivot href. Its API —
+    `createDataTable(root, {caption, columns, data, getRowId, rowHref,
+    onRowClick, rowActions, textFilterKeys, emptyMessage, liveRegion}) ->
+    {setData, setTextFilter, setFilter, setSort, getSort, getVisible,
+    element}` — is intended for reuse by U1's recent-runs table and U5's
+    store explorer (each minus the facet sidebar, which is Findings-specific
+    UI built in `js/findings.js`, not part of the shared module).
+
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is
   served separately from the vulnerable target (different origin/port; never in the
@@ -241,7 +298,10 @@ bugs — the research-platform diagnostics of decision D2.
   sends requests.
 - **NFR-UI-read-only** The UI itself does not write result tables
   (`finding`/`attempt`/`candidate`); in automatic mode those are written by the
-  tools it invokes, not by the UI.
+  tools it invokes, not by the UI. `saved_views` (FR-UI-13, FR-CORE-9) is the
+  one deliberate exception: it holds view *definitions* a person authored in
+  the panel (filter/sort/column specs), never tool output, so writing it does
+  not violate this invariant.
 - **NFR-UI-live** Live views reflect the current run without blocking the tools.
 - **NFR-UI-redacted** Secrets never render; the UI shows redacted values only.
 

@@ -3,6 +3,50 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0019 — Migration 12: `saved_views` table (U2-table, Findings workbench) (2026-09-22)
+- Change: migration 12 (append-only registry; head → 12) adds
+  `saved_views(id, table_key, name, spec_json, is_pinned, created_at,
+  updated_at)` — a durable, server-side store for named filter/sort/column
+  specs a person saves in a faceted workbench (the Findings workbench,
+  `CC-UI-0029`, is the first caller; `table_key` names the logical dataset the
+  view is over, e.g. `"finding"`, so other workbenches can reuse the same
+  table later rather than inventing their own). `spec_json` is opaque to the
+  store — it is only ever read/written as JSON by `fuzzlab.web.savedviews`,
+  never queried by field. One index, `idx_saved_views_table(table_key)`, for
+  the one read pattern (`GET /api/views?table=`). Additive; no existing
+  table/column changed. **Note on bookkeeping numbering:** this CC-CORE number
+  was not in lane U2's pre-assigned block (`docs/PARALLEL_LANE_BUILD_PLAN.md`
+  reserved only `CC-UI-0029` for U2) — the lane's own scope statement
+  (`fuzzlab/web/app.py` read route(s) plus the shared UI files) did not
+  foresee needing a new store table. `CC-CORE-0019` was computed as "highest
+  existing + 1" at the time this entry was written (mirroring how `B0`'s
+  `metric_series` migration got both a `CC-CORE-0018` and a `CC-UI` entry);
+  per PA-0031, an integrator merging this lane alongside others touching
+  `02-core-library/change-control.md` should re-verify no other lane claimed
+  `CC-CORE-0019` in the meantime before merging, rather than assuming this
+  number is uncontested.
+- Impact (other components / project): additive only. UI-owned data (view
+  definitions a person authored in the panel), not a `finding`/`attempt`/
+  `candidate`/flow result table, so it does not touch `NFR-UI-read-only`
+  ("the UI writes no result tables") — see `CC-UI-0029`'s own impact note for
+  why this is the one deliberate write path that requirement still allows.
+  No other component reads or writes this table.
+- Risk (level; mitigation): low — one additive table + one index, written only
+  through `fuzzlab.web.savedviews`'s four functions (`list_views`/`get_view`/
+  `create_view`/`update_view`/`delete_view`), each parameterized (no string-built
+  SQL). Mitigated by `tests/test_web_findings.py`'s saved-view round-trip tests
+  (direct store functions and the `/api/views` HTTP surface) and the existing
+  `tests/test_core_foundations.py::test_migrations_are_idempotent` pattern
+  (re-run here implicitly via every other store-backed web test creating a
+  fresh store on migration 12).
+- Deliverables:
+  - [x] Migration 12 added to the append-only `MIGRATIONS` registry — done.
+  - [x] `fuzzlab.web.savedviews` CRUD module — done.
+  - [x] Round-trip tests (store-level + HTTP) — done.
+- Effectiveness (assessed 2026-09-22): effective — saved views persist across
+  store reopens and are visible to any reader of the same store file, unlike
+  the `localStorage`-only alternative R-03 explicitly rejected for this data.
+
 ### CC-CORE-0018 — Migration 11: `metric_series` table + `open_store()`/`log_scalar`/`MetricLogger` (B0-table, Phase 4b) (2026-09-22)
 - Change: migration 11 (append-only registry; head → 11) adds `metric_series(id, run_id,
   source, key, step, ts, value)`, the generic cross-run scalar-series sink for per-step

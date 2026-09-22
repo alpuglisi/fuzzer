@@ -14,6 +14,26 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- UI (`CC-UI-0029`, `FR-UI-13`, build lane U2): added the **Findings workbench**
+  (`/findings`, `/findings/{id}`) — a faceted filter sidebar (severity, vuln
+  class, method, mechanism, endpoint; live counts; APG Disclosure a11y
+  pattern) + applied-filter chips + server-side saved views
+  (`saved_views` table, migration 12; `GET/POST/PUT/DELETE /api/views?table=`)
+  over the existing `finding`/`attempt` tables, list→detail, and a "send to
+  Repeater" pivot reusing U0's PRG+303 pattern (`POST /findings/repeater/
+  from-finding` → `303` → `/proxy?repeater_tab=ID`, opaque tab id only —
+  `RepeaterController.create_from_finding` reconstructs a best-effort request
+  from the finding's own url/method/param since findings carry no raw bytes).
+  The finding detail view renders the multi-artifact ground-truth fields
+  (`primary_endpoint`/`primary_role`/`related_endpoints`/`flow_variant`) when a
+  finding's evidence happens to carry them (additive/optional, per
+  CR-LAB-0001 Addendum B — the oracle itself never reads ground truth). Built
+  the shared, hand-rolled `js/datatable.js` ES module (native `<table>`, not
+  `role="grid"`; `textContent`-only rendering; scheme-checked pivot hrefs;
+  `columns[]`/`data`/`onRowClick`/`rowActions`/`textFilterKeys` API) per R-03,
+  reusable by U1's recent-runs table and U5's store explorer. Read-only over
+  the store aside from the saved-views CRUD it deliberately owns
+  (`NFR-UI-read-only` names result tables; view *definitions* are not one).
 - UI/ML (`CC-UI-0031`, `CC-ML-0010`, `FR-UI-11`, `FR-UI-12`, `FR-ML-9`, build lane
   U4): built the **ML tab** (`/ml`) as a read-only, advisory surface over model
   internals already in the store — classifier PR curve/reliability/ECE, ranker

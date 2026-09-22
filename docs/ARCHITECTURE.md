@@ -688,6 +688,25 @@ tracked in the requirements files, not here.
   Wave 1 (U1–U5) builds each section's real content on top of this split: an Overview
   dashboard, a Findings workbench, a Proxy rebuild, the ML tab, and Diagnostics + store
   explorer.
+- **U2 — Findings workbench (`docs/UI_IMPLEMENTATION_PLAN.md` §3, CC-UI-0029,
+  2026-09-22):** `GET /findings`/`/findings/{id}` — a faceted-filter sidebar (severity,
+  vuln class, method, mechanism, endpoint; live per-group counts) + a quick-filter +
+  applied-filter chips + a **saved-view** chip row over `finding`/`attempt`
+  (`web/findingsview.py`, read-only), entirely client-side filter/sort over one bounded
+  snapshot (D4/R-03). Saved views persist server-side in a new `saved_views` table
+  (migration 12, `CC-CORE-0019`; `web/savedviews.py`;
+  `GET/POST/PUT/DELETE /api/views?table=`) — the one write path this section owns
+  (view definitions, not a result table). The detail view renders the multi-artifact
+  ground-truth fields (`primary_endpoint`/`primary_role`/`related_endpoints`/
+  `flow_variant`, CR-LAB-0001 Addendum B) when a finding's evidence carries them
+  (additive/optional; no current writer attaches them yet). "Send to Repeater" reuses
+  U0's PRG+303 pivot exactly (`POST /findings/repeater/from-finding` → 303 →
+  `/proxy?repeater_tab=<id>`); since findings carry no raw bytes, the tab is a
+  best-effort reconstruction from the finding's own url/method/param, explicitly
+  labeled as such. Also shipped `static/js/datatable.js` — a standalone, hand-rolled
+  ES module (native `<table>`, `textContent`-only rendering, scheme-checked pivot
+  hrefs) meant for reuse by U1's recent-runs table and U5's store explorer (D4: no
+  table dependency).
 - **U4 — ML tab (`docs/UI_IMPLEMENTATION_PLAN.md` §3, CC-UI-0031/CC-ML-0010, 2026-09-22,
   Phase 3, Wave 1, built on U0):** filled in `/ml` with read-only, advisory panels over
   model internals already in the store — classifier PR curve + reliability/ECE, ranker
@@ -704,18 +723,15 @@ tracked in the requirements files, not here.
   `ResizeObserver` on the chart's parent cell + `requestAnimationFrame` coalescing, a
   `MutationObserver`/`matchMedia` retheme, `window.__charts` registry, and a
   visually-hidden `<table>` a11y fallback per chart. **Known gap** (see
-  `docs/components/10-ml-components/requirements.md` FR-ML-8): the logistic
+  `docs/components/10-ml-components/requirements.md` FR-ML-9): the logistic
   classifier's trained weights are never persisted to the store, so the "logistic
   weights" panel R-06 calls for renders a documented not-available state rather than a
   value — closing it is a future ML-component change, out of this lane's read-only
   scope.
-  **Pending:** U1–U3, U5 (Overview / Findings / Proxy rebuild; the TensorBoard-like
-  diagnostics tab + a `metric_series` time-series table / Phase 4; Datasette-style store
-  exploration — U5 should reuse this lane's `static/vendor/uplot/` and
-  `static/js/chart.js` rather than re-vendoring), a `--dry-run` mode, and a plain CLI
-  entry point per tool for headless use (`fuzzlab auto` exists today). (U6's
-  control-plane hardening already landed — `SecurityGateMiddleware`, CC-UI-0026 — the
-  prior revision of this paragraph listed it as pending; corrected here.)
+  **Pending:** U5 (the TensorBoard-like diagnostics tab + a `metric_series` time-series
+  table / Phase 4; Datasette-style store exploration — U5 should reuse this lane's
+  `static/vendor/uplot/`, `static/js/chart.js`, and U2's `static/js/datatable.js` rather
+  than re-vendoring/rebuilding). U0/U1/U2/U3/U4/U6 and D0a/D0b have all landed.
 - **Reproducible evaluation report** `[built]` (Phase 10 T10.4, `fuzzlab/report/`): a
   deterministic report over a stored run (run/config identity, target, counts, findings,
   metrics, deployed models, active plugins), canonical JSON for diffing; read-only

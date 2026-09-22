@@ -350,6 +350,28 @@ CREATE INDEX idx_metric_series_run ON metric_series(run_id, source, key, step);
 CREATE INDEX idx_metric_series_overlay ON metric_series(source, key, run_id, step);
 """
 
+# --- migration 12: saved views (U2, CC-UI-0029, R-03) -----------------------
+# The Findings workbench's faceted filters/quick-filter/sort/columns are saved
+# server-side (durable, shared across the panel's own readers) rather than in
+# `localStorage` (per-viewer only — reserved for throwaway UI state like the
+# last-selected view id). `table_key` names the logical dataset the view is
+# over ('finding' first; other workbenches can reuse this table later).
+# `spec_json` is opaque to the store — `{version, name, pinned, filter:
+# {text, facets, predicates}, sort, columns}` (see `fuzzlab.web.savedviews`).
+# Additive; no existing table/column changes.
+_M0012 = """
+CREATE TABLE saved_views (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_key  TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    spec_json  TEXT NOT NULL,
+    is_pinned  INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_saved_views_table ON saved_views(table_key);
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -363,6 +385,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (9, _M0009),
     (10, _M0010),
     (11, _M0011),
+    (12, _M0012),
 ]
 
 
