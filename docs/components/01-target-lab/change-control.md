@@ -3,6 +3,77 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0060 — Tier-1 conformance-suite live wiring (FR-LAB-56) (2026-09-22)
+- Change: `fuzzlab/labgen/conformance/tier1.py` (`build_tier1_case`/
+  `run_tier1_case`/`evaluate_tier1_response`, `Tier1Client`) was, by its own
+  module docstring, exercised only against a hand-written fake test double
+  -- never a real app or database (build lane T1, `docs/
+  PARALLEL_LANE_BUILD_PLAN.md`). This change wires it against a real
+  in-process app+DB for whichever stack already has a real client, following
+  the `php_laravel` live-boot proof precedent already established at
+  `CC-LAB-0054`/`FR-LAB-52`:
+  1. **No new harness code.** `fuzzlab.labgen.conformance.live_boot
+     .LiveBootHarness` already implements the `Tier1Client` protocol via its
+     existing `.fetch()` method (added at `CC-LAB-0054`, unmodified by this
+     change) -- this lane found it already reusable as-is and made no edit
+     to `live_boot.py` at all, avoiding any need to coordinate a shared
+     harness module with sibling lane T2 (`tier2.py`'s own live wiring),
+     which this change also does not touch.
+  2. **`tests/test_labgen_conformance_tier1.py` gained a new, clearly
+     separated section**, `TestTier1RealLiveBoot`, skip-guarded on
+     `live_boot_available()` and marked `@pytest.mark.slow` (the same
+     convention `CC-LAB-0054` introduced), proving two real cases through
+     `tier1.py`'s own public API rather than by hand-inspecting
+     `LiveBootHarness.get()`/`.post()` responses directly:
+     - `product.php`'s real vulnerable/secure twin (`LABGEN-RPL-PRODUCT` /
+       `LABGEN-RPL-PRODUCT-BOUND`, `lab/manifests/
+       phase3_php_laravel_real_pages_numeric.yaml`): a real
+       boolean-injection payload (`1 OR 1=1`) run through `run_tier1_case()`
+       against a real booted app, asserting `Tier1Outcome.matches_expectation`
+       is `True` for both twins (the vulnerable cell's response contains the
+       second seeded product, "Puppy Bed"; the bound-parameter twin's does
+       not) -- the same real differential `CC-LAB-0054`'s own
+       `test_live_boot_numeric_manifest_sqli_twin_round_trips_a_payload`
+       proves, now proven through `evaluate_tier1_response`'s marker-in-body
+       decision logic instead of a bespoke row-count assertion.
+     - `contact.php`/`newsletter.php` (`LABGEN-PLRP-1005`/`1006`,
+       `lab/manifests/phase3_laravel_real_pages_forms.yaml`, secure-only
+       escaped-echo forms): a raw `<script>alert(1)</script>` payload run
+       through `build_tier1_case()`/`run_tier1_case()` with
+       `expected_vulnerable=False`, confirming the real response never
+       reflects it unescaped.
+  3. **`tier1.py`'s module docstring and `Tier1Client`'s own docstring
+     updated** to state the current, stack-by-stack truth (real for
+     `php_laravel` via `LiveBootHarness`, still design-only for any stack
+     without such a harness) -- no behavior change to any function; the
+     `OnHostRequiredError` guard and its semantics are unchanged.
+- Real, observed result: both new tests pass against a real booted Laravel
+  13 app (real `composer install`, real `php artisan serve`, real HTTP) in
+  this sandbox. One transient failure was observed and diagnosed during
+  development -- a `composer` VCS-cache collision from another build lane's
+  concurrent `composer install` against the same shared `~/.cache/composer`
+  directory on this multi-lane host (`fatal: destination path ... already
+  exists`) -- not a defect in this change; the same test passes cleanly once
+  run without that concurrent contention, and this is the same
+  shared-cache-on-one-host hazard `CC-LAB-0054`'s harness already carries
+  for any concurrent caller, not something this change introduces or
+  changes the exposure of.
+- Impact (other components / project): none outside LAB. `tier2.py` (owned
+  by sibling lane T2 for its own live wiring) imports only
+  `Tier1Case`/`OnHostRequiredError` from `tier1.py`, both structurally
+  unchanged by this entry, so T2's own work is unaffected regardless of
+  dispatch order. No existing test's expectations changed; the 7 pre-existing
+  offline decision-logic tests in `tests/test_labgen_conformance_tier1.py`
+  pass unchanged.
+- Risk (level; mitigation or accepted-risk justification): **low**. Purely
+  additive (new tests + docstring-only edits to `tier1.py`; zero lines of
+  `live_boot.py` touched). Never sends traffic to the real, loopback-only lab
+  target -- `LiveBootHarness` assembles and boots its own throwaway,
+  in-sandbox build, exactly as `CC-LAB-0054` already established, so D11's
+  no-auto-run/`--authorized` posture is unaffected (nothing here needs that
+  flag). Skip-guarded on `live_boot_available()`, so an environment without
+  composer/php/network reachability SKIPS cleanly rather than failing.
+
 ### CC-LAB-0058 — real MariaDB-backed live-boot mode + `search.php` canonical-cell resolution (FR-LAB-55) (2026-09-22)
 - Change: two independent, purely additive extensions, both delivered together
   because the second is proven with the first:

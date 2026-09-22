@@ -242,8 +242,17 @@ tracked in the requirements files, not here.
   `--check` so it can never fail a build. A stack-agnostic tiered conformance suite
   (`fuzzlab/labgen/conformance/`, `CC-LAB-0027`) any emitter must pass: Tier
   0 (lint + minimal-pair diff) and Tier 3 (whole-lab regeneration) are real,
-  fully exercised offline; `tier1.py`/`tier2.py` themselves remain
-  honestly-labeled `[design]` interfaces. As of `CC-LAB-0054`/`FR-LAB-52`
+  fully exercised offline; `tier2.py` remains an honestly-labeled `[design]`
+  interface (a real, container-based oracle is genuinely out of scope). As of
+  `CC-LAB-0060`/`FR-LAB-56` (2026-09-22), `tier1.py`'s own public API
+  (`build_tier1_case`/`run_tier1_case`/`evaluate_tier1_response`) is no
+  longer design-only for every stack: it is run for real, through
+  `LiveBootHarness` below, for `php_laravel` (`tests/
+  test_labgen_conformance_tier1.py`'s `TestTier1RealLiveBoot`, skip-guarded,
+  `pytest.mark.slow`) — proving a real SQLi differential and a real
+  escaped-XSS negative through `tier1.py`'s own decision logic, not just a
+  hand-written fake client. A stack with no real `Tier1Client` yet stays
+  design-only for Tier 1. As of `CC-LAB-0054`/`FR-LAB-52`
   (2026-09-22), the live-boot on-host dependency Tier 1/2 needed is real for
   `php_laravel`: `fuzzlab/labgen/conformance/live_boot.py` assembles a real
   Laravel 13 skeleton (checked in, trimmed from a real `composer

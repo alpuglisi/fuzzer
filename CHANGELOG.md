@@ -14,6 +14,19 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB (`CC-LAB-0060`, `FR-LAB-56`, build lane T1): wired `fuzzlab.labgen
+  .conformance.tier1`'s public API (`build_tier1_case`/`run_tier1_case`/
+  `evaluate_tier1_response`) against a real in-process app+DB for the first
+  time, reusing `CC-LAB-0054`'s existing `LiveBootHarness` (unmodified) as a
+  real `Tier1Client` — no longer purely "[design]" for the `php_laravel`
+  stack. `tests/test_labgen_conformance_tier1.py` gained a skip-guarded,
+  `@pytest.mark.slow` `TestTier1RealLiveBoot` class proving a real
+  vulnerable/secure SQLi differential (`product.php`'s twin) and a real
+  escaped-XSS negative (`contact.php`/`newsletter.php`) through `tier1.py`'s
+  own decision logic against a genuinely booted Laravel app — synthetic,
+  in-sandbox only, never the real loopback-only lab target (D11), so no
+  `--authorized` flag applies. `tier2.py` and its own tests are untouched
+  (out of scope for this lane; owned by lane T2).
 - Planning: added `docs/PARALLEL_LANE_BUILD_PLAN.md`, organizing the
   remaining safe-to-build-now backlog (lab-track page migration + conformance
   wiring, UI/diagnostics tabs, M8/M10 mutation-oracle wiring) into pre-numbered,
