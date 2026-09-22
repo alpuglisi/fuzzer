@@ -1,0 +1,46 @@
+# Migration-exemption register (L-P3.3c-CUT prep, `CC-LAB-0053`/`FR-LAB-51`,
+# docs/LAB_IMPLEMENTATION_PLAN.md §4.3.6.6 point 3).
+#
+# One entry per `PFF-` case in `lab/ground-truth/labels.json` that is
+# DELIBERATELY not reproduced by any `php_laravel` cell. Machine-readable and
+# read by the gate itself (`fuzzlab.labgen.cutover_gate`) rather than kept as
+# prose, so an uncovered case absent from this file fails the build loudly,
+# and adding an entry here is a diff a reviewer sees -- an exemption is a
+# reviewed decision, never a silent omission.
+#
+# This file does NOT decide whether the cutover (`L-P3.3c-CUT`, which deletes
+# `puppy-fort-factory/` and re-points production code/deploy config) is ready
+# to run -- it only records, for today's `php_laravel` coverage, which cases
+# are exempt and why. Every entry below traces to a decision already made
+# (§4.3.6.6.5's `track.php` finding, or the D-open-1/D-open-2 decisions
+# recorded in §4.3.6.7); this file must never assert a resolution beyond what
+# that section actually says.
+exemptions:
+  - pff_case: PFF-1002
+    reason: >-
+      track.php performs no database query at all (order_id is int-cast,
+      status is canned demo data) -- its security comes from having no sink,
+      not from a modeled safe op, and lab/safety_matrix.yaml has no
+      intval_cast op to express "safe because there is nothing to inject
+      into." No php_laravel cell is emitted for this page (plan
+      §4.3.6.6, "Two findings that change the naive reading of this table").
+  - pff_case: PFF-0007
+    reason: >-
+      reviews.php's DOM XSS (location.hash `author` written via innerHTML,
+      rendering: js) never reaches the server, so no php_current/php_laravel
+      emitter models it. D-open-1, decided 2026-09-22 (plan §4.3.6.7): Layer B
+      (JS-rendered pages) reproduction is not required for the cutover --
+      accepted losing the live crawler-discoverability runbook exercise
+      (documented in docs/ON_HOST_RUNBOOK.md) rather than building
+      JS-rendering into the generator. D-open-2, decided 2026-09-22 (plan
+      §4.3.6.7): DOM XSS (L-P3.3c-DOM) is out of the cutover's "full
+      coverage" bar -- a new client-side sink class, not a migration; it
+      remains backlog, not something L-P3.3c-CUT waits on.
+  - pff_case: PFF-0008
+    reason: >-
+      feedback.php's DOM XSS (the `ref` query param used client-side only,
+      written via innerHTML, rendering: js) never reaches the server, so no
+      php_current/php_laravel emitter models it. Same two decisions as
+      PFF-0007 above: D-open-1, decided 2026-09-22 (plan §4.3.6.7, Layer B
+      not required) and D-open-2, decided 2026-09-22 (plan §4.3.6.7, DOM XSS
+      out of cutover scope, L-P3.3c-DOM remains backlog).

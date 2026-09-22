@@ -90,6 +90,19 @@ Built in four lanes:
   Real ``puppy-fort-factory/`` page reproduction depends on L-P3.3b; every
   *other* route in :data:`_PAGE_PROFILES` remains an illustrative Laravel
   page, and no ``lab/ground-truth/`` label claims otherwise.
+* **L-P3.3c-CUT prep (`CC-LAB-0053`/`FR-LAB-51`)** -- the parity/cutover
+  coverage gate (plan §4.3.6.6 point 3) needs a per-cell ``PFF-`` case
+  mapping derivable from this emitter's own metadata rather than doc-comment
+  parsing. :func:`ground_truth_cases_for` reads it, extending (never
+  duplicating) the existing :data:`_GROUND_TRUTH_CASE_KEY`/
+  :data:`_CANONICAL_CELL_KEY` convention with two more page-profile keys for
+  the two shapes that convention alone cannot express: one page reproducing
+  more than one case by sink family (:data:`_GROUND_TRUTH_CASE_BY_FAMILY_KEY`,
+  ``search.php``'s ``PFF-0002``/``PFF-0003``), and a page reproducing an
+  extra, non-primary case as boilerplate on every cell rather than one
+  canonical cell (:data:`_SECONDARY_GROUND_TRUTH_CASES_KEY`, ``login.php``'s
+  ``PFF-1008`` password condition). See
+  :mod:`fuzzlab.labgen.cutover_gate` for the gate itself.
 
 **Deliberately not carried by this lane, named rather than glossed over:**
 
@@ -126,6 +139,7 @@ __all__ = [
     "PHP_LARAVEL_STACK_ENV",
     "SUPPORTED_CONTEXT_DEPTHS",
     "StackEnv",
+    "ground_truth_cases_for",
     "served_url_for",
 ]
 
@@ -255,6 +269,35 @@ _CANONICAL_CELL_KEY = "canonical_cell_id"
 #: :data:`_SOURCE_OVERRIDE_KEY`, so no template ever sees it. Optional: an
 #: illustrative page profile carries none.
 _GROUND_TRUTH_CASE_KEY = "ground_truth_case"
+
+#: Page-profile key (L-P3.3c-CUT prep, `CC-LAB-0053`/`FR-LAB-51`): the extra
+#: ``PFF-`` case ids the same page also reproduces at a non-primary,
+#: boilerplate position that no cell's own ``sink_context`` names -- e.g.
+#: ``login.php``'s already-hashed password condition (``PFF-1008``), rendered
+#: verbatim in both login cells' sink statement as the sink's *second*,
+#: non-tainted condition (see ``password_var``/``password_param`` above), but
+#: never itself a distinct injection point a cell targets. Attributed to
+#: *every* cell of the page (canonical or twin), since the boilerplate is
+#: structural and identical across them, unlike :data:`_GROUND_TRUTH_CASE_KEY`
+#: (attributed only to the one cell :data:`_CANONICAL_CELL_KEY` names).
+#: Same descriptive-metadata discipline as :data:`_GROUND_TRUTH_CASE_KEY`:
+#: popped before any template renders (never a routing/rendering input), and
+#: read only by :func:`ground_truth_cases_for` (the L-P3.3c-CUT coverage
+#: gate, :mod:`fuzzlab.labgen.cutover_gate`). Optional: a page with no
+#: secondary case carries none.
+_SECONDARY_GROUND_TRUTH_CASES_KEY = "secondary_ground_truth_cases"
+
+#: Page-profile key (L-P3.3c-CUT prep, `CC-LAB-0053`/`FR-LAB-51`): a
+#: ``sink_context.family -> PFF- case id`` mapping for a real page whose
+#: single profile is shared by cells of more than one family and therefore
+#: cannot name one page-wide :data:`_GROUND_TRUTH_CASE_KEY` -- G6's
+#: ``search.php`` (one ``?q=`` reaching three sink families across six
+#: cells, two of which -- the HTML body reflection and the quoted-attribute
+#: reflection -- fold into the same ``PFF-0003`` case per ``labels.json``).
+#: Read only by :func:`ground_truth_cases_for`; never by
+#: :func:`_served_route_for` or any routing/rendering decision, and popped
+#: before any template renders, exactly like :data:`_GROUND_TRUTH_CASE_KEY`.
+_GROUND_TRUTH_CASE_BY_FAMILY_KEY = "ground_truth_case_by_family"
 
 #: Page-profile key that overrides a shape's default *source* module -- the
 #: same mechanism (and the same reasoning) as ``php_current``'s: one
@@ -501,6 +544,12 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "real_page": True,
         "canonical_cell_id": "LABGEN-PLA-0001",
         "ground_truth_case": "PFF-0004",
+        # PFF-1008 (POST `password`, "md5-hashed before use; not an injection
+        # point") is the sink's second, non-tainted condition -- rendered
+        # identically in both login cells via `password_var`/`password_param`
+        # above, never a distinct cell of its own. See
+        # `_SECONDARY_GROUND_TRUTH_CASES_KEY`.
+        "secondary_ground_truth_cases": ("PFF-1008",),
         "session_login": {
             "id_column": "id",
             "name_column": "username",
@@ -625,6 +674,16 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "real_page": True,
         "canonical_cell_id": None,  # still open for L-P3.3c-CUT -- see above
         "ground_truth_case": None,  # spans PFF-0002/PFF-0003; no single case per cell
+        # Per-family mapping instead (`_GROUND_TRUTH_CASE_BY_FAMILY_KEY`): the
+        # third sink (a quoted attribute) has no case of its own -- labels.json
+        # folds it into PFF-0003's single xss-reflected case (see this
+        # manifest's own docstring), so it maps to the same case id as
+        # html_body.
+        "ground_truth_case_by_family": {
+            "sql_string_literal": "PFF-0002",
+            "html_body": "PFF-0003",
+            "html_attribute_quoted": "PFF-0003",
+        },
     },
 }
 
@@ -784,6 +843,50 @@ def served_url_for(cell: Cell) -> str:
     return url
 
 
+def ground_truth_cases_for(cell: Cell) -> tuple[str, ...]:
+    """The ``PFF-`` ground-truth case ids ``cell`` reproduces, derived from
+    the ground-truth metadata on its own page profile(s) -- never a
+    hand-maintained per-cell literal (PA-0001/PA-0027; the
+    ``fuzzlab.labgen.cutover_gate`` coverage gate calls this over every
+    manifest's cells rather than restating a case-id map).
+
+    Zero, one, or two case ids, from up to two profiles (``cell.route`` and,
+    for a ``stored_second_order`` cell, the distinct render/sink page
+    :func:`_render_route_for` names -- G4's ``edit_profile.php``/
+    ``profile.php`` pair is exactly why both are checked):
+
+    * :data:`_GROUND_TRUTH_CASE_KEY`, when set on that profile and ``cell`` is
+      the :data:`_CANONICAL_CELL_KEY` it names (the case belongs to the one
+      cell that owns the page's real URL, not to every twin of it).
+    * :data:`_GROUND_TRUTH_CASE_BY_FAMILY_KEY`, keyed by ``cell.sink_context
+      .family`` -- for a page like ``search.php`` whose one profile spans more
+      than one ``PFF-`` case and therefore names no single page-wide case.
+    * :data:`_SECONDARY_GROUND_TRUTH_CASES_KEY` -- attributed to *every* cell
+      of that profile (not gated on being the canonical cell), since it names
+      a structural, boilerplate position identical across a page's twins
+      (e.g. login.php's already-hashed ``PFF-1008`` password condition).
+
+    A non-``real_page`` profile (an illustrative page) or a missing profile
+    contributes nothing. Order-preserving, de-duplicated.
+    """
+    render_route = _render_route_for(cell)
+    case_ids: list[str] = []
+    for path in dict.fromkeys((cell.route.path, render_route.path)):
+        profile = _PAGE_PROFILES.get(path)
+        if profile is None or not profile.get(_REAL_PAGE_KEY):
+            continue
+        primary = profile.get(_GROUND_TRUTH_CASE_KEY)
+        canonical = profile.get(_CANONICAL_CELL_KEY)
+        if primary is not None and canonical is not None and cell.cell_id == canonical:
+            case_ids.append(primary)
+        by_family = profile.get(_GROUND_TRUTH_CASE_BY_FAMILY_KEY) or {}
+        family_case = by_family.get(cell.sink_context.family)
+        if family_case is not None:
+            case_ids.append(family_case)
+        case_ids.extend(profile.get(_SECONDARY_GROUND_TRUTH_CASES_KEY, ()) or ())
+    return tuple(dict.fromkeys(case_ids))
+
+
 def _view_name_for(cell_id: str) -> str:
     """The Blade view name (dot notation) for a view-rendering cell."""
     return f"cells.{_cell_slug(cell_id)}"
@@ -844,6 +947,8 @@ class LaravelEmitter(Emitter):
         ctx.pop(_REAL_PAGE_KEY, None)
         ctx.pop(_CANONICAL_CELL_KEY, None)
         ctx.pop(_GROUND_TRUTH_CASE_KEY, None)
+        ctx.pop(_SECONDARY_GROUND_TRUTH_CASES_KEY, None)
+        ctx.pop(_GROUND_TRUTH_CASE_BY_FAMILY_KEY, None)
         ctx["method_name"] = _METHOD_NAME
         ctx["view_name"] = _view_name_for(cell.cell_id)
 
@@ -1035,6 +1140,8 @@ class LaravelEmitter(Emitter):
         write_ctx.pop(_REAL_PAGE_KEY, None)
         write_ctx.pop(_CANONICAL_CELL_KEY, None)
         write_ctx.pop(_GROUND_TRUTH_CASE_KEY, None)
+        write_ctx.pop(_SECONDARY_GROUND_TRUTH_CASES_KEY, None)
+        write_ctx.pop(_GROUND_TRUTH_CASE_BY_FAMILY_KEY, None)
         write_ctx["write_method_name"] = _WRITE_METHOD_NAME
         # Redirect to wherever THIS cell's own read route lives -- canonical
         # or twin, decided the same way every other served URL is.

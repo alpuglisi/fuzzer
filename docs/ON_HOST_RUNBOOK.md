@@ -103,6 +103,22 @@ The lab's test accounts are `admin/admin123`, `alice/password1`, `bob/letmein`.
    JWT-auth app) using `--host <that-host>` and its own saved credentials, to confirm
    dynamic login detection and per-host credentials across mechanisms (cookie vs JWT).
 
+> **Known, deliberate gap after the `L-P3.3c-CUT` cutover (D-open-1, decided
+> 2026-09-22 — `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.7):** `puppy-fort-factory/`
+> today serves 10 JS-rendered pages plus a JS-injected "Discover" nav, which exist
+> specifically to give the crawler above something a static spider provably cannot
+> see. No `labgen` emitter reproduces client-rendered pages, and the decision was to
+> accept losing this **live, on-host crawler-discoverability exercise** rather than
+> build JS-rendering into the generator (that would be new emitter capability, not a
+> migration). Once the generated lab is the only target, running Part C's crawl step
+> exercises server-rendered discovery only; there is no on-host equivalent of
+> "watch the spider find a JS-injected nav link" any more. This does not affect any
+> automated test: every consumer of the JS pages (`tests/test_labels_contract.py`,
+> `tests/test_auto.py`, `tests/test_oracle_browser.py`) reads `lab/ground-truth/`
+> JSON, not the PHP files, and those keep passing unchanged. The two `xss-dom`
+> ground-truth cases these pages carry (`PFF-0007`/`PFF-0008`) are recorded in
+> `lab/ground-truth/migration-exemptions.yaml` per D-open-1/D-open-2.
+
 ## Part D — Phase 2: automatic run + request-reduction measurement
 
 Automatic mode is wired as `fuzzlab auto` — it consolidates a crawl, resolves the

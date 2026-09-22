@@ -310,9 +310,36 @@ tracked in the requirements files, not here.
   signature, so every migrated page's real route keeps the app's exact
   `.php`-suffixed URL (T-LAB0.9's additive-only regression gate does not see
   those cases *relocate*) through a single mechanism rather than five. The
-  DOM-XSS sink class (`PFF-0007`/`PFF-0008` -- no sink family exists yet,
-  `D-open-2`) and the atomic cutover that deletes the hand-built directory
-  (`D-open-1`) are still pending and unrelated to this consolidation.
+  DOM-XSS sink class (`PFF-0007`/`PFF-0008` -- no sink family exists yet) is,
+  per `D-open-2` (decided 2026-09-22), formally out of the cutover's "full
+  coverage" bar and deferred backlog rather than something `L-P3.3c-CUT`
+  waits on; per `D-open-1` (decided 2026-09-22), the cutover does not require
+  reproducing the JS-rendered (Layer B) pages either -- both cases are
+  recorded in `lab/ground-truth/migration-exemptions.yaml`
+  (`CC-LAB-0053`/`FR-LAB-51`, below). The atomic cutover itself that deletes
+  the hand-built directory remains unrelated to this consolidation and
+  unscheduled, pending human sign-off (plan §4.3.6.5).
+
+  **The parity/cutover coverage gate** (`CC-LAB-0053`/`FR-LAB-51`,
+  `fuzzlab/labgen/cutover_gate.py`, plan §4.3.6.6 point 3) is the precondition
+  `L-P3.3c-CUT` needs before it can run, built ahead of and independent from
+  the cutover itself: `assert_cutover_coverage()` asserts every `PFF-` case in
+  `lab/ground-truth/labels.json` is reproduced by an emitted `php_laravel`
+  cell (derived from `LaravelEmitter.supports()` over every manifest, never a
+  hand-maintained literal, PA-0001/PA-0027) or named in the machine-readable
+  `lab/ground-truth/migration-exemptions.yaml` (`{pff_case, reason}` entries,
+  read by the gate itself). It is its own module rather than an addition to
+  `regression_gate.py` (which diffs two loaded `GroundTruth` snapshots,
+  independent of manifests/emitters by design), mirroring that module's
+  `diff_*`/`assert_*` convention instead. `ground_truth_cases_for()` extends
+  `php_laravel`'s existing page-profile metadata (`_GROUND_TRUTH_CASE_KEY`/
+  `_CANONICAL_CELL_KEY`) with two more keys the coverage question needs:
+  `ground_truth_case_by_family` (`search.php`'s one profile spanning
+  `PFF-0002`/`PFF-0003`) and `secondary_ground_truth_cases` (`login.php`'s
+  boilerplate `PFF-1008` password condition). Currently green: 13 of 16
+  `PFF-` cases covered, 3 exempted (`PFF-1002` -- `track.php` has no sink at
+  all; `PFF-0007`/`PFF-0008` -- DOM XSS, per `D-open-1`/`D-open-2` above), 0
+  uncovered.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

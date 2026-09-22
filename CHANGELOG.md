@@ -14,6 +14,24 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB: built the `L-P3.3c-CUT` parity/cutover coverage gate (plan §4.3.6.6
+  point 3) ahead of the cutover itself, which stays blocked on human sign-off.
+  `fuzzlab.labgen.cutover_gate` asserts every `PFF-` case in
+  `lab/ground-truth/labels.json` is covered by at least one emitted
+  `php_laravel` cell (derived from `LaravelEmitter.supports()` over every
+  `lab/manifests/*.yaml` cell, PA-0001/PA-0027) or named in the new
+  machine-readable `lab/ground-truth/migration-exemptions.yaml`. Extended the
+  existing `_GROUND_TRUTH_CASE_KEY`/`_CANONICAL_CELL_KEY` page-profile
+  convention (rather than a second mechanism) with
+  `ground_truth_case_by_family` (search.php's `PFF-0002`/`PFF-0003` split by
+  sink family) and `secondary_ground_truth_cases` (login.php's boilerplate
+  `PFF-1008` password condition), both read by the new
+  `ground_truth_cases_for()`. The register lists `PFF-1002` (track.php has no
+  sink at all) and `PFF-0007`/`PFF-0008` (DOM XSS, exempted per the D-open-1/
+  D-open-2 decisions above). Gate is green: all 16 `labels.json` cases are
+  covered or exempted, no gap found. Documented the D-open-1 crawler-
+  discoverability gap in `docs/ON_HOST_RUNBOOK.md`. (`CC-LAB-0053`,
+  `FR-LAB-51`; `tests/test_labgen_cutover_gate.py`)
 - LAB (planning): decided the two open questions in
   `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.7 blocking `L-P3.3c`'s remaining
   scope. D-open-1: retiring `puppy-fort-factory/` does **not** require

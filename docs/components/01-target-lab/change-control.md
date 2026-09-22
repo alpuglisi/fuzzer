@@ -3,6 +3,84 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0053 — L-P3.3c-CUT prep: parity/cutover coverage gate + migration-exemption register (2026-09-22)
+- Change: built the **coverage gate** plan §4.3.6.6 point 3 describes, and only that —
+  the atomic cutover (`L-P3.3c-CUT`: deleting `puppy-fort-factory/`, re-pointing
+  `lab/compose.yaml`/`lab/web.Dockerfile`/`deploy.sh`/`fuzzlab/mutation/filtermodel.py`'s
+  WAF-rules path) is untouched and stays blocked on human sign-off (high blast radius,
+  hard to reverse). New `fuzzlab/labgen/cutover_gate.py` (a sibling of
+  `regression_gate.py`, not an addition to it — that module diffs two already-loaded
+  `GroundTruth` snapshots, schema-shaped and manifest-independent by design; this gate
+  instead walks manifest cells through an emitter's `supports()`, a different shape of
+  computation, so it gets its own module and mirrors that module's `diff_*`/`assert_*`
+  two-function convention rather than being force-fit into it) exposes
+  `assert_cutover_coverage()`/`diff_cutover_coverage()`: every `PFF-` case in
+  `lab/ground-truth/labels.json` must be covered by at least one emitted `php_laravel`
+  cell or named in the new `lab/ground-truth/migration-exemptions.yaml` (machine-readable,
+  one `{pff_case, reason}` entry per exemption, read by the gate itself, malformed/
+  duplicate entries raise loud). Coverage is derived, never hand-maintained
+  (PA-0001/PA-0027): `compute_php_laravel_coverage()` walks every `lab/manifests/*.yaml`
+  cell through `LaravelEmitter.supports()` and the new
+  `fuzzlab.labgen.emitters.php_laravel.ground_truth_cases_for(cell)`, which extends
+  (rather than duplicates) `CC-LAB-0052`'s `_GROUND_TRUTH_CASE_KEY`/
+  `_CANONICAL_CELL_KEY` page-profile convention with two more keys that convention alone
+  cannot express: `ground_truth_case_by_family` (a page whose one profile spans more than
+  one `PFF-` case by sink family — `search.php`'s `PFF-0002`/`PFF-0003`) and
+  `secondary_ground_truth_cases` (a page reproducing an extra, non-primary case as
+  boilerplate on every cell rather than one canonical cell — `login.php`'s already-hashed
+  `PFF-1008` password condition). Both new keys are popped in `render()`/
+  `_render_write_controller()` alongside the existing metadata keys, so neither can leak
+  a case ID into a generated file (FR-LAB-2, same discipline `_GROUND_TRUTH_CASE_KEY`
+  already has). The exemption register lists `PFF-1002` (`track.php` performs no
+  database query at all — no sink to model, per plan §4.3.6.6's own finding) and
+  `PFF-0007`/`PFF-0008` (DOM XSS — client-rendered, never reaches the server; exempted
+  per the D-open-1/D-open-2 decisions recorded in plan §4.3.6.7, both decided
+  2026-09-22). Also documented the D-open-1 live-crawler-discoverability gap in
+  `docs/ON_HOST_RUNBOOK.md` (Part C), per that decision's own requirement.
+- Impact (other components / project): none outside LAB — `cutover_gate.py` is a new,
+  standalone, generator-build-time module with no runtime callers yet (parallel to
+  `regression_gate.py`'s own pre-CLI existence); the two new `php_laravel` page-profile
+  keys are additive, popped before render, and do not change any emitted file's bytes
+  (verified: the whole-manifest Tier-3 regeneration tests for `search.php`/`login.php`'s
+  manifests still pass unchanged). Directly informs `L-P3.3c-CUT` (not yet dispatched):
+  running `assert_cutover_coverage()` today is exactly the go/no-go signal that lane
+  needs, and it is currently green.
+- Risk (level; mitigation or accepted-risk justification): low. The gate is additive and
+  read-only against the real repo (loads `labels.json`/`lab/manifests/*.yaml`/the new
+  exemptions file; writes nothing); the two new page-profile keys are optional, defaulted
+  metadata read only by the new function. Main risk is an exemption reason going stale if
+  a later change resolves what it cites — mitigated by each reason citing a specific,
+  dated decision (D-open-1/D-open-2, or the §4.3.6.6 `track.php` finding) rather than a
+  vague "not yet done", so staleness is checkable by re-reading the cited section.
+- Deliverables:
+  - [x] `lab/ground-truth/migration-exemptions.yaml` — `PFF-1002`/`PFF-0007`/`PFF-0008`,
+    each with a reason citing a specific decision — done.
+  - [x] `fuzzlab/labgen/cutover_gate.py` (`CutoverGateError`, `CutoverCoverageDiff`,
+    `load_exemptions`, `compute_php_laravel_coverage`, `diff_cutover_coverage`,
+    `assert_cutover_coverage`) — done.
+  - [x] `fuzzlab/labgen/emitters/php_laravel/__init__.py`: `ground_truth_cases_for()`,
+    `_GROUND_TRUTH_CASE_BY_FAMILY_KEY`, `_SECONDARY_GROUND_TRUTH_CASES_KEY`, `search.php`/
+    `login.php` profiles updated, both new keys popped in `render()`/
+    `_render_write_controller()` — done.
+  - [x] `tests/test_labgen_cutover_gate.py` — fixture-based gate-mechanics tests
+    (malformed registers, missing file, raising/non-raising paths, PA-0027's
+    supports()-derivation check) plus the real-repo run (`assert_cutover_coverage()`
+    against the actual `lab/ground-truth/`/`lab/manifests/`, and a pinned assertion on
+    the exemption register's contents) — done, 16 tests, all passing.
+  - [x] `docs/ON_HOST_RUNBOOK.md` Part C: documented the D-open-1 live-crawler-
+    discoverability gap — done.
+  - [x] `CHANGELOG.md`, this entry, `FR-LAB-51` — done.
+- Effectiveness (assessed 2026-09-22): the gate ran clean against the current repo —
+  `pytest tests/test_labgen_cutover_gate.py` passes all 16 tests, including
+  `test_every_real_pff_case_is_covered_or_exempted` and
+  `test_covered_and_exempted_partition_every_labels_json_case`, which together confirm
+  all 16 `PFF-` cases in `labels.json` are covered (10: `PFF-0001`, `PFF-0002`,
+  `PFF-0003`, `PFF-0004`, `PFF-0005`, `PFF-0006`, `PFF-1001`, `PFF-1003`, `PFF-1004`,
+  `PFF-1005`, `PFF-1006`, `PFF-1007`, `PFF-1008` — 13 covered) or exempted (`PFF-1002`,
+  `PFF-0007`, `PFF-0008` — 3 exempted), with none uncovered. Full suite:
+  `pytest -q` — 1512 passed, 8 skipped (the prior 1496/8 baseline plus this change's 16
+  new tests, no regressions).
+
 ### CC-LAB-0052 — L-P3.3c consolidation: one unified URL-pinning mechanism replacing five independent ones (2026-09-22)
 - Change: six sub-lanes (L-P3.3c-G1..G6) were dispatched concurrently against
   `fuzzlab/labgen/emitters/php_laravel/__init__.py` and `route_accumulator.py`. Because they

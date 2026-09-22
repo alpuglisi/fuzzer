@@ -35,7 +35,16 @@ and measured. Authorized, lab-only.
 - **FR-LAB-7** (Lab track) Support two tiers: dense range and realistic shop.
 - **FR-LAB-8** (Lab track) Migrate the existing hand-built Puppy Fort Factory
   app's content into the generator (Phase 3) rather than keep it as a
-  permanent separate fixture. (D20)
+  permanent separate fixture. (D20) **Status (2026-09-22, `FR-LAB-51`/
+  `CC-LAB-0053`): still open, not satisfied.** The migration itself (server-side
+  pages, `FR-LAB-44`..`50`) and the parity/cutover coverage gate that verifies it
+  (`FR-LAB-51`) are both done, and the gate reports 13 of 16 `PFF-` cases
+  covered by an emitted `php_laravel` cell with the remaining 3 exempted
+  (`lab/ground-truth/migration-exemptions.yaml`). This requirement is
+  satisfied only once `L-P3.3c-CUT` actually retires the fixture (deletes
+  `puppy-fort-factory/`, re-points `lab/compose.yaml`/`deploy.sh`/
+  `filtermodel.py`'s WAF-rules path) — deliberately not scheduled yet, pending
+  human sign-off (plan §4.3.6.5).
 - **FR-LAB-9** (Lab track) Own the pattern-provenance corpus (`patterns/`,
   OSV/GHSA-sourced pattern cards informing scenario briefs in original words
   only, never inlined as code) as a LAB subcomponent, not an IND catalog. (D20)
@@ -1158,6 +1167,53 @@ lane) can submit a payload as
     bikeshed. No alternative convention was evaluated against it. See §8.
   - **Not resolved by this requirement, and not this pass's to resolve:** `search.php`'s
     canonical-cell choice (`FR-LAB-49`, `L-P3.3c-CUT`'s to make). (`CC-LAB-0052`)
+
+- **FR-LAB-51** *(L-P3.3c-CUT prep, plan §4.3.6.6 point 3; the parity/cutover coverage
+  gate, built ahead of and independent from `L-P3.3c-CUT` itself, which remains
+  unscheduled pending human sign-off.)* A coverage assertion that every `PFF-` case in
+  `lab/ground-truth/labels.json` maps to at least one emitted `php_laravel` cell, or to a
+  reviewed entry in an explicit exemption register — never a case silently uncovered.
+  `fuzzlab.labgen.cutover_gate.assert_cutover_coverage()`/`diff_cutover_coverage()`
+  classify every case as covered, exempted, or (gate-failing) uncovered:
+  1. **Coverage is derived, never a hand-maintained literal** (PA-0001/PA-0027):
+     `compute_php_laravel_coverage()` walks every `lab/manifests/*.yaml` cell through
+     `LaravelEmitter.supports()` and the new
+     `fuzzlab.labgen.emitters.php_laravel.ground_truth_cases_for(cell)`. A case gaining or
+     losing a reproducing cell changes the gate's result with no second list to update.
+  2. **`ground_truth_cases_for()` extends `FR-LAB-50`'s `_GROUND_TRUTH_CASE_KEY`/
+     `_CANONICAL_CELL_KEY` page-profile convention**, rather than a second, competing
+     mechanism, with two more page-profile keys for the two shapes that convention alone
+     cannot express: `ground_truth_case_by_family` (`sink_context.family -> PFF- case
+     id`, for a page whose one profile spans more than one case — `search.php`'s
+     `PFF-0002`/`PFF-0003`, `FR-LAB-49`) and `secondary_ground_truth_cases` (extra case
+     ids a page reproduces as a non-primary, boilerplate position identical across every
+     cell of that page, rather than owned by one canonical cell — `login.php`'s
+     already-hashed `PFF-1008` password condition, `FR-LAB-46`). Both are popped before
+     any template renders, exactly like `_GROUND_TRUTH_CASE_KEY` (FR-LAB-2: no case ID
+     leaks into a generated file).
+  3. **The exemption register**, `lab/ground-truth/migration-exemptions.yaml`, is
+     machine-readable (`{pff_case, reason}` entries) and read by the gate itself, never
+     kept as prose — an uncovered case absent from it fails the gate loudly, and adding an
+     entry is a diff a reviewer sees. `load_exemptions()` raises on a malformed or
+     duplicate entry rather than silently treating the register as empty. Today's register
+     lists `PFF-1002` (`track.php` performs no database query at all — no sink for any op
+     the safety matrix models to apply to, per plan §4.3.6.6's own finding) and
+     `PFF-0007`/`PFF-0008` (DOM XSS, client-rendered, never reaches the server — exempted
+     per the D-open-1/D-open-2 decisions, plan §4.3.6.7, both decided 2026-09-22: Layer B
+     reproduction is not required for the cutover, and DOM XSS/`L-P3.3c-DOM` is out of the
+     cutover's "full coverage" bar, deferred backlog instead).
+  4. **Deliberately its own module**, `fuzzlab.labgen.cutover_gate`, not an addition to
+     `fuzzlab.labgen.regression_gate`: that gate diffs two already-loaded `GroundTruth`
+     snapshots (schema-shaped, manifest-independent by design); this one walks manifest
+     cells through an emitter's `supports()` — a different computation shape over
+     different inputs — while mirroring that module's `diff_*` (non-raising) / `assert_*`
+     (raising) two-function convention.
+  - **Does not itself gate or perform `L-P3.3c-CUT`.** This requirement is the
+    verification mechanism plan §4.3.6.6 describes as a precondition for the cutover; the
+    cutover's own re-pointing work (`lab/compose.yaml`, `deploy.sh`,
+    `fuzzlab/mutation/filtermodel.py`'s WAF-rules path, deleting `puppy-fort-factory/`) is
+    untouched by it and stays blocked on human sign-off (`FR-LAB-8` remains **not**
+    satisfied by this requirement — see that entry). (`CC-LAB-0053`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
