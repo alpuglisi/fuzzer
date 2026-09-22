@@ -2,28 +2,32 @@
 (category 1 / e-commerce pilot, ``docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md``
 §2/§9.4a/§9.5). This project's first Ruby-on-Rails stack.
 
-**Scope of this dispatch (Phase A only -- see the plan's §2, written for
-node_express but structurally reused here).** This module, together with
-``modules.py``/``route_accumulator.py`` and the checked-in real skeleton
-under ``stack/skeleton/``, is the minimum real, working emitter needed to
-prove the pipeline end to end: assemble a manifest cell into real
-controller/view/route files, boot a real Rails app, and serve a real HTTP
-request. It renders exactly one illustrative shape
-(``("xss", "html_body")`` -- "reflect a request parameter into the response
-body", the same bar ``php_laravel``'s very first live-boot test set) and
-nothing else.
+**Phase A** (``CC-LAB-0071``/``FR-LAB-65``) built the minimum real, working
+emitter needed to prove the pipeline end to end: assemble a manifest cell
+into real controller/view/route files, boot a real Rails app, and serve a
+real HTTP request, via exactly one illustrative shape (``("xss",
+"html_body")``).
 
-**Explicitly out of scope here** (a separate, later lane, per the plan's own
-"What to build"/"Explicitly OUT of scope" split): the real Rails-idiom
-vulnerability modules Shopify's own functionality/CWE research shortlisted
+**Phase B** (this delivery -- ``CC-LAB-0072``..``CC-LAB-0075``/
+``FR-LAB-66``..``FR-LAB-68``) adds the three real Rails-idiom vulnerability
+modules Shopify's own functionality/CWE research shortlisted
 (``docs/research/site-architecture-survey-functionality-shopify.md`` /
-plan §9.4a) -- a ``webhook-signature`` naive-``==``-vs-``ActiveSupport::
-SecurityUtils.secure_compare`` idiom, CWE-915 mass assignment via Rails'
-``permit!``, and CWE-502 insecure deserialization via ``Marshal.load``/
-``YAML.unsafe_load``. Building those is Phase B's job, against the harness
-this dispatch builds; deepening this emitter's ``_MODULE_SET_BY_SHAPE``-
-equivalent registry to carry them is that lane's responsibility, not this
-one's.
+plan §9.4a's "Decided" block):
+
+- ``("webhook_signature", "webhook_signature_verification")`` -- naive
+  ``==`` vs ``ActiveSupport::SecurityUtils.secure_compare`` over a real
+  recomputed HMAC-SHA256.
+- ``("mass_assignment", "orm_entity_bulk_assign")`` -- Rails' unrestricted
+  ``permit!`` vs an explicit ``permit(:a, :b)`` strong-parameters
+  allowlist, against the checked-in ``users`` table.
+- ``("insecure_deserialization", "object_deserialization")`` -- Psych's
+  ``YAML.unsafe_load`` vs ``YAML.safe_load``.
+
+Every new shape uses the ``single_statement`` complexity (a JSON response
+the sink itself renders) rather than ``render_only``'s separate view file,
+and none of them need a view: :data:`_MODULE_SET_BY_SHAPE`'s
+``renders_view`` flag on each entry decides which path :meth:`RailsEmitter.render`
+takes -- see that method's own comments.
 """
 
 from __future__ import annotations
@@ -51,15 +55,73 @@ class _ModuleSet(NamedTuple):
     source: str
     sink: str
     complexity: str
+    #: The controller action name (also the route's ``to: '...#<action>'``
+    #: and, for a ``renders_view`` shape, the view file's own stem). Phase
+    #: A's one shape used a fixed ``"show"`` for all three roles; Phase B's
+    #: JSON-responding shapes are write endpoints, so this is now per-shape
+    #: rather than a single module-wide constant (PA-0003/PA-0021: the
+    #: emitted route and the emitted controller method can never name two
+    #: different things).
+    action: str = "show"
+    #: Whether this shape hands a value to a separate view file
+    #: (``render_only``, Phase A's only shape) or the sink itself renders a
+    #: complete JSON response with no view file at all (every Phase B
+    #: shape, ``single_statement``).
+    renders_view: bool = True
 
 
 #: (vuln_class, sink_context.family) -> which modules render this shape.
-#: Exactly one entry in this Phase A dispatch -- see the module docstring.
 _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("xss", "html_body"): _ModuleSet("get_param", "html_body_echo", "render_only"),
+    # CC-LAB-0072: webhook-signature verification (naive `==` vs
+    # ActiveSupport::SecurityUtils.secure_compare) over a real recomputed
+    # HMAC-SHA256 -- a webhook delivery is always a POST.
+    ("webhook_signature", "webhook_signature_verification"): _ModuleSet(
+        "raw_request_body", "webhook_signature_verification", "single_statement",
+        action="create", renders_view=False,
+    ),
+    # CC-LAB-0073: CWE-915 mass assignment (`permit!` vs an explicit
+    # `permit(:a, :b)` allowlist) against the checked-in `users` table --
+    # a merchant/customer profile-update endpoint, so PATCH.
+    ("mass_assignment", "orm_entity_bulk_assign"): _ModuleSet(
+        "all_params_nested", "orm_entity_bulk_assign", "single_statement",
+        action="update", renders_view=False,
+    ),
+    # CC-LAB-0074: CWE-502 insecure deserialization (`YAML.unsafe_load` vs
+    # `YAML.safe_load`) on a bulk-import-style POST body.
+    ("insecure_deserialization", "object_deserialization"): _ModuleSet(
+        "post_param", "object_deserialization", "single_statement",
+        action="create", renders_view=False,
+    ),
 }
 
-_METHOD_NAME = "show"
+#: Per-shape static render-only metadata (param/variable names, the
+#: mass-assignment allowlist, the webhook secret/header) -- none of this is
+#: verdict-relevant (the same "render-only metadata" role
+#: ``php_laravel``'s own ``_PAGE_PROFILES`` static fields play), so it lives
+#: here rather than on :class:`_ModuleSet`, which only names *which*
+#: modules render a shape, never their inputs.
+_SHAPE_CTX: dict[tuple[str, str], dict[str, Any]] = {
+    ("xss", "html_body"): {"var_name": "value", "param_name": "q"},
+    ("webhook_signature", "webhook_signature_verification"): {
+        "var_name": "body",
+        "header_name": "X-Shopify-Hmac-SHA256",
+        # A fixed, obviously-fake lab secret -- never a real credential
+        # (D12/CLAUDE.md's "credentials in the OS keyring, never commit
+        # secrets" rule does not apply to a synthetic app secret this
+        # illustrative cell both signs and verifies with itself).
+        "secret": "whsec_lab_lab_only_not_a_real_secret",
+    },
+    ("mass_assignment", "orm_entity_bulk_assign"): {
+        "var_name": "attrs",
+        "resource_name": "user",
+        "allowed_fields": ("username", "bio"),
+    },
+    ("insecure_deserialization", "object_deserialization"): {
+        "var_name": "raw_yaml",
+        "param_name": "yaml_payload",
+    },
+}
 
 #: A cell ID like ``LABGEN-RR-0001`` -> a Rails-legal, unique, lowercase
 #: snake_case identifier (``labgen_rr_0001``) safe to use in both a
@@ -109,8 +171,8 @@ def url_path_for(cell_id: str) -> str:
     return f"/cell/{_slug_for(cell_id)}"
 
 
-def _view_name_for(cell_id: str) -> str:
-    return _METHOD_NAME
+def _view_name_for(action: str) -> str:
+    return action
 
 
 class RailsEmitter(Emitter):
@@ -137,25 +199,20 @@ class RailsEmitter(Emitter):
         if cell.context_depth not in SUPPORTED_CONTEXT_DEPTHS:
             raise ValueError(
                 f"{cell.cell_id}: ruby_rails renders context_depth "
-                f"{list(SUPPORTED_CONTEXT_DEPTHS)} only (Phase A), got {cell.context_depth!r}"
+                f"{list(SUPPORTED_CONTEXT_DEPTHS)} only (Phase A/B), got {cell.context_depth!r}"
             )
 
-        modules = _MODULE_SET_BY_SHAPE[(cell.vuln_class, cell.sink_context.family)]
+        shape = (cell.vuln_class, cell.sink_context.family)
+        modules = _MODULE_SET_BY_SHAPE[shape]
         controller_name = controller_name_for(cell.cell_id)
         controller_class = _controller_class_for(cell.cell_id)
-        view_name = _view_name_for(cell.cell_id)
+        view_name = _view_name_for(modules.action)
 
         ctx: dict[str, Any] = {
-            "var_name": "value",
-            "param_name": cell.route.path.rsplit("/", 1)[-1] or "q",
-            "method_name": _METHOD_NAME,
+            "method_name": modules.action,
             "view_name": view_name,
+            **_SHAPE_CTX[shape],
         }
-        # The param name a cell's source reads is not itself part of the
-        # verdict-relevant shape vocabulary -- fixed to a stable, readable
-        # name (`q`) rather than derived from `cell.route.path` for any cell
-        # whose path has no trailing segment to reuse.
-        ctx["param_name"] = "q"
 
         source_result = SOURCES[modules.source].render(ctx)
         ctx = source_result.context
@@ -173,17 +230,7 @@ class RailsEmitter(Emitter):
             transform_code_blocks.append(transform_result.code)
 
         sink_result = SINKS[modules.sink].render(ctx)
-
-        raw_body = source_result.code + "".join(transform_code_blocks)
-        # Indent every source/transform line under the controller method's
-        # own `def`/`end` (cosmetic -- Ruby is whitespace-insensitive -- but
-        # matches this project's other emitters' convention of emitting
-        # source that reads like a human wrote it, not a diagnostic aid to
-        # skip).
-        body = "\n".join(f"    {line}" if line else line for line in raw_body.splitlines()) + "\n"
-        complexity_result = COMPLEXITIES[modules.complexity].render(
-            {**ctx, "body": body, "view_template": f"{controller_name}/{view_name}"}
-        )
+        ctx = sink_result.context
 
         composition = " -> ".join((modules.source, *applied_ops, modules.sink, modules.complexity))
         # Zeitwerk (Rails' autoloader) expects exactly one top-level constant
@@ -191,31 +238,61 @@ class RailsEmitter(Emitter):
         # must define only `controller_class`, never a second
         # `ApplicationController` definition of its own; the skeleton's real
         # `app/controllers/application_controller.rb` already defines it.
-        controller_content = (
+        controller_header = (
             "# Generated by fuzzlab.labgen.emitters.ruby_rails. Do not edit by hand.\n"
             f"# Module composition: {composition}\n"
             f"# cell: {cell.cell_id}\n"
             f"class {controller_class} < ApplicationController\n"
-            f"{complexity_result.code}"
-            "end\n"
         )
+        controller_footer = "end\n"
 
-        view_dir = f"app/views/{controller_name}"
-        view_content = (
-            f"<%# Generated by fuzzlab.labgen.emitters.ruby_rails -- cell: {cell.cell_id} %>\n"
-            + sink_result.code
-        )
+        def _indent(raw: str) -> str:
+            # Indent every emitted line under the controller method's own
+            # `def`/`end` (cosmetic -- Ruby is whitespace-insensitive -- but
+            # matches this project's other emitters' convention of emitting
+            # source that reads like a human wrote it, not a diagnostic aid
+            # to skip).
+            return "\n".join(f"    {line}" if line else line for line in raw.splitlines()) + "\n"
 
+        if modules.renders_view:
+            # Phase A shape: the sink is a separate view file, not code in
+            # the controller method -- the complexity template itself emits
+            # the `render template: ...` call.
+            raw_body = source_result.code + "".join(transform_code_blocks)
+            body = _indent(raw_body)
+            complexity_result = COMPLEXITIES[modules.complexity].render(
+                {**ctx, "body": body, "view_template": f"{controller_name}/{view_name}"}
+            )
+            controller_content = controller_header + complexity_result.code + controller_footer
+            view_dir = f"app/views/{controller_name}"
+            view_content = (
+                f"<%# Generated by fuzzlab.labgen.emitters.ruby_rails -- cell: {cell.cell_id} %>\n"
+                + sink_result.code
+            )
+            return (
+                EmittedFile(
+                    path=f"app/controllers/{controller_name}_controller.rb",
+                    content=controller_content.encode("utf-8"),
+                    role="controller",
+                ),
+                EmittedFile(
+                    path=f"{view_dir}/{view_name}.html.erb",
+                    content=view_content.encode("utf-8"),
+                    role="view",
+                ),
+            )
+
+        # Phase B shapes: the sink itself renders a complete JSON response
+        # inline in the controller method -- there is no view file at all.
+        raw_body = source_result.code + "".join(transform_code_blocks) + sink_result.code
+        body = _indent(raw_body)
+        complexity_result = COMPLEXITIES[modules.complexity].render({**ctx, "body": body})
+        controller_content = controller_header + complexity_result.code + controller_footer
         return (
             EmittedFile(
                 path=f"app/controllers/{controller_name}_controller.rb",
                 content=controller_content.encode("utf-8"),
                 role="controller",
-            ),
-            EmittedFile(
-                path=f"{view_dir}/{view_name}.html.erb",
-                content=view_content.encode("utf-8"),
-                role="view",
             ),
         )
 
@@ -225,10 +302,11 @@ class RailsEmitter(Emitter):
         ``LaravelEmitter.route_fragment_for``'s role exactly (Addendum D:
         the accumulator category lives outside a per-cell ``render()``
         return value)."""
+        modules = _MODULE_SET_BY_SHAPE[(cell.vuln_class, cell.sink_context.family)]
         return self._route_accumulator.fragment_for_cell(
             cell_id=cell.cell_id,
             controller_name=controller_name_for(cell.cell_id),
             url_path=url_path_for(cell.cell_id),
             method=cell.route.method,
-            action=_METHOD_NAME,
+            action=modules.action,
         )

@@ -3,6 +3,288 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0075 — ruby_rails Phase B shared harness/tooling infrastructure (FR-LAB-66/67/68) (2026-09-22)
+- Change: the harness/tooling additions the three Rails Phase B vulnerability
+  modules below (`CC-LAB-0072`/`0073`/`0074`) all depend on, landed together
+  since none of the three modules is separable from it.
+  - `fuzzlab.labgen.conformance.rails_live_boot.RailsLiveBootHarness`:
+    `request()`/`post()` gained `raw_body`/`headers` parameters (mutually
+    exclusive with `data`) -- a webhook-signature check must recompute its
+    HMAC over the exact raw bytes it signs, which `data`'s own
+    `application/x-www-form-urlencoded` encoding would silently re-encode
+    out from under a caller trying to forge a real header. New `patch()`
+    convenience method. New `run_ruby(code, timeout=...)` method: writes a
+    real, standalone Ruby script into the harness's already-`bundle
+    install`-ed app directory and runs it via `bundle exec ruby`, so a
+    caller can exercise the exact real gem versions this app's own
+    `Gemfile.lock` resolved (used by `CC-LAB-0072`'s timing microbenchmark)
+    without a second, separate `bundle install` round trip.
+  - `fuzzlab.labgen.conformance.tier0`: new `ruby_available()`/
+    `lint_ruby()`/`lint_ruby_emitted_files()` -- the Ruby analogue of
+    `lint_php`/`lint_python` (`ruby -c`, the "parse, don't execute" flag),
+    this project's first Ruby syntax-check helper, skip-guarded per this
+    project's PA-0005 pattern.
+  - `fuzzlab/labgen/emitters/ruby_rails/stack/skeleton/app/controllers/
+    application_controller.rb`: gained `skip_forgery_protection` -- every
+    Phase B cell is a non-GET write endpoint (`PATCH`/`POST`) a real HTTP
+    client sends directly, with no browser session/CSRF-token round trip of
+    its own (`RailsLiveBootHarness` never renders a form page first), and
+    CSRF is an orthogonal concern from every vulnerability class this lane
+    builds. Without this, every Phase B live-boot POST/PATCH test 422s on
+    Rails' own default forgery protection (found and fixed during this
+    change's own development, before any test was ever reported passing --
+    not a defect in previously-shipped code, so the bug protocol does not
+    apply; see this change's own final report).
+  - `RailsEmitter` (`__init__.py`): `_ModuleSet` gained `action`/
+    `renders_view` fields (Phase A hard-coded a single `_METHOD_NAME =
+    "show"`/always-render-a-view assumption that does not hold for a
+    write endpoint returning JSON); `render()` now branches on
+    `renders_view` -- the existing render-only-with-view path is untouched
+    byte-for-byte for the one Phase A shape, and a new JSON-only path (the
+    sink itself renders a complete `render json: ...` response, no view
+    file at all) is added for the three Phase B shapes. New `_SHAPE_CTX`
+    dict centralizes each shape's render-only static metadata (param/
+    variable names, the mass-assignment allowlist, the webhook secret/
+    header), replacing Phase A's inline hard-coded `ctx` dict.
+  - `fuzzlab.labgen.conformance.static_precheck`: two new `UNINFORMATIVE`
+    rows for the genuinely new `(webhook_signature,
+    webhook_signature_verification)`/`(insecure_deserialization,
+    object_deserialization)` shapes; mass-assignment reuses its existing
+    `CC-LAB-0063`/`0064` row unchanged.
+- Impact (other components / project): `ruby_rails`/`rails_live_boot`/
+  `tier0`/`static_precheck` widened additively; the one behavior change to
+  already-shipped Phase A code is `_ModuleSet`'s two new fields (both
+  default to Phase A's exact prior values, `action="show"`,
+  `renders_view=True`) and `render()`'s branch on them -- the existing
+  Phase A live-boot test (`tests/test_labgen_ruby_rails_live_boot.py`)
+  re-run unmodified and still passes byte-for-byte (see this change's own
+  final report for the exact re-run result).
+- Risk (level; mitigation or accepted-risk justification): Low. Additive
+  API surface (new harness methods/params with mutually-exclusive guards,
+  new tier0 functions, new static_precheck rows); the one refactor to
+  existing Phase A code (`_ModuleSet`/`render()`) is covered by re-running
+  the pre-existing Phase A live-boot test, which passed unchanged.
+- Deliverables:
+  - [x] `RailsLiveBootHarness.request/post/patch/run_ruby` — done
+  - [x] `tier0.ruby_available/lint_ruby/lint_ruby_emitted_files` — done
+  - [x] `application_controller.rb` `skip_forgery_protection` — done
+  - [x] `RailsEmitter` `_ModuleSet`/`render()` generalization — done, Phase A
+    behavior unchanged (re-run passing)
+  - [x] `static_precheck.py` two new rows — done
+  - [x] `requirements.md` (`FR-LAB-66`/`67`/`68`, cross-referenced) — done
+- Effectiveness (assessed 2026-09-22): the pre-existing Phase A live-boot
+  test passes unchanged after this refactor; all three Phase B modules
+  below build on this infrastructure and pass their own real, executed
+  live-boot proofs.
+
+### CC-LAB-0074 — CWE-502 insecure deserialization vulnerable/secure pair, ruby_rails (FR-LAB-68) (2026-09-22)
+- Change: per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a's
+  decided Category-1 (e-commerce) Shopify/Rails cell list, item 3: the
+  `ruby_rails` emitter gained a real, dedicated vulnerable/secure pair for
+  CWE-502 -- a bulk-import-style POST endpoint accepting a YAML body,
+  parsed with `YAML.unsafe_load` (vulnerable) or `YAML.safe_load` (secure).
+  First implementation, in any stack, of the existing
+  `object_deserialization` sink family (`lab/safety_matrix.yaml`).
+  - New shape `("insecure_deserialization", "object_deserialization")` in
+    `RailsEmitter._MODULE_SET_BY_SHAPE`. New source `post_param` (reused
+    shared-vocabulary name, `params[:yaml_payload]`). Two new ops,
+    `yaml_unsafe_load` (`no_effect`) / `yaml_safe_load` (`neutralises`,
+    `[insecure_deserialization]`), and new sink `object_deserialization`
+    (parses, then reports the real parsed value's Ruby class or the raised
+    exception's class, as JSON).
+  - New manifest `lab/manifests/insecure_deserialization_rails_sample.yaml`
+    (`LABGEN-RR-0006` vulnerable, `LABGEN-RR-0007` secure), matching new
+    `lab/safety_matrix.yaml` rows, and offline Tier-0/Tier-3 coverage
+    (`tests/test_labgen_ruby_rails_insecure_deserialization.py`).
+  - A real, executed adversarial proof, not simulated
+    (`tests/test_labgen_ruby_rails_insecure_deserialization_live_boot.py`):
+    a real HTTP POST carrying a `!ruby/object:OpenStruct` YAML payload
+    against each real booted twin. Vulnerable twin's real response:
+    `{"ok": true, "parsed_class": "OpenStruct"}` -- an attacker-chosen Ruby
+    object actually constructed server-side. Secure twin's real response:
+    `{"ok": false, "error": "Psych::DisallowedClass"}` -- rejected before
+    construction. A third test confirms both twins parse ordinary plain
+    YAML identically (minimal-pair invariant, proven over a real HTTP round
+    trip, not just template text).
+- Impact (other components / project): `ruby_rails` module inventory
+  widened (additive). `lab/safety_matrix.yaml` gained two additive rows
+  (`version` unchanged at `1`). `application_controller.rb` gained
+  `require "ostruct"` (see `CC-LAB-0075` -- shared with the other two Phase
+  B modules, not repeated here).
+- Risk (level; mitigation or accepted-risk justification): Low. The
+  adversarial payload constructs a harmless `OpenStruct`, never a gadget
+  chain/RCE payload (this project's lab-only, non-adversarial-target
+  policy, CLAUDE.md's Safety section) -- the proof only needs to show an
+  arbitrary object type is constructed, the property CVE-2013-0156's own
+  disclosure turns into RCE via a gadget this lab never builds or needs.
+- Deliverables:
+  - [x] `ruby_rails` source/transform/sink modules + Jinja2 templates
+    (vulnerable + secure) — done
+  - [x] `lab/manifests/insecure_deserialization_rails_sample.yaml`
+    (2 cells) — done
+  - [x] `lab/safety_matrix.yaml` rows — done
+  - [x] `static_precheck.py` row (see `CC-LAB-0075`) — done
+  - [x] Real, executed adversarial proof (real HTTP POST, real Rails/Psych)
+    — done
+  - [x] `docs/PREVENTIVE_ACTIONS.md`/bug protocol — not triggered; no code
+    defect found in previously-shipped code during this change
+  - [x] `requirements.md` (`FR-LAB-68`) — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a/§9.5 progress
+    update — done
+- Effectiveness (assessed 2026-09-22): both cells derive their expected
+  verdict (`LABGEN-RR-0006` VULNERABLE/trivial, `LABGEN-RR-0007` SECURE);
+  both render, `ruby -c` lint clean, and regenerate byte-identically
+  (Tier 3); the real live-boot proof reproduces the intended vulnerable/
+  secure divergence with no observed flakiness across repeated runs.
+
+### CC-LAB-0073 — CWE-915 mass assignment vulnerable/secure pair, ruby_rails (FR-LAB-67) (2026-09-22)
+- Change: per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a's
+  decided Category-1 (e-commerce) Shopify/Rails cell list, item 2: the
+  `ruby_rails` emitter gained a real, dedicated vulnerable/secure pair for
+  CWE-915 -- a merchant/customer profile-update endpoint (`PATCH`) against
+  the checked-in `users` table, using Rails' own unrestricted `permit!`
+  (vulnerable) or an explicit `permit(:username, :bio)` strong-parameters
+  allowlist (secure). First Ruby/Rails-idiomatic instance of the existing
+  `orm_entity_bulk_assign` sink family (`lab/safety_matrix.yaml`,
+  previously implemented only by `php_laravel`'s own
+  `DB::table(...)->update()` twin).
+  - New shape `("mass_assignment", "orm_entity_bulk_assign")` in
+    `RailsEmitter._MODULE_SET_BY_SHAPE`. New source `all_params_nested`
+    (`params.require(:user)` -- Rails' own nested strong-parameters root,
+    genuinely distinct from every flat-body source another stack's
+    vocabulary already names). Two new, Rails-strong-parameters-specific
+    ops: `permit_bang_unrestricted` (`no_effect`) and
+    `strong_params_explicit_allowlist` (`neutralises`,
+    `[mass_assignment]`) -- minted new because `permit!` is Rails' own
+    named mechanism, matching how every other framework's own mass-
+    assignment escape hatch in this matrix group already has its own name
+    (`orm_fields_option_allowlist`, `typed_graphql_field_mapping`, etc.).
+    New sink `orm_entity_bulk_assign` (a real `ActiveRecord#update!` call).
+  - Extends the `CC-LAB-0071`/`FR-LAB-65` skeleton with a new migration,
+    `db/migrate/20260922000001_add_role_to_users.rb`, adding the one
+    privilege-relevant column (`role`) the pair needs (Phase A's own
+    `users` migration deliberately carried none yet) and seeding one real
+    `shopper1` row via the migration's own `up` block (SQL `execute`,
+    this stack's per-run-SQLite analogue of `php_laravel`'s own
+    `LiveBootHarness`-side `REAL_SCHEMA_SQL` seed).
+  - New manifest `lab/manifests/mass_assignment_rails_sample.yaml`
+    (`LABGEN-RR-0004` vulnerable, `LABGEN-RR-0005` secure), matching new
+    `lab/safety_matrix.yaml` rows, and offline Tier-0/Tier-3 coverage
+    (`tests/test_labgen_ruby_rails_mass_assignment.py`).
+  - A real, executed adversarial proof, not simulated
+    (`tests/test_labgen_ruby_rails_mass_assignment_live_boot.py`): a real
+    HTTP PATCH against each real booted twin, body carrying `user[role]=
+    admin` alongside the legitimate `user[bio]=...`. Vulnerable twin's
+    real response after a real ActiveRecord write: `"role":"admin"`.
+    Secure twin's real response: `"role":"customer"` (the seeded default
+    -- the attacker's field never reached the write). Each twin boots its
+    own fresh harness/database so one twin's write cannot leak into the
+    other's assertion (verified this actually matters: an earlier
+    manual, single-shared-harness run showed exactly this contamination,
+    which is why the landed tests use one harness per twin).
+- Impact (other components / project): `ruby_rails` module inventory and
+  checked-in skeleton widened (additive; Phase A's own migration/model
+  untouched, a new migration file added alongside it). `lab/safety_matrix.
+  yaml` gained two additive rows (`version` unchanged at `1`).
+- Risk (level; mitigation or accepted-risk justification): Low. Purely
+  additive code-generation/schema surface; the new migration only adds a
+  column with a safe default (`"customer"`) and one seed row via a real,
+  idempotent-shaped `INSERT`, run only inside a harness's own throwaway
+  per-run SQLite database (never a shared/persistent one).
+- Deliverables:
+  - [x] `ruby_rails` source/transform/sink modules + Jinja2 templates
+    (vulnerable + secure) — done
+  - [x] New migration (`role` column + seed row) — done
+  - [x] `lab/manifests/mass_assignment_rails_sample.yaml` (2 cells) — done
+  - [x] `lab/safety_matrix.yaml` rows — done
+  - [x] `static_precheck.py` row reused, no new row needed (see
+    `CC-LAB-0075`) — done
+  - [x] Real, executed adversarial proof (real HTTP PATCH, real
+    ActiveRecord/SQLite) — done
+  - [x] `docs/PREVENTIVE_ACTIONS.md`/bug protocol — not triggered; no code
+    defect found in previously-shipped code during this change
+  - [x] `requirements.md` (`FR-LAB-67`) — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a/§9.5 progress
+    update — done
+- Effectiveness (assessed 2026-09-22): both cells derive their expected
+  verdict (`LABGEN-RR-0004` VULNERABLE/trivial, `LABGEN-RR-0005` SECURE);
+  both render, `ruby -c` lint clean, and regenerate byte-identically
+  (Tier 3); the real live-boot proof reproduces the intended vulnerable/
+  secure divergence with no observed flakiness across repeated runs.
+
+### CC-LAB-0072 — webhook-signature verification vulnerable/secure pair, ruby_rails (FR-LAB-66) (2026-09-22)
+- Change: per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a's
+  decided Category-1 (e-commerce) Shopify/Rails cell list, item 1
+  (strongest-grounded of the three -- a real, specific Shopify mechanism):
+  the `ruby_rails` emitter gained a real, dedicated vulnerable/secure pair
+  extending the existing `webhook-signature` corpus class with a Rails
+  idiom -- a naive `==` compare of a recomputed HMAC-SHA256 (vulnerable)
+  vs Rails' own `ActiveSupport::SecurityUtils.secure_compare` (secure).
+  First implementation, in any stack, of the existing
+  `webhook_signature_verification` sink family (`lab/safety_matrix.yaml`
+  already had rows for this family from an earlier Node-only corpus pass;
+  no emitter had implemented it in code before this change).
+  - New shape `("webhook_signature", "webhook_signature_verification")` in
+    `RailsEmitter._MODULE_SET_BY_SHAPE`. New source `raw_request_body`
+    (`request.body.read` -- a signature check must recompute its HMAC over
+    the exact raw bytes the provider signed, never a re-serialized form).
+    Reuses the existing `naive_string_compare`/`constant_time_compare` op
+    vocabulary verbatim -- no new op minted, since these already exist
+    with exactly the right `partial`/`neutralises` semantics. New sink
+    `webhook_signature_verification` (recomputes the HMAC-SHA256 with a
+    fixed, obviously-synthetic lab secret and compares to the
+    `X-Shopify-Hmac-SHA256` header).
+  - New manifest `lab/manifests/webhook_signature_rails_sample.yaml`
+    (`LABGEN-RR-0002` vulnerable, `LABGEN-RR-0003` secure), offline
+    Tier-0/Tier-3 coverage (`tests/test_labgen_ruby_rails_webhook_signature.py`).
+    No new `lab/safety_matrix.yaml` rows needed (ops reused verbatim).
+  - A real, executed, two-part proof
+    (`tests/test_labgen_ruby_rails_webhook_signature_live_boot.py`), since
+    a naive `==` and `secure_compare` give the *same* accept/reject answer
+    for any single well-formed request (the vulnerability is a timing side
+    channel, not a functional bypass): (1) a real HTTP round trip against
+    each real booted twin with a real forged valid HMAC and a real
+    tampered one, confirming both correctly accept/reject; (2) a real,
+    isolated Ruby timing microbenchmark
+    (`RailsLiveBootHarness.run_ruby`, see `CC-LAB-0075`) executed inside
+    the booted cell's own `bundle exec` against the real
+    `ActiveSupport::SecurityUtils.secure_compare` this app's own
+    `Gemfile.lock` resolved: measured plain `String#==`'s early-vs-late
+    mismatch timing ratio at ~4.8x (200,000-byte synthetic strings, 800
+    iterations each) vs. `secure_compare`'s own ratio at ~1.02x (repeated
+    3x with no observed flakiness). The synthetic string size is
+    deliberately much larger than this cell's own ~44-byte digest, chosen
+    purely to make the real, already-present timing behavior reliably
+    measurable within a bounded test, documented explicitly as such in the
+    test's own docstring.
+- Impact (other components / project): `ruby_rails` module inventory
+  widened (additive). No `lab/safety_matrix.yaml` change (ops reused as-
+  is). `RailsLiveBootHarness` gained `raw_body`/`headers`/`run_ruby` (see
+  `CC-LAB-0075`, shared with the other two Phase B modules).
+- Risk (level; mitigation or accepted-risk justification): Low. Purely
+  additive code-generation surface; the fixed lab secret is an obviously-
+  synthetic string (`whsec_lab_lab_only_not_a_real_secret`) both signed and
+  verified by this same illustrative cell, never a real credential (D12
+  does not apply to a self-contained synthetic app secret).
+- Deliverables:
+  - [x] `ruby_rails` source/sink modules + Jinja2 templates (vulnerable +
+    secure) — done
+  - [x] `lab/manifests/webhook_signature_rails_sample.yaml` (2 cells) —
+    done
+  - [x] `static_precheck.py` row (see `CC-LAB-0075`) — done
+  - [x] Real, executed two-part proof (real HTTP round trip + real Ruby
+    timing microbenchmark) — done
+  - [x] `docs/PREVENTIVE_ACTIONS.md`/bug protocol — not triggered; no code
+    defect found in previously-shipped code during this change
+  - [x] `requirements.md` (`FR-LAB-66`) — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a/§9.5 progress
+    update — done
+- Effectiveness (assessed 2026-09-22): both cells derive their expected
+  verdict (`LABGEN-RR-0002` VULNERABLE/easy, `LABGEN-RR-0003` SECURE); both
+  render, `ruby -c` lint clean, and regenerate byte-identically (Tier 3);
+  both the functional-correctness and timing-microbenchmark live-boot
+  proofs pass with no observed flakiness across repeated runs.
+
 ### CC-LAB-0076 — CWE-1333 (ReDoS) vulnerable/secure pair, node_express (FR-LAB-69) (2026-09-22)
 - Change: per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a's decided
   Category-1 (e-commerce) Walmart/Node cell list, the `node_express` emitter

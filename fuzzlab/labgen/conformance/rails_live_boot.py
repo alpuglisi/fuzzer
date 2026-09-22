@@ -344,31 +344,93 @@ class RailsLiveBootHarness:
         assert self._port is not None
         return f"http://127.0.0.1:{self._port}"
 
-    def request(self, method: str, path: str, *, params: dict[str, str] | None = None,
-                data: dict[str, str] | None = None) -> HttpResponse:
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+        data: dict[str, str] | None = None,
+        raw_body: bytes | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> HttpResponse:
         """A real HTTP request against the booted app, via the standard
         library only (no new HTTP client abstraction) -- mirrors
         ``LiveBootHarness.request`` exactly, including never following a
-        redirect (``BUG-0028``'s lesson, applied here from the start)."""
+        redirect (``BUG-0028``'s lesson, applied here from the start).
+
+        ``raw_body``/``headers`` (CC-LAB-0072, webhook-signature) let a
+        caller send exact, unencoded bytes with caller-chosen headers --
+        e.g. a real ``X-Shopify-Hmac-SHA256`` header computed over the
+        exact bytes about to be sent, which ``data``'s own
+        ``application/x-www-form-urlencoded`` encoding would otherwise
+        silently re-encode out from under a caller trying to forge one.
+        Mutually exclusive with ``data`` -- a caller sends one request body
+        shape, never both encoded onto the same request."""
         import urllib.parse
 
+        if raw_body is not None and data is not None:
+            raise ValueError("RailsLiveBootHarness.request: pass raw_body or data, never both")
+
         url = self._base_url() + path
-        body: bytes | None = None
-        headers = {}
+        body: bytes | None = raw_body
+        request_headers: dict[str, str] = dict(headers) if headers else {}
         if params:
             url += "?" + urllib.parse.urlencode(params)
         if data is not None:
             body = urllib.parse.urlencode(data).encode("utf-8")
-            headers["Content-Type"] = "application/x-www-form-urlencoded"
-        req = urllib.request.Request(url, data=body, method=method.upper(), headers=headers)
+            request_headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
+        req = urllib.request.Request(url, data=body, method=method.upper(), headers=request_headers)
         with _NO_REDIRECT_OPENER.open(req, timeout=REQUEST_TIMEOUT_S) as resp:
             return HttpResponse(status=resp.status, body=resp.read().decode("utf-8", errors="replace"))
 
     def get(self, path: str, *, params: dict[str, str] | None = None) -> HttpResponse:
         return self.request("GET", path, params=params)
 
-    def post(self, path: str, *, data: dict[str, str] | None = None) -> HttpResponse:
-        return self.request("POST", path, data=data)
+    def post(
+        self,
+        path: str,
+        *,
+        data: dict[str, str] | None = None,
+        raw_body: bytes | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> HttpResponse:
+        return self.request("POST", path, data=data, raw_body=raw_body, headers=headers)
+
+    def patch(
+        self,
+        path: str,
+        *,
+        data: dict[str, str] | None = None,
+    ) -> HttpResponse:
+        return self.request("PATCH", path, data=data)
+
+    def run_ruby(self, code: str, *, timeout: float = 30.0) -> subprocess.CompletedProcess:
+        """Run a real, standalone Ruby script (``bundle exec ruby``) inside
+        this harness's already-``bundle install``-ed app directory --
+        CC-LAB-0072's webhook-signature timing microbenchmark uses this to
+        exercise the exact real ``ActiveSupport::SecurityUtils.secure_compare``
+        this app's own ``Gemfile.lock`` resolved, without a second, separate
+        ``bundle install`` round trip. Must be called after :meth:`build`
+        (or inside the ``with`` block) -- raises :class:`RailsLiveBootError`
+        if the app is not yet assembled/installed, the same "never silently
+        proceed against a directory that is not there" discipline every
+        other real subprocess step in this module follows."""
+        if self._app_dir is None:
+            raise RailsLiveBootError("run_ruby called before build() assembled the app")
+        import uuid
+
+        script = self._app_dir / f"tmp_probe_{uuid.uuid4().hex}.rb"
+        script.write_text(code, encoding="utf-8")
+        try:
+            return _run(
+                ["bundle", "exec", "ruby", str(script)],
+                cwd=self._app_dir,
+                timeout=timeout,
+                env=self._harness_env(),
+            )
+        finally:
+            script.unlink(missing_ok=True)
 
     # -- Tier1Client conformance -----------------------------------------------
 

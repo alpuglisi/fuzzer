@@ -1,0 +1,11 @@
+# Real Psych deserialization: {{ deserialize_method }} decides whether an
+# attacker-supplied `!ruby/object:...` tag is honored (unsafe_load) or
+# rejected (safe_load). The sink reports which Ruby class the parsed value
+# actually became -- or which exception Psych raised -- so the vulnerable/
+# secure divergence is directly observable in the response.
+begin
+  parsed = YAML.{{ deserialize_method }}({{ var_name }})
+  render json: { ok: true, parsed_class: parsed.class.name }
+rescue => e
+  render json: { ok: false, error: e.class.name }
+end

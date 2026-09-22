@@ -1,0 +1,5 @@
+# permit_bang_unrestricted: every key in {{ var_name }} is accepted,
+# including any field this endpoint never intended to expose (Rails' own
+# unrestricted strong-parameters escape hatch). Safety matrix:
+# effect=no_effect.
+{{ var_name }} = {{ var_name }}.permit!

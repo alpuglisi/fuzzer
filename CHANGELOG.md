@@ -13,6 +13,29 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- LAB (`claude/second-target-cat1-ecommerce`): `ruby_rails` Phase B — the
+  three real, Shopify-grounded vulnerability modules
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a's "Decided" block
+  names, all built as real, rendering, live-boot-tested minimal pairs:
+  webhook-signature verification (naive `==` vs Rails'
+  `ActiveSupport::SecurityUtils.secure_compare`, `CC-LAB-0072`/`FR-LAB-66`
+  — first implementation of the existing `webhook_signature_verification`
+  sink family in any stack, plus a real, isolated Ruby timing microbenchmark
+  proving the actual timing-safety divergence, not just functional parity),
+  CWE-915 mass assignment (Rails' `permit!` vs an explicit
+  `permit(:username, :bio)` allowlist against the checked-in `users` table,
+  `CC-LAB-0073`/`FR-LAB-67` — first Ruby-idiomatic instance of the existing
+  `orm_entity_bulk_assign` family, with a new migration adding the `role`
+  column the pair needs), and CWE-502 insecure deserialization
+  (`YAML.unsafe_load` vs `YAML.safe_load`, `CC-LAB-0074`/`FR-LAB-68` — first
+  implementation of the existing `object_deserialization` family in any
+  stack, real `!ruby/object:OpenStruct` payload actually constructed under
+  `unsafe_load`, rejected `Psych::DisallowedClass` under `safe_load`).
+  Shared harness/tooling this required (`RailsLiveBootHarness`
+  `raw_body`/`headers`/`run_ruby`, `tier0.lint_ruby`,
+  `application_controller.rb`'s `skip_forgery_protection`) tracked under
+  `CC-LAB-0075`. Every pair proved with a real, executed HTTP round trip
+  against a real booted Rails app — no simulated verdicts.
 - LAB/FUZZ (`claude/second-target-cat1-ecommerce`): CWE-1333 (ReDoS)
   vulnerable/secure pair for `node_express` (`unescaped_regex_construct` vs.
   `regex_escape_construct`, `regex_highlight_match` sink family, a search/

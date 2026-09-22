@@ -540,7 +540,7 @@ one's own pilot:
 
 | # | Category | Status | Sites picked (stack) | New stack(s) needed | Branch | Bookkeeping block reserved | Notes |
 |---|---|---|---|---|---|---|---|
-| 1 | E-commerce/marketplaces | **Piloting — CWE selection done (§9.4a); Walmart/Node cells 2 of 2 landed (CC-LAB-0070 CWE-1321 prototype pollution; CC-LAB-0076 CWE-1333 ReDoS, plus its own M1 timing-differential oracle mechanism, CC-FUZZ-0025); Rails Phase A (skeleton + live-boot harness) landed (CC-LAB-0071); Rails Phase B (webhook-signature/CWE-915/CWE-502 modules) in progress by a concurrent lane on this same branch, not yet landed as of this row's edit; next: wire node_express + the new oracle strategy into multitarget.py, finish Rails Phase B, Phase C page design** | Shopify (Ruby on Rails); Walmart (Node/Express — reuses existing) | Ruby on Rails | `claude/second-target-cat1-ecommerce` | `CC-LAB-0070`-`0071`, `0076` used (ReDoS lane, `0072`-`0075`/`0077`-`0089` left for the concurrent Rails lane per its own pre-assigned/reserved block — see that lane's own commits for its actual numbers); `CC-FUZZ-0025`/`FR-FUZZ-12` used in the FUZZ component for the new oracle mechanism | See §9.4a for full detail (site-pair rationale, functionality findings, CWE shortlists, breadth ranking). |
+| 1 | E-commerce/marketplaces | **Piloting — CWE selection done (§9.4a); Walmart/Node cells 2 of 2 landed (CC-LAB-0070 CWE-1321 prototype pollution; CC-LAB-0076 CWE-1333 ReDoS, plus its own M1 timing-differential oracle mechanism, CC-FUZZ-0025); Rails Phase A (skeleton + live-boot harness) landed (CC-LAB-0071); Rails Phase B all 3 cells landed (CC-LAB-0072 webhook-signature, CC-LAB-0073 CWE-915 mass assignment, CC-LAB-0074 CWE-502 insecure deserialization, shared infra CC-LAB-0075) — both apps' full cell lists (3 Rails + 2 Node) are now built and proven end to end; next: wire node_express + ruby_rails + the new oracle strategy into multitarget.py, Phase C page design** | Shopify (Ruby on Rails); Walmart (Node/Express — reuses existing) | Ruby on Rails | `claude/second-target-cat1-ecommerce` | `CC-LAB-0070`-`0076` used (`0072`-`0075` used by this Rails Phase B lane exactly as pre-assigned; `0077`-`0089` still free); `CC-FUZZ-0025`/`FR-FUZZ-12` used in the FUZZ component for the new oracle mechanism | See §9.4a for full detail (site-pair rationale, functionality findings, CWE shortlists, breadth ranking). |
 | 2 | Social / UGC platforms | Not started | — | Likely Python/Django (Instagram) is the strongest new-stack candidate; Facebook (PHP/Hack+HHVM) may or may not warrant a *new* stack vs. reusing `php_laravel`/`php_current` as an approximation — this is exactly the kind of call §9.1 asks the picking session to make and record, not this table to pre-decide. Discord flagged in §9.1 step 1 as likely excluded (realtime/Elixir, not a request/response fit). YouTube likely excluded (Google-internal infra, no portable app-language claim). | — | — | Open for another session to pick up. |
 | 3 | SaaS / productivity / collaboration | Not started | — | Candidates per the survey: Slack (PHP/Hack web tier + Java realtime — itself two stacks), Notion (sharded Postgres + Kafka, but no named app-framework/language beyond "engineering blog doesn't name one" — check before committing), Atlassian (Java/Kotlin+Spring, Node+Express, or Python — Atlassian itself uses 3 stacks, pick the one most distinct from what's already built), Microsoft 365/Teams (Node.js backend + React/TS front end), Google Workspace (OT + Spanner/Bigtable — confirmed at the algorithm/storage level, not at a portable app-framework level; may not be a sensible single-stack pick without further research). | — | — | Open. Flag: Google Workspace's confirmed detail is algorithmic/storage, not framework-level — whoever picks this category should research further (per the standing instruction to do more research if needed) before treating it as buildable, or should pick two of the other four sites instead. |
 | 4 | Media / streaming / content platforms | Not started | — | Candidates: Netflix (Java/Spring Boot + a Federated GraphQL gateway), Spotify (Java/Spring + Kafka), Twitch (Go, post-monolith-migration — genuinely distinct paradigm from the others), Disney+ (excluded per §9.1 step 1 — infrastructure-only, unconfirmed at application-code level). | — | — | Open. Twitch/Go vs. Netflix-or-Spotify/Java+Spring reads as the most architecturally distinct pair from the current research, but the picking session should verify against §9.1's full procedure rather than take this as decided. |
@@ -698,12 +698,12 @@ next steps, in order, per §9.1-§9.3's discipline:
    `RailsLiveBootHarness` (`fuzzlab/labgen/conformance/rails_live_boot.py`)
    proven end to end by a real, executed, passing test
    (`tests/test_labgen_ruby_rails_live_boot.py`, 1 passed, ~4.9s real
-   `bundle install` + migrate + boot + HTTP round trip). **Next (not yet
-   done):** Phase B — the actual Rails-idiom vulnerability modules this
-   section's own "Decided" block names (webhook-signature idiom, CWE-915,
-   CWE-502) against this harness, widening `RailsEmitter.
-   SUPPORTED_CONTEXT_DEPTHS`/`_MODULE_SET_BY_SHAPE` beyond the one Phase A
-   shape. In parallel: deepen `node_express`'s module inventory with the
+   `bundle install` + migrate + boot + HTTP round trip). **Phase B is now
+   also done** (`CC-LAB-0072`-`0075`/`FR-LAB-66`-`68`, 2026-09-22, see the
+   progress update below) — the actual Rails-idiom vulnerability modules
+   this section's own "Decided" block names (webhook-signature idiom,
+   CWE-915, CWE-502), widening `RailsEmitter._MODULE_SET_BY_SHAPE` from the
+   one Phase A shape to four. In parallel: deepen `node_express`'s module inventory with the
    two new Node cells (§3's Phase B, extended with the specific
    CWE-1321/1333 modules §9.4a names — these are additive to what §3
    originally scoped generically; CWE-1321 already done, see
@@ -740,3 +740,51 @@ wiring `node_express`/the new oracle strategy into `multitarget.py`, and
 running the oracle mechanism against a live target. The Rails skeleton
 (Phase A, `CC-LAB-0071`, done by a concurrent lane on this same branch) and
 Phase C page design remain the next work.
+
+**Progress update (2026-09-22, Rails Phase B lane):** all 3 Shopify/Rails
+cells §9.4a's "Decided" block names are now **done**, built against the
+Phase A skeleton/harness by a concurrent lane on this same branch --
+`RailsEmitter._MODULE_SET_BY_SHAPE` widened from the one Phase A shape to
+four:
+
+- Webhook-signature verification (`CC-LAB-0072`/`FR-LAB-66`): a real
+  naive-`==`-vs-`ActiveSupport::SecurityUtils.secure_compare` pair over a
+  recomputed HMAC-SHA256, the first implementation of the existing
+  `webhook_signature_verification` sink family in any stack. Proved two
+  ways: a real HTTP round trip against both booted twins with a real
+  forged valid/tampered signature (both twins correctly accept/reject --
+  the vulnerability is a timing side channel, not a functional bypass, per
+  D20's own `partial` framing), and a real, isolated Ruby timing
+  microbenchmark (`RailsLiveBootHarness.run_ruby`) showing plain `==`'s
+  early-vs-late mismatch timing ratio at ~4.8x vs. `secure_compare`'s own
+  ~1.02x, executed against the real `activesupport` gem this app's own
+  `Gemfile.lock` resolved.
+- CWE-915 mass assignment (`CC-LAB-0073`/`FR-LAB-67`): Rails' own
+  unrestricted `permit!` vs. an explicit `permit(:username, :bio)`
+  strong-parameters allowlist, against the checked-in `users` table (a new
+  migration adds the one privilege-relevant `role` column the pair needs).
+  Proved with a real HTTP PATCH against each booted twin: the vulnerable
+  twin's real ActiveRecord write lets an attacker also set `role`; the
+  secure twin's real write silently drops it.
+- CWE-502 insecure deserialization (`CC-LAB-0074`/`FR-LAB-68`):
+  `YAML.unsafe_load` vs. `YAML.safe_load`, the first implementation of the
+  existing `object_deserialization` sink family in any stack. Proved with
+  a real HTTP POST carrying a `!ruby/object:OpenStruct` YAML payload: the
+  vulnerable twin's real response reports a real `OpenStruct` was
+  constructed server-side; the secure twin's real response reports
+  `Psych::DisallowedClass` instead.
+
+Shared harness/tooling this required (`RailsLiveBootHarness`
+`raw_body`/`headers`/`run_ruby`, `tier0.lint_ruby`, `application_controller
+.rb`'s `skip_forgery_protection`) tracked under `CC-LAB-0075`/`FR-LAB-66`-
+`68` (cross-referenced). All three pairs derive their expected verdict,
+`ruby -c` lint clean, regenerate byte-identically (Tier 3), and pass their
+real live-boot proofs with no observed flakiness across repeated runs --
+see `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0072`-
+`0075` entries for full detail. Both Shopify/Rails and Walmart/Node app
+cell lists §9.4a's "Decided" block named are therefore now fully built.
+**Not done here** (explicitly out of this lane's scope, per its own
+dispatch instructions): wiring `ruby_rails`/`node_express`/the ReDoS
+oracle strategy into `multitarget.py`; Phase C page design/identity for
+either app; the deferred `order`/`pluck` identifier-position SQLi variant
+§9.4a flags as a follow-up increment, not part of this pilot's first pass.

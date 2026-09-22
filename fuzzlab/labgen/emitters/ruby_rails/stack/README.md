@@ -89,3 +89,25 @@ PHPUnit stubs.
 **Scope**: this skeleton is a test-harness / conformance-check asset, per
 this dispatch's own explicit boundary (Phase A only) -- it is not wired into
 `lab/compose.yaml`/`deploy.sh`, and `lab/safety_matrix.yaml` is untouched.
+
+## Phase B additions (`CC-LAB-0072`..`CC-LAB-0075`, 2026-09-22)
+
+Two real, additive changes on top of the Phase A skeleton above, needed by
+the three Rails-idiom vulnerability modules this phase built (see
+`docs/components/01-target-lab/change-control.md`'s `CC-LAB-0072`..`0075`
+entries for full detail):
+
+- `db/migrate/20260922000001_add_role_to_users.rb` -- adds the one
+  privilege-relevant column (`role`) the CWE-915 mass-assignment pair
+  needs (Phase A's own `users` migration deliberately carried none yet),
+  and seeds one real `shopper1` row via the migration's own `up` block --
+  this stack's per-run-SQLite analogue of `php_laravel`'s own
+  `LiveBootHarness`-side `REAL_SCHEMA_SQL` seed, since a Rails migration
+  has no separate fixture-loading step of its own to reuse instead.
+- `app/controllers/application_controller.rb` now also has
+  `skip_forgery_protection` (every Phase B cell is a non-GET write
+  endpoint a real HTTP client hits directly, with no browser CSRF-token
+  round trip of its own) and `require "ostruct"` (so a
+  `!ruby/object:OpenStruct` YAML tag is loadable at all under the CWE-502
+  cell's vulnerable twin -- required globally since requiring a stdlib
+  class is not itself the vulnerability).

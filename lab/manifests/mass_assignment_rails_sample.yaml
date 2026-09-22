@@ -1,0 +1,37 @@
+# Mass-assignment sample manifest (CC-LAB-0073), ruby_rails.
+#
+# First Ruby/Rails-idiomatic instance of the existing `orm_entity_bulk_assign`
+# sink family (lab/safety_matrix.yaml, previously implemented only by
+# php_laravel's `DB::table(...)->update($fields)` twin). Mirrors a Shopify
+# merchant/customer profile-update endpoint
+# (docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §9.4a's "Decided" block):
+# a PATCH against the checked-in `users` table, whose one privilege-relevant
+# column (`role`) a legitimate profile-update form never exposes.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: `params.require(:user).permit!` accepts every key the
+  # client sent inside the nested `user` root, including `role` -- no
+  # allowlist stands between the request body and the ActiveRecord write.
+  - cell_id: LABGEN-RR-0004
+    class: mass_assignment
+    stack_profile: ruby_rails
+    route: { method: PATCH, path: /cell/labgen_rr_0004 }
+    sink_context:
+      family: orm_entity_bulk_assign
+      required_neutralizations: [mass_assignment]
+    transform: [permit_bang_unrestricted]
+
+  # Secure twin: the only difference is the transform region
+  # (strong_params_explicit_allowlist instead of permit_bang_unrestricted)
+  # -- the minimal-pair invariant. Only `username`/`bio` ever reach the
+  # write; a `role` key the request carries is silently dropped by Rails'
+  # own strong-parameters `permit(:username, :bio)` before `update!` runs.
+  - cell_id: LABGEN-RR-0005
+    class: mass_assignment
+    stack_profile: ruby_rails
+    route: { method: PATCH, path: /cell/labgen_rr_0005 }
+    sink_context:
+      family: orm_entity_bulk_assign
+      required_neutralizations: [mass_assignment]
+    transform: [strong_params_explicit_allowlist]

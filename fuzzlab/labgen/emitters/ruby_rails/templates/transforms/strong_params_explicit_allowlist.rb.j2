@@ -1,0 +1,6 @@
+# strong_params_explicit_allowlist: {{ var_name }} is filtered down to only
+# the keys in a fixed, endpoint-owned allowlist ({{ allowed_fields_rb }}) via
+# Rails' strong-parameters `permit(...)`, before it reaches the sink -- any
+# other key the client sent is silently dropped here, never written. Safety
+# matrix: effect=neutralises, neutralizes: [mass_assignment].
+{{ var_name }} = {{ var_name }}.permit({{ allowed_fields_rb }})

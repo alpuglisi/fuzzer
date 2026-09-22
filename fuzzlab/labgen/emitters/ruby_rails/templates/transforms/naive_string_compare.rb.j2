@@ -1,0 +1,5 @@
+# naive_string_compare: flags the sink to compare the computed and provided
+# HMAC digests with plain `==`, which short-circuits on the first mismatched
+# byte -- a timing side channel, not a correctness bypass for a well-formed
+# forged signature. Safety matrix: effect=partial, neutralizes:
+# [weak_signature_comparison].

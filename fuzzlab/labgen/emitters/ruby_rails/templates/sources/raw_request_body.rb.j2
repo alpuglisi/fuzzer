@@ -1,0 +1,4 @@
+# Raw HTTP request body bytes -> local variable. A webhook-signature check
+# must recompute its HMAC over these exact raw bytes, never a re-serialized/
+# re-parsed form (order/whitespace-sensitive).
+{{ var_name }} = request.body.read
