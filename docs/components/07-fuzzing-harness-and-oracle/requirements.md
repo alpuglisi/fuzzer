@@ -69,14 +69,18 @@ rewards) derives from it.
   excluded from scope; no traffic off localhost.
 - **NFR-FUZZ-labeled-output** Emits labeled results (e.g. CSV) with opaque case IDs
   for benchmarking and ML training (D9, D10).
-- **NFR-FUZZ-dry-run** `fuzzlab fuzz` and `fuzzlab auto` accept `--dry-run`: plans
-  and prints the exact argv/command that would run and sends nothing (no probe,
-  no oracle confirmation), for headless use outside the web UI. Bypasses the
-  `--authorized` gate for the preview itself (nothing is sent either way), and
-  reuses the web launcher's dry-run plan/report logic
+- **NFR-FUZZ-dry-run** `fuzzlab fuzz`, `fuzzlab auto`, and `fuzzlab greybox-run`
+  accept `--dry-run`: plans and prints the exact argv/command that would run and
+  sends nothing (no probe, no oracle confirmation, no coverage/DB-fault side-channel
+  read, no `Store`/CA/sender construction), for headless use outside the web UI.
+  Bypasses the `--authorized` gate for the preview itself (nothing is sent either
+  way), and reuses the web launcher's dry-run plan/report logic
   (`fuzzlab/web/commandspec.py` + `fuzzlab/web/runner.py`) via the shared
-  `fuzzlab/cli_dryrun.py` helper. `fuzzlab greybox-run` is out of scope for this
-  requirement — its `--dry-run` is a separate, later change (D0b).
+  `fuzzlab/cli_dryrun.py` helper. `fuzz`/`auto` were added by `CC-FUZZ-0020` (lane
+  D0a); `greybox-run` — including the `--mutation-variants`/
+  `--max-mutation-variants`/`--allow-destructive` flags `CC-FUZZ-0019` (Lane
+  C1/M8-wiring) added — was added by `CC-FUZZ-0022` (lane D0b), sequenced after
+  C1 since both touch `fuzzlab/greybox/greybox_cli.py`.
 
 ## 5. Interfaces and data contracts
 Reads `candidate` rows (and scheduler choices); writes `attempt` rows (features,
