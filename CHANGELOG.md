@@ -14,6 +14,17 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- SCHED (`CC-SCHED-0005`, `FR-SCHED-9`, build lane B0-bandit-emitter): wired the
+  bandit loop into B0's `metric_series` sink (`CC-CORE-0018`) — `ThompsonBandit.
+  attach_metrics`/`flush_metrics` (`fuzzlab/scheduler/bandit.py`) emit
+  `regret/cumulative` and `posterior/arm_<N>/mean` under `source="bandit"` on
+  every `update()` pull, via `MetricLogger`; `fuzzlab auto --bandit`
+  (`fuzzlab/harness/auto_cli.py`) attaches/flushes it around the run. Purely
+  additive/observational (no `attach_metrics` call = unchanged selection/posterior
+  behavior); unblocks R-05's bandit cumulative-regret + per-arm posterior-mean
+  diagnostics panel. Tests: `tests/test_scheduler.py` (unit) +
+  `tests/test_auto.py::test_run_auto_with_bandit_emits_metric_series`
+  (end-to-end via `run_auto`).
 - MUT (`CC-MUT-0011`, `FR-MUT-8`, B0 emitters sub-lane): `MutationSearch` now
   optionally emits its per-step reward/novelty signal into the `metric_series`
   table (`source="mutation"`) via B0's `MetricLogger`/`log_scalar`

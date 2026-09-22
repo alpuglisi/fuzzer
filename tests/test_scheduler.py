@@ -2,7 +2,7 @@
 
 import random
 
-from fuzzlab.core.store import Store
+from fuzzlab.core.store import MetricLogger, Store
 from fuzzlab.scheduler import Beta, ThompsonBandit, UniformScheduler
 
 
@@ -136,3 +136,84 @@ def test_uniform_selects_from_arms_and_ignores_feedback():
     picks = {u.select("ctx", ["a", "b"]) for _ in range(20)}
     assert picks <= {"a", "b"} and picks                      # only valid arms
     u.update("ctx", "a", 1.0)                                 # no-op, no crash
+
+
+# --- per-pull metric emission (CC-SCHED-0005, R-05) ------------------------
+
+def test_update_with_no_metrics_attached_is_unchanged():
+    # Default behavior (no attach_metrics call): update() works exactly as before.
+    b = ThompsonBandit(rng=random.Random(0))
+    b.update("ctx", "a", 1.0)
+    b.flush_metrics()                       # no-op, does not raise with nothing attached
+    assert b.mean("ctx", "a") == 2.0 / 3.0
+
+
+def test_attach_metrics_emits_regret_and_posterior_rows(tmp_path):
+    with Store(tmp_path / "m.db") as store:
+        run_id = store.start_run("test", "cfg")
+        bandit = ThompsonBandit(rng=random.Random(0))
+        bandit.attach_metrics(MetricLogger(store, run_id, "bandit", flush_every=200))
+
+        bandit.update("ctx", "good", 1.0)
+        bandit.update("ctx", "bad", 0.0)
+        bandit.update("ctx", "good", 1.0)
+        bandit.flush_metrics()
+
+        rows = store.conn.execute(
+            "SELECT source, key, step, value FROM metric_series "
+            "WHERE run_id=? ORDER BY key, step", (run_id,)).fetchall()
+
+    keys = {r["key"] for r in rows}
+    assert all(r["source"] == "bandit" for r in rows)
+    assert "regret/cumulative" in keys
+    # One arm_<N> series per distinct arm played, first-seen order (good=0, bad=1).
+    assert "posterior/arm_0/mean" in keys
+    assert "posterior/arm_1/mean" in keys
+
+    regret_rows = [r for r in rows if r["key"] == "regret/cumulative"]
+    assert [r["step"] for r in regret_rows] == [1, 2, 3]
+    # Cumulative regret is non-decreasing (each pull adds a non-negative term).
+    values = [r["value"] for r in regret_rows]
+    assert values == sorted(values)
+
+    good_rows = [r for r in rows if r["key"] == "posterior/arm_0/mean"]
+    # Two pulls of "good" recorded (steps 1 and 3); posterior mean rises with reward.
+    assert [r["step"] for r in good_rows] == [1, 3]
+    assert good_rows[1]["value"] > good_rows[0]["value"]
+
+
+def test_attach_metrics_does_not_change_selection_or_posteriors():
+    # Emission is observational-only: same seed => same posteriors/selections with
+    # or without a logger attached.
+    plain = ThompsonBandit(rng=random.Random(7))
+    for _ in range(10):
+        plain.update("ctx", "a", 1.0)
+        plain.update("ctx", "b", 0.0)
+
+    with_metrics = ThompsonBandit(rng=random.Random(7))
+    with_metrics.attach_metrics(_fake_logger())
+    for _ in range(10):
+        with_metrics.update("ctx", "a", 1.0)
+        with_metrics.update("ctx", "b", 0.0)
+
+    assert plain.mean("ctx", "a") == with_metrics.mean("ctx", "a")
+    assert plain.mean("ctx", "b") == with_metrics.mean("ctx", "b")
+    assert plain.select("ctx", ["a", "b"]) == with_metrics.select("ctx", ["a", "b"])
+
+
+def _fake_logger():
+    """A minimal stand-in with the ``log``/``flush`` surface MetricLogger exposes,
+    so this test doesn't need a real Store just to prove emission is side-effect-free
+    on the bandit's own state."""
+    class _Fake:
+        def __init__(self):
+            self.rows = []
+
+        def log(self, key, step, value, ts=None):
+            self.rows.append((key, step, value))
+            return True
+
+        def flush(self):
+            pass
+
+    return _Fake()

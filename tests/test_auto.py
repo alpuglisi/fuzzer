@@ -206,6 +206,36 @@ def test_run_auto_with_bandit_learns_and_persists(tmp_path):
         assert n > 0
 
 
+def test_run_auto_with_bandit_emits_metric_series(tmp_path):
+    """CC-SCHED-0005: with a MetricLogger attached (the `fuzzlab auto --bandit` wiring
+    in auto_cli.py), each bandit pull made while confirming candidates in a real
+    run_auto() pass lands regret/cumulative + posterior/arm_<N>/mean rows in
+    metric_series under source="bandit"."""
+    from fuzzlab.core.store import MetricLogger
+    from fuzzlab.oracle.strategies import default_strategies
+    from fuzzlab.scheduler import ThompsonBandit, arm_priors
+
+    gt = contract.load(GT_DIR)
+    bandit = ThompsonBandit(priors=arm_priors(default_strategies()))
+    with Store(tmp_path / "u.db") as store:
+        run_id = store.start_run("auto", "h")
+        _seed_crawl(store, run_id)
+        bandit.attach_metrics(MetricLogger(store, run_id, "bandit", flush_every=200))
+        run_auto(base_url="http://localhost", store=store, run_id=run_id,
+                 sender=AutoSender(), mode="automatic", ground_truth=gt,
+                 points_source="crawl", scheduler=bandit)
+        bandit.flush_metrics()
+
+        rows = store.conn.execute(
+            "SELECT source, key FROM metric_series WHERE run_id=?", (run_id,)).fetchall()
+
+    assert rows                                           # at least one bandit pull happened
+    assert all(r["source"] == "bandit" for r in rows)
+    keys = {r["key"] for r in rows}
+    assert "regret/cumulative" in keys
+    assert any(k.startswith("posterior/arm_") and k.endswith("/mean") for k in keys)
+
+
 def test_run_auto_no_ground_truth_requires_categories(tmp_path):
     with Store(tmp_path / "u.db") as store:
         run_id = store.start_run("auto", "h")
