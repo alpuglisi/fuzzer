@@ -45,12 +45,19 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Disable CONNECT/TLS interception (plain-HTTP proxy only)")
     p.add_argument("--authorized", action="store_true",
                    help="Required to run the proxy (it forwards traffic to upstreams)")
+    from fuzzlab.cli_dryrun import add_dry_run_flag
+    add_dry_run_flag(p)
     return p
 
 
 def main(argv: list[str]) -> int:
     p = build_parser()
     args = p.parse_args(argv)
+
+    if args.dry_run:
+        from fuzzlab.cli_dryrun import report
+        report("proxy", args)
+        return 0
 
     ca = LocalCA(args.ca_dir)
 

@@ -227,6 +227,8 @@ def build_parser():
                    help="Authenticate as this identity via the session manager "
                         "(needs saved credentials: `fuzzlab session set-credential`). "
                         "Omit to run unauthenticated.")
+    from fuzzlab.cli_dryrun import add_dry_run_flag
+    add_dry_run_flag(p)
     return p
 
 
@@ -236,6 +238,10 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
+    if args.dry_run:
+        from fuzzlab.cli_dryrun import report
+        report("fuzz", args)
+        return 0
     if not args.authorized:
         sys.exit("Refusing to run without --authorized. Only test systems you own or may test.")
 

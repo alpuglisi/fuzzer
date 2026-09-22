@@ -54,6 +54,11 @@ feedback and the scheduler.
 - **NFR-MUT-bounded** Search is budget-bounded and reproducible under a fixed seed.
 - **NFR-MUT-offline** The LLM expansion path is offline and gated; nothing is sent
   to an external service without explicit opt-in.
+- **NFR-MUT-dry-run** `fuzzlab mutate-run` accepts `--dry-run`: plans and prints
+  the exact argv/command it would run and sends nothing (no payload/probe), for
+  headless use outside the web UI. Reuses the web launcher's dry-run plan/report
+  logic (`fuzzlab/web/commandspec.py` + `fuzzlab/web/runner.py`) via the shared
+  `fuzzlab/cli_dryrun.py` helper.
 
 ## 5. Interfaces and data contracts
 Reads catalog payloads and canary/filter observations; reads coverage signals and

@@ -3,6 +3,30 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0015 — `--dry-run` CLI flag (lane D0a) (2026-09-22)
+- Change: `fuzzlab/tools/fetcher.py::build_parser()` gained `--dry-run` (via the
+  shared `fuzzlab/cli_dryrun.add_dry_run_flag()`). The module's `__main__` block
+  checks `args.dry_run` first: if set, it calls `fuzzlab/cli_dryrun.report("audit",
+  args)` — reusing the web launcher's existing dry-run plan/report logic
+  (`fuzzlab/web/commandspec.spec()` + `fuzzlab/web/runner.build_argv()`/
+  `display_command()`, CC-UI-0013/0015) — and exits 0 before `load_urls`/
+  `load_indicators`/`ContentFetcher` run. No probe is sent. Unchanged when
+  `--dry-run` is absent.
+- Impact (other components / project): AUD only, plus an incidental UI effect — see
+  CC-UI-0027 (the introspected `build_parser()` surfaces the new checkbox in the web
+  launcher automatically; `fuzzlab/web/app.py` untouched). No schema/store change.
+- Risk (level; mitigation): low — additive flag, short-circuits before any side
+  effect. Mitigated by `tests/test_cli_dry_run.py` (audit cases: flag present, report
+  printed, `load_urls`/`load_indicators` patched to raise if called) and the
+  unchanged full suite otherwise.
+- Deliverables:
+  - [x] `--dry-run` on `audit`'s parser — done.
+  - [x] Short-circuit in `__main__` calling the shared `cli_dryrun.report()` — done.
+  - [x] Tests confirming the plan is reported and nothing runs — done.
+- Effectiveness (assessed 2026-09-22): effective — `fuzzlab audit --dry-run` prints
+  the planned argv/command and exits 0 without loading any DB or fetching anything;
+  verified directly and via the new tests.
+
 ### CC-AUD-0014 — Expose `build_parser()` for the command-spec registry (2026-09-21)
 - Change: `fuzzlab/tools/fetcher.py` now factors its argparse setup into `build_parser()`;
   `parse_args()` delegates to it. Added `prog="fuzzlab audit"` for accurate usage.

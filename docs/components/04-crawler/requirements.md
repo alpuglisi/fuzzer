@@ -36,6 +36,11 @@ fuzzer.
   spaces.
 - **NFR-CRAWL-reproducible** Record a crawl manifest (URL → template →
   discovered-from) so runs can be diffed.
+- **NFR-CRAWL-dry-run** `fuzzlab crawl` accepts `--dry-run`: plans and prints the
+  exact argv/command it would run and sends nothing (no request is made), for
+  headless use outside the web UI. Reuses the web launcher's dry-run plan/report
+  logic (`fuzzlab/web/commandspec.py` + `fuzzlab/web/runner.py`) via the shared
+  `fuzzlab/cli_dryrun.py` helper, rather than a separate implementation.
 
 ## 5. Interfaces and data contracts
 Writes `page`, `endpoint`, and `parameter` rows (with a `source` of link vs xhr).

@@ -3,6 +3,34 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0017 — `--dry-run` CLI flag (lane D0a) (2026-09-22)
+- Change: `fuzzlab/proxy/cli.py::build_parser()` gained `--dry-run` (via the shared
+  `fuzzlab/cli_dryrun.add_dry_run_flag()`). `main()` checks `args.dry_run` first —
+  before `LocalCA` is constructed, before the `--export-ca` branch, and before the
+  `--authorized` gate — and calls `fuzzlab/cli_dryrun.report("proxy", args)`, reusing
+  the web launcher's existing dry-run plan/report logic
+  (`fuzzlab/web/commandspec.spec()` + `fuzzlab/web/runner.build_argv()`/
+  `display_command()`, CC-UI-0013/0015), then returns 0. No listener is started, no
+  CA file is written, and no upstream traffic is sent. `--dry-run` takes priority
+  over `--export-ca` (both send no traffic, but `--export-ca` still writes files;
+  `--dry-run` performs neither). Unchanged when `--dry-run` is absent.
+- Impact (other components / project): PROXY only, plus an incidental UI effect —
+  see CC-UI-0027 (introspected `build_parser()` surfaces the new checkbox in the web
+  launcher automatically; `fuzzlab/web/app.py` untouched). No schema/store change.
+- Risk (level; mitigation): low — additive flag, short-circuits before any side
+  effect (including the `--export-ca` file write). Mitigated by
+  `tests/test_cli_dry_run.py` (proxy case: flag present, report printed, `LocalCA`/
+  `SocketSender`/`asyncio.run` patched to raise if called) and the unchanged full
+  suite otherwise.
+- Deliverables:
+  - [x] `--dry-run` on `proxy`'s parser — done.
+  - [x] Short-circuit ahead of `LocalCA`/`--export-ca`/`--authorized` in `main()`,
+    calling the shared `cli_dryrun.report()` — done.
+  - [x] Tests confirming the plan is reported and nothing runs — done.
+- Effectiveness (assessed 2026-09-22): effective — `fuzzlab proxy --dry-run` prints
+  the planned argv/command and returns 0 without creating a CA, opening a listener,
+  or sending any traffic; verified directly and via the new tests.
+
 ### CC-PROXY-0016 — Fix (BUG-0021): `RepeaterController` per-thread SQLite connection (2026-09-21)
 - Change: `fuzzlab/web/proxycontrol.py::RepeaterController` no longer caches one shared
   `Store`/`Repeater` on `self`. It now keeps them per calling OS thread
