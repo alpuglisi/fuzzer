@@ -14,6 +14,19 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Research: Phase 2 corpus collection for the "file handling" feature row
+  (priority 9, row 4) of `docs/VULN_CORPUS_EXPANSION_PLAN.md` — added
+  `docs/research/corpus-examples/file-handling/{php,node,python}/` with
+  12 real, license-triaged, commit-pinned examples (4 per language, two
+  matched vulnerable/idiomatic pairs each: an upload handler with no/weak
+  extension check vs. an allowlist+content-type check, and a download/serve
+  endpoint with an unconfined user-supplied path vs. a realpath/allowlist-
+  confined one) covering CWE-434 unrestricted upload and CWE-22 path
+  traversal. `gitleaks` scanned every copied file (no leaks; one unrelated
+  hardcoded demo credential found by manual read in a source file's
+  unrelated config block was excluded from the excerpt rather than copied
+  in and redacted). Reference/staging only, not read by lab generation per
+  the plan's validation gate.
 - Research: Phase 2 corpus collection for the "e-commerce (cart/checkout/
   payment/coupons, incl. billing/invoicing/subscriptions)" feature row
   (priority 9, row 6) of `docs/VULN_CORPUS_EXPANSION_PLAN.md` — added

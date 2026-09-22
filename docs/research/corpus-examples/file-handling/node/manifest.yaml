@@ -1,0 +1,57 @@
+# Phase 2 corpus cell: file-handling / node
+# Sub-shapes collected (per assignment):
+#   (a) upload handler: no/weak extension check (multer, no fileFilter) vs.
+#       allowlist+content-type check (multer fileFilter)
+#   (b) download/serve endpoint: unconfined path-from-user-input vs.
+#       validated/confined path
+#
+# Pairing status: both sub-shapes are fully paired (vulnerable + idiomatic
+# each) -- not half-populated.
+
+- file: vulnerable-1.js
+  role: vulnerable
+  repo: g0v/wiselike
+  commit_sha: 592900090ecc7320b79d36289fec9dc808ccb4e6
+  license: CC0-1.0
+  license_note: "Public-domain-equivalent dedication; no attribution required, still recorded for provenance."
+  pattern: "unrestricted upload: multer.diskStorage() configured with no fileFilter option at all, and the destination multer() instance built from it also has no fileFilter -- any content-type/extension is accepted and written under the client-supplied file.originalname"
+  notes: "avatar-upload route (`/users/:user/avatar`) in a real Discourse-SSO-integrated Node/Express backend. This is the (a)-vulnerable sub-shape's clearest real-world illustration found: literally zero validation options passed to multer()."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-1.js
+  role: idiomatic
+  repo: Kelvi077/Ecommerce-Website-Template-FullStack
+  commit_sha: 1c593778dc7d94ac3e0de67212f8e2acaaedbfac
+  license: MIT
+  license_copyright: "Copyright (c) 2025 Kelvi"
+  pattern: "allowlist + content-type check: multer's fileFilter rejects anything whose mimetype doesn't start with 'image/', and the storage filename callback additionally sanitizes file.originalname (path.basename + character allowlist regex) before deriving the extension used for the stored name"
+  notes: "excerpt of the multer storage/fileFilter setup from app.js (605 lines total); the source file's own inline comments ('SECURITY: ...') mark this as a deliberate hardening pass in the original commit history, which is exactly the (a)-idiomatic contrast to vulnerable-1.js's g0v/wiselike shape."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: vulnerable-2.js
+  role: vulnerable
+  repo: Tzahi12345/YoutubeDL-Material
+  commit_sha: 28234c0d4ba65059be18f3692f6f5e5b1170b1a6
+  license: MIT
+  license_copyright: "Copyright 2018 Isaac Grynsztein"
+  pattern: "path traversal / absolute-path bypass on download: req.params.path is decodeURIComponent()'d and, if path.isAbsolute() is true, passed straight to res.sendFile() with no confinement check at all; the relative branch does path.join(__dirname, file_path) which is also traversable via ../ segments"
+  notes: "`/api/thumbnail/:path` route in a popular real self-hosted video-downloader app (thousands of stars). Illustrates the (b)-vulnerable sub-shape's 'absolute path supplied by the client bypasses the intended base directory' variant, distinct from php's vulnerable-2.php plain-concat variant."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-2.js
+  role: idiomatic
+  repo: Aman9690/clash-config-editor
+  commit_sha: 064e7861ef8bd7918a38341a3113d5c317e0f131
+  license: MIT
+  license_copyright: "Copyright (c) 2025 小渔同学"
+  pattern: "confined download, double-checked: isValidFilename() first rejects any filename containing '..', a path separator, or an absolute-path form (plus a strict character allowlist regex), and the resolved fs.realpath() of the joined path is separately required to startsWith() the realpath() of the confining configDir before the file is read"
+  notes: "excerpt of the `/api/files/read/:filename` route from backend/server.js (505 lines total); chosen as the (b)-idiomatic counterpart because it layers a filename allowlist AND a realpath confinement check, the two most common real-world mitigations for this CWE-22 shape."
+  validated: false
+  validated_by: []
+  redacted: false

@@ -1,0 +1,57 @@
+# Phase 2 corpus cell: file-handling / python
+# Sub-shapes collected (per assignment):
+#   (a) upload handler: no/weak extension check (werkzeug-style, no allowlist
+#       actually enforced) vs. allowlist+content-type check (secure_filename)
+#   (b) download/serve endpoint: unconfined path-from-user-input vs.
+#       validated/confined path
+#
+# Pairing status: both sub-shapes are fully paired (vulnerable + idiomatic
+# each) -- not half-populated.
+
+- file: vulnerable-1.py
+  role: vulnerable
+  repo: kaushikjadhav01/COVID-19-Detection-Flask-App-based-on-Chest-X-rays-and-CT-Scans
+  commit_sha: 4487c14493d943709b5e660c98cad5b659c68faf
+  license: MIT
+  license_copyright: "Copyright (c) 2023 Kaushik Jadhav"
+  pattern: "weak/no extension check: an ALLOWED_EXTENSIONS allowlist is defined at module scope but never referenced/enforced by this route, and werkzeug's secure_filename() call is present in the source but commented out -- any uploaded file is accepted and written to disk"
+  notes: "`/uploaded_chest` route in a real Flask ML-inference demo app. Chosen over a from-scratch example specifically because the dead ALLOWED_EXTENSIONS/commented-out secure_filename() shows the real-world failure mode of a validation control that exists in the codebase but was bypassed/disabled, not just omitted outright."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-1.py
+  role: idiomatic
+  repo: xuchengli/ai-answerer
+  commit_sha: d328d12ab198c1b52d681361ca93c9311e3208c4
+  license: MIT
+  license_copyright: "Copyright (c) 2024 lixucheng"
+  pattern: "allowlist via werkzeug secure_filename() applied to the uploaded filename before file.save(), paired with send_from_directory() (which itself confines the served path to UPLOAD_FOLDER) on the matching download route"
+  notes: "excerpt of the `/upload` and `/uploads/<name>` routes from app.py (a Flask + LLM/TTS 'answer this homework photo' app). The source file's app.config block also hardcodes a demo Redis URL with an inline password (`redis://:passw0rd@localhost`) and third-party API key env-var names a few lines away from the routes copied here -- that block was deliberately excluded from the excerpt rather than redacted-in-place, since it is unrelated to the file-handling pattern being illustrated. gitleaks did not flag it (below its rule thresholds), but a manual read did; excluding it meant no redaction marker was needed in the copied file itself."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: vulnerable-2.py
+  role: vulnerable
+  repo: mugenkyou/College_daddy
+  commit_sha: d0a1eb2c1b1950f1fcfde8855c980c77c35e6b27
+  license: MIT
+  license_copyright: "Copyright (c) 2025 Sachin"
+  pattern: "path traversal on download: path.lstrip('/') only strips leading slashes (not '../' segments), and the resulting attacker-influenced directory is passed as send_from_directory()'s *base directory* argument -- werkzeug's built-in traversal guard there only protects the filename argument, not a caller-controlled base directory"
+  notes: "`/api/download` route in a real student-materials web app. Illustrates a subtler (b)-vulnerable variant than a bare open()/readfile() call: the developer used the 'safe' werkzeug helper but still handed it an unconfined directory argument."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-2.py
+  role: idiomatic
+  repo: laurentftech/Podcast_generator
+  commit_sha: 1cf78ef0527e31f5ef04adb9e6229052667b8724
+  license: MIT
+  license_copyright: "Copyright (c) 2025 Laurent FRANCOISE"
+  pattern: "confined download: os.path.normpath(os.path.abspath(...)) resolves the requested demo directory, then requires it to startswith(demos_base + os.sep) -- the trailing os.sep is notable because it avoids the classic prefix-bypass bug where a sibling directory name (e.g. 'demos_evil') would otherwise satisfy a bare startswith(demos_base) check"
+  notes: "`/demos/<demo_id>/<path:filename>` route in a real podcast-generation web app. Chosen as the (b)-idiomatic counterpart specifically for the os.sep detail, which is a real-world-quality nuance the plan's research noted matters (naive startswith() confinement checks are a known incomplete mitigation)."
+  validated: false
+  validated_by: []
+  redacted: false

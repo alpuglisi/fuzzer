@@ -1,0 +1,55 @@
+# Phase 2 corpus cell: file-handling / php
+# Sub-shapes collected (per assignment):
+#   (a) upload handler: no/weak extension check vs. allowlist+content-type check
+#   (b) download/serve endpoint: unconfined path-from-user-input vs. validated/confined path
+#
+# Pairing status: both sub-shapes are fully paired (vulnerable + idiomatic
+# each) -- not half-populated.
+
+- file: vulnerable-1.php
+  role: vulnerable
+  repo: GreatDevelopers/Certificate
+  commit_sha: 97171bb0e5e22e52eacf4e4fa81773e5f3cffb73
+  license: MIT
+  license_copyright: "Copyright (c) 2017 Great Developers"
+  pattern: "unrestricted upload: uploaded 'photo' (a compressed images archive) is move_uploaded_file()'d with no extension or content-type check at all; the sibling .csv upload only does a weak strrchr()-based extension check on the original filename before moving it, then shells out (tar/unzip) on it"
+  notes: "real certificate-generation web app (not a synthetic PoC); mirrors puppy-fort-factory's own unrestricted-upload shape (CWE-434). Full file copied (149 lines) -- kept whole since the vulnerable upload and the immediately-following unzip/shell_exec use of the uploaded file are one continuous flow."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-1.php
+  role: idiomatic
+  repo: WonderCMS/wondercms
+  commit_sha: 7dae4c93f266c05ca6563a96e9f0168f2defe399
+  license: MIT
+  license_copyright: "Copyright (c) 2026 Robert Isoski and WonderCMS contributors"
+  pattern: "allowlist + content-type check: extension checked against a fixed $allowedExtensions list AND the real MIME type (via finfo/mime_content_type) checked against a fixed $allowedMimeTypes list, both required before move_uploaded_file()"
+  notes: "excerpt of WonderCMS::uploadFileAction() from the CMS's single-file index.php (3830 lines total) -- only the upload-validation method was copied, not the whole file, per Phase 2's 'not a bare copy of the whole thing when a fragment illustrates the shape' spirit. Filename is also defanged via basename()+str_replace() against traversal sequences before use."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: vulnerable-2.php
+  role: vulnerable
+  repo: asvinb/pixidou
+  commit_sha: 39b5a833785b168133dfe63336af43df4ee63b76
+  license: GPL-2.0
+  license_note: "Copyleft -- kept as the smallest illustrative fragment (this IS the whole file: 3 lines of actual code plus the required GPL header/attribution). Do not use as the seed of a non-GPL emitter template without carrying this license forward."
+  pattern: "classic reflected path traversal on download: readfile('images/'.$_GET['file']) with zero validation/canonicalization of the user-supplied filename; Content-Disposition header also echoes $_GET['file'] unescaped"
+  notes: "download.php in Pixidou, an open-source AJAX image editor. Copyright header (incl. author's published contact email) is preserved verbatim as required by the GPL's notice-preservation term -- this is the author's own deliberate public attribution, not incidental PII, so it was not redacted."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-2.php
+  role: idiomatic
+  repo: RagnarTheGreat/Serenity-Share
+  commit_sha: 38807bf3a4ecedf4bdc8348d7654942781248b88
+  license: MIT
+  license_copyright: "Copyright (c) 2024 Serenity Share"
+  pattern: "confined download: resolves the target file's realpath() and requires it to start with the share directory's own realpath() (strpos(...) !== 0 check) before readfile(); basename() also applied to the filename used in the Content-Disposition header"
+  notes: "excerpt of the $_GET['file'] download branch from share.php (689 lines total) in a self-hosted file-sharing app -- only the validation+readfile branch was copied, not the surrounding share-management/session code."
+  validated: false
+  validated_by: []
+  redacted: false
