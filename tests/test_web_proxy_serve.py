@@ -37,10 +37,11 @@ def test_controller_intercept_toggle():
 # --- app wiring ------------------------------------------------------------
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
 from fuzzlab.web.app import create_app, serve, web_main  # noqa: E402
+
+from tests._web_client import web_client  # noqa: E402
 
 
 def _cfg(**over):
@@ -48,12 +49,12 @@ def _cfg(**over):
 
 
 def test_proxy_status_dormant_without_proxy():
-    r = TestClient(create_app(_cfg())).get("/api/proxy/status").json()
+    r = web_client(create_app(_cfg())).get("/api/proxy/status").json()
     assert r == {"configured": False, "running": False}
 
 
 def test_proxy_intercept_409_without_proxy():
-    r = TestClient(create_app(_cfg())).post("/api/proxy/intercept", json={"on": True})
+    r = web_client(create_app(_cfg())).post("/api/proxy/intercept", json={"on": True})
     assert r.status_code == 409
 
 
@@ -61,7 +62,7 @@ def test_lifespan_starts_and_stops_the_proxy():
     ctrl = ProxyController(ProxyConfig(port=0))
     app = create_app(_cfg(), proxy=ctrl)
     # lifespan runs only under the context manager: startup binds, shutdown stops.
-    with TestClient(app) as client:
+    with web_client(app) as client:
         st = client.get("/api/proxy/status").json()
         assert st["running"] is True and st["port"] > 0
         assert client.post("/api/proxy/intercept", json={"on": True}).json()["intercept"] is True

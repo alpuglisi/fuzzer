@@ -10,10 +10,17 @@ export function toWire(s) {
   return s.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
 }
 
+// U6 (control-plane hardening, R-13): every state-changing call is under
+// `/api/*`, which the server's ControlPlaneHardening middleware requires this
+// custom header on (it forces a CORS preflight a cross-origin page cannot
+// satisfy — see fuzzlab/web/app.py). Both wrappers add it unconditionally
+// since both only ever call `/api/*` routes.
+const CLIENT_HEADER = { "X-Fuzzlab-Client": "1" };
+
 export async function postJSON(url, body) {
   const r = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...CLIENT_HEADER },
     body: JSON.stringify(body),
   });
   let data = {};
@@ -22,7 +29,7 @@ export async function postJSON(url, body) {
 }
 
 export async function delJSON(url) {
-  const r = await fetch(url, { method: "DELETE" });
+  const r = await fetch(url, { method: "DELETE", headers: { ...CLIENT_HEADER } });
   let data = {};
   try { data = await r.json(); } catch (_) { /* empty */ }
   return { status: r.status, data };

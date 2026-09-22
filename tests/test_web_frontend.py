@@ -14,10 +14,11 @@ from __future__ import annotations
 import pytest
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
 from fuzzlab.web.app import NAV, create_app  # noqa: E402
+
+from tests._web_client import web_client  # noqa: E402
 
 # (route, section id, template name) — the single parametrization covering
 # routing + deep-link + template + active-nav for every sidebar section (R-09).
@@ -30,7 +31,7 @@ SECTIONS = [(item["href"], item["id"], f"sections/{item['id']}.html") for item i
 def _client(authorized=False):
     cfg = load_config(overrides={"target_base_url": "http://localhost",
                                  "authorized": authorized}, environ={})
-    return TestClient(create_app(cfg))
+    return web_client(create_app(cfg))
 
 
 def test_static_css_partials_are_served():

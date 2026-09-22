@@ -43,6 +43,185 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _TEMPLATES_DIR = os.path.join(_HERE, "templates")
 _STATIC_DIR = os.path.join(_HERE, "static")
 
+
+# --- U6: control-plane hardening (component #12, R-13/CC-UI-0026) -------------
+#
+# A single global ASGI middleware (not `BaseHTTPMiddleware`, which historically
+# buffers/interferes with streaming responses like the launcher's SSE stream)
+# that closes the loopback control panel's remaining web-attacker surface:
+# DNS-rebinding (a wrong Host header) and CSRF/cross-site POSTs driven by a
+# hostile page the person merely has open in another tab. Two independent
+# gates, per the resolved R-13 research note in
+# docs/UI_IMPLEMENTATION_PLAN.md §U6 (both are required — each defeats an
+# attack the other alone misses):
+#
+#   (a) **Host allow-list**, on every request. Starlette's own
+#       ``TrustedHostMiddleware`` strips the port before comparing, so a
+#       rebinding attack that resolves an attacker domain to 127.0.0.1 but
+#       keeps the (wrong) port would sail through it; this checks the *exact*
+#       ``host:port`` instead. The expected value is read from the ASGI
+#       ``scope["server"]`` tuple — the local address this connection was
+#       actually accepted on (uvicorn sets it from the socket, never from
+#       anything client-supplied) — so it self-adjusts to whatever host/port
+#       the app is actually bound to for that connection (needed since e.g.
+#       browser-driven tests bind an ephemeral port) without trusting the
+#       client at all. A mismatch is fail-closed: HTTP 421.
+#   (b) On state-changing methods (POST/PUT/DELETE): **Origin exact-match**
+#       plus **`Sec-Fetch-Site: same-origin`** — deliberately rejecting
+#       `same-site` too, because the deliberately-vulnerable lab this panel
+#       drives runs on a sibling loopback port, which is *same-site* but must
+#       never be treated as trusted. Browsers without Fetch Metadata (or a
+#       plain HTML form submit) fall back to an exact-prefix **Referer**
+#       check. `/api/*` routes additionally require the custom
+#       `X-Fuzzlab-Client: 1` header, which a cross-origin page cannot attach
+#       without triggering a CORS preflight it cannot satisfy (no server-side
+#       CORS is configured — cookieless by design; SameSite cookies would not
+#       help here since the lab is same-site, D11/no-auto-run). Any failure
+#       here is fail-closed: HTTP 403. This is independent of the existing
+#       `authorized` gate (still read only from server-side `Config`, never
+#       from the request body) and of target validation on send/replay paths
+#       (`RepeaterController`/`ProxyController` — read separately; unaffected
+#       by this middleware).
+#
+# Every response, including a rejected one, also gets a tight offline
+# security-header set (CSP/nosniff/frame-options/referrer-policy/COOP/CORP),
+# plus `Cache-Control: no-store` on `/api/*`, `/results` and `/runs/*`
+# responses so a shared/forward proxy or browser cache never retains findings.
+_SECURITY_HEADERS: list[tuple[bytes, bytes]] = [
+    (b"content-security-policy",
+     b"default-src 'none'; script-src 'self'; style-src 'self'; "
+     b"connect-src 'self'; form-action 'self'; frame-ancestors 'none'; "
+     b"base-uri 'none'; object-src 'none'"),
+    (b"x-content-type-options", b"nosniff"),
+    (b"x-frame-options", b"DENY"),
+    (b"referrer-policy", b"same-origin"),
+    (b"cross-origin-opener-policy", b"same-origin"),
+    (b"cross-origin-resource-policy", b"same-origin"),
+]
+_NO_STORE_PREFIXES = ("/api/", "/results", "/runs/")
+_STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "DELETE"})
+
+
+def _no_store_path(path: str) -> bool:
+    return path.startswith(_NO_STORE_PREFIXES) or path == "/results"
+
+
+def _inject_security_headers(message: dict[str, Any], path: str) -> dict[str, Any]:
+    """Return an ``http.response.start`` message with the fixed security-header
+    set applied (replacing any same-named header a route already set)."""
+    drop = {name for name, _ in _SECURITY_HEADERS}
+    if _no_store_path(path):
+        drop.add(b"cache-control")
+    kept = [(n, v) for n, v in message.get("headers", []) if n.lower() not in drop]
+    kept.extend(_SECURITY_HEADERS)
+    if _no_store_path(path):
+        kept.append((b"cache-control", b"no-store"))
+    message["headers"] = kept
+    return message
+
+
+async def _deny(send: Callable, status: int, reason: str, path: str) -> None:
+    """Send a minimal, fail-closed plain-text rejection (still carrying the
+    same security headers as any other response)."""
+    body = reason.encode("utf-8")
+    start = {
+        "type": "http.response.start",
+        "status": status,
+        "headers": [(b"content-type", b"text/plain; charset=utf-8"),
+                    (b"content-length", str(len(body)).encode("latin-1"))],
+    }
+    await send(_inject_security_headers(start, path))
+    await send({"type": "http.response.body", "body": body})
+
+
+def _header_map(scope: dict[str, Any]) -> dict[str, str]:
+    """Case-insensitive view of the ASGI scope's raw (bytes, bytes) headers."""
+    out: dict[str, str] = {}
+    for raw_name, raw_value in scope.get("headers", []):
+        out[raw_name.decode("latin-1").lower()] = raw_value.decode("latin-1")
+    return out
+
+
+def _expected_host(scope: dict[str, Any]) -> str | None:
+    """The ``host:port`` this connection was actually accepted on (from the
+    ASGI server, never from a client-supplied header) — the ground truth the
+    Host header is checked against."""
+    server = scope.get("server")
+    if not server or server[0] is None:
+        return None
+    host, port = server
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"{host}:{port}" if port else host
+
+
+def _origin_check(headers: dict[str, str], expected_origin: str) -> tuple[bool, str]:
+    """Origin/Sec-Fetch-Site/Referer gate for a state-changing request. See the
+    module-level comment above for why both Fetch-Metadata and Referer paths
+    are needed, and why `same-site` must be rejected alongside `same-site`."""
+    sec_fetch_site = headers.get("sec-fetch-site")
+    origin = headers.get("origin")
+    if sec_fetch_site is not None:
+        if sec_fetch_site.lower() != "same-origin":
+            return False, "cross-origin request (Sec-Fetch-Site)"
+        if origin is None or origin.rstrip("/").lower() != expected_origin.lower():
+            return False, "Origin mismatch"
+        return True, ""
+    # No Fetch Metadata (plain form POST / non-browser client): fall back to
+    # an exact-prefix Referer check; an Origin header, if present, must still
+    # agree (browsers attach Origin to same-origin POSTs too).
+    referer = headers.get("referer")
+    if referer is None:
+        return False, "no Sec-Fetch-Site and no Referer"
+    ref = referer.lower()
+    exp = expected_origin.lower()
+    if ref != exp and not ref.startswith(exp + "/"):
+        return False, "Referer mismatch"
+    if origin is not None and origin.rstrip("/").lower() != exp:
+        return False, "Origin mismatch"
+    return True, ""
+
+
+class ControlPlaneHardening:
+    """Global ASGI middleware: Host allow-list + Origin/Sec-Fetch-Site/Referer
+    CSRF gate + security headers on every response (U6, R-13). See the
+    module-level comment block above for the full rationale."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "/")
+        headers = _header_map(scope)
+        expected_host = _expected_host(scope)
+
+        host_header = headers.get("host")
+        if expected_host is None or host_header is None or \
+                host_header.lower() != expected_host.lower():
+            await _deny(send, 421, "misdirected request: bad Host header", path)
+            return
+
+        if scope.get("method") in _STATE_CHANGING_METHODS:
+            scheme = scope.get("scheme") or "http"
+            expected_origin = f"{scheme}://{expected_host}"
+            ok, reason = _origin_check(headers, expected_origin)
+            if ok and path.startswith("/api/") and headers.get("x-fuzzlab-client") != "1":
+                ok, reason = False, "missing X-Fuzzlab-Client header"
+            if not ok:
+                await _deny(send, 403, f"forbidden: {reason}", path)
+                return
+
+        async def send_wrapper(message):
+            if message.get("type") == "http.response.start":
+                message = _inject_security_headers(message, path)
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
 # A pipeline runner takes the config and returns a summary dict. Injected so the
 # panel is testable and does not itself send traffic.
 PipelineRunner = Callable[[Config], dict[str, Any]]
@@ -278,6 +457,10 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
 
     app = FastAPI(title="fuzzlab control panel", docs_url=None, redoc_url=None,
                   lifespan=_lifespan)
+    # U6: global control-plane hardening (Host allow-list + Origin/CSRF gate +
+    # security headers) — added before any route so it wraps every response,
+    # including static files and the SSE stream.
+    app.add_middleware(ControlPlaneHardening)
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 

@@ -84,13 +84,14 @@ def test_create_from_flow(tmp_path):
 # --- routes ----------------------------------------------------------------
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
 
 from fuzzlab.web.app import create_app  # noqa: E402
 
+from tests._web_client import web_client  # noqa: E402
+
 
 def test_routes_list_create_and_send_gate(tmp_path):
-    client = TestClient(create_app(_cfg(tmp_path / "r.db", authorized=False)))
+    client = web_client(create_app(_cfg(tmp_path / "r.db", authorized=False)))
     assert client.get("/api/proxy/repeater/tabs").json()["tabs"] == []
     made = client.post("/api/proxy/repeater/tabs",
                        json={"name": "t", "host": "127.0.0.1", "port": 80,
@@ -103,7 +104,7 @@ def test_routes_list_create_and_send_gate(tmp_path):
 def test_route_send_reaches_upstream_when_authorized(tmp_path):
     srv, port = _threaded_upstream()
     try:
-        client = TestClient(create_app(_cfg(tmp_path / "r.db", authorized=True)))
+        client = web_client(create_app(_cfg(tmp_path / "r.db", authorized=True)))
         tab = client.post("/api/proxy/repeater/tabs",
                           json={"name": "u", "host": "127.0.0.1", "port": port,
                                 "raw": "GET /orig HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"}).json()
@@ -117,5 +118,5 @@ def test_route_send_reaches_upstream_when_authorized(tmp_path):
 
 
 def test_route_from_flow_404_missing(tmp_path):
-    client = TestClient(create_app(_cfg(tmp_path / "r.db")))
+    client = web_client(create_app(_cfg(tmp_path / "r.db")))
     assert client.post("/api/proxy/repeater/from-flow/1").status_code == 404

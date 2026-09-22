@@ -3,16 +3,17 @@
 import pytest
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
 from fuzzlab.web.app import create_app, serve  # noqa: E402
+
+from tests._web_client import web_client  # noqa: E402
 
 
 def _client(authorized=False, pipeline=None):
     cfg = load_config(overrides={"authorized": authorized,
                                  "target_base_url": "http://localhost"}, environ={})
-    return TestClient(create_app(cfg, pipeline=pipeline))
+    return web_client(create_app(cfg, pipeline=pipeline))
 
 
 def test_index_offers_both_modes_and_does_not_run():

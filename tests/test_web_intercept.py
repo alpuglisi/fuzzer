@@ -52,10 +52,11 @@ def test_controller_set_intercept_responses():
 # --- routes ----------------------------------------------------------------
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
 from fuzzlab.web.app import create_app  # noqa: E402
+
+from tests._web_client import web_client  # noqa: E402
 
 
 def _cfg():
@@ -63,7 +64,7 @@ def _cfg():
 
 
 def test_intercept_routes_409_without_proxy():
-    c = TestClient(create_app(_cfg()))
+    c = web_client(create_app(_cfg()))
     assert c.get("/api/proxy/intercept/pending").status_code == 409
     assert c.post("/api/proxy/intercept/1/forward", json={}).status_code == 409
     assert c.post("/api/proxy/intercept/1/drop").status_code == 409
@@ -71,7 +72,7 @@ def test_intercept_routes_409_without_proxy():
 
 def test_intercept_routes_with_prebuilt_proxy():
     ctrl = _controller()
-    c = TestClient(create_app(_cfg(), proxy=ctrl))   # no lifespan → no socket, engine ready
+    c = web_client(create_app(_cfg(), proxy=ctrl))   # no lifespan → no socket, engine ready
     assert c.get("/api/proxy/intercept/pending").json() == {"pending": []}
     # toggling responses reflects in status
     st = c.post("/api/proxy/intercept", json={"on": True, "responses": True}).json()

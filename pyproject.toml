@@ -55,7 +55,13 @@ dependencies = [
 # JavaScript-rendering crawl (spider/fetcher dynamic mode).
 browser = ["playwright>=1.40,<2"]
 # Local web control panel + launcher (component #12, decision D11).
-web = ["fastapi>=0.110,<1", "uvicorn>=0.27,<1", "jinja2>=3.1,<4"]
+# starlette is pinned explicitly (not left to fastapi's transitive range):
+# CVE-2026-48710 "BadHost" is a pre-1.0.1 Host-header validation bypass, and
+# U6's control-plane hardening (host allow-list, Origin/Sec-Fetch checks) keys
+# off Host/path, so the underlying ASGI layer must not be vulnerable to a
+# Host-header bypass itself (CC-UI-0026).
+web = ["fastapi>=0.110,<1", "uvicorn>=0.27,<1", "jinja2>=3.1,<4",
+       "starlette>=1.0.1,<2"]
 # Lab generator: the metadata leakage-probe reference implementation
 # (T-LAB0.11, fuzzlab/labgen/leakage_probe.py) — not needed for the rest of
 # fuzzlab/labgen/, so kept optional rather than a main dependency (PA-0005:

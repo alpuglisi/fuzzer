@@ -61,10 +61,11 @@ def test_matchreplace_add_validates():
 # --- routes ----------------------------------------------------------------
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
 from fuzzlab.web.app import create_app  # noqa: E402
+
+from tests._web_client import web_client  # noqa: E402
 
 
 def _cfg():
@@ -72,14 +73,14 @@ def _cfg():
 
 
 def test_scope_and_mr_routes_409_without_proxy():
-    c = TestClient(create_app(_cfg()))
+    c = web_client(create_app(_cfg()))
     assert c.get("/api/proxy/scope").status_code == 409
     assert c.get("/api/proxy/matchreplace").status_code == 409
     assert c.post("/api/proxy/scope", json={"host": "x"}).status_code == 409
 
 
 def test_scope_routes_with_proxy():
-    c = TestClient(create_app(_cfg(), proxy=_controller()))
+    c = web_client(create_app(_cfg(), proxy=_controller()))
     assert len(c.get("/api/proxy/scope").json()["scope"]) == 1
     assert c.post("/api/proxy/scope", json={}).status_code == 400        # host required
     added = c.post("/api/proxy/scope", json={"host": "10.0.0.9", "exclude": True}).json()
@@ -89,7 +90,7 @@ def test_scope_routes_with_proxy():
 
 
 def test_matchreplace_routes_with_proxy():
-    c = TestClient(create_app(_cfg(), proxy=_controller()))
+    c = web_client(create_app(_cfg(), proxy=_controller()))
     assert c.get("/api/proxy/matchreplace").json()["rules"] == []
     ok = c.post("/api/proxy/matchreplace",
                 json={"target": "body", "match": "a", "replace": "b"}).json()
