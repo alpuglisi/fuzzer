@@ -14,6 +14,13 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Governance: added a change-control gate to `CLAUDE.md` requiring the
+  component change-control document to be completed before a change is
+  implemented, and requiring two independently spawned AI agents to
+  adversarially review that document's adequacy and accuracy prior to
+  implementation. The author decides at their discretion whether to update the
+  document in response to observations; if updated, both agents re-review.
+  Implementation proceeds only once the author and both agents approve.
 - Planning: completed `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s Phase 1 — merged
   real research on common web-app feature areas and on which are
   disproportionately exploited (OWASP Top 10/WSTG, CWE Top 25, PortSwigger,

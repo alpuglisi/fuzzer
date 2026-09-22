@@ -65,6 +65,38 @@ that alters behavior updates both — a new change-control entry *and* the requi
 spec edited in place. Likewise `docs/ARCHITECTURE.md` is kept current, while the
 `CHANGELOG.md` line records that it changed.
 
+## Change-control gate — adversarial review before implementation (MANDATORY)
+
+The change-control document (the `docs/components/<n>-*/change-control.md` entry for
+each affected component, per the entry template in `docs/components/README.md`) must be
+**written and completed before the change is implemented** — not drafted afterward to
+match what was already built. Implementation only starts once the gate below passes.
+
+1. **Draft the change-control entry(ies) first**, with all required fields filled in
+   (Change, Impact assessment, Risk assessment, Deliverables, Effectiveness left
+   `pending`) — before writing or editing any implementation code.
+2. **Spawn two AI agents to adversarially review the draft.** Each reviews the
+   document's **adequacy** (does it cover the real impact/risk/deliverables? is
+   anything missing or hand-waved?) and **accuracy** (are its claims about the change,
+   its impact, and its risk actually correct?). The two agents review independently.
+3. **The author (the agent/contributor writing the change-control entry) decides**
+   whether to update the document in response to each reviewer's observations —
+   updates are at the author's discretion, not automatic. The author is not obligated
+   to accept an observation it judges wrong or out of scope, but should record why an
+   observation was declined if it's substantive.
+4. **Re-review on update.** If the document is changed to address observations, both
+   agents re-review the updated document (steps 2–3 repeat) before proceeding.
+5. **Implementation gate.** The change may be implemented **only once all three
+   parties approve the change-control document**: the author and both spawned
+   reviewing agents. If either agent withholds approval, iterate (update-or-justify,
+   then re-review) until all three agree, or stand down on the change.
+
+This gate applies to the change-control document itself, ahead of code — it does not
+replace the append-only change-control log entry still required at completion under
+the bookkeeping checklist below (deliverables get checked off, Effectiveness gets
+assessed after the change lands). Governance-doc changes (this file, `README.md`,
+`docs/` process READMEs) follow the same gate before being edited.
+
 ## Bug workflow (when you fix a code defect)
 
 A single bug produces the three linked artifacts below (ERROR_LOG ↔ BUG-NNNN ↔ PA-NNNN),
@@ -136,6 +168,10 @@ substitute if the specified one is unavailable.
 - `docs/MULTI_AGENT_ORCHESTRATION.md` — multi-lane/multi-agent orchestration policy:
   parallelism, independent verification, pre-assigned bookkeeping numbers, delegation
   mechanism fidelity, and when to flag risk instead of proceeding autonomously.
+
+Note: the two adversarial-review agents required by the change-control gate above are
+review-only spawns for gating a specific change-control document and are distinct from
+the parallel build lanes `docs/MULTI_AGENT_ORCHESTRATION.md` governs.
 
 If this summary and a canonical doc ever disagree, the canonical doc wins — and fix this
 file to match.
