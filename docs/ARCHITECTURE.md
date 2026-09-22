@@ -242,9 +242,19 @@ tracked in the requirements files, not here.
   `--check` so it can never fail a build. A stack-agnostic tiered conformance suite
   (`fuzzlab/labgen/conformance/`, `CC-LAB-0027`) any emitter must pass: Tier
   0 (lint + minimal-pair diff) and Tier 3 (whole-lab regeneration) are real,
-  fully exercised offline; Tier 1 (in-process functional/security) and
-  Tier 2 (the container-based oracle — the only tier that confirms a label)
-  are honestly-labeled `[design]` interfaces awaiting on-host wiring. A second
+  fully exercised offline; `tier1.py`/`tier2.py` themselves remain
+  honestly-labeled `[design]` interfaces. As of `CC-LAB-0054`/`FR-LAB-52`
+  (2026-09-22), the live-boot on-host dependency Tier 1/2 needed is real for
+  `php_laravel`: `fuzzlab/labgen/conformance/live_boot.py` assembles a real
+  Laravel 13 skeleton (checked in, trimmed from a real `composer
+  create-project`) with a manifest's real emitter output, runs a real
+  `composer install`, boots a real `php artisan serve` against a seeded
+  SQLite DB, and makes real HTTP requests — run via
+  `tests/test_labgen_conformance_live_boot.py` (skip-guarded,
+  `pytest.mark.slow`, not wired into `--check`), covering the escaped-echo
+  form pages and the `product.php` numeric-SQLi vulnerable/secure twin (a
+  real, observed payload differential). Tier 2's real, dialect-correct,
+  container-based oracle confirmation remains unbuilt. A second
   Phase-3 stack emitter (`fuzzlab/labgen/emitters/python_fastapi/`, Tier-A
   depth per `CR-LAB-0001` Addendum C's stack-pacing decision, `CC-LAB-0029`)
   is built: FastAPI + SQLAlchemy + Jinja2, the same three value-context

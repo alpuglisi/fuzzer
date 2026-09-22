@@ -110,3 +110,18 @@ include = ["fuzzlab*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    # CC-LAB-0054/FR-LAB-52: a test that runs a real `composer install`
+    # against Packagist and boots a real `php artisan serve` process --
+    # real wall-clock time (network + dependency resolution), unlike the
+    # rest of this offline-only suite. Skip-guarded (PA-0005) on its own
+    # capability probe (`fuzzlab.labgen.conformance.live_boot.live_boot_available`)
+    # so it degrades to a clean skip, never a failure, wherever composer/
+    # network is absent -- and additionally opt-out-able without editing code
+    # via `FUZZLAB_SKIP_SLOW=1` (this project's first use of this convention;
+    # see docs/components/01-target-lab/requirements.md FR-LAB-52). Not
+    # excluded from default `pytest -q` collection: it still runs (and is
+    # skip-guarded) by default, this marker exists so `pytest -m slow` /
+    # `pytest -m "not slow"` can select or deselect it explicitly.
+    "slow: exercises a real composer install + live php artisan serve boot (network + wall-clock heavy)",
+]

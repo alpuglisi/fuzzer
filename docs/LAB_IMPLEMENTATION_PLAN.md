@@ -151,8 +151,31 @@ default one).
    vacuously pass or need `expected_stacks`/`expected_classes` overrides
    with no real signal behind them.
 4. Register `fuzzlab.labgen.conformance`'s Tier 0/Tier 3 checks as part of
-   `--check` too — they're already real and offline; Tier 1/2 stay
-   unregistered until their on-host dependencies exist.
+   `--check` too — they're already real and offline. Tier 1/2 stay
+   unregistered in `--check` itself (a real `composer install` per invocation
+   would make every `--check` run silently network-dependent and far
+   slower), but as of `CC-LAB-0054`/`FR-LAB-52` (2026-09-22) their on-host
+   dependencies **do now exist and are real**, for `php_laravel` at least:
+   `fuzzlab.labgen.conformance.live_boot.LiveBootHarness` assembles a real
+   Laravel 13 project (a checked-in, trimmed real skeleton overlaid with a
+   manifest's real emitter output), runs a real `composer install`, seeds a
+   real SQLite DB, boots a real `php artisan serve`, and makes real HTTP
+   requests against it — proven, in this offline sandbox (PHP 8.4 + Composer
+   with real Packagist reachability; no Docker daemon needed, since Docker
+   was only ever the deployment/isolation mechanism), for the
+   `phase3_laravel_real_pages_forms` and `phase3_php_laravel_real_pages_numeric`
+   manifests, including a real vulnerable/secure payload differential on the
+   `product.php` SQLi twin. Run directly via
+   `pytest tests/test_labgen_conformance_live_boot.py` (skip-guarded,
+   `pytest.mark.slow`), not through `--check`. Still narrower than a genuine
+   Tier 2: it uses SQLite (a documented, scoped substitution — see
+   `live_boot.py`'s module docstring — never validated for the
+   dialect-sensitive identifier/alias-position SQLi shapes), does not yet
+   drive the auth/G2/G4/search real-page manifests (need more seed data), and
+   still performs no real, container-based, dialect-correct oracle
+   confirmation (`tier2.py`'s "the only tier that actually confirms a label"
+   claim is unchanged). See `docs/components/01-target-lab/requirements.md`
+   FR-LAB-52 for the full scope statement.
 5. Tests: an end-to-end CLI test using the existing example manifest
    (`lab/manifests/example_phase0_scaffold.yaml`), asserting `--check` passes
    on a clean tree and fails loud on each individual gate's own known-bad

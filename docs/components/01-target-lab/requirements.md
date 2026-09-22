@@ -1215,6 +1215,90 @@ lane) can submit a payload as
     untouched by it and stays blocked on human sign-off (`FR-LAB-8` remains **not**
     satisfied by this requirement — see that entry). (`CC-LAB-0053`)
 
+- **FR-LAB-52** *(`docs/LAB_IMPLEMENTATION_PLAN.md` ~line 154's Tier 1/2 gap; the
+  live-boot verification precondition for `L-P3.3c-CUT`, built ahead of and
+  independent from the cutover itself, which remains unscheduled pending human
+  sign-off.)* A `php_laravel`-emitted build must be provably not just
+  syntactically valid PHP (`tier0`'s `php -l`) but a **genuinely bootable,
+  responding application**: `fuzzlab.labgen.conformance.live_boot` assembles a
+  real Laravel 13 project (the checked-in
+  `fuzzlab/labgen/emitters/php_laravel/stack/skeleton/` skeleton — a real
+  `composer create-project laravel/laravel` output, trimmed of dev-only
+  tooling/front-end build pipeline — overlaid with a manifest's real
+  `LaravelEmitter`-rendered controllers/views/routes), runs a real `composer
+  install --no-dev`, seeds a real per-run SQLite database, boots a real `php
+  artisan serve` process, and makes real HTTP requests against it via
+  `LiveBootHarness`.
+  1. **The skeleton/generated-content seam follows `StackEnv`'s own
+     scaffold convention** (`stack_env.py`'s `scaffold_files`/
+     `render_scaffold`), extended rather than forked: the skeleton directory is
+     the "framework, rendered once, stack-wide" half; a manifest's
+     `LaravelEmitter.render()`/`route_fragment_for()` output overlaid on top by
+     `LiveBootHarness._assemble()` is the "generated per-manifest content"
+     half — the same split `StackEnv.scaffold_files` already documents, now
+     actually exercised end to end for the first time (no existing
+     `fuzzlab.labgen.cli` path assembles scaffold + accumulated
+     `routes/web.php` + per-cell files into one bootable tree; that assembly
+     step is this requirement's own new code, not a pre-existing gap in
+     already-shipped CLI behavior — see `route_accumulator.py`'s own
+     docstring, which already named this as a future whole-manifest build
+     driver's job).
+  2. **SQLite is this harness's own, explicitly-scoped substitution for the
+     production lab's MariaDB target** (`lab/sql/schema.sql`, read for shape
+     only — never touched or moved). It is adequate for what this requirement
+     proves (a real boot + a real, observable payload differential) and
+     explicitly **not** claimed adequate for what Tier 2's real, dialect-
+     sensitive oracle confirmation would need (identifier/alias-position SQLi
+     verdicts, which `tier1.py`'s own docstring already flags as
+     dialect-sensitive) — this requirement's own harness only drives manifests
+     outside that shape class. A harness-only `.env` (`_harness_env_content`)
+     is used instead of `StackEnv.env_file_content()` (which pins the real
+     lab's own `DB_CONNECTION=mysql` production default) for exactly this
+     reason: the two must not be conflated into one setting silently drifting
+     production config.
+  3. **Skip-guarded on a real capability probe**, `live_boot_available()`
+     (composer + php on `PATH`, the checked-in skeleton present, and
+     Packagist actually network-reachable) — never a bare tool-presence check
+     mistaken for a working capability (PA-0005/PA-0009's "verify it is
+     actually usable" rule). `tests/test_labgen_conformance_live_boot.py`
+     applies this as a module-level `pytest.mark.skipif` and additionally
+     tags both tests `@pytest.mark.slow` (a new marker, `pyproject.toml`'s
+     `[tool.pytest.ini_options] markers`) — the project's first use of that
+     convention, documented there for a future slow/network-dependent test to
+     follow, selectable/deselectable via `pytest -m slow` / `pytest -m "not
+     slow"` without needing to edit test code.
+  4. **Proves a real vulnerable/secure payload differential**, not just two
+     boot successes: `test_live_boot_numeric_manifest_sqli_twin_round_trips_a_payload`
+     sends the same boolean-injection payload (`1 OR 1=1`) at
+     `product.php`'s real, pinned vulnerable (`LABGEN-RPL-PRODUCT`) and secure
+     (`LABGEN-RPL-PRODUCT-BOUND`) twins and asserts the raw-concatenation cell
+     returns every seeded row while the bound-parameter cell does not — the
+     actual, observable security property the safety matrix's derived
+     verdicts claim, verified against a real response body rather than
+     inferred from source text.
+  - **Coverage actually proven in this session**: `lab/manifests/
+    phase3_laravel_real_pages_forms.yaml` (`contact.php`/`newsletter.php`,
+    escaped-echo POST forms, no DB) and `lab/manifests/
+    phase3_php_laravel_real_pages_numeric.yaml` (`product.php`/`blog_post.php`
+    numeric-literal SQLi vulnerable/secure twins, against the seeded SQLite
+    `products`/`posts` tables) — 4 of the 6 `phase3_php_laravel_real_pages_*`/
+    `phase3_laravel_real_pages_*` manifests. The other real-page manifests
+    (auth/G2/G4/search) are **not yet driven by this harness** — they need
+    additional seed data (a `users` table with a real bcrypt/md5-matching
+    row for `login.php`, a stored-second-order write-then-read round trip for
+    `edit_profile.php`/`profile.php`) that this requirement's scope did not
+    extend to; `LiveBootHarness` itself does not preclude it, and a future
+    change should extend `_SCHEMA_SQL`/`_SEED_SQL` and add their own test
+    functions rather than a second harness. (`CC-LAB-0054`)
+  - **Does not itself confirm a Tier-2, oracle-grade vulnerable/secure
+    verdict.** `fuzzlab.labgen.conformance.tier2`'s "the only tier that
+    actually confirms a label" claim is unchanged by this requirement — a
+    real, container-based, dialect-correct oracle (sqlmap/commix/ZAP-wrapped)
+    remains genuinely unbuilt and out of scope here. This requirement narrows,
+    but does not close, the gap `docs/LAB_IMPLEMENTATION_PLAN.md` ~line 154
+    named; see that document's own updated text for the current, accurate
+    status.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

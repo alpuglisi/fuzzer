@@ -3,6 +3,97 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0054 — real, on-host live-boot conformance harness for php_laravel (FR-LAB-52) (2026-09-22)
+- Change: built the Tier 1/2 live-boot capability `docs/LAB_IMPLEMENTATION_PLAN.md`
+  ~line 154 named as blocked on on-host dependencies that "do not exist" — they now do,
+  for real, in this offline sandbox (PHP 8.4 + Composer with real Packagist network
+  access, no Docker daemon required: Docker was only ever the deployment/isolation
+  mechanism, not a functional requirement, confirmed against `StackEnv.entrypoint_cmd`
+  which is already `php artisan serve`, not a container-only command).
+  1. **A real, minimal Laravel 13 project skeleton**, checked in at
+     `fuzzlab/labgen/emitters/php_laravel/stack/skeleton/` — a real `composer
+     create-project laravel/laravel .` output (resolved `laravel/framework` `v13.32.0`,
+     matching `PHP_LARAVEL_STACK_ENV.framework_version` exactly), trimmed of `vendor/`,
+     `.git/`, `tests/`, `.github/`, `resources/{css,js}`, `public/favicon.ico`,
+     `routes/web.php` (overlaid per-manifest by the harness) and the dev-only
+     composer/npm tooling this task's harness never runs. Confirmed
+     `StackEnv.index_php_content()` already byte-matches Laravel 13's real generated
+     `public/index.php` (no change needed there). One real skeleton edit:
+     `bootstrap/app.php` disables Laravel's session-CSRF middleware globally
+     (`validateCsrfTokens(except: ['*'])`) — the real `puppy-fort-factory/` pages this
+     stack reproduces have no CSRF framework of their own, so leaving Laravel's default
+     enabled would silently add an unmodeled security control on every migrated POST
+     page (discovered for real: `contact.php`/`newsletter.php` both returned HTTP 419
+     until this was disabled).
+  2. **`fuzzlab/labgen/conformance/live_boot.py`** (new): `LiveBootHarness` assembles a
+     temp-directory app from the skeleton + a manifest's real `LaravelEmitter.render()`/
+     `route_fragment_for()` output (the missing whole-build assembly step
+     `route_accumulator.py`'s own docstring already flagged as future work — no existing
+     `fuzzlab.labgen.cli` path does this; `render_manifest`/`tier3.render_whole_sample`
+     merge per-cell files only, never the scaffold or the accumulated routes file), runs
+     a real `composer install --no-dev`, writes a harness-only SQLite `.env`
+     (`DB_CONNECTION=sqlite`, explicitly never `StackEnv.env_file_content()`'s own
+     production `mysql` default — see FR-LAB-52 point 2 for why conflating the two would
+     be unsafe), seeds a minimal `products`/`posts`/`users` SQLite schema/seed covering
+     exactly what the currently-driven manifests' rendered controllers touch, boots a
+     real `php artisan serve` on a free local port, and exposes `.get()`/`.post()`
+     (stdlib `urllib`, no new dependency) plus a `fetch()` method that implements
+     `tier1.Tier1Client` for real — the first real client that protocol has ever had.
+     Capability-probed via `live_boot_available()` (composer + php + skeleton present +
+     real Packagist reachability, PA-0005/PA-0008/PA-0009), never a bare tool-presence
+     guess. Teardown (`close()`/`__exit__`) always terminates the `php artisan serve`
+     process (SIGTERM then SIGKILL on a 5s timeout) and removes its temp directory, on
+     every exit path including an exception, per PA-0012's bounded-teardown convention
+     applied to a subprocess.
+  3. **`tests/test_labgen_conformance_live_boot.py`** (new, real, on-host): two tests,
+     both actually run and passed in this sandbox (44.7s combined). Verified no leaked
+     `php artisan serve` process or temp directory after a run.
+     - `test_live_boot_forms_manifest_serves_real_pages` — boots
+       `phase3_laravel_real_pages_forms.yaml` (`contact.php`/`newsletter.php`, no DB),
+       POSTs a `<script>` payload at each real pinned URL, and asserts a real HTTP 200
+       whose body contains the HTML-entity-escaped form of the payload and never the raw
+       payload — the actual, observable security property the `html_entity_escape`
+       transform claims.
+     - `test_live_boot_numeric_manifest_sqli_twin_round_trips_a_payload` — boots
+       `phase3_php_laravel_real_pages_numeric.yaml` against the seeded SQLite `products`
+       table, sends the same `1 OR 1=1` boolean-injection payload at `product.php`'s real
+       vulnerable (`LABGEN-RPL-PRODUCT`) and secure (`LABGEN-RPL-PRODUCT-BOUND`) twins,
+       and asserts the raw-concatenation cell's real response body contains every seeded
+       row while the bound-parameter cell's does not — a real, observed payload
+       differential end to end (task instruction 4's third bullet), not an inference from
+       source text.
+  4. **New `pytest.mark.slow`** (`pyproject.toml`'s `[tool.pytest.ini_options] markers` —
+     this project's first use of a slow-test marker convention, documented there):
+     applied to both new tests. Not added to default `addopts` (a plain `pytest -q` still
+     collects and runs them here, where composer/network are both available, exactly as
+     this task's own instruction 8 requires) — the marker exists so `pytest -m slow` /
+     `pytest -m "not slow"` can select or deselect them explicitly elsewhere, alongside
+     the `pytest.mark.skipif(not live_boot_available())` guard that already makes the
+     test suite degrade to a clean skip (not a failure, not extra wall-clock time beyond
+     one fast capability probe) in any environment lacking composer/network.
+  5. **Not covered by this pass** (see FR-LAB-52's own "coverage actually proven"
+     bullet): the auth/G2/G4/search real-page manifests need additional seed data (a
+     real login row, a stored-second-order write-then-read round trip) this change did
+     not build. `docs/LAB_IMPLEMENTATION_PLAN.md` ~line 154 updated to describe this
+     narrowed, accurate state rather than "on-host dependencies do not exist".
+- Impact (other components / project): none outside LAB. No existing emitter output,
+  manifest, or `--check` gate path is touched — `live_boot.py`/its test are additive,
+  new files only, and `bootstrap/app.php`/the new `skeleton/` tree are new files this
+  harness alone reads (no existing test or CLI path reads `stack/skeleton/`). Not wired
+  into `fuzzlab.labgen.cli`'s `--check` gate suite (deliberately: that suite runs for
+  every manifest/emitter on every invocation, and a real `composer install` per
+  invocation would make it silently network-dependent and orders of magnitude slower for
+  every existing user — this is a separate, explicitly opt-in-by-marker conformance
+  check, run directly via pytest, matching this task's own "not something that silently
+  triples every `pytest -q` run" instruction applied one level up, to `--check` too).
+- Verification: `pytest tests/test_labgen_conformance_live_boot.py -q` → 2 passed (real
+  run, this session, 2026-09-22). Full suite: see `docs/ARCHITECTURE.md`'s updated build
+  status and this session's own report for the exact before/after pass count.
+- Rollback: delete `fuzzlab/labgen/conformance/live_boot.py`,
+  `tests/test_labgen_conformance_live_boot.py`, and
+  `fuzzlab/labgen/emitters/php_laravel/stack/skeleton/`; revert the `pyproject.toml`
+  `markers` addition. No other file depends on any of them.
+
 ### CC-LAB-0053 — L-P3.3c-CUT prep: parity/cutover coverage gate + migration-exemption register (2026-09-22)
 - Change: built the **coverage gate** plan §4.3.6.6 point 3 describes, and only that —
   the atomic cutover (`L-P3.3c-CUT`: deleting `puppy-fort-factory/`, re-pointing

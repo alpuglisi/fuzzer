@@ -14,6 +14,25 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB: built a real, on-host live-boot conformance harness for `php_laravel`
+  (`CC-LAB-0054`/`FR-LAB-52`) — the Tier 1/2 gap `docs/LAB_IMPLEMENTATION_PLAN.md`
+  ~line 154 named as blocked on on-host dependencies that "do not exist". A checked-in
+  real Laravel 13 skeleton (`fuzzlab/labgen/emitters/php_laravel/stack/skeleton/`,
+  trimmed from a real `composer create-project laravel/laravel`) plus new
+  `fuzzlab.labgen.conformance.live_boot.LiveBootHarness` assembles a manifest's real
+  `LaravelEmitter` output onto it, runs a real `composer install`, seeds a real SQLite
+  DB, boots a real `php artisan serve`, and makes real HTTP requests — proving (for the
+  `phase3_laravel_real_pages_forms` and `phase3_php_laravel_real_pages_numeric`
+  manifests) that the generated app actually boots, serves its pinned real URLs, and
+  shows a real vulnerable/secure payload differential on the `product.php` SQLi twin.
+  Skip-guarded (`live_boot_available()`) and marked `pytest.mark.slow` (new marker,
+  documented in `pyproject.toml`), so it degrades to a clean skip without
+  composer/network and does not change default `pytest -q` behavior elsewhere. Fixed a
+  real defect discovered while wiring this (Laravel's default session-CSRF middleware
+  returning HTTP 419 for the migrated POST pages, which have no CSRF framework of their
+  own) by disabling it in the new skeleton. Auth/G2/G4/search real-page manifests remain
+  undriven by this harness (need additional seed data) — see `CC-LAB-0054` for the exact
+  scope.
 - LAB: built the `L-P3.3c-CUT` parity/cutover coverage gate (plan §4.3.6.6
   point 3) ahead of the cutover itself, which stays blocked on human sign-off.
   `fuzzlab.labgen.cutover_gate` asserts every `PFF-` case in
