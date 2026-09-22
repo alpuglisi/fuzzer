@@ -80,7 +80,7 @@ STATIC_PRECHECK_BY_SHAPE: dict[tuple[str, str], StaticPrecheckStatus] = {
     # html_body)`'s situation. The unquoted family is uninformative because
     # there the escaping is *present* and only the context is wrong.
     ("xss", "html_attribute_quoted"): StaticPrecheckStatus.INFORMATIVE,
-    # --- CC-LAB-0060: mass-assignment (orm_entity_bulk_assign) ------------
+    # --- CC-LAB-0064: mass-assignment (orm_entity_bulk_assign) ------------
     # UNINFORMATIVE, same underlying reason as every SQL shape above: a
     # dynamic UPDATE built from a runtime-computed field list looks
     # syntactically unremarkable to a static tool with no business-logic

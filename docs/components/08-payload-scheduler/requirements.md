@@ -30,19 +30,36 @@ from oracle and grey-box reward.
   over no learning.
 - **FR-SCHED-8** Take reward from the oracle (confirmed finding) and, when
   available, grey-box coverage (dense reward).
+- **FR-SCHED-9** *(added 2026-09-22, CC-SCHED-0005)* Optionally emit per-pull
+  diagnostics into the shared `metric_series` sink: `ThompsonBandit.attach_metrics`
+  takes a `fuzzlab.core.store.MetricLogger`, after which every `update()` call
+  (one bandit pull) logs `regret/cumulative` (running pseudo-regret vs. the best
+  posterior mean known in that context before the pull) and
+  `posterior/arm_<N>/mean` (the just-played arm's updated posterior mean, `<N>` a
+  stable first-seen-order per-arm index) under `source="bandit"`. With no logger
+  attached, behavior (selection, posteriors, return values) is unchanged — this is
+  observational-only. `fuzzlab auto --bandit` attaches a logger and flushes it
+  around the run (`auto_cli.py`).
 
 ## 4. Non-functional requirements
 - **NFR-SCHED-reproducible** Given a fixed seed and posteriors, selection is
   reproducible.
 - **NFR-SCHED-observable** Every selection records the arm, context, and sampled
-  value for later analysis (research-platform posture, D2).
+  value for later analysis (research-platform posture, D2). *(2026-09-22,
+  CC-SCHED-0005)* Extended: when attached, per-pull `regret/cumulative` and
+  `posterior/arm_<N>/mean` time series are additionally recorded in
+  `metric_series` (see FR-SCHED-9) for cross-run diagnostics (R-05).
 - **NFR-SCHED-degrade** With no learned signal, behaves no worse than the uniform
   control.
 
 ## 5. Interfaces and data contracts
 Reads `candidate` rows and `target` fingerprint; reads/writes `bandit_posteriors`;
 reads reward from `finding`/`attempt` and grey-box signals. Emits a per-candidate
-family choice consumed by the fuzzing harness.
+family choice consumed by the fuzzing harness. *(2026-09-22, CC-SCHED-0005)* Also
+optionally writes `metric_series` rows (`source="bandit"`,
+`regret/cumulative` and `posterior/arm_<N>/mean` keys, one step per pull) via
+`fuzzlab.core.store.MetricLogger`, when a logger is attached with
+`attach_metrics` — read by the diagnostics UI (R-05, component U5).
 
 ## 6. Dependencies (components)
 `core/`, auditor (candidates), fuzzing harness and oracle (rewards), grey-box

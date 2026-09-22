@@ -15,7 +15,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 ## 2026-09-22
 
 - LAB: implemented code generation for `orm_entity_bulk_assign`
-  (mass-assignment, registry-only since `CC-LAB-0059`/`FR-LAB-56`) in
+  (mass-assignment, registry-only since `CC-LAB-0063`/`FR-LAB-58`) in
   `php_current`'s shared `fuzzlab.labgen.modules` registry (1 new source,
   2 new transforms, 1 new sink, 4 templates), drafted and reviewed through
   the new pre-change gate before implementation. Mid-implementation, found
@@ -29,8 +29,8 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   Eloquent-model design an earlier draft had already ruled out. New
   manifests `lab/manifests/mass_assignment_sample.yaml` (php_current) and
   `lab/manifests/mass_assignment_laravel_sample.yaml` (php_laravel), 21
-  new tests (`tests/test_labgen_mass_assignment.py`), `CC-LAB-0060`/
-  `FR-LAB-57`. Verified: both stacks' cells render and derive the
+  new tests (`tests/test_labgen_mass_assignment.py`), `CC-LAB-0064`/
+  `FR-LAB-59`. Verified: both stacks' cells render and derive the
   intended verdict, `php -l` clean, full `labgen`-marked suite unchanged
   at 29 pre-existing failures (this sandbox's missing `gitleaks`/`numpy`),
   zero new regressions. Other 8 ops of this family, the other 19 new sink
@@ -48,7 +48,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`) — 102 entries
   (was 25), 20 new sink families, ~70 new ops, covering all 12 corpus cells
   (the original 6 plus the 6 added below). Registry-only: no emitter/module
-  yet generates code for the new sink families. `CC-LAB-0059` / `FR-LAB-56`.
+  yet generates code for the new sink families. `CC-LAB-0063` / `FR-LAB-58`.
 - Research: added 6 brand-new vulnerability-class cells to the corpus
   (`docs/research/corpus-examples/{mass-assignment,ssrf,
   insecure-deserialization,ssti,header-injection,webhook-signature}/`),
@@ -72,11 +72,11 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   patterns (framework docs, public CVEs) and explicitly marked
   `synthetic: true` with no fabricated repo attribution. Every entry
   carries >= 2 CWEs unique to it (`cwe_shared`/`cwe_unique` split, per
-  PA-0032) -- `.claude/hooks/check-corpus-cwe-coverage.sh` passes clean
+  PA-0033) -- `.claude/hooks/check-corpus-cwe-coverage.sh` passes clean
   across the full 60-entry set after an iterative collision-fix pass (the
   hook caught and this session fixed every cross-entry CWE-ID collision
   it found). `.claude/hooks/check-corpus-cwe-coverage.sh` extended again
-  (per PA-0032) to mechanically enforce the new "at least 5 pairs per
+  (per PA-0033) to mechanically enforce the new "at least 5 pairs per
   class" floor itself, not just the CWE-uniqueness floor — it now blocks
   the session if any touched corpus cell has fewer than 5 `role:
   vulnerable` entries across its manifest.yaml files. Status section of
@@ -104,10 +104,10 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
     the first time it ran against this pass's work; both fixed, hook now
     passes clean.
   - Updated `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`'s Step 6
-    section and PA-0032 (`docs/PREVENTIVE_ACTIONS.md`) to describe the
+    section and PA-0033 (`docs/PREVENTIVE_ACTIONS.md`) to describe the
     tightened shared/unique standard and its enforcement.
 - Planning: rewrote `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`
-  from scratch, per explicit instruction following `docs/bugs/BUG-0029-*.md`.
+  from scratch, per explicit instruction following `docs/bugs/BUG-0030-*.md`.
   Restructures the 8 steps to be concise and executable, and replaces the
   prior version's unenforced "more CWEs is better" prose (Step 6) with a
   concrete per-entry research procedure, an explicit 2-CWE floor, and a
@@ -117,7 +117,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   reflects the real current state (waves 1-2 complete and CWE-remediated;
   additional architecture/function combinations per category and dynamic-
   tier validation remain open, explicitly, not silently deferred).
-- Bug fix: `docs/bugs/BUG-0029-corpus-expansion-agent-under-delivered-explicit-cwe-research-instruction.md`
+- Bug fix: `docs/bugs/BUG-0030-corpus-expansion-agent-under-delivered-explicit-cwe-research-instruction.md`
   — the CWE research done for waves 1-2 of the site-architecture corpus
   expansion under-delivered `docs/VULN_CORPUS_EXPANSION_PLAN.md`/
   `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md` Step 6's explicit
@@ -136,7 +136,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   check-corpus-cwe-coverage.sh` (new `Stop` hook, wired in
   `.claude/settings.json`) that mechanically blocks the session from ending
   if a touched corpus manifest entry has fewer than 2 CWEs and no
-  rationale. New preventive action: **PA-0032** (`docs/PREVENTIVE_ACTIONS.md`,
+  rationale. New preventive action: **PA-0033** (`docs/PREVENTIVE_ACTIONS.md`,
   strengthens PA-0020's enforcement scope). `ERROR_LOG.md` entry added.
 - Research: executed wave 2 of the site-architecture corpus expansion
   (`docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`), per explicit
@@ -198,6 +198,278 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   Cites the MITRE CWE index (<https://cwe.mitre.org/data/index.html>) as the
   CWE-identification source. Planning only — not dispatched, no research or
   collection performed.
+- FUZZ (`CC-FUZZ-0024`, `FR-FUZZ-11`): wired M10 grey-box confirmation into the real
+  oracle pipeline — `GreyboxConfirmationStrategy` (constructor-injected
+  `CoverageSource`/`DbFaultSource`, both default `None`, fail-closed no-op without a
+  source or a `send_correlated`-capable sender) consults the already-built pure
+  decision (`greybox_confirms()`/`m10_evidence()`) for sql-injection/xss, threaded
+  through `default_strategies()` → `Oracle` → `run_pipeline` → `run_auto` → new
+  `fuzzlab auto --greybox-coverage-file`/`--greybox-dbfault-file` flags, mirroring
+  the M8 OOB seam. Merged from `claude/trusting-noether-heon0n` (cherry-picked,
+  renumbered — `CC-FUZZ-0020`/`FR-FUZZ-9` there collided with this branch's
+  already-landed D0a/B0-coverage-frontier entries). The live pcov/DB-fault side
+  channel and a correlating oracle probe sender stay on-host last-mile work.
+- FUZZ (`CC-FUZZ-0023`, `FR-FUZZ-10`): built the previously-unbuilt M8 out-of-band
+  (OOB) callback oracle mechanism — `fuzzlab/oracle/oob.py::OobListener` (a
+  loopback-only, default-off local canary tracker) plus
+  `CommandInjectionOobStrategy`, confirming blind command injection when a target
+  executes an injected shell fragment that fetches a unique canary URL but leaves
+  no timing/response signal. Wired through `Oracle(oob=...)`,
+  `run_pipeline`/`run_auto`, and the new `fuzzlab auto --oob` flag (default off,
+  same gating shape as `--browser`/the proxy's `--authorized`). Merged from
+  `claude/trusting-noether-heon0n` (cherry-picked, renumbered — `CC-FUZZ-0019`/
+  `FR-FUZZ-8` there collided with this branch's already-landed C1/M8-wiring entry,
+  an unrelated same-numbered lane about mutation-variant wiring).
+- LAB (`CC-LAB-0062`, Wave A2, build lane A2): verified the Phase-0
+  manifest-generator exit criterion, scoped to Layer A per D-open-1 —
+  re-ran the parity/cutover coverage gate (`fuzzlab.labgen.cutover_gate
+  .assert_cutover_coverage()`, `tests/test_labgen_cutover_gate.py`, 16/16
+  passing) against the live repo, confirming all six `L-P3.3c-G1`..`G6`
+  page groups done and a clean 12 covered / 4 exempted / 0 uncovered split
+  over the 16 `PFF-` real-page cases. Closes Phase 0's exit criterion for
+  Layer A in `docs/DECISIONS_AND_ROADMAP.md` and `docs/ARCHITECTURE.md`;
+  corrected stale 13/3 counts in `docs/components/01-target-lab
+  /requirements.md` (`FR-LAB-8`/`FR-LAB-51`) to the current 12/4/0 split.
+  No code changed; `L-P3.3c-CUT` (deleting `puppy-fort-factory/`) remains
+  unscheduled pending human sign-off. Documented that this is a functional
+  parity/coverage proof, not a literal byte-for-byte source-text diff — no
+  such tool exists in this repo for either `php_current` or `php_laravel`.
+- UI (`CC-UI-0032`, `FR-UI-14`, build lane U5): built out the **Diagnostics tab**
+  (cross-run trend charts, intra-run metric series with server-side LTTB
+  downsampling + client-side EMA smoothing, candidate-score/bandit/model-registry
+  snapshot panels) and a read-only, injection-safe **store explorer** (`FR-UI-2`)
+  over `run_metrics`/`metric_series`/`candidate`/`bandit_posteriors`/`model` —
+  because U5 was dispatched from a pre-Wave-2 base, it independently built its own
+  `chart.js`/`datatable.js`/vendored uPlot; these were reconciled by hand onto the
+  already-landed U4 (`CC-UI-0031`) and U2 (`CC-UI-0029`) versions rather than
+  merged raw, to avoid silently clobbering already-consumed shared infrastructure.
+- UI (`CC-UI-0029`, `FR-UI-13`, build lane U2): added the **Findings workbench**
+  (`/findings`, `/findings/{id}`) — a faceted filter sidebar (severity, vuln
+  class, method, mechanism, endpoint; live counts; APG Disclosure a11y
+  pattern) + applied-filter chips + server-side saved views
+  (`saved_views` table, migration 12; `GET/POST/PUT/DELETE /api/views?table=`)
+  over the existing `finding`/`attempt` tables, list→detail, and a "send to
+  Repeater" pivot reusing U0's PRG+303 pattern (`POST /findings/repeater/
+  from-finding` → `303` → `/proxy?repeater_tab=ID`, opaque tab id only —
+  `RepeaterController.create_from_finding` reconstructs a best-effort request
+  from the finding's own url/method/param since findings carry no raw bytes).
+  The finding detail view renders the multi-artifact ground-truth fields
+  (`primary_endpoint`/`primary_role`/`related_endpoints`/`flow_variant`) when a
+  finding's evidence happens to carry them (additive/optional, per
+  CR-LAB-0001 Addendum B — the oracle itself never reads ground truth). Built
+  the shared, hand-rolled `js/datatable.js` ES module (native `<table>`, not
+  `role="grid"`; `textContent`-only rendering; scheme-checked pivot hrefs;
+  `columns[]`/`data`/`onRowClick`/`rowActions`/`textFilterKeys` API) per R-03,
+  reusable by U1's recent-runs table and U5's store explorer. Read-only over
+  the store aside from the saved-views CRUD it deliberately owns
+  (`NFR-UI-read-only` names result tables; view *definitions* are not one).
+- UI/ML (`CC-UI-0031`, `CC-ML-0010`, `FR-UI-11`, `FR-UI-12`, `FR-ML-9`, build lane
+  U4): built the **ML tab** (`/ml`) as a read-only, advisory surface over model
+  internals already in the store — classifier PR curve/reliability/ECE, ranker
+  nDCG@k/precision@k + score distributions, the conformal flag/abstain/drop split,
+  the ECOD anomaly histogram, active-learning committee disagreement, bandit Beta
+  posteriors, and mutation killed/survived variants — behind a persistent
+  non-dismissible advisory banner, categorical bands, and a neutral blue/amber
+  palette (never the oracle's red/green), per R-06. Vendored **uPlot 1.6.32**
+  (`static/vendor/uplot/`) and built the shared `createChart()` wrapper
+  (`static/js/chart.js`, per R-02/R-12) for reuse by U5's Diagnostics tab. New
+  read-only module `fuzzlab/web/mlview.py` + `GET /api/ml/data`; nothing here writes
+  to the store. 17 new tests (`tests/test_web_ml.py`); full suite green — see this
+  lane's change-control entries for pass/skip counts.
+- UI (`CC-UI-0028`, `FR-UI-10`, build lane U1): added the **Overview dashboard**
+  as the new landing route (`/`) — 5 KPI tiles (findings, runs, last run,
+  detection quality, efficiency), a recent-runs table, a findings-by-severity
+  bar (severity derived read-only from `finding.vuln_class`, since the store has
+  no severity column), quick actions, and empty/partial-empty states, per
+  resolved marker R-10 in `docs/UI_IMPLEMENTATION_PLAN.md`. The **Launcher**
+  moved off `/` to its own route, `/launcher` (behavior unchanged), so Overview
+  doesn't overload it. Read-only over the store (never creates it, never writes
+  a result-table row); served from one aggregate read,
+  `fuzzlab/web/results.py::overview_summary`. `js/datatable.js` (the shared
+  read-only `DataTable` R-03 reserves for U2/U5) did not exist yet, so the
+  recent-runs table got its own small hand-rolled click-to-sort instead —
+  flagged for U2/U5 to reconcile when the shared component lands.
+- FUZZ (`CC-FUZZ-0022`, `NFR-FUZZ-dry-run`, build lane D0b): added `--dry-run` to
+  `fuzzlab greybox-run`'s CLI (`fuzzlab/greybox/greybox_cli.py`), reusing the
+  shared `fuzzlab/cli_dryrun.py` plan/report helper the same way lane D0a's
+  `CC-FUZZ-0020` did for `fuzz`/`auto` — plans and prints the exact argv/command,
+  sends nothing, short-circuits before `--authorized`/`Store`/sender/coverage-
+  source construction. Completes lane group B's D0 (`--dry-run` on every CLI
+  entry point); sequenced after Wave C1's `CC-FUZZ-0019` M8-wiring for the
+  genuine file overlap on `greybox_cli.py`. The preview automatically reflects
+  C1's `--mutation-variants`/`--max-mutation-variants`/`--allow-destructive`
+  flags too, via the existing generic `argparse` introspection in
+  `fuzzlab/web/commandspec.py` — no extra wiring needed. Tests added to
+  `tests/test_cli_dry_run.py`; full suite green (see test run for counts).
+- SCHED (`CC-SCHED-0005`, `FR-SCHED-9`, build lane B0-bandit-emitter): wired the
+  bandit loop into B0's `metric_series` sink (`CC-CORE-0018`) — `ThompsonBandit.
+  attach_metrics`/`flush_metrics` (`fuzzlab/scheduler/bandit.py`) emit
+  `regret/cumulative` and `posterior/arm_<N>/mean` under `source="bandit"` on
+  every `update()` pull, via `MetricLogger`; `fuzzlab auto --bandit`
+  (`fuzzlab/harness/auto_cli.py`) attaches/flushes it around the run. Purely
+  additive/observational (no `attach_metrics` call = unchanged selection/posterior
+  behavior); unblocks R-05's bandit cumulative-regret + per-arm posterior-mean
+  diagnostics panel. Tests: `tests/test_scheduler.py` (unit) +
+  `tests/test_auto.py::test_run_auto_with_bandit_emits_metric_series`
+  (end-to-end via `run_auto`).
+- MUT (`CC-MUT-0011`, `FR-MUT-8`, B0 emitters sub-lane): `MutationSearch` now
+  optionally emits its per-step reward/novelty signal into the `metric_series`
+  table (`source="mutation"`) via B0's `MetricLogger`/`log_scalar`
+  (`fuzzlab/core/store.py`, CC-CORE-0018); `fuzzlab mutate-run`
+  (`fuzzlab/mutation/run.py::run_mutation`) attaches one shared logger across
+  all base payloads in a run — why: gives the diagnostics UI (U5/B0) a live
+  training-curve-style view of the mutation search, matching the GBT/logistic/
+  bandit/coverage emitters already planned for this table; purely additive,
+  no change to search/selection behavior.
+- ML (`CC-ML-0009`, build lane B0 Wave 1b): wired per-round/per-epoch scalar
+  emission from `GradientBoostedTrees.fit`/`LogisticRegression.fit` (`fuzzlab/ml
+  /gbt.py`, `fuzzlab/ml/logistic.py`) into B0-table's `metric_series` sink via
+  `fuzzlab/ml/train.py`'s new `_fit_with_metrics` helper, using B0-table's
+  `MetricLogger` (`CC-CORE-0018`), so the classifier's training curves are
+  finally visible instead of only the end-of-run PR-AUC in `run_metrics`.
+  Additive/opt-in: a new `on_round`/`on_epoch` callback param on each model's
+  `fit()`, exercised only for the deploy fit and only when `train_and_score`
+  is given a `run_id`; existing training behavior/output is unchanged.
+  `source="gbt"`/`source="logreg"` per the subsystem-prefix schema note,
+  `key`s `train/loss`, `train/mean_abs_update` (GBT), `train/l2_norm`
+  (logistic).
+- FUZZ (`CC-FUZZ-0021`, `FR-FUZZ-9`, build lane B0's coverage-frontier
+  emitter, Wave 1b): `fuzzlab/greybox/run.py::run_greybox()` now emits the
+  run-wide `CoverageFrontier`'s per-attempt growth to `core/store.py`'s
+  `metric_series` table (`source="coverage"`, `key="coverage/lines"`) via a
+  buffered `MetricLogger`, additive alongside the existing
+  `greybox_frontier_size` `run_metrics` total — enables a future UI reader to
+  chart coverage growth over a run. Landed after lane C1's `CC-FUZZ-0019`
+  M8-wiring, per the build plan's flagged file-overlap in this same
+  attempt/summary loop.
+- UI/PROXY (`CC-UI-0030`, `CC-PROXY-0018`, build lane U3): rebuilt the Proxy
+  workbench's History / Intercept / Repeater byte editors on one shared
+  `<message-editor>` ES module (`fuzzlab/web/static/js/msgeditor.js`, R-04) —
+  Raw (the only editable mode, plain `<textarea>`, byte-exact) | Pretty
+  (hand-rolled tokenizer, DOM-built, never innerHTML) | read-only Hex on
+  responses, a status/timing strip, a CRLF/non-printing-byte display toggle,
+  and Ctrl-F search painted via the CSS Custom Highlight API over a read-only
+  mirror (never span-injected into the buffer). Added a vanilla CSS-grid
+  resizable splitter (`attachSplitter()`, no library) for the request/response
+  panes in History detail and Repeater, plus a sub-nav for jumping between the
+  four Proxy cards. Backend (`RepeaterController`, BUG-0021's per-thread fix)
+  is unchanged; the editable textareas keep the ids the existing Playwright/
+  API tests target (`#rep-raw`, `#pending-raw`, `#rep-resp`) and the
+  `toWire()` CRLF-restore in `common.js` remains the single byte-exact send
+  path. Proxy/desync tooling stays default-off and lab-only — no safety-gate
+  change.
+- Process: filed `docs/bugs/BUG-0029` (the session paused to ask for continuation
+  confirmation despite an explicit "work until you run out of tasks" instruction) and
+  added `PA-0032` — check a next-step question against the task's standing
+  instructions before asking it; reserve check-ins for genuine blockers, not
+  already-pre-authorized natural stopping points. Not a fuzzlab code defect; filed at
+  the user's explicit request.
+- LAB (`CC-LAB-0060`, `FR-LAB-57`, build lane T1): wired `fuzzlab.labgen
+  .conformance.tier1`'s public API (`build_tier1_case`/`run_tier1_case`/
+  `evaluate_tier1_response`) against a real in-process app+DB for the first
+  time, reusing `CC-LAB-0054`'s existing `LiveBootHarness` (unmodified) as a
+  real `Tier1Client` — no longer purely "[design]" for the `php_laravel`
+  stack. `tests/test_labgen_conformance_tier1.py` gained a skip-guarded,
+  `@pytest.mark.slow` `TestTier1RealLiveBoot` class proving a real
+  vulnerable/secure SQLi differential (`product.php`'s twin) and a real
+  escaped-XSS negative (`contact.php`/`newsletter.php`) through `tier1.py`'s
+  own decision logic against a genuinely booted Laravel app — synthetic,
+  in-sandbox only, never the real loopback-only lab target (D11), so no
+  `--authorized` flag applies. `tier2.py` and its own tests are untouched
+  (out of scope for this lane; owned by lane T2).
+- CLI/D0a: added a headless `--dry-run` flag to every plain CLI entry point except
+  `fuzzlab greybox-run` (owned by lane D0b) — `crawl`, `audit`, `fuzz`, `auto`,
+  `mutate-run`, `proxy` — that plans and prints the exact command it would run and
+  sends nothing, for use outside the web UI. Reuses the web launcher's existing
+  `/api/launch/dry-run` plan/report logic (`fuzzlab/web/commandspec.py` +
+  `fuzzlab/web/runner.py`) via a new shared `fuzzlab/cli_dryrun.py` helper, instead
+  of reimplementing it (CC-CRAWL-0007, CC-AUD-0015, CC-FUZZ-0020, CC-MUT-0010,
+  CC-PROXY-0017; CC-UI-0027 for the incidental web-launcher form change — see the UI
+  entry for why that number was needed even though `fuzzlab/web/app.py` was not
+  touched).
+- FUZZ/MUT: wired the mutation engine's accepted, semantics-preserving payload
+  variants (Phase 8 T8.5, previously reaching only the standalone `mutate-run`
+  CLI) into the **main harness's** attempt path — `greybox/run.py::run_greybox`
+  now optionally (`--mutation-variants` on `greybox-run`) probes each sqli/xss
+  attack with a bounded set of mutation-engine variants through the same
+  attempt/reward/coverage pipeline as the built-in probes, and writes back the
+  ones that hit or reach new code to `payload_variant` via the existing
+  destructive-gated `catalog.record_variant`, same as `mutate-run` does — so
+  `greybox-run` actually consumes mutation variants, not just `mutate-run`
+  (Lane C1/M8-wiring, `CC-FUZZ-0019`/`CC-MUT-0009`).
+- UI (CC-UI-0026): lane U6 — control-plane hardening for the web launcher's POST/PUT/
+  DELETE surface (`fuzzlab/web/app.py`'s new `SecurityGateMiddleware`): a Host allow-
+  list on every request (DNS-rebinding defense, rolled ourselves) plus, on state-
+  changing requests, Origin == allow-list + `Sec-Fetch-Site == same-origin` (rejecting
+  same-site too — the lab is same-site with the panel on a sibling port) and a custom
+  `X-Fuzzlab-Client` header on `/api/*` JSON bodies, with a Referer fallback for non-
+  Fetch-Metadata clients and a form-POST exemption from the custom header (a native
+  `<form>` can never set one). Why: the panel is loopback-only (D11) but still
+  reachable by any page the operator's browser visits — this closes that gap per
+  `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U6) / R-13, operationalizing NFR-UI-localhost.
+  Pinned `starlette>=1.0.1,<2` (CVE-2026-48710 prerequisite). New
+  `tests/test_web_security.py` (16 cases); all existing web-test files updated to a
+  shared `tests/_webclient.py` TestClient helper so they keep passing through the new
+  gate. See `docs/components/12-diagnostics-and-ui/change-control.md` CC-UI-0026 for
+  full detail and the exact `app.py` touch-points (kept additive/localized alongside
+  lane U0's MPA route-split work on the same file).
+- UI: lane U0 (`docs/UI_IMPLEMENTATION_PLAN.md` §3, `CC-UI-0025`) — replaced the
+  hash-switched single page with real per-section MPA routes (`/`, `/proxy`,
+  `/results`, `/ml`, `/diagnostics`), split `templates/index.html` into
+  `templates/sections/*.html`, `static/app.js` into per-section ES modules under
+  `static/js/` (plus a shared `common.js`/`shell.js`), and `static/app.css` into
+  per-section partials under `static/css/` (plus a shared `shell.css`); retired
+  the client-side `initTabs()` hash router (R-01) and gave the sidebar real
+  `href`s with server-rendered `aria-current="page"` active state. Converted the
+  Proxy "send to Repeater" pivot to POST/Redirect/GET with a 303 (R-07) — the tab
+  id travels as an opaque `?repeater_tab=` query hint, never raw request bytes —
+  as the enabling refactor every other Wave-1 UI lane depends on.
+- Core: lane B0-table — additive migration 11 adds `metric_series(run_id, source,
+  key, step, ts, value)`, the shared cross-run scalar-series table for future
+  per-step emitters (GBT/logistic, bandit loop, coverage frontier,
+  `MutationSearch`), plus the write path they'll use: a central
+  `open_store()` (WAL, `busy_timeout=10000`, `synchronous=NORMAL`,
+  `foreign_keys=ON`) that `connect()` now aliases, `log_scalar(...)`, and a
+  buffered `MetricLogger` context manager — non-finite values rejected at
+  emit. Per-component emitters are out of scope for this lane (`CC-CORE-0018`).
+- Lab (`CC-LAB-0059`, Wave A0): mechanically reconfirmed the Layer-A
+  reconciliation against the live repo — all 16 `PFF-` cases in
+  `lab/ground-truth/labels.json` still accounted for (12 covered / 4
+  exempted / 0 uncovered, per `lab/ground-truth/migration-exemptions.yaml`),
+  no new pages/cases found under `puppy-fort-factory/`. Added a dated
+  confirmation note at `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.7a; no
+  `G7…Gn` lanes dispatched, no code changed.
+- LAB (lane T2, `CC-LAB-0061`): wired `fuzzlab/labgen/conformance/tier2.py`
+  (previously design-only) against a real, synthetic, in-sandbox
+  `php_laravel` live-boot app, following the same precedent `CC-LAB-0054`
+  established for Tier 1 — new `LiveBootTier2Oracle`, a real `Tier2Oracle`
+  that adds a control/baseline differential on top of Tier 1's bare
+  evidence-marker check, fails closed (inconclusive) when the control itself
+  can't distinguish vulnerable from not. Never touches the real,
+  loopback-only lab target and needs no `--authorized` (D11). 9 real tests
+  in `tests/test_labgen_conformance_tier2.py`, including 2 genuine live-boot
+  confirmations against `product.php`'s real numeric-SQLi twin — all pass.
+- Planning: added `docs/PARALLEL_LANE_BUILD_PLAN.md`, organizing the
+  remaining safe-to-build-now backlog (lab-track page migration + conformance
+  wiring, UI/diagnostics tabs, M8/M10 mutation-oracle wiring) into pre-numbered,
+  file-disjoint build lanes/waves for concurrent dispatch — no lane executed
+  yet, plan only, per `docs/MULTI_AGENT_ORCHESTRATION.md`.
+- Planning: revised `docs/PARALLEL_LANE_BUILD_PLAN.md` through v2–v7 after
+  six independent review rounds — fixed a bookkeeping-number collision, a
+  false "UI route-split already done" premise, a false "Layer-A ~26-page
+  migration backlog" premise (it was already closed out by the existing
+  G1–G6 lanes per decision D-open-1), a duplicated-vs.-authoritative UI lane
+  structure (now defers to `docs/UI_IMPLEMENTATION_PLAN.md`'s own
+  U0–U6/B0/X0 map), an arithmetic error, a real file-overlap risk between
+  the `metric_series` coverage-frontier emitter and the mutation-engine
+  wiring lane in `fuzzlab/greybox/run.py`, a stale "X0 still pending" claim
+  (X0 was already shipped as `CC-UI-0024`, dropped from dispatch), a lane
+  (`--dry-run` CLI flag) that was missing pre-assigned bookkeeping numbers
+  for four of the five non-UI components it touches, a leftover UI-numbering
+  gap in that same lane's fifth number, and added a scope-transparency note
+  distinguishing original-backlog UI lanes from infrastructure scope pulled
+  in by adopting the authoritative UI plan. Still plan-only — no lane
+  executed.
 - Research: Phase 3 CWE mapping for the "file handling" corpus cell
   (`docs/research/corpus-examples/file-handling/{php,node,python}/manifest.yaml`,
   12 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each

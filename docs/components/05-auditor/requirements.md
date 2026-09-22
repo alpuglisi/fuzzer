@@ -39,6 +39,11 @@ budget where a vulnerability is plausible.
 - **NFR-AUD-safe** Probing uses non-destructive canaries only; destructive checks
   are gated off by default.
 - **NFR-AUD-no-leak** Candidate identifiers carry no vulnerability class name (D9).
+- **NFR-AUD-dry-run** `fuzzlab audit` accepts `--dry-run`: plans and prints the
+  exact argv/command it would run and sends nothing (no probe is made), for
+  headless use outside the web UI. Reuses the web launcher's dry-run plan/report
+  logic (`fuzzlab/web/commandspec.py` + `fuzzlab/web/runner.py`) via the shared
+  `fuzzlab/cli_dryrun.py` helper.
 
 ## 5. Interfaces and data contracts
 Reads `page`, `endpoint`, `parameter` from the store; writes `candidate` rows

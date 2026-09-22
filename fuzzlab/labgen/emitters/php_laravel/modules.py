@@ -208,7 +208,7 @@ class ReadStoredFieldSource(TemplateModule):
 class AllPostParamsSource(TemplateModule):
     """The WHOLE request body, read through ``$request->all()`` -- the
     Laravel analogue of ``fuzzlab.labgen.modules.AllPostParamsSource``'s
-    ``$_POST`` read (CC-LAB-0060's follow-up, restoring the "Laravel carries
+    ``$_POST`` read (CC-LAB-0064's follow-up, restoring the "Laravel carries
     every shape php_current supports" full-depth invariant
     ``tests/test_labgen_php_laravel_harder_shapes.py`` asserts).
     ``GetParamSource``/``PostParamSource`` both extract exactly one named
@@ -397,7 +397,7 @@ class AttrValueAllowlistTransform(TemplateModule):
 
 
 class UnfilteredBodyUpdateTransform(TemplateModule):
-    """The ``unfiltered_body_update`` op (CC-LAB-0060, `mass_assignment`
+    """The ``unfiltered_body_update`` op (CC-LAB-0064, `mass_assignment`
     concern): ``value_expr`` passes through unchanged -- every key in the
     whole request body reaches the sink. Safety matrix: ``effect=no_effect``
     (the vulnerable twin)."""
@@ -409,7 +409,7 @@ class UnfilteredBodyUpdateTransform(TemplateModule):
 
 
 class RuntimeFieldAllowlistTransform(TemplateModule):
-    """The ``runtime_field_allowlist`` op (CC-LAB-0060, `mass_assignment`
+    """The ``runtime_field_allowlist`` op (CC-LAB-0064, `mass_assignment`
     concern): rewrites ``value_expr`` to only the keys also present in
     ``allowed_fields`` (an ordered tuple the emitter's own page profile
     supplies -- mirrors :class:`IdentifierAllowlistTransform`'s
@@ -569,7 +569,7 @@ class SqlStringLiteralLikeSink(TemplateModule):
 
 
 class OrmEntityBulkAssignSink(TemplateModule):
-    """The ``orm_entity_bulk_assign`` sink family (CC-LAB-0060,
+    """The ``orm_entity_bulk_assign`` sink family (CC-LAB-0064,
     mass-assignment). Unlike ``fuzzlab.labgen.modules``' php_current
     analogue -- plain PDO, which needs a runtime ``foreach`` to build a SET
     clause by hand -- Laravel's Query Builder ``update()`` accepts an
@@ -579,7 +579,7 @@ class OrmEntityBulkAssignSink(TemplateModule):
     an Eloquent model's own ``update()``: Eloquent's ``$fillable``/
     ``$guarded`` is a model-class property with no existing module category
     in either registry for emitting a separate model file (the reason an
-    earlier draft of CC-LAB-0060 was re-scoped away from Eloquent
+    earlier draft of CC-LAB-0064 was re-scoped away from Eloquent
     entirely); the Query Builder bypasses Eloquent's mass-assignment guard
     the same way raw PDO does, which is exactly the vulnerability class
     this sink renders -- and it is real, commonly-used Laravel API, not a

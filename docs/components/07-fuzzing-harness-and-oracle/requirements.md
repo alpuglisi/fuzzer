@@ -1,10 +1,10 @@
 # Fuzzing Harness and Oracle — Requirement Specification
 
-Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5); harness generalization ongoing]`
-· Last updated: 2026-09-21
+Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5/M8; M10 grey-box wiring layer built, live sources on-host); harness generalization ongoing; greybox-run consumes mutation-engine variants (opt-in); coverage-frontier growth emitted to metric_series]`
+· Last updated: 2026-09-22 · see CC-FUZZ-0024
 
-Related: `ARCHITECTURE.md` #7; `DECISIONS_AND_ROADMAP.md` (D1, D5, D7, Phase 2/3);
-`./change-control.md`.
+Related: `ARCHITECTURE.md` #7; `DECISIONS_AND_ROADMAP.md` (D1, D5, D7, Phase 2/3,
+Phase 8); `./change-control.md`.
 
 ## 1. Purpose
 Send payloads at candidates, extract per-attempt features and reward, and — via a
@@ -50,6 +50,110 @@ rewards) derives from it.
   sending anything.
 - **FR-FUZZ-7** Serialize timing-sensitive sends at concurrency 1 per host via the
   shared budget mutex.
+- **FR-FUZZ-8** The live grey-box run (`greybox/run.py::run_greybox`) can, opt-in
+  (`--mutation-variants` / `mutation_variants=True`, off by default), also probe
+  each point's sqli/xss attacks with a bounded set of the mutation engine's
+  semantics-preserving variants (component #9, MUT), through the same
+  attempt/reward/coverage path as the built-in probes; a variant that hits or
+  reaches new code is written back to `payload_variant` via MUT's existing
+  destructive-gated `catalog.record_variant` — the harness's own consumer of
+  Phase 8 T8.5's write-back path, alongside the standalone `mutate-run` CLI.
+  Added by `CC-FUZZ-0019` (Lane C1/M8-wiring).
+- **FR-FUZZ-9** `run_greybox()` emits the run-wide `CoverageFrontier`'s growth
+  to `core/store.py`'s `metric_series` table (component #2, CORE) once per
+  attempt, via a buffered `MetricLogger(store, run_id, source="coverage")`
+  and the private `_record_coverage_metric()` helper: `key="coverage/lines"`,
+  `step=` the running attempt count, `value=` the frontier's current `.size`.
+  Always on (no flag — read-side-only addition, no new traffic or behavior
+  change to the attempt path itself); additive alongside the pre-existing
+  `greybox_frontier_size` end-of-run `run_metrics` total, which is unchanged.
+  Added by `CC-FUZZ-0021` (lane B0's coverage-frontier emitter, Wave 1b,
+  sequenced after `CC-FUZZ-0019`/`CC-FUZZ-0020` per the file-overlap note in
+  `docs/PARALLEL_LANE_BUILD_PLAN.md`).
+- **FR-FUZZ-10** The oracle supports **M8 out-of-band (OOB) callback** confirmation
+  for blind injection classes with no observable direct-response difference. Scope
+  and contract:
+  - `fuzzlab.oracle.oob.OobListener` is a loopback-only (`127.0.0.1`/`localhost`
+    only; any other host raises) local HTTP callback tracker. It binds no socket
+    until `start()` is called (default-off — never binds implicitly), mints
+    unguessable per-probe tokens (`register()`), gives the URL to embed in a payload
+    (`callback_url(token)`), and reports whether that exact token was later
+    requested (`wait_for(token, timeout)`, `hits(token)`). It is a process-local test
+    fixture for this lab — no DNS component, no external reachability, no
+    persistence — never a general-purpose, publicly reachable interaction/
+    collaborator service (Safety, `CLAUDE.md`).
+  - `CommandInjectionOobStrategy` (`fuzzlab.oracle.strategies`) is a
+    `ConfirmationStrategy` for `vuln_class="command-injection"`,
+    `category="command-injection"`, `mechanism="oob-callback"`. It takes an
+    `OobListener` by injection (constructor arg, default `None`) exactly like the M6
+    `BrowserExecutor` seam: with a listener, it embeds a fresh canary URL in a
+    shell-fetch payload (`curl`/`wget`) per attempt and confirms iff that token is
+    requested before `timeout`; without one, it no-ops (`confirm()` returns `None`
+    immediately, no probe sent) — fail-closed, and it never constructs a listener of
+    its own.
+  - Wiring: `default_strategies(oob=None)`, `Oracle(oob=None)`,
+    `run_pipeline(oob=None)`, `run_auto(oob=None)` all take the listener as an
+    optional keyword that defaults to `None` (no behavior change for existing
+    callers). `fuzzlab auto --oob` is the only place that constructs and `start()`s a
+    real `OobListener`; it is default-off and torn down (`stop()`) at the end of the
+    run regardless of outcome.
+  - Applies alongside the existing M1 timing strategy for the same category (both
+    `applies()` on `category="command-injection"`); the oracle tries the cheaper M1
+    timing check first, then M8, so a target that suppresses timing signal but still
+    executes the shell fragment is still confirmable.
+  - Other blind classes named in `docs/architecture/oracle-confirmation.md` Tier 3
+    (blind SSRF, blind XXE, blind insecure-deserialization) can register their own
+    `ConfirmationStrategy` against the same `OobListener` seam later — M8 the
+    *mechanism* is now built and pluggable; wiring every blind class onto it is
+    tracked as future work, not blocked on anything.
+  - Added by `CC-FUZZ-0023`, merged in from `claude/trusting-noether-heon0n`
+    (renumbered from that branch's own `FR-FUZZ-8` — see the change-control
+    entry's provenance note for why).
+- **FR-FUZZ-11** The oracle supports **M10 grey-box confirmation** for sql-injection
+  and xss, layered as a secondary mechanism alongside the black-box strategies for
+  those categories. This requirement covers the *wiring layer* only — the pure
+  decision (`fuzzlab.greybox.confirm.greybox_confirms()`/`m10_evidence()`) and the
+  `CoverageSource`/`DbFaultSource` protocols were already built and unit-tested
+  (Phase 3 T3.1–T3.5); what this adds is the seam that lets `Oracle.confirm()`
+  actually consult them:
+  - `GreyboxConfirmationStrategy` (`fuzzlab.oracle.strategies`) is a
+    `ConfirmationStrategy` with `mechanism="grey-box-coverage"`; `applies()` scopes
+    it to `category in ("sql-injection", "xss")` (cross-cutting like M8 alongside
+    M1, not one class). It takes an optional `CoverageSource` and an optional
+    `DbFaultSource` by constructor injection (both default `None`) exactly like the
+    M6 `BrowserExecutor` / M8 `OobListener` seams: with neither source, `confirm()`
+    returns `None` immediately (no probe sent, fail-closed).
+  - With at least one source injected, it still needs the `sender` passed into
+    `confirm()` to expose `send_correlated(url, param, value, *, method, location)
+    -> (Probe, request_id)` (the contract already established for the live
+    grey-box run, `fuzzlab/greybox/run.py`'s `RequestsCorrelatingSender`) so the one
+    probe it sends can be matched back to the coverage/DB-fault side channel by a
+    fresh `X-Fzl-Cov` id; without a `send_correlated`-capable sender it no-ops too.
+    It resolves `vuln_class` from the candidate (or `category_to_oracle_class`),
+    looks up the sink's app file by URL, and calls `greybox_confirms()`/
+    `m10_evidence()` for the verdict/evidence — the oracle stays the sole
+    finding-writer.
+  - Wiring: `default_strategies(coverage=None, dbfault=None)`,
+    `Oracle(coverage=None, dbfault=None)`, `run_pipeline(coverage=None,
+    dbfault=None)`, `run_auto(coverage=None, dbfault=None)` all take the sources as
+    optional keywords defaulting to `None` (no behavior change for existing
+    callers). `fuzzlab auto --greybox-coverage-file DIR` /
+    `--greybox-dbfault-file DIR` construct `FileCoverageSource`/`FileDbFaultSource`
+    against that on-host pcov/DB-fault side channel directory; both default off.
+  - **Honesty about live capability:** this wiring layer is offline-buildable and
+    fully unit-tested with `InMemoryCoverageSource`/`InMemoryDbFaultSource`
+    (`tests/test_oracle_greybox.py`). It does **not** by itself make M10 live in a
+    real run: the CLI flags construct `FileCoverageSource`/`FileDbFaultSource`
+    against the lab's on-host pcov/DB-fault side channel, but no shipped sender yet
+    implements `send_correlated` against a live target (the `RequestsProbeSender`/
+    `SeamProbeSender` used by `fuzzlab auto` do not), so `--greybox-coverage-file`/
+    `--greybox-dbfault-file` currently no-op against a live target until a
+    correlating oracle probe sender is built — that plumbing (attaching a real
+    `X-Fzl-Cov` header per oracle probe against the instrumented lab) remains
+    on-host last-mile work (`docs/ON_HOST_TASKS.md`).
+  - Added by `CC-FUZZ-0024`, merged in from `claude/trusting-noether-heon0n`
+    (renumbered from that branch's own `FR-FUZZ-9` — see the change-control
+    entry's provenance note for why).
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
@@ -60,17 +164,35 @@ rewards) derives from it.
   excluded from scope; no traffic off localhost.
 - **NFR-FUZZ-labeled-output** Emits labeled results (e.g. CSV) with opaque case IDs
   for benchmarking and ML training (D9, D10).
+- **NFR-FUZZ-dry-run** `fuzzlab fuzz`, `fuzzlab auto`, and `fuzzlab greybox-run`
+  accept `--dry-run`: plans and prints the exact argv/command that would run and
+  sends nothing (no probe, no oracle confirmation, no coverage/DB-fault side-channel
+  read, no `Store`/CA/sender construction), for headless use outside the web UI.
+  Bypasses the `--authorized` gate for the preview itself (nothing is sent either
+  way), and reuses the web launcher's dry-run plan/report logic
+  (`fuzzlab/web/commandspec.py` + `fuzzlab/web/runner.py`) via the shared
+  `fuzzlab/cli_dryrun.py` helper. `fuzz`/`auto` were added by `CC-FUZZ-0020` (lane
+  D0a); `greybox-run` — including the `--mutation-variants`/
+  `--max-mutation-variants`/`--allow-destructive` flags `CC-FUZZ-0019` (Lane
+  C1/M8-wiring) added — was added by `CC-FUZZ-0022` (lane D0b), sequenced after
+  C1 since both touch `fuzzlab/greybox/greybox_cli.py`.
 
 ## 5. Interfaces and data contracts
 Reads `candidate` rows (and scheduler choices); writes `attempt` rows (features,
 reward) and, via the oracle, `finding` rows (labels, evidence). Reads grey-box
 coverage/fault signals when available. Authenticates via the session manager;
-sends via the `core/` HTTP client.
+sends via the `core/` HTTP client. Optionally (FR-FUZZ-8) reads mutation-engine
+operators/validator (component #9, MUT) and writes accepted variants to
+`payload_variant` via MUT's `catalog.record_variant`. Writes `metric_series`
+rows (`source="coverage"`, `key="coverage/lines"`) via `core/store.py`'s
+`log_scalar`/`MetricLogger` (FR-FUZZ-9).
 
 ## 6. Dependencies (components)
 `core/`, session manager, payload scheduler, indicator DB & catalogs; grey-box
-instrumentation for reward and coverage/fault labels. (The oracle itself depends
-on `core/` and the target lab, plus grey-box signals when available.)
+instrumentation for reward and coverage/fault labels; mutation engine (MUT,
+optional — FR-FUZZ-8). (The oracle itself depends on `core/` and the target lab,
+plus grey-box signals when available.) `core/store.py`'s `metric_series` table
+and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
 
 ## 7. Acceptance criteria
 - Confirms the lab's known blind-SQLi injection points with the differential

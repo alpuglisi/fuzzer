@@ -171,7 +171,7 @@ class ReadStoredFieldSource(TemplateModule):
 class AllPostParamsSource(TemplateModule):
     """Extracts the WHOLE ``$_POST`` array (not one named parameter) into a
     PHP variable and publishes it as ``value_expr`` -- the mass-assignment
-    family's source shape (``orm_entity_bulk_assign``, CC-LAB-0060).
+    family's source shape (``orm_entity_bulk_assign``, CC-LAB-0064).
     ``GetParamSource``/``PostParamSource`` both extract exactly one named
     parameter, the wrong shape for a bulk-assignment sink, which needs the
     whole tainted key/value map to decide which fields get written."""
@@ -196,7 +196,7 @@ class IdentityTransform(TemplateModule):
 
 
 class UnfilteredBodyUpdateTransform(TemplateModule):
-    """The ``unfiltered_body_update`` op (CC-LAB-0060, `mass_assignment`
+    """The ``unfiltered_body_update`` op (CC-LAB-0064, `mass_assignment`
     concern): ``value_expr`` passes through unchanged -- every key in the
     whole tainted array reaches the sink, including any the endpoint never
     intended to accept. Safety matrix: ``effect=no_effect`` (the vulnerable
@@ -209,7 +209,7 @@ class UnfilteredBodyUpdateTransform(TemplateModule):
 
 
 class RuntimeFieldAllowlistTransform(TemplateModule):
-    """The ``runtime_field_allowlist`` op (CC-LAB-0060, `mass_assignment`
+    """The ``runtime_field_allowlist`` op (CC-LAB-0064, `mass_assignment`
     concern): rewrites ``value_expr`` to only the keys also present in
     ``allowed_fields`` (an ordered tuple the emitter's own page profile
     supplies -- mirrors :class:`IdentifierAllowlistTransform`'s
@@ -544,7 +544,7 @@ class SqlStringLiteralLikeSink(TemplateModule):
 
 
 class OrmEntityBulkAssignSink(TemplateModule):
-    """The ``orm_entity_bulk_assign`` sink family (CC-LAB-0060,
+    """The ``orm_entity_bulk_assign`` sink family (CC-LAB-0064,
     mass-assignment): builds and executes a parameterized ``UPDATE ... SET
     ...`` at runtime from whatever keys are present in ``value_expr``'s
     array. Column *names* come from the array's own keys -- tainted when
@@ -638,7 +638,7 @@ SOURCES: dict[str, Module] = {
     "get_param": GetParamSource(),
     "post_param": PostParamSource(),
     "read_stored_field": ReadStoredFieldSource(),
-    # CC-LAB-0060: mass-assignment's whole-array source (vs. one named param).
+    # CC-LAB-0064: mass-assignment's whole-array source (vs. one named param).
     "all_post_params": AllPostParamsSource(),
 }
 TRANSFORMS: dict[str, Module] = {
@@ -654,7 +654,7 @@ TRANSFORMS: dict[str, Module] = {
     "identifier_allowlist": IdentifierAllowlistTransform(),
     "url_scheme_allowlist": UrlSchemeAllowlistTransform(),
     "attr_value_allowlist": AttrValueAllowlistTransform(),
-    # CC-LAB-0060: mass-assignment ops (lab/safety_matrix.yaml's
+    # CC-LAB-0064: mass-assignment ops (lab/safety_matrix.yaml's
     # orm_entity_bulk_assign rows).
     "unfiltered_body_update": UnfilteredBodyUpdateTransform(),
     "runtime_field_allowlist": RuntimeFieldAllowlistTransform(),
@@ -676,7 +676,7 @@ SINKS: dict[str, Module] = {
     # deliberately not widened to either.
     "html_attribute_quoted_echo": HtmlAttributeQuotedEchoSink(),
     "sql_string_literal_like": SqlStringLiteralLikeSink(),
-    # CC-LAB-0060: mass-assignment's sink family.
+    # CC-LAB-0064: mass-assignment's sink family.
     "orm_entity_bulk_assign": OrmEntityBulkAssignSink(),
 }
 COMPLEXITIES: dict[str, Module] = {

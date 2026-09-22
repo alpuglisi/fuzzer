@@ -1,0 +1,120 @@
+/* Overview section (U1/CC-UI-0028) — the landing dashboard ("/"): 5 KPI tiles,
+ * a recent-runs table, a findings-by-severity bar, and quick actions (R-10).
+ * Shared chrome (`.card`, `table`, `.pill`, `.muted`) lives in css/shell.css;
+ * this file is the section's own partial (D3).
+ */
+
+.ov-empty {
+  max-width: 420px;
+  margin: 3rem auto 0;
+  text-align: center;
+}
+.ov-empty .btn { margin-top: .6rem; }
+
+/* --- KPI tile row (R-10: 5 tiles, big numbers, each clickable) ------------ */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: .7rem;
+  margin-bottom: 1rem;
+}
+@media (max-width: 980px) {
+  .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .kpi-row { grid-template-columns: 1fr; }
+}
+.kpi-tile {
+  display: block;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: .8rem .9rem;
+  box-shadow: var(--shadow);
+  color: inherit;
+  text-decoration: none;
+}
+.kpi-tile:hover { border-color: var(--accent); text-decoration: none; }
+.kpi-label {
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--muted); font-weight: 600;
+}
+.kpi-value { font-size: 1.9rem; font-weight: 700; line-height: 1.15; margin: .15rem 0 .2rem; }
+.kpi-value-sm { font-size: 1.1rem; }
+.kpi-sub { font-size: .78rem; color: var(--muted); min-height: 1.1em; }
+.kpi-sub .sev-chip { margin-right: .3rem; }
+
+/* --- severity chips/legend (reuse the crit/high/med/low/info tokens) ------ */
+.sev-chip, .sev-dot { }
+.sev-chip {
+  display: inline-block; font-size: .72rem; padding: 0 .4rem; border-radius: 999px;
+  border: 1px solid currentColor;
+}
+.sev-critical, .sev-critical.sev-dot { color: var(--crit); }
+.sev-high, .sev-high.sev-dot { color: var(--high); }
+.sev-medium, .sev-medium.sev-dot { color: var(--med); }
+.sev-low, .sev-low.sev-dot { color: var(--low); }
+.sev-info, .sev-info.sev-dot { color: var(--info); }
+
+/* --- panel grid: A (recent runs) + B (severity) + C (quick actions) ------- */
+.ov-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  grid-template-areas: "a b" "a c";
+  gap: 1rem;
+}
+.ov-panel-a { grid-area: a; }
+.ov-panel-b { grid-area: b; }
+.ov-panel-c { grid-area: c; }
+@media (max-width: 900px) {
+  .ov-grid { grid-template-columns: 1fr; grid-template-areas: "a" "b" "c"; }
+}
+
+#ov-recent-runs th[data-sort] { cursor: pointer; }
+#ov-recent-runs th[data-sort]:hover { color: var(--text); }
+#ov-recent-runs th.sorted::after { content: " \2193"; }
+#ov-recent-runs th.sorted[data-dir="asc"]::after { content: " \2191"; }
+
+/* --- findings-by-severity horizontal segmented bar ------------------------ */
+.sev-bar {
+  display: flex;
+  width: 100%; height: 18px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+}
+.sev-seg { height: 100%; }
+.sev-seg.sev-critical { background: var(--crit); }
+.sev-seg.sev-high { background: var(--high); }
+.sev-seg.sev-medium { background: var(--med); }
+.sev-seg.sev-low { background: var(--low); }
+.sev-seg.sev-info { background: var(--info); }
+
+.sev-legend {
+  list-style: none; margin: .7rem 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: .3rem;
+  font-size: .82rem;
+}
+.sev-legend .sev-dot {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  background: currentColor; margin-right: .4rem;
+}
+
+/* --- quick actions ---------------------------------------------------- */
+.ov-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.btn {
+  display: inline-block;
+  font: inherit; font-size: .85rem; font-weight: 600;
+  padding: .45rem .9rem; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface2); color: var(--text);
+  text-decoration: none; cursor: pointer;
+}
+.btn:hover { border-color: var(--accent); text-decoration: none; }
+.btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
+.btn.primary:hover { filter: brightness(1.05); }
+.btn.ghost { background: transparent; }
+
+/* --- status pills (recent-runs / last-run tile) ---------------------------- */
+.pill.status-completed { color: var(--ok); border-color: var(--ok); }
+.pill.status-recorded { color: var(--muted); }

@@ -154,7 +154,7 @@ tracked in the requirements files, not here.
   `generalizes` verdict — the generalization evidence. The live run against an external
   validation lab is on-host; the manifest-generated second target plugs in as a
   `TargetSpec`.
-- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- two emitters (php_current, python_fastapi) built, Tier-A depth for the second; real app reproduction planned]` (D8, target shape pinned by **D20**/
+- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- three emitters (php_current, python_fastapi, php_laravel) built; Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself pending human sign-off]` (D8, target shape pinned by **D20**/
   `CR-LAB-0001`): the "lab as a compiler" — one manifest plus a safety matrix,
   seed, and env-profile generate the app, labels, docs, and oracle tests, with a
   **binary** verdict derived from `(transform, sink context)` (a partially
@@ -242,8 +242,21 @@ tracked in the requirements files, not here.
   `--check` so it can never fail a build. A stack-agnostic tiered conformance suite
   (`fuzzlab/labgen/conformance/`, `CC-LAB-0027`) any emitter must pass: Tier
   0 (lint + minimal-pair diff) and Tier 3 (whole-lab regeneration) are real,
-  fully exercised offline; `tier1.py`/`tier2.py` themselves remain
-  honestly-labeled `[design]` interfaces. As of `CC-LAB-0054`/`FR-LAB-52`
+  fully exercised offline; `tier1.py`/`tier2.py` originally remained
+  honestly-labeled `[design]` interfaces. As of `CC-LAB-0060`/`FR-LAB-57`
+  (2026-09-22), `tier1.py`'s own public API (`build_tier1_case`/
+  `run_tier1_case`/`evaluate_tier1_response`) is no longer design-only for
+  every stack: it is run for real, through `LiveBootHarness` below, for
+  `php_laravel` (`tests/test_labgen_conformance_tier1.py`'s
+  `TestTier1RealLiveBoot`, skip-guarded, `pytest.mark.slow`) — proving a real
+  SQLi differential and a real escaped-XSS negative through `tier1.py`'s own
+  decision logic, not just a hand-written fake client. As of
+  `CC-LAB-0061`/`FR-LAB-56` (2026-09-22), `tier2.py` gained the same
+  treatment via a new `LiveBootTier2Oracle`, adding a real control/baseline
+  differential on top of Tier 1's bare evidence-marker check (fails closed
+  when the control itself can't distinguish vulnerable from not). A stack
+  with no real `Tier1Client`/`Tier2Client` yet stays design-only for that
+  tier. As of `CC-LAB-0054`/`FR-LAB-52`
   (2026-09-22), the live-boot on-host dependency Tier 1/2 needed is real for
   `php_laravel`: `fuzzlab/labgen/conformance/live_boot.py` assembles a real
   Laravel 13 skeleton (checked in, trimmed from a real `composer
@@ -280,7 +293,20 @@ tracked in the requirements files, not here.
   scope). Tier 2's real, dialect-correct, container-based oracle confirmation
   remains unbuilt (this MariaDB mode strengthens but does not replace it — it
   proves boot + observable behavior against the real engine, not an
-  oracle-grade verdict). A second
+  oracle-grade verdict). **`tier2.py` itself gains a real, synthetic-in-sandbox
+  `Tier2Oracle` (`CC-LAB-0061`/`FR-LAB-56`, 2026-09-22, lane T2 of
+  `docs/PARALLEL_LANE_BUILD_PLAN.md`)**: `LiveBootTier2Oracle`, built on the
+  existing, unmodified `live_boot.LiveBootHarness` (never the real,
+  loopback-only lab target, no `--authorized`), adds a real control/baseline
+  differential over Tier 1's bare marker check and fails closed
+  (`inconclusive`) rather than guessing when the control can't distinguish
+  vulnerable from not — proven for real against `product.php`'s numeric-SQLi
+  vulnerable/secure twins (a real positive and negative confirmation), plus 7
+  offline tests. `tier2.py` is no longer purely `[design]`, but this remains a
+  narrower, synthetic-in-sandbox claim than the production-grade, real-target
+  oracle T-LAB0.7 describes, which stays
+  `fuzzlab.labgen.identifier_sqli_assertion.IdentifierSqliTier2Oracle`'s (and
+  any future real-target oracle's) job. A second
   Phase-3 stack emitter (`fuzzlab/labgen/emitters/python_fastapi/`, Tier-A
   depth per `CR-LAB-0001` Addendum C's stack-pacing decision, `CC-LAB-0029`)
   is built: FastAPI + SQLAlchemy + Jinja2, the same three value-context
@@ -292,7 +318,15 @@ tracked in the requirements files, not here.
   disables `/docs`/`/redoc`/`/openapi.json` in that scaffold (FastAPI serves
   them by default regardless of any debug flag); passes Tier 0/Tier 3 against
   its own sample manifest. A manifest reproducing today's real ~30-page PHP
-  app byte-identically (the actual Phase 0 exit criterion) remains planned.
+  app byte-identically (`LAB_PHASE_0_PLAN.md`'s original, literal wording of
+  the Phase 0 exit criterion) remains planned in that literal sense — no tool
+  in this repo diffs generated source against `puppy-fort-factory/`'s actual
+  file bytes, for either `php_current` or `php_laravel`. **Superseded for the
+  Layer-A/cutover purpose by D-open-1** (`docs/LAB_IMPLEMENTATION_PLAN.md`
+  §4.3.6.7, decided 2026-09-22): the operative exit bar for closing Phase 0 on
+  the 16 `PFF-` real-page cases is functional **parity/coverage**, not a
+  literal source-text diff (impossible in any case once the reproduction
+  target is a Laravel reimplementation rather than raw PHP) — verified below.
   A **second, Laravel/Eloquent/Blade-idiom PHP emitter**
   (`fuzzlab/labgen/emitters/php_laravel/`, `CC-LAB-0029`, lane L-P3.3a) is now
   built as a **foundation only**: a `StackEnv` (`stack_env.py`) carrying a
@@ -372,10 +406,29 @@ tracked in the requirements files, not here.
   `_CANONICAL_CELL_KEY`) with two more keys the coverage question needs:
   `ground_truth_case_by_family` (`search.php`'s one profile spanning
   `PFF-0002`/`PFF-0003`) and `secondary_ground_truth_cases` (`login.php`'s
-  boilerplate `PFF-1008` password condition). Currently green: 13 of 16
-  `PFF-` cases covered, 3 exempted (`PFF-1002` -- `track.php` has no sink at
-  all; `PFF-0007`/`PFF-0008` -- DOM XSS, per `D-open-1`/`D-open-2` above), 0
-  uncovered.
+  boilerplate `PFF-1008` password condition). Currently green: 12 of 16
+  `PFF-` cases covered, 4 exempted (`PFF-1002` -- `track.php` has no sink at
+  all; `PFF-0007`/`PFF-0008` -- DOM XSS, per `D-open-1`/`D-open-2` above;
+  `PFF-0003` -- `search.php`'s reflected-XSS case, added by `CC-LAB-0058`
+  once `/search.php`'s single canonical cell was resolved in favor of the
+  co-located SQLi, `PFF-0002`), 0 uncovered.
+
+  **Layer A closed (`CC-LAB-0062`, Wave A2, 2026-09-22).** `docs/
+  PARALLEL_LANE_BUILD_PLAN.md`'s Wave A2 lane re-ran this gate
+  (`tests/test_labgen_cutover_gate.py`, all 16 tests including the two that
+  exercise it against the live repo state) and confirmed the 12/4/0 split
+  above plus every `L-P3.3c-G1`..`G6` change-control entry
+  (`CC-LAB-0046`..`CC-LAB-0051`) present and marked done — the "Checkable
+  gate condition" `docs/PARALLEL_LANE_BUILD_PLAN.md`'s Wave A2 entry names.
+  This closes Phase 0's exit criterion **as scoped to Layer A by D-open-1**:
+  every server-side real page in `lab/ground-truth/labels.json` now either
+  reproduces through an emitted `php_laravel` cell or carries a reviewed
+  exemption. It does **not** close `FR-LAB-8` itself (the atomic cutover that
+  deletes `puppy-fort-factory/` remains unscheduled, pending human sign-off,
+  `L-P3.3c-CUT`), and it is a functional parity/coverage result, not a
+  literal byte-for-byte source-text diff against `puppy-fort-factory/`'s
+  actual file bytes (no such tool exists in this repo — see the note above,
+  where this section first introduces the generator).
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not
@@ -473,20 +526,38 @@ tracked in the requirements files, not here.
   which consolidates a crawl, runs scoped rules + oracle confirmation, and — with a
   ground-truth contract — scores TP/FP. The legacy `tools/blind_sqli_fuzzer.py`
   remains as the original single-class fuzzer.
-- **Oracle** `[built; M8/M10 pending]`: a **class-pluggable** deterministic confirmer
-  (`oracle/oracle.py`, `oracle/strategies.py`, `oracle/probe.py`) — the **only**
-  writer of `finding` labels — over 7 vuln classes (sqli, reflected/DOM/stored XSS,
-  open-redirect, SSTI, file-inclusion, command-injection). Built mechanisms:
-  M1 differential timing, M2 error signature, M3 boolean/response differential,
-  M4 SSTI evaluation marker, M5 reflected-canary-in-context, M6 browser execution
+- **Oracle** `[built; M10 wiring layer built, live sources on-host]`: a
+  **class-pluggable** deterministic confirmer (`oracle/oracle.py`,
+  `oracle/strategies.py`, `oracle/probe.py`) — the **only** writer of `finding`
+  labels — over 7 vuln classes (sqli, reflected/DOM/stored XSS, open-redirect,
+  SSTI, file-inclusion, command-injection). Built mechanisms: M1 differential
+  timing, M2 error signature, M3 boolean/response differential, M4 SSTI
+  evaluation marker, M5 reflected-canary-in-context, M6 browser execution
   (stored/DOM XSS via an injected `BrowserExecutor` — `oracle/browser.py`,
-  `tools/browserexec.py`), M7 file-content marker (LFI/traversal), and M9
-  redirect-target control. **Pending:** M8 out-of-band callback and M10 grey-box
-  (the grey-box reward hook is wired via `greybox/confirm.py`; its live signal is
-  on-host). Findings are written in path-normalized form via `core/urls.to_path`.
+  `tools/browserexec.py`), M7 file-content marker (LFI/traversal), M8 out-of-band
+  callback (blind command injection, via an injected, already-started
+  `OobListener` — `oracle/oob.py`, a loopback-only local canary tracker;
+  default-off, wired through `fuzzlab auto --oob`), M9 redirect-target control,
+  and M10 grey-box confirmation (sql-injection/xss, via an injected
+  `CoverageSource`/`DbFaultSource` — `greybox/coverage.py`, `greybox/dbfault.py` —
+  consulting the pure `greybox/confirm.py::greybox_confirms()` decision through
+  `GreyboxConfirmationStrategy`; default-off, wired through `fuzzlab auto
+  --greybox-coverage-file`/`--greybox-dbfault-file`). **M10 caveat:** the wiring
+  layer is built and fully unit-tested offline (`InMemoryCoverageSource`/
+  `InMemoryDbFaultSource`); it is not yet live end-to-end — it additionally needs
+  a correlating oracle probe sender (`send_correlated`, the contract
+  `greybox/run.py`'s `RequestsCorrelatingSender` already establishes) that no
+  shipped oracle sender implements yet, plus the on-host pcov/DB-fault side
+  channel behind `FileCoverageSource`/`FileDbFaultSource` — both on-host last-mile
+  work. Findings are written in path-normalized form via `core/urls.to_path`.
   Each injection class registers the mechanism(s) that prove it; full mechanism set
   and the injection-class → mechanism mapping (derived from `references/`):
-  `architecture/oracle-confirmation.md`.
+  `architecture/oracle-confirmation.md`. M8/M10 (`CC-FUZZ-0023`/`0024`,
+  `FR-FUZZ-10`/`11`) were merged in from the diverged branch
+  `claude/trusting-noether-heon0n` (cherry-picked and renumbered; that branch's
+  own `CC-FUZZ-0019`/`0020` and `FR-FUZZ-8`/`9` collided with numbers this
+  branch's own C1/D0a/B0 lanes had already claimed for unrelated work — see the
+  change-control entries' provenance notes).
 - **Depends on (components):** `core/`, session manager, scheduler, oracle,
   indicator DB & catalogs; grey-box instrumentation for reward and labels. (The
   oracle itself depends on `core/` and the target lab, plus grey-box signals when
@@ -520,12 +591,19 @@ tracked in the requirements files, not here.
   seam, budget-bounded/seeded); `catalog.py` records variant provenance to
   `payload_variant` (migration 8) behind the **destructive gate** (NFR-MUT-safe);
   `llm.py::LlmExpander` is the gated, default-off, offline expansion scaffold.
+  Write-back is now reachable from **two** callers (`CC-MUT-0009`/`CC-FUZZ-0019`,
+  2026-09-22): the standalone `fuzzlab mutate-run` CLI's live WAF-evasion search, and
+  the main grey-box harness's own attempt loop (`greybox/run.py::run_greybox`,
+  opt-in `--mutation-variants`) — both call the same `catalog.record_variant`.
 - **Exit** `[on-host]`: against the enabled D16 WAF, variants bypass the filter where the
   base is blocked **and** reach new code (grey-box coverage) vs the static catalog.
 - **Depends on (components):** `core/`, indicator DB & catalogs, scheduler,
   oracle, grey-box instrumentation. (A lab WAF is a prerequisite decision, not a
   component dependency.)
-- **Writes:** new payload candidates back into the catalog/attempts.
+- **Depended on by:** the fuzzing harness (component #7) — `greybox/run.py` calls
+  this component's operators/validator/`catalog.record_variant` directly (opt-in).
+- **Writes:** new payload candidates back into the catalog/attempts, from either
+  `mutate-run` or `greybox-run`.
 
 ### 10. ML components `[built — classifier, ranker, active learner, anomaly detector; held-out exits on-host]` (Phases 5, 7, 10)
 - **Detection classifier** (A.1) `[built; held-out exit on-host]`: the `fuzzlab/ml/`
@@ -637,12 +715,89 @@ tracked in the requirements files, not here.
   change, hash-based section switching preserved; CC-UI-0021, FR-UI-8). The **Launch view** was
   then rebuilt as the approved **master-detail** — a grouped, gate-tagged activity picker →
   the selected activity's command-spec form (`initLaunchNav()`; CC-UI-0022), brought forward
-  from R1. R1 still adds deep-linkable per-section routes + an Overview dashboard, R2 a Findings
-  workbench, R3 a Proxy rebuild.
-  **Pending:** the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
-  `metric_series` time-series table (Phase 4), Datasette-style store exploration, a
-  `--dry-run` mode, and a plain CLI entry point per tool for headless use
-  (`fuzzlab auto` exists today).
+  from R1.
+- **U0 — MPA routes + asset split (`docs/UI_IMPLEMENTATION_PLAN.md` §3, CC-UI-0025,
+  2026-09-22, the enabling refactor every Wave-1 UI lane depends on):** retired the
+  hash-based section switching from R0 in favor of **real per-section routes** —
+  `GET /` (Launcher), `/proxy`, `/results`, `/ml`, `/diagnostics`, plus `/runs/{id}` — each
+  independently deep-linkable, no-JS-renderable, and with server-computed sidebar active
+  state (`aria-current="page"`) from one `NAV` source of truth in `web/app.py`. Split
+  `templates/index.html` → `templates/sections/*.html`, `static/app.js` →
+  `static/js/{shell,common,launcher,proxy}.js`, `static/app.css` →
+  `static/css/{shell,launcher,proxy,results}.css` (D3: per-section modules/partials, no
+  bundler) — making U1–U5's sections file-disjoint. The Proxy "send to Repeater" pivot now
+  follows **POST/Redirect/GET with a 303** (R-07): a real `<form method="post">` to
+  `POST /proxy/repeater/from-flow`, then a 303 to `/proxy?repeater_tab=<id>` — an opaque id
+  only, never raw request bytes. Full-page MPA over HTMX per resolved R-01 (a loopback
+  full-page GET is sub-millisecond, so HTMX's benefit doesn't apply here).
+  Wave 1 (U1–U5) builds each section's real content on top of this split: an Overview
+  dashboard, a Findings workbench, a Proxy rebuild, the ML tab, and Diagnostics + store
+  explorer.
+- **U2 — Findings workbench (`docs/UI_IMPLEMENTATION_PLAN.md` §3, CC-UI-0029,
+  2026-09-22):** `GET /findings`/`/findings/{id}` — a faceted-filter sidebar (severity,
+  vuln class, method, mechanism, endpoint; live per-group counts) + a quick-filter +
+  applied-filter chips + a **saved-view** chip row over `finding`/`attempt`
+  (`web/findingsview.py`, read-only), entirely client-side filter/sort over one bounded
+  snapshot (D4/R-03). Saved views persist server-side in a new `saved_views` table
+  (migration 12, `CC-CORE-0019`; `web/savedviews.py`;
+  `GET/POST/PUT/DELETE /api/views?table=`) — the one write path this section owns
+  (view definitions, not a result table). The detail view renders the multi-artifact
+  ground-truth fields (`primary_endpoint`/`primary_role`/`related_endpoints`/
+  `flow_variant`, CR-LAB-0001 Addendum B) when a finding's evidence carries them
+  (additive/optional; no current writer attaches them yet). "Send to Repeater" reuses
+  U0's PRG+303 pivot exactly (`POST /findings/repeater/from-finding` → 303 →
+  `/proxy?repeater_tab=<id>`); since findings carry no raw bytes, the tab is a
+  best-effort reconstruction from the finding's own url/method/param, explicitly
+  labeled as such. Also shipped `static/js/datatable.js` — a standalone, hand-rolled
+  ES module (native `<table>`, `textContent`-only rendering, scheme-checked pivot
+  hrefs) meant for reuse by U1's recent-runs table and U5's store explorer (D4: no
+  table dependency).
+- **U4 — ML tab (`docs/UI_IMPLEMENTATION_PLAN.md` §3, CC-UI-0031/CC-ML-0010, 2026-09-22,
+  Phase 3, Wave 1, built on U0):** filled in `/ml` with read-only, advisory panels over
+  model internals already in the store — classifier PR curve + reliability/ECE, ranker
+  nDCG@k/precision@k + score/uncertainty distributions, the conformal flag/abstain/drop
+  split, the ECOD anomaly tripwire, active-learning committee disagreement, Thompson-
+  bandit Beta posteriors, and mutation killed/survived variants — behind a persistent
+  non-dismissible advisory banner, categorical bands, verb hygiene, and a neutral
+  blue/amber palette (never the oracle's red/green), per resolved R-06. New read-only
+  `fuzzlab/web/mlview.py` + `GET /api/ml/data`. Introduced this project's **charting
+  layer** (D2, resolved R-02/R-12), shared with U5: vendored **uPlot 1.6.32** verbatim
+  (`static/vendor/uplot/uPlot.esm.js` + `uPlot.min.css`, no bundler/CDN) behind
+  `static/js/chart.js::createChart()` — full destroy()+recreate on theme/density change
+  (canvas can't read CSS vars and uPlot bakes colors in at construction), a debounced
+  `ResizeObserver` on the chart's parent cell + `requestAnimationFrame` coalescing, a
+  `MutationObserver`/`matchMedia` retheme, `window.__charts` registry, and a
+  visually-hidden `<table>` a11y fallback per chart. **Known gap** (see
+  `docs/components/10-ml-components/requirements.md` FR-ML-9): the logistic
+  classifier's trained weights are never persisted to the store, so the "logistic
+  weights" panel R-06 calls for renders a documented not-available state rather than a
+  value — closing it is a future ML-component change, out of this lane's read-only
+  scope.
+  U0/U1/U2/U3/U4/U6 and D0a/D0b have all landed.
+- **U5 — Diagnostics tab + store explorer (`docs/UI_IMPLEMENTATION_PLAN.md` §3,
+  CC-UI-0032, 2026-09-22, Phase 3/4, Wave 2, built on U0/U4/U2):** filled in
+  `/diagnostics` (previously a stub) with a TensorBoard-like view over the
+  `metric_series` time-series table (migration 11, `CC-CORE-0018`): cross-run
+  trend charts over `run_metrics`, intra-run/cross-run step-series overlays with
+  server-side LTTB downsampling (R-05) and client-side EMA smoothing applied
+  after downsampling, plus snapshot panels (candidate-score histogram, bandit
+  arm posteriors, model-registry timeline). Also shipped the read-only,
+  Datasette-style **store explorer** (`FR-UI-2`/`FR-UI-14`): any store table,
+  browsable via `GET /api/store/tables` + `GET /api/store/tables/{name}`, with
+  the table name always re-validated against a live `sqlite_master` query before
+  use — the actual injection-safety mechanism (`tests/test_web_diagnostics.py`
+  covers this with parametrized injection-attempt cases). U5 was dispatched from
+  a pre-Wave-2 base and, per PA-0031's merge protocol, independently built its
+  own `static/js/chart.js`, `static/js/datatable.js`, and a second vendored copy
+  of uPlot before U4's and U2's versions had landed; the integrator reconciled
+  these by hand at merge time onto the already-landed versions rather than
+  merging raw — U5's unique `ema()` client-side smoothing helper was merged into
+  U4's `chart.js`, and `static/js/diagnostics.js` was adapted to call U2's
+  landed `createDataTable()` API rather than landing a second `DataTable`
+  implementation; U5's own `chart.js`/`datatable.js`/vendored uPlot copies were
+  discarded. Known gap: the wall-clock/relative-time x-axis modes fall back to
+  step order pending real per-point timestamps in the `metric_series_data` wire
+  payload (a follow-up, not a regression — step order is still monotonic).
 - **Reproducible evaluation report** `[built]` (Phase 10 T10.4, `fuzzlab/report/`): a
   deterministic report over a stored run (run/config identity, target, counts, findings,
   metrics, deployed models, active plugins), canonical JSON for diffing; read-only
@@ -691,6 +846,7 @@ detail):
 | `model` (versions, calibration) | ML training | ML inference |
 | `request_budget` | all tools | budget manager, UI |
 | coverage / fault signals | grey-box hooks | fuzzer, scheduler, mutation |
+| `metric_series` (cross-run scalars: `run_id, source, key, step, ts, value`; migration 11) | per-step emitters via `core.store.log_scalar`/`MetricLogger`: coverage frontier (`greybox/run.py::run_greybox`, `source="coverage"`, landed `CC-FUZZ-0021`) landed; GBT/logistic, bandit loop, `MutationSearch`, stage timing still pending as later, separate lanes | diagnostics UI (U5) |
 
 ## Dependency ordering
 
@@ -786,7 +942,7 @@ Suite: 390 passed / 4 skipped (the skips need a native build unavailable in the 
     logging), indicator DB + payload catalogs, ground-truth label contract, and the
     integration harness.
   - **Deterministic wins (Phase 2):** the generalized fuzzing harness and the
-    class-pluggable **oracle** (mechanisms M1–M7 + M9 across 7 vuln classes; the sole
+    class-pluggable **oracle** (mechanisms M1–M9 across 7 vuln classes; the sole
     finding-writer), driven by `fuzzlab auto` with TP/FP scoring against ground truth.
   - **Bandit scheduler (Phase 4):** Thompson sampling with context buckets,
     catalog priors, cost-normalized selection, hierarchical backoff, persisted
@@ -828,7 +984,13 @@ Suite: 390 passed / 4 skipped (the skips need a native build unavailable in the 
     `run_plugin` recording (migration 10), and the pipeline wiring (T10.2 — HTTP seam,
     auditor, oracle; `fuzzlab auto --plugins`) and the `register_payload_source` consumer
     (mutation `PayloadPool`) are built — all seven hooks wired.
-  - **Oracle mechanisms:** M8 (out-of-band) and M10 (grey-box) still to build.
+  - **Oracle mechanisms:** M8 (out-of-band, `oracle/oob.py` — blind command
+    injection, via `fuzzlab auto --oob`) is built; M10 (grey-box,
+    `GreyboxConfirmationStrategy` — sql-injection/xss, via `fuzzlab auto
+    --greybox-coverage-file`/`--greybox-dbfault-file`) has its wiring layer built
+    and unit-tested offline — the live correlating probe sender and the on-host
+    pcov/DB-fault side channel it needs to confirm against a real target remain
+    on-host last-mile work.
   - **Intercepting proxy (Phase 6):** the full offline stack is built — byte-exact
     dual-path core (`RawMessage` + `h11`), scope, match-and-replace, flow history
     (migration 6, FTS5), repeater, interception, manual-login session capture, the

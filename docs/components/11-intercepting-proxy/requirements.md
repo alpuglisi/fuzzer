@@ -49,11 +49,23 @@ that shares the store, never a mandatory pipeline (D5).
 - **NFR-PROXY-nonblocking** History writes are batched and must not stall the data
   path.
 - **NFR-PROXY-optional** Nothing in the core pipeline requires the proxy to run.
+- **NFR-PROXY-dry-run** `fuzzlab proxy` accepts `--dry-run`: plans and prints the
+  exact argv/command it would run and sends nothing (no listener is started, no
+  upstream traffic), for headless use outside the web UI. Distinct from
+  `--export-ca` (which also sends no traffic but actually writes the CA file);
+  `--dry-run` takes priority and performs neither action. Reuses the web
+  launcher's dry-run plan/report logic (`fuzzlab/web/commandspec.py` +
+  `fuzzlab/web/runner.py`) via the shared `fuzzlab/cli_dryrun.py` helper.
 
 ## 5. Interfaces and data contracts
 Writes `flow` rows (+ raw bytes) to the store, read by the anomaly detector, UI,
 and analysis. Uses the session manager as an addon. Shares `core/` config, budget,
-and logging.
+and logging. *(Note, U3/CC-PROXY-0018, 2026-09-22: the web UI's Proxy section was
+re-laid on a shared message-editor component and resizable panes — see
+`docs/components/12-diagnostics-and-ui/requirements.md`'s FR-UI-9 — purely a
+client-side presentation change against these same unchanged `/api/proxy/*`
+routes and `flow`/repeater-tab contracts; no interface or data-contract change
+here.)*
 
 ## 6. Dependencies (components)
 `core/`, session manager (attached as an addon).

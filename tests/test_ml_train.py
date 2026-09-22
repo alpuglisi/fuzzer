@@ -92,6 +92,65 @@ def test_train_and_score_auto_selects_a_model(tmp_path):
                                        key=lambda m: result["model_selection"][m])
 
 
+def test_train_and_score_logistic_emits_metric_series(tmp_path):
+    """B0's GBT/logistic emitter (CC-ML-0009): the deploy fit emits per-epoch
+    train/loss scalars to metric_series under source='logreg'."""
+    with Store(tmp_path / "u.db") as store:
+        run_id = _seed_rich(store)
+        train_and_score(store, run_id, model_kind="logistic")
+        rows = store.conn.execute(
+            "SELECT source, key, step, value FROM metric_series "
+            "WHERE run_id=? AND source='logreg' ORDER BY step", (run_id,)).fetchall()
+        keys = {r["key"] for r in rows}
+        assert "train/loss" in keys and "train/l2_norm" in keys
+        steps = sorted({r["step"] for r in rows})
+        assert steps[0] == 0
+        # one row per (epoch, key) pair, no dupes/gaps at the tail
+        loss_steps = [r["step"] for r in rows if r["key"] == "train/loss"]
+        assert loss_steps == list(range(len(loss_steps)))
+
+
+def test_train_and_score_gbt_emits_metric_series(tmp_path):
+    with Store(tmp_path / "u.db") as store:
+        run_id = _seed_rich(store)
+        train_and_score(store, run_id, model_kind="gbt")
+        rows = store.conn.execute(
+            "SELECT key, step, value FROM metric_series "
+            "WHERE run_id=? AND source='gbt' ORDER BY step", (run_id,)).fetchall()
+        keys = {r["key"] for r in rows}
+        assert "train/loss" in keys and "train/mean_abs_update" in keys
+        loss_steps = [r["step"] for r in rows if r["key"] == "train/loss"]
+        assert loss_steps == list(range(len(loss_steps)))
+        # loss should trend downward over boosting rounds (sanity, not strict monotonic)
+        losses = [r["value"] for r in rows if r["key"] == "train/loss"]
+        assert losses[-1] < losses[0]
+
+
+def test_train_and_score_no_run_id_emits_no_metric_series(tmp_path):
+    """Additive-only: without a run_id there's nowhere to attribute rows, so
+    metric emission is skipped entirely (no crash, no orphaned rows)."""
+    with Store(tmp_path / "u.db") as store:
+        run_id = _seed_rich(store)
+        train_and_score(store, run_id=None, model_kind="logistic")
+        n = store.conn.execute(
+            "SELECT COUNT(*) c FROM metric_series").fetchone()["c"]
+        assert n == 0
+
+
+def test_train_and_score_fallback_emits_no_metric_series(tmp_path):
+    """The prevalence-fallback path fits no GBT/logistic model, so it emits
+    nothing to metric_series."""
+    with Store(tmp_path / "u.db") as store:
+        run_id = store.start_run("auto", "h")
+        _cand(store, run_id, "/a.php", "id", "sql-injection")
+        _cand(store, run_id, "/b.php", "q", "xss")
+        store.conn.commit()
+        train_and_score(store, run_id)
+        n = store.conn.execute(
+            "SELECT COUNT(*) c FROM metric_series WHERE run_id=?", (run_id,)).fetchone()["c"]
+        assert n == 0
+
+
 def test_train_and_score_falls_back_when_thin(tmp_path):
     with Store(tmp_path / "u.db") as store:
         run_id = store.start_run("auto", "h")

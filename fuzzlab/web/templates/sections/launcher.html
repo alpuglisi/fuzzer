@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}fuzzlab &mdash; Launcher{% endblock %}
+{% block crumb %}Launcher{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/launcher.css">{% endblock %}
+{% block content %}
+<section class="panel" aria-labelledby="launcher-h1">
+  <h1 id="launcher-h1" class="visually-hidden">Launcher</h1>
+  <div class="launch">
+    <!-- master: activity picker (grouped, gate-tagged) -->
+    <div class="actlist card">
+      <div class="lh">Activities <span class="cnt">{{ activities | length }}</span></div>
+      <div class="actscroll">
+        {% for grp in activity_groups %}
+        <div class="ft2">{{ grp.label }}</div>
+        {% for a in grp.acts %}
+        <a class="act" href="#launcher-{{ a.name }}" data-for="{{ a.name }}">{{ a.name }}
+          <span class="gates">
+            {% if a.sends_traffic %}<span class="gt g-traffic" title="sends traffic">traffic</span>{% endif %}
+            {% if a.needs_authorized %}<span class="gt g-auth" title="--authorized">auth</span>{% endif %}
+            {% if a.destructive_gate %}<span class="gt g-destr" title="--allow-destructive">destr</span>{% endif %}
+          </span></a>
+        {% endfor %}
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- detail: one configurable form per activity (JS shows the selected one) -->
+    <div class="lform">
+      {% if not authorized %}
+      <p class="warn">Not authorized: set <code>authorized: true</code> in config to enable
+        automatic mode and traffic-sending tools. Lab-only.</p>
+      {% endif %}
+
+      {% for a in activities %}
+      <div class="lform-detail card" id="launcher-{{ a.name }}" data-for="{{ a.name }}">
+        {% if a.subcommands %}
+        <div class="lform-head"><div><b>{{ a.name }}</b>
+          <span class="tag">subcommands</span></div></div>
+        <p class="muted2">{{ a.summary }}</p>
+        <p class="muted">Subcommands
+          {% for sub in a.subcommands %}<code>{{ sub }}</code> {% endfor %}&mdash; run from the
+          CLI (<code>fuzzlab {{ a.name }} &lt;sub&gt;</code>); their interactive prompts aren't
+          launched from the panel.</p>
+        {% else %}
+
+        {% if a.name == 'auto' %}
+        <form method="post" action="/api/run/automatic" class="auto-quick">
+          <button type="submit" {% if not authorized %}disabled{% endif %}>&#9654; Run full pipeline</button>
+          <span class="muted">one-click discovery &rarr; oracle-confirm; or configure flags below.</span>
+        </form>
+        {% endif %}
+
+        <form class="launch-form" data-command="{{ a.name }}">
+          <div class="lform-head">
+            <div><b>{{ a.name }}</b>
+              {% if a.sends_traffic %}<span class="tag t-traffic">sends traffic</span>{% endif %}
+              {% if a.needs_authorized %}<span class="tag t-auth">--authorized</span>{% endif %}
+              {% if a.destructive_gate %}<span class="tag t-destr">--allow-destructive</span>{% endif %}
+            </div>
+            <div class="quick">
+              <button type="button" data-action="dry-run">Dry-run</button>
+              <button type="button" data-action="run"
+                {% if a.sends_traffic and not authorized %}disabled title="set authorized:true to run traffic tools"{% endif %}>Run</button>
+              <button type="button" data-action="stop" disabled>Stop</button>
+            </div>
+          </div>
+          <p class="muted2">{{ a.summary }} Fields come straight from the tool's own
+            <code>argparse</code> parser.</p>
+
+          {% for o in a.options if o.type != 'bool' %}
+          <div class="frow">
+            <label for="f-{{ a.name }}-{{ o.dest }}">{{ o.name }}{% if o.required %} *{% endif %}</label>
+            <div>
+              {% if o.dest == 'categories' and categories %}
+              <span class="catgroup" data-catgroup="{{ o.dest }}">
+                {% for c in categories %}
+                <label class="cat"><input type="checkbox" value="{{ c }}"> {{ c }}</label>
+                {% endfor %}
+              </span>
+              {% elif o.type == 'choice' %}
+              <select id="f-{{ a.name }}-{{ o.dest }}" data-dest="{{ o.dest }}" data-type="choice">
+                {% for c in o.choices %}<option{% if c == (o.default|string) %} selected{% endif %}>{{ c }}</option>{% endfor %}
+              </select>
+              {% elif o.multiple %}
+              <textarea id="f-{{ a.name }}-{{ o.dest }}" data-dest="{{ o.dest }}" data-type="{{ o.type }}"
+                        data-multiple="true" rows="2" placeholder="one per line"></textarea>
+              {% elif o.type in ('int', 'float') %}
+              <input type="number" id="f-{{ a.name }}-{{ o.dest }}" data-dest="{{ o.dest }}"
+                     data-type="{{ o.type }}"{% if o.default is not none %} placeholder="{{ o.default }}"{% endif %}>
+              {% else %}
+              <input type="text" id="f-{{ a.name }}-{{ o.dest }}" data-dest="{{ o.dest }}"
+                     data-type="str"{% if o.default is not none %} placeholder="{{ o.default }}"{% endif %}>
+              {% endif %}
+              {% if o.help %}<span class="muted"> {{ o.help }}</span>{% endif %}
+            </div>
+          </div>
+          {% endfor %}
+
+          {% set ns = namespace(has_bool=false) %}
+          {% for o in a.options if o.type == 'bool' %}{% set ns.has_bool = true %}{% endfor %}
+          {% if ns.has_bool %}
+          <div class="frow">
+            <label>options</label>
+            <div class="chips optck">
+              {% for o in a.options if o.type == 'bool' %}
+              <label class="ck"><input type="checkbox" id="f-{{ a.name }}-{{ o.dest }}"
+                data-dest="{{ o.dest }}" data-type="bool"{% if (o.dest == 'authorized' and authorized) or o.default %} checked{% endif %}>
+                {{ o.name }}</label>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+
+          {% if a.name == 'auto' %}
+          <div class="frow">
+            <label>Plugins</label>
+            <div class="plugpanel">
+              {% if plugins %}
+              <span class="pgmuted">attach with <code>--plugins</code>:</span>
+              {% for p in plugins %}<span class="pchip">{{ p.name }} v{{ p.version }}</span>{% endfor %}
+              {% else %}
+              <span class="pgmuted">No entry-point plugins installed; runs use none by default.</span>
+              {% endif %}
+            </div>
+          </div>
+          {% endif %}
+
+          <div class="preview launch-preview" hidden></div>
+          <div class="ft2" style="margin-top:.7rem">Live output</div>
+          <pre class="console launch-output" hidden></pre>
+        </form>
+        {% endif %}
+      </div>
+      {% endfor %}
+
+      {% if last_result is not none %}
+      <div class="card"><h3>Last result</h3><pre class="result">{{ last_result }}</pre></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <details class="manual-ref">
+    <summary>Manual / CLI reference</summary>
+    <p class="muted">Leave the lab running and drive the tools by hand. Selectable categories
+      (D14): <code>{{ categories | join(', ') }}</code> &mdash; add
+      <code>--categories &lt;list&gt;</code> to scope.</p>
+    <ul>
+      {% for c in commands %}
+      <li><b>{{ c.name }}</b>: <code>{{ c.cmd }}</code></li>
+      {% endfor %}
+    </ul>
+  </details>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="/static/js/launcher.js"></script>{% endblock %}

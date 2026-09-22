@@ -71,16 +71,16 @@ def test_runner_stream_unknown_token():
 # --- routes ----------------------------------------------------------------
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
 from fuzzlab.web.app import create_app  # noqa: E402
+from tests._webclient import web_client  # noqa: E402
 
 
 def _client(authorized=False):
     cfg = load_config(overrides={"authorized": authorized,
                                  "target_base_url": "http://localhost"}, environ={})
-    return TestClient(create_app(cfg))
+    return web_client(create_app(cfg))
 
 
 def test_dry_run_previews_argv_without_executing():

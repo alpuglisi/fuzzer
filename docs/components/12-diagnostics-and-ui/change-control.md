@@ -3,6 +3,720 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0032 — Lane U5: Diagnostics tab + store explorer (2026-09-22)
+- Change: per `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U5) and its resolved
+  R-02/R-05/R-12, built out the Diagnostics section (previously a stub since
+  U0/CC-UI-0025's MPA split): cross-run scalar trend lines over `run_metrics`
+  (`fuzzlab.web.diagnostics.run_metrics_trend`); intra-run/cross-run overlay
+  step series over `metric_series` (`metric_series_data`), read-side
+  downsampled server-side via a ~40-line pure-Python **LTTB** implementation
+  (`diagnostics.lttb`, R-05: "≈1000 pts/series, preserves loss spikes/regret
+  jumps a naive stride/average erases") — then **EMA smoothing applied
+  client-side, after downsampling** (`chart.js::ema`), matching R-05's
+  specified render order; snapshot panels for candidate-score distribution
+  (pre-binned server-side, never raw per-candidate rows), bandit arm
+  posteriors (`bandit_posteriors`, posterior mean derived client-visible),
+  and the model-registry timeline (`model`). Controls per R-05: a run
+  multi-select with per-run color (stable palette index by run id), a metric
+  picker grouped by `source` (collapsible `<details>`) with a substring
+  filter, an EMA slider (0–0.99), an x-axis toggle (step/relative-time/
+  wall-clock — the latter two currently fall back to step order pending a
+  timestamp array in the series payload, noted as a known gap below), and a
+  y-axis log toggle. Also built the **store explorer** (FR-UI-14, previously
+  unimplemented), used to satisfy `FR-UI-2`'s realized annotation: read-only,
+  Datasette-style browsing of any table in the store via
+  `GET /api/store/tables` + `GET /api/store/tables/{name}`, with the table
+  name re-validated against `sqlite_master` server-side before every use
+  (never taken from the request unchecked) — the actual injection-safety
+  mechanism, with a strict-identifier regex as defense-in-depth on top. New
+  files: `fuzzlab/web/diagnostics.py` (pure query/LTTB/store-explorer module,
+  mirrors `results.py`/`proxyview.py`), `fuzzlab/web/static/js/diagnostics.js`,
+  `fuzzlab/web/static/css/diagnostics.css`, `tests/test_web_diagnostics.py`.
+  Extended `fuzzlab/web/templates/sections/diagnostics.html` (was a stub) and
+  added nine `GET /api/diagnostics/*` + `GET /api/store/*` read routes plus a
+  `_with_store` helper to `fuzzlab/web/app.py` — no writes, no new backend
+  beyond these read routes (matches the U5 acceptance criteria verbatim).
+- Impact (other components / project): additive-only — no schema change (uses
+  `run_metrics`/`metric_series`/`candidate`/`bandit_posteriors`/`model`,
+  `metric_series` already landed via lane B0-table before this lane started),
+  no change to any existing route or template. **Shared-infra reconciliation
+  (PA-0031 merge protocol):** this lane was dispatched from a pre-Wave-2 base
+  where `js/chart.js`/`js/datatable.js`/vendored uPlot did not yet exist, and
+  independently built its own complete copies of all three, duplicating work
+  U4 (`CC-UI-0031`, `js/chart.js` + vendored uPlot 1.6.32) and U2
+  (`CC-UI-0029`, `js/datatable.js`) had already landed by the time this lane
+  merged. Rather than a raw merge (which would have silently clobbered the
+  already-landed, already-consumed versions), the integrator reconciled by
+  hand: `chart.js` — U5's `createChart(el, {id, type, data, series, opts})`
+  contract and handle shape were compatible with U4's landed version, so only
+  U5's unique `ema(values, alpha)` client-side smoothing helper (used by the
+  EMA slider above) was appended to U4's file; U5's own `chart.js` and
+  vendored uPlot copies were discarded in favor of U4's. `datatable.js` — U5's
+  `mount(el, {columns, data, onRowClick, rowActions, textFilterKeys}) →
+  {setData, setFilter, destroy}` contract was incompatible with U2's landed
+  `createDataTable(root, {caption, columns, data, ...}) → {setData,
+  setTextFilter, setFilter, setSort, getSort, getVisible, element}` (row-based
+  `render(row)` vs. value-based `render(value)`, no self-mount/`destroy()` on
+  U2's side since it mounts via `root.replaceChildren()`), so `diagnostics.js`
+  was adapted to call U2's actual API rather than landing a second, divergent
+  DataTable implementation; U5's own `datatable.js` was discarded entirely. No
+  other component's contract changed.
+- Risk (level; mitigation): low-medium.
+  - **Store explorer injection risk** (the highest-consequence risk this lane
+    touches): mitigated by construction — `diagnostics._resolve_table` always
+    re-reads the caller's table name against a live `sqlite_master` query and
+    only ever interpolates the name *that query itself returned*, never the
+    raw request value, so no string an attacker controls can reach raw SQL
+    beyond selecting among tables that already exist; `limit`/`offset` are
+    separately `int()`-cast, clamped, and bound as parameters regardless.
+    Covered by `test_web_diagnostics.py`'s injection-attempt parametrized
+    tests (both the pure-function and the HTTP-route layer) asserting the
+    store is provably untouched afterward, plus a BLOB-column test (never
+    emits raw bytes into JSON).
+  - **Client-side rendering risk**: the store explorer renders arbitrary,
+    fuzzer-written row content (URLs, payloads, bodies) — `datatable.js`
+    writes every cell via `textContent` only; a static test greps
+    `datatable.js`/`diagnostics.js`/`chart.js` for any live (non-comment)
+    `innerHTML` use.
+  - **Vendoring provenance**: uPlot's provenance is documented under
+    `CC-UI-0031` (U4 vendored it first; this lane reuses that copy as-is).
+  - **x-axis wall-clock/relative-time toggle is not fully wired**: the
+    `metric_series` read path (`diagnostics.metric_series_data`) does not yet
+    return per-point timestamps in the JSON payload (only `step`), so
+    `diagnostics.js` currently falls back to step-order for both
+    "relative-time" and "wall-clock" x-axis modes rather than real
+    wall-clock ticks. `metric_series.ts` already exists in the store
+    (per B0's schema) and is queried in the SQL but simply not yet returned
+    on the wire — a small, low-risk follow-up (a later change-control entry),
+    not a functional regression since step order is still monotonic and
+    correctly labeled in the axis-toggle UI's semantics for now.
+  - **Not independently browser-tested**: `playwright` is not installed in
+    this environment (`tests/test_web_repeater_browser.py`'s own
+    `importorskip("playwright")` pattern confirms other browser tests already
+    skip here too), so the R-09 "dark-mode/density correct" acceptance point
+    and the `window.__charts` a11y-table contract are exercised only by
+    static/manual code review against the R-12 spec, not an automated
+    browser assertion, in this environment. Flagged for the integrator to
+    re-run with a browser-capable runner before considering R-09/R-11
+    coverage complete for this tab.
+- Deliverables:
+  - [x] `fuzzlab/web/diagnostics.py` — pure LTTB/trend/series/snapshot/store-
+    explorer query functions — done.
+  - [x] `GET /api/diagnostics/{runs,metrics,trend,series,candidates/{id},
+    bandit,models}` + `GET /api/store/{tables,tables/{name}}` read routes in
+    `fuzzlab/web/app.py` — done.
+  - [x] Reused U4's vendored uPlot 1.6.32 (`/static/vendor/uplot/`) — done.
+  - [x] `js/chart.js` shared `createChart()` wrapper (R-12: tokens, density,
+    ResizeObserver, retheme, teardown, `window.__charts`, a11y table) — done;
+    U5's unique `ema()` helper merged into U4's landed file (see the
+    reconciliation note above).
+  - [x] `js/diagnostics.js` adapted to call U2's landed `js/datatable.js`
+    (`createDataTable`) rather than duplicating a second `DataTable` (see the
+    reconciliation note above).
+  - [x] `js/diagnostics.js` page orchestration + `sections/diagnostics.html`
+    extended with the controls/panels/store-explorer markup — done.
+  - [x] `css/diagnostics.css` — done.
+  - [x] `tests/test_web_diagnostics.py` (28 tests: LTTB correctness, pure
+    query functions, API routes, read-only-no-store-file guarantee,
+    injection-attempt rejection, BLOB summarization, static innerHTML guard)
+    — done, all passing against the reconciled tree.
+  - [ ] Wire real timestamps into `metric_series_data`'s response for the
+    wall-clock/relative-time x-axis modes — todo (follow-up).
+  - [ ] Browser-driven (Playwright) dark-mode/density/`window.__charts`
+    verification — todo, blocked on a browser-capable test environment.
+- Effectiveness (assessed 2026-09-22): effective for the acceptance criteria
+  that are testable in this environment — charts/panels/store-explorer render
+  from `run_metrics`/`metric_series`/`candidate`/`bandit_posteriors`/`model`
+  with no new backend beyond the listed read routes; the store explorer is
+  provably read-only and injection-safe (parametrized SQL-injection tests
+  against both the pure functions and the live HTTP routes all pass and leave
+  the store unmodified). Dark-mode/density correctness and the R-09
+  `window.__charts` browser contract are implemented per spec but not
+  machine-verified here (no Playwright) — re-assess once a browser-capable
+  run confirms them.
+
+### CC-UI-0031 — Lane U4: ML tab — read-only, advisory model-internals panels (2026-09-22)
+- Change: per `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U4) and its resolved R-06/R-02/R-12,
+  filled in the `/ml` section (previously a placeholder card, U0) with read-only,
+  advisory panels over model internals already in the store: classifier PR curve +
+  operating point, a reliability diagram + ECE (the advisory anchor), a logistic
+  weights panel (documented not-available — see below), ranker nDCG@k/precision@k vs. a
+  random baseline + rank score/uncertainty histograms + a score-vs-uncertainty scatter,
+  the conformal flag/abstain/drop stacked split (leads the tab, per R-06) + a
+  nonconformity histogram with the calibrated thresholds, the ECOD anomaly score
+  histogram + flagged-rate, active-learning committee disagreement histogram + a top-N
+  query queue, Thompson-bandit Beta posteriors (an overlaid density per arm via a
+  15-line `lgamma`-based pdf on a 200-point grid, pure stdlib `math` — no numpy/scipy —
+  plus a mean/90%-CI/pulls/mean-cost forest table), and a mutation-engine
+  killed/survived variants table. A persistent, **non-dismissible** advisory banner
+  ("Model output is advisory; confirmed findings come from the oracle") leads every
+  render; every score carries an uncertainty companion, its N, and (where meaningful) a
+  baseline; verb hygiene throughout is "scored/ranked/flagged", never
+  "detected/vulnerable/confirmed"; the palette is neutral blue (`--accent`) / amber
+  (`--warn`) only — never `--crit`/`--ok` (the oracle's red/green, reserved for
+  Results/Findings).
+  - New `fuzzlab/web/mlview.py`: one function per panel plus `ml_overview()`, all
+    **read-only** — every function only `SELECT`s from the store; two panels
+    (anomaly, active-learning disagreement) recompute a lightweight, deterministic
+    derivation of already-stored candidate feature vectors on the fly (ECOD fit +
+    score; a capped bootstrap committee fit + disagreement) without persisting
+    anything back — unlike the training-time equivalents
+    (`fuzzlab.ml.anomaly.detect_anomalies`, which records `run_metrics`), this module
+    writes nothing, ever. Reuses existing pure-Python ML helpers
+    (`fuzzlab.ml.metrics.pr_auc`, `fuzzlab.ml.ranking.mean_ndcg_at_k`/
+    `mean_precision_at_k`, `fuzzlab.ml.conformal.ConformalGate`,
+    `fuzzlab.ml.anomaly.ECOD`/`flag_top`, `fuzzlab.ml.active.Committee`/
+    `disagreement`) rather than re-deriving them.
+  - New route `GET /api/ml/data` (optional `?run_id=`) in `fuzzlab/web/app.py`,
+    backed by `_read_ml()` (mirrors `_read_runs`/`_read_detail`'s
+    store-existence-checked read pattern); degrades to `{"available_any": false}` on a
+    missing/empty store rather than erroring, and each panel degrades independently to
+    `{"available": false, "reason": ...}` on partially-populated data (e.g. candidates
+    exist but nothing has been scored yet).
+  - **Vendored uPlot 1.6.32** (MIT; R-02's resolved decision) verbatim as two static
+    files — `fuzzlab/web/static/vendor/uplot/uPlot.esm.js` (145 KB) +
+    `uPlot.min.css` — pulled via `npm pack uplot@1.6.32` and copied from the
+    package's own `dist/`, unmodified; no bundler, no CDN.
+  - New shared wrapper `fuzzlab/web/static/js/chart.js::createChart(el, {id, type,
+    data, series, opts})` (R-12's exact spec), a standalone ES module built to be
+    shared with U5's Diagnostics tab (not ML-specific): resolves CSS color tokens
+    through a hidden-probe element's computed style (`getPropertyValue` alone can
+    return an unresolved `var()`/`color-mix()` chain the canvas can't parse); maps
+    `data-density` to discrete font/gutter/tick/gap/point sizing buckets; a debounced
+    `ResizeObserver` on the chart's **parent cell** (not uPlot's own root, which would
+    self-trigger an RO feedback loop) coalesced with `requestAnimationFrame`; a
+    `MutationObserver` on `<html>` (`data-theme`/`data-density`) plus a `matchMedia`
+    listener for an unforced system-preference flip, both driving one idempotent
+    `destroy()` + recreate (never a partial restyle — uPlot bakes colors into the
+    canvas at draw and measures axis geometry at construction); `window.__charts` is a
+    `Map<id, handle>` for tests/debugging; every chart renders a visually-hidden
+    `<table>` a11y fallback (canvas `aria-hidden`, wrapper `role="img"`, ~200-row cap,
+    refreshed on `setData()`) since a canvas chart is opaque to screen readers.
+    `handle.destroy()` disconnects both observers, removes the `matchMedia` listener,
+    cancels any pending `requestAnimationFrame`, and calls `uPlot.destroy()` — the
+    observers otherwise hold references and leak across the app's MPA navigations.
+  - `fuzzlab/web/static/tokens.css`: added `--chart-h` (density-varying chart height
+    token both `chart.js` and any section CSS can read).
+  - New `fuzzlab/web/static/css/ml.css`, rewritten `templates/sections/ml.html`
+    (still extends `base.html`; no shell change) and `static/js/ml.js`.
+- Impact (other components / project): UI-only; no write path added anywhere. ML
+  component (component #10): a **consumer** of its already-stored outputs, not a
+  producer — no change to any ML training/scoring code. Documents one real gap
+  against ML component #10's own requirement spec: the logistic classifier's
+  coefficients are never persisted to the store (`train_and_score` only ever writes
+  the conformal calibration thresholds to `model.calibration`), so the "logistic
+  weights diverging bar" panel R-06 calls for renders a documented not-available
+  state instead of fabricating or inventing a value — recorded as `FR-ML-9`'s known
+  gap in `10-ml-components/requirements.md`, not silently dropped. `static/js/chart.js`
+  and `static/vendor/uplot/` are new shared infrastructure U5 (Diagnostics, same wave)
+  also depends on; at dispatch time neither existed yet, so this lane created them
+  (U5 should reuse, not re-vendor — flagged to the integrator per the multi-agent
+  orchestration merge protocol).
+- Risk (level; mitigation): low — strictly additive and read-only; no existing route,
+  table, or write path is touched. The one thing worth naming: `mlview.py`'s active-
+  learning panel trains a small bootstrap committee (`fuzzlab.ml.active.Committee`,
+  5 rankers by default) synchronously inside a `GET` handler — capped to 300 sampled
+  candidates (deterministic stride sample) to bound the cost on a large store, and
+  wrapped so a fit failure degrades to `{"available": false}` rather than a 500.
+  Mitigated by 17 new tests (`tests/test_web_ml.py`): every panel function against a
+  seeded store, an empty-store degrade-gracefully case for the whole overview, the
+  `/api/ml/data` route (seeded and missing-store), the advisory banner (present,
+  non-dismissible, normalized-whitespace matched) and verb-hygiene checks against the
+  actual template/JS source, the vendored uPlot files and new static assets serving,
+  and an explicit read-only assertion (`run_metrics` row count unchanged around the
+  anomaly panel call, the one case with a training-time write-carrying sibling).
+- Deliverables:
+  - [x] `fuzzlab/web/mlview.py` — one read-only function per panel + `ml_overview()` — done.
+  - [x] `GET /api/ml/data` (+ `_read_ml` in `app.py`) — done.
+  - [x] Vendored uPlot 1.6.32 (`static/vendor/uplot/`) — done.
+  - [x] Shared `createChart()` wrapper (`static/js/chart.js`) per R-12 — done.
+  - [x] `sections/ml.html` + `js/ml.js` + `css/ml.css`, advisory banner + categorical
+    bands + verb hygiene + blue/amber palette (R-06) — done.
+  - [x] `--chart-h` token added to `tokens.css` — done.
+  - [x] Tests (`tests/test_web_ml.py`, 17 new) — done.
+  - [ ] On-host visual QA (light/dark/compact, real trained models) — on-host.
+- Effectiveness (assessed 2026-09-22): effective in tests — every panel renders from a
+  seeded store or degrades to a named reason, the read-only assertion holds, and the
+  advisory framing (banner, verb hygiene, palette) is present in the served markup/JS.
+  Full-suite pass/skip counts recorded in this same date's CHANGELOG entry.
+### CC-UI-0030 — Proxy workbench rebuild: shared message editor + resizable panes + sub-nav (lane U3) (2026-09-22)
+- Change: re-laid the Proxy section's History / Intercept / Repeater byte editors
+  on one new shared custom element, `<message-editor>`
+  (`fuzzlab/web/static/js/msgeditor.js`), per the resolved R-04 marker in
+  `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U3):
+  - API: `{editable, bytes, meta}` in as properties, `getBytes()` out. The
+    editable pane is a plain `<textarea>` (`.value` is the single byte-exact
+    source of truth); Raw is the only editable mode and the default. Pretty
+    (hand-rolled HTTP tokenizer, JSON body pretty-print when the content-type
+    says so) and read-only Hex (response only) render into a separate
+    read-only `<pre>` mirror, built entirely with `createElement`/`textContent`
+    — never `innerHTML`, matching the existing untrusted-flow-content
+    discipline already in `proxy.js`.
+  - A status/timing strip (status+reason, elapsed ms, byte length,
+    content-type).
+  - A CRLF/non-printing-byte display toggle (Unicode control-picture glyphs;
+    display only, never touches the underlying bytes).
+  - Ctrl-F in-message search painted via `CSS.highlights`/the Custom Highlight
+    API over the read-only mirror's text nodes — never by span-injecting the
+    buffer. For an editable Raw pane (which can't host highlight ranges), the
+    search briefly shows a synced read-only overlay of the same bytes; the
+    textarea underneath is never touched and `getBytes()` still reads only it.
+  - No vendored highlighting/editor library — hand-rolled tokenizer + DOM,
+    per R-04's explicit "hand-roll, do not vendor" verdict.
+  - `attachSplitter()`: a vanilla CSS-grid resizable splitter (one rewritable
+    `--a` grid-track custom property + pointer-capture drag + arrow-key a11y +
+    localStorage persistence, try/catch-guarded) — no library — used for the
+    request/response pane pairs in History's flow detail and in Repeater, each
+    with a "stack vertically" layout toggle.
+  - A sticky in-page sub-nav (`.proxy-subnav`) linking the four Proxy cards
+    (History / Intercept / Repeater / Scope · Match-Replace).
+  - `sections/proxy.html`, `js/proxy.js`, and `css/proxy.css` were extended
+    (not replaced) to wire the new editors into the existing History/Intercept/
+    Repeater flows; the editable editors keep the exact element ids the
+    pre-existing tests target (`#pending-raw`, `#rep-raw`) and the read-only
+    response mirror keeps `#rep-resp`, so `toWire()`'s CRLF-restore
+    (`fuzzlab/web/static/js/common.js`) remains the one documented
+    `\n`→`\r\n` normalization point applied right before a byte-exact send —
+    `msgeditor.js` does not duplicate it.
+- Impact (other components / project): UI-only markup/JS change plus an
+  incidental PROXY-facing note (this lane's dual bookkeeping — see
+  `CC-PROXY-0018` for the PROXY-component entry; no PROXY backend code
+  changed). No new routes, no schema change, no change to
+  `NFR-UI-control-plane-hardened`'s request-gating. Does not touch
+  `RepeaterController`'s per-thread fix (BUG-0021/`CC-PROXY-0016`). Does not
+  flip proxy/desync tooling's default-off, lab-only posture (CLAUDE.md Safety)
+  — the `--authorized` gate on Repeater sends and the "not running in-process"
+  fallbacks are unchanged.
+- Risk (level; mitigation): low-medium — a real-DOM-structure change to a
+  route already covered by a Playwright browser test
+  (`tests/test_web_repeater_browser.py`). Mitigated by: keeping the exact ids
+  that test drives (`#rep-new-host`/`#rep-new-port`/`#rep-new-raw`/`#rep-create`/
+  `#rep-editor`/`#rep-raw`/`#rep-send`/`#rep-resp`) live in the light DOM (no
+  shadow root, by design, specifically so automation and section CSS keep
+  working); `getBytes()` reading only the plain textarea's `.value` so
+  byte-exact editing is unchanged; running the full suite unmodified after the
+  change (see Deliverables/Effectiveness for the pass/skip counts). The CSS
+  Custom Highlight API is feature-detected (`'highlights' in CSS && typeof
+  Highlight === 'function'`) and search degrades to "no paint" rather than
+  throwing where unsupported.
+- Deliverables:
+  - [x] `fuzzlab/web/static/js/msgeditor.js` — new shared `<message-editor>`
+    custom element + `attachSplitter()` — done.
+  - [x] `sections/proxy.html` extended: sub-nav, `message-editor` markup for
+    History detail / Intercept / Repeater, resizable-split containers + layout
+    toggles — done.
+  - [x] `js/proxy.js` extended: wires flow detail / intercept / repeater to the
+    new editors' `{bytes, meta, getBytes()}` API instead of raw
+    textarea/`<pre>` access; `toWire()` usage unchanged — done.
+  - [x] `css/proxy.css` extended: sub-nav, `message-editor` layout/toolbar/
+    search-highlight, `.me-split` splitter styles, all via existing design
+    tokens (no raw hex) — done.
+  - [x] Full test suite run unmodified; existing Repeater browser test and
+    intercept/history/scope suites green — see Effectiveness for counts.
+- Effectiveness (assessed 2026-09-22): pending full independent verification
+  by an integrator per `docs/MULTI_AGENT_ORCHESTRATION.md`; self-assessed
+  effective from this lane's own full-suite run — see the lane's handback
+  report for the pass/skip counts.
+### CC-UI-0029 — Lane U2: Findings workbench (faceted filters + saved views + shared DataTable) (2026-09-22)
+- Change: per `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U2) and its resolved R-03/R-07/R-11,
+  added the Findings workbench: `GET /findings` (list) and `GET /findings/{id}` (detail),
+  reading `finding`/`attempt` via the new `fuzzlab.web.findingsview` module (mirrors
+  `web/results.py`/`web/proxyview.py`: pure, read-only functions over the shared store,
+  never creates the store file). **Facet sidebar** (severity, vuln class, method,
+  mechanism/`confidence`, endpoint — 5 groups per R-03) implemented as the APG Disclosure
+  pattern (`<button aria-expanded aria-controls>` per group, native checkboxes with the
+  live count inside each `<label>`, `fieldset`/`role=group`) with **live counts**
+  recomputed against every *other* active group's filter (OR within a group, AND across
+  groups) — all client-side over one bounded (`limit=5000`) fetched snapshot
+  (`GET /api/findings`), matching D4's "hand-roll tables/filters, no virtualization" and
+  R-03's "a few thousand rows is fine" ceiling. Top **quick-filter** (debounced substring
+  over url/param/vuln_class/mechanism) + **applied-filter chips**
+  (`role=group` "Applied filters", each a `<button aria-label="Remove filter: …">`, focus
+  moved to the quick-filter input on removal — never to `<body>`, per R-11) + "Clear all".
+  **Severity** has no store column (the schema has none — see `NFR-UI-read-only`'s "the UI
+  reads" posture and `docs/ARCHITECTURE.md`'s store-as-contract); `findingsview.
+  derive_severity(vuln_class)` computes a UI-only, advisory band via substring rules,
+  documented as never written back and never treated as a stored/scored fact. Rendered as
+  a text+color `.badge` (never color alone, R-11).
+  **Saved views** persist server-side (`saved_views` table, migration 12 —
+  `CC-CORE-0019`; see that entry for the store-contract change and its bookkeeping-number
+  note) via `fuzzlab.web.savedviews` + `GET/POST/PUT/DELETE /api/views?table=`; a spec is
+  `{version, name, filter:{text, facets}, sort}` (R-03's shape, `predicates` deferred —
+  no caller needs Tenable-style predicates yet). `localStorage` (try/catch-wrapped) holds
+  only throwaway per-viewer state (collapsed facet groups, the last-applied view id, a
+  draft quick-filter string) per R-07's state-decision rule.
+  **"Send to Repeater / open request" pivot** follows U0's PRG+303 pattern exactly:
+  `POST /findings/repeater/from-finding` (a real `<form>`, both on the list's per-row
+  action and the detail page) → `RepeaterController.create_from_finding` →
+  `RedirectResponse(..., 303)` to `/proxy?repeater_tab=ID` — opaque tab id only, never
+  bytes on the wire. `finding`/`attempt` carry no raw request bytes (only proxy flow
+  history does, via the existing `create_from_flow`), so `create_from_finding`
+  reconstructs a minimal, best-effort request line from the finding's own
+  `url`/`method`/`param` against the configured target host; the tab name says
+  "(reconstructed)" so it is never mistaken for a byte-exact replay.
+  **Ground truth**: the detail view renders `primary_endpoint`/`primary_role`/
+  `related_endpoints`/`flow_variant` (CR-LAB-0001 Addendum B /
+  `fuzzlab.labels.contract.Case`) when a finding's `evidence` JSON happens to carry them
+  — additive/optional, matched by key, never required or invented. Note the honest
+  current state: the oracle (`fuzzlab/oracle/oracle.py`, the sole finding-writer) never
+  reads ground truth (D9/D10 fail-closed: it must not know the answer) and no existing
+  writer currently attaches these keys to `verdict.evidence`, so this renders today only
+  if/when a future harness-integration or plugin chooses to carry them through — the
+  detail template and `findingsview._ground_truth_fields` are the reading side of that
+  contract, built ahead of a writer per the lane's own scope (`app.py` read routes only).
+  **Shared `js/datatable.js`** (new standalone ES module, D3): native `<table>` (not
+  `role="grid"` — read-only sort + row-link, not a composite widget, per R-11), every
+  cell via `textContent` (never innerHTML — url/param/payload are target-derived,
+  untrusted), a real `<a href>` in the primary cell wrapped around JS-rendered content
+  (row-click is an enhancement on top), named row-action buttons, a fixed severity rank
+  map for non-lexicographic sort, and `safeHref()` (http/https/relative-only, blocks
+  `javascript:`/`data:`) applied to every rendered pivot href. API: `createDataTable(root,
+  {caption, columns:[{key,label,render,sortValue,sortable}], data, getRowId, rowHref,
+  onRowClick, rowActions, textFilterKeys, emptyMessage, liveRegion}) ->
+  {setData, setTextFilter, setFilter, setSort, getSort, getVisible, element}`. Files:
+  `sections/findings.html`, `templates/finding.html` (detail; alongside `templates/
+  run.html`, not under `sections/` — a record detail page, not a section route), `js/
+  findings.js`, `js/datatable.js`, `css/findings.css`; `app.py` gained the `findings` NAV
+  entry (Workbench group, after Proxy) and `_read_findings`/`_read_finding`/
+  `_saved_views` read helpers.
+- Impact (other components / project): read-only over `finding`/`attempt` (no schema
+  change to either); the one write surface (`saved_views`) is view *definitions* a person
+  authored in the panel, not tool output — `CC-CORE-0019` covers that table's own impact.
+  `fuzzlab/web/app.py` and `fuzzlab/web/proxycontrol.py` (new `RepeaterController.
+  create_from_finding`) are shared with U0/U3/U6's prior changes to those files but this
+  lane only adds routes/methods, touching no existing route/method body. `js/datatable.js`
+  is new and currently has exactly one consumer (this lane); U1 (recent-runs table) and
+  U5 (store explorer) are documented in `docs/UI_IMPLEMENTATION_PLAN.md` §3 to reuse it
+  *minus* the facet sidebar — **flagging for the integrator**: those are concurrent
+  Wave-1 lanes and neither imports/depends on `datatable.js` as written here, so there is
+  no code collision today, but their own dispatch prompts should point at this file's
+  actual API (above) rather than assume a different shape, since none of the three lanes
+  coordinated the exact signature ahead of time.
+- Risk (level; mitigation): low — additive routes/files, no result-table writes, no
+  change to `NFR-UI-localhost`/`NFR-UI-control-plane-hardened` (the existing
+  `SecurityGateMiddleware` covers the new POST route the same as every other `/proxy/
+  repeater/from-*` route). The reconstructed-request pivot could mislead someone into
+  treating it as a byte-exact replay; mitigated by the explicit "(reconstructed)" tab
+  name and this entry's documentation, plus `test_create_from_finding_reconstructs_a_
+  request_not_byte_exact`. XSS-shaped `url`/`param`/`evidence` values are covered by
+  `test_finding_detail_page_renders_untrusted_fields_dom_safe` (Jinja autoescape) and
+  `datatable.js`'s `textContent`-only rendering (exercised transitively by the list page;
+  no headless-browser test in this lane — see Deliverables).
+- Deliverables:
+  - [x] `fuzzlab.web.findingsview` (list/detail, derived severity, ground-truth pass-through) — done.
+  - [x] `fuzzlab.web.savedviews` (CRUD over `saved_views`) — done.
+  - [x] Migration 12 (`saved_views`) — done (`CC-CORE-0019`).
+  - [x] `RepeaterController.create_from_finding` — done.
+  - [x] Routes: `/findings`, `/findings/{id}`, `/api/findings`, `/findings/repeater/
+    from-finding` (PRG+303), `/api/views` (GET/POST/PUT/DELETE) — done.
+  - [x] `sections/findings.html`, `templates/finding.html`, `js/datatable.js`, `js/
+    findings.js`, `css/findings.css` — done.
+  - [x] Tests: filter/facet derivation, saved-view round-trip (store + HTTP), DOM-safe
+    rendering of untrusted fields, PRG+303 pivot, reads-only — done
+    (`tests/test_web_findings.py`, 16 tests).
+  - [ ] Real-browser/headless a11y smoke of the facet Disclosure + DataTable keyboard
+    model (focus-visible ring, `aria-sort` toggling, chip-removal focus target) — not
+    done in this lane; existing precedent (`test_web_launcher_browser.py`, `test_web_
+    repeater_browser.py`) shows the pattern other lanes used for this, left as a
+    follow-up rather than expanding this lane's scope past its `app.py`-read-routes
+    + shared-file remit.
+- Effectiveness (assessed 2026-09-22): effective for the stated scope — filter+saved-view
+  round-trip, DOM-safe untrusted-field rendering, and the "send to Repeater" PRG pivot are
+  all covered by passing tests; the workbench renders against both an empty store and a
+  seeded one without creating the store file on a bare read.
+
+### CC-UI-0028 — Overview dashboard: new landing route "/", Launcher moved to "/launcher" (lane U1) (2026-09-22)
+- Change: built the Overview dashboard (`FR-UI-10`, resolved marker R-10 in
+  `docs/UI_IMPLEMENTATION_PLAN.md`) as the panel's new landing route:
+  - `fuzzlab/web/results.py`: added `severity_of()` (a fixed, read-only
+    `vuln_class` → severity bucket map — critical/high/medium/low/info — since
+    `finding` has no `severity` column, only `confidence`, which the oracle
+    actually uses for the detection *mechanism*, e.g. "error-signature", not a
+    severity level) and `overview_summary(store, recent_limit=10)`: one
+    aggregate read (total findings, severity breakdown, total runs, runs in the
+    last 7 days, the ~10 newest runs, the latest scored run's detection quality,
+    the latest budgeted run's efficiency).
+  - `fuzzlab/web/app.py`: `GET /` now renders `sections/overview.html` via a new
+    `_overview_context`/`_read_overview` (empty-store-safe, never creates the
+    store); the **Launcher** moved from `/` to a new `GET /launcher` route with
+    otherwise unchanged behavior/context (`_launcher_context` unchanged). `NAV`
+    gained an "Overview" entry (`href="/"`, first in the Workbench group) and the
+    existing "Launcher" entry's `href` changed to `/launcher`.
+  - New files: `fuzzlab/web/templates/sections/overview.html`,
+    `fuzzlab/web/static/css/overview.css`, `fuzzlab/web/static/js/overview.js`
+    (a small hand-rolled click-to-sort for the recent-runs table — progressive
+    enhancement only, the table fully renders server-side without it).
+  - Findings-by-severity is a plain CSS horizontal segmented bar over the
+    existing `--crit/--high/--med/--low/--info` design tokens (`tokens.css`,
+    already present for exactly this purpose); no chart library added (R-10
+    explicitly calls uPlot poor for this shape).
+- Impact (other components / project): the panel's landing URL now serves
+  different content — a person/bookmark/script that opened `/` expecting the
+  Launcher must now use `/launcher` (also true of the Playwright browser-smoke
+  test, updated in this change — see Deliverables). No backend/store schema
+  change (severity is derived, not stored) and no other component's contract
+  changed. `docs/UI_IMPLEMENTATION_PLAN.md`'s R-03-resolved shared `DataTable`
+  (reserved for U2's Findings workbench, reused by U1's recent-runs table and
+  U5's store explorer) **did not exist in this lane's worktree** (`js/
+  datatable.js` absent) — flagged, not guessed at: this lane built its own
+  minimal recent-runs table instead of the shared component, so U2 (which is
+  expected to land `js/datatable.js`) and U5 should reconcile Overview's table
+  onto the shared component once it exists, per the parallel-lane merge
+  protocol in `docs/MULTI_AGENT_ORCHESTRATION.md`.
+- Risk (level; mitigation): low — strictly read-only (never creates the store,
+  never writes a result-table row; verified by a dedicated test asserting row
+  counts are unchanged after repeated `GET /`) and additive (one new route +
+  one relocated route, both GET, both already covered by the existing
+  loopback/control-plane hardening middleware, which wraps every route by
+  construction). The route move is a real behavior change for anyone who had
+  `/` open expecting the Launcher; mitigated by moving it to a clearly-related,
+  discoverable URL (`/launcher`, linked from the sidebar and from Overview's own
+  quick actions) rather than removing it, and by updating every test that
+  depended on `/` == Launcher (see Deliverables) so the suite still pins the
+  Launcher's exact behavior, just at its new address.
+- Deliverables:
+  - [x] `fuzzlab/web/results.py::severity_of`/`overview_summary` — done.
+  - [x] `app.py` routes (`/` → Overview, `/launcher` → Launcher) + NAV update — done.
+  - [x] `sections/overview.html`, `css/overview.css`, `js/overview.js` — done.
+  - [x] New `tests/test_web_overview.py` (14 tests: severity mapping, the
+    aggregate on an empty/seeded/unscored store, recent-runs capping/order, the
+    empty state never creating the store, KPI tiles, partial-empty em-dashes,
+    the severity bar, quick actions, nav active-state, and a no-writes
+    assertion) — done, all passing.
+  - [x] Updated existing suites that assumed `/` == Launcher:
+    `tests/test_web_launcher.py`, `tests/test_web_frontend.py` (SECTIONS table +
+    the Launcher-content block), `tests/test_web_launcher_browser.py` (Playwright
+    smoke's base URL) — done; `tests/test_web_security.py` needed no change (its
+    `/` assertions are status/header-only, not content).
+  - [x] Full repo test suite run, confirmed green (see Effectiveness) — done.
+  - [x] `docs/components/12-diagnostics-and-ui/requirements.md` — `FR-UI-7`
+    updated in place (route map) + new `FR-UI-10` added — done.
+  - [x] `CHANGELOG.md` line — done.
+  - [ ] Reconcile Overview's recent-runs table onto the shared `DataTable` once
+    U2 lands `js/datatable.js` — todo, owned by whichever of U2/U5 lands second
+    (flagged above, not this lane's to build).
+- Effectiveness (assessed 2026-09-22): intent achieved — `/` renders the Overview
+  spec from R-10 (5 tiles, recent-runs table, severity bar, quick actions, both
+  empty states), `/launcher` preserves the pre-existing Launcher behavior
+  unchanged, and the full local test suite passes with no regressions (see the
+  commit's reported pass count). The one open item (shared `DataTable`
+  reconciliation) is explicitly deferred to U2/U5 above, not silently dropped.
+
+### CC-UI-0027 — Incidental: CLI `--dry-run` flag surfaces in the launcher form (lane D0a) (2026-09-22)
+- Change: lane D0a added a `--dry-run` flag to the `build_parser()` of `crawl`,
+  `audit`, `fuzz`, `auto`, `mutate-run`, and `proxy` (see CC-CRAWL-0007,
+  CC-AUD-0015, CC-FUZZ-0020, CC-MUT-0010, CC-PROXY-0017 for the per-component
+  detail). `fuzzlab/web/commandspec.py::introspect()` reads each tool's flags
+  straight from its own `build_parser()` by design (see that module's docstring:
+  "a new flag shows up in the UI automatically with no change here"), so this new
+  flag now appears as an ordinary `bool` option (a checkbox) in each affected
+  activity's form in the web launcher, with **no code change to
+  `fuzzlab/web/app.py` or `fuzzlab/web/commandspec.py`**. This entry exists to
+  record that UI-visible effect, per PA-0031 (D0a's reserved bookkeeping numbers
+  include this conditional UI number precisely for this case).
+- Impact (other components / project): UI-visible only — one more checkbox per
+  affected activity's launcher form. No behavior change to the web launcher's own
+  `POST /api/launch/dry-run` route (CC-UI-0013/0015), which already previews any
+  command without executing it and does not depend on this new flag. If a person
+  checks the new `--dry-run` box and clicks the real "launch" action, the child
+  process now started via `POST /api/launch` would itself just print its plan and
+  exit 0 (the same behavior the CLI gets directly) — harmless, and arguably useful,
+  but not a scenario this lane added UI copy/handling for. `fuzzlab/greybox/
+  greybox_cli.py` (`greybox-run`'s form) is unaffected — that tool's `--dry-run` is
+  a separate, later change (lane D0b, `CC-FUZZ-0022`).
+- Risk (level; mitigation): low — the new option is inert unless a person explicitly
+  checks it, and even then only causes the corresponding CLI process (launched
+  in-process by the web launcher, same as any other flag) to print its plan and
+  exit instead of running for real; it cannot be more permissive than running
+  without it. Mitigated by the unchanged `tests/test_web_commandspec.py` and
+  `tests/test_web_launcher.py` suites (no assertion pinned the pre-existing flag
+  count per tool, so introspecting one more flag did not break anything) plus the
+  new `tests/test_cli_dry_run.py`.
+- Deliverables:
+  - [x] Confirmed via `commandspec.spec(name).to_dict()` that `--dry-run` appears
+    as a `bool` option for each of the six affected activities, with no code change
+    needed in `commandspec.py`/`app.py` — done.
+  - [x] Confirmed the web dry-run suites still pass unchanged — done.
+- Effectiveness (assessed 2026-09-22): effective as a record — the launcher form now
+  offers `--dry-run` for the six affected activities purely through the existing
+  introspection contract; no drift between the CLI's flags and the UI's form
+  (PA-0001/PA-0003 preserved).
+### CC-UI-0026 — Lane U6: control-plane hardening (Host/Origin/Fetch-Metadata gate) (2026-09-22)
+- Change: per `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U6) and its resolved R-13, added
+  `fuzzlab.web.app.SecurityGateMiddleware` — a raw ASGI middleware (not
+  `BaseHTTPMiddleware`, to avoid interfering with the SSE launch-output stream) guarding
+  the whole control plane against being driven by a hostile web page the operator's
+  browser happens to visit, given NFR-UI-localhost's "loopback-only" alone does not stop
+  that. Two independent gates, both required (each defeats an attack the other misses):
+  (a) an exact Host (`host:port`) allow-list on **every** request, rolled ourselves since
+  Starlette's `TrustedHostMiddleware` strips the port and can't pin against DNS
+  rebinding; (b) on POST/PUT/DELETE, Origin == the allow-list **and**
+  `Sec-Fetch-Site == same-origin` (same-site rejected too — the deliberately-vulnerable
+  lab this panel drives is same-site with it on a sibling port, the R-13 "landmine"),
+  plus a custom `X-Fuzzlab-Client: 1` header on `/api/*` JSON bodies (forces a CORS
+  preflight a cross-origin page can't satisfy). The custom-header check cannot apply to
+  the panel's existing no-JS `<form method="post" action="/api/run/automatic">` (a
+  native form can never set a custom header at all, JS or not), so form-encoded
+  (`application/x-www-form-urlencoded` / `multipart/form-data`) `/api/*` bodies are
+  exempted from that one check and rely on Origin + Sec-Fetch-Site alone — still real: a
+  cross-site auto-submitted forged form fails the same-origin check. Clients sending no
+  Fetch Metadata (older browsers, non-browser/API clients) fall back to Origin, then
+  Referer. Stays cookieless — no ambient credential means no CSRF token/session store is
+  needed, and SameSite wouldn't help given the same-site landmine. Fails closed on any
+  ambiguity. Every response (success or denial) also gets a tight offline CSP
+  (`default-src 'none'` etc.), `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, COOP/CORP `same-origin`, and
+  `Cache-Control: no-store` off `/static/`. Pinned `starlette>=1.0.1,<2` explicitly in
+  the `web` extra (`pyproject.toml`) — the R-13 prerequisite (CVE-2026-48710 "BadHost":
+  a pre-1.0.1 Host-header validation bypass that would undercut gate (a)); the installed
+  version (1.6.0) already satisfied it, this just makes it a declared, enforced floor
+  rather than an accident of fastapi's own transitive range. Wired the browser's own JS
+  (originally `static/app.js`'s, now `static/js/common.js`'s `postJSON`/`delJSON` after
+  lane U0's asset split — the only two call sites that ever issue a state-changing
+  `fetch()`) to send `X-Fuzzlab-Client: 1`, so the existing launcher/proxy/repeater UI
+  keeps working unmodified from the operator's own browser.
+- Impact (other components / project): UI only; no result-table/store contract change.
+  **Shares `fuzzlab/web/app.py` with lane U0** (MPA route split, `CC-UI-0025`, merged
+  first) — kept additive and localized (one new module-level block + a 4-line
+  `add_middleware` call in `create_app`) so it slotted in cleanly alongside U0's route
+  registrations without touching them; manually reapplied onto the post-U0 tree by the
+  integrating session rather than a raw `git merge` (U0 renamed `static/app.js` →
+  `static/js/*.js`, which would otherwise have conflicted). Every existing web test's
+  `TestClient` now needs a `base_url`/headers matching this gate (httpx's default
+  `http://testserver` base URL and lack of Origin/Sec-Fetch-Site headers would otherwise
+  421/403 on everything); centralized in a new `tests/_webclient.py` helper and applied
+  across all existing web-test files rather than duplicated per file. The two
+  real-browser Playwright tests (`test_web_launcher_browser.py`,
+  `test_web_repeater_browser.py`) bind uvicorn to an OS-assigned ephemeral port directly
+  but previously left `cfg`'s `web_host`/`web_port` at their defaults (unused before
+  this change); now pass `"web_port": port` explicitly so this gate's Host allow-list
+  matches the port the browser actually navigates to.
+- Risk (level; mitigation): medium (a fail-closed gate on a widely-shared file, wrong in
+  either direction is bad — too loose reopens R-13, too strict breaks the panel/lab
+  workflow). Mitigated: new `tests/test_web_security.py` (16 cases) covers both gates
+  independently — wrong Host (421) including the DNS-rebinding case (correct
+  Origin/Sec-Fetch-Site, wrong Host, still 421); classic cross-site CSRF (403); the
+  same-site-sibling-port landmine specifically (403); same-origin missing the custom
+  header on `/api/*` (403) vs. present (reaches the handler, proven by a distinct 400
+  from unknown-command business logic, not a 403); the no-Fetch-Metadata → Origin →
+  Referer fallback chain (pass and reject cases); the form-POST custom-header exemption
+  (reaches the handler) vs. a forged cross-site form (still 403); security headers
+  present on both success and denial responses; `Cache-Control: no-store` present on API
+  responses and absent on `/static/`. Full web test suite (post-U0-merge, one adjusted
+  asset path — `/static/app.css` → `/static/css/shell.css` — since U0's asset split
+  landed first): 135 passed, 2 skipped (Playwright-gated browser tests skip when
+  Chromium isn't installed).
+- Deliverables:
+  - [x] `SecurityGateMiddleware` + `_security_allowlist`/`_origin_of`/`_deny`/
+    `_inject_response_headers` + the CSP/security-header constants, added to
+    `fuzzlab/web/app.py` as one self-contained block right after `_STATIC_DIR` (before
+    the sidebar-nav source of truth U0 added) — done.
+  - [x] Wired into `create_app` via a single `app.add_middleware(SecurityGateMiddleware,
+    ...)` call, added immediately after `app = FastAPI(...)` and before
+    `app.mount("/static", ...)` — the *only* other touch to `create_app`'s existing body;
+    no route handler in `fuzzlab/web/app.py` was modified — done.
+  - [x] `static/js/common.js`: `postJSON`/`delJSON` now send `X-Fuzzlab-Client: 1` —
+    done (applied to U0's post-split module, not the pre-split `static/app.js`).
+  - [x] `pyproject.toml`: explicit `starlette>=1.0.1,<2` pin in the `web` extra — done.
+  - [x] `tests/_webclient.py` shared TestClient helper (extended to accept passthrough
+    `**kwargs` for U0's `follow_redirects=False` PRG test) + all existing web-test files
+    updated to use it — done.
+  - [x] `tests/test_web_launcher_browser.py` / `tests/test_web_repeater_browser.py`:
+    pass `web_port` matching the real bind port — done.
+  - [x] `tests/test_web_security.py` — new, 16 cases, both gates — done.
+  - [x] `docs/components/12-diagnostics-and-ui/requirements.md`: new
+    **NFR-UI-control-plane-hardened**, NFR-UI-localhost cross-referenced to it, new
+    acceptance-criteria bullet — done.
+  - [x] `CHANGELOG.md` line — done.
+  - [x] full test suite run — done (counts recorded above).
+- Effectiveness (assessed 2026-09-22): effective for the stated scope — both R-13 gates
+  verified independently by `tests/test_web_security.py`, and the existing launcher/
+  proxy/repeater surfaces (sync `TestClient` suites + the two real-Chromium Playwright
+  suites) keep passing through the gate rather than around it. Re-assess once U1–U5 add
+  their own POST routes, to confirm every new state-changing route is still `/api/*`-
+  shaped (or is deliberately reviewed as the form-POST exemption's next instance) and so
+  stays covered by this gate without a per-route opt-in being needed.
+
+### CC-UI-0025 — Lane U0: MPA routes + asset split (the serialization-breaker) (2026-09-22)
+- Change: per `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U0) and resolved markers R-01/R-07,
+  replaced the hash-switched single page (`GET /` rendering all five `.panel` sections,
+  `app.js`'s `initTabs()` toggling `.hidden` on `hashchange`) with **real, independently
+  deep-linkable per-section routes**: `GET /` (Launcher), `/proxy`, `/results`, `/ml`,
+  `/diagnostics`, plus the pre-existing `/runs/{id}`. `fuzzlab/web/app.py` gained a single
+  `NAV` source of truth (grouped Workbench/Analysis links, each `{id, label, href, icon}`)
+  and `_shell_context(cfg, active=...)`/`_launcher_context`/`_results_context` builders that
+  compute the active section server-side per request; every `TemplateResponse` already used
+  the modern `(request, name, ctx)` signature (R-01), unchanged. Split
+  `templates/index.html` into `templates/sections/{launcher,proxy,results,ml,diagnostics}.html`
+  (each `{% extends "base.html" %}`), `static/app.js` into `static/js/{shell,common,
+  launcher,proxy}.js` (`shell.js` = theme/density/sidebar/proxy-chip, loaded on every page;
+  `common.js` = shared `postJSON`/`delJSON`/`toWire`/`subscribe`; `launcher.js`/`proxy.js` =
+  per-section behavior), and `static/app.css` into `static/css/{shell,launcher,proxy,
+  results}.css` (`shell.css` = the app-shell grid + shared primitives, loaded on every page;
+  each section links its own partial). `base.html`'s sidebar now renders real `<a href="...">`
+  links from `NAV` with server-rendered `aria-current="page"` on the active one (never color
+  alone — a left accent bar too, R-11); the no-FOUC inline `<head>` script is unchanged and
+  now runs on every full-page MPA navigation, as required. `initTabs()`/the hash router is
+  fully retired, not just unused. Converted the Proxy "send to Repeater" pivot to **POST /
+  Redirect / GET with a 303** (R-07): a real `<form method="post" action="/proxy/repeater/
+  from-flow">` posts the opaque `flow_id`; the new `POST /proxy/repeater/from-flow` route
+  (parses the small `application/x-www-form-urlencoded` body by hand via `urllib.parse.
+  parse_qsl` rather than pulling in `python-multipart` for one field, per PA-0005's spirit)
+  creates the tab server-side and 303-redirects to `/proxy?repeater_tab=<id>` — an opaque
+  hint the Repeater JS treats as a fallback-safe seed (never bytes on the wire; an unknown
+  flow id degrades to the default view, never a 404). The pre-existing JSON API
+  (`POST /api/proxy/repeater/from-flow/{flow_id}`, used by `test_web_repeater.py` and the
+  controller layer) is untouched. `run.html`/`not_found.html` now link back to `/results`
+  (the run listing's real route) instead of `/`, and carry `active="results"` so the sidebar
+  reflects that a run detail is a Results sub-page.
+- Impact (other components / project): UI only; no schema/contract change. Establishes the
+  file-disjoint surface (`templates/sections/*.html`, `static/{js,css}/<section>.*`) every
+  Wave-1 UI lane (U1–U5) depends on to build in parallel without touching each other's files,
+  per `docs/UI_IMPLEMENTATION_PLAN.md` §4's dependency map. `FR-UI-7`/`FR-UI-8` in
+  `requirements.md` updated in place to describe the MPA shell (superseding the
+  hash-switched-`.panel` description from CC-UI-0021/0022). No change to `core/`, the store
+  contract, or any tool's CLI. U6 (control-plane hardening, `CC-UI-0026`) is a same-`app.py`
+  Wave-0 lane that lands with/right after this one per that plan's own note; this change adds
+  no CSRF/Origin/Host validation itself (out of U0's scope) and does not weaken the existing
+  no-auto-run/loopback-only/authorized-gate invariants (unchanged gate checks on
+  `/api/run/automatic`, `/api/launch`, `/api/proxy/repeater/tabs/{id}/send`).
+- Risk (level; mitigation): low-medium — the change is a structural refactor of every route
+  and every static asset path, so a missed reference could 404 a whole section. Mitigated by:
+  a full route inventory (`/`, `/proxy`, `/results`, `/ml`, `/diagnostics`, `/runs/{id}`,
+  `not_found.html`) each asserted directly via `TestClient`; a parametrized route/no-JS test
+  over every section (`test_section_route_renders_the_app_shell`,
+  `test_section_route_is_deep_linkable_and_marks_active_nav`) asserting the shell, the
+  section's own content, `aria-current="page"`, and the `data-section` hook exist together;
+  explicit assertions that no `href="/#..."` hash link remains and that `initTabs` is gone;
+  a 303-redirect test for the new PRG pivot (both the found and not-found flow-id cases); a
+  grep across `fuzzlab/`/`tests/` confirming no remaining reference to the retired
+  `templates/index.html`/`static/app.css`/`static/app.js` paths. The PRG route's hand-rolled
+  form parse is scoped to one trusted-shape field (`flow_id`, cast through `int()`) so a
+  malformed body degrades to the safe default redirect rather than raising.
+- Deliverables:
+  - [x] `NAV` + per-route `_shell_context`/`_launcher_context`/`_results_context` in
+    `app.py`, with `/`, `/proxy`, `/results`, `/ml`, `/diagnostics` routes — done.
+  - [x] `templates/sections/*.html` split (extends `base.html`; per-section `{% block
+    styles %}`/`{% block scripts %}`) — done.
+  - [x] `static/css/{shell,launcher,proxy,results}.css` + `static/js/{shell,common,
+    launcher,proxy}.js` split; `app.css`/`app.js` removed — done.
+  - [x] Server-rendered sidebar `aria-current="page"` + `data-section` hooks on `<nav>`
+    links and `<main>` — done.
+  - [x] PRG + 303 "send to Repeater" pivot (`POST /proxy/repeater/from-flow`) — done.
+  - [x] `run.html`/`not_found.html` updated to link `/results` and carry `active="results"`
+    — done.
+  - [x] Tests updated for routes (`test_web_frontend.py` rewritten; `test_web_results.py`,
+    `test_web_proxy_history.py` moved their shell assertions off `/` to `/results`/`/proxy`;
+    browser-smoke selectors updated to `data-section`) — done, focused run green (see below).
+  - [x] `docs/components/12-diagnostics-and-ui/requirements.md` (`FR-UI-7`, `FR-UI-8`)
+    updated in place — done.
+- Effectiveness (assessed 2026-09-22): effective for its own scope — every section is
+  independently reachable and deep-linkable, no-JS (`TestClient`, which runs no JS) renders
+  each section's full content, the active-nav state is server-rendered, and the focused web
+  suite (`test_web_frontend.py` plus every other `test_web_*.py` file) passed locally (128
+  passed; see the report for exact counts). Re-assess once U1–U5 land on top of this split
+  and once U6's control-plane hardening lands alongside it in `app.py`.
+
 ### CC-UI-0024 — Lane X0: register `lab-generate` in the launcher (own group) (2026-09-22)
 - Change: surfaced `fuzzlab lab-generate` as a launchable activity in the web launcher (Wave-0
   lane X0 of `docs/UI_IMPLEMENTATION_PLAN.md`). `fuzzlab/labgen/cli.py` already exposed

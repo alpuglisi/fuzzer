@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}fuzzlab &mdash; Proxy{% endblock %}
+{% block crumb %}Proxy{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/proxy.css">{% endblock %}
+{% block content %}
+<section class="panel" aria-labelledby="proxy-h1">
+  <h1 id="proxy-h1" class="visually-hidden">Proxy workbench</h1>
+  <nav class="proxy-subnav" aria-label="Proxy sections">
+    <a href="#history-card">History</a>
+    <a href="#intercept-card">Intercept</a>
+    <a href="#repeater-card">Repeater</a>
+    <a href="#scope-card">Scope &middot; Match-Replace</a>
+  </nav>
+  <div class="card">
+    <h2>Proxy workbench</h2>
+    <p class="muted" id="proxy-status">Proxy: checking&hellip;</p>
+    <p class="muted">History, live Intercept (pause / edit / drop / forward), Repeater, and
+      Scope / Match-Replace are all below. Intercept, Repeater sends, and Scope /
+      Match-Replace need the in-process proxy (<code>fuzzlab web --with-proxy --authorized</code>).</p>
+  </div>
+
+  <div class="card" id="history-card">
+    <h2>History</h2>
+    <div class="field">
+      <input type="text" id="flow-search" placeholder="search url / host / head&hellip;">
+      <button type="button" id="flow-refresh">Refresh</button>
+    </div>
+    <table id="flow-table">
+      <thead><tr><th>#</th><th>method</th><th>url</th><th>host</th><th>status</th>
+        <th>ms</th><th>proto</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="muted" id="flow-empty" hidden>No flows recorded yet. Start the proxy
+      (<code>fuzzlab web --with-proxy --authorized</code>, or <code>fuzzlab proxy</code>)
+      and drive traffic through it.</p>
+    <div id="flow-detail" hidden>
+      <h3>Flow <span id="flow-detail-id"></span>
+        <span class="muted">&mdash; stored bytes are redacted</span></h3>
+      <!-- PRG + 303 (R-07): a real POST creates the Repeater tab server-side, then a
+           303 redirect back to /proxy?repeater_tab=ID carries only the opaque tab id —
+           never raw request bytes — on the wire; works with JS off too. -->
+      <form method="post" action="/proxy/repeater/from-flow" id="flow-to-repeater-form">
+        <input type="hidden" name="flow_id" id="flow-to-repeater-id" value="">
+        <button type="submit" id="flow-to-repeater">&rarr; Repeater</button>
+      </form>
+      <div class="me-split-layout">
+        <button type="button" class="tbtn" id="flow-split-layout" aria-pressed="false">&#8645; Stack vertically</button>
+      </div>
+      <div class="me-split" id="flow-split">
+        <div class="me-pane">
+          <h4>Request</h4>
+          <message-editor id="flow-req-editor" mirror-id="flow-req"></message-editor>
+        </div>
+        <div class="me-split-handle" aria-label="Resize request/response panes"></div>
+        <div class="me-pane">
+          <h4>Response</h4>
+          <message-editor id="flow-resp-editor" mirror-id="flow-resp"></message-editor>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="intercept-card">
+    <h2>Intercept</h2>
+    <p class="muted" id="intercept-unavailable" hidden>Not running in-process. Start with
+      <code>fuzzlab web --with-proxy --authorized</code> to pause, edit, drop, and forward
+      live traffic.</p>
+    <div id="intercept-controls" hidden>
+      <div class="field">
+        <label class="cat"><input type="checkbox" id="intercept-on"> Intercept requests</label>
+        <label class="cat"><input type="checkbox" id="intercept-resp"> and responses</label>
+        <span class="muted" id="intercept-count"></span>
+      </div>
+      <table id="pending-table">
+        <thead><tr><th>#</th><th>dir</th><th>method</th><th>target</th><th>host</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="muted" id="pending-empty" hidden>No flows held. Toggle intercept on and
+        drive traffic through the proxy.</p>
+      <div id="pending-detail" hidden>
+        <h3>Editing held flow <span id="pending-id"></span>
+          <span class="muted">&mdash; edit the raw bytes, then Forward (or Drop)</span></h3>
+        <message-editor id="pending-editor" editable textarea-id="pending-raw"></message-editor>
+        <div class="actions">
+          <button type="button" id="pending-forward">Forward</button>
+          <button type="button" id="pending-drop">Drop</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="repeater-card" data-repeater-tab="{{ repeater_tab if repeater_tab is not none else '' }}">
+    <h2>Repeater</h2>
+    <p class="muted">Save a raw request as a tab and replay it byte-exact. Use
+      &ldquo;&rarr; Repeater&rdquo; on a History flow to seed one.
+      {% if not authorized %}Sending is disabled until <code>authorized: true</code>.{% endif %}</p>
+    <div class="field">
+      <label for="rep-tab-select">Tabs</label>
+      <select id="rep-tab-select"><option value="">&mdash; select a tab &mdash;</option></select>
+      <button type="button" id="rep-refresh">Refresh</button>
+    </div>
+    <details>
+      <summary>New tab</summary>
+      <div class="field"><label for="rep-new-name">name</label>
+        <input type="text" id="rep-new-name" placeholder="tab"></div>
+      <div class="field"><label for="rep-new-host">host</label>
+        <input type="text" id="rep-new-host" placeholder="127.0.0.1"></div>
+      <div class="field"><label for="rep-new-port">port</label>
+        <input type="number" id="rep-new-port" placeholder="8080"></div>
+      <div class="field"><label for="rep-new-tls">TLS</label>
+        <input type="checkbox" id="rep-new-tls"></div>
+      <div class="field"><label for="rep-new-raw">raw request</label>
+        <textarea id="rep-new-raw" class="pending-raw" rows="6"
+                  placeholder="GET / HTTP/1.1&#10;Host: 127.0.0.1&#10;&#10;"></textarea></div>
+      <div class="actions"><button type="button" id="rep-create">Create tab</button></div>
+    </details>
+    <div id="rep-editor" hidden>
+      <div class="me-split-layout">
+        <button type="button" class="tbtn" id="rep-split-layout" aria-pressed="false">&#8645; Stack vertically</button>
+        <button type="button" id="rep-send"
+          {% if not authorized %}disabled title="set authorized:true to replay"{% endif %}>Send</button>
+      </div>
+      <div class="me-split" id="rep-split">
+        <div class="me-pane">
+          <h4>Request</h4>
+          <message-editor id="rep-editor-msg" editable textarea-id="rep-raw"></message-editor>
+        </div>
+        <div class="me-split-handle" aria-label="Resize request/response panes"></div>
+        <div class="me-pane">
+          <h4>Response</h4>
+          <message-editor id="rep-resp-editor" mirror-id="rep-resp"></message-editor>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="scope-card">
+    <h2>Scope &middot; Match-Replace</h2>
+    <p class="muted" id="scope-unavailable" hidden>Not running in-process. Start with
+      <code>fuzzlab web --with-proxy --authorized</code> to manage scope and rewrites.</p>
+    <div id="scope-controls" hidden>
+      <h3>Scope <span class="muted">&mdash; default-deny; an exclude always wins</span></h3>
+      <table id="scope-table">
+        <thead><tr><th>#</th><th>host</th><th>path regex</th><th>type</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="field"><label for="scope-host">host</label>
+        <input type="text" id="scope-host" placeholder="127.0.0.1:8080 &middot; .lab.local &middot; *"></div>
+      <div class="field"><label for="scope-path">path regex</label>
+        <input type="text" id="scope-path" placeholder="(optional)"></div>
+      <div class="field"><label for="scope-exclude">exclude</label>
+        <input type="checkbox" id="scope-exclude"></div>
+      <div class="actions"><button type="button" id="scope-add">Add scope rule</button></div>
+
+      <h3>Match-Replace <span class="muted">&mdash; ordered byte rewrites</span></h3>
+      <table id="mr-table">
+        <thead><tr><th>#</th><th>target</th><th>header</th><th>match &rarr; replace</th>
+          <th>regex</th><th>on</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="field"><label for="mr-target">target</label>
+        <select id="mr-target">
+          <option>request_line</option><option>status_line</option>
+          <option>header</option><option>body</option>
+        </select></div>
+      <div class="field"><label for="mr-header">header name</label>
+        <input type="text" id="mr-header" placeholder="(when target = header)"></div>
+      <div class="field"><label for="mr-match">match</label><input type="text" id="mr-match"></div>
+      <div class="field"><label for="mr-replace">replace</label><input type="text" id="mr-replace"></div>
+      <div class="field"><label for="mr-regex">regex</label><input type="checkbox" id="mr-regex"></div>
+      <div class="actions"><button type="button" id="mr-add">Add rewrite rule</button></div>
+      <p class="warn" id="mr-error"></p>
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="/static/js/proxy.js"></script>{% endblock %}

@@ -26,55 +26,55 @@
 #     the wrong escaping (added L-P1.2b)
 #   ownership_check_bypass — a lookup by ID/key returns or acts on a resource
 #     without verifying the requester owns/is a member of it (IDOR) (added
-#     CC-LAB-0059)
+#     CC-LAB-0063)
 #   jwt_algorithm_confusion — JWT signature verification does not pin/
 #     restrict the accepted algorithm, so an attacker-chosen `alg` (e.g.
 #     `none`, or a public-key algorithm swapped for an HMAC one) is honored
-#     (added CC-LAB-0059)
+#     (added CC-LAB-0063)
 #   weak_token_entropy — a session/reset/API token is derived from a
-#     non-cryptographic, predictable source (added CC-LAB-0059)
+#     non-cryptographic, predictable source (added CC-LAB-0063)
 #   stale_authorization_state — an authorization decision (e.g. "is this
 #     account blocked") is taken from a value cached at an earlier point
 #     (e.g. login time) rather than revalidated for the current request
-#     (added CC-LAB-0059)
+#     (added CC-LAB-0063)
 #   price_integrity_bypass — a payment/charge amount is taken from
 #     client-supplied input rather than recomputed server-side from trusted
-#     data (added CC-LAB-0059)
+#     data (added CC-LAB-0063)
 #   race_condition_toctou — a check-then-act gap (e.g. "is this coupon
 #     unused?" then "mark it used") allows the same single-use resource to
 #     be redeemed, or the same counter incremented, more than once under
-#     concurrent requests (added CC-LAB-0059)
+#     concurrent requests (added CC-LAB-0063)
 #   unrestricted_file_upload — an uploaded file's true type/executability is
 #     not verified, allowing a web-executable file into a web-served path
-#     (added CC-LAB-0059)
+#     (added CC-LAB-0063)
 #   path_traversal — a filesystem path built from tainted input can escape
-#     its intended base directory (added CC-LAB-0059)
+#     its intended base directory (added CC-LAB-0063)
 #   sql_order_by_injection — tainted input selects the `ORDER BY`
 #     column/direction with no fixed allowlist — the sort-clause-scoped
-#     sibling of `sql_identifier_substitution` (added CC-LAB-0059)
+#     sibling of `sql_identifier_substitution` (added CC-LAB-0063)
 #   server_template_injection — tainted input becomes template *source*
 #     compiled/evaluated at render time, not just data interpolated into a
-#     fixed, file-loaded template (added CC-LAB-0059)
+#     fixed, file-loaded template (added CC-LAB-0063)
 #   xxe_entity_resolution — the XML parser resolves external entities
-#     declared in a document it parses (added CC-LAB-0059)
+#     declared in a document it parses (added CC-LAB-0063)
 #   mass_assignment — tainted request-body fields are written into a
 #     persisted entity beyond the fields the endpoint intends to accept
-#     (added CC-LAB-0059)
+#     (added CC-LAB-0063)
 #   ssrf_request_forgery — server-side code fetches a URL whose host/scheme
 #     is attacker-influenced, reaching internal/otherwise-unreachable
-#     network targets (added CC-LAB-0059)
+#     network targets (added CC-LAB-0063)
 #   insecure_deserialization — tainted bytes are deserialized by a mechanism
 #     that can construct/execute more than plain data (objects, closures,
-#     code), not just parse a fixed data format (added CC-LAB-0059)
+#     code), not just parse a fixed data format (added CC-LAB-0063)
 #   email_header_injection — tainted input reaches a raw mail-header string
 #     with no CR/LF stripping, allowing extra headers/recipients to be
-#     injected (added CC-LAB-0059)
+#     injected (added CC-LAB-0063)
 #   http_header_injection — tainted input reaches a raw HTTP response header
 #     with no CR/LF stripping, allowing response-splitting/extra headers
-#     (added CC-LAB-0059)
+#     (added CC-LAB-0063)
 #   weak_signature_comparison — a webhook/HMAC signature is verified with a
 #     non-constant-time or type-juggling-prone comparison, or verification
-#     is skipped/bypassable entirely (added CC-LAB-0059)
+#     is skipped/bypassable entirely (added CC-LAB-0063)
 version: 1
 entries:
   # --- SQL sinks -----------------------------------------------------
@@ -294,7 +294,7 @@ entries:
     sink_family: html_attribute_quoted
     effect: no_effect
 
-  # --- CC-LAB-0059: applying corpus-collected suggested_op/suggested_sink_
+  # --- CC-LAB-0063: applying corpus-collected suggested_op/suggested_sink_
   # family proposals to the matrix (site-architecture expansion plan, Step 8
   # handoff) ------------------------------------------------------------
   # All entries below are brand-new (op, sink_family) pairs (new sink

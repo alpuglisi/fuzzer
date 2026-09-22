@@ -1,5 +1,6 @@
 """Phase 0 foundation tests: store/migrations, config, budget, HTTP seam."""
 
+import math
 import threading
 
 import pytest
@@ -8,7 +9,7 @@ from fuzzlab.core import migrations
 from fuzzlab.core.budget import BudgetExceeded, RequestBudget
 from fuzzlab.core.config import load_config
 from fuzzlab.core.http import HttpClient, OutOfScope, Request
-from fuzzlab.core.store import Store, connect
+from fuzzlab.core.store import MetricLogger, Store, connect, log_scalar, open_store
 
 
 # --- store + migrations -------------------------------------------------
@@ -22,7 +23,8 @@ def test_migrations_are_idempotent(tmp_path):
     tables = {r["name"] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table'")}
     for expected in ("run", "page", "candidate", "attempt", "finding",
-                     "flow", "bandit_posteriors", "request_budget", "run_metrics"):
+                     "flow", "bandit_posteriors", "request_budget", "run_metrics",
+                     "metric_series"):
         assert expected in tables
 
 
@@ -42,6 +44,99 @@ def test_pragmas_set(tmp_path):
     conn = connect(tmp_path / "s.db")
     assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+
+def test_open_store_is_wal_smoke(tmp_path):
+    """R-08 smoke test: the central open_store() connection is WAL, with the
+    busy_timeout/synchronous pragmas the concurrency design relies on."""
+    conn = open_store(tmp_path / "s.db")
+    assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1  # NORMAL
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    # busy_timeout reflects back the configured ms value.
+    assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 10000
+    conn.close()
+
+
+# --- metric_series / log_scalar / MetricLogger (B0, CC-CORE-0018) -------
+def test_metric_series_schema_and_indexes(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        cols = {r["name"] for r in store.conn.execute("PRAGMA table_info(metric_series)")}
+        assert cols == {"id", "run_id", "source", "key", "step", "ts", "value"}
+        indexes = {r["name"] for r in store.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='metric_series'")}
+        assert "idx_metric_series_run" in indexes
+        assert "idx_metric_series_overlay" in indexes
+
+
+def test_log_scalar_roundtrip(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("test", "hash123")
+        ok = log_scalar(store, run_id, "gbt", "train/loss", step=1, value=0.5)
+        assert ok is True
+        row = store.conn.execute(
+            "SELECT run_id, source, key, step, value FROM metric_series"
+        ).fetchone()
+        assert (row["run_id"], row["source"], row["key"], row["step"], row["value"]) == (
+            run_id, "gbt", "train/loss", 1, 0.5,
+        )
+
+
+def test_log_scalar_accepts_raw_connection(tmp_path):
+    """Per-component emitters may hold their own open_store() connection
+    rather than a full Store wrapper."""
+    conn = open_store(tmp_path / "s.db")
+    migrations.migrate(conn)
+    conn.execute("INSERT INTO run (tool, config_hash) VALUES ('t', 'h')")
+    conn.commit()
+    run_id = conn.execute("SELECT id FROM run").fetchone()[0]
+    assert log_scalar(conn, run_id, "bandit", "regret/cumulative", step=0, value=1.0)
+    conn.close()
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_log_scalar_rejects_non_finite(tmp_path, bad):
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("test", "hash123")
+        with pytest.warns(UserWarning):
+            ok = log_scalar(store, run_id, "gbt", "train/loss", step=1, value=bad)
+        assert ok is False
+        count = store.conn.execute("SELECT COUNT(*) FROM metric_series").fetchone()[0]
+        assert count == 0
+
+
+def test_metric_logger_flushes_every_n(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("test", "hash123")
+        with MetricLogger(store, run_id, "coverage", flush_every=3) as ml:
+            ml.log("lines", step=0, value=1.0)
+            ml.log("lines", step=1, value=2.0)
+            # not flushed yet (< flush_every)
+            count_mid = store.conn.execute("SELECT COUNT(*) FROM metric_series").fetchone()[0]
+            assert count_mid == 0
+            ml.log("lines", step=2, value=3.0)  # hits flush_every=3 -> auto-flush
+            count_after = store.conn.execute("SELECT COUNT(*) FROM metric_series").fetchone()[0]
+            assert count_after == 3
+            ml.log("lines", step=3, value=4.0)  # buffered, not yet flushed
+        # context manager exit flushes the remainder
+        final_count = store.conn.execute("SELECT COUNT(*) FROM metric_series").fetchone()[0]
+        assert final_count == 4
+
+
+def test_metric_logger_drops_non_finite_and_flushes_on_exception(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("test", "hash123")
+        with pytest.raises(RuntimeError):
+            with MetricLogger(store, run_id, "coverage", flush_every=200) as ml:
+                ml.log("lines", step=0, value=1.0)
+                with pytest.warns(UserWarning):
+                    assert ml.log("lines", step=1, value=float("nan")) is False
+                raise RuntimeError("boom")
+        # flush-on-exit-or-exception still wrote the one good row, dropped the bad one.
+        rows = store.conn.execute("SELECT key, step, value FROM metric_series").fetchall()
+        assert len(rows) == 1
+        assert rows[0]["step"] == 0
+        assert math.isfinite(rows[0]["value"])
 
 
 # --- config -------------------------------------------------------------

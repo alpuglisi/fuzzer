@@ -104,7 +104,7 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("xss", "html_attribute_unquoted"): _ModuleSet(
         "get_param", "html_attribute_unquoted_echo", "render_only"
     ),
-    # CC-LAB-0060: mass-assignment (orm_entity_bulk_assign). The transform is
+    # CC-LAB-0064: mass-assignment (orm_entity_bulk_assign). The transform is
     # never fixed here (per _ModuleSet's own contract) -- the manifest cell's
     # own transform pipeline picks unfiltered_body_update (vulnerable) or
     # runtime_field_allowlist (secure).
@@ -194,7 +194,7 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
         "attr_name": "theme",
         "attr_default": "default",
     },
-    # CC-LAB-0060: account_settings.php POSTs a field=>value map that is bulk-
+    # CC-LAB-0064: account_settings.php POSTs a field=>value map that is bulk-
     # assigned onto the current user's own row. `allowed_fields` is what the
     # `runtime_field_allowlist` transform allows (mirrors `allowed_identifiers`'
     # role for `identifier_allowlist` above) -- the real fields this endpoint

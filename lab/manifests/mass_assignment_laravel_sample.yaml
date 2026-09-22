@@ -1,4 +1,4 @@
-# Mass-assignment sample manifest (CC-LAB-0060/FR-LAB-57), php_laravel.
+# Mass-assignment sample manifest (CC-LAB-0064/FR-LAB-59), php_laravel.
 #
 # php_laravel's own twin pair for the `orm_entity_bulk_assign` shape,
 # restoring the "Laravel carries every shape php_current supports"

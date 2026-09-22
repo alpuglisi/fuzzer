@@ -3,6 +3,32 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0007 — `--dry-run` CLI flag (lane D0a) (2026-09-22)
+- Change: `fuzzlab/tools/spider.py::build_parser()` gained `--dry-run` (via the new
+  shared `fuzzlab/cli_dryrun.add_dry_run_flag()`). The module's `__main__` block now
+  checks `args.dry_run` first: if set, it calls `fuzzlab/cli_dryrun.report("crawl",
+  args)` — which plans and prints the exact argv/display command via the web
+  launcher's existing pure functions (`fuzzlab/web/commandspec.spec()` +
+  `fuzzlab/web/runner.build_argv()`/`display_command()`, CC-UI-0013/0015) — and exits
+  0 before `LocalSpider` is ever constructed. No crawl request is made. When
+  `--dry-run` is absent, behavior is unchanged.
+- Impact (other components / project): CRAWL only, plus an incidental UI effect — see
+  CC-UI-0027 (the web launcher's per-tool option list is introspected straight from
+  `build_parser()`, so the new `--dry-run` checkbox shows up there automatically, with
+  no code change to `fuzzlab/web/app.py`). No schema/store change; the dry-run path
+  never touches the spider DB or the store.
+- Risk (level; mitigation): low — additive flag, short-circuits before any side
+  effect. Mitigated by `tests/test_cli_dry_run.py` (crawl cases: flag present, report
+  printed, `LocalSpider.__init__`/`.crawl` patched to raise if called — confirming
+  nothing executes) and the unchanged full suite otherwise.
+- Deliverables:
+  - [x] `--dry-run` on `crawl`'s parser — done.
+  - [x] Short-circuit in `__main__` calling the shared `cli_dryrun.report()` — done.
+  - [x] Tests confirming the plan is reported and nothing runs — done.
+- Effectiveness (assessed 2026-09-22): effective — `fuzzlab crawl --dry-run` prints
+  the planned argv/command and exits 0 without constructing `LocalSpider` or making
+  any request; verified directly and via the new tests.
+
 ### CC-CRAWL-0006 — Expose `build_parser()` for the command-spec registry (2026-09-21)
 - Change: `fuzzlab/tools/spider.py` now factors its argparse setup into `build_parser()`
   (returns the `ArgumentParser`); `parse_args()` delegates to it. Added `prog="fuzzlab

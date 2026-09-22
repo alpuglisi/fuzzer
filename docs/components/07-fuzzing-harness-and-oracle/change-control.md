@@ -3,6 +3,405 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0024 — Wire M10 grey-box confirmation into the oracle pipeline (2026-09-22)
+- Change: built the seam layer for the M10 grey-box mechanism whose pure decision
+  logic (`fuzzlab/greybox/confirm.py::greybox_confirms()`/`m10_evidence()`) and
+  source protocols (`fuzzlab/greybox/coverage.py::CoverageSource`,
+  `fuzzlab/greybox/dbfault.py::DbFaultSource`, plus their `InMemory*` fakes and live
+  `File*` readers) were already built and unit-tested in an earlier Phase 3 lane.
+  Added `GreyboxConfirmationStrategy` to `fuzzlab/oracle/strategies.py`: mechanism
+  `grey-box-coverage`, `applies()` scoped to `category in ("sql-injection", "xss")`
+  (a cross-cutting secondary layer, same pattern as M8 alongside M1 for
+  command-injection — not one class). It takes an optional `CoverageSource` and an
+  optional `DbFaultSource` by constructor injection (both default `None`) and
+  no-ops (`confirm()` returns `None`, no probe sent) when neither is given — same
+  seam shape as the M6 `BrowserExecutor`/M8 `OobListener`. When at least one source
+  is given, it further requires the `sender` to expose `send_correlated(url, param,
+  value, *, method, location) -> (Probe, request_id)` (the contract already
+  established for the live grey-box run driver, `fuzzlab/greybox/run.py`'s
+  `RequestsCorrelatingSender`) so its one probe can be matched back to the
+  coverage/DB-fault side channel by a fresh `X-Fzl-Cov`-style id; without a
+  `send_correlated`-capable sender it also no-ops (fail-closed, never a guess).
+  Wired into `default_strategies(coverage=None, dbfault=None)`,
+  `Oracle(coverage=None, dbfault=None)` (`fuzzlab/oracle/oracle.py`),
+  `run_pipeline(coverage=None, dbfault=None)` (`fuzzlab/harness/pipeline.py`), and
+  `run_auto(coverage=None, dbfault=None)` (`fuzzlab/harness/auto.py`); `fuzzlab
+  auto` gained `--greybox-coverage-file DIR`/`--greybox-dbfault-file DIR` (default
+  off, same shape as `--oob`), which construct `FileCoverageSource`/
+  `FileDbFaultSource` against that directory only when passed.
+- **Provenance note**: this lane was originally built on the diverged branch
+  `claude/trusting-noether-heon0n` as `CC-FUZZ-0020`/`FR-FUZZ-9` (its own local
+  numbering), independently of this branch's Wave 1a–3 dispatch. Cherry-picked and
+  renumbered on merge into this branch — `CC-FUZZ-0020` and `FR-FUZZ-9` here
+  already belonged to this branch's own D0a (`--dry-run` on `fuzz`/`auto`) and
+  B0's coverage-frontier `metric_series` emitter, an unrelated same-numbered
+  collision from independent, non-communicating concurrent work (see
+  `docs/PREVENTIVE_ACTIONS.md` PA-0031 — pre-assigned numbers only prevent
+  collisions *within* one dispatch; they cannot prevent collisions against a
+  wholly separate branch neither dispatch knew existed). No functional content
+  changed from the original commit; only IDs and cross-references were
+  renumbered (`CC-FUZZ-0020`→`0024`, `FR-FUZZ-9`→`11`) and this note added.
+- Impact (other components / project): FUZZ only — additive. `Oracle.__init__` and
+  `default_strategies()`/`run_pipeline()`/`run_auto()` gained optional
+  `coverage=None`/`dbfault=None` keywords; every existing caller that omits them is
+  unaffected (no behavior change, same as `oob=None`/`browser=None`). Sql-injection
+  and xss candidates that the black-box strategies leave unconfirmed can now be
+  confirmed via covered-sink (+DB-fault for sqli) evidence, *once* both an
+  instrumented lab's coverage/DB-fault side channel and a correlating oracle probe
+  sender exist — neither exists yet in this repo, so in a live `fuzzlab auto` run
+  today the new flags construct real `FileCoverageSource`/`FileDbFaultSource`
+  readers but the strategy still no-ops (the shipped `RequestsProbeSender`/
+  `SeamProbeSender` do not implement `send_correlated`). That live correlating
+  sender and the on-host pcov/DB-fault shim remain out of scope here (on-host
+  last-mile work, `docs/ON_HOST_TASKS.md`) — this change is deliberately scoped to
+  the offline-buildable wiring layer only, not the live plumbing.
+- Risk (level; mitigation): low — pure additive wiring with every new keyword
+  defaulting to `None`/off, so no existing caller's behavior changes (verified by
+  the full fast suite staying green). The one new behavior (sending a probe) is
+  gated behind *both* an injected source and a `send_correlated`-capable sender, so
+  it cannot fire against any sender or run configuration that exists in this repo
+  today. Mitigated further by: (1) fail-closed by construction — `confirm()`
+  returns `None` on either gate missing or when `greybox_confirms()` itself returns
+  `False`, never a guess; (2) `applies()` scoped tightly to the two categories
+  `greybox_confirms()` actually has a rule for, so it never masquerades as a
+  confirmer for classes it cannot judge; (3) tests on the real strategy against
+  real `InMemoryCoverageSource`/`InMemoryDbFaultSource` fakes (not mocks of this
+  strategy's own code, per PA-0005), including the full `Oracle.confirm()` pipeline
+  end to end.
+- Deliverables:
+  - [x] `GreyboxConfirmationStrategy` (M10, categories `sql-injection`/`xss`,
+    constructor-injected `CoverageSource`/`DbFaultSource`, fail-closed no-op
+    without a source or a correlating sender) — `fuzzlab/oracle/strategies.py` —
+    done.
+  - [x] Wired into `default_strategies()`, `Oracle`, `run_pipeline()`, `run_auto()`,
+    and `fuzzlab auto --greybox-coverage-file`/`--greybox-dbfault-file` — done.
+  - [x] Tests with real `InMemoryCoverageSource`/`InMemoryDbFaultSource` fakes (not
+    mocks of our own code): `tests/test_oracle_greybox.py` (12 tests) — done,
+    re-run clean against this branch's tree (22/22 with `test_oracle_oob.py`
+    combined) at merge time.
+  - [x] `requirements.md` `FR-FUZZ-11` added; `docs/ARCHITECTURE.md` Oracle status
+    note updated — done.
+  - [x] Full suite green on this branch's merged tree — done (see merge commit).
+  - [ ] Live correlating oracle probe sender (a `send_correlated`-capable
+    `RequestsProbeSender`/`SeamProbeSender` variant attaching a real `X-Fzl-Cov`
+    header) and the on-host pcov/DB-fault shim behind `FileCoverageSource`/
+    `FileDbFaultSource` — on-host last-mile, tracked in `docs/ON_HOST_TASKS.md`,
+    not started here.
+- Effectiveness (assessed 2026-09-22): effective for the wiring layer —
+  `tests/test_oracle_greybox.py` proves the strategy confirms sqli only with both
+  sink-covered and db-fault evidence, confirms xss with sink-covered evidence
+  alone, no-ops without a source, no-ops without a `send_correlated`-capable
+  sender, is registered in `default_strategies()`, and integrates through the full
+  `Oracle.confirm()` pipeline. Live-target effectiveness is unverified and
+  unverifiable in this sandbox — it depends on on-host infra this change does not
+  build (tracked above, not a regression this lane introduced).
+
+### CC-FUZZ-0023 — Build M8 out-of-band (OOB) callback mechanism (2026-09-22)
+- Change: implemented the previously-unbuilt M8 mechanism from
+  `docs/architecture/oracle-confirmation.md` — out-of-band callback confirmation for
+  blind injection classes with no direct response difference. Added
+  `fuzzlab/oracle/oob.py::OobListener`: a loopback-only (`127.0.0.1`/`localhost`
+  only — raises `ValueError` on any other host), in-memory, per-run HTTP callback
+  tracker (`register()` mints an unguessable token, `callback_url()` gives the URL to
+  embed in a payload, `wait_for()` polls for a hit); it binds no socket until
+  `start()` is called (default-off, mirroring the M6 `BrowserExecutor`/proxy/desync
+  dual-use gating pattern in this project — not a general-purpose, publicly reachable
+  collaborator-style service). Added `CommandInjectionOobStrategy` (mechanism
+  `oob-callback`, category `command-injection`) to `fuzzlab/oracle/strategies.py`:
+  embeds a fresh canary URL in `curl`/`wget` shell-fetch payloads and confirms only if
+  that exact token is later requested; it takes the listener by injection and no-ops
+  (returns `None`, no probe sent) when none is given, so it never reaches for a real
+  listener on its own. Wired into `default_strategies(oob=...)`, `Oracle(oob=...)`
+  (`fuzzlab/oracle/oracle.py`), `run_pipeline(oob=...)`
+  (`fuzzlab/harness/pipeline.py`), and `run_auto(oob=...)`
+  (`fuzzlab/harness/auto.py`); `fuzzlab auto` gained `--oob` (default off, same shape
+  as `--browser`), which constructs and starts the listener only when passed and
+  tears it down in a `finally` block after the run.
+- **Provenance note**: this lane was originally built on the diverged branch
+  `claude/trusting-noether-heon0n` as `CC-FUZZ-0019`/`FR-FUZZ-8` (its own local
+  numbering), independently of this branch's Wave 1a–3 dispatch. Cherry-picked and
+  renumbered on merge — `CC-FUZZ-0019` and `FR-FUZZ-8` here already belonged to
+  this branch's own C1/M8-wiring lane (an unrelated, same-numbered lane about
+  wiring mutation-engine *variants* into the attempt path — a task-numbering
+  coincidence with oracle mechanism "M8", not the same M8). No functional content
+  changed from the original commit; only IDs and cross-references were renumbered
+  (`CC-FUZZ-0019`→`0023`, `FR-FUZZ-8`→`10`) and this note added.
+- Impact (other components / project): FUZZ only — additive. `Oracle.__init__` and
+  `default_strategies()`/`run_pipeline()`/`run_auto()` gained an optional `oob=None`
+  keyword; every existing caller that omits it is unaffected (no behavior change,
+  same as `browser=None`). Blind command injection (Tier 3,
+  `docs/architecture/oracle-confirmation.md`) now has a working M8 confirmer
+  alongside the existing M1 timing one — `applies()` scopes both to the
+  `command-injection` category, so the oracle tries timing first, OOB second, and a
+  target that suppresses timing signal but still executes the shell fragment (fetches
+  the canary) is now confirmable. No schema change (findings already carry an
+  arbitrary `mechanism` string). No traffic sent unless `--oob`/`--authorized` are
+  both given, and the listener never leaves loopback.
+- Risk (level; mitigation): low-medium — a new local network listener is more
+  sensitive than a pure library change. Mitigated by: (1) the loopback-only guard in
+  `OobListener.__init__` (raises before binding on any non-loopback host); (2)
+  default-off at every layer (constructor argument defaults to `None`; CLI flag
+  defaults to `False`); (3) no DNS component, no external reachability, no
+  persistence beyond the process — it cannot function as a general-purpose OOB
+  interaction/collaborator service; (4) real tests exercising the actual socket (not
+  a mock) confirm it only ever records a hit for the exact token requested and never
+  cross-wires tokens; (5) fail-closed by construction — `confirm()` returns `None` on
+  timeout or when no listener is injected, never a guess.
+- Deliverables:
+  - [x] `OobListener` (loopback-only, default-off, real HTTP listener + token
+    register/callback_url/wait_for) — `fuzzlab/oracle/oob.py` — done.
+  - [x] `CommandInjectionOobStrategy` (M8, category `command-injection`) — done.
+  - [x] Wired into `default_strategies()`, `Oracle`, `run_pipeline()`, `run_auto()`,
+    and `fuzzlab auto --oob` — done.
+  - [x] Tests on the real listener and the real strategy (not mocks of our own code):
+    `tests/test_oracle_oob.py` (10 tests) — done.
+  - [x] `requirements.md` `FR-FUZZ-10` added; `docs/ARCHITECTURE.md` Oracle status
+    note updated — done.
+  - [x] Full suite green on this branch's merged tree — done (see merge commit).
+- Effectiveness (assessed 2026-09-22): effective — `tests/test_oracle_oob.py` proves
+  the listener records a real hit end to end (real socket, real HTTP request via
+  `urllib`), times out cleanly on a benign/secure target, does not cross-wire two
+  concurrent tokens, and that `Oracle.confirm()` reaches a `mechanism="oob-callback"`
+  verdict through the full pipeline wiring (not the strategy in isolation). Full
+  fast suite on this branch's merged tree: see the merge commit for the exact count.
+
+### CC-FUZZ-0022 — `--dry-run` CLI flag on `greybox-run` (lane D0b) (2026-09-22)
+- Change: `fuzzlab/greybox/greybox_cli.py::build_parser()` gained `--dry-run` (via
+  the shared `fuzzlab/cli_dryrun.add_dry_run_flag()`), and `main()` checks
+  `args.dry_run` first — before the `--authorized` gate and before any
+  `contract.load()`/points-sourcing/`Store()`/sender/coverage-source/dbfault-source/
+  lab-control construction — and calls `fuzzlab/cli_dryrun.report("greybox-run",
+  args)`, reusing the web launcher's existing dry-run plan/report logic
+  (`fuzzlab/web/commandspec.spec()` + `fuzzlab/web/runner.build_argv()`/
+  `display_command()`, CC-UI-0013/0015), then returns 0 before any probe/side-
+  channel read happens. No traffic is sent. `greybox-run` was already registered
+  in `fuzzlab/web/commandspec.py`'s `_REGISTRY` (introspecting
+  `greybox_cli.build_parser()` directly), so the planned argv/display
+  automatically reflects every flag on the parser — including the
+  `--mutation-variants`/`--max-mutation-variants`/`--allow-destructive` flags Lane
+  C1/M8-wiring (`CC-FUZZ-0019`) added to this same parser — with no separate
+  wiring needed for those three flags specifically. Sequenced after Wave C1
+  (genuine file overlap on `fuzzlab/greybox/greybox_cli.py`, per the build plan's
+  D0b entry), on top of `CC-FUZZ-0019`. Deliberately bypasses the `--authorized`
+  requirement for the dry-run preview itself (nothing is sent either way,
+  mirroring D0a's `CC-FUZZ-0020` and the web launcher's own dry-run route).
+  Unchanged when `--dry-run` is absent. Completes lane group B's D0
+  (`--dry-run` on every CLI entry point); D0a (`CC-FUZZ-0020`, plus CC-CRAWL-0007/
+  CC-AUD-0015/CC-MUT-0010/CC-PROXY-0017/conditional CC-UI-0027) covered the other
+  six commands.
+- Impact (other components / project): FUZZ only, plus an incidental UI effect —
+  `greybox-run`'s introspected `build_parser()` now surfaces a `--dry-run` checkbox
+  in the web launcher automatically alongside the pre-existing mutation-variant
+  flags (no `fuzzlab/web/app.py` change; the web launcher already has its own
+  dry-run route, unaffected by this CLI-level flag). No schema/store change.
+- Risk (level; mitigation): low — additive flag, short-circuits before any side
+  effect, placed ahead of the `--authorized` check by design (documented above so
+  it isn't mistaken for a gate bypass on real execution). Mitigated by
+  `tests/test_cli_dry_run.py` (new greybox-run cases: flag present; the plan
+  reflects `--mutation-variants`/`--max-mutation-variants`/`--allow-destructive`
+  when passed; `run_greybox`/`points_from_store`/`RequestsCorrelatingSender`/
+  `Store.__init__`/`import_spider` patched to raise if called; a case also asserts
+  `would_execute: False` is reported when `--authorized` is absent) and the
+  unchanged full suite otherwise.
+- Deliverables:
+  - [x] `--dry-run` on `greybox-run`'s parser — done.
+  - [x] Short-circuit ahead of the `--authorized` gate in `main()`, calling the
+    shared `cli_dryrun.report()` — done.
+  - [x] Dry-run preview correctly reflects the C1-added mutation-variant flags —
+    done (verified via `introspect()`'s generic parser walk, no special-casing
+    needed; covered by a dedicated test).
+  - [x] Tests confirming the plan is reported and nothing runs — done.
+- Effectiveness (assessed 2026-09-22): effective — `fuzzlab greybox-run --dry-run`
+  prints the planned argv/command (including any mutation-variant flags passed)
+  and returns 0 without constructing a `Store`, sender, coverage/dbfault source, or
+  lab control, and without reading `--ground-truth`/`--spider-db`; verified
+  directly and via the new tests.
+### CC-FUZZ-0021 — coverage-frontier `metric_series` emitter (lane B0, Wave 1b) (2026-09-22)
+- Change: `fuzzlab/greybox/run.py::run_greybox()` now emits a per-attempt
+  `metric_series` row tracking the run-wide `CoverageFrontier`'s growth,
+  additive alongside the pre-existing `greybox_frontier_size` `run_metrics`
+  end-of-run total. New private helper `_record_coverage_metric(logger, step,
+  frontier)` writes `source="coverage"`, `key="coverage/lines"`, `step=`
+  the running attempt count, `value=` the frontier's current `.size` — per
+  `docs/UI_IMPLEMENTATION_PLAN.md` §3 (B0)'s resolved schema notes (R-05),
+  which name `coverage/lines` as the worked example key for this exact
+  source. `run_greybox()` opens one `fuzzlab.core.store.MetricLogger(store,
+  run_id, source="coverage")` at the top of the run (alongside the existing
+  `frontier = CoverageFrontier()`), calls `_record_coverage_metric` once per
+  attempt right after `summary["attempts"] += 1`, and flushes it once at the
+  end of the run before the summary is returned. Follows the same
+  small-function-slotted-into-the-loop pattern lane C1 established in this
+  file (`mutation_variant_probes` / `_record_accepted_variant`) specifically
+  so this sub-lane could land cleanly after it. No existing coverage-tracking
+  or attempt-path behavior changed — this is additive metric emission only;
+  `frontier`, `summary`, the `attempt`/`run_metrics` writes, and the
+  mutation-variant wiring (`CC-FUZZ-0019`) are all untouched.
+- Impact (other components / project): FUZZ only for the write path (new
+  dependency on `fuzzlab.core.store.MetricLogger`/`metric_series`, landed by
+  `CC-CORE-0018`). Enables — but does not itself build — a future UI reader
+  (`docs/UI_IMPLEMENTATION_PLAN.md`'s U5 lane, "metric_series tab" /
+  Datasette-style store exploration) to chart per-run coverage-frontier
+  growth. This is the one B0 emitter sub-lane the build plan
+  (`docs/PARALLEL_LANE_BUILD_PLAN.md`, "B0/C1 file-overlap risk" note) flagged
+  as needing to land after C1's M8-wiring (`CC-FUZZ-0019`) rather than in
+  parallel with it, since both touch `run.py`'s attempt/summary loop; it was
+  dispatched only after confirming `CC-FUZZ-0019`/`CC-FUZZ-0020` were already
+  merged into the base branch. No interface/contract change to
+  `run_greybox()`'s signature or return value (`summary` dict unchanged).
+- Risk (level; mitigation): low — purely additive write path (one buffered
+  `MetricLogger` per run, flushed once at the end plus its own
+  `flush_every=200` periodic flush; non-finite values are dropped with a
+  warning by `log_scalar`/`MetricLogger.log` itself, never reaching this
+  component). No change to reward shaping, screening, M10 confirmation, or
+  the `attempt`/`run_metrics` tables. `MetricLogger` holds `store.conn` for
+  the lifetime of one `run_greybox()` call on the same thread that already
+  drives every other `store.conn` write in this function, so PA-0023
+  (thread-affine `sqlite3` connection handles) does not apply — no new
+  cross-thread caching is introduced.
+- Deliverables:
+  - [x] `_record_coverage_metric()` helper + wiring into `run_greybox()`'s
+    attempt loop and end-of-run flush — done.
+  - [x] Tests: `tests/test_greybox_live.py::test_run_greybox_emits_coverage_metric_series`
+    and `::test_run_greybox_coverage_metric_series_isolated_per_run` — done.
+  - [x] Confirmed lane C1's existing tests in `tests/test_greybox_live.py`
+    pass unmodified (18/18, including the 16 pre-existing C1/base tests) —
+    done.
+  - [x] `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    updated in place with the new emission behavior — done.
+  - [x] `CHANGELOG.md` line — done.
+- Effectiveness (assessed 2026-09-22): intent achieved — `run_greybox()` now
+  writes `coverage/lines` rows to `metric_series` per attempt, verified by
+  the new tests reading them back directly from the store (values match the
+  frontier's growth exactly, isolated correctly per `run_id`), with no
+  regression in any pre-existing `test_greybox_live.py`/`test_greybox.py`
+  test.
+
+### CC-FUZZ-0020 — `--dry-run` CLI flag on `fuzz` + `auto` (lane D0a) (2026-09-22)
+- Change: `fuzzlab/tools/blind_sqli_fuzzer.py::build_parser()` and
+  `fuzzlab/harness/auto_cli.py::build_parser()` both gained `--dry-run` (via the
+  shared `fuzzlab/cli_dryrun.add_dry_run_flag()`). Both `main()`s check
+  `args.dry_run` first — before the `--authorized` gate — and call
+  `fuzzlab/cli_dryrun.report("fuzz", args)` / `report("auto", args)` respectively,
+  reusing the web launcher's existing dry-run plan/report logic
+  (`fuzzlab/web/commandspec.spec()` + `fuzzlab/web/runner.build_argv()`/
+  `display_command()`, CC-UI-0013/0015), then return 0 before any sender/`Store`/
+  oracle is constructed. No probe or confirmation traffic is sent. Deliberately
+  bypasses the `--authorized` requirement for the dry-run preview itself (nothing is
+  sent either way, mirroring the web launcher's own dry-run route, which also does
+  not require `authorized`). Unchanged when `--dry-run` is absent. This is one
+  reserved number covering both commands since they land in a single lane/commit
+  (per the plan's numbering note); `fuzzlab greybox-run` is explicitly out of scope
+  here — that is lane D0b's `CC-FUZZ-0022`, sequenced after Wave C1's `CC-FUZZ-0019`
+  M8-wiring lane, which this lane does not touch.
+- Impact (other components / project): FUZZ only, plus an incidental UI effect — see
+  CC-UI-0027 (introspected `build_parser()` surfaces the new checkbox for both `fuzz`
+  and `auto` in the web launcher automatically; `fuzzlab/web/app.py` untouched). No
+  schema/store change; no interaction with Wave C1's M8-wiring (different files:
+  that lane touches `fuzzlab/greybox/run.py`/`greybox_cli.py`, this lane does not).
+- Risk (level; mitigation): low — additive flag, short-circuits before any side
+  effect, placed ahead of the `--authorized` check by design (documented above so it
+  isn't mistaken for a gate bypass on real execution). Mitigated by
+  `tests/test_cli_dry_run.py` (fuzz + auto cases: flag present, report printed,
+  `establish_baseline`/`run_fuzzing_cycle` and `run_auto`/`Store.__init__` patched to
+  raise if called; a fuzz case also asserts `would_execute: False` is reported when
+  `--authorized` is absent, i.e. the preview correctly reflects that a real run would
+  be refused) and the unchanged full suite otherwise.
+- Deliverables:
+  - [x] `--dry-run` on `fuzz`'s and `auto`'s parsers — done.
+  - [x] Short-circuit ahead of the `--authorized` gate in both `main()`s, calling the
+    shared `cli_dryrun.report()` — done.
+  - [x] Tests confirming the plan is reported and nothing runs, for both commands —
+    done.
+- Effectiveness (assessed 2026-09-22): effective — `fuzzlab fuzz --dry-run` and
+  `fuzzlab auto --dry-run` both print the planned argv/command and return 0 without
+  constructing a sender, `Store`, or oracle; verified directly and via the new tests.
+### CC-FUZZ-0019 — Wire mutation-engine variants into `greybox-run`'s attempt path (Lane C1/M8-wiring) (2026-09-22)
+- Change: `docs/PHASE_8_PLAN.md`'s T8.5 ("emit accepted variants into the attempt
+  path") only reached the standalone `fuzzlab mutate-run` CLI
+  (`fuzzlab/mutation/cli.py`/`fuzzlab/mutation/run.py`) — confirmed before this
+  change: no `mutation`/`variant` references anywhere in `fuzzlab/greybox/run.py`
+  or `fuzzlab/greybox/greybox_cli.py`. `fuzzlab/greybox/run.py` now wires the
+  mutation engine into the **main harness's own** attempt loop:
+  - New `mutation_variant_probes()` (function boundary kept separate from the main
+    loop, per the build-plan's note that a later lane adds a `metric_series`
+    emitter to this same file): given the point's existing sqli/xss `ProbeSpec`s,
+    applies up to `max_variants` of the mutation engine's operators
+    (`fuzzlab/mutation/operators.py`, T8.1) per base payload and keeps only the
+    ones the semantics validator (`fuzzlab/mutation/semantics.py`, T8.1/
+    NFR-MUT-semantics) judges meaning-preserving. Skips the `url-encode` operator
+    here specifically, since the probe transport (`requests`' `params=`/`data=`)
+    would percent-encode an already-percent-encoded value a second time.
+  - `run_greybox(..., mutation_variants: bool = False, max_mutation_variants: int
+    = 2, allow_destructive: bool = False)`: when `mutation_variants` is set, each
+    point's ordered probe list is extended with that point's mutation variants,
+    which then go through the **exact same** send/screening/reward/coverage/
+    `record_attempt_signals` path as any other probe (one `attempt` row each,
+    tagged `mutation_variant: true` in `features_json`, `payload_family =
+    "mutation:<operator-id>"`).
+  - New `_record_accepted_variant()`: a mutation-derived probe that actually hit
+    (screening > 0) or reached new code (`new_lines > 0`) when probed live is
+    written back to `payload_variant` via the existing, destructive-gated
+    `fuzzlab.mutation.catalog.record_variant` (NFR-MUT-safe unchanged — same
+    gate, same default-off `allow_destructive`) — exactly the write-back T8.5
+    describes, now reachable from `greybox-run` too, not only `mutate-run`.
+  - New summary/`run_metrics` counters: `mutation_variants_probed`,
+    `mutation_variants_recorded` (`greybox_mutation_variants_probed`/
+    `_recorded`, only recorded when the flag is on).
+  - `greybox_cli.py`: new opt-in flags `--mutation-variants`, `--max-mutation-
+    variants` (default 2), `--allow-destructive` (mirrors `mutate-run`'s own
+    flag). The existing `--authorized` gate is unchanged and still required
+    before anything is sent — this lane does not touch or weaken it; the new
+    traffic is additional probes sent through the same already-gated sender, not
+    a new unauthenticated path.
+  - Default behavior is unchanged: `mutation_variants` defaults to `False`, so
+    `greybox-run` without the new flag sends exactly the same probes as before
+    (verified by a dedicated regression test).
+- Impact (other components / project): FUZZ (`greybox/run.py`,
+  `greybox_cli.py`) now has a direct, opt-in dependency on MUT
+  (`fuzzlab.mutation.catalog`/`operators`/`semantics`) at import time — no
+  circular import (MUT's own live-search path only imports `greybox.run` inside
+  a function body, for its `make_coverage_fn`). `payload_variant` rows can now
+  originate from a `greybox-run`, not only a `mutate-run`; existing readers of
+  that table (`catalog.list_variants`) are unaffected — same schema
+  (migration 8), no new columns. No change to the oracle's finding-writing path
+  or to M10 (`greybox/confirm.py`) — mutation variants feed the attempt path
+  exactly like any other probe, they are not a new confirmation mechanism.
+- Risk (level; mitigation): low — additive and off by default. The new code path
+  only runs when `--mutation-variants` (or `mutation_variants=True`) is passed;
+  every existing call site and test keeps its old behavior (`ProbeSpec` gained
+  two trailing-default fields, `base`/`operators`, so old positional/keyword
+  construction is unaffected). Extra live traffic when opted in is bounded by
+  `max_mutation_variants` per attack probe (NFR-MUT-bounded) and still requires
+  `--authorized`. Mitigated by dedicated regression tests (below) plus the full
+  suite green.
+- Deliverables:
+  - [x] `mutation_variant_probes()` in `fuzzlab/greybox/run.py` — done.
+  - [x] `run_greybox(mutation_variants=..., max_mutation_variants=...,
+    allow_destructive=...)` wiring + `_record_accepted_variant()` write-back —
+    done.
+  - [x] `greybox_cli.py` `--mutation-variants`/`--max-mutation-variants`/
+    `--allow-destructive` flags, passed through; summary print updated — done.
+  - [x] Tests in `tests/test_greybox_live.py`:
+    `test_mutation_variant_probes_generates_preserving_variants`,
+    `test_mutation_variant_probes_none_for_unclassed_kind`,
+    `test_run_greybox_consumes_mutation_variants_into_attempt_path` (asserts
+    extra `attempt` rows + `payload_variant` write-back with correct
+    provenance), `test_run_greybox_mutation_variants_off_by_default`
+    (backward-compat regression) — done.
+  - [x] CHANGELOG.md line — done.
+  - [x] `docs/components/07-fuzzing-harness-and-oracle/requirements.md` updated
+    (new FR-FUZZ-8) — done.
+  - [ ] T8.7's on-host exit criterion (WAF-enabled live verification) — out of
+    scope for this lane per the build plan; left for a later on-host pass.
+- Effectiveness (assessed 2026-09-22): effective offline — confirmed via grep
+  that `fuzzlab/greybox/run.py`/`greybox_cli.py` had zero mutation/variant
+  references before this change; after, `run_greybox` sends mutation-engine
+  variants through the attempt path and records the accepted ones to
+  `payload_variant` when opted in, proven by the new tests
+  (`tests/test_greybox_live.py`), with the no-flag default path unchanged
+  (regression test). On-host WAF-evasion verification (T8.7) is a separate,
+  later exit check, not this lane's scope.
+
 ### CC-FUZZ-0018 — Expose `build_parser()` for the command-spec registry (2026-09-21)
 - Change: the fuzz/oracle activities factor their argparse setup into `build_parser()`, with
   `main()` delegating — `fuzzlab/tools/blind_sqli_fuzzer.py` (`parse_args()` delegates;

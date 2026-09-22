@@ -1,7 +1,18 @@
-"""Tests for the Phase 0.2 frontend foundation: static assets + tab shell.
+"""Tests for the frontend foundation: static assets + the MPA app shell.
 
 Covers the new structure without weakening the launcher/results invariants those
 suites already protect (no-auto-run, loopback-only, read-only over the store).
+
+U0 (CC-UI-0025) replaced the hash-switched single page with real per-section
+routes (`/`, `/proxy`, `/results`, `/ml`, `/diagnostics`) and split
+`templates/index.html` / `static/app.js` / `static/app.css` into per-section
+templates, ES modules, and CSS partials. This module covers the route/no-JS
+layer of the R-09 test strategy: `TestClient` runs no JS, so its body *is* the
+no-JS assertion.
+
+U1 (CC-UI-0028) added the Overview dashboard as the new landing route ("/")
+and moved Launcher to its own route ("/launcher") so the dashboard doesn't
+overload it (R-10) -- routes below and SECTIONS are updated accordingly.
 """
 
 from __future__ import annotations
@@ -9,29 +20,69 @@ from __future__ import annotations
 import pytest
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
 from fuzzlab.web.app import create_app  # noqa: E402
+from tests._webclient import web_client  # noqa: E402
+
+# Every section route, its nav id, and one string that must appear only when the
+# section actually rendered (not just the shared shell chrome).
+SECTIONS = [
+    ("/", "overview", "No runs yet"),
+    ("/launcher", "launcher", "Activities"),
+    ("/proxy", "proxy", "Proxy workbench"),
+    ("/results", "results", "Review runs"),
+    ("/ml", "ml", "Machine learning"),
+    ("/diagnostics", "diagnostics", "Diagnostics"),
+]
 
 
 def _client(authorized=False):
     cfg = load_config(overrides={"target_base_url": "http://localhost",
                                  "authorized": authorized}, environ={})
-    return TestClient(create_app(cfg))
+    return web_client(create_app(cfg))
 
 
-def test_static_css_is_served():
-    r = _client().get("/static/app.css")
+# --- static assets (split per D3: per-section CSS partials + JS modules) --------
+
+def test_static_shell_css_is_served():
+    r = _client().get("/static/css/shell.css")
     assert r.status_code == 200
     assert "text/css" in r.headers["content-type"]
     assert ".card" in r.text and "nav.tabs" in r.text
 
 
-def test_static_js_is_served():
-    r = _client().get("/static/app.js")
+def test_static_section_css_is_served():
+    for path, needle in [
+        ("/static/css/overview.css", ".kpi-row"),
+        ("/static/css/launcher.css", ".launch"),
+        ("/static/css/proxy.css", "#flow-table"),
+        ("/static/css/results.css", "Results section"),
+    ]:
+        r = _client().get(path)
+        assert r.status_code == 200, path
+        assert "text/css" in r.headers["content-type"]
+        assert needle in r.text
+
+
+def test_static_shell_js_is_served():
+    r = _client().get("/static/js/shell.js")
     assert r.status_code == 200
-    assert "subscribe" in r.text and "initTabs" in r.text
+    assert "initShell" in r.text
+    # the old hash-based tab router is retired, not just moved
+    assert "function initTabs" not in r.text
+
+
+def test_static_section_js_modules_are_served():
+    for path, needle in [
+        ("/static/js/common.js", "export function subscribe"),
+        ("/static/js/overview.js", "initSortableTable"),
+        ("/static/js/launcher.js", "initLaunchForms"),
+        ("/static/js/proxy.js", "initRepeater"),
+    ]:
+        r = _client().get(path)
+        assert r.status_code == 200, path
+        assert needle in r.text
 
 
 def test_static_tokens_css_is_served():
@@ -46,18 +97,48 @@ def test_static_tokens_css_is_served():
     assert '[data-density="compact"]' in r.text
 
 
-def test_index_renders_the_app_shell():
-    # R0 shell: left sidebar (nav.tabs) + top context bar, tokens linked before app.css,
-    # and a no-FOUC head script that applies the persisted theme before first paint.
-    body = _client().get("/").text
+# --- app shell: every section route, deep-linked, no-JS ------------------------
+
+@pytest.mark.parametrize("path, section, needle", SECTIONS)
+def test_section_route_renders_the_app_shell(path, section, needle):
+    body = _client().get(path).text
     assert 'class="sidebar"' in body and 'class="topbar"' in body
     assert '/static/tokens.css' in body
-    assert body.index('/static/tokens.css') < body.index('/static/app.css')
+    assert body.index('/static/tokens.css') < body.index('/static/css/shell.css')
     assert 'id="theme-toggle"' in body and 'id="density-toggle"' in body
     assert 'id="proxy-chip"' in body
     assert 'localStorage.getItem("fl-theme")' in body  # no-FOUC inline script
     # the context bar reflects config (authorization state) server-side
     assert "not authorized" in body
+    # the section itself rendered, not just the shared shell
+    assert needle in body
+
+
+@pytest.mark.parametrize("path, section, needle", SECTIONS)
+def test_section_route_is_deep_linkable_and_marks_active_nav(path, section, needle):
+    # Deep-linking: each section is reachable directly, no client router needed
+    # (this is exactly what TestClient's single GET proves — no JS runs here).
+    r = _client().get(path)
+    assert r.status_code == 200
+    body = r.text
+    # server-rendered active state (R-01): the matching sidebar link carries
+    # `aria-current="page"`; the <main> content region is tagged with the
+    # section id (a stable hook for the browser-smoke layer, R-09).
+    assert f'<main class="content" id="main" tabindex="-1" data-section="{section}">' in body
+    link_start = body.index(f'href="{path}" data-section="{section}"')
+    link_chunk = body[link_start:link_start + 200]
+    assert 'aria-current="page"' in link_chunk
+    # no other sidebar link claims aria-current on this page
+    assert body.count('aria-current="page"') == 1
+
+
+def test_sidebar_links_are_real_hrefs_not_hashes():
+    body = _client().get("/").text
+    assert '<nav class="tabs"' in body
+    for path in ("/", "/launcher", "/proxy", "/results", "/ml", "/diagnostics"):
+        assert f'href="{path}"' in body
+    # no hash-based nav left
+    assert 'href="/#' not in body
 
 
 def test_shell_context_on_run_and_not_found_pages():
@@ -66,33 +147,22 @@ def test_shell_context_on_run_and_not_found_pages():
     nf = client.get("/runs/999999")   # no store → not found, still framed by the shell
     assert nf.status_code == 404
     assert 'class="sidebar"' in nf.text and 'class="topbar"' in nf.text
+    # a run/not-found page is a sub-page of Results — the sidebar reflects that
+    assert 'data-section="results"' in nf.text
 
 
-def test_index_renders_the_tab_shell():
-    body = _client().get("/").text
-    # R0: the tab nav moved into the app-shell sidebar (a labelled landmark), but it is
-    # still <nav class="tabs"> switching the same five sections by data-tab/id.
-    assert '<nav class="tabs"' in body
-    for tab in ("launcher", "proxy", "results", "ml", "diagnostics"):
-        assert f'data-tab="{tab}"' in body
-        assert f'id="tab-{tab}"' in body
-    # the shared stylesheet + module script are linked
-    assert '/static/app.css' in body
-    assert '/static/app.js' in body
+# --- Launcher section content (unchanged behavior; moved to "/launcher" by U1) -
 
-
-def test_index_previews_activities_from_the_command_spec():
-    body = _client().get("/").text
+def test_launcher_previews_activities_from_the_command_spec():
+    body = _client().get("/launcher").text
     # activities come from the command-spec registry (Phase 0.1)
     assert "greybox-run" in body and "mutate-run" in body
     # gate pills surface which activities send traffic / need authorization
     assert "sends traffic" in body and "--authorized" in body
 
 
-# --- Phase 1: interactive launcher forms -----------------------------------
-
 def test_launcher_renders_a_form_per_activity():
-    body = _client().get("/").text
+    body = _client().get("/launcher").text
     # one form per non-subcommand activity (session is subcommand-only → note, no form)
     assert body.count('class="launch-form"') >= 8
     assert 'data-command="auto"' in body
@@ -110,14 +180,14 @@ def test_run_buttons_gated_by_authorization():
     # unauthorized: traffic tools' Run is disabled; read-only tools stay enabled.
     # Matched on the (whitespace-independent) gate title so the layout can evolve.
     gate = 'title="set authorized:true to run traffic tools"'
-    unauth = _client(authorized=False).get("/").text
+    unauth = _client(authorized=False).get("/launcher").text
     assert unauth.count(gate) == 7
-    auth = _client(authorized=True).get("/").text
+    auth = _client(authorized=True).get("/launcher").text
     assert gate not in auth
 
 
 def test_category_picker_rendered_for_auto():
-    body = _client().get("/").text
+    body = _client().get("/launcher").text
     assert 'data-catgroup="categories"' in body
     # populated from the known injection categories
     assert 'class="cat"' in body
@@ -125,13 +195,48 @@ def test_category_picker_rendered_for_auto():
 
 def test_plugins_panel_and_endpoint():
     client = _client()
-    assert "Plugins" in client.get("/").text
+    assert "Plugins" in client.get("/launcher").text
     data = client.get("/api/plugins").json()
     assert "plugins" in data and isinstance(data["plugins"], list)
 
 
 def test_session_is_subcommand_note_not_a_form():
-    body = _client().get("/").text
+    body = _client().get("/launcher").text
     # session has subparsers → rendered as a CLI note, not a launch form
     assert 'data-command="session"' not in body
     assert "fuzzlab session &lt;sub&gt;" in body
+
+
+# --- R-07: the "send to Repeater" pivot is real PRG + 303 ----------------------
+
+def test_repeater_pivot_is_a_post_form_not_a_url_seed():
+    body = _client().get("/proxy").text
+    assert '<form method="post" action="/proxy/repeater/from-flow"' in body
+    assert 'name="flow_id"' in body
+    # never seed request bytes in the URL/query string
+    assert "raw_request=" not in body
+
+
+def test_repeater_pivot_redirects_303_and_carries_only_the_tab_id(tmp_path):
+    from fuzzlab.core.store import Store
+    from fuzzlab.proxy.history import FlowRecord, HistoryWriter
+
+    path = tmp_path / "p.db"
+    with Store(path) as store:
+        rid = store.start_run("proxy", "127.0.0.1")
+        hw = HistoryWriter(store, rid, batch_size=1)
+        hw.record(FlowRecord(method="GET", url="http://127.0.0.1:8080/p.php",
+                             host="127.0.0.1:8080",
+                             raw_request=b"GET /p.php HTTP/1.1\r\nHost: 127.0.0.1:8080\r\n\r\n",
+                             raw_response=b"HTTP/1.1 200 OK\r\n\r\n"))
+        hw.flush()
+        fid = store.conn.execute("SELECT id FROM flow").fetchone()["id"]
+
+    cfg = load_config(overrides={"store_path": str(path)}, environ={})
+    client = web_client(create_app(cfg), follow_redirects=False)
+    r = client.post("/proxy/repeater/from-flow", data={"flow_id": str(fid)})
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/proxy?repeater_tab=")
+    # an unknown flow id degrades to the default view rather than 404ing the pivot
+    r2 = client.post("/proxy/repeater/from-flow", data={"flow_id": "999999"})
+    assert r2.status_code == 303 and r2.headers["location"] == "/proxy"

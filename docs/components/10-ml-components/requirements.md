@@ -1,6 +1,6 @@
 # ML Components — Requirement Specification
 
-Component code: **ML** · Status: `[planned]` (Phases 5, 7, 10) · Last updated: 2026-09-21
+Component code: **ML** · Status: `[planned]` (Phases 5, 7, 10) · Last updated: 2026-09-22
 
 Related: `ARCHITECTURE.md` #10; `DECISIONS_AND_ROADMAP.md` (D1, D2, D10);
 `./change-control.md`.
@@ -32,6 +32,34 @@ the oracle owns truth (the oracle/advisory split).
   config change, not a code change.
 - **FR-ML-7** Train and evaluate against the lab's cell/transform splits with a
   permanent blind holdout, plus external validation (WAVSEP / Juice Shop) (D10).
+- **FR-ML-9** *(added CC-ML-0010, lane U4)* Model internals already written to the
+  store are surfaced **read-only** by the web control panel's ML tab (`GET /ml`,
+  `GET /api/ml/data`; see `12-diagnostics-and-ui/requirements.md` FR-UI-11): classifier
+  PR curve + reliability/ECE, ranker nDCG@k/precision@k + score/uncertainty
+  distributions, the conformal flag/abstain/drop split, the ECOD anomaly tripwire, the
+  active-learning committee's disagreement, the bandit's Beta posteriors, and mutation
+  variants. `fuzzlab/web/mlview.py` reads only — it computes derived views (PR curve
+  points, a reliability diagram, a histogram, a Beta density, a lightweight bootstrap
+  committee) from stored feature vectors and scores; it never writes a row, including
+  no `run_metrics` write even where the equivalent training-time helper
+  (`fuzzlab.ml.anomaly.detect_anomalies`) does. **Known gap:** the logistic
+  classifier's coefficients (log-odds weights) are not persisted anywhere in the store
+  — `train_and_score` fits a fresh model per request and only ever writes the
+  conformal calibration thresholds to `model.calibration`, never `_w`/`_b` — so the
+  UI's "logistic weights diverging bar" panel (R-06) renders a documented
+  not-available state rather than a value; making it real needs either a schema change
+  (persist trained weights) or a training-time change (write on every `train_and_score`
+  call), both out of scope for a read-only lane.
+- **FR-ML-8 (training telemetry, CC-ML-0009)** When trained with a `run_id`, the
+  GBT and logistic classifiers (`FR-ML-1`) emit per-round/per-epoch scalar
+  training metrics (at minimum `train/loss`) to `core/`'s cross-run
+  `metric_series` sink (`log_scalar`/`MetricLogger`), under `source="gbt"` /
+  `source="logreg"` respectively, for the deploy fit only (not the per-fold
+  out-of-fold fits used for model selection/calibration). Without a `run_id`,
+  or when the training falls back to the prevalence baseline (no GBT/logistic
+  model is fit), no rows are emitted. Purely observational: emission never
+  changes what is fit or what scores/labels are written (`NFR-ML-advisory`,
+  `NFR-ML-reproducible` both hold unchanged).
 
 ## 4. Non-functional requirements
 - **NFR-ML-advisory** ML output is advisory: it can reorder, screen, or flag, but
@@ -47,6 +75,11 @@ the oracle owns truth (the oracle/advisory split).
 Reads `attempt`/`candidate`/`flow` features and oracle `finding` labels (for
 training); writes `candidate.score`, attempt scores/uncertainty, `model` rows
 (versions, calibration). Never writes `finding`. Runs as `core/` plugins.
+Optionally writes `core/`'s `metric_series` rows (`source="gbt"`/`"logreg"`,
+`key` a slash-delimited path such as `train/loss`) via `log_scalar`/
+`MetricLogger` when training is given a `run_id` (FR-ML-8) — read-only from
+ML's perspective of the rest of the system; no other component depends on
+these rows existing.
 
 ## 6. Dependencies (components)
 `core/`, the oracle (labels), and the component that produces each model's inputs

@@ -3,9 +3,9 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0060 — orm_entity_bulk_assign (mass-assignment) module implementation, php_current emitter (2026-09-22)
+### CC-LAB-0064 — orm_entity_bulk_assign (mass-assignment) module implementation, php_current emitter (2026-09-22)
 - Change: implements code generation for the `orm_entity_bulk_assign` sink
-  family (one of the 20 new sink families `CC-LAB-0059`/`FR-LAB-56` added as
+  family (one of the 20 new sink families `CC-LAB-0063`/`FR-LAB-58` added as
   registry-only entries) in the **shared `fuzzlab.labgen.modules` registry**
   (`fuzzlab/labgen/modules/__init__.py`, `php_current`'s package), as the
   first scoped increment of that follow-up work — not all 20 families x 4
@@ -123,7 +123,7 @@ Component code: **LAB**. Entry format and required fields: see
   templates/tests, and one new entry added to (not modified within)
   `fuzzlab/labgen/conformance/static_precheck.py`'s
   `STATIC_PRECHECK_BY_SHAPE` dict. No change to `lab/safety_matrix.yaml`
-  (its 2 relevant rows already exist from `CC-LAB-0059`) or to
+  (its 2 relevant rows already exist from `CC-LAB-0063`) or to
   `verdict.py`'s derivation logic. No change to any existing module,
   template, test, or `STATIC_PRECHECK_BY_SHAPE` row.
   `sink_context.family` is already a plain open string field
@@ -133,7 +133,7 @@ Component code: **LAB**. Entry format and required fields: see
   change-control entry — explicitly not implied done here. The other 3
   emitters (`php_laravel`, `python_fastapi`, `node_express`) and the other
   19 new sink families remain untouched and registry-only, exactly as
-  `CC-LAB-0059` left them.
+  `CC-LAB-0063` left them.
 - Risk (level; mitigation): low — purely additive new modules/templates/
   manifest/tests; nothing existing is edited, and `php_current` is the
   lab-only, loopback-bound target this project's safety rules
@@ -220,7 +220,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] Tests (classifiability, minimal-pair rendering, `--check` end-to-
     end) — done, `tests/test_labgen_mass_assignment.py` (21 tests, all
     pass).
-  - [x] `docs/components/01-target-lab/requirements.md` **FR-LAB-57** —
+  - [x] `docs/components/01-target-lab/requirements.md` **FR-LAB-59** —
     done, including both divergences above.
   - [x] Explicit deferral note carried into `CHANGELOG.md` and the
     site-architecture plan's Status section — done.
@@ -246,7 +246,7 @@ Component code: **LAB**. Entry format and required fields: see
   failing on this sandbox for the same `gitleaks`/`numpy` reason before
   this change). No new, unexplained test failures.
 
-### CC-LAB-0059 — apply corpus `suggested_op`/`suggested_sink_family` proposals to `lab/safety_matrix.yaml` (site-architecture expansion Step 8) (2026-09-22)
+### CC-LAB-0063 — apply corpus `suggested_op`/`suggested_sink_family` proposals to `lab/safety_matrix.yaml` (site-architecture expansion Step 8) (2026-09-22)
 - Change: per direct instruction, accepted the `suggested_op`/
   `suggested_sink_family` proposals recorded on every entry across all 12
   `docs/research/corpus-examples/*/` cells collected by the site-architecture
@@ -315,6 +315,334 @@ Component code: **LAB**. Entry format and required fields: see
   site-architecture corpus proposed, schema-valid and collision-free, with
   no behavior change to any pre-existing entry.
 
+### CC-LAB-0062 — Wave A2: byte-identical/parity manifest reproduction verified, Phase 0 exit criterion closed for Layer A (2026-09-22)
+- Change: pure verification, no code/schema/manifest change. Dispatched as
+  `docs/PARALLEL_LANE_BUILD_PLAN.md`'s Wave A2 lane (the "byte-identical
+  full-manifest reproduction" capstone), gated on `CC-LAB-0059`'s (Wave A0)
+  confirmation that Layer A is closed with no `G7..Gn` lanes needed.
+  1. **Re-ran the parity/cutover coverage gate against the live repo.**
+     `fuzzlab.labgen.cutover_gate.assert_cutover_coverage()`/
+     `diff_cutover_coverage()` (`FR-LAB-51`, `CC-LAB-0053`) is the "manifest
+     diff tool" the lane's own "Checkable gate condition" names.
+     `tests/test_labgen_cutover_gate.py` (16 tests, including
+     `test_every_real_pff_case_is_covered_or_exempted` and
+     `test_covered_and_exempted_partition_every_labels_json_case`, both of
+     which run the gate against the actual `lab/ground-truth/labels.json` +
+     `lab/ground-truth/migration-exemptions.yaml` + every real
+     `lab/manifests/*.yaml`, not a synthetic fixture) — 16/16 passed. Live
+     result: **12 covered / 4 exempted / 0 uncovered** across the 16 `PFF-`
+     real-page cases, matching `CC-LAB-0058`'s/`CC-LAB-0059`'s own recorded
+     split exactly (unchanged since Wave A0's reconciliation — no new page
+     or case since `CC-LAB-0059`).
+  2. **Confirmed all six `L-P3.3c-G1`..`G6` change-control entries
+     (`CC-LAB-0046` through `CC-LAB-0051`) are present and every one of
+     their own deliverables checklists shows `[x] ... done`** — the other
+     half of the lane's "Checkable gate condition."
+  3. **Scope note (per this lane's own dispatch, not re-litigated here):**
+     `docs/LAB_PHASE_0_PLAN.md`'s original exit-criterion wording ("emits
+     source and labels byte-identical to today's hand-authored
+     `puppy-fort-factory/` + `lab/ground-truth/*`") predates the Layer A/B
+     split and is superseded, for the cutover-readiness question, by
+     **D-open-1** (`docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.7, decided
+     2026-09-22): the operative bar is Layer-A (server-side, 16 `PFF-`
+     cases) functional parity/coverage, not literal Layer-B reproduction.
+     Grepped the repo (`fuzzlab/`, `tests/`) for any tool that diffs
+     generated output against `puppy-fort-factory/`'s actual file bytes:
+     **none exists**, for either `php_current` (whose own real-page test,
+     `tests/test_labgen_php_current_real_pages.py`, explicitly scopes
+     itself to 4 of the 12 covered pages and states in its own docstring
+     that "live regeneration-and-diff against the running container is
+     separate, on-host work") or `php_laravel` (a Laravel reimplementation,
+     for which a literal source-text byte match against the old raw-PHP
+     files is not a meaningful target in the first place). This is reported
+     plainly, not papered over: **the literal, whole-repo byte-diff gate
+     `LAB_PHASE_0_PLAN.md` originally described was never built**, and
+     nothing in this verification pass builds it. What passed, and is what
+     the Wave A2 lane spec itself defines as the closing condition, is the
+     parity/coverage gate above.
+  4. **Doc corrections (stale counts found while verifying).**
+     `docs/components/01-target-lab/requirements.md`'s `FR-LAB-8` status
+     note and `FR-LAB-51`'s own body still said "13 of 16 covered, 3
+     exempted" — the pre-`CC-LAB-0058` count, never updated when `CC-LAB-
+     0058` moved `PFF-0003` from covered to exempted (`CC-LAB-0059`'s own
+     deliverables explicitly left `requirements.md` untouched, "not this
+     lane's" call at the time). Corrected in place to 12/4/0, with
+     `PFF-0003` added to `FR-LAB-51`'s exemption list. Not a code defect
+     (no behavior was ever wrong — only the living-doc prose lagged the
+     gate's own already-correct live result), so no `docs/bugs/BUG-NNNN`
+     entry: this is ordinary "keep the specs current" bookkeeping
+     (`CLAUDE.md` checklist item 6), not the bug protocol.
+  5. **Phase-0 exit criterion closed for Layer A.** Updated
+     `docs/DECISIONS_AND_ROADMAP.md` (Lab track section) and
+     `docs/ARCHITECTURE.md` (Manifest-driven generator entry, both its
+     bracket build-status tag and its prose) to record this closure,
+     explicitly scoped to Layer A per D-open-1, and explicitly distinct
+     from `FR-LAB-8`/`L-P3.3c-CUT` (the atomic cutover itself), which
+     remains unscheduled, pending human sign-off, and untouched by this
+     entry.
+- Impact (other components / project): none outside LAB — no code, schema,
+  manifest, or ground-truth file changed; this closes a project-level
+  milestone (Phase 0's exit criterion, Layer-A scope) in the docs that track
+  it, and corrects two stale counts in a living spec. No other component's
+  interfaces or contracts changed.
+- Risk (level; mitigation or accepted-risk justification): none — read-only
+  verification plus documentation edits; no runtime or generated-file
+  behavior changed. The one substantive judgment call (treating the
+  parity/coverage gate, not a literal byte-diff, as satisfying "byte-
+  identical" for closure purposes) is not this entry's own call to make —
+  it is D-open-1's, already decided and cited throughout; this entry only
+  reports the verification against that already-resolved scope, and states
+  plainly, per §3 above, exactly what was and was not built.
+- Deliverables:
+  - [x] Re-ran `tests/test_labgen_cutover_gate.py` against the live repo —
+    16/16 passed, 12/4/0 split confirmed — done.
+  - [x] Confirmed `CC-LAB-0046`..`CC-LAB-0051` (G1–G6) present and done —
+    done.
+  - [x] `docs/DECISIONS_AND_ROADMAP.md` — Layer-A closure note added — done.
+  - [x] `docs/ARCHITECTURE.md` — build-status tag + prose updated — done.
+  - [x] `docs/components/01-target-lab/requirements.md` — `FR-LAB-8`/
+    `FR-LAB-51` stale 13/3 counts corrected to 12/4/0, `PFF-0003` added to
+    `FR-LAB-51`'s exemption list — done.
+  - [x] `CHANGELOG.md` — done.
+  - [x] This change-control entry — done.
+  - [x] Full suite (`pytest -q -m "not slow"`): 1683 passed, 8 skipped, 15
+    deselected — done, green, zero new failures (no code touched).
+  - [ ] Not this lane: `L-P3.3c-CUT` itself (deletes `puppy-fort-factory/`,
+    re-points deploy config) — remains blocked on human sign-off, per plan
+    §4.3.6.5.
+  - [ ] Not this lane: building the literal whole-repo byte-diff tool
+    `LAB_PHASE_0_PLAN.md`'s original wording described (§3 above) — real
+    future work if that literal claim is ever wanted, not something this
+    lane's own checkable gate condition required.
+- Effectiveness (assessed 2026-09-22): met, for the lane's own defined
+  closing condition — the parity/cutover coverage gate is green (12/4/0)
+  against the live repo, all six `G1`..`G6` entries are done, and the
+  project-level docs (`DECISIONS_AND_ROADMAP.md`, `ARCHITECTURE.md`,
+  `requirements.md`) now reflect that Layer A is closed while `FR-LAB-8`
+  itself is not. The literal, original "byte-identical to
+  `puppy-fort-factory/`'s actual file bytes" reading of the Phase 0 exit
+  criterion is **not** met and no tool exists to check it — recorded
+  honestly above rather than silently substituted, per this lane's own
+  dispatch instructions.
+
+### CC-LAB-0061 — Tier 2 conformance-suite live wiring (lane T2, extends FR-LAB-52) (2026-09-22)
+- Change: `fuzzlab/labgen/conformance/tier2.py` was `"[design -- not exercised
+  by this task's own test suite]"` (no working confirmation logic, only the
+  `Tier2Oracle` protocol/`Tier2Outcome` dataclass/`run_tier2_case` plumbing).
+  This lane (`docs/PARALLEL_LANE_BUILD_PLAN.md` Lane group A / T2) wires it
+  against a REAL in-process app+DB, following the exact `php_laravel`
+  live-boot precedent `CC-LAB-0054` established for Tier 1 — a synthetic,
+  in-sandbox Laravel 13 + SQLite boot via the already-existing, unmodified
+  `fuzzlab.labgen.conformance.live_boot.LiveBootHarness`, **never** the
+  real, loopback-only Ryder's Puppy Fort Factory target, and needing no
+  `--authorized` flag (D11/CLAUDE.md Safety — verified against
+  `docs/DECISIONS_AND_ROADMAP.md` D11 before starting).
+  1. **New `LiveBootTier2Oracle`** (`tier2.py`, additive): a real
+     `Tier2Oracle` implementation that drives a `Tier2Client`
+     (structurally satisfied by `LiveBootHarness`'s existing `.get()`/
+     `.post()` — no change to `live_boot.py` needed or made) and adds a
+     genuine control/baseline differential on top of what Tier 1 alone can
+     show: it fetches the case's real payload response AND a second real
+     response for a caller-supplied inert control value at the same
+     param/location, and only reports `confirmed_vulnerable` when the
+     evidence marker is present in the payload response and genuinely
+     absent from the control response. A control value that itself
+     produces the marker is reported honestly as `inconclusive`
+     (`confirmed=False`, detail says why) rather than guessed either way —
+     fails closed, per PA-0025, matching
+     `fuzzlab.labgen.identifier_sqli_assertion.IdentifierSqliTier2Oracle`'s
+     own fail-closed convention (a second, independent, already-existing
+     real `Tier2Oracle` implementation this entry does not modify).
+  2. **New `Tier2Client` protocol** (`tier2.py`, additive): the minimal
+     `.get()`/`.post()` shape `LiveBootTier2Oracle` needs, satisfied
+     structurally by `LiveBootHarness` without this module importing it
+     directly.
+  3. **`tests/test_labgen_conformance_tier2.py`** (rewritten, additive over
+     the prior file's two offline interface tests, which are kept
+     unchanged): 9 tests total.
+     - 5 offline (no network, no live app): the original
+       `OnHostRequiredError`/fake-oracle wiring tests, plus new offline
+       tests of `LiveBootTier2Oracle`'s own control/payload differential
+       logic (confirm / does-not-confirm / inconclusive-control) against a
+       synthetic `_FakeTier2Client` test double, and one wiring test
+       through `run_tier2_case` itself.
+     - 2 real, on-host, `@pytest.mark.slow`, skip-guarded
+       (`live_boot.live_boot_available()`) tests: boot the REAL
+       `phase3_php_laravel_real_pages_numeric.yaml` manifest and run
+       `LiveBootTier2Oracle` against `product.php`'s real vulnerable
+       (`LABGEN-RPL-PRODUCT`) and secure (`LABGEN-RPL-PRODUCT-BOUND`)
+       twins for the classic `1 OR 1=1` boolean-injection payload — a real,
+       observed positive AND negative confirmation, not an inference from
+       source text.
+  4. **`tier2.py`'s own module/`run_tier2_case` docstrings updated** to
+     describe the new real, narrower, synthetic-in-sandbox claim precisely,
+     and to keep disclaiming (unchanged in substance from before this
+     change) that this is still not the production-grade, dialect-sensitive,
+     real-target container oracle T-LAB0.7 describes — that remains
+     `IdentifierSqliTier2Oracle`'s/a future real-target oracle's job.
+- **Shared-fixture check (per this lane's own dispatch instructions).**
+  `fuzzlab/labgen/conformance/live_boot.py` and
+  `tests/test_labgen_conformance_live_boot.py` already exist (built by
+  `CC-LAB-0054`/`CC-LAB-0056`/`CC-LAB-0058`, none of which are this wave's
+  T1/T2 lanes) and are imported read-only by this change — no edit was
+  needed or made to either file, so there is **no file-ownership conflict**
+  with lane T1 (which owns `tier1.py`, untouched here, and may also import
+  `live_boot.py` read-only the same way `LiveBootHarness.fetch()` already
+  does for `Tier1Client`). Scope stayed exactly `tier2.py` +
+  `tests/test_labgen_conformance_tier2.py`, per this lane's file ownership.
+- Impact (other components / project): none outside LAB. Purely additive to
+  `tier2.py` (new class + protocol + `__all__` entries; `run_tier2_case`'s
+  behavior/signature unchanged, only its error-message text and docstring
+  updated). No existing caller of `tier2.py` exists yet outside its own test
+  suite, so no other component's behavior changes.
+- Risk (level; mitigation or accepted-risk justification): **low**. Purely
+  additive to a conformance harness that gates nothing in `--check` or
+  production; reuses the already-proven, unmodified `LiveBootHarness`
+  (`CC-LAB-0054`/`0056`/`0058`) rather than building a second live-boot
+  mechanism. The new oracle's fail-closed `inconclusive` behavior can only
+  make a previously-impossible-to-detect ambiguous-control case reported
+  honestly, never silently mis-report a pass.
+- Verification: `pytest tests/test_labgen_conformance_tier2.py -q` → 9
+  passed (real run, this session, 2026-09-22; composer/php on PATH and
+  Packagist reachable in this sandbox, so both `@pytest.mark.slow` live-boot
+  tests ran for real rather than skipping). Full suite
+  (`pytest -q -m "not slow"`): 1443 passed, 38 skipped, 29 failed — all 29
+  failures confirmed pre-existing and unrelated (a missing `scipy`/stats
+  runtime dependency affecting `fingerprint_gate.py` and its callers;
+  reproduced identically on the pre-change commit via `git stash`, so this
+  change introduces zero new failures).
+- Rollback: revert `fuzzlab/labgen/conformance/tier2.py` and
+  `tests/test_labgen_conformance_tier2.py` to their prior state (this
+  entry's diff is additive-only within both files; no other file was
+  touched).
+- Effectiveness (assessed 2026-09-22): met — `tier2.py` now has a real,
+  in-sandbox live-boot confirmation path, proven by 2 genuine positive/
+  negative live-boot confirmations plus 7 offline tests, all green,
+  mirroring `CC-LAB-0054`'s own effectiveness bar for Tier 1.
+
+### CC-LAB-0060 — Tier-1 conformance-suite live wiring (FR-LAB-57) (2026-09-22)
+- Change: `fuzzlab/labgen/conformance/tier1.py` (`build_tier1_case`/
+  `run_tier1_case`/`evaluate_tier1_response`, `Tier1Client`) was, by its own
+  module docstring, exercised only against a hand-written fake test double
+  -- never a real app or database (build lane T1, `docs/
+  PARALLEL_LANE_BUILD_PLAN.md`). This change wires it against a real
+  in-process app+DB for whichever stack already has a real client, following
+  the `php_laravel` live-boot proof precedent already established at
+  `CC-LAB-0054`/`FR-LAB-52`:
+  1. **No new harness code.** `fuzzlab.labgen.conformance.live_boot
+     .LiveBootHarness` already implements the `Tier1Client` protocol via its
+     existing `.fetch()` method (added at `CC-LAB-0054`, unmodified by this
+     change) -- this lane found it already reusable as-is and made no edit
+     to `live_boot.py` at all, avoiding any need to coordinate a shared
+     harness module with sibling lane T2 (`tier2.py`'s own live wiring),
+     which this change also does not touch.
+  2. **`tests/test_labgen_conformance_tier1.py` gained a new, clearly
+     separated section**, `TestTier1RealLiveBoot`, skip-guarded on
+     `live_boot_available()` and marked `@pytest.mark.slow` (the same
+     convention `CC-LAB-0054` introduced), proving two real cases through
+     `tier1.py`'s own public API rather than by hand-inspecting
+     `LiveBootHarness.get()`/`.post()` responses directly:
+     - `product.php`'s real vulnerable/secure twin (`LABGEN-RPL-PRODUCT` /
+       `LABGEN-RPL-PRODUCT-BOUND`, `lab/manifests/
+       phase3_php_laravel_real_pages_numeric.yaml`): a real
+       boolean-injection payload (`1 OR 1=1`) run through `run_tier1_case()`
+       against a real booted app, asserting `Tier1Outcome.matches_expectation`
+       is `True` for both twins (the vulnerable cell's response contains the
+       second seeded product, "Puppy Bed"; the bound-parameter twin's does
+       not) -- the same real differential `CC-LAB-0054`'s own
+       `test_live_boot_numeric_manifest_sqli_twin_round_trips_a_payload`
+       proves, now proven through `evaluate_tier1_response`'s marker-in-body
+       decision logic instead of a bespoke row-count assertion.
+     - `contact.php`/`newsletter.php` (`LABGEN-PLRP-1005`/`1006`,
+       `lab/manifests/phase3_laravel_real_pages_forms.yaml`, secure-only
+       escaped-echo forms): a raw `<script>alert(1)</script>` payload run
+       through `build_tier1_case()`/`run_tier1_case()` with
+       `expected_vulnerable=False`, confirming the real response never
+       reflects it unescaped.
+  3. **`tier1.py`'s module docstring and `Tier1Client`'s own docstring
+     updated** to state the current, stack-by-stack truth (real for
+     `php_laravel` via `LiveBootHarness`, still design-only for any stack
+     without such a harness) -- no behavior change to any function; the
+     `OnHostRequiredError` guard and its semantics are unchanged.
+- Real, observed result: both new tests pass against a real booted Laravel
+  13 app (real `composer install`, real `php artisan serve`, real HTTP) in
+  this sandbox. One transient failure was observed and diagnosed during
+  development -- a `composer` VCS-cache collision from another build lane's
+  concurrent `composer install` against the same shared `~/.cache/composer`
+  directory on this multi-lane host (`fatal: destination path ... already
+  exists`) -- not a defect in this change; the same test passes cleanly once
+  run without that concurrent contention, and this is the same
+  shared-cache-on-one-host hazard `CC-LAB-0054`'s harness already carries
+  for any concurrent caller, not something this change introduces or
+  changes the exposure of.
+- Impact (other components / project): none outside LAB. `tier2.py` (owned
+  by sibling lane T2 for its own live wiring) imports only
+  `Tier1Case`/`OnHostRequiredError` from `tier1.py`, both structurally
+  unchanged by this entry, so T2's own work is unaffected regardless of
+  dispatch order. No existing test's expectations changed; the 7 pre-existing
+  offline decision-logic tests in `tests/test_labgen_conformance_tier1.py`
+  pass unchanged.
+- Risk (level; mitigation or accepted-risk justification): **low**. Purely
+  additive (new tests + docstring-only edits to `tier1.py`; zero lines of
+  `live_boot.py` touched). Never sends traffic to the real, loopback-only lab
+  target -- `LiveBootHarness` assembles and boots its own throwaway,
+  in-sandbox build, exactly as `CC-LAB-0054` already established, so D11's
+  no-auto-run/`--authorized` posture is unaffected (nothing here needs that
+  flag). Skip-guarded on `live_boot_available()`, so an environment without
+  composer/php/network reachability SKIPS cleanly rather than failing.
+
+### CC-LAB-0059 — Wave A0: Layer-A reconciliation reconfirmed against live repo, no G7…Gn scope (2026-09-22)
+- Change: pure verification, no code/schema change. Dispatched as
+  `docs/PARALLEL_LANE_BUILD_PLAN.md`'s Wave A0 lane to mechanically
+  reconfirm `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.1/§4.3.6.3/§4.3.6.7's
+  Layer-A reconciliation against the live repo state (pages/cases may have
+  changed since the plan was written on 2026-09-22). Verified:
+  1. `lab/ground-truth/labels.json` carries exactly 16 `PFF-` cases
+     (`PFF-0001…0008`, `PFF-1001…1008`), unchanged since the Phase-0
+     label-contract commit (single commit in `git log` ever touches this
+     file).
+  2. `lab/ground-truth/migration-exemptions.yaml` lists exactly 4 exempted
+     cases (`PFF-1002`, `PFF-0007`, `PFF-0008`, `PFF-0003`), each citing a
+     dated decision already on record (`CC-LAB-0053`'s three plus
+     `CC-LAB-0058`'s `PFF-0003` addition) — giving a live 12 covered / 4
+     exempted / 0 uncovered split, matching `CC-LAB-0058`'s own recorded
+     result. All six `L-P3.3c-G1`…`L-P3.3c-G6` change-control entries
+     (`CC-LAB-0046` through `CC-LAB-0051`) are present and marked done.
+  3. A repo-wide grep for `PFF-` under `puppy-fort-factory/` found no label
+     strings in the app source (labels live only in `lab/ground-truth/`, by
+     design) and `find puppy-fort-factory -maxdepth 2 -iname '*.php'`
+     turned up no page absent from §4.3.6.3's table — no new pages or cases
+     added since the plan was written.
+  Added a dated confirmation note, `docs/LAB_IMPLEMENTATION_PLAN.md`
+  §4.3.6.7a, recording this reconciliation and its one clarification: the
+  plan's earlier "13 done / 1 exempt / 2 deferred" framing predates
+  `CC-LAB-0058` and is one case off on the partition (not the total) —
+  `PFF-0003` moved from "covered" to "exempted" for its real-URL/live-boot
+  claim specifically, while its shape remains authored/tested as one of
+  G6's own cells. **Conclusion: Layer A is closed. No `G7…Gn` lanes
+  dispatched** (Wave A1 of the build plan is skipped in full, as its own
+  text anticipates for this expected outcome).
+- Impact (other components / project): none — no code, schema, manifest, or
+  ground-truth file changed; this is a documentation-only reconciliation
+  check. Unblocks Wave A2 (the byte-identical manifest capstone) per the
+  build plan's own dependency table, which was gated on A0 confirming
+  closure.
+- Risk (level; mitigation or accepted-risk justification): none — read-only
+  verification; no runtime or generated-file behavior changed.
+- Deliverables:
+  - [x] `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.7a — confirmation note
+    added — done.
+  - [x] `CHANGELOG.md` — done.
+  - [x] This change-control entry — done.
+  - [ ] Not this lane: `docs/components/01-target-lab/requirements.md` —
+    no requirement's scope/interfaces/contracts changed by this
+    verification pass, so left untouched (FR-LAB-8's migration-completion
+    marking remains `L-P3.3c-CUT`'s call, not this reconciliation's).
+- Effectiveness (assessed 2026-09-22): confirmed directly against the live
+  repo state described above — `labels.json` (16 cases),
+  `migration-exemptions.yaml` (4 entries), and a `puppy-fort-factory/`
+  grep/`find` sweep for undocumented pages, all consistent with Layer A
+  being fully accounted for and closed.
 ### CC-LAB-0058 — real MariaDB-backed live-boot mode + `search.php` canonical-cell resolution (FR-LAB-55) (2026-09-22)
 - Change: two independent, purely additive extensions, both delivered together
   because the second is proven with the first:

@@ -64,14 +64,29 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Probe an authenticated surface as this identity (optional)")
     p.add_argument("--settle", type=float, default=0.0,
                    help="Seconds to wait after each request for the shim to flush")
+    p.add_argument("--mutation-variants", action="store_true",
+                   help="Also probe sqli/xss attacks with mutation-engine variants "
+                        "(T8.5 wiring); off by default (extra live traffic)")
+    p.add_argument("--max-mutation-variants", type=int, default=2,
+                   help="Cap on mutation variants tried per attack probe (default 2)")
+    p.add_argument("--allow-destructive", action="store_true",
+                   help="Permit recording destructive-looking mutation variants "
+                        "(default: refused, matches `mutate-run`)")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
+    from fuzzlab.cli_dryrun import add_dry_run_flag
+    add_dry_run_flag(p)
     return p
 
 
 def main(argv: list[str]) -> int:
     p = build_parser()
     args = p.parse_args(argv)
+
+    if args.dry_run:
+        from fuzzlab.cli_dryrun import report
+        report("greybox-run", args)
+        return 0
 
     if not args.authorized:
         p.error("refusing to send probes without --authorized (lab-only)")
@@ -119,7 +134,10 @@ def main(argv: list[str]) -> int:
             base_url=args.base_url, store=store, run_id=run_id, points=points,
             sender=sender, coverage_source=coverage_source,
             dbfault_source=dbfault_source, lab_control=lab_control,
-            reset_between=args.reset, app_root=args.app_root, settle=args.settle)
+            reset_between=args.reset, app_root=args.app_root, settle=args.settle,
+            mutation_variants=args.mutation_variants,
+            max_mutation_variants=args.max_mutation_variants,
+            allow_destructive=args.allow_destructive)
 
         _print_summary(args, source, counts, points, skipped, summary, run_id)
     return 0
@@ -139,6 +157,9 @@ def _print_summary(args, source, counts, points, skipped, summary, run_id) -> No
           f"new-code (payload vs its baseline) max: {summary['newcode_reward']:.3f}   "
           f"overall max: {summary['max_reward']:.3f}")
     print(f"  app coverage lines seen: {summary.get('coverage_lines_seen', 0)}")
+    if args.mutation_variants:
+        print(f"  mutation variants probed: {summary.get('mutation_variants_probed', 0)}   "
+              f"recorded (accepted): {summary.get('mutation_variants_recorded', 0)}")
     if summary.get("coverage_lines_seen", 0) == 0:
         print("  NOTE: no application coverage was captured — is the cov.php shim "
               "installed and is --cov-dir the bind-mounted side channel?")

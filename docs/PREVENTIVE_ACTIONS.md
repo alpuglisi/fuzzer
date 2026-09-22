@@ -277,8 +277,20 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   `docs/MULTI_AGENT_ORCHESTRATION.md` for the full rationale and the rejected
   alternatives (fragment files, batched reconciliation, fewer/larger lanes, a merge-queue
   bot).
-- **PA-0032** — Strengthens PA-0020's *scope of enforcement* (not its diagnosis, which
-  PA-0032 reuses as-is): PA-0020 established that a bug whose root cause is "my own
+- **PA-0032** — Before ending a turn with any next-step question, offer, or "say the
+  word" framing directed at the user, check that question against the standing
+  instructions already given for the current task. If the user already authorized the
+  action the question is about (a scope, a count, a condition like "until X" or "keep
+  going until done"), do not ask again — proceed. Reserve an end-of-turn check-in for a
+  genuine blocker: an actual decision only the user can make, a missing input, or an
+  ambiguity the standing instructions do not resolve — never for a natural-feeling
+  stopping point (a wave/phase/batch finishing) that the standing instructions already
+  cover. This is a session-conduct rule, not a fix for a fuzzlab code defect — a
+  different root cause from PA-0019's bookkeeping-recall gap (that one is about
+  recalling *what to record*; this one is about recalling *what was already
+  authorized*). (from BUG-0029)
+- **PA-0033** — Strengthens PA-0020's *scope of enforcement* (not its diagnosis, which
+  PA-0033 reuses as-is): PA-0020 established that a bug whose root cause is "my own
   missed or inconsistent self-check" needs mechanical enforcement, not a clearer written
   rule — but its own enforcement artifact (`check-error-log-bookkeeping.sh`) only covers
   one instance of that class (`ERROR_LOG.md` bookkeeping). Every future explicit,
@@ -295,14 +307,14 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   flat `cwe:` field; tightened to the shared/unique split and cross-entry uniqueness
   check after the first version still allowed copy-pasting the same CWEs across sibling
   entries, which a direct follow-up instruction correctly identified as not meeting the
-  actual intent.) (from BUG-0029)
+  actual intent.) (from BUG-0030)
 
   Extended again per this same principle when a follow-up direct instruction ("at least
   5 pairs, not one example per CWE") surfaced a second uncovered quantitative floor:
   `check-corpus-cwe-coverage.sh` now also aggregates every `manifest.yaml` under a
   touched cell directory (`docs/research/corpus-examples/<cell>/`) and blocks the
   session if that cell has fewer than 5 `role: vulnerable` entries. Same failure mode as
-  the original PA-0032 gap — a quantitative "at least N" instruction was tracked only in
+  the original PA-0033 gap — a quantitative "at least N" instruction was tracked only in
   prose (this plan doc's Status section) rather than mechanically enforced — caught
-  before it recurred a second time by applying PA-0032's own rule proactively this time,
+  before it recurred a second time by applying PA-0033's own rule proactively this time,
   rather than waiting for a review to catch it.

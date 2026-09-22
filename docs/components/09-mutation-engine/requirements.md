@@ -1,6 +1,6 @@
 # Mutation Engine — Requirement Specification
 
-Component code: **MUT** · Status: `[built — operators/validator/XSS, filter model + learner, bandit/coverage search, destructive-gated variant write-back, and the live HttpFilter + fuzzlab mutate-run driver; live WAF evasion verified on-host]` (Phase 8) · Last updated: 2026-09-22 · see CC-MUT-0008
+Component code: **MUT** · Status: `[built — operators/validator/XSS, filter model + learner, bandit/coverage search, destructive-gated variant write-back (reachable from both fuzzlab mutate-run and the main greybox-run harness), the live HttpFilter + fuzzlab mutate-run driver (live WAF evasion verified on-host), and optional MutationSearch reward/novelty telemetry into metric_series]` (Phase 8; B0 emitter sub-lane) · Last updated: 2026-09-22 · see CC-MUT-0011
 
 Related: `ARCHITECTURE.md` #9; `DECISIONS_AND_ROADMAP.md` (D1, Phase 8);
 `./change-control.md`.
@@ -30,6 +30,11 @@ feedback and the scheduler.
 - **FR-MUT-5** Optionally expand the catalog with an offline, **gated** LLM step
   (default off; human-reviewed before entries are trusted).
 - **FR-MUT-6** Write new payload candidates back into the catalog/attempts.
+  Reachable from two callers as of `CC-MUT-0009`: the standalone `mutate-run`
+  CLI's live WAF-evasion search (`fuzzlab/mutation/run.py`, unchanged), and the
+  main grey-box harness's own attempt loop (`greybox/run.py::run_greybox`,
+  FUZZ component #7, FR-FUZZ-8, opt-in) — both go through the same
+  destructive-gated `catalog.record_variant` (PA-0003: one shared write path).
 - **FR-MUT-7** The semantics validator (`SemanticsValidator.preserves()`) must
   fail **closed**, not open, on any transform whose safety cannot be decided from
   the compared fragment alone — concretely, a mutation that introduces a SQL `--`
@@ -49,16 +54,35 @@ feedback and the scheduler.
 - **NFR-MUT-bounded** Search is budget-bounded and reproducible under a fixed seed.
 - **NFR-MUT-offline** The LLM expansion path is offline and gated; nothing is sent
   to an external service without explicit opt-in.
+- **NFR-MUT-dry-run** `fuzzlab mutate-run` accepts `--dry-run`: plans and prints
+  the exact argv/command it would run and sends nothing (no payload/probe), for
+  headless use outside the web UI. Reuses the web launcher's dry-run plan/report
+  logic (`fuzzlab/web/commandspec.py` + `fuzzlab/web/runner.py`) via the shared
+  `fuzzlab/cli_dryrun.py` helper.
+
+- **FR-MUT-8** `MutationSearch` optionally emits its per-step reward and novelty
+  signal into `metric_series` (`source="mutation"`, `key="reward"`/`"novelty"`,
+  `step`=1-based search step) via an injected `fuzzlab.core.store.MetricLogger`
+  (`metric_logger=` constructor parameter, default `None`). `fuzzlab mutate-run`
+  (`fuzzlab/mutation/run.py::run_mutation`) always attaches one, shared across
+  every base payload's search under the run's `run_id`. Purely observational —
+  never read back by the search/selection logic itself (CC-MUT-0011).
 
 ## 5. Interfaces and data contracts
 Reads catalog payloads and canary/filter observations; reads coverage signals and
 scheduler operator choices; writes new payload candidates back to the
-catalog/`attempt` path.
+catalog/`attempt` path. Optionally writes per-step scalar telemetry
+(`MutationSearch` reward/novelty) to the shared `metric_series` table via
+`fuzzlab.core.store.MetricLogger`/`log_scalar` (FR-MUT-8, CC-MUT-0011).
 
 ## 6. Dependencies (components)
 `core/`, indicator DB & catalogs, payload scheduler, oracle, grey-box
 instrumentation. (A lab WAF is a prerequisite decision for evaluating filter
-evasion, not a component dependency.)
+evasion, not a component dependency.) As of `CC-MUT-0009`, this component is
+also depended **on** by FUZZ (#7): `greybox/run.py` calls
+`default_operators`/`SemanticsValidator`/`catalog.record_variant` directly. As of
+`CC-MUT-0011`, `MutationSearch`/`run_mutation` optionally depend on CORE's
+`metric_series`/`MetricLogger` (B0, CC-CORE-0018) for reward/novelty telemetry.
 
 ## 7. Acceptance criteria
 - Produces variants that reach code the static catalog did not (measured by

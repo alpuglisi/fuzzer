@@ -79,7 +79,10 @@ def test_repeater_create_and_send_in_browser(tmp_path):
     up, up_port = _threaded_upstream()
     web_port = _free_port()
     cfg = load_config(overrides={"authorized": True, "target_base_url": "http://127.0.0.1",
-                                 "store_path": str(tmp_path / "s.db")}, environ={})
+                                 "store_path": str(tmp_path / "s.db"),
+                                 # U6's Host allow-list is derived from web_host/web_port
+                                 # (CC-UI-0026); must match the real bind port below.
+                                 "web_port": web_port}, environ={})
     server = _Server(create_app(cfg), web_port)
     server.start()
     try:
@@ -95,7 +98,8 @@ def test_repeater_create_and_send_in_browser(tmp_path):
             pg = browser.new_page()
             pg.set_default_timeout(15000)
             pg.goto(f"http://127.0.0.1:{web_port}/")
-            pg.click('nav.tabs a[data-tab="proxy"]')
+            pg.click('nav.tabs a[data-section="proxy"]')
+            pg.wait_for_url("**/proxy")
             pg.click("#repeater-card details summary")
             pg.fill("#rep-new-host", "127.0.0.1")
             pg.fill("#rep-new-port", str(up_port))

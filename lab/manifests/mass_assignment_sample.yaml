@@ -1,15 +1,15 @@
-# Mass-assignment sample manifest (CC-LAB-0060), php_current.
+# Mass-assignment sample manifest (CC-LAB-0064), php_current.
 #
 # First illustrative pair for the `orm_entity_bulk_assign` sink family
-# (lab/safety_matrix.yaml's `mass_assignment` concern, added by CC-LAB-0059/
-# FR-LAB-56 as a registry-only entry, implemented here in php_current's
-# shared module registry per CC-LAB-0060/FR-LAB-57). Mirrors
+# (lab/safety_matrix.yaml's `mass_assignment` concern, added by CC-LAB-0063/
+# FR-LAB-58 as a registry-only entry, implemented here in php_current's
+# shared module registry per CC-LAB-0064/FR-LAB-59). Mirrors
 # `/account_settings.php`'s POST handler (php_current page profile in
 # `fuzzlab/labgen/emitters/php_current/__init__.py`): a user-editable-
 # profile PATCH-style endpoint that bulk-assigns whatever fields the
 # request body carries onto the current user's own row.
 #
-# php_laravel's own twin pair for this same shape (FR-LAB-57's "full depth"
+# php_laravel's own twin pair for this same shape (FR-LAB-59's "full depth"
 # follow-up) lives in the sibling
 # `lab/manifests/mass_assignment_laravel_sample.yaml` -- a separate file,
 # not mixed into this one, since every manifest in this project targets

@@ -3,6 +3,133 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0011 — `MutationSearch` reward/novelty emitted into `metric_series` (B0 emitter sub-lane) (2026-09-22)
+- Change: `fuzzlab/mutation/search.py::MutationSearch` gained an optional
+  `metric_logger: MetricLogger | None = None` constructor parameter (B0's
+  `fuzzlab.core.store.MetricLogger`, CC-CORE-0018). In `search()`'s per-step loop,
+  after the existing `step_reward` (already computed via `_reward()`) and a new
+  `step_novel` (the max `_novelty()` seen across that step's candidate variants,
+  mirroring how `step_reward` is already a per-step max) are known, if a
+  `metric_logger` is attached it logs two rows per step: `key="reward"` and
+  `key="novelty"`, both under `source="mutation"`, `step=<search step, 1-based>`.
+  A step whose chosen bandit arm produced no variants (the existing
+  `if not variants: continue` branch) logs nothing for that step — unchanged
+  no-op behavior, just no metric row. `fuzzlab/mutation/run.py::run_mutation`
+  (the `mutate-run` driver) now opens one `MetricLogger(store, run_id,
+  source="mutation")` for the whole run (as a context manager, flushed on exit)
+  and passes it to every base payload's `MutationSearch` instance, so all bases
+  in one `mutate-run` invocation share one buffered writer under one run_id.
+  Purely additive/observational: the bandit scheduler update, hill-climb
+  acceptance, and `SearchResult`/`best` selection logic are byte-for-byte
+  unchanged; `metric_logger=None` (the default, and every existing caller/test
+  that doesn't pass it) is a no-op with zero behavior change.
+- Impact (other components / project): CORE only as a consumer of B0's already-
+  landed `metric_series`/`MetricLogger` (CC-CORE-0018) — no schema change here.
+  No interaction with lane C1's `greybox/run.py` `mutation_variant_probes()`/
+  `_record_accepted_variant()` wiring (CC-MUT-0009) or lane D0a's `--dry-run`
+  flag (CC-MUT-0010): neither touches `MutationSearch` or `run_mutation`'s
+  signature beyond this addition, and `--dry-run` still short-circuits before
+  `run_mutation`/`MutationSearch` are ever constructed, so no metrics are logged
+  on a dry run. `greybox/run.py` does not call `MutationSearch` itself (it calls
+  the operators/validator/catalog functions directly per CC-MUT-0009), so it is
+  unaffected and out of scope for this change.
+- Risk (level; mitigation): low — new optional parameter, default `None`,
+  additive-only code path; the emission line runs only inside the existing loop
+  and cannot alter `step_reward`, `accepted`, or `best`. Mitigated by
+  `tests/test_mutation_search.py`'s new metric tests (rows land with the
+  expected `source`/`key`/`step` shape; identical search result with vs. without
+  a `metric_logger` attached for the same seed; `run_mutation`'s shared logger
+  reaches `metric_series` end-to-end) plus the unchanged pre-existing search
+  tests (still green, proving no behavior drift).
+- Deliverables:
+  - [x] `MutationSearch(metric_logger=...)` — done.
+  - [x] Per-step `reward`/`novelty` rows under `source="mutation"` — done.
+  - [x] `run_mutation()` wires one shared `MetricLogger` across all bases — done.
+  - [x] Tests: rows land in `metric_series`; emission doesn't change the search
+    result; `run_mutation` wiring end-to-end — done.
+  - [x] `requirements.md`/`CHANGELOG.md` updated — done.
+- Effectiveness (assessed 2026-09-22): effective — `tests/test_mutation_search.py`
+  confirms `reward`/`novelty` rows land under `source="mutation"` for the run_id
+  used, with monotonic step numbers matching search steps that tried a variant,
+  and that attaching a `metric_logger` does not change `(variant, operators)` for
+  a fixed seed; `run_mutation()`'s shared-logger test confirms every base's rows
+  share one `source`/`run_id`. Full suite green (see this entry's commit).
+
+### CC-MUT-0010 — `--dry-run` CLI flag (lane D0a) (2026-09-22)
+- Change: `fuzzlab/mutation/cli.py::build_parser()` gained `--dry-run` (via the
+  shared `fuzzlab/cli_dryrun.add_dry_run_flag()`). `main()` checks `args.dry_run`
+  first — before the `--authorized` gate and before resolving `--base` payloads —
+  and calls `fuzzlab/cli_dryrun.report("mutate-run", args)`, reusing the web
+  launcher's existing dry-run plan/report logic (`fuzzlab/web/commandspec.spec()` +
+  `fuzzlab/web/runner.build_argv()`/`display_command()`, CC-UI-0013/0015), then
+  returns 0 before `make_probe_sender`/`Store`/`mrun.run_mutation` are ever called.
+  No payload is sent. Unchanged when `--dry-run` is absent.
+- Impact (other components / project): MUT only, plus an incidental UI effect — see
+  CC-UI-0027 (introspected `build_parser()` surfaces the new checkbox in the web
+  launcher automatically; `fuzzlab/web/app.py` untouched). No schema/store change; no
+  interaction with Wave C1's `CC-MUT-0009` M8-wiring (different code paths —
+  `fuzzlab/mutation/run.py`'s attempt-path wiring vs. this CLI's flag).
+- Risk (level; mitigation): low — additive flag, short-circuits before any side
+  effect. Mitigated by `tests/test_cli_dry_run.py` (mutate-run case: flag present,
+  report printed, `mrun.run_mutation`/`Store.__init__`/`make_probe_sender` patched to
+  raise if called) and the unchanged full suite otherwise.
+- Deliverables:
+  - [x] `--dry-run` on `mutate-run`'s parser — done.
+  - [x] Short-circuit ahead of the `--authorized` gate in `main()`, calling the
+    shared `cli_dryrun.report()` — done.
+  - [x] Tests confirming the plan is reported and nothing runs — done.
+- Effectiveness (assessed 2026-09-22): effective — `fuzzlab mutate-run --dry-run`
+  prints the planned argv/command and returns 0 without constructing a sender,
+  `Store`, or running the mutation search; verified directly and via the new tests.
+### CC-MUT-0009 — Reach the main harness's attempt path, not just `mutate-run` (Lane C1/M8-wiring) (2026-09-22)
+- Change: companion entry to `CC-FUZZ-0019` (see that entry for the full
+  mechanism — this one records the MUT-side of the same change). T8.5's "emit
+  accepted variants into the attempt path" previously only reached the
+  standalone `fuzzlab mutate-run` CLI's own attempt/summary loop
+  (`fuzzlab/mutation/run.py::run_mutation`); `fuzzlab/mutation/operators.py`
+  (T8.1), `semantics.py` (T8.1) and `catalog.record_variant` (T8.5) are now also
+  called directly from `fuzzlab/greybox/run.py` (the FUZZ component's own
+  harness), so `greybox-run` generates, probes, and — via the same destructive-
+  gated `record_variant` — writes back mutation variants too, without going
+  through `mutate-run`/`MutationSearch`/`HttpFilter`'s live-WAF-learning loop at
+  all (that remains `mutate-run`'s job; this is a lighter, offline-generated
+  variant set bounded by `max_mutation_variants` per attack probe, screened by
+  whether it actually hit/reached new code when the harness sent it — no
+  separate live WAF-caught/evaded round-trip like `MutationSearch` runs). No
+  code in `fuzzlab/mutation/` itself changed; this is purely a new consumer of
+  its existing public surface (`default_operators`, `SemanticsValidator`,
+  `record_variant`).
+- Impact (other components / project): `payload_variant` (migration 8) now has
+  two writers — `mutate-run` (unchanged) and `greybox-run` (new, opt-in). Both
+  go through the same `record_variant`/destructive-gate function (PA-0003:
+  single shared write path), so the gate and schema stay consistent across
+  writers. FUZZ (`greybox/run.py`) gained an import-time dependency on this
+  component; no circular import (this component's own live-search code path
+  only imports `fuzzlab.greybox.run` inside a function body, for
+  `mutation/run.py::make_coverage_fn`, which is unaffected).
+- Risk (level; mitigation): low — no existing MUT code changed, only a new
+  external caller of already-tested functions (`default_operators`,
+  `SemanticsValidator.preserves`, `record_variant`, all covered by
+  `tests/test_mutation_operators.py` and `tests/test_mutation_catalog.py`
+  already). The `url-encode` operator is deliberately skipped by the new
+  caller (double-encoding over the probe transport — see `CC-FUZZ-0019`); no
+  change to which operators `mutate-run` itself uses.
+- Deliverables:
+  - [x] No `fuzzlab/mutation/` source changes required — verified the existing
+    public surface (`default_operators`, `SemanticsValidator`, `record_variant`)
+    is sufficient for the new caller — done.
+  - [x] `tests/test_greybox_live.py` regression tests proving the new caller
+    round-trips correctly through `record_variant`/`payload_variant` (see
+    `CC-FUZZ-0019` for the list) — done.
+  - [x] `docs/components/09-mutation-engine/requirements.md` FR-MUT-6 updated
+    in place to reflect the now-dual write-back path — done.
+  - [x] CHANGELOG.md line (shared with `CC-FUZZ-0019`) — done.
+- Effectiveness (assessed 2026-09-22): effective — `payload_variant` rows now
+  originate from `greybox-run` when `--mutation-variants` is passed, proven by
+  `test_run_greybox_consumes_mutation_variants_into_attempt_path`, with no
+  change to `mutate-run`'s own behavior or existing MUT test suite (still
+  green).
+
 ### CC-MUT-0008 — Fix `SemanticsValidator` fail-open on untrusted SQL comment-append; fix AST case-sensitivity (2026-09-22)
 - Change: `fuzzlab/mutation/semantics.py` — added `introduces_line_comment(original,
   mutated)` (true when `mutated` carries a `--` marker `original` didn't) and made

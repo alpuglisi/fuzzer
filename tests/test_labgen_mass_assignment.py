@@ -1,11 +1,11 @@
-"""Mass-assignment (CC-LAB-0060): the `orm_entity_bulk_assign` sink family's
+"""Mass-assignment (CC-LAB-0064): the `orm_entity_bulk_assign` sink family's
 first code-generation increment -- the shared `fuzzlab.labgen.modules`
 registry (`php_current`'s package), its new source/transform/sink modules,
 the static-precheck flag, and the Tier-0/Tier-3 conformance passes over the
 new manifest.
 
 Everything here is real and offline: the real `lab/safety_matrix.yaml`
-(rows already added by CC-LAB-0059), the real
+(rows already added by CC-LAB-0063), the real
 `lab/manifests/mass_assignment_sample.yaml`, the real emitter and its real
 Jinja2 module fragments -- no fakes, and (where `php` is on the build host,
 PA-0005's skip-guard pattern) a real `php -l` syntax check of every
@@ -50,7 +50,7 @@ def _cell(manifest, cell_id: str) -> Cell:
 
 
 # ---------------------------------------------------------------------------
-# Safety matrix: the CC-LAB-0059 rows this increment renders code for
+# Safety matrix: the CC-LAB-0063 rows this increment renders code for
 # ---------------------------------------------------------------------------
 
 
@@ -148,7 +148,7 @@ def test_every_cell_of_the_new_manifest_renders(emitter, manifest) -> None:
 
 
 def test_the_laravel_twin_pair_also_renders() -> None:
-    """FR-LAB-57's full-depth follow-up: php_laravel carries this shape too,
+    """FR-LAB-59's full-depth follow-up: php_laravel carries this shape too,
     via its own Query-Builder-based OrmEntityBulkAssignSink, in its own
     sibling manifest (every manifest in this project targets one
     stack_profile)."""

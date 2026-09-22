@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}fuzzlab &mdash; ML{% endblock %}
+{% block crumb %}ML{% endblock %}
+{% block styles %}
+<link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+<link rel="stylesheet" href="/static/css/ml.css">
+{% endblock %}
+{% block content %}
+<section class="panel" aria-labelledby="ml-h1">
+  <h1 id="ml-h1" class="visually-hidden">Machine learning</h1>
+
+  <!-- Persistent, non-dismissible advisory banner (R-06) — no close button, ever. -->
+  <div class="card ml-banner" role="note" aria-label="Advisory notice">
+    <p><strong>Model output is advisory.</strong> Confirmed findings come from the
+      oracle (Results tab), not from any score, band, or flag shown here. Every score
+      below carries an uncertainty companion, the sample size (N) it was computed
+      over, and the data split it came from.</p>
+  </div>
+
+  <div class="card">
+    <h2>Machine learning</h2>
+    <p class="muted">Read-only surfacing of the classifier, ranker, conformal triage
+      gate, anomaly tripwire, active-learning committee, Thompson bandit, and mutation
+      engine &mdash; kept separate from the primary panel. Nothing here writes to the
+      store, and nothing here ever labels a candidate a vulnerability.</p>
+    <p class="muted" id="ml-empty" hidden>No model internals in the store yet &mdash;
+      run training, ranking, or a mutation search first (<code>fuzzlab auto</code> or
+      the individual <code>fuzzlab</code> ML subcommands).</p>
+  </div>
+
+  <!-- Conformal triage: leads the tab per R-06 (flag/abstain/drop + the nonconformity
+       histogram + thresholds). -->
+  <div class="card ml-panel" id="panel-conformal" data-panel="conformal">
+    <h2>Conformal triage <span class="muted">&mdash; flag / abstain / drop</span></h2>
+    <p class="muted">Calibrated thresholds route confident scores to <b>flag</b> or
+      <b>drop</b> automatically (bounded error rate) and hand the uncertain middle to
+      <b>abstain</b> &mdash; for human/oracle review. This is a routing decision, not a
+      verdict.</p>
+    <p class="ml-meta" data-field="summary"></p>
+    <div class="ml-chart-row">
+      <div class="ml-chart-cell"><h3>Split</h3>
+        <div class="ml-chart" id="chart-conformal-split"></div></div>
+      <div class="ml-chart-cell"><h3>Nonconformity scores</h3>
+        <div class="ml-chart" id="chart-conformal-hist"></div></div>
+    </div>
+    <p class="muted" data-field="empty" hidden></p>
+  </div>
+
+  <!-- Reliability diagram is the advisory anchor (R-06): leads with banner + split +
+       calibration, so it sits right after the conformal split. -->
+  <div class="card ml-panel" id="panel-calibration" data-panel="classifier">
+    <h2>Classifier calibration &amp; ranking quality</h2>
+    <p class="ml-meta" data-field="summary"></p>
+    <div class="ml-chart-row">
+      <div class="ml-chart-cell"><h3>Reliability diagram <span class="muted">(binned;
+        45&deg; = perfectly calibrated)</span></h3>
+        <div class="ml-chart" id="chart-reliability"></div></div>
+      <div class="ml-chart-cell"><h3>PR curve <span class="muted">vs. prevalence
+        baseline</span></h3>
+        <div class="ml-chart" id="chart-pr-curve"></div></div>
+    </div>
+    <p class="muted" data-field="empty" hidden></p>
+  </div>
+
+  <div class="card ml-panel" id="panel-weights" data-panel="weights">
+    <h2>Logistic weights <span class="muted">&mdash; log-odds</span></h2>
+    <p class="muted">Global &beta; vs. a per-instance &beta;&middot;x contribution
+      (diverging bar; global and per-instance are labeled separately so they are never
+      mistaken for one another).</p>
+    <div class="ml-chart-cell"><div class="ml-chart" id="chart-weights"></div></div>
+    <p class="muted" data-field="empty">Not available: coefficients are trained
+      per-request and are not persisted to the store (only the conformal calibration
+      thresholds are), so this lane cannot surface them without a schema/training
+      change out of its read-only scope. Documented as a known gap &mdash; see
+      requirements.md FR-UI-11.</p>
+  </div>
+
+  <div class="card ml-panel" id="panel-ranker" data-panel="ranker">
+    <h2>Ranker <span class="muted">&mdash; ordering quality, zero request cost</span></h2>
+    <p class="ml-meta" data-field="summary"></p>
+    <div class="ml-chart-row">
+      <div class="ml-chart-cell"><h3>nDCG@k / precision@k <span class="muted">vs.
+        random</span></h3>
+        <div class="ml-chart" id="chart-rank-bars"></div></div>
+      <div class="ml-chart-cell"><h3>Rank score</h3>
+        <div class="ml-chart" id="chart-rank-score-hist"></div></div>
+      <div class="ml-chart-cell"><h3>Rank uncertainty</h3>
+        <div class="ml-chart" id="chart-rank-unc-hist"></div></div>
+      <div class="ml-chart-cell"><h3>Score vs. uncertainty</h3>
+        <div class="ml-chart" id="chart-rank-scatter"></div></div>
+    </div>
+    <p class="muted" data-field="empty" hidden></p>
+  </div>
+
+  <div class="card ml-panel" id="panel-anomaly" data-panel="anomaly">
+    <h2>Anomaly tripwire <span class="muted">&mdash; ECOD</span></h2>
+    <p class="muted">Unusual &ne; malicious: this flags statistically unusual requests
+      for review, not confirmed attacks.</p>
+    <p class="ml-meta" data-field="summary"></p>
+    <div class="ml-chart-cell"><div class="ml-chart" id="chart-anomaly-hist"></div></div>
+    <p class="muted" data-field="empty" hidden></p>
+  </div>
+
+  <div class="card ml-panel" id="panel-disagreement" data-panel="disagreement">
+    <h2>Active learning <span class="muted">&mdash; committee disagreement</span></h2>
+    <p class="muted">Candidates a bootstrap committee disagrees on most are the ones
+      most worth the oracle's limited budget next.</p>
+    <p class="ml-meta" data-field="summary"></p>
+    <div class="ml-chart-row">
+      <div class="ml-chart-cell"><h3>Disagreement</h3>
+        <div class="ml-chart" id="chart-disagreement-hist"></div></div>
+      <div class="ml-chart-cell">
+        <h3>Top query queue</h3>
+        <table id="disagreement-queue">
+          <thead><tr><th>candidate</th><th>disagreement</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <p class="muted" data-field="empty" hidden></p>
+  </div>
+
+  <div class="card ml-panel" id="panel-bandit" data-panel="bandit">
+    <h2>Bandit posteriors <span class="muted">&mdash; Thompson sampling, Beta(&alpha;,
+      &beta;)</span></h2>
+    <div class="ml-chart-row">
+      <div class="ml-chart-cell"><h3>Overlaid density</h3>
+        <div class="ml-chart" id="chart-bandit-density"></div></div>
+      <div class="ml-chart-cell">
+        <h3>Forest &mdash; mean &plusmn; 90% CI</h3>
+        <table id="bandit-forest">
+          <thead><tr><th>context</th><th>arm</th><th>mean</th><th>90% CI</th>
+            <th>pulls</th><th>mean cost</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <p class="muted" data-field="empty" hidden></p>
+  </div>
+
+  <div class="card ml-panel" id="panel-mutation" data-panel="mutation">
+    <h2>Mutation variants <span class="muted">&mdash; killed / survived</span></h2>
+    <p class="ml-meta" data-field="summary"></p>
+    <table id="mutation-table">
+      <thead><tr><th>id</th><th>class</th><th>variant</th><th>bypassed rule</th>
+        <th>status</th><th>coverage &Delta;</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="muted" data-field="empty" hidden></p>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="/static/js/ml.js"></script>{% endblock %}

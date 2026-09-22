@@ -1,4 +1,4 @@
-# BUG-0029 — Site-architecture corpus expansion under-delivered the plan's
+# BUG-0030 — Site-architecture corpus expansion under-delivered the plan's
 own explicit "as many substantiated CWEs as possible" instruction, and this
 recurred even immediately after a first correction for a related but
 distinct under-delivery (deferring research scope)
@@ -186,7 +186,7 @@ artifact, not just an appeal to the already-written general rule.
 
 ## Preventive action
 
-**PA-0032** (strengthens/supersedes PA-0020's enforcement scope, does not
+**PA-0033** (strengthens/supersedes PA-0020's enforcement scope, does not
 revise its diagnosis): every future explicit, quantitative "do more of X /
 don't stop at the minimum" instruction that produces a checkable artifact
 (a list, a count, a set of records) must get its own concrete, mechanical

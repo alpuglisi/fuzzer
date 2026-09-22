@@ -1,20 +1,32 @@
 """Tier 1 -- in-process functional + security assertion (T-LAB0.7).
 
-**[design -- not exercised against a live app/DB by this task's own test
-suite].** Per ``docs/LAB_PHASE_0_PLAN.md`` T-LAB0.7, a real Tier-1 check
-runs the app in-process against a real, long-lived database container --
-**never** an in-memory SQLite substitute, which produces dialect-dependent
-false passes/fails specifically for SQL-injection cells (identifier-
-position injection behaves differently across SQL dialects). This session
-is explicitly offline-only (no live containerized lab), so this module
-builds only Tier 1's *structure and interface* -- what a case looks like,
-how it is invoked, what it asserts -- and its own tests exercise that
-decision logic (:func:`evaluate_tier1_response`) against synthetic,
-hand-written response bodies via a fake test-double client, **never** a
-real running app or database. A Tier-1 pass is never recorded as oracle
-confirmation (T-LAB0.7's own rule) -- and neither is a pass of this
-module's own offline tests. Wiring a real in-process app + real DB
-container is separate, on-host work, out of scope for this session.
+**No longer design-only for every stack.** Per ``docs/LAB_PHASE_0_PLAN.md``
+T-LAB0.7, a real Tier-1 check runs the app in-process against a real
+database -- **never** an in-memory SQLite substitute used as a claimed
+dialect-accurate oracle, since identifier/alias-position SQL injection can
+behave differently across SQL dialects (this module's decision logic itself
+stays dialect-agnostic: it only checks whether a marker string appears in a
+real response body). ``fuzzlab.labgen.conformance.live_boot.LiveBootHarness``
+(``CC-LAB-0054``/``FR-LAB-52``) is a real, on-host-independent
+:class:`Tier1Client` implementation for the ``php_laravel`` stack -- it
+assembles a real Laravel build, boots it with a real ``php artisan serve``,
+and serves real HTTP responses, so :func:`run_tier1_case` can now be, and is
+(``CC-LAB-0060``/``FR-LAB-56``), exercised against a genuinely running
+in-process app for the stacks that harness covers, entirely inside this
+project's own offline test suite (no external/live lab target is touched --
+see the module docstring on ``live_boot`` for the sandbox-local mechanism).
+``tests/test_labgen_conformance_tier1.py`` carries both: the original
+decision-logic tests against a hand-written fake client (never claim more
+than "this module's wiring is coherent"), and skip-guarded
+(``live_boot_available()``) tests that run real :class:`Tier1Case` objects
+through :func:`run_tier1_case` against a real :class:`LiveBootHarness` for
+the ``php_laravel`` real-page manifests that harness already proves boot
+(the ``numeric`` and ``forms`` groups). Stacks with no such harness yet (e.g.
+``php_current``) remain design-only for Tier 1 until one is built --
+:class:`OnHostRequiredError` still refuses to run without a real client, and
+a Tier-1 pass is still never recorded as Tier-2 oracle confirmation
+(T-LAB0.7's own rule; Tier-2 wiring is separate, out-of-scope work -- see
+``tier2.py``).
 """
 
 from __future__ import annotations
@@ -101,10 +113,13 @@ def evaluate_tier1_response(case: Tier1Case, response_body: str) -> Tier1Outcome
 
 
 class Tier1Client(Protocol):
-    """What :func:`run_tier1_case` needs from an in-process app client. A
-    real implementation (on-host, out of scope here) wraps an in-process
-    PHP runtime plus a real, long-lived database container, per T-LAB0.7's
-    own rule against an in-memory SQLite substitute."""
+    """What :func:`run_tier1_case` needs from an in-process app client.
+
+    ``fuzzlab.labgen.conformance.live_boot.LiveBootHarness`` is a real,
+    already-built implementation of this protocol for the ``php_laravel``
+    stack (its ``.fetch()`` method); a stack without such a harness yet has
+    no real implementation, and :func:`run_tier1_case` refuses to run
+    without one (see :class:`OnHostRequiredError`)."""
 
     def fetch(self, case: Tier1Case) -> str:
         """Perform the request ``case`` describes and return the response

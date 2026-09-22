@@ -26,12 +26,12 @@ from typing import Any, Callable, TYPE_CHECKING
 # annotations resolve under `from __future__ import annotations`. Importing this
 # module implies the web extra; `core` never imports it, so core stays web-free.
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from fuzzlab.core.config import Config, load_config
-from fuzzlab.web import commandspec, results
+from fuzzlab.web import commandspec, findingsview, mlview, results, savedviews
 from fuzzlab.web.proxycontrol import RepeaterController
 from fuzzlab.web.runner import Runner, build_argv, display_command
 from fuzzlab.web.sse import sse_response
@@ -42,6 +42,192 @@ if TYPE_CHECKING:
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _TEMPLATES_DIR = os.path.join(_HERE, "templates")
 _STATIC_DIR = os.path.join(_HERE, "static")
+
+
+# --- control-plane hardening (component #12, CC-UI-0026, R-13) ---------------
+#
+# The panel is loopback-only (D11) but still reachable by any web page the operator's
+# browser visits, so it needs its own CSRF/DNS-rebinding defenses even with no ambient
+# credential (cookieless; SameSite wouldn't help — see below). Two INDEPENDENT gates are
+# required because each attack defeats the other's single defense on its own:
+#
+#   (a) Host allow-list, checked on *every* request. This is the only defense against
+#       DNS rebinding (a hostile page's origin resolves to 127.0.0.1 after the browser
+#       already trusted it): the attacker's JS runs same-origin per the browser but the
+#       Host header the server actually receives is wrong. Rolled ourselves rather than
+#       Starlette's TrustedHostMiddleware, which matches host only and strips/ignores
+#       the port — useless here since the port is exactly what pins this app apart from
+#       the lab target sharing the same loopback address.
+#   (b) On state-changing methods (POST/PUT/DELETE): Origin must equal the allow-list
+#       *and* Sec-Fetch-Site must be "same-origin" — REJECTING "same-site" too. A "site"
+#       is scheme+registrable-domain and port-independent, so this control plane and the
+#       deliberately-vulnerable lab it drives are same-site on 127.0.0.1 (only the port
+#       differs) — same-site alone is not enough here (classic CSRF sends a correct Host
+#       but a cross-site/attacker Origin; DNS rebinding sends a correct-looking
+#       Sec-Fetch-Site/Origin but a wrong Host — only the pair catches both).
+#
+# No CSRF token / session store: there's no ambient credential (no cookies) for a forged
+# request to ride on, so header validation alone suffices, and staying cookieless avoids
+# ever needing SameSite (which, per the same-site landmine above, would not help anyway).
+# Loopback is treated as a secure context, so modern browsers reliably send
+# Sec-Fetch-*/Origin; the Referer fallback below covers older/non-browser clients only.
+#
+# Implemented as a raw ASGI middleware (not `BaseHTTPMiddleware`) so it never buffers or
+# otherwise interferes with the SSE launch-output stream (`/api/launch/{token}/stream`).
+
+_CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+        "form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'")
+
+# Headers applied to every response, success or denial (security posture must not
+# depend on the outcome of the gate that decides whether to serve the request at all).
+_SECURITY_RESPONSE_HEADERS: list[tuple[bytes, bytes]] = [
+    (b"content-security-policy", _CSP.encode("latin-1")),
+    (b"x-content-type-options", b"nosniff"),
+    (b"x-frame-options", b"DENY"),
+    (b"referrer-policy", b"same-origin"),
+    (b"cross-origin-opener-policy", b"same-origin"),
+    (b"cross-origin-resource-policy", b"same-origin"),
+]
+
+# Content-Types that indicate a plain, no-JS <form method="post"> submission (e.g. the
+# panel's "Run automatic" quick-action) rather than a script-driven `fetch()`/XHR call.
+# The X-Fuzzlab-Client custom-header gate below is skipped for these — a native form can
+# never set a custom header, JS or not, so requiring it there would just break the
+# no-JS-friendly form with no security gain; Origin + Sec-Fetch-Site already defend that
+# path (a cross-site page's auto-submitted form fails the same-origin check).
+_FORM_CONTENT_TYPES = ("application/x-www-form-urlencoded", "multipart/form-data")
+
+
+def _security_allowlist(cfg: Config) -> tuple[frozenset[str], frozenset[str]]:
+    """The exact Host-header value(s) and Origin(s) this control plane accepts, derived
+    from its own loopback bind config (single source of truth for both gates below)."""
+    host = str(cfg.get("web_host", "127.0.0.1"))
+    port = int(cfg.get("web_port", 8787))
+    host_port = f"{host}:{port}".lower()
+    return frozenset({host_port}), frozenset({f"http://{host_port}"})
+
+
+def _origin_of(url: str) -> str | None:
+    """``scheme://host[:port]`` of a URL (e.g. a Referer), or None if unparseable."""
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    if not parts.scheme or not parts.netloc:
+        return None
+    return f"{parts.scheme}://{parts.netloc}".lower()
+
+
+async def _deny(send, status: int, reason: str) -> None:
+    """Send a minimal, fail-closed denial response carrying the same security headers
+    as any other response, bypassing the wrapped app entirely."""
+    body = reason.encode("utf-8")
+    headers = [
+        (b"content-type", b"text/plain; charset=utf-8"),
+        (b"content-length", str(len(body)).encode("latin-1")),
+        (b"cache-control", b"no-store"),
+        *_SECURITY_RESPONSE_HEADERS,
+    ]
+    await send({"type": "http.response.start", "status": status, "headers": headers})
+    await send({"type": "http.response.body", "body": body})
+
+
+def _inject_response_headers(send, path: str):
+    """Wrap an ASGI `send` so every response (not just denials) carries the CSP/frame/
+    sniff/referrer/COOP/CORP headers, plus `Cache-Control: no-store` off `/static/`."""
+    async def _send(message):
+        if message["type"] == "http.response.start":
+            headers = list(message.get("headers", []))
+            headers.extend(_SECURITY_RESPONSE_HEADERS)
+            if not path.startswith("/static/"):
+                headers.append((b"cache-control", b"no-store"))
+            message = {**message, "headers": headers}
+        await send(message)
+    return _send
+
+
+class SecurityGateMiddleware:
+    """Guards the control plane's state-changing surface against being driven by a
+    hostile web page (component #12, CC-UI-0026, R-13/NFR-UI-localhost). See the module
+    banner above for the two-gate rationale. Fail-closed: any ambiguity is a denial."""
+
+    def __init__(self, app, *, allowed_hosts: frozenset[str], allowed_origins: frozenset[str]):
+        self._app = app
+        self._hosts = allowed_hosts
+        self._origins = allowed_origins
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1")
+                   for k, v in scope.get("headers", [])}
+
+        # Gate (a): Host allow-list, every request — the DNS-rebinding defense.
+        host = headers.get("host")
+        if host is None or host.lower() not in self._hosts:
+            await _deny(send, 421, "unrecognized Host (DNS-rebinding guard)")
+            return
+
+        # Gate (b): state-changing methods only.
+        if scope["method"] in ("POST", "PUT", "DELETE"):
+            if not self._state_change_allowed(headers, scope["path"]):
+                await _deny(send, 403, "cross-origin/cross-site request rejected")
+                return
+
+        await self._app(scope, receive, _inject_response_headers(send, scope["path"]))
+
+    def _state_change_allowed(self, headers: dict[str, str], path: str) -> bool:
+        origin = headers.get("origin")
+        sec_fetch_site = headers.get("sec-fetch-site")
+        referer = headers.get("referer")
+
+        if sec_fetch_site is not None:
+            # Fetch Metadata present (reliable on loopback's secure context): same-
+            # origin ONLY — same-site is rejected too (the same-site landmine above).
+            if sec_fetch_site != "same-origin":
+                return False
+            if origin is None or origin.lower() not in self._origins:
+                return False
+        else:
+            # No Fetch Metadata: an older browser or a non-browser client (e.g. a
+            # script hitting the API directly). Fall back to Origin, then Referer.
+            ok = origin is not None and origin.lower() in self._origins
+            if not ok and referer is not None:
+                ref_origin = _origin_of(referer)
+                ok = ref_origin is not None and ref_origin in self._origins
+            if not ok:
+                return False
+
+        if path.startswith("/api/"):
+            content_type = headers.get("content-type", "")
+            is_form = content_type.split(";", 1)[0].strip().lower() in _FORM_CONTENT_TYPES
+            if not is_form and headers.get("x-fuzzlab-client") != "1":
+                return False
+        return True
+
+
+# U0 (CC-UI-0025): single source of truth for the sidebar nav — real per-section
+# routes, grouped Workbench / Analysis per FR-UI-7/8. `href` is a real URL (no
+# hash), `id` is compared against the per-request `active` section to render
+# server-side `aria-current="page"` (R-01/R-11); nothing here is JS-switched.
+NAV: list[dict[str, Any]] = [
+    {"group": "Workbench", "links": [
+        # U1/CC-UI-0028: Overview is now the landing route ("/"); Launcher moved to
+        # its own route ("/launcher") so the dashboard doesn't overload it (R-10).
+        {"id": "overview", "label": "Overview", "href": "/", "icon": "◆"},
+        {"id": "launcher", "label": "Launcher", "href": "/launcher", "icon": "▸"},
+        {"id": "proxy", "label": "Proxy", "href": "/proxy", "icon": "⇄"},
+        {"id": "findings", "label": "Findings", "href": "/findings", "icon": "⚑"},
+        {"id": "results", "label": "Results", "href": "/results", "icon": "▤"},
+    ]},
+    {"group": "Analysis", "links": [
+        {"id": "ml", "label": "ML", "href": "/ml", "icon": "◈"},
+        {"id": "diagnostics", "label": "Diagnostics", "href": "/diagnostics", "icon": "◍"},
+    ]},
+]
 
 # A pipeline runner takes the config and returns a summary dict. Injected so the
 # panel is testable and does not itself send traffic.
@@ -100,6 +286,21 @@ def _read_detail(cfg: Config, run_id: int) -> dict | None:
         return results.run_detail(store, run_id)
 
 
+def _read_ml(cfg: Config, run_id: int | None = None) -> dict:
+    """The whole read-only ML overview (U4/CC-UI-0031, CC-ML-0010) — every panel from
+    already-stored model internals; `{"available_any": False}` when the store has
+    nothing to show yet (no model trained, no bandit posteriors, ...)."""
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return {"run_id": run_id, "available_any": False}
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        overview = mlview.ml_overview(store, run_id)
+    overview["available_any"] = any(
+        isinstance(v, dict) and v.get("available") for v in overview.values())
+    return overview
+
+
 def _read_flows(cfg: Config, query: str | None = None) -> list[dict]:
     path = cfg.get("store_path", "fuzzlab.db")
     if not results.store_exists(path):
@@ -110,6 +311,22 @@ def _read_flows(cfg: Config, query: str | None = None) -> list[dict]:
         return proxyview.list_flows(store, query=query)
 
 
+def _read_overview(cfg: Config) -> dict:
+    """The Overview dashboard's aggregate (U1/CC-UI-0028); empty-store safe, never
+    creates the store file."""
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return {
+            "total_findings": 0, "severity": dict.fromkeys(
+                ("critical", "high", "medium", "low", "info"), 0),
+            "total_runs": 0, "runs_last_7d": 0, "recent_runs": [], "last_run": None,
+            "detection_quality": None, "efficiency": None,
+        }
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        return results.overview_summary(store)
+
+
 def _read_flow(cfg: Config, flow_id: int) -> dict | None:
     path = cfg.get("store_path", "fuzzlab.db")
     if not results.store_exists(path):
@@ -118,6 +335,53 @@ def _read_flow(cfg: Config, flow_id: int) -> dict | None:
     from fuzzlab.web import proxyview
     with Store(path) as store:
         return proxyview.flow_detail(store, flow_id)
+
+
+def _read_findings(cfg: Config) -> list[dict]:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return []
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        return findingsview.list_findings(store)
+
+
+def _read_finding(cfg: Config, finding_id: int) -> dict | None:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return None
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        return findingsview.finding_detail(store, finding_id)
+
+
+# --- saved views (U2/CC-UI-0029): the one write path this section owns; the
+# store file IS created on first save (an explicit user action), same posture
+# as the Repeater's "create tab" (never an implicit side effect of a GET).
+
+def _saved_views(cfg: Config, table_key: str) -> list[dict]:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return []
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        return savedviews.list_views(store, table_key)
+
+
+# --- diagnostics + store explorer (U5/CC-UI-0032, FR-UI-2) -------------------
+#
+# Same read-only-over-the-store shape as `_read_runs`/`_read_flows` above: never
+# creates the store file, opens a short-lived `Store` per request, and delegates
+# all query logic to the pure `fuzzlab.web.diagnostics` module so it's testable
+# without FastAPI.
+
+def _with_store(cfg: Config, fn: Callable[[Any], Any], default: Any) -> Any:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return default
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        return fn(store)
 
 
 # --- template context builders (rendering lives in templates/, via jinja2) ----
@@ -180,30 +444,40 @@ def _active_plugins() -> list[dict]:
         return []
 
 
-def _shell_context(cfg: Config) -> dict[str, Any]:
-    """Chrome shared by every page (sidebar + top context bar): the target, scope, and
-    authorization state the topbar chips render. Merged into each TemplateResponse so the
-    shell is identical on the index, a run detail, and the not-found page."""
+def _shell_context(cfg: Config, active: str | None = None) -> dict[str, Any]:
+    """Chrome shared by every page (sidebar + top context bar): the target, scope,
+    authorization state, and the nav/active section the topbar/sidebar render.
+    Merged into each TemplateResponse so the shell is identical on every route —
+    each section's own route (U0/CC-UI-0025), a run detail, and the not-found page."""
     return {
         "target": cfg.get("target_base_url", ""),
         "scope": ", ".join(cfg.get("scope_hosts", [])),
         "authorized": bool(cfg.get("authorized", False)),
+        "nav": NAV,
+        "active": active,
     }
 
 
-def _index_context(cfg: Config, state: LauncherState, runs: list[dict]) -> dict[str, Any]:
+def _launcher_context(cfg: Config, state: LauncherState) -> dict[str, Any]:
     activities = _activities()
     return {
-        **_shell_context(cfg),
+        **_shell_context(cfg, active="launcher"),
         "mode": state.mode,
         "categories": _known_categories(),
         "commands": _tool_commands(cfg),
         "activities": activities,
         "activity_groups": _group_activities(activities),
         "plugins": _active_plugins(),
-        "runs": runs,
         "last_result": None if state.last_result is None else str(state.last_result),
     }
+
+
+def _results_context(cfg: Config, runs: list[dict]) -> dict[str, Any]:
+    return {**_shell_context(cfg, active="results"), "runs": runs}
+
+
+def _overview_context(cfg: Config) -> dict[str, Any]:
+    return {**_shell_context(cfg, active="overview"), **_read_overview(cfg)}
 
 
 def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None,
@@ -231,6 +505,11 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
 
     app = FastAPI(title="fuzzlab control panel", docs_url=None, redoc_url=None,
                   lifespan=_lifespan)
+    # Control-plane hardening (CC-UI-0026, R-13) — see the class/module docs above.
+    # Added first so it wraps every route below, including /static.
+    allowed_hosts, allowed_origins = _security_allowlist(cfg)
+    app.add_middleware(SecurityGateMiddleware, allowed_hosts=allowed_hosts,
+                       allowed_origins=allowed_origins)
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 
@@ -241,10 +520,204 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         except KeyError:
             return None
 
+    # --- section routes (U0/CC-UI-0025): real per-section MPA routes replacing the
+    # old hash-switched single page; each is independently deep-linkable and no-JS
+    # renders its full content (R-01). Sidebar `active` state (aria-current) is
+    # computed server-side per route via `_shell_context`/`_launcher_context`.
+
     @app.get("/", response_class=HTMLResponse)
-    def index(request: Request):
+    def overview_page(request: Request):
+        # U1/CC-UI-0028: Overview is the landing route; read-only over the store
+        # (renders with an empty store and with seeded runs, R-10).
         return templates.TemplateResponse(
-            request, "index.html", _index_context(cfg, state, _read_runs(cfg)))
+            request, "sections/overview.html", _overview_context(cfg))
+
+    @app.get("/launcher", response_class=HTMLResponse)
+    def launcher(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/launcher.html", _launcher_context(cfg, state))
+
+    @app.get("/proxy", response_class=HTMLResponse)
+    def proxy_page(request: Request, repeater_tab: int | None = None):
+        # `repeater_tab` is an opaque hint carried across the PRG "send to Repeater"
+        # pivot (R-07) — never bytes, just the tab id; the page falls back to the
+        # default (no pre-selection) if it doesn't resolve to a live tab.
+        ctx = {**_shell_context(cfg, active="proxy"), "repeater_tab": repeater_tab}
+        return templates.TemplateResponse(request, "sections/proxy.html", ctx)
+
+    @app.get("/results", response_class=HTMLResponse)
+    def results_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/results.html", _results_context(cfg, _read_runs(cfg)))
+
+    @app.get("/findings", response_class=HTMLResponse)
+    def findings_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/findings.html", _shell_context(cfg, active="findings"))
+
+    @app.get("/api/findings")
+    def api_findings():
+        return {"findings": _read_findings(cfg)}
+
+    @app.get("/findings/{finding_id}", response_class=HTMLResponse)
+    def finding_html(request: Request, finding_id: int):
+        detail = _read_finding(cfg, finding_id)
+        if detail is None:
+            return templates.TemplateResponse(
+                request, "not_found.html",
+                {"run_id": finding_id, "kind": "Finding", "back_href": "/findings",
+                 **_shell_context(cfg, active="findings")}, status_code=404)
+        return templates.TemplateResponse(
+            request, "finding.html",
+            {"detail": detail, **_shell_context(cfg, active="findings")})
+
+    # --- "send to Repeater / open request" pivot, PRG + 303 (R-07) -------------
+    # Same pattern as U0's /proxy/repeater/from-flow: a real <form method="post">
+    # (works with JS off) creates the Repeater tab server-side, then a 303
+    # redirect carries only the opaque tab id in the query string. Findings don't
+    # persist raw bytes (only proxy flow history does), so `create_from_finding`
+    # reconstructs a minimal request from the finding's own url/method/param —
+    # never bytes from the URL, never a fetch, never a fabricated "original".
+    @app.post("/findings/repeater/from-finding")
+    async def repeater_from_finding_prg(request: Request):
+        from urllib.parse import parse_qsl
+        body = (await request.body()).decode("utf-8", errors="replace")
+        form = dict(parse_qsl(body))
+        try:
+            finding_id = int(form.get("finding_id", ""))
+        except (TypeError, ValueError):
+            return RedirectResponse(url="/findings", status_code=303)
+        tab = repeater_ctl.create_from_finding(finding_id)
+        if tab is None:
+            return RedirectResponse(url="/findings", status_code=303)
+        return RedirectResponse(url=f"/proxy?repeater_tab={tab['id']}", status_code=303)
+
+    # --- saved views (U2/CC-UI-0029, R-03): server-side, per `table_key` -------
+    @app.get("/api/views")
+    def views_list(table: str):
+        return {"views": _saved_views(cfg, table)}
+
+    @app.post("/api/views")
+    async def views_create(request: Request):
+        body = await request.json()
+        table_key = body.get("table")
+        name = (body.get("name") or "").strip()
+        if not table_key or not name:
+            return JSONResponse({"error": "table and name are required"}, status_code=400)
+        spec = body.get("spec") or {}
+        if not isinstance(spec, dict):
+            return JSONResponse({"error": "spec must be an object"}, status_code=400)
+        from fuzzlab.core.store import Store
+        with Store(cfg.get("store_path", "fuzzlab.db")) as store:
+            view = savedviews.create_view(store, table_key, name, spec,
+                                          bool(body.get("pinned", False)))
+        return {"view": view}
+
+    @app.put("/api/views/{view_id}")
+    async def views_update(view_id: int, request: Request):
+        body = await request.json()
+        spec = body.get("spec")
+        if spec is not None and not isinstance(spec, dict):
+            return JSONResponse({"error": "spec must be an object"}, status_code=400)
+        path = cfg.get("store_path", "fuzzlab.db")
+        if not results.store_exists(path):
+            return JSONResponse({"error": f"view {view_id} not found"}, status_code=404)
+        from fuzzlab.core.store import Store
+        with Store(path) as store:
+            view = savedviews.update_view(
+                store, view_id, name=body.get("name"), spec=spec,
+                pinned=body.get("pinned"))
+        if view is None:
+            return JSONResponse({"error": f"view {view_id} not found"}, status_code=404)
+        return {"view": view}
+
+    @app.delete("/api/views/{view_id}")
+    def views_delete(view_id: int):
+        path = cfg.get("store_path", "fuzzlab.db")
+        if not results.store_exists(path):
+            return JSONResponse({"error": f"view {view_id} not found"}, status_code=404)
+        from fuzzlab.core.store import Store
+        with Store(path) as store:
+            ok = savedviews.delete_view(store, view_id)
+        if not ok:
+            return JSONResponse({"error": f"view {view_id} not found"}, status_code=404)
+        return {"deleted": True}
+
+    @app.get("/ml", response_class=HTMLResponse)
+    def ml_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/ml.html", _shell_context(cfg, active="ml"))
+
+    @app.get("/diagnostics", response_class=HTMLResponse)
+    def diagnostics_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/diagnostics.html", _shell_context(cfg, active="diagnostics"))
+
+    # --- diagnostics API (U5/CC-UI-0032) — cross-run trends, intra-run series,
+    # snapshots; all read-only, no new backend beyond these routes (R-05/R-12). ---
+
+    @app.get("/api/diagnostics/runs")
+    def diag_runs() -> dict[str, Any]:
+        from fuzzlab.web import diagnostics as diag
+        return {"runs": _with_store(cfg, diag.list_runs_brief, [])}
+
+    @app.get("/api/diagnostics/metrics")
+    def diag_metrics() -> dict[str, Any]:
+        from fuzzlab.web import diagnostics as diag
+        return _with_store(cfg, diag.metric_keys, {"run_metrics": [], "series": {}})
+
+    @app.get("/api/diagnostics/trend")
+    def diag_trend(run_ids: str = "", keys: str = "") -> dict[str, Any]:
+        from fuzzlab.web import diagnostics as diag
+        ids = [int(x) for x in run_ids.split(",") if x.strip().isdigit()]
+        key_list = [k for k in keys.split(",") if k.strip()]
+        return _with_store(
+            cfg, lambda s: diag.run_metrics_trend(s, ids, key_list), {"runs": [], "series": {}})
+
+    @app.get("/api/diagnostics/series")
+    def diag_series(
+        run_ids: str = "", source: str = "", key: str = "", max_points: int = 1000,
+    ) -> dict[str, Any]:
+        from fuzzlab.web import diagnostics as diag
+        ids = [int(x) for x in run_ids.split(",") if x.strip().isdigit()]
+        return _with_store(
+            cfg,
+            lambda s: diag.metric_series_data(s, ids, source, key, max_points=max_points),
+            {"source": source, "key": key, "series": {}},
+        )
+
+    @app.get("/api/diagnostics/candidates/{run_id}")
+    def diag_candidates(run_id: int) -> dict[str, Any]:
+        from fuzzlab.web import diagnostics as diag
+        return _with_store(
+            cfg, lambda s: diag.candidate_score_histogram(s, run_id),
+            {"run_id": run_id, "edges": [], "counts": [], "n": 0})
+
+    @app.get("/api/diagnostics/bandit")
+    def diag_bandit() -> dict[str, Any]:
+        from fuzzlab.web import diagnostics as diag
+        return {"arms": _with_store(cfg, diag.bandit_arms, [])}
+
+    @app.get("/api/diagnostics/models")
+    def diag_models() -> dict[str, Any]:
+        from fuzzlab.web import diagnostics as diag
+        return {"models": _with_store(cfg, diag.model_registry_timeline, [])}
+
+    # --- store explorer (FR-UI-2) — strictly read-only, injection-safe. -----
+
+    @app.get("/api/store/tables")
+    def store_tables() -> dict[str, Any]:
+        from fuzzlab.web import diagnostics as diag
+        return {"tables": _with_store(cfg, diag.list_tables, [])}
+
+    @app.get("/api/store/tables/{name}")
+    def store_table(name: str, limit: int = 100, offset: int = 0):
+        from fuzzlab.web import diagnostics as diag
+        page = _with_store(
+            cfg, lambda s: diag.browse_table(s, name, limit=limit, offset=offset), None)
+        if page is None:
+            return JSONResponse({"error": f"no such table {name!r}"}, status_code=404)
+        return page
 
     @app.get("/api/status")
     def status() -> dict[str, Any]:
@@ -295,9 +768,9 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         if detail is None:
             return templates.TemplateResponse(
                 request, "not_found.html",
-                {"run_id": run_id, **_shell_context(cfg)}, status_code=404)
+                {"run_id": run_id, **_shell_context(cfg, active="results")}, status_code=404)
         return templates.TemplateResponse(
-            request, "run.html", {"detail": detail, **_shell_context(cfg)})
+            request, "run.html", {"detail": detail, **_shell_context(cfg, active="results")})
 
     # --- launcher: dry-run preview, gated execution, live output (Phase 0.3) ---
 
@@ -343,6 +816,12 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     @app.post("/api/launch/{token}/stop")
     async def launch_stop(token: str):
         return {"stopped": runner.stop(token)}
+
+    # --- ML tab (U4/CC-UI-0031, CC-ML-0010): read-only, advisory (R-06) ---------
+
+    @app.get("/api/ml/data")
+    def ml_data(run_id: int | None = None):
+        return _read_ml(cfg, run_id)
 
     @app.get("/api/plugins")
     def plugins():
@@ -486,6 +965,29 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         if tab is None:
             return JSONResponse({"error": f"flow {flow_id} not found"}, status_code=404)
         return tab
+
+    # --- "send to Repeater" pivot, PRG + 303 (R-07) ----------------------------
+    # A real <form method="post"> so the pivot works as a plain navigation (no JS
+    # required to trigger it): POST creates the tab server-side, then a 303
+    # redirect to GET /proxy carries only the opaque tab id in the query string —
+    # never raw request bytes (those stay server-side; redaction is render-time).
+    @app.post("/proxy/repeater/from-flow")
+    async def repeater_from_flow_prg(request: Request):
+        # Parsed by hand (urlencoded `application/x-www-form-urlencoded`, the
+        # browser's default for a plain <form>) rather than Starlette's
+        # `request.form()`, which pulls in `python-multipart` even for this
+        # single-field case — an extra dependency this one field doesn't earn.
+        from urllib.parse import parse_qsl
+        body = (await request.body()).decode("utf-8", errors="replace")
+        form = dict(parse_qsl(body))
+        try:
+            flow_id = int(form.get("flow_id", ""))
+        except (TypeError, ValueError):
+            return RedirectResponse(url="/proxy", status_code=303)
+        tab = repeater_ctl.create_from_flow(flow_id)
+        if tab is None:
+            return RedirectResponse(url="/proxy", status_code=303)
+        return RedirectResponse(url=f"/proxy?repeater_tab={tab['id']}", status_code=303)
 
     @app.post("/api/proxy/repeater/tabs/{tab_id}/send")
     async def repeater_send(tab_id: int, request: Request):

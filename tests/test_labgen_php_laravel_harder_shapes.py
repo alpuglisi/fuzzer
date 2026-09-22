@@ -88,7 +88,7 @@ REQUIRED_SHAPES = {
     ("xss", "html_body"),
     ("xss", "url_javascript_scheme"),
     ("xss", "html_attribute_unquoted"),
-    # CC-LAB-0060: mass-assignment, added to php_current first then here, to
+    # CC-LAB-0064: mass-assignment, added to php_current first then here, to
     # keep this full-depth invariant true (php_laravel's own
     # OrmEntityBulkAssignSink uses DB::table()->update(), not php_current's
     # PDO -- a genuine Laravel-idiomatic equivalent, not a port).

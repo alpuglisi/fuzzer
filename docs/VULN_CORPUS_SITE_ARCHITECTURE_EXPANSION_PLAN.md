@@ -1,6 +1,6 @@
 # Vulnerability corpus expansion — site-architecture extension plan
 
-Rewritten from scratch 2026-09-22 following `docs/bugs/BUG-0029-*.md`: the
+Rewritten from scratch 2026-09-22 following `docs/bugs/BUG-0030-*.md`: the
 prior version of this plan stated Step 6 ("the more CWEs the better") as
 unenforced prose, and that step was under-delivered twice in a row as a
 result. This version fixes that by making every step's success criterion
@@ -45,7 +45,7 @@ validation tiers unchanged. It does not redefine them.
 6. **Research CWEs — to an enforced floor, not a vibe.** For each entry,
    research (against the MITRE CWE index, not recall) every CWE genuinely
    applicable to its architecture/function/tech-stack combination. See
-   "Step 6 in detail" below — this is the step BUG-0029 was about, so it
+   "Step 6 in detail" below — this is the step BUG-0030 was about, so it
    gets its own section instead of a one-line restatement.
 7. **Build and validate a vulnerable counterpart.** Using step 6's CWEs,
    construct (or find) the vulnerable side of the pair; validate it is
@@ -55,7 +55,7 @@ validation tiers unchanged. It does not redefine them.
    `lab/safety_matrix.yaml` row or module template — a proposal, not an
    applied change; see "Step 8 handoff" below for why it stops there.
 
-## Step 6 in detail (revised twice: BUG-0029, then tightened per direct
+## Step 6 in detail (revised twice: BUG-0030, then tightened per direct
 ## follow-up instruction — shared CWEs don't count toward the floor)
 
 **Schema: `cwe_shared:` / `cwe_unique:` / `cwe_rationale:`, not a flat
@@ -105,7 +105,7 @@ pass, read the code again rather than padding with a generic parent CWE
 `cwe_unique` entries, or if any `cwe_unique` ID is also claimed unique by
 another touched entry (a real cross-entry collision the first version of
 this hook could not detect at all, since it only counted a flat list's
-length). This is the enforcement path PA-0032 requires — verified against
+length). This is the enforcement path PA-0033 requires — verified against
 the actual corpus, not just asserted: it caught 2 legacy entries still on
 the old flat `cwe:` field and one real cross-entry ID collision
 (CWE-367 claimed by two different entries) the first time it ran against
@@ -157,7 +157,7 @@ entry are the proposal a later change accepts, renames, or merges.
 
 ## Status
 
-- [x] Plan rewritten from scratch (this document), per `docs/bugs/BUG-0029-*.md`.
+- [x] Plan rewritten from scratch (this document), per `docs/bugs/BUG-0030-*.md`.
 - [x] Step 1: all 6 categories x 5 sites identified, sourced —
       `docs/research/site-architecture-survey.md`.
 - [x] Step 2: architecture write-ups complete for all 6 categories (20
@@ -185,7 +185,7 @@ entry are the proposal a later change accepts, renames, or merges.
 - [x] Step 8: `suggested_op`/`suggested_sink_family` proposals recorded for
       all pairs across all 12 cells. Applied to `lab/safety_matrix.yaml` per
       direct instruction (102 entries, was 25; 20 new sink families; see
-      `CC-LAB-0059`/`FR-LAB-56`) — registry-only, no emitter/module yet
+      `CC-LAB-0063`/`FR-LAB-58`) — registry-only, no emitter/module yet
       generates code for the new sink families (separate future work).
 - [x] Scope correction (per direct instruction): waves 1-2 had incorrectly
       confined collection to CWE classes already implemented in
@@ -214,7 +214,7 @@ entry are the proposal a later change accepts, renames, or merges.
       (`hook_exit=0`) across the full touched set. `suggested_op`/
       `suggested_sink_family` recorded per entry, applied to
       `lab/safety_matrix.yaml` together with the original 6 pairs' — see
-      the Step 8 line above (`CC-LAB-0059`/`FR-LAB-56`).
+      the Step 8 line above (`CC-LAB-0063`/`FR-LAB-58`).
 - [ ] Remaining architecture/function combinations within each of the 6
       original categories (each category's 5 sites can surface more than
       one combination; only one per category has been carried through for
@@ -224,12 +224,12 @@ entry are the proposal a later change accepts, renames, or merges.
       pair is `validated: true` at the static/manual-review tier in the
       interim.
 - [x] `lab/safety_matrix.yaml` integration — done per direct instruction,
-      `CC-LAB-0059`/`FR-LAB-56` (see Step 8 above). Registry-only: emitter/
+      `CC-LAB-0063`/`FR-LAB-58` (see Step 8 above). Registry-only: emitter/
       module code generation for the 20 new sink families remains a
       separate, unstarted follow-up.
 - [x] Emitter/module code generation, first increment — `orm_entity_bulk_
       assign` (mass-assignment) implemented in `php_current` and
-      `php_laravel` (`CC-LAB-0060`/`FR-LAB-57`, drafted and reviewed
+      `php_laravel` (`CC-LAB-0064`/`FR-LAB-59`, drafted and reviewed
       through this project's new pre-change review gate before
       implementation, per direct instruction). 2 of the family's 10 ops;
       the other 8 ops, the other 19 new sink families, and

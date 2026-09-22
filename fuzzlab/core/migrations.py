@@ -321,6 +321,57 @@ CREATE TABLE run_plugin (
 CREATE INDEX idx_run_plugin_run ON run_plugin(run_id);
 """
 
+# --- migration 11: cross-run scalar time series (Phase 4b, B0 / CC-CORE-0018) -
+# A generic, TensorBoard/MLflow-shaped scalar log: any subsystem (GBT/logistic
+# training curves, the bandit loop's posterior/regret, coverage-frontier growth,
+# MutationSearch reward/novelty, stage wall-clock/throughput, ...) writes rows
+# here instead of inventing its own metrics table. `source` is the subsystem
+# bucket (mirrors existing `run_metrics` prefixes: 'gbt', 'logreg', 'bandit',
+# 'coverage', 'rank', 'ml'); `key` is a bounded, slash-delimited path
+# ('train/loss', 'regret/cumulative', 'posterior/arm_3/mean',
+# 'coverage/lines') — never a per-example/feature key; distributions are
+# stored pre-binned by the writer, not as raw per-key blowup. `value` is
+# REAL NOT NULL; non-finite values (NaN/inf) are rejected by the writer
+# (log_scalar), not representable here — no `is_nan` column, no NaN
+# read-branch. Two indexes serve the two access patterns: one series within a
+# run (run_id, source, key, step), and one series overlaid across runs
+# (source, key, run_id, step). Additive; no existing table/column changes.
+_M0011 = """
+CREATE TABLE metric_series (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id  INTEGER NOT NULL REFERENCES run(id),
+    source  TEXT NOT NULL,
+    key     TEXT NOT NULL,
+    step    INTEGER NOT NULL,
+    ts      TEXT NOT NULL DEFAULT (datetime('now')),
+    value   REAL NOT NULL
+);
+CREATE INDEX idx_metric_series_run ON metric_series(run_id, source, key, step);
+CREATE INDEX idx_metric_series_overlay ON metric_series(source, key, run_id, step);
+"""
+
+# --- migration 12: saved views (U2, CC-UI-0029, R-03) -----------------------
+# The Findings workbench's faceted filters/quick-filter/sort/columns are saved
+# server-side (durable, shared across the panel's own readers) rather than in
+# `localStorage` (per-viewer only — reserved for throwaway UI state like the
+# last-selected view id). `table_key` names the logical dataset the view is
+# over ('finding' first; other workbenches can reuse this table later).
+# `spec_json` is opaque to the store — `{version, name, pinned, filter:
+# {text, facets, predicates}, sort, columns}` (see `fuzzlab.web.savedviews`).
+# Additive; no existing table/column changes.
+_M0012 = """
+CREATE TABLE saved_views (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_key  TEXT NOT NULL,
+    name       TEXT NOT NULL,
+    spec_json  TEXT NOT NULL,
+    is_pinned  INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_saved_views_table ON saved_views(table_key);
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -333,6 +384,8 @@ MIGRATIONS: list[tuple[int, str]] = [
     (8, _M0008),
     (9, _M0009),
     (10, _M0010),
+    (11, _M0011),
+    (12, _M0012),
 ]
 
 

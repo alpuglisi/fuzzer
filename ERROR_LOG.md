@@ -37,7 +37,7 @@ Format per entry:
   missed self-check needs mechanical enforcement, not a clearer written
   rule"), but PA-0020's existing enforcement (`check-error-log-bookkeeping.sh`)
   is scoped only to `ERROR_LOG.md` bookkeeping, not to this deliverable —
-  see `docs/bugs/BUG-0029-*.md`'s "Prior-preventive-action failure
+  see `docs/bugs/BUG-0030-*.md`'s "Prior-preventive-action failure
   analysis" for the full account.
 - **Remediation:** re-researched and expanded all 6 existing entries' `cwe:`
   lists against the MITRE index; added
@@ -48,7 +48,7 @@ Format per entry:
   `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md` from scratch with
   a Step 6 that names the actual research procedure and its enforcement
   mechanism instead of repeating unenforced prose. New preventive action:
-  PA-0032 (`docs/PREVENTIVE_ACTIONS.md`).
+  PA-0033 (`docs/PREVENTIVE_ACTIONS.md`).
 - **Status:** Fixed.
 
 ## 2026-09-22 — Research tooling: Semgrep installs but panics at import in this remote execution environment (Environment)
@@ -79,6 +79,28 @@ Format per entry:
 - **Status:** Environment (fixed outside the repo — no `fuzzlab` code defect,
   so no `docs/bugs/BUG-NNNN-*.md`/preventive-action entry applies; this is
   purely a note for whoever next tries to run Semgrep in a similar container).
+## 2026-09-22 — Session process: agent paused to ask for continuation after explicit "work until tasks run out" instruction (fixed, BUG-0029/PA-0032)
+
+- **Symptom:** the user instructed the session to keep executing the approved
+  `docs/PARALLEL_LANE_BUILD_PLAN.md` build lanes "until you ran out of tasks." After
+  Wave 1a completed (7 lanes merged, verified, pushed), the session ended its turn with
+  a summary that included "say the word if you want me to continue" — an implicit
+  request for confirmation before dispatching Wave 1b/Wave 2, despite the user having
+  already given that authorization up front.
+- **Root cause:** default end-of-turn habit (offering a next-step choice) was applied
+  even though the user's standing instruction for this task explicitly pre-authorized
+  continuing without a check-in; the session treated "keep working" as applying only to
+  the current wave rather than to the whole remaining backlog.
+- **Remediation:** the user called it out directly; the session proceeded immediately
+  with Wave 1b (B0's 4 emitter sub-lanes) and Wave 2 (5 UI lanes + D0b) without asking
+  again, and will continue dispatching remaining waves/lanes from
+  `docs/PARALLEL_LANE_BUILD_PLAN.md` without pausing for confirmation until the backlog
+  is actually exhausted or a genuine blocker (not just "more work exists") comes up.
+- **Status:** Fixed. Not a fuzzlab code defect, so `CLAUDE.md`'s bug protocol does not
+  strictly require it — but per the user's explicit request, given the full treatment
+  anyway: `docs/bugs/BUG-0029-session-paused-for-confirmation-despite-explicit-continue-instruction.md`
+  (root-cause analysis, recurrence review against `BUG-0018`'s related-but-distinct
+  agent-conduct failure) and `docs/PREVENTIVE_ACTIONS.md`'s **PA-0032**.
 
 ## 2026-09-22 — LAB: `LiveBootHarness` silently followed real redirects and its seeded schema lacked Eloquent timestamp columns (fixed)
 

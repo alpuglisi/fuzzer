@@ -5,12 +5,12 @@ import json
 import pytest
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
 from fuzzlab.core.store import Store  # noqa: E402
 from fuzzlab.web.app import create_app  # noqa: E402
 from fuzzlab.web.results import list_runs, run_detail  # noqa: E402
+from tests._webclient import web_client  # noqa: E402
 
 
 def _seed(path):
@@ -43,7 +43,7 @@ def _seed(path):
 def _client(path):
     cfg = load_config(overrides={"store_path": str(path),
                                  "target_base_url": "http://127.0.0.1:8080"}, environ={})
-    return TestClient(create_app(cfg))
+    return web_client(create_app(cfg))
 
 
 def test_results_functions_read_the_store(tmp_path):
@@ -85,10 +85,12 @@ def test_run_html_page_renders_findings(tmp_path):
     assert "TP=4" in body and "FP=0" in body
 
 
-def test_index_shows_runs_table(tmp_path):
+def test_results_page_shows_runs_table(tmp_path):
+    # Results is now its own route (U0/CC-UI-0025): the run listing moved off "/",
+    # which now renders the Launcher.
     path = tmp_path / "r.db"
     _seed(path)
-    body = _client(path).get("/").text
+    body = _client(path).get("/results").text
     assert "Review runs" in body and "/runs/1" in body
 
 
@@ -119,4 +121,4 @@ def test_panel_without_store_shows_no_runs(tmp_path):
     client = _client(path)
     assert client.get("/api/runs").json()["runs"] == []
     assert not path.exists()
-    assert "No runs recorded yet" in client.get("/").text
+    assert "No runs recorded yet" in client.get("/results").text

@@ -1,11 +1,11 @@
 #!/bin/bash
-# Stop hook: mechanically catch the BUG-0029 failure mode (a corpus
+# Stop hook: mechanically catch the BUG-0030 failure mode (a corpus
 # manifest.yaml entry given only a recalled CWE or two, or CWEs merely
 # copy-pasted across sibling entries) instead of relying on remembering
-# PA-0032. Every entry needs >= 2 CWEs in `cwe_unique:` that are not
+# PA-0033. Every entry needs >= 2 CWEs in `cwe_unique:` that are not
 # claimed as unique by any other entry this hook checks (a CWE relevant to
 # more than one entry belongs in `cwe_shared:` instead and does not count
-# toward the floor). See docs/bugs/BUG-0029-*.md.
+# toward the floor). See docs/bugs/BUG-0030-*.md.
 
 input=$(cat)
 
@@ -82,7 +82,7 @@ for path in manifests:
                 # Pre-migration entry using the old flat `cwe:` field.
                 problems.append(
                     f"{path}: {fname} still uses the old flat `cwe:` field -- "
-                    f"migrate to `cwe_unique:`/`cwe_shared:` per PA-0032's "
+                    f"migrate to `cwe_unique:`/`cwe_shared:` per PA-0033's "
                     f"updated standard (>= 2 CWEs unique to this entry, not "
                     f"shared with any other touched entry)."
                 )
@@ -114,7 +114,7 @@ for path in manifests:
 import os
 import glob
 
-# Second mechanical floor (PA-0032): "at least 5 vulnerable/idiomatic pairs
+# Second mechanical floor (PA-0033): "at least 5 vulnerable/idiomatic pairs
 # per class" is its own explicit quantitative instruction and needs its own
 # check, not just a restatement in a planning doc. Group by cell directory
 # (docs/research/corpus-examples/<cell>/), aggregate every manifest.yaml
@@ -165,7 +165,7 @@ if problems:
         print(f"  - {p}", file=sys.stderr)
     print(
         "Research the MITRE CWE index (https://cwe.mitre.org/data/index.html) for "
-        "CWEs genuinely specific to each entry's own code, per PA-0032 / "
+        "CWEs genuinely specific to each entry's own code, per PA-0033 / "
         "docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md Step 6. For the "
         "pairs-per-class floor, add more vulnerable/idiomatic pairs to the cell.",
         file=sys.stderr,

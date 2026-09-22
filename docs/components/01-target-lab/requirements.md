@@ -36,11 +36,18 @@ and measured. Authorized, lab-only.
 - **FR-LAB-8** (Lab track) Migrate the existing hand-built Puppy Fort Factory
   app's content into the generator (Phase 3) rather than keep it as a
   permanent separate fixture. (D20) **Status (2026-09-22, `FR-LAB-51`/
-  `CC-LAB-0053`): still open, not satisfied.** The migration itself (server-side
-  pages, `FR-LAB-44`..`50`) and the parity/cutover coverage gate that verifies it
-  (`FR-LAB-51`) are both done, and the gate reports 13 of 16 `PFF-` cases
-  covered by an emitted `php_laravel` cell with the remaining 3 exempted
-  (`lab/ground-truth/migration-exemptions.yaml`). This requirement is
+  `CC-LAB-0053`, reconfirmed by `CC-LAB-0062`): still open, not satisfied.**
+  The migration itself (server-side pages, `FR-LAB-44`..`50`) and the
+  parity/cutover coverage gate that verifies it (`FR-LAB-51`) are both done,
+  and the gate reports **12 of 16** `PFF-` cases covered by an emitted
+  `php_laravel` cell with the remaining **4 exempted**
+  (`lab/ground-truth/migration-exemptions.yaml`; `CC-LAB-0058` moved
+  `PFF-0003` from covered to exempted after `PFF-0002` was chosen as
+  `/search.php`'s one canonical cell) and 0 uncovered — this is Layer A
+  (the 16 real-page `PFF-` cases) fully closed per D-open-1's scope
+  resolution (`docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.7), not the whole
+  ~30-page app in the literal, byte-for-byte sense `LAB_PHASE_0_PLAN.md`'s
+  original exit-criterion wording used. This requirement itself is
   satisfied only once `L-P3.3c-CUT` actually retires the fixture (deletes
   `puppy-fort-factory/`, re-points `lab/compose.yaml`/`deploy.sh`/
   `filtermodel.py`'s WAF-rules path) — deliberately not scheduled yet, pending
@@ -1197,11 +1204,17 @@ lane) can submit a payload as
      entry is a diff a reviewer sees. `load_exemptions()` raises on a malformed or
      duplicate entry rather than silently treating the register as empty. Today's register
      lists `PFF-1002` (`track.php` performs no database query at all — no sink for any op
-     the safety matrix models to apply to, per plan §4.3.6.6's own finding) and
+     the safety matrix models to apply to, per plan §4.3.6.6's own finding),
      `PFF-0007`/`PFF-0008` (DOM XSS, client-rendered, never reaches the server — exempted
      per the D-open-1/D-open-2 decisions, plan §4.3.6.7, both decided 2026-09-22: Layer B
      reproduction is not required for the cutover, and DOM XSS/`L-P3.3c-DOM` is out of the
-     cutover's "full coverage" bar, deferred backlog instead).
+     cutover's "full coverage" bar, deferred backlog instead), and (added by `CC-LAB-0058`)
+     `PFF-0003` (`search.php`'s reflected-XSS case — real, but `/search.php`'s single
+     `php_laravel` page profile can render only one canonical cell at that real URL, and
+     `PFF-0002`, the co-located LIKE-clause SQLi, was chosen canonical; `PFF-0003`'s shape
+     remains authored/tested as one of `FR-LAB-49`'s illustrative-URL cells). Status
+     (`CC-LAB-0062`, 2026-09-22): live gate result is 12 covered / 4 exempted / 0
+     uncovered — Layer A closed.
   4. **Deliberately its own module**, `fuzzlab.labgen.cutover_gate`, not an addition to
      `fuzzlab.labgen.regression_gate`: that gate diffs two already-loaded `GroundTruth`
      snapshots (schema-shaped, manifest-independent by design); this one walks manifest
@@ -1495,13 +1508,93 @@ lane) can submit a payload as
     silently patch around it.
   - Still, as `FR-LAB-52`/`FR-LAB-54` already state, **not** a Tier-2,
     oracle-grade, container-based, dialect-correct oracle confirmation of a
-    label (`tier2.py`'s own claim is unchanged) — this requirement proves
-    boot + real, observable behavior against the real engine and real
-    schema, which is a stronger, but still narrower, claim than that.
+    label (see `FR-LAB-56` for `tier2.py`'s own, now real but still
+    synthetic-in-sandbox, claim) — this requirement proves boot + real,
+    observable behavior against the real engine and real schema, which is a
+    stronger, but still narrower, claim than a full Tier-2 confirmation.
 
-- **FR-LAB-56** *(applies the site-architecture expansion corpus's
+- **FR-LAB-56** *(wires `fuzzlab.labgen.conformance.tier2` — previously
+  `"[design -- not exercised]"`, no working confirmation logic — against a
+  real, synthetic, in-sandbox app, mirroring `FR-LAB-52`'s Tier-1 precedent;
+  `CC-LAB-0061`.)* `tier2.py` gains a real `Tier2Oracle` implementation,
+  `LiveBootTier2Oracle`, built on the existing, unmodified
+  `fuzzlab.labgen.conformance.live_boot.LiveBootHarness` (never the real,
+  loopback-only lab target; no `--authorized` needed, D11). It adds a real
+  control/baseline differential on top of what a bare Tier-1 evidence-marker
+  check can show: it sends the case's real payload request and a second
+  real request for a caller-supplied inert control value at the same
+  param/location, and reports `confirmed_vulnerable` only when the evidence
+  marker is present in the payload response and genuinely absent from the
+  control response — never guessing a verdict when the control itself
+  cannot distinguish vulnerable from not (a real `inconclusive` detail is
+  reported instead, fail-closed per `PA-0025`, matching
+  `fuzzlab.labgen.identifier_sqli_assertion.IdentifierSqliTier2Oracle`'s own
+  convention — a second, pre-existing, real `Tier2Oracle` this requirement
+  does not change). New `Tier2Client` protocol names the minimal
+  `.get()`/`.post()` shape it needs, satisfied structurally by
+  `LiveBootHarness` without a new import dependency between the two
+  conformance modules. Proven for real (not just offline) against
+  `phase3_php_laravel_real_pages_numeric.yaml`'s `product.php` vulnerable
+  (`LABGEN-RPL-PRODUCT`) / secure (`LABGEN-RPL-PRODUCT-BOUND`) twins — a
+  real positive and a real negative confirmation for the same `1 OR 1=1`
+  boolean-injection payload.
+  - Still **not** the production-grade, dialect-sensitive, container-based,
+    real-target oracle T-LAB0.7 describes as Tier 2's own bar — that remains
+    `IdentifierSqliTier2Oracle`'s/a future real-target oracle's job, exactly
+    as `FR-LAB-52`/`FR-LAB-54`/`FR-LAB-55` already state for the equivalent
+    Tier-1 live-boot claim. `LiveBootTier2Oracle` narrows that gap (a real,
+    in-sandbox confirmation mechanism now exists where none did before) but
+    does not close it.
+
+- **FR-LAB-57** *(`CC-LAB-0060`, 2026-09-22 — wires `fuzzlab.labgen.
+  conformance.tier1`'s own public API against a real in-process app+DB, for
+  whichever stacks already have a real `Tier1Client`; extends `FR-LAB-52`'s
+  `LiveBootHarness` scope, does not change it.)* `tier1.py`'s
+  `build_tier1_case`/`run_tier1_case`/`evaluate_tier1_response` must be
+  provably exercisable against a real running app, not only a hand-written
+  fake client — for any stack that already has a real, on-host-independent
+  `Tier1Client` implementation. Today that is `php_laravel`, via
+  `LiveBootHarness.fetch()` (`FR-LAB-52`'s existing harness, unmodified and
+  reused as-is; this requirement adds no new harness code, only tests that
+  drive the existing one through `tier1.py`'s own public functions instead
+  of `LiveBootHarness.get()`/`.post()` directly).
+  1. **Real Tier-1 cases, real differential.** `TestTier1RealLiveBoot` in
+     `tests/test_labgen_conformance_tier1.py` builds real `Tier1Case`
+     objects for `product.php`'s real vulnerable/secure twin
+     (`LABGEN-RPL-PRODUCT`/`LABGEN-RPL-PRODUCT-BOUND`, `lab/manifests/
+     phase3_php_laravel_real_pages_numeric.yaml`) and runs each through
+     `run_tier1_case()` against a real `LiveBootHarness` — the same real
+     boolean-injection differential `FR-LAB-52`'s own
+     `test_live_boot_numeric_manifest_sqli_twin_round_trips_a_payload`
+     proves by hand-inspecting `harness.get()` responses, now proven through
+     `evaluate_tier1_response`'s own marker-in-body decision logic instead.
+     Both twins' real `Tier1Outcome.matches_expectation` is asserted `True`.
+  2. **Real Tier-1 negative.** The same test module runs `contact.php`/
+     `newsletter.php` (`LABGEN-PLRP-1005`/`1006`, `lab/manifests/
+     phase3_laravel_real_pages_forms.yaml`, secure-only escaped-echo forms)
+     through `build_tier1_case()`/`run_tier1_case()` with a raw
+     `<script>...</script>` payload and `expected_vulnerable=False`,
+     asserting the real response never reflects it unescaped.
+  3. **Skip-guarded and marked slow**, exactly matching `FR-LAB-52`'s own
+     convention: `live_boot_available()` (composer + php on `PATH`, real
+     Packagist reachability) gates the whole `TestTier1RealLiveBoot` class,
+     and each test carries `@pytest.mark.slow` — a real `composer install`
+     against Packagist, unchanged wall-clock-time profile from `FR-LAB-52`.
+  4. **Still synthetic, in-sandbox, never the real target (D11).** Exactly
+     like `FR-LAB-52`/`FR-LAB-54`/`FR-LAB-55`: `LiveBootHarness` assembles
+     and boots its own throwaway build in a temp directory; nothing here
+     sends traffic to the real, loopback-only Ryder's Puppy Fort Factory
+     lab target, so no `--authorized` flag applies (D11 unchanged).
+  5. **Stacks with no real `Tier1Client` yet remain design-only.** `tier1.py`
+     itself is unmodified in behavior — only its module docstring is
+     updated to state the current, stack-by-stack status accurately.
+     `OnHostRequiredError` is still raised for any case run with `client=None`,
+     and a Tier-1 pass is still never recorded as Tier-2 oracle confirmation
+     (`tier2.py`'s own scope is untouched by this requirement).
+
+- **FR-LAB-58** *(applies the site-architecture expansion corpus's
   `suggested_op`/`suggested_sink_family` proposals to `lab/safety_matrix.yaml`,
-  per `CC-LAB-0059`.)* `lab/safety_matrix.yaml` grows from 25 to 102 entries,
+  per `CC-LAB-0063`.)* `lab/safety_matrix.yaml` grows from 25 to 102 entries,
   covering 20 new `sink_family` values and ~70 new transform `op`s, spanning
   every cell `docs/research/corpus-examples/` currently holds (the original
   6 — `access-control`, `auth-session`, `ecommerce-logic`, `file-handling`,
@@ -1542,11 +1635,11 @@ lane) can submit a payload as
   sink_family)` key across the 102 entries; `tests/test_labgen_verdict.py`
   (15 tests, pre-existing entries only) stays green, unchanged.
 
-- **FR-LAB-57** *(implements code generation for `orm_entity_bulk_assign`
-  in `php_current`'s shared module registry, per `CC-LAB-0060`, drafted and
+- **FR-LAB-59** *(implements code generation for `orm_entity_bulk_assign`
+  in `php_current`'s shared module registry, per `CC-LAB-0064`, drafted and
   reviewed through this project's new pre-change review gate,
   `docs/components/README.md`, before implementation.)* First scoped
-  increment of the module-template half `FR-LAB-56` left unstarted: 2 of
+  increment of the module-template half `FR-LAB-58` left unstarted: 2 of
   the family's 10 `lab/safety_matrix.yaml` ops (`unfiltered_body_update`
   vulnerable, `runtime_field_allowlist` secure), in the shared
   `fuzzlab.labgen.modules` registry (`fuzzlab/labgen/modules/__init__.py`,
@@ -1555,7 +1648,7 @@ lane) can submit a payload as
   registry for `fuzzlab.labgen.minimal_pair`'s composition-line classifier
   to pass (its `_MODULE_CATEGORY` dict is built only from this package's
   `SOURCES`/`TRANSFORMS`/`SINKS`/`COMPLEXITIES`, never from an individual
-  emitter's own dicts); an earlier draft of `CC-LAB-0060` targeted
+  emitter's own dicts); an earlier draft of `CC-LAB-0064` targeted
   `php_laravel`'s Eloquent `$fillable`/`$guarded` directly and was
   re-scoped away from that in review for exactly this reason, plus a
   second one — Eloquent's mass-assignment guard is a model-class property,
@@ -1603,7 +1696,7 @@ lane) can submit a payload as
   the corpus's Node anchors that do not map naturally onto this registry's
   plain-PDO idiom), `php_laravel`/`python_fastapi`/`node_express` reusing
   these same registered names for their own native rendering, and the
-  other 19 new sink families `FR-LAB-56` left registry-only. Verified:
+  other 19 new sink families `FR-LAB-58` left registry-only. Verified:
   both cells render via `PhpCurrentEmitter`, `php -l` clean, `verdict()`
   derives `VULNERABLE`/`trivial` and `SECURE` respectively, 20 new tests in
   `tests/test_labgen_mass_assignment.py` pass; `lab-generate --check`
