@@ -14,6 +14,22 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- UI (CC-UI-0026): lane U6 — control-plane hardening for the web launcher's POST/PUT/
+  DELETE surface (`fuzzlab/web/app.py`'s new `SecurityGateMiddleware`): a Host allow-
+  list on every request (DNS-rebinding defense, rolled ourselves) plus, on state-
+  changing requests, Origin == allow-list + `Sec-Fetch-Site == same-origin` (rejecting
+  same-site too — the lab is same-site with the panel on a sibling port) and a custom
+  `X-Fuzzlab-Client` header on `/api/*` JSON bodies, with a Referer fallback for non-
+  Fetch-Metadata clients and a form-POST exemption from the custom header (a native
+  `<form>` can never set one). Why: the panel is loopback-only (D11) but still
+  reachable by any page the operator's browser visits — this closes that gap per
+  `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U6) / R-13, operationalizing NFR-UI-localhost.
+  Pinned `starlette>=1.0.1,<2` (CVE-2026-48710 prerequisite). New
+  `tests/test_web_security.py` (16 cases); all existing web-test files updated to a
+  shared `tests/_webclient.py` TestClient helper so they keep passing through the new
+  gate. See `docs/components/12-diagnostics-and-ui/change-control.md` CC-UI-0026 for
+  full detail and the exact `app.py` touch-points (kept additive/localized alongside
+  lane U0's MPA route-split work on the same file).
 - UI: lane U0 (`docs/UI_IMPLEMENTATION_PLAN.md` §3, `CC-UI-0025`) — replaced the
   hash-switched single page with real per-section MPA routes (`/`, `/proxy`,
   `/results`, `/ml`, `/diagnostics`), split `templates/index.html` into

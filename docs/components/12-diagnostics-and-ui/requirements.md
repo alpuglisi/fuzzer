@@ -113,6 +113,29 @@ bugs — the research-platform diagnostics of decision D2.
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is
   served separately from the vulnerable target (different origin/port; never in the
   target's web root) so the control plane is never itself an attack surface. (D11)
+  Operationalized by **NFR-UI-control-plane-hardened** below: binding to loopback alone
+  does not stop a hostile page the operator's browser visits from driving this app, since
+  the panel is still reachable over HTTP like any other loopback service.
+- **NFR-UI-control-plane-hardened** *(added CC-UI-0026, R-13)* Every request is checked
+  against an exact Host (`host:port`) allow-list (rolled ourselves — not Starlette's
+  `TrustedHostMiddleware`, which strips the port and so cannot pin against DNS
+  rebinding). Every state-changing request (POST/PUT/DELETE) additionally requires
+  Origin == that allow-list **and** `Sec-Fetch-Site == same-origin` — **same-site is
+  rejected too**, because the deliberately-vulnerable lab this panel drives is same-site
+  with it (same registrable domain, `127.0.0.1`, only the port differs) — plus a custom
+  `X-Fuzzlab-Client: 1` header on `/api/*` JSON requests (forces a CORS preflight a
+  cross-origin page cannot satisfy; exempted for `application/x-www-form-urlencoded` /
+  `multipart/form-data` bodies, which a native `<form>` can never set a custom header on
+  and which Origin/Sec-Fetch-Site alone already defend). Clients sending no Fetch
+  Metadata (older browsers, non-browser/API clients) fall back to Origin, then Referer.
+  Stays cookieless (no CSRF token/session store — there is no ambient credential for a
+  forged request to ride on, and SameSite would not help given the same-site landmine
+  above). Fails closed on any ambiguity. A tight, offline CSP plus `X-Content-Type-
+  Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, COOP/CORP
+  `same-origin`, and `Cache-Control: no-store` (off `/static/`) are set on every
+  response, success or denial. Requires Starlette ≥1.0.1 (CVE-2026-48710, "BadHost":
+  pre-1.0.1 Host-header validation bypass — this hardening keys off Host, so a bypass
+  there defeats it). Implementation: `fuzzlab.web.app.SecurityGateMiddleware`.
 - **NFR-UI-no-auto-run** No tool traffic reaches the target as a side effect of
   bring-up; only an explicit automatic-mode selection or a manual tool invocation
   sends requests.
@@ -144,6 +167,11 @@ their own results.
 - Datasette view exposes the result tables for exploration.
 - `run_metrics` is populated per run; `--dry-run` sends no traffic.
 - No secret is ever rendered.
+- A request with an unrecognized Host is rejected (421); a cross-origin or same-site
+  (but not same-origin) state-changing request is rejected (403); an `/api/*` JSON
+  POST/PUT/DELETE without `X-Fuzzlab-Client: 1` is rejected; a legitimate same-origin
+  request (JSON with the header, or a form-encoded POST) succeeds; every response
+  carries the CSP and related security headers.
 
 ## 8. Open questions
 - Web stack (e.g. FastAPI or Flask + a light frontend; Datasette embedded vs

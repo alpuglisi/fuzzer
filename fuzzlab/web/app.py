@@ -43,6 +43,172 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _TEMPLATES_DIR = os.path.join(_HERE, "templates")
 _STATIC_DIR = os.path.join(_HERE, "static")
 
+
+# --- control-plane hardening (component #12, CC-UI-0026, R-13) ---------------
+#
+# The panel is loopback-only (D11) but still reachable by any web page the operator's
+# browser visits, so it needs its own CSRF/DNS-rebinding defenses even with no ambient
+# credential (cookieless; SameSite wouldn't help — see below). Two INDEPENDENT gates are
+# required because each attack defeats the other's single defense on its own:
+#
+#   (a) Host allow-list, checked on *every* request. This is the only defense against
+#       DNS rebinding (a hostile page's origin resolves to 127.0.0.1 after the browser
+#       already trusted it): the attacker's JS runs same-origin per the browser but the
+#       Host header the server actually receives is wrong. Rolled ourselves rather than
+#       Starlette's TrustedHostMiddleware, which matches host only and strips/ignores
+#       the port — useless here since the port is exactly what pins this app apart from
+#       the lab target sharing the same loopback address.
+#   (b) On state-changing methods (POST/PUT/DELETE): Origin must equal the allow-list
+#       *and* Sec-Fetch-Site must be "same-origin" — REJECTING "same-site" too. A "site"
+#       is scheme+registrable-domain and port-independent, so this control plane and the
+#       deliberately-vulnerable lab it drives are same-site on 127.0.0.1 (only the port
+#       differs) — same-site alone is not enough here (classic CSRF sends a correct Host
+#       but a cross-site/attacker Origin; DNS rebinding sends a correct-looking
+#       Sec-Fetch-Site/Origin but a wrong Host — only the pair catches both).
+#
+# No CSRF token / session store: there's no ambient credential (no cookies) for a forged
+# request to ride on, so header validation alone suffices, and staying cookieless avoids
+# ever needing SameSite (which, per the same-site landmine above, would not help anyway).
+# Loopback is treated as a secure context, so modern browsers reliably send
+# Sec-Fetch-*/Origin; the Referer fallback below covers older/non-browser clients only.
+#
+# Implemented as a raw ASGI middleware (not `BaseHTTPMiddleware`) so it never buffers or
+# otherwise interferes with the SSE launch-output stream (`/api/launch/{token}/stream`).
+
+_CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+        "form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'")
+
+# Headers applied to every response, success or denial (security posture must not
+# depend on the outcome of the gate that decides whether to serve the request at all).
+_SECURITY_RESPONSE_HEADERS: list[tuple[bytes, bytes]] = [
+    (b"content-security-policy", _CSP.encode("latin-1")),
+    (b"x-content-type-options", b"nosniff"),
+    (b"x-frame-options", b"DENY"),
+    (b"referrer-policy", b"same-origin"),
+    (b"cross-origin-opener-policy", b"same-origin"),
+    (b"cross-origin-resource-policy", b"same-origin"),
+]
+
+# Content-Types that indicate a plain, no-JS <form method="post"> submission (e.g. the
+# panel's "Run automatic" quick-action) rather than a script-driven `fetch()`/XHR call.
+# The X-Fuzzlab-Client custom-header gate below is skipped for these — a native form can
+# never set a custom header, JS or not, so requiring it there would just break the
+# no-JS-friendly form with no security gain; Origin + Sec-Fetch-Site already defend that
+# path (a cross-site page's auto-submitted form fails the same-origin check).
+_FORM_CONTENT_TYPES = ("application/x-www-form-urlencoded", "multipart/form-data")
+
+
+def _security_allowlist(cfg: Config) -> tuple[frozenset[str], frozenset[str]]:
+    """The exact Host-header value(s) and Origin(s) this control plane accepts, derived
+    from its own loopback bind config (single source of truth for both gates below)."""
+    host = str(cfg.get("web_host", "127.0.0.1"))
+    port = int(cfg.get("web_port", 8787))
+    host_port = f"{host}:{port}".lower()
+    return frozenset({host_port}), frozenset({f"http://{host_port}"})
+
+
+def _origin_of(url: str) -> str | None:
+    """``scheme://host[:port]`` of a URL (e.g. a Referer), or None if unparseable."""
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    if not parts.scheme or not parts.netloc:
+        return None
+    return f"{parts.scheme}://{parts.netloc}".lower()
+
+
+async def _deny(send, status: int, reason: str) -> None:
+    """Send a minimal, fail-closed denial response carrying the same security headers
+    as any other response, bypassing the wrapped app entirely."""
+    body = reason.encode("utf-8")
+    headers = [
+        (b"content-type", b"text/plain; charset=utf-8"),
+        (b"content-length", str(len(body)).encode("latin-1")),
+        (b"cache-control", b"no-store"),
+        *_SECURITY_RESPONSE_HEADERS,
+    ]
+    await send({"type": "http.response.start", "status": status, "headers": headers})
+    await send({"type": "http.response.body", "body": body})
+
+
+def _inject_response_headers(send, path: str):
+    """Wrap an ASGI `send` so every response (not just denials) carries the CSP/frame/
+    sniff/referrer/COOP/CORP headers, plus `Cache-Control: no-store` off `/static/`."""
+    async def _send(message):
+        if message["type"] == "http.response.start":
+            headers = list(message.get("headers", []))
+            headers.extend(_SECURITY_RESPONSE_HEADERS)
+            if not path.startswith("/static/"):
+                headers.append((b"cache-control", b"no-store"))
+            message = {**message, "headers": headers}
+        await send(message)
+    return _send
+
+
+class SecurityGateMiddleware:
+    """Guards the control plane's state-changing surface against being driven by a
+    hostile web page (component #12, CC-UI-0026, R-13/NFR-UI-localhost). See the module
+    banner above for the two-gate rationale. Fail-closed: any ambiguity is a denial."""
+
+    def __init__(self, app, *, allowed_hosts: frozenset[str], allowed_origins: frozenset[str]):
+        self._app = app
+        self._hosts = allowed_hosts
+        self._origins = allowed_origins
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1")
+                   for k, v in scope.get("headers", [])}
+
+        # Gate (a): Host allow-list, every request — the DNS-rebinding defense.
+        host = headers.get("host")
+        if host is None or host.lower() not in self._hosts:
+            await _deny(send, 421, "unrecognized Host (DNS-rebinding guard)")
+            return
+
+        # Gate (b): state-changing methods only.
+        if scope["method"] in ("POST", "PUT", "DELETE"):
+            if not self._state_change_allowed(headers, scope["path"]):
+                await _deny(send, 403, "cross-origin/cross-site request rejected")
+                return
+
+        await self._app(scope, receive, _inject_response_headers(send, scope["path"]))
+
+    def _state_change_allowed(self, headers: dict[str, str], path: str) -> bool:
+        origin = headers.get("origin")
+        sec_fetch_site = headers.get("sec-fetch-site")
+        referer = headers.get("referer")
+
+        if sec_fetch_site is not None:
+            # Fetch Metadata present (reliable on loopback's secure context): same-
+            # origin ONLY — same-site is rejected too (the same-site landmine above).
+            if sec_fetch_site != "same-origin":
+                return False
+            if origin is None or origin.lower() not in self._origins:
+                return False
+        else:
+            # No Fetch Metadata: an older browser or a non-browser client (e.g. a
+            # script hitting the API directly). Fall back to Origin, then Referer.
+            ok = origin is not None and origin.lower() in self._origins
+            if not ok and referer is not None:
+                ref_origin = _origin_of(referer)
+                ok = ref_origin is not None and ref_origin in self._origins
+            if not ok:
+                return False
+
+        if path.startswith("/api/"):
+            content_type = headers.get("content-type", "")
+            is_form = content_type.split(";", 1)[0].strip().lower() in _FORM_CONTENT_TYPES
+            if not is_form and headers.get("x-fuzzlab-client") != "1":
+                return False
+        return True
+
+
 # U0 (CC-UI-0025): single source of truth for the sidebar nav — real per-section
 # routes, grouped Workbench / Analysis per FR-UI-7/8. `href` is a real URL (no
 # hash), `id` is compared against the per-request `active` section to render
@@ -253,6 +419,11 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
 
     app = FastAPI(title="fuzzlab control panel", docs_url=None, redoc_url=None,
                   lifespan=_lifespan)
+    # Control-plane hardening (CC-UI-0026, R-13) — see the class/module docs above.
+    # Added first so it wraps every route below, including /static.
+    allowed_hosts, allowed_origins = _security_allowlist(cfg)
+    app.add_middleware(SecurityGateMiddleware, allowed_hosts=allowed_hosts,
+                       allowed_origins=allowed_origins)
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 

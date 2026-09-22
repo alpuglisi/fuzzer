@@ -16,10 +16,10 @@ from __future__ import annotations
 import pytest
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
 from fuzzlab.web.app import create_app  # noqa: E402
+from tests._webclient import web_client  # noqa: E402
 
 # Every section route, its nav id, and one string that must appear only when the
 # section actually rendered (not just the shared shell chrome).
@@ -35,7 +35,7 @@ SECTIONS = [
 def _client(authorized=False):
     cfg = load_config(overrides={"target_base_url": "http://localhost",
                                  "authorized": authorized}, environ={})
-    return TestClient(create_app(cfg))
+    return web_client(create_app(cfg))
 
 
 # --- static assets (split per D3: per-section CSS partials + JS modules) --------
@@ -226,7 +226,7 @@ def test_repeater_pivot_redirects_303_and_carries_only_the_tab_id(tmp_path):
         fid = store.conn.execute("SELECT id FROM flow").fetchone()["id"]
 
     cfg = load_config(overrides={"store_path": str(path)}, environ={})
-    client = TestClient(create_app(cfg), follow_redirects=False)
+    client = web_client(create_app(cfg), follow_redirects=False)
     r = client.post("/proxy/repeater/from-flow", data={"flow_id": str(fid)})
     assert r.status_code == 303
     assert r.headers["location"].startswith("/proxy?repeater_tab=")

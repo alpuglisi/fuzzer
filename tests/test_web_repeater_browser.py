@@ -79,7 +79,10 @@ def test_repeater_create_and_send_in_browser(tmp_path):
     up, up_port = _threaded_upstream()
     web_port = _free_port()
     cfg = load_config(overrides={"authorized": True, "target_base_url": "http://127.0.0.1",
-                                 "store_path": str(tmp_path / "s.db")}, environ={})
+                                 "store_path": str(tmp_path / "s.db"),
+                                 # U6's Host allow-list is derived from web_host/web_port
+                                 # (CC-UI-0026); must match the real bind port below.
+                                 "web_port": web_port}, environ={})
     server = _Server(create_app(cfg), web_port)
     server.start()
     try:

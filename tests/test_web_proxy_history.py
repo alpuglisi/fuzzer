@@ -63,15 +63,15 @@ def test_flow_detail_decodes_raw(tmp_path):
 # --- routes ----------------------------------------------------------------
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
 from fuzzlab.web.app import create_app  # noqa: E402
+from tests._webclient import web_client  # noqa: E402
 
 
 def _client(path):
     cfg = load_config(overrides={"store_path": str(path)}, environ={})
-    return TestClient(create_app(cfg))
+    return web_client(create_app(cfg))
 
 
 def test_api_flows_list_and_search(tmp_path):

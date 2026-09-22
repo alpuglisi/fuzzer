@@ -22,10 +22,17 @@ export function toWire(s) {
   return s.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
 }
 
+// X-Fuzzlab-Client is required by the server's control-plane gate on every state-
+// changing /api/* request (U6 / R-13): a custom header forces the browser to send a
+// CORS preflight that a cross-origin page can never satisfy (no CORS middleware here
+// grants it), on top of the Origin/Sec-Fetch-Site check. All POST/DELETE calls in this
+// module go through postJSON/delJSON, so setting it here covers the whole surface.
+const FUZZLAB_CLIENT_HEADERS = { "X-Fuzzlab-Client": "1" };
+
 export async function postJSON(url, body) {
   const r = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...FUZZLAB_CLIENT_HEADERS },
     body: JSON.stringify(body),
   });
   let data = {};
@@ -34,7 +41,7 @@ export async function postJSON(url, body) {
 }
 
 export async function delJSON(url) {
-  const r = await fetch(url, { method: "DELETE" });
+  const r = await fetch(url, { method: "DELETE", headers: FUZZLAB_CLIENT_HEADERS });
   let data = {};
   try { data = await r.json(); } catch (_) { /* empty */ }
   return { status: r.status, data };

@@ -3,6 +3,102 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0026 — Lane U6: control-plane hardening (Host/Origin/Fetch-Metadata gate) (2026-09-22)
+- Change: per `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U6) and its resolved R-13, added
+  `fuzzlab.web.app.SecurityGateMiddleware` — a raw ASGI middleware (not
+  `BaseHTTPMiddleware`, to avoid interfering with the SSE launch-output stream) guarding
+  the whole control plane against being driven by a hostile web page the operator's
+  browser happens to visit, given NFR-UI-localhost's "loopback-only" alone does not stop
+  that. Two independent gates, both required (each defeats an attack the other misses):
+  (a) an exact Host (`host:port`) allow-list on **every** request, rolled ourselves since
+  Starlette's `TrustedHostMiddleware` strips the port and can't pin against DNS
+  rebinding; (b) on POST/PUT/DELETE, Origin == the allow-list **and**
+  `Sec-Fetch-Site == same-origin` (same-site rejected too — the deliberately-vulnerable
+  lab this panel drives is same-site with it on a sibling port, the R-13 "landmine"),
+  plus a custom `X-Fuzzlab-Client: 1` header on `/api/*` JSON bodies (forces a CORS
+  preflight a cross-origin page can't satisfy). The custom-header check cannot apply to
+  the panel's existing no-JS `<form method="post" action="/api/run/automatic">` (a
+  native form can never set a custom header at all, JS or not), so form-encoded
+  (`application/x-www-form-urlencoded` / `multipart/form-data`) `/api/*` bodies are
+  exempted from that one check and rely on Origin + Sec-Fetch-Site alone — still real: a
+  cross-site auto-submitted forged form fails the same-origin check. Clients sending no
+  Fetch Metadata (older browsers, non-browser/API clients) fall back to Origin, then
+  Referer. Stays cookieless — no ambient credential means no CSRF token/session store is
+  needed, and SameSite wouldn't help given the same-site landmine. Fails closed on any
+  ambiguity. Every response (success or denial) also gets a tight offline CSP
+  (`default-src 'none'` etc.), `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, COOP/CORP `same-origin`, and
+  `Cache-Control: no-store` off `/static/`. Pinned `starlette>=1.0.1,<2` explicitly in
+  the `web` extra (`pyproject.toml`) — the R-13 prerequisite (CVE-2026-48710 "BadHost":
+  a pre-1.0.1 Host-header validation bypass that would undercut gate (a)); the installed
+  version (1.6.0) already satisfied it, this just makes it a declared, enforced floor
+  rather than an accident of fastapi's own transitive range. Wired the browser's own JS
+  (originally `static/app.js`'s, now `static/js/common.js`'s `postJSON`/`delJSON` after
+  lane U0's asset split — the only two call sites that ever issue a state-changing
+  `fetch()`) to send `X-Fuzzlab-Client: 1`, so the existing launcher/proxy/repeater UI
+  keeps working unmodified from the operator's own browser.
+- Impact (other components / project): UI only; no result-table/store contract change.
+  **Shares `fuzzlab/web/app.py` with lane U0** (MPA route split, `CC-UI-0025`, merged
+  first) — kept additive and localized (one new module-level block + a 4-line
+  `add_middleware` call in `create_app`) so it slotted in cleanly alongside U0's route
+  registrations without touching them; manually reapplied onto the post-U0 tree by the
+  integrating session rather than a raw `git merge` (U0 renamed `static/app.js` →
+  `static/js/*.js`, which would otherwise have conflicted). Every existing web test's
+  `TestClient` now needs a `base_url`/headers matching this gate (httpx's default
+  `http://testserver` base URL and lack of Origin/Sec-Fetch-Site headers would otherwise
+  421/403 on everything); centralized in a new `tests/_webclient.py` helper and applied
+  across all existing web-test files rather than duplicated per file. The two
+  real-browser Playwright tests (`test_web_launcher_browser.py`,
+  `test_web_repeater_browser.py`) bind uvicorn to an OS-assigned ephemeral port directly
+  but previously left `cfg`'s `web_host`/`web_port` at their defaults (unused before
+  this change); now pass `"web_port": port` explicitly so this gate's Host allow-list
+  matches the port the browser actually navigates to.
+- Risk (level; mitigation): medium (a fail-closed gate on a widely-shared file, wrong in
+  either direction is bad — too loose reopens R-13, too strict breaks the panel/lab
+  workflow). Mitigated: new `tests/test_web_security.py` (16 cases) covers both gates
+  independently — wrong Host (421) including the DNS-rebinding case (correct
+  Origin/Sec-Fetch-Site, wrong Host, still 421); classic cross-site CSRF (403); the
+  same-site-sibling-port landmine specifically (403); same-origin missing the custom
+  header on `/api/*` (403) vs. present (reaches the handler, proven by a distinct 400
+  from unknown-command business logic, not a 403); the no-Fetch-Metadata → Origin →
+  Referer fallback chain (pass and reject cases); the form-POST custom-header exemption
+  (reaches the handler) vs. a forged cross-site form (still 403); security headers
+  present on both success and denial responses; `Cache-Control: no-store` present on API
+  responses and absent on `/static/`. Full web test suite (post-U0-merge, one adjusted
+  asset path — `/static/app.css` → `/static/css/shell.css` — since U0's asset split
+  landed first): 135 passed, 2 skipped (Playwright-gated browser tests skip when
+  Chromium isn't installed).
+- Deliverables:
+  - [x] `SecurityGateMiddleware` + `_security_allowlist`/`_origin_of`/`_deny`/
+    `_inject_response_headers` + the CSP/security-header constants, added to
+    `fuzzlab/web/app.py` as one self-contained block right after `_STATIC_DIR` (before
+    the sidebar-nav source of truth U0 added) — done.
+  - [x] Wired into `create_app` via a single `app.add_middleware(SecurityGateMiddleware,
+    ...)` call, added immediately after `app = FastAPI(...)` and before
+    `app.mount("/static", ...)` — the *only* other touch to `create_app`'s existing body;
+    no route handler in `fuzzlab/web/app.py` was modified — done.
+  - [x] `static/js/common.js`: `postJSON`/`delJSON` now send `X-Fuzzlab-Client: 1` —
+    done (applied to U0's post-split module, not the pre-split `static/app.js`).
+  - [x] `pyproject.toml`: explicit `starlette>=1.0.1,<2` pin in the `web` extra — done.
+  - [x] `tests/_webclient.py` shared TestClient helper (extended to accept passthrough
+    `**kwargs` for U0's `follow_redirects=False` PRG test) + all existing web-test files
+    updated to use it — done.
+  - [x] `tests/test_web_launcher_browser.py` / `tests/test_web_repeater_browser.py`:
+    pass `web_port` matching the real bind port — done.
+  - [x] `tests/test_web_security.py` — new, 16 cases, both gates — done.
+  - [x] `docs/components/12-diagnostics-and-ui/requirements.md`: new
+    **NFR-UI-control-plane-hardened**, NFR-UI-localhost cross-referenced to it, new
+    acceptance-criteria bullet — done.
+  - [x] `CHANGELOG.md` line — done.
+  - [x] full test suite run — done (counts recorded above).
+- Effectiveness (assessed 2026-09-22): effective for the stated scope — both R-13 gates
+  verified independently by `tests/test_web_security.py`, and the existing launcher/
+  proxy/repeater surfaces (sync `TestClient` suites + the two real-Chromium Playwright
+  suites) keep passing through the gate rather than around it. Re-assess once U1–U5 add
+  their own POST routes, to confirm every new state-changing route is still `/api/*`-
+  shaped (or is deliberately reviewed as the form-POST exemption's next instance) and so
+  stays covered by this gate without a per-route opt-in being needed.
+
 ### CC-UI-0025 — Lane U0: MPA routes + asset split (the serialization-breaker) (2026-09-22)
 - Change: per `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U0) and resolved markers R-01/R-07,
   replaced the hash-switched single page (`GET /` rendering all five `.panel` sections,
