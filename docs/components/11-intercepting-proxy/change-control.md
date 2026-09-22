@@ -3,6 +3,43 @@
 Component code: **PROXY**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PROXY-0018 — Incidental: Proxy workbench UI rebuild on a shared message editor (lane U3) (2026-09-22)
+- Change: lane U3 rebuilt the web control panel's Proxy section UI on a shared
+  `<message-editor>` component and resizable panes (see `CC-UI-0030` for the
+  full detail — this is the PROXY-side bookkeeping entry, per this lane's
+  dual reservation). **No PROXY-component code changed**: `fuzzlab/proxy/*`
+  (engine, interceptor, repeater, scope, match-replace, history) and
+  `fuzzlab/web/proxycontrol.py` / `fuzzlab/web/proxyview.py` (the read/write
+  surfaces the UI calls) are all untouched. This entry exists to record that
+  PROXY-facing UI effect, the same pattern `CC-UI-0027`/`CC-PROXY-0017` used
+  for D0a's cross-component UI note.
+- Impact (other components / project): none on PROXY's own behavior or data
+  contracts (`flow`/repeater-tab schema, scope/match-replace semantics,
+  intercept hold/forward/drop) — purely a client-side re-lay of how those
+  existing `/api/proxy/*` routes are displayed and edited. `RepeaterController`
+  (`CC-PROXY-0016`, BUG-0021's per-thread SQLite fix) is unmodified. The
+  `--authorized` gate on Repeater sends, and the "not running in-process"
+  fallback messaging for Intercept/Repeater/Scope, are unchanged — proxy/
+  desync tooling's default-off, lab-only posture (CLAUDE.md Safety) is not
+  affected.
+- Risk (level; mitigation): low — no PROXY code path changed; the only risk
+  surface is the UI's byte-exact round-trip through the new editor, mitigated
+  as described under `CC-UI-0030` (unchanged `toWire()` CRLF-restore path,
+  `getBytes()` reading only the plain-textarea source of truth, existing
+  Repeater/Intercept/History test suites re-run unmodified).
+- Deliverables:
+  - [x] Confirmed no `fuzzlab/proxy/*` or `fuzzlab/web/proxycontrol.py` /
+    `fuzzlab/web/proxyview.py` changes were needed or made — done.
+  - [x] Confirmed the existing proxy/repeater/intercept test suites
+    (`tests/test_proxy_*.py`, `tests/test_web_intercept.py`,
+    `tests/test_web_repeater*.py`, `tests/test_web_proxy_history.py`,
+    `tests/test_web_scope.py`) pass unmodified against the new UI — see
+    `CC-UI-0030`'s Effectiveness for the run's pass/skip counts.
+- Effectiveness (assessed 2026-09-22): effective — the PROXY backend and its
+  contract are provably untouched (no diff under `fuzzlab/proxy/` or the
+  proxy control/view modules), and its test suites pass unmodified against
+  the rebuilt UI.
+
 ### CC-PROXY-0017 — `--dry-run` CLI flag (lane D0a) (2026-09-22)
 - Change: `fuzzlab/proxy/cli.py::build_parser()` gained `--dry-run` (via the shared
   `fuzzlab/cli_dryrun.add_dry_run_flag()`). `main()` checks `args.dry_run` first —

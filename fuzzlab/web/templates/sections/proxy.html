@@ -5,6 +5,12 @@
 {% block content %}
 <section class="panel" aria-labelledby="proxy-h1">
   <h1 id="proxy-h1" class="visually-hidden">Proxy workbench</h1>
+  <nav class="proxy-subnav" aria-label="Proxy sections">
+    <a href="#history-card">History</a>
+    <a href="#intercept-card">Intercept</a>
+    <a href="#repeater-card">Repeater</a>
+    <a href="#scope-card">Scope &middot; Match-Replace</a>
+  </nav>
   <div class="card">
     <h2>Proxy workbench</h2>
     <p class="muted" id="proxy-status">Proxy: checking&hellip;</p>
@@ -13,7 +19,7 @@
       Match-Replace need the in-process proxy (<code>fuzzlab web --with-proxy --authorized</code>).</p>
   </div>
 
-  <div class="card">
+  <div class="card" id="history-card">
     <h2>History</h2>
     <div class="field">
       <input type="text" id="flow-search" placeholder="search url / host / head&hellip;">
@@ -37,8 +43,20 @@
         <input type="hidden" name="flow_id" id="flow-to-repeater-id" value="">
         <button type="submit" id="flow-to-repeater">&rarr; Repeater</button>
       </form>
-      <h4>Request</h4><pre class="flow-raw" id="flow-req"></pre>
-      <h4>Response</h4><pre class="flow-raw" id="flow-resp"></pre>
+      <div class="me-split-layout">
+        <button type="button" class="tbtn" id="flow-split-layout" aria-pressed="false">&#8645; Stack vertically</button>
+      </div>
+      <div class="me-split" id="flow-split">
+        <div class="me-pane">
+          <h4>Request</h4>
+          <message-editor id="flow-req-editor" mirror-id="flow-req"></message-editor>
+        </div>
+        <div class="me-split-handle" aria-label="Resize request/response panes"></div>
+        <div class="me-pane">
+          <h4>Response</h4>
+          <message-editor id="flow-resp-editor" mirror-id="flow-resp"></message-editor>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -62,7 +80,7 @@
       <div id="pending-detail" hidden>
         <h3>Editing held flow <span id="pending-id"></span>
           <span class="muted">&mdash; edit the raw bytes, then Forward (or Drop)</span></h3>
-        <textarea id="pending-raw" class="pending-raw" rows="12" spellcheck="false"></textarea>
+        <message-editor id="pending-editor" editable textarea-id="pending-raw"></message-editor>
         <div class="actions">
           <button type="button" id="pending-forward">Forward</button>
           <button type="button" id="pending-drop">Drop</button>
@@ -97,14 +115,22 @@
       <div class="actions"><button type="button" id="rep-create">Create tab</button></div>
     </details>
     <div id="rep-editor" hidden>
-      <h4>Request</h4>
-      <textarea id="rep-raw" class="pending-raw" rows="10" spellcheck="false"></textarea>
-      <div class="actions">
+      <div class="me-split-layout">
+        <button type="button" class="tbtn" id="rep-split-layout" aria-pressed="false">&#8645; Stack vertically</button>
         <button type="button" id="rep-send"
           {% if not authorized %}disabled title="set authorized:true to replay"{% endif %}>Send</button>
       </div>
-      <h4>Response</h4>
-      <pre class="flow-raw" id="rep-resp"></pre>
+      <div class="me-split" id="rep-split">
+        <div class="me-pane">
+          <h4>Request</h4>
+          <message-editor id="rep-editor-msg" editable textarea-id="rep-raw"></message-editor>
+        </div>
+        <div class="me-split-handle" aria-label="Resize request/response panes"></div>
+        <div class="me-pane">
+          <h4>Response</h4>
+          <message-editor id="rep-resp-editor" mirror-id="rep-resp"></message-editor>
+        </div>
+      </div>
     </div>
   </div>
 
