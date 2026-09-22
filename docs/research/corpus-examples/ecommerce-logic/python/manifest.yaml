@@ -1,0 +1,113 @@
+# Vuln-corpus Phase 2 manifest — feature: e-commerce (cart/checkout/
+# payment/coupons, incl. billing/invoicing/subscriptions), language:
+# Python. See docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 2 for the
+# schema/rules this file follows.
+#
+# Pairing note: this cell covers two distinct real-world business-logic
+# shapes rather than one same-shape pair. vulnerable-1.py is a price-
+# tampering example (CWE-840: client-supplied "amount" trusted at the
+# Stripe charge step); vulnerable-2.py is a race-condition example
+# (CWE-362/367/841: non-atomic check-then-act on a coupon's usage
+# counter). idiomatic-1.py is the price/quantity-tampering shape's real,
+# licensed counterpart (server-side recomputation of the charge amount).
+# No comparably clear, acceptably-licensed *locked* counterpart to
+# vulnerable-2.py's race (e.g. select_for_update() or F('usage_count')+1)
+# was found in this pass -- several real candidates exist (see the
+# "Skipped for no license" note below) but none carried a usable license;
+# recorded here as a half-populated sub-cell rather than padded with a
+# weak substitute, per Phase 2's guidance for this feature class.
+
+- file: vulnerable-1.py
+  role: vulnerable
+  repo: BloomTech-Labs/CS10-labor-pos
+  commit_sha: f7365a08c13101d58839eea45cd54da06edc0908
+  license: MIT
+  license_copyright_line: "Copyright (c) 2018 Lambda Labs"
+  tutorial_or_course_project: true
+  pattern: "Django checkout() view builds the Stripe charge directly from request.POST.get('amount', ...) and request.POST.get('currency', ...), with no server-side price/amount recomputation from an order or cart record (CWE-840 business-logic price tampering)"
+  notes: >
+    "CS10-labor-pos" is a Lambda School (now BloomTech) student cohort
+    project ("Lambda Labs" copyright line, 2018); the same
+    checkout()-trusts-request.POST('amount') shape recurs nearly
+    verbatim across several other BloomTech-Labs cohort repos found
+    during collection (CS10-employee-shift, CS10-flight-log,
+    Labs8-OfflineReader), all sharing the same MIT/"Lambda Labs" license
+    -- this one was kept as the representative example rather than
+    duplicating the same shape multiple times, per this corpus's "stop
+    once additional candidates are just re-showing the same
+    implementation shape" guidance. Source file path in the origin repo:
+    POSserver/payment/views.py.
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: vulnerable-2.py
+  role: vulnerable
+  repo: arvinmaroufi/MasaiShop
+  commit_sha: 55fc3afc0409e54945c99a407d1f07ffe38951c4
+  license: MIT
+  license_copyright_line: "Copyright (c) [2024] [آروین معروفی]"
+  tutorial_or_course_project: false
+  pattern: "apply_coupon() view: coupon.is_valid() (checks is_active/expiry/max_usage) is read, then -- after computing and applying the discount to the cart -- coupon.usage_count is incremented with a plain Python `+= 1` and .save(), with no select_for_update(), no F() expression, and no transaction wrapping the read-check-write sequence (CWE-367/362/841: concurrent requests can all pass is_valid() before any of them commits the increment, so usage_count can exceed max_usage)"
+  notes: >
+    Real, non-tutorial Django e-commerce project (Persian-language UI
+    strings kept verbatim from the source, as they are the app's own
+    user-facing messages, not incidental PII). LICENSE.txt file
+    (MIT, Persian translation) present in the repo root; the bracketed
+    copyright line "(c) [2024] [آروین معروفی]" is copied verbatim as it
+    appears in the license file, including its literal brackets. Only
+    the single apply_coupon() function was kept from cart/views.py (the
+    file also has cart/add_to_cart/update_cart_item/remove_cart_item/
+    shopping_payment/successful_payment views not relevant to this
+    entry's pattern). Source file path in the origin repo:
+    cart/views.py.
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-1.py
+  role: idiomatic
+  repo: afarroc/jewelry_catalog
+  commit_sha: c56697fea303ecde9f70ff977d32d866aefe9ebc
+  license: MIT
+  license_copyright_line: "Copyright (c) 2025 Arturo Farro"
+  tutorial_or_course_project: false
+  pattern: "process_order() computes order.total from order.subtotal (itself built from each cart item's product.price) plus server-configured shipping/tax, inside a transaction.atomic() block; process_payment() then charges exactly int(order.total * 100) via stripe.PaymentIntent.create() -- the charge amount is never read from the request"
+  notes: >
+    Real, current (2025) Django jewelry e-commerce project; not a
+    tutorial/course project. Only process_order() and process_payment()
+    were kept from orders/views.py (a 650+ line file with several other
+    checkout code paths -- a class-based/AJAX checkout view, order
+    history/detail/invoice views, cancellation/refund handling, and a
+    DRF API -- all using the same order.total-computed-then-charged
+    pattern; process_order()/process_payment() were chosen as the
+    clearest, most self-contained illustration). Source file path in the
+    origin repo: orders/views.py.
+  validated: false
+  validated_by: []
+  redacted: false
+
+# Skipped for no license (cited/described in prose only, per this
+# corpus's license-handling rule -- no source text copied from any of
+# these):
+#
+# - The exact "coupon.usage_count += 1; coupon.save()" non-atomic race
+#   shape in vulnerable-2.py recurs almost verbatim across many other
+#   Django e-commerce student/portfolio projects found during collection
+#   (whizkidefos/trederwen-springs-platform, AnNguyen05092004/
+#   Bookstore-management-system, AshishCherian15/
+#   Multi-Stock-Logistics-Platform, Christian-39/chris-lux,
+#   amgad165/Retro-store, Ricas2410/mablex, IlboudoOusmane/Vente-en-ligne,
+#   GreeshmaAbeesh/Fashionfiesta) -- none of them carry a LICENSE file.
+#   arvinmaroufi/MasaiShop was the only one found with a declared license.
+# - A real, *locked* counterpart to this race (select_for_update() and/or
+#   an F('usage_count') + 1 atomic update inside a transaction) was found
+#   in CNRWhoAmI/meraycoshop (backend/apps/coupons/services.py),
+#   gam98/valentina-ecommerce-backend (apps/orders/services.py), and
+#   ln-khanhduy/elearning (backend/apps/promotions/services/
+#   coupon_service.py) -- all unlicensed. Aniket-Dev-IT/CartMax
+#   (store/coupon_utils.py) also has this locked shape but carries an
+#   explicit proprietary "All Rights Reserved" LICENSE, which this
+#   corpus's rules treat the same as no license for copying purposes.
+#   None was usable; this leaves vulnerable-2.py's race without a locked
+#   idiomatic counterpart in this pass.

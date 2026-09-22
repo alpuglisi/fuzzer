@@ -1,0 +1,133 @@
+# Vuln-corpus Phase 2 manifest — feature: e-commerce (cart/checkout/
+# payment/coupons, incl. billing/invoicing/subscriptions), language:
+# Node/JavaScript. See docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 2 for the
+# schema/rules this file follows.
+#
+# Pairing note: vulnerable-1/2/3.js all show the same real-world shape --
+# an Express route trusts req.body.price (a client-supplied number) as the
+# Stripe charge amount, with no server-side recomputation from a product/
+# cart record. idiomatic-1.js and idiomatic-2.js are two independently-
+# sourced real contrasts to that same shape (one recomputes the total from
+# a Mongoose Cart/Product lookup at the payment-intent step; the other
+# accumulates cart.totalCost from product.price at add-to-cart time and
+# charges that accumulated value, never a client-posted total). No
+# race-condition (coupon/single-use-resource) example was locatable for
+# Node under an acceptable license in this pass -- see the "gap" note at
+# the end of this file.
+
+- file: vulnerable-1.js
+  role: vulnerable
+  repo: BAM-Shopper/BAM-Shopper
+  commit_sha: 4c82228513754c9770c70b11803bff8c98117754
+  license: MIT
+  license_copyright_line: "Copyright (c) 2018 Fullstack Academy"
+  tutorial_or_course_project: true
+  pattern: "checkout route builds the Stripe charge amount directly from req.body.price, a client-supplied field, with no server-side price lookup (CWE-840 business-logic price tampering)"
+  notes: >
+    "BAM-Shopper" is a Fullstack Academy student capstone built from the
+    school's shared "Grace Shopper" project template/rubric (hence the
+    2018 Fullstack Academy MIT copyright line, common to several
+    independently-implemented student repos built from the same
+    template -- see vulnerable-2.js and vulnerable-3.js, different teams,
+    same license/copyright line, genuinely different code). Source file
+    path in the origin repo: server/api/checkout.js.
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: vulnerable-2.js
+  role: vulnerable
+  repo: ComitiesCandescent/grace-shopper
+  commit_sha: c693a4a504b59801d15bc25237d718d36ce843fc
+  license: MIT
+  license_copyright_line: "Copyright (c) 2018 Fullstack Academy"
+  tutorial_or_course_project: true
+  pattern: "same shape as vulnerable-1.js: POST /api/cart/charge passes req.body.price straight through to stripe.charges.create()"
+  notes: >
+    Independent Fullstack Academy student team's implementation of the
+    same "Grace Shopper" capstone template as vulnerable-1.js/-3.js (see
+    that entry's note on the shared license/copyright line). A hardcoded
+    Stripe test-mode secret key (sk_test_...) present in the original
+    source was redacted to REDACTED_API_KEY per this corpus's secrets-
+    scrubbing rule; gitleaks (stripe-access-token rule) confirmed the
+    match against the unredacted source and found nothing in the redacted
+    copy actually committed here. Source file path in the origin repo:
+    server/api/cart.js.
+  validated: false
+  validated_by: []
+  redacted: true
+
+- file: vulnerable-3.js
+  role: vulnerable
+  repo: Enmotion-Art/GraceShopper
+  commit_sha: 3516bf5103ffd32b75b6f375677c5e3d578c7d33
+  license: MIT
+  license_copyright_line: "Copyright (c) 2018 Fullstack Academy"
+  tutorial_or_course_project: true
+  pattern: "same shape as vulnerable-1.js/-2.js: POST /charge passes req.body.price straight through to stripe.charges.create()"
+  notes: >
+    A third, independent Fullstack Academy student team's implementation
+    of the same capstone template (see vulnerable-1.js's note). Kept as a
+    third example, rather than stopping at two, because the surrounding
+    order-creation code (req.body.productIds -> OrderProduct.setQuantity)
+    is a meaningfully different quantity-handling shape worth keeping
+    even though the charge call itself repeats the same price-tampering
+    pattern. A hardcoded Stripe test-mode secret key (sk_test_...) in the
+    original source was redacted to REDACTED_API_KEY; gitleaks
+    (stripe-access-token rule) confirmed the match against the unredacted
+    source and found nothing in the redacted copy actually committed
+    here. Source file path in the origin repo: server/api/orders.js.
+  validated: false
+  validated_by: []
+  redacted: true
+
+- file: idiomatic-1.js
+  role: idiomatic
+  repo: demirelarda/TrizyBackend
+  commit_sha: 20e9df83d80657dd5291faac94eec1e6b10696de
+  license: MIT
+  license_copyright_line: "Copyright (c) 2025 Arda Demirel"
+  tutorial_or_course_project: false
+  pattern: "createPaymentIntent looks up each cart item's product via Mongoose populate(), validates stock, sums quantity * (salePrice ?? price) server-side, and only then calls stripe.paymentIntents.create() with the computed total -- the charge step never reads a price/amount out of the request"
+  notes: >
+    Real, current (2025) small e-commerce backend; not a tutorial/course
+    project. Only the createPaymentIntent handler was kept (the file also
+    contains order-finalization and address-lookup helpers not relevant
+    to this entry's pattern). Source file path in the origin repo:
+    controllers/paymentController.js.
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-2.js
+  role: idiomatic
+  repo: arifahmad17/BuyBags
+  commit_sha: b04509c31ba363faead6c1a6a5868a40b3f28be8
+  license: MIT
+  license_copyright_line: "Copyright (c) 2023 arifahmad17"
+  tutorial_or_course_project: false
+  pattern: "add-to-cart handler reads product.price from the DB (Product.findById) and accumulates it into cart.totalCost server-side; the checkout handler later charges cart.totalCost * 100, never a client-posted amount -- a different idiomatic shape from idiomatic-1.js (accumulate-at-add-time vs. recompute-at-charge-time)"
+  notes: >
+    Kept alongside idiomatic-1.js because it illustrates a meaningfully
+    different idiomatic shape (server-side accumulation into a persisted
+    cart total, rather than a fresh per-item recomputation at the payment
+    step) for the same underlying "never trust a client-supplied price"
+    principle. Only the add-to-cart and checkout routes were kept from a
+    larger router file (product listing, category browsing, and other
+    unrelated routes were omitted for size). Source file path in the
+    origin repo: routes/index.js.
+  validated: false
+  validated_by: []
+  redacted: false
+
+# Gap note: no real, acceptably-licensed Node example of the *race-
+# condition* shape (single-use coupon/resource redeemed via a non-atomic
+# check-then-act, CWE-362/367/841) was found in this pass. Several
+# candidates existed (e.g. Loknath73/Querystorm-Dbms-project's PHP coupon-
+# purchase flow, and multiple Django "coupon.usage_count += 1; .save()"
+# hits -- see the PHP and Python manifests in this same feature directory
+# for those, both under acceptable licenses) but no comparably clear
+# Node/Express race example turned up under a usable license within this
+# collection effort. This cell is populated (5 examples, above the 3-5
+# target) for the price/quantity-tampering shape but not for the race-
+# condition shape; noted here rather than padded with a weak substitute.

@@ -1,0 +1,105 @@
+# Vuln-corpus Phase 2 manifest — feature: e-commerce (cart/checkout/
+# payment/coupons, incl. billing/invoicing/subscriptions), language: PHP.
+# See docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 2 for the schema/rules this
+# file follows.
+#
+# Pairing note: this cell landed at the 2-example floor, and -- unlike
+# most other cells in this corpus -- the two examples are NOT a matched
+# pair of the *same* code shape. This is the "harder to find" outcome the
+# assignment anticipated for this feature class: real PHP e-commerce
+# projects trusting a client-posted price/total at the charge step are
+# common on GitHub (see the many hits noted below), but essentially none
+# of the ones actually exhibiting that exact shape carry a LICENSE file or
+# a declared license, so per this corpus's license-triage rule they could
+# not be copied. The one real, licensed PHP business-logic-flaw example
+# located was a coupon-redemption race condition (a different sink shape:
+# CWE-362/367/841, not CWE-840 price tampering); a real, licensed
+# idiomatic price-recomputation example was located separately and paired
+# with it here on the shared "e-commerce business-logic" feature rather
+# than on an identical sink. See "Skipped for no license" below for the
+# unlicensed price-tampering candidates that would otherwise have made a
+# tighter same-shape pair.
+
+- file: vulnerable-1.php
+  role: vulnerable
+  repo: cnqvnet/mucms
+  commit_sha: 53efad054242e471157be9a57aa0a0a7143d54cf
+  license: Apache-2.0
+  tutorial_or_course_project: false
+  pattern: "check-then-act coupon-redemption race: checkCode() reads uses_left and the caller checks `uses_left <= 0` in PHP, but the corresponding decrement (setUsesLeft(), an unconditional `UPDATE ... SET uses_left = uses_left - 1`) happens later in a separate statement with no row lock, no `WHERE uses_left > 0` guard, and no transaction wrapping the read and the write together (CWE-367/362/841)"
+  notes: >
+    Real, currently-maintained open-source game-server CMS ("free mu cms
+    based on dmn mucms", per its own README); Apache-2.0 LICENSE present
+    in the repo root, no NOTICE file to carry forward. Combines an excerpt
+    of two real files from the same plugin (see the file's own header
+    comment): application/plugins/gift_code/models/model.gift_code.php
+    (checkCode/checkUsesByAccount/logGiftCode/setUsesLeft methods) and
+    application/plugins/gift_code/plugin.php (the redeem_coupon POST
+    handler, trimmed to its first reward branch -- the original repeats
+    the same checkCode() -> ...checks... -> setUsesLeft() shape across
+    ~8 near-identical branches for different reward types). Confirmed via
+    plugin.php that setUsesLeft() actually is called at the end of the
+    validated branch, well after the uses_left check, with several other
+    validation steps (server/expiry/class/per-account usage-cap checks) in
+    between that only widen the race window without re-reading or locking
+    uses_left.
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-1.php
+  role: idiomatic
+  repo: dprabin/simple-php-shopping-cart
+  commit_sha: 677f18b90b7be9814871739b99f4a064eeea59f7
+  license: GPL-2.0
+  tutorial_or_course_project: false
+  pattern: "checkout (PayPal Express Checkout) recomputes each line item's price via Product_model->get_product_details($item_id) -- a fresh DB lookup keyed only by the posted item id -- and accumulates the order total itself, rather than trusting a client-supplied price or total field for the PAYMENTREQUEST_0_AMT sent to PayPal"
+  notes: >
+    Real, published CodeIgniter shopping-cart project. Per this corpus's
+    copyleft-handling rule (repo's LICENSE is GPLv2), only the single
+    relevant method (Cart::process()) was copied, not the whole
+    controller file (index/add/update/payment_success methods, and the
+    class's inline __construct-era comments, were omitted). Notably, the
+    same controller's add() method (not included here) does accept a
+    client-posted 'price' into the CI cart library's per-item record --
+    but that client-influenced value is never what actually reaches the
+    charge step, because process() always re-derives price from
+    Product_model before building the PayPal request, which is exactly
+    why process() (not add()) is the idiomatic-shape excerpt kept here.
+    Source file path in the origin repo: application/controllers/cart.php.
+  validated: false
+  validated_by: []
+  redacted: false
+
+# Skipped for no license (cited/described in prose only, per this
+# corpus's license-handling rule -- no source text copied from any of
+# these):
+#
+# - Loknath73/Querystorm-Dbms-project (buyer_dashboard/cart_action.php,
+#   actions/buy_coupon.php): a full PHP marketplace with a coupon-
+#   purchase/coupon-redemption flow very similar in shape to
+#   vulnerable-1.php (SELECT-then-conditional-UPDATE on coupon_purchases.
+#   uses_left), plus a genuine cart-quantity/stock-check flow. No LICENSE
+#   file and no license declared anywhere in the repo (checked README,
+#   no composer.json) -- skipped per the "no LICENSE file / no license
+#   declared" rule.
+# - hamzamamdouh298/shop_4K (checkout.php): the clearest price-tampering
+#   hit found in this pass -- `$total_price = $_POST['total_price'];`
+#   inserted directly into the orders table with no recomputation from
+#   cart contents. No LICENSE file. The same author's
+#   hamzamamdouh298/BOOKS_STORE (checkout.php) computes sub_total
+#   server-side from cart_item price * quantity -- would have been a
+#   near-perfect same-author matched pair for this exact shape, but it
+#   is also unlicensed.
+# - webihooks/dg (coupon.php): considered, but its LICENSE is the
+#   upstream Razorpay PHP sample app's MIT grant (the repo's own README
+#   identifies it as "Razorpay Test App for PHP") while coupon.php and
+#   several unrelated vendored integrations (OneSignal, QR code, Firebase
+#   JWT) sit alongside it in the same repo -- the license does not
+#   clearly cover that file, and the repo's grab-bag structure also reads
+#   as a disk-dump under this corpus's source-quality bar. Skipped.
+# - superior57/stripe-php (process.php): `$amount = $_POST['price'];`
+#   passed straight to Stripe -- skipped both for no license and because
+#   the file contains what looks like a real (if possibly inert) Stripe
+#   secret key hardcoded inline, which this corpus's "when in doubt, skip"
+#   secrets rule counsels against even attempting to redact-and-copy.
