@@ -1,21 +1,80 @@
-// fuzzlab control panel — Proxy section (U0: MPA split).
-// Only loaded on the Proxy route ("/proxy"). History, live Intercept, Repeater,
-// and Scope/Match-Replace are sub-views of this one section/page (not separate
-// NAV routes) — U3 later re-lays them with a shared message editor + sub-nav, but
-// U0 keeps their existing behavior, just relocated out of the retired index.html.
+// fuzzlab control panel — Proxy section (U3: proxy workbench rebuild).
+//
+// History, live Intercept, Repeater, and Scope/Match-Replace are sub-views of this
+// one section/page, switched by an in-page sub-nav (a real APG "Tabs" pattern —
+// no separate NAV routes; the Proxy route itself stays the one server-rendered
+// page U0 gave it). Intercept and Repeater both render raw HTTP messages through
+// the shared `<message-editor>` element (js/msgeditor.js); History's flow detail
+// reuses it too (read-only) for a consistent redacted view. `toWire` (js/http.js)
+// stays the single documented CRLF-restore point, applied only at the actual
+// forward/send call sites — msgeditor.getBytes() itself never touches newlines.
 
 import { postJSON, delJSON, toWire } from "./http.js";
+import { attachSplitter } from "./msgeditor.js";
+
+// --- sub-nav: History / Intercept / Repeater / Scope+Match-Replace ---------
+// A standard APG "automatic activation" tabs widget, scoped to the Proxy page.
+// State (which sub-tab is open) is kept in the URL hash so a reload, a deep link,
+// or the "-> Repeater" pivot from History can all select a tab without a full
+// page navigation (R-07's pattern, applied within a single MPA route).
+function initSubnav() {
+  const nav = document.querySelector(".subnav");
+  if (!nav) return null;
+  const tabs = Array.from(nav.querySelectorAll(".subnav-tab"));
+  const panelOf = (btn) => document.getElementById(btn.getAttribute("aria-controls"));
+  const nameOf = (btn) => btn.id.replace(/^subtab-/, "");
+
+  function activate(name, { focus = false } = {}) {
+    let matched = false;
+    for (const btn of tabs) {
+      const on = nameOf(btn) === name;
+      matched = matched || on;
+      btn.setAttribute("aria-selected", String(on));
+      btn.tabIndex = on ? 0 : -1;
+      panelOf(btn).hidden = !on;
+      if (on && focus) btn.focus();
+    }
+    if (matched) history.replaceState(null, "", "#" + name);
+    return matched;
+  }
+
+  tabs.forEach((btn, i) => {
+    btn.addEventListener("click", () => activate(nameOf(btn)));
+    btn.addEventListener("keydown", (e) => {
+      let target = null;
+      if (e.key === "ArrowRight") target = tabs[(i + 1) % tabs.length];
+      else if (e.key === "ArrowLeft") target = tabs[(i - 1 + tabs.length) % tabs.length];
+      else if (e.key === "Home") target = tabs[0];
+      else if (e.key === "End") target = tabs[tabs.length - 1];
+      if (target) { e.preventDefault(); activate(nameOf(target), { focus: true }); }
+    });
+  });
+
+  const initial = (location.hash || "").slice(1);
+  activate(tabs.some((b) => nameOf(b) === initial) ? initial : "history");
+  return { activate };
+}
 
 // --- Proxy tab: flow history (read-only) ---
 // Flow url/host/head come from recorded traffic (untrusted), so rows are built with
 // DOM APIs and textContent — never string-interpolated HTML.
-function initProxy() {
+function initProxy(subnav) {
   const table = document.querySelector("#flow-table tbody");
   if (!table) return; // not the proxy page
   const empty = document.getElementById("flow-empty");
   const search = document.getElementById("flow-search");
   const detail = document.getElementById("flow-detail");
+  const reqEditor = document.getElementById("flow-req-editor");
+  const respEditor = document.getElementById("flow-resp-editor");
   let currentFlowId = null;
+
+  const split = attachSplitter(document.getElementById("flow-split"),
+    { orientKey: "fl-split-history" });
+  document.getElementById("flow-layout-toggle").addEventListener("click", () => {
+    const root = document.getElementById("flow-split");
+    const next = root.dataset.orient === "horizontal" ? "vertical" : "horizontal";
+    split.setOrient(next);
+  });
 
   async function showFlow(id) {
     const r = await fetch(`/api/proxy/flows/${id}`);
@@ -23,8 +82,9 @@ function initProxy() {
     const f = await r.json();
     currentFlowId = f.id;
     document.getElementById("flow-detail-id").textContent = "#" + f.id;
-    document.getElementById("flow-req").textContent = f.raw_request || "(none)";
-    document.getElementById("flow-resp").textContent = f.raw_response || "(none)";
+    reqEditor.bytes = f.raw_request || "";
+    respEditor.bytes = f.raw_response || "";
+    respEditor.meta = { status: f.status, ms: f.elapsed_ms };
     detail.hidden = false;
   }
 
@@ -32,8 +92,10 @@ function initProxy() {
   if (toRep) toRep.addEventListener("click", async () => {
     if (currentFlowId == null) return;
     const { status, data } = await postJSON(`/api/proxy/repeater/from-flow/${currentFlowId}`, {});
-    if (status === 200) document.dispatchEvent(
-      new CustomEvent("repeater-select", { detail: data.id }));
+    if (status === 200) {
+      document.dispatchEvent(new CustomEvent("repeater-select", { detail: data.id }));
+      if (subnav) subnav.activate("repeater");
+    }
   });
 
   async function load() {
@@ -69,7 +131,7 @@ function initProxy() {
 
 // --- Proxy tab: live interception (pause / edit / drop / forward) ---
 function initIntercept() {
-  const card = document.getElementById("intercept-card");
+  const card = document.getElementById("panel-intercept");
   if (!card) return;
   const unavailable = document.getElementById("intercept-unavailable");
   const controls = document.getElementById("intercept-controls");
@@ -79,7 +141,7 @@ function initIntercept() {
   const tbody = document.querySelector("#pending-table tbody");
   const empty = document.getElementById("pending-empty");
   const detail = document.getElementById("pending-detail");
-  const rawArea = document.getElementById("pending-raw");
+  const editor = document.getElementById("pending-editor");
   const idSpan = document.getElementById("pending-id");
   let selectedId = null;
 
@@ -94,7 +156,7 @@ function initIntercept() {
   function selectFlow(f) {
     selectedId = f.id;
     idSpan.textContent = "#" + f.id + " (" + f.direction + ")";
-    rawArea.value = f.raw;
+    editor.bytes = f.raw;
     detail.hidden = false;
   }
 
@@ -123,7 +185,7 @@ function initIntercept() {
 
   document.getElementById("pending-forward").addEventListener("click", async () => {
     if (selectedId == null) return;
-    await postJSON(`/api/proxy/intercept/${selectedId}/forward`, { raw: toWire(rawArea.value) });
+    await postJSON(`/api/proxy/intercept/${selectedId}/forward`, { raw: toWire(editor.getBytes()) });
     detail.hidden = true; selectedId = null; poll();
   });
   document.getElementById("pending-drop").addEventListener("click", async () => {
@@ -144,21 +206,30 @@ function initIntercept() {
 
 // --- Proxy tab: Repeater (replay tabs) ---
 function initRepeater() {
-  const card = document.getElementById("repeater-card");
+  const card = document.getElementById("panel-repeater");
   if (!card) return;
   const select = document.getElementById("rep-tab-select");
   const editor = document.getElementById("rep-editor");
-  const rawArea = document.getElementById("rep-raw");
-  const respPre = document.getElementById("rep-resp");
+  const reqEditor = document.getElementById("rep-req-editor");
+  const respEditor = document.getElementById("rep-resp-editor");
   const sendBtn = document.getElementById("rep-send");
   let tabs = [];
+
+  const split = attachSplitter(document.getElementById("rep-split"),
+    { orientKey: "fl-split-repeater" });
+  document.getElementById("rep-layout-toggle").addEventListener("click", () => {
+    const root = document.getElementById("rep-split");
+    const next = root.dataset.orient === "horizontal" ? "vertical" : "horizontal";
+    split.setOrient(next);
+  });
 
   function selectId(id) {
     const tab = tabs.find((t) => String(t.id) === String(id));
     if (!tab) { editor.hidden = true; return; }
     select.value = String(id);
-    rawArea.value = tab.raw;
-    respPre.textContent = "";
+    reqEditor.bytes = tab.raw;
+    respEditor.bytes = "";
+    respEditor.meta = null;
     editor.hidden = false;
   }
 
@@ -188,10 +259,17 @@ function initRepeater() {
   if (sendBtn) sendBtn.addEventListener("click", async () => {
     const id = select.value;
     if (!id) return;
+    const started = performance.now();
     const { status, data } = await postJSON(`/api/proxy/repeater/tabs/${id}/send`,
-      { raw: toWire(rawArea.value) });
-    respPre.textContent = status === 200 ? (data.response || "(empty)")
-      : "error: " + (data.error || status);
+      { raw: toWire(reqEditor.getBytes()) });
+    const ms = Math.round(performance.now() - started);
+    if (status === 200) {
+      respEditor.bytes = data.response || "";
+      respEditor.meta = { ms };
+    } else {
+      respEditor.meta = null;
+      respEditor.bytes = "error: " + (data.error || status);
+    }
   });
 
   document.addEventListener("repeater-select", (e) => loadTabs(e.detail));
@@ -200,7 +278,7 @@ function initRepeater() {
 
 // --- Proxy tab: Scope + Match-Replace ---
 function initScope() {
-  const card = document.getElementById("scope-card");
+  const card = document.getElementById("panel-scope");
   if (!card) return;
   const unavailable = document.getElementById("scope-unavailable");
   const controls = document.getElementById("scope-controls");
@@ -279,7 +357,8 @@ function initScope() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  initProxy();
+  const subnav = initSubnav();
+  initProxy(subnav);
   initIntercept();
   initRepeater();
   initScope();

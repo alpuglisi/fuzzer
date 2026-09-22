@@ -98,17 +98,22 @@ def test_repeater_create_and_send_in_browser(tmp_path):
             # U0: the Proxy section is a real route, not a hash-tab switch.
             pg.click('nav.tabs a[data-section="proxy"]')
             pg.wait_for_url(f"http://127.0.0.1:{web_port}/proxy")
-            pg.click("#repeater-card details summary")
+            # U3: History/Intercept/Repeater/Scope are an in-page sub-nav now.
+            pg.click("#subtab-repeater")
+            pg.locator("#panel-repeater").wait_for(state="visible")
+            pg.click("#panel-repeater details summary")
             pg.fill("#rep-new-host", "127.0.0.1")
             pg.fill("#rep-new-port", str(up_port))
             pg.fill("#rep-new-raw",
                     f"GET /orig HTTP/1.1\r\nHost: 127.0.0.1:{up_port}\r\n\r\n")
             pg.click("#rep-create")
             pg.locator("#rep-editor").wait_for(state="visible")
-            # edit the target in the textarea (which normalizes newlines to LF)
-            pg.fill("#rep-raw", f"GET /edited HTTP/1.1\r\nHost: 127.0.0.1:{up_port}\r\n\r\n")
+            # edit the target in the shared <message-editor>'s Raw textarea (which
+            # normalizes newlines to LF, same as the old plain textarea did).
+            req_raw = pg.locator("#rep-req-editor textarea.me-raw-edit")
+            req_raw.fill(f"GET /edited HTTP/1.1\r\nHost: 127.0.0.1:{up_port}\r\n\r\n")
             pg.click("#rep-send")
-            resp = pg.locator("#rep-resp")
+            resp = pg.locator("#rep-resp-editor pre.me-raw-view")
             pg.wait_for_function("el => el.textContent.includes('echo=')",
                                  arg=resp.element_handle(), timeout=20000)
             assert "echo=/edited" in resp.inner_text()

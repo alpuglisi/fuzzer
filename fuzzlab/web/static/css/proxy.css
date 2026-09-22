@@ -1,20 +1,35 @@
-/* fuzzlab control panel — Proxy section (U0: MPA split).
+/* fuzzlab control panel — Proxy section (U3: proxy workbench rebuild).
  * Only linked by templates/sections/proxy.html. Relies on shell.css (card, table,
- * .field, .muted, .warn, …) already being loaded.
+ * .field, .muted, .warn, …) already being loaded. Styles here also cover the shared
+ * `<message-editor>` element and the vanilla splitter (js/msgeditor.js) — both are
+ * only ever used from this page today, so their look lives with the page that uses
+ * them rather than in a separate, currently-single-consumer stylesheet.
  */
+
+/* --- sub-nav (History / Intercept / Repeater / Scope+Match-Replace) ---------- */
+.subnav {
+  display: flex; gap: .3rem; margin: 0 0 .9rem; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+}
+.subnav-tab {
+  background: none; border: 1px solid transparent; border-bottom: none;
+  border-radius: 8px 8px 0 0; color: var(--muted); font-weight: 500;
+  padding: .5rem .9rem; cursor: pointer; margin-bottom: -1px;
+}
+.subnav-tab:hover { background: var(--surface2); color: var(--text); }
+.subnav-tab[aria-selected="true"] {
+  background: var(--surface); color: var(--accent); font-weight: 600;
+  border-color: var(--border); border-bottom: 1px solid var(--surface);
+}
+.subnav-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* --- proxy history ------------------------------------------------------ */
 #flow-table td { font-size: .85rem; }
 #flow-table tbody tr.flow-row { cursor: pointer; }
 #flow-table tbody tr.flow-row:hover { background: var(--surface2); }
 #flow-table td:nth-child(3) { max-width: 34rem; overflow-wrap: anywhere; }
-.flow-raw {
-  background: #0b0e14; color: #d8dee9; padding: .6rem; border-radius: 8px;
-  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 20rem; overflow: auto;
-  font-family: var(--mono); font-size: .8rem;
-}
 
-/* --- intercept / repeater editors --------------------------------------- */
+/* --- intercept / repeater / history: raw-request fallback fields -------- */
 #pending-table tbody tr.flow-row { cursor: pointer; }
 #pending-table tbody tr.flow-row:hover { background: var(--surface2); }
 .pending-raw {
@@ -22,3 +37,97 @@
   padding: .5rem; border: 1px solid var(--border); border-radius: 8px;
   background: var(--surface2); color: var(--text);
 }
+
+button.ghost {
+  background: var(--surface2); color: var(--text); border-color: var(--border);
+}
+
+/* --- resizable splitter (request | response) ----------------------------
+ * A CSS-grid track sized by the `--a` custom property (px), rewritten by
+ * js/msgeditor.js's attachSplitter(); everything else here is static.
+ */
+.me-split {
+  display: grid; min-width: 0; min-height: 0; gap: 0;
+  margin: .4rem 0; height: 26rem;
+}
+.me-split[data-orient="horizontal"] {
+  grid-template-columns: var(--a, 50%) 8px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+.me-split[data-orient="vertical"] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: var(--a, 50%) 8px minmax(0, 1fr);
+}
+.me-split > .me-pane-a, .me-split > .me-pane-b {
+  min-width: 0; min-height: 0; overflow: auto;
+  display: flex; flex-direction: column;
+}
+.me-handle {
+  background: var(--border); touch-action: none; cursor: col-resize;
+  border-radius: 4px;
+}
+.me-split[data-orient="vertical"] .me-handle { cursor: row-resize; }
+.me-handle:hover { background: var(--accent); }
+.me-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* --- shared <message-editor> ---------------------------------------------
+ * Light-DOM custom element (no shadow root) — these rules target its internal
+ * class names directly wherever it's mounted on this page.
+ */
+message-editor {
+  display: flex; flex-direction: column; min-height: 0; flex: 1;
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+  background: var(--surface2);
+}
+.me-strip {
+  display: flex; gap: .7rem; padding: .3rem .6rem; font-size: .76rem;
+  color: var(--muted); border-bottom: 1px solid var(--border); flex-wrap: wrap;
+}
+.me-strip-status { font-weight: 600; color: var(--text); }
+.me-bar {
+  display: flex; align-items: center; gap: .6rem; padding: .3rem .5rem;
+  border-bottom: 1px solid var(--border); flex-wrap: wrap;
+}
+.me-tabs { display: flex; gap: 2px; }
+.me-tab {
+  background: none; border: 1px solid transparent; color: var(--muted);
+  font-size: .78rem; padding: .25rem .6rem; border-radius: 6px;
+}
+.me-tab:hover { background: var(--surface); color: var(--text); }
+.me-tab[aria-selected="true"] { background: var(--surface); color: var(--accent); font-weight: 600; }
+.me-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.me-toggle { font-size: .76rem; color: var(--muted); display: flex; align-items: center; gap: .3rem; }
+.me-search-btn {
+  margin-left: auto; background: none; border: 1px solid var(--border);
+  color: var(--muted); padding: .15rem .5rem; border-radius: 6px;
+}
+.me-panes { position: relative; flex: 1; min-height: 0; display: flex; }
+.me-raw-edit, .me-raw-view, .me-hex {
+  flex: 1; min-height: 0; font-family: var(--mono); font-size: .82rem;
+  padding: .5rem; margin: 0; border: none; background: var(--surface2);
+  color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto;
+  resize: none;
+}
+.me-raw-edit:focus, .me-raw-view:focus-visible { outline: 2px solid var(--accent-weak); }
+.me-pretty { flex: 1; min-height: 0; overflow: auto; padding: .5rem .6rem; }
+.me-pretty-start { font-family: var(--mono); font-weight: 600; margin-bottom: .4rem; }
+.me-pretty-headers { width: 100%; margin-bottom: .4rem; }
+.me-pretty-headers th { width: 12rem; color: var(--muted); font-weight: 500; text-transform: none; }
+.me-pretty-body {
+  font-family: var(--mono); font-size: .82rem; white-space: pre-wrap;
+  overflow-wrap: anywhere; background: var(--surface); padding: .4rem; border-radius: 6px;
+}
+.me-search {
+  display: flex; align-items: center; gap: .4rem; padding: .3rem .5rem;
+  border-top: 1px solid var(--border); background: var(--surface);
+}
+.me-search-input {
+  flex: 1; font: inherit; padding: .25rem .45rem; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--surface2); color: var(--text);
+}
+.me-search-count { font-size: .76rem; color: var(--muted); min-width: 3rem; text-align: right; }
+.me-search button { padding: .2rem .5rem; }
+
+/* CSS Custom Highlight paint for Ctrl-F matches (read-only mirror only). */
+::highlight(me-match) { background-color: #f5d90a55; }
+::highlight(me-current) { background-color: #ff9800aa; }
