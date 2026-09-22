@@ -165,17 +165,32 @@ default one).
    was only ever the deployment/isolation mechanism), for the
    `phase3_laravel_real_pages_forms` and `phase3_php_laravel_real_pages_numeric`
    manifests, including a real vulnerable/secure payload differential on the
-   `product.php` SQLi twin. Run directly via
-   `pytest tests/test_labgen_conformance_live_boot.py` (skip-guarded,
-   `pytest.mark.slow`), not through `--check`. Still narrower than a genuine
-   Tier 2: it uses SQLite (a documented, scoped substitution — see
-   `live_boot.py`'s module docstring — never validated for the
-   dialect-sensitive identifier/alias-position SQLi shapes), does not yet
-   drive the auth/G2/G4/search real-page manifests (need more seed data), and
-   still performs no real, container-based, dialect-correct oracle
-   confirmation (`tier2.py`'s "the only tier that actually confirms a label"
-   claim is unchanged). See `docs/components/01-target-lab/requirements.md`
-   FR-LAB-52 for the full scope statement.
+   `product.php` SQLi twin. **Extended (`CC-LAB-0056`/`FR-LAB-54`, 2026-09-22)
+   to three more groups**: `auth` (`login.php`'s real SQLi boolean-injection
+   auth bypass against a real seeded `users` row, secure twin `401`, plus a
+   real `register.php` `INSERT`), `g2` (`products.php`/`api/products.php`'s
+   real, well-formed JSON feed), and `g4` (`edit_profile.php` -> `profile.php`,
+   a genuine write-then-read round trip proving the vulnerable cell's stored
+   payload survives unescaped while the secure twin's is entity-escaped) —
+   5 of the 6 `phase3_php_laravel_real_pages_*`/`phase3_laravel_real_pages_*`
+   manifests now driven. Only `search.php` remains undriven, and deliberately
+   so: its own manifest header documents all six of its cells as still
+   without a canonical URL-owning cell pending the `L-P3.3c-CUT` policy
+   decision (`CC-LAB-0052`/`0053`) — there is no single stable `/search.php`
+   URL to live-boot against yet. Extending coverage also surfaced and fixed
+   two real defects in the harness itself (`BUG-0028`): it silently followed
+   a real login's own `302` redirect (masking success as a `404`), and its
+   seeded schema lacked the columns Eloquent's default timestamps need
+   (breaking every `g4` write with a real `500`) — see `docs/bugs/BUG-0028-*.md`.
+   Run directly via `pytest tests/test_labgen_conformance_live_boot.py`
+   (skip-guarded, `pytest.mark.slow`), not through `--check`. Still narrower
+   than a genuine Tier 2: it uses SQLite (a documented, scoped substitution —
+   see `live_boot.py`'s module docstring — never validated for the
+   dialect-sensitive identifier/alias-position SQLi shapes), and still
+   performs no real, container-based, dialect-correct oracle confirmation
+   (`tier2.py`'s "the only tier that actually confirms a label" claim is
+   unchanged). See `docs/components/01-target-lab/requirements.md`
+   FR-LAB-52/FR-LAB-54 for the full scope statement.
 5. Tests: an end-to-end CLI test using the existing example manifest
    (`lab/manifests/example_phase0_scaffold.yaml`), asserting `--check` passes
    on a clean tree and fails loud on each individual gate's own known-bad

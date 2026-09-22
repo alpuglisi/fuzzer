@@ -252,3 +252,16 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   gating boolean anywhere else) needs its own "declared difference alone passes, declared
   difference *plus* an unrelated rewrite still fails" pair of tests, not one. (from
   BUG-0027)
+- **PA-0030** — A harness that claims to report "the real app's response" must not
+  silently apply a client **default** that transforms what the server actually sent
+  before the caller sees it (redirect-following, retry-on-error, automatic
+  decompression changing an observable byte count, etc.) unless that transformation
+  is the literal thing under test. Before extending such a harness's coverage to a
+  previously untested category of real behavior (a redirect, a write through a
+  different persistence layer/ORM than the ones already exercised, an authenticated
+  flow), enumerate what that behavior needs from BOTH the client library's own
+  documented defaults and the framework/ORM's own default behaviors (timestamps,
+  casts, soft deletes, etc.) that no existing case happened to trigger — extending
+  PA-0026's "enumerate every precondition, not only the one that motivated the
+  change" discipline from allowlist adapters to live HTTP+ORM conformance harnesses.
+  (from BUG-0028)

@@ -3,6 +3,88 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0056 — `live_boot.py`: real on-host live-boot proof for the auth/G2/G4 real-page manifest groups (FR-LAB-54) (2026-09-22)
+- Change: extends `CC-LAB-0054`/`FR-LAB-52`'s `fuzzlab.labgen.conformance.live_boot`
+  harness's proven coverage from 2 to 5 of the 6 `phase3_php_laravel_real_pages_*`/
+  `phase3_laravel_real_pages_*` manifests, reusing the existing `LiveBootHarness` API
+  (`.get()`/`.post()`/`.query_db()`) rather than building a second mechanism:
+  1. **`auth`** (`lab/manifests/phase3_php_laravel_real_pages_auth.yaml`): a real
+     seeded `users` row (`SEED_USERNAME`/`SEED_PASSWORD`/`SEED_USER_ID`, md5-hashed —
+     matching `login.php`'s own `password_hash_fn`, never bcrypt, since the migrated
+     login/register controllers go through `DB::table('users')`, not Eloquent, so
+     `App\Models\User`'s `'password' => 'hashed'` cast never applies to either page).
+     `login.php`'s vulnerable/secure twin (`LABGEN-PLA-0001`/`0002`) is proven with a
+     genuine, unauthenticated SQLi boolean-injection auth bypass on the vulnerable
+     cell (a `302` matching a real seeded row with no correct password at all) and a
+     real `401` on the secure (bound-parameter) twin for the identical payload.
+     `register.php` (`LABGEN-PLA-0003`) is proven with a real prepared `INSERT`,
+     observed by reading the row back out of the same booted app's own SQLite
+     database (`LiveBootHarness.query_db()`, new), plus the real duplicate-username
+     `409` rejection.
+  2. **`g2`** (`lab/manifests/phase3_php_laravel_real_pages_g2.yaml`): both cells are
+     secure-only per the manifest itself (no vulnerable twin exists to differential
+     against). `products.php` is proven with a real, category-filtered HTML result
+     set against the seeded `products` table; `api/products.php` is proven with a
+     real, well-formed JSON array (`json.loads()` on the real response body) whose
+     field shape/casts match the `json_view` Eloquent API Resource's own declared
+     contract, plus both endpoints' real bound-parameter behavior against a
+     string-literal-breakout payload (matches nothing, on both).
+  3. **`g4`** (`lab/manifests/phase3_php_laravel_real_pages_g4.yaml`): the one
+     genuinely two-request case — `edit_profile.php` (write) then `profile.php`
+     (read/sink), against the same seeded `users` row's `bio` field (the write/read
+     endpoints' shared `?user=` owner default, `SEED_USER_ID`). Proven for both the
+     vulnerable cell (`LABGEN-PLRP-0401`: a POSTed `<script>` marker survives
+     unescaped at the read sink) and the secure twin (`LABGEN-PLRP-0402`: the same
+     marker is HTML-entity-escaped) — each cell's own read URL AND write URL
+     (canonical or twin) derived from the emitter's own `route_fragment_for()`
+     output, never re-derived, per PA-0001/PA-0021.
+  - `search.php` (`lab/manifests/phase3_php_laravel_real_pages_search.yaml`) is
+    explicitly **not** attempted: its own header documents that all six of its
+    cells are still without a canonical URL-owning cell pending the `L-P3.3c-CUT`
+    policy decision (`CC-LAB-0052`/`0053`), so there is no single stable
+    `/search.php` URL to live-boot against yet.
+  - **`BUG-0028` (full bug protocol; see `docs/bugs/BUG-0028-*.md`/`ERROR_LOG.md`,
+    `PA-0030`).** Two real defects in the harness itself, found while building the
+    above: (a) `LiveBootHarness.request()` silently followed a real `POST` `302`
+    (stdlib `urllib` default), masking a real login success as a `404` against a
+    manifest with no `/profile.php` route of its own; (b) the seeded `users` schema
+    had no `created_at`/`updated_at` columns, which `App\Models\User`'s default
+    Eloquent `$timestamps = true` needs on every `->save()` — breaking every G4
+    write with a real `500`. Both fixed in `live_boot.py`: a custom
+    non-redirect-following `urllib` opener, and two new nullable schema columns.
+- Impact (other components / project): none outside LAB. No existing test's
+  expectations changed; `request()`'s new never-follow-a-redirect behavior can only
+  make a previously response correctly reported, and neither `CC-LAB-0054` test
+  (`forms`/`numeric`) exercises a redirect, so both keep passing unchanged. The
+  seeded schema's two new nullable columns are additive; the pre-existing
+  `register.php` `INSERT` (which never mentions them) is unaffected.
+- Risk (level; mitigation or accepted-risk justification): **low**. Purely additive
+  to a conformance harness that gates nothing in `--check` or production; the two
+  bug fixes can only make previously-misreported/broken behavior correctly
+  reported, never regress an already-passing assertion (regression-tested directly
+  by the new tests, which would have failed loudly pre-fix).
+- Deliverables:
+  - [x] `fuzzlab/labgen/conformance/live_boot.py`: `SEED_USER_ID`/`SEED_USERNAME`/
+        `SEED_PASSWORD`/`SEED_EMAIL`/`SEED_FULL_NAME`/`SEED_BIO`, a seeded `users`
+        row (md5-hashed password), `LiveBootHarness.query_db()`,
+        `_NoRedirectHttpErrorProcessor`/`_NO_REDIRECT_OPENER`, `created_at`/
+        `updated_at` columns on the seeded `users` table — done
+  - [x] `tests/test_labgen_conformance_live_boot.py`: 3 new `@pytest.mark.slow`
+        tests (`test_live_boot_auth_manifest_sqli_bypasses_login_and_register_
+        inserts_a_row`, `test_live_boot_g2_manifest_serves_real_html_listing_and_
+        real_json_feed`, `test_live_boot_g4_manifest_stored_bio_round_trips_write_
+        then_read`) — done, all passing against a real `php`/`composer`/Packagist
+        environment
+  - [x] `docs/bugs/BUG-0028-*.md` + `ERROR_LOG.md` + `docs/PREVENTIVE_ACTIONS.md`
+        (`PA-0030`) — done
+  - [x] `docs/components/01-target-lab/requirements.md` (`FR-LAB-54`) — done
+  - [x] `docs/LAB_IMPLEMENTATION_PLAN.md` (~line 154's status note) — done
+  - [x] `CHANGELOG.md` — done
+- Verification: `pytest -m slow tests/test_labgen_conformance_live_boot.py -v` (5
+  passed, real `php`/`composer` + Packagist reachability available in this
+  environment); full suite `pytest -q` — see the run recorded alongside this entry's
+  commit for the exact pass/skip counts.
+
 ### CC-LAB-0055 — `minimal_pair.py`: `pair_by` (path-independent pairing) + a real content-confinement defect fix (FR-LAB-53) (2026-09-22)
 - Change: two independent fixes to `fuzzlab/labgen/minimal_pair.py`, both closing gaps
   lane L-P3.3c-G3 found and worked around rather than fixed (`CC-LAB-0048`; see also

@@ -14,6 +14,18 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB: extended `fuzzlab.labgen.conformance.live_boot.LiveBootHarness` real on-host
+  live-boot proof to three more real-page manifest groups — `auth` (a real SQLi
+  boolean-injection login bypass and a real `register.php` `INSERT`), `g2`
+  (`products.php`/`api/products.php`'s real JSON feed), and `g4` (the
+  `edit_profile.php` -> `profile.php` stored-second-order write-then-read round
+  trip) — bringing live-boot coverage to 5 of the 6 `phase3_php_laravel_real_pages_*`
+  manifests (`search.php` remains genuinely unpinned pending `L-P3.3c-CUT`, per its
+  own manifest header). Along the way, fixed two real defects in the harness itself
+  (silent redirect-following masking a real login success as a `404`; a seeded
+  schema missing the columns Eloquent's default timestamps need, breaking every G4
+  write) — see `docs/bugs/BUG-0028-*.md` (`CC-LAB-0056`/`FR-LAB-54`, `PA-0030`).
+
 - LAB: `fuzzlab.labgen.minimal_pair.check_minimal_pair()` gained an optional `pair_by`
   key function so two independently-authored cells rendering to different file paths
   (lane L-P3.3c-G3's `login.php`/its secure twin, `CC-LAB-0048`) can be paired and

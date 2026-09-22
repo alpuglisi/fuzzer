@@ -23,6 +23,32 @@ real ``requests`` calls against it. :func:`Tier1Client`-conformant --
 :class:`~fuzzlab.labgen.conformance.tier1.Tier1Case` can be run against a
 *real* client for the first time, not just a hand-written test double.
 
+**Coverage (``CC-LAB-0056``/``FR-LAB-54``, extending ``CC-LAB-0054``/
+``FR-LAB-52``).** Five of the six ``phase3_php_laravel_real_pages_*``/
+``phase3_laravel_real_pages_*`` manifests are now driven end to end:
+``forms`` and ``numeric`` (``CC-LAB-0054``), plus ``auth`` (``login.php``'s
+real SQLi-bypass/bound-parameter twin against a real seeded ``users`` row,
+and ``register.php``'s real prepared ``INSERT``), ``g2`` (``products.php`` /
+``api/products.php``'s real JSON feed), and ``g4`` (the
+``edit_profile.php`` -> ``profile.php`` stored-second-order write-then-read
+round trip) (``CC-LAB-0056``). ``search.php`` remains genuinely unpinned
+(no single cell owns its real URL yet, pending the ``L-P3.3c-CUT`` decision
+-- see that manifest's own header) and is not attempted here.
+
+**The seeded ``users`` row (:data:`SEED_USERNAME`/:data:`SEED_PASSWORD`,
+user id :data:`SEED_USER_ID`).** One row serves both the auth group's real
+login and the G4 group's stored-``bio`` owner default (``$request->query
+('user', 1)``) -- the same real ``users`` table both groups' migrated pages
+read, not two independently-seeded rows for what is one table. Its password
+is stored **md5-hashed**, matching ``login.php``'s own
+``password_hash_fn`` (see ``php_laravel.__init__._PAGE_PROFILES
+['/login.php']``) -- never bcrypt/``Hash::make``: the migrated
+login/register controllers go through ``DB::table('users')`` (the query
+builder), never Eloquent, so ``App\\Models\\User``'s ``'password' =>
+'hashed'`` cast (which *would* expect bcrypt) is never invoked for either
+page. Confirmed directly against the skeleton's own ``app/Models/User.php``
+before relying on it, not assumed.
+
 **Why SQLite here, MariaDB in the real lab.** Per this task's own scope: the
 production lab target (``puppy-fort-factory/`` today, this generator's output
 after the eventual ``L-P3.3c-CUT`` atomic cutover) is deliberately MariaDB,
@@ -118,6 +144,25 @@ def live_boot_available() -> bool:
     )
 
 
+class _NoRedirectHttpErrorProcessor(urllib.request.HTTPErrorProcessor):
+    """Hands back every response -- 2xx, 3xx, 4xx, 5xx alike -- exactly as
+    the server sent it, instead of ``urllib``'s default behavior of raising
+    :class:`urllib.error.HTTPError` for non-2xx and silently *following* a
+    3xx via :class:`urllib.request.HTTPRedirectHandler` (``BUG-0028``: this
+    harness must observe the raw redirect, never chase it)."""
+
+    def http_response(self, request, response):  # noqa: D102 - stdlib override
+        return response
+
+    https_response = http_response
+
+
+#: One shared, never-follows-a-redirect opener for every
+#: :meth:`LiveBootHarness.request` call -- built once at import time (it
+#: holds no per-app state) rather than per request.
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHttpErrorProcessor())
+
+
 def _find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
@@ -180,9 +225,49 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT NOT NULL,
     password TEXT NOT NULL,
     full_name TEXT,
-    bio TEXT
+    bio TEXT,
+    created_at TEXT,
+    updated_at TEXT
 );
 """
+#: ``created_at``/``updated_at`` above are for :class:`\\App\\Models\\User`
+#: alone (``login.php``/``register.php`` go through ``DB::table('users')``,
+#: which never touches them): Eloquent's default ``$timestamps = true``
+#: unconditionally sets ``updated_at`` on every ``->save()`` -- including the
+#: G4 write endpoint's ``$storedOwner->save()`` -- regardless of whether the
+#: real reproduced page tracks timestamps, so the seeded table must have
+#: somewhere for Eloquent to put it or every G4 write 500s
+#: (``SQLSTATE[HY000]: no such column: updated_at`` -- ``BUG-0028``).
+
+#: The auth-group real login (``LABGEN-PLA-0001``/``0002``) and stored
+#: second-order (``LABGEN-PLRP-0401``/``0402``) manifests both need a real,
+#: pre-existing ``users`` row: ``id=1`` is the ``owner_param`` default every
+#: ``/profile.php``/``/edit_profile.php`` request falls back to
+#: (``read_stored_field.php.j2``/``stored_field_write.php.j2``:
+#: ``$request->query('user', 1)``), and it is also this harness's one known
+#: login identity for ``/login.php`` -- the same row serves both groups
+#: (``CC-LAB-0056``/``FR-LAB-54``), never two independently-seeded rows for
+#: what is the same real page's one users table.
+#:
+#: The password is stored **md5-hashed**, matching the real page's own
+#: ``password_hash_fn`` (``php_laravel.__init__._PAGE_PROFILES['/login.php']``)
+#: -- never bcrypt/``Hash::make``, which the migrated login controller does
+#: not call (it goes through ``DB::table('users')``, not Eloquent, so the
+#: model's ``'password' => 'hashed'`` cast is never in play for login/register
+#: -- see this harness's own test module for the full reasoning).
+SEED_USER_ID = 1
+SEED_USERNAME = "user_a"
+SEED_PASSWORD = "correct-horse-battery-staple"
+SEED_EMAIL = "user_a@example.test"
+SEED_FULL_NAME = "User A"
+SEED_BIO = "Just a puppy fan."
+
+
+def _seed_password_hash() -> str:
+    import hashlib
+
+    return hashlib.md5(SEED_PASSWORD.encode("utf-8")).hexdigest()
+
 
 _SEED_SQL = """
 INSERT INTO products (name, description, price, category, stock) VALUES
@@ -277,7 +362,39 @@ class LiveBootHarness:
         try:
             conn.executescript(_SCHEMA_SQL)
             conn.executescript(_SEED_SQL)
+            conn.execute(
+                "INSERT INTO users (id, username, email, password, full_name, bio) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    SEED_USER_ID,
+                    SEED_USERNAME,
+                    SEED_EMAIL,
+                    _seed_password_hash(),
+                    SEED_FULL_NAME,
+                    SEED_BIO,
+                ),
+            )
             conn.commit()
+        finally:
+            conn.close()
+
+    def query_db(self, sql: str, params: tuple = ()) -> list[dict]:
+        """Read-only introspection over the harness's own seeded SQLite
+        database, for a test to observe a write it made through a real HTTP
+        request (e.g. ``register.php``'s real ``INSERT``) without this
+        harness growing a second, parallel HTTP-response-parsing mechanism
+        for something a direct row read answers more simply. Never used by
+        this module itself to *drive* a request -- only by a caller
+        confirming one already landed."""
+        assert self._app_dir is not None
+        import sqlite3
+
+        db_path = self._app_dir / "database" / "database.sqlite"
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(sql, params).fetchall()
+            return [dict(row) for row in rows]
         finally:
             conn.close()
 
@@ -344,7 +461,21 @@ class LiveBootHarness:
                 data: dict[str, str] | None = None) -> HttpResponse:
         """A real HTTP request against the booted app. Uses only the standard
         library (``urllib``) so this module needs no extra runtime
-        dependency beyond what :mod:`fuzzlab` already declares."""
+        dependency beyond what :mod:`fuzzlab` already declares.
+
+        Never follows a redirect (``BUG-0028``): a real login/session page
+        (``/login.php``) and a stored-second-order write endpoint
+        (``/edit_profile.php``) both legitimately respond with a real
+        ``302``, and a caller proving *that specific* response -- not
+        whatever page it happens to point at -- needs the raw status and
+        body this app actually returned. ``urllib``'s default opener
+        auto-follows a ``301``/``302``/``303`` for a ``POST`` too (converting
+        it to a ``GET`` on the new URL, per :class:`urllib.request.
+        HTTPRedirectHandler.redirect_request`'s own docstring) -- exactly the
+        stdlib default this method must not inherit here, or a real
+        auth-bypass 302 silently turns into whatever the redirect target
+        happens to return instead (see ``BUG-0028`` for the concrete case
+        this masked)."""
         import urllib.parse
 
         url = self._base_url() + path
@@ -356,11 +487,8 @@ class LiveBootHarness:
             body = urllib.parse.urlencode(data).encode("utf-8")
             headers["Content-Type"] = "application/x-www-form-urlencoded"
         req = urllib.request.Request(url, data=body, method=method.upper(), headers=headers)
-        try:
-            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_S) as resp:
-                return HttpResponse(status=resp.status, body=resp.read().decode("utf-8", errors="replace"))
-        except urllib.error.HTTPError as exc:
-            return HttpResponse(status=exc.code, body=exc.read().decode("utf-8", errors="replace"))
+        with _NO_REDIRECT_OPENER.open(req, timeout=REQUEST_TIMEOUT_S) as resp:
+            return HttpResponse(status=resp.status, body=resp.read().decode("utf-8", errors="replace"))
 
     def get(self, path: str, *, params: dict[str, str] | None = None) -> HttpResponse:
         return self.request("GET", path, params=params)

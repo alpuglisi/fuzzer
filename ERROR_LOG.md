@@ -18,6 +18,25 @@ Format per entry:
 
 ---
 
+## 2026-09-22 — LAB: `LiveBootHarness` silently followed real redirects and its seeded schema lacked Eloquent timestamp columns (fixed)
+
+- **Symptom:** extending `LiveBootHarness` coverage to the auth/G4 real-page manifests
+  (`CC-LAB-0056`/`FR-LAB-54`), a real correct-credentials `POST /login.php` reported a
+  `404` (a successful login's own real `302` to `/profile.php` was silently chased to a
+  `GET` on a URL the auth manifest alone never registers), and every G4 write
+  (`edit_profile.php`) reported an unconditional real `500`.
+- **Root cause:** `LiveBootHarness.request()` used `urllib.request.urlopen()` directly,
+  which auto-follows a `POST`'s `301`/`302`/`303` per the stdlib's own documented
+  default; and the harness's seeded SQLite `users` table had no `created_at`/
+  `updated_at` columns, which `App\Models\User`'s default Eloquent `$timestamps = true`
+  needs on every `->save()` (a code path only G4's write endpoint exercises — neither
+  original `CC-LAB-0054` manifest touches Eloquent at all).
+- **Remediation:** `request()` now opens through a custom `urllib` opener
+  (`_NoRedirectHttpErrorProcessor`) that hands back every response unmodified instead of
+  chasing a redirect; `_SCHEMA_SQL`'s `users` table gained nullable `created_at`/
+  `updated_at` columns. See `docs/bugs/BUG-0028-*.md` for the full RCA.
+- **Status:** Fixed (`CC-LAB-0056`/`FR-LAB-54`, `PA-0030`).
+
 ## 2026-09-22 — LAB: `check_minimal_pair`'s content-confinement check silently disabled whenever the two variants' compositions differ by name (fixed)
 
 - **Symptom:** `fuzzlab.labgen.minimal_pair.check_minimal_pair()` returned `None` (no

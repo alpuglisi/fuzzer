@@ -1290,6 +1290,10 @@ lane) can submit a payload as
     extend to; `LiveBootHarness` itself does not preclude it, and a future
     change should extend `_SCHEMA_SQL`/`_SEED_SQL` and add their own test
     functions rather than a second harness. (`CC-LAB-0054`)
+
+    *(Update, `FR-LAB-54`/`CC-LAB-0056`, 2026-09-22: the auth/G2/G4 manifests
+    are now also driven — see `FR-LAB-54` below for the full statement. Only
+    `search.php` remains undriven, deliberately, pending `L-P3.3c-CUT`.)*
   - **Does not itself confirm a Tier-2, oracle-grade vulnerable/secure
     verdict.** `fuzzlab.labgen.conformance.tier2`'s "the only tier that
     actually confirms a label" claim is unchanged by this requirement — a
@@ -1335,6 +1339,87 @@ lane) can submit a payload as
      module standalone -- a line this checker's docstring already refuses to
      cross; recorded as a residual, explicitly out-of-scope gap, the same
      way the pre-existing equal-composition-length restriction already is.
+
+- **FR-LAB-54** *(extends `FR-LAB-52`'s live-boot scope; `CC-LAB-0056`,
+  `docs/bugs/BUG-0028-*.md`.)* `fuzzlab.labgen.conformance.live_boot
+  .LiveBootHarness`'s real, on-host proof extends from 2 to 5 of the 6
+  `phase3_php_laravel_real_pages_*`/`phase3_laravel_real_pages_*` manifests:
+  1. **`auth`** (`login.php`/`register.php`). A real seeded `users` row
+     (`SEED_USER_ID`/`SEED_USERNAME`/`SEED_PASSWORD`, module-level constants
+     on `live_boot.py`) whose password is stored **md5-hashed** — matching
+     `login.php`'s own `password_hash_fn` (`php_laravel.__init__
+     ._PAGE_PROFILES['/login.php']`), never bcrypt/`Hash::make`: the
+     migrated login/register controllers go through `DB::table('users')`
+     (the query builder), never Eloquent, so `App\Models\User`'s
+     `'password' => 'hashed'` cast is never invoked for either page —
+     confirmed directly against the skeleton's own `app/Models/User.php`
+     before relying on it. `login.php`'s vulnerable/secure twin
+     (`LABGEN-PLA-0001`/`0002`) is proven with a genuine, unauthenticated
+     SQLi boolean-injection auth bypass: the vulnerable cell authenticates
+     (a real `302`) with no correct password at all, while the bound-
+     parameter secure twin rejects the identical payload with the real
+     page's own `401`. (The naive `' OR '1'='1' -- ` textbook payload does
+     **not** work against this specific rendered statement — it leaves
+     Laravel's separately-bound `->where('password', ...)` clause's
+     placeholder commented out of the final SQL text while PDO still tries
+     to bind a value to it, a real `SQLSTATE[HY000]` `QueryException`
+     rather than a bypass; the working payload keeps one placeholder of its
+     own before the comment marker so the still-supplied binding lands on
+     it instead. Recorded here because it is a genuine, observed fact about
+     this exact query shape, not assumed from the textbook form.)
+     `register.php` (`LABGEN-PLA-0003`) is proven with a real prepared
+     `INSERT`, confirmed by reading the row back out of the same booted
+     app's own SQLite database (`LiveBootHarness.query_db()`, new — a
+     read-only introspection helper for observing a write a real HTTP
+     request already made, never used to drive a request itself), plus the
+     real duplicate-username `409` rejection.
+  2. **`g2`** (`products.php`/`api/products.php`). Both cells are
+     secure-only per the manifest itself — no vulnerable twin exists to
+     differential against, confirmed by reading the manifest rather than
+     assumed. `products.php` is proven with a real, category-filtered HTML
+     result set against the seeded `products` table (reusing, not
+     duplicating, `FR-LAB-52`'s existing product seed data);
+     `api/products.php` is proven with a real, well-formed JSON array
+     (parsed with `json.loads()` on the real response body, not merely
+     "status 200") whose field set/types match the `json_view` Eloquent API
+     Resource's own declared contract, plus both endpoints' real
+     bound-parameter behavior against a string-literal-breakout payload.
+  3. **`g4`** (`edit_profile.php` -> `profile.php`, `stored_second_order`).
+     The one genuinely sequential-state case: a real POST to the write
+     endpoint followed by a real GET of the read endpoint, both against the
+     same seeded `users` row's `bio` field (the write/read endpoints' shared
+     `?user=` owner default, `SEED_USER_ID` — no session/auth machinery
+     needed to reach either endpoint, confirmed directly: neither the write
+     nor the read route carries any auth middleware in the generated
+     `routes/web.php`, so `FR-LAB-52`'s auth-session adapter is not a
+     dependency here). Proven for both the vulnerable cell
+     (`LABGEN-PLRP-0401`: a POSTed `<script>` marker survives unescaped at
+     the read sink) and the secure twin (`LABGEN-PLRP-0402`: the same
+     marker is HTML-entity-escaped, `&lt;script&gt;...`) — each cell's own
+     read URL AND write URL (canonical or twin, per `FR-LAB-50`'s unified
+     mechanism) derived from the emitter's own `route_fragment_for()`
+     output rather than re-derived (PA-0001/PA-0021).
+  - **`search.php` is explicitly not attempted.**
+    `lab/manifests/phase3_php_laravel_real_pages_search.yaml`'s own header
+    documents that all six of its cells are still without a canonical
+    URL-owning cell pending the `L-P3.3c-CUT` policy decision (`CC-LAB-0052`/
+    `0053`) — there is no single stable `/search.php` URL to live-boot
+    against yet, and inventing one here would mean making a canonical-cell
+    choice this project has explicitly deferred to a human decision.
+  - **`BUG-0028` (full bug protocol).** Extending coverage surfaced two real
+    defects in `LiveBootHarness` itself (not in any emitted code), both
+    invisible until a real redirect and a real Eloquent `->save()` were
+    exercised for the first time: (a) `request()` silently followed a real
+    `POST` `302` (`urllib`'s own documented default), masking a real login
+    success as a `404`; (b) the seeded `users` schema lacked the
+    `created_at`/`updated_at` columns `App\Models\User`'s default Eloquent
+    timestamps need, breaking every G4 write with a real `500`. Both fixed
+    (a non-redirect-following `urllib` opener; two new nullable schema
+    columns) — see `docs/bugs/BUG-0028-*.md` and `PA-0030`.
+  - Still, as `FR-LAB-52` already states, **not** a Tier-2, oracle-grade,
+    dialect-correct verdict confirmation — this requirement only extends
+    which real-page groups get a real boot + real, observable behavior,
+    unchanged in kind from `FR-LAB-52`'s own scope statement.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

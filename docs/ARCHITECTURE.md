@@ -253,7 +253,14 @@ tracked in the requirements files, not here.
   `tests/test_labgen_conformance_live_boot.py` (skip-guarded,
   `pytest.mark.slow`, not wired into `--check`), covering the escaped-echo
   form pages and the `product.php` numeric-SQLi vulnerable/secure twin (a
-  real, observed payload differential). Tier 2's real, dialect-correct,
+  real, observed payload differential). **Extended (`CC-LAB-0056`/`FR-LAB-54`,
+  2026-09-22)** to the auth pages (`login.php`'s real SQLi auth-bypass twin,
+  `register.php`'s real `INSERT`), the catalog/JSON-feed pages
+  (`products.php`/`api/products.php`, including a real, parsed JSON
+  response), and the stored-second-order pair (`edit_profile.php` ->
+  `profile.php`, a real write-then-read round trip) — 5 of 6 real-page
+  manifest groups now live-boot-proven; only `search.php` remains
+  deliberately unpinned pending `L-P3.3c-CUT`. Tier 2's real, dialect-correct,
   container-based oracle confirmation remains unbuilt. A second
   Phase-3 stack emitter (`fuzzlab/labgen/emitters/python_fastapi/`, Tier-A
   depth per `CR-LAB-0001` Addendum C's stack-pacing decision, `CC-LAB-0029`)
