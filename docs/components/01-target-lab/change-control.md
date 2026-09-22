@@ -3,6 +3,133 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0045 — L-P1.3: the metadata leakage probe becomes a required `--check` gate, with per-class thresholds (2026-09-22)
+*(`CC-LAB-0045` was pre-assigned to this lane by the orchestrating session, with
+`CC-LAB-0044` reserved for the concurrent lane L-P3.3b — so, unlike CC-LAB-0040..0043,
+this entry needed no merge-time renumbering. `FR-LAB-43` likewise.)*
+- Change: implemented `docs/LAB_IMPLEMENTATION_PLAN.md` §2.3's second half (its first
+  half, the χ² fingerprint gate, is `CC-LAB-0040`/L-P3.4 and is untouched here), in
+  three pieces:
+  1. **Per-class AUC thresholds in `fuzzlab/labgen/leakage_probe.py`** — the §2.3
+     decision of 2026-09-21 ("per-class thresholds, not one global 0.55-0.60 band"),
+     modelled on the existing `PER_CLASS_FEATURE_EXCLUSIONS` dict as the plan asked:
+     `PER_CLASS_AUC_THRESHOLDS: dict[str, ClassThreshold]`, where `ClassThreshold`
+     carries `(auc_threshold, status, justification)` and validates all three.
+     **The design tension this had to resolve, and how:** that module's own docstring
+     (point 5) and the comment above `PER_CLASS_FEATURE_EXCLUSIONS` both stated flatly
+     that a per-class *threshold* is a loophole — "a per-class threshold would just
+     disable the gate for that class". That warning is honored rather than overridden,
+     by making the override one-directional: a class's effective pass line is
+     `min(its own permutation-null percentile, its configured threshold)`. A configured
+     number can therefore only ever make the gate **stricter**; raising one above a
+     class's own null has literally no effect, so the dict cannot be used to turn a red
+     class green. The two docstrings were updated in place to say this (a new point 6)
+     rather than left contradicting the code.
+     Every shipped value is `status="provisional"`, seeded from
+     `PROVISIONAL_THRESHOLD_BAND = (0.55, 0.60)` — mid-band for the dense classes
+     (`sqli`, `xss`, `sqli_error`, `secure`), top-of-band for the two classes whose
+     legitimate-signal feature `latency_ms` is already excluded
+     (`sqli_blind_time`, `race_condition`), and top-of-band for the
+     `DEFAULT_CLASS_THRESHOLD` an unregistered class falls back to. Each carries a
+     written rationale, and `format_leakage_report` prints every class's number *with
+     its PROVISIONAL/CALIBRATED status and rationale*, plus an explicit NOTE naming the
+     classes whose verdict currently rests on an uncalibrated number — the §2.3
+     requirement that a future calibration pass be able to tell which numbers still
+     need a properly-sized permutation null.
+  2. **A gate wrapper.** `probe_leakage` stays the pure measurement function it always
+     was (it still never raises on a leaky result, and its existing signature/fields are
+     untouched); `run_leakage_gate` is the new raising wrapper, and it names **every**
+     violation found, global and per-class, in one `MetadataLeakageError` — the same
+     "one error listing all violations" convention `run_fingerprint_gate` uses.
+     `InsufficientCorpusError` is deliberately a *separate* type: "we could not measure"
+     is not "we measured a leak", and a caller must be able to skip on the former.
+     `insufficiency_reason()` names the specific shortfall (empty / <2 classes /
+     `MIN_CELLS_FOR_GATE` / `MIN_GROUPS_FOR_GATE` / `MIN_CELLS_PER_CLASS_FOR_GATE` / no
+     in-scope feature with any variance). Two additive, backward-compatible extensions
+     support this: a `feature_scope` parameter that may only **narrow** the closed
+     allowlist (never widen it), and new `LeakageResult.per_class` /
+     `.per_class_leaks` / `.gate_passes` / `.provisional_classes` members appended with
+     defaults so the pre-existing `leaks` field keeps its exact prior meaning.
+     `corpus_analysis.stratified_split`'s use of `grouped_cv` is unaffected — that
+     function's signature and construction are untouched.
+  3. **Wired into `fuzzlab/labgen/cli.py`'s `run_checks` as required step 9**, following
+     step 8's pattern exactly: a single adapter
+     (`leakage_probe_records_from_manifest`) between the schema and a deliberately
+     schema-independent probe, reusing `corpus_analysis.generating_rule_id` as the
+     grouping key rather than deriving a second one (PA-0003/PA-0021), a lazy import so
+     a missing scikit-learn becomes a fail-closed `--check` failure instead of an import
+     crash, and a SKIP with an explicit printed reason when the corpus cannot support
+     the measurement. The gate's report is printed on the **pass** path too, because a
+     provisional-threshold annotation only shown on failure would never be read.
+- **Honest limitation, recorded rather than built around.** The lane brief expected the
+  harder-shapes manifest's new cell-count/class/transform variation (L-P1.2b) to make
+  this gate meaningful. It does not, for a reason no amount of corpus variation fixes:
+  five of the seven allowlisted features (`status_code`, `response_length`,
+  `header_count`, `latency_ms`, `content_type`) are observations of a **live response**,
+  and the sixth (`param_name_length`) lives in each emitter's private per-route page
+  profile, not in the `Cell` IR (`ParamSpec` carries `location`/`encoding`, never a
+  name). Only `path_depth` is manifest-derivable, hence
+  `cli.MANIFEST_DERIVABLE_LEAKAGE_FEATURES = ("path_depth",)`. Imputing the rest would be
+  feeding a stage inputs the real upstream never produced, which PA-0006 forbids, so the
+  probe is told the true scope via `feature_scope` and skips loudly instead. Consequence:
+  on every manifest shipped today the gate prints
+  `metadata leakage gate SKIPPED -- the corpus has 13 cell(s); the gate needs >= 40 ...`
+  and passes. The gate is nonetheless proven to run for real, and to both pass and fail
+  correctly, on manifest-derived corpora through the real CLI (see Deliverables).
+  Making it non-vacuous on the real corpus needs observed response metadata recorded per
+  cell at build time — a separate, real deliverable, not an oversight; noted in
+  `FR-LAB-43` and flagged to the orchestrating session.
+- Impact (other components / project): **LAB only.** `fuzzlab lab-generate --check`
+  gains a ninth gate; `fuzzlab/labgen/leakage_probe.py` and `fuzzlab/labgen/cli.py` are
+  the only source files changed. No emitter, no `schema.Cell`, no
+  `fingerprint_gate.py`, no safety matrix, no ground-truth contract, and no other
+  component is touched. `corpus_analysis.py` is read but not modified; its `grouped_cv`
+  call site keeps working (asserted by the unchanged
+  `tests/test_labgen_corpus_analysis.py`). The one interface change is additive:
+  `probe_leakage` gains an optional `feature_scope` keyword and `LeakageResult` gains
+  four defaulted members, so every pre-existing caller compiles and behaves identically.
+- Risk (level; mitigation or accepted-risk justification): **Low-to-moderate, and the
+  moderate part is stated rather than hidden.** (a) *A new required gate could fail a
+  build spuriously.* Mitigated structurally: the gate refuses to judge a corpus it
+  cannot measure (typed `InsufficientCorpusError` → printed skip, never a failure), and
+  the per-class thresholds can only tighten against an empirically-derived null, never
+  replace it. (b) *The threshold numbers are guesses.* Accepted and labelled: every one
+  is `provisional`, inside the plan's own band, printed as such on every run, and
+  asserted to be so by a test — the plan explicitly sanctions provisional values at this
+  phase. (c) *The gate is currently vacuous on real manifests.* Accepted, documented in
+  three places (the constant's docstring, the printed skip reason, `FR-LAB-43`), and
+  reported to the orchestrating session rather than concealed by loosening the
+  sufficiency floors to force a run on 13 cells — which would have produced a
+  meaningless verdict, the exact failure mode PA-0017 warns about (a metric that does
+  not measure the capability it claims to).
+- Deliverables:
+  - [x] `PER_CLASS_AUC_THRESHOLDS` + `ClassThreshold` + `THRESHOLD_STATUSES` +
+        `PROVISIONAL_THRESHOLD_BAND` + `class_threshold()` — done
+  - [x] Per-class one-vs-rest AUC and per-class permutation nulls, computed from the
+        same cross-validated probabilities as the global AUC (never a second fit) — done
+  - [x] `run_leakage_gate` / `LeakageGateReport` / `MetadataLeakageError` /
+        `InsufficientCorpusError` / `insufficiency_reason` / `format_leakage_report` — done
+  - [x] Additive `feature_scope` (narrow-only) + explicit rejection of an in-scope
+        feature missing from a cell (PA-0006, never silently imputed) — done
+  - [x] `cli.run_checks` step 9 + `leakage_probe_records_from_manifest` + `path_depth`
+        + `MANIFEST_DERIVABLE_LEAKAGE_FEATURES` — done
+  - [x] Tests: 14 new in `tests/test_labgen_leakage_probe.py` (reusing that module's own
+        `_leaky_corpus`/`_clean_corpus` fixtures, not re-authored ones) + 7 new in
+        `tests/test_labgen_cli.py`, including a real gate PASS and a real gate FAIL
+        driven through `run_checks` on manifest-derived corpora built by re-pathing the
+        real real-pages cells between php_current's two existing renderable depths — done
+  - [x] CHANGELOG line, this entry, `FR-LAB-43`, `docs/ARCHITECTURE.md` — done
+- Effectiveness (assessed 2026-09-22): **Partially achieved, precisely.** The mechanism
+  is complete and demonstrably correct: `pytest` 1337 passed / 8 skipped / 2 failed
+  (the two are the pre-existing, already-logged `tests/test_mutation_operators.py`
+  MUT-component failures, confirmed identical to this branch's baseline before any of
+  this lane's changes — unrelated to LAB). The gate genuinely fails a build when a
+  feature trivially predicts the class, and genuinely passes when it does not, both
+  proven end to end through `cli.run_checks`. What is *not* achieved is the plan's
+  implicit hope that §2.2's corpus variation would make this gate bite on real
+  manifests: it skips on all of them, for the feature-availability reason above. Judge
+  again once per-cell observed response metadata exists.
+
 ### CC-LAB-0043 — L-P1.2b: the harder SQLi/XSS shapes + identifier-SQLi oracle wiring (2026-09-21)
 *(Numbered `CC-LAB-0043` rather than the `CC-LAB-0040` this lane claimed "from the top of
 this log at authoring time" — by merge time, lanes L-P3.4 (`CC-LAB-0040`), L-P1.4

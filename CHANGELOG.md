@@ -12,6 +12,24 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-22
+
+- LAB: made the metadata leakage probe a required `fuzzlab lab-generate --check` gate
+  and gave it the per-class thresholds `docs/LAB_IMPLEMENTATION_PLAN.md` §2.3 decided on
+  (lane L-P1.3, `CC-LAB-0045`, `FR-LAB-43`) — `leakage_probe.run_leakage_gate` now wraps
+  the (still non-raising) `probe_leakage` measurement, judging each class's one-vs-rest
+  AUC against `min(its own permutation null, its configured `PER_CLASS_AUC_THRESHOLDS`
+  line)`. Strictest-of-two is deliberate: it implements §2.3's per-class decision while
+  honoring the module's standing warning that a per-class threshold must never be usable
+  to switch the gate off for a class. Every shipped threshold is marked `provisional`
+  (seeded from the report's 0.55-0.60 band) and the gate prints each one's
+  provisional-vs-calibrated status, so a later calibration pass can see which numbers
+  still need a properly-sized permutation null. Honest limitation recorded rather than
+  papered over: a manifest carries only one of the seven allowlisted features
+  (`path_depth`) — the other six are live-response observations — so on every sample
+  manifest shipped today the gate SKIPS with an explicit printed reason rather than
+  pretending to measure.
+
 ## 2026-09-21
 
 - LAB: carried the stack axis end to end and made the fingerprint-independence gate

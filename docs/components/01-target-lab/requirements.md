@@ -200,8 +200,9 @@ and measured. Authorized, lab-only.
   always `inconclusive`, never guessed as secure. (`CR-LAB-0001`
   tool-mapping table, `docs/spikes/SPIKE-005-zap-vs-ssti-flask-hacking-playground.md`,
   `CC-LAB-0021`)
-- **FR-LAB-21** (Lab track, Phase 0/1 foundation, reference implementation — not
-  build-gating yet) `fuzzlab.labgen.leakage_probe.probe_leakage()` detects whether a
+- **FR-LAB-21** (Lab track, Phase 0/1 foundation; the measurement half — the gating half
+  it originally deferred is now **FR-LAB-43**, `CC-LAB-0045`)
+  `fuzzlab.labgen.leakage_probe.probe_leakage()` detects whether a
   corpus's non-payload metadata (status code, response length, header count, latency,
   param-name length, path depth, content-type — a closed allowlist) statistically leaks
   the vulnerability label, via a deliberately weak classifier, `StratifiedGroupKFold`
@@ -210,9 +211,13 @@ and measured. Authorized, lab-only.
   time-based-blind-SQLi/race-condition classes, where timing *is* the signal) each carry
   a written justification and are always reported, never silently applied. Requires the
   optional `labgen` extras (`scikit-learn`, `numpy`); not imported eagerly by
-  `fuzzlab.labgen.__init__`, so the rest of the package has no hard dependency on it. Not
-  wired into any build gate — full build-gating starts once real variation exists
-  (Phase 1), per `docs/LAB_PHASE_0_PLAN.md` T-LAB0.11. (`docs/LAB_PHASE_0_PLAN.md`
+  `fuzzlab.labgen.__init__`, so the rest of the package has no hard dependency on it.
+  `probe_leakage()` itself still **never raises on a leaky result** — it measures and
+  returns; the raising build gate built on top of it is `run_leakage_gate()`, specified
+  by FR-LAB-43 (this supersedes this requirement's original "not wired into any build
+  gate — full build-gating starts once real variation exists (Phase 1)", which was
+  `docs/LAB_PHASE_0_PLAN.md` T-LAB0.11's Phase-1 condition and has now been met).
+  (`docs/LAB_PHASE_0_PLAN.md`
   T-LAB0.11, `CC-LAB-0023`)
 - **FR-LAB-22** (Lab track, Phase 0) A secret-scanner build gate, separate
   from and complementary to the FR-LAB-15 name-leak gate, runs **Gitleaks**
@@ -481,9 +486,13 @@ lane) can submit a payload as
   (FR-LAB-28) — that needs a Cell-to-GroundTruth converter (deriving
   `labels.json`/`injection-points.json`/`expectedresults.csv`-shaped data from a
   rendered manifest) that does not exist yet, a genuine separate follow-up, left
-  as a `# TODO(L-P0.9-integration)` in `run_checks()`; and `fingerprint_gate.py`
-  is deliberately not wired (needs a real multi-stack corpus, Phase 3, to mean
-  anything against a single-stack corpus).
+  as a `# TODO(L-P0.9-integration)` in `run_checks()`. *(Updated to current truth: this
+  requirement previously also said `fingerprint_gate.py` was deliberately not wired.
+  Both statistical gates are now required `--check` steps — the
+  fingerprint-independence gate as step 8 (FR-LAB-38, `CC-LAB-0040`) and the metadata
+  leakage gate as step 9 (FR-LAB-43, `CC-LAB-0045`) — each skipping with an explicit
+  printed reason on a corpus its check is ill-defined or unmeasurable for, rather than
+  not being wired at all.)*
   (`docs/LAB_IMPLEMENTATION_PLAN.md` §1.2 T-LAB0.10, `CC-LAB-0034`)
 - **FR-LAB-33** (Lab track, Phase 3, L-P3.1, Tier-A depth) *(Numbered `FR-LAB-33`
   rather than `FR-LAB-27` at merge time — this lane independently claimed
@@ -896,6 +905,54 @@ lane) can submit a payload as
      `fuzzlab.labgen.identifier_sqli_assertion` (see §5), which runs lane L-P1.2a's
      `run_identifier_sqli_oracle` against a cell and fails closed unless its outcome
      matches the cell's **derived** verdict. (`CC-LAB-0043`)
+- **FR-LAB-43** (Lab track, generator-build-time, §2.3, lane L-P1.3) The metadata
+  leakage probe (FR-LAB-8's `fuzzlab.labgen.leakage_probe`) is a **required**
+  `fuzzlab lab-generate --check` step, judged with **per-class thresholds**:
+  1. **`run_leakage_gate`** is the gating entry point; `probe_leakage` remains the
+     non-raising measurement function (its pre-existing signature, fields and semantics
+     are unchanged — `LeakageResult.leaks` still means "global AUC exceeded the global
+     permutation null" and nothing else). The gate raises one `MetadataLeakageError`
+     naming **every** violation, global and per-class.
+  2. **Per-class thresholds.** `PER_CLASS_AUC_THRESHOLDS: dict[str, ClassThreshold]`
+     (`auc_threshold`, `status` ∈ `THRESHOLD_STATUSES`, written `justification`), with
+     `DEFAULT_CLASS_THRESHOLD` for unregistered classes. A class's **effective** pass
+     line is `min(its own permutation-null percentile, its configured threshold)`. This
+     one-directional, fail-closed composition is load-bearing, not an implementation
+     detail: it delivers §2.3's per-class decision while preserving FR-LAB-8's standing
+     constraint that no per-class knob may be usable to disable the gate for a class —
+     a configured number can only tighten, and raising one above that class's null has
+     no effect at all.
+  3. **Provisional calibration is part of the contract.** Every threshold shipped in
+     Phase 1 is `status="provisional"`, seeded from
+     `PROVISIONAL_THRESHOLD_BAND = (0.55, 0.60)`, and `format_leakage_report` must print
+     each class's number **with its status and rationale** plus a NOTE naming the classes
+     whose verdict currently rests on an uncalibrated number. A threshold becomes
+     `"calibrated"` only when its value has actually been derived from a properly-sized
+     permutation-null distribution for that class.
+  4. **Insufficient data is a skip, never a failure.** `insufficiency_reason()` returns
+     the specific shortfall (empty corpus, fewer than two classes, fewer than
+     `MIN_CELLS_FOR_GATE` cells, fewer than `MIN_GROUPS_FOR_GATE` generating-rule groups,
+     a class below `MIN_CELLS_PER_CLASS_FOR_GATE`, or no in-scope feature with any
+     variance) and `run_leakage_gate` raises the **separate** type
+     `InsufficientCorpusError` for it, so a caller can skip with a printed reason rather
+     than fail a build — mirroring FR-LAB-38's single-stack skip in the fingerprint gate.
+  5. **Feature scope is narrow-only.** `probe_leakage(feature_scope=...)` may restrict
+     the closed `FEATURE_ALLOWLIST` to the features a given corpus actually observes, and
+     may never widen it. An in-scope feature absent from any cell is rejected, never
+     imputed (PA-0006).
+  6. **The CLI adapter.** `cli.leakage_probe_records_from_manifest(manifest)` is the one
+     schema↔probe adapter, labelling by `vuln_class` and grouping by
+     `corpus_analysis.generating_rule_id` — the same shared rule ID the de-duplication
+     report and the stratified split use (PA-0003/PA-0021), never a second grouping.
+  7. **Known scope limit (current truth, not a deferral).** Only
+     `cli.MANIFEST_DERIVABLE_LEAKAGE_FEATURES = ("path_depth",)` of the seven allowlisted
+     features is derivable from a manifest: five are live-response observations and
+     `param_name_length` lives in an emitter's private per-route page profile, not in the
+     `Cell` IR. Consequently the gate **skips on every sample manifest shipped today**.
+     Making it bite on the real corpus requires observed per-cell response metadata
+     recorded at build time; until that exists, this requirement's gating value is
+     realized only for corpora that carry such metadata (which the tests exercise
+     directly). (`CC-LAB-0045`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

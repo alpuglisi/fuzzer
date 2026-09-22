@@ -458,3 +458,164 @@ def test_lab_generate_check_end_to_end_fails_on_a_confounded_two_stack_manifest(
     rc = labgen_cli.main(["--manifest", str(manifest_path), "--out", str(out_dir), "--check"])
     assert rc == 1
     assert "fingerprint-independence gate" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# --check step 9: the metadata leakage gate (L-P1.3 /
+# docs/LAB_IMPLEMENTATION_PLAN.md SS2.3).
+#
+# The corpora below are built by *re-pathing* the real php_current real-pages
+# sample manifest's cells between the two renderable depths php_current already
+# has page profiles for (`/product.php` vs `/example/product.php`,
+# `/profile.php` vs `/example/profile.php`) -- reusing real, renderable cells,
+# the same construction the fingerprint-gate block above uses, rather than
+# hand-authoring an emitter-incompatible synthetic manifest. `path_depth` is the
+# one allowlisted feature a manifest actually carries (see
+# `labgen_cli.MANIFEST_DERIVABLE_LEAKAGE_FEATURES`), so making it correlate with
+# `vuln_class` is exactly the "a feature that trivially predicts the class"
+# leakage shape this gate exists to catch.
+# ---------------------------------------------------------------------------
+
+HARDER_SHAPES_MANIFEST = "lab/manifests/phase1_harder_shapes_sample.yaml"
+
+#: (depth-1 path, depth-2 path) pairs php_current has a real page profile for.
+DEEPER_PAGE = {"/product.php": "/example/product.php", "/profile.php": "/example/profile.php"}
+
+
+def _leakage_manifest(*, leaky: bool, replicas: int = 6) -> Manifest:
+    """A manifest big enough for `leakage_probe`'s own sufficiency floors, in
+    which `path_depth` either perfectly predicts `vuln_class` (`leaky=True`) or
+    is balanced across classes (`leaky=False`).
+
+    Replicated `replicas` times purely for sample size:
+    `leakage_probe.MIN_CELLS_FOR_GATE` cells and
+    `MIN_CELLS_PER_CLASS_FOR_GATE` per class are what make the gate consent to
+    judge a corpus at all, and the 8-cell sample manifest is far below both.
+    """
+    base = _real_pages_cells()
+    cells = [
+        dataclasses.replace(c, cell_id=f"{c.cell_id.replace('LABGEN-RP-', 'LABGEN-LK-')}-R{n}")
+        for n in range(replicas)
+        for c in base
+    ]
+
+    def deepen(cell):
+        deeper = DEEPER_PAGE.get(cell.route.path)
+        if deeper is None:
+            return cell
+        return dataclasses.replace(cell, route=dataclasses.replace(cell.route, path=deeper))
+
+    out = []
+    if leaky:
+        # Every xss cell goes deep, every sqli cell stays shallow: path_depth
+        # IS the class.
+        for cell in cells:
+            out.append(deepen(cell) if cell.vuln_class == "xss" else cell)
+    else:
+        # Exactly half of each class goes deep (among the cells that have a
+        # deeper page at all), so path_depth carries no class information.
+        for vuln_class in sorted({c.vuln_class for c in cells}):
+            members = [c for c in cells if c.vuln_class == vuln_class]
+            eligible = [i for i, c in enumerate(members) if c.route.path in DEEPER_PAGE]
+            deep = set(eligible[: len(members) // 2])
+            out.extend(deepen(c) if i in deep else c for i, c in enumerate(members))
+    return Manifest(manifest_version=1, safety_matrix_version=1, cells=tuple(out))
+
+
+def test_leakage_probe_records_from_manifest_reuses_the_shared_rule_id():
+    from fuzzlab.labgen import corpus_analysis
+
+    manifest = load_manifest(HARDER_SHAPES_MANIFEST)
+    records = labgen_cli.leakage_probe_records_from_manifest(manifest)
+    assert len(records) == len(manifest.cells)
+    assert all(set(r) == {"label", "rule_id", "features"} for r in records)
+    # The grouping key is the SHARED generating-rule ID, not a second,
+    # independently-derived one (PA-0003/PA-0021).
+    assert [r["rule_id"] for r in records] == [
+        corpus_analysis.generating_rule_id(c) for c in manifest.cells
+    ]
+    assert [r["label"] for r in records] == [c.vuln_class for c in manifest.cells]
+    # Only the manifest-derivable features, never an imputed live-response one.
+    assert all(
+        set(r["features"]) == set(labgen_cli.MANIFEST_DERIVABLE_LEAKAGE_FEATURES) for r in records
+    )
+
+
+def test_manifest_derivable_features_are_a_strict_subset_of_the_closed_allowlist():
+    from fuzzlab.labgen import leakage_probe
+
+    scope = set(labgen_cli.MANIFEST_DERIVABLE_LEAKAGE_FEATURES)
+    assert scope and scope < set(leakage_probe.FEATURE_ALLOWLIST)
+
+
+def test_path_depth_counts_non_empty_segments():
+    assert labgen_cli.path_depth("/product.php") == 1
+    assert labgen_cli.path_depth("/example/product.php") == 2
+    assert labgen_cli.path_depth("/") == 0
+
+
+def test_run_checks_skips_the_leakage_gate_on_the_harder_shapes_manifest(capsys):
+    """Today's real Phase-1 manifest is far below the gate's own sufficiency
+    floors, so the required step must SKIP with an explicit printed reason --
+    mirroring the fingerprint gate's single-stack skip -- and never fail."""
+    from fuzzlab.labgen import leakage_probe
+
+    manifest = load_manifest(HARDER_SHAPES_MANIFEST)
+    assert len(manifest.cells) < leakage_probe.MIN_CELLS_FOR_GATE
+    emitter = PhpCurrentEmitter()
+    tree = labgen_cli.render_manifest(emitter, manifest)
+    failures = labgen_cli.run_checks(emitter, manifest, tree)
+    assert not [f for f in failures if "metadata leakage gate" in f]
+    out = capsys.readouterr().out
+    assert "metadata leakage gate SKIPPED" in out
+    assert str(leakage_probe.MIN_CELLS_FOR_GATE) in out
+    # The reason names the in-scope feature set, so a reader can see *why* the
+    # probe is thin here rather than guessing.
+    assert "path_depth" in out
+
+
+def test_run_checks_leakage_gate_passes_on_a_balanced_corpus_and_prints_its_report(capsys):
+    manifest = _leakage_manifest(leaky=False)
+    emitter = PhpCurrentEmitter()
+    tree = labgen_cli.render_manifest(emitter, manifest)
+    failures = labgen_cli.run_checks(emitter, manifest, tree)
+    assert not [f for f in failures if "metadata leakage gate" in f]
+    out = capsys.readouterr().out
+    # Really ran -- not skipped.
+    assert "metadata leakage gate SKIPPED" not in out
+    assert "metadata leakage gate passed" in out
+    # The provisional-vs-calibrated annotation is printed on the PASS path too
+    # (plan SS2.3: a future pass must be able to see which numbers need work).
+    assert "PROVISIONAL" in out
+    assert "per-class thresholds" in out
+
+
+def test_run_checks_leakage_gate_fails_loud_when_a_feature_trivially_predicts_the_class():
+    manifest = _leakage_manifest(leaky=True)
+    emitter = PhpCurrentEmitter()
+    tree = labgen_cli.render_manifest(emitter, manifest)
+    failures = labgen_cli.run_checks(emitter, manifest, tree)
+    gate_failures = [f for f in failures if "metadata leakage gate" in f]
+    assert len(gate_failures) == 1
+    message = gate_failures[0]
+    assert "one-vs-rest AUC" in message
+    assert "'xss'" in message and "'sqli'" in message
+
+
+def test_run_checks_leakage_gate_fails_closed_when_sklearn_is_missing(monkeypatch):
+    # Same simulated-absence pattern as the scipy case above: a missing optional
+    # dependency must become a --check failure, never a silent pass. Both the
+    # already-bound package attribute and the sys.modules entry have to go --
+    # `from fuzzlab.labgen import leakage_probe` prefers the attribute and would
+    # otherwise never reach the import system at all.
+    import fuzzlab.labgen as labgen_pkg
+
+    monkeypatch.delattr(labgen_pkg, "leakage_probe", raising=False)
+    monkeypatch.setitem(sys.modules, "fuzzlab.labgen.leakage_probe", None)
+    manifest = load_manifest(HARDER_SHAPES_MANIFEST)
+    emitter = PhpCurrentEmitter()
+    tree = labgen_cli.render_manifest(emitter, manifest)
+    failures = labgen_cli.run_checks(emitter, manifest, tree)
+    gate_failures = [f for f in failures if "metadata leakage gate" in f]
+    assert len(gate_failures) == 1
+    assert "fail-closed, missing dependency" in gate_failures[0]

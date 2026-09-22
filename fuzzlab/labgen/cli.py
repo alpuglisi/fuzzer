@@ -23,7 +23,11 @@ This is a thin CLI over already-built pieces:
   ``CR-LAB-0001`` §3) -- the last of these only when the manifest's cells
   actually span two or more ``stack_profile`` values, since that gate is
   ill-defined for a single-stack corpus (see
-  ``MIN_STACKS_FOR_FINGERPRINT_GATE``). The regression/
+  ``MIN_STACKS_FOR_FINGERPRINT_GATE``), and the metadata leakage gate
+  (``fuzzlab.labgen.leakage_probe``, T-LAB0.11 / plan SS2.3) -- likewise
+  required, and likewise skipped with an explicit printed reason when the
+  corpus is too small or too degenerate for its permutation null to mean
+  anything (``leakage_probe.insufficiency_reason``). The regression/
   additive-only gate (``fuzzlab.labgen.regression_gate``, T-LAB0.9) is not
   yet wired here -- see the ``# TODO(L-P0.9-integration)`` in ``run_checks``.
 - ``--corpus-report <path>``, which writes the corpus-analysis **artifact**
@@ -80,6 +84,34 @@ MIN_STACKS_FOR_FINGERPRINT_GATE = 2
 #: used as a *ceiling* rather than a flat requirement -- see
 #: :func:`fingerprint_gate_config` for why.
 CANONICAL_MIN_CLASSES_PER_STACK = 3
+
+#: The subset of ``fuzzlab.labgen.leakage_probe.FEATURE_ALLOWLIST`` that is
+#: derivable from a **manifest** at ``--check`` time, and therefore the
+#: ``feature_scope`` the leakage gate runs with here.
+#:
+#: This is deliberately short, and the shortness is a real finding rather than
+#: an oversight: five of the seven allowlisted features (``status_code``,
+#: ``response_length``, ``header_count``, ``latency_ms``, ``content_type``) are
+#: *observations of a live response*, and the sixth (``param_name_length``)
+#: lives in each emitter's private per-route page profile, not in the manifest
+#: IR (``schema.ParamSpec`` carries ``location``/``encoding``, never a name).
+#: A manifest simply does not contain them. Passing them as ``None`` and letting
+#: the pipeline impute would be feeding a stage inputs the real upstream never
+#: produced -- exactly what PA-0006 forbids -- so they are left out of scope and
+#: ``leakage_probe.probe_leakage`` is told so explicitly via ``feature_scope``.
+#: See ``docs/components/01-target-lab/requirements.md`` FR-LAB-43 for the
+#: consequence: until a build-time oracle records observed response metadata per
+#: cell, this gate's in-scope feature set is thin enough that it skips on every
+#: manifest shipped today.
+MANIFEST_DERIVABLE_LEAKAGE_FEATURES: tuple[str, ...] = ("path_depth",)
+
+#: ``n_splits``/``n_permutations`` the leakage gate runs with from the CLI.
+#: Lower than ``probe_leakage``'s own defaults (5/200) is *not* used: a build
+#: gate must not be quietly weaker than the mechanism's documented setting, and
+#: ``leakage_probe.MIN_GROUPS_FOR_GATE`` already guarantees enough groups for
+#: 5 folds before the gate consents to judge a corpus at all.
+LEAKAGE_GATE_N_SPLITS = 5
+LEAKAGE_GATE_N_PERMUTATIONS = 200
 
 
 class LabGenCliError(RuntimeError):
@@ -216,6 +248,46 @@ def fingerprint_gate_config(records: list[dict[str, str]]) -> dict[str, object]:
     }
 
 
+def path_depth(path: str) -> int:
+    """Number of non-empty segments in a route path (``/catalog.php`` -> 1).
+    The one place this corpus derives ``path_depth``, so the gate adapter and
+    any future consumer cannot disagree about it (PA-0003/PA-0021)."""
+    return len([segment for segment in path.split("/") if segment])
+
+
+def leakage_probe_records_from_manifest(manifest: Manifest) -> list[dict[str, object]]:
+    """The manifest's cells as ``leakage_probe``-shaped cells.
+
+    The counterpart of :func:`corpus_records_from_manifest` for the second
+    statistical gate, and likewise the *one* adapter between the schema and a
+    deliberately schema-independent probe.
+
+    - ``label`` is ``cell.vuln_class`` -- the vulnerability label the probe must
+      not be able to predict from non-payload metadata.
+    - ``rule_id`` is ``corpus_analysis.generating_rule_id(cell)`` -- **reused**,
+      never re-derived, so "cells the de-duplication report calls
+      near-duplicates", "cells the stratified split keeps together", and "cells
+      the leakage probe groups into one CV fold" are by construction the same
+      grouping (PA-0003/PA-0021; the probe's own docstring point 3 requires
+      grouping by generating-rule ID, and this is that ID).
+    - ``features`` carries exactly :data:`MANIFEST_DERIVABLE_LEAKAGE_FEATURES`
+      -- see that constant for why the other five allowlisted features are
+      absent rather than imputed.
+
+    Scoped to ``manifest.cells``, not to :func:`_supported_cells`, for the same
+    reason :func:`corpus_records_from_manifest` is: metadata leakage is a
+    property of the authored corpus, not of one emitter's subset of it.
+    """
+    return [
+        {
+            "label": cell.vuln_class,
+            "rule_id": corpus_analysis.generating_rule_id(cell),
+            "features": {"path_depth": path_depth(cell.route.path)},
+        }
+        for cell in manifest.cells
+    ]
+
+
 def run_checks(emitter: Emitter, manifest: Manifest, tree: dict[str, bytes]) -> list[str]:
     """Run the offline ``--check`` gate suite against the already-rendered
     ``tree``. Returns the list of failure messages (empty == all gates
@@ -331,6 +403,64 @@ def run_checks(emitter: Emitter, manifest: Manifest, tree: dict[str, bytes]) -> 
             failures.append(f"fingerprint-independence gate (fail-closed, missing dependency): {exc}")
         except fingerprint_gate.FingerprintIndependenceError as exc:
             failures.append(f"fingerprint-independence gate: {exc}")
+
+    # 9. Metadata leakage gate (leakage_probe.py, T-LAB0.11 /
+    #    docs/LAB_IMPLEMENTATION_PLAN.md SS2.3) -- the second statistical gate,
+    #    likewise a REQUIRED step. Mirrors step 8's convention exactly: when the
+    #    corpus is too small or too degenerate for the probe to mean anything
+    #    (leakage_probe.insufficiency_reason), SKIP with an explicit printed
+    #    reason rather than fail -- "not enough data to be meaningful" is not a
+    #    leakage problem, and a gate that failed on it would just be a corpus-size
+    #    requirement wearing a statistics costume.
+    #
+    #    Imported lazily: fuzzlab.labgen.leakage_probe raises ImportError at
+    #    module import when scikit-learn is absent, and a missing optional
+    #    dependency must become a fail-closed --check failure (never an uncaught
+    #    traceback, and never a silent pass), the same way step 8 handles
+    #    MissingStatsDependencyError.
+    try:
+        from fuzzlab.labgen import leakage_probe
+    except ImportError as exc:
+        failures.append(
+            f"metadata leakage gate (fail-closed, missing dependency): {exc}"
+        )
+    else:
+        probe_cells = leakage_probe_records_from_manifest(manifest)
+        skip_reason = leakage_probe.insufficiency_reason(
+            probe_cells, feature_scope=MANIFEST_DERIVABLE_LEAKAGE_FEATURES
+        )
+        if skip_reason is not None:
+            print(
+                f"lab-generate --check: metadata leakage gate SKIPPED -- {skip_reason}. "
+                f"In-scope features for a manifest-derived corpus: "
+                f"{list(MANIFEST_DERIVABLE_LEAKAGE_FEATURES)} (the other "
+                f"{len(leakage_probe.FEATURE_ALLOWLIST) - len(MANIFEST_DERIVABLE_LEAKAGE_FEATURES)} "
+                f"allowlisted feature(s) are live-response observations a manifest does not "
+                f"carry -- see MANIFEST_DERIVABLE_LEAKAGE_FEATURES). Not a failure: too "
+                f"little data to measure is not evidence of leakage."
+            )
+        else:
+            try:
+                report = leakage_probe.run_leakage_gate(
+                    probe_cells,
+                    n_splits=LEAKAGE_GATE_N_SPLITS,
+                    n_permutations=LEAKAGE_GATE_N_PERMUTATIONS,
+                    feature_scope=MANIFEST_DERIVABLE_LEAKAGE_FEATURES,
+                )
+            except leakage_probe.InsufficientCorpusError as exc:
+                # Belt-and-braces: insufficiency_reason already returned None
+                # above, so reaching here would mean the two disagreed. Still a
+                # skip, never a failure.
+                print(f"lab-generate --check: metadata leakage gate SKIPPED -- {exc}")
+            except leakage_probe.MetadataLeakageError as exc:
+                failures.append(f"metadata leakage gate: {exc}")
+            else:
+                # Printed on the PASS path too: the per-class thresholds'
+                # provisional-vs-calibrated status is required output of this
+                # gate (plan SS2.3), and a report only shown on failure would
+                # never surface which numbers still need calibrating.
+                print("lab-generate --check: metadata leakage gate passed")
+                print(report.report_text)
 
     return failures
 
