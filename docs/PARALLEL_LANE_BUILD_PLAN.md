@@ -22,6 +22,17 @@ Revision history:
      map for exactly this UI backlog (U0–U6, B0, X0). v3 replaces the
      invented R2/R3/ML-tab/etc. lane structure with a pointer to that plan
      plus this document's own contribution: pre-assigned bookkeeping numbers.
+- v4 (2026-09-22): revised after review round 3. Fixed: an arithmetic error
+  in Wave A0's reconciliation (11 pages ≠ 16 cases; corrected to 13 cases +
+  1 exempt + 2 deferred = 16); a real, previously-unflagged file overlap
+  between B0's coverage-frontier emitter and C1/M8-wiring in
+  `fuzzlab/greybox/run.py` (now split into Wave 1a/1b with an explicit
+  sequencing note); A2's scope question resolved inline via D-open-1 (Layer
+  A only) instead of left open, since A0 already quotes the answer; the
+  `CC-SCHED-0004`→`0005` number resolved instead of left "TBD"; and D0 split
+  into D0a (non-greybox CLI tools, Wave 1, no gate) + D0b (`greybox-run`
+  only, Wave 2, gated on C1) to reclaim parallelism the single-lane version
+  was leaving on the table.
 
 Scope: the three backlog groups called out as "safe to build now (offline, no
 missing precondition)" — lab track / manifest generator, UI/diagnostics, and
@@ -81,12 +92,15 @@ against the repo's own decisions.** Verified directly against
   the only pages the `php_current`/`php_laravel` emitters model) and
   **Layer B** (≈17 unlabeled, JS-rendered/static realism pages — `about`,
   `faq`, `cart`, `checkout`, etc.).
-- Layer A's page table (§4.3.6.3) is **already fully accounted for**: G1–G6
-  cover `product`, `blog_post`, `products`, `api/products`, `login`,
-  `register`, `profile`+`edit_profile`, `contact`, `newsletter`, `search`
-  (11 pages, done); `track.php` is exempt (no sink); `reviews.php`/
-  `feedback.php` are the DOM-XSS pair, explicitly deferred (blocked — "no
-  family exists"), not merged. That's all 16 `PFF-` cases.
+- Layer A's page table (§4.3.6.3) is **already fully accounted for by case
+  count, not just page count**: G1–G6 cover 11 pages (`product`, `blog_post`,
+  `products`, `api/products`, `login`, `register`, `profile`+`edit_profile`,
+  `contact`, `newsletter`, `search`) carrying **13 labeled `PFF-` cases**
+  (`login` and `search` each carry 2; `profile`+`edit_profile` together carry
+  2) — done. `track.php` is exempt (no sink, `PFF-1002`) — 1 case.
+  `reviews.php`/`feedback.php` are the DOM-XSS pair (`PFF-0007`/`PFF-0008`),
+  explicitly deferred (blocked — "no family exists"), not merged — 2 cases.
+  13 + 1 + 2 = **16 `PFF-` cases**, all accounted for.
 - **D-open-1 (decided 2026-09-22)**: "does retiring the fixture require
   reproducing Layer B? **No.**" Layer B is realism/crawler surface by design
   and was never meant to become generator cells.
@@ -102,7 +116,7 @@ discrepancy either way.
 - Reserved: `CC-LAB-0059`
 - Scope: mechanically confirm the reconciliation above against the live repo
   state at dispatch time (pages/cases may have changed since 2026-09-22):
-  verify all 16 `PFF-` cases are accounted for (11 done via G1–G6, 2 deferred
+  verify all 16 `PFF-` cases are accounted for (13 done via G1–G6, 2 deferred
   DOM, 1 exempt track.php) and that no new labeled cases were added. If the
   count still reconciles, **A0's output is a short note in
   `docs/LAB_IMPLEMENTATION_PLAN.md` confirming Layer A is closed** (pending
@@ -156,20 +170,19 @@ lane touching it that wave), reserving `CC-LAB-0060` onward.
 
 **A2 — Byte-identical full-manifest reproduction (Phase-0 exit criterion)**
 - Reserved: `CC-LAB-0062`
-- **Scope needs one open question resolved before dispatch, flagged not
-  assumed**: the exit criterion is described elsewhere as reproducing "the
-  full ~30-page app byte-identically." Given D-open-1 decided Layer B
-  reproduction is *not* required, it's unclear whether "~30-page" in that
-  criterion means all pages (Layer A + Layer B, ~30) or was always shorthand
-  for Layer A alone (13 pages) — the two readings imply very different scope.
-  **Do not dispatch A2 until this is resolved** (by checking
-  `docs/LAB_PHASE_0_PLAN.md`/`docs/PHASE_0_PLAN.md`'s literal exit-criterion
-  wording, or asking the user) — resolving it is a fast check, but skipping
-  it risks building the wrong thing.
-- Once resolved: **checkable gate condition** — every Layer-A `CC-LAB-00NN`
-  entry (G1–G6, plus any A1 lanes if they exist) is present and marked done
-  in `docs/components/01-target-lab/change-control.md`, and the manifest diff
-  tool reports zero remaining unmigrated pages within the resolved scope.
+- **Scope, resolved via D-open-1 (v3 had left this an open question — round 3
+  review correctly pointed out A0 already answers it two sections earlier)**:
+  `docs/LAB_PHASE_0_PLAN.md`'s original "~30-page" exit-criterion wording
+  predates the Layer A/B split and is superseded by D-open-1, which directly
+  answers this exact question ("does retiring the fixture require
+  reproducing Layer B? No"). A2's byte-identical scope is therefore **Layer A
+  only** (the 16 `PFF-` cases / 13 non-exempt, non-deferred pages) — not the
+  full ~30-page app. If a later decision reopens D-open-1, re-check this
+  scope before dispatching.
+- **Checkable gate condition**: every Layer-A `CC-LAB-00NN` entry (G1–G6,
+  plus any A1 lanes if they exist) is present and marked done in
+  `docs/components/01-target-lab/change-control.md`, and the manifest diff
+  tool reports zero remaining unmigrated Layer-A pages.
 - This lane is also the natural place to close out Phase 0 in
   `docs/DECISIONS_AND_ROADMAP.md` and `docs/ARCHITECTURE.md`'s phase-status
   table once it passes.
@@ -203,18 +216,34 @@ layer, below.
   confirmed highest is `CC-CORE-0017`) — plus one number per emitter
   sub-lane, each in its own component:
   - GBT/logistic emitter → `CC-ML-0009`
-  - Bandit-loop emitter → component TBD (likely SCHED; **verify current
-    highest `CC-SCHED-NNNN` before dispatch — not established by this
-    planning pass**)
+  - Bandit-loop emitter → `CC-SCHED-0005` (current confirmed highest is
+    `CC-SCHED-0004`, in `docs/components/08-payload-scheduler/change-control.md`)
   - Coverage-frontier emitter → `CC-FUZZ-0020` (reserved after C1's
-    `CC-FUZZ-0019` below; verify no other lane claimed it first)
+    `CC-FUZZ-0019` below; verify no other lane claimed it first) — **see the
+    B0/C1 file-overlap risk below before dispatching this specific sub-lane**
   - `MutationSearch` reward/novelty emitter → `CC-MUT-0010` (reserved after
     C1's `CC-MUT-0009` below)
-- Scope: exactly as specified in `docs/UI_IMPLEMENTATION_PLAN.md` §3 (B0),
-  including its resolved WAL/`open_store()` concurrency design. Per that
-  document, table-first then one emitter per component in parallel — this
-  plan's addition is simply giving each emitter sub-lane its own reserved
-  number so they don't collide when they land.
+- **Sub-lane sequencing, made explicit**: per `docs/UI_IMPLEMENTATION_PLAN.md`
+  §3 (B0, line 284), it's "table first, **then** one emitter per component in
+  parallel" — the migration landing in `core/store.py` is a real serial
+  sub-gate, not a fifth parallel piece. Treat B0 as **Wave 1a (table)** →
+  **Wave 1b (4 emitters, parallel)** within Wave 1, not five simultaneous
+  pieces from the start — see the wave-summary table's footnote.
+- **File-overlap risk: B0's coverage-frontier emitter vs. C1's M8-wiring.**
+  Both touch `fuzzlab/greybox/run.py`: C1 wires mutation variants into the
+  same attempt/summary loop (`run.py`'s `_record_metric(...)` calls and the
+  main run loop, roughly lines 165–259) that a coverage-growth
+  `metric_series` emitter would naturally hook into. **Do not run these two
+  sub-lanes as truly simultaneous edits to `run.py`** — either serialize
+  B0's coverage-frontier emitter after C1 lands, or have the two lanes
+  coordinate explicitly on disjoint functions within that file before
+  dispatch. This was missed in v3 and is a real same-wave, same-file
+  collision risk, not a hypothetical one.
+- Scope: otherwise exactly as specified in `docs/UI_IMPLEMENTATION_PLAN.md`
+  §3 (B0), including its resolved WAL/`open_store()` concurrency design —
+  this plan's addition is giving each sub-lane its own reserved number and
+  flagging the two risks above that the source document doesn't itself
+  need to address (it wasn't written with C1 in mind).
 
 **X0 — Register `lab-generate` in the launcher**
 - Reserved: `CC-UI-0026`
@@ -253,22 +282,32 @@ layer, below.
 All five Wave-1 lanes share `docs/components/12-diagnostics-and-ui/`
 bookkeeping files — follow the **merge protocol** above.
 
-### D0 — `--dry-run` CLI flag *(not part of UI_IMPLEMENTATION_PLAN.md's lane map — a separate, smaller item)*
-- Reserved: `CC-UI-0033` (if surfaced/documented through the web UI) +
-  `CC-FUZZ-0021` (see numbering note below).
+### D0 — `--dry-run` CLI flag *(not part of UI_IMPLEMENTATION_PLAN.md's lane map — a separate, smaller item; splits into two sub-lanes to reclaim parallelism)*
 - **Scope, precisely**: the web UI already ships a dry-run preview
   (`POST /api/launch/dry-run` in `fuzzlab/web/app.py` + `web/runner.py`,
   shipped as `CC-UI-0013`/`CC-UI-0015`, both done) — "plans and reports the
   exact argv/display, sends nothing." **Do not rebuild that.** The actual
   remaining gap, per `docs/ARCHITECTURE.md`'s pending list, is a **CLI-level**
-  `--dry-run` flag on the plain CLI entry points in `fuzzlab/cli.py` (listed
-  alongside "a plain CLI entry point per tool for headless use," itself
-  pending) — for headless use outside the web UI. Scope this lane narrowly to
-  that CLI flag/entry-point work; reuse the web dry-run's plan/report logic
-  rather than reimplementing it.
-- Overlap / sequencing risk: this lane's CLI-entry-point work plausibly
-  touches the same files as **M8-wiring** in Lane group C. Treat as
-  sequenced after Wave C1, not a same-wave parallel lane.
+  `--dry-run` flag on the plain CLI entry points for headless use outside the
+  web UI. `fuzzlab/cli.py` itself does no argparse — it's a thin string-
+  dispatch shim that forwards args unchanged to each tool's own module
+  (`greybox_cli.py`, `mutation/cli.py`, etc.), each with its own
+  `build_parser()`/`main()`. So the flag has to be added **per tool module**,
+  not in one shared place.
+- **D0a — non-greybox tools** *(dispatch in Wave 1, file-disjoint from C1)*
+  - Reserved: `CC-UI-0033` (if surfaced/documented through the web UI).
+  - Scope: add `--dry-run` to every CLI entry point **except**
+    `fuzzlab/greybox/greybox_cli.py` — e.g. `crawl`, `audit`, `fuzz`,
+    `mutate-run`, `proxy`, `auto`. Reuse the web dry-run's plan/report logic
+    rather than reimplementing it. None of these touch the files C1 (Wave
+    C1, below) is editing, so this sub-lane needs no gate.
+- **D0b — `greybox-run --dry-run`** *(sequenced after Wave C1 — genuine file overlap)*
+  - Reserved: `CC-FUZZ-0021`.
+  - Scope: same flag, but on `fuzzlab/greybox/greybox_cli.py`'s parser/
+    `main()` specifically — the one entry point that **does** overlap with
+    **M8-wiring** (Wave C1), which also edits that module's run loop. Treat
+    as sequenced after Wave C1 lands, not a same-wave parallel lane; this is
+    the only piece of D0 that needs the gate.
 
 ---
 
@@ -294,9 +333,9 @@ areas below.
   engine into the **main harness's** attempt path (the code path
   `greybox-run` uses), not just the standalone `mutate-run` entry point.
   T8.7's on-host exit criterion stays out of scope here.
-- This lane, not lane group B's `D0` dry-run lane, is the primary owner of
-  the fuzzer's attempt-path files for this wave — see the D0 note above.
-  `CC-FUZZ-0019` belongs to this lane only (`D0` reserves `CC-FUZZ-0021`,
+- This lane, not lane group B's `D0b` dry-run sub-lane, is the primary owner
+  of the fuzzer's attempt-path files for this wave — see the D0 note above.
+  `CC-FUZZ-0019` belongs to this lane only (`D0b` reserves `CC-FUZZ-0021`,
   B0's coverage emitter reserves `CC-FUZZ-0020` — verify no collision at
   dispatch time regardless).
 
@@ -330,41 +369,38 @@ areas below.
 
 | Wave | Lanes that can run concurrently | Gate to enter this wave |
 | --- | --- | --- |
-| 1 | A0 (Layer-A reconciliation, small/fast) · T1 · T2 · UI Wave 0 (U0, B0 + its emitter sub-lanes, X0, U6 — U6 lands with/right after U0) · C1 (M8-wiring) | None — all offline-buildable now |
-| 2 | UI Wave 1 (U1, U2, U3, U4, U5 — once U0 lands) · D0 `--dry-run` CLI flag (once C1 lands) · A1 G7…Gn lanes (only if A0 found real remaining scope — expected not to exist) | U0 merged (for UI Wave 1); C1 merged (for D0); A0 confirms scope exists (for A1, exception path) |
-| 3 | A2 byte-identical manifest capstone (scope question resolved first) · C2 M10 offline slice (only if scoping lane/human confirms) | A1 merged if it existed, else A0's closure confirmed + open scope question resolved (for A2); explicit scoping confirmation + C1 merged (for C2) |
+| 1a | A0 (Layer-A reconciliation, small/fast) · T1 · T2 · U0 · **B0-table** (the `metric_series` migration only) · X0 · U6 (lands with/right after U0) · C1 (M8-wiring) · **D0a** (`--dry-run` on every CLI entry point except `greybox_cli.py`) | None — all offline-buildable now |
+| 1b | **B0's 4 emitter sub-lanes** (GBT/logistic, bandit-loop, `MutationSearch`, coverage-frontier) | B0-table merged (per `UI_IMPLEMENTATION_PLAN.md`'s "table first, then emitters"); **the coverage-frontier emitter specifically also waits on C1** (real `greybox/run.py` file overlap — see Lane group B) |
+| 2 | UI Wave 1 (U1, U2, U3, U4, U5 — once U0 lands) · **D0b** (`greybox-run --dry-run`, once C1 lands) · A1 G7…Gn lanes (only if A0 found real remaining scope — expected not to exist) | U0 merged (for UI Wave 1); C1 merged (for D0b); A0 confirms scope exists (for A1, exception path) |
+| 3 | A2 byte-identical manifest capstone (Layer-A scope, per D-open-1) · C2 M10 offline slice (only if scoping lane/human confirms) | A1 merged if it existed, else A0's closure confirmed (for A2); explicit scoping confirmation + C1 merged (for C2) |
 
-**Correction from v2**: Wave 1 now has up to **7 concurrent lanes** (A0, T1,
-T2, U0, B0, X0, C1 — U6 lands right behind U0 rather than fully parallel with
-it), higher than v2's revised count of 3, because A0 no longer blocks T1/T2
-(they don't depend on it) and because adopting `UI_IMPLEMENTATION_PLAN.md`'s
-actual Wave-0 map (U0/B0/X0/U6) correctly parallelizes UI work that v2's
-invented "R1-first" serialization understated in a different way than v1's
-original (wrong) "R1 is done" overcount. The largest fan-out is Wave 2's five
-UI lanes (U1–U5), landing together once U0 merges.
+Wave 1a has up to **8 concurrent lanes** (A0, T1, T2, U0, B0-table, X0, C1,
+D0a — U6 lands right behind U0 rather than fully parallel with it). Wave 1b
+adds B0's 4 emitter sub-lanes once the table merges (3 of them immediately;
+the coverage-frontier one waits on C1 too). The largest single fan-out is
+Wave 2's five UI lanes (U1–U5), landing together once U0 merges.
 
 ## Known risks to flag before dispatch (per MULTI_AGENT_ORCHESTRATION.md — flag, don't silently resolve)
 
-- **A2's scope question** (does the Phase-0 byte-identical exit criterion
-  mean Layer A only, or Layer A + Layer B?) must be resolved before A2 is
-  dispatched — check `docs/LAB_PHASE_0_PLAN.md`/`docs/PHASE_0_PLAN.md`'s
-  literal wording, or ask the user.
 - A0 may find nothing to do (expected outcome) — don't treat A1 as guaranteed
   work; confirm before allocating agents to it.
 - Unconfirmed shared conformance-harness fixture file between T1 and T2 —
   verify before dispatch.
-- `CC-SCHED-NNNN`'s current highest was not established by this planning
-  pass — verify before reserving a SCHED number for B0's bandit-loop emitter
-  sub-lane.
-- The FUZZ-number sequencing across B0 (coverage emitter), C1 (M8-wiring),
-  D0 (dry-run), and C2 (M10) depends on dispatch order matching this plan's
-  assumed order (C1 first, since it's Wave 1) — if any of these lanes
-  dispatch out of the order this plan assumes, re-verify the next-free
-  `CC-FUZZ-NNNN` rather than trusting the numbers above blindly.
+- **B0's coverage-frontier emitter and C1 (M8-wiring) both edit
+  `fuzzlab/greybox/run.py`'s attempt/summary loop.** Don't dispatch these as
+  truly simultaneous edits — serialize the emitter after C1, or have the two
+  lanes agree on disjoint functions within the file before dispatch (see
+  Lane group B's B0 entry).
+- The FUZZ-number sequencing across B0 (coverage emitter, `CC-FUZZ-0020`),
+  C1 (M8-wiring, `CC-FUZZ-0019`), D0b (`greybox-run --dry-run`,
+  `CC-FUZZ-0021`), and C2 (M10, `CC-FUZZ-0022`) depends on dispatch order
+  matching this plan's assumed order (C1 first, since it's Wave 1a) — if any
+  of these lanes dispatch out of the order this plan assumes, re-verify the
+  next-free `CC-FUZZ-NNNN` rather than trusting the numbers above blindly.
 - M10's offline-buildability is an open scoping question, not yet confirmed
   by anyone — Wave C2 stays provisional until a scoping lane or a human
   explicitly resolves it.
 - Same-wave, same-component concurrent edits to `change-control.md` /
-  `requirements.md` (UI's Wave 0 and Wave 1 lanes, and any A1 lanes if they
-  exist) need the **merge protocol** above applied at integration time, not
-  assumed away.
+  `requirements.md` (UI's Wave 0/1 lanes, and any A1 lanes if they exist)
+  need the **merge protocol** above applied at integration time, not assumed
+  away.
