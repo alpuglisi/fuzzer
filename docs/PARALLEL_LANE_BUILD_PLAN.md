@@ -18,10 +18,11 @@ Revision history:
      migration backlog left — see the corrected Wave A0 below.
   2. **Lane group B duplicated an already-authoritative plan.** The repo
      already has `docs/UI_IMPLEMENTATION_PLAN.md` — a more detailed,
-     decision-locked (D1–D5), already change-controlled (`CC-UI-0023`) lane
-     map for exactly this UI backlog (U0–U6, B0, X0). v3 replaces the
-     invented R2/R3/ML-tab/etc. lane structure with a pointer to that plan
-     plus this document's own contribution: pre-assigned bookkeeping numbers.
+     decision-locked (D1–D5), already change-controlled (starting at
+     `CC-UI-0023`) lane map for exactly this UI backlog (U0–U6, B0, X0). v3
+     replaces the invented R2/R3/ML-tab/etc. lane structure with a pointer to
+     that plan plus this document's own contribution: pre-assigned
+     bookkeeping numbers.
 - v4 (2026-09-22): revised after review round 3. Fixed: an arithmetic error
   in Wave A0's reconciliation (11 pages ≠ 16 cases; corrected to 13 cases +
   1 exempt + 2 deferred = 16); a real, previously-unflagged file overlap
@@ -33,6 +34,17 @@ Revision history:
   into D0a (non-greybox CLI tools, Wave 1, no gate) + D0b (`greybox-run`
   only, Wave 2, gated on C1) to reclaim parallelism the single-lane version
   was leaving on the table.
+- v5 (2026-09-22): revised after review round 4 (three reviewers; 1 approve
+  with minor notes, 2 needs-revision). Fixed: **X0 ("register `lab-generate`
+  in the launcher") is already done** — confirmed as `CC-UI-0024`, landed in
+  `fuzzlab/web/commandspec.py` with tests; `docs/UI_IMPLEMENTATION_PLAN.md`
+  was never updated to mark it done, which is what caused this plan to keep
+  listing it as a Wave-0 lane through v4. Dropped X0 from dispatch and
+  renumbered `CC-UI-0026`–`0032` accordingly. Also: this plan's own
+  bookkeeping trail had a gap — v2/v3/v4 revised the document without adding
+  corresponding `CHANGELOG.md` lines (fixed, consolidated entry added); and
+  U3's dual-use safety-posture note is now promoted to the Known Risks list,
+  not just stated inline in U3's own entry.
 
 Scope: the three backlog groups called out as "safe to build now (offline, no
 missing precondition)" — lab track / manifest generator, UI/diagnostics, and
@@ -193,9 +205,9 @@ lane touching it that wave), reserving `CC-LAB-0060` onward.
 
 **Correction from v2: do not reinvent this lane map.** The repo already has
 `docs/UI_IMPLEMENTATION_PLAN.md` — "fully task-broken-down with a parallel
-lane map," locked build decisions D1–D5, already change-controlled at
-`CC-UI-0023`, and a wave map sized for exactly this kind of concurrent
-dispatch. v2's Wave B0/B1 (an invented "R1 route-split" prerequisite plus
+lane map," locked build decisions D1–D5, already change-controlled starting
+at `CC-UI-0023` (the plan document itself), and a wave map sized for exactly
+this kind of concurrent dispatch. v2's Wave B0/B1 (an invented "R1 route-split" prerequisite plus
 R2/R3/ML-tab/metric_series/store-exploration lanes) covered the same ground
 less precisely and used a lane label (`B0`) that collides with that document's
 own `B0` (a different, real lane — the `metric_series` migration). **Use
@@ -245,13 +257,20 @@ layer, below.
   flagging the two risks above that the source document doesn't itself
   need to address (it wasn't written with C1 in mind).
 
-**X0 — Register `lab-generate` in the launcher**
-- Reserved: `CC-UI-0026`
-- Scope: exactly as specified in `docs/UI_IMPLEMENTATION_PLAN.md` §3 (X0).
-  Independent of the shell files; no gate.
+**~~X0 — Register `lab-generate` in the launcher~~ — already done, drop from dispatch.**
+Verified directly against `docs/components/12-diagnostics-and-ui/change-control.md`:
+its actual top entry is `CC-UI-0024` — "Lane X0: register `lab-generate` in
+the launcher (own group)," dated 2026-09-22, landed in
+`fuzzlab/web/commandspec.py` (`_load_labgen` loader, `_REGISTRY` entry,
+`group="Lab / authoring"`) with matching tests in
+`tests/test_web_commandspec.py`. `docs/UI_IMPLEMENTATION_PLAN.md` itself was
+never updated to mark X0 done, which is what caused this plan (through v4)
+to still list it as a Wave-0 lane to dispatch. **Do not dispatch X0** —
+correspondingly, `CC-UI-0024` (not `0023`) is the real current-highest UI
+number, and `CC-UI-0025` (U0, below) is still correctly the next-free one.
 
 **U6 — Control-plane hardening**
-- Reserved: `CC-UI-0027`
+- Reserved: `CC-UI-0026`
 - Scope: exactly as specified in `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U6).
   Shares `app.py` with U0 — land with or immediately after U0, per that
   document's own note, not fully parallel with it.
@@ -259,24 +278,26 @@ layer, below.
 ### Wave 1 (per `UI_IMPLEMENTATION_PLAN.md` §4 — gated on U0 landing)
 
 **U1 — Overview dashboard**
-- Reserved: `CC-UI-0028`
+- Reserved: `CC-UI-0027`
 
 **U2 — Findings workbench** *(the R2 "Findings workbench" item from the original backlog)*
-- Reserved: `CC-UI-0029`
+- Reserved: `CC-UI-0028`
 
 **U3 — Proxy workbench rebuild** *(the R3 "Proxy rebuild" item from the original backlog)*
-- Reserved: `CC-UI-0030` + `CC-PROXY-0017`
+- Reserved: `CC-UI-0029` + `CC-PROXY-0017`
 - Note the safety posture: proxy/desync tooling stays default-off and
-  lab-only per CLAUDE.md; this lane must not flip that default.
+  lab-only per CLAUDE.md; this lane must not flip that default (also
+  promoted to **Known risks** below — easy to miss on a skim of just the
+  lane list).
 
 **U4 — ML tab**
-- Reserved: `CC-UI-0031` + `CC-ML-0010` (after B0's GBT/logistic emitter
+- Reserved: `CC-UI-0030` + `CC-ML-0010` (after B0's GBT/logistic emitter
   claims `CC-ML-0009` above — verify ordering at dispatch time)
 - Also needs D2 (charting library, already resolved: uPlot 1.6.32) — no
   further research gate.
 
 **U5 — Diagnostics + store explorer** *(covers both the "metric_series tab" and "Datasette-style store exploration" items from the original backlog — they're one lane per the authoritative plan, not two)*
-- Reserved: `CC-UI-0032`
+- Reserved: `CC-UI-0031`
 - Enriched by B0 landing but not blocked by it, per that document.
 
 All five Wave-1 lanes share `docs/components/12-diagnostics-and-ui/`
@@ -295,7 +316,7 @@ bookkeeping files — follow the **merge protocol** above.
   `build_parser()`/`main()`. So the flag has to be added **per tool module**,
   not in one shared place.
 - **D0a — non-greybox tools** *(dispatch in Wave 1, file-disjoint from C1)*
-  - Reserved: `CC-UI-0033` (if surfaced/documented through the web UI).
+  - Reserved: `CC-UI-0032` (if surfaced/documented through the web UI).
   - Scope: add `--dry-run` to every CLI entry point **except**
     `fuzzlab/greybox/greybox_cli.py` — e.g. `crawl`, `audit`, `fuzz`,
     `mutate-run`, `proxy`, `auto`. Reuse the web dry-run's plan/report logic
@@ -369,19 +390,32 @@ areas below.
 
 | Wave | Lanes that can run concurrently | Gate to enter this wave |
 | --- | --- | --- |
-| 1a | A0 (Layer-A reconciliation, small/fast) · T1 · T2 · U0 · **B0-table** (the `metric_series` migration only) · X0 · U6 (lands with/right after U0) · C1 (M8-wiring) · **D0a** (`--dry-run` on every CLI entry point except `greybox_cli.py`) | None — all offline-buildable now |
+| 1a | A0 (Layer-A reconciliation, small/fast) · T1 · T2 · U0 · **B0-table** (the `metric_series` migration only) · U6 (lands with/right after U0) · C1 (M8-wiring) · **D0a** (`--dry-run` on every CLI entry point except `greybox_cli.py`) | None — all offline-buildable now (X0 dropped — already shipped as `CC-UI-0024`) |
 | 1b | **B0's 4 emitter sub-lanes** (GBT/logistic, bandit-loop, `MutationSearch`, coverage-frontier) | B0-table merged (per `UI_IMPLEMENTATION_PLAN.md`'s "table first, then emitters"); **the coverage-frontier emitter specifically also waits on C1** (real `greybox/run.py` file overlap — see Lane group B) |
 | 2 | UI Wave 1 (U1, U2, U3, U4, U5 — once U0 lands) · **D0b** (`greybox-run --dry-run`, once C1 lands) · A1 G7…Gn lanes (only if A0 found real remaining scope — expected not to exist) | U0 merged (for UI Wave 1); C1 merged (for D0b); A0 confirms scope exists (for A1, exception path) |
 | 3 | A2 byte-identical manifest capstone (Layer-A scope, per D-open-1) · C2 M10 offline slice (only if scoping lane/human confirms) | A1 merged if it existed, else A0's closure confirmed (for A2); explicit scoping confirmation + C1 merged (for C2) |
 
-Wave 1a has up to **8 concurrent lanes** (A0, T1, T2, U0, B0-table, X0, C1,
-D0a — U6 lands right behind U0 rather than fully parallel with it). Wave 1b
-adds B0's 4 emitter sub-lanes once the table merges (3 of them immediately;
-the coverage-frontier one waits on C1 too). The largest single fan-out is
-Wave 2's five UI lanes (U1–U5), landing together once U0 merges.
+Wave 1a has up to **7 concurrent lanes** (A0, T1, T2, U0, B0-table, C1, D0a —
+U6 lands right behind U0 rather than fully parallel with it; X0 dropped, see
+below). Wave 1b adds B0's 4 emitter sub-lanes once the table merges (3 of
+them immediately; the coverage-frontier one waits on C1 too). The largest
+single fan-out is Wave 2's five UI lanes (U1–U5), landing together once U0
+merges.
 
 ## Known risks to flag before dispatch (per MULTI_AGENT_ORCHESTRATION.md — flag, don't silently resolve)
 
+- **X0 ("register `lab-generate` in the launcher") is already done** —
+  confirmed as `CC-UI-0024` in `docs/components/12-diagnostics-and-ui/change-control.md`,
+  landed in `fuzzlab/web/commandspec.py` with matching tests.
+  `docs/UI_IMPLEMENTATION_PLAN.md` still lists it as a lane because that
+  source document was never updated to mark it done — do not dispatch X0,
+  and don't trust that document's lane list as a completion signal without
+  cross-checking the actual change-control log (this was missed through v4
+  of this plan).
+- **U3's dual-use safety posture**: proxy/desync tooling stays default-off
+  and lab-only per CLAUDE.md; U3 (Proxy workbench rebuild) must not flip
+  that default. Easy to miss if only skimming this risk list — also stated
+  inline in U3's own entry.
 - A0 may find nothing to do (expected outcome) — don't treat A1 as guaranteed
   work; confirm before allocating agents to it.
 - Unconfirmed shared conformance-harness fixture file between T1 and T2 —
