@@ -34,10 +34,155 @@ the right point to make that deferred call.
    directly/idiomatically rather than requiring the shape to route around
    the framework's own validation first.
 
-**Not yet decided (flagged, not resolved here — see §4):** whether the new
-app's pages are original content or deliberately drawn from the
-site-architecture corpus research. This gates Phase C and should be decided
-before Phase C is dispatched, not during it.
+3. **Phase C's page-content question is decided (2026-09-22): corpus-
+   grounded**, not original content. See §4a below for what this expands
+   into and §0b for the open questions this creates that need an answer
+   before any of §4a is dispatched.
+
+## 0a. Scope expansion (2026-09-22, per direct instruction)
+
+The project owner's instruction, recorded here in full rather than
+paraphrased down to a decision line, because several parts of it are new
+requirements this plan did not previously scope:
+
+> The answer to phase C's question is corpus grounded pages. We have
+> research on a few different categories of websites, their architectures,
+> and tech stacks. There may or may not be research on features and
+> functionalities of each website. This was supposed to be done but may
+> have been overlooked, in which case you will need to do the research. We
+> are going to generate 2 new manifest generated web applications per
+> website category in the research. The generated applications should be
+> based on actual tech stack and functionality of the websites in the
+> category. Each new application will use corpus grounded pages. CWEs based
+> on the researched tech stacks and architectures were specifically
+> researched to facilitate implementation in these applications. The goal
+> is applications that reflect what would be observed in real life with
+> vulnerabilities placed realistically. If more research is required to
+> achieve this, feel free to do so. https://cwe.mitre.org/top25/ is a good
+> resource. When designing the pages and deciding on vulnerabilities take
+> into account that we are also trying to expand categories of
+> vulnerabilities and expand the type of vulnerabilities.
+
+**What this means, broken into concrete requirements:**
+
+1. **Scope: 12 new apps, not 1.** `docs/research/site-architecture-survey.md`
+   (Steps 1-2 of `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`)
+   currently documents **6 categories** (E-commerce/marketplaces, Social/
+   UGC platforms, SaaS/productivity/collaboration, Media/streaming/content
+   platforms, Travel/booking/marketplaces, Fintech/payments), each with 5
+   real, cited sites and real, sourced architecture write-ups. **Two new
+   manifest-generated apps per category** — 12 total — each based on the
+   *actual* tech stack and functionality of (some subset of) that
+   category's real researched sites.
+2. **Verified finding: the functionality-research gap is real, not
+   hypothetical.** I checked `docs/research/site-architecture-survey.md` in
+   full against this instruction before writing this section. Every
+   category's write-up is genuinely thorough on **architecture** (backend
+   language/framework, database, hosting, confidence-rated, multi-sourced)
+   but contains **no equivalent per-site feature/functionality research** —
+   no breakdown of what a real Amazon/Shopify/Etsy/Walmart/WooCommerce page
+   actually *does* (checkout flow shape, review system, seller-dashboard
+   permissions, search/filter behavior, etc.), the way
+   `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s own base-plan Phase 1 did for the
+   *abstract* feature catalog. This confirms the project owner's suspicion:
+   **this research was not done and must be done** before Phase C-per-app
+   page design can proceed on real grounding rather than invention. This is
+   new work, not a re-read of something already there.
+3. **CWE research must be tied to each app's actual tech stack/
+   architecture, not just its abstract vulnerability class.** The existing
+   corpus's own CWE-research discipline (`docs/VULN_CORPUS_SITE_ARCHITECTURE_
+   EXPANSION_PLAN.md` Step 6 — MITRE CWE index lookups, `cwe_shared`/
+   `cwe_unique` floor, per-entry rationale grounded in the entry's own code)
+   is the right *mechanism* and should be reused, not redesigned — but it
+   was applied to individual collected code snippets, not to "what would a
+   real `<stack>` app in `<category>` realistically have wrong with it."
+   This instruction asks for the latter, additionally: given a chosen
+   real site's actual stack + a real feature it has, research which CWEs
+   are realistically introduced by *that combination specifically*
+   (framework-specific footguns, stack-specific default-insecure
+   configurations, version-specific known-CVE-shaped patterns), not only
+   "this code sample happens to have CWE-X." **`https://cwe.mitre.org/
+   top25/` is named explicitly as a resource** — used as one input among
+   others (the corpus's existing MITRE-index-lookup discipline, the
+   architecture survey's own sourcing standard), not the sole source.
+4. **Deliberate vulnerability-class breadth is a design constraint, not a
+   side effect.** When choosing which vulnerabilities go on which pages,
+   actively check candidate CWEs against what `lab/safety_matrix.yaml`
+   and the existing corpus (`docs/research/corpus-examples/`) already
+   cover, and against the CWE Top 25, and prefer classes that **expand**
+   real coverage over classes that duplicate it — mirroring the reasoning
+   `docs/LAB_SECOND_TARGET_NODE_EXPRESS_PLAN.md`'s own §4 recommendation
+   already used for the single-app version of this plan (prefer SSRF/SSTI/
+   header-injection/insecure-deserialization/webhook-signature-shaped
+   classes the current `php_laravel` lab doesn't model at all, over a
+   fourth SQLi variant).
+5. **"Reflect what would be observed in real life, placed realistically"**
+   is the standing bar for every page: a vulnerability should exist because
+   the real site's real stack/feature combination would plausibly produce
+   it (a known framework footgun, a realistic developer mistake for that
+   exact stack), not because it was the easiest shape to template.
+
+## 0b. Open questions this scope expansion creates — need an answer before §4a is dispatched
+
+These are genuine ambiguities the instruction above doesn't resolve, laid
+out rather than guessed at, per this project's own standing discipline
+(`docs/MULTI_AGENT_ORCHESTRATION.md` §5 — flag genuine risk/ambiguity
+rather than silently pick an interpretation for a decision this size):
+
+1. **Does "actual tech stack ... of the websites in the category" override
+   or coexist with the already-made "stack = `node_express`" decision
+   (§0.2)?** The six categories' real architecture research names Ruby on
+   Rails (Shopify), legacy-PHP (Etsy, WooCommerce), Node.js/Java
+   microservices (Walmart), and AWS-service-oriented (Amazon) for
+   e-commerce alone — none of which is uniformly `node_express`. Three
+   readings are all plausible from the instruction as given:
+   - **(a) Stack-mapped:** for each of the 12 apps, use whichever of the
+     project's existing emitters (`php_current`/`php_laravel`,
+     `python_fastapi`, `node_express`) most closely matches that app's
+     real-site stack, and pick which 2 sites per category to model
+     specifically so their real stacks land on emitters that already
+     exist — i.e., let existing-emitter coverage help choose *which* 2
+     of each category's 5 sites become the 2 apps.
+   - **(b) New-emitters-as-needed:** take stack fidelity literally and
+     build new emitters for stacks the project doesn't have yet (Ruby/
+     Rails, Java, etc.) where a category's real leading sites need one —
+     a substantially larger effort than anything in this plan's Phases
+     A-B, and its own multi-week-scale undertaking per new stack.
+   - **(c) `node_express`-only:** keep the earlier decision as the
+     universal implementation stack for all 12 apps regardless of a given
+     category's real dominant stack, and satisfy "based on actual tech
+     stack" at the level of *functionality/behavior* (the app behaves like
+     a real Shopify-style storefront) rather than *language/framework*
+     identity.
+   **This plan does not pick one — it needs the project owner's call**,
+   since (b) in particular changes this plan's total scope by roughly an
+   order of magnitude versus (a)/(c).
+2. **Which 2 of each category's 5 already-researched sites become the 2
+   apps?** (E.g. for e-commerce: Amazon-style marketplace vs. WooCommerce-
+   style single-store are architecturally the most distinct pairing among
+   the 5 researched — but this is an example, not a proposal to treat as
+   decided.) Should site selection be driven by (i) architectural
+   distinctness within the category (maximize what's learned), (ii)
+   real-world popularity/representativeness, or (iii) which 2 stacks
+   happen to map to emitters that already exist (only relevant if question
+   1 resolves to reading (a))?
+3. **Does this 12-app initiative fold in and supersede the single-
+   `node_express`-app plan (§§1-7 above), or run alongside it as a
+   separate, additional effort?** If question 1 resolves to (a) or (c) and
+   one of the 12 new apps ends up being `node_express`-based and serves the
+   same generalization purpose §§1-7 describe, that single app may *be*
+   one of the 12 rather than a 13th, separate build — but this plan
+   currently treats §§1-7 as their own, already-scoped unit and should not
+   silently absorb or duplicate effort with §4a without an explicit call.
+4. **Sequencing/sizing.** 12 apps × (functionality research + CWE research
+   + page design + module-inventory depth + Tier 0-3 conformance +
+   bookkeeping) is a substantially larger undertaking than anything else
+   built this session, closer in scale to the entire `php_laravel`
+   migration's history than to any single lane. Should this be piloted on
+   one category first (prove the full research → CWE → pages → conformance
+   pipeline once, end to end) before committing to all 6, mirroring how
+   the base vulnerability-corpus plan itself phased into waves rather than
+   dispatching all categories simultaneously?
 
 ## 1. Current state of `node_express` (verified against the code, not assumed)
 
@@ -160,7 +305,7 @@ here rather than assumed serial, but not committed to a lane map until
 Phase A's skeleton decisions actually land (a lane map drawn now would be
 speculating on an interface that hasn't been designed yet).
 
-## 4. Phase C — its own identity and ground truth (has an open design question)
+## 4. Phase C — its own identity and ground truth (page-content question now decided; scope expanded — see §0a/§0b/§4a)
 
 **Goal:** a genuinely separate app — its own name, its own coherent page
 set, its own `labels.json`/`injection-points.json` ground truth, never
@@ -168,54 +313,49 @@ reusing `puppy-fort-factory`'s (or its successor generated lab's) case IDs
 or identity. Generalization evidence means nothing if the "second" target
 is secretly the first one's cases relabeled.
 
-**Open question, not resolved here — decide before dispatching this
-phase:** should the new app's pages be original content authored for this
-purpose, or deliberately drawn from the site-architecture corpus research
-(`docs/research/corpus-examples/`, the six original categories plus the
-six `claude/vuln-corpus-expansion-zjl1iw` added — access-control,
-auth-session, ugc-xss, file-handling, search-export, ecommerce-logic,
-mass-assignment, ssrf, ssti, header-injection, insecure-deserialization,
-webhook-signature).
+**Decided (2026-09-22): corpus-grounded, not original content** — see §0a
+item 1. This applies to the single-app version of Phase C described below
+*and* is the same rule §4a's 12-app expansion uses; §4a does not restate
+the reasoning, only the added scope.
 
-Considerations for that decision, laid out rather than resolved:
+Reasoning recorded for why corpus-grounded won (kept for context, not a
+live decision anymore):
 
 - **Corpus-grounded** gives the new app the same "modeled on real code
   shapes, not invented from memory" grounding this project's whole
   generator philosophy already rests on (see `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s
   own "Why" section) — and reuses research already done and reviewed this
   session, rather than inventing a second, parallel justification story.
-- **Corpus-grounded** also means this second target can exercise
-  vulnerability classes the current `php_laravel` lab doesn't have at all
-  yet (SSRF, SSTI, header injection, insecure deserialization, webhook
-  signature bypass) — a genuinely different attack-surface profile, which
-  is exactly what makes a transfer-generalization measurement meaningful
-  rather than a repeat of the same classes on a different templating
-  syntax.
-- **Original content** is faster to design (no corpus-fidelity bar to
-  clear) but weaker generalization evidence — it would only be testing
-  "does the toolkit work on syntactically different Node code," not "does
-  it work on a different, independently-grounded set of vulnerability
-  shapes."
+- **Corpus-grounded** also means the new app(s) can exercise vulnerability
+  classes the current `php_laravel` lab doesn't have at all yet (SSRF,
+  SSTI, header injection, insecure deserialization, webhook signature
+  bypass) — a genuinely different attack-surface profile, which is exactly
+  what makes a transfer-generalization measurement meaningful rather than
+  a repeat of the same classes on a different templating syntax.
 
-**Recommendation (not a decision — the project owner's call):** corpus-
-grounded, specifically using the newer classes the current lab doesn't yet
-model (SSRF/SSTI/header-injection/insecure-deserialization/webhook-
-signature) rather than re-doing SQLi/XSS a second time, so the second
-target's value is additive to the toolkit's real coverage, not merely
-duplicative.
+**Note on scope:** this section (§4) was originally scoped to one app on
+one stack (`node_express`, §0.2). §0a/§4a expand "corpus-grounded" into 12
+apps across 6 researched categories, each requiring its own functionality
+research (§0a item 2) and stack-specific CWE research (§0a item 3) *before*
+the steps below can run per app. §0b's open questions (especially #1, the
+stack-fidelity question) must be answered before treating any of the 12
+apps as dispatchable — the steps below remain correct as a *template* per
+app, just not yet sized or stack-assigned for all 12.
 
-Once decided:
+Steps, per app, once §0b is answered:
 
 1. Pick a coherent page/route set spanning the chosen vulnerability classes
-   (a small, self-consistent app identity — e.g. a webhook-integration
-   dashboard, matching whichever classes are in scope — not a loose bag of
-   unrelated illustrative cells).
+   (a small, self-consistent app identity matching a real researched
+   site's actual functionality — not a loose bag of unrelated illustrative
+   cells).
 2. Author `labels.json`/`injection-points.json` for this app from scratch,
    with its own opaque case-ID scheme (never `PFF-*`), following
    `docs/DECISIONS_AND_ROADMAP.md` D9's existing out-of-band ground-truth
    contract.
 3. Author the manifest(s) (vulnerable/secure twin pairs, one per chosen
-   class) using Phase B's module inventory.
+   class) using Phase B's module inventory (or the corresponding module
+   inventory for whichever stack §0b's question 1 resolves to for this
+   app).
 
 ## 5. Phase D — Tier 1/2 conformance
 
@@ -243,11 +383,16 @@ land — it is "run the proof," not "design the proof."
 
 - Does not build an external target (Juice Shop/WAVSEP) — that option was
   explicitly not chosen (§0).
-- Does not resolve Phase C's corpus-vs-original design question — flagged,
-  not decided, per §4.
 - Does not attempt the live/on-host `T10.6` measurement itself — only the
   toolkit-side proof that a second target can be run and compared, which
   is the part actually blocked on nothing but being built.
+- Does not resolve §0b's open questions (stack-fidelity approach for the
+  12-app expansion, which 2 sites per category, whether the 12 apps
+  subsume §§1-7's single app, sequencing/piloting) — flagged, not decided.
+- Does not yet do the functionality-per-site research §0a item 2 found
+  missing, or the stack-specific CWE research §0a item 3 asks for — both
+  are real, sized work items for whenever §0b is answered and this plan
+  moves from planning to execution.
 
 ## 8. Bookkeeping conventions for whoever executes this plan
 
