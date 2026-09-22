@@ -85,10 +85,14 @@ def test_run_html_page_renders_findings(tmp_path):
     assert "TP=4" in body and "FP=0" in body
 
 
-def test_index_shows_runs_table(tmp_path):
+def test_results_route_shows_runs_table(tmp_path):
     path = tmp_path / "r.db"
     _seed(path)
-    body = _client(path).get("/").text
+    r = _client(path).get("/results")
+    assert r.status_code == 200
+    assert r.template.name == "sections/results.html"
+    assert r.context["active"] == "results"
+    body = r.text
     assert "Review runs" in body and "/runs/1" in body
 
 
@@ -119,4 +123,5 @@ def test_panel_without_store_shows_no_runs(tmp_path):
     client = _client(path)
     assert client.get("/api/runs").json()["runs"] == []
     assert not path.exists()
-    assert "No runs recorded yet" in client.get("/").text
+    assert "No runs recorded yet" in client.get("/results").text
+    assert not path.exists()

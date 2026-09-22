@@ -1,0 +1,5 @@
+/* fuzzlab control panel — Diagnostics section (U0: MPA split).
+ * Only linked by templates/sections/diagnostics.html. Relies on shell.css for the
+ * shared card/.muted rules; this partial exists for Diagnostics-specific overrides
+ * (U5 adds the chart/store-explorer panels here).
+ */

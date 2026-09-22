@@ -1,0 +1,24 @@
+/* fuzzlab control panel — Proxy section (U0: MPA split).
+ * Only linked by templates/sections/proxy.html. Relies on shell.css (card, table,
+ * .field, .muted, .warn, …) already being loaded.
+ */
+
+/* --- proxy history ------------------------------------------------------ */
+#flow-table td { font-size: .85rem; }
+#flow-table tbody tr.flow-row { cursor: pointer; }
+#flow-table tbody tr.flow-row:hover { background: var(--surface2); }
+#flow-table td:nth-child(3) { max-width: 34rem; overflow-wrap: anywhere; }
+.flow-raw {
+  background: #0b0e14; color: #d8dee9; padding: .6rem; border-radius: 8px;
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 20rem; overflow: auto;
+  font-family: var(--mono); font-size: .8rem;
+}
+
+/* --- intercept / repeater editors --------------------------------------- */
+#pending-table tbody tr.flow-row { cursor: pointer; }
+#pending-table tbody tr.flow-row:hover { background: var(--surface2); }
+.pending-raw {
+  width: 100%; font-family: var(--mono); font-size: .82rem;
+  padding: .5rem; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface2); color: var(--text);
+}

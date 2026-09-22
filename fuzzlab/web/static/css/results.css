@@ -1,0 +1,6 @@
+/* fuzzlab control panel — Results section (U0: MPA split).
+ * Only linked by templates/sections/results.html. The runs table itself relies on
+ * shell.css's shared table/card/.muted rules; this partial exists for
+ * Results-specific overrides as the section grows (U1 adds the KPI/overview
+ * content on a separate route).
+ */

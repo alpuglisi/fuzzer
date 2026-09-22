@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block crumb %}Results{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/results.css">{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Review runs</h2>
+  {% if runs %}
+  <table>
+    <thead><tr><th>run</th><th>tool</th><th>target</th><th>started</th><th>findings</th></tr></thead>
+    <tbody>
+      {% for r in runs %}
+      <tr>
+        <td><a href="/runs/{{ r.id }}">#{{ r.id }}</a></td>
+        <td>{{ r.tool }}</td>
+        <td><code>{{ r.target or '' }}</code></td>
+        <td>{{ r.started_at or '' }}</td>
+        <td>{{ r.findings }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No runs recorded yet. Run a tool with <code>--store</code>, or use
+    automatic mode, then refresh.</p>
+  {% endif %}
+</div>
+{% endblock %}

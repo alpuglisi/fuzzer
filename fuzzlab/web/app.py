@@ -180,28 +180,75 @@ def _active_plugins() -> list[dict]:
         return []
 
 
-def _shell_context(cfg: Config) -> dict[str, Any]:
-    """Chrome shared by every page (sidebar + top context bar): the target, scope, and
-    authorization state the topbar chips render. Merged into each TemplateResponse so the
-    shell is identical on the index, a run detail, and the not-found page."""
+# --- MPA routing (U0): one source-of-truth nav list, real per-section routes ---
+#
+# Each entry is (section id, label, href, icon); the id doubles as the template's
+# `data-section` hook and, when it matches the current route's `active` id (computed
+# in the route handler below — never derived from the request path), drives the
+# server-rendered `aria-current="page"` + `.active` class in base.html's nav loop.
+# `group` buckets entries under the sidebar's two headers (Workbench / Analysis), in
+# the order given here — the same "single list, no per-page duplication" pattern the
+# launcher's `_ACTIVITY_GROUPS` above already uses for activities.
+NAV: list[dict[str, str]] = [
+    {"id": "launcher", "label": "Launcher", "href": "/", "icon": "▸",
+     "group": "Workbench"},
+    {"id": "proxy", "label": "Proxy", "href": "/proxy", "icon": "⇄",
+     "group": "Workbench"},
+    {"id": "results", "label": "Results", "href": "/results", "icon": "▤",
+     "group": "Workbench"},
+    {"id": "ml", "label": "ML", "href": "/ml", "icon": "◈",
+     "group": "Analysis"},
+    {"id": "diagnostics", "label": "Diagnostics", "href": "/diagnostics", "icon": "◍",
+     "group": "Analysis"},
+]
+
+
+def _nav_groups() -> list[tuple[str, list[dict[str, str]]]]:
+    """Group NAV into (label, items) pairs, preserving first-appearance order —
+    the shape base.html's sidebar loop renders the two `.side-sep` headers from."""
+    groups: list[tuple[str, list[dict[str, str]]]] = []
+    by_label: dict[str, list[dict[str, str]]] = {}
+    for item in NAV:
+        label = item["group"]
+        if label not in by_label:
+            by_label[label] = []
+            groups.append((label, by_label[label]))
+        by_label[label].append(item)
+    return groups
+
+
+_NAV_GROUPS = _nav_groups()
+
+
+def _shell_context(cfg: Config, active: str) -> dict[str, Any]:
+    """Chrome shared by every page (sidebar + top context bar): the target, scope,
+    authorization state the topbar chips render, and the nav's active section.
+    Merged into each TemplateResponse so the shell is identical on every section
+    route, a run detail, and the not-found page. ``active`` is computed by the route
+    handler (never guessed from the request path) and compared against NAV's ids in
+    the nav loop for server-rendered active state (R-01 in
+    docs/UI_IMPLEMENTATION_PLAN.md)."""
     return {
         "target": cfg.get("target_base_url", ""),
         "scope": ", ".join(cfg.get("scope_hosts", [])),
         "authorized": bool(cfg.get("authorized", False)),
+        "nav_groups": _NAV_GROUPS,
+        "active": active,
     }
 
 
-def _index_context(cfg: Config, state: LauncherState, runs: list[dict]) -> dict[str, Any]:
+def _launcher_context(cfg: Config, state: LauncherState) -> dict[str, Any]:
+    """Context for the Launcher section route (``/``): activities, the manual/CLI
+    reference, and the last dry-run/automatic result. No result-table data (that's
+    the Results route) — the launcher only ever *launches* or previews."""
     activities = _activities()
     return {
-        **_shell_context(cfg),
         "mode": state.mode,
         "categories": _known_categories(),
         "commands": _tool_commands(cfg),
         "activities": activities,
         "activity_groups": _group_activities(activities),
         "plugins": _active_plugins(),
-        "runs": runs,
         "last_result": None if state.last_result is None else str(state.last_result),
     }
 
@@ -241,10 +288,36 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         except KeyError:
             return None
 
+    # --- MPA section routes (U0): one real route per sidebar section, each its own
+    # template + per-section JS/CSS. `active` is passed explicitly so the shared shell
+    # renders the correct `aria-current="page"` without inferring it from the path. ---
+
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
         return templates.TemplateResponse(
-            request, "index.html", _index_context(cfg, state, _read_runs(cfg)))
+            request, "sections/launcher.html",
+            {**_shell_context(cfg, "launcher"), **_launcher_context(cfg, state)})
+
+    @app.get("/proxy", response_class=HTMLResponse)
+    def proxy_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/proxy.html", _shell_context(cfg, "proxy"))
+
+    @app.get("/results", response_class=HTMLResponse)
+    def results_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/results.html",
+            {**_shell_context(cfg, "results"), "runs": _read_runs(cfg)})
+
+    @app.get("/ml", response_class=HTMLResponse)
+    def ml_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/ml.html", _shell_context(cfg, "ml"))
+
+    @app.get("/diagnostics", response_class=HTMLResponse)
+    def diagnostics_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/diagnostics.html", _shell_context(cfg, "diagnostics"))
 
     @app.get("/api/status")
     def status() -> dict[str, Any]:
@@ -291,13 +364,15 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
 
     @app.get("/runs/{run_id}", response_class=HTMLResponse)
     def run_html(request: Request, run_id: int):
+        # A run's detail page is reached from the Results list, so it highlights
+        # "results" in the nav even though it isn't itself a NAV entry.
         detail = _read_detail(cfg, run_id)
         if detail is None:
             return templates.TemplateResponse(
                 request, "not_found.html",
-                {"run_id": run_id, **_shell_context(cfg)}, status_code=404)
+                {"run_id": run_id, **_shell_context(cfg, "results")}, status_code=404)
         return templates.TemplateResponse(
-            request, "run.html", {"detail": detail, **_shell_context(cfg)})
+            request, "run.html", {"detail": detail, **_shell_context(cfg, "results")})
 
     # --- launcher: dry-run preview, gated execution, live output (Phase 0.3) ---
 

@@ -1,7 +1,12 @@
-"""Tests for the Phase 0.2 frontend foundation: static assets + tab shell.
+"""Tests for the app shell + MPA section routes (U0: MPA routes + asset split).
 
-Covers the new structure without weakening the launcher/results invariants those
-suites already protect (no-auto-run, loopback-only, read-only over the store).
+Covers the new per-section-route structure without weakening the launcher/results
+invariants those suites already protect (no-auto-run, loopback-only, read-only over
+the store). U0 retired the hash-tab shell (`initTabs`, `.panel`/`data-tab`): each
+sidebar section is now a real route rendering its own template, with the active nav
+item computed server-side (`response.context["active"]`) rather than switched by
+client JS. Starlette's `TestClient` runs no JS, so every assertion here doubles as
+the no-JS check (R-09 test strategy, docs/UI_IMPLEMENTATION_PLAN.md §7).
 """
 
 from __future__ import annotations
@@ -12,7 +17,14 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
-from fuzzlab.web.app import create_app  # noqa: E402
+from fuzzlab.web.app import NAV, create_app  # noqa: E402
+
+# (route, section id, template name) — the single parametrization covering
+# routing + deep-link + template + active-nav for every sidebar section (R-09).
+# Derived from app.py's NAV (the single source of truth the nav loop itself uses,
+# PA-0001) rather than a hand-maintained duplicate; the template name follows the
+# `sections/<id>.html` convention every route in app.py wires up.
+SECTIONS = [(item["href"], item["id"], f"sections/{item['id']}.html") for item in NAV]
 
 
 def _client(authorized=False):
@@ -21,17 +33,32 @@ def _client(authorized=False):
     return TestClient(create_app(cfg))
 
 
-def test_static_css_is_served():
-    r = _client().get("/static/app.css")
+def test_static_css_partials_are_served():
+    client = _client()
+    r = client.get("/static/tokens.css")
+    assert r.status_code == 200 and "text/css" in r.headers["content-type"]
+    r = client.get("/static/css/shell.css")
     assert r.status_code == 200
     assert "text/css" in r.headers["content-type"]
     assert ".card" in r.text and "nav.tabs" in r.text
+    r = client.get("/static/css/launcher.css")
+    assert r.status_code == 200 and ".launch" in r.text
+    r = client.get("/static/css/proxy.css")
+    assert r.status_code == 200 and "#flow-table" in r.text
 
 
-def test_static_js_is_served():
-    r = _client().get("/static/app.js")
+def test_static_js_modules_are_served():
+    client = _client()
+    r = client.get("/static/js/shell.js")
     assert r.status_code == 200
-    assert "subscribe" in r.text and "initTabs" in r.text
+    assert "initShell" in r.text
+    assert "function initTabs" not in r.text  # U0 retired the hash-tab shell
+    r = client.get("/static/js/launcher.js")
+    assert r.status_code == 200 and "initLaunchForms" in r.text
+    r = client.get("/static/js/proxy.js")
+    assert r.status_code == 200 and "initIntercept" in r.text
+    r = client.get("/static/js/http.js")
+    assert r.status_code == 200 and "subscribe" in r.text
 
 
 def test_static_tokens_css_is_served():
@@ -46,18 +73,49 @@ def test_static_tokens_css_is_served():
     assert '[data-density="compact"]' in r.text
 
 
-def test_index_renders_the_app_shell():
-    # R0 shell: left sidebar (nav.tabs) + top context bar, tokens linked before app.css,
-    # and a no-FOUC head script that applies the persisted theme before first paint.
-    body = _client().get("/").text
+@pytest.mark.parametrize("route,section_id,template", SECTIONS)
+def test_section_route_renders_with_active_nav(route, section_id, template):
+    # Routing + deep-link + template + server-rendered active-nav, in one place
+    # (R-09): every sidebar section is reachable at its own URL, renders the right
+    # template, and marks itself current via `active` (compared to NAV in the nav
+    # loop, never guessed from the request path).
+    r = _client().get(route)
+    assert r.status_code == 200
+    assert r.template.name == template
+    assert r.context["active"] == section_id
+    body = r.text
+    assert f'data-section="{section_id}"' in body
+    assert f'aria-current="page"' in body
+    # every page carries the shared shell chrome
     assert 'class="sidebar"' in body and 'class="topbar"' in body
     assert '/static/tokens.css' in body
-    assert body.index('/static/tokens.css') < body.index('/static/app.css')
+    assert '/static/css/shell.css' in body
+    assert body.index('/static/tokens.css') < body.index('/static/css/shell.css')
+    assert '/static/js/shell.js' in body
     assert 'id="theme-toggle"' in body and 'id="density-toggle"' in body
     assert 'id="proxy-chip"' in body
     assert 'localStorage.getItem("fl-theme")' in body  # no-FOUC inline script
-    # the context bar reflects config (authorization state) server-side
-    assert "not authorized" in body
+
+
+def test_sidebar_links_are_real_hrefs_to_every_section():
+    # No hash-tab switching left: the sidebar nav is plain <a href> per section, so
+    # deep-linking, back/forward, and no-JS all come free from the browser.
+    body = _client().get("/").text
+    for route, section_id, _ in SECTIONS:
+        assert f'href="{route}" data-section="{section_id}"' in body
+    assert 'data-tab=' not in body   # the retired hash-tab attribute is gone
+
+
+def test_only_the_current_sections_nav_link_is_marked_active():
+    import re
+    for route, section_id, _ in SECTIONS:
+        body = _client().get(route).text
+        assert body.count('aria-current="page"') == 1
+        # the <a> carrying aria-current="page" is the one for this route's own section
+        anchors = re.findall(r'<a href="[^"]*" data-section="([^"]+)"[^>]*>', body)
+        current = [sec for sec in anchors
+                   if re.search(rf'data-section="{sec}"[^>]*aria-current="page"', body)]
+        assert current == [section_id]
 
 
 def test_shell_context_on_run_and_not_found_pages():
@@ -66,19 +124,8 @@ def test_shell_context_on_run_and_not_found_pages():
     nf = client.get("/runs/999999")   # no store → not found, still framed by the shell
     assert nf.status_code == 404
     assert 'class="sidebar"' in nf.text and 'class="topbar"' in nf.text
-
-
-def test_index_renders_the_tab_shell():
-    body = _client().get("/").text
-    # R0: the tab nav moved into the app-shell sidebar (a labelled landmark), but it is
-    # still <nav class="tabs"> switching the same five sections by data-tab/id.
-    assert '<nav class="tabs"' in body
-    for tab in ("launcher", "proxy", "results", "ml", "diagnostics"):
-        assert f'data-tab="{tab}"' in body
-        assert f'id="tab-{tab}"' in body
-    # the shared stylesheet + module script are linked
-    assert '/static/app.css' in body
-    assert '/static/app.js' in body
+    # a run detail is reached from Results, so Results stays highlighted in the nav
+    assert nf.context["active"] == "results"
 
 
 def test_index_previews_activities_from_the_command_spec():

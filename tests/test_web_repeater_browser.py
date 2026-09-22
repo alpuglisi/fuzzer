@@ -95,7 +95,9 @@ def test_repeater_create_and_send_in_browser(tmp_path):
             pg = browser.new_page()
             pg.set_default_timeout(15000)
             pg.goto(f"http://127.0.0.1:{web_port}/")
-            pg.click('nav.tabs a[data-tab="proxy"]')
+            # U0: the Proxy section is a real route, not a hash-tab switch.
+            pg.click('nav.tabs a[data-section="proxy"]')
+            pg.wait_for_url(f"http://127.0.0.1:{web_port}/proxy")
             pg.click("#repeater-card details summary")
             pg.fill("#rep-new-host", "127.0.0.1")
             pg.fill("#rep-new-port", str(up_port))

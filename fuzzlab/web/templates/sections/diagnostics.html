@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block crumb %}Diagnostics{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/diagnostics.css">{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Diagnostics</h2>
+  <p class="muted">A TensorBoard-like view: cross-run metric trends, intra-run reward
+    / coverage / latency series, bandit arm state, and a store explorer. Arrives in
+    Phase 4; time-series charts need the new metric-series instrumentation.</p>
+</div>
+{% endblock %}

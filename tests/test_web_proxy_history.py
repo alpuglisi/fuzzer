@@ -100,9 +100,12 @@ def test_api_flows_missing_store_is_empty_and_creates_nothing(tmp_path):
     assert not path.exists()
 
 
-def test_proxy_tab_renders_history_ui(tmp_path):
+def test_proxy_route_renders_history_ui(tmp_path):
     path = tmp_path / "p.db"
     _seed(path)
-    body = _client(path).get("/").text
+    r = _client(path).get("/proxy")
+    assert r.status_code == 200
+    assert r.template.name == "sections/proxy.html"
+    assert r.context["active"] == "proxy"
+    body = r.text
     assert 'id="flow-table"' in body and 'id="flow-search"' in body
-    assert 'id="tab-proxy"' in body

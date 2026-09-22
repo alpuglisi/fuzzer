@@ -1,0 +1,5 @@
+/* fuzzlab control panel — ML section (U0: MPA split).
+ * Only linked by templates/sections/ml.html. Relies on shell.css for the shared
+ * card/.muted rules; this partial exists for ML-specific overrides (U4 adds the
+ * read-only model-internals panels here).
+ */
