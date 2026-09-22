@@ -14,6 +14,16 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB / project tooling: fixed four bugs found in a script review —
+  `lab/labctl.sh down` reporting success without verifying its fallback
+  teardown worked (BUG-0029), `_force_clean`'s unscoped `podman pod prune -f`
+  affecting other podman projects on the same host (BUG-0030), the
+  `check-error-log-bookkeeping.sh` Stop hook silently skipping already-
+  committed work on an unpushed branch (BUG-0031), and its keyword regex
+  missing plural nominalized forms like "failures"/"regressions" (BUG-0032).
+  Proposed via `docs/change-requests/CR-LAB-0002-labctl-and-bookkeeping-hook-
+  bugfixes.md`, reviewed and revised through two independent adversarial
+  reviews before landing (`CC-LAB-0057`, `PA-0031`..`PA-0034`).
 - Planning: added `docs/VULN_CORPUS_EXPANSION_PLAN.md`, a research plan for
   broadening the generated lab beyond SQLi/XSS — Phase 1 catalogs common web-app
   feature areas and cross-references which are disproportionately exploited in

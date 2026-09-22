@@ -18,6 +18,54 @@ Format per entry:
 
 ---
 
+## 2026-09-22 — Bookkeeping hook: keyword regex missed plural nominalized forms ("failures", "regressions") (fixed)
+
+- **Symptom:** `.claude/hooks/check-error-log-bookkeeping.sh`'s incident-keyword regex
+  did not match "failures"/"regressions" in a diff, only their singular forms — verified
+  directly (`grep -qE '\bfail(s|ed|ing|ure)?\b'` fails on "failures").
+- **Root cause:** the `fail`/`regress` alternatives' nominalized-form branches (`ure`,
+  `ion`) had no plural variant, unlike every other alternative in the same regex.
+- **Remediation:** widened to `ures?`/`ions?`. See `docs/bugs/BUG-0032-*.md`,
+  `PA-0034`, `docs/change-requests/CR-LAB-0002-*.md`.
+- **Status:** Fixed
+
+## 2026-09-22 — Bookkeeping hook silently degraded to uncommitted-diff-only checking on an unpushed branch (fixed)
+
+- **Symptom:** `.claude/hooks/check-error-log-bookkeeping.sh` missed already-committed
+  incident-shaped work when `origin/<branch>` didn't exist (fresh unpushed branch, or no
+  `origin` remote), exiting 0 with nothing checked.
+- **Root cause:** `upstream` had exactly one source (`origin/<branch>`) with no fallback
+  for the routine case where that ref doesn't exist yet.
+- **Remediation:** added a merge-base fallback against `origin/main`/`origin/master`/
+  `main`/`master` (first found) when `origin/<branch>` is absent. See
+  `docs/bugs/BUG-0031-*.md`, `PA-0033`, `docs/change-requests/CR-LAB-0002-*.md`.
+- **Status:** Fixed
+
+## 2026-09-22 — LAB: `labctl.sh`'s `_force_clean` pruned every podman project's pods on the host, not just fuzzlab's (fixed)
+
+- **Symptom:** `lab/labctl.sh`'s self-heal helper ran `podman pod prune -f`, a host-wide
+  command with no project scoping.
+- **Root cause:** the pod-cleanup step used a host-wide convenience verb instead of the
+  same name-scoping discipline already used by `_force_clean`'s container/network-removal
+  steps.
+- **Remediation:** replaced with a `pff-lab`-name-filtered `podman pod rm -f`. See
+  `docs/bugs/BUG-0030-*.md`, `PA-0032`, `CC-LAB-0057`,
+  `docs/change-requests/CR-LAB-0002-*.md`.
+- **Status:** Fixed
+
+## 2026-09-22 — LAB: `labctl.sh down` reported success without verifying the fallback teardown worked (fixed)
+
+- **Symptom:** `lab/labctl.sh down`, on a failed `compose down`, always exited 0 after
+  calling the shared `_force_clean` self-heal helper — even when the failure was
+  unrelated to a wedged podman stack and nothing was actually torn down.
+- **Root cause:** unlike `up`/`reset`, `down`'s failure branch never re-attempted the
+  real `compose down` after `_force_clean`, so it inherited `_force_clean`'s
+  by-design-unconditional `return 0` as its own exit status.
+- **Remediation:** `down` now retries `compose down` after `_force_clean` and lets that
+  retry's exit status propagate, matching `up`/`reset`. See `docs/bugs/BUG-0029-*.md`,
+  `PA-0031`, `CC-LAB-0057`, `docs/change-requests/CR-LAB-0002-*.md`.
+- **Status:** Fixed
+
 ## 2026-09-22 — LAB: `LiveBootHarness` silently followed real redirects and its seeded schema lacked Eloquent timestamp columns (fixed)
 
 - **Symptom:** extending `LiveBootHarness` coverage to the auth/G4 real-page manifests

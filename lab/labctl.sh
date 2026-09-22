@@ -52,7 +52,16 @@ _force_clean() {
   for c in pff-lab_frontend_1 pff-lab_web_1 pff-lab_db_1; do
     podman rm -f "$c" >/dev/null 2>&1 || true      # -f removes even running/wedged ones
   done
-  podman pod prune -f >/dev/null 2>&1 || true        # drop the emptied pod(s)
+  # Scope to this project's own pod(s) — `podman pod prune -f` is host-wide and
+  # would remove any other podman-managed project's stopped/empty pods on the
+  # same host too (BUG-0030). `pod rm -f` (not `prune`) also force-tears down
+  # a matched pod even if it still holds live containers, which is desirable
+  # here: this is exactly the wedged-stack case (BUG-0013/BUG-0017) this
+  # function exists for.
+  mapfile -t _pods < <(podman pod ps -q --filter "name=pff-lab" 2>/dev/null) || true
+  if [ "${#_pods[@]}" -gt 0 ]; then
+    podman pod rm -f "${_pods[@]}" >/dev/null 2>&1 || true
+  fi
   podman network rm pff-lab_default >/dev/null 2>&1 || true
   if [ "${1:-}" = "drop-volume" ]; then
     podman volume rm pff-lab_pff-db-data >/dev/null 2>&1 || true
@@ -83,10 +92,14 @@ case "${1:-}" in
     # Teardown keeps the DB volume. A wedged podman stack can make `down` itself fail to
     # remove "improper"/running containers, so on failure force-clean (keep-volume) — the
     # same self-heal as up/reset (PA-0018: every container-remove path routes through the
-    # shared helper, keyed on the operation not the trigger).
+    # shared helper, keyed on the operation not the trigger). Retry `down` after the
+    # force-clean and let ITS exit status propagate (BUG-0029): the old code always
+    # returned 0 here even when the failure was unrelated to a wedged pod (e.g. no
+    # podman installed, so `_force_clean` no-ops) and nothing was actually torn down.
     if ! "${COMPOSE[@]}" down; then
       echo "down failed; force-clearing wedged stack (DB volume kept)..." >&2
       _force_clean keep-volume
+      "${COMPOSE[@]}" down
     fi
     ;;
   reset)

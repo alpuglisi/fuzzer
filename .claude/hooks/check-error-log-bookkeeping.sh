@@ -25,8 +25,21 @@ error_log="ERROR_LOG.md"
 
 current_branch=$(git branch --show-current)
 upstream=""
-if [[ -n "$current_branch" ]] && git rev-parse -q --verify "origin/$current_branch" >/dev/null 2>&1; then
-  upstream="origin/$current_branch"
+if [[ -n "$current_branch" ]]; then
+  if git rev-parse -q --verify "origin/$current_branch" >/dev/null 2>&1; then
+    upstream="origin/$current_branch"
+  else
+    # No pushed upstream yet (fresh branch, or no `origin` remote at all) — fall
+    # back to the merge-base with the local default branch, so "not yet landed"
+    # is still measured against where this branch actually diverged instead of
+    # silently degrading to only the uncommitted diff (BUG-0031).
+    for ref in origin/main origin/master main master; do
+      if git rev-parse -q --verify "$ref" >/dev/null 2>&1 && [[ "$ref" != "$current_branch" ]]; then
+        upstream="$ref"
+        break
+      fi
+    done
+  fi
 fi
 
 # Files touched by this turn's not-yet-landed work: uncommitted changes
@@ -55,7 +68,9 @@ suspect_paths=$(echo "$changed_files" | grep -E '^docs/(spikes|bugs)/.*\.md$')
 
 # Heuristic 2: incident-shaped language added anywhere in the diff, excluding
 # ERROR_LOG.md itself (already checked above) and this hook's own file.
-keyword_regex='\bfail(s|ed|ing|ure)?\b|\bhang(s|ing)?\b|\bworkaround(s|ed)?\b|\bkilled\b|\btimed out\b|\btimeout(s|ed)?\b|\bcrash(es|ed|ing)?\b|\bbroken\b|\bregress(es|ed|ion)?\b'
+# Note: `ures?`/`ions?` (not `ure`/`ion`) so the plural nominalized forms
+# ("failures", "regressions") match too, not just the singular (BUG-0032).
+keyword_regex='\bfail(s|ed|ing|ures?)?\b|\bhang(s|ing)?\b|\bworkaround(s|ed)?\b|\bkilled\b|\btimed out\b|\btimeout(s|ed)?\b|\bcrash(es|ed|ing)?\b|\bbroken\b|\bregress(es|ed|ions?)?\b'
 keyword_hits=""
 {
   git diff -U0 -- . ":(exclude)$error_log" ":(exclude).claude/hooks/check-error-log-bookkeeping.sh"

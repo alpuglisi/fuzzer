@@ -265,3 +265,51 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   PA-0026's "enumerate every precondition, not only the one that motivated the
   change" discipline from allowlist adapters to live HTTP+ORM conformance harnesses.
   (from BUG-0028)
+- **PA-0031** — When a shared best-effort helper is added to a code path
+  specifically to make a previously-failing operation succeed (a self-heal, a
+  retry, a fallback), the calling path's exit status must come from
+  **re-attempting and checking the actual operation the helper was meant to
+  unblock** — never from the helper's own return value, if that helper is
+  designed to return success unconditionally (as a "safe to call anywhere,
+  including as a no-op" cleanup helper legitimately is). Generalizes PA-0018's
+  "every container-lifecycle path must route through the shared helper":
+  routing through the helper is necessary but not sufficient — the path must
+  still verify the operation succeeded afterward, the same way its sibling
+  paths already do, rather than treating "we called the self-heal helper" as
+  itself the success condition. (from BUG-0029)
+- **PA-0032** — A project-scoped cleanup helper (self-heal, teardown,
+  cache-clear, etc.) must scope **every** step to the project, not just the
+  steps whose scoping was easy to reach for by naming an exact resource. When
+  adding a step to such a helper, check whether the CLI/tool being called has
+  a host-wide "clean everything of this kind" verb (`prune`, `clean`, `gc`,
+  etc.) as well as a filtered/scoped one (`--filter`, `--name`, a label
+  selector); if a host-wide verb is used, that must be a deliberate,
+  documented exception (with a stated reason it cannot be scoped), never the
+  unexamined default. Closes a gap PA-0018's container-lifecycle sweep did
+  not cover: PA-0018 asks whether every relevant *path* routes through the
+  shared helper, not whether every *step inside* the shared helper itself is
+  scoped to the project — both questions must be asked when auditing or
+  extending such a helper. (from BUG-0030)
+- **PA-0033** — A mechanical enforcement hook built to close a "the rule was
+  correct but never applied" gap (per PA-0020's pattern) must itself be
+  reviewed for completeness of its *detection* logic, not just its trigger
+  conditions — specifically, enumerate every state the signal it depends on
+  (a ref, a file, an environment variable) can be in, including states where
+  that signal doesn't exist yet or never will (an unpushed branch, a repo
+  with no remote, a missing config file), and verify the hook's behavior in
+  each rather than only the state it was written and tested against. Extends
+  PA-0020's "enforcement must not depend on my remembering" principle to the
+  enforcement mechanism's own inputs: a hook whose detection quietly narrows
+  when its primary signal is absent is exactly as fragile as the rule it
+  replaced, just one layer further from view. (from BUG-0031)
+- **PA-0034** — When a keyword-matching heuristic includes a **nominalized
+  noun form** derived from a verb (e.g. `fail` → `failure`, `regress` →
+  `regression` — as opposed to a plain `-s`/`-ed`/`-ing` inflection), that
+  nominalized alternative must itself admit its own plural (`ures?`/`ions?`,
+  not `ure`/`ion`) — nominalization changes the word's part of speech, and a
+  noun pluralizes independently of whatever inflections its parent verb
+  takes. Before adding or editing such a regex, test every alternative
+  against this project's own incident-prose conventions (e.g.
+  `docs/bugs/README.md`'s and other `docs/bugs/*.md` files' actual wording)
+  as a concrete corpus, not just by enumerating keywords from memory. (from
+  BUG-0032)

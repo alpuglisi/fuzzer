@@ -294,21 +294,21 @@ no existing match narrowed.)
 
 ## 7. Deliverables
 
-- [ ] 3.1 — `lab/labctl.sh` `down` retry-then-propagate fix — todo
-- [ ] 3.2 — `lab/labctl.sh` `_force_clean` pod-prune scoping fix — todo
-- [ ] 3.3 — hook upstream-fallback fix — todo
-- [ ] 3.4 — hook keyword-regex plural fix — todo
-- [ ] Bug workflow, **one `ERROR_LOG.md` line + one `docs/bugs/BUG-NNNN-*.md` +
+- [x] 3.1 — `lab/labctl.sh` `down` retry-then-propagate fix — done
+- [x] 3.2 — `lab/labctl.sh` `_force_clean` pod-prune scoping fix — done
+- [x] 3.3 — hook upstream-fallback fix — done
+- [x] 3.4 — hook keyword-regex plural fix — done
+- [x] Bug workflow, **one `ERROR_LOG.md` line + one `docs/bugs/BUG-NNNN-*.md` +
       one `PREVENTIVE_ACTIONS.md` entry per distinct root cause** (revised
       per Reviewer 2, §10 — see rationale there), not bundled into a single
-      doc — todo, gated on this CR's approval:
-  - [ ] `BUG-0029` / `PA-0031` — 3.1, `down` exit-code swallow
-  - [ ] `BUG-0030` / `PA-0032` — 3.2, unscoped `podman pod prune -f`
-  - [ ] `BUG-0031` / `PA-0033` — 3.3, hook upstream-detection gap
-  - [ ] `BUG-0032` / `PA-0034` — 3.4, hook regex plural-form miss
-- [ ] `docs/components/01-target-lab/change-control.md` — `CC-LAB-0057` for
-      3.1/3.2 — todo
-- [ ] `CHANGELOG.md` line covering all four — todo
+      doc — done:
+  - [x] `BUG-0029` / `PA-0031` — 3.1, `down` exit-code swallow
+  - [x] `BUG-0030` / `PA-0032` — 3.2, unscoped `podman pod prune -f`
+  - [x] `BUG-0031` / `PA-0033` — 3.3, hook upstream-detection gap
+  - [x] `BUG-0032` / `PA-0034` — 3.4, hook regex plural-form miss
+- [x] `docs/components/01-target-lab/change-control.md` — `CC-LAB-0057` for
+      3.1/3.2 — done
+- [x] `CHANGELOG.md` line covering all four — done
 
 ## 8. Explicitly out of scope
 
@@ -326,8 +326,21 @@ no existing match narrowed.)
 
 ## 9. Effectiveness
 
-Pending — assessed after the fix lands and one on-host `labctl.sh` cycle plus
-the hook regression check (§6) pass.
+Assessed 2026-09-22, partially: `bash -n` passes on both patched files;
+`grep -oE` construction confirmed the regex fix matches "failures"/
+"regressions" while still matching every previously-matched form; a
+standalone `set -euo pipefail` harness confirmed (a) a failing final command
+inside an `if` branch propagates its exit status as the branch's own status
+(3.1) and (b) `mapfile` against a zero-line process substitution safely
+yields a zero-length array with no unbound-variable trap under `set -u`
+(3.2). `pytest` could not be run to completion in this build environment
+(collection errors on unrelated pre-existing missing dependencies, e.g.
+`bs4`/BeautifulSoup — not something either patched file touches or that this
+CR's diff caused; confirmed no test file imports `lab/labctl.sh` or the hook
+script). The on-host `labctl.sh up`/`down`/`reset` cycle and the hook's
+`jq`-fed-stdin regression check from §6 are still outstanding — this
+environment has no podman/docker to run them — and remain the final
+verification step per `docs/ON_HOST_RUNBOOK.md`.
 
 ## 10. Independent review (required before any patch lands)
 

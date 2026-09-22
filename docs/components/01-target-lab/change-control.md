@@ -3,6 +3,58 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0057 — `labctl.sh`: `down` exit-code fix + `_force_clean` pod-prune scoping (BUG-0029/BUG-0030) (2026-09-22)
+- Change: two bugfixes in `lab/labctl.sh`, found in a script review and approved
+  via `docs/change-requests/CR-LAB-0002-labctl-and-bookkeeping-hook-bugfixes.md`
+  (3/3 sign-off: two independent adversarial reviews plus author, both rounds'
+  required changes applied before landing):
+  1. `down`'s failure branch now retries `"${COMPOSE[@]}" down` after
+     `_force_clean keep-volume` and lets that retry's exit status propagate,
+     matching `up`/`reset`'s existing retry-then-propagate shape — previously
+     it always exited 0 once `_force_clean` ran, regardless of whether
+     teardown actually succeeded (`BUG-0029`).
+  2. `_force_clean`'s pod-cleanup step now uses a `pff-lab`-name-filtered
+     `podman pod rm -f` instead of the host-wide `podman pod prune -f`, so a
+     fuzzlab self-heal no longer removes other podman-managed projects'
+     stopped/empty pods on the same host (`BUG-0030`). Disclosed, accepted
+     behavior change: `pod rm -f` (unlike `prune`) will force-remove a
+     matched pod even if it still holds live containers — an intentional
+     strengthening for the wedged-stack case `_force_clean` exists for
+     (BUG-0013/BUG-0017), not an oversight.
+- Impact (other components / project): behavior-only; no interface, CLI flag,
+  or data-contract change. No script currently invokes `./labctl.sh down` on
+  an automated path (the two textual references in `scripts/greybox_e2e.sh`
+  and `scripts/h2_desync_e2e.sh` are printed human-facing recovery hints
+  inside `die`/`echo`, never executed — confirmed by grep of every caller
+  during CR review), so fix 1's present-day effect is limited to a human
+  operator running `down` interactively. Fix 2 benefits every automated
+  caller of `up`/`reset` (`scripts/greybox_e2e.sh`, `scripts/h2_desync_e2e.sh`,
+  `scripts/waf_evasion_e2e.sh`, `scripts/proxy_e2e.sh`) via the shared
+  `_force_clean` helper's narrower blast radius.
+- Risk (level; mitigation or accepted-risk justification): low. Both fixes
+  correct already-fallible code in a strictly stricter/safer direction.
+  Accepted residual risk: the `pff-lab`-name filter is substring/regex
+  matching, not exact — a hypothetical second project named e.g.
+  `pff-lab-ci` on the same host would also match (still narrower than the
+  prior fully host-wide prune). Full risk disclosure in
+  `docs/change-requests/CR-LAB-0002-*.md` §5.
+- Deliverables:
+  - [x] `down` retry-then-propagate fix — done
+  - [x] `_force_clean` pod-prune scoping fix — done
+  - [x] `docs/bugs/BUG-0029-*.md` + `PA-0031` — done
+  - [x] `docs/bugs/BUG-0030-*.md` + `PA-0032` — done
+  - [x] `ERROR_LOG.md` entries — done
+  - [x] `CHANGELOG.md` line — done
+- Effectiveness (assessed 2026-09-22): `bash -n lab/labctl.sh` passes; a
+  standalone `set -euo pipefail` harness confirmed the retry-then-propagate
+  exit-status behavior and the zero-result `mapfile` array-safety behavior
+  used by the pod-scoping fix. No existing automated test harness targets
+  `lab/labctl.sh` directly (a thin CLI wrapper over compose, exercised
+  manually per `docs/ON_HOST_RUNBOOK.md`); an on-host `up`/`down`/`reset`
+  cycle is the remaining verification step, per `docs/change-requests/
+  CR-LAB-0002-*.md` §6 (not yet run in this build environment — no
+  podman/docker available here).
+
 ### CC-LAB-0056 — `live_boot.py`: real on-host live-boot proof for the auth/G2/G4 real-page manifest groups (FR-LAB-54) (2026-09-22)
 - Change: extends `CC-LAB-0054`/`FR-LAB-52`'s `fuzzlab.labgen.conformance.live_boot`
   harness's proven coverage from 2 to 5 of the 6 `phase3_php_laravel_real_pages_*`/
