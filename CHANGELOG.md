@@ -14,6 +14,19 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Planning: revised `docs/VULN_CORPUS_EXPANSION_PLAN.md` via a 3-cycle
+  review→research→revise pass — added a commonality×exploitability scoring
+  rubric to merge Phase 1's two research angles into one ranked list, concrete
+  Phase 2 per-cell example counts/source-quality bar/license and secrets
+  handling (grounded in this project's own D12 no-secrets rule), a canonical
+  `manifest.yaml` metadata convention reconciling three previously-inconsistent
+  ideas of where per-example metadata lives, and a Phase 3 handoff format that
+  checks proposed `op`/`sink_family` names against `lab/safety_matrix.yaml`'s
+  actual current vocabulary before minting new ones. Note: the dispatched
+  agent lacked Agent/Task-tool access and did the cycle's research itself via
+  direct WebSearch rather than spawning separate sub-agents as instructed;
+  flagged to and accepted by the user as-is (see BUG-REPORT sent this session
+  on the broader gap this revealed in delegation verification).
 - Planning: added `docs/VULN_CORPUS_EXPANSION_PLAN.md`, a research plan for
   broadening the generated lab beyond SQLi/XSS — Phase 1 catalogs common web-app
   feature areas and cross-references which are disproportionately exploited in
