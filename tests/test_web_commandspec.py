@@ -104,7 +104,10 @@ def test_all_specs_build_and_are_json_serializable():
 @pytest.mark.parametrize("name,authorized,destructive,traffic", [
     ("auto", True, False, True),
     ("fuzz", True, False, True),
-    ("greybox-run", True, False, True),
+    # greybox-run gained its own --allow-destructive gate (CC-FUZZ-0019): its
+    # opt-in mutation-variant write-back goes through the same destructive gate
+    # as mutate-run, so the auto-derived commandspec now reports it too.
+    ("greybox-run", True, True, True),
     ("proxy", True, False, True),
     ("mutate-run", True, True, True),
     ("crawl", False, False, True),

@@ -1,6 +1,6 @@
 # Mutation Engine — Requirement Specification
 
-Component code: **MUT** · Status: `[built — operators/validator/XSS, filter model + learner, bandit/coverage search, destructive-gated variant write-back, and the live HttpFilter + fuzzlab mutate-run driver; live WAF evasion verified on-host]` (Phase 8) · Last updated: 2026-09-22 · see CC-MUT-0008
+Component code: **MUT** · Status: `[built — operators/validator/XSS, filter model + learner, bandit/coverage search, destructive-gated variant write-back (reachable from both fuzzlab mutate-run and the main greybox-run harness), and the live HttpFilter + fuzzlab mutate-run driver; live WAF evasion verified on-host]` (Phase 8) · Last updated: 2026-09-22 · see CC-MUT-0009
 
 Related: `ARCHITECTURE.md` #9; `DECISIONS_AND_ROADMAP.md` (D1, Phase 8);
 `./change-control.md`.
@@ -30,6 +30,11 @@ feedback and the scheduler.
 - **FR-MUT-5** Optionally expand the catalog with an offline, **gated** LLM step
   (default off; human-reviewed before entries are trusted).
 - **FR-MUT-6** Write new payload candidates back into the catalog/attempts.
+  Reachable from two callers as of `CC-MUT-0009`: the standalone `mutate-run`
+  CLI's live WAF-evasion search (`fuzzlab/mutation/run.py`, unchanged), and the
+  main grey-box harness's own attempt loop (`greybox/run.py::run_greybox`,
+  FUZZ component #7, FR-FUZZ-8, opt-in) — both go through the same
+  destructive-gated `catalog.record_variant` (PA-0003: one shared write path).
 - **FR-MUT-7** The semantics validator (`SemanticsValidator.preserves()`) must
   fail **closed**, not open, on any transform whose safety cannot be decided from
   the compared fragment alone — concretely, a mutation that introduces a SQL `--`
@@ -58,7 +63,9 @@ catalog/`attempt` path.
 ## 6. Dependencies (components)
 `core/`, indicator DB & catalogs, payload scheduler, oracle, grey-box
 instrumentation. (A lab WAF is a prerequisite decision for evaluating filter
-evasion, not a component dependency.)
+evasion, not a component dependency.) As of `CC-MUT-0009`, this component is
+also depended **on** by FUZZ (#7): `greybox/run.py` calls
+`default_operators`/`SemanticsValidator`/`catalog.record_variant` directly.
 
 ## 7. Acceptance criteria
 - Produces variants that reach code the static catalog did not (measured by

@@ -520,12 +520,19 @@ tracked in the requirements files, not here.
   seam, budget-bounded/seeded); `catalog.py` records variant provenance to
   `payload_variant` (migration 8) behind the **destructive gate** (NFR-MUT-safe);
   `llm.py::LlmExpander` is the gated, default-off, offline expansion scaffold.
+  Write-back is now reachable from **two** callers (`CC-MUT-0009`/`CC-FUZZ-0019`,
+  2026-09-22): the standalone `fuzzlab mutate-run` CLI's live WAF-evasion search, and
+  the main grey-box harness's own attempt loop (`greybox/run.py::run_greybox`,
+  opt-in `--mutation-variants`) — both call the same `catalog.record_variant`.
 - **Exit** `[on-host]`: against the enabled D16 WAF, variants bypass the filter where the
   base is blocked **and** reach new code (grey-box coverage) vs the static catalog.
 - **Depends on (components):** `core/`, indicator DB & catalogs, scheduler,
   oracle, grey-box instrumentation. (A lab WAF is a prerequisite decision, not a
   component dependency.)
-- **Writes:** new payload candidates back into the catalog/attempts.
+- **Depended on by:** the fuzzing harness (component #7) — `greybox/run.py` calls
+  this component's operators/validator/`catalog.record_variant` directly (opt-in).
+- **Writes:** new payload candidates back into the catalog/attempts, from either
+  `mutate-run` or `greybox-run`.
 
 ### 10. ML components `[built — classifier, ranker, active learner, anomaly detector; held-out exits on-host]` (Phases 5, 7, 10)
 - **Detection classifier** (A.1) `[built; held-out exit on-host]`: the `fuzzlab/ml/`

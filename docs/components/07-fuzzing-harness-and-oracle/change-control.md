@@ -3,6 +3,93 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0019 — Wire mutation-engine variants into `greybox-run`'s attempt path (Lane C1/M8-wiring) (2026-09-22)
+- Change: `docs/PHASE_8_PLAN.md`'s T8.5 ("emit accepted variants into the attempt
+  path") only reached the standalone `fuzzlab mutate-run` CLI
+  (`fuzzlab/mutation/cli.py`/`fuzzlab/mutation/run.py`) — confirmed before this
+  change: no `mutation`/`variant` references anywhere in `fuzzlab/greybox/run.py`
+  or `fuzzlab/greybox/greybox_cli.py`. `fuzzlab/greybox/run.py` now wires the
+  mutation engine into the **main harness's own** attempt loop:
+  - New `mutation_variant_probes()` (function boundary kept separate from the main
+    loop, per the build-plan's note that a later lane adds a `metric_series`
+    emitter to this same file): given the point's existing sqli/xss `ProbeSpec`s,
+    applies up to `max_variants` of the mutation engine's operators
+    (`fuzzlab/mutation/operators.py`, T8.1) per base payload and keeps only the
+    ones the semantics validator (`fuzzlab/mutation/semantics.py`, T8.1/
+    NFR-MUT-semantics) judges meaning-preserving. Skips the `url-encode` operator
+    here specifically, since the probe transport (`requests`' `params=`/`data=`)
+    would percent-encode an already-percent-encoded value a second time.
+  - `run_greybox(..., mutation_variants: bool = False, max_mutation_variants: int
+    = 2, allow_destructive: bool = False)`: when `mutation_variants` is set, each
+    point's ordered probe list is extended with that point's mutation variants,
+    which then go through the **exact same** send/screening/reward/coverage/
+    `record_attempt_signals` path as any other probe (one `attempt` row each,
+    tagged `mutation_variant: true` in `features_json`, `payload_family =
+    "mutation:<operator-id>"`).
+  - New `_record_accepted_variant()`: a mutation-derived probe that actually hit
+    (screening > 0) or reached new code (`new_lines > 0`) when probed live is
+    written back to `payload_variant` via the existing, destructive-gated
+    `fuzzlab.mutation.catalog.record_variant` (NFR-MUT-safe unchanged — same
+    gate, same default-off `allow_destructive`) — exactly the write-back T8.5
+    describes, now reachable from `greybox-run` too, not only `mutate-run`.
+  - New summary/`run_metrics` counters: `mutation_variants_probed`,
+    `mutation_variants_recorded` (`greybox_mutation_variants_probed`/
+    `_recorded`, only recorded when the flag is on).
+  - `greybox_cli.py`: new opt-in flags `--mutation-variants`, `--max-mutation-
+    variants` (default 2), `--allow-destructive` (mirrors `mutate-run`'s own
+    flag). The existing `--authorized` gate is unchanged and still required
+    before anything is sent — this lane does not touch or weaken it; the new
+    traffic is additional probes sent through the same already-gated sender, not
+    a new unauthenticated path.
+  - Default behavior is unchanged: `mutation_variants` defaults to `False`, so
+    `greybox-run` without the new flag sends exactly the same probes as before
+    (verified by a dedicated regression test).
+- Impact (other components / project): FUZZ (`greybox/run.py`,
+  `greybox_cli.py`) now has a direct, opt-in dependency on MUT
+  (`fuzzlab.mutation.catalog`/`operators`/`semantics`) at import time — no
+  circular import (MUT's own live-search path only imports `greybox.run` inside
+  a function body, for its `make_coverage_fn`). `payload_variant` rows can now
+  originate from a `greybox-run`, not only a `mutate-run`; existing readers of
+  that table (`catalog.list_variants`) are unaffected — same schema
+  (migration 8), no new columns. No change to the oracle's finding-writing path
+  or to M10 (`greybox/confirm.py`) — mutation variants feed the attempt path
+  exactly like any other probe, they are not a new confirmation mechanism.
+- Risk (level; mitigation): low — additive and off by default. The new code path
+  only runs when `--mutation-variants` (or `mutation_variants=True`) is passed;
+  every existing call site and test keeps its old behavior (`ProbeSpec` gained
+  two trailing-default fields, `base`/`operators`, so old positional/keyword
+  construction is unaffected). Extra live traffic when opted in is bounded by
+  `max_mutation_variants` per attack probe (NFR-MUT-bounded) and still requires
+  `--authorized`. Mitigated by dedicated regression tests (below) plus the full
+  suite green.
+- Deliverables:
+  - [x] `mutation_variant_probes()` in `fuzzlab/greybox/run.py` — done.
+  - [x] `run_greybox(mutation_variants=..., max_mutation_variants=...,
+    allow_destructive=...)` wiring + `_record_accepted_variant()` write-back —
+    done.
+  - [x] `greybox_cli.py` `--mutation-variants`/`--max-mutation-variants`/
+    `--allow-destructive` flags, passed through; summary print updated — done.
+  - [x] Tests in `tests/test_greybox_live.py`:
+    `test_mutation_variant_probes_generates_preserving_variants`,
+    `test_mutation_variant_probes_none_for_unclassed_kind`,
+    `test_run_greybox_consumes_mutation_variants_into_attempt_path` (asserts
+    extra `attempt` rows + `payload_variant` write-back with correct
+    provenance), `test_run_greybox_mutation_variants_off_by_default`
+    (backward-compat regression) — done.
+  - [x] CHANGELOG.md line — done.
+  - [x] `docs/components/07-fuzzing-harness-and-oracle/requirements.md` updated
+    (new FR-FUZZ-8) — done.
+  - [ ] T8.7's on-host exit criterion (WAF-enabled live verification) — out of
+    scope for this lane per the build plan; left for a later on-host pass.
+- Effectiveness (assessed 2026-09-22): effective offline — confirmed via grep
+  that `fuzzlab/greybox/run.py`/`greybox_cli.py` had zero mutation/variant
+  references before this change; after, `run_greybox` sends mutation-engine
+  variants through the attempt path and records the accepted ones to
+  `payload_variant` when opted in, proven by the new tests
+  (`tests/test_greybox_live.py`), with the no-flag default path unchanged
+  (regression test). On-host WAF-evasion verification (T8.7) is a separate,
+  later exit check, not this lane's scope.
+
 ### CC-FUZZ-0018 — Expose `build_parser()` for the command-spec registry (2026-09-21)
 - Change: the fuzz/oracle activities factor their argparse setup into `build_parser()`, with
   `main()` delegating — `fuzzlab/tools/blind_sqli_fuzzer.py` (`parse_args()` delegates;

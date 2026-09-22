@@ -10,7 +10,7 @@ from fuzzlab.greybox.coverage import FileCoverageSource, sanitize_cid
 from fuzzlab.greybox.dbfault import FileDbFaultSource
 from fuzzlab.greybox.reset import LabControlError, ScriptLabControl
 from fuzzlab.greybox.run import (GreyboxPoint, ProbeSpec, RequestsCorrelatingSender,
-                                 run_greybox)
+                                 mutation_variant_probes, run_greybox)
 from fuzzlab.oracle.probe import Probe
 
 
@@ -215,6 +215,108 @@ def test_run_greybox_resets_between_stateful_points(tmp_path):
     # snapshot once at start; restore once after the POST point (GET point does not reset).
     assert ("snapshot", "baseline") in lc.calls
     assert lc.reset_count == 1
+
+
+# --- T8.5 wiring: mutation-engine variants in the main attempt path ----------
+def test_mutation_variant_probes_generates_preserving_variants():
+    base = (ProbeSpec("baseline", "1", "baseline"),
+            ProbeSpec("sqli-error", "1' OR 1=1 -- -", "sqli"))
+    variants = mutation_variant_probes(base, max_variants=2)
+    # The baseline probe never yields variants; only the sqli attack does.
+    assert variants and all(v.kind == "sqli" for v in variants)
+    assert all(v.base == "1' OR 1=1 -- -" for v in variants)
+    assert all(v.family.startswith("mutation:") for v in variants)
+    # Bounded to max_variants.
+    assert len(variants) <= 2
+    # url-encode is skipped (double-encoding through the probe transport).
+    assert all(v.operators != ("url-encode",) for v in variants)
+
+
+def test_mutation_variant_probes_none_for_unclassed_kind():
+    base = (ProbeSpec("custom", "whatever", "other"),)
+    assert mutation_variant_probes(base) == []
+
+
+def test_run_greybox_consumes_mutation_variants_into_attempt_path(tmp_path):
+    """The main harness's attempt loop (not just `mutate-run`) now sends mutation-engine
+    variants and records the accepted ones to `payload_variant` (T8.5 wiring, C1)."""
+    app = "/var/www/html/search.php"
+    base_payload = "1' OR 1=1 -- -"
+    probes = (ProbeSpec("baseline", "1", "baseline"),
+              ProbeSpec("sqli-error", base_payload, "sqli"))
+    point = GreyboxPoint(url="http://h/search.php", param="q", method="GET",
+                         location="query", vuln_class="sqli")
+
+    # Figure out how many variants will actually be generated for this base payload,
+    # so the fake sender's script matches 1:1 (baseline, base attack, then N variants).
+    n_variants = len(mutation_variant_probes(
+        [p for p in probes if p.kind != "baseline"], max_variants=2))
+    assert n_variants >= 1        # sanity: this base payload does mutate
+
+    script = [
+        (Probe(200, "ok"), {app: [10, 11]}, False),                          # baseline
+        (Probe(500, "You have an error in your SQL syntax"),
+         {app: [10, 11, 40]}, True),                                         # base sqli
+    ]
+    # Every mutation variant also "hits" (error status + new coverage), so all get
+    # recorded as accepted variants.
+    for i in range(n_variants):
+        script.append((Probe(500, "You have an error in your SQL syntax"),
+                       {app: [10, 11, 40, 50 + i]}, True))
+    sender = FakeSender(script)
+    cov, fault = DictCoverage(sender), DictFault(sender)
+
+    with Store(tmp_path / "u.db") as store:
+        run_id = store.start_run("greybox", "h")
+        summary = run_greybox(base_url="http://h", store=store, run_id=run_id,
+                              points=[point], sender=sender, coverage_source=cov,
+                              dbfault_source=fault, probes=probes,
+                              mutation_variants=True, max_mutation_variants=2)
+
+        variant_rows = store.conn.execute(
+            "SELECT base_payload, variant, operators, vuln_class, coverage_gain "
+            "FROM payload_variant WHERE run_id=?", (run_id,)).fetchall()
+        attempt_families = [r["payload_family"] for r in store.conn.execute(
+            "SELECT payload_family FROM attempt WHERE run_id=? ORDER BY id",
+            (run_id,)).fetchall()]
+
+    # attempts: baseline + base sqli + the mutation variants, all through the same loop.
+    assert summary["attempts"] == 2 + n_variants
+    assert summary["mutation_variants_probed"] == n_variants
+    assert summary["mutation_variants_recorded"] == n_variants
+    assert sum(1 for f in attempt_families if f.startswith("mutation:")) == n_variants
+    # Written back to payload_variant with correct provenance (T8.5's write-back path).
+    assert len(variant_rows) == n_variants
+    for row in variant_rows:
+        assert row["base_payload"] == base_payload
+        assert row["vuln_class"] == "sql-injection"
+        assert row["coverage_gain"] and row["coverage_gain"] > 0
+        assert json.loads(row["operators"])
+
+
+def test_run_greybox_mutation_variants_off_by_default(tmp_path):
+    """Backward-compatible default: no mutation traffic unless explicitly opted in."""
+    app = "/var/www/html/a.php"
+    probes = (ProbeSpec("baseline", "1", "baseline"),
+              ProbeSpec("sqli-error", "'", "sqli"))
+    sender = FakeSender([
+        (Probe(200, "ok"), {app: [1]}, False),
+        (Probe(500, "SQL syntax"), {app: [1, 2]}, True),
+    ])
+    cov, fault = DictCoverage(sender), DictFault(sender)
+    point = GreyboxPoint("http://h/a.php", "id", "GET", "query", "sqli")
+    with Store(tmp_path / "u.db") as store:
+        run_id = store.start_run("greybox", "h")
+        summary = run_greybox(base_url="http://h", store=store, run_id=run_id,
+                              points=[point], sender=sender, coverage_source=cov,
+                              dbfault_source=fault, probes=probes)
+        n_variants = store.conn.execute(
+            "SELECT COUNT(*) AS n FROM payload_variant WHERE run_id=?",
+            (run_id,)).fetchone()["n"]
+    assert summary["attempts"] == 2                # no extra mutation probes sent
+    assert summary["mutation_variants_probed"] == 0
+    assert summary["mutation_variants_recorded"] == 0
+    assert n_variants == 0
 
 
 def test_requests_correlating_sender_sets_header(monkeypatch):
