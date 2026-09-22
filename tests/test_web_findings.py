@@ -8,12 +8,13 @@ import json
 import pytest
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
 from fuzzlab.core.store import Store  # noqa: E402
 from fuzzlab.web import findingsview, savedviews  # noqa: E402
 from fuzzlab.web.app import create_app  # noqa: E402
+
+from ._web_client import web_client  # noqa: E402
 
 
 def _seed(path):
@@ -36,7 +37,7 @@ def _seed(path):
 def _client(path, target="http://127.0.0.1:8080"):
     cfg = load_config(overrides={"store_path": str(path), "target_base_url": target},
                       environ={})
-    return TestClient(create_app(cfg))
+    return web_client(create_app(cfg))
 
 
 # --- pure view-layer functions ----------------------------------------------
