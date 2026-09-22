@@ -55,6 +55,47 @@ Newest first.
   ML tab now renders through this same chart wrapper with no second implementation to
   maintain.
 
+### CC-UI-0030 — Lane U4: read-only advisory ML tab (2026-09-22)
+- Change: built out `/ml` (a U0 placeholder) into a read-only, advisory dashboard over
+  classifier/ranker/conformal/anomaly/active-learning/bandit/mutation state already
+  persisted in the store (`fuzzlab/web/mlview.py`: pure aggregation over `run_metrics`,
+  `metric_series`, `model`, `candidate`, `bandit_posteriors`, `payload_variant` — never
+  a training run, never a store write, never anything that touches the fuzzing loop). A
+  family with no persisted data reports itself unavailable rather than fabricating a
+  value (verified per family: anomaly has only a flagged-count, no per-point ECOD score
+  to histogram; active learning persists nothing at all, so its queue reuses the
+  ranker's own `rank_uncertainty`; mutation's `payload_variant` only ever records an
+  *accepted* variant, so there is no killed/survived split to show; logistic's fitted
+  coefficients are never persisted, so no diverging-bar weight chart). Charts render
+  through the shared `static/js/charts.js` wrapper (U5, `CC-UI-0031`) — this lane
+  originally vendored uPlot and built its own near-identical wrapper independently and
+  concurrently with U5 (neither could see the other mid-build); reconciled at
+  integration onto U5's version, generalized there (per-series `label`/`color`/`width`
+  overrides + an opt-in `kind: "bars"` path for the histogram panels) rather than
+  keeping two implementations. `ml.js`'s three chart-mount helpers now build data in
+  the shared wrapper's `{mode, series}` shape; each sets `role="img"`/aria-label on its
+  own chart element (some of this tab's labels are runtime-formatted, e.g. conformal's
+  `t_lo`/`t_hi`, so they can't be set server-side the way Diagnostics' static labels
+  are).
+- Impact (other components / project): read-only consumer of CORE's `metric_series`
+  (B0) and every ML/oracle/scheduler/mutation component's existing `run_metrics`/store
+  writes — no new write path anywhere. Establishes `static/js/charts.js` as the one
+  chart implementation for both Diagnostics and this tab (no second wrapper to
+  maintain).
+- Risk (level; mitigation): low (advisory, read-only; the one behavior risk was the
+  charts.js reconciliation silently regressing a chart) — mitigated by
+  `tests/test_web_ml.py` (empty-store "every family unavailable" case, a seeded-store
+  case asserting every family's real read-only aggregation, and a route/no-JS render
+  check), a `tests/test_web_ml_browser.py` real-browser smoke, and the unchanged full
+  suite after the charts.js reconciliation.
+- Deliverables:
+  - [x] `mlview.py` read-only aggregation over every ML family — done.
+  - [x] `/ml` route built out from the U0 placeholder — done.
+  - [x] Charts reconciled onto U5's shared `charts.js` (no duplicate wrapper) — done.
+- Effectiveness (assessed 2026-09-22): effective — every family with real persisted
+  data renders a real chart/table, every family without one says so explicitly instead
+  of fabricating a value, and the tab shares one chart implementation with Diagnostics.
+
 ### CC-UI-0029 — Lane U3: Proxy workbench rebuild on shared message-editor + splitter + sub-nav (2026-09-22)
 - Change: replaced the Proxy section's single long page with an in-page sub-nav
   (History/Intercept/Repeater/Scope·Match-Replace, APG Tabs pattern) and a new shared ES

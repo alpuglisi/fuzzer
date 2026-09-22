@@ -163,6 +163,14 @@ bugs — the research-platform diagnostics of decision D2.
   toggle. The one documented newline transform (`\n`→`\r\n` on send/forward) stays in
   `toWire` (`js/http.js`), applied only at the actual network call site — never inside
   the editor component. *(Realized: Wave-1 lane U3, CC-UI-0029.)*
+- **FR-UI-15** The ML tab (`/ml`) renders a read-only, advisory summary of classifier,
+  ranker, conformal-triage, anomaly, active-learning, bandit, and mutation-search state
+  already persisted in the store (`run_metrics`, `metric_series`, `model`, `candidate`,
+  `bandit_posteriors`, `payload_variant`). It never trains a model, writes to the
+  store, or influences the fuzzing loop, and a family with no persisted data reports
+  itself unavailable rather than fabricating a value. Charts render through the same
+  shared `static/js/charts.js` wrapper Diagnostics uses (FR-UI-16) — not a second
+  hand-rolled implementation. *(Realized: Wave-1 lane U4, CC-UI-0030.)*
 - **FR-UI-16** The Diagnostics tab renders one chart per populated `metric_series`
   `(source, key)`, downsampled server-side before transmission (LTTB for a plain trend
   line; a min/max envelope for a CI-band-style series, e.g. bandit posterior/regret) so

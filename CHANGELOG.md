@@ -14,6 +14,12 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- UI: built out the ML tab (`/ml`) into a read-only, advisory dashboard over
+  classifier/ranker/conformal/anomaly/active-learning/bandit/mutation state already in
+  the store; every unavailable family says so rather than fabricating a value. Its
+  charts were reconciled onto U5's shared `charts.js` wrapper instead of the
+  near-duplicate this lane had built independently and concurrently (`CC-UI-0030`,
+  `FR-UI-15`).
 - UI: rebuilt the Diagnostics tab into a TensorBoard-like `metric_series` chart viewer
   (server-side LTTB/envelope downsampling, uPlot 1.6.32 vendored) plus a read-only,
   redacting store explorer; the shared `charts.js` wrapper was generalized so the ML
