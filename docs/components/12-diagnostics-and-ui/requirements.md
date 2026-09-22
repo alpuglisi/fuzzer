@@ -113,6 +113,15 @@ bugs — the research-platform diagnostics of decision D2.
   existing `authorized` no-auto-run gate (FR-UI-5 et al.), which stays sourced only from
   server-side `Config`. *(Realized: Wave-0 lane U6, CC-UI-0026; prerequisite: Starlette
   `>=1.0.1,<2`, CVE-2026-48710 "BadHost".)*
+- **FR-UI-11** Overview dashboard (`GET /`, the landing route): a 5-tile KPI row
+  (Findings w/ severity split, Runs w/ 7-day count, Last run, Detection quality [F1/MCC,
+  em-dash if unscored], Efficiency [requests-per-finding, em-dash if unscored]), each
+  tile linking to an existing route; Panel A recent-runs table (≤10, newest first, via
+  the shared `DataTable`, FR-UI-12); Panel B a findings-by-severity bar; Panel C quick
+  actions (Launch auto, Open proxy, Model registry). Served from one aggregate read per
+  request; writes no result tables. Zero runs → a single onboarding card, never a
+  zero-grid. The Launcher (FR-UI-6) lives at `/launch`, its own route, not `/`.
+  *(Realized: Wave-1 lane U1, CC-UI-0027.)*
 - **FR-UI-12** Findings workbench (`/findings`, `/findings/{id}`): a collapsible left facet
   sidebar (multi-select, live counts; OR within a group, AND across groups — vuln class,
   severity, method, confidence/mechanism, endpoint), a debounced quick-filter over

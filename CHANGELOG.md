@@ -19,6 +19,9 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   to `fuzzlab/web/app.py`, guarding every current and future POST/PUT/DELETE route; pinned
   `starlette>=1.0.1,<2` (CVE-2026-48710 "BadHost"), a hard prerequisite since the hardening
   keys off Host/path validation (`CC-UI-0026`, `FR-UI-10`).
+- UI: made the Overview dashboard the landing route (`GET /`) — 5-tile KPI row,
+  recent-runs panel (via the shared DataTable), findings-by-severity bar, quick actions;
+  the Launcher moved to `/launch` (`CC-UI-0027`, `FR-UI-11`).
 - UI/CORE: added the Findings workbench (`/findings`, `/findings/{id}`) — faceted
   sidebar, saved views (new `saved_views` table, migration 12), and the shared
   `js/datatable.js` module U1/U5 also reuse — plus a Post/Redirect/Get "send to

@@ -48,6 +48,45 @@ Newest first.
   regressed, and the repeater's unrestricted-destination finding is now on record for a
   deliberate follow-up decision instead of silently unnoticed.
 
+### CC-UI-0027 — Lane U1: Overview dashboard as the landing route (2026-09-22)
+- Change: `GET /` now renders the Overview dashboard (new `_overview_context` builder in
+  `app.py`, `templates/sections/overview.html`, `static/css/overview.css`,
+  `static/js/overview.js`) — a 5-tile KPI row (Findings w/ severity split, Runs w/ 7-day
+  count, Last run, Detection quality [F1/MCC, em-dash if unscored], Efficiency
+  [requests-per-finding, em-dash if unscored]), each tile linking to an existing route;
+  Panel A recent-runs table (≤10, newest first); Panel B a findings-by-severity bar (the
+  uPlot sparkline is deferred — no chart infra existed yet when this lane branched);
+  Panel C quick actions (Launch auto → `/launch`, Open proxy → `/proxy`, Model registry →
+  `/ml`). Served from one aggregate read per request; writes no result tables. Zero runs
+  → a single onboarding card, never a zero-grid. **Repointed the Launcher from `/` to
+  `/launch`** (its own `NAV` entry) — U0 had wired `/` to the Launcher, but the plan's R-10
+  spec and this lane's brief are explicit that `/` is the Overview landing route; this is
+  a real, narrow behavior change (NAV + two route handlers only). Panel A hydrates via the
+  shared `js/datatable.js` (U2, `CC-UI-0028`) once that lane landed — this lane originally
+  built its own minimal DataTable ahead of U2 and adopted U2's fuller shared module at
+  integration instead of keeping a duplicate implementation.
+- Impact (other components / project): the one behavior change (Launcher's route) is
+  covered by updated tests (`test_web_frontend.py`, `test_web_launcher.py`,
+  `test_web_launcher_browser.py`, plus the `NAV`-parametrized nav/route tests that picked
+  it up automatically). No `severity` column exists on `finding` — `finding.confidence` is
+  actually the oracle's confirmation *mechanism*, not a risk level — so the KPI/Panel B
+  severity split is a UI-only display heuristic keyed on `finding.vuln_class`
+  (`_SEVERITY_BY_VULN_CLASS` in `app.py`), never persisted; superseding it with a real
+  `severity` column is a candidate follow-up once U2's findings facets (which also assume
+  a severity field) motivate one. No "run status" (running/passed/failed) is persisted
+  either, so the "Last run" tile shows the finding count instead of a pass/fail badge.
+- Risk (level; mitigation): low-medium (the `/` repoint is the one real behavior change) —
+  mitigated by `tests/test_web_overview.py` (empty/unscored/scored/cap-at-10 cases) and
+  the unchanged full suite.
+- Deliverables:
+  - [x] KPI row (5 tiles) + Panel A/B/C — done.
+  - [x] Aggregate single-read context builder — done.
+  - [x] Launcher repointed to `/launch` — done.
+  - [x] uPlot sparkline — deferred (no chart infra at branch time; not blocking).
+- Effectiveness (assessed 2026-09-22): effective — empty/scored/unscored states render
+  correctly, the Launcher move didn't regress any existing launcher test, and Panel A now
+  shares the same `DataTable` module U2/U5 use.
+
 ### CC-UI-0028 — Lane U2: Findings workbench (facets, saved views, shared DataTable) (2026-09-22)
 - Change: new `/findings` + `/findings/{id}` routes (`fuzzlab/web/findingsview.py`) render
   a faceted workbench over `finding`/`attempt`: a collapsible left facet sidebar
