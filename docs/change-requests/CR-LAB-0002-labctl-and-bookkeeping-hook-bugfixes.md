@@ -69,9 +69,20 @@ down)
 If `_force_clean` actually cleared a wedged stack, the retried `down` now
 succeeds cleanly and exits 0 for a real reason. If the failure was unrelated
 (no podman, real daemon error), the retry fails again for the same reason and
-its exit status propagates under `set -e`, aborting `labctl.sh down` and any
-caller chain (`scripts/greybox_e2e.sh`'s `down && build && up`) instead of
-silently continuing against a stack that was never torn down.
+its exit status propagates under `set -e`, aborting `labctl.sh down` instead
+of silently reporting success on a stack that was never torn down.
+
+**Correction (post-review):** an earlier draft of this section additionally
+claimed `scripts/greybox_e2e.sh`'s `down && podman-compose build --no-cache
+web && ./labctl.sh up` chain as a live automated caller that would benefit
+from this fix. That is wrong — checked directly: that chain is a string
+literal inside `greybox_e2e.sh`'s `die "..."` call (a human-facing recovery
+hint printed on a pcov-not-loaded failure, at `scripts/greybox_e2e.sh:81`),
+never executed by the script. `scripts/h2_desync_e2e.sh:94`'s `./labctl.sh
+down` reference is the same pattern — an `echo`ed manual follow-up, not a
+live call. A full grep of the caller scripts found **no script anywhere that
+actually invokes `./labctl.sh down` in an automatically-executed path** — see
+§4/§5 for the corrected impact/risk framing.
 
 ### 3.2 `lab/labctl.sh:55` — `_force_clean`'s `podman pod prune -f` is host-wide, not project-scoped
 
@@ -178,12 +189,21 @@ no existing match narrowed.)
 ## 4. Impact (other components / project)
 
 - **LAB (`lab/labctl.sh`):** behavior-only fix to an operational script; no
-  interface, CLI flag, or data contract changes. `scripts/greybox_e2e.sh` and
-  any other caller of `labctl.sh down`/`up`/`reset` gets stricter (correct)
-  failure propagation from `down`, and a narrower blast radius from
-  `_force_clean`. No other component depends on `labctl.sh`'s exit code today
-  besides that one `&&`-chained call in `scripts/greybox_e2e.sh`, which this
-  fix makes *more* correct (it currently can proceed past a botched `down`).
+  interface, CLI flag, or data contract changes. **Corrected (post-review):**
+  grepping every script in `scripts/` and `lab/`, no script actually invokes
+  `./labctl.sh down` on an automatically-executed path today — the two
+  references to it (`scripts/greybox_e2e.sh:81`, `scripts/h2_desync_e2e.sh:94`)
+  are both human-facing recovery hints printed inside a `die`/`echo`, never
+  executed. So `down`'s exit code currently has **no live automated
+  consumer**; this fix's only present-day effect is that a human who copies
+  that printed hint command now gets an honest failure/success signal instead
+  of a hardcoded success. `_force_clean`'s narrower blast radius (3.2) is
+  shared by `up`/`reset`, which *are* invoked automatically by
+  `scripts/greybox_e2e.sh`, `scripts/h2_desync_e2e.sh`,
+  `scripts/waf_evasion_e2e.sh`, and `scripts/proxy_e2e.sh` — those callers are
+  unaffected in behavior (3.2 only narrows what gets pruned, it doesn't change
+  `up`/`reset`'s own exit-code handling), but do share the benefit of the
+  fixed blast radius on every self-heal they trigger.
 - **Project tooling (the Stop hook):** purely a detection-recall improvement
   for a mechanical bookkeeping check; it cannot make the hook block something
   it doesn't already block today (§3.3/§3.4 only add cases the hook now
@@ -200,11 +220,12 @@ no existing match narrowed.)
   already-fallible code (fixing a swallowed-error / unscoped-blast-radius /
   under-detection bug can only make behavior stricter/safer, never looser).
 - **Accepted risk (3.1):** `down` can now propagate a real failure it used to
-  hide, which is the intended, safer behavior — but it is a **behavior
-  change** for any script that currently relies on `labctl.sh down` always
-  exiting 0. Checked: only `scripts/greybox_e2e.sh` chains on it
-  (`&&`-sequenced), and failing loudly there instead of silently continuing
-  into a rebuild is the correct behavior, not a regression.
+  hide, which is the intended, safer behavior. **Corrected (post-review):** no
+  script currently invokes `./labctl.sh down` on a live, automatically-executed
+  path (see §4) — so there is, today, no automated caller whose behavior this
+  changes at all; the risk is lower than originally stated, limited to a human
+  operator running `down` interactively now seeing a real failure instead of a
+  fabricated success, which is strictly the intended fix, not a regression.
 - **Accepted risk (3.2):** the `pff-lab`-name filter is a best-effort scope,
   not a guarantee (see the residual-risk note in §3.2) — accepted because the
   failure mode if the filter ever misses is "no worse than not cleaning up",
@@ -272,15 +293,35 @@ agents scrutinizing the diagnosis and the proposed fixes (not rubber-stamping
 them), plus this author's own sign-off — 3/3 required to proceed. Findings and
 disposition recorded below as they come in.
 
-### Reviewer 1
-*(pending)*
+### Reviewer 1 (independent agent, round A)
+
+Verdict: **APPROVE WITH CHANGES.** Independently re-verified all four
+diagnoses and fixes against current source (confirmed `bash -n` clean on
+both files; confirmed the `mapfile`/`set -u`/`set -e` interaction in 3.2 is
+safe on a zero-result filter; confirmed the regex change in 3.4 only adds
+alternation branches, narrowing nothing; confirmed the CC/BUG next-ID claims
+against the actual logs). One required correction: §3.1/§4/§5 wrongly cited
+`scripts/greybox_e2e.sh`'s `down && build && up` and
+`scripts/h2_desync_e2e.sh`'s `down` reference as live automated callers of
+`labctl.sh down` — both are in fact human-facing hint strings inside
+`die`/`echo`, never executed. No other instances of any of the four bug
+classes found elsewhere in the repo. All four fixes otherwise correct,
+complete, and safe to apply as written.
 
 ### Reviewer 2
 *(pending)*
 
 ### Author disposition
-*(pending — will state, for each reviewer concern raised: accepted-and-revised,
-or why not, before proceeding)*
+
+**Reviewer 1's required correction: accepted and applied.** Verified
+directly (`scripts/greybox_e2e.sh:80-82`, `scripts/h2_desync_e2e.sh:94`) —
+both are string literals inside `die "..."`/`echo`, not executed. §3.1, §4,
+and §5 above have been rewritten to state accurately that no script
+currently invokes `./labctl.sh down` on an automated path, and that 3.1's
+real-world effect today is limited to a human running it interactively. This
+makes 3.1's risk *lower* than originally assessed, not higher — no change to
+the proposed fix itself, only to the impact/risk narrative. Remaining verdict
+pending Reviewer 2.
 
 ## On approval
 
