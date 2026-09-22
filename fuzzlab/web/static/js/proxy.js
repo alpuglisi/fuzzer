@@ -1,261 +1,30 @@
-// fuzzlab control panel — client shell.
-// Progressive enhancement: with JS off, every panel renders (nothing is hidden);
-// with JS on, the tab nav shows one panel at a time.
+// Proxy section (U0/CC-UI-0025): History (read-only) + Intercept + Repeater +
+// Scope/Match-Replace. Flow url/host/head come from recorded traffic (untrusted),
+// so rows are built with DOM APIs and textContent — never string-interpolated
+// HTML. The "send to Repeater" pivot is a real <form method="post"> to
+// /proxy/repeater/from-flow (PRG + 303, R-07): this module only fills the hidden
+// flow_id input before the browser submits it — no fetch, no seeded bytes in a URL.
+import { postJSON, delJSON, toWire } from "/static/js/common.js";
 
-const PANELS = () => Array.from(document.querySelectorAll(".panel"));
-const TABS = () => Array.from(document.querySelectorAll("nav.tabs a"));
-
-function activate(name) {
-  let matched = false;
-  for (const panel of PANELS()) {
-    const on = panel.id === `tab-${name}`;
-    panel.classList.toggle("hidden", !on);
-    matched = matched || on;
-  }
-  for (const tab of TABS()) {
-    tab.classList.toggle("active", tab.dataset.tab === name);
-  }
-  return matched;
-}
-
-function currentTab() {
-  const hash = (location.hash || "").replace(/^#/, "");
-  return hash || "launcher";
-}
-
-function initTabs() {
-  const tabs = TABS();
-  // The sidebar nav is present on every page (base.html), but only the index has the
-  // .panel sections it switches. On a run/detail page there is nothing to activate.
-  if (tabs.length === 0 || PANELS().length === 0) return;
-  if (!activate(currentTab())) activate("launcher");
-  window.addEventListener("hashchange", () => {
-    if (!activate(currentTab())) activate("launcher");
-  });
-}
-
-// --- app shell: theme / density / sidebar persistence + proxy status chip ---
-// All chrome; it touches no invariant. Preferences persist in localStorage (wrapped
-// in try/catch: a private window or blocked storage must never break the page). Theme
-// and density live on <html> so tokens.css resolves them; the no-FOUC <head> script
-// applies them before first paint, and this only handles clicks afterwards.
-function initShell() {
-  const root = document.documentElement;
-  const store = {
-    get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
-    set(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* ignore */ } },
-    del(k) { try { localStorage.removeItem(k); } catch (_) { /* ignore */ } },
-  };
-
-  // theme: system (no attr) → light → dark → system
-  const theme = document.getElementById("theme-toggle");
-  if (theme) theme.addEventListener("click", () => {
-    const cur = root.getAttribute("data-theme");
-    const next = cur === "light" ? "dark" : cur === "dark" ? null : "light";
-    if (next) { root.setAttribute("data-theme", next); store.set("fl-theme", next); }
-    else { root.removeAttribute("data-theme"); store.del("fl-theme"); }
-  });
-
-  // density: comfortable (no attr) ↔ compact
-  const density = document.getElementById("density-toggle");
-  if (density) density.addEventListener("click", () => {
-    if (root.getAttribute("data-density") === "compact") {
-      root.removeAttribute("data-density"); store.del("fl-density");
-    } else {
-      root.setAttribute("data-density", "compact"); store.set("fl-density", "compact");
-    }
-  });
-
-  // sidebar collapse
-  const collapse = document.getElementById("sidebar-toggle");
-  if (collapse) collapse.addEventListener("click", () => {
-    if (root.getAttribute("data-collapsed") === "1") {
-      root.removeAttribute("data-collapsed"); store.del("fl-collapsed");
-    } else {
-      root.setAttribute("data-collapsed", "1"); store.set("fl-collapsed", "1");
-    }
-  });
-
-  // proxy status chip (topbar): a compact mirror of /api/proxy/status
-  const chip = document.getElementById("proxy-chip");
-  if (chip) fetch("/api/proxy/status").then((r) => r.json()).then((s) => {
-    const led = chip.querySelector(".led");
-    let label = "proxy off", cls = "led off";
-    if (!s.configured) { label = "proxy: history only"; cls = "led off"; }
-    else if (s.running) {
-      label = `proxy ${s.host}:${s.port}` + (s.intercept ? " · intercept" : "");
-      cls = "led on";
-    } else { label = "proxy: stopped"; cls = "led warn"; }
-    chip.textContent = "";
-    if (led) { led.className = cls; chip.appendChild(led); }
-    chip.appendChild(document.createTextNode(" " + label));
-  }).catch(() => {});
-}
-
-// Minimal Server-Sent Events helper for later phases (proxy events).
-// Returns the EventSource so callers can close() it; onMessage gets parsed JSON
-// when possible, else the raw string.
-export function subscribe(url, onMessage, onError) {
-  const es = new EventSource(url);
-  es.onmessage = (ev) => {
-    let data = ev.data;
-    try { data = JSON.parse(ev.data); } catch (_) { /* keep raw */ }
-    onMessage(data, ev);
-  };
-  if (onError) es.onerror = onError;
-  return es;
-}
-
-// A <textarea> normalizes newlines to LF, but HTTP framing needs CRLF. Restore CRLF
-// before sending an edited raw request/response (the API itself stays byte-exact — for
-// deliberate LF-only / malformed framing use the CLI or API directly).
-function toWire(s) {
-  return s.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n");
-}
-
-async function postJSON(url, body) {
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  let data = {};
-  try { data = await r.json(); } catch (_) { /* empty */ }
-  return { status: r.status, data };
-}
-
-async function delJSON(url) {
-  const r = await fetch(url, { method: "DELETE" });
-  let data = {};
-  try { data = await r.json(); } catch (_) { /* empty */ }
-  return { status: r.status, data };
-}
-
-// Read a launch form into a {dest: value} map the /api/launch* endpoints expect.
-function collectValues(form) {
-  const values = {};
-  for (const el of form.querySelectorAll("[data-dest]")) {
-    const dest = el.dataset.dest;
-    if (el.dataset.type === "bool") {
-      if (el.checked) values[dest] = true;
-    } else if (el.dataset.multiple === "true") {
-      const lines = el.value.split("\n").map((s) => s.trim()).filter(Boolean);
-      if (lines.length) values[dest] = lines;
-    } else if (el.value !== "" && el.value != null) {
-      values[dest] =
-        el.dataset.type === "int" ? parseInt(el.value, 10)
-        : el.dataset.type === "float" ? parseFloat(el.value)
-        : el.value;
-    }
-  }
-  // category picker (D14): checked boxes → a comma-joined --categories value
-  for (const group of form.querySelectorAll("[data-catgroup]")) {
-    const checked = Array.from(group.querySelectorAll("input:checked")).map((i) => i.value);
-    if (checked.length) values[group.dataset.catgroup] = checked.join(",");
-  }
-  return values;
-}
-
-// --- Launch view: master (activity picker) → detail (one form shown) ---
-// Every activity's detail renders server-side; with JS on we show one at a time and let the
-// left list switch between them (no-JS shows all — same progressive-enhancement rule as tabs).
-function initLaunchNav() {
-  const acts = Array.from(document.querySelectorAll(".actlist .act"));
-  const details = Array.from(document.querySelectorAll(".lform-detail"));
-  if (!acts.length || !details.length) return;
-
-  function select(name) {
-    let matched = false;
-    for (const d of details) {
-      const on = d.dataset.for === name;
-      d.classList.toggle("hidden", !on);
-      matched = matched || on;
-    }
-    for (const a of acts) a.classList.toggle("sel", a.dataset.for === name);
-    return matched;
-  }
-
-  for (const a of acts) {
-    a.addEventListener("click", (e) => { e.preventDefault(); select(a.dataset.for); });
-  }
-  // Default to `auto` when present (the full pipeline), else the first activity.
-  const prefer = acts.find((a) => a.dataset.for === "auto") || acts[0];
-  select(prefer.dataset.for);
-}
-
-function initLaunchForms() {
-  for (const form of document.querySelectorAll("form.launch-form")) {
-    const command = form.dataset.command;
-    const preview = form.querySelector(".launch-preview");
-    const output = form.querySelector(".launch-output");
-    const runBtn = form.querySelector('[data-action="run"]');
-    const stopBtn = form.querySelector('[data-action="stop"]');
-    let es = null, token = null;
-
-    form.querySelector('[data-action="dry-run"]').addEventListener("click", async () => {
-      const { data } = await postJSON("/api/launch/dry-run",
-        { command, values: collectValues(form) });
-      preview.hidden = false;
-      preview.textContent = data.display || (data.error ? "error: " + data.error : "");
-    });
-
-    if (runBtn) runBtn.addEventListener("click", async () => {
-      output.hidden = false;
-      output.textContent = "";
-      const { status, data } = await postJSON("/api/launch",
-        { command, values: collectValues(form) });
-      if (status !== 200) {
-        output.textContent = "error: " + (data.error || status);
-        return;
-      }
-      token = data.token;
-      stopBtn.disabled = false;
-      es = new EventSource(`/api/launch/${token}/stream`);
-      es.addEventListener("output", (e) => { output.textContent += e.data + "\n"; });
-      es.addEventListener("done", (e) => {
-        let rc = "";
-        try { rc = JSON.parse(e.data).returncode; } catch (_) { /* ignore */ }
-        output.textContent += `\n[exit ${rc}]`;
-        es.close(); stopBtn.disabled = true;
-      });
-      es.addEventListener("error", () => { es.close(); stopBtn.disabled = true; });
-    });
-
-    if (stopBtn) stopBtn.addEventListener("click", async () => {
-      if (token) await postJSON(`/api/launch/${token}/stop`, {});
-    });
-  }
-}
-
-// --- Proxy tab: flow history (read-only) ---
-// Flow url/host/head come from recorded traffic (untrusted), so rows are built with
-// DOM APIs and textContent — never string-interpolated HTML.
+// --- History (read-only) ---
 function initProxy() {
   const table = document.querySelector("#flow-table tbody");
-  if (!table) return; // not the index page
+  if (!table) return; // not the proxy page
   const empty = document.getElementById("flow-empty");
   const search = document.getElementById("flow-search");
   const detail = document.getElementById("flow-detail");
-  let currentFlowId = null;
+  const toRepId = document.getElementById("flow-to-repeater-id");
 
   async function showFlow(id) {
     const r = await fetch(`/api/proxy/flows/${id}`);
     if (!r.ok) return;
     const f = await r.json();
-    currentFlowId = f.id;
     document.getElementById("flow-detail-id").textContent = "#" + f.id;
     document.getElementById("flow-req").textContent = f.raw_request || "(none)";
     document.getElementById("flow-resp").textContent = f.raw_response || "(none)";
+    if (toRepId) toRepId.value = String(f.id);
     detail.hidden = false;
   }
-
-  const toRep = document.getElementById("flow-to-repeater");
-  if (toRep) toRep.addEventListener("click", async () => {
-    if (currentFlowId == null) return;
-    const { status, data } = await postJSON(`/api/proxy/repeater/from-flow/${currentFlowId}`, {});
-    if (status === 200) document.dispatchEvent(
-      new CustomEvent("repeater-select", { detail: data.id }));
-  });
 
   async function load() {
     const q = search && search.value.trim();
@@ -288,7 +57,7 @@ function initProxy() {
   load();
 }
 
-// --- Proxy tab: live interception (pause / edit / drop / forward) ---
+// --- Intercept (pause / edit / drop / forward) ---
 function initIntercept() {
   const card = document.getElementById("intercept-card");
   if (!card) return;
@@ -363,7 +132,7 @@ function initIntercept() {
   }).catch(() => {});
 }
 
-// --- Proxy tab: Repeater (replay tabs) ---
+// --- Repeater (replay tabs) ---
 function initRepeater() {
   const card = document.getElementById("repeater-card");
   if (!card) return;
@@ -372,6 +141,10 @@ function initRepeater() {
   const rawArea = document.getElementById("rep-raw");
   const respPre = document.getElementById("rep-resp");
   const sendBtn = document.getElementById("rep-send");
+  // The PRG "send to Repeater" pivot (R-07) lands back here with ?repeater_tab=ID —
+  // an opaque hint, server-rendered onto the card; fall back to no selection if it
+  // doesn't resolve to a live tab (never treat a query id as authoritative).
+  const seedTab = card.dataset.repeaterTab || "";
   let tabs = [];
 
   function selectId(id) {
@@ -415,11 +188,10 @@ function initRepeater() {
       : "error: " + (data.error || status);
   });
 
-  document.addEventListener("repeater-select", (e) => loadTabs(e.detail));
-  loadTabs();
+  loadTabs(seedTab || null);
 }
 
-// --- Proxy tab: Scope + Match-Replace ---
+// --- Scope + Match-Replace ---
 function initScope() {
   const card = document.getElementById("scope-card");
   if (!card) return;
@@ -500,7 +272,5 @@ function initScope() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  initShell();
-  initTabs(); initLaunchNav(); initLaunchForms();
   initProxy(); initIntercept(); initRepeater(); initScope();
 });

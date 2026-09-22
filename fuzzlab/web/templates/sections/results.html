@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}fuzzlab &mdash; Results{% endblock %}
+{% block crumb %}Results{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/results.css">{% endblock %}
+{% block content %}
+<section class="panel" aria-labelledby="results-h1">
+  <h1 id="results-h1" class="visually-hidden">Results</h1>
+  <div class="card">
+    <h2>Review runs</h2>
+    {% if runs %}
+    <table>
+      <caption class="visually-hidden">Recorded runs, newest first</caption>
+      <thead><tr><th scope="col">run</th><th scope="col">tool</th><th scope="col">target</th>
+        <th scope="col">started</th><th scope="col">findings</th></tr></thead>
+      <tbody>
+        {% for r in runs %}
+        <tr>
+          <td><a href="/runs/{{ r.id }}">#{{ r.id }}</a></td>
+          <td>{{ r.tool }}</td>
+          <td><code>{{ r.target or '' }}</code></td>
+          <td>{{ r.started_at or '' }}</td>
+          <td>{{ r.findings }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">No runs recorded yet. Run a tool with <code>--store</code>, or use
+      automatic mode, then refresh.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

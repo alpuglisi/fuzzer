@@ -3,6 +3,86 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0025 — Lane U0: MPA routes + asset split (the serialization-breaker) (2026-09-22)
+- Change: per `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U0) and resolved markers R-01/R-07,
+  replaced the hash-switched single page (`GET /` rendering all five `.panel` sections,
+  `app.js`'s `initTabs()` toggling `.hidden` on `hashchange`) with **real, independently
+  deep-linkable per-section routes**: `GET /` (Launcher), `/proxy`, `/results`, `/ml`,
+  `/diagnostics`, plus the pre-existing `/runs/{id}`. `fuzzlab/web/app.py` gained a single
+  `NAV` source of truth (grouped Workbench/Analysis links, each `{id, label, href, icon}`)
+  and `_shell_context(cfg, active=...)`/`_launcher_context`/`_results_context` builders that
+  compute the active section server-side per request; every `TemplateResponse` already used
+  the modern `(request, name, ctx)` signature (R-01), unchanged. Split
+  `templates/index.html` into `templates/sections/{launcher,proxy,results,ml,diagnostics}.html`
+  (each `{% extends "base.html" %}`), `static/app.js` into `static/js/{shell,common,
+  launcher,proxy}.js` (`shell.js` = theme/density/sidebar/proxy-chip, loaded on every page;
+  `common.js` = shared `postJSON`/`delJSON`/`toWire`/`subscribe`; `launcher.js`/`proxy.js` =
+  per-section behavior), and `static/app.css` into `static/css/{shell,launcher,proxy,
+  results}.css` (`shell.css` = the app-shell grid + shared primitives, loaded on every page;
+  each section links its own partial). `base.html`'s sidebar now renders real `<a href="...">`
+  links from `NAV` with server-rendered `aria-current="page"` on the active one (never color
+  alone — a left accent bar too, R-11); the no-FOUC inline `<head>` script is unchanged and
+  now runs on every full-page MPA navigation, as required. `initTabs()`/the hash router is
+  fully retired, not just unused. Converted the Proxy "send to Repeater" pivot to **POST /
+  Redirect / GET with a 303** (R-07): a real `<form method="post" action="/proxy/repeater/
+  from-flow">` posts the opaque `flow_id`; the new `POST /proxy/repeater/from-flow` route
+  (parses the small `application/x-www-form-urlencoded` body by hand via `urllib.parse.
+  parse_qsl` rather than pulling in `python-multipart` for one field, per PA-0005's spirit)
+  creates the tab server-side and 303-redirects to `/proxy?repeater_tab=<id>` — an opaque
+  hint the Repeater JS treats as a fallback-safe seed (never bytes on the wire; an unknown
+  flow id degrades to the default view, never a 404). The pre-existing JSON API
+  (`POST /api/proxy/repeater/from-flow/{flow_id}`, used by `test_web_repeater.py` and the
+  controller layer) is untouched. `run.html`/`not_found.html` now link back to `/results`
+  (the run listing's real route) instead of `/`, and carry `active="results"` so the sidebar
+  reflects that a run detail is a Results sub-page.
+- Impact (other components / project): UI only; no schema/contract change. Establishes the
+  file-disjoint surface (`templates/sections/*.html`, `static/{js,css}/<section>.*`) every
+  Wave-1 UI lane (U1–U5) depends on to build in parallel without touching each other's files,
+  per `docs/UI_IMPLEMENTATION_PLAN.md` §4's dependency map. `FR-UI-7`/`FR-UI-8` in
+  `requirements.md` updated in place to describe the MPA shell (superseding the
+  hash-switched-`.panel` description from CC-UI-0021/0022). No change to `core/`, the store
+  contract, or any tool's CLI. U6 (control-plane hardening, `CC-UI-0026`) is a same-`app.py`
+  Wave-0 lane that lands with/right after this one per that plan's own note; this change adds
+  no CSRF/Origin/Host validation itself (out of U0's scope) and does not weaken the existing
+  no-auto-run/loopback-only/authorized-gate invariants (unchanged gate checks on
+  `/api/run/automatic`, `/api/launch`, `/api/proxy/repeater/tabs/{id}/send`).
+- Risk (level; mitigation): low-medium — the change is a structural refactor of every route
+  and every static asset path, so a missed reference could 404 a whole section. Mitigated by:
+  a full route inventory (`/`, `/proxy`, `/results`, `/ml`, `/diagnostics`, `/runs/{id}`,
+  `not_found.html`) each asserted directly via `TestClient`; a parametrized route/no-JS test
+  over every section (`test_section_route_renders_the_app_shell`,
+  `test_section_route_is_deep_linkable_and_marks_active_nav`) asserting the shell, the
+  section's own content, `aria-current="page"`, and the `data-section` hook exist together;
+  explicit assertions that no `href="/#..."` hash link remains and that `initTabs` is gone;
+  a 303-redirect test for the new PRG pivot (both the found and not-found flow-id cases); a
+  grep across `fuzzlab/`/`tests/` confirming no remaining reference to the retired
+  `templates/index.html`/`static/app.css`/`static/app.js` paths. The PRG route's hand-rolled
+  form parse is scoped to one trusted-shape field (`flow_id`, cast through `int()`) so a
+  malformed body degrades to the safe default redirect rather than raising.
+- Deliverables:
+  - [x] `NAV` + per-route `_shell_context`/`_launcher_context`/`_results_context` in
+    `app.py`, with `/`, `/proxy`, `/results`, `/ml`, `/diagnostics` routes — done.
+  - [x] `templates/sections/*.html` split (extends `base.html`; per-section `{% block
+    styles %}`/`{% block scripts %}`) — done.
+  - [x] `static/css/{shell,launcher,proxy,results}.css` + `static/js/{shell,common,
+    launcher,proxy}.js` split; `app.css`/`app.js` removed — done.
+  - [x] Server-rendered sidebar `aria-current="page"` + `data-section` hooks on `<nav>`
+    links and `<main>` — done.
+  - [x] PRG + 303 "send to Repeater" pivot (`POST /proxy/repeater/from-flow`) — done.
+  - [x] `run.html`/`not_found.html` updated to link `/results` and carry `active="results"`
+    — done.
+  - [x] Tests updated for routes (`test_web_frontend.py` rewritten; `test_web_results.py`,
+    `test_web_proxy_history.py` moved their shell assertions off `/` to `/results`/`/proxy`;
+    browser-smoke selectors updated to `data-section`) — done, focused run green (see below).
+  - [x] `docs/components/12-diagnostics-and-ui/requirements.md` (`FR-UI-7`, `FR-UI-8`)
+    updated in place — done.
+- Effectiveness (assessed 2026-09-22): effective for its own scope — every section is
+  independently reachable and deep-linkable, no-JS (`TestClient`, which runs no JS) renders
+  each section's full content, the active-nav state is server-rendered, and the focused web
+  suite (`test_web_frontend.py` plus every other `test_web_*.py` file) passed locally (128
+  passed; see the report for exact counts). Re-assess once U1–U5 land on top of this split
+  and once U6's control-plane hardening lands alongside it in `app.py`.
+
 ### CC-UI-0024 — Lane X0: register `lab-generate` in the launcher (own group) (2026-09-22)
 - Change: surfaced `fuzzlab lab-generate` as a launchable activity in the web launcher (Wave-0
   lane X0 of `docs/UI_IMPLEMENTATION_PLAN.md`). `fuzzlab/labgen/cli.py` already exposed

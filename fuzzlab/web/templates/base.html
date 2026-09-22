@@ -6,7 +6,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script>
     /* No-FOUC: apply the persisted theme/density before first paint. Wrapped in
-       try/catch so a blocked/absent localStorage never stops the page rendering. */
+       try/catch so a blocked/absent localStorage never stops the page rendering.
+       Runs on every full-page load under the MPA (U0) — required, since a stored
+       theme/density would otherwise flash on each navigation. */
     try {
       var t = localStorage.getItem("fl-theme");
       if (t) document.documentElement.setAttribute("data-theme", t);
@@ -17,26 +19,29 @@
     } catch (e) { /* no storage — render with defaults */ }
   </script>
   <link rel="stylesheet" href="/static/tokens.css">
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/css/shell.css">
+  {% block styles %}{% endblock %}
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to content</a>
 <aside class="sidebar">
   <div class="brand"><span class="dot"></span><span>fuzzlab</span></div>
   <nav class="tabs" aria-label="Primary">
-    <div class="side-sep"><span>Workbench</span></div>
-    <a href="/#launcher" data-tab="launcher"><span class="ic">▸</span><span>Launcher</span></a>
-    <a href="/#proxy" data-tab="proxy"><span class="ic">⇄</span><span>Proxy</span></a>
-    <a href="/#results" data-tab="results"><span class="ic">▤</span><span>Results</span></a>
-    <div class="side-sep"><span>Analysis</span></div>
-    <a href="/#ml" data-tab="ml"><span class="ic">◈</span><span>ML</span></a>
-    <a href="/#diagnostics" data-tab="diagnostics"><span class="ic">◍</span><span>Diagnostics</span></a>
+    {% for grp in nav %}
+    <div class="side-sep"><span>{{ grp.group }}</span></div>
+    {% for item in grp.links %}
+    <a href="{{ item.href }}" data-section="{{ item.id }}"
+       {% if item.id == active %}class="active" aria-current="page"{% endif %}>
+      <span class="ic" aria-hidden="true">{{ item.icon }}</span><span>{{ item.label }}</span></a>
+    {% endfor %}
+    {% endfor %}
   </nav>
-  <div class="side-foot"><span>lab-only · loopback</span></div>
+  <div class="side-foot"><span>lab-only &middot; loopback</span></div>
 </aside>
 
 <header class="topbar">
   <button type="button" class="hamb" id="sidebar-toggle" title="Collapse sidebar"
-          aria-label="Collapse sidebar">☰</button>
+          aria-label="Collapse sidebar">&#9776;</button>
   <span class="crumb">{% block crumb %}Control panel{% endblock %}</span>
   <div class="ctx">
     <span class="chip">target <b>{{ target or '—' }}</b></span>
@@ -47,13 +52,14 @@
     <span class="chip" id="proxy-chip"><span class="led off"></span>proxy</span>
   </div>
   <span class="spacer"></span>
-  <button type="button" class="tbtn" id="theme-toggle" title="Toggle light / dark / system">◐ Theme</button>
-  <button type="button" class="tbtn" id="density-toggle" title="Toggle comfortable / compact">▤ Density</button>
+  <button type="button" class="tbtn" id="theme-toggle" title="Toggle light / dark / system">&#9680; Theme</button>
+  <button type="button" class="tbtn" id="density-toggle" title="Toggle comfortable / compact">&#9636; Density</button>
 </header>
 
-<main class="content">
+<main class="content" id="main" tabindex="-1" data-section="{{ active or '' }}">
 {% block content %}{% endblock %}
 </main>
-<script type="module" src="/static/app.js"></script>
+<script type="module" src="/static/js/shell.js"></script>
+{% block scripts %}{% endblock %}
 </body>
 </html>

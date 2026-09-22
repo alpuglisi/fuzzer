@@ -26,7 +26,7 @@ from typing import Any, Callable, TYPE_CHECKING
 # annotations resolve under `from __future__ import annotations`. Importing this
 # module implies the web extra; `core` never imports it, so core stays web-free.
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -42,6 +42,22 @@ if TYPE_CHECKING:
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _TEMPLATES_DIR = os.path.join(_HERE, "templates")
 _STATIC_DIR = os.path.join(_HERE, "static")
+
+# U0 (CC-UI-0025): single source of truth for the sidebar nav — real per-section
+# routes, grouped Workbench / Analysis per FR-UI-7/8. `href` is a real URL (no
+# hash), `id` is compared against the per-request `active` section to render
+# server-side `aria-current="page"` (R-01/R-11); nothing here is JS-switched.
+NAV: list[dict[str, Any]] = [
+    {"group": "Workbench", "links": [
+        {"id": "launcher", "label": "Launcher", "href": "/", "icon": "▸"},
+        {"id": "proxy", "label": "Proxy", "href": "/proxy", "icon": "⇄"},
+        {"id": "results", "label": "Results", "href": "/results", "icon": "▤"},
+    ]},
+    {"group": "Analysis", "links": [
+        {"id": "ml", "label": "ML", "href": "/ml", "icon": "◈"},
+        {"id": "diagnostics", "label": "Diagnostics", "href": "/diagnostics", "icon": "◍"},
+    ]},
+]
 
 # A pipeline runner takes the config and returns a summary dict. Injected so the
 # panel is testable and does not itself send traffic.
@@ -180,30 +196,36 @@ def _active_plugins() -> list[dict]:
         return []
 
 
-def _shell_context(cfg: Config) -> dict[str, Any]:
-    """Chrome shared by every page (sidebar + top context bar): the target, scope, and
-    authorization state the topbar chips render. Merged into each TemplateResponse so the
-    shell is identical on the index, a run detail, and the not-found page."""
+def _shell_context(cfg: Config, active: str | None = None) -> dict[str, Any]:
+    """Chrome shared by every page (sidebar + top context bar): the target, scope,
+    authorization state, and the nav/active section the topbar/sidebar render.
+    Merged into each TemplateResponse so the shell is identical on every route —
+    each section's own route (U0/CC-UI-0025), a run detail, and the not-found page."""
     return {
         "target": cfg.get("target_base_url", ""),
         "scope": ", ".join(cfg.get("scope_hosts", [])),
         "authorized": bool(cfg.get("authorized", False)),
+        "nav": NAV,
+        "active": active,
     }
 
 
-def _index_context(cfg: Config, state: LauncherState, runs: list[dict]) -> dict[str, Any]:
+def _launcher_context(cfg: Config, state: LauncherState) -> dict[str, Any]:
     activities = _activities()
     return {
-        **_shell_context(cfg),
+        **_shell_context(cfg, active="launcher"),
         "mode": state.mode,
         "categories": _known_categories(),
         "commands": _tool_commands(cfg),
         "activities": activities,
         "activity_groups": _group_activities(activities),
         "plugins": _active_plugins(),
-        "runs": runs,
         "last_result": None if state.last_result is None else str(state.last_result),
     }
+
+
+def _results_context(cfg: Config, runs: list[dict]) -> dict[str, Any]:
+    return {**_shell_context(cfg, active="results"), "runs": runs}
 
 
 def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None,
@@ -241,10 +263,38 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         except KeyError:
             return None
 
+    # --- section routes (U0/CC-UI-0025): real per-section MPA routes replacing the
+    # old hash-switched single page; each is independently deep-linkable and no-JS
+    # renders its full content (R-01). Sidebar `active` state (aria-current) is
+    # computed server-side per route via `_shell_context`/`_launcher_context`.
+
     @app.get("/", response_class=HTMLResponse)
-    def index(request: Request):
+    def launcher(request: Request):
         return templates.TemplateResponse(
-            request, "index.html", _index_context(cfg, state, _read_runs(cfg)))
+            request, "sections/launcher.html", _launcher_context(cfg, state))
+
+    @app.get("/proxy", response_class=HTMLResponse)
+    def proxy_page(request: Request, repeater_tab: int | None = None):
+        # `repeater_tab` is an opaque hint carried across the PRG "send to Repeater"
+        # pivot (R-07) — never bytes, just the tab id; the page falls back to the
+        # default (no pre-selection) if it doesn't resolve to a live tab.
+        ctx = {**_shell_context(cfg, active="proxy"), "repeater_tab": repeater_tab}
+        return templates.TemplateResponse(request, "sections/proxy.html", ctx)
+
+    @app.get("/results", response_class=HTMLResponse)
+    def results_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/results.html", _results_context(cfg, _read_runs(cfg)))
+
+    @app.get("/ml", response_class=HTMLResponse)
+    def ml_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/ml.html", _shell_context(cfg, active="ml"))
+
+    @app.get("/diagnostics", response_class=HTMLResponse)
+    def diagnostics_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/diagnostics.html", _shell_context(cfg, active="diagnostics"))
 
     @app.get("/api/status")
     def status() -> dict[str, Any]:
@@ -295,9 +345,9 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         if detail is None:
             return templates.TemplateResponse(
                 request, "not_found.html",
-                {"run_id": run_id, **_shell_context(cfg)}, status_code=404)
+                {"run_id": run_id, **_shell_context(cfg, active="results")}, status_code=404)
         return templates.TemplateResponse(
-            request, "run.html", {"detail": detail, **_shell_context(cfg)})
+            request, "run.html", {"detail": detail, **_shell_context(cfg, active="results")})
 
     # --- launcher: dry-run preview, gated execution, live output (Phase 0.3) ---
 
@@ -486,6 +536,29 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         if tab is None:
             return JSONResponse({"error": f"flow {flow_id} not found"}, status_code=404)
         return tab
+
+    # --- "send to Repeater" pivot, PRG + 303 (R-07) ----------------------------
+    # A real <form method="post"> so the pivot works as a plain navigation (no JS
+    # required to trigger it): POST creates the tab server-side, then a 303
+    # redirect to GET /proxy carries only the opaque tab id in the query string —
+    # never raw request bytes (those stay server-side; redaction is render-time).
+    @app.post("/proxy/repeater/from-flow")
+    async def repeater_from_flow_prg(request: Request):
+        # Parsed by hand (urlencoded `application/x-www-form-urlencoded`, the
+        # browser's default for a plain <form>) rather than Starlette's
+        # `request.form()`, which pulls in `python-multipart` even for this
+        # single-field case — an extra dependency this one field doesn't earn.
+        from urllib.parse import parse_qsl
+        body = (await request.body()).decode("utf-8", errors="replace")
+        form = dict(parse_qsl(body))
+        try:
+            flow_id = int(form.get("flow_id", ""))
+        except (TypeError, ValueError):
+            return RedirectResponse(url="/proxy", status_code=303)
+        tab = repeater_ctl.create_from_flow(flow_id)
+        if tab is None:
+            return RedirectResponse(url="/proxy", status_code=303)
+        return RedirectResponse(url=f"/proxy?repeater_tab={tab['id']}", status_code=303)
 
     @app.post("/api/proxy/repeater/tabs/{tab_id}/send")
     async def repeater_send(tab_id: int, request: Request):
