@@ -1,0 +1,69 @@
+"""Module-composition unit tests for `go_net_http` (category 4 pilot,
+`CC-LAB-0090`/`FR-LAB-64`).
+
+Mirrors `tests/test_labgen_node_express_modules.py`'s convention exactly,
+scoped to `fuzzlab.labgen.emitters.go_net_http.modules`'s own registries
+and templates (a separate, self-contained module inventory).
+"""
+
+from __future__ import annotations
+
+from fuzzlab.labgen.emitters.go_net_http.modules import (
+    COMPLEXITIES,
+    SINKS,
+    SOURCES,
+    TRANSFORMS,
+    _COMPLEXITY_ENV,
+    _SINK_ENV,
+    _SOURCE_ENV,
+    _TRANSFORM_ENV,
+    render_route_line,
+)
+
+
+def test_module_environments_set_determinism_flags_explicitly() -> None:
+    for env in (_SOURCE_ENV, _TRANSFORM_ENV, _SINK_ENV, _COMPLEXITY_ENV):
+        assert env.trim_blocks is True
+        assert env.lstrip_blocks is True
+        assert env.keep_trailing_newline is True
+
+
+def test_read_webhook_signature_source_publishes_naive_comparison_by_default() -> None:
+    result = SOURCES["read_webhook_signature"].render({})
+    assert "hmac.New(sha256.New, webhookSecret)" in result.code
+    assert result.context["computed_var"] == "computed"
+    assert result.context["header_var"] == "headerSig"
+    assert result.context["value_expr"] == "headerSig == computed"
+
+
+def test_naive_string_compare_transform_leaves_naive_comparison() -> None:
+    ctx = {"header_var": "headerSig", "computed_var": "computed"}
+    result = TRANSFORMS["naive_string_compare"].render(ctx)
+    assert result.context["value_expr"] == "headerSig == computed"
+    assert "==" in result.code
+
+
+def test_constant_time_compare_transform_publishes_hmac_equal() -> None:
+    ctx = {"header_var": "headerSig", "computed_var": "computed"}
+    result = TRANSFORMS["constant_time_compare"].render(ctx)
+    assert result.context["value_expr"] == "hmac.Equal([]byte(headerSig), []byte(computed))"
+    assert "hmac.Equal" in result.code
+
+
+def test_webhook_signature_verification_sink_branches_on_value_expr() -> None:
+    ctx = {"value_expr": "hmac.Equal([]byte(headerSig), []byte(computed))"}
+    result = SINKS["webhook_signature_verification"].render(ctx)
+    assert "if hmac.Equal([]byte(headerSig), []byte(computed)) {" in result.code
+    assert "http.StatusOK" in result.code
+    assert "http.StatusUnauthorized" in result.code
+
+
+def test_render_only_complexity_wraps_body_in_handler_func() -> None:
+    result = COMPLEXITIES["render_only"].render({"body": "\tdoSomething()", "handler_name": "handleTest"})
+    assert result.code.startswith("func handleTest(w http.ResponseWriter, r *http.Request) {")
+    assert "doSomething()" in result.code
+
+
+def test_render_route_line_uses_method_pattern_syntax() -> None:
+    line = render_route_line(method="POST", path="/generated/labgen-go-0001", handler_name="handleLabgenGo0001")
+    assert line.strip() == 'mux.HandleFunc("POST /generated/labgen-go-0001", handleLabgenGo0001)'

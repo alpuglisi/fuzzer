@@ -1839,6 +1839,52 @@ lane) can submit a payload as
     only the `git rm -r puppy-fort-factory/` once the first commit's own
     full test run (fast suite + the live-boot slow suite) was green.
 
+- **FR-LAB-64** *(`go_net_http` Phase A: this project's first Go target-lab
+  stack; `CC-LAB-0090`, 2026-09-22, category 4 pilot — Media/streaming,
+  Twitch pick, `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4/§9.5).*
+  The toolkit supports a Go/`net/http` target stack at Phase-A depth: one
+  real, live-bootable illustrative shape, matching every other stack's own
+  Phase-A bar (`ruby_rails`'s `FR-LAB-65` being the immediately preceding
+  precedent for this exact scope level).
+  - `fuzzlab.labgen.emitters.go_net_http.GoEmitter` renders exactly one
+    shape — `("webhook_signature", "webhook_signature_verification")`, an
+    EventSub-webhook-receiver-shaped handler comparing two HMAC-SHA256
+    digests either with Go's `==` (vulnerable — CWE-347, data-dependent-time
+    comparison) or `crypto/hmac.Equal` (secure — constant-time). Reuses
+    `lab/safety_matrix.yaml`'s existing `webhook_signature_verification`
+    sink family and its existing `naive_string_compare`/
+    `constant_time_compare` ops verbatim (added by `CC-LAB-0063` for the
+    corpus-examples research) — no new safety-matrix entry was needed.
+  - A real, checked-in skeleton (`fuzzlab/labgen/emitters/go_net_http/
+    stack/skeleton/`: a bare `go mod init` plus a hand-written `main.go`
+    wiring `net/http.NewServeMux()`) and a real live-boot harness
+    (`fuzzlab.labgen.conformance.go_live_boot.GoLiveBootHarness`) that
+    assembles, runs a real `go build`, boots the compiled binary, and
+    serves real HTTP requests — proven end to end by
+    `tests/test_labgen_go_live_boot.py` (real signature accepted/rejected
+    for both twins, `@pytest.mark.slow`, skip-guarded on
+    `go_boot_available()`).
+  - `go_boot_available()`'s network probe (`_go_module_proxy_probe`) runs a
+    real, bounded `go list -m -versions` against the real Go module proxy —
+    built correctly the first time per `PA-0035`, not a bare socket check
+    (`BUG-0033`'s exact mistake, avoided here for a new package manager).
+  - Tier 0 (`go vet`/`gofmt -l`, `tests/test_labgen_go_net_http.py`) and
+    Tier 3 (whole-manifest regenerate-and-diff,
+    `tests/test_labgen_go_net_http_conformance.py`) both pass for the one
+    illustrative cell pair (`lab/manifests/webhook_signature_go_sample.yaml`).
+  - **Explicit scope call: no per-run database in this Phase A.** The one
+    illustrative shape is stateless (no read/write to persisted data),
+    unlike every other stack's own Phase-A illustrative shape — deferred to
+    Phase B, when a data-touching shape (the CWE-918 SSRF pick recorded in
+    `docs/research/site-architecture-survey-functionality-twitch.md` §2) is
+    added for this stack.
+  - **Deliberately out of scope here** (Phase B, per the plan's own
+    "richer stack-idiomatic modules are a separate, later lane" split): the
+    real Twitch EventSub message-ID/timestamp concatenation and 10-minute
+    replay-window check, CWE-918 (SSRF), and any SQLi/XSS shape for this
+    stack (which would be the first shape needing the per-run database
+    above).
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

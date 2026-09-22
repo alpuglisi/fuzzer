@@ -1,0 +1,40 @@
+# Webhook-signature sample manifest (CC-LAB-0090), go_net_http.
+#
+# First illustrative pair for this stack's Phase A build (category 4 pilot,
+# Media/streaming, Twitch pick -- docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md
+# §9.4/§9.5). Grounded in the Twitch functionality/CWE research
+# (docs/research/site-architecture-survey-functionality-twitch.md): an
+# EventSub-webhook-receiver-shaped endpoint that verifies an inbound
+# request's HMAC-SHA256 signature before trusting its body.
+#
+# Reuses `lab/safety_matrix.yaml`'s existing `webhook_signature_verification`
+# sink family and its existing `naive_string_compare`/`constant_time_compare`
+# ops verbatim (added by CC-LAB-0063 for the corpus-examples/webhook-signature/
+# {node,php,python} research) -- no new safety-matrix entry was needed; this
+# is simply the first `go_net_http` instance of an already-modeled class.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: compares the two HMAC-SHA256 digests with Go's `==` operator
+  # -- a data-dependent-time comparison (CWE-347).
+  - cell_id: LABGEN-GO-0001
+    class: webhook_signature
+    stack_profile: go_net_http
+    route: { method: POST, path: /webhooks/eventsub }
+    sink_context:
+      family: webhook_signature_verification
+      required_neutralizations: [weak_signature_comparison]
+    transform: [naive_string_compare]
+
+  # Secure twin: the only difference is the transform region
+  # (constant_time_compare instead of naive_string_compare) -- the
+  # minimal-pair invariant. Uses crypto/hmac.Equal, constant-time
+  # regardless of where the two digests first differ.
+  - cell_id: LABGEN-GO-0002
+    class: webhook_signature
+    stack_profile: go_net_http
+    route: { method: POST, path: /webhooks/eventsub }
+    sink_context:
+      family: webhook_signature_verification
+      required_neutralizations: [weak_signature_comparison]
+    transform: [constant_time_compare]

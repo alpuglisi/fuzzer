@@ -4,6 +4,35 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-22 (category 4 pilot, Phase A build)
+- LAB: `go_net_http` Phase A — this project's first Go target-lab stack
+  (`CC-LAB-0090`/`FR-LAB-64`). A real, checked-in `net/http`-only skeleton,
+  a `GoEmitter` rendering one illustrative shape (an EventSub-webhook-
+  receiver-shaped handler, CWE-347: Go's `==` vs. `crypto/hmac.Equal`),
+  and `GoLiveBootHarness` (real `go build`, real boot, real HTTP) —
+  reviewed pre-implementation by 2 independent agents per the component's
+  pre-change review gate, both rounds' findings incorporated before code
+  landed. Passed the pre-change review with 3/3 agreement, then two real
+  defects were caught and fixed during implementation itself (a
+  capability-probe/boot-subprocess environment bug that made
+  `go_boot_available()` under-report, and a route-accumulator bug that
+  double-registered a vulnerable/secure twin pair at the same path) —
+  see `CC-LAB-0090`'s Effectiveness note. Reuses `lab/safety_matrix.yaml`'s
+  existing `webhook_signature_verification` family/ops verbatim (no new
+  entry needed — a scope reduction found and corrected during
+  implementation). Tier 0 (`go vet`/`gofmt -l`) and Tier 3
+  (regenerate-and-diff) both pass; the real live-boot test
+  (`tests/test_labgen_go_live_boot.py`) proves a real payload differential
+  end to end. `docs/ARCHITECTURE.md` and
+  `docs/components/01-target-lab/requirements.md` updated; also recorded
+  `node_express` in `docs/ARCHITECTURE.md`, found undocumented there
+  during this pass. Full non-slow test suite re-run: no regression (15
+  pre-existing failures, all a missing `gitleaks` executable on this
+  sandbox, unrelated to this change). Netflix/Java-Spring-Boot Phase A
+  (this category's other pick, CWE-502) is not yet built — tracked as
+  this pilot's next step in `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
+  §9.4.
+
 ## 2026-09-22 (category 4 pilot)
 - Docs: Category 4 (Media/streaming/content platforms) of
   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s 12-app expansion moved

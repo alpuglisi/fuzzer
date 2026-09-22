@@ -159,7 +159,7 @@ tracked in the requirements files, not here.
   `generalizes` verdict — the generalization evidence. The live run against an external
   validation lab is on-host; the manifest-generated second target plugs in as a
   `TargetSpec`.
-- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- three emitters (php_current, python_fastapi, php_laravel) built; Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself pending human sign-off]` (D8, target shape pinned by **D20**/
+- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- four emitters (php_current, python_fastapi, php_laravel, node_express) built to varying depth, plus a fifth (go_net_http, Phase A only) added by the category-4 second-target pilot; Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself pending human sign-off]` (D8, target shape pinned by **D20**/
   `CR-LAB-0001`): the "lab as a compiler" — one manifest plus a safety matrix,
   seed, and env-profile generate the app, labels, docs, and oracle tests, with a
   **binary** verdict derived from `(transform, sink context)` (a partially
@@ -333,7 +333,27 @@ tracked in the requirements files, not here.
   app byte-identically (`LAB_PHASE_0_PLAN.md`'s original, literal wording of
   the Phase 0 exit criterion) remains planned in that literal sense — no tool
   in this repo diffs generated source against `puppy-fort-factory/`'s actual
-  file bytes, for either `php_current` or `php_laravel`. **Superseded for the
+  file bytes, for either `php_current` or `php_laravel`. A **fourth stack
+  emitter** (`fuzzlab/labgen/emitters/node_express/`, L-P3.1, Tier-A depth)
+  is built: Express + `mysql2`, the same three value-context shapes
+  `php_current`/`python_fastapi` prove, via its own fully independent
+  module-composition system; a `route`-category accumulator method
+  (`render_route_accumulator`, not part of the base `Emitter` ABC) builds
+  the shared `app.js` route-registration file, fed by one fragment per
+  supported cell sorted by cell ID. A **fifth stack emitter**
+  (`fuzzlab/labgen/emitters/go_net_http/`, category 4 second-target pilot's
+  `CC-LAB-0090`/`FR-LAB-64`, 2026-09-22) is this project's first Go stack —
+  standard-library `net/http` only, Phase A depth (one illustrative
+  shape: an HMAC-signature-verified webhook receiver, CWE-347, reusing
+  `lab/safety_matrix.yaml`'s existing `webhook_signature_verification`
+  family) with a real checked-in skeleton, a real `GoLiveBootHarness`
+  (`fuzzlab/labgen/conformance/go_live_boot.py`, no separate
+  install-dependencies step since `go build` resolves and compiles in one),
+  and Tier 0 (`go vet`/`gofmt -l`)/Tier 3 conformance passing — the Go
+  analogue of `ruby_rails`'s own Phase-A dispatch for category 1. Deferred
+  to Phase B for this stack: a per-run database (this Phase A's one shape
+  is stateless), CWE-918 (SSRF), and the richer Twitch EventSub message-ID/
+  timestamp/replay-window checks. **Superseded for the
   Layer-A/cutover purpose by D-open-1** (`docs/LAB_IMPLEMENTATION_PLAN.md`
   §4.3.6.7, decided 2026-09-22): the operative exit bar for closing Phase 0 on
   the 16 `PFF-` real-page cases is functional **parity/coverage**, not a

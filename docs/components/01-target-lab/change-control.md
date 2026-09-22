@@ -3,6 +3,214 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0090 — `go_net_http` emitter Phase A: real skeleton + live-boot harness + one illustrative CWE-347 webhook-signature cell (2026-09-22)
+
+- Change: Adds this project's first Go stack, `go_net_http`, mirroring the
+  Phase-A scope and shape category 1's `ruby_rails` pilot already set
+  (`CC-LAB-0071`/`FR-LAB-65`): a real, checked-in, minimal Go HTTP service
+  skeleton (standard library `net/http` only — no third-party router/
+  framework, matching Twitch's own documented "Go-centric microservices,
+  new API edge" architecture, per `docs/research/site-architecture-survey.md`
+  Category 4 and this pilot's own
+  `docs/research/site-architecture-survey-functionality-twitch.md`), a
+  `GoEmitter` (`fuzzlab.labgen.emitter.Emitter` subclass) that renders one
+  illustrative shape, and a `GoLiveBootHarness`
+  (`fuzzlab.labgen.conformance.go_live_boot`) that assembles a manifest's
+  rendered output onto the skeleton, runs a real `go build`, boots the
+  compiled binary, and lets a caller make real HTTP requests against it —
+  the same "real assemble, real build, real boot, real HTTP" bar every
+  prior stack's Phase A was held to.
+
+  **The one illustrative shape** (`vuln_class="webhook_signature"`,
+  `sink_context.family="hmac_signature_check"`): an EventSub-webhook-
+  receiver-shaped `net/http.HandlerFunc` that reads a request body plus a
+  `X-Signature` header carrying a hex-encoded HMAC-SHA256 digest (Twitch's
+  own real EventSub scheme, minus the message-ID/timestamp concatenation
+  and replay-window check, deferred to Phase B alongside the richer
+  CWE-918/CWE-862 picks — this Phase A cell is deliberately the simplest
+  slice, matching `ruby_rails` Phase A's own "exactly one shape, richer
+  ones deferred" scope note). Vulnerable twin compares the computed digest
+  to the header value with Go's `==` operator (data-dependent-time string
+  comparison — CWE-347, per
+  `docs/research/site-architecture-survey-functionality-twitch.md` §2's
+  researched pick); secure twin uses `crypto/hmac.Equal` (Go's own
+  constant-time comparison, the same function the Twitch integration
+  guides researched this session document as the correct idiom).
+
+  New/changed files (paths chosen to mirror `ruby_rails`'s existing
+  layout so the pattern generalizes cleanly to a third framework-routed
+  Go-like stack later):
+  - `fuzzlab/labgen/emitters/go_net_http/__init__.py` (new, ~180-220
+    LOC, estimated from `ruby_rails/__init__.py`'s 234 LOC for a
+    comparably-scoped one-shape emitter) — `GoEmitter`, `supports()`,
+    `render()`, `render_route_accumulator()` (Go's own `net/http.ServeMux`
+    registration lines, accumulator cardinality, mirroring
+    `node_express`'s own accumulator method
+    (`NodeExpressEmitter.render_route_accumulator`, in
+    `fuzzlab/labgen/emitters/node_express/__init__.py` — that stack has no
+    separate `app.js` file on disk in the source tree; `app.js` is its
+    *rendered output* path) and `ruby_rails`'s `route_accumulator.py` —
+    whichever shape fits `net/http.ServeMux`'s actual registration idiom,
+    decided during implementation, not pre-committed here).
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py` (new, ~80-120 LOC,
+    estimated from `ruby_rails/modules.py`'s 179 LOC scaled down for one
+    shape vs. two) — the `hmac_signature_check` source/sink module pair
+    (vulnerable: `==`; secure: `hmac.Equal`) plus a `render_only`
+    complexity, matching every other stack's module-composition shape.
+  - `fuzzlab/labgen/emitters/go_net_http/stack/skeleton/` (new, real
+    `go mod init` output: `go.mod`, `main.go` wiring `net/http.ServeMux`
+    + `http.ListenAndServe`, a `README.md` recording exact provenance
+    and the (empty, since a bare `go mod init` has no dev tooling to
+    trim) trim list — mirroring `ruby_rails/stack/README.md`'s
+    convention).
+  - `fuzzlab/labgen/conformance/go_live_boot.py` (new, ~140-180 LOC,
+    estimated from `rails_live_boot.py`'s 402 LOC scaled down — Go needs
+    no separate install step distinct from build, unlike `bundle
+    install`/`npm install`/`composer install`, so this harness is
+    structurally *simpler* than every predecessor's) — `GoLiveBootHarness`,
+    `go_boot_available()` (a real, bounded, network-touching capability
+    probe per `PA-0035`: `go list -m -versions <throwaway module not
+    already in the local module cache>` against the real Go module proxy,
+    `proxy.golang.org` — empirically confirmed reachable through this
+    sandbox's outbound HTTPS proxy this session (`go list -m -versions
+    rsc.io/quote` succeeded in a scratch dir), not merely assumed
+    allow-listed — never a bare socket/DNS check standing in for it, the
+    exact class of mistake `BUG-0033` was), bounded timeouts on every
+    subprocess step
+    (`go build`, boot, request) enforced at the harness level.
+  - `tests/test_labgen_go_net_http_modules.py` (new, unit-level, no live
+    boot — mirrors `tests/test_labgen_node_express_modules.py`'s shape).
+  - `tests/test_labgen_go_live_boot.py` (new, one real, executed,
+    `@pytest.mark.slow` test skip-guarded on `go_boot_available()`:
+    assemble the one illustrative cell pair, boot both twins for real,
+    prove the payload differential — vulnerable twin accepts a
+    length-extended/timing-crafted-irrelevant-but-*wrong* signature that
+    happens to share a short common prefix under a naive comparison in a
+    way the test can force deterministically (e.g. by asserting the
+    *correct* digest is still required end-to-end, which is what a
+    single-request functional test can actually prove without a real
+    timing side channel — the test proves the vulnerable twin's `==`
+    still requires exact equality functionally identical to the secure
+    twin's `hmac.Equal` for a **correct** signature, and that an
+    **incorrect** signature is rejected by both; the CWE-347 timing
+    property itself is not empirically provable by a single-request
+    functional oracle and is not claimed to be — this mirrors this
+    project's own standing "a functional test proves the code path, not
+    the timing side-channel" honesty rule already applied to other
+    non-functional-oracle classes like CWE-1333/ReDoS in the Walmart
+    research note).
+  - `lab/safety_matrix.yaml` — add the `hmac_signature_check` sink family
+    for `go_net_http` alongside its existing per-stack entries.
+  - `lab/manifests/webhook_signature_go_sample.yaml` (new) — the one
+    illustrative vulnerable/secure cell pair.
+  - `docs/components/01-target-lab/requirements.md` — add **`FR-LAB-64`**
+    ("the toolkit supports a Go/`net/http` target stack, Phase-A depth:
+    one real, live-bootable illustrative shape") in place. **Corrected by
+    accuracy review:** the draft originally assumed `ruby_rails` (which
+    would be `FR-LAB-65`) is already landed on this branch and picked
+    `FR-LAB-70` as next-free by extension. On `claude/category-4-build-
+    t9uz3y`, `ruby_rails` does not exist — it lives only on unmerged
+    `origin/claude/second-target-cat1-ecommerce`. This branch's real
+    highest requirement ID (confirmed by grep against
+    `docs/components/01-target-lab/requirements.md` on this branch) is
+    `FR-LAB-63`, so the correct next-free number here is `FR-LAB-64`. (The
+    `CC-LAB-0090` change-control number is unaffected — it is independently
+    pre-reserved for this category in
+    `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s §9.4 tracker/§9.2
+    ledger regardless of which branch merges first; `requirements.md`,
+    unlike the change-control log, is a living doc edited in place per
+    branch, so its next-free number is branch-local and must be
+    re-checked at merge time regardless.)
+  - `docs/ARCHITECTURE.md` — record the new `go_net_http` stack/component
+    dependency (a new target-lab stack is exactly the "components/
+    dependencies changed" trigger this doc's own maintenance rule names).
+
+  **Explicit scope calls this revision adds (per adequacy review):**
+  - **Per-run database: not needed for this cell, deferred.** The one
+    illustrative shape (an HMAC-signature check on an inbound webhook
+    request) is stateless — no read/write to persisted data — so this
+    Phase A ships with **no database wiring at all**, unlike every prior
+    stack's Phase A (which each needed one because their illustrative
+    shape was SQLi/XSS against stored data). `go_net_http` gets a real
+    per-run SQLite-backed database (mirroring every other stack's
+    dev/test-tier choice) when Phase B adds a shape that actually reads
+    or writes data (the CWE-918 SSRF pick, or any future SQLi/stored-XSS
+    shape for this stack) — tracked there, not silently dropped here.
+  - **Tier 0/Tier 3 conformance are in this Phase A's scope, not just the
+    live-boot proof**, per the plan's own §2/§3 sequencing note (Tier 0/3
+    don't need the live-boot harness *running*, only the skeleton/module
+    shape to be fixed) — added as their own deliverables below rather than
+    only mentioned in passing under Risk.
+
+- Impact (other components / project): none outside `LAB` — no other
+  component's interface or contract changes. Adds a new `StackEnv`/
+  `Emitter` instance to `fuzzlab.labgen.emitters`; does not modify the
+  shared `Emitter` ABC, `Cell`/`SinkContext` schema, or any existing
+  stack's emitter/harness. `fuzzlab/harness/multitarget.py`'s
+  `TargetSpec` plumbing is not touched by this entry (that is Phase E,
+  out of scope here).
+- Risk (level; mitigation or accepted-risk justification): **low**. New,
+  additive code path; no existing stack's generated output changes (Tier 3
+  whole-lab regeneration determinism gate re-run to confirm this after
+  implementation, per every prior stack's own precedent). The one
+  meaningful risk is the capability-probe correctness class `BUG-0033`
+  already burned this project on once — mitigated by building
+  `go_boot_available()` to the same PA-0035-compliant real-network-probe
+  standard from the first commit, not retrofitted.
+- Deliverables:
+  - [x] `fuzzlab/labgen/emitters/go_net_http/__init__.py` + `modules.py` — done
+  - [x] `fuzzlab/labgen/emitters/go_net_http/stack/skeleton/` + `README.md` — done
+  - [x] `fuzzlab/labgen/conformance/go_live_boot.py` — done
+  - [x] `tests/test_labgen_go_net_http_modules.py` + `tests/test_labgen_go_net_http.py` — done
+  - [x] `tests/test_labgen_go_live_boot.py` (real, executed, slow-marked) — done
+  - [x] `lab/manifests/webhook_signature_go_sample.yaml` — done. **No
+    `lab/safety_matrix.yaml` change was needed** (a scope reduction found
+    during implementation, corrected here rather than left standing): that
+    file already carries a `webhook_signature_verification` sink family
+    with `naive_string_compare`/`constant_time_compare` ops, added by
+    `CC-LAB-0063` for the `corpus-examples/webhook-signature/` research.
+    This dispatch's module inventory (`modules.py`) reuses that family and
+    both ops verbatim rather than adding a new `hmac_signature_check`
+    family, as the original draft had assumed before checking.
+  - [x] `docs/components/01-target-lab/requirements.md` (`FR-LAB-64`) — done
+  - [x] `docs/ARCHITECTURE.md` — recorded the new `go_net_http` stack, and
+    (found undocumented during this pass) `node_express` alongside it —
+    done
+  - [x] Tier 0 (`go vet`/`gofmt -l`) for both illustrative cells' rendered
+    output — done, `tests/test_labgen_go_net_http.py`
+  - [x] Tier 3 (whole-manifest regenerate-and-diff, byte-deterministic) —
+    done, `tests/test_labgen_go_net_http_conformance.py`
+- Effectiveness (assessed 2026-09-22): effective. Observed directly, not
+  inferred: a real `go build` compiles the assembled skeleton + generated
+  handlers/accumulator; the compiled binary boots and accepts real HTTP
+  connections; both twins return `200` for a correctly-HMAC-signed request
+  body and `401` for an incorrect or missing signature
+  (`tests/test_labgen_go_live_boot.py`, executed this session, not
+  skipped — `go_boot_available()` returned `True` in this sandbox). Two
+  real defects were found and fixed during this same implementation pass
+  (not deferred to a separate bug report, since both were caught and
+  corrected before landing, per this project's own "fix it in the same
+  change when found before merge" convention for non-shipped code):
+  (1) `_go_module_proxy_probe`/the boot subprocess initially passed a
+  hand-picked `env={...}` instead of the real process environment, which
+  made `go_boot_available()` incorrectly report `False` in this sandbox
+  (missing `HOME`/`GOCACHE`/proxy variables `go` needs) — fixed by
+  inheriting the full environment, the same convention every other stack's
+  own harness already uses; (2) the route accumulator initially registered
+  a vulnerable/secure twin pair at the same literal `cell.route.path`,
+  which panics `net/http.ServeMux` on the second registration — fixed to
+  derive the served path from `cell_id` instead
+  (`/generated/<cell_id.lower()>`), matching `node_express`'s own
+  accumulator convention exactly. 18/18 new tests pass (`pytest tests/
+  test_labgen_go_net_http*.py tests/test_labgen_go_live_boot.py`); the
+  full non-slow suite was re-run afterward and shows no regression (the
+  15 pre-existing failures it still shows are all a missing `gitleaks`
+  executable on this sandbox's `PATH`, unrelated to and pre-dating this
+  change).
+
+  Reviewed by 2 independent agents pre-implementation (accuracy + adequacy passes, per the component README's pre-change review gate); both rounds' findings (FR-LAB numbering, node_express accumulator reference, unverified proxy-allowlist claim, missing Tier 0/3 + docs/ARCHITECTURE.md deliverables, the unaddressed per-run-database scope call) are incorporated above. 3/3 agreement reached before implementation began.
+
+
 ### CC-LAB-0069 — real live-boot verification that `orm_entity_bulk_assign`'s php_laravel sink safely quotes an adversarial column-name key (FR-LAB-63) (2026-09-22)
 - Change: `CC-LAB-0064`'s php_current sink (`fuzzlab/labgen/modules/sinks/
   orm_entity_bulk_assign.php.j2`) got a real, executed adversarial test for its
