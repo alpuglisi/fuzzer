@@ -13,6 +13,17 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- Docs: added `docs/LAB_SECOND_TARGET_NODE_EXPRESS_PLAN.md` — the
+  implementation plan for closing the "second target app" deferred decision
+  (`docs/DECISIONS_AND_ROADMAP.md`) with a second manifest-generated app on
+  `node_express`. Records the two decisions already made (second target =
+  another manifest-generated app, not an external lab; stack = `node_express`
+  over `python_fastapi`) and phases the remaining work (real bootable
+  skeleton + live-boot harness, module-inventory depth, its own identity/
+  ground truth, Tier 1/2 conformance, wiring into the already-built-but-
+  unused `multitarget.py`/`TargetSpec`). One design question flagged as
+  genuinely open (corpus-grounded vs. original page content for Phase C),
+  not resolved in the doc. **Planning only — not executed.**
 - LAB: added a real live-boot test (`CC-LAB-0069`/`FR-LAB-63`) proving the
   php_laravel `orm_entity_bulk_assign` sink's lack of an identifier-charset
   guard (unlike php_current's post-`BUG-0031` guard) is safe in practice, not

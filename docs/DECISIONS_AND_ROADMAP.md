@@ -410,8 +410,13 @@ decisions" below for the original framing.
 - **Classifier false-positive tolerance (conformal α)** — decide at the
   classifier phase (Phase 5); a value judgment, leaning to a high abstain rate
   and low false-flag rate.
-- **Second target app** — decide when generalization becomes a goal, after the
-  core toolkit works.
+- ~~**Second target app** — decide when generalization becomes a goal, after
+  the core toolkit works.~~ **Partially decided (2026-09-22):** a second
+  manifest-generated app on `node_express` (over an external lab like Juice
+  Shop/WAVSEP, and over `python_fastapi`) — see
+  `docs/LAB_SECOND_TARGET_NODE_EXPRESS_PLAN.md` for the full plan and
+  rationale. **Still open within that plan:** whether its pages are original
+  content or corpus-grounded (that plan's §4) — not yet built either way.
 - **Full from-scratch HTTP parser** — reconsider after the toolkit works end to
   end (per D4).
 - ~~**One DB file per project vs one global DB** — decide at Phase 0; leaning
