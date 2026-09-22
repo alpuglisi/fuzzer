@@ -277,7 +277,14 @@ tracked in the requirements files, not here.
   schema/Eloquent-timestamps gap in the G4 write path) — see that test
   module's own docstring and `CC-LAB-0058` for the full detail; neither is
   fixed here (documented future work, out of this additive-only change's
-  scope). Tier 2's real, dialect-correct, container-based oracle confirmation
+  scope). **Capability-probe fix (`CC-LAB-0059`/`FR-LAB-56`, `BUG-0029`,
+  2026-09-22):** `live_boot_available()`'s network-reachability check now
+  runs a real, bounded `composer show -a` Packagist round trip through
+  composer's own (proxy-aware) HTTP client, instead of a bare
+  `socket.create_connection` — the raw-socket version could report
+  "available" on a path a real, proxied `composer install` does not take,
+  letting a gated test hang instead of pass/skip in an environment whose
+  real HTTPS egress requires a configured proxy. Tier 2's real, dialect-correct, container-based oracle confirmation
   remains unbuilt (this MariaDB mode strengthens but does not replace it — it
   proves boot + observable behavior against the real engine, not an
   oracle-grade verdict). A second

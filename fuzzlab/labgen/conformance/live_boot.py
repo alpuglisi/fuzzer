@@ -73,11 +73,18 @@ the one shape class where dialect matters for the *verdict itself*.
 
 **Skip-guarded, matching this project's PA-0005/T-LAB0.7 convention.**
 :func:`live_boot_available` is the one authoritative capability probe
-(``composer`` + ``php`` on PATH, plus real Packagist network reachability) a
-caller (chiefly the pytest suite) must check before constructing a
-:class:`LiveBootHarness` -- exactly like :func:`tier0.php_available` gates
-``php -l``. A missing tool or unreachable network SKIPS the check; it never
-silently reports a pass.
+(``composer`` + ``php`` on PATH, plus a real, bounded Packagist round trip
+made through composer's own HTTP client -- ``BUG-0029``: a bare raw-socket
+reachability check is not an accurate predictor of whether a real
+``composer install`` will complete in bounded time, e.g. when this
+environment's real HTTPS path requires a configured proxy a raw
+``socket.create_connection`` bypasses) a caller (chiefly the pytest suite)
+must check before constructing a :class:`LiveBootHarness` -- exactly like
+:func:`tier0.php_available` gates ``php -l``. A missing tool or unreachable
+network SKIPS the check; it never silently reports a pass, and every later
+real subprocess step in the pipeline (``composer install``, ``artisan
+key:generate``) also enforces its own bounded timeout independently -- the
+probe passing is never relied on alone to guarantee those won't hang.
 """
 
 from __future__ import annotations
@@ -123,28 +130,76 @@ class LiveBootError(RuntimeError):
     never an error)."""
 
 
-def _network_reachable(host: str = "repo.packagist.org", timeout: float = 5.0) -> bool:
-    try:
-        socket.create_connection((host, 443), timeout=timeout).close()
-        return True
-    except OSError:
+#: How long :func:`_composer_network_probe` may take before it reports the
+#: network unavailable rather than hang -- enforced by ``subprocess.run``'s
+#: own ``timeout``, never inferred from the probe "returning" on its own
+#: (``BUG-0029``: a probe that can only report success/failure, never hang,
+#: is the entire point of replacing a bare socket connect with it).
+NETWORK_PROBE_TIMEOUT_S = 20.0
+
+
+def _composer_network_probe(timeout: float = NETWORK_PROBE_TIMEOUT_S) -> bool:
+    """Actually attempt the real operation :func:`live_boot_available` must
+    predict the outcome of -- a real Packagist metadata round trip through
+    **composer's own HTTP client** (``composer show -a <pkg>``, the cheapest
+    composer subcommand that still performs one) -- instead of a bare
+    ``socket.create_connection`` to port 443 (``BUG-0029``).
+
+    Why the raw-socket version was wrong, concretely: in this project's own
+    sandboxed CI environment, outbound HTTPS only actually completes through
+    a configured HTTPS proxy (``HTTPS_PROXY``/``https_proxy``; see
+    ``/root/.ccr/README.md``). A raw TCP ``connect()`` to
+    ``repo.packagist.org:443`` can succeed (this environment's egress
+    accepts the TCP handshake) even though a *real* TLS/HTTP request outside
+    the proxied path is not the path ``composer install`` itself will use --
+    so the old probe's "yes, network available" answer did not predict
+    whether the real dependent operation (a real ``composer install``) would
+    complete in bounded time. This probe closes that gap by running the
+    *actual client* (``composer``, which honors ``HTTPS_PROXY`` exactly as
+    ``composer install`` will) against the *actual dependency* (Packagist),
+    not a substitute transport.
+
+    ``psr/log`` is queried with no local ``composer.json`` present (run from
+    a scratch cwd) so this never reads/writes this repo's own lockfile or
+    vendor state -- a read-only capability check, like every other
+    ``*_available()`` probe in this project (PA-0005/PA-0008).
+
+    Bounded and enforced by this function's own ``timeout`` -- a
+    :class:`subprocess.TimeoutExpired` or any other failure to run composer
+    reports unavailable (``False``), never propagates and never hangs the
+    caller: PA-0025's fail-closed doctrine ("a wrapper's status conclusion
+    must be independently verified against the real thing, not inferred"),
+    extended here from tool-oracle output classification to a pre-flight
+    capability probe."""
+    if shutil.which("composer") is None:
         return False
+    try:
+        result = subprocess.run(
+            ["composer", "show", "-a", "--no-interaction", "--no-ansi", "psr/log"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=tempfile.gettempdir(),
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    return result.returncode == 0
 
 
 def live_boot_available() -> bool:
     """The authoritative capability probe this module's own tests (and any
     other caller) must gate on before constructing a
     :class:`LiveBootHarness` -- PA-0005/PA-0008: a real capability check
-    (composer + php on PATH, and Packagist actually reachable), never a
-    fragile proxy. Composer's own dry-run resolution against Packagist is
-    what this project's task brief verified by hand; this is that same
-    check, made mechanical and skip-guarding rather than assumed once and
-    hardcoded."""
+    (composer + php on PATH, and a real, bounded, composer-driven Packagist
+    round trip -- :func:`_composer_network_probe`, not a raw socket connect;
+    see its own docstring and ``BUG-0029`` for why the raw-socket version
+    was a fragile, misleading proxy for the real thing it needed to
+    predict)."""
     return (
         shutil.which("composer") is not None
         and shutil.which("php") is not None
         and SKELETON_DIR.is_dir()
-        and _network_reachable()
+        and _composer_network_probe()
     )
 
 
@@ -536,10 +591,24 @@ INSERT INTO posts (title, body) VALUES
 
 
 def _run(cmd: list[str], *, cwd: Path, timeout: float, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
-    result = subprocess.run(
-        cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env,
-    )
-    return result
+    """Run a real subprocess step of the live-boot pipeline (``composer
+    install``, ``artisan key:generate``, ...) with an enforced, bounded
+    ``timeout`` on every call site -- never left to the caller to remember
+    (``BUG-0029``/PA-0032: a passing capability probe is not a substitute
+    for every *later* real network/subprocess operation also being bounded
+    on its own). A hung network mid-install now raises a clear, immediate
+    :class:`LiveBootError` naming which step and after how long -- never an
+    uncaught :class:`subprocess.TimeoutExpired` and never an indefinite
+    hang."""
+    try:
+        return subprocess.run(
+            cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise LiveBootError(
+            f"{cmd[0]} did not complete within {timeout}s (cmd={cmd!r}): "
+            f"stdout={exc.stdout!r} stderr={exc.stderr!r}"
+        ) from exc
 
 
 @dataclass(frozen=True)

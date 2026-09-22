@@ -1499,6 +1499,37 @@ lane) can submit a payload as
     boot + real, observable behavior against the real engine and real
     schema, which is a stronger, but still narrower, claim than that.
 
+- **FR-LAB-56** *(`live_boot.py`'s capability-probe accuracy; `CC-LAB-0059`,
+  `BUG-0029`/`PA-0032`, 2026-09-22).* `live_boot_available()`'s network-
+  reachability check must exercise the **actual operation path** it gates
+  (a real `composer install`'s proxy-aware HTTPS/Packagist round trip
+  through composer's own HTTP client), never a raw-socket or other proxy
+  signal for it that can diverge from the real path in an environment
+  whose real HTTPS egress requires a configured proxy a bare
+  `socket.create_connection` bypasses:
+  - `_composer_network_probe()` runs a real, minimal `composer show -a
+    psr/log` query (no local `composer.json`/lockfile touched) as the
+    network half of `live_boot_available()`, replacing the prior bare
+    `socket.create_connection((host, 443))` check (`_network_reachable`,
+    `FR-LAB-52`'s original probe — now removed as unsound per `BUG-0029`'s
+    RCA).
+  - The probe enforces its own bounded, explicit timeout
+    (`NETWORK_PROBE_TIMEOUT_S`) and reports unavailable (`False`) — never
+    raises, never hangs the caller — on a `subprocess.TimeoutExpired` or
+    any `OSError` starting the process.
+  - Every later real subprocess step of the live-boot pipeline (`composer
+    install`, `artisan key:generate`, run through the shared `_run()`
+    helper) also enforces its own explicit, bounded `timeout=`
+    independently of this probe passing — a passing probe is never relied
+    on alone to guarantee a later real step won't hang — and `_run()`
+    turns a `subprocess.TimeoutExpired` from any of them into a clear
+    `LiveBootError` naming the command and bound, rather than letting it
+    propagate uncaught or hang.
+  - This requirement generalizes to any future `*_available()`-style
+    capability probe added to this component: it must test the real,
+    actual dependent operation's path, not an easier-to-check stand-in for
+    it (`PA-0032`).
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

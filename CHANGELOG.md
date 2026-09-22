@@ -14,6 +14,16 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB: fixed `live_boot_available()`'s network-reachability probe, which tested a bare
+  raw-socket TCP connect instead of the actual, proxy-aware composer-driven Packagist
+  round trip `composer install` itself performs — in a sandbox where real HTTPS only
+  completes through a configured proxy, the raw-socket probe could report "available"
+  without predicting whether the real, gated operation would complete in bounded time,
+  letting a live-boot test hang instead of pass/skip. Replaced with
+  `_composer_network_probe()` (a real, bounded `composer show -a` round trip); `_run()`
+  now wraps a `subprocess.TimeoutExpired` from any pipeline step in a clear
+  `LiveBootError` instead of letting it propagate uncaught. `CC-LAB-0059`/`FR-LAB-56`,
+  `BUG-0029`, `PA-0032`.
 - Docs: added `docs/VULN_CORPUS_EXPANSION_PLAN_SITE_ARCHETYPES.md` — a
   proposed extension to `docs/VULN_CORPUS_EXPANSION_PLAN.md` that sources
   corpus collection from concrete popular-website categories and their

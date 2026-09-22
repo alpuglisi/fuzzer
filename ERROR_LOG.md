@@ -18,6 +18,26 @@ Format per entry:
 
 ---
 
+## 2026-09-22 — LAB: `live_boot_available()`'s network probe tested a raw socket connect, not the real proxied composer-install path, letting a live-boot test hang instead of skip/pass (fixed)
+
+- **Symptom:** a background lane's incidental plain `pytest -q` run observed
+  `tests/test_labgen_conformance_live_boot.py::test_live_boot_forms_manifest_serves_real_pages`
+  hang indefinitely instead of completing or skipping (could not be reproduced on demand
+  in this session's own sandbox; investigated via code reading).
+- **Root cause:** `live_boot_available()`'s `_network_reachable()` probed a bare
+  `socket.create_connection((host, 443))` -- a different, easier operation than the real
+  one it gates (`composer install`'s real, proxy-aware HTTPS round trip through composer's
+  own HTTP client). In a sandbox where outbound HTTPS only actually completes through a
+  configured proxy, a raw TCP connect can report "reachable" without saying anything about
+  whether the real, proxied operation will complete in bounded time.
+- **Remediation:** replaced the raw-socket probe with `_composer_network_probe()`, which
+  runs a real, bounded (`timeout=`-enforced) `composer show -a psr/log` -- the actual
+  client and code path `composer install` itself uses -- and reports unavailable
+  (never hangs, never raises) on timeout/failure. `_run()` (every real subprocess step of
+  the pipeline) now wraps `subprocess.TimeoutExpired` in a clear `LiveBootError` instead of
+  letting it propagate uncaught. See `docs/bugs/BUG-0029-*.md` for the full RCA.
+- **Status:** Fixed (`CC-LAB-0059`/`FR-LAB-56`, `PA-0032`).
+
 ## 2026-09-22 — LAB: `LiveBootHarness` silently followed real redirects and its seeded schema lacked Eloquent timestamp columns (fixed)
 
 - **Symptom:** extending `LiveBootHarness` coverage to the auth/G4 real-page manifests

@@ -3,6 +3,49 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0059 — `live_boot_available()`'s network probe now exercises a real, bounded composer round trip instead of a raw socket connect (FR-LAB-56) (2026-09-22)
+- Change: fixed `BUG-0029` (a genuine code defect, full bug protocol applied). In
+  `fuzzlab/labgen/conformance/live_boot.py`, replaced `_network_reachable()` (a bare
+  `socket.create_connection((host, 443))`) with `_composer_network_probe()`, which runs
+  a real `composer show -a --no-interaction psr/log` (the cheapest composer subcommand
+  that still performs a real Packagist metadata fetch through composer's own HTTP
+  client — the same proxy-aware transport `composer install` itself uses) from a scratch
+  cwd, with an explicit, enforced `timeout=` (`NETWORK_PROBE_TIMEOUT_S = 20.0`) that
+  reports unavailable (never raises, never hangs) on `subprocess.TimeoutExpired` or any
+  `OSError`. `live_boot_available()` now gates on this instead. `_run()` (every real
+  subprocess step of the live-boot pipeline: `composer install`, `artisan
+  key:generate`) now wraps a `subprocess.TimeoutExpired` in a clear `LiveBootError`
+  naming the command and bound, rather than letting it propagate uncaught — every call
+  site already passed an explicit `timeout=`, so this is a fail-clearly-not-a-hang
+  clarity fix at the shared helper, not a new timeout. New test module
+  `tests/test_labgen_conformance_live_boot_probe.py` (7 tests, not skip-guarded) covers
+  the probe's and `_run`'s own failure-handling via monkeypatched `subprocess.run`.
+- Impact (other components / project): none outside LAB — both changed functions are
+  private to `live_boot.py` and reached only through `live_boot_available()`, whose
+  public contract (a `bool`, `True` only when the environment can actually complete the
+  real dependent operation) is unchanged, only made accurate. No other component reads
+  or gates on `_network_reachable`/`_composer_network_probe` directly.
+- Risk (level; mitigation or accepted-risk justification): low. The probe now shells out
+  to `composer` (already a hard runtime dependency of this same module, on the same PATH
+  `live_boot_available()` already checks) rather than opening a raw socket — strictly
+  more representative of the real operation, and explicitly bounded so a slow/hung
+  network reports `False` (skip) at worst, never a hang, matching the pre-existing
+  fail-closed contract of every other `*_available()` probe in this project (PA-0005).
+- Deliverables:
+  - [x] `_composer_network_probe()` replacing `_network_reachable()` — done
+  - [x] `_run()` wraps `subprocess.TimeoutExpired` in `LiveBootError` — done
+  - [x] `tests/test_labgen_conformance_live_boot_probe.py` (7 new tests) — done
+  - [x] `docs/bugs/BUG-0029-*.md`, `PA-0032`, `ERROR_LOG.md`, `CHANGELOG.md` — done
+  - [x] `requirements.md` — `FR-LAB-56` added — done
+- Effectiveness (assessed 2026-09-22): the new probe correctly reports `False` on a
+  simulated timeout, missing composer, and a real nonzero exit (unit tests, all
+  passing); it correctly reports `True` in this session's own sandbox, matching that
+  sandbox's real `composer diagnose`-confirmed connectivity. The existing live-boot
+  test suite (`tests/test_labgen_conformance_live_boot.py`,
+  `..._live_boot_mariadb.py`) was re-run end to end after the change and stayed green
+  (see this change's own bug report for the full pass counts and the honest note that
+  the originally reported hang could not be reproduced on demand in this sandbox).
+
 ### CC-LAB-0058 — real MariaDB-backed live-boot mode + `search.php` canonical-cell resolution (FR-LAB-55) (2026-09-22)
 - Change: two independent, purely additive extensions, both delivered together
   because the second is proven with the first:
