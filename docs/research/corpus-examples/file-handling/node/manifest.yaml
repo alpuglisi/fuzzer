@@ -19,14 +19,23 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-434, CWE-646, CWE-20, CWE-669]
+  cwe_shared: [CWE-434, CWE-20]
+  cwe_unique: [CWE-94, CWE-99]
   cwe_rationale: >
-    Same mechanism/research as idiomatic-peertube-upload-1.ts's
-    cwe_rationale below (added as part of BUG-0029's remediation sweep):
-    no fileFilter at all means the file's dangerous-type-ness is never
-    checked (CWE-434, CWE-20, CWE-669 -- the parent relationships), and the
-    stored filename is taken directly from the client-supplied
-    `file.originalname` with no independent verification (CWE-646).
+    Shared (this cell's own upload-sub-shape class, see idiomatic-1.js
+    below and both peertube-upload entries elsewhere in this corpus):
+    CWE-434 (Unrestricted Upload of File with Dangerous Type), CWE-20
+    (Improper Input Validation).
+    Unique to this entry, researched against the MITRE CWE index: CWE-94
+    (Improper Control of Generation of Code, 'Code Injection') -- this is
+    specifically an *avatar* upload on a real, Discourse-SSO-integrated
+    backend, served from a web-accessible directory per the pattern field;
+    with zero type checking, a server-executable file disguised as an
+    image is the concrete escalation this endpoint's own architecture
+    enables; CWE-99 (Improper Control of Resource Identifiers, 'Resource
+    Injection') -- the uploaded file becomes a new server-side resource
+    identified in part by `file.originalname`, attacker-controlled data,
+    with no server-side identity/type control at all.
   suggested_op: no_extension_check
   suggested_sink_family: fs_web_root_write
 
@@ -41,8 +50,20 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-434, CWE-646, CWE-20, CWE-669]
-  cwe_rationale: "See vulnerable-1.js's cwe_rationale above -- same mechanism, researched once."
+  cwe_shared: [CWE-434, CWE-20]
+  cwe_unique: [CWE-646, CWE-73]
+  cwe_rationale: >
+    Shared: see vulnerable-1.js's cwe_rationale above.
+    Unique to this entry: CWE-646 (Reliance on File Name or Extension of
+    Externally-Supplied File) -- flagging a residual gap even in this
+    "idiomatic" mitigation: the fileFilter checks the client-declared
+    `mimetype` (populated from the multipart Content-Type header the
+    client itself sends, not server-verified against file content), a
+    real, commonly-cited incomplete-mitigation pattern; CWE-73 (External
+    Control of File Name or Path) -- distinct from CWE-646, this is what
+    the *second*, separate layer (path.basename + character allowlist on
+    the stored filename) specifically mitigates, a layer vulnerable-1.js
+    has no equivalent of at all.
   suggested_op: mime_type_check
   suggested_sink_family: fs_web_root_write
 
@@ -57,21 +78,19 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-22, CWE-36, CWE-23, CWE-73]
+  cwe_shared: [CWE-22]
+  cwe_unique: [CWE-36, CWE-23]
   cwe_rationale: >
-    Researched against the MITRE CWE index for this entry's two distinct
-    traversal branches (added as part of BUG-0029's remediation sweep):
-    CWE-22 (Path Traversal) is the parent weakness; CWE-36 (Absolute Path
-    Traversal) is CWE-22's own listed child and the precise fit for the
-    `path.isAbsolute()` branch, which passes a client-supplied absolute
-    path straight to `res.sendFile()`; CWE-23 (Relative Path Traversal) is
-    CWE-22's other listed child and fits the other branch
-    (`path.join(__dirname, file_path)`, traversable via `../` segments);
-    CWE-73 (External Control of File Name or Path) is the broader class
-    both instantiate -- `req.params.path` directly controls the resolved
-    filesystem path with no confinement check. Same rationale applies to
-    idiomatic-2.js below, which demonstrates the mitigation of the same
-    CWEs -- not restated there.
+    Shared (this cell's download-sub-shape class, see idiomatic-2.js
+    below): CWE-22 (Path Traversal), the parent weakness both this entry's
+    branches instantiate.
+    Unique to this entry, researched against the MITRE CWE index -- this
+    entry's own two distinct, independently-real traversal branches: CWE-36
+    (Absolute Path Traversal) is CWE-22's listed child and the precise fit
+    for the `path.isAbsolute()` branch (a client-supplied absolute path
+    passed straight to `res.sendFile()`); CWE-23 (Relative Path Traversal)
+    is CWE-22's other listed child, fitting the other branch
+    (`path.join(__dirname, file_path)`, traversable via `../` segments).
   suggested_op: unconfined_path
   suggested_sink_family: fs_path_read
 
@@ -86,8 +105,22 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-22, CWE-36, CWE-23, CWE-73]
-  cwe_rationale: "See vulnerable-2.js's cwe_rationale above -- same mechanism, researched once."
+  cwe_shared: [CWE-22]
+  cwe_unique: [CWE-706, CWE-171]
+  cwe_rationale: >
+    Shared: see vulnerable-2.js's cwe_rationale above.
+    Unique to this entry: CWE-706 (Use of Incorrectly-Resolved Name or
+    Reference) -- the confinement check's second layer (`fs.realpath()`
+    plus `startsWith()`) is the well-documented string-prefix-confinement
+    pattern, which has a real bypass class of its own if the confining
+    directory's path happens to be a string prefix of an unrelated sibling
+    directory (e.g. `/var/www/config` vs. `/var/www/config-secret`); CWE-171
+    (Cleansing, Canonicalization, and Comparison Errors) -- the *first*
+    layer (`isValidFilename()`'s denylist of `..`/separators/absolute
+    form) runs before canonicalization, relying on the *second* layer's
+    `realpath()` call to actually canonicalize the path; a denylist check
+    performed before canonicalization is the specific pattern CWE-171
+    describes.
   suggested_op: realpath_confine
   suggested_sink_family: fs_path_read
 
@@ -120,24 +153,22 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
-  cwe: [CWE-434, CWE-646, CWE-20, CWE-669]
+  cwe_shared: [CWE-434, CWE-20]
+  cwe_unique: [CWE-770, CWE-1284]
   cwe_rationale: >
-    Researched against the MITRE CWE index for the missing-mimetype-check
-    mechanism this pair contrasts, not recalled: CWE-434 (Unrestricted
-    Upload of File with Dangerous Type) is the primary weakness class;
-    CWE-646 (Reliance on File Name or Extension of Externally-Supplied
-    File) applies because the vulnerable side (below) uses the client-
-    declared `originalname`/mimetype as its sole basis for accepting and
-    naming the file, exactly the anti-pattern CWE-646 names; CWE-20
-    (Improper Input Validation) is CWE-434's own listed parent relationship;
-    CWE-669 (Incorrect Resource Transfer Between Spheres) is CWE-434's own
-    listed parent -- the general class covering a resource (the uploaded
-    file) crossing from an untrusted sphere (the client) into a trusted one
-    (the server's public media directory) without adequate checks. Note:
-    the vulnerable side below additionally introduces CWE-22 (Path
-    Traversal), listed only on that entry since it is a second, distinct
-    mechanism (join() on an unsanitized filename) not present in this
-    idiomatic side at all.
+    Shared: CWE-434 (Unrestricted Upload of File with Dangerous Type) is
+    the primary weakness class; CWE-20 (Improper Input Validation) is its
+    listed parent -- documented once for this pair, see
+    vulnerable-peertube-upload-1.ts below.
+    Unique to this entry, researched against the MITRE CWE index -- this
+    real function does more than the type check: CWE-770 (Allocation of
+    Resources Without Limits or Throttling) -- `checkUserQuota({
+    channelUser, uploadSize, ... })` enforces a per-user resource quota,
+    correctly mitigating exactly this CWE; CWE-1284 (Improper Validation of
+    Specified Quantity in Input) -- `isVideoFileSizeValid(videoFileSize.
+    toString())` separately validates the size *value* itself is within
+    bounds, a distinct check (quantity validation) from the quota
+    enforcement above (resource allocation control).
   suggested_op: mime_type_check   # same op already established for this
                              # cell's PHP entries (no_extension_check's
                              # paired mitigation) -- reused across languages
@@ -162,17 +193,25 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
-  cwe: [CWE-434, CWE-646, CWE-20, CWE-669, CWE-22]
+  cwe_shared: [CWE-434, CWE-20, CWE-22]
+  cwe_unique: [CWE-400, CWE-129]
   cwe_rationale: >
-    First four: see idiomatic-peertube-upload-1.ts's cwe_rationale above --
-    same missing-mimetype-check mechanism, researched once. CWE-22 (Path
-    Traversal) is additional and specific to this vulnerable entry: the
-    manufactured handler builds its destination path via
-    `join(CONFIG.STORAGE.VIDEOS_DIR, file.originalname)` with no
-    sanitization of `originalname` at all, so a filename like
-    `../../etc/cron.d/x` would resolve outside VIDEOS_DIR -- a second,
-    independently-substantiated weakness this specific manufactured file
-    introduces beyond the mimetype-check gap it was built to illustrate.
+    Shared: CWE-434/CWE-20, see idiomatic-peertube-upload-1.ts's
+    cwe_rationale above. CWE-22 (Path Traversal) is additionally shared
+    here (documented, not counted toward this entry's floor -- it is this
+    corpus's own recurring traversal class, see both file-handling
+    traversal-pair entries above) because the manufactured handler builds
+    its destination path via `join(CONFIG.STORAGE.VIDEOS_DIR,
+    file.originalname)` with no sanitization at all, so a filename like
+    `../../etc/cron.d/x` resolves outside VIDEOS_DIR.
+    Unique to this entry, researched against the MITRE CWE index: CWE-400
+    (Uncontrolled Resource Consumption) -- unlike the idiomatic sibling,
+    this handler has no equivalent of checkUserQuota()/
+    isVideoFileSizeValid() at all, so upload size is entirely unbounded;
+    CWE-129 (Improper Validation of Array Index) -- `req.files['videofile']
+    [0]` indexes into the files array with no check that the field exists
+    or has at least one element, a distinct input-shape-validation gap
+    from the missing content checks.
   suggested_op: no_extension_check   # same op already established for
                              # this cell's PHP entries -- reused
   suggested_sink_family: fs_web_root_write

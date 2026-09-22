@@ -1,13 +1,14 @@
 #!/bin/bash
 # Stop hook: mechanically catch the BUG-0029 failure mode (a corpus
-# manifest.yaml entry given only a recalled CWE or two instead of the
-# "more is better" research ceiling docs/VULN_CORPUS_EXPANSION_PLAN.md and
-# docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md's Step 6 both call
-# for) instead of relying on remembering PA-0032. See docs/bugs/BUG-0029-*.md.
+# manifest.yaml entry given only a recalled CWE or two, or CWEs merely
+# copy-pasted across sibling entries) instead of relying on remembering
+# PA-0032. Every entry needs >= 2 CWEs in `cwe_unique:` that are not
+# claimed as unique by any other entry this hook checks (a CWE relevant to
+# more than one entry belongs in `cwe_shared:` instead and does not count
+# toward the floor). See docs/bugs/BUG-0029-*.md.
 
 input=$(cat)
 
-# Recursion guard, same pattern as check-error-log-bookkeeping.sh.
 stop_hook_active=$(echo "$input" | jq -r '.stop_hook_active')
 if [[ "$stop_hook_active" = "true" ]]; then
   exit 0
@@ -26,8 +27,6 @@ if [[ -n "$current_branch" ]] && git rev-parse -q --verify "origin/$current_bran
   upstream="origin/$current_branch"
 fi
 
-# manifest.yaml files touched by this turn's not-yet-landed work
-# (uncommitted changes plus any commits not yet on the remote).
 changed_manifests=$(
   {
     git diff --name-only
@@ -47,13 +46,17 @@ import sys
 try:
     import yaml
 except ImportError:
-    # yaml not available in this environment -- fail open, matching this
-    # project's "never assumed present" posture (PA-0005) for an
-    # environment-dependent check rather than blocking on a missing tool.
     sys.exit(0)
 
 manifests = sys.argv[1].split("\n") if len(sys.argv) > 1 else []
-thin = []
+problems = []
+
+# Track which entry first claimed each CWE as "unique" so a repeat across
+# entries (even across different manifest files) is caught, not just
+# within one file.
+unique_claims = {}  # cwe_id -> (path, file)
+
+all_entries = []  # (path, file, cwe_unique, cwe_shared)
 
 for path in manifests:
     path = path.strip()
@@ -69,25 +72,57 @@ for path in manifests:
     for entry in entries:
         if not isinstance(entry, dict):
             continue
-        cwe_list = entry.get("cwe") or []
-        rationale = entry.get("cwe_count_rationale")
-        if len(cwe_list) < 2 and not rationale:
-            thin.append((path, entry.get("file", "<unnamed>"), len(cwe_list)))
+        fname = entry.get("file", "<unnamed>")
+        cwe_unique = entry.get("cwe_unique")
+        cwe_shared = entry.get("cwe_shared") or []
+        legacy_cwe = entry.get("cwe")
 
-if thin:
+        if cwe_unique is None:
+            if legacy_cwe is not None:
+                # Pre-migration entry using the old flat `cwe:` field.
+                problems.append(
+                    f"{path}: {fname} still uses the old flat `cwe:` field -- "
+                    f"migrate to `cwe_unique:`/`cwe_shared:` per PA-0032's "
+                    f"updated standard (>= 2 CWEs unique to this entry, not "
+                    f"shared with any other touched entry)."
+                )
+            continue
+
+        all_entries.append((path, fname, cwe_unique, cwe_shared))
+
+        if len(cwe_unique) < 2:
+            problems.append(
+                f"{path}: {fname} has only {len(cwe_unique)} cwe_unique "
+                f"entr{'y' if len(cwe_unique) == 1 else 'ies'} (need >= 2). "
+                f"CWEs shared with other entries go in cwe_shared instead "
+                f"and do not count toward this floor."
+            )
+
+        for cwe_id in cwe_unique:
+            if cwe_id in unique_claims:
+                other_path, other_fname = unique_claims[cwe_id]
+                if (other_path, other_fname) != (path, fname):
+                    problems.append(
+                        f"{cwe_id} is claimed as cwe_unique by both "
+                        f"{other_path}:{other_fname} and {path}:{fname} -- "
+                        f"a CWE relevant to more than one entry belongs in "
+                        f"cwe_shared on both, not cwe_unique on either."
+                    )
+            else:
+                unique_claims[cwe_id] = (path, fname)
+
+if problems:
     print(
-        "One or more docs/research/corpus-examples/*/manifest.yaml entries touched by "
-        "this turn have fewer than 2 CWE IDs and no cwe_count_rationale field:",
+        "docs/research/corpus-examples/*/manifest.yaml entries touched by this "
+        "turn don't meet the >= 2 unique CWEs per entry standard:",
         file=sys.stderr,
     )
-    for path, fname, count in thin:
-        print(f"  - {path}: {fname} (cwe count = {count})", file=sys.stderr)
+    for p in problems:
+        print(f"  - {p}", file=sys.stderr)
     print(
-        "Per docs/VULN_CORPUS_EXPANSION_PLAN.md / "
-        "docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md Step 6 and PA-0032, "
-        "research the MITRE CWE index (https://cwe.mitre.org/data/index.html) for "
-        "additional substantiated CWEs before finishing, or add a "
-        "cwe_count_rationale: field explaining why fewer than 2 genuinely apply.",
+        "Research the MITRE CWE index (https://cwe.mitre.org/data/index.html) for "
+        "CWEs genuinely specific to each entry's own code, per PA-0032 / "
+        "docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md Step 6.",
         file=sys.stderr,
     )
     sys.exit(1)

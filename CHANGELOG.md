@@ -14,6 +14,30 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Research + bookkeeping: redid the site-architecture corpus expansion's
+  Step 2 and Step 6 per direct follow-up instruction (deeper architecture
+  research; at least 2 CWEs unique to each entry, with CWEs shared across
+  entries documented but not counted toward that floor).
+  - Deepened `docs/research/site-architecture-survey.md`'s 4 weakest
+    architecture write-ups (Google Workspace, Cash App, Venmo, Trip.com)
+    with additional independent sources, resolving most of their previously
+    "unconfirmed" claims.
+  - Replaced every touched entry's flat `cwe:`/`cwe_rationale:` fields
+    (across all 5 manifest files this session has touched: `ecommerce-logic/
+    php`, `ugc-xss/python`, `access-control/node`, `file-handling/node`,
+    `auth-session/php` — 29 entries total, the 12 added in waves 1-2 plus 17
+    pre-existing entries sharing those files) with `cwe_shared:`/
+    `cwe_unique:`/`cwe_rationale:`, researching each entry's own actual code
+    for >= 2 CWEs not claimed by any other entry in the corpus.
+  - Extended `.claude/hooks/check-corpus-cwe-coverage.sh` to check
+    `cwe_unique` count *and* cross-entry uniqueness (not just presence) —
+    it caught 2 remaining flat-`cwe:` entries and one real cross-entry ID
+    collision (`CWE-367` independently claimed by two different entries)
+    the first time it ran against this pass's work; both fixed, hook now
+    passes clean.
+  - Updated `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`'s Step 6
+    section and PA-0032 (`docs/PREVENTIVE_ACTIONS.md`) to describe the
+    tightened shared/unique standard and its enforcement.
 - Planning: rewrote `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`
   from scratch, per explicit instruction following `docs/bugs/BUG-0029-*.md`.
   Restructures the 8 steps to be concise and executable, and replaces the

@@ -30,15 +30,26 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-79, CWE-80, CWE-116, CWE-838]
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-489, CWE-501]
   cwe_rationale: >
-    Same |safe/autoescape-bypass mechanism and MITRE CWE index research as
-    idiomatic-django-comments-1.html's cwe_rationale elsewhere in this
-    corpus (added as part of BUG-0029's remediation sweep): CWE-79
-    (primary), CWE-80 (its listed child, the reflected-HTML variant),
-    CWE-116 (its listed parent, the general output-encoding-failure class),
-    CWE-838 (Jinja2's |safe is choosing no encoding for an HTML context
-    that requires one).
+    Shared (this entry's own primary class -- see this file's other
+    XSS-family entries for the same shared pair, documented once per
+    entry): CWE-79 (Cross-site Scripting) is the primary weakness; CWE-116
+    (Improper Encoding or Escaping of Output) is CWE-79's listed parent.
+    Unique to this entry, researched against the MITRE CWE index and not
+    claimed by any other entry in this corpus: CWE-489 (Active Debug Code)
+    -- per this entry's own notes, the app's `insecure()` route (this file)
+    is deliberately kept live and publicly reachable alongside its
+    `secure()` sibling in the very same deployed teaching app, the same
+    real-world risk class as a debug/demo-only endpoint left reachable in
+    a shipped instance; CWE-501 (Trust Boundary Violation) -- per the
+    pattern field, the comment is stored "completely unsanitized," meaning
+    the untrusted-input/trusted-application-data trust boundary is crossed
+    unneutralized at *both* the storage-write step and the later
+    template-render step, not just at render time (contrast idiomatic-1.py,
+    where bleach.clean() neutralizes the value at the storage-write
+    crossing, leaving only render-time trust to establish).
   suggested_op: raw_concat   # Jinja2's |safe filter opts the value out of
                              # autoescaping entirely -- functionally the same
                              # "no transform at all" shape as the existing
@@ -63,8 +74,24 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-79, CWE-80, CWE-116, CWE-838]
-  cwe_rationale: "See vulnerable-1.py's cwe_rationale above -- same mechanism, researched once."
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-183, CWE-85]
+  cwe_rationale: >
+    Shared: see vulnerable-1.py's cwe_rationale above -- same weakness
+    class, the same source file's secure() sibling route.
+    Unique to this entry: CWE-183 (Permissive List of Allowed Inputs) --
+    bleach.clean() sanitizes via an *allowlist* of permitted tags/
+    attributes (default allowlist per the pattern field), meaning the app
+    explicitly supports rich-text comments; the sanitizer itself, not the
+    render step, is now the security boundary, and an over-permissive
+    allowlist (e.g. permitting `<a href>` without restricting the URL
+    scheme) is a distinct residual risk this entry's own mitigation
+    introduces, separate from the render-time |safe concern shared with
+    vulnerable-1.py; CWE-85 (Doubled Character XSS Manipulations) -- HTML
+    sanitizers including bleach have real, documented history of bypasses
+    via double-encoding/character-doubling tricks, a distinct attack class
+    an allowlist sanitizer (unlike simple escaping) is specifically
+    exposed to.
   suggested_op: bleach_clean   # bleach.clean() on ingest is an allowlist
                              # HTML sanitizer, distinct from html_entity_escape
                              # (the matrix's only existing HTML-body transform,
@@ -90,8 +117,21 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-79, CWE-80, CWE-116, CWE-838]
-  cwe_rationale: "See vulnerable-1.py's cwe_rationale above -- same mechanism, researched once."
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-1188, CWE-436]
+  cwe_rationale: >
+    Shared: see vulnerable-1.py's cwe_rationale above -- same weakness
+    class, an independent production instance of the mitigation.
+    Unique to this entry: CWE-1188 (Insecure Default Initialization of
+    Resource) -- the pattern field says bleach.clean() runs with its
+    "default allowlist," i.e. this production app relies on the library's
+    shipped default configuration, not an app-reviewed/hardened allowlist,
+    as its security boundary; CWE-436 (Interpretation Conflict) -- the
+    sink method name (`TaskHistory.set_comment_action`) and its
+    persistence as task *history* implies this sanitized-but-still-HTML
+    value may be read later by a different consumer (an audit/export
+    view, a notification digest) that assumes history entries are plain
+    text -- two components interpreting the same stored data differently.
   suggested_op: bleach_clean   # same allowlist-sanitizer mechanism as
                              # idiomatic-1.py, a second independent instance
                              # -- reused, not a new name
@@ -124,21 +164,25 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
-  cwe: [CWE-79, CWE-80, CWE-116, CWE-838]
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-83, CWE-838]
   cwe_rationale: >
-    Researched against the MITRE CWE index for the |safe/autoescape
-    mechanism this pair contrasts, not recalled: CWE-79 (Improper
-    Neutralization of Input During Web Page Generation, 'Cross-site
-    Scripting') is the primary weakness class; CWE-80 (Improper
-    Neutralization of Script-Related HTML Tags in a Web Page, Basic XSS) is
-    CWE-79's own listed child and the specific variant this reflected-HTML
-    shape is; CWE-116 (Improper Encoding or Escaping of Output) is CWE-79's
-    listed parent relationship -- the general output-encoding failure class
-    CWE-79 instantiates for HTML specifically; CWE-838 (Inappropriate
-    Encoding for Output Context) applies because |safe is literally
-    choosing "no encoding" for a context (an HTML document body) that
-    requires one. Same rationale applies to vulnerable-django-comments-1.html
-    below, which shares this exact mechanism -- not restated there.
+    Shared: CWE-79 (Cross-site Scripting) is the primary weakness class;
+    CWE-116 (Improper Encoding or Escaping of Output) is its listed parent
+    -- documented once for this pair, see vulnerable-django-comments-1.html
+    below.
+    Unique to this entry, researched against the MITRE CWE index
+    (https://cwe.mitre.org/data/index.html): CWE-83 (Improper Neutralization
+    of Script in Attributes in a Web Page) -- the real template also
+    interpolates `comment.id` directly into an HTML attribute
+    (`<dt id="c{{ comment.id }}">`), a genuinely different sink context
+    from the comment-body sink this pair is otherwise built around, and
+    Django's default autoescape does not differentiate attribute-context
+    from body-context encoding requirements; CWE-838 (Inappropriate
+    Encoding for Output Context) -- this template has (at least) two
+    distinct output contexts (the `id` attribute and the comment body)
+    sharing one undifferentiated escaping mechanism, exactly CWE-838's
+    "one encoding applied regardless of context" description.
   suggested_op: default_autoescape   # relying on the template engine's
                              # default escaping (no explicit op applied) is
                              # a distinct shape from bleach_clean (sanitizes
@@ -169,8 +213,21 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
-  cwe: [CWE-79, CWE-80, CWE-116, CWE-838]
-  cwe_rationale: "See idiomatic-django-comments-1.html's cwe_rationale above -- same mechanism, researched once."
+  cwe_shared: [CWE-79, CWE-116]
+  cwe_unique: [CWE-80, CWE-81]
+  cwe_rationale: >
+    Shared: see idiomatic-django-comments-1.html's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index, distinct
+    from the idiomatic sibling's attribute-context finding (this entry's
+    added |safe touches only comment.comment, not the id attribute -- an
+    inconsistent, partial application of risk, not the same finding):
+    CWE-80 (Improper Neutralization of Script-Related HTML Tags in a Web
+    Page, Basic XSS) -- CWE-79's listed child for the general "script tag
+    survives unescaped" shape |safe produces here; CWE-81 (Improper
+    Neutralization of Script in an IMG Tag in a Web Page) -- a second,
+    distinct listed child of CWE-79, specifically the IMG/`onerror`-style
+    payload vector that surviving-unescaped markup enables, separate from
+    a bare `<script>` tag.
   suggested_op: raw_concat   # |safe opts the value out of autoescaping
                              # entirely -- same "no transform at all" shape
                              # already covered by the existing raw_concat

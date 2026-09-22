@@ -286,7 +286,13 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   checkable artifact (a list, a count, a set of records) must get its **own** concrete,
   mechanical check at the time the instruction is first acted on — not a restatement of
   the instruction's own wording in a planning document, and not deferred on the
-  assumption PA-0020's general principle already covers it by existing. First concrete
+  assumption PA-0020's general principle already covers it by existing. Concrete
   instance: `.claude/hooks/check-corpus-cwe-coverage.sh`, which blocks the session from
   ending if a touched `docs/research/corpus-examples/*/*/manifest.yaml` entry has fewer
-  than 2 CWE IDs and no `cwe_count_rationale:` explaining the cap. (from BUG-0029)
+  than 2 `cwe_unique` CWEs, or if any `cwe_unique` ID is also claimed unique by another
+  touched entry — a CWE relevant to more than one entry belongs in `cwe_shared` and does
+  not count toward either entry's floor. (Initially built as a simpler length check on a
+  flat `cwe:` field; tightened to the shared/unique split and cross-entry uniqueness
+  check after the first version still allowed copy-pasting the same CWEs across sibling
+  entries, which a direct follow-up instruction correctly identified as not meeting the
+  actual intent.) (from BUG-0029)

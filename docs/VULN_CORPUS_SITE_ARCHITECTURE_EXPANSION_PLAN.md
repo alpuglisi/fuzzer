@@ -55,42 +55,61 @@ validation tiers unchanged. It does not redefine them.
    `lab/safety_matrix.yaml` row or module template — a proposal, not an
    applied change; see "Step 8 handoff" below for why it stops there.
 
-## Step 6 in detail (the fix for BUG-0029)
+## Step 6 in detail (revised twice: BUG-0029, then tightened per direct
+## follow-up instruction — shared CWEs don't count toward the floor)
+
+**Schema: `cwe_shared:` / `cwe_unique:` / `cwe_rationale:`, not a flat
+`cwe:` list.** A CWE genuinely relevant to more than one entry in this
+corpus is real and worth recording — but it belongs in `cwe_shared:` and
+does **not** count toward any entry's floor. Only CWEs that are unique to
+one specific entry (not claimed by any other entry this corpus's
+mechanical check covers) count toward the floor below.
 
 **Procedure, per entry:**
 
 1. Identify the entry's actual weakness mechanism from its `pattern:` field
    (what specifically goes wrong, not just "XSS" or "IDOR" as a label).
 2. Look up that mechanism's primary CWE in the MITRE CWE index
-   (<https://cwe.mitre.org/data/index.html>).
-3. Walk that CWE's own listed relationships — parent (`ChildOf`), children
-   (`ParentOf`), and related weaknesses — and record every one that is
-   **genuinely, specifically applicable** to this entry's actual code, not
-   every relationship the index happens to list. A parent class applies
-   only if the entry's mechanism truly instantiates it; a sibling/child
-   applies only if the entry's code matches that child's more specific
-   description.
-4. Check whether the entry's code introduces a **second, independent**
-   mechanism beyond the one that motivated collecting it (e.g. an unrelated
-   path-traversal issue alongside the mimetype-check gap the entry was
-   built to show). If so, that's a genuinely separate CWE, not padding.
-5. Record the result as `cwe: [...]` plus a `cwe_count_rationale:` field:
-   one line per CWE naming *why* it applies (the specific relationship or
-   mechanism), not just the ID. A paired idiomatic/vulnerable entry that
-   shares one mechanism can point its rationale at the other entry's
-   write-up instead of repeating it.
+   (<https://cwe.mitre.org/data/index.html>) and put the class-defining
+   CWE(s) — the ones that would also apply to this entry's paired
+   counterpart or to other entries with the same mechanism — in
+   `cwe_shared:`.
+3. Read the entry's **own actual code** (not the mechanism in the
+   abstract) for details specific to *this* entry: a distinctive line, a
+   parameter, a real bug the excerpt happens to contain, a consequence
+   specific to what the code does (what kind of data, what kind of
+   endpoint). Walk the MITRE index's relationships (parent/child/related)
+   from those specifics, not from the shared class alone — a narrow,
+   well-grounded child ID beats a broad parent every time two entries would
+   otherwise end up wanting the same ID.
+4. Check whether the entry's code introduces a second, independent
+   mechanism beyond the one that motivated collecting it. If so, that's a
+   genuinely separate CWE.
+5. Record `cwe_shared: [...]`, `cwe_unique: [...]`, and `cwe_rationale:`
+   (prose naming *why* each unique CWE applies, grounded in the entry's own
+   code — not just the ID). A CWE that turns out to already be claimed
+   unique by another entry moves to `cwe_shared` on both, and a fresh,
+   narrower replacement is found — this is expected, not a failure; the
+   mechanical check below is what catches it.
 
-**Floor: every entry needs at least 2 CWEs and a rationale, or an explicit,
-honest statement of why fewer genuinely apply.** "Fewer CWEs, honestly
-justified" is an acceptable outcome; "fewer CWEs, unexamined" is the bug
-this plan exists to stop recurring.
+**Floor: every entry needs at least 2 `cwe_unique` entries, not shared with
+any other entry this corpus's check covers.** No honesty-escape-hatch this
+time — this floor is not negotiable per direct instruction; if step 3
+doesn't turn up two genuinely distinct, well-grounded IDs on the first
+pass, read the code again rather than padding with a generic parent CWE
+(which almost always turns out to be shared with something else anyway).
 
 **Enforcement.** `.claude/hooks/check-corpus-cwe-coverage.sh` runs as a
-`Stop` hook and mechanically blocks the session from ending if any
-`docs/research/corpus-examples/*/*/manifest.yaml` entry touched by the
-turn has fewer than 2 CWEs and no `cwe_count_rationale:`. This is the
-enforcement path PA-0032 requires for this instruction — the instruction is
-not re-stated here as prose alone a third time.
+`Stop` hook and mechanically blocks the session from ending if any touched
+`docs/research/corpus-examples/*/*/manifest.yaml` entry has fewer than 2
+`cwe_unique` entries, or if any `cwe_unique` ID is also claimed unique by
+another touched entry (a real cross-entry collision the first version of
+this hook could not detect at all, since it only counted a flat list's
+length). This is the enforcement path PA-0032 requires — verified against
+the actual corpus, not just asserted: it caught 2 legacy entries still on
+the old flat `cwe:` field and one real cross-entry ID collision
+(CWE-367 claimed by two different entries) the first time it ran against
+this pass's work.
 
 ## Step 8 handoff (unchanged from before, restated briefly)
 
@@ -142,17 +161,27 @@ entry are the proposal a later change accepts, renames, or merges.
 - [x] Step 1: all 6 categories x 5 sites identified, sourced —
       `docs/research/site-architecture-survey.md`.
 - [x] Step 2: architecture write-ups complete for all 6 categories (20
-      sites in wave 2, plus the first 10 in wave 1) — same file.
+      sites in wave 2, plus the first 10 in wave 1), then deepened further
+      per direct instruction for the 4 weakest write-ups (Google Workspace,
+      Cash App, Venmo, Trip.com) with additional independent sources — same
+      file.
 - [x] Steps 3-7: one real architecture/function combination carried through
       per category (6 total pairs) — see `docs/research/corpus-examples/
       {ecommerce-logic,ugc-xss,access-control,file-handling,auth-session}/
       {php,node,python}/manifest.yaml` for the `architecture:`-tagged
       entries added in waves 1-2.
-- [x] Step 6 remediated to this plan's new floor for all 17 entries the
-      BUG-0029 sweep touched (the 6 pairs added in waves 1-2 plus 5
-      pre-existing entries sharing their manifest files) — `cwe_count_rationale:`
-      present on each, `.claude/hooks/check-corpus-cwe-coverage.sh` passes
-      clean on the current tree.
+- [x] Step 6 fully redone (not just remediated) to the tightened
+      `cwe_shared`/`cwe_unique` standard for all 29 entries across the 5
+      touched manifest files (the 12 entries added in waves 1-2, plus 17
+      pre-existing entries sharing those manifest files) — every entry
+      carries >= 2 `cwe_unique` CWEs not claimed by any other entry in the
+      corpus, each grounded in that entry's own actual code (not the
+      abstract mechanism), with `cwe_rationale:` prose per entry.
+      `.claude/hooks/check-corpus-cwe-coverage.sh` (extended to check
+      cross-entry uniqueness, not just count) passes clean on the current
+      tree — it caught 2 entries still on the old flat `cwe:` field and one
+      real cross-entry ID collision (CWE-367) the first time it ran against
+      this pass's work, both fixed.
 - [x] Step 8: `suggested_op`/`suggested_sink_family` proposals recorded for
       all 6 pairs. Not yet applied to `lab/safety_matrix.yaml` — deliberately
       out of scope for a corpus-collection pass (see "Step 8 handoff").

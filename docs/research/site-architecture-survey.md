@@ -167,19 +167,26 @@ roundup](https://www.wrike.com/collaborative-work-guide/best-collaboration-tools
   runtime, and WebRTC for real-time audio/video. Primary source (Microsoft
   Community Hub, a first-party Microsoft engineering channel). Confidence:
   primary source — confirmed.
-- **Google Workspace (Docs/Sheets/Drive).** Weaker sourcing than the other
-  four: no single first-party "how Google Docs is built" engineering post
-  was found in this pass (Google is comparatively far less open than
-  Slack/Notion/Atlassian about internal architecture specifics for
-  Workspace). What's confirmable from Google's own public technology
-  disclosures (Cloud Platform documentation, published engineering talks):
-  Bigtable/Spanner as the backing distributed-storage technologies Google
-  uses broadly, and Protocol Buffers as Google's standard internal
-  serialization format instead of JSON/XML. These are Google's own
-  documented platform technologies (primary source), but their specific
-  application to Docs/Sheets/Drive internals is not independently
-  confirmed in this pass — **marked unconfirmed at the product-specific
-  level**, confirmed only at the general-Google-infrastructure level.
+- **Google Workspace (Docs/Sheets/Drive).** Deepened in this pass: still no
+  single first-party "how Google Docs is built" post (Google remains
+  comparatively closed about Workspace internals versus Slack/Notion/
+  Atlassian), but the product-specific gap flagged previously is now
+  substantially narrowed by two independently-confirming technical-analysis
+  sources (not each other's mirror — one is a general system-design
+  writeup, the other a dedicated collaborative-editing-architecture
+  deep-dive) that both name the same two claims: **Operational
+  Transformation** (adopted circa 2009) as Docs' real-time collaborative-
+  editing conflict-resolution algorithm — each editor's keystrokes are sent
+  as transformable *operations*, not raw character diffs, and a per-
+  document collaboration-engine server resolves concurrent operations
+  deterministically before persisting; and a **split storage layer** —
+  **Spanner** for globally-distributed metadata/permissions (who can see/
+  edit a given document) and **Bigtable** for the actual document content,
+  chosen for its high-throughput row-level access pattern. Confidence: two
+  independent source types (general system-design analysis + a dedicated
+  collaborative-editing deep-dive, cross-confirming the same OT/Spanner/
+  Bigtable split) — **confirmed at the product-specific level**, upgraded
+  from the prior pass's "unconfirmed."
 
 ## Category 4 — Media / streaming / content platforms (Step 2 complete)
 
@@ -280,16 +287,24 @@ Source: [Statista most-visited travel/tourism sites
   mobile clients. Primary source (TripAdvisor's own Tripadvisor Tech
   Medium publication and engineering.tripadvisor.com). Confidence: primary
   source — confirmed.
-- **Trip.com.** Weaker sourcing than the other four: the strongest source
-  found is a CNCF case study (a semi-primary source, since CNCF case
-  studies are written in collaboration with the featured company) documenting
+- **Trip.com.** Deepened in this pass: the platform-level picture is now
+  broader (still no equivalent of "Trip.com's app code is Java/Go/etc." was
+  independently confirmed, so that specific claim stays unconfirmed) — the
+  CNCF case study (semi-primary, co-written with the company) documents
   Trip.com's large-scale Kubernetes platform (100+ platform engineers,
-  10,000+ engineers total, both on-prem and multi-cloud AWS/Alibaba Cloud
-  clusters, Cilium for networking) — but this is infrastructure/platform
-  level, not application-architecture/language-stack level. **Marked
-  unconfirmed at the application-stack level** (no equivalent of "Trip.com
-  is built in Java/PHP/etc." was found and independently confirmed in this
-  pass); confirmed only at the Kubernetes-platform level.
+  10,000+ engineers total, on-prem plus multi-cloud AWS/Alibaba Cloud
+  clusters, Cilium for networking); newly added this pass, a second,
+  independent source (an Alibaba Cloud community engineering writeup,
+  cross-published from Trip.com's own account of the same work) documents
+  Trip.com's API layer specifically: a large fleet of internal HTTP
+  services whose interface contracts are generated as OpenAPI/Swagger
+  specs, fronted (for newer AI/LLM-integration traffic specifically) by a
+  self-hosted API gateway built on the open-source Higress project,
+  deployed inside the same internal Kubernetes cluster. Confidence: two
+  independent source types for the platform/API-gateway layer — confirmed
+  at that layer. **Still marked unconfirmed at the application-language
+  level** (Java/Go/etc.) — that specific claim was not found from any
+  source in this pass, primary or otherwise, and is not asserted.
 
 ## Category 6 — Fintech / payments (Step 2 complete)
 
@@ -336,20 +351,40 @@ fintech apps 2026](https://www.velmie.com/post/best-us-fintech-apps).
   provider (including early adoption of AWS Outpost for consistent tooling
   in regulated regions). Primary source (Wise's own engineering blog).
   Confidence: primary source — confirmed.
-- **Cash App (Block).** Cash App's own engineering blog ("Cash App Code
-  Blog") is a real, citable primary source, but this pass only surfaced
-  client-side (Android/Compose) architecture detail from it, not backend
-  language/service-architecture specifics. **Marked unconfirmed at the
-  backend-architecture level** — confirmed only that Cash App's Android
-  client uses a reactive Compose-based architecture (Cash App's own
-  engineering blog); no independently-confirmed backend stack claim is
-  made here.
-- **Venmo (PayPal-owned).** No dedicated first-party Venmo engineering
-  architecture post was found in this pass distinct from PayPal's own
-  (Venmo's public "Engineering @ Venmo" page functions mainly as a careers/
-  index page in what this pass could access, not a detailed architecture
-  writeup). Venmo has operated as a PayPal-owned subsidiary since 2013,
-  which is itself a two-independently-confirmable fact (PayPal's own
-  investor/corporate disclosures, widely corroborated), but **the specific
-  claim that Venmo's application stack matches PayPal's is unconfirmed** in
-  this pass — recorded as such rather than assumed.
+- **Cash App (Block).** Deepened in this pass: the backend-architecture gap
+  flagged previously is now partly closed. Cash App's own engineering blog
+  and Kotlin's own published case study of Cash App (a vendor case study,
+  but one built from direct interview material with Cash App's own
+  engineers — a distinct source type from the blog) both independently
+  confirm **Kotlin as Cash App's chosen backend-services language since
+  2017** (alongside Java for performance-sensitive services), running on a
+  **microservices architecture on AWS**; Cash App's own blog additionally
+  documents payment processing as a **state-machine**, with each payment's
+  lifecycle tracked via a `state` column that advances as the payment moves
+  through defined stages. Confidence: two independent source types (Cash
+  App's own blog plus JetBrains/Kotlin's independently-reported case study)
+  — **confirmed at the backend-architecture level**, upgraded from the
+  prior pass's "unconfirmed." Still only the client-side (Android/Compose)
+  detail from the prior pass and this backend summary are confirmed;
+  finer service-decomposition detail (which specific services exist) was
+  not found and is not claimed.
+- **Venmo (PayPal-owned).** Deepened in this pass: the application-stack
+  gap flagged previously is now partly closed by a genuinely independent
+  source — an AWS customer case study (a semi-primary source: AWS
+  publishing its own customer's account, distinct from anything PayPal or
+  Venmo self-published) documents Venmo's own infrastructure team, in their
+  own words, describing a migration from MySQL to **Amazon DynamoDB** for
+  its primary datastore (a 90% infrastructure-cost reduction cited
+  directly), **Python services running on Kubernetes**, **Celery** for
+  asynchronous queue processing, a parallel **MySQL-to-Redis** migration
+  for fast reads/writes, and **Puppet** for infrastructure configuration
+  management. Confidence: this AWS case study is one source, but it quotes
+  a named Venmo director of engineering directly (treated here as
+  functionally primary — the company's own engineer, on the record, not a
+  third party's inference) — **confirmed at this level**, upgraded from
+  the prior pass's "unconfirmed." The broader claim that Venmo's stack is
+  now unified with PayPal's own platform (per PayPal's own July 2025
+  "PayPal World" interoperability announcement, a second, genuinely
+  independent primary source) is confirmed only as an *initiative in
+  progress*, not as "Venmo now runs on PayPal's stack" — that stronger
+  claim remains unconfirmed and is not made here.
