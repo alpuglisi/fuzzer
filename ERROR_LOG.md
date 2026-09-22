@@ -18,6 +18,57 @@ Format per entry:
 
 ---
 
+## 2026-09-22 — Mass-assignment codegen: smuggled SQLi, broken POST routing, and a nullable dereference, found by PR review (fixed, BUG-0031/PA-0034)
+
+- **Symptom:** PR #1's external review found the `orm_entity_bulk_assign`
+  code-generation increment (`CC-LAB-0064`/`FR-LAB-59`), which had passed its
+  own 21-test suite and a 4-round change-control review, had three real
+  defects: the php_current sink spliced an unvalidated `$_POST` array key
+  into a SQL identifier position (a real SQL injection, CWE-89, smuggled
+  into a cell classified mass-assignment-only); `php_laravel`'s
+  `_served_route_for()` hardcoded `GET` for illustrative pages, so the new
+  illustrative POST cells were served at the wrong HTTP method and could
+  never be exercised; and the php_laravel sink dereferenced
+  `$request->user()->id` unguarded, fatal on any unauthenticated request.
+- **Root cause:** the feature's own tests and its change-control review both
+  verified the code against the *design it was written to satisfy* (mass
+  assignment via a valid key; correct registry wiring; correct Eloquent
+  semantics), never against adversarial inputs orthogonal to that design (a
+  malformed identifier; a method-mismatched request; a null auth context) —
+  see `docs/bugs/BUG-0031-*.md` for the full Five Whys.
+- **Remediation:** identifier-charset guard on the SQL column name
+  (php_current); `_served_route_for()` now serves an illustrative page at
+  its cell's own declared method (verified backward-compatible against every
+  pre-existing illustrative cell, all of which are `GET`); PHP 8 nullsafe
+  `?->id` on the Laravel sink. New preventive action: **PA-0034**.
+- **Status:** Fixed.
+
+## 2026-09-22 — `check-corpus-cwe-coverage.sh` silently passed unannotated and unpaired corpus entries (fixed, BUG-0032/PA-0034)
+
+- **Symptom:** the same PR review found two gaps in the `Stop` hook built
+  specifically to mechanically enforce the corpus's CWE-coverage and
+  pairs-per-class floors (`PA-0033`): an entry with neither `cwe_unique:`
+  nor the legacy `cwe:` field at all fell through a bare `continue` with no
+  problem ever recorded; and the pairs-per-class floor only counted
+  `role: vulnerable` entries, so a cell with 5 orphaned vulnerable entries
+  and zero idiomatic counterparts satisfied the floor and passed.
+- **Root cause:** the hook was validated only by confirming it caught the
+  specific problems already present in the real, self-authored corpus at
+  build time — never against synthetic fixtures shaped like the exact
+  failure modes it claims to catch, which the author's own habits never
+  happened to produce. Same root-cause class as `BUG-0030` (`PA-0033`'s own
+  origin), recurring one layer up in the enforcement mechanism `BUG-0030`'s
+  fix built — see `docs/bugs/BUG-0032-*.md`'s prior-preventive-action
+  failure analysis.
+- **Remediation:** both gaps closed; verified against three synthetic
+  fixtures (missing-CWE-field entry; 5-vulnerable/3-idiomatic cell;
+  genuine 5/5 paired cell) since the real corpus never exercised these
+  shapes. Also fixed a related nit: the no-upstream diff fallback now uses
+  the merge-base with the default branch, so a manifest edit already
+  committed on a fresh, unpushed branch is still checked. Strengthens
+  **PA-0033** via the shared **PA-0034**.
+- **Status:** Fixed.
+
 ## 2026-09-22 — Corpus expansion: CWE research under-delivered the plan's explicit "more is better" instruction, recurring right after a related correction (fixed)
 
 - **Symptom:** every one of the 6 manufactured vulnerable/idiomatic pairs
@@ -119,8 +170,8 @@ Format per entry:
   client and code path `composer install` itself uses -- and reports unavailable
   (never hangs, never raises) on timeout/failure. `_run()` (every real subprocess step of
   the pipeline) now wraps `subprocess.TimeoutExpired` in a clear `LiveBootError` instead of
-  letting it propagate uncaught. See `docs/bugs/BUG-0031-*.md` for the full RCA.
-- **Status:** Fixed (`CC-LAB-0065`/`FR-LAB-60`, `PA-0034`).
+  letting it propagate uncaught. See `docs/bugs/BUG-0033-*.md` for the full RCA.
+- **Status:** Fixed (`CC-LAB-0068`/`FR-LAB-60`, `PA-0035`).
 
 ## 2026-09-22 — LAB: `LiveBootHarness` silently followed real redirects and its seeded schema lacked Eloquent timestamp columns (fixed)
 

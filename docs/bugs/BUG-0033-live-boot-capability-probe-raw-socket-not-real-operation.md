@@ -1,4 +1,4 @@
-# BUG-0031 — `live_boot_available()`'s capability probe tested raw TCP
+# BUG-0033 — `live_boot_available()`'s capability probe tested raw TCP
 reachability, not the real, proxied composer-install path it exists to
 predict, so a hung real install could pass the probe and then hang the test
 
@@ -117,7 +117,7 @@ alone succeed within any bounded time.
   and elapsed bound, instead of letting it propagate uncaught. Every call
   site already passed an explicit `timeout=` (`composer install`:
   `install_timeout=240.0`; `artisan key:generate`: `30.0`), so this is a
-  clarity fix, not a new timeout — PA-0034 (below) requires this bounded-
+  clarity fix, not a new timeout — PA-0035 (below) requires this bounded-
   and-error-clearly discipline to be **enforced at the shared helper**,
   never left to each call site to remember correctly on its own.
 - New regression coverage:
@@ -195,7 +195,7 @@ before deciding the preventive action.
   all. Not the same mechanism.
 - No prior `BUG-NNNN`/`PA-NNNN` addresses a capability probe that exercises
   a different, easier operation than the one it gates. This is a new
-  preventive action (`PA-0034`), not a strengthening of an existing one —
+  preventive action (`PA-0035`), not a strengthening of an existing one —
   though it explicitly generalizes PA-0025's fail-closed "verify the real
   thing, not a proxy for it" doctrine to a new context (capability probes),
   the way PA-0028/PA-0029/PA-0030 each already generalize an earlier PA to
@@ -203,5 +203,5 @@ before deciding the preventive action.
 
 ## Preventive action
 
-**PA-0034** (new) — recorded in `docs/PREVENTIVE_ACTIONS.md`; see that file
+**PA-0035** (new) — recorded in `docs/PREVENTIVE_ACTIONS.md`; see that file
 for the full text and the PA-0002 sweep this bug's fix performed.

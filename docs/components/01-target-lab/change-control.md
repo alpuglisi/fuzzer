@@ -3,6 +3,48 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0068 — `live_boot_available()`'s network probe now exercises a real, bounded composer round trip instead of a raw socket connect (FR-LAB-60) (2026-09-22)
+- Change: fixed `BUG-0033` (a genuine code defect, full bug protocol applied). In
+  `fuzzlab/labgen/conformance/live_boot.py`, replaced `_network_reachable()` (a bare
+  `socket.create_connection((host, 443))`) with `_composer_network_probe()`, which runs
+  a real `composer show -a --no-interaction psr/log` (the cheapest composer subcommand
+  that still performs a real Packagist metadata fetch through composer's own HTTP
+  client — the same proxy-aware transport `composer install` itself uses) from a scratch
+  cwd, with an explicit, enforced `timeout=` (`NETWORK_PROBE_TIMEOUT_S = 20.0`) that
+  reports unavailable (never raises, never hangs) on `subprocess.TimeoutExpired` or any
+  `OSError`. `live_boot_available()` now gates on this instead. `_run()` (every real
+  subprocess step of the live-boot pipeline: `composer install`, `artisan
+  key:generate`) now wraps a `subprocess.TimeoutExpired` in a clear `LiveBootError`
+  naming the command and bound, rather than letting it propagate uncaught — every call
+  site already passed an explicit `timeout=`, so this is a fail-clearly-not-a-hang
+  clarity fix at the shared helper, not a new timeout. New test module
+  `tests/test_labgen_conformance_live_boot_probe.py` (7 tests, not skip-guarded) covers
+  the probe's and `_run`'s own failure-handling via monkeypatched `subprocess.run`.
+- Impact (other components / project): none outside LAB — both changed functions are
+  private to `live_boot.py` and reached only through `live_boot_available()`, whose
+  public contract (a `bool`, `True` only when the environment can actually complete the
+  real dependent operation) is unchanged, only made accurate. No other component reads
+  or gates on `_network_reachable`/`_composer_network_probe` directly.
+- Risk (level; mitigation or accepted-risk justification): low. The probe now shells out
+  to `composer` (already a hard runtime dependency of this same module, on the same PATH
+  `live_boot_available()` already checks) rather than opening a raw socket — strictly
+  more representative of the real operation, and explicitly bounded so a slow/hung
+  network reports `False` (skip) at worst, never a hang, matching the pre-existing
+  fail-closed contract of every other `*_available()` probe in this project (PA-0005).
+- Deliverables:
+  - [x] `_composer_network_probe()` replacing `_network_reachable()` — done
+  - [x] `_run()` wraps `subprocess.TimeoutExpired` in `LiveBootError` — done
+  - [x] `tests/test_labgen_conformance_live_boot_probe.py` (7 new tests) — done
+  - [x] `docs/bugs/BUG-0033-*.md`, `PA-0035`, `ERROR_LOG.md`, `CHANGELOG.md` — done
+  - [x] `requirements.md` — `FR-LAB-60` added — done
+- Effectiveness (assessed 2026-09-22): the new probe correctly reports `False` on a
+  simulated timeout, missing composer, and a real nonzero exit (unit tests, all
+  passing); it correctly reports `True` in this session's own sandbox, matching that
+  sandbox's real `composer diagnose`-confirmed connectivity. The existing live-boot
+  test suite (`tests/test_labgen_conformance_live_boot.py`,
+  `..._live_boot_mariadb.py`) was re-run end to end after the change and stayed green
+  (see this change's own bug report for the full pass counts and the honest note that
+  the originally reported hang could not be reproduced on demand in this sandbox).
 ### CC-LAB-0067 — L-P3.3c-CUT: the atomic cutover, retiring `puppy-fort-factory/` (FR-LAB-62) (2026-09-22)
 - Change: executed the atomic cutover (`docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.5/
   §4.3.6.6), authorized by the project owner with explicit sign-off that the deletion
@@ -283,49 +325,83 @@ Component code: **LAB**. Entry format and required fields: see
   `tests/test_labgen_conformance_live_boot.py`, ~165s), and the full fast suite is green:
   **1565 passed, 8 skipped, 12 deselected** (`pytest -q -m "not slow"`).
 
-### CC-LAB-0065 — `live_boot_available()`'s network probe now exercises a real, bounded composer round trip instead of a raw socket connect (FR-LAB-60) (2026-09-22)
-- Change: fixed `BUG-0031` (a genuine code defect, full bug protocol applied). In
-  `fuzzlab/labgen/conformance/live_boot.py`, replaced `_network_reachable()` (a bare
-  `socket.create_connection((host, 443))`) with `_composer_network_probe()`, which runs
-  a real `composer show -a --no-interaction psr/log` (the cheapest composer subcommand
-  that still performs a real Packagist metadata fetch through composer's own HTTP
-  client — the same proxy-aware transport `composer install` itself uses) from a scratch
-  cwd, with an explicit, enforced `timeout=` (`NETWORK_PROBE_TIMEOUT_S = 20.0`) that
-  reports unavailable (never raises, never hangs) on `subprocess.TimeoutExpired` or any
-  `OSError`. `live_boot_available()` now gates on this instead. `_run()` (every real
-  subprocess step of the live-boot pipeline: `composer install`, `artisan
-  key:generate`) now wraps a `subprocess.TimeoutExpired` in a clear `LiveBootError`
-  naming the command and bound, rather than letting it propagate uncaught — every call
-  site already passed an explicit `timeout=`, so this is a fail-clearly-not-a-hang
-  clarity fix at the shared helper, not a new timeout. New test module
-  `tests/test_labgen_conformance_live_boot_probe.py` (7 tests, not skip-guarded) covers
-  the probe's and `_run`'s own failure-handling via monkeypatched `subprocess.run`.
-- Impact (other components / project): none outside LAB — both changed functions are
-  private to `live_boot.py` and reached only through `live_boot_available()`, whose
-  public contract (a `bool`, `True` only when the environment can actually complete the
-  real dependent operation) is unchanged, only made accurate. No other component reads
-  or gates on `_network_reachable`/`_composer_network_probe` directly.
-- Risk (level; mitigation or accepted-risk justification): low. The probe now shells out
-  to `composer` (already a hard runtime dependency of this same module, on the same PATH
-  `live_boot_available()` already checks) rather than opening a raw socket — strictly
-  more representative of the real operation, and explicitly bounded so a slow/hung
-  network reports `False` (skip) at worst, never a hang, matching the pre-existing
-  fail-closed contract of every other `*_available()` probe in this project (PA-0005).
+### CC-LAB-0065 — fix 3 real defects PR review found in CC-LAB-0064's mass-assignment codegen, plus 2 in its own CWE-coverage hook (2026-09-22)
+- Change: implements the corrective action for `BUG-0031` and `BUG-0032`
+  (see those reports for the full root-cause analysis). Not run through this
+  project's pre-change review gate (`docs/components/README.md`) as a fresh
+  design proposal: these are direct fixes for concrete findings an external
+  reviewer already posted on `alpuglisi/fuzzer#1`, so the review that gate
+  exists to front-load already happened, via the PR mechanism instead.
+  1. **`fuzzlab/labgen/modules/sinks/orm_entity_bulk_assign.php.j2`
+     (php_current):** the SET-clause column name (`$__col`) is now rejected
+     unless it matches `^[A-Za-z0-9_]+$` before being spliced into `$sql` —
+     closes a real SQL injection (CWE-89) an unvalidated `$_POST` array key
+     could smuggle into a cell classified mass-assignment-only. The
+     mass-assignment vulnerability itself is untouched: any *validly-shaped*
+     column (`role`, `is_admin`, anything not on the endpoint's real
+     allowlist) still reaches the query on the unfiltered twin.
+  2. **`fuzzlab/labgen/emitters/php_laravel/__init__.py`'s
+     `_served_route_for()`:** an illustrative page now serves at the cell's
+     own declared `method` instead of a hardcoded `"GET"` — the new
+     mass-assignment cells are the first illustrative POST cells this
+     emitter ever rendered, and the hardcoding meant their generated route
+     could never actually receive a POST. Verified backward-compatible:
+     every pre-existing illustrative cell across every `lab/manifests/*.yaml`
+     is already `GET` (checked via `load_manifest` before the fix landed).
+  3. **`fuzzlab/labgen/emitters/php_laravel/templates/sinks/
+     orm_entity_bulk_assign.php.j2`:** `$request->user()?->id` (PHP 8
+     nullsafe) instead of `$request->user()->id` — the generated
+     illustrative cell sets up no auth/session middleware, so an
+     unauthenticated request previously hit a fatal `null->id` error rather
+     than the non-fatal null-degrade `php_current`'s `$currentUser['id']`
+     array-access convention already has for the same cell shape.
+  4. **`.claude/hooks/check-corpus-cwe-coverage.sh`:** an entry with
+     neither `cwe_unique:` nor the legacy `cwe:` field now records an
+     explicit problem instead of silently `continue`-ing past it; the
+     pairs-per-class floor now counts `role: idiomatic` entries alongside
+     `role: vulnerable` and requires >= 5 of **each** (a cell with 5
+     orphaned vulnerable entries and 0 idiomatic previously passed); a
+     vulnerable entry's `derived_from` is checked against the files
+     actually present in its manifest. Also, a nit-severity fix: the
+     no-upstream diff fallback now uses the merge-base with the default
+     branch, so a manifest edit already committed on a fresh, unpushed
+     branch is still checked rather than silently skipped.
+  5. Tests: `test_orm_entity_bulk_assign_sink_rejects_a_syntax_injection_
+     shaped_key` (renders the malicious key against a real in-memory SQLite
+     table, proves it never reaches the query); `test_the_routes_file_
+     carries_one_sorted_line_per_cell` rewritten to check every cell's
+     actual HTTP verb (its prior form counted only `Route::get(` lines,
+     which would have hidden this exact bug by construction).
+- Impact (other components / project): no new files; all 3 codegen fixes are
+  edits to templates/routing logic `CC-LAB-0064` already added, and the
+  hook fixes are edits to the hook `PA-0033` already added. No schema or
+  registry-shape change. `test_the_routes_file_carries_one_sorted_line_per_
+  cell`'s rewrite changes what it asserts (verb-aware instead of
+  GET-only) but not what it protects — still one line per cell, still
+  cell-ID-sorted.
+- Risk (level; mitigation): low for the codegen fixes (narrowly scoped,
+  each verified against a real rendered-and-executed reproduction of the
+  defect it closes, full `labgen`-marked suite re-run clean at the same 29
+  pre-existing environment-only failures as before this change). Low for
+  the hook fixes (verified against synthetic fixtures per `BUG-0032`'s own
+  corrective action, since the real corpus never exercised the malformed
+  shapes being fixed).
 - Deliverables:
-  - [x] `_composer_network_probe()` replacing `_network_reachable()` — done
-  - [x] `_run()` wraps `subprocess.TimeoutExpired` in `LiveBootError` — done
-  - [x] `tests/test_labgen_conformance_live_boot_probe.py` (7 new tests) — done
-  - [x] `docs/bugs/BUG-0031-*.md`, `PA-0034`, `ERROR_LOG.md`, `CHANGELOG.md` — done
-  - [x] `requirements.md` — `FR-LAB-60` added — done
-- Effectiveness (assessed 2026-09-22): the new probe correctly reports `False` on a
-  simulated timeout, missing composer, and a real nonzero exit (unit tests, all
-  passing); it correctly reports `True` in this session's own sandbox, matching that
-  sandbox's real `composer diagnose`-confirmed connectivity. The existing live-boot
-  test suite (`tests/test_labgen_conformance_live_boot.py`,
-  `..._live_boot_mariadb.py`) was re-run end to end after the change and stayed green
-  (see this change's own bug report for the full pass counts and the honest note that
-  the originally reported hang could not be reproduced on demand in this sandbox).
-
+  - [x] SQLi guard in the php_current sink template — done.
+  - [x] `_served_route_for()` HTTP-method fix — done.
+  - [x] Nullsafe operator in the php_laravel sink template — done.
+  - [x] `check-corpus-cwe-coverage.sh`'s two silent-pass fixes + one nit fix
+    — done.
+  - [x] `docs/bugs/BUG-0031-*.md`, `docs/bugs/BUG-0032-*.md`,
+    `docs/PREVENTIVE_ACTIONS.md` **PA-0034**, `ERROR_LOG.md` entries — done.
+  - [x] Tests updated/added, full suite re-verified — done.
+- Effectiveness (assessed 2026-09-22): effective. All 4 generated PHP files
+  (2 php_current, 2 php_laravel) still `php -l` clean; the SQLi guard
+  verified via a real in-memory SQLite execution proving the malicious key
+  never reaches SQL text; the routing fix verified via
+  `route_fragment_for()` now emitting `Route::post(...)` for the new cells;
+  full `not slow`-marked suite: 1483 passed (29 pre-existing environment-
+  only failures, unchanged from before this fix).
 ### CC-LAB-0064 — orm_entity_bulk_assign (mass-assignment) module implementation, php_current emitter (2026-09-22)
 - Change: implements code generation for the `orm_entity_bulk_assign` sink
   family (one of the 20 new sink families `CC-LAB-0063`/`FR-LAB-58` added as

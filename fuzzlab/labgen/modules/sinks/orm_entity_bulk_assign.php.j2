@@ -1,23 +1,40 @@
 // A bulk-assignment write: every key present in {{ value_expr }} at this point
 // (tainted when unfiltered, allowlisted when the runtime_field_allowlist
 // transform ran first) becomes a column this statement writes -- the sink
-// never filters anything itself, per this file's own "a sink never escapes
-// anything itself" convention, applied here to *which columns* rather than
-// *how a value is escaped*. Bound values are always parameters, never
-// concatenated; only the SET clause's column list is built from tainted keys.
+// never decides *which* columns are legitimate to write (that is the
+// mass_assignment concern the transform pipeline models), per this file's
+// own "a sink never escapes anything itself" convention. It DOES still
+// reject a key that cannot even be a bare SQL identifier
+// (^[A-Za-z0-9_]+$) before splicing it into $sql: an array key surviving
+// PHP's key normalization can carry arbitrary punctuation, and neither
+// PDO nor any SQL dialect offers a binding mechanism for identifiers, so
+// admitting one unchecked would smuggle a second, unlabeled vulnerability
+// class (raw SQL injection, CWE-89) into a cell this corpus classifies as
+// mass-assignment only (lab/safety_matrix.yaml's `mass_assignment`
+// concern). This still leaves the mass-assignment vulnerability fully
+// intact on the unfiltered twin: any *validly-shaped* column name --
+// `role`, `is_admin`, anything not on the endpoint's own allowlist --
+// still reaches the query; only a value that could never be a real column
+// name in the first place (and so could only be a syntax-injection
+// payload) is skipped.
 $__massAssignFields = {{ value_expr }};
 $__setClauses = [];
 $__boundValues = [];
+$__appliedFields = [];
 foreach ($__massAssignFields as $__col => $__val) {
+    if (!preg_match('/^[A-Za-z0-9_]+$/', (string) $__col)) {
+        continue;
+    }
     $__setClauses[] = "$__col = ?";
     $__boundValues[] = $__val;
+    $__appliedFields[] = $__col;
 }
 if (!empty($__setClauses)) {
     $sql = "UPDATE {{ table }} SET " . implode(', ', $__setClauses) . " WHERE {{ id_column }} = ?";
     $__boundValues[] = $currentUser['id'];
     $stmt = $pdo->prepare($sql);
     $stmt->execute($__boundValues);
-    $row = ['updated_fields' => array_keys($__massAssignFields)];
+    $row = ['updated_fields' => $__appliedFields];
 } else {
     $row = ['updated_fields' => []];
 }

@@ -295,7 +295,7 @@ tracked in the requirements files, not here.
   schema/Eloquent-timestamps gap in the G4 write path) — see that test
   module's own docstring and `CC-LAB-0058` for the full detail; neither is
   fixed here (documented future work, out of this additive-only change's
-  scope). **Capability-probe fix (`CC-LAB-0065`/`FR-LAB-60`, `BUG-0031`,
+  scope). **Capability-probe fix (`CC-LAB-0068`/`FR-LAB-60`, `BUG-0033`,
   2026-09-22):** `live_boot_available()`'s network-reachability check now
   runs a real, bounded `composer show -a` Packagist round trip through
   composer's own (proxy-aware) HTTP client, instead of a bare

@@ -1705,8 +1705,8 @@ lane) can submit a payload as
   phase1_harder_shapes_sample.yaml` run the same way), the same gates
   every other manifest in this repository currently fails on here.
 
-- **FR-LAB-60** *(`live_boot.py`'s capability-probe accuracy; `CC-LAB-0065`,
-  `BUG-0031`/`PA-0034`, 2026-09-22).* `live_boot_available()`'s network-
+- **FR-LAB-60** *(`live_boot.py`'s capability-probe accuracy; `CC-LAB-0068`,
+  `BUG-0033`/`PA-0035`, 2026-09-22).* `live_boot_available()`'s network-
   reachability check must exercise the **actual operation path** it gates
   (a real `composer install`'s proxy-aware HTTPS/Packagist round trip
   through composer's own HTTP client), never a raw-socket or other proxy
@@ -1717,7 +1717,7 @@ lane) can submit a payload as
     psr/log` query (no local `composer.json`/lockfile touched) as the
     network half of `live_boot_available()`, replacing the prior bare
     `socket.create_connection((host, 443))` check (`_network_reachable`,
-    `FR-LAB-52`'s original probe — now removed as unsound per `BUG-0031`'s
+    `FR-LAB-52`'s original probe — now removed as unsound per `BUG-0033`'s
     RCA).
   - The probe enforces its own bounded, explicit timeout
     (`NETWORK_PROBE_TIMEOUT_S`) and reports unavailable (`False`) — never

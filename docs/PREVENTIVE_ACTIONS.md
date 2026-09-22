@@ -318,7 +318,29 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   prose (this plan doc's Status section) rather than mechanically enforced — caught
   before it recurred a second time by applying PA-0033's own rule proactively this time,
   rather than waiting for a review to catch it.
-- **PA-0034** — A capability probe that gates whether a real, potentially slow or
+- **PA-0034** — Two related rules, from a PR review that found real defects a
+  same-session test suite and a 4-round change-control review both missed (from
+  `BUG-0031`, code-generation, and `BUG-0032`, an enforcement hook — recurrence of the
+  same root cause one layer apart):
+  1. Any new code-generation sink/template that constructs a SQL statement (or other
+     executable text) from a runtime-computed *identifier* (not just a bound value), or
+     that combines a request-derived value with a request-derived HTTP verb/route/
+     auth-context assumption for the first time in a given code path, needs at least one
+     test that renders the actual code and executes it against an adversarial input
+     *orthogonal* to the feature's own intended demonstration (a malformed identifier, a
+     mismatched HTTP verb, an absent auth context) — not only assertions that prove the
+     feature's own happy path. A feature's own tests passing proves it does what it was
+     built to do; it does not prove it doesn't also do something else unsafe.
+  2. Any mechanical check built to enforce a quantitative/structural floor (PA-0033's own
+     class of artifact) must, before being trusted, be run against at least one synthetic
+     fixture *constructed to be malformed in the specific way the check claims to catch*
+     — not validated solely by confirming it flags the real corpus's/codebase's own
+     currently-known problems, since self-authored data rarely reproduces the malformed
+     shape a future author might actually produce. Strengthens PA-0033: building the
+     check is necessary but not sufficient; the check needs its own adversarial
+     self-check before "mechanical enforcement exists" can be trusted. (from BUG-0031,
+     BUG-0032)
+- **PA-0035** — A capability probe that gates whether a real, potentially slow or
   hanging operation runs (a `pytest.mark.skipif(not xxx_available(), ...)`-style guard,
   or any equivalent pre-flight check) must exercise the **actual operation path** —
   the same client/transport/binary the real, gated operation itself uses, doing the
@@ -332,7 +354,7 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   verified against what the real underlying thing actually did, never inferred from an
   easier-to-observe stand-in") from tool-oracle *output* classification to pre-flight
   *capability* probes specifically — a context PA-0025's own wording does not cover
-  (see `BUG-0031`'s recurrence review for why this is a new rule rather than a
+  (see `BUG-0033`'s recurrence review for why this is a new rule rather than a
   stretching of PA-0025's stated scope). Every such probe must also enforce its **own**
   bounded, explicit timeout on that real operation and report unavailable (never raise,
   never hang) if it is exceeded — passing this probe is never, by itself, a guarantee
@@ -346,4 +368,4 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   (a CLI binary on PATH, or an actual import-and-parse of the library in question), not
   a proxy signal for it — only `live_boot_available()`'s network half
   (`_network_reachable`, now `_composer_network_probe`) had this defect. (from
-  BUG-0031)
+  BUG-0033)

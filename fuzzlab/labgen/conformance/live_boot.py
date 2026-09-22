@@ -80,7 +80,7 @@ the one shape class where dialect matters for the *verdict itself*.
 **Skip-guarded, matching this project's PA-0005/T-LAB0.7 convention.**
 :func:`live_boot_available` is the one authoritative capability probe
 (``composer`` + ``php`` on PATH, plus a real, bounded Packagist round trip
-made through composer's own HTTP client -- ``BUG-0031``: a bare raw-socket
+made through composer's own HTTP client -- ``BUG-0033``: a bare raw-socket
 reachability check is not an accurate predictor of whether a real
 ``composer install`` will complete in bounded time, e.g. when this
 environment's real HTTPS path requires a configured proxy a raw
@@ -139,7 +139,7 @@ class LiveBootError(RuntimeError):
 #: How long :func:`_composer_network_probe` may take before it reports the
 #: network unavailable rather than hang -- enforced by ``subprocess.run``'s
 #: own ``timeout``, never inferred from the probe "returning" on its own
-#: (``BUG-0031``: a probe that can only report success/failure, never hang,
+#: (``BUG-0033``: a probe that can only report success/failure, never hang,
 #: is the entire point of replacing a bare socket connect with it).
 NETWORK_PROBE_TIMEOUT_S = 20.0
 
@@ -149,7 +149,7 @@ def _composer_network_probe(timeout: float = NETWORK_PROBE_TIMEOUT_S) -> bool:
     predict the outcome of -- a real Packagist metadata round trip through
     **composer's own HTTP client** (``composer show -a <pkg>``, the cheapest
     composer subcommand that still performs one) -- instead of a bare
-    ``socket.create_connection`` to port 443 (``BUG-0031``).
+    ``socket.create_connection`` to port 443 (``BUG-0033``).
 
     Why the raw-socket version was wrong, concretely: in this project's own
     sandboxed CI environment, outbound HTTPS only actually completes through
@@ -198,7 +198,7 @@ def live_boot_available() -> bool:
     :class:`LiveBootHarness` -- PA-0005/PA-0008: a real capability check
     (composer + php on PATH, and a real, bounded, composer-driven Packagist
     round trip -- :func:`_composer_network_probe`, not a raw socket connect;
-    see its own docstring and ``BUG-0031`` for why the raw-socket version
+    see its own docstring and ``BUG-0033`` for why the raw-socket version
     was a fragile, misleading proxy for the real thing it needed to
     predict)."""
     return (
@@ -601,7 +601,7 @@ def _run(cmd: list[str], *, cwd: Path, timeout: float, env: dict[str, str] | Non
     """Run a real subprocess step of the live-boot pipeline (``composer
     install``, ``artisan key:generate``, ...) with an enforced, bounded
     ``timeout`` on every call site -- never left to the caller to remember
-    (``BUG-0031``/PA-0034: a passing capability probe is not a substitute
+    (``BUG-0033``/PA-0035: a passing capability probe is not a substitute
     for every *later* real network/subprocess operation also being bounded
     on its own). A hung network mid-install now raises a clear, immediate
     :class:`LiveBootError` naming which step and after how long -- never an

@@ -6,6 +6,12 @@
 // vulnerability class raw PDO exhibits, reached through Laravel's real,
 // idiomatic Query Builder API rather than a manufactured workaround. The
 // sink never filters anything itself.
+//
+// This illustrative cell (like php_current's `$currentUser['id']` twin)
+// carries no login/session setup of its own -- `?->id` (PHP 8's nullsafe
+// operator) degrades an unauthenticated request to a null WHERE value
+// rather than a fatal error on `null->id`, matching php_current's own
+// non-fatal degrade-to-null on an undefined `$currentUser` array access.
 $__massAssignFields = {{ value_expr }};
-DB::table('{{ table }}')->where('{{ id_column }}', $request->user()->id)->update($__massAssignFields);
+DB::table('{{ table }}')->where('{{ id_column }}', $request->user()?->id)->update($__massAssignFields);
 $rows = ['updated_fields' => array_keys($__massAssignFields)];

@@ -1,4 +1,4 @@
-"""Regression coverage for `BUG-0031`/`PA-0034`: `live_boot.live_boot_available()`'s
+"""Regression coverage for `BUG-0033`/`PA-0035`: `live_boot.live_boot_available()`'s
 capability probe must exercise the real, actual operation path (a bounded
 composer-driven Packagist round trip) rather than a raw-socket proxy for it,
 and every later real subprocess step in the live-boot pipeline (`_run`) must
@@ -26,7 +26,7 @@ from fuzzlab.labgen.conformance import live_boot
 def test_composer_network_probe_returns_false_on_timeout_never_raises(monkeypatch) -> None:
     """A hung `composer show` (the real op the probe exercises) must report
     `False` -- never propagate `subprocess.TimeoutExpired`, and never hang
-    the caller. Direct regression for `BUG-0031`'s failure mode."""
+    the caller. Direct regression for `BUG-0033`'s failure mode."""
     monkeypatch.setattr(live_boot.shutil, "which", lambda name: "/usr/local/bin/composer")
 
     def _raise_timeout(*args, **kwargs):
@@ -69,7 +69,7 @@ def test_composer_network_probe_enforces_a_bounded_timeout(monkeypatch) -> None:
     """The probe must actually pass a `timeout=` through to `subprocess.run`
     -- never rely on composer's own internal timeouts, which is exactly the
     "assume the later real operation is bounded because the probe passed"
-    gap `PA-0034` closes."""
+    gap `PA-0035` closes."""
     monkeypatch.setattr(live_boot.shutil, "which", lambda name: "/usr/local/bin/composer")
     captured: dict = {}
 
@@ -87,7 +87,7 @@ def test_run_wraps_subprocess_timeout_in_live_boot_error_not_a_hang(monkeypatch)
     `composer install`, `artisan key:generate`, ...) must turn a real
     `subprocess.TimeoutExpired` into an immediate, clearly-worded
     `LiveBootError` -- never let it propagate uncaught and never hang.
-    Direct regression for `PA-0034`'s "every later real operation must also
+    Direct regression for `PA-0035`'s "every later real operation must also
     be independently bounded" requirement."""
 
     def _raise_timeout(*args, **kwargs):

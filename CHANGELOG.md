@@ -20,9 +20,9 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   against `main`) with `claude/trusting-noether-heon0n` merged in on top. Kept:
   the executed `L-P3.3c-CUT` atomic cutover (`puppy-fort-factory/` deleted, lab
   re-pointed at the generator) and `L-P3.3c-DOM` (DOM-XSS sink class), both
-  renumbered — `CC-LAB-0059/0060/0061` → `CC-LAB-0065/0066/0067`,
-  `FR-LAB-56/57/58` → `FR-LAB-60/61/62`, `BUG-0029` → `BUG-0031`, `PA-0032` →
-  `PA-0034` (the originals of each were already taken by `vuln-corpus-
+  renumbered — `CC-LAB-0059/0060/0061` → `CC-LAB-0068/0066/0067`,
+  `FR-LAB-56/57/58` → `FR-LAB-60/61/62`, `BUG-0029` → `BUG-0033`, `PA-0032` →
+  `PA-0035` (the originals of each were already taken by `vuln-corpus-
   expansion-zjl1iw`'s own, unrelated content of the same numbers). Discarded as
   duplicates (identical or superseded code already present on the merge base):
   the M8/M10 oracle mechanisms (byte-identical, already correctly attributed as
@@ -52,6 +52,25 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   `filtermodel.py` all comment-only historical mentions), the cutover
   coverage gate green, the fast suite (1769 passed, 8 skipped, 16 deselected)
   and the live-boot + MariaDB slow suite (12 passed) both green post-merge.
+- Process: merged `claude/vuln-corpus-expansion-zjl1iw`'s new tip (`caa7a9c`,
+  landed on that branch after `reconcile-all-lines` was already built from its
+  prior tip) into `reconcile-all-lines`. That commit independently minted
+  `CC-LAB-0065`, `BUG-0031`, `BUG-0032`, and `PA-0034` for unrelated content
+  (fixes to the `orm_entity_bulk_assign` mass-assignment codegen and its
+  CWE-coverage hook) — a second-order recurrence of exactly the collision
+  class this whole reconciliation exists to resolve, caused by the merge
+  target moving mid-reconciliation rather than any error in the prior pass.
+  Renumbered this branch's own colliding entries one more notch, since
+  `caa7a9c` had already landed on its own branch first: `CC-LAB-0065` →
+  `CC-LAB-0068`, `BUG-0031` → `BUG-0033` (file renamed), `PA-0034` → `PA-0035`.
+  Swept and fixed every cross-reference (`ERROR_LOG.md`, `docs/ARCHITECTURE.md`,
+  `docs/components/01-target-lab/{change-control,requirements}.md`,
+  `fuzzlab/labgen/conformance/live_boot.py`,
+  `tests/test_labgen_conformance_live_boot_probe.py`). `caa7a9c`'s own
+  content (`CC-LAB-0065`, `BUG-0031`/`0032`, `PA-0034`) kept its numbers
+  unchanged, per the same "never renumber the side that landed first"
+  discipline as the original reconciliation. Verified clean afterward: no
+  duplicate `CC-LAB`/`FR-LAB`/`PA`/`BUG` headers or filenames repo-wide.
 - LAB: `L-P3.3c-CUT` — executed the atomic cutover (commit 1 of 2): re-homed the WAF
   ruleset/DB schema/coverage-and-WAF shims/vulnerability map off the hand-built
   `puppy-fort-factory/` app and onto `lab/`-owned locations and a new
@@ -79,6 +98,19 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   `migration-exemptions.yaml` (now covered, not exempt), and a real live-boot proof.
   CC-LAB-0066/FR-LAB-61.
 
+- LAB: fixed 3 real defects PR #1's review found in the `orm_entity_bulk_
+  assign` mass-assignment codegen, plus 2 in its own CWE-coverage hook
+  (`CC-LAB-0065`, `BUG-0031`/`BUG-0032`/`PA-0034`) — a real SQL injection
+  (CWE-89) smuggled into the php_current sink via an unvalidated `$_POST`
+  array key used as a SQL identifier; php_laravel's illustrative POST cells
+  served as `GET` (broken routing, `_served_route_for()` hardcoded the
+  method); a fatal null dereference on `$request->user()->id` with no auth
+  setup; and `.claude/hooks/check-corpus-cwe-coverage.sh` silently passing
+  entries with no CWE field at all and cells with orphaned vulnerable-only
+  entries. All fixed, root-caused, and preventive-actioned per the bug
+  protocol; verified against synthetic fixtures and a real in-memory SQLite
+  execution proving the SQLi payload is dropped. Full suite re-run clean at
+  the same 29 pre-existing environment-only failures.
 - LAB: implemented code generation for `orm_entity_bulk_assign`
   (mass-assignment, registry-only since `CC-LAB-0063`/`FR-LAB-58`) in
   `php_current`'s shared `fuzzlab.labgen.modules` registry (1 new source,
@@ -543,8 +575,8 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   letting a live-boot test hang instead of pass/skip. Replaced with
   `_composer_network_probe()` (a real, bounded `composer show -a` round trip); `_run()`
   now wraps a `subprocess.TimeoutExpired` from any pipeline step in a clear
-  `LiveBootError` instead of letting it propagate uncaught. `CC-LAB-0065`/`FR-LAB-60`,
-  `BUG-0031`, `PA-0034`.
+  `LiveBootError` instead of letting it propagate uncaught. `CC-LAB-0068`/`FR-LAB-60`,
+  `BUG-0033`, `PA-0035`.
 - Docs: added `docs/VULN_CORPUS_EXPANSION_PLAN_SITE_ARCHETYPES.md` — a
   proposed extension to `docs/VULN_CORPUS_EXPANSION_PLAN.md` that sources
   corpus collection from concrete popular-website categories and their
