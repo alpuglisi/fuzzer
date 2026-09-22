@@ -715,6 +715,55 @@ class DomInnerhtmlEchoSink(TemplateModule):
         super().__init__("dom_innerhtml_echo", "sink", _SINK_ENV, "dom_innerhtml_echo.php.j2")
 
 
+# --- CC-LAB-0090: open redirect (category 5, Booking.com pilot) -----------
+#
+# Registered here (unrendered by `php_current`'s own `_MODULE_SET_BY_SHAPE`,
+# exactly like L-P3.3c-DOM's `dom_url_source`/`dom_text_content`/
+# `dom_innerhtml_echo` above) purely for the shared minimal-pair vocabulary
+# (:mod:`fuzzlab.labgen.minimal_pair` classifies every emitter's composition
+# positions against this package's registries and raises for a name it
+# cannot find) -- `php_laravel` is the emitter that actually renders this
+# shape, for the new Booking.com-themed illustrative app
+# (`lab/manifests/booking_open_redirect_sample.yaml`).
+
+
+class RedirectTargetAllowlistTransform(TemplateModule):
+    """The ``redirect_target_allowlist`` op: rewrites ``value_expr`` so only
+    a same-origin relative path survives -- see
+    ``fuzzlab.labgen.emitters.php_laravel.modules.RedirectTargetAllowlistTransform``
+    (the emitter that actually renders this op) for the real check."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "redirect_target_allowlist", "transform", _TRANSFORM_ENV, "redirect_target_allowlist.php.j2"
+        )
+
+
+class HttpRedirectReturnSink(TemplateModule):
+    """The ``http_redirect_return`` sink: a server-issued HTTP redirect whose
+    target is ``value_expr``. Unlike every other sink in this package, its
+    own rendered code is the terminal statement of the method it is
+    composed into (there is no row/value to return), which is why this
+    shape also needs its own ``complexity`` module rather than
+    ``single_statement``/``render_only``."""
+
+    def __init__(self) -> None:
+        super().__init__("http_redirect_return", "sink", _SINK_ENV, "http_redirect_return.php.j2")
+
+
+class RedirectResponseComplexity(TemplateModule):
+    """The ``redirect_response`` complexity: the controller method for a
+    cell whose sink's own code already is the terminal statement (the
+    ``http_redirect_return`` sink's ``return redirect(...)``), so this
+    wrapper adds only the method signature, no additional tail -- unlike
+    ``single_statement`` (closes with a JSON response) or ``render_only``
+    (closes with ``return view(...)``), neither of which fits a sink with
+    no row/value to hand back."""
+
+    def __init__(self) -> None:
+        super().__init__("redirect_response", "complexity", _COMPLEXITY_ENV, "redirect_response.php.j2")
+
+
 SOURCES: dict[str, Module] = {
     "get_param": GetParamSource(),
     "post_param": PostParamSource(),
@@ -745,6 +794,10 @@ TRANSFORMS: dict[str, Module] = {
     # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
     "dom_text_content": DomTextContentTransform(),
+    # CC-LAB-0090: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "redirect_target_allowlist": RedirectTargetAllowlistTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -768,10 +821,18 @@ SINKS: dict[str, Module] = {
     # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
     "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
+    # CC-LAB-0090: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "http_redirect_return": HttpRedirectReturnSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),
     "render_only": RenderOnlyComplexity(),
+    # CC-LAB-0090: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "redirect_response": RedirectResponseComplexity(),
 }
 #: Depth-hop fragments (§3.5, L-P2.5). Keyed by fragment, not by depth level:
 #: `same_file_helper` and `cross_file` share the same helper definition and

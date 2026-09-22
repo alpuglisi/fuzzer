@@ -230,6 +230,17 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     # through a request parameter -- it is worth keeping the two classes
     # visibly distinct rather than conflating them under "xss".
     ("xss-dom", "dom_html_sink"): _ModuleSet("dom_url_source", "dom_innerhtml_echo", "render_only"),
+    # CC-LAB-0090 (category 5, Booking.com pilot): a server-issued HTTP
+    # redirect whose target is a tainted query parameter -- the affiliate/
+    # partner-continuation link Booking.com's real checkout flow uses
+    # (docs/research/category5-travel-functionality-and-cwe-research.md
+    # §1.1/§2.1). Neither `single_statement` nor `render_only` fits this
+    # sink (see `HttpRedirectReturnSink`/`RedirectResponseComplexity`'s own
+    # docstrings), which is why this is the first shape to name a third
+    # complexity module.
+    ("open_redirect", "http_redirect_location"): _ModuleSet(
+        "get_param", "http_redirect_return", "redirect_response"
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -442,6 +453,12 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # unfiltered write can still reach, since they are simply absent from the
     # allowlist, not from the table itself. Mirrors
     # `fuzzlab.labgen.emitters.php_current`'s `/account_settings.php` profile.
+    # CC-LAB-0090 (category 5, Booking.com pilot app): the "continue to
+    # partner/payment provider" redirect a real Booking.com-style checkout
+    # flow issues (docs/research/category5-travel-functionality-and-cwe-
+    # research.md §1.1). No `table`/`column`: the source is an ordinary GET
+    # query parameter, not a database lookup.
+    "/booking/continue": {"var_name": "return_to", "param_name": "return_to"},
     "/example/account_settings": {
         "var_name": "postFields",
         "table": "users",

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "target": "php_laravel",
+  "points": [
+    {
+      "url": "/cell/labgen-bc-0001",
+      "method": "GET",
+      "param": "return_to",
+      "location": "query",
+      "rendering": "server"
+    }
+  ]
+}

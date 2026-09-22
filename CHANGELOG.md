@@ -13,6 +13,26 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- LAB: category 5 (Travel/booking/marketplaces) pilot, first increment —
+  a new `open_redirect` (CWE-601) vulnerability shape on `php_laravel`
+  (`lab/safety_matrix.yaml`'s new `http_redirect_location` sink family, a
+  spelled-out-and-verified `redirect_target_allowlist` transform, and the
+  first sink/complexity pair whose own code is a method's terminal
+  statement), rendered as a new, standalone Booking.com-style illustrative
+  page (`lab/manifests/booking_open_redirect_sample.yaml`) with its own
+  out-of-band ground truth (`lab/ground-truth-booking-clone/`, case
+  `BKNG-0001` — never `puppy-fort-factory`'s `PFF-*` identity), grounded in
+  cited Booking.com/Expedia functionality and stack-specific CWE research
+  (`docs/research/category5-travel-functionality-and-cwe-research.md`).
+  Went through this repo's pre-change review gate (two independent agent
+  reviews; the adequacy pass returned INADEQUATE on the first draft and
+  drove a real, verified allowlist check plus a real live-boot proof
+  instead of prose/structural-only checks — see `CC-LAB-0090`), which
+  surfaced two genuine, non-obvious findings about Laravel's own
+  `redirect()` helper before landing rather than after. Category 5's
+  other pick, Expedia's Java/Spring Boot half, stays paused: Maven
+  Central/Spring Initializr are unreachable through this sandbox's egress
+  proxy (recorded 2026-09-22, `ERROR_LOG.md`).
 - Docs: renamed `docs/LAB_SECOND_TARGET_NODE_EXPRESS_PLAN.md` ->
   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` and added its §9,
   recording the project owner's answers to §0b's open questions: stack

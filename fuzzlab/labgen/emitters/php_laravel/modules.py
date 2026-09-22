@@ -391,6 +391,45 @@ class UrlSchemeAllowlistTransform(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class RedirectTargetAllowlistTransform(TemplateModule):
+    """The ``redirect_target_allowlist`` op (CC-LAB-0090, `open_redirect`
+    concern): rewrites ``value_expr`` so only a same-origin relative path
+    survives -- otherwise the inert default ``'/'``.
+
+    The allowlist is deliberately an explicit character-class match on the
+    *whole* value, not a "does it start with a slash?" prefix check (PA-0026:
+    an allowlist adapter must enumerate its value-shape preconditions for
+    real, not describe them in prose). The first character after the leading
+    ``/`` must itself be alphanumeric, which is what rejects every open-
+    redirect bypass shape this op is meant to close in one check: a
+    protocol-relative target (``//evil.com`` -- second character is ``/``),
+    a backslash-prefixed target (``/\\evil.com`` -- second character is
+    ``\\``; some browsers normalize a leading backslash to a slash), a
+    triple-slash target (``///evil.com``), and any value that does not begin
+    with exactly one ``/`` at all (``evil.com``, ``\\evil.com``,
+    ``https://evil.com``, ``javascript:alert(1)`` -- none of these start
+    with ``/`` immediately followed by an alphanumeric character, so none of
+    them can match). Everything after that second character is limited to
+    an explicit safe-path/query character class (no colon, no backslash, no
+    whitespace/control characters), so a scheme or a host cannot be smuggled
+    in later in the string either."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "redirect_target_allowlist", "transform", _TRANSFORM_ENV, "redirect_target_allowlist.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        value_expr = ctx["value_expr"]
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = (
+            "(preg_match('/^\\/[A-Za-z0-9][A-Za-z0-9\\-_.\\/?=&%]*$/', (string) "
+            f"{value_expr}) ? {value_expr} : '/')"
+        )
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 class AttrValueAllowlistTransform(TemplateModule):
     """The ``attr_value_allowlist`` op: rewrites ``value_expr`` so only a
     strict ``^[A-Za-z0-9_-]+$`` value survives (otherwise the page profile's
@@ -652,6 +691,25 @@ class DomInnerhtmlEchoSink(TemplateModule):
         super().__init__("dom_innerhtml_echo", "sink", _SINK_ENV, "dom_innerhtml_echo.blade.php.j2")
 
 
+class HttpRedirectReturnSink(TemplateModule):
+    """The ``http_redirect_return`` sink family (CC-LAB-0090, `open_redirect`
+    concern): a server-issued HTTP redirect (Laravel's ``redirect()``
+    helper, an HTTP 3xx ``Location:`` header) whose target is
+    ``value_expr``.
+
+    Unlike every other sink in this module, its own rendered code is the
+    **terminal statement** of the method it is composed into -- there is no
+    row/value for a complexity wrapper to hand back afterward, which is why
+    this shape also needs its own ``complexity`` module
+    (:class:`RedirectResponseComplexity`) rather than
+    ``single_statement``/``render_only``. Not a Blade view either (no
+    ``.blade.php.j2`` suffix, so it stays out of :data:`VIEW_SINKS`): a
+    redirect response has no presentation layer to render."""
+
+    def __init__(self) -> None:
+        super().__init__("http_redirect_return", "sink", _SINK_ENV, "http_redirect_return.php.j2")
+
+
 # --- views (the `view` module category, L-P3.3c-G2) -----------------------
 #
 # CR-LAB-0001 Addendum D names `"view"` as a module *category* alongside
@@ -903,6 +961,27 @@ class RenderOnlyComplexity(TemplateModule):
         return RenderResult(code=code, context=dict(ctx))
 
 
+class RedirectResponseComplexity(TemplateModule):
+    """The controller method for a cell whose sink is
+    :class:`HttpRedirectReturnSink`: the composed source/transform/sink body
+    *is* the whole method, closing with the sink's own ``return
+    redirect(...)`` statement. Neither :class:`SingleStatementComplexity`
+    (always adds its own ``return response()->json($rows)``/tail) nor
+    :class:`RenderOnlyComplexity` (always adds its own ``return
+    view(...)``) fits a sink whose code is already the method's terminal
+    statement -- both would emit unreachable code after a real ``return``,
+    which is exactly why this shape needs a third complexity rather than
+    reusing either."""
+
+    def __init__(self) -> None:
+        super().__init__("redirect_response", "complexity", _COMPLEXITY_ENV, "redirect_response.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        template = self._env.get_template(self._template_name)
+        code = template.render(body=ctx["body"], method_name=ctx["method_name"])
+        return RenderResult(code=code, context=dict(ctx))
+
+
 #: Source modules. Keys are :mod:`fuzzlab.labgen.modules`' shared names on
 #: purpose -- see this module's docstring, decision 1.
 SOURCES: dict[str, Module] = {
@@ -931,6 +1010,8 @@ TRANSFORMS: dict[str, Module] = {
     "runtime_field_allowlist": RuntimeFieldAllowlistTransform(),
     # L-P3.3c-DOM (reviews.php/feedback.php): the client-side write mechanism.
     "dom_text_content": DomTextContentTransform(),
+    # CC-LAB-0090 (open_redirect, category 5's Booking.com pilot app).
+    "redirect_target_allowlist": RedirectTargetAllowlistTransform(),
 }
 #: Sinks. The three HTML sinks render a **Blade view** body rather than a
 #: controller statement; :data:`VIEW_SINKS` names them so the emitter knows
@@ -951,10 +1032,14 @@ SINKS: dict[str, Module] = {
     "orm_entity_bulk_assign": OrmEntityBulkAssignSink(),
     # L-P3.3c-DOM: reviews.php/feedback.php's client-only DOM-XSS sink.
     "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
+    # CC-LAB-0090 (open_redirect, category 5's Booking.com pilot app).
+    "http_redirect_return": HttpRedirectReturnSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),
     "render_only": RenderOnlyComplexity(),
+    # CC-LAB-0090 (open_redirect, category 5's Booking.com pilot app).
+    "redirect_response": RedirectResponseComplexity(),
 }
 #: ``view``-category modules (L-P3.3c-G2). Selected per page by the emitter's
 #: own page profile (``view_category``), never by the verdict-relevant shape

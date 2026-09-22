@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "target": "php_laravel",
+  "cases": [
+    {
+      "case_id": "BKNG-0001",
+      "url": "/cell/labgen-bc-0001",
+      "method": "GET",
+      "param": "return_to",
+      "location": "query",
+      "vuln_class": "open_redirect",
+      "sink_context": "redirect",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "notes": "return_to used unvalidated as the redirect() Location target -- modeled on Booking.com's real post-checkout partner/payment-provider continuation link (docs/research/category5-travel-functionality-and-cwe-research.md, CWE-601). CC-LAB-0090/FR-LAB-64, category 5 pilot's own ground truth -- never a PFF-* case."
+    }
+  ]
+}

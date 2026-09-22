@@ -423,6 +423,31 @@ tracked in the requirements files, not here.
   `innerHTML`/`textContent` shape. `PFF-0007`/`PFF-0008` are **no longer**
   in `lab/ground-truth/migration-exemptions.yaml` (covered, not exempt).
 
+  **Multi-category, multi-app expansion begun (`docs/LAB_MULTI_CATEGORY_
+  SECOND_TARGETS_PLAN.md` §9, category 5 pilot's first increment,
+  `CC-LAB-0090`/`FR-LAB-64`/`FR-LAB-65`, 2026-09-22).** The `php_laravel`
+  emitter now renders more than one lab-app *identity*, not just one
+  (`puppy-fort-factory`'s migrated pages plus illustrative pages): a new,
+  standalone Booking.com-themed app (`lab/manifests/
+  booking_open_redirect_sample.yaml`) with its own out-of-band ground truth
+  in its own directory (`lab/ground-truth-booking-clone/`, opaque `BKNG-`
+  case-ID prefix — never `PFF-*`), the first real precedent for
+  `fuzzlab.labels.contract.load()` serving more than one `ground_truth_dir`
+  and for `fuzzlab.labgen.cutover_gate`'s `PFF-`-scoped coverage gate
+  correctly ignoring a second app's cases by construction. Also the shape
+  inventory's first genuinely new vulnerability class since DOM-XSS above:
+  `("open_redirect", "http_redirect_location")` (CWE-601) — a server-issued
+  HTTP redirect (`redirect()`) whose real-code sink is the method's own
+  terminal statement, the first shape needing a third `complexity` module
+  (`redirect_response`) because neither `single_statement` nor `render_only`
+  fits it. `fuzzlab/labels/schemas/labels.schema.json`'s `vuln_class`/
+  `sink_context` enums widened additively (`open_redirect`/`redirect`) to
+  carry it. This is the pilot category of a planned 12-app expansion (2 apps
+  per researched site-category, 6 categories); category 1 (E-commerce,
+  Shopify/Rails + Walmart/Node) is piloting concurrently on its own branch,
+  categories 2-6 are open. See the plan doc's own §9.4 tracker for live,
+  per-category status rather than restating it here.
+
   **The parity/cutover coverage gate** (`CC-LAB-0053`/`FR-LAB-51`,
   `fuzzlab/labgen/cutover_gate.py`, plan §4.3.6.6 point 3) is the precondition
   `L-P3.3c-CUT` needs before it can run, built ahead of and independent from

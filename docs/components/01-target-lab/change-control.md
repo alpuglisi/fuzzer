@@ -3,7 +3,154 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0069 — real live-boot verification that `orm_entity_bulk_assign`'s php_laravel sink safely quotes an adversarial column-name key (FR-LAB-63) (2026-09-22)
+### CC-LAB-0090 — category 5 (Travel/booking) pilot, first increment: `open_redirect` (CWE-601) shape on `php_laravel`, Booking.com's own app (FR-LAB-64, FR-LAB-65) (2026-09-22)
+- Change: the first buildable increment of category 5's Booking.com half
+  (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5;
+  `docs/research/category5-travel-functionality-and-cwe-research.md`'s
+  CWE-601 shortlist item, §2.1) — a genuinely new vulnerability shape, a new
+  standalone illustrative page, and this app's own out-of-band ground truth,
+  never `puppy-fort-factory`'s `PFF-*` identity. Went through this
+  component's pre-change review gate (a draft reviewed independently for
+  accuracy and adequacy by two agents; the adequacy pass returned
+  INADEQUATE on the first draft with six concrete, prioritized fixes,
+  including an FR-numbering collision against `CC-LAB-0069` and — most
+  load-bearing — a demand that the allowlist transform's actual bypass
+  resistance be spelled out and proven, not just named). Every fix was
+  applied before implementation, and the transform's real behavior (see
+  below) was additionally verified end-to-end via a real live boot before
+  this entry was closed out, which caught two real gaps neither reviewer
+  nor the original draft anticipated (see Effectiveness).
+
+  1. **`lab/safety_matrix.yaml`** (additive, `version` stays 1): new sink
+     family `http_redirect_location`, new concern `open_redirect`. Baseline:
+     `op: raw_concat, sink_family: http_redirect_location, effect:
+     no_effect`. Secure twin: `op: redirect_target_allowlist, sink_family:
+     http_redirect_location, effect: neutralises, neutralizes:
+     [open_redirect]`.
+  2. **The allowlist's real check** (the reviewer-demanded, most
+     load-bearing deliverable):
+     `preg_match('/^\/[A-Za-z0-9][A-Za-z0-9\-_.\/?=&%]*$/', (string)
+     $value)`, collapsing to `'/'` on no match
+     (`fuzzlab.labgen.emitters.php_laravel.modules.
+     RedirectTargetAllowlistTransform.render`). Verified by construction
+     against every bypass shape named in review (protocol-relative
+     `//evil.com`, backslash-prefixed `/\evil.com`, triple-slash, absolute
+     URL, `javascript:`), and then verified for real (see item 6) against
+     Booking.com's own live-booted app.
+  3. **New modules**, registered in **both** `fuzzlab.labgen.modules`
+     (`php_current`, unrendered — shared minimal-pair vocabulary only, the
+     `L-P3.3c-DOM`/`FR-LAB-61` discipline) and
+     `fuzzlab.labgen.emitters.php_laravel.modules`/`__init__.py` (rendered):
+     `redirect_target_allowlist` (transform), `http_redirect_return` (sink
+     — the first sink in this project whose own code is a method's terminal
+     statement), `redirect_response` (complexity — the first shape needing
+     a *third* complexity module, since neither `single_statement` nor
+     `render_only` fits a sink with no row/value to hand back). New page
+     profile `/booking/continue` (`return_to`), new `_MODULE_SET_BY_SHAPE`
+     row. `fuzzlab.labgen.conformance.static_precheck.
+     STATIC_PRECHECK_BY_SHAPE` gained `("open_redirect",
+     "http_redirect_location") -> INFORMATIVE`.
+  4. **New manifest** `lab/manifests/booking_open_redirect_sample.yaml`
+     (`LABGEN-BC-0001`/`LABGEN-BC-0002`). Deliberately narrow: does not yet
+     cover the rest of Booking.com's researched functionality or the
+     research doc's other shortlisted candidates (price-integrity
+     duplicate, CWE-1236 CSV-export) — later increments in the same
+     reserved `CC-LAB-0090`-`0119` block.
+  5. **New, separate ground-truth directory**
+     `lab/ground-truth-booking-clone/` (`labels.json`,
+     `injection-points.json`, `expectedresults.csv`; one case, `BKNG-0001`)
+     — verified (not assumed) that appending to `lab/ground-truth/` would
+     break `fuzzlab.labgen.cutover_gate`'s unconditional `PFF-` coverage
+     walk, since this page is illustrative (no `ground_truth_cases_for()`
+     coverage). `fuzzlab/labels/schemas/labels.schema.json`'s `vuln_class`/
+     `sink_context` enums widened additively (`"open_redirect"`/
+     `"redirect"`); every existing `PFF-` case re-validated unchanged.
+  6. **Real live-boot proof**
+     (`tests/test_labgen_open_redirect.py::test_live_boot_redirect_manifest_blocks_the_bypass_shapes_the_allowlist_is_meant_to_catch`),
+     matching this component's own `CC-LAB-0069` evidentiary bar: real HTTP
+     `GET`s against both live-booted twins with real adversarial `return_to`
+     payloads, reading the real (unfollowed — `BUG-0028`'s existing
+     `_NoRedirectHttpErrorProcessor`) `Location:` header back. This is what
+     surfaced two real, non-obvious findings neither the draft nor either
+     reviewer predicted (see Effectiveness) and drove `LiveBootHarness`
+     gaining an additive `headers: dict[str, str]` field on `HttpResponse`
+     (default `{}`; every pre-existing construction unchanged) — the first
+     caller of this harness that needed a response header, not only
+     status/body.
+  7. `docs/components/01-target-lab/requirements.md`: `FR-LAB-64`/
+     `FR-LAB-65` (not `FR-LAB-63`/`64` as first drafted — `CC-LAB-0069`
+     already cites `FR-LAB-63`, a real collision the adequacy reviewer
+     caught before implementation).
+  8. `tests/test_labgen_open_redirect.py`: verdict-derivation, Tier 0
+     (lint + minimal-pair), Tier 3 (regen-diff, unique-path), CLI `--check`,
+     a two-ground-truth-directories-load-independently smoke test (the
+     first test in this repo to do so — `FR-LAB-65`), and the live-boot
+     test above.
+- Impact (other components / project): additive-only across
+  `lab/safety_matrix.yaml`, both `modules.py` registries (php_current
+  unrendered, php_laravel rendered), `php_laravel/__init__.py`,
+  `fuzzlab/labels/schemas/labels.schema.json` (2 enum widenings), a new
+  ground-truth directory, and `fuzzlab.labgen.conformance.live_boot`'s
+  `HttpResponse`/`LiveBootHarness.request()` (new field/populated value,
+  no signature change). `fuzzlab.labgen.cutover_gate` (`PFF-` coverage
+  gate) unaffected by construction (new directory, never
+  `lab/ground-truth/labels.json`). No other of the 13 components touched.
+  Explicitly out of scope: the price-integrity duplicate and CWE-1236
+  CSV-export candidates (later increments, same reserved block).
+- Risk (level; mitigation or accepted-risk justification): low-to-moderate,
+  two vectors named explicitly per adequacy review: (1) the shared
+  `labels.schema.json` enum widening touches every ground-truth directory's
+  validation — mitigated by keeping it strictly additive and re-running the
+  full existing test suite (`lab/ground-truth/`-backed tests included) to
+  confirm no regression; (2) this is the first fully-new-CWE-class-plus-
+  first-non-`PFF-`-app-with-its-own-ground-truth pattern this project has
+  built, with no exact precedent to copy end-to-end (`FR-LAB-61`'s DOM-XSS
+  shape is the closest, but it reused `lab/ground-truth/` rather than a new
+  directory) — mitigated by the real live-boot proof (item 6) rather than
+  resting on Tier 0/3 structural checks alone, which is what surfaced this
+  entry's own real gaps before landing (see Effectiveness) instead of after.
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml`: `http_redirect_location`/`open_redirect` — done
+  - [x] `fuzzlab/labgen/modules/__init__.py`: shared-vocabulary-only registration — done
+  - [x] `fuzzlab/labgen/emitters/php_laravel/modules.py` + 3 templates — done
+  - [x] `fuzzlab/labgen/emitters/php_laravel/__init__.py`: page profile + module-set row — done
+  - [x] `lab/manifests/booking_open_redirect_sample.yaml` (2 cells) — done
+  - [x] `fuzzlab/labels/schemas/labels.schema.json`: enum widening — done
+  - [x] `lab/ground-truth-booking-clone/` (3 files, `BKNG-0001`) — done
+  - [x] `fuzzlab/labgen/conformance/static_precheck.py`: new entry — done
+  - [x] `fuzzlab/labgen/conformance/live_boot.py`: `HttpResponse.headers` — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-64`/`65` — done
+  - [x] `tests/test_labgen_open_redirect.py` (10 tests, all green including
+        the real live-boot test) — done
+  - [x] `CHANGELOG.md` line — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done
+- Effectiveness (assessed 2026-09-22): achieved its intent, with evidence,
+  and the review gate's own value is part of that evidence. The adequacy
+  review's demand for a real, spelled-out allowlist check (rather than a
+  prose description) and a real payload-differential proof (rather than
+  Tier 0/3 alone) is what caught two genuine, non-obvious facts before this
+  entry closed, neither of which the draft or either reviewer predicted:
+  (a) Laravel's own `redirect()`/`UrlGenerator::isValidUrl()` helper treats
+  a protocol-relative or scheme-qualified value as "already a URL" and
+  passes it through verbatim — confirming those two shapes are the real
+  exploitable differential — but treats a bare backslash-prefixed value or
+  a `javascript:`-scheme value as an ordinary relative *path* and rewrites
+  it onto this app's own host regardless of any allowlist, so those two
+  adversarial-looking payloads are not exploitable through this specific
+  sink at all (kept in the test as a verified negative control, not
+  asserted as a second attack proof); (b) the secure twin's safe fallback
+  is not literally re-served as the string `'/'` in the `Location` header —
+  Laravel's `redirect('/')` resolves it to a fully-qualified same-origin
+  URL — so the real proof asserts same-origin (`netloc`) and root path
+  structurally, not exact-string equality. Both were found by actually
+  booting the app and reading real HTTP responses, not by static reasoning
+  about Laravel's internals, which is exactly the class of gap Tier 0/3-only
+  coverage would have missed and the review gate's adequacy pass predicted
+  in the abstract. Full `pytest` run (this component's ground-truth/
+  cutover-gate suite plus the new test module) green; broader whole-repo
+  suite run as part of this same change to confirm no regression elsewhere.
+
+
 - Change: `CC-LAB-0064`'s php_current sink (`fuzzlab/labgen/modules/sinks/
   orm_entity_bulk_assign.php.j2`) got a real, executed adversarial test for its
   identifier-charset guard after `BUG-0031` found the guard's absence let a

@@ -75,6 +75,10 @@
 #   weak_signature_comparison — a webhook/HMAC signature is verified with a
 #     non-constant-time or type-juggling-prone comparison, or verification
 #     is skipped/bypassable entirely (added CC-LAB-0063)
+#   open_redirect — a server-issued redirect's target is built from tainted
+#     input with no check that it stays on this site, letting an attacker
+#     send a user through a trusted domain to an arbitrary external
+#     destination (CWE-601) (added CC-LAB-0090)
 version: 1
 entries:
   # --- SQL sinks -----------------------------------------------------
@@ -707,3 +711,33 @@ entries:
     sink_family: dom_html_sink
     effect: neutralises
     neutralizes: [html_tag_break]
+
+  # --- CC-LAB-0090: open redirect (category 5 pilot, Booking.com's real
+  # affiliate/partner-redirect and post-checkout-continuation behavior --
+  # docs/research/category5-travel-functionality-and-cwe-research.md
+  # §1.1/§2.1, CWE-601) ------------------------------------------------
+  # `http_redirect_location`: a genuinely new family -- the tainted value
+  # becomes the target of a server-issued HTTP redirect (Laravel's
+  # `redirect($value)`, an HTTP 3xx `Location:` header), not a value read
+  # back into a page body at all. `raw_concat` is reused as the baseline
+  # vulnerable op (no transform at all), the same meaning it has at every
+  # other family in this file.
+  - op: raw_concat
+    sink_family: http_redirect_location
+    effect: no_effect
+
+  # `redirect_target_allowlist`: rewrites the value so only a same-origin
+  # relative path survives (exactly one leading `/`, not itself followed by
+  # a second `/` or a backslash, and beginning with an alphanumeric
+  # character) -- everything else, including a protocol-relative target
+  # (`//evil.com`), a backslash-prefixed target (`/\evil.com`), a
+  # scheme-qualified absolute URL (`https://evil.com`), and a
+  # `javascript:`-shaped value, collapses to the safe default `/`. This is
+  # the context-correct fix for `open_redirect`: unlike `html_entity_escape`
+  # (which escapes markup) or `url_scheme_allowlist` (which allows any
+  # http/https URL, including an attacker-controlled one), a redirect target
+  # is only safe when it cannot leave this origin at all.
+  - op: redirect_target_allowlist
+    sink_family: http_redirect_location
+    effect: neutralises
+    neutralizes: [open_redirect]

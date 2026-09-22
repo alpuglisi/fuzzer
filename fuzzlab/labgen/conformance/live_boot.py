@@ -102,7 +102,7 @@ import sys
 import tempfile
 import time
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from fuzzlab.labgen.conformance.tier1 import Tier1Case
@@ -622,6 +622,12 @@ def _run(cmd: list[str], *, cwd: Path, timeout: float, env: dict[str, str] | Non
 class HttpResponse:
     status: int
     body: str
+    #: Response headers (CC-LAB-0090: the first caller of this harness that
+    #: needs to observe a header rather than only status/body -- a real
+    #: `Location:` header proof for the open-redirect shape). Additive: a
+    #: default of `{}` keeps every pre-existing construction of this
+    #: dataclass unchanged.
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 class LiveBootHarness:
@@ -871,7 +877,11 @@ class LiveBootHarness:
             headers["Content-Type"] = "application/x-www-form-urlencoded"
         req = urllib.request.Request(url, data=body, method=method.upper(), headers=headers)
         with _NO_REDIRECT_OPENER.open(req, timeout=REQUEST_TIMEOUT_S) as resp:
-            return HttpResponse(status=resp.status, body=resp.read().decode("utf-8", errors="replace"))
+            return HttpResponse(
+                status=resp.status,
+                body=resp.read().decode("utf-8", errors="replace"),
+                headers=dict(resp.headers.items()),
+            )
 
     def get(self, path: str, *, params: dict[str, str] | None = None) -> HttpResponse:
         return self.request("GET", path, params=params)

@@ -100,6 +100,19 @@ STATIC_PRECHECK_BY_SHAPE: dict[tuple[str, str], StaticPrecheckStatus] = {
     # step further: those shapes at least have a PHP-observable call for the
     # checker to mis-trust as a sanitizer).
     ("xss-dom", "dom_html_sink"): StaticPrecheckStatus.UNINFORMATIVE,
+    # --- CC-LAB-0090: open redirect (category 5, Booking.com pilot) --------
+    # INFORMATIVE: a vulnerable cell's `redirect($value)` sink is fed a
+    # request-parameter value with no check applied at all -- the same
+    # textbook "value reaches a sensitive sink with nothing between source
+    # and sink" shape as ("xss", "html_body") above, which a taint-style
+    # static checker (most of which model `header()`/redirect-style sinks
+    # explicitly) is reasonably expected to flag. Unlike the escaping-
+    # context-mismatch XSS shapes, the secure twin's `redirect_target_
+    # allowlist` transform is a real, present validation call immediately
+    # before the sink, not an escaping function misapplied to the wrong
+    # context -- so a clean scan of the secure twin is not evidence of
+    # nothing the way it is for those shapes.
+    ("open_redirect", "http_redirect_location"): StaticPrecheckStatus.INFORMATIVE,
 }
 
 

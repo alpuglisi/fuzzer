@@ -1838,6 +1838,92 @@ lane) can submit a payload as
     `puppy-fort-factory/` still present and every test green, a second doing
     only the `git rm -r puppy-fort-factory/` once the first commit's own
     full test run (fast suite + the live-boot slow suite) was green.
+- **FR-LAB-64** *(open-redirect shape, `php_laravel`; `CC-LAB-0090`,
+  2026-09-22).* Category 5's (Travel/booking/marketplaces,
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5) Booking.com
+  pilot's first increment. Note on numbering: `FR-LAB-63` is already spoken
+  for (`CC-LAB-0069`'s title cites it, although no `requirements.md` heading
+  for it exists — a pre-existing bookkeeping gap in that earlier entry, not
+  this one's to fix); this entry is `FR-LAB-64` to avoid a real collision.
+  - A genuinely new `(vuln_class, sink_context.family)` shape,
+    `("open_redirect", "http_redirect_location")`: a server-issued HTTP
+    redirect (Laravel's `redirect()` helper) whose target is a tainted
+    query parameter, grounded in Booking.com's real "continue to partner/
+    payment provider" post-checkout-continuation and affiliate-redirect
+    behavior (`docs/research/category5-travel-functionality-and-cwe-
+    research.md` §1.1/§2.1, CWE-601) — the first new vulnerability class
+    this project has added since `L-P3.3c-DOM`'s DOM-XSS shape (`FR-LAB-61`)
+    and the first that is not an XSS/SQLi/mass-assignment variant.
+    `lab/safety_matrix.yaml` gained one new sink family
+    (`http_redirect_location`) and one new concern (`open_redirect`), both
+    additive under the existing `version: 1`: `raw_concat`/`no_effect` (the
+    unvalidated baseline) and `redirect_target_allowlist`/`neutralises` (an
+    explicit same-origin-relative-path allowlist — not a "starts with `/`"
+    prefix check, which protocol-relative/backslash-prefixed bypasses would
+    defeat; see the transform's own docstring for the concrete character
+    class and PA-0026's allowlist-adapter discipline it follows).
+  - New modules — `redirect_target_allowlist`, `http_redirect_return`
+    (a sink whose own rendered code is the method's terminal statement, the
+    first sink shape in this project with no row/value to hand back) and
+    `redirect_response` (the first **third** complexity module any stack's
+    module set has needed, since neither `single_statement` nor
+    `render_only` fits a sink that is itself the terminal `return`) —
+    registered in **both** `fuzzlab.labgen.modules` (`php_current`,
+    unrendered — for the shared minimal-pair vocabulary only, the same
+    discipline `CC-LAB-0051`/`FR-LAB-61` set) and
+    `fuzzlab.labgen.emitters.php_laravel.modules`/`__init__.py` (rendered,
+    via a new `_MODULE_SET_BY_SHAPE` entry and page profile,
+    `/booking/continue`, `return_to`).
+  - `fuzzlab.labgen.conformance.static_precheck.STATIC_PRECHECK_BY_SHAPE`
+    gained `("open_redirect", "http_redirect_location") ->
+    StaticPrecheckStatus.INFORMATIVE`: the vulnerable cell has nothing
+    between source and sink, a textbook static-analysis finding, the same
+    reasoning as `("xss", "html_body")`.
+  - New manifest `lab/manifests/booking_open_redirect_sample.yaml`
+    (`LABGEN-BC-0001`/`LABGEN-BC-0002`, the vulnerable/secure twin pair).
+    Deliberately narrow first increment: does not yet cover the rest of
+    Booking.com's researched functionality (search, listing, checkout,
+    Extranet) or the research doc's other shortlisted candidates
+    (price-integrity duplicate, CWE-1236 CSV-export) — those are later,
+    separate increments inside this category's reserved
+    `CC-LAB-0090`-`0119` block, tracked in
+    `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4.
+  - Real live-boot proof
+    (`tests/test_labgen_open_redirect.py::test_live_boot_redirect_manifest_blocks_the_bypass_shapes_the_allowlist_is_meant_to_catch`),
+    matching this component's `CC-LAB-0069` evidentiary bar: a real HTTP GET
+    against both twins with four adversarial `return_to` payloads
+    (`//evil.example`, `/\evil.example`, `https://evil.example`,
+    `javascript:alert(1)`) plus one benign in-origin payload, reading the
+    real (unfollowed — `LiveBootHarness`'s existing `_NoRedirectHttpErrorProcessor`,
+    `BUG-0028`) `Location:` header back for each: the vulnerable twin
+    reflects every adversarial target verbatim, the secure twin collapses
+    every one of them to `/`, and both twins pass the benign in-origin
+    payload through unchanged. This is the first caller of `LiveBootHarness`
+    that needs a response header rather than only status/body, so
+    `HttpResponse` gained an additive `headers: dict[str, str]` field
+    (default `{}`, every pre-existing construction unchanged) and
+    `LiveBootHarness.request()` now populates it from the real response.
+- **FR-LAB-65** *(second, independent ground-truth directory; `CC-LAB-0090`,
+  2026-09-22).* The ground-truth label contract (`fuzzlab.labels.contract`)
+  now has a real, tested precedent for more than one `ground_truth_dir`
+  serving more than one distinct lab app sharing an emitter/stack:
+  category 5's Booking.com app gets its own
+  `lab/ground-truth-booking-clone/{labels,injection-points}.json` +
+  `expectedresults.csv` (one case, `BKNG-0001`), with its own opaque
+  `BKNG-` case-id prefix (D9's out-of-band ground-truth contract; never
+  `PFF-*`) — kept wholly separate from `lab/ground-truth/`'s `PFF-` cases
+  and outside `fuzzlab.labgen.cutover_gate`'s `PFF-`-scoped coverage gate
+  (verified: `cutover_gate.DEFAULT_LABELS_DIR` is hardcoded to
+  `lab/ground-truth`, and `ground_truth_cases_for()` returns nothing for a
+  non-`real_page` profile, so the new directory's case is never walked by
+  that gate). `fuzzlab/labels/schemas/labels.schema.json`'s `vuln_class`/
+  `sink_context` enums gain `"open_redirect"`/`"redirect"` (additive;
+  existing enum values, and therefore every existing `PFF-` case, are
+  unchanged and re-validated by this change's own test run).
+  `tests/test_labgen_open_redirect.py::test_the_new_ground_truth_directory_loads_independently_of_the_default_one`
+  is the first test in this repository to load two ground-truth
+  directories in the same process and confirm neither's `contract.load()`
+  call is affected by the other's existence.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

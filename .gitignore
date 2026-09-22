@@ -6,6 +6,9 @@ venv/
 *.csv
 # ...but the ground-truth contract CSV is tracked, not a generated dataset
 !lab/ground-truth/*.csv
+# CC-LAB-0090: category 5's Booking.com app has its own ground-truth
+# directory (D9's out-of-band contract), same "tracked, not generated" rule
+!lab/ground-truth-booking-clone/*.csv
 # python build / test artifacts
 *.egg-info/
 build/
