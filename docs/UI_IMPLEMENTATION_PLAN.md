@@ -38,6 +38,35 @@ Locked decisions:
   by the components themselves, never by the UI.
 - **Secrets never render** — redaction on write; the UI shows redacted values only.
 - **No build step; fully offline** — no CDN, no bundler; every asset served from `/static`.
+- **Accessible + keyboard-operable** — WCAG 2.2 AA target; native semantics over ARIA widgets;
+  meaning never by color alone; contrast verified per theme (see R-11 below).
+- **Not itself an attack surface** — the new POST surface is guarded by Host/Origin/Fetch-Metadata
+  validation + a tight CSP so a hostile web page can't drive it (U6 / R-13); this operationalizes
+  NFR-UI-localhost.
+
+> ✅ **[R-11 resolved · round 3]** **Accessibility (cross-cutting; WCAG 2.2 AA).** **DataTable =
+> native `<table>`, NOT `role="grid"`** (grid forces an arrow-key composite-widget model wrong for
+> read-only sort + row-link): `<caption>`, `<th scope>`, a sort `<button>` inside each `<th>` with
+> single-active `aria-sort`, a real `<a href="/finding/{id}">` in the primary cell (whole-row click
+> is a JS enhancement, never the only path), specifically-named row-action buttons, + a
+> visually-hidden `aria-live="polite"` sort announcer. **Facets = APG Disclosure** (header `<button
+> aria-expanded aria-controls>` → hideable panel) + native checkboxes with the **count inside the
+> `<label>`**, grouped via `fieldset`/`role=group`. **Chips** = `role=group` "Applied filters"; each
+> a `<button aria-label="Remove filter: …">` (× is `aria-hidden`); **move focus on removal** (never
+> to `<body>`); "Clear all"; a live match-count region. **Splitter = APG Window Splitter**:
+> `role="separator" tabindex=0`, `aria-controls`, `aria-valuemin/max/now`,
+> `aria-orientation="vertical"` + **Left/Right** arrows for side-by-side panes (Home/End; optional
+> Enter-collapse / F6). **Textarea:** labelled, `spellcheck/autocorrect/autocapitalize=off`, **Tab
+> not trapped** (2.1.2). **Charts:** `<canvas aria-hidden="true">` + a sibling **visually-hidden
+> `<table>`** (clip method + `white-space:nowrap` so it can't cause page scroll; never
+> `display:none`) inside a `<figure>` with `<figcaption>` + a one-line text summary; optional "View
+> as data table" disclosure. **Shell:** skip-link → `<main id="main" tabindex="-1">`, one `<h1>`/
+> page, landmarks with unique labels, `nav` `aria-current="page"` (+ a non-color indicator),
+> `:focus-visible` ring ≥2px meeting 3:1 in **both** themes, no focus traps (rely on the browser's
+> native focus reset on real navigations — don't script focus-on-load for a true-routes MPA).
+> **Color:** 4.5:1 text / 3:1 non-text; **severity/status = text (+shape), never hue alone**; verify
+> each severity/status/focus token's ratio **per theme** (an explicit acceptance criterion); respect
+> `forced-colors`. Build one shared `aria-live` results region + sort announcer at page load.
 
 ## 3. Outstanding deliverables
 
@@ -88,7 +117,7 @@ independence), **depends on**, **sub-lanes** (recursive independent splits), **a
 - **Files:** `sections/overview.html`, `js/overview.js`, `css/overview.css`, `app.py` route.
 - **Depends on:** U0. **Sub-lanes:** KPI tiles / recent-runs / quick-actions.
 - **Acceptance:** renders with an empty store and with seeded runs; no result-table writes.
-> 🔎 **[R-03]** covers the reusable read-only table used here for recent runs.
+> ↳ **See [R-03]** (U2) for the reusable read-only DataTable this reuses for recent runs.
 > ✅ **[R-10 resolved · round 2]** **Overview spec.** KPI tile row (5, big numbers, each clickable →
 > filtered view): (1) **Findings** = `len(findings)` + severity-split sub-line; (2) **Runs** =
 > `len(runs)` + "N in last 7d"; (3) **Last run** = newest run's status badge + tool→target +
@@ -224,6 +253,26 @@ independence), **depends on**, **sub-lanes** (recursive independent splits), **a
 > parallel-coords, system metrics, media logging, websocket streaming (manual refresh — or a
 > light poll only while a run is active — suffices offline). **Render order: downsample
 > server-side → send → EMA client-side.**
+> ✅ **[R-12 resolved · round 3]** **Shared `createChart(el, {id, type, data, series, opts})`
+> wrapper** (consumed by U4 + U5). **Theme/density change → full `destroy()` + recreate** (uPlot
+> bakes colors into the canvas at draw and measures axis geometry at construction; density also
+> changes axis sizing) — `setData()` for data-only, `setSize()` for resize. **Resolve tokens via a
+> hidden probe** (`probe.style.color='var(--tok)'` → `getComputedStyle(probe).color` → concrete
+> `rgb()`), because `getPropertyValue('--tok')` yields unresolved `color-mix()`/`var()` chains the
+> canvas can't parse; use `getPropertyValue`+`parseFloat` only for numeric tokens. **Density →
+> discrete sizing buckets** off `data-density` (comfortable/compact: font 12/11, x-gutter 34/28,
+> y-gutter 50/44, tick 6/4, gap 6/4, tick-space 60·40 / 48·30, point 5/4); use uPlot's **HTML
+> legend** (DOM → inherits tokens) with line-height tied to `--row`; height from a per-density
+> `--chart-h` token. **Responsive:** debounced **`ResizeObserver` on the parent cell** (not the
+> uPlot root — feedback loop), coalesced with `requestAnimationFrame` (dodges the RO-loop warning) →
+> `setSize`; re-`resize()` when a hidden panel is revealed. **Retheme** wires BOTH a MutationObserver
+> on `<html>` (`data-theme`/`data-density`) and `matchMedia` to one idempotent handler; preserve
+> x-zoom (`scales.x.min/max`) and series toggles across rebuild. **Teardown (critical — RO/MO hold
+> refs → leak):** `destroy()` disconnects RO+MO, removes the matchMedia listener, cancels rAFs, calls
+> `u.destroy()`, drops the id from the registry. **`window.__charts`** = a Map id→handle (`getData()`
+> + live `.u`) for the R-09 tests; each chart also builds a `visually-hidden` `<table>` (canvas
+> `aria-hidden`, wrapper `role="img"`+label, ~200-row cap), kept current on `setData` — the R-09
+> fallback + R-11 a11y surface.
 
 ### B0 — `metric_series` table + emitters  *(Wave 0; backend; feature Phase 4b)*
 - **Scope:** additive migration `metric_series(run_id, source, key, step, ts, value)`; then
@@ -276,6 +325,41 @@ independence), **depends on**, **sub-lanes** (recursive independent splits), **a
 - **Acceptance:** the activity appears grouped; dry-run previews the exact command; a form field
   per flag from the parser; command-spec introspection test covers it.
 
+### U6 — Control-plane hardening  *(Wave 0/1; guards every POST; new — from R-13)*
+- **Scope:** a global middleware + security headers so the MPA's new state-changing POST surface
+  can't be driven by a hostile web page — preserving **NFR-UI-localhost**. **Two independent gates
+  (need both):** (a) a **Host allow-list** (exact `host:port` set) on *every* request — the only
+  DNS-rebinding defense (roll our own; Starlette's `TrustedHostMiddleware` strips the port and can't
+  pin it); (b) on POST/PUT/DELETE: **Origin == exact** allow-list **+ `Sec-Fetch-Site ==
+  same-origin`** (reject *same-site* — the target lab is same-site on a sibling port!), a
+  **custom-header** (`X-Fuzzlab-Client: 1`) requirement on `/api/*` (forces a CORS preflight a
+  cross-origin page can't satisfy), and a Referer fallback for form POSTs / non-browser clients.
+  Fail closed; stay **cookieless** (SameSite wouldn't help — lab is same-site). Tight offline
+  **CSP** (`default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self';
+  form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'`) + `nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, COOP/CORP same-origin, `Cache-Control:
+  no-store` on API/results. Bind 127.0.0.1/[::1] only.
+- **Prerequisite:** **upgrade Starlette ≥ 1.0.1** (CVE-2026-48710 "BadHost" — pre-1.0.1 Host-header
+  validation bypass; our hardening keys off Host/path, so this is a hard prereq).
+- **Files:** `web/app.py` (middleware + headers) — small/localized; **coordinate with U0's app.py
+  edits**. **Depends on:** — (guards current *and* future POSTs; lands with or right after U0).
+  **Sub-lanes:** none.
+- **Acceptance:** wrong-Host → 421/403; cross-site *and* same-site POST → 403; `/api/*` without the
+  client header → 403; same-origin form + API POST pass; CSP present on responses; a test matrix
+  over these cases. Cross-checks: the `authorized` gate stays **independent of any request-body
+  field** (a rebound/same-site page can't flip it), and a send/replay **target is validated to equal
+  the configured lab host:port** (a forged body can't redirect traffic elsewhere).
+> ✅ **[R-13 resolved · round 3]** Two independent layers are required because each attack defeats
+> the other's single defense: DNS-rebinding sends `Sec-Fetch-Site: same-origin` + attacker Origin
+> but a wrong **Host** (only the Host allow-list catches it); classic CSRF sends the right Host but
+> cross-site **Origin**/Sec-Fetch (only Origin/Fetch-Metadata catches it). **Same-site landmine:** a
+> "site" is scheme+registrable-domain and **port-independent**, so the control plane and the
+> deliberately-vulnerable lab are *same-site* on `127.0.0.1` → require **same-origin only** and stay
+> cookieless. No CSRF token/session store needed (no ambient credential) — header validation
+> suffices. Loopback is a secure context, so `Sec-Fetch-*`/`Origin` are reliably sent. High impact
+> here: `/api/launch` + `/api/run/automatic` spawn subprocesses and the repeater sends traffic, so a
+> forged request is code/traffic execution, not a nuisance.
+
 ### Deferred (not lanes yet)
 - **D6 — a "Lab" UI section** surfacing labgen manifests/verdicts/conformance. Revisit once the
   generator's data model stabilizes on the LAB track.
@@ -285,8 +369,8 @@ independence), **depends on**, **sub-lanes** (recursive independent splits), **a
 
 | Wave | Lanes (parallel) | Gate |
 |---|---|---|
-| **0** | **U0** (MPA + split) · **B0** (metric_series→emitters) · **X0** (lab-generate) | none — dispatch now |
-| **1** | **U1** Overview · **U2** Findings · **U3** Proxy · **U4** ML · **U5** Diagnostics | U0 landed; U5 also needs D2 lib chosen (R-02) |
+| **0** | **U0** (MPA + split) · **B0** (metric_series→emitters) · **X0** (lab-generate) · **U6** (control-plane hardening — shares `app.py`, so land with/right after U0) | none — dispatch now |
+| **1** | **U1** Overview · **U2** Findings · **U3** Proxy · **U4** ML · **U5** Diagnostics | U0 landed; U5 also needs D2 lib chosen (R-02); every POST route observes U6's gate |
 
 - **Critical path:** U0 → U3 / U5 (the two heaviest). U0 is the only cross-lane bottleneck; it
   gets priority and stays one agent to avoid self-conflict.
@@ -310,9 +394,9 @@ independence), **depends on**, **sub-lanes** (recursive independent splits), **a
 | R-08 | **SQLite concurrency for `metric_series`** — WAL/busy_timeout under our per-request connection model; safe writer(loop)+reader(UI)+labgen coexistence | B0, CORE | 2 | ✅ resolved (WAL) |
 | R-09 | **Test strategy for the MPA + canvas charts + DataTable** — route/no-JS/active-nav/deep-link tests; asserting uPlot canvas + facets in a real browser | all UI, process | 2 | ✅ resolved (node:test + TestClient + Playwright) |
 | R-10 | **Overview dashboard content** — which KPIs/widgets a security+ML overview should lead with (VM-tool patterns), read-only + fast | U1 | 2 | ✅ resolved |
-| R-11 | **Accessibility & keyboard model** across the shell — ARIA for the DataTable/grid, facet disclosure, resizable splitter, canvas-chart alternatives, focus order | all UI | 3 | 🔎 dispatched |
-| R-12 | **uPlot theming/density/responsive integration** — wiring tokens + density (row→chart sizing), ResizeObserver, and the shared chart-component API | U4, U5 | 3 | 🔎 dispatched |
-| R-13 | **Loopback web-app security hardening** — DNS-rebinding, CSRF, Origin/Host checks for the new POST routes (pivot, saved-views, launch) on a local server | U0, all POST | 3 | 🔎 dispatched |
+| R-11 | **Accessibility & keyboard model** across the shell — ARIA for the DataTable/grid, facet disclosure, resizable splitter, canvas-chart alternatives, focus order | all UI | 3 | ✅ resolved (native `<table>`) |
+| R-12 | **uPlot theming/density/responsive integration** — wiring tokens + density (row→chart sizing), ResizeObserver, and the shared chart-component API | U4, U5 | 3 | ✅ resolved |
+| R-13 | **Loopback web-app security hardening** — DNS-rebinding, CSRF, Origin/Host checks for the new POST routes (pivot, saved-views, launch) on a local server | U0, all POST → **U6** | 3 | ✅ resolved (new lane U6) |
 
 ## 6. Refinement log
 
@@ -331,10 +415,18 @@ independence), **depends on**, **sub-lanes** (recursive independent splits), **a
   + `TestClient` route/no-JS + Playwright via offscreen table & `window.__charts`, no new deps,
   R-09); U1 gains a concrete **Overview spec** (5 KPI tiles + recent-runs table + severity bar +
   quick actions + empty states, R-10).
-- **Round 3 — dispatched 2026-09-22.** Three web agents on the finer gaps rounds 1–2 exposed:
-  R-11 accessibility & keyboard model across the shell, R-12 uPlot theming/density/responsive
-  integration + shared chart component, R-13 loopback web-app security hardening (DNS-rebinding /
-  CSRF / Origin-Host) for the new POST surface. Findings pending.
+- **Round 3 — complete (2026-09-22).** Three web agents (R-11…R-13) returned; folded in. Outcomes:
+  a cross-cutting **accessibility** spec (native `<table>` not `role=grid`; APG Disclosure/Splitter;
+  canvas + visually-hidden table; skip-link/landmarks/focus-visible; not-color-alone per theme —
+  R-11); the **shared `createChart` wrapper** (probe-resolved tokens, destroy+recreate on
+  theme/density, ResizeObserver, leak-safe teardown, `window.__charts` + a11y table — R-12); and a
+  **new lane U6, control-plane hardening** (Host allow-list + Origin/`Sec-Fetch-Site=same-origin` +
+  `/api/*` custom-header + tight CSP; Starlette ≥ 1.0.1 for CVE-2026-48710; the "same-site lab"
+  landmine — R-13). Two invariants added to §2 (accessible; not-itself-an-attack-surface); U6 added
+  to the deliverables + wave map.
+- **Loop complete.** All 13 research markers resolved across 3 rounds; deliverables are executable
+  and lane-organized. Remaining open items are product decisions, not research: task #19 (whether
+  the UI surfaces labgen outputs) and the deferred greybox reward=0.000 investigation.
 
 ## 7. Process / bookkeeping (per CLAUDE.md)
 

@@ -25,6 +25,17 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   hand-rolled highlighting; TensorBoard-style diagnostics + validated `metric_series` schema +
   `MetricLogger` + LTTB downsampling; advisory-framed read-only ML panels. Reason: prepare the UI
   track for distributed, out-of-order lane builds. CC-UI-0023, FR-UI-8.
+- Docs (UI): completed the plan's 3-round research-refinement loop (13 web-research markers).
+  Round 2 added the PRG+303 cross-section pivot + a URL/server/localStorage state rule (U0), a
+  WAL + `open_store()` SQLite-concurrency design for `metric_series` (B0/CORE), a zero-new-dep
+  three-layer test strategy (§7), and a concrete Overview spec (U1). Round 3 added a cross-cutting
+  accessibility spec (native `<table>` not `role=grid`; APG Disclosure/Splitter; canvas +
+  visually-hidden table; not-color-alone per theme), the shared `createChart` uPlot wrapper
+  (probe-resolved tokens, destroy+recreate on theme/density, ResizeObserver, leak-safe teardown),
+  and a **new lane U6 — control-plane hardening** (Host allow-list + Origin/`Sec-Fetch-Site`
+  same-origin + `/api/*` custom-header + tight CSP; Starlette ≥ 1.0.1 for CVE-2026-48710; the
+  same-site-lab landmine), plus two §2 invariants (accessible; not-itself-an-attack-surface).
+  CC-UI-0023.
 
 ## 2026-09-21
 

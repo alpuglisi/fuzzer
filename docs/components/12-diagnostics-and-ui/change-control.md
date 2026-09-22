@@ -37,11 +37,14 @@ Newest first.
   - [x] Round 1 research (R-01…R-06) dispatched + folded in — done.
   - [x] Round 2 (R-07 MPA pivot/state, R-08 SQLite WAL concurrency, R-09 test strategy, R-10
     Overview content) — folded in.
-  - [ ] Round 3 (R-11 accessibility, R-12 uPlot theming/responsive, R-13 loopback security) —
-    dispatched; pending fold-in.
-- Effectiveness (assessed 2026-09-22): effective so far — round-1 research converted five open
-  design forks into concrete, executable specs with cited sources; re-assess after rounds 2–3 and
-  once the first lanes (U0/B0/X0) build against it.
+  - [x] Round 3 (R-11 accessibility, R-12 uPlot theming/responsive, R-13 loopback security) —
+    folded in; added lane **U6 — control-plane hardening** and two §2 invariants (accessible;
+    not-itself-an-attack-surface).
+- Effectiveness (assessed 2026-09-22): effective — the 3-round research loop (13 markers) converted
+  every open UI design fork into concrete, cited, executable spec and surfaced one net-new lane
+  (U6) that a security tool needs to keep its own control plane off the attack surface. Deliverables
+  are lane/wave-organized for distributed builds. Re-assess once the first lanes (U0/B0/X0/U6)
+  build against it.
 
 ### CC-UI-0022 — Launch view rebuilt as the approved master-detail (2026-09-21)
 - Change: rebuilt the Launcher section inside the R0 shell to match the **approved mockup**
