@@ -355,3 +355,15 @@ th {
   .brand span, nav.tabs a span:not(.ic), .side-sep, .side-foot { display: none; }
   .content { padding: 1rem .8rem; }
 }
+
+/* --- Findings workbench (R2): facets + table, list -> detail ------------ */
+.findings-layout { display: grid; grid-template-columns: 240px 1fr; gap: 1rem; align-items: start; }
+.facets .field > label { display: block; min-width: 0; margin-bottom: .15rem; }
+.facets .field select, .facets .field input { width: 100%; }
+.saved-views { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: .7rem; }
+.saved-views h3 { margin: 0 0 .4rem; font-size: .85rem; color: var(--muted); }
+.saved-views select { width: 100%; margin-bottom: .4rem; }
+.findings-main table { width: 100%; }
+@media (max-width: 900px) {
+  .findings-layout { grid-template-columns: 1fr; }
+}

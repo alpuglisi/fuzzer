@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}fuzzlab finding #{{ detail.id }}{% endblock %}
+{% block crumb %}Finding #{{ detail.id }}{% endblock %}
+{% block content %}
+<p><a href="/findings">&larr; all findings</a></p>
+<h1>Finding #{{ detail.id }} &mdash; {{ detail.vuln_class or 'unknown' }}</h1>
+<p class="muted">Run <a href="/runs/{{ detail.run_id }}">#{{ detail.run_id }}</a>
+  ({{ detail.run_tool or '' }}, started {{ detail.run_started_at or '' }}),
+  confidence <code>{{ detail.confidence or '' }}</code>{% if detail.category %},
+  category <code>{{ detail.category }}</code>{% endif %}.</p>
+
+<div class="card">
+  <h2>Location</h2>
+  <div class="field"><label>Method</label> <code>{{ detail.method or '' }}</code></div>
+  <div class="field"><label>URL</label> <code>{{ detail.url or '' }}</code></div>
+  <div class="field"><label>Param</label> <code>{{ detail.param or '' }}</code></div>
+  <div class="actions">
+    <button type="button" id="to-repeater" data-finding-id="{{ detail.id }}">&rarr; Repeater</button>
+    <span class="muted" id="to-repeater-status"></span>
+  </div>
+</div>
+
+{% if detail.attempt %}
+<div class="card">
+  <h2>Attempt</h2>
+  <div class="muted">payload family <code>{{ detail.attempt.payload_family or '' }}</code>
+    &middot; reward {{ detail.attempt.reward if detail.attempt.reward is not none else '—' }}
+    &middot; score {{ detail.attempt.score if detail.attempt.score is not none else '—' }}</div>
+</div>
+{% endif %}
+
+{% if detail.candidate %}
+<div class="card">
+  <h2>Candidate (audit rule)</h2>
+  <div class="muted">rule <code>{{ detail.candidate.rule or '' }}</code>
+    &middot; sink context <code>{{ detail.candidate.sink_context or '' }}</code></div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Evidence (oracle mechanism)</h2>
+  {% if detail.evidence %}
+  <ul>
+  {% for k, v in detail.evidence.items() %}
+    <li><code>{{ k }}</code>: {{ v }}</li>
+  {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No evidence recorded.</p>
+  {% endif %}
+</div>
+{% endblock %}

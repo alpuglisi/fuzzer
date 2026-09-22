@@ -1,6 +1,6 @@
 # Diagnostics and UI — Requirement Specification
 
-Component code: **UI** · Status: `[planned]` · Last updated: 2026-09-21
+Component code: **UI** · Status: `[planned]` · Last updated: 2026-09-22
 
 Related: `ARCHITECTURE.md` #12; `DECISIONS_AND_ROADMAP.md` (D2, D5, D11);
 `./change-control.md`.
@@ -104,6 +104,21 @@ bugs — the research-platform diagnostics of decision D2.
   in `app.py`, `results.overview_summary()`; CC-UI-0025. Retires the hash-tab single document
   FR-UI-7/FR-UI-8 originally described. R2 adds the Findings workbench, R3 the Proxy rebuild,
   both as further routes in this same shell.)*
+- **FR-UI-10** A **Findings workbench** (`/findings`, `/findings/{id}`) over the existing
+  `finding`/`attempt` data: a **faceted filter plane** (`vuln_class`, `confidence`, a
+  `category` derived by joining out to the linked candidate's audit-rule evidence, `run_id`,
+  `has_evidence`), a findings table, per-viewer **saved views** (named filter sets in
+  `localStorage`, degrading cleanly without it), and a detail pane (location, the linked
+  attempt/candidate, and the oracle's full evidence). A finding's underlying request can be
+  pivoted to the Repeater ("send to Repeater") — reconstructed from its `url`/`method`/`param`
+  and `evidence['payload']` (the store keeps no raw bytes for a finding), via the same
+  `RepeaterController.create_tab` write path History's flow-to-Repeater pivot already uses.
+  Read-only over the store (NFR-UI-read-only); renders correctly with no store at all.
+  *(Realized: R2 of the layout redesign —
+  `results.list_findings/finding_facets/finding_detail/build_finding_raw_request`,
+  `RepeaterController.create_from_finding`, `templates/sections/findings.html` +
+  `templates/finding.html`; CC-UI-0026. R3 (Proxy rebuild) is next per
+  `docs/UI_LAYOUT_REDESIGN.md`.)*
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

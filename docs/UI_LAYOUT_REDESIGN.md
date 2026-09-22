@@ -199,7 +199,16 @@ in-page state persist in `localStorage`.
   the segmented-bar/sparkline treatment described in §6 is left for a follow-up pass once a
   charting story exists (R3+/Phase 4).
 - **R2 — Findings workbench.** Faceted filters + saved views over the existing `finding`/
-  `attempt` data; wire "send to Repeater / open request".
+  `attempt` data; wire "send to Repeater / open request". `[built; CC-UI-0026, FR-UI-10]`
+  — `/findings` (facet plane + table) and `/findings/{id}` (detail: location, linked
+  attempt/candidate, full evidence), both server-rendered per R1's route pattern;
+  `results.list_findings/finding_facets/finding_detail` (category derived by joining out
+  to the linked candidate's audit-rule evidence — the store has no `category` column on
+  `finding`); saved views are per-viewer `localStorage` (name -> querystring); "send to
+  Repeater" reuses the existing `RepeaterController.create_tab` write path History's
+  flow-to-Repeater pivot already established, reconstructing a raw request from the
+  finding's `url`/`method`/`param` + `evidence['payload']` (no raw bytes are stored for a
+  finding) via `results.build_finding_raw_request()`.
 - **R3 — Proxy workbench rebuild.** Re-lay Proxy on the shared message editor + resizable
   panes + sub-nav (folding in Phase 2.1–2.4).
 - Phases **3 (ML)** and **4 (Diagnostics)** then land as sections in the shell rather than new

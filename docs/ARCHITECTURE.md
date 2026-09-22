@@ -698,8 +698,15 @@ tracked in the requirements files, not here.
   (findings + a by-category breakdown — the store has no severity taxonomy yet, FR-UI-9),
   runs, last run, detection quality (F1/MCC on the latest scored run), efficiency
   (requests/finding), a recent-runs table, and quick actions to Launch/Proxy; read-only,
-  renders correctly with no store at all (CC-UI-0025, FR-UI-9). R2 still adds a Findings
-  workbench, R3 a Proxy rebuild.
+  renders correctly with no store at all (CC-UI-0025, FR-UI-9). **R2 built:** a **Findings
+  workbench** (`/findings`, `/findings/{id}`) over the existing `finding`/`attempt` data — a
+  faceted filter plane (`vuln_class`, `confidence`, a `category` derived by joining out to
+  the linked candidate's audit-rule evidence, `run_id`, `has_evidence`), a table, per-viewer
+  saved views (`localStorage`), and a detail pane (location, linked attempt/candidate, full
+  oracle evidence). "Send to Repeater" pivots a finding by reconstructing its request from
+  `url`/`method`/`param` + `evidence['payload']` (no raw bytes are stored for a finding) and
+  reusing the same `RepeaterController.create_tab` write path History's flow pivot already
+  established (CC-UI-0026, FR-UI-10). R3 still adds a Proxy rebuild.
   **Pending:** the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
   `metric_series` time-series table (Phase 4), Datasette-style store exploration, a
   `--dry-run` mode, and a plain CLI entry point per tool for headless use

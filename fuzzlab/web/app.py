@@ -80,6 +80,29 @@ def _known_categories() -> list[str]:
         return []
 
 
+# --- query-string parsing for the Findings facets (plain GET params, so blank ---
+# --- select options — the browser always submits `name=` for them — must parse ---
+# --- as "no filter", not a 422 on `int|None`/`bool|None` route params) -----------
+
+def _opt_str(v: str | None) -> str | None:
+    return v or None
+
+
+def _opt_int(v: str | None) -> int | None:
+    if not v:
+        return None
+    try:
+        return int(v)
+    except ValueError:
+        return None
+
+
+def _opt_bool(v: str | None) -> bool | None:
+    if not v:
+        return None
+    return v.strip().lower() in ("1", "true", "yes", "on")
+
+
 # --- store-backed results (read-only; never creates the store file) -----------
 
 def _read_runs(cfg: Config) -> list[dict]:
@@ -98,6 +121,33 @@ def _read_detail(cfg: Config, run_id: int) -> dict | None:
     from fuzzlab.core.store import Store
     with Store(path) as store:
         return results.run_detail(store, run_id)
+
+
+def _read_findings(cfg: Config, **filters: Any) -> list[dict]:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return []
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        return results.list_findings(store, **filters)
+
+
+def _read_finding_facets(cfg: Config) -> dict:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return {"vuln_classes": [], "confidences": [], "categories": [], "runs": []}
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        return results.finding_facets(store)
+
+
+def _read_finding(cfg: Config, finding_id: int) -> dict | None:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return None
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        return results.finding_detail(store, finding_id)
 
 
 def _read_flows(cfg: Config, query: str | None = None) -> list[dict]:
@@ -211,6 +261,24 @@ def _overview_context(cfg: Config) -> dict[str, Any]:
     return {**_shell_context(cfg, "overview"), **summary}
 
 
+def _findings_context(cfg: Config, run_id: int | None = None, vuln_class: str | None = None,
+                      confidence: str | None = None, category: str | None = None,
+                      has_evidence: bool | None = None) -> dict[str, Any]:
+    """R2 Findings workbench (docs/UI_LAYOUT_REDESIGN.md #6/#9): faceted findings +
+    the facet plane's own distinct values, read-only over the store. Renders
+    correctly with no store at all, like the Overview dashboard."""
+    findings = _read_findings(
+        cfg, run_id=run_id, vuln_class=vuln_class or None, confidence=confidence or None,
+        category=category or None, has_evidence=has_evidence)
+    return {
+        "findings": findings,
+        "facets": _read_finding_facets(cfg),
+        "filters": {"run_id": run_id, "vuln_class": vuln_class or "",
+                   "confidence": confidence or "", "category": category or "",
+                   "has_evidence": has_evidence},
+    }
+
+
 def _launch_context(cfg: Config, state: LauncherState) -> dict[str, Any]:
     activities = _activities()
     return {
@@ -280,6 +348,28 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         return templates.TemplateResponse(
             request, "sections/proxy.html", _shell_context(cfg, "proxy"))
 
+    @app.get("/findings", response_class=HTMLResponse)
+    def findings_page(request: Request, run_id: str | None = None, vuln_class: str | None = None,
+                      confidence: str | None = None, category: str | None = None,
+                      has_evidence: str | None = None):
+        return templates.TemplateResponse(
+            request, "sections/findings.html",
+            {**_shell_context(cfg, "findings"),
+             **_findings_context(cfg, _opt_int(run_id), _opt_str(vuln_class), _opt_str(confidence),
+                                 _opt_str(category), _opt_bool(has_evidence))})
+
+    @app.get("/findings/{finding_id}", response_class=HTMLResponse)
+    def finding_page(request: Request, finding_id: int):
+        detail = _read_finding(cfg, finding_id)
+        if detail is None:
+            return templates.TemplateResponse(
+                request, "not_found.html",
+                {"kind": "Finding", "item_id": finding_id, "back_href": "/findings",
+                 **_shell_context(cfg, "findings")}, status_code=404)
+        return templates.TemplateResponse(
+            request, "finding.html",
+            {"detail": detail, **_shell_context(cfg, "findings")})
+
     @app.get("/runs", response_class=HTMLResponse)
     def runs_page(request: Request):
         return templates.TemplateResponse(
@@ -331,6 +421,21 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     @app.get("/api/runs")
     def runs() -> dict[str, Any]:
         return {"runs": _read_runs(cfg)}
+
+    @app.get("/api/findings")
+    def api_findings(run_id: str | None = None, vuln_class: str | None = None,
+                     confidence: str | None = None, category: str | None = None,
+                     has_evidence: str | None = None) -> dict[str, Any]:
+        ctx = _findings_context(cfg, _opt_int(run_id), _opt_str(vuln_class), _opt_str(confidence),
+                                _opt_str(category), _opt_bool(has_evidence))
+        return {"findings": ctx["findings"], "facets": ctx["facets"]}
+
+    @app.get("/api/findings/{finding_id}")
+    def api_finding(finding_id: int):
+        detail = _read_finding(cfg, finding_id)
+        if detail is None:
+            return JSONResponse({"error": f"finding {finding_id} not found"}, status_code=404)
+        return detail
 
     @app.get("/api/runs/{run_id}")
     def run(run_id: int):
@@ -535,6 +640,13 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         tab = repeater_ctl.create_from_flow(flow_id)
         if tab is None:
             return JSONResponse({"error": f"flow {flow_id} not found"}, status_code=404)
+        return tab
+
+    @app.post("/api/proxy/repeater/from-finding/{finding_id}")
+    async def repeater_from_finding(finding_id: int):
+        tab = repeater_ctl.create_from_finding(finding_id)
+        if tab is None:
+            return JSONResponse({"error": f"finding {finding_id} not found"}, status_code=404)
         return tab
 
     @app.post("/api/proxy/repeater/tabs/{tab_id}/send")

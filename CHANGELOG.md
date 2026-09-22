@@ -13,6 +13,14 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- UI: built R2 of the layout redesign — a **Findings workbench** (`/findings`,
+  `/findings/{id}`) with a faceted filter plane (`vuln_class`, `confidence`, a
+  `category` derived from the linked candidate's audit-rule evidence, `run_id`,
+  `has_evidence`), per-viewer saved views, a detail pane, and a real "send to
+  Repeater" pivot that reconstructs a finding's request and reuses the existing
+  `RepeaterController.create_tab` write path History's flow pivot already
+  established — over the existing `finding`/`attempt` store data, no schema change
+  (CC-UI-0026, FR-UI-10).
 - SCHED/MUT: closed a confirmed wiring gap where the mutation engine's
   `payload_variant` table was write-only — added `fuzzlab/scheduler/variants.py`
   (a candidate source reading `payload_variant` back in, scoped like the existing

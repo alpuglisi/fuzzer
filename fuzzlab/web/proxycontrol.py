@@ -15,6 +15,7 @@ listener but sends nothing until a proxied client drives in-scope traffic throug
 
 from __future__ import annotations
 
+import json
 import threading
 from dataclasses import dataclass, field
 from typing import Any
@@ -339,6 +340,38 @@ class RepeaterController:
         name = f"flow #{flow_id}"
         return self.create_tab(name, host or "127.0.0.1", port,
                                raw.decode("latin-1", "replace"), use_tls=use_tls)
+
+    def create_from_finding(self, finding_id: int) -> dict[str, Any] | None:
+        """Seed a tab from a finding's location + oracle-recorded payload (the R2
+        "send to Repeater" pivot, docs/UI_LAYOUT_REDESIGN.md #6/#9). Unlike
+        :meth:`create_from_flow`, no raw bytes are stored for a finding — the request
+        is reconstructed from ``url``/``method``/``param`` and ``evidence['payload']``
+        via :func:`results.build_finding_raw_request`. ``None`` if the finding (or the
+        store) does not exist."""
+        from fuzzlab.web import results
+        thread_store = self._thread_store()
+        if thread_store is None and not results.store_exists(self._path()):
+            return None
+        from fuzzlab.core.store import Store
+        own = thread_store or Store(self._path())
+        try:
+            row = own.conn.execute(
+                "SELECT f.url, f.method, f.param, f.evidence, t.base_url "
+                "FROM finding f LEFT JOIN target t ON t.run_id = f.run_id "
+                "WHERE f.id=?", (finding_id,)).fetchone()
+            if row is None:
+                return None
+            try:
+                evidence = json.loads(row["evidence"]) if row["evidence"] else {}
+            except (ValueError, TypeError):
+                evidence = {}
+        finally:
+            if own is not thread_store:
+                own.close()
+        base_url = row["base_url"] or self.cfg.get("target_base_url", "")
+        raw, host, port, use_tls = results.build_finding_raw_request(
+            row["url"], row["method"], row["param"], evidence.get("payload", ""), base_url)
+        return self.create_tab(f"finding #{finding_id}", host, port, raw, use_tls=use_tls)
 
     def send(self, tab_id: int, raw: str | None = None) -> dict[str, Any] | None:
         """Replay a tab (optionally edited); returns the raw response as text."""

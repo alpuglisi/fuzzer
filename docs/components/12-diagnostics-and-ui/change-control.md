@@ -3,6 +3,93 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0026 — R2: Findings workbench (facets + saved views + send-to-Repeater) (2026-09-22)
+- Change: built R2 of the layout redesign (`docs/UI_LAYOUT_REDESIGN.md` §6/§9) on top of R1's
+  routes/shell — a faceted Findings workbench over the existing `finding`/`attempt` data, plus
+  the "send to Repeater" pivot the doc calls out as the genuine scanner+proxy differentiator.
+  - **Query helpers (`results.py`, pure, no FastAPI)**: `list_findings()` (facet-filterable:
+    `run_id`, `vuln_class`, `confidence`, `category`, `has_evidence`; newest first; the store
+    has no `category` column on `finding` itself, so it is derived by joining
+    `finding -> attempt -> candidate` and reading the audit rule's `category` out of the
+    candidate's evidence JSON — `None` when a finding has no linked candidate, e.g. an
+    oracle-only confirmation with no audit-rule origin), `finding_facets()` (distinct
+    `vuln_class`/`confidence`/derived-`category` values plus the runs that actually have
+    findings, for the filter selects), `finding_detail()` (one finding joined out to its
+    attempt/candidate/run/target row), and `build_finding_raw_request()` — a pure function
+    that synthesizes a raw HTTP/1.1 request from a finding's `url`/`method`/`param` plus
+    `evidence['payload']` (when the confirming strategy recorded one; most do, per
+    `oracle/strategies.py` — a few timing-only mechanisms don't, and the function still
+    returns a valid, replayable request at that location without a reproduced payload).
+    Filtering runs in Python, not SQL, since `category` is JSON-derived, not a column —
+    acceptable at the lab's scale (a run's findings are tens to a few hundred rows).
+  - **Routes (`app.py`)**: `GET /findings` (list + facet plane, server-rendered from GET query
+    params) and `GET /findings/{id}` (detail: location, linked attempt/candidate, full
+    evidence dump, the "→ Repeater" button) — real, deep-linkable routes per R1's pattern, a
+    new `findings` sidebar entry between Proxy and Results. `GET /api/findings` and
+    `GET /api/findings/{id}` expose the same data as JSON. Facet query params are accepted as
+    plain strings and parsed with `_opt_int`/`_opt_str`/`_opt_bool` (blank-tolerant) rather
+    than typed `int|None`/`bool|None` path params, because a `<select>`'s "— any —" option
+    still submits `name=` (empty string) on the query string, which FastAPI/Pydantic would
+    otherwise 422 on for a typed optional int/bool.
+  - **Send to Repeater (real wiring, not a dead button)**: `RepeaterController.create_from_finding()`
+    (`proxycontrol.py`) reuses the *existing* Repeater mechanism `create_from_flow()` already
+    established for Proxy History — it reads the finding's location + evidence, its run's
+    `target.base_url`, builds the raw request via `results.build_finding_raw_request()`, and
+    calls the same `create_tab()` the flow pivot uses. New route
+    `POST /api/proxy/repeater/from-finding/{id}` mirrors `from-flow/{id}` (404 on an unknown
+    finding). Since Findings and Proxy are separate documents (MPA, no client router), the
+    finding detail page's button POSTs, then navigates to `/proxy?repeater_tab=<id>`;
+    `initRepeater()` in `app.js` now reads that query param on load and selects the tab —
+    the in-page `repeater-select` CustomEvent (used when History and Repeater share a page)
+    doesn't cross a navigation, so this is the MPA-appropriate equivalent, not a rewrite of
+    the existing mechanism.
+  - **Templates/JS**: `templates/sections/findings.html` (facet form + table, extends
+    `base.html`) and `templates/finding.html` (detail page). Saved views are per-viewer
+    `localStorage` (`fl-findings-views`, name -> querystring), wrapped in try/catch
+    (`initFindings()` in `app.js`) so a blocked/absent store just disables the feature, per
+    the shell's existing per-viewer-preference pattern (theme/density/collapse). No shared
+    generic `DataTable`/message-editor JS component exists yet to reuse (R0 built the shell,
+    `postJSON`/`subscribe`, and per-page vanilla-JS table rendering, not an extracted
+    component) — this follows the same per-page pattern the Proxy History table already uses
+    (`initProxy()`), not a new one.
+  - `not_found.html` generalized (`kind`/`item_id`/`back_href`, default unchanged) so it
+    renders "Finding N not found" too, not just "Run N not found".
+  - New requirement `FR-UI-10` records this in the living spec.
+- Impact (other components / project): UI only, read-only over the store (NFR-UI-read-only
+  holds — no new writes; `create_from_finding` only inserts a `repeater_tab` row, the same
+  write `create_from_flow`/`create_tab` already make). No schema change. The Proxy workbench's
+  existing routes/DOM/JS are unchanged except the one `initRepeater()` addition (reading
+  `?repeater_tab=`), which is additive and backward compatible with the flow-history pivot.
+- Risk (level; mitigation): low (additive routes + one new template pair + one new controller
+  method reusing an established write path; no change to launcher/proxy/results gating or
+  auth checks). Mitigation: `tests/test_web_findings.py` covers the pure query helpers on an
+  empty store and a fully-joined seeded store (derived category, `has_evidence`, each facet
+  filter individually, `run_id` filter), `build_finding_raw_request` (GET/query, POST/body
+  with no payload, and the default-host fallback), the `/findings` and `/findings/{id}` routes
+  (empty-store safety, real data wiring, facet filtering via query params, the blank-select-
+  value 422 case, the 404 case), the `/api/findings*` JSON endpoints, and the send-to-Repeater
+  wiring end to end — `RepeaterController.create_from_finding` building a real replayable tab
+  and the `/api/proxy/repeater/from-finding/{id}` route creating a tab that then appears in
+  the ordinary `/api/proxy/repeater/tabs` listing (404 on an unknown finding in both).
+- Deliverables:
+  - [x] `results.list_findings/finding_facets/finding_detail/build_finding_raw_request` — done.
+  - [x] `/findings`, `/findings/{id}`, `/api/findings`, `/api/findings/{id}` routes — done.
+  - [x] `RepeaterController.create_from_finding` + `POST /api/proxy/repeater/from-finding/{id}` — done.
+  - [x] `templates/sections/findings.html`, `templates/finding.html`, sidebar entry — done.
+  - [x] `app.js`: `initFindings()` (saved views), `initFindingDetail()` (send-to-Repeater),
+    `initRepeater()` `?repeater_tab=` deep-link support — done.
+  - [x] `tests/test_web_findings.py` (14 tests) added; full fast suite
+    (`pytest -q -m "not slow"`): 1591 passed, 8 skipped, 12 deselected (excluding 14
+    pre-existing `test_mutation_filter`/`test_mutation_search` failures from a concurrent,
+    uncommitted lab-migration lane's in-flight `puppy-fort-factory/config/waf-rules.json` ->
+    `lab/waf-rules.json` rename already in the shared tree before this lane started — not a
+    regression from this change; confirmed via `git status` showing the rename as the only
+    change touching those tests' fixture path) — done.
+- Effectiveness (assessed 2026-09-22): effective — Findings now has its own faceted,
+  deep-linkable workbench wired to real data, and the "send to Repeater" pivot the redesign
+  doc names as a differentiator is real (creates an actual replayable tab), closing R2. R3
+  (Proxy rebuild) is next per the migration path; re-assess once it lands.
+
 ### CC-UI-0025 — R1: deep-linkable per-section routes + Overview dashboard (2026-09-22)
 - Change: built R1 of the layout redesign (`docs/UI_LAYOUT_REDESIGN.md` §9), the enabling
   routing refactor plus the Overview dashboard it was sequenced with.

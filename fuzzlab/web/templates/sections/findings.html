@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block crumb %}Findings{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="findings-layout">
+    <div class="card facets">
+      <h2>Filters</h2>
+      <form id="facet-form" method="get" action="/findings">
+        <div class="field">
+          <label for="f-run">Run</label>
+          <select id="f-run" name="run_id">
+            <option value="">— any run —</option>
+            {% for r in facets.runs %}
+            <option value="{{ r.id }}" {% if filters.run_id == r.id %}selected{% endif %}>#{{ r.id }} {{ r.tool }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-vuln">Vuln class</label>
+          <select id="f-vuln" name="vuln_class">
+            <option value="">— any —</option>
+            {% for v in facets.vuln_classes %}
+            <option value="{{ v }}" {% if filters.vuln_class == v %}selected{% endif %}>{{ v }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-conf">Confidence</label>
+          <select id="f-conf" name="confidence">
+            <option value="">— any —</option>
+            {% for c in facets.confidences %}
+            <option value="{{ c }}" {% if filters.confidence == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-cat">Category</label>
+          <select id="f-cat" name="category">
+            <option value="">— any —</option>
+            {% for c in facets.categories %}
+            <option value="{{ c }}" {% if filters.category == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-evid">Has evidence</label>
+          <select id="f-evid" name="has_evidence">
+            <option value="">— any —</option>
+            <option value="true" {% if filters.has_evidence == true %}selected{% endif %}>yes</option>
+            <option value="false" {% if filters.has_evidence == false %}selected{% endif %}>no</option>
+          </select>
+        </div>
+        <div class="actions">
+          <button type="submit">Apply</button>
+          <a href="/findings">Clear</a>
+        </div>
+      </form>
+      <div class="saved-views">
+        <h3>Saved views</h3>
+        <select id="view-select"><option value="">— select a saved view —</option></select>
+        <div class="actions">
+          <input type="text" id="view-name" placeholder="name this view">
+          <button type="button" id="view-save">Save current</button>
+          <button type="button" id="view-delete">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card findings-main">
+      <h2>Findings ({{ findings | length }})</h2>
+      {% if findings %}
+      <table id="findings-table">
+        <thead><tr><th>id</th><th>class</th><th>confidence</th><th>category</th>
+          <th>method</th><th>url</th><th>param</th><th>run</th><th>evidence</th></tr></thead>
+        <tbody>
+          {% for f in findings %}
+          <tr>
+            <td><a href="/findings/{{ f.id }}">#{{ f.id }}</a></td>
+            <td>{{ f.vuln_class or '' }}</td>
+            <td>{{ f.confidence or '' }}</td>
+            <td>{{ f.category or '' }}</td>
+            <td>{{ f.method or '' }}</td>
+            <td><code>{{ f.url or '' }}</code></td>
+            <td>{{ f.param or '' }}</td>
+            <td><a href="/runs/{{ f.run_id }}">#{{ f.run_id }}</a></td>
+            <td>{{ 'yes' if f.has_evidence else 'no' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted">No findings match these filters. Run <code>fuzzlab audit</code> /
+        <code>fuzzlab fuzz</code> / <code>fuzzlab auto</code> against the lab, or
+        <a href="/findings">clear the filters</a>.</p>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

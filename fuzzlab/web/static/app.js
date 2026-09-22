@@ -387,7 +387,80 @@ function initRepeater() {
   });
 
   document.addEventListener("repeater-select", (e) => loadTabs(e.detail));
-  loadTabs();
+  // Deep-link from a finding's "→ Repeater" pivot (R2): /proxy?repeater_tab=<id>
+  // selects the tab created just before the redirect (MPA — no client router, so
+  // the created-tab id travels as a query param instead of an in-page event).
+  const params = new URLSearchParams(window.location.search);
+  const wantTab = params.get("repeater_tab");
+  loadTabs(wantTab != null ? wantTab : undefined);
+}
+
+// --- Findings workbench (R2): facets are plain GET params (server-rendered,
+// deep-linkable); saved views are per-viewer localStorage of a name -> querystring,
+// wrapped in try/catch so a blocked/absent localStorage just disables the feature. ---
+function initFindings() {
+  const select = document.getElementById("view-select");
+  if (!select) return; // not the findings page
+  const KEY = "fl-findings-views";
+
+  function load() {
+    try {
+      return JSON.parse(localStorage.getItem(KEY) || "{}");
+    } catch (e) { return {}; }
+  }
+  function save(views) {
+    try { localStorage.setItem(KEY, JSON.stringify(views)); } catch (e) { /* degrade */ }
+  }
+  function refresh() {
+    const views = load();
+    select.replaceChildren(new Option("— select a saved view —", ""));
+    for (const name of Object.keys(views).sort()) select.appendChild(new Option(name, name));
+  }
+
+  select.addEventListener("change", () => {
+    const views = load();
+    if (select.value && views[select.value] != null) {
+      window.location.search = views[select.value];
+    }
+  });
+  const saveBtn = document.getElementById("view-save");
+  if (saveBtn) saveBtn.addEventListener("click", () => {
+    const nameEl = document.getElementById("view-name");
+    const name = (nameEl.value || "").trim();
+    if (!name) return;
+    const views = load();
+    views[name] = window.location.search.replace(/^\?/, "");
+    save(views);
+    nameEl.value = "";
+    refresh();
+    select.value = name;
+  });
+  const delBtn = document.getElementById("view-delete");
+  if (delBtn) delBtn.addEventListener("click", () => {
+    if (!select.value) return;
+    const views = load();
+    delete views[select.value];
+    save(views);
+    refresh();
+  });
+  refresh();
+}
+
+// --- Finding detail: "send to Repeater" pivot (R2) ---
+function initFindingDetail() {
+  const btn = document.getElementById("to-repeater");
+  if (!btn) return; // not a finding detail page
+  const status = document.getElementById("to-repeater-status");
+  btn.addEventListener("click", async () => {
+    const id = btn.dataset.findingId;
+    status.textContent = "sending…";
+    const { status: code, data } = await postJSON(`/api/proxy/repeater/from-finding/${id}`, {});
+    if (code === 200) {
+      window.location.href = `/proxy?repeater_tab=${encodeURIComponent(data.id)}`;
+    } else {
+      status.textContent = "error: " + (data.error || code);
+    }
+  });
 }
 
 // --- Proxy tab: Scope + Match-Replace ---
@@ -474,4 +547,5 @@ document.addEventListener("DOMContentLoaded", () => {
   initShell();
   initLaunchNav(); initLaunchForms();
   initProxy(); initIntercept(); initRepeater(); initScope();
+  initFindings(); initFindingDetail();
 });
