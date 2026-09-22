@@ -14,6 +14,15 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- MUT (`CC-MUT-0011`, `FR-MUT-8`, B0 emitters sub-lane): `MutationSearch` now
+  optionally emits its per-step reward/novelty signal into the `metric_series`
+  table (`source="mutation"`) via B0's `MetricLogger`/`log_scalar`
+  (`fuzzlab/core/store.py`, CC-CORE-0018); `fuzzlab mutate-run`
+  (`fuzzlab/mutation/run.py::run_mutation`) attaches one shared logger across
+  all base payloads in a run — why: gives the diagnostics UI (U5/B0) a live
+  training-curve-style view of the mutation search, matching the GBT/logistic/
+  bandit/coverage emitters already planned for this table; purely additive,
+  no change to search/selection behavior.
 - ML (`CC-ML-0009`, build lane B0 Wave 1b): wired per-round/per-epoch scalar
   emission from `GradientBoostedTrees.fit`/`LogisticRegression.fit` (`fuzzlab/ml
   /gbt.py`, `fuzzlab/ml/logistic.py`) into B0-table's `metric_series` sink via

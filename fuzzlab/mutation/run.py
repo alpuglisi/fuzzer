@@ -5,6 +5,8 @@ runs `MutationSearch` per base payload, and — when a base is blocked and a
 semantics-preserving variant evades — writes the variant to `payload_variant` via the
 destructive-gated `record_search_result`. Optionally measures real coverage gain through
 the Part E grey-box side channel so the "reach new code" half of the exit is live too.
+Also emits each base's per-step reward/novelty into `metric_series` (source="mutation",
+CC-MUT-0011) via a shared `MetricLogger`, purely for observability.
 Lab-only; the caller supplies an authorized sender.
 """
 
@@ -12,6 +14,7 @@ from __future__ import annotations
 
 import time
 
+from fuzzlab.core.store import MetricLogger
 from fuzzlab.mutation.catalog import record_search_result
 from fuzzlab.mutation.livefilter import HttpFilter
 from fuzzlab.mutation.search import MutationSearch
@@ -56,30 +59,35 @@ def run_mutation(*, url: str, param: str, store, run_id: int, sender,
     """Search for a bypass per base; record the preserving evaders. Returns a summary."""
     flt = HttpFilter(sender, url, param, method=method, location=location)
     summary = {"bases": 0, "blocked": 0, "bypasses": 0, "recorded": 0, "results": []}
-    for base in bases:
-        base_blocked = flt.caught(base)
-        search = MutationSearch(flt, coverage_fn=coverage_fn, seed=seed, budget=budget)
-        res = search.search(base, vuln_class)
-        bypass = bool(res.evaded and res.semantics_ok and base_blocked)
-        recorded = None
-        if bypass:
-            base_hits = flt.evaluate(base).hits
-            recorded = record_search_result(
-                store, run_id, base, res, vuln_class,
-                bypassed_rule=(",".join(base_hits) or None),
-                allow_destructive=allow_destructive)
-        summary["bases"] += 1
-        summary["blocked"] += 1 if base_blocked else 0
-        summary["bypasses"] += 1 if bypass else 0
-        summary["recorded"] += 1 if recorded is not None else 0
-        summary["results"].append({
-            "base": base,
-            "base_blocked": base_blocked,
-            "variant": res.variant,
-            "operators": list(res.operators),
-            "evaded": res.evaded,
-            "semantics_ok": res.semantics_ok,
-            "novel_lines": res.novel_lines,
-            "recorded_id": recorded,
-        })
+    # B0 emitter (CC-MUT-0011, R-05): one buffered `metric_series` writer for the whole
+    # run, shared across each base's MutationSearch so reward/novelty land under a single
+    # source="mutation" series per run_id. Purely observational; flushed on exit.
+    with MetricLogger(store, run_id, source="mutation") as metric_logger:
+        for base in bases:
+            base_blocked = flt.caught(base)
+            search = MutationSearch(flt, coverage_fn=coverage_fn, seed=seed, budget=budget,
+                                    metric_logger=metric_logger)
+            res = search.search(base, vuln_class)
+            bypass = bool(res.evaded and res.semantics_ok and base_blocked)
+            recorded = None
+            if bypass:
+                base_hits = flt.evaluate(base).hits
+                recorded = record_search_result(
+                    store, run_id, base, res, vuln_class,
+                    bypassed_rule=(",".join(base_hits) or None),
+                    allow_destructive=allow_destructive)
+            summary["bases"] += 1
+            summary["blocked"] += 1 if base_blocked else 0
+            summary["bypasses"] += 1 if bypass else 0
+            summary["recorded"] += 1 if recorded is not None else 0
+            summary["results"].append({
+                "base": base,
+                "base_blocked": base_blocked,
+                "variant": res.variant,
+                "operators": list(res.operators),
+                "evaded": res.evaded,
+                "semantics_ok": res.semantics_ok,
+                "novel_lines": res.novel_lines,
+                "recorded_id": recorded,
+            })
     return summary

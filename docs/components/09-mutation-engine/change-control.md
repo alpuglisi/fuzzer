@@ -3,6 +3,58 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0011 — `MutationSearch` reward/novelty emitted into `metric_series` (B0 emitter sub-lane) (2026-09-22)
+- Change: `fuzzlab/mutation/search.py::MutationSearch` gained an optional
+  `metric_logger: MetricLogger | None = None` constructor parameter (B0's
+  `fuzzlab.core.store.MetricLogger`, CC-CORE-0018). In `search()`'s per-step loop,
+  after the existing `step_reward` (already computed via `_reward()`) and a new
+  `step_novel` (the max `_novelty()` seen across that step's candidate variants,
+  mirroring how `step_reward` is already a per-step max) are known, if a
+  `metric_logger` is attached it logs two rows per step: `key="reward"` and
+  `key="novelty"`, both under `source="mutation"`, `step=<search step, 1-based>`.
+  A step whose chosen bandit arm produced no variants (the existing
+  `if not variants: continue` branch) logs nothing for that step — unchanged
+  no-op behavior, just no metric row. `fuzzlab/mutation/run.py::run_mutation`
+  (the `mutate-run` driver) now opens one `MetricLogger(store, run_id,
+  source="mutation")` for the whole run (as a context manager, flushed on exit)
+  and passes it to every base payload's `MutationSearch` instance, so all bases
+  in one `mutate-run` invocation share one buffered writer under one run_id.
+  Purely additive/observational: the bandit scheduler update, hill-climb
+  acceptance, and `SearchResult`/`best` selection logic are byte-for-byte
+  unchanged; `metric_logger=None` (the default, and every existing caller/test
+  that doesn't pass it) is a no-op with zero behavior change.
+- Impact (other components / project): CORE only as a consumer of B0's already-
+  landed `metric_series`/`MetricLogger` (CC-CORE-0018) — no schema change here.
+  No interaction with lane C1's `greybox/run.py` `mutation_variant_probes()`/
+  `_record_accepted_variant()` wiring (CC-MUT-0009) or lane D0a's `--dry-run`
+  flag (CC-MUT-0010): neither touches `MutationSearch` or `run_mutation`'s
+  signature beyond this addition, and `--dry-run` still short-circuits before
+  `run_mutation`/`MutationSearch` are ever constructed, so no metrics are logged
+  on a dry run. `greybox/run.py` does not call `MutationSearch` itself (it calls
+  the operators/validator/catalog functions directly per CC-MUT-0009), so it is
+  unaffected and out of scope for this change.
+- Risk (level; mitigation): low — new optional parameter, default `None`,
+  additive-only code path; the emission line runs only inside the existing loop
+  and cannot alter `step_reward`, `accepted`, or `best`. Mitigated by
+  `tests/test_mutation_search.py`'s new metric tests (rows land with the
+  expected `source`/`key`/`step` shape; identical search result with vs. without
+  a `metric_logger` attached for the same seed; `run_mutation`'s shared logger
+  reaches `metric_series` end-to-end) plus the unchanged pre-existing search
+  tests (still green, proving no behavior drift).
+- Deliverables:
+  - [x] `MutationSearch(metric_logger=...)` — done.
+  - [x] Per-step `reward`/`novelty` rows under `source="mutation"` — done.
+  - [x] `run_mutation()` wires one shared `MetricLogger` across all bases — done.
+  - [x] Tests: rows land in `metric_series`; emission doesn't change the search
+    result; `run_mutation` wiring end-to-end — done.
+  - [x] `requirements.md`/`CHANGELOG.md` updated — done.
+- Effectiveness (assessed 2026-09-22): effective — `tests/test_mutation_search.py`
+  confirms `reward`/`novelty` rows land under `source="mutation"` for the run_id
+  used, with monotonic step numbers matching search steps that tried a variant,
+  and that attaching a `metric_logger` does not change `(variant, operators)` for
+  a fixed seed; `run_mutation()`'s shared-logger test confirms every base's rows
+  share one `source`/`run_id`. Full suite green (see this entry's commit).
+
 ### CC-MUT-0010 — `--dry-run` CLI flag (lane D0a) (2026-09-22)
 - Change: `fuzzlab/mutation/cli.py::build_parser()` gained `--dry-run` (via the
   shared `fuzzlab/cli_dryrun.add_dry_run_flag()`). `main()` checks `args.dry_run`

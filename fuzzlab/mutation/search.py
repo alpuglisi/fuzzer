@@ -9,6 +9,12 @@ budget-bounded and reproducible under a fixed seed (NFR-MUT-bounded).
 Coverage is read through an injected ``coverage_fn`` (payload → file→lines map): offline
 a fake supplies it; live it sends the request and reads the grey-box coverage source.
 With no ``coverage_fn`` the objective is pure evasion.
+
+With an optional ``metric_logger`` (a :class:`fuzzlab.core.store.MetricLogger`, B0 /
+CC-MUT-0011), each search step's reward and novelty signal is additionally logged to
+``metric_series`` (``source="mutation"``, ``key="reward"``/``"novelty"``) for
+observability. This is purely a side-channel emission — it never feeds back into the
+bandit/hill-climb selection logic itself.
 """
 
 from __future__ import annotations
@@ -17,6 +23,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Callable, Mapping
 
+from fuzzlab.core.store import MetricLogger
 from fuzzlab.greybox.coverage import CoverageFrontier
 from fuzzlab.mutation.learn import Filter
 from fuzzlab.mutation.operators import MutationOperator, default_operators
@@ -54,7 +61,8 @@ class MutationSearch:
                  scheduler: ThompsonBandit | None = None,
                  coverage_fn: CoverageFn | None = None,
                  operators: list[MutationOperator] | None = None,
-                 seed: int = 0, budget: int = 40):
+                 seed: int = 0, budget: int = 40,
+                 metric_logger: "MetricLogger | None" = None):
         self.filter = flt
         self.validator = validator or SemanticsValidator()
         self.scheduler = scheduler or ThompsonBandit(rng=random.Random(seed))
@@ -62,6 +70,10 @@ class MutationSearch:
         self.operators = operators
         self.budget = budget
         self.frontier = CoverageFrontier()
+        # B0 emitter (CC-MUT-0011, R-05): optional buffered writer for this search's
+        # per-step reward/novelty signal into `metric_series` (source="mutation"). Purely
+        # additive/observational — never consulted by the search/selection logic itself.
+        self.metric_logger = metric_logger
 
     def _novelty(self, payload: str) -> int:
         if self.coverage_fn is None:
@@ -85,6 +97,7 @@ class MutationSearch:
                 self.scheduler.update(ctx, arm, 0.0)     # no-op operator here
                 continue
             step_reward = 0.0
+            step_novel = 0
             accepted = None
             for v in variants:
                 evaded = not self.filter.caught(v)
@@ -92,12 +105,16 @@ class MutationSearch:
                                                       trusted=not op.surface)
                 novel = self._novelty(v)
                 step_reward = max(step_reward, _reward(evaded, preserving, novel))
+                step_novel = max(step_novel, novel)
                 cand = SearchResult(v, chain + [arm], evaded, preserving, novel, step)
                 if cand._key() > best._key():
                     best = cand
                 if preserving and (evaded or novel > 0) and accepted is None:
                     accepted = v                          # hill-climb toward this variant
             self.scheduler.update(ctx, arm, step_reward)
+            if self.metric_logger is not None:
+                self.metric_logger.log("reward", step, step_reward)
+                self.metric_logger.log("novelty", step, float(step_novel))
             if accepted is not None:
                 current, chain = accepted, chain + [arm]
             # pure-evasion objective: stop once we have a preserving bypass
