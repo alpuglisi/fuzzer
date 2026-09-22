@@ -27,6 +27,13 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-79]
+  suggested_op: raw_concat   # zero escaping/sanitization before an HTML-body
+                             # echo -- same "no transform at all" shape as the
+                             # existing raw_concat entries; reused, not new
+  suggested_sink_family: html_body   # existing family; attacker content lands
+                             # as raw HTML content in the page body, matching
+                             # this family's own profile.php-bio precedent
 
 - file: idiomatic-1.php
   role: idiomatic
@@ -47,6 +54,13 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-79]
+  suggested_op: wp_kses_post   # allowlist HTML sanitizer -- a genuinely
+                             # different mechanism from html_entity_escape
+                             # (permits a safe tag/attribute subset rather
+                             # than encoding everything); no existing matrix
+                             # op models this, so proposed as new
+  suggested_sink_family: html_body   # same sink position as vulnerable-1.php
 
 - file: idiomatic-2.php
   role: idiomatic
@@ -64,3 +78,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-79]
+  suggested_op: html_entity_escape   # htmlspecialchars() at an HTML-body
+                             # position exactly matches the existing
+                             # (html_entity_escape, html_body, neutralises)
+                             # row -- reused verbatim, not renamed
+  suggested_sink_family: html_body

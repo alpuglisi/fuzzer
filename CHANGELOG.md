@@ -14,6 +14,22 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Research: Phase 3 CWE mapping for the "user-generated content / stored XSS"
+  corpus cell
+  (`docs/research/corpus-examples/ugc-xss/{php,node,python}/manifest.yaml`,
+  9 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each
+  entry per `docs/VULN_CORPUS_EXPANSION_PLAN.md` Phase 3's handoff spec.
+  CWE-79 on every entry (stored XSS via comment rendering). All entries reuse
+  the existing `html_body` sink family (its scope already covers a stored-XSS
+  case, `raw_concat`/`profile.php`'s bio field, so no new "stored" sink family
+  was needed even for the Node `innerHTML`/`dangerouslySetInnerHTML`
+  examples). `suggested_op` reuses `raw_concat` for every no-sanitization
+  vulnerable entry and the existing `html_entity_escape` for the one plain
+  `htmlspecialchars()` idiomatic entry; three new allowlist-sanitizer ops are
+  proposed since no existing op models that mechanism: `wp_kses_post`,
+  `dompurify_sanitize`, `bleach_clean`. Documentation/metadata-only —
+  `validated`/`validated_by` untouched, no source files altered.
+
 - Research: Phase 3 CWE mapping for the "auth-session" corpus cell
   (`docs/research/corpus-examples/auth-session/{php,node,python}/manifest.yaml`,
   12 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each

@@ -30,6 +30,13 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-79]
+  suggested_op: raw_concat   # Jinja2's |safe filter opts the value out of
+                             # autoescaping entirely -- functionally the same
+                             # "no transform at all" shape as the existing
+                             # raw_concat rows, just a different per-language
+                             # spelling of the same op; reused
+  suggested_sink_family: html_body
 
 - file: idiomatic-1.py
   role: idiomatic
@@ -48,6 +55,13 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-79]
+  suggested_op: bleach_clean   # bleach.clean() on ingest is an allowlist
+                             # HTML sanitizer, distinct from html_entity_escape
+                             # (the matrix's only existing HTML-body transform,
+                             # which escapes rather than sanitizes markup) --
+                             # proposed as new
+  suggested_sink_family: html_body
 
 - file: idiomatic-2.py
   role: idiomatic
@@ -67,3 +81,8 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-79]
+  suggested_op: bleach_clean   # same allowlist-sanitizer mechanism as
+                             # idiomatic-1.py, a second independent instance
+                             # -- reused, not a new name
+  suggested_sink_family: html_body

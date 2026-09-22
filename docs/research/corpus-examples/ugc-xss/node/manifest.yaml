@@ -27,6 +27,17 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-79]
+  suggested_op: raw_concat   # no sanitizer anywhere in the render path before
+                             # the innerHTML assignment -- same "no transform"
+                             # shape as the existing raw_concat rows; reused
+  suggested_sink_family: html_body   # innerHTML places attacker content as
+                             # raw HTML content in the page body; the existing
+                             # family's scope (already covers a stored-XSS
+                             # case, profile.php's bio field) is about parse
+                             # position, not render mechanism, so it applies
+                             # equally to a client-side DOM insertion -- no
+                             # new "html_body_stored" family needed
 
 - file: vulnerable-2.js
   role: vulnerable
@@ -45,6 +56,10 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-79]
+  suggested_op: raw_concat   # dangerouslySetInnerHTML with no sanitizer call
+                             # -- same shape as vulnerable-1.js, reused
+  suggested_sink_family: html_body   # same reasoning as vulnerable-1.js above
 
 - file: idiomatic-1.jsx
   role: idiomatic
@@ -60,3 +75,12 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-79]
+  suggested_op: dompurify_sanitize   # DOMPurify.sanitize() is a distinct
+                             # allowlist-sanitizer mechanism not currently in
+                             # the matrix (the matrix's only HTML-body
+                             # transform today is html_entity_escape, which
+                             # escapes rather than sanitizing markup) --
+                             # proposed as new
+  suggested_sink_family: html_body   # same dangerouslySetInnerHTML sink
+                             # position as vulnerable-2.js
