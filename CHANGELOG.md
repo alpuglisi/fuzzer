@@ -33,6 +33,17 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   other pick, Expedia's Java/Spring Boot half, stays paused: Maven
   Central/Spring Initializr are unreachable through this sandbox's egress
   proxy (recorded 2026-09-22, `ERROR_LOG.md`).
+- LAB: fixed `BUG-0034` (a same-session, self-caught defect, full bug
+  protocol applied) — `CC-LAB-0090`'s three new shared-vocabulary modules
+  (`redirect_target_allowlist`/`http_redirect_return`/`redirect_response`)
+  shipped without their `_DETERMINISM_CTX_BY_MODULE` fixture entries in
+  `tests/test_labgen_modules.py`, caught by that file's own completeness
+  guard test on a whole-repo `pytest` run done as this change's own closing
+  verification. Fixed by adding the three entries; new `PA-0036` closes the
+  verification-sequencing gap (a change touching a shared, cross-stack
+  registry needs the whole-repo suite, not only the directly-relevant test
+  files) rather than restating `PA-0001`/`PA-0027`, whose own guard test
+  worked correctly here.
 - Docs: renamed `docs/LAB_SECOND_TARGET_NODE_EXPRESS_PLAN.md` ->
   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` and added its §9,
   recording the project owner's answers to §0b's open questions: stack

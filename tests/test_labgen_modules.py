@@ -227,6 +227,15 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
         "dom_suffix": "-post",
         "dom_write_prop": "innerHTML",
     },
+    # CC-LAB-0090: registered in the shared vocabulary so minimal_pair can
+    # classify them (php_current's shape map does not use any of them).
+    # None of the three real templates reference a Jinja variable (see
+    # fuzzlab.labgen.modules' own docstring for these classes), so any
+    # non-empty ctx satisfies them -- value_expr is supplied anyway to match
+    # this table's own convention of a realistic-looking fixture per module.
+    "redirect_target_allowlist": {"value_expr": "$return_to"},
+    "http_redirect_return": {"value_expr": "$return_to"},
+    "redirect_response": {"body": "    // x\n", "method_name": "handle_x"},
 }
 
 

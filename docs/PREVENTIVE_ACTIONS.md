@@ -369,3 +369,16 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   a proxy signal for it — only `live_boot_available()`'s network half
   (`_network_reachable`, now `_composer_network_probe`) had this defect. (from
   BUG-0033)
+- **PA-0036** — When a change registers a module (or any entry) in a **shared,
+  cross-stack** registry consumed by more than one stack-specific module set or more
+  than one test file's own completeness table (as opposed to a change confined to one
+  stack's own emitter-local registry), run the whole-repo `pytest tests/` suite and
+  confirm it is green **before** the change is pushed/considered complete — not only
+  the test file(s) judged directly relevant to the change. Sharpens `CLAUDE.md`'s own
+  Definition-of-Done step 2 ("run the suite; keep it green") for the specific case
+  where "the suite" that matters is not obviously implied by which production file was
+  edited: `fuzzlab.labgen.modules`' shared registries have their own, separate
+  completeness table/guard test (`tests/test_labgen_modules.py`'s
+  `_DETERMINISM_CTX_BY_MODULE`) from any single stack's own module-set tests, and a
+  change that adds a shared-vocabulary-only registration (the `L-P3.3c-DOM`/
+  `CC-LAB-0090` pattern) must satisfy both. (from BUG-0034)

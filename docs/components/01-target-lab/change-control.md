@@ -146,9 +146,20 @@ Component code: **LAB**. Entry format and required fields: see
   booting the app and reading real HTTP responses, not by static reasoning
   about Laravel's internals, which is exactly the class of gap Tier 0/3-only
   coverage would have missed and the review gate's adequacy pass predicted
-  in the abstract. Full `pytest` run (this component's ground-truth/
-  cutover-gate suite plus the new test module) green; broader whole-repo
-  suite run as part of this same change to confirm no regression elsewhere.
+  in the abstract. A first whole-repo `pytest tests/` run (1616 passed, 30
+  skipped, 2 real failures) additionally caught a third gap the review gate
+  and this entry's own drafting missed: `tests/test_labgen_modules.py`'s
+  `_DETERMINISM_CTX_BY_MODULE` table (a hand-kept, test-enforced completeness
+  map over every module the shared `fuzzlab.labgen.modules` registries hold)
+  had no entries for the three new shared-vocabulary-only registrations
+  (`redirect_target_allowlist`/`http_redirect_return`/`redirect_response`),
+  failing loud exactly as `PA-0001`/`PA-0027` intend a completeness check to
+  — fixed by adding the three entries, matching the existing `L-P3.3c-DOM`
+  row's own comment convention. A second whole-repo run after that fix: 1618
+  passed, 30 skipped, 0 failed — this component's ground-truth/cutover-gate
+  suite, the new `tests/test_labgen_open_redirect.py` module, and every
+  pre-existing test all green together, not just this shape's own tests in
+  isolation.
 
 
 - Change: `CC-LAB-0064`'s php_current sink (`fuzzlab/labgen/modules/sinks/

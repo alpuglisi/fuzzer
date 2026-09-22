@@ -18,6 +18,39 @@ Format per entry:
 
 ---
 
+## 2026-09-22 — Category 5 pilot (open_redirect shape): shared-vocabulary modules added without their determinism-fixture entries (Fixed, BUG-0034/PA-0036)
+
+- **Symptom:** `CC-LAB-0090`'s three new shared-vocabulary-only module
+  registrations (`redirect_target_allowlist`/`http_redirect_return`/
+  `redirect_response` in `fuzzlab/labgen/modules/__init__.py`) were pushed
+  in a commit that had only been verified with `tests/
+  test_labgen_open_redirect.py` and `tests/test_labgen_php_laravel_harder_
+  shapes.py` run directly — not the whole-repo `pytest tests/` suite. A
+  first whole-repo run (done as this same change's own closing
+  verification, before declaring it complete) failed two tests:
+  `tests/test_labgen_modules.py::test_every_module_renders_
+  deterministically_twice` and `::test_every_registered_module_has_a_
+  determinism_ctx_fixture`.
+- **Root cause:** `_DETERMINISM_CTX_BY_MODULE` (a hand-kept, per-module
+  fixture table in `tests/test_labgen_modules.py`, guarded by its own
+  completeness assertion) had no entries for the three new module names —
+  an authoring omission in the same commit that registered them, not a gap
+  in the guard test itself, which is exactly `PA-0001`/`PA-0027`'s "a
+  hand-maintained completeness table must be kept in sync, and a guard test
+  must fail loud when it isn't" pattern working as designed.
+- **Remediation:** added the three missing `_DETERMINISM_CTX_BY_MODULE`
+  entries (matching the file's own `L-P3.3c-DOM` precedent's comment
+  convention), verified with a second whole-repo `pytest tests/` run:
+  1618 passed, 30 skipped, 0 failed.
+- **Status:** Fixed. See `docs/bugs/BUG-0034-*.md` for the full RCA and
+  recurrence review: `PA-0001`/`PA-0027` already cover the registry/
+  guard-test discipline itself (and their guard test worked correctly here
+  — it failed loud on the very first run against the new code), so this is
+  not a recurrence of that root cause. The actual gap was this session's
+  own pre-push verification being scoped to "directly relevant test
+  files" rather than the whole suite; `PA-0036` (new) closes that
+  sequencing gap.
+
 ## 2026-09-22 — Category 5 pilot (Expedia/Java-Spring-Boot): Maven Central unreachable through this sandbox's egress proxy (Open, Environment)
 
 - **Symptom:** building `node_express`/`php_laravel`'s equivalent of a real,
