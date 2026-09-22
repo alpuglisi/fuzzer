@@ -67,7 +67,7 @@ bugs — the research-platform diagnostics of decision D2.
 - **FR-UI-7** The panel is organized as a **multi-page app with real per-section
   routes**: **Launcher** (`/`, run controls), **Proxy** (`/proxy`, traffic
   review/edit/drop/forward/repeat), **Findings** (`/findings`, the faceted findings
-  workbench — see FR-UI-11), **Results** (`/results`, runs dashboard),
+  workbench — see FR-UI-13), **Results** (`/results`, runs dashboard),
   **ML** (`/ml`, classifier/ranker/conformal/anomaly/active-learning/bandit/mutation —
   kept **separate** from the primary panel), and **Diagnostics** (`/diagnostics`, a
   TensorBoard-like view for performance review and deep troubleshooting), plus
@@ -111,7 +111,7 @@ bugs — the research-platform diagnostics of decision D2.
   rebuilds still follow in Wave 1 (U1–U5), per `docs/UI_LAYOUT_REDESIGN.md` and
   `docs/UI_IMPLEMENTATION_PLAN.md`.)*
 
-- **FR-UI-11** *(added CC-UI-0029, U2)* The **Findings workbench** (`/findings`,
+- **FR-UI-13** *(added CC-UI-0029, U2)* The **Findings workbench** (`/findings`,
   `/findings/{id}`) offers faceted filtering + saved views over `finding`/`attempt`,
   read-only, plus a "send to Repeater" pivot:
   - A **left facet sidebar** (severity, vuln class, method, confirmation
@@ -198,7 +198,7 @@ bugs — the research-platform diagnostics of decision D2.
   sends requests.
 - **NFR-UI-read-only** The UI itself does not write result tables
   (`finding`/`attempt`/`candidate`); in automatic mode those are written by the
-  tools it invokes, not by the UI. `saved_views` (FR-UI-11, FR-CORE-9) is the
+  tools it invokes, not by the UI. `saved_views` (FR-UI-13, FR-CORE-9) is the
   one deliberate exception: it holds view *definitions* a person authored in
   the panel (filter/sort/column specs), never tool output, so writing it does
   not violate this invariant.

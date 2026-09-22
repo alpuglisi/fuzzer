@@ -14,7 +14,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
-- UI (`CC-UI-0029`, `FR-UI-11`, build lane U2): added the **Findings workbench**
+- UI (`CC-UI-0029`, `FR-UI-13`, build lane U2): added the **Findings workbench**
   (`/findings`, `/findings/{id}`) — a faceted filter sidebar (severity, vuln
   class, method, mechanism, endpoint; live counts; APG Disclosure a11y
   pattern) + applied-filter chips + server-side saved views
