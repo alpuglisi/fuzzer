@@ -49,6 +49,13 @@ that shares the store, never a mandatory pipeline (D5).
 - **NFR-PROXY-nonblocking** History writes are batched and must not stall the data
   path.
 - **NFR-PROXY-optional** Nothing in the core pipeline requires the proxy to run.
+- **NFR-PROXY-dry-run** `fuzzlab proxy` accepts `--dry-run`: plans and prints the
+  exact argv/command it would run and sends nothing (no listener is started, no
+  upstream traffic), for headless use outside the web UI. Distinct from
+  `--export-ca` (which also sends no traffic but actually writes the CA file);
+  `--dry-run` takes priority and performs neither action. Reuses the web
+  launcher's dry-run plan/report logic (`fuzzlab/web/commandspec.py` +
+  `fuzzlab/web/runner.py`) via the shared `fuzzlab/cli_dryrun.py` helper.
 
 ## 5. Interfaces and data contracts
 Writes `flow` rows (+ raw bytes) to the store, read by the anomaly detector, UI,

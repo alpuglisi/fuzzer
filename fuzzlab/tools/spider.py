@@ -332,6 +332,8 @@ def build_parser():
     p.add_argument("--identity", default=None,
                    help="Crawl authenticated as this identity via the session manager "
                         "(needs saved credentials; Playwright engine). Omit to crawl anonymously.")
+    from fuzzlab.cli_dryrun import add_dry_run_flag
+    add_dry_run_flag(p)
     return p
 
 
@@ -341,6 +343,10 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.dry_run:
+        from fuzzlab.cli_dryrun import report
+        report("crawl", args)
+        raise SystemExit(0)
     get_logger("crawler").info("crawler starting",
                                extra={"start": args.start, "engine": args.engine,
                                       "identity": args.identity})

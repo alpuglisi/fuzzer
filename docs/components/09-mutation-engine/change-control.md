@@ -3,6 +3,33 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0010 — `--dry-run` CLI flag (lane D0a) (2026-09-22)
+- Change: `fuzzlab/mutation/cli.py::build_parser()` gained `--dry-run` (via the
+  shared `fuzzlab/cli_dryrun.add_dry_run_flag()`). `main()` checks `args.dry_run`
+  first — before the `--authorized` gate and before resolving `--base` payloads —
+  and calls `fuzzlab/cli_dryrun.report("mutate-run", args)`, reusing the web
+  launcher's existing dry-run plan/report logic (`fuzzlab/web/commandspec.spec()` +
+  `fuzzlab/web/runner.build_argv()`/`display_command()`, CC-UI-0013/0015), then
+  returns 0 before `make_probe_sender`/`Store`/`mrun.run_mutation` are ever called.
+  No payload is sent. Unchanged when `--dry-run` is absent.
+- Impact (other components / project): MUT only, plus an incidental UI effect — see
+  CC-UI-0027 (introspected `build_parser()` surfaces the new checkbox in the web
+  launcher automatically; `fuzzlab/web/app.py` untouched). No schema/store change; no
+  interaction with Wave C1's `CC-MUT-0009` M8-wiring (different code paths —
+  `fuzzlab/mutation/run.py`'s attempt-path wiring vs. this CLI's flag).
+- Risk (level; mitigation): low — additive flag, short-circuits before any side
+  effect. Mitigated by `tests/test_cli_dry_run.py` (mutate-run case: flag present,
+  report printed, `mrun.run_mutation`/`Store.__init__`/`make_probe_sender` patched to
+  raise if called) and the unchanged full suite otherwise.
+- Deliverables:
+  - [x] `--dry-run` on `mutate-run`'s parser — done.
+  - [x] Short-circuit ahead of the `--authorized` gate in `main()`, calling the
+    shared `cli_dryrun.report()` — done.
+  - [x] Tests confirming the plan is reported and nothing runs — done.
+- Effectiveness (assessed 2026-09-22): effective — `fuzzlab mutate-run --dry-run`
+  prints the planned argv/command and returns 0 without constructing a sender,
+  `Store`, or running the mutation search; verified directly and via the new tests.
+
 ### CC-MUT-0008 — Fix `SemanticsValidator` fail-open on untrusted SQL comment-append; fix AST case-sensitivity (2026-09-22)
 - Change: `fuzzlab/mutation/semantics.py` — added `introduces_line_comment(original,
   mutated)` (true when `mutated` carries a `--` marker `original` didn't) and made

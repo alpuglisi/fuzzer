@@ -809,6 +809,8 @@ def build_parser():
     p.add_argument("--base-url", default=None,
                    help="Target base URL for authentication (required with --identity), "
                         "e.g. http://localhost:8080")
+    from fuzzlab.cli_dryrun import add_dry_run_flag
+    add_dry_run_flag(p)
     return p
 
 
@@ -836,6 +838,10 @@ def print_summary(conn, out_name):
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.dry_run:
+        from fuzzlab.cli_dryrun import report
+        report("audit", args)
+        raise SystemExit(0)
     log = get_logger("auditor")
     log.info("auditor starting", extra={"indicator_db": args.indicator_db,
                                         "spider_db": args.spider_db})

@@ -3,6 +3,46 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0020 — `--dry-run` CLI flag on `fuzz` + `auto` (lane D0a) (2026-09-22)
+- Change: `fuzzlab/tools/blind_sqli_fuzzer.py::build_parser()` and
+  `fuzzlab/harness/auto_cli.py::build_parser()` both gained `--dry-run` (via the
+  shared `fuzzlab/cli_dryrun.add_dry_run_flag()`). Both `main()`s check
+  `args.dry_run` first — before the `--authorized` gate — and call
+  `fuzzlab/cli_dryrun.report("fuzz", args)` / `report("auto", args)` respectively,
+  reusing the web launcher's existing dry-run plan/report logic
+  (`fuzzlab/web/commandspec.spec()` + `fuzzlab/web/runner.build_argv()`/
+  `display_command()`, CC-UI-0013/0015), then return 0 before any sender/`Store`/
+  oracle is constructed. No probe or confirmation traffic is sent. Deliberately
+  bypasses the `--authorized` requirement for the dry-run preview itself (nothing is
+  sent either way, mirroring the web launcher's own dry-run route, which also does
+  not require `authorized`). Unchanged when `--dry-run` is absent. This is one
+  reserved number covering both commands since they land in a single lane/commit
+  (per the plan's numbering note); `fuzzlab greybox-run` is explicitly out of scope
+  here — that is lane D0b's `CC-FUZZ-0022`, sequenced after Wave C1's `CC-FUZZ-0019`
+  M8-wiring lane, which this lane does not touch.
+- Impact (other components / project): FUZZ only, plus an incidental UI effect — see
+  CC-UI-0027 (introspected `build_parser()` surfaces the new checkbox for both `fuzz`
+  and `auto` in the web launcher automatically; `fuzzlab/web/app.py` untouched). No
+  schema/store change; no interaction with Wave C1's M8-wiring (different files:
+  that lane touches `fuzzlab/greybox/run.py`/`greybox_cli.py`, this lane does not).
+- Risk (level; mitigation): low — additive flag, short-circuits before any side
+  effect, placed ahead of the `--authorized` check by design (documented above so it
+  isn't mistaken for a gate bypass on real execution). Mitigated by
+  `tests/test_cli_dry_run.py` (fuzz + auto cases: flag present, report printed,
+  `establish_baseline`/`run_fuzzing_cycle` and `run_auto`/`Store.__init__` patched to
+  raise if called; a fuzz case also asserts `would_execute: False` is reported when
+  `--authorized` is absent, i.e. the preview correctly reflects that a real run would
+  be refused) and the unchanged full suite otherwise.
+- Deliverables:
+  - [x] `--dry-run` on `fuzz`'s and `auto`'s parsers — done.
+  - [x] Short-circuit ahead of the `--authorized` gate in both `main()`s, calling the
+    shared `cli_dryrun.report()` — done.
+  - [x] Tests confirming the plan is reported and nothing runs, for both commands —
+    done.
+- Effectiveness (assessed 2026-09-22): effective — `fuzzlab fuzz --dry-run` and
+  `fuzzlab auto --dry-run` both print the planned argv/command and return 0 without
+  constructing a sender, `Store`, or oracle; verified directly and via the new tests.
+
 ### CC-FUZZ-0018 — Expose `build_parser()` for the command-spec registry (2026-09-21)
 - Change: the fuzz/oracle activities factor their argparse setup into `build_parser()`, with
   `main()` delegating — `fuzzlab/tools/blind_sqli_fuzzer.py` (`parse_args()` delegates;

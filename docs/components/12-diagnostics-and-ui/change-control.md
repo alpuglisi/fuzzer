@@ -3,6 +3,46 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0027 — Incidental: CLI `--dry-run` flag surfaces in the launcher form (lane D0a) (2026-09-22)
+- Change: lane D0a added a `--dry-run` flag to the `build_parser()` of `crawl`,
+  `audit`, `fuzz`, `auto`, `mutate-run`, and `proxy` (see CC-CRAWL-0007,
+  CC-AUD-0015, CC-FUZZ-0020, CC-MUT-0010, CC-PROXY-0017 for the per-component
+  detail). `fuzzlab/web/commandspec.py::introspect()` reads each tool's flags
+  straight from its own `build_parser()` by design (see that module's docstring:
+  "a new flag shows up in the UI automatically with no change here"), so this new
+  flag now appears as an ordinary `bool` option (a checkbox) in each affected
+  activity's form in the web launcher, with **no code change to
+  `fuzzlab/web/app.py` or `fuzzlab/web/commandspec.py`**. This entry exists to
+  record that UI-visible effect, per PA-0031 (D0a's reserved bookkeeping numbers
+  include this conditional UI number precisely for this case).
+- Impact (other components / project): UI-visible only — one more checkbox per
+  affected activity's launcher form. No behavior change to the web launcher's own
+  `POST /api/launch/dry-run` route (CC-UI-0013/0015), which already previews any
+  command without executing it and does not depend on this new flag. If a person
+  checks the new `--dry-run` box and clicks the real "launch" action, the child
+  process now started via `POST /api/launch` would itself just print its plan and
+  exit 0 (the same behavior the CLI gets directly) — harmless, and arguably useful,
+  but not a scenario this lane added UI copy/handling for. `fuzzlab/greybox/
+  greybox_cli.py` (`greybox-run`'s form) is unaffected — that tool's `--dry-run` is
+  a separate, later change (lane D0b, `CC-FUZZ-0022`).
+- Risk (level; mitigation): low — the new option is inert unless a person explicitly
+  checks it, and even then only causes the corresponding CLI process (launched
+  in-process by the web launcher, same as any other flag) to print its plan and
+  exit instead of running for real; it cannot be more permissive than running
+  without it. Mitigated by the unchanged `tests/test_web_commandspec.py` and
+  `tests/test_web_launcher.py` suites (no assertion pinned the pre-existing flag
+  count per tool, so introspecting one more flag did not break anything) plus the
+  new `tests/test_cli_dry_run.py`.
+- Deliverables:
+  - [x] Confirmed via `commandspec.spec(name).to_dict()` that `--dry-run` appears
+    as a `bool` option for each of the six affected activities, with no code change
+    needed in `commandspec.py`/`app.py` — done.
+  - [x] Confirmed the web dry-run suites still pass unchanged — done.
+- Effectiveness (assessed 2026-09-22): effective as a record — the launcher form now
+  offers `--dry-run` for the six affected activities purely through the existing
+  introspection contract; no drift between the CLI's flags and the UI's form
+  (PA-0001/PA-0003 preserved).
+
 ### CC-UI-0024 — Lane X0: register `lab-generate` in the launcher (own group) (2026-09-22)
 - Change: surfaced `fuzzlab lab-generate` as a launchable activity in the web launcher (Wave-0
   lane X0 of `docs/UI_IMPLEMENTATION_PLAN.md`). `fuzzlab/labgen/cli.py` already exposed

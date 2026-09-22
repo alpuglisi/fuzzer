@@ -14,6 +14,16 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- CLI/D0a: added a headless `--dry-run` flag to every plain CLI entry point except
+  `fuzzlab greybox-run` (owned by lane D0b) — `crawl`, `audit`, `fuzz`, `auto`,
+  `mutate-run`, `proxy` — that plans and prints the exact command it would run and
+  sends nothing, for use outside the web UI. Reuses the web launcher's existing
+  `/api/launch/dry-run` plan/report logic (`fuzzlab/web/commandspec.py` +
+  `fuzzlab/web/runner.py`) via a new shared `fuzzlab/cli_dryrun.py` helper, instead
+  of reimplementing it (CC-CRAWL-0007, CC-AUD-0015, CC-FUZZ-0020, CC-MUT-0010,
+  CC-PROXY-0017; CC-UI-0027 for the incidental web-launcher form change — see the UI
+  entry for why that number was needed even though `fuzzlab/web/app.py` was not
+  touched).
 - Planning: added `docs/PARALLEL_LANE_BUILD_PLAN.md`, organizing the
   remaining safe-to-build-now backlog (lab-track page migration + conformance
   wiring, UI/diagnostics tabs, M8/M10 mutation-oracle wiring) into pre-numbered,
