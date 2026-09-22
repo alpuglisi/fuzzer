@@ -3,6 +3,111 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0031 — Lane U4: ML tab — read-only, advisory model-internals panels (2026-09-22)
+- Change: per `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U4) and its resolved R-06/R-02/R-12,
+  filled in the `/ml` section (previously a placeholder card, U0) with read-only,
+  advisory panels over model internals already in the store: classifier PR curve +
+  operating point, a reliability diagram + ECE (the advisory anchor), a logistic
+  weights panel (documented not-available — see below), ranker nDCG@k/precision@k vs. a
+  random baseline + rank score/uncertainty histograms + a score-vs-uncertainty scatter,
+  the conformal flag/abstain/drop stacked split (leads the tab, per R-06) + a
+  nonconformity histogram with the calibrated thresholds, the ECOD anomaly score
+  histogram + flagged-rate, active-learning committee disagreement histogram + a top-N
+  query queue, Thompson-bandit Beta posteriors (an overlaid density per arm via a
+  15-line `lgamma`-based pdf on a 200-point grid, pure stdlib `math` — no numpy/scipy —
+  plus a mean/90%-CI/pulls/mean-cost forest table), and a mutation-engine
+  killed/survived variants table. A persistent, **non-dismissible** advisory banner
+  ("Model output is advisory; confirmed findings come from the oracle") leads every
+  render; every score carries an uncertainty companion, its N, and (where meaningful) a
+  baseline; verb hygiene throughout is "scored/ranked/flagged", never
+  "detected/vulnerable/confirmed"; the palette is neutral blue (`--accent`) / amber
+  (`--warn`) only — never `--crit`/`--ok` (the oracle's red/green, reserved for
+  Results/Findings).
+  - New `fuzzlab/web/mlview.py`: one function per panel plus `ml_overview()`, all
+    **read-only** — every function only `SELECT`s from the store; two panels
+    (anomaly, active-learning disagreement) recompute a lightweight, deterministic
+    derivation of already-stored candidate feature vectors on the fly (ECOD fit +
+    score; a capped bootstrap committee fit + disagreement) without persisting
+    anything back — unlike the training-time equivalents
+    (`fuzzlab.ml.anomaly.detect_anomalies`, which records `run_metrics`), this module
+    writes nothing, ever. Reuses existing pure-Python ML helpers
+    (`fuzzlab.ml.metrics.pr_auc`, `fuzzlab.ml.ranking.mean_ndcg_at_k`/
+    `mean_precision_at_k`, `fuzzlab.ml.conformal.ConformalGate`,
+    `fuzzlab.ml.anomaly.ECOD`/`flag_top`, `fuzzlab.ml.active.Committee`/
+    `disagreement`) rather than re-deriving them.
+  - New route `GET /api/ml/data` (optional `?run_id=`) in `fuzzlab/web/app.py`,
+    backed by `_read_ml()` (mirrors `_read_runs`/`_read_detail`'s
+    store-existence-checked read pattern); degrades to `{"available_any": false}` on a
+    missing/empty store rather than erroring, and each panel degrades independently to
+    `{"available": false, "reason": ...}` on partially-populated data (e.g. candidates
+    exist but nothing has been scored yet).
+  - **Vendored uPlot 1.6.32** (MIT; R-02's resolved decision) verbatim as two static
+    files — `fuzzlab/web/static/vendor/uplot/uPlot.esm.js` (145 KB) +
+    `uPlot.min.css` — pulled via `npm pack uplot@1.6.32` and copied from the
+    package's own `dist/`, unmodified; no bundler, no CDN.
+  - New shared wrapper `fuzzlab/web/static/js/chart.js::createChart(el, {id, type,
+    data, series, opts})` (R-12's exact spec), a standalone ES module built to be
+    shared with U5's Diagnostics tab (not ML-specific): resolves CSS color tokens
+    through a hidden-probe element's computed style (`getPropertyValue` alone can
+    return an unresolved `var()`/`color-mix()` chain the canvas can't parse); maps
+    `data-density` to discrete font/gutter/tick/gap/point sizing buckets; a debounced
+    `ResizeObserver` on the chart's **parent cell** (not uPlot's own root, which would
+    self-trigger an RO feedback loop) coalesced with `requestAnimationFrame`; a
+    `MutationObserver` on `<html>` (`data-theme`/`data-density`) plus a `matchMedia`
+    listener for an unforced system-preference flip, both driving one idempotent
+    `destroy()` + recreate (never a partial restyle — uPlot bakes colors into the
+    canvas at draw and measures axis geometry at construction); `window.__charts` is a
+    `Map<id, handle>` for tests/debugging; every chart renders a visually-hidden
+    `<table>` a11y fallback (canvas `aria-hidden`, wrapper `role="img"`, ~200-row cap,
+    refreshed on `setData()`) since a canvas chart is opaque to screen readers.
+    `handle.destroy()` disconnects both observers, removes the `matchMedia` listener,
+    cancels any pending `requestAnimationFrame`, and calls `uPlot.destroy()` — the
+    observers otherwise hold references and leak across the app's MPA navigations.
+  - `fuzzlab/web/static/tokens.css`: added `--chart-h` (density-varying chart height
+    token both `chart.js` and any section CSS can read).
+  - New `fuzzlab/web/static/css/ml.css`, rewritten `templates/sections/ml.html`
+    (still extends `base.html`; no shell change) and `static/js/ml.js`.
+- Impact (other components / project): UI-only; no write path added anywhere. ML
+  component (component #10): a **consumer** of its already-stored outputs, not a
+  producer — no change to any ML training/scoring code. Documents one real gap
+  against ML component #10's own requirement spec: the logistic classifier's
+  coefficients are never persisted to the store (`train_and_score` only ever writes
+  the conformal calibration thresholds to `model.calibration`), so the "logistic
+  weights diverging bar" panel R-06 calls for renders a documented not-available
+  state instead of fabricating or inventing a value — recorded as `FR-ML-8`'s known
+  gap in `10-ml-components/requirements.md`, not silently dropped. `static/js/chart.js`
+  and `static/vendor/uplot/` are new shared infrastructure U5 (Diagnostics, same wave)
+  also depends on; at dispatch time neither existed yet, so this lane created them
+  (U5 should reuse, not re-vendor — flagged to the integrator per the multi-agent
+  orchestration merge protocol).
+- Risk (level; mitigation): low — strictly additive and read-only; no existing route,
+  table, or write path is touched. The one thing worth naming: `mlview.py`'s active-
+  learning panel trains a small bootstrap committee (`fuzzlab.ml.active.Committee`,
+  5 rankers by default) synchronously inside a `GET` handler — capped to 300 sampled
+  candidates (deterministic stride sample) to bound the cost on a large store, and
+  wrapped so a fit failure degrades to `{"available": false}` rather than a 500.
+  Mitigated by 17 new tests (`tests/test_web_ml.py`): every panel function against a
+  seeded store, an empty-store degrade-gracefully case for the whole overview, the
+  `/api/ml/data` route (seeded and missing-store), the advisory banner (present,
+  non-dismissible, normalized-whitespace matched) and verb-hygiene checks against the
+  actual template/JS source, the vendored uPlot files and new static assets serving,
+  and an explicit read-only assertion (`run_metrics` row count unchanged around the
+  anomaly panel call, the one case with a training-time write-carrying sibling).
+- Deliverables:
+  - [x] `fuzzlab/web/mlview.py` — one read-only function per panel + `ml_overview()` — done.
+  - [x] `GET /api/ml/data` (+ `_read_ml` in `app.py`) — done.
+  - [x] Vendored uPlot 1.6.32 (`static/vendor/uplot/`) — done.
+  - [x] Shared `createChart()` wrapper (`static/js/chart.js`) per R-12 — done.
+  - [x] `sections/ml.html` + `js/ml.js` + `css/ml.css`, advisory banner + categorical
+    bands + verb hygiene + blue/amber palette (R-06) — done.
+  - [x] `--chart-h` token added to `tokens.css` — done.
+  - [x] Tests (`tests/test_web_ml.py`, 17 new) — done.
+  - [ ] On-host visual QA (light/dark/compact, real trained models) — on-host.
+- Effectiveness (assessed 2026-09-22): effective in tests — every panel renders from a
+  seeded store or degrades to a named reason, the read-only assertion holds, and the
+  advisory framing (banner, verb hygiene, palette) is present in the served markup/JS.
+  Full-suite pass/skip counts recorded in this same date's CHANGELOG entry.
+
 ### CC-UI-0027 — Incidental: CLI `--dry-run` flag surfaces in the launcher form (lane D0a) (2026-09-22)
 - Change: lane D0a added a `--dry-run` flag to the `build_parser()` of `crawl`,
   `audit`, `fuzz`, `auto`, `mutate-run`, and `proxy` (see CC-CRAWL-0007,

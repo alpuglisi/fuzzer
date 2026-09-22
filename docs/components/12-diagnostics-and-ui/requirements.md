@@ -109,6 +109,46 @@ bugs — the research-platform diagnostics of decision D2.
   rebuilds still follow in Wave 1 (U1–U5), per `docs/UI_LAYOUT_REDESIGN.md` and
   `docs/UI_IMPLEMENTATION_PLAN.md`.)*
 
+- **FR-UI-11** *(added CC-UI-0031, lane U4)* The **ML tab** (`/ml`) is **read-only and
+  advisory** (R-06): a persistent, non-dismissible banner ("Model output is advisory;
+  confirmed findings come from the oracle") leads the tab, followed by the conformal
+  flag/abstain/drop split and the classifier's reliability diagram — the advisory
+  anchor. Every score shows an uncertainty companion, its N, and (where meaningful) a
+  baseline. Verb hygiene: model output is "scored/ranked/flagged", never
+  "detected/vulnerable/confirmed" (`fuzzlab/web/static/js/ml.js`, `templates/sections/
+  ml.html`). Palette is neutral blue/amber only (`--accent`/`--warn`) — never the
+  oracle's red/green (`--crit`/`--ok`, reserved for Results/Findings). Panels: PR curve
+  + reliability/ECE, logistic weights (documented not-available — see
+  `10-ml-components/requirements.md` FR-ML-8), nDCG@k/precision@k vs. random, rank
+  score/uncertainty histograms + a score-vs-uncertainty scatter, the conformal stacked
+  split + nonconformity histogram, the ECOD anomaly histogram, committee-disagreement
+  histogram + a top-N query queue, bandit Beta posteriors (overlaid density + a
+  forest/interval table), and a mutation killed/survived table. `GET /api/ml/data`
+  (`fuzzlab/web/mlview.py`) is the sole data source — read-only over the store,
+  optionally filtered by `run_id`; degrades to a documented "not available" reason per
+  panel (never an error) on an empty or partially-populated store.
+- **FR-UI-12** *(added CC-UI-0031, lane U4, resolved R-02/R-12)* A shared charting
+  layer, consumed by both the ML tab (U4) and Diagnostics (U5): **uPlot 1.6.32**
+  (MIT, vendored verbatim as two static files, `static/vendor/uplot/uPlot.esm.js` +
+  `uPlot.min.css` — no bundler, no CDN) behind one wrapper,
+  `static/js/chart.js::createChart(el, {id, type, data, series, opts})`. Canvas can't
+  read CSS custom properties and uPlot bakes resolved colors into the canvas at
+  construction, so a theme or density change is a full `destroy()` + recreate (data-only
+  updates use `setData()`; size-only updates use `setSize()`); color tokens are resolved
+  through a hidden-probe element's computed style (`getPropertyValue` alone can hand
+  back an unresolved `var()`/`color-mix()` chain the canvas can't parse). Density maps
+  to discrete sizing buckets off `data-density`. Responsive via a debounced
+  `ResizeObserver` on the chart's parent cell (not uPlot's own root — an RO feedback
+  loop), coalesced with `requestAnimationFrame`. Retheme wires a `MutationObserver` on
+  `<html>` (`data-theme`/`data-density`) plus a `matchMedia` listener for an unforced
+  system-preference change. `window.__charts` is a `Map<id, handle>` for tests/
+  debugging; every chart also renders a visually-hidden `<table>` a11y fallback next to
+  the (`aria-hidden`) canvas, since a canvas chart is opaque to screen readers.
+  Teardown (`handle.destroy()`) disconnects the `ResizeObserver`/`MutationObserver`,
+  removes the `matchMedia` listener, cancels any pending `requestAnimationFrame`, calls
+  `uPlot.destroy()`, and drops the chart from the registry — required because the
+  observers otherwise hold references and leak across an MPA navigation.
+
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is
   served separately from the vulnerable target (different origin/port; never in the

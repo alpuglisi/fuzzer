@@ -32,6 +32,24 @@ the oracle owns truth (the oracle/advisory split).
   config change, not a code change.
 - **FR-ML-7** Train and evaluate against the lab's cell/transform splits with a
   permanent blind holdout, plus external validation (WAVSEP / Juice Shop) (D10).
+- **FR-ML-8** *(added CC-ML-0010, lane U4)* Model internals already written to the
+  store are surfaced **read-only** by the web control panel's ML tab (`GET /ml`,
+  `GET /api/ml/data`; see `12-diagnostics-and-ui/requirements.md` FR-UI-11): classifier
+  PR curve + reliability/ECE, ranker nDCG@k/precision@k + score/uncertainty
+  distributions, the conformal flag/abstain/drop split, the ECOD anomaly tripwire, the
+  active-learning committee's disagreement, the bandit's Beta posteriors, and mutation
+  variants. `fuzzlab/web/mlview.py` reads only — it computes derived views (PR curve
+  points, a reliability diagram, a histogram, a Beta density, a lightweight bootstrap
+  committee) from stored feature vectors and scores; it never writes a row, including
+  no `run_metrics` write even where the equivalent training-time helper
+  (`fuzzlab.ml.anomaly.detect_anomalies`) does. **Known gap:** the logistic
+  classifier's coefficients (log-odds weights) are not persisted anywhere in the store
+  — `train_and_score` fits a fresh model per request and only ever writes the
+  conformal calibration thresholds to `model.calibration`, never `_w`/`_b` — so the
+  UI's "logistic weights diverging bar" panel (R-06) renders a documented
+  not-available state rather than a value; making it real needs either a schema change
+  (persist trained weights) or a training-time change (write on every `train_and_score`
+  call), both out of scope for a read-only lane.
 
 ## 4. Non-functional requirements
 - **NFR-ML-advisory** ML output is advisory: it can reorder, screen, or flag, but

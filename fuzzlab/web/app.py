@@ -31,7 +31,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from fuzzlab.core.config import Config, load_config
-from fuzzlab.web import commandspec, results
+from fuzzlab.web import commandspec, mlview, results
 from fuzzlab.web.proxycontrol import RepeaterController
 from fuzzlab.web.runner import Runner, build_argv, display_command
 from fuzzlab.web.sse import sse_response
@@ -280,6 +280,21 @@ def _read_detail(cfg: Config, run_id: int) -> dict | None:
     from fuzzlab.core.store import Store
     with Store(path) as store:
         return results.run_detail(store, run_id)
+
+
+def _read_ml(cfg: Config, run_id: int | None = None) -> dict:
+    """The whole read-only ML overview (U4/CC-UI-0031, CC-ML-0010) — every panel from
+    already-stored model internals; `{"available_any": False}` when the store has
+    nothing to show yet (no model trained, no bandit posteriors, ...)."""
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return {"run_id": run_id, "available_any": False}
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        overview = mlview.ml_overview(store, run_id)
+    overview["available_any"] = any(
+        isinstance(v, dict) and v.get("available") for v in overview.values())
+    return overview
 
 
 def _read_flows(cfg: Config, query: str | None = None) -> list[dict]:
@@ -564,6 +579,12 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     @app.post("/api/launch/{token}/stop")
     async def launch_stop(token: str):
         return {"stopped": runner.stop(token)}
+
+    # --- ML tab (U4/CC-UI-0031, CC-ML-0010): read-only, advisory (R-06) ---------
+
+    @app.get("/api/ml/data")
+    def ml_data(run_id: int | None = None):
+        return _read_ml(cfg, run_id)
 
     @app.get("/api/plugins")
     def plugins():
