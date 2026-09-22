@@ -198,6 +198,35 @@ def test_attack_novelty_is_per_point_not_global_frontier(tmp_path):
     assert summary["coverage_lines_seen"] > 0                   # shim clearly produced data
 
 
+def test_run_greybox_emits_coverage_frontier_growth_series(tmp_path):
+    """B0: the coverage-frontier loop emits a growing `coverage/coverage/lines`
+    metric_series point per probe (running frontier size, non-decreasing)."""
+    app = "/var/www/html/product.php"
+    probes = (ProbeSpec("baseline", "1", "baseline"),
+             ProbeSpec("sqli-error", "'", "sqli"))
+    sender = FakeSender([
+        (Probe(200, "ok"), {app: [10, 11]}, False),
+        (Probe(500, "err"), {app: [10, 11, 40, 41, 42]}, True),
+    ])
+    cov, fault = DictCoverage(sender), DictFault(sender)
+    point = GreyboxPoint(url="http://127.0.0.1:8080/product.php", param="id",
+                         method="GET", location="query", vuln_class="sqli-error")
+    with Store(tmp_path / "u.db") as store:
+        run_id = store.start_run("greybox", "127.0.0.1")
+        run_greybox(base_url="http://127.0.0.1:8080", store=store, run_id=run_id,
+                   points=[point], sender=sender, coverage_source=cov,
+                   dbfault_source=fault, probes=probes)
+        rows = store.conn.execute(
+            "SELECT source, key, step, value FROM metric_series WHERE run_id=? "
+            "ORDER BY step", (run_id,)).fetchall()
+    assert [r["source"] for r in rows] == ["coverage", "coverage"]
+    assert [r["key"] for r in rows] == ["coverage/lines", "coverage/lines"]
+    assert [r["step"] for r in rows] == [1, 2]
+    assert rows[0]["value"] == 2      # frontier after baseline: {10,11}
+    assert rows[1]["value"] == 5      # frontier after sqli-error: + {40,41,42}
+    assert rows[1]["value"] >= rows[0]["value"]   # monotonically non-decreasing
+
+
 def test_run_greybox_resets_between_stateful_points(tmp_path):
     from fuzzlab.greybox.reset import FakeLabControl
     probes = (ProbeSpec("baseline", "1", "baseline"),)

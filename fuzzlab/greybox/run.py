@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import Callable, Iterable, Sequence
 from urllib.parse import urlparse
 
+from fuzzlab.core.store import MetricLogger
 from fuzzlab.greybox.confirm import greybox_confirms
 from fuzzlab.greybox.coverage import (CoverageFrontier, app_lines, encode_coverage)
 from fuzzlab.greybox.recorder import record_attempt_signals
@@ -181,6 +182,8 @@ def run_greybox(*, base_url: str, store, run_id: int,
     if lab_control is not None:
         lab_control.snapshot("baseline")
 
+    step = 0
+    metric_logger = MetricLogger(store, run_id, "coverage")
     for pt in points:
         # Send the benign baseline(s) first to establish this point's baseline coverage,
         # then diff each attack against it. Novelty for the reward is PER-POINT
@@ -198,6 +201,8 @@ def run_greybox(*, base_url: str, store, run_id: int,
             cov = app_lines(coverage_source.lines_for(cid), include_prefixes=include)
             cov_lines = {(f, ln) for f, lns in cov.items() for ln in lns}
             frontier.observe(cov)          # accumulate the run-wide exploration total
+            step += 1
+            metric_logger.log("coverage/lines", step, float(frontier.size))
             fault = dbfault_source.fault_for(cid)
             if spec.kind == "baseline":
                 if baseline_probe is None:
@@ -252,6 +257,7 @@ def run_greybox(*, base_url: str, store, run_id: int,
             lab_control.reset("baseline")
 
     summary["novel_lines"] = frontier.size
+    metric_logger.flush()
     _record_metric(store, run_id, "greybox_attempts", summary["attempts"])
     _record_metric(store, run_id, "greybox_db_faults", summary["db_faults"])
     _record_metric(store, run_id, "greybox_novel_lines", summary["novel_lines"])
