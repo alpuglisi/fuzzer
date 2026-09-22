@@ -4,6 +4,34 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-22 (category 4 pilot, Phase A build — Netflix/Java)
+- LAB: `java_spring_boot` Phase A — this project's first JVM/Java
+  target-lab stack (`CC-LAB-0091`/`FR-LAB-65`). A real Maven/Spring Boot
+  3.4.1 skeleton (`spring-boot-starter-web` only, no GraphQL/DGS
+  dependency — see the entry's explicit scope call), a `JavaEmitter`
+  rendering one illustrative shape (a playback-resume endpoint, CWE-502:
+  Jackson's `activateDefaultTyping()` vs. a fixed DTO class), and
+  `JavaLiveBootHarness` (real `mvn package`, real boot, real HTTP) —
+  reviewed pre-implementation by 2 independent agents per the pre-change
+  review gate. Architecturally distinct from every other routed emitter:
+  Spring Boot's component scanning needs no route accumulator at all.
+  Adds two new ops (`jackson_default_typing_deserialize`/
+  `jackson_typed_allowlist_deserialize`) to `lab/safety_matrix.yaml`'s
+  existing `object_deserialization` family. One design bug caught and
+  fixed during implementation (both twins would have mapped to the same
+  literal route path, ambiguous at Spring Boot boot — fixed by deriving
+  the served path from `cell_id`, matching `go_net_http`'s own
+  convention). Tier 0 (`mvn -q compile`) and Tier 3 both pass; the real
+  live-boot test proves an observable deserialization code-path
+  differential end to end. `docs/ARCHITECTURE.md` and
+  `docs/components/01-target-lab/requirements.md` updated. Full non-slow
+  suite re-run: no regression (same 15 pre-existing `gitleaks`-related
+  failures as the prior entry). **Category 4 pilot's both Phase-A builds
+  (Twitch/Go, Netflix/Java) are now done**; Phase B (richer stack-idiomatic
+  modules, GraphQL/DGS federation, per-run databases) and Phases C-E
+  (corpus-grounded pages, conformance, `multitarget.py` wiring) remain, per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4/§9.5.
+
 ## 2026-09-22 (category 4 pilot, Phase A build)
 - LAB: `go_net_http` Phase A — this project's first Go target-lab stack
   (`CC-LAB-0090`/`FR-LAB-64`). A real, checked-in `net/http`-only skeleton,

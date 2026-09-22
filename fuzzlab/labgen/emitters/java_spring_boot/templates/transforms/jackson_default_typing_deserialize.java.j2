@@ -1,0 +1,6 @@
+// jackson_default_typing_deserialize transform: {{ result_var }} is deserialized
+// with Jackson's activateDefaultTyping() into a polymorphic Object -- the
+// concrete runtime type is resolved from an attacker-controlled type hint in
+// the JSON itself (CWE-502)
+mapper.activateDefaultTyping(mapper.getPolymorphicTypeValidator(), ObjectMapper.DefaultTyping.NON_FINAL);
+Object {{ result_var }} = mapper.readValue({{ body_var }}, Object.class);

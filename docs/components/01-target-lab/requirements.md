@@ -1885,6 +1885,81 @@ lane) can submit a payload as
     stack (which would be the first shape needing the per-run database
     above).
 
+- **FR-LAB-65** *(`java_spring_boot` Phase A: this project's first JVM/Java
+  target-lab stack; `CC-LAB-0091`, 2026-09-22, category 4 pilot — Media/
+  streaming, Netflix pick, `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
+  §9.4/§9.5).* The toolkit supports a Spring Boot 3.4.1/Spring MVC target
+  stack at Phase-A depth: one real, live-bootable illustrative shape,
+  matching every other stack's own Phase-A bar (`go_net_http`'s
+  `FR-LAB-64` being the immediately preceding precedent for this exact
+  scope level, within the same category-4 pilot).
+  - `fuzzlab.labgen.emitters.java_spring_boot.JavaEmitter` renders exactly
+    one shape — `("insecure_deserialization", "object_deserialization")`,
+    a `/api/playback/resume`-shaped `@RestController`/`@PostMapping`
+    handler that Jackson-deserializes its request body either
+    polymorphically (vulnerable — CWE-502, `activateDefaultTyping()`
+    lets an attacker-supplied type hint in the JSON pick the concrete
+    class Jackson instantiates) or into a single, fixed, concrete DTO
+    class (secure — no polymorphism). Reuses `lab/safety_matrix.yaml`'s
+    existing `object_deserialization` sink family (added by `CC-LAB-0063`)
+    but adds two new ops to it — `jackson_default_typing_deserialize`/
+    `jackson_typed_allowlist_deserialize` — since none of that family's
+    existing node/php/python ops names this Java-specific idiom.
+  - **No route accumulator, a genuine architectural difference from every
+    other routed emitter (`node_express`/`ruby_rails`/`go_net_http`) —
+    Spring Boot's component scanning auto-discovers every generated
+    `@RestController` class on the classpath at boot**, rooted at
+    `Application.java`'s package (`com.fuzzlab.lab`); every generated cell
+    controller is hardcoded to the fixed subpackage
+    `com.fuzzlab.lab.cells`, guaranteed by construction, never derived
+    from anything manifest-supplied (`CC-LAB-0091`'s own adequacy-review
+    correction made this package/file-layout guarantee explicit).
+  - A real, checked-in skeleton (`fuzzlab/labgen/emitters/java_spring_boot/
+    stack/skeleton/`: a `pom.xml` inheriting `spring-boot-starter-parent`
+    3.4.1 with `spring-boot-starter-web`, resolved for real against Maven
+    Central) and a real live-boot harness
+    (`fuzzlab.labgen.conformance.java_live_boot.JavaLiveBootHarness`) that
+    assembles, runs a real `mvn package`, boots the packaged jar, and
+    serves real HTTP requests — proven end to end by
+    `tests/test_labgen_java_live_boot.py` (a real, observable
+    deserialization code-path differential: the vulnerable twin accepts a
+    caller-chosen type hint the secure twin rejects, `@pytest.mark.slow`,
+    skip-guarded on `java_boot_available()`). This is a **code-path**
+    proof, not a working `ysoserial`-style RCE gadget chain (neither twin
+    has one on its classpath) and not a timing-side-channel proof (CWE-502
+    has no timing property to prove) — stated explicitly per this
+    project's own honesty convention for non-exploit-chain illustrative
+    cells.
+  - `java_boot_available()`'s network probe (`_maven_central_probe`) runs
+    a real, bounded `mvn dependency:go-offline` against the checked-in
+    skeleton's own `pom.xml` — built correctly per `PA-0035` from the
+    first commit (a raw, unauthenticated `curl` against Maven Central
+    directly returned a real `429` during this dispatch's own research;
+    the probe never uses anything but the real `mvn` client, which
+    resolves the same dependency successfully), and every Maven/JVM
+    subprocess call inherits the full process environment rather than a
+    hand-picked subset (the exact bug `CC-LAB-0090`'s own `go` probe had
+    and fixed, applied correctly here from the start).
+  - Tier 0 (`mvn -q compile`, `tests/test_labgen_java_spring_boot.py` —
+    necessarily network-coupled for this stack, since compiling against
+    Spring Boot needs the same resolved dependencies the live-boot harness
+    needs; acknowledged, not silently assumed) and Tier 3 (whole-manifest
+    regenerate-and-diff, `tests/test_labgen_java_spring_boot_conformance.py`)
+    both pass for the one illustrative cell pair
+    (`lab/manifests/insecure_deserialization_java_sample.yaml`).
+  - **Explicit scope call: no per-run database in this Phase A.** Like
+    `go_net_http`'s Phase A, the one illustrative shape is stateless (no
+    read/write to persisted data) — deferred to Phase B, when a
+    data-touching shape (the CWE-862 GraphQL-field-authorization pick, or
+    the eventual DGS/GraphQL-federation layer itself) is added for this
+    stack.
+  - **Deliberately out of scope here** (Phase B): the GraphQL/DGS
+    federation layer (`spring-boot-starter-graphql`, `@DgsComponent`/
+    `@DgsData` resolvers, a federation directive set) and CWE-862
+    (GraphQL field authorization), per
+    `docs/research/site-architecture-survey-functionality-netflix.md` §2's
+    own Phase B note.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

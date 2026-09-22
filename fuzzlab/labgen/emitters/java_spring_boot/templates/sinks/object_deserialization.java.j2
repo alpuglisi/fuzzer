@@ -1,0 +1,5 @@
+// object_deserialization sink: acknowledges the deserialized {{ result_var }}
+// -- no gadget chain is wired up on the classpath even in the vulnerable
+// twin; this cell demonstrates the unsafe deserialization API call shape,
+// not a working RCE payload
+return ResponseEntity.ok("{\"status\":\"ok\"}");

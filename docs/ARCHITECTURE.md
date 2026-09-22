@@ -159,7 +159,7 @@ tracked in the requirements files, not here.
   `generalizes` verdict — the generalization evidence. The live run against an external
   validation lab is on-host; the manifest-generated second target plugs in as a
   `TargetSpec`.
-- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- four emitters (php_current, python_fastapi, php_laravel, node_express) built to varying depth, plus a fifth (go_net_http, Phase A only) added by the category-4 second-target pilot; Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself pending human sign-off]` (D8, target shape pinned by **D20**/
+- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- four emitters (php_current, python_fastapi, php_laravel, node_express) built to varying depth, plus two more (go_net_http, java_spring_boot -- both Phase A only) added by the category-4 second-target pilot; Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself pending human sign-off]` (D8, target shape pinned by **D20**/
   `CR-LAB-0001`): the "lab as a compiler" — one manifest plus a safety matrix,
   seed, and env-profile generate the app, labels, docs, and oracle tests, with a
   **binary** verdict derived from `(transform, sink context)` (a partially
@@ -353,7 +353,24 @@ tracked in the requirements files, not here.
   analogue of `ruby_rails`'s own Phase-A dispatch for category 1. Deferred
   to Phase B for this stack: a per-run database (this Phase A's one shape
   is stateless), CWE-918 (SSRF), and the richer Twitch EventSub message-ID/
-  timestamp/replay-window checks. **Superseded for the
+  timestamp/replay-window checks. A **sixth stack emitter**
+  (`fuzzlab/labgen/emitters/java_spring_boot/`, category 4 second-target
+  pilot's `CC-LAB-0091`/`FR-LAB-65`, 2026-09-22) is this project's first
+  JVM/Java stack — Spring Boot 3.4.1/Spring MVC, Phase A depth (one
+  illustrative shape: a Jackson-polymorphic-deserialization endpoint,
+  CWE-502, reusing `lab/safety_matrix.yaml`'s existing
+  `object_deserialization` family with two new Java-specific ops) with a
+  real checked-in Maven skeleton, a real `JavaLiveBootHarness`
+  (`fuzzlab/labgen/conformance/java_live_boot.py`), and Tier 0
+  (`mvn -q compile`)/Tier 3 conformance passing. Architecturally distinct
+  from every other routed emitter: Spring Boot's component scanning
+  auto-discovers each generated `@RestController` class on the classpath
+  at boot, so this stack needs **no route accumulator at all** (every
+  generated cell controller is hardcoded to a fixed subpackage,
+  `com.fuzzlab.lab.cells`, under the scanned root). Deferred to Phase B:
+  a per-run database (this shape is stateless too), the GraphQL/DGS
+  federation layer Netflix's real architecture uses, and its CWE-862
+  field-authorization pick. **Superseded for the
   Layer-A/cutover purpose by D-open-1** (`docs/LAB_IMPLEMENTATION_PLAN.md`
   §4.3.6.7, decided 2026-09-22): the operative exit bar for closing Phase 0 on
   the 16 `PFF-` real-page cases is functional **parity/coverage**, not a

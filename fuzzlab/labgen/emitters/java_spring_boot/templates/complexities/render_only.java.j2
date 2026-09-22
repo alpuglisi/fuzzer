@@ -1,0 +1,8 @@
+@RestController
+public class {{ class_name }} {
+
+    @PostMapping("{{ path }}")
+    public ResponseEntity<String> handle(HttpServletRequest request) throws IOException {
+{{ body }}
+    }
+}
