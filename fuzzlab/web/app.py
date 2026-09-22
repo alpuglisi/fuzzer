@@ -31,7 +31,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from fuzzlab.core.config import Config, load_config
-from fuzzlab.web import commandspec, findingsview, results, savedviews
+from fuzzlab.web import (commandspec, diagview, findingsview, results,
+                         savedviews, storeview)
 from fuzzlab.web.proxycontrol import RepeaterController
 from fuzzlab.web.runner import Runner, build_argv, display_command
 from fuzzlab.web.sse import sse_response
@@ -327,6 +328,77 @@ def _views_store(cfg: Config):
     """
     from fuzzlab.core.store import Store
     return Store(cfg.get("store_path", "fuzzlab.db"))
+
+
+# --- U5: diagnostics charts + store explorer (read-only) ---------------------
+
+_CHART_TABLE_CAP = 200  # R-12's offscreen-fallback-table row cap
+
+
+def _diagnostics_charts(cfg: Config) -> list[dict[str, Any]]:
+    """One entry per populated `metric_series` (source, key), each carrying its
+    server-downsampled data (R-05's render order) plus a capped flat row list
+    for the chart's offscreen `<table>` fallback (R-09/R-11) — so the page is
+    informative even with JS disabled, and `diagnostics.js` only has to hand
+    the same `data` straight to the shared `createChart` wrapper."""
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return []
+    from fuzzlab.core.store import Store
+    charts: list[dict[str, Any]] = []
+    with Store(path) as store:
+        for i, s in enumerate(diagview.list_series(store)):
+            data = diagview.series_data(store, s["source"], s["key"])
+            table_rows: list[dict[str, Any]] = []
+            for series in data["series"]:
+                if series.get("y") is not None:
+                    for x, y in zip(series["x"], series["y"]):
+                        table_rows.append({"run_id": series["run_id"], "x": x, "y": y})
+                else:
+                    for x, mn, mx in zip(series["x"], series["min"], series["max"]):
+                        table_rows.append({"run_id": series["run_id"], "x": x,
+                                           "min": mn, "max": mx})
+            charts.append({
+                "id": f"chart-{i}",
+                "source": s["source"],
+                "key": s["key"],
+                "mode": s["mode"],
+                "runs": s["runs"],
+                "points": s["points"],
+                "data": data,
+                "table_rows": table_rows[:_CHART_TABLE_CAP],
+            })
+    return charts
+
+
+_DEFAULT_STORE_TABLE = "run"
+
+
+def _diagnostics_store_explorer(cfg: Config, table: str | None,
+                                limit: int, offset: int) -> dict[str, Any]:
+    """The store explorer's context: every browsable table (name-only, for the
+    picker) and the selected table's redacted page of rows (storeview does the
+    redaction — this is purely wiring)."""
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return {"tables": [], "table": None}
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        tables = storeview.list_tables(store)
+        names = [t["name"] for t in tables]
+        if not names:
+            return {"tables": [], "table": None}
+        chosen = table if table in names else (
+            _DEFAULT_STORE_TABLE if _DEFAULT_STORE_TABLE in names else names[0])
+        rows = storeview.table_rows(store, chosen, limit=limit, offset=offset)
+        return {"tables": names, "table": rows}
+
+
+def _diagnostics_context(cfg: Config, table: str | None, limit: int, offset: int) -> dict[str, Any]:
+    return {
+        "charts": _diagnostics_charts(cfg),
+        "store": _diagnostics_store_explorer(cfg, table, limit, offset),
+    }
 
 
 # --- template context builders (rendering lives in templates/, via jinja2) ----
@@ -673,9 +745,12 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
             request, "sections/ml.html", _shell_context(cfg, "ml"))
 
     @app.get("/diagnostics", response_class=HTMLResponse)
-    def diagnostics_page(request: Request):
+    def diagnostics_page(request: Request, table: str | None = None,
+                         limit: int = 50, offset: int = 0):
         return templates.TemplateResponse(
-            request, "sections/diagnostics.html", _shell_context(cfg, "diagnostics"))
+            request, "sections/diagnostics.html",
+            {**_shell_context(cfg, "diagnostics"),
+             **_diagnostics_context(cfg, table, limit, offset)})
 
     @app.get("/api/status")
     def status() -> dict[str, Any]:
@@ -885,6 +960,52 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     @app.get("/api/plugins")
     def plugins():
         return {"plugins": _active_plugins()}
+
+    # --- U5: diagnostics charts + store explorer (read-only APIs) --------------
+
+    def _open_store_or_none():
+        path = cfg.get("store_path", "fuzzlab.db")
+        if not results.store_exists(path):
+            return None
+        from fuzzlab.core.store import Store
+        return Store(path)
+
+    @app.get("/api/diagnostics/series")
+    def diagnostics_series():
+        store = _open_store_or_none()
+        if store is None:
+            return {"series": []}
+        with store:
+            return {"series": diagview.list_series(store)}
+
+    @app.get("/api/diagnostics/series/data")
+    def diagnostics_series_data(source: str, key: str, run_ids: str | None = None,
+                                max_points: int = 1000):
+        store = _open_store_or_none()
+        if store is None:
+            return JSONResponse({"error": "no store"}, status_code=404)
+        ids = [int(x) for x in run_ids.split(",") if x.strip()] if run_ids else None
+        with store:
+            return diagview.series_data(store, source, key, ids, max_points)
+
+    @app.get("/api/store/tables")
+    def store_tables():
+        store = _open_store_or_none()
+        if store is None:
+            return {"tables": []}
+        with store:
+            return {"tables": storeview.list_tables(store)}
+
+    @app.get("/api/store/{table}")
+    def store_table(table: str, limit: int = 100, offset: int = 0):
+        store = _open_store_or_none()
+        if store is None:
+            return JSONResponse({"error": "no store"}, status_code=404)
+        with store:
+            rows = storeview.table_rows(store, table, limit=limit, offset=offset)
+        if rows is None:
+            return JSONResponse({"error": f"unknown table {table!r}"}, status_code=404)
+        return rows
 
     # --- in-process proxy status/control (Phase 0.4; full workbench in Phase 2) ---
 

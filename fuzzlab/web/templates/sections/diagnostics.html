@@ -1,11 +1,124 @@
 {% extends "base.html" %}
 {% block crumb %}Diagnostics{% endblock %}
-{% block styles %}<link rel="stylesheet" href="/static/css/diagnostics.css">{% endblock %}
+{% block styles %}
+<link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+<link rel="stylesheet" href="/static/css/diagnostics.css">
+{% endblock %}
 {% block content %}
 <div class="card">
   <h2>Diagnostics</h2>
-  <p class="muted">A TensorBoard-like view: cross-run metric trends, intra-run reward
-    / coverage / latency series, bandit arm state, and a store explorer. Arrives in
-    Phase 4; time-series charts need the new metric-series instrumentation.</p>
+  <p class="muted">A TensorBoard-like view over <code>metric_series</code>: training
+    curves, bandit posterior/regret (as a min/max band), coverage-frontier growth, and
+    mutation reward/novelty &mdash; one chart per populated source/key, read-only. Every
+    chart ships a hidden data table underneath it for screen readers and for browsers
+    with JavaScript off.</p>
+</div>
+
+<div class="card" id="diag-charts-card">
+  <h2>Metric charts</h2>
+  {% if charts %}
+  <div class="field">
+    <label for="metric-filter">filter</label>
+    <input type="text" id="metric-filter" placeholder="substring, e.g. loss / regret">
+    <label for="smoothing"># EMA smoothing</label>
+    <input type="range" id="smoothing" min="0" max="0.99" step="0.01" value="0">
+    <span class="muted" id="smoothing-value">0.00</span>
+  </div>
+  {% for source, group in charts|groupby("source") %}
+  <details class="chart-group" open data-source="{{ source }}">
+    <summary>{{ source }} <span class="muted">({{ group|length }})</span></summary>
+    <div class="chart-group-body">
+    {% for c in group %}
+    <div class="chart-panel" data-chart-id="{{ c.id }}" data-source="{{ c.source }}"
+        data-key="{{ c.key }}" data-mode="{{ c.mode }}">
+      <h4>{{ c.key }} <span class="muted">&middot; {{ c.points }} pts &middot;
+        {{ c.runs|length }} run{{ 's' if c.runs|length != 1 }}</span></h4>
+      <div class="chart-el" id="el-{{ c.id }}" role="img"
+          aria-label="{{ c.source }}/{{ c.key }} chart over {{ c.runs|length }} run(s)"></div>
+      <script type="application/json" data-chart-json="{{ c.id }}">{{ c.data|tojson }}</script>
+      <details class="chart-fallback">
+        <summary>Data table (fallback)</summary>
+        <table class="visually-hidden-table" id="table-{{ c.id }}" aria-hidden="false">
+          <thead><tr>
+            <th>run</th><th>x</th>
+            {% if c.mode == 'envelope' %}<th>min</th><th>max</th>{% else %}<th>y</th>{% endif %}
+          </tr></thead>
+          <tbody>
+            {% for row in c.table_rows %}
+            <tr>
+              <td>{{ row.run_id }}</td><td>{{ row.x }}</td>
+              {% if c.mode == 'envelope' %}<td>{{ row.min }}</td><td>{{ row.max }}</td>
+              {% else %}<td>{{ row.y }}</td>{% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </details>
+    </div>
+    {% endfor %}
+    </div>
+  </details>
+  {% endfor %}
+  {% else %}
+  <p class="muted" id="charts-empty">No metric series recorded yet. Training curves,
+    bandit posterior/regret, coverage growth, and mutation reward/novelty appear here
+    once a run with <code>metric_series</code> instrumentation (GBT/logistic training,
+    the bandit-backed oracle, greybox coverage, or mutation search) has written points.</p>
+  {% endif %}
+</div>
+
+<div class="card" id="store-explorer-card">
+  <h2>Store explorer</h2>
+  <p class="muted">Read-only, ad-hoc browsing of the store's tables &mdash; secret-bearing
+    columns (passwords, tokens, credentials, cookies, authorization headers) and every
+    binary blob are redacted before they ever reach this page.</p>
+  {% if store.tables %}
+  <form method="get" action="/diagnostics" id="store-table-form">
+    <div class="field">
+      <label for="store-table-select">table</label>
+      <select id="store-table-select" name="table">
+        {% for t in store.tables %}
+        <option value="{{ t }}" {{ 'selected' if store.table and store.table.table == t }}>{{ t }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Load</button>
+    </div>
+  </form>
+  {% if store.table %}
+  <div id="store-table-wrap" data-table="{{ store.table.table }}"
+      data-limit="{{ store.table.limit }}" data-offset="{{ store.table.offset }}"
+      data-total="{{ store.table.total }}">
+    <table id="store-rows-table">
+      <thead><tr>
+        {% for col in store.table.columns %}
+        <th>{{ col.name }}{% if col.redacted %} <span title="redacted" aria-label="redacted">&#128274;</span>{% endif %}</th>
+        {% endfor %}
+      </tr></thead>
+      <tbody>
+        {% for row in store.table.rows %}
+        <tr>
+          {% for col in store.table.columns %}
+          <td>{{ row[col.name] if row[col.name] is not none else '' }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted" id="store-table-empty" {% if store.table.rows %}hidden{% endif %}>
+      No rows in this table.</p>
+    <div class="actions">
+      <button type="button" id="store-prev" {% if store.table.offset <= 0 %}disabled{% endif %}>&larr; Prev</button>
+      <span class="muted">{{ store.table.offset + 1 }}&ndash;{{ store.table.offset + store.table.rows|length }}
+        of {{ store.table.total }}</span>
+      <button type="button" id="store-next"
+        {% if store.table.offset + store.table.rows|length >= store.table.total %}disabled{% endif %}>Next &rarr;</button>
+    </div>
+  </div>
+  {% endif %}
+  {% else %}
+  <p class="muted" id="store-empty">No store file yet &mdash; run a tool with
+    <code>--store</code> first, then refresh.</p>
+  {% endif %}
 </div>
 {% endblock %}
+{% block scripts %}<script type="module" src="/static/js/diagnostics.js"></script>{% endblock %}

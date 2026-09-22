@@ -17,6 +17,20 @@ export function toWire(s) {
 // since both only ever call `/api/*` routes.
 const CLIENT_HEADER = { "X-Fuzzlab-Client": "1" };
 
+// U5: a plain GET-and-parse-JSON helper (diagnostics charts, store explorer).
+// Never throws on a non-2xx or non-JSON body — callers get {error: ...} back
+// instead, matching postJSON/delJSON's "never throw" shape.
+export async function getJSON(url) {
+  try {
+    const r = await fetch(url);
+    const data = await r.json();
+    if (!r.ok) return { error: data.error || `HTTP ${r.status}` };
+    return data;
+  } catch (e) {
+    return { error: String(e) };
+  }
+}
+
 export async function postJSON(url, body) {
   const r = await fetch(url, {
     method: "POST",

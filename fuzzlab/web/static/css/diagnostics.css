@@ -1,5 +1,81 @@
-/* fuzzlab control panel — Diagnostics section (U0: MPA split).
+/* fuzzlab control panel — Diagnostics section (U5).
  * Only linked by templates/sections/diagnostics.html. Relies on shell.css for the
- * shared card/.muted rules; this partial exists for Diagnostics-specific overrides
- * (U5 adds the chart/store-explorer panels here).
+ * shared card/.muted/.field/.actions rules; this partial holds the chart-grid,
+ * offscreen-table, and store-explorer layout uPlot itself doesn't style.
  */
+
+.chart-group { margin-bottom: 12px; }
+.chart-group > summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 6px 0;
+  color: var(--text);
+}
+.chart-group-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 16px;
+  padding: 8px 0 4px;
+}
+
+.chart-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--surface);
+}
+.chart-panel h4 { margin: 0 0 6px; font-size: 13px; }
+.chart-el { min-height: 170px; }
+
+/* uPlot's own legend/axis/cursor DOM is real HTML (not canvas), so it
+   inherits these tokens directly; only the canvas itself needs the JS-side
+   getComputedStyle probe in charts.js. */
+.u-legend { font-size: 11px; color: var(--muted); }
+
+/* The offscreen fallback table: a <details> so it's reachable (not
+   display:none, which some assistive tech treats inconsistently) but out of
+   the normal visual flow until opened — canvas is the primary visual, the
+   table is the primary data surface for screen readers / no-JS. */
+.chart-fallback { margin-top: 6px; }
+.chart-fallback > summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+.visually-hidden-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  display: block;
+}
+.visually-hidden-table th, .visually-hidden-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 2px 6px;
+  text-align: right;
+  font-family: var(--mono);
+}
+.visually-hidden-table th:first-child, .visually-hidden-table td:first-child { text-align: left; }
+
+#store-rows-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: 8px;
+}
+#store-rows-table th, #store-rows-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+  font-family: var(--mono);
+  white-space: nowrap;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#store-rows-table thead th { color: var(--muted); font-weight: 600; }
+
+[data-density="compact"] .chart-el { min-height: 130px; }
+[data-density="compact"] .chart-group-body { gap: 10px; }
+
+@media (max-width: 640px) {
+  .chart-group-body { grid-template-columns: 1fr; }
+}
