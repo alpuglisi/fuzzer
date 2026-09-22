@@ -19,11 +19,12 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
 from fuzzlab.core.store import Store, log_scalar  # noqa: E402
 from fuzzlab.web.app import create_app  # noqa: E402
+
+from ._web_client import web_client  # noqa: E402
 
 _REPO = Path(__file__).resolve().parent.parent
 _JS_TESTS = [
@@ -50,7 +51,7 @@ def _client(store_path: str | None = None):
     if store_path is not None:
         overrides["store_path"] = store_path
     cfg = load_config(overrides=overrides, environ={})
-    return TestClient(create_app(cfg))
+    return web_client(create_app(cfg))
 
 
 def _seed_metrics(path: str) -> int:
