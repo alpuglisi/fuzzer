@@ -371,6 +371,25 @@ additional target alongside a permanently-kept original. `LAB_PHASE_0_PLAN.md`
 corrected to match; nothing about Phase 0's own exit criterion changes (it
 still just proves reproduction, not cutover).
 
+**Layer A reproduction proven, cutover itself still pending (2026-09-22,
+`CC-LAB-0062`, Wave A2):** `docs/LAB_IMPLEMENTATION_PLAN.md`'s **D-open-1**
+resolved this exit criterion's scope to the 16 `PFF-` real-page (Layer A)
+cases in `lab/ground-truth/labels.json` — not the JS-rendered Layer-B pages,
+which the cutover deliberately does not wait on. Wave A2 re-ran the
+parity/cutover coverage gate (`fuzzlab.labgen.cutover_gate
+.assert_cutover_coverage()`, `tests/test_labgen_cutover_gate.py`) against the
+live repo and confirmed all six `L-P3.3c-G1`..`G6` page groups done and a
+clean 12 covered / 4 exempted / 0 uncovered split — **Phase 0's exit
+criterion is met for Layer A.** Two things this does *not* mean: (1) this is
+a functional parity/coverage proof, not the literal byte-for-byte source-text
+diff this section's first paragraph describes — no tool in this repo diffs
+generated output against `puppy-fort-factory/`'s actual file bytes, and one
+could not exist for `php_laravel` specifically since it is a Laravel
+reimplementation, not raw PHP; (2) `FR-LAB-8`/`L-P3.3c-CUT` (actually deleting
+`puppy-fort-factory/` and re-pointing deploy config) remains unscheduled,
+pending human sign-off, unaffected by this closure. See
+`docs/components/01-target-lab/change-control.md`'s `CC-LAB-0062` entry.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the
