@@ -14,6 +14,16 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Planning: completed `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s Phase 1 — merged
+  real research on common web-app feature areas and on which are
+  disproportionately exploited (OWASP Top 10/WSTG, CWE Top 25, PortSwigger,
+  documented CVE/HackerOne patterns) into one commonality x exploitability
+  ranked table of 19 features, applying the plan's own boundary-rule merges
+  (social features into access-control, billing into e-commerce) and its
+  "score 3 only with 2 independent source types" discipline (several rows
+  honestly capped at 2 where a second type couldn't be found). Chatbots/AI
+  assistants flagged as scored low on evidence-scope grounds (governed by a
+  separate OWASP LLM Top 10), not a real-world-risk judgment.
 - Planning: hardened `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s Phase 3 via a
   3-cycle review→research→revise pass (real research: pairs-per-CWE floor
   scaled to available source material rather than a fixed number, grounded

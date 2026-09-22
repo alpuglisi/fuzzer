@@ -559,12 +559,66 @@ step 1 alone). Concretely:
 
 ## Candidate feature/vulnerability list
 
-*(To be filled in once Phase 1 research lands.)*
+Merged per the Phase 1 methodology (commonality x exploitability, 1-3 each,
+priority = product, max 9). Angle 1 (feature catalog) research used a
+qualitative Ubiquitous/Common/Frequent/Niche scale; mapped here to 1-3
+(Ubiquitous->3, Common->3 when the feature is standard within its own app
+category, Common/Frequent->2, Niche->1) per Phase 1's own scoring rubric.
+Angle 2 (exploitability) already used the 1-3 scale directly, with scores
+capped at 2 wherever fewer than 2 independent source types could be found
+(the plan's own hard requirement for a 3) — see the full per-feature source
+citations in this session's research record; abbreviated here to keep the
+table scannable.
+
+**Boundary-rule merges applied** (angle 2 flagged these as sharing the same
+code shape/sink family as another row): "Social features" folded into
+"Authorization/access control" (both are IDOR/BOLA on object references —
+a literal duplicate, not just a related class). "Billing/invoicing" folded
+into "E-commerce" (same business-logic/price-manipulation shape). Angle 2
+also flagged "Referral/loyalty" and "Calendar/scheduling" as sharing
+e-commerce's race-condition *pattern* — kept as separate rows here rather
+than merged, since they're genuinely different real-world code (a booking
+table vs. a coupon-redemption counter are different sink families for
+Phase 2's actual collection purposes) even though the abstract vulnerability
+class rhymes; noted in each row.
+
+| # | Feature | Commonality | Exploitability | Priority | Vuln class(es) | Notes |
+|---|---|---|---|---|---|---|
+| 1 | Authorization / access control (incl. social features: follow/friend, sharing, profile visibility — merged, same IDOR/BOLA shape) | 3 | 3 | **9** | IDOR/BOLA, vertical/horizontal privilege escalation, forced browsing (CWE-639/862/863) | OWASP A01:2021 (#1 category, ~94% of tested apps); arXiv HackerOne BOLA study (78.5% confirmed). Two independent source types. |
+| 2 | Authentication / session management | 3 | 3 | **9** | Broken auth, session fixation, JWT `alg:none`, weak reset tokens (CWE-287/384/640) | OWASP A07:2021; dedicated WSTG-ATHN+WSTG-SESS categories; documented JWT `alg:none` CVEs/HackerOne pattern. |
+| 3 | User-generated content (comments/reviews/forums/messaging/chat) | 3 | 3 | **9** | Stored/reflected XSS, HTML injection (CWE-79) | CWE Top 25 2024 ranks XSS **#1** overall; dedicated WSTG-CLNT category; historically the single most common HackerOne report type. |
+| 4 | File handling (upload/download/preview/storage) | 3 | 3 | **9** | Unrestricted upload -> RCE, path traversal, XXE via uploaded docs, SSRF via remote-fetch preview (CWE-434/22/611) | Dedicated WSTG upload/traversal tests; CWE-22 and CWE-434 both recurring Top-25 entries; real CVE (Drupal REST upload->RCE, CVE-2019-6340). |
+| 5 | Search / filtering (merged with reporting/exports/dashboards per angle 2 — same "user filter param reaches a query/template" shape) | 3 | 3 | **9** | SQL/NoSQL injection, SSTI/XXE in export templates, IDOR via report IDs (CWE-89/943/611/1336) | CWE Top 25 2024 ranks SQLi **#3**; dedicated WSTG/PortSwigger SQLi+XXE+SSTI topics; real CVEs in report/export template engines. |
+| 6 | E-commerce (cart/checkout/payment/coupons; incl. billing/invoicing/subscriptions — merged, same business-logic shape) | 3 | 3 | **9** | Business logic (price/quantity tampering, coupon-stacking), race conditions on single-use resources (CWE-841/362/840) | Dedicated WSTG-BUSL category names price manipulation/workflow bypass as test cases; two independently documented real disclosed race-condition cases (Stripe coupon, Starbucks gift card). |
+| 7 | Configuration / settings / admin panels | 3 | 2 | 6 | Security misconfiguration — default creds, exposed debug endpoints, verbose errors (CWE-16 family, CWE-209) | OWASP A05:2021 + dedicated WSTG-CONF category, but both OWASP-authored (treated as one source family, not two independent types) — capped at 2 per the plan's own rule. |
+| 8 | Notifications (email/SMS/push, template-driven) | 3 | 2 | 6 | Header/email injection (CWE-93), SSRF via link-preview, HTML injection in templated emails | WSTG-INPV email-header-injection test case + recognized CWE, but only one independent source type found — capped at 2. |
+| 9 | Background / async processing (job queues, scheduled tasks) | 2 | 3 | 6 | Insecure deserialization of queued payloads -> RCE (CWE-502), SSRF from worker outbound calls | OWASP A08:2021; CWE-502 in Top 25 2024; landmark real breach (CVE-2017-5638 Struts OGNL, used in the Equifax breach). |
+| 10 | Content management (CMS pages, themeable templates, media library) | 2 | 3 | 6 | SSTI (CWE-1336), stored XSS in WYSIWYG content, unrestricted media upload | OWASP A03:2021 injection (SSTI subtype); CWE-94 (parent class) in Top 25 2024; dedicated PortSwigger SSTI topic; real CMS theme-editor SSTI/RCE CVEs. |
+| 11 | APIs / integrations (inbound webhook signature verification, mass-assignment on API param binding — scoped narrowly per Phase 1's own boundary note) | 2 | 3 | 6 | Mass assignment (CWE-915), missing webhook signature verification -> forged events, SSRF via callback URLs | CWE-915 recurring Top-25-adjacent; dedicated WSTG-APIT category; real historical incident (GitHub 2012 mass-assignment breach). |
+| 12 | Onboarding / registration (email verification, invite flows) | 2 | 2 | 4 | Account takeover via predictable verification tokens, host-header password-reset-link poisoning, open redirect in invites (CWE-640/601) | OWASP A07:2021 + dedicated WSTG-IDNT category; overlaps heavily with row 2 (auth/session) — candidate for a future merge if Phase 2 finds the same code shape. |
+| 13 | Support / helpdesk (ticketing, live chat, attachments) | 2 | 2 | 4 | Stored XSS via agent-facing ticket rendering, IDOR across tickets/orgs, unrestricted attachment upload | Shares CWE-79/434 with rows 3/4 but no independently-documented helpdesk-specific pattern found — held at 2. |
+| 14 | Localization / i18n (locale-driven template/resource selection) | 2 | 2 | 4 | Path/local-file-inclusion via locale param (CWE-22/98) | CWE-22 Top-25-adjacent + WSTG-INPV LFI test cases; known but narrower pattern (older PHP CMS locale-LFI CVEs), one independently confirmed source type in this pass. |
+| 15 | Calendar / scheduling (bookings, appointments) | 2 | 2 | 4 | Business logic (double-booking race condition), IDOR on other users' events (CWE-362/639) | Shares e-commerce's race-condition *pattern*, different sink family (booking-availability flag, not a redemption counter) — kept separate. |
+| 16 | Referral / loyalty / rewards programs | 2 | 2 | 4 | Business logic / race conditions (double-crediting via parallel requests) | Same pattern as e-commerce coupon races; kept separate for Phase 2's collection purposes since the actual code (referral crediting) differs from checkout code. |
+| 17 | Surveys / feedback / form builders / custom fields | 2 | 2 | 4 | Stored XSS via free-text answers, NoSQL/SQL injection via dynamic custom-field queries (CWE-79/89/943) | Shares CWE-79/89 with rows 3/5 but no independently-distinct survey/form-builder pattern found — held at 2 to avoid double-counting those rows' evidence. |
+| 18 | Workflow automation (rules engines, "if this then that" triggers) | 2 | 2 | 4 | SSRF via user-configured outbound action URLs, SSTI/expression-language injection in rule conditions (CWE-918/1336) | OWASP A10:2021 SSRF is a dedicated category, but PortSwigger's SSRF content is treated as the same source family — no independently distinct workflow-automation CVE/writeup found, held at 2. |
+| 19 | Chatbots / AI assistants (LLM-backed features, RAG, agentic tool use) | 2 | **1 (evidence-scope-limited, not a claim of low real-world risk)** | 2 | Prompt injection -> tool-call abuse/data exfiltration, SSRF via LLM-driven URL fetch tools | Governed by OWASP's separate *LLM* Top 10, outside this pass's stated source scope (OWASP Top 10 2021/2025, CWE Top 25, classic WSTG/PortSwigger/CVE corpus) — flagged explicitly for a dedicated follow-up pass against LLM-specific sources before this score is trusted for prioritization. |
+
+**Reading this for Phase 2 dispatch:** rows 1-6 (priority 9) are the
+strongest, best-evidenced candidates and should be Phase 2's first wave.
+Rows 7-11 (priority 6) are solid second-wave candidates. Rows 12-18
+(priority 4) are legitimate but thinner-evidenced — fine to collect, lower
+urgency. Row 19 (chatbots/AI) should not be treated as "deprioritized on
+the merits" — its low score is a source-scope artifact, not a risk
+judgment, and deserves its own follow-up research pass using LLM-specific
+sources (OWASP LLM Top 10) before Phase 2 either includes or skips it.
 
 ## Status
 
 - [x] Phase 1 dispatched (in progress — see Phase 1 heading above)
-- [ ] Phase 1 complete, list documented above
+- [x] Phase 1 complete, list documented above (19 features scored and
+      ranked; row 19's score is flagged as evidence-scope-limited, not a
+      risk judgment — see the list's own closing note)
 - [ ] Phase 2 dispatched
 - [ ] Phase 2 complete, corpus collected
 - [ ] Phase 3: CWEs assigned to collected examples
