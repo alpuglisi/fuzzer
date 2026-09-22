@@ -86,6 +86,44 @@ def test_run_html_page_renders_findings(tmp_path):
     assert "TP=4" in body and "FP=0" in body
 
 
+def test_run_html_page_surfaces_reproducibility_report(tmp_path):
+    path = tmp_path / "r.db"
+    run_id = _seed(path)
+    r = _client(path).get(f"/runs/{run_id}")
+    assert r.status_code == 200
+    body = r.text
+    assert "Reproducibility report" in body
+    assert f"/runs/{run_id}/report.json" in body           # download link present
+    assert "No plugins active for this run." in body       # this seed has none
+
+
+def test_run_report_json_matches_build_report_exactly(tmp_path):
+    from fuzzlab.report import build_report, format_json
+
+    path = tmp_path / "r.db"
+    run_id = _seed(path)
+    r = _client(path).get(f"/runs/{run_id}/report.json")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/json")
+    with Store(path) as store:
+        expected = format_json(build_report(store, run_id))
+    assert r.text == expected                              # byte-identical, not just equal
+
+
+def test_run_report_json_404_for_missing_run(tmp_path):
+    path = tmp_path / "r.db"
+    _seed(path)
+    r = _client(path).get("/runs/9999/report.json")
+    assert r.status_code == 404
+
+
+def test_run_report_json_404_without_a_store(tmp_path):
+    path = tmp_path / "missing.db"
+    r = _client(path).get("/runs/1/report.json")
+    assert r.status_code == 404
+    assert not path.exists()                                # never creates a store to read it
+
+
 def test_results_route_shows_runs_table(tmp_path):
     path = tmp_path / "r.db"
     _seed(path)

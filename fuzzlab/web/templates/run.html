@@ -80,4 +80,32 @@
   {% endfor %}
   </ul>
 </div>
+
+{% if report %}
+<div class="card">
+  <h2>Reproducibility report</h2>
+  <p class="muted">The deterministic <code>fuzzlab report</code> artifact for this run —
+    what produced it, so it can be re-verified. Read-only; sends nothing.</p>
+  {% set repro = report.reproducibility %}
+  <div class="muted">schema <code>{{ repro.schema_version }}</code>
+    &middot; config <code>{{ repro.config_hash or '?' }}</code>
+    {% if repro.feature_versions %}
+    &middot; feature version(s) <code>{{ repro.feature_versions | join(', ') }}</code>
+    {% endif %}
+  </div>
+  {% if report.models %}
+  <div>Models:
+    {% for m in report.models %}<code>{{ m.name }} v{{ m.version }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+  </div>
+  {% endif %}
+  {% if report.plugins %}
+  <div>Active plugins:
+    {% for p in report.plugins %}<code>{{ p.name }} v{{ p.version }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+  </div>
+  {% else %}
+  <div class="muted">No plugins active for this run.</div>
+  {% endif %}
+  <p><a href="/runs/{{ detail.id }}/report.json">Download report (canonical JSON)</a></p>
+</div>
+{% endif %}
 {% endblock %}

@@ -26,11 +26,12 @@ from typing import Any, Callable, TYPE_CHECKING
 # annotations resolve under `from __future__ import annotations`. Importing this
 # module implies the web extra; `core` never imports it, so core stays web-free.
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from fuzzlab.core.config import Config, load_config
+from fuzzlab.report import build_report, format_json
 from fuzzlab.web import (commandspec, diagview, findingsview, mlview, results,
                          savedviews, storeview)
 from fuzzlab.web.proxycontrol import RepeaterController
@@ -278,6 +279,19 @@ def _read_detail(cfg: Config, run_id: int) -> dict | None:
     from fuzzlab.core.store import Store
     with Store(path) as store:
         return results.run_detail(store, run_id)
+
+
+def _read_report(cfg: Config, run_id: int) -> dict | None:
+    """The reproducible evaluation report (`fuzzlab report`, T10.4) for one run —
+    pure read, no traffic; ``None`` for a missing store or a run id that doesn't
+    exist (``build_report``'s own ``run`` key is ``None`` in that case)."""
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return None
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        report = build_report(store, run_id)
+    return report if report.get("run") is not None else None
 
 
 def _read_flows(cfg: Config, query: str | None = None) -> list[dict]:
@@ -923,7 +937,19 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
                 request, "not_found.html",
                 {"run_id": run_id, **_shell_context(cfg, "results")}, status_code=404)
         return templates.TemplateResponse(
-            request, "run.html", {"detail": detail, **_shell_context(cfg, "results")})
+            request, "run.html",
+            {"detail": detail, "report": _read_report(cfg, run_id),
+             **_shell_context(cfg, "results")})
+
+    @app.get("/runs/{run_id}/report.json")
+    def run_report_json(run_id: int):
+        # The canonical, sorted-key JSON `fuzzlab report --json` would print —
+        # served byte-identical here so the on-disk and web artifacts never
+        # diverge (T10.4's reproducibility promise). Pure read; no traffic.
+        report = _read_report(cfg, run_id)
+        if report is None:
+            return JSONResponse({"error": f"run {run_id} not found"}, status_code=404)
+        return Response(content=format_json(report), media_type="application/json")
 
     # --- launcher: dry-run preview, gated execution, live output (Phase 0.3) ---
 

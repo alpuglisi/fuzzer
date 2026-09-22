@@ -188,6 +188,14 @@ bugs — the research-platform diagnostics of decision D2.
   authorization) is redacted, and any BLOB-valued column renders only as
   `<blob: N bytes>` — both at render time, before the response leaves the server; the
   explorer never writes to the store. *(Realized: Wave-1 lane U5, CC-UI-0031.)*
+- **FR-UI-18** A run's detail page (`/runs/{run_id}`) surfaces the reproducible
+  evaluation report (schema version, config hash, feature version(s), deployed
+  models, active plugins) built by `fuzzlab.report.build_report`, and offers it as
+  a downloadable canonical JSON artifact at `GET /runs/{run_id}/report.json` —
+  byte-identical to what `fuzzlab report --json` prints for the same run, since
+  both go through `fuzzlab.report.format_json`. Pure read; no traffic; a missing
+  store or run id is a 404, never a store-creation side effect.
+  *(Realized: CC-UI-0032.)*
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

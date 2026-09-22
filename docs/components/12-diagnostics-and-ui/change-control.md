@@ -3,6 +3,42 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0032 — Surface the reproducible evaluation report in the web panel (CC-UI-0009 follow-up) (2026-09-22)
+- Change: a run's detail page (`/runs/{run_id}`) now renders a "Reproducibility
+  report" card — schema version, config hash, feature version(s), deployed models,
+  and the active plugin set — built from the same `fuzzlab.report.build_report`
+  (T10.4) the `fuzzlab report` CLI already uses, plus a download link to a new
+  `GET /runs/{run_id}/report.json` route. That route serves
+  `fuzzlab.report.format_json`'s canonical, sorted-key output **byte-identical**
+  to what the CLI's `--json` flag prints — the on-disk and web artifacts can
+  never diverge, since both go through the same formatter. Pure read; no
+  traffic; no schema change; `_read_report` follows the existing `_read_detail`
+  guard pattern (a missing store or run id is `None`, never a store creation as
+  a side effect of reading).
+- Impact (other components / project): closes CC-UI-0009's explicitly-optional
+  "surface the report in the web panel" follow-up. No change to the existing
+  run-detail context (`detail`) — the report is a separate `report` template
+  variable, avoiding any key collision with `results.run_detail`'s own
+  differently-shaped `counts`/`findings`. `/runs/{run_id}/report.json` matches
+  U6's `Cache-Control: no-store` prefix match on `/runs/*`, so no extra header
+  wiring was needed there.
+- Risk (level; mitigation): low — purely additive read surface, reusing an
+  already-tested, deterministic builder. Mitigated by 4 new tests
+  (`tests/test_web_results.py`): the run page shows the report card + download
+  link; the JSON route's body is asserted **byte-identical** (not just equal)
+  to `format_json(build_report(...))` called directly against the same store;
+  404 for a run id that doesn't exist; 404 without creating a store when the
+  store file doesn't exist yet.
+- Deliverables:
+  - [x] `_read_report` helper + wired into `run_html`'s context — done.
+  - [x] `GET /runs/{run_id}/report.json` (canonical JSON, byte-identical to the
+    CLI) — done.
+  - [x] "Reproducibility report" card on the run detail page — done.
+- Effectiveness (assessed 2026-09-22): effective — the web route's bytes are
+  proven identical to the CLI's own formatter output in tests, and the run page
+  now names exactly what produced a result (schema/config/feature/model/plugin
+  versions) without leaving the panel.
+
 ### CC-UI-0031 — Lane U5: Diagnostics metric charts + read-only store explorer (2026-09-22)
 - Change: rebuilt the `/diagnostics` tab (a U0 placeholder) into a TensorBoard-like
   metric-series viewer plus a Datasette-style store explorer. `fuzzlab/web/diagview.py`

@@ -14,6 +14,10 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- UI: a run's detail page now surfaces the reproducible evaluation report
+  (schema/config/feature/model/plugin versions) plus a canonical-JSON download
+  route byte-identical to `fuzzlab report --json` — closes the CC-UI-0009
+  "surface the report in the web panel" follow-up (`CC-UI-0032`, `FR-UI-18`).
 - FUZZ: `Oracle.confirm()` now records a `probes_per_finding` metric_series point
   (total probes across every confirmation mechanism tried, not only the
   confirming one) per finding, with or without a bandit scheduler attached, so a
