@@ -14,18 +14,19 @@ import json
 import pytest
 
 pytest.importorskip("fastapi")
-from fastapi.testclient import TestClient  # noqa: E402
 
 from fuzzlab.core.config import load_config  # noqa: E402
 from fuzzlab.core.store import MetricLogger, Store, log_scalar  # noqa: E402
 from fuzzlab.web import mlview  # noqa: E402
 from fuzzlab.web.app import create_app  # noqa: E402
 
+from ._web_client import web_client  # noqa: E402
+
 
 def _client(path):
     cfg = load_config(overrides={"store_path": str(path),
                                  "target_base_url": "http://127.0.0.1:8080"}, environ={})
-    return TestClient(create_app(cfg))
+    return web_client(create_app(cfg))
 
 
 def _seed_full(path) -> int:
