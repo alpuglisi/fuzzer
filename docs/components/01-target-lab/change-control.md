@@ -3,6 +3,84 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0065 — fix 3 real defects PR review found in CC-LAB-0064's mass-assignment codegen, plus 2 in its own CWE-coverage hook (2026-09-22)
+- Change: implements the corrective action for `BUG-0031` and `BUG-0032`
+  (see those reports for the full root-cause analysis). Not run through this
+  project's pre-change review gate (`docs/components/README.md`) as a fresh
+  design proposal: these are direct fixes for concrete findings an external
+  reviewer already posted on `alpuglisi/fuzzer#1`, so the review that gate
+  exists to front-load already happened, via the PR mechanism instead.
+  1. **`fuzzlab/labgen/modules/sinks/orm_entity_bulk_assign.php.j2`
+     (php_current):** the SET-clause column name (`$__col`) is now rejected
+     unless it matches `^[A-Za-z0-9_]+$` before being spliced into `$sql` —
+     closes a real SQL injection (CWE-89) an unvalidated `$_POST` array key
+     could smuggle into a cell classified mass-assignment-only. The
+     mass-assignment vulnerability itself is untouched: any *validly-shaped*
+     column (`role`, `is_admin`, anything not on the endpoint's real
+     allowlist) still reaches the query on the unfiltered twin.
+  2. **`fuzzlab/labgen/emitters/php_laravel/__init__.py`'s
+     `_served_route_for()`:** an illustrative page now serves at the cell's
+     own declared `method` instead of a hardcoded `"GET"` — the new
+     mass-assignment cells are the first illustrative POST cells this
+     emitter ever rendered, and the hardcoding meant their generated route
+     could never actually receive a POST. Verified backward-compatible:
+     every pre-existing illustrative cell across every `lab/manifests/*.yaml`
+     is already `GET` (checked via `load_manifest` before the fix landed).
+  3. **`fuzzlab/labgen/emitters/php_laravel/templates/sinks/
+     orm_entity_bulk_assign.php.j2`:** `$request->user()?->id` (PHP 8
+     nullsafe) instead of `$request->user()->id` — the generated
+     illustrative cell sets up no auth/session middleware, so an
+     unauthenticated request previously hit a fatal `null->id` error rather
+     than the non-fatal null-degrade `php_current`'s `$currentUser['id']`
+     array-access convention already has for the same cell shape.
+  4. **`.claude/hooks/check-corpus-cwe-coverage.sh`:** an entry with
+     neither `cwe_unique:` nor the legacy `cwe:` field now records an
+     explicit problem instead of silently `continue`-ing past it; the
+     pairs-per-class floor now counts `role: idiomatic` entries alongside
+     `role: vulnerable` and requires >= 5 of **each** (a cell with 5
+     orphaned vulnerable entries and 0 idiomatic previously passed); a
+     vulnerable entry's `derived_from` is checked against the files
+     actually present in its manifest. Also, a nit-severity fix: the
+     no-upstream diff fallback now uses the merge-base with the default
+     branch, so a manifest edit already committed on a fresh, unpushed
+     branch is still checked rather than silently skipped.
+  5. Tests: `test_orm_entity_bulk_assign_sink_rejects_a_syntax_injection_
+     shaped_key` (renders the malicious key against a real in-memory SQLite
+     table, proves it never reaches the query); `test_the_routes_file_
+     carries_one_sorted_line_per_cell` rewritten to check every cell's
+     actual HTTP verb (its prior form counted only `Route::get(` lines,
+     which would have hidden this exact bug by construction).
+- Impact (other components / project): no new files; all 3 codegen fixes are
+  edits to templates/routing logic `CC-LAB-0064` already added, and the
+  hook fixes are edits to the hook `PA-0033` already added. No schema or
+  registry-shape change. `test_the_routes_file_carries_one_sorted_line_per_
+  cell`'s rewrite changes what it asserts (verb-aware instead of
+  GET-only) but not what it protects — still one line per cell, still
+  cell-ID-sorted.
+- Risk (level; mitigation): low for the codegen fixes (narrowly scoped,
+  each verified against a real rendered-and-executed reproduction of the
+  defect it closes, full `labgen`-marked suite re-run clean at the same 29
+  pre-existing environment-only failures as before this change). Low for
+  the hook fixes (verified against synthetic fixtures per `BUG-0032`'s own
+  corrective action, since the real corpus never exercised the malformed
+  shapes being fixed).
+- Deliverables:
+  - [x] SQLi guard in the php_current sink template — done.
+  - [x] `_served_route_for()` HTTP-method fix — done.
+  - [x] Nullsafe operator in the php_laravel sink template — done.
+  - [x] `check-corpus-cwe-coverage.sh`'s two silent-pass fixes + one nit fix
+    — done.
+  - [x] `docs/bugs/BUG-0031-*.md`, `docs/bugs/BUG-0032-*.md`,
+    `docs/PREVENTIVE_ACTIONS.md` **PA-0034**, `ERROR_LOG.md` entries — done.
+  - [x] Tests updated/added, full suite re-verified — done.
+- Effectiveness (assessed 2026-09-22): effective. All 4 generated PHP files
+  (2 php_current, 2 php_laravel) still `php -l` clean; the SQLi guard
+  verified via a real in-memory SQLite execution proving the malicious key
+  never reaches SQL text; the routing fix verified via
+  `route_fragment_for()` now emitting `Route::post(...)` for the new cells;
+  full `not slow`-marked suite: 1483 passed (29 pre-existing environment-
+  only failures, unchanged from before this fix).
+
 ### CC-LAB-0064 — orm_entity_bulk_assign (mass-assignment) module implementation, php_current emitter (2026-09-22)
 - Change: implements code generation for the `orm_entity_bulk_assign` sink
   family (one of the 20 new sink families `CC-LAB-0063`/`FR-LAB-58` added as

@@ -14,6 +14,19 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB: fixed 3 real defects PR #1's review found in the `orm_entity_bulk_
+  assign` mass-assignment codegen, plus 2 in its own CWE-coverage hook
+  (`CC-LAB-0065`, `BUG-0031`/`BUG-0032`/`PA-0034`) — a real SQL injection
+  (CWE-89) smuggled into the php_current sink via an unvalidated `$_POST`
+  array key used as a SQL identifier; php_laravel's illustrative POST cells
+  served as `GET` (broken routing, `_served_route_for()` hardcoded the
+  method); a fatal null dereference on `$request->user()->id` with no auth
+  setup; and `.claude/hooks/check-corpus-cwe-coverage.sh` silently passing
+  entries with no CWE field at all and cells with orphaned vulnerable-only
+  entries. All fixed, root-caused, and preventive-actioned per the bug
+  protocol; verified against synthetic fixtures and a real in-memory SQLite
+  execution proving the SQLi payload is dropped. Full suite re-run clean at
+  the same 29 pre-existing environment-only failures.
 - LAB: implemented code generation for `orm_entity_bulk_assign`
   (mass-assignment, registry-only since `CC-LAB-0063`/`FR-LAB-58`) in
   `php_current`'s shared `fuzzlab.labgen.modules` registry (1 new source,

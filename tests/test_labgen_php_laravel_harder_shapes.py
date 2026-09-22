@@ -580,12 +580,23 @@ def test_tier0_lint_passes_for_every_cell_including_the_blade_views(emitter, man
 def test_the_routes_file_carries_one_sorted_line_per_cell(emitter, manifest) -> None:
     fragments = {c.cell_id: emitter.route_fragment_for(c) for c in manifest.cells}
     content = assemble_routes_file(fragments).content.decode("utf-8")
-    route_lines = [line for line in content.splitlines() if line.startswith("Route::get(")]
+    # An illustrative page is served at its own cell's declared HTTP method
+    # (`_served_route_for` -- fixed to stop hardcoding GET, since this
+    # manifest already has illustrative POST cells, e.g. LABGEN-PL-0003/4's
+    # `/login` twins, that a hardcoded-GET route could never actually be
+    # exercised at), so `Route::<verb>(` varies per cell, not just `get`.
+    route_lines = [line for line in content.splitlines() if line.startswith("Route::")]
     assert len(route_lines) == len(manifest.cells)
-    # Sorted by cell ID, never by append order (Addendum D determinism rule).
-    assert route_lines == sorted(route_lines)
+    # Sorted by cell ID, never by append order or by HTTP verb (Addendum D
+    # determinism rule) -- extract each line's trailing `// cell: <ID>`
+    # rather than comparing line text, since verb now varies per cell and
+    # "Route::get(" < "Route::post(" would otherwise mask a real ordering
+    # bug (or hide one) independent of cell-ID order.
+    line_cell_ids = [line.rsplit("// cell: ", 1)[1] for line in route_lines]
+    assert line_cell_ids == sorted(line_cell_ids)
     for cell in manifest.cells:
         assert f"/cell/{cell.cell_id.lower()}" in content
+        assert f"Route::{cell.route.method.lower()}(" in content
 
 
 def test_cli_check_passes_end_to_end_on_the_widened_manifest(tmp_path) -> None:

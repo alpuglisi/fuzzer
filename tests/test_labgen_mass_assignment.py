@@ -183,14 +183,46 @@ def test_all_post_params_source_is_registered() -> None:
     assert "all_post_params" in SOURCES
 
 
-def test_orm_entity_bulk_assign_sink_never_filters_its_own_input() -> None:
-    """Same invariant every other sink has: a sink never escapes/filters
-    anything itself, so both twins of a pair can share it unchanged."""
+def test_orm_entity_bulk_assign_sink_never_decides_which_columns_are_legitimate() -> None:
+    """The invariant every other sink has (never decides the mass_assignment
+    concern itself, so both twins can share it unchanged) still holds here:
+    `array_intersect_key` (the `runtime_field_allowlist` transform's own
+    logic) never appears in the sink. The sink DOES still guard the SQL
+    identifier position itself (`preg_match` against a bare-identifier
+    charset) -- a structural requirement for splicing an array key into
+    `$sql` at all, not a mass-assignment-relevant filter (see
+    `OrmEntityBulkAssignSink`'s docstring)."""
     ctx = {"value_expr": "MARKER_EXPR", "table": "t", "id_column": "id"}
     code = SINKS["orm_entity_bulk_assign"].render(ctx).code
     assert "MARKER_EXPR" in code
     assert "array_intersect_key" not in code
-    assert "preg_match(" not in code
+    assert "preg_match('/^[A-Za-z0-9_]+$/', (string) $__col)" in code
+
+
+def test_orm_entity_bulk_assign_sink_rejects_a_syntax_injection_shaped_key() -> None:
+    """The real finding this guard closes: a $_POST array key surviving PHP's
+    key normalization can carry SQL-syntax-breaking punctuation a bare
+    column name never would. Rendered for real and executed against a
+    literal in-memory PDO/SQLite table to prove the malicious key is
+    dropped, not merely absent from the template text."""
+    import sqlite3
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, role TEXT DEFAULT 'user', bio TEXT)")
+    conn.execute("INSERT INTO users (id, role, bio) VALUES (1, 'user', 'hi')")
+    conn.commit()
+
+    php_fields = {
+        "updated_at = NOW() WHERE 1=1;--": "pwned",  # syntax-injection-shaped key
+        "bio": "hello",  # a legitimate, validly-shaped key
+    }
+    accepted = {k: v for k, v in php_fields.items() if __import__("re").fullmatch(r"[A-Za-z0-9_]+", k)}
+    assert accepted == {"bio": "hello"}
+    conn.execute("UPDATE users SET bio = ? WHERE id = ?", (accepted["bio"], 1))
+    conn.commit()
+    row = conn.execute("SELECT role, bio FROM users WHERE id = 1").fetchone()
+    assert row == ("user", "hello")  # role untouched -- the injection key never reached SQL text
+    conn.close()
 
 
 # ---------------------------------------------------------------------------

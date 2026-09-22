@@ -822,8 +822,13 @@ def _served_route_for(page_path: str, cell_id: str, method: str) -> tuple[str, s
     Three cases:
 
     * **Illustrative page** (no :data:`_REAL_PAGE_KEY`): the cell-ID-derived
-      ``/cell/<slug>`` URL, method ``GET`` -- the pre-L-P3.3c behavior,
-      unchanged.
+      ``/cell/<slug>`` URL, at the cell's own ``method`` (every pre-existing
+      illustrative cell happens to be ``GET``, so this was long
+      indistinguishable from hardcoding ``GET`` -- CC-LAB-0064's mass-
+      assignment cells are the first illustrative ``POST`` cells, which
+      surfaced that the hardcoding was itself the bug: a ``POST``-declared
+      cell got registered as ``Route::get(...)`` and could never actually be
+      exercised at its declared method).
     * **Real page, no canonical cell yet** (:data:`_CANONICAL_CELL_KEY` is
       ``None``): the deliberately-unpinned state -- no current profile uses
       it (L-P3.3c-G6's ``search.php`` was the one example, resolved by
@@ -836,7 +841,7 @@ def _served_route_for(page_path: str, cell_id: str, method: str) -> tuple[str, s
     """
     profile = _PAGE_PROFILES.get(page_path, {})
     if not profile.get(_REAL_PAGE_KEY):
-        return _url_path_for(cell_id), "GET"
+        return _url_path_for(cell_id), method.upper()
     if _CANONICAL_CELL_KEY not in profile:
         raise ValueError(
             f"php_laravel page profile for {page_path!r} declares {_REAL_PAGE_KEY!r} but names no "
@@ -849,7 +854,7 @@ def _served_route_for(page_path: str, cell_id: str, method: str) -> tuple[str, s
         # Deliberately unpinned -- see the docstring above and
         # `_CANONICAL_CELL_KEY`'s own docstring for why this is a legal,
         # flagged-open state (L-P3.3c-CUT), not a bug.
-        return _url_path_for(cell_id), "GET"
+        return _url_path_for(cell_id), method.upper()
     if cell_id == canonical:
         return page_path, method.upper()
     return _twin_url_for(page_path, cell_id), method.upper()

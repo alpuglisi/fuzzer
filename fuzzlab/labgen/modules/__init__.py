@@ -557,7 +557,21 @@ class OrmEntityBulkAssignSink(TemplateModule):
     positionally-matching bound-values array -- real new surface, not a
     reuse of :class:`SqlIdentifierOrderBySink`'s single-value-substitution
     pattern. No Jinja-level loop is needed: the column set isn't known
-    until PHP runtime, since the keys are attacker-controlled."""
+    until PHP runtime, since the keys are attacker-controlled.
+
+    One narrow exception to "a sink never filters anything itself": each
+    key is checked against a bare-identifier charset (``^[A-Za-z0-9_]+$``)
+    before it is spliced into ``$sql``, since PHP array keys survive far
+    more punctuation than a SQL identifier position can safely admit and
+    neither PDO nor any SQL dialect offers a binding mechanism for
+    identifiers. Without this, the vulnerable twin would smuggle a second,
+    unlabeled vulnerability class (raw SQL injection, CWE-89) into a cell
+    this corpus classifies as mass-assignment only. This does not narrow
+    *which* columns are legitimate (still the transform's job, per
+    `runtime_field_allowlist`) -- only a value that could never be a real
+    column name at all is rejected, so the mass-assignment vulnerability
+    itself (writing `role`, `is_admin`, or any other validly-shaped,
+    endpoint-unintended column) is untouched on the unfiltered twin."""
 
     def __init__(self) -> None:
         super().__init__("orm_entity_bulk_assign", "sink", _SINK_ENV, "orm_entity_bulk_assign.php.j2")
