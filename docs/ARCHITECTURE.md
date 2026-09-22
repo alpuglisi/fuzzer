@@ -217,7 +217,20 @@ tracked in the requirements files, not here.
   explicit printed reason, since the check is ill-defined for one stack rather
   than merely unhelpful. Per-case `stack` is also carried in the ground-truth
   `labels.json` contract (optional, inline) so the axis reaches the artifact
-  downstream analysis reads, not just the manifest. Read-only corpus-analysis
+  downstream analysis reads, not just the manifest. The **metadata leakage
+  gate** (`fuzzlab/labgen/leakage_probe.py`, `CC-LAB-0045`, plan §2.3) is the
+  second required statistical `--check` step: a weak logistic model,
+  cross-validated with `grouped_cv` (grouped by generating-rule ID), must not
+  predict a cell's `vuln_class` from non-payload metadata alone, judged
+  per-class against `min(that class's permutation null, its configured
+  `PER_CLASS_AUC_THRESHOLDS` line)` — fail-closed, so a configured number can
+  only tighten the gate. Every configured threshold currently ships as
+  `provisional`, and the gate prints that status per class. Like the
+  fingerprint gate it skips with an explicit printed reason when the corpus
+  cannot support the measurement (`leakage_probe.insufficiency_reason`), which
+  today it does on every sample manifest: a manifest carries only one of the
+  seven allowlisted features (`path_depth`), the rest being live-response
+  observations no build-time artifact records yet. Read-only corpus-analysis
   tooling (`fuzzlab/labgen/corpus_analysis.py`, `CC-LAB-0041`, plan §2.4) sits
   alongside those gates but is deliberately **not** one: a train/holdout
   split grouped by generating-rule ID (reusing `leakage_probe.grouped_cv`,

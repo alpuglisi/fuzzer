@@ -16,9 +16,23 @@ import pytest
 pytest.importorskip("sklearn", reason="leakage probe requires scikit-learn")
 
 from fuzzlab.labgen.leakage_probe import (
+    DEFAULT_CLASS_THRESHOLD,
     FEATURE_ALLOWLIST,
+    MIN_CELLS_FOR_GATE,
+    MIN_CELLS_PER_CLASS_FOR_GATE,
+    MIN_GROUPS_FOR_GATE,
+    PER_CLASS_AUC_THRESHOLDS,
     PER_CLASS_FEATURE_EXCLUSIONS,
+    PROVISIONAL_THRESHOLD_BAND,
+    THRESHOLD_STATUSES,
+    ClassThreshold,
+    InsufficientCorpusError,
+    MetadataLeakageError,
+    class_threshold,
+    format_leakage_report,
+    insufficiency_reason,
     probe_leakage,
+    run_leakage_gate,
 )
 
 
@@ -195,3 +209,172 @@ def test_missing_group_key_rejected():
     del cells[0]["rule_id"]
     with pytest.raises(ValueError, match="group key"):
         probe_leakage(cells, n_splits=3, n_permutations=5)
+
+
+# ---------------------------------------------------------------------------
+# Per-class thresholds + the build gate (lane L-P1.3,
+# docs/LAB_IMPLEMENTATION_PLAN.md SS2.3).
+#
+# Every corpus below is one of this module's own existing fixtures
+# (`_leaky_corpus` / `_clean_corpus`), per this lane's scope discipline: reuse
+# the probe's fixtures rather than re-authoring a parallel set.
+# ---------------------------------------------------------------------------
+
+GATE_KWARGS = {"n_splits": 3, "n_permutations": 40, "random_state": 0}
+
+
+def test_every_shipped_per_class_threshold_is_provisional_and_inside_the_plans_band():
+    # SS2.3 is explicit that Phase 1's values are PROVISIONAL, seeded from the
+    # report's band. Both properties are asserted against the module's own
+    # source-of-truth constants rather than literals (PA-0001).
+    low, high = PROVISIONAL_THRESHOLD_BAND
+    shipped = list(PER_CLASS_AUC_THRESHOLDS.values()) + [DEFAULT_CLASS_THRESHOLD]
+    assert shipped, "the registry must not be empty"
+    for threshold in shipped:
+        assert threshold.status == "provisional"
+        assert threshold.status in THRESHOLD_STATUSES
+        assert low <= threshold.auc_threshold <= high
+        assert threshold.justification.strip()
+
+
+def test_class_threshold_falls_back_to_the_documented_default():
+    assert class_threshold("sqli") is PER_CLASS_AUC_THRESHOLDS["sqli"]
+    assert class_threshold("a_class_nobody_has_registered") is DEFAULT_CLASS_THRESHOLD
+
+
+def test_class_threshold_rejects_an_unknown_status_and_an_impossible_auc():
+    with pytest.raises(ValueError, match="status must be one of"):
+        ClassThreshold(auc_threshold=0.58, status="calibrated-ish", justification="x")
+    with pytest.raises(ValueError, match=r"must be in \[0.5, 1.0\]"):
+        ClassThreshold(auc_threshold=0.2, status="provisional", justification="x")
+    with pytest.raises(ValueError, match="non-empty written line"):
+        ClassThreshold(auc_threshold=0.58, status="provisional", justification="   ")
+
+
+def test_per_class_rows_are_reported_for_every_class():
+    result = probe_leakage(_clean_corpus(), **GATE_KWARGS)
+    assert {row.label for row in result.per_class} == {"sqli_error", "secure"}
+    for row in result.per_class:
+        assert row.n_samples == 60
+        # Fail-closed: the effective line is the STRICTER of the two, so a
+        # configured number can only tighten the gate, never disable it.
+        assert row.effective_threshold == min(row.null_threshold, row.configured.auc_threshold)
+        assert row.binding_line in {"permutation_null", "configured_threshold"}
+
+
+def test_a_configured_threshold_can_only_ever_tighten_never_loosen(monkeypatch):
+    """The loophole `PER_CLASS_FEATURE_EXCLUSIONS`'s own comment warns about: a
+    per-class threshold must not be settable high enough to switch the gate off
+    for that class. Setting one to the maximum must leave the verdict exactly as
+    the permutation null alone decided it."""
+    monkeypatch.setitem(
+        PER_CLASS_AUC_THRESHOLDS,
+        "sqli_error",
+        ClassThreshold(auc_threshold=1.0, status="provisional", justification="test: maximally loose"),
+    )
+    result = probe_leakage(_leaky_corpus(), **GATE_KWARGS)
+    row = next(r for r in result.per_class if r.label == "sqli_error")
+    assert row.binding_line == "permutation_null"
+    assert row.effective_threshold == row.null_threshold
+    assert row.leaks is True  # still caught, despite a 1.0 configured threshold
+
+
+def test_gate_passes_on_a_non_leaky_corpus_and_returns_a_report():
+    report = run_leakage_gate(_clean_corpus(), **GATE_KWARGS)
+    assert report.result.gate_passes is True
+    assert report.result.leaks is False
+    assert report.result.per_class_leaks is False
+    assert report.report_text == format_leakage_report(report.result)
+
+
+def test_gate_fails_loud_on_a_deliberately_leaky_corpus():
+    # `_leaky_corpus` makes `status_code` trivially predict the class.
+    with pytest.raises(MetadataLeakageError) as exc_info:
+        run_leakage_gate(_leaky_corpus(), **GATE_KWARGS)
+    message = str(exc_info.value)
+    # Names EVERY violation, global and per-class, not just the first.
+    assert "global metadata AUC" in message
+    assert "class 'sqli_error'" in message
+    assert "class 'secure'" in message
+
+
+def test_gate_report_marks_each_threshold_provisional_or_calibrated():
+    report = run_leakage_gate(_clean_corpus(), **GATE_KWARGS)
+    text = report.report_text
+    assert "PROVISIONAL" in text
+    # Each class gets its own annotated line, plus the configured rationale.
+    for label in ("sqli_error", "secure"):
+        assert f"- {label}: AUC" in text
+        assert PER_CLASS_AUC_THRESHOLDS[label].justification in text
+    # And the report says, in words, which classes' verdicts rest on a number
+    # nobody has calibrated yet -- the point of the SS2.3 requirement.
+    if report.result.provisional_classes:
+        assert "not one derived" in text
+    else:
+        assert "no verdict above currently rests on an uncalibrated" in text
+
+
+def test_gate_skips_rather_than_fails_on_a_corpus_too_small_to_judge():
+    tiny = _clean_corpus(n=MIN_CELLS_FOR_GATE - 1, n_rules=MIN_GROUPS_FOR_GATE + 2)
+    reason = insufficiency_reason(tiny)
+    assert reason is not None and str(MIN_CELLS_FOR_GATE) in reason
+    with pytest.raises(InsufficientCorpusError, match="permutation null"):
+        run_leakage_gate(tiny, **GATE_KWARGS)
+
+
+def test_insufficiency_reason_names_each_distinct_shortfall():
+    assert "empty" in insufficiency_reason([])
+
+    one_class = [
+        _make_cell("secure", f"rule{i}", **dict.fromkeys(FEATURE_ALLOWLIST, 1))
+        for i in range(MIN_CELLS_FOR_GATE + 5)
+    ]
+    assert ">= 2" in insufficiency_reason(one_class)
+
+    few_groups = _clean_corpus(n=MIN_CELLS_FOR_GATE + 10, n_rules=MIN_GROUPS_FOR_GATE - 1)
+    assert "generating-rule group" in insufficiency_reason(few_groups)
+
+    thin_class = _clean_corpus(n=MIN_CELLS_FOR_GATE + 10, n_rules=MIN_GROUPS_FOR_GATE + 2)
+    for cell in thin_class[: len(thin_class) - (MIN_CELLS_PER_CLASS_FOR_GATE - 1)]:
+        cell["label"] = "sqli_error"
+    assert "fewer than" in insufficiency_reason(thin_class)
+
+    # A big, well-grouped corpus whose in-scope feature never varies: no
+    # variance means every AUC is chance by construction.
+    flat = _clean_corpus(n=MIN_CELLS_FOR_GATE + 10, n_rules=MIN_GROUPS_FOR_GATE + 2)
+    for cell in flat:
+        cell["features"]["path_depth"] = 1
+    assert "varies across this corpus" in insufficiency_reason(flat, feature_scope=("path_depth",))
+    # ...while the same corpus with the full allowlist in scope is measurable.
+    assert insufficiency_reason(flat) is None
+
+
+def test_feature_scope_narrows_the_probe_and_can_never_widen_the_allowlist():
+    cells = _clean_corpus()
+    result = probe_leakage(cells, feature_scope=("path_depth", "status_code"), **GATE_KWARGS)
+    # Allowlist order is preserved regardless of the order passed.
+    assert result.features_used == ("status_code", "path_depth")
+
+    with pytest.raises(ValueError, match="may only NARROW"):
+        probe_leakage(cells, feature_scope=("status_code", "raw_payload"), **GATE_KWARGS)
+    with pytest.raises(ValueError, match="at least one allowlisted feature"):
+        probe_leakage(cells, feature_scope=(), **GATE_KWARGS)
+
+
+def test_an_in_scope_feature_missing_from_a_cell_is_rejected_not_imputed():
+    # PA-0006: a silently-imputed feature would be an input the real upstream
+    # never produced. The probe must say so rather than guess.
+    cells = _clean_corpus()
+    del cells[3]["features"]["latency_ms"]
+    with pytest.raises(ValueError, match="absent from at least one"):
+        probe_leakage(cells, **GATE_KWARGS)
+    # ...and narrowing the scope to what the corpus does carry is the fix.
+    assert probe_leakage(cells, feature_scope=("status_code",), **GATE_KWARGS) is not None
+
+
+def test_existing_global_leaks_field_keeps_its_meaning():
+    # Backward compatibility: `leaks` stays the global-AUC-vs-global-null
+    # verdict it always was; the per-class verdict is a separate field.
+    result = probe_leakage(_clean_corpus(), **GATE_KWARGS)
+    assert result.leaks == (result.observed_auc > result.null_threshold)
+    assert result.gate_passes == (not (result.leaks or result.per_class_leaks))
