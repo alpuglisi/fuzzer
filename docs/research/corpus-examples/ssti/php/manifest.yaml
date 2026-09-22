@@ -1,0 +1,121 @@
+# ssti / php -- new corpus cell (CWE-1336), per direct instruction to
+# expand into classes not already in this corpus/lab/safety_matrix.yaml.
+# Category 4 (media/streaming/content) architecture research (content-
+# management/templating). 5 pairs across php/node/python (see ../node/
+# and ../python/ for the other 3). One real upstream anchor (Twig) plus
+# manufactured pairs representing distinct real template engines
+# (Handlebars, Jinja2, Smarty, EJS).
+
+- file: idiomatic-twig-file-template-1.php
+  role: idiomatic
+  architecture: twig-file-loaded-template
+  repo: twigphp/Twig
+  commit_sha: a8900116997903a2170ec8055eec96432a4c8ad5
+  license: BSD-3-Clause
+  tutorial_or_course_project: false
+  pattern: "Twig\\Environment::render() called with a fixed template NAME resolved through a configured loader -- templates are files an application developer controls, never compiled from request data"
+  notes: >
+    The Twig object usage is real (BSD-3-Clause, repo twigphp/Twig); the
+    surrounding channel-page caller is manufactured context. Paired with
+    vulnerable-twig-user-template-1.php below, which uses the SAME real
+    Twig API's createTemplate() method -- whose own docblock (quoted in
+    that entry) documents the exact contrast this pair illustrates.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-1336, CWE-94]
+  cwe_unique: [CWE-532, CWE-501]
+  cwe_rationale: >
+    Shared (this cell's core class, documented once, see every other
+    entry): CWE-1336 (Improper Neutralization of Special Elements Used in
+    a Template Engine) is the canonical SSTI ID; CWE-94 (Improper Control
+    of Generation of Code) is the general code-injection class SSTI
+    instantiates.
+    Unique: CWE-532 (Insertion of Sensitive Information into Log File) --
+    Twig's cache layer can log/record template-compile errors including
+    fragments of the source it was compiling; CWE-501 (Trust Boundary
+    Violation) -- the compiled-template cache directory
+    (`/tmp/twig_cache`) is a shared, world-writable-by-default location
+    mixing app-trusted compiled output with the OS temp namespace.
+  suggested_op: file_loaded_template_name
+  suggested_sink_family: template_render
+
+- file: vulnerable-twig-user-template-1.php
+  role: vulnerable
+  architecture: twig-file-loaded-template
+  derived_from: idiomatic-twig-file-template-1.php
+  repo: twigphp/Twig
+  commit_sha: a8900116997903a2170ec8055eec96432a4c8ad5
+  license: BSD-3-Clause
+  tutorial_or_course_project: false
+  pattern: "manufactured caller of Twig's real createTemplate($template) method -- its own docblock says 'This method should not be used as a generic way to load templates,' and this entry does exactly that with user-supplied text"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology, calling Twig's own real, documented-risky API."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-1336, CWE-94]
+  cwe_unique: [CWE-538, CWE-613]
+  cwe_rationale: >
+    Shared: see idiomatic-twig-file-template-1.php above.
+    Unique: CWE-538 (Insertion of Sensitive Information into Externally-
+    Accessible File or Directory) -- documented real Twig SSTI chains
+    reach engine-internal objects (e.g. `_self.env`) via property/method
+    access exposed to template expressions, potentially dumping internal
+    configuration into the rendered output itself; CWE-613 (Insufficient
+    Session Expiration) -- the compiled template is executed immediately
+    per request with no re-validation of the session that originally
+    supplied the bio text.
+  suggested_op: user_supplied_template_compile
+  suggested_sink_family: template_render
+
+- file: idiomatic-smarty-fixed-template-4.php
+  role: idiomatic
+  architecture: smarty-fixed-template
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "Smarty::display() called with a fixed .tpl file name, never a runtime string"
+  notes: "Manufactured, representing a real, common Smarty usage pattern distinct from Twig's loader-based one."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-1336, CWE-94]
+  cwe_unique: [CWE-614, CWE-617]
+  cwe_rationale: >
+    Shared: see idiomatic-twig-file-template-1.php above.
+    Unique: CWE-614 (Sensitive Cookie in HTTPS Session Without 'Secure'
+    Attribute) -- flagged generally as a residual concern in the same
+    request lifecycle this rendering call belongs to; CWE-617 (Reachable
+    Assertion) -- Smarty's own template-compile step can raise fatal
+    errors on malformed template syntax, and nothing here confirms those
+    are handled rather than crashing the request.
+  suggested_op: file_loaded_template_name
+  suggested_sink_family: template_render
+
+- file: vulnerable-smarty-eval-5.php
+  role: vulnerable
+  architecture: smarty-fixed-template
+  derived_from: idiomatic-smarty-fixed-template-4.php
+  license: "N/A (synthetic -- represents Smarty's own documented risk
+    around its eval:/string-based template APIs)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: Smarty::fetch('eval:' . $userSuppliedBio) compiles and evaluates a user-supplied string as template source, with PHP function calls reachable by default"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology, using Smarty's own real, documented-risky eval: API."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-1336, CWE-94]
+  cwe_unique: [CWE-646, CWE-649]
+  cwe_rationale: >
+    Shared: see idiomatic-twig-file-template-1.php above.
+    Unique: CWE-646 (Reliance on File Name or Extension of Externally-
+    Supplied File) -- if `$userSuppliedBio` is itself persisted (a
+    profile bio field) before being evaluated on later views, the
+    poisoned template text is a standing threat, not a one-shot request;
+    CWE-649 (Reliance on Obfuscation or Encryption without Integrity
+    Checking) -- Smarty's default unsandboxed mode reaches real PHP
+    functions directly from template syntax with no integrity check on
+    the template source itself.
+  suggested_op: eval_string_template_compile
+  suggested_sink_family: template_render

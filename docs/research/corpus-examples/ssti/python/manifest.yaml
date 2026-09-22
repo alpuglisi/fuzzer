@@ -1,0 +1,59 @@
+# ssti / python -- part of the cell (see ../php/manifest.yaml's header).
+# Entry 3 of this cell's 5 pairs.
+
+- file: idiomatic-jinja2-file-template-3.py
+  role: idiomatic
+  architecture: jinja2-file-loaded-template
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "Environment(loader=FileSystemLoader(...)).get_template(name) -- a fixed template name resolved against a configured directory, never compiled from request data"
+  notes: "Manufactured, representing a real, common safe-Jinja2-usage shape, the same mitigation class as this cell's Twig entry in a different, independently common templating engine."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-1336, CWE-94]
+  cwe_unique: [CWE-657, CWE-359]
+  cwe_rationale: >
+    Shared (this cell's core class, see ../php/manifest.yaml's
+    idiomatic-twig-file-template-1.php entry): CWE-1336, CWE-94.
+    Unique: CWE-657 (Violation of Secure Design Principles) -- Jinja2's
+    own default autoescape is OFF for the FileSystemLoader config shown
+    (autoescape must be explicitly enabled), a fail-open default distinct
+    from this pair's own SSTI focus; CWE-359 (Exposure of Private
+    Information) -- neither `title` nor `notes` is checked for expected
+    shape before being handed to `render()`, so free-text notes could
+    contain other users' data pasted in by mistake with nothing catching
+    it before display.
+  suggested_op: file_loaded_template_name
+  suggested_sink_family: template_render
+
+- file: vulnerable-jinja2-user-template-3.py
+  role: vulnerable
+  architecture: jinja2-file-loaded-template
+  derived_from: idiomatic-jinja2-file-template-3.py
+  license: "N/A (synthetic -- represents Jinja2's own documented risk:
+    its default, non-sandboxed Environment allows reaching Python's
+    object model from template expressions)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: Environment().from_string(user_supplied_layout) compiles attacker text as a template -- the well-documented {{ ''.__class__.__mro__[...] }} Jinja2 SSTI-to-RCE chain applies directly to a default Environment"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology, using Jinja2's own real, documented-risky from_string() API and its well-known object-model-traversal exploitation chain."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-1336, CWE-94]
+  cwe_unique: [CWE-289, CWE-290]
+  cwe_rationale: >
+    Shared: see idiomatic-jinja2-file-template-3.py above.
+    Unique: CWE-289 (Authentication Bypass by Alternate Name) -- the
+    documented `__class__.__mro__` chain reaches classes and objects via
+    an alternate path through Python's own object model rather than any
+    application-defined API, side-stepping whatever authorization that
+    API would have enforced; CWE-290 (Authentication Bypass by Spoofing)
+    -- flagged generally, since `from_string()` compiles and the
+    immediate `.render()` call executes it in the same request, with no
+    check the request is what the template author's session actually
+    intended to submit.
+  suggested_op: user_supplied_template_compile
+  suggested_sink_family: template_render

@@ -1,0 +1,104 @@
+# ssrf / php -- part of the ssrf cell (see ../node/manifest.yaml's header
+# for the cell-wide note: 5 pairs total across node/php/python, entries
+# 3 and 5 of that 5 are here).
+
+- file: idiomatic-webhook-verify-3.php
+  role: idiomatic
+  architecture: webhook-callback-verification
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "parse_url() scheme check, gethostbyname() + filter_var(FILTER_FLAG_NO_PRIV_RANGE|FILTER_FLAG_NO_RES_RANGE) IP check, and CURLOPT_FOLLOWLOCATION explicitly disabled before curl_exec()"
+  notes: "Manufactured, representing a real, common PHP cURL-based SSRF mitigation shape."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-918, CWE-20, CWE-441]
+  cwe_unique: [CWE-829, CWE-923]
+  cwe_rationale: >
+    Shared (this cell's core class, see ../node/manifest.yaml's
+    idiomatic-safe-fetch-1.js entry): CWE-918, CWE-20, CWE-441.
+    Unique: CWE-829 (Inclusion of Functionality from Untrusted Control
+    Sphere) -- a customer-configured, fully external endpoint is reached
+    out to and its response trusted as a health signal; CWE-923 (Improper
+    Restriction of Communication Channel to Intended Endpoints) -- this
+    function's entire job is exactly what CWE-923 names: restricting which
+    endpoints this outbound channel may reach.
+  suggested_op: scheme_and_resolved_ip_allowlist
+  suggested_sink_family: server_side_http_fetch
+
+- file: vulnerable-webhook-verify-3.php
+  role: vulnerable
+  architecture: webhook-callback-verification
+  derived_from: idiomatic-webhook-verify-3.php
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: curl_init($callbackUrl) with no scheme/IP check; FOLLOWLOCATION left unset (per this entry's own notes, the surrounding codebase routinely enables it on other cURL calls for convenience)"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-918, CWE-20, CWE-441]
+  cwe_unique: [CWE-494, CWE-830]
+  cwe_rationale: >
+    Shared: see idiomatic-webhook-verify-3.php above.
+    Unique: CWE-494 (Download of Code Without Integrity Check) -- this
+    function relies on cURL's own default for FOLLOWLOCATION rather than
+    setting it explicitly, in a codebase this entry's own notes say
+    enables it elsewhere, so the effective request target changes with no
+    check the response is what the caller expected; CWE-830 (Inclusion of
+    Web Functionality from an Untrusted Source) -- the fetched response
+    body is treated as a trustworthy health signal despite originating
+    entirely outside the application's control.
+  suggested_op: unchecked_url_fetch
+  suggested_sink_family: server_side_http_fetch
+
+- file: idiomatic-pdf-remote-image-5.php
+  role: idiomatic
+  architecture: pdf-export-remote-image
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "scheme check, resolved-IP private/reserved-range check, and a stream context with follow_location disabled before file_get_contents()"
+  notes: "Manufactured, representing a real, common PHP file_get_contents()-based mitigation shape, distinct from entry 3's cURL-based one."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-918, CWE-20, CWE-441]
+  cwe_unique: [CWE-436, CWE-693]
+  cwe_rationale: >
+    Shared: see idiomatic-webhook-verify-3.php above.
+    Unique: CWE-436 (Interpretation Conflict) -- the URL's scheme is
+    checked but the fetched response's own Content-Type is never
+    confirmed to actually be an image before the PDF renderer interprets
+    it as one; CWE-693 (Protection Mechanism Failure) -- this check is one
+    function; any other call site in the app that also calls
+    file_get_contents() on a URL is not covered by it.
+  suggested_op: scheme_and_resolved_ip_allowlist
+  suggested_sink_family: server_side_http_fetch
+
+- file: vulnerable-pdf-remote-image-5.php
+  role: vulnerable
+  architecture: pdf-export-remote-image
+  derived_from: idiomatic-pdf-remote-image-5.php
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: @file_get_contents($imageUrl) with no scheme/IP check -- a well-documented real PHP SSRF vector, since file_get_contents() transparently follows the http:// stream wrapper and, if not restricted, the phar:// wrapper"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-918, CWE-20, CWE-441]
+  cwe_unique: [CWE-98, CWE-73]
+  cwe_rationale: >
+    Shared: see idiomatic-webhook-verify-3.php above.
+    Unique: CWE-98 (PHP Remote File Inclusion) -- file_get_contents() on
+    an unchecked URL is a well-documented instance of this exact PHP-
+    specific weakness class, distinct from the generic SSRF framing;
+    CWE-73 (External Control of File Name or Path) -- the same function
+    also accepts a plain local path, so `$imageUrl` controls a filesystem
+    reference, not only a network request.
+  suggested_op: unchecked_url_fetch
+  suggested_sink_family: server_side_http_fetch

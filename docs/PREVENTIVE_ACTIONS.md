@@ -296,3 +296,13 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   check after the first version still allowed copy-pasting the same CWEs across sibling
   entries, which a direct follow-up instruction correctly identified as not meeting the
   actual intent.) (from BUG-0029)
+
+  Extended again per this same principle when a follow-up direct instruction ("at least
+  5 pairs, not one example per CWE") surfaced a second uncovered quantitative floor:
+  `check-corpus-cwe-coverage.sh` now also aggregates every `manifest.yaml` under a
+  touched cell directory (`docs/research/corpus-examples/<cell>/`) and blocks the
+  session if that cell has fewer than 5 `role: vulnerable` entries. Same failure mode as
+  the original PA-0032 gap — a quantitative "at least N" instruction was tracked only in
+  prose (this plan doc's Status section) rather than mechanically enforced — caught
+  before it recurred a second time by applying PA-0032's own rule proactively this time,
+  rather than waiting for a review to catch it.

@@ -1,0 +1,55 @@
+# ssrf / python -- part of the ssrf cell (see ../node/manifest.yaml's
+# header for the cell-wide note: entry 4 of that cell's 5 pairs is here).
+
+- file: idiomatic-oembed-unfurl-4.py
+  role: idiomatic
+  architecture: chat-link-unfurl
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "urlparse() scheme check, socket.gethostbyname() + ipaddress module is_private/is_loopback/is_link_local check, and allow_redirects=False before requests.get()"
+  notes: "Manufactured, representing a real, common Python requests-based SSRF mitigation shape, distinct from the node/php entries' equivalents in this cell."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-918, CWE-20, CWE-441]
+  cwe_unique: [CWE-300, CWE-1220]
+  cwe_rationale: >
+    Shared (this cell's core class, see ../node/manifest.yaml's
+    idiomatic-safe-fetch-1.js entry): CWE-918, CWE-20, CWE-441.
+    Unique: CWE-300 (Channel Accessible by Non-Endpoint) -- the IP check
+    happens once via `socket.gethostbyname()`, but `requests.get()`
+    resolves and connects independently afterward, leaving a window where
+    the channel's actual endpoint is not the one that was verified;
+    CWE-1220 (Insufficient Granularity of Access Control) -- the check
+    covers scheme and resolved IP but never the port, so an internal
+    service on a non-standard port of an otherwise-public-looking IP is
+    not excluded.
+  suggested_op: scheme_and_resolved_ip_allowlist
+  suggested_sink_family: server_side_http_fetch
+
+- file: vulnerable-oembed-unfurl-4.py
+  role: vulnerable
+  architecture: chat-link-unfurl
+  derived_from: idiomatic-oembed-unfurl-4.py
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: requests.get(message_url) with no scheme/IP check; allow_redirects defaults to True in requests"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-918, CWE-20, CWE-441]
+  cwe_unique: [CWE-704, CWE-664]
+  cwe_rationale: >
+    Shared: see idiomatic-oembed-unfurl-4.py above.
+    Unique: CWE-704 (Incorrect Type Conversion or Cast) -- `.json()` is
+    called and trusted as the expected oEmbed shape with no check that the
+    response is actually well-formed oEmbed data rather than an arbitrary
+    JSON body from wherever the (possibly redirected) request landed;
+    CWE-664 (Improper Control of a Resource Through its Lifetime) -- the
+    outbound connection's destination is established once at request time
+    and never re-verified across any redirect hops it follows.
+  suggested_op: unchecked_url_fetch
+  suggested_sink_family: server_side_http_fetch

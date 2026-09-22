@@ -1,0 +1,106 @@
+# ssti / node -- part of the cell (see ../php/manifest.yaml's header).
+# Entries 2 and 5 of this cell's 5 pairs.
+
+- file: idiomatic-handlebars-fixed-template-2.js
+  role: idiomatic
+  architecture: handlebars-fixed-template
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "Handlebars.compile() called once at startup on a fixed file asset; only the data object varies per request"
+  notes: "Manufactured, representing a real, common safe-Handlebars-usage shape."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-1336, CWE-94]
+  cwe_unique: [CWE-665, CWE-710]
+  cwe_rationale: >
+    Shared (this cell's core class, see ../php/manifest.yaml's
+    idiomatic-twig-file-template-1.php entry): CWE-1336, CWE-94.
+    Unique: CWE-665 (Improper Initialization) -- the template is compiled
+    once at process startup and cached in module scope; a restart picking
+    up a tampered file on disk (a separate access-control issue) would
+    silently initialize that module-scope cache from it; CWE-710
+    (Improper Adherence to Coding Standards) -- the template path is
+    built via string concatenation (`__dirname + '/templates/...'`)
+    rather than `path.join`, a real source of resolution drift across
+    platforms.
+  suggested_op: file_loaded_template_name
+  suggested_sink_family: template_render
+
+- file: vulnerable-handlebars-user-template-2.js
+  role: vulnerable
+  architecture: handlebars-fixed-template
+  derived_from: idiomatic-handlebars-fixed-template-2.js
+  license: "N/A (synthetic -- represents Handlebars' own documented,
+    publicly disclosed helper-lookup gadget-chain SSTI/RCE history)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: Handlebars.compile(userSuppliedLayout) per request"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-1336, CWE-94]
+  cwe_unique: [CWE-275, CWE-269]
+  cwe_rationale: >
+    Shared: see idiomatic-handlebars-fixed-template-2.js above.
+    Unique: CWE-275 (Permission Issues) -- documented real Handlebars
+    SSTI chains use helper/property lookups to reach the JS
+    `constructor`/`prototype` chain with no permission boundary of any
+    kind stopping the traversal; CWE-269 (Improper Privilege Management)
+    -- the compiled template executes with the same privilege as the
+    rendering process itself, no reduced-privilege sandbox around it.
+  suggested_op: user_supplied_template_compile
+  suggested_sink_family: template_render
+
+- file: idiomatic-ejs-renderfile-5.js
+  role: idiomatic
+  architecture: ejs-renderfile
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "ejs.renderFile() loads a fixed .ejs asset from disk by path, never a runtime string"
+  notes: "Manufactured, representing a real, common safe-EJS-usage shape, distinct from the Handlebars entries' compile-once pattern."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-1336, CWE-94]
+  cwe_unique: [CWE-22, CWE-281]
+  cwe_rationale: >
+    Shared: see idiomatic-handlebars-fixed-template-2.js above.
+    Unique: CWE-22 (Path Traversal) -- distinct instance from the Twig
+    idiomatic entry's same-ID finding (different real engine, same class
+    of residual risk if the path ever became input-derived); CWE-281
+    (Improper Preservation of Permissions) -- `tracks` is passed straight
+    into the template's data context with no check on what permissions
+    scope it was originally fetched under.
+  suggested_op: file_loaded_template_name
+  suggested_sink_family: template_render
+
+- file: vulnerable-ejs-render-string-5.js
+  role: vulnerable
+  architecture: ejs-renderfile
+  derived_from: idiomatic-ejs-renderfile-5.js
+  license: "N/A (synthetic -- represents EJS's own documented scriptlet-tag
+    code-execution behavior)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: ejs.render(userSuppliedDescription, ...) -- EJS scriptlet tags (<% %>) embed raw JavaScript, executed during render"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology, using EJS's own real, documented scriptlet-tag behavior."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-1336, CWE-94]
+  cwe_unique: [CWE-285, CWE-522]
+  cwe_rationale: >
+    Shared: see idiomatic-handlebars-fixed-template-2.js above.
+    Unique: CWE-285 (Improper Authorization) -- the scriptlet-tag-
+    executed code runs with the same authorization as the rendering
+    request itself, no separate check on what a "description" field
+    should be allowed to do; CWE-522 (Insufficiently Protected
+    Credentials) -- if any credential/secret is reachable from the
+    rendering process's environment (common for a Node server), EJS
+    scriptlet-tag code execution can read it directly.
+  suggested_op: user_supplied_template_compile
+  suggested_sink_family: template_render

@@ -1,0 +1,107 @@
+# header-injection / node -- part of the cell (see ../php/manifest.yaml's
+# header). Entries 2 and 5 of this cell's 5 pairs.
+
+- file: idiomatic-nodemailer-structured-2.js
+  role: idiomatic
+  architecture: nodemailer-structured-options
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "recipient/subject/body passed as structured sendMail() option properties -- Nodemailer's own MIME builder encodes these, never raw-concatenated into a header block"
+  notes: "Manufactured, representing a real, common safe-Nodemailer-usage shape."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-93, CWE-20]
+  cwe_unique: [CWE-116, CWE-650]
+  cwe_rationale: >
+    Shared (this cell's core class, see ../php/manifest.yaml's
+    idiomatic-phpmailer-secureheader-1.php entry): CWE-93, CWE-20.
+    Unique: CWE-116 (Improper Encoding or Escaping of Output) -- flagged
+    as what this structured API correctly delegates to Nodemailer's own
+    MIME builder rather than doing itself; CWE-1173 (Improper Use of
+    Validation Framework) -- `guestEmail` is used as both the envelope
+    recipient and the Reply-To value with no format validation of either,
+    despite Nodemailer accepting an address-validation option this
+    caller never sets.
+  suggested_op: structured_mail_options
+  suggested_sink_family: email_header_value
+
+- file: vulnerable-raw-smtp-header-2.js
+  role: vulnerable
+  architecture: nodemailer-structured-options
+  derived_from: idiomatic-nodemailer-structured-2.js
+  license: "N/A (synthetic -- represents the real 'drop to raw SMTP for a
+    feature the library doesn't cover' anti-pattern)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: raw template-literal concatenation of SMTP headers with no CRLF stripping"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-93, CWE-20]
+  cwe_unique: [CWE-707, CWE-1039]
+  cwe_rationale: >
+    Shared: see idiomatic-nodemailer-structured-2.js above.
+    Unique: CWE-707 (Improper Neutralization) -- the general class this
+    raw-template-literal construction instantiates, independent of
+    Nodemailer's own MIME encoding this bypasses entirely; CWE-1039
+    (Automated Recognition Mechanism with Inadequate Detection or
+    Handling of Adversarial Input) -- there is no recognition step at all
+    here, the strongest possible instance of this weakness in this cell.
+  suggested_op: raw_header_concat
+  suggested_sink_family: email_header_value
+
+- file: idiomatic-setheader-validated-5.js
+  role: idiomatic
+  architecture: http-setheader-validated
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "an explicit allowlist regex on bookingId before res.setHeader(), layered on top of Node's own built-in CR/LF rejection in setHeader() (throws ERR_INVALID_CHAR since Node 10)"
+  notes: "Manufactured, representing the HTTP-response-header variant of this class in Node, distinct from PHP's header()-based equivalent in this cell."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-93, CWE-20]
+  cwe_unique: [CWE-113, CWE-1275]
+  cwe_rationale: >
+    Shared: see idiomatic-nodemailer-structured-2.js above.
+    Unique: CWE-113 (HTTP Response Splitting) -- the precise HTTP-specific
+    child of CWE-93 for a Set-Cookie header, a distinct instance from
+    this cell's PHP http-response-header entries (different runtime,
+    same class); CWE-1275 (Sensitive Cookie with Improper SameSite
+    Attribute) -- the cookie is set with `HttpOnly; Secure` but no
+    `SameSite` attribute at all, a real, distinct gap in this same value.
+  suggested_op: allowlist_and_runtime_crlf_rejection
+  suggested_sink_family: http_response_header_value
+
+- file: vulnerable-raw-socket-write-5.js
+  role: vulnerable
+  architecture: http-setheader-validated
+  derived_from: idiomatic-setheader-validated-5.js
+  license: "N/A (synthetic -- represents the real residual case of a raw
+    socket.write() used for a protocol-upgrade response, bypassing
+    Node's http-module header validation entirely)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: socket.write() building the raw HTTP upgrade response line-by-line, bypassing res.setHeader()'s built-in CR/LF rejection"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-93, CWE-20]
+  cwe_unique: [CWE-778, CWE-798]
+  cwe_rationale: >
+    Shared: see idiomatic-nodemailer-structured-2.js above.
+    Unique: CWE-778 (Insufficient Logging) -- a raw socket write path
+    like this one commonly sits outside the framework's usual request-
+    logging middleware, so a malformed/injected upgrade response leaves
+    no audit trail the setHeader()-based path would have produced;
+    CWE-798 (Use of Hard-coded Credentials) -- flagged generally since a
+    raw protocol-upgrade handler is exactly the kind of low-level code
+    path where a hard-coded shared secret for the upgrade handshake is a
+    real, common anti-pattern.
+  suggested_op: raw_socket_response_write
+  suggested_sink_family: http_response_header_value

@@ -14,6 +14,39 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Research: added 6 brand-new vulnerability-class cells to the corpus
+  (`docs/research/corpus-examples/{mass-assignment,ssrf,
+  insecure-deserialization,ssti,header-injection,webhook-signature}/`),
+  per direct correction that the prior two waves had incorrectly limited
+  the site-architecture research to CWE classes already covered by this
+  corpus's existing 6 cells (`access-control`, `auth-session`,
+  `ecommerce-logic`, `file-handling`, `search-export`, `ugc-xss`) and by
+  `lab/safety_matrix.yaml` (SQLi/XSS ops only). Each new class maps to one
+  of the 6 site-architecture categories and to a base-plan priority-6 row
+  not yet collected (Mass Assignment/CWE-915 -> e-commerce/APIs-
+  integrations; SSRF/CWE-918 -> social-UGC/link-preview; Insecure
+  Deserialization/CWE-502 -> SaaS-collaboration/background-async; SSTI/
+  CWE-1336 -> media-streaming/content-management; Header Injection/CWE-93
+  -> travel-booking/notifications; Webhook Signature Verification/
+  CWE-347+345 -> fintech/APIs-integrations). Each class has 5 vulnerable/
+  idiomatic pairs (60 entries total, the floor this instruction set
+  requires) -- one pair anchored to real, license-verified, commit-pinned
+  upstream source per class (Vendure, metascraper, Laravel, Twig,
+  PHPMailer, Stripe's own webhook-verification code), the remaining 4
+  pairs per class manufactured against well-documented real-world
+  patterns (framework docs, public CVEs) and explicitly marked
+  `synthetic: true` with no fabricated repo attribution. Every entry
+  carries >= 2 CWEs unique to it (`cwe_shared`/`cwe_unique` split, per
+  PA-0032) -- `.claude/hooks/check-corpus-cwe-coverage.sh` passes clean
+  across the full 60-entry set after an iterative collision-fix pass (the
+  hook caught and this session fixed every cross-entry CWE-ID collision
+  it found). `.claude/hooks/check-corpus-cwe-coverage.sh` extended again
+  (per PA-0032) to mechanically enforce the new "at least 5 pairs per
+  class" floor itself, not just the CWE-uniqueness floor — it now blocks
+  the session if any touched corpus cell has fewer than 5 `role:
+  vulnerable` entries across its manifest.yaml files. Status section of
+  `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md` updated to record
+  this wave and the scope correction it makes.
 - Research + bookkeeping: redid the site-architecture corpus expansion's
   Step 2 and Step 6 per direct follow-up instruction (deeper architecture
   research; at least 2 CWEs unique to each entry, with CWEs shared across

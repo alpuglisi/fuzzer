@@ -1,0 +1,113 @@
+# insecure-deserialization / node -- part of the cell (see
+# ../php/manifest.yaml's header). Entries 3 and 4 of this cell's 5 pairs.
+
+- file: idiomatic-job-spec-no-eval-2.js
+  role: idiomatic
+  architecture: declarative-job-spec
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "JSON.parse() plus a handler-lookup table (handlers[job.type]) -- the payload can only ever select among a fixed, pre-registered set of functions, never supply code"
+  notes: "Manufactured, representing a real, common 'data, not code' job-queue design."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-502, CWE-20]
+  cwe_unique: [CWE-1321, CWE-843]
+  cwe_rationale: >
+    Shared (this cell's core class, see ../php/manifest.yaml's
+    idiomatic-laravel-encrypted-command-1.php entry): CWE-502, CWE-20.
+    Unique -- a real, genuine gap in this specific code: `handlers[job.type]`
+    is a bracket-notation lookup on a plain object; if `job.type` is
+    `"constructor"`, the lookup resolves to `Object`'s own constructor
+    function (inherited via the prototype chain) rather than `undefined`,
+    so the `if (!handler)` guard does not catch it: CWE-1321 (Improperly
+    Controlled Modification of Object Prototype Attributes) -- the
+    lookup's exposure to prototype-chain properties via an attacker-
+    controlled key is exactly this weakness's access pattern, even though
+    no assignment occurs; CWE-843 (Type Confusion) -- the code assumes
+    `handler` is always one of the three registered job functions, but a
+    crafted `job.type` can make it resolve to an unrelated built-in
+    function instead.
+  suggested_op: handler_registry_lookup
+  suggested_sink_family: object_deserialization
+
+- file: vulnerable-job-spec-vm-eval-2.js
+  role: vulnerable
+  architecture: declarative-job-spec
+  derived_from: idiomatic-job-spec-no-eval-2.js
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: vm.runInNewContext(job.script, job.context) -- job-authored script text is executed directly"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-502, CWE-20]
+  cwe_unique: [CWE-470, CWE-96]
+  cwe_rationale: >
+    Shared: see idiomatic-job-spec-no-eval-2.js above.
+    Unique: CWE-470 (Use of Externally-Controlled Input to Select Classes
+    or Code, 'Unsafe Reflection') -- `job.script` selects arbitrary code
+    to run, chosen entirely by the job payload's author; CWE-96 (Improper
+    Neutralization of Directives in Statically Saved Code, 'Static Code
+    Injection') -- the script text is persisted (queued) before execution,
+    distinct from an in-memory-only eval, so a poisoned queue entry
+    remains a standing threat until processed.
+  suggested_op: vm_script_execution
+  suggested_sink_family: object_deserialization
+
+- file: idiomatic-webhook-payload-json-4.js
+  role: idiomatic
+  architecture: node-serialize-contrast
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "JSON.parse(rawBody) only -- no code-execution-capable deserializer"
+  notes: "Manufactured, representing the safe baseline any Node webhook handler should use instead of a function-executing deserializer."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-502, CWE-20]
+  cwe_unique: [CWE-770, CWE-407]
+  cwe_rationale: >
+    Shared: see idiomatic-job-spec-no-eval-2.js above.
+    Unique: CWE-770 (Allocation of Resources Without Limits or
+    Throttling) -- no size limit is placed on `rawBody` before it's
+    parsed; CWE-407 (Inefficient Algorithmic Complexity) -- a maliciously
+    deeply-nested JSON structure can cause pathological parse time even
+    though JSON.parse() itself is safe from code execution.
+  suggested_op: json_parse_only
+  suggested_sink_family: object_deserialization
+
+- file: vulnerable-webhook-payload-nodeserialize-4.js
+  role: vulnerable
+  architecture: node-serialize-contrast
+  derived_from: idiomatic-webhook-payload-json-4.js
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: serialize.unserialize(rawBody) -- node-serialize's own documented behavior of executing IIFEs embedded in a specially-marked payload string during 'deserialization'"
+  notes: >
+    Manufactured, but the mechanism cited (the _$$ND_FUNC$$_ marker
+    string and its function-execution behavior) is real and publicly
+    documented via CVE-2017-5941 and the package's own README, not
+    invented for this entry.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-502, CWE-20]
+  cwe_unique: [CWE-77, CWE-1104]
+  cwe_rationale: >
+    Shared: see idiomatic-job-spec-no-eval-2.js above.
+    Unique: CWE-77 (Improper Neutralization of Special Elements used in a
+    Command, 'Command Injection') -- the documented CVE-2017-5941 example
+    payload itself invokes `child_process.exec('id')`, a direct path from
+    this deserialization call to OS command execution; CWE-1104 (Use of
+    Unmaintained Third-Party Components) -- node-serialize has been
+    effectively unmaintained since this CVE's disclosure, a real,
+    documented fact about the dependency itself, distinct from the code
+    pattern's own risk.
+  suggested_op: function_executing_deserialize
+  suggested_sink_family: object_deserialization

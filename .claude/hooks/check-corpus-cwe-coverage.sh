@@ -111,10 +111,54 @@ for path in manifests:
             else:
                 unique_claims[cwe_id] = (path, fname)
 
+import os
+import glob
+
+# Second mechanical floor (PA-0032): "at least 5 vulnerable/idiomatic pairs
+# per class" is its own explicit quantitative instruction and needs its own
+# check, not just a restatement in a planning doc. Group by cell directory
+# (docs/research/corpus-examples/<cell>/), aggregate every manifest.yaml
+# under that cell (not just the ones touched this turn, since a cell can
+# span multiple language subdirs and only some may be touched), and
+# require >= 5 `role: vulnerable` entries per touched cell.
+touched_cells = set()
+for path in manifests:
+    path = path.strip()
+    if not path:
+        continue
+    parts = path.split("/")
+    # docs/research/corpus-examples/<cell>/<lang>/manifest.yaml
+    try:
+        idx = parts.index("corpus-examples")
+        touched_cells.add("/".join(parts[: idx + 2]))
+    except (ValueError, IndexError):
+        continue
+
+for cell_dir in sorted(touched_cells):
+    vulnerable_count = 0
+    for manifest_path in glob.glob(os.path.join(cell_dir, "*", "manifest.yaml")):
+        try:
+            with open(manifest_path) as f:
+                entries = yaml.safe_load(f) or []
+        except (FileNotFoundError, yaml.YAMLError):
+            continue
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get("role") == "vulnerable":
+                vulnerable_count += 1
+    if vulnerable_count < 5:
+        problems.append(
+            f"{cell_dir} has only {vulnerable_count} `role: vulnerable` "
+            f"entries across its manifest.yaml files (need >= 5 vulnerable/"
+            f"idiomatic pairs per class, per direct instruction)."
+        )
+
 if problems:
     print(
         "docs/research/corpus-examples/*/manifest.yaml entries touched by this "
-        "turn don't meet the >= 2 unique CWEs per entry standard:",
+        "turn don't meet the >= 2 unique CWEs per entry standard and/or the "
+        ">= 5 pairs per class standard:",
         file=sys.stderr,
     )
     for p in problems:
@@ -122,7 +166,8 @@ if problems:
     print(
         "Research the MITRE CWE index (https://cwe.mitre.org/data/index.html) for "
         "CWEs genuinely specific to each entry's own code, per PA-0032 / "
-        "docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md Step 6.",
+        "docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md Step 6. For the "
+        "pairs-per-class floor, add more vulnerable/idiomatic pairs to the cell.",
         file=sys.stderr,
     )
     sys.exit(1)

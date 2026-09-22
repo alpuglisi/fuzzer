@@ -1,0 +1,117 @@
+# webhook-signature / node -- new corpus cell (CWE-347/CWE-345), per
+# direct instruction to expand into classes not already in this corpus/
+# lab/safety_matrix.yaml. Category 6 (fintech/payments) architecture
+# research (APIs/integrations). 5 pairs across node/php/python. One real
+# upstream anchor (Stripe's own webhook-verification code) plus
+# manufactured pairs covering both "no verification at all" and
+# "verification present but timing-unsafe" sub-shapes.
+
+- file: idiomatic-stripe-validate-signature-1.ts
+  role: idiomatic
+  architecture: stripe-webhook-verification
+  repo: stripe/stripe-node
+  commit_sha: 9996a2d4f129c8b02f36f715b27a30c956087007
+  license: MIT
+  tutorial_or_course_project: false
+  pattern: "validateComputedSignature(): platformFunctions.secureCompare() (constant-time) for the HMAC check, plus a separate timestamp-tolerance check to reject replayed/stale events"
+  notes: >
+    Verbatim excerpt (trimmed to the two checks, per this corpus's
+    excerpting convention). Source file: src/Webhooks.ts. Note (from the
+    real docstring, not reproduced verbatim here): timestamp verification
+    is opt-in via the `tolerance` parameter in this API, not the default.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-345]
+  cwe_unique: [CWE-294, CWE-636]
+  cwe_rationale: >
+    Shared (this cell's core class, documented once, see every other
+    entry): CWE-347 (Improper Verification of Cryptographic Signature) is
+    the canonical ID; CWE-345 (Insufficient Verification of Data
+    Authenticity) is its general parent.
+    Unique: CWE-294 (Authentication Bypass by Capture-replay) -- per this
+    entry's own real docstring, timestamp/tolerance verification (the
+    replay defense) is opt-in, not the default, in this exact API;
+    CWE-636 (Not Failing Securely, 'Failing Open') -- a caller using this
+    function without passing `tolerance` gets no replay protection at
+    all, despite the function's name suggesting full validation.
+  suggested_op: constant_time_signature_and_timestamp_check
+  suggested_sink_family: webhook_signature_verification
+
+- file: vulnerable-webhook-no-verify-1.js
+  role: vulnerable
+  architecture: stripe-webhook-verification
+  derived_from: idiomatic-stripe-validate-signature-1.ts
+  license: "N/A (synthetic -- represents the well-documented real
+    anti-pattern of trusting a webhook body because it arrived over
+    HTTPS, with no provider signature check at all)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: req.body processed directly with no signature-verification call of any kind"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-345]
+  cwe_unique: [CWE-425, CWE-358]
+  cwe_rationale: >
+    Shared: see idiomatic-stripe-validate-signature-1.ts above.
+    Unique: CWE-425 (Direct Request, 'Forced Browsing') -- no check of
+    any kind gates this endpoint beyond it being reachable, so simply
+    knowing/guessing the webhook URL is sufficient; CWE-358 (Improperly
+    Implemented Security Check for Standard) -- the
+    endpoint's URL path implies it follows the payment provider's own
+    webhook standard, but implements none of that standard's
+    verification requirements.
+  suggested_op: no_signature_check
+  suggested_sink_family: webhook_signature_verification
+
+- file: idiomatic-timingsafe-equal-4.js
+  role: idiomatic
+  architecture: hmac-timingsafe-equal
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "crypto.timingSafeEqual() with an explicit length check first -- Node's own documented API constraint (timingSafeEqual throws on mismatched buffer lengths)"
+  notes: "Manufactured, representing the generic HMAC-webhook verification shape (GitHub-style), distinct from Stripe's own bundled verification API above."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-345]
+  cwe_unique: [CWE-208, CWE-620]
+  cwe_rationale: >
+    Shared: see idiomatic-stripe-validate-signature-1.ts above.
+    Unique: CWE-208 (Observable Timing Discrepancy) -- the explicit
+    length-check-then-timingSafeEqual sequence is precisely the
+    documented mitigation for this; CWE-620 (Unverified Password Change)
+    -- flagged generally as a residual concern for whatever process
+    rotates `webhookSecret`, a precondition the HMAC's own strength
+    depends on.
+  suggested_op: constant_time_compare
+  suggested_sink_family: webhook_signature_verification
+
+- file: vulnerable-strict-equal-4.js
+  role: vulnerable
+  architecture: hmac-timingsafe-equal
+  derived_from: idiomatic-timingsafe-equal-4.js
+  license: "N/A (synthetic -- represents the well-documented real timing-
+    side-channel risk of comparing secrets with a short-circuiting `===`)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: expected === signatureHeader -- JavaScript's short-circuiting string equality leaks a timing signal proportional to the matching-prefix length"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-345]
+  cwe_unique: [CWE-697, CWE-571]
+  cwe_rationale: >
+    Shared: see idiomatic-stripe-validate-signature-1.ts above.
+    Unique: CWE-697 (Incorrect Comparison) -- `===` is the wrong
+    comparison operator for a secret-bearing value, independent of the
+    timing question; CWE-571 (Expression is Always True) -- flagged
+    generally: if `expected` and `signatureHeader` are ever both empty
+    strings (a malformed-request edge case), this `===` comparison
+    returns true with no signature having been checked at all.
+  suggested_op: naive_string_compare
+  suggested_sink_family: webhook_signature_verification

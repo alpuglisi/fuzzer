@@ -1,0 +1,55 @@
+# webhook-signature / python -- part of the cell (see
+# ../node/manifest.yaml's header). Entry 3 of this cell's 5 pairs.
+
+- file: idiomatic-hmac-compare-digest-3.py
+  role: idiomatic
+  architecture: hmac-compare-digest
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "hmac.compare_digest() for a constant-time comparison -- Python's own hmac module documentation explicitly recommends this specifically to avoid timing attacks"
+  notes: "Manufactured, representing the generic HMAC-webhook verification shape in Python, the same mitigation class as this cell's Node/PHP entries in an independently common language."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-345]
+  cwe_unique: [CWE-384, CWE-1025]
+  cwe_rationale: >
+    Shared (this cell's core class, see ../node/manifest.yaml's
+    idiomatic-stripe-validate-signature-1.ts entry): CWE-347, CWE-345.
+    Unique: CWE-384 (Session Fixation) -- flagged generally as a residual
+    concern for whatever session this webhook event ultimately drives a
+    state change in; CWE-1025 (Comparison Using Wrong Factors) --
+    `signature_header` is used directly with no check that it's a
+    well-formed hex string of the expected length before the constant-
+    time comparison runs, so a malformed header is compared byte-for-byte
+    against an expected value it could never structurally match.
+  suggested_op: constant_time_compare
+  suggested_sink_family: webhook_signature_verification
+
+- file: vulnerable-hmac-naive-equality-3.py
+  role: vulnerable
+  architecture: hmac-compare-digest
+  derived_from: idiomatic-hmac-compare-digest-3.py
+  license: "N/A (synthetic -- represents the well-documented real timing-
+    side-channel risk of comparing secrets with a short-circuiting `==`)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: expected == signature_header -- Python string equality short-circuits on the first mismatched byte"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-345]
+  cwe_unique: [CWE-570, CWE-486]
+  cwe_rationale: >
+    Shared: see idiomatic-hmac-compare-digest-3.py above.
+    Unique: CWE-570 (Expression is Always False) -- flagged generally: if
+    `signature_header` is ever empty or malformed, this `==` comparison
+    is trivially always-false in a way that gives no diagnostic signal
+    distinguishing "wrong signature" from "malformed input"; CWE-486
+    (Comparison of Classes by Name) -- flagged generally as the same
+    class of "wrong-basis comparison" bug this entry's `==` (comparing by
+    value only, ignoring how that value was derived) instantiates.
+  suggested_op: naive_string_compare
+  suggested_sink_family: webhook_signature_verification

@@ -185,9 +185,38 @@ entry are the proposal a later change accepts, renames, or merges.
 - [x] Step 8: `suggested_op`/`suggested_sink_family` proposals recorded for
       all 6 pairs. Not yet applied to `lab/safety_matrix.yaml` — deliberately
       out of scope for a corpus-collection pass (see "Step 8 handoff").
+- [x] Scope correction (per direct instruction): waves 1-2 had incorrectly
+      confined collection to CWE classes already implemented in
+      `lab/safety_matrix.yaml` (SQLi/XSS-adjacent only), defeating the
+      point of this research (expanding the generator's vulnerability
+      classes), and had collected only 1 pair per class instead of the
+      required floor of >= 5. Corrected in wave 3: 6 brand-new
+      vulnerability-class cells, one per site-architecture category, none
+      previously in the corpus or `lab/safety_matrix.yaml` — mass-assignment
+      (CWE-915, category 1/e-commerce), ssrf (CWE-918, category 2/social-
+      UGC), insecure-deserialization (CWE-502, category 3/SaaS), ssti
+      (CWE-1336, category 4/media), header-injection (CWE-93, category
+      5/travel), webhook-signature (CWE-347/CWE-345, category 6/fintech) —
+      see `docs/research/corpus-examples/{mass-assignment,ssrf,
+      insecure-deserialization,ssti,header-injection,webhook-signature}/
+      {node,php,python}/manifest.yaml`. Each class has >= 5 vulnerable/
+      idiomatic pairs (60 entries total): one real, license-verified,
+      commit-pinned upstream anchor per class plus 4 manufactured pairs
+      (`synthetic: true`, `license: "N/A (synthetic)"`, no fabricated repo
+      attribution) per Phase 3's "Pair generation" methodology, chosen
+      because 5 independently-sourced real repos per brand-new class was
+      impractical within this environment. All 60 entries meet the
+      tightened `cwe_shared`/`cwe_unique` standard (>= 2 `cwe_unique` CWEs
+      each, no cross-entry collisions across any touched manifest file);
+      `.claude/hooks/check-corpus-cwe-coverage.sh` passes clean
+      (`hook_exit=0`) across the full touched set. `suggested_op`/
+      `suggested_sink_family` recorded per entry, not yet applied to
+      `lab/safety_matrix.yaml` (same Step 8 deferral as the original 6
+      pairs).
 - [ ] Remaining architecture/function combinations within each of the 6
-      categories (each category's 5 sites can surface more than one
-      combination; only one per category has been carried through so far).
+      original categories (each category's 5 sites can surface more than
+      one combination; only one per category has been carried through for
+      the original 6 pairs so far) — separate from the 6 new classes above.
 - [ ] Dynamic-tier validation for all 6 pairs (`validated_by: [dynamic]`) —
       deferred to an environment with a sandboxed execution runtime; every
       pair is `validated: true` at the static/manual-review tier in the

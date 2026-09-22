@@ -1,0 +1,114 @@
+# ssrf / node -- new corpus cell (CWE-918), per direct instruction to
+# expand into classes not already in this corpus/lab/safety_matrix.yaml.
+# Category 2 (social/UGC) architecture research. 5 pairs, spread across
+# node/php/python (see sibling manifest.yaml files in ../php/ and
+# ../python/ -- this cell's 5 pairs are NOT all in this one file; entries
+# 1-2 are here, 3 and 5 are in ../php/, 4 is in ../python/). One real
+# upstream anchor (metascraper) plus 4 manufactured pairs representing
+# distinct real-world "fetch a URL server-side" features (avatar import,
+# webhook verification, link unfurl, PDF remote-image embedding).
+
+- file: idiomatic-safe-fetch-1.js
+  role: idiomatic
+  architecture: metascraper-link-preview
+  repo: microlinkhq/metascraper
+  commit_sha: b3e17a907db0abbd141d6ee5a85f731ef429ecfc
+  license: MIT
+  tutorial_or_course_project: false
+  pattern: "real metascraper URL-extraction rule (unmodified) plus a manufactured caller that validates scheme, resolves and checks the IP against private/loopback ranges, and disables redirect-following before fetching"
+  notes: "The extraction rule is verbatim upstream; the safe-fetch wrapper around it is manufactured, since metascraper itself never fetches."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-918, CWE-20, CWE-441]
+  cwe_unique: [CWE-367, CWE-184]
+  cwe_rationale: >
+    Shared (this cell's core class, documented once): CWE-918 (Server-Side
+    Request Forgery) is the canonical ID; CWE-20 is its general parent;
+    CWE-441 (Unintended Proxy or Intermediary, 'Confused Deputy') is core
+    to SSRF's own definition -- the server acts on the attacker's behalf
+    using its own network position.
+    Unique: CWE-367 (TOCTOU) -- the IP is resolved once for the check, then
+    fetch() resolves the hostname again internally; a DNS answer that
+    changes between the two resolutions defeats the check; CWE-184
+    (Incomplete List of Disallowed Inputs) -- `isPrivateOrLoopback()`'s
+    prefix list omits IPv4-mapped IPv6 (`::ffff:127.0.0.1`), ULA
+    (`fc00::/7`), and CGNAT (`100.64.0.0/10`) ranges.
+  suggested_op: scheme_and_resolved_ip_allowlist
+  suggested_sink_family: server_side_http_fetch
+
+- file: vulnerable-safe-fetch-1.js
+  role: vulnerable
+  architecture: metascraper-link-preview
+  derived_from: idiomatic-safe-fetch-1.js
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: fetch(candidateUrl) with no scheme/IP check and default redirect-following"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-918, CWE-20, CWE-441]
+  cwe_unique: [CWE-610, CWE-406]
+  cwe_rationale: >
+    Shared: see idiomatic-safe-fetch-1.js above.
+    Unique: CWE-610 (Externally Controlled Reference to a Resource in
+    Another Sphere) -- `candidateUrl` is a fully externally-controlled
+    reference to whatever resource it names, network or otherwise;
+    CWE-406 (Insufficient Control of Network Message Volume) -- unlike
+    entry 1's wrapper, no timeout or response-size bound is set here, so
+    a slow or oversized response from an attacker-chosen endpoint ties up
+    server resources.
+  suggested_op: unchecked_url_fetch
+  suggested_sink_family: server_side_http_fetch
+
+- file: idiomatic-avatar-import-2.js
+  role: idiomatic
+  architecture: avatar-url-import
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "hostname allowlist (ALLOWED_HOSTS) plus https-only scheme check before fetching"
+  notes: "Manufactured, representing a real, common host-allowlist mitigation shape distinct from entry 1's resolved-IP-based check."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-918, CWE-20, CWE-441]
+  cwe_unique: [CWE-940, CWE-346]
+  cwe_rationale: >
+    Shared: see idiomatic-safe-fetch-1.js above.
+    Unique: CWE-940 (Improper Verification of Source of a Communication
+    Channel) -- the allowlist checks the *destination* hostname only,
+    never confirming the fetched response actually originated from the
+    expected image-hosting service rather than an impersonator; CWE-346
+    (Origin Validation Error) -- the check matches on hostname string
+    only, not on any cryptographic origin/certificate identity, so
+    DNS-level spoofing of an allowed hostname isn't defended against by
+    this check alone.
+  suggested_op: hostname_allowlist
+  suggested_sink_family: server_side_http_fetch
+
+- file: vulnerable-avatar-import-2.js
+  role: vulnerable
+  architecture: avatar-url-import
+  derived_from: idiomatic-avatar-import-2.js
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: fetch(userSuppliedUrl) with no hostname allowlist at all"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-918, CWE-20, CWE-441]
+  cwe_unique: [CWE-400, CWE-284]
+  cwe_rationale: >
+    Shared: see idiomatic-safe-fetch-1.js above.
+    Unique: CWE-400 (Uncontrolled Resource Consumption) -- no timeout or
+    response-size limit is shown, unlike entry 1's wrapper; CWE-284
+    (Improper Access Control) -- flagged at the general level since this
+    endpoint effectively grants any authenticated user an open proxy into
+    whatever network the server can reach.
+  suggested_op: unchecked_url_fetch
+  suggested_sink_family: server_side_http_fetch
