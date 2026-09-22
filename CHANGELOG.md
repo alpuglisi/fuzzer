@@ -13,6 +13,12 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- Docs: `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4/§9.2/§9.6 —
+  category 3 (SaaS/productivity/collaboration) claimed as piloting on
+  `claude/category-3-build-iuu5k9`, reserved `CC-LAB-0090`-`0119`, and
+  recorded its §9.1 site-pair pick (Slack, reusing `php_laravel`; Atlassian,
+  a new Java/Kotlin+Spring Boot emitter) — done first, per §9.3's
+  coordination contract, before any category-3 build work.
 - Docs: renamed `docs/LAB_SECOND_TARGET_NODE_EXPRESS_PLAN.md` ->
   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` and added its §9,
   recording the project owner's answers to §0b's open questions: stack

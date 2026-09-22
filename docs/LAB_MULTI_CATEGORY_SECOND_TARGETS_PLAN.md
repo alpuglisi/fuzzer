@@ -492,6 +492,8 @@ one, not build two.
 | PHP, synchronous procedural | Built | Original lab, `php_current` | Foundation-tier depth. |
 | Node/Express, synchronous API | Shallow (Tier-A), being deepened | §§1-6 above (pre-expansion plan) | Not yet full depth; whichever category picks Node/Express as one of its two should coordinate with whoever is deepening it rather than starting a second effort. |
 | Python, async API (FastAPI/Pydantic) | Shallow (Tier-A) | Original Phase 3 lane | Exists; available to reuse if a category's pick lands here specifically (not just "Python" generically — see §9.1 step 2's paradigm distinction, e.g. this is NOT the same stack as Django). |
+| PHP/Hack, synchronous MVC (HHVM) | Reused (mapped onto `php_laravel`'s paradigm group per §9.1 step 2 — company/runtime differ, paradigm doesn't) | Category 3 (Slack pick) | Slack's own web/app-logic tier (auth, business logic, DB writes) is Hack-on-HHVM, not vanilla PHP, but per §9.1 step 2 paradigm (synchronous, template/MVC-rendering web app) is what groups stacks, not company or exact runtime — this reuses `php_laravel` rather than requiring a distinct Hack/HHVM emitter. Category 3's Slack app is a new app identity/page-set built on the existing `php_laravel` emitter, not a new emitter. |
+| Java/Kotlin, Spring Boot microservice | New — being built | Category 3 (Atlassian pick) | Genuinely new stack (JVM, Spring MVC/Boot request/response, dependency-injected controller/service/repository layering) — not close to any existing emitter. Any other category (5/6 both flagged Java/Kotlin candidates — Expedia, Wise, Cash App) should reuse this emitter rather than building a second Java/Spring one; check here first. |
 | *(add a row per new stack the moment a category picks it — before building it, not after)* | — | — | — |
 
 ### 9.3 Multi-session coordination contract (read this before touching any code)
@@ -541,7 +543,7 @@ one's own pilot:
 |---|---|---|---|---|---|---|---|
 | 1 | E-commerce/marketplaces | **Piloting** | Shopify (Ruby on Rails); Walmart (Node/Express — reuses existing) | Ruby on Rails | `claude/second-target-cat1-ecommerce` | `CC-LAB-0070`-`0089` (reserved, not yet all used) | Amazon excluded (AWS-microservices, no single app-language claim confirmed — not a sensible single-stack target); Etsy/WooCommerce excluded as redundant with Shopify's PHP-adjacent... no — Etsy/WooCommerce are PHP, genuinely distinct from Rails, but both landed in the same (PHP, synchronous, template-rendering) group as each other per §9.1 step 2, and PHP is already a built stack (§9.2) — Walmart's Node/Express pick was preferred over a second PHP pick specifically per §9.1 step 4's reuse preference. Functionality research and CWE research for this pair: **not started yet** — next step. |
 | 2 | Social / UGC platforms | Not started | — | Likely Python/Django (Instagram) is the strongest new-stack candidate; Facebook (PHP/Hack+HHVM) may or may not warrant a *new* stack vs. reusing `php_laravel`/`php_current` as an approximation — this is exactly the kind of call §9.1 asks the picking session to make and record, not this table to pre-decide. Discord flagged in §9.1 step 1 as likely excluded (realtime/Elixir, not a request/response fit). YouTube likely excluded (Google-internal infra, no portable app-language claim). | — | — | Open for another session to pick up. |
-| 3 | SaaS / productivity / collaboration | Not started | — | Candidates per the survey: Slack (PHP/Hack web tier + Java realtime — itself two stacks), Notion (sharded Postgres + Kafka, but no named app-framework/language beyond "engineering blog doesn't name one" — check before committing), Atlassian (Java/Kotlin+Spring, Node+Express, or Python — Atlassian itself uses 3 stacks, pick the one most distinct from what's already built), Microsoft 365/Teams (Node.js backend + React/TS front end), Google Workspace (OT + Spanner/Bigtable — confirmed at the algorithm/storage level, not at a portable app-framework level; may not be a sensible single-stack pick without further research). | — | — | Open. Flag: Google Workspace's confirmed detail is algorithmic/storage, not framework-level — whoever picks this category should research further (per the standing instruction to do more research if needed) before treating it as buildable, or should pick two of the other four sites instead. |
+| 3 | SaaS / productivity / collaboration | **Piloting** | Slack (PHP/Hack web tier — reuses `php_laravel`); Atlassian (Java/Kotlin+Spring Boot — new emitter) | Java/Kotlin, Spring Boot | `claude/category-3-build-iuu5k9` | `CC-LAB-0090`-`0119` (reserved, not yet all used) | Google Workspace excluded per §9.1 step 1: OT algorithm + Spanner/Bigtable is confirmed at the algorithm/storage level only, no named portable app-framework/language claim, same exclusion class as Disney+/Trip.com. Notion excluded for the same reason: Postgres/Redis/Kafka are infra/data-model detail, not an app-framework/language claim the survey names — re-checked, still not found; would need dedicated research to unblock and two other candidates already give a stronger distinctness pair. Remaining three (Slack, Atlassian, MS365/Teams) grouped per §9.1 step 2: Slack = PHP/Hack, synchronous web-app tier (Java realtime-messaging tier excluded — not the app-logic tier, a WebSocket fan-out layer, poor fit for this generator's request/response IR); Atlassian = Java/Kotlin+Spring Boot microservice (picked over Atlassian's own Node+Express/Python options as the most distinct from stacks already built); MS365/Teams = Node.js+Apollo GraphQL BFF (same language family as the already-built/being-deepened `node_express`, so not the most distinct choice available). Slack vs. Atlassian is the most distinct pair (different language, different runtime, different paradigm) of the three viable candidates. Reuse-vs-new (§9.1 step 4): Slack's PHP/Hack web tier groups with `php_laravel`'s paradigm (synchronous MVC/template-rendering) — reused rather than built as a separate Hack/HHVM emitter (see §9.2 ledger note); Atlassian's Java/Kotlin+Spring Boot is genuinely new and doesn't overlap any built or reused stack, satisfying step 4's "other pick still distinct" requirement. Functionality + stack-specific CWE research: **in progress**. |
 | 4 | Media / streaming / content platforms | Not started | — | Candidates: Netflix (Java/Spring Boot + a Federated GraphQL gateway), Spotify (Java/Spring + Kafka), Twitch (Go, post-monolith-migration — genuinely distinct paradigm from the others), Disney+ (excluded per §9.1 step 1 — infrastructure-only, unconfirmed at application-code level). | — | — | Open. Twitch/Go vs. Netflix-or-Spotify/Java+Spring reads as the most architecturally distinct pair from the current research, but the picking session should verify against §9.1's full procedure rather than take this as decided. |
 | 5 | Travel / booking / marketplaces | Not started | — | Candidates: Booking.com (PHP+MariaDB — same language-family caveat as category 1/2's PHP sites, check §9.2 before assuming reuse), Airbnb (Ruby on Rails + Java/Dropwizard — Rails may already be built by the time this category starts, per §9.2's ledger; check it), Expedia (Java/Spring Boot, later Kotlin), TripAdvisor (event-driven microservices + GraphQL BFF — no single portable app-language claim as clearly named as the others), Trip.com (excluded per §9.1 step 1 — unconfirmed at the application-language level). | — | — | Open. |
 | 6 | Fintech / payments | Not started | — | Candidates: PayPal (historically Java, now diversifying to Node.js for high-traffic pages — itself two stacks, and Node may already be built, check §9.2), Stripe (Ruby — same caveat as Rails re: §9.2 if category 1 or 5 already built a Ruby stack; Stripe is Ruby generically, not Rails specifically, worth checking if that's a meaningfully different stack for this purpose or the same group), Wise (Java-based microservice fleet), Cash App (Kotlin + Java, state-machine payment lifecycle — a genuinely distinctive *functional* pattern worth preserving in page design even if the stack overlaps another Java/Kotlin pick), Venmo (Python on Kubernetes + DynamoDB + Celery — check against category 2's Python pick before assuming this is the same group). | — | — | Open. This category has the most cross-category stack-reuse-checking to do before picking (Node, Ruby, Java/Kotlin, and Python all plausibly already exist elsewhere by the time this category starts) — the picking session should read §9.2 particularly carefully. |
@@ -589,3 +591,45 @@ next steps, in order, per §9.1-§9.3's discipline:
    examples), prove conformance (§5), wire into `multitarget.py` (§6).
 5. Update §9.4's tracker row at every step above — do not wait until the
    category is fully done to report progress.
+
+### 9.6 Category 3 pilot (SaaS/productivity/collaboration) — next steps
+
+Note on category 1's status: at the time category 3 started, no
+`claude/second-target-cat1-ecommerce` branch existed and no `CC-LAB-0070`+
+entries had landed, despite §9.4's row reading "Piloting" — category 1's
+pilot session evidently did not execute past updating this document. Flagged
+here rather than silently reused/overwritten; category 3 proceeds
+independently on its own branch and bookkeeping block per §9.3, and does not
+touch category 1's reserved block.
+
+Category 3 is now **piloting** on branch `claude/category-3-build-iuu5k9`
+(assigned by the dispatching session rather than self-chosen; it fills the
+same role §9.3.1's `claude/second-target-cat<N>-<slug>` convention
+describes). Concrete next steps, in order, per §9.1-§9.3's discipline:
+
+1. Site-pair selection (this section, §9.4's row) — **done**: Slack
+   (PHP/Hack web-app tier, reusing `php_laravel`) + Atlassian (Java/Kotlin
+   + Spring Boot, new emitter).
+2. Functionality/feature research for Slack and Atlassian (Jira/Confluence)
+   specifically — real pages/flows (channels/messages/file-sharing/
+   incoming-outgoing webhooks for Slack; issues/wiki-pages/attachments/
+   REST-webhooks/macros for Jira-Confluence), cited, closing the §0a item 2
+   gap for this category.
+3. Stack-specific CWE research for each, cross-checked against
+   `lab/safety_matrix.yaml` and `docs/research/corpus-examples/` for
+   breadth (§0a items 3-4): Hack/PHP-web-tier footguns realistic for a
+   Slack-shaped app (webhook signature verification, SSRF via link
+   unfurling/outgoing webhooks, header injection in webhook forwarding —
+   all already corpus-researched but not yet built into any manifest, per
+   the audit in this pilot's research doc); Spring Boot/Java footguns
+   realistic for a Jira/Confluence-shaped app (OGNL/expression-language
+   injection in the macro/template system — the real shape behind
+   CVE-2021-26084/CVE-2022-26134, Java XXE from a default-permissive XML
+   parser, Java deserialization of untrusted data, Spring MVC mass
+   assignment via unguarded `@ModelAttribute` binding).
+4. Build the Java/Kotlin+Spring Boot skeleton/live-boot harness (the
+   biggest new-work item in this pilot, mirroring §2's Phase A template),
+   the new Slack-identity page set on the existing `php_laravel` emitter
+   (§4's Phase C template), prove conformance (§5), wire into
+   `multitarget.py` (§6).
+5. Update §9.4's tracker row at every step above.
