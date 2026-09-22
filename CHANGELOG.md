@@ -60,6 +60,13 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   scope questions (whether the JS-rendered crawler surface must be reproduced, and whether
   DOM XSS blocks the cutover) are left explicitly open for the user. Documentation only —
   no code, tests, or manifests touched.
+- Feature (UI, Wave-0 lane X0): registered `fuzzlab lab-generate` as a launchable activity in the
+  web launcher, in its own **"Lab / authoring"** group. Added a loader + `_REGISTRY` entry and an
+  optional `group` field to the command spec (`commandspec.py`), and made `_group_activities`
+  (`app.py`) bucket by that spec group (falling back to the name-map / "Other"). lab-generate sends
+  no traffic (renders files; `--check` runs offline gates), so it carries no `authorized` gate.
+  Reason: one consistent control plane for every CLI; establishes the U0↔X0 grouping contract.
+  Fields stay argparse-derived (PA-0001). CC-UI-0024.
 - Docs (UI): added `docs/UI_IMPLEMENTATION_PLAN.md` — a single tracked plan for the remaining web
   UI work: the settled build policy (no build step; hand-roll where cheap; vendor one zero-dep
   static file only for charts), the five locked decisions, the outstanding deliverables (U0, U1–U5,

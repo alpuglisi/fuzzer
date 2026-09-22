@@ -3,6 +3,39 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0024 — Lane X0: register `lab-generate` in the launcher (own group) (2026-09-22)
+- Change: surfaced `fuzzlab lab-generate` as a launchable activity in the web launcher (Wave-0
+  lane X0 of `docs/UI_IMPLEMENTATION_PLAN.md`). `fuzzlab/labgen/cli.py` already exposed
+  `build_parser()`, so this added a `_load_labgen` loader + a `_REGISTRY` entry in
+  `fuzzlab/web/commandspec.py` (`sends_traffic=False` — it renders files locally and `--check`
+  runs offline build gates, so **no `authorized`/destructive gate**). Introduced an optional
+  `group` field on `_Entry`/`CommandSpec` (+ `to_dict()`), set to `"Lab / authoring"` for
+  lab-generate; made `app.py`'s `_group_activities` bucket leftover activities by that spec
+  `group` (falling back to the existing name-map / "Other"), so the activity picker shows
+  lab-generate under its own group while every other tool's grouping is unchanged.
+- Impact (other components / project): UI only; no schema/contract change. The command-spec form
+  contract is unchanged (fields still argparse-derived — PA-0001). The new `group` field is
+  additive and defaults to `None`. Establishes the U0↔X0 grouping contract (X0 sets `group`; U0
+  reads `a.get("group")`), so U0's app.py refactor composes without conflict. `lab-generate`'s
+  parser pulls in `fuzzlab.labgen`, which needs the declared `covertable` dep; `all_specs()`
+  already skips any activity whose parser import fails, so a missing optional dep degrades the
+  launcher rather than breaking it.
+- Risk (level; mitigation): low. Registering an activity runs nothing (introspection is pure).
+  Mitigation: new `test_web_commandspec.py` cases assert lab-generate is registered, grouped
+  ("Lab / authoring"), non-traffic/ungated, and argparse-derived, and that `group` defaults to
+  `None` elsewhere; `python -m fuzzlab.cli lab-generate --help` verified; web + command-spec
+  suites green (44 passed in the focused run). No `authorized` gate on a file-rendering tool
+  keeps no-auto-run intact (it sends no traffic).
+- Deliverables:
+  - [x] `_load_labgen` + `_REGISTRY` entry + `group` field in `commandspec.py` — done.
+  - [x] group-aware `_group_activities` in `app.py` — done.
+  - [x] command-spec tests for lab-generate + the `group` default — done.
+  - [x] full-suite check (X0 introduced no new failures; 1281 passed — the only failures are
+    pre-existing LAB `--check` tests needing the `gitleaks` binary, absent in this sandbox) — done.
+- Effectiveness (assessed 2026-09-22): effective — lab-generate now appears as a grouped,
+  non-traffic launcher activity with argparse-derived fields, and the `group` contract is in place
+  for U0. Re-assess once U0's MPA refactor renders the grouped picker end-to-end.
+
 ### CC-UI-0023 — UI implementation plan + build policy + round-1 research (2026-09-22)
 - Change: added `docs/UI_IMPLEMENTATION_PLAN.md`, the single tracked plan for the remaining web UI
   work (companion to `UI_REVAMP_PLAN.md`, `UI_LAYOUT_REDESIGN.md`, and the LAB plan). It records

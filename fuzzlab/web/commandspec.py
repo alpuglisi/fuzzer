@@ -54,6 +54,7 @@ class CommandSpec:
     sends_traffic: bool             # does invoking it reach the target?
     needs_authorized: bool          # has an --authorized gate
     destructive_gate: bool          # has an --allow-destructive gate
+    group: str | None = None        # launcher grouping label; None → default name-map
     options: list[OptionSpec] = field(default_factory=list)
     subcommands: dict[str, list[OptionSpec]] = field(default_factory=dict)
 
@@ -63,6 +64,7 @@ class CommandSpec:
             "sends_traffic": self.sends_traffic,
             "needs_authorized": self.needs_authorized,
             "destructive_gate": self.destructive_gate,
+            "group": self.group,
             "options": [o.to_dict() for o in self.options],
             "subcommands": {
                 k: [o.to_dict() for o in v] for k, v in self.subcommands.items()
@@ -127,6 +129,7 @@ class _Entry:
     summary: str
     sends_traffic: bool
     loader: Callable[[], argparse.ArgumentParser] | None  # None → no flags
+    group: str | None = None        # launcher grouping label (None → default name-map)
 
 
 def _load_crawl() -> argparse.ArgumentParser:
@@ -174,6 +177,11 @@ def _load_session() -> argparse.ArgumentParser:
     return build_parser()
 
 
+def _load_labgen() -> argparse.ArgumentParser:
+    from fuzzlab.labgen.cli import build_parser
+    return build_parser()
+
+
 # Ordered: discovery → attack → analysis. `sends_traffic` is a fact about the
 # activity, not something argparse knows, so it is declared here; the authorized
 # and destructive gates ARE read from the parser (presence of the flags).
@@ -188,6 +196,12 @@ _REGISTRY: list[_Entry] = [
     _Entry("report", "Reproducible evaluation report for a stored run.", False, _load_report),
     _Entry("session", "Provision per-host credentials; print a session header.", True, _load_session),
     _Entry("build-db", "Rebuild the packaged indicator database (no traffic).", False, None),
+    # Lab authoring: render a manifest to source files. Read-only (writes files;
+    # `--check` runs build gates) — sends no traffic, so no authorized gate.
+    _Entry("lab-generate",
+           "Render a lab manifest to source files via an emitter (read-only; "
+           "--check runs build gates).",
+           False, _load_labgen, group="Lab / authoring"),
 ]
 
 
@@ -196,7 +210,7 @@ def _build(entry: _Entry) -> CommandSpec:
         return CommandSpec(
             name=entry.name, prog=f"fuzzlab {entry.name}", summary=entry.summary,
             sends_traffic=entry.sends_traffic, needs_authorized=False,
-            destructive_gate=False, options=[], subcommands={},
+            destructive_gate=False, group=entry.group, options=[], subcommands={},
         )
     parser = entry.loader()
     options, subcommands = introspect(parser)
@@ -210,6 +224,7 @@ def _build(entry: _Entry) -> CommandSpec:
         sends_traffic=entry.sends_traffic,
         needs_authorized="authorized" in dests,
         destructive_gate="allow_destructive" in dests,
+        group=entry.group,
         options=options,
         subcommands=subcommands,
     )

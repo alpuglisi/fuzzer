@@ -152,9 +152,21 @@ def _group_activities(activities: list[dict]) -> list[dict]:
         claimed.update(a["name"] for a in acts)
         if acts:
             grouped.append({"label": label, "acts": acts})
-    rest = [a for a in activities if a["name"] not in claimed]
-    if rest:
-        grouped.append({"label": "Other", "acts": rest})
+    # Leftover activities bucket by an explicit spec `group` (X0: e.g. "Lab /
+    # authoring"), else "Other" — preserving registry order and group
+    # first-appearance order.
+    order: list[str] = []
+    buckets: dict[str, list[dict]] = {}
+    for a in activities:
+        if a["name"] in claimed:
+            continue
+        label = a.get("group") or "Other"
+        if label not in buckets:
+            buckets[label] = []
+            order.append(label)
+        buckets[label].append(a)
+    for label in order:
+        grouped.append({"label": label, "acts": buckets[label]})
     return grouped
 
 

@@ -67,8 +67,29 @@ def test_dest_uses_long_flag_name():
 def test_registry_lists_expected_activities():
     names = set(cs.command_names())
     expected = {"crawl", "audit", "fuzz", "auto", "greybox-run",
-                "proxy", "mutate-run", "report", "session", "build-db"}
+                "proxy", "mutate-run", "report", "session", "build-db",
+                "lab-generate"}
     assert expected <= names
+
+
+def test_lab_generate_registered_grouped_and_untraffic():
+    # X0: lab-generate is a launchable authoring activity in its own group. It
+    # renders files (writes locally, `--check` runs gates) and sends NO traffic,
+    # so it carries no authorized/destructive gate.
+    s = cs.spec("lab-generate")
+    assert s.group == "Lab / authoring"
+    assert s.sends_traffic is False
+    assert s.needs_authorized is False and s.destructive_gate is False
+    # fields come from the tool's own parser (PA-0001), incl. the required ones
+    dests = {o.dest: o for o in s.options}
+    assert dests["manifest"].required is True and dests["out"].required is True
+    assert dests["emitter"].type == "choice"
+    assert "group" in s.to_dict()  # the field is exposed to the UI
+
+
+def test_group_defaults_to_none_for_ungrouped_activities():
+    assert cs.spec("auto").group is None
+    assert cs.spec("auto").to_dict()["group"] is None
 
 
 def test_all_specs_build_and_are_json_serializable():
