@@ -501,20 +501,30 @@ tracked in the requirements files, not here.
   which consolidates a crawl, runs scoped rules + oracle confirmation, and — with a
   ground-truth contract — scores TP/FP. The legacy `tools/blind_sqli_fuzzer.py`
   remains as the original single-class fuzzer.
-- **Oracle** `[built; M10 pending]`: a **class-pluggable** deterministic confirmer
-  (`oracle/oracle.py`, `oracle/strategies.py`, `oracle/probe.py`) — the **only**
-  writer of `finding` labels — over 7 vuln classes (sqli, reflected/DOM/stored XSS,
-  open-redirect, SSTI, file-inclusion, command-injection). Built mechanisms:
-  M1 differential timing, M2 error signature, M3 boolean/response differential,
-  M4 SSTI evaluation marker, M5 reflected-canary-in-context, M6 browser execution
+- **Oracle** `[built; M10 wiring layer built, live sources on-host]`: a
+  **class-pluggable** deterministic confirmer (`oracle/oracle.py`,
+  `oracle/strategies.py`, `oracle/probe.py`) — the **only** writer of `finding`
+  labels — over 7 vuln classes (sqli, reflected/DOM/stored XSS, open-redirect,
+  SSTI, file-inclusion, command-injection). Built mechanisms: M1 differential
+  timing, M2 error signature, M3 boolean/response differential, M4 SSTI
+  evaluation marker, M5 reflected-canary-in-context, M6 browser execution
   (stored/DOM XSS via an injected `BrowserExecutor` — `oracle/browser.py`,
   `tools/browserexec.py`), M7 file-content marker (LFI/traversal), M8 out-of-band
   callback (blind command injection, via an injected, already-started
   `OobListener` — `oracle/oob.py`, a loopback-only local canary tracker;
-  default-off, wired through `fuzzlab auto --oob`), and M9 redirect-target control.
-  **Pending:** M10 grey-box (the grey-box reward hook is wired via
-  `greybox/confirm.py`; its live signal is on-host). Findings are written in
-  path-normalized form via `core/urls.to_path`.
+  default-off, wired through `fuzzlab auto --oob`), M9 redirect-target control,
+  and M10 grey-box confirmation (sql-injection/xss, via an injected
+  `CoverageSource`/`DbFaultSource` — `greybox/coverage.py`, `greybox/dbfault.py` —
+  consulting the pure `greybox/confirm.py::greybox_confirms()` decision through
+  `GreyboxConfirmationStrategy`; default-off, wired through `fuzzlab auto
+  --greybox-coverage-file`/`--greybox-dbfault-file`). **M10 caveat:** the wiring
+  layer is built and fully unit-tested offline (`InMemoryCoverageSource`/
+  `InMemoryDbFaultSource`); it is not yet live end-to-end — it additionally needs
+  a correlating oracle probe sender (`send_correlated`, the contract
+  `greybox/run.py`'s `RequestsCorrelatingSender` already establishes) that no
+  shipped oracle sender implements yet, plus the on-host pcov/DB-fault side
+  channel behind `FileCoverageSource`/`FileDbFaultSource` — both on-host last-mile
+  work. Findings are written in path-normalized form via `core/urls.to_path`.
   Each injection class registers the mechanism(s) that prove it; full mechanism set
   and the injection-class → mechanism mapping (derived from `references/`):
   `architecture/oracle-confirmation.md`.
@@ -553,10 +563,21 @@ tracked in the requirements files, not here.
   `llm.py::LlmExpander` is the gated, default-off, offline expansion scaffold.
 - **Exit** `[on-host]`: against the enabled D16 WAF, variants bypass the filter where the
   base is blocked **and** reach new code (grey-box coverage) vs the static catalog.
+- **Variant candidate source `[built]`** (`fuzzlab/scheduler/variants.py`,
+  FR-MUT-8/FR-SCHED-9): closes the gap where `payload_variant` was write-only —
+  `load_variant_candidates`/`variant_probe_specs` read the table back in (scoped by
+  vuln_class/sink_context, mirroring the existing `catalog_families`/`catalog_priors`
+  candidate-source shape) and hand variants to the live grey-box attempt path as
+  `ProbeSpec`s, **alongside** (never replacing) `run_greybox`'s default probes. Wired
+  into the CLI via `fuzzlab greybox-run --mutation-variants` (default off,
+  `--mutation-limit`-bounded), gated the same as every other request-sending path
+  by `--authorized` (D11).
 - **Depends on (components):** `core/`, indicator DB & catalogs, scheduler,
   oracle, grey-box instrumentation. (A lab WAF is a prerequisite decision, not a
   component dependency.)
-- **Writes:** new payload candidates back into the catalog/attempts.
+- **Writes:** new payload candidates back into the catalog (`payload_variant`); reads
+  back in via the scheduler's variant candidate source, feeding the grey-box `attempt`
+  path.
 
 ### 10. ML components `[built — classifier, ranker, active learner, anomaly detector; held-out exits on-host]` (Phases 5, 7, 10)
 - **Detection classifier** (A.1) `[built; held-out exit on-host]`: the `fuzzlab/ml/`
@@ -857,8 +878,10 @@ Suite: 390 passed / 4 skipped (the skips need a native build unavailable in the 
   - **Mutation engine (Phase 8):** the full offline stack is built — operators +
     semantics validator (canonical + `sqlglot` AST), context-typed filter-aware XSS, the
     filter model + bypass learner, the bandit/coverage-guided search, variant write-back
-    to `payload_variant` (migration 8) behind the destructive gate, and the gated
-    default-off LLM scaffold; only the live filter-bypass + coverage exit (T8.7) remains.
+    to `payload_variant` (migration 8) behind the destructive gate, the gated
+    default-off LLM scaffold, and (closing a previously untested wiring gap) the
+    `payload_variant` -> scheduler candidate source -> `greybox-run --mutation-variants`
+    read-back path; only the live filter-bypass + coverage exit (T8.7) remains.
   - **Protocol depth (Phase 9):** the from-scratch WebSocket frame codec + handshake, the
     `flow.protocol` tag (migration 9), and the byte-exact HTTP/2 frame layer + minimal
     HPACK + raw-frame client are built; the parsed `wsproto`/`h2` path, live ALPN/socket,
@@ -869,7 +892,12 @@ Suite: 390 passed / 4 skipped (the skips need a native build unavailable in the 
     auditor, oracle; `fuzzlab auto --plugins`) and the `register_payload_source` consumer
     (mutation `PayloadPool`) are built — all seven hooks wired.
   - **Oracle mechanisms:** M8 (out-of-band, `oracle/oob.py` — blind command
-    injection, via `fuzzlab auto --oob`) is built; M10 (grey-box) still to build.
+    injection, via `fuzzlab auto --oob`) is built; M10 (grey-box,
+    `GreyboxConfirmationStrategy` — sql-injection/xss, via `fuzzlab auto
+    --greybox-coverage-file`/`--greybox-dbfault-file`) has its wiring layer built
+    and unit-tested offline — the live correlating probe sender and the on-host
+    pcov/DB-fault side channel it needs to confirm against a real target remain
+    on-host last-mile work.
   - **Intercepting proxy (Phase 6):** the full offline stack is built — byte-exact
     dual-path core (`RawMessage` + `h11`), scope, match-and-replace, flow history
     (migration 6, FTS5), repeater, interception, manual-login session capture, the

@@ -1,6 +1,6 @@
 # Fuzzing Harness and Oracle — Requirement Specification
 
-Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5/M8); harness generalization ongoing]`
+Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5/M8; M10 grey-box wiring layer built, live sources on-host); harness generalization ongoing]`
 · Last updated: 2026-09-22
 
 Related: `ARCHITECTURE.md` #7; `DECISIONS_AND_ROADMAP.md` (D1, D5, D7, Phase 2/3);
@@ -86,6 +86,49 @@ rewards) derives from it.
     `ConfirmationStrategy` against the same `OobListener` seam later — M8 the
     *mechanism* is now built and pluggable; wiring every blind class onto it is
     tracked as future work, not blocked on anything.
+- **FR-FUZZ-9** The oracle supports **M10 grey-box confirmation** for sql-injection
+  and xss, layered as a secondary mechanism alongside the black-box strategies for
+  those categories. This requirement covers the *wiring layer* only — the pure
+  decision (`fuzzlab.greybox.confirm.greybox_confirms()`/`m10_evidence()`) and the
+  `CoverageSource`/`DbFaultSource` protocols were already built and unit-tested
+  (Phase 3 T3.1–T3.5); what this adds is the seam that lets `Oracle.confirm()`
+  actually consult them:
+  - `GreyboxConfirmationStrategy` (`fuzzlab.oracle.strategies`) is a
+    `ConfirmationStrategy` with `mechanism="grey-box-coverage"`; `applies()` scopes
+    it to `category in ("sql-injection", "xss")` (cross-cutting like M8 alongside
+    M1, not one class). It takes an optional `CoverageSource` and an optional
+    `DbFaultSource` by constructor injection (both default `None`) exactly like the
+    M6 `BrowserExecutor` / M8 `OobListener` seams: with neither source, `confirm()`
+    returns `None` immediately (no probe sent, fail-closed).
+  - With at least one source injected, it still needs the `sender` passed into
+    `confirm()` to expose `send_correlated(url, param, value, *, method, location)
+    -> (Probe, request_id)` (the contract already established for the live
+    grey-box run, `fuzzlab/greybox/run.py`'s `RequestsCorrelatingSender`) so the one
+    probe it sends can be matched back to the coverage/DB-fault side channel by a
+    fresh `X-Fzl-Cov` id; without a `send_correlated`-capable sender it no-ops too.
+    It resolves `vuln_class` from the candidate (or `category_to_oracle_class`),
+    looks up the sink's app file by URL, and calls `greybox_confirms()`/
+    `m10_evidence()` for the verdict/evidence — the oracle stays the sole
+    finding-writer.
+  - Wiring: `default_strategies(coverage=None, dbfault=None)`,
+    `Oracle(coverage=None, dbfault=None)`, `run_pipeline(coverage=None,
+    dbfault=None)`, `run_auto(coverage=None, dbfault=None)` all take the sources as
+    optional keywords defaulting to `None` (no behavior change for existing
+    callers). `fuzzlab auto --greybox-coverage-file DIR` /
+    `--greybox-dbfault-file DIR` construct `FileCoverageSource`/`FileDbFaultSource`
+    against that on-host pcov/DB-fault side channel directory; both default off.
+  - **Honesty about live capability:** this wiring layer is offline-buildable and
+    fully unit-tested with `InMemoryCoverageSource`/`InMemoryDbFaultSource`
+    (`tests/test_oracle_greybox.py`). It does **not** by itself make M10 live in a
+    real run: the CLI flags construct `FileCoverageSource`/`FileDbFaultSource`
+    against the lab's on-host pcov/DB-fault side channel, but no shipped sender yet
+    implements `send_correlated` against a live target (the `RequestsProbeSender`/
+    `SeamProbeSender` used by `fuzzlab auto` do not), so `--greybox-coverage-file`/
+    `--greybox-dbfault-file` currently no-op against a live target until a
+    correlating oracle probe sender is built — that plumbing (attaching a real
+    `X-Fzl-Cov` header per oracle probe against the instrumented lab) remains
+    on-host last-mile work (`docs/ON_HOST_TASKS.md`), same status as before this
+    change for the live coverage/DB-fault sources themselves.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

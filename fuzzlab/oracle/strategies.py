@@ -18,6 +18,10 @@ from fuzzlab.oracle.browser import (
     ExecRequest,
     StoreStep,
 )
+from fuzzlab.greybox.confirm import greybox_confirms, m10_evidence
+from fuzzlab.greybox.coverage import CoverageSource, app_lines
+from fuzzlab.greybox.dbfault import DbFaultSource
+from fuzzlab.greybox.reward import GreyboxSignal
 from fuzzlab.oracle.context import breakout_for, is_unescaped, type_reflection
 from fuzzlab.oracle.oob import OobListener
 from fuzzlab.oracle.probe import Candidate, Sender, Verdict
@@ -331,6 +335,88 @@ class CommandInjectionOobStrategy(ConfirmationStrategy):
         return None
 
 
+# Grey-box (M10) default confirmation-side probes: something that would reach the
+# vulnerable sink (a SQLi syntax-breaker; an XSS canary) so the coverage/DB-fault
+# side channel has something to observe. Distinct from the black-box strategies'
+# own probes above -- this one probe is purely to *generate* the signal, not to
+# read the HTTP response for a verdict (the verdict comes from coverage/db_fault).
+_GREYBOX_APP_ROOT = "/var/www/html"
+_GREYBOX_PROBE_PAYLOADS = {
+    "sqli": "1' OR '1'='1' -- -",
+    "xss": "<fzlgbx>",
+}
+
+
+def _greybox_sink_file(url: str, app_root: str = _GREYBOX_APP_ROOT) -> str:
+    """Map a candidate's URL to the app file expected to serve it (…/login.php)."""
+    from urllib.parse import urlparse
+    path = urlparse(url).path or "/"
+    base = path.rsplit("/", 1)[-1] or "index.php"
+    return app_root.rstrip("/") + "/" + base
+
+
+class GreyboxConfirmationStrategy(ConfirmationStrategy):
+    """M10: grey-box confirmation via a covered sink line (+ a DB fault for SQLi).
+
+    A cross-cutting, category-agnostic secondary mechanism layered alongside the
+    category-specific black-box strategies (the same pattern M8's OOB callback
+    uses alongside M1 timing for command injection): where the black-box
+    mechanisms for `sql-injection`/`xss` abstain, `greybox_confirms()` (the pure
+    decision in `fuzzlab/greybox/confirm.py`) confirms from the injected
+    `CoverageSource`/`DbFaultSource` instead.
+
+    Needs both the request-to-signal correlation and at least one source to do
+    anything: the ``sender`` passed to `confirm()` must expose the
+    ``send_correlated(url, param, value, *, method, location) -> (Probe, request_id)``
+    contract already established for the live grey-box run
+    (`fuzzlab/greybox/run.py`'s `RequestsCorrelatingSender`), so the probe this
+    strategy sends can be matched back to the coverage/DB-fault side channel by a
+    fresh ``X-Fzl-Cov`` id. Without a `send_correlated`-capable sender, or without
+    either source injected, this strategy no-ops (returns ``None``, fail-closed) --
+    same seam shape as the M6 `BrowserExecutor` / M8 `OobListener`. The *live*
+    pcov/DB-fault side channel behind these sources is on-host infra (T3.1/T3.4,
+    docs/ON_HOST_TASKS.md); this wiring layer is fully exercised offline via
+    `InMemoryCoverageSource`/`InMemoryDbFaultSource`.
+    """
+    mechanism = "grey-box-coverage"
+    category = ""                      # applies() is overridden (spans two categories)
+    _CATEGORIES = ("sql-injection", "xss")
+
+    def __init__(self, coverage: CoverageSource | None = None,
+                 dbfault: DbFaultSource | None = None,
+                 app_root: str = _GREYBOX_APP_ROOT):
+        self._coverage = coverage
+        self._dbfault = dbfault
+        self._app_root = app_root
+
+    def applies(self, candidate: Candidate) -> bool:
+        return candidate.category in self._CATEGORIES
+
+    def confirm(self, candidate, sender):
+        if self._coverage is None and self._dbfault is None:
+            return None                                    # no source injected -> no-op
+        send_correlated = getattr(sender, "send_correlated", None)
+        if send_correlated is None:
+            return None                                    # sender can't mint a correlation id
+        vuln_class = candidate.vuln_class or category_to_oracle_class(candidate.category)
+        if not vuln_class:
+            return None
+        family = "sqli" if vuln_class.startswith("sqli") else "xss"
+        payload = _GREYBOX_PROBE_PAYLOADS[family]
+        _probe, request_id = send_correlated(candidate.url, candidate.param, payload,
+                                             method=candidate.method,
+                                             location=candidate.location)
+        coverage = app_lines(self._coverage.lines_for(request_id)) \
+            if self._coverage is not None else {}
+        sink_covered = _greybox_sink_file(candidate.url, self._app_root) in coverage
+        db_fault = self._dbfault.fault_for(request_id).faulted \
+            if self._dbfault is not None else False
+        signal = GreyboxSignal(sink_covered=sink_covered, db_fault=db_fault)
+        if greybox_confirms(vuln_class, signal):
+            return Verdict(True, vuln_class, self.mechanism, m10_evidence(vuln_class, signal))
+        return None
+
+
 # --- browser-execution XSS (M6): stored + DOM. Need an injected BrowserExecutor. ---
 def _xss_exec_payloads(token: str) -> list[str]:
     """Payloads that, if they execute, call the sentinel with the token."""
@@ -391,20 +477,26 @@ class StoredXssStrategy(_BrowserXssStrategy):
 
 
 def default_strategies(browser: BrowserExecutor | None = None,
-                       oob: OobListener | None = None) -> list[ConfirmationStrategy]:
+                       oob: OobListener | None = None,
+                       coverage: CoverageSource | None = None,
+                       dbfault: DbFaultSource | None = None) -> list[ConfirmationStrategy]:
     """Cheapest/strongest first, per category. `applies()` scopes each to its category.
 
     The M6 browser strategies are included with the injected ``browser`` (or without,
     in which case they no-op — stored/DOM XSS stays unconfirmed until a browser is
     set). Likewise the M8 OOB strategy is included with the injected, already-started
     ``oob`` listener (or without, in which case it no-ops — blind command injection
-    still confirms via M1 timing, just not via OOB callback).
+    still confirms via M1 timing, just not via OOB callback). The M10 grey-box
+    strategy is included last (a secondary, cross-cutting layer over sql-injection/
+    xss): with neither ``coverage`` nor ``dbfault`` injected it no-ops, same as the
+    others.
     """
     return [SqliErrorStrategy(), SqliBooleanStrategy(), SqliTimingStrategy(),
             ReflectedXssStrategy(), DomXssStrategy(browser), StoredXssStrategy(browser),
             OpenRedirectStrategy(), SstiStrategy(),
             PathTraversalStrategy(), CommandInjectionStrategy(),
-            CommandInjectionOobStrategy(oob)]
+            CommandInjectionOobStrategy(oob),
+            GreyboxConfirmationStrategy(coverage, dbfault)]
 
 
 # Reference-style category -> the oracle vuln_class we have a strategy for.

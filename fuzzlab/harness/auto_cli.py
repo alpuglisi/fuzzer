@@ -50,6 +50,17 @@ def build_parser() -> argparse.ArgumentParser:
                         "injection) via a local, loopback-only listener. Default off; "
                         "the listener never binds to anything but 127.0.0.1 and is torn "
                         "down at the end of the run.")
+    p.add_argument("--greybox-coverage-file", default=None,
+                   help="Enable M10 grey-box confirmation (sql-injection/xss) with a "
+                        "FileCoverageSource reading the lab shim's per-request pcov "
+                        "side channel from this directory. Default off (no-op); needs "
+                        "a correlating probe sender to do anything (on-host last mile).")
+    p.add_argument("--greybox-dbfault-file", default=None,
+                   help="Enable M10's DB-fault corroboration with a FileDbFaultSource "
+                        "reading the lab shim's per-request side channel from this "
+                        "directory. Default off (no-op). May be combined with "
+                        "--greybox-coverage-file, or used alone (xss needs coverage "
+                        "only; sqli needs both).")
     p.add_argument("--bandit", action="store_true",
                    help="Order oracle mechanisms with the Thompson bandit (Phase 4); "
                         "posteriors persist in the store across runs")
@@ -95,6 +106,14 @@ def main(argv: list[str]) -> int:
             from fuzzlab.oracle.oob import OobListener
             oob = OobListener()          # loopback-only; refuses any other host
             oob.start()
+        coverage = None
+        if args.greybox_coverage_file:
+            from fuzzlab.greybox.coverage import FileCoverageSource
+            coverage = FileCoverageSource(args.greybox_coverage_file)
+        dbfault = None
+        if args.greybox_dbfault_file:
+            from fuzzlab.greybox.dbfault import FileDbFaultSource
+            dbfault = FileDbFaultSource(args.greybox_dbfault_file)
         scheduler = None
         if args.bandit:
             from fuzzlab.oracle.strategies import default_strategies
@@ -110,7 +129,8 @@ def main(argv: list[str]) -> int:
             result = run_auto(base_url=args.base_url, store=store, run_id=run_id,
                               sender=sender, mode=args.mode, ground_truth=ground_truth,
                               selected_categories=selected, points_source=args.points,
-                              browser=browser, oob=oob, scheduler=scheduler, plugins=plugins)
+                              browser=browser, oob=oob, coverage=coverage, dbfault=dbfault,
+                              scheduler=scheduler, plugins=plugins)
         except RunModeError as exc:
             p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
         finally:

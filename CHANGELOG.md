@@ -13,6 +13,15 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- FUZZ: wired M10 grey-box confirmation into the real oracle pipeline —
+  `GreyboxConfirmationStrategy` (constructor-injected `CoverageSource`/
+  `DbFaultSource`, both default `None`, fail-closed no-op without a source or a
+  `send_correlated`-capable sender) consults the already-built pure decision
+  (`greybox_confirms()`/`m10_evidence()`) for sql-injection/xss, threaded through
+  `default_strategies()` → `Oracle` → `run_pipeline` → `run_auto` → new
+  `fuzzlab auto --greybox-coverage-file`/`--greybox-dbfault-file` flags, mirroring
+  the M8 OOB seam; the live pcov/DB-fault side channel and a correlating oracle
+  probe sender stay on-host last-mile work (CC-FUZZ-0020).
 - Docs: closed decision **D21** (`docs/DECISIONS_AND_ROADMAP.md`) — formalized
   the already-shipped "per-project SQLite files + small global config DB"
   storage layout as settled, closing out a stale "decide at Phase 0" deferred
