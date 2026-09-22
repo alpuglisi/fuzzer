@@ -1499,7 +1499,7 @@ lane) can submit a payload as
     boot + real, observable behavior against the real engine and real
     schema, which is a stronger, but still narrower, claim than that.
 
-- **FR-LAB-56** *(`CC-LAB-0060`, 2026-09-22 — wires `fuzzlab.labgen.
+- **FR-LAB-57** *(`CC-LAB-0060`, 2026-09-22 — wires `fuzzlab.labgen.
   conformance.tier1`'s own public API against a real in-process app+DB, for
   whichever stacks already have a real `Tier1Client`; extends `FR-LAB-52`'s
   `LiveBootHarness` scope, does not change it.)* `tier1.py`'s

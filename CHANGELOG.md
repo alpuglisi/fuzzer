@@ -14,7 +14,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
-- LAB (`CC-LAB-0060`, `FR-LAB-56`, build lane T1): wired `fuzzlab.labgen
+- LAB (`CC-LAB-0060`, `FR-LAB-57`, build lane T1): wired `fuzzlab.labgen
   .conformance.tier1`'s public API (`build_tier1_case`/`run_tier1_case`/
   `evaluate_tier1_response`) against a real in-process app+DB for the first
   time, reusing `CC-LAB-0054`'s existing `LiveBootHarness` (unmodified) as a

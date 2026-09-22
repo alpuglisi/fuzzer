@@ -244,7 +244,7 @@ tracked in the requirements files, not here.
   0 (lint + minimal-pair diff) and Tier 3 (whole-lab regeneration) are real,
   fully exercised offline; `tier2.py` remains an honestly-labeled `[design]`
   interface (a real, container-based oracle is genuinely out of scope). As of
-  `CC-LAB-0060`/`FR-LAB-56` (2026-09-22), `tier1.py`'s own public API
+  `CC-LAB-0060`/`FR-LAB-57` (2026-09-22), `tier1.py`'s own public API
   (`build_tier1_case`/`run_tier1_case`/`evaluate_tier1_response`) is no
   longer design-only for every stack: it is run for real, through
   `LiveBootHarness` below, for `php_laravel` (`tests/

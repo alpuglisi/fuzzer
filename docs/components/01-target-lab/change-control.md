@@ -3,7 +3,7 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0060 — Tier-1 conformance-suite live wiring (FR-LAB-56) (2026-09-22)
+### CC-LAB-0060 — Tier-1 conformance-suite live wiring (FR-LAB-57) (2026-09-22)
 - Change: `fuzzlab/labgen/conformance/tier1.py` (`build_tier1_case`/
   `run_tier1_case`/`evaluate_tier1_response`, `Tier1Client`) was, by its own
   module docstring, exercised only against a hand-written fake test double
