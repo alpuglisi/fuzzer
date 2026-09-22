@@ -14,6 +14,28 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- FUZZ (`CC-FUZZ-0024`, `FR-FUZZ-11`): wired M10 grey-box confirmation into the real
+  oracle pipeline — `GreyboxConfirmationStrategy` (constructor-injected
+  `CoverageSource`/`DbFaultSource`, both default `None`, fail-closed no-op without a
+  source or a `send_correlated`-capable sender) consults the already-built pure
+  decision (`greybox_confirms()`/`m10_evidence()`) for sql-injection/xss, threaded
+  through `default_strategies()` → `Oracle` → `run_pipeline` → `run_auto` → new
+  `fuzzlab auto --greybox-coverage-file`/`--greybox-dbfault-file` flags, mirroring
+  the M8 OOB seam. Merged from `claude/trusting-noether-heon0n` (cherry-picked,
+  renumbered — `CC-FUZZ-0020`/`FR-FUZZ-9` there collided with this branch's
+  already-landed D0a/B0-coverage-frontier entries). The live pcov/DB-fault side
+  channel and a correlating oracle probe sender stay on-host last-mile work.
+- FUZZ (`CC-FUZZ-0023`, `FR-FUZZ-10`): built the previously-unbuilt M8 out-of-band
+  (OOB) callback oracle mechanism — `fuzzlab/oracle/oob.py::OobListener` (a
+  loopback-only, default-off local canary tracker) plus
+  `CommandInjectionOobStrategy`, confirming blind command injection when a target
+  executes an injected shell fragment that fetches a unique canary URL but leaves
+  no timing/response signal. Wired through `Oracle(oob=...)`,
+  `run_pipeline`/`run_auto`, and the new `fuzzlab auto --oob` flag (default off,
+  same gating shape as `--browser`/the proxy's `--authorized`). Merged from
+  `claude/trusting-noether-heon0n` (cherry-picked, renumbered — `CC-FUZZ-0019`/
+  `FR-FUZZ-8` there collided with this branch's already-landed C1/M8-wiring entry,
+  an unrelated same-numbered lane about mutation-variant wiring).
 - LAB (`CC-LAB-0062`, Wave A2, build lane A2): verified the Phase-0
   manifest-generator exit criterion, scoped to Layer A per D-open-1 —
   re-ran the parity/cutover coverage gate (`fuzzlab.labgen.cutover_gate
