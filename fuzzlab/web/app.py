@@ -399,7 +399,9 @@ def _active_plugins() -> list[dict]:
 # the order given here — the same "single list, no per-page duplication" pattern the
 # launcher's `_ACTIVITY_GROUPS` above already uses for activities.
 NAV: list[dict[str, str]] = [
-    {"id": "launcher", "label": "Launcher", "href": "/", "icon": "▸",
+    {"id": "overview", "label": "Overview", "href": "/", "icon": "◧",
+     "group": "Workbench"},
+    {"id": "launcher", "label": "Launcher", "href": "/launch", "icon": "▸",
      "group": "Workbench"},
     {"id": "proxy", "label": "Proxy", "href": "/proxy", "icon": "⇄",
      "group": "Workbench"},
@@ -464,6 +466,110 @@ def _launcher_context(cfg: Config, state: LauncherState) -> dict[str, Any]:
     }
 
 
+# --- Overview dashboard (U1): one aggregate read, no per-run joins on load ----
+#
+# The store has no severity column yet (the oracle writes `vuln_class` +
+# `confidence` as its confirmation *mechanism*, e.g. "error-signature" — not a
+# risk level; see `fuzzlab/oracle/oracle.py`). Severity-by-vuln-class below is a
+# UI-only display heuristic (OWASP/CVSS-style convention), never a stored fact,
+# until a real severity field lands on `finding` (flagged for U2/backend).
+_SEVERITY_BY_VULN_CLASS: dict[str, str] = {
+    "sqli": "Critical",
+    "command-injection": "Critical",
+    "ssti": "Critical",
+    "file-inclusion": "High",
+    "xss-reflected": "Medium",
+    "xss-dom": "Medium",
+    "xss-stored": "Medium",
+    "open-redirect": "Low",
+}
+_SEVERITY_ORDER = ("Critical", "High", "Medium", "Low", "Info")
+
+
+def _severity_of(vuln_class: str | None) -> str:
+    return _SEVERITY_BY_VULN_CLASS.get(vuln_class or "", "Info")
+
+
+def _overview_context(cfg: Config) -> dict[str, Any]:
+    """Context for the Overview dashboard (``/``): one aggregate read over the
+    store — counts, pre-aggregated findings-by-severity, and the latest ~10 runs
+    joined with their finding counts (one query, no N+1). Read-only; writes no
+    result tables (FR-UI-11). Empty store or 0 runs -> the onboarding-card state;
+    an unscored store -> em-dashes in the quality/efficiency tiles, never ``0``."""
+    empty: dict[str, Any] = {"has_store": False, "kpi": None, "recent_runs": []}
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return empty
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        run_count = store.conn.execute("SELECT COUNT(*) c FROM run").fetchone()["c"]
+        if run_count == 0:
+            return empty
+        runs_7d = store.conn.execute(
+            "SELECT COUNT(*) c FROM run WHERE started_at >= datetime('now','-7 days')"
+        ).fetchone()["c"]
+        finding_count = store.conn.execute(
+            "SELECT COUNT(*) c FROM finding").fetchone()["c"]
+
+        severity_totals: dict[str, int] = {s: 0 for s in _SEVERITY_ORDER}
+        for row in store.conn.execute(
+                "SELECT vuln_class, COUNT(*) c FROM finding GROUP BY vuln_class"):
+            severity_totals[_severity_of(row["vuln_class"])] += row["c"]
+        severity_bars = [{"severity": s, "count": severity_totals[s]}
+                         for s in _SEVERITY_ORDER if severity_totals[s]]
+
+        recent_runs = [dict(row) for row in store.conn.execute(
+            "SELECT r.id AS id, r.tool AS tool, r.config_hash AS target, "
+            "r.started_at AS started_at, COUNT(f.id) AS findings "
+            "FROM run r LEFT JOIN finding f ON f.run_id = r.id "
+            "GROUP BY r.id ORDER BY r.id DESC LIMIT 10")]
+        newest_run = recent_runs[0] if recent_runs else None
+
+        # Detection quality: latest run the harness actually scored (an "f1" row
+        # in run_metrics means `integration.record_metrics` ran for it).
+        detection_quality = None
+        f1_row = store.conn.execute(
+            "SELECT run_id, value FROM run_metrics WHERE key='f1' "
+            "ORDER BY run_id DESC LIMIT 1").fetchone()
+        if f1_row is not None:
+            mcc_row = store.conn.execute(
+                "SELECT value FROM run_metrics WHERE run_id=? AND key='mcc'",
+                (f1_row["run_id"],)).fetchone()
+            detection_quality = {
+                "run_id": f1_row["run_id"], "f1": round(f1_row["value"], 3),
+                "mcc": round(mcc_row["value"], 3) if mcc_row else None}
+
+        # Efficiency: latest run with a recorded requests-per-finding (automatic
+        # mode only; see `fuzzlab/harness/pipeline.py`).
+        efficiency = None
+        rpf_row = store.conn.execute(
+            "SELECT run_id, value FROM run_metrics "
+            "WHERE key='pipeline_requests_per_finding' AND value IS NOT NULL "
+            "ORDER BY run_id DESC LIMIT 1").fetchone()
+        if rpf_row is not None:
+            req_row = store.conn.execute(
+                "SELECT value FROM run_metrics WHERE run_id=? AND key='pipeline_requests'",
+                (rpf_row["run_id"],)).fetchone()
+            efficiency = {
+                "run_id": rpf_row["run_id"],
+                "requests_per_finding": round(rpf_row["value"], 2),
+                "total_requests": int(req_row["value"]) if req_row else None}
+
+    return {
+        "has_store": True,
+        "recent_runs": recent_runs,
+        "kpi": {
+            "findings_total": finding_count,
+            "severity_bars": severity_bars,
+            "runs_total": run_count,
+            "runs_7d": runs_7d,
+            "newest_run": newest_run,
+            "detection_quality": detection_quality,
+            "efficiency": efficiency,
+        },
+    }
+
+
 def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None,
                proxy: "ProxyController | None" = None):
     """Build the FastAPI app (loopback-only, read-only over the store).
@@ -508,7 +614,13 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     # renders the correct `aria-current="page"` without inferring it from the path. ---
 
     @app.get("/", response_class=HTMLResponse)
-    def index(request: Request):
+    def overview_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/overview.html",
+            {**_shell_context(cfg, "overview"), **_overview_context(cfg)})
+
+    @app.get("/launch", response_class=HTMLResponse)
+    def launcher_page(request: Request):
         return templates.TemplateResponse(
             request, "sections/launcher.html",
             {**_shell_context(cfg, "launcher"), **_launcher_context(cfg, state)})

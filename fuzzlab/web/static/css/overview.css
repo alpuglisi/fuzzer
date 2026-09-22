@@ -1,0 +1,105 @@
+/* fuzzlab control panel — Overview dashboard (U1). Only linked by
+ * templates/sections/overview.html. Relies on shell.css for .card/table/.muted
+ * and tokens.css for color (severity: --crit/--high/--med/--low/--info).
+ */
+
+/* --- empty state (0 runs): one centered onboarding card, not a zero-grid --- */
+.ov-empty {
+  max-width: 32rem;
+  margin: 3rem auto;
+  text-align: center;
+}
+.ov-empty h2 { margin-top: 0; }
+.ov-empty .ov-btn { margin-top: .75rem; }
+
+/* --- KPI row: 5 clickable tiles ------------------------------------------ */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: .75rem;
+  margin-bottom: 1rem;
+}
+.kpi-tile {
+  display: block;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: .85rem 1rem;
+  text-decoration: none;
+  color: var(--text);
+}
+.kpi-tile:hover, .kpi-tile:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+.kpi-tile:focus-visible { outline: 2px solid var(--accent-weak); }
+.kpi-label {
+  font-size: .74rem; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .03em; font-weight: 600;
+}
+.kpi-value { font-size: 1.6rem; font-weight: 700; margin: .15rem 0; }
+.kpi-sub { font-size: .78rem; color: var(--muted); line-height: 1.35; }
+
+@media (max-width: 900px) {
+  .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .kpi-row { grid-template-columns: 1fr; }
+}
+
+/* --- panel grid: A (recent runs) spans; B/C sit beside it on wide screens - */
+.ov-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  grid-template-areas: "a b" "a c";
+  gap: .9rem;
+}
+.ov-panel-a { grid-area: a; }
+.ov-panel-b { grid-area: b; }
+.ov-panel-c { grid-area: c; }
+@media (max-width: 900px) {
+  .ov-grid { grid-template-columns: 1fr; grid-template-areas: "a" "b" "c"; }
+}
+
+/* --- Panel B: findings-by-severity horizontal bar ------------------------ */
+.sev-bar {
+  display: flex;
+  height: 14px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--surface2);
+  margin: .5rem 0 .75rem;
+}
+.sev-seg { height: 100%; }
+.sev-dot {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  margin-right: .35rem; vertical-align: middle;
+}
+.sev-legend { list-style: none; margin: 0; padding: 0; font-size: .85rem; }
+.sev-legend li { margin: .25rem 0; }
+
+.sev-critical, .sev-critical.sev-dot { background: var(--crit); }
+.sev-high, .sev-high.sev-dot { background: var(--high); }
+.sev-medium, .sev-medium.sev-dot { background: var(--med); }
+.sev-low, .sev-low.sev-dot { background: var(--low); }
+.sev-info, .sev-info.sev-dot { background: var(--info); }
+
+.ov-deferred { margin-top: .75rem; font-size: .78rem; }
+
+/* --- Panel C: quick actions ------------------------------------------------ */
+.ov-actions { display: flex; flex-direction: column; gap: .5rem; }
+.ov-btn {
+  display: inline-block; text-align: center; text-decoration: none;
+  font: inherit; padding: .5rem .9rem; border-radius: 8px; border: 1px solid transparent;
+}
+.ov-btn-primary { background: var(--accent); color: #fff; }
+.ov-btn-primary:hover { filter: brightness(1.05); }
+.ov-btn-secondary, .ov-btn-tertiary {
+  background: var(--surface2); color: var(--text); border-color: var(--border);
+}
+.ov-btn-secondary:hover, .ov-btn-tertiary:hover { border-color: var(--accent); }
+
+/* --- recent-runs table: sortable header hint once JS hydrates it --------- */
+#recent-runs-table th[role="button"] { text-decoration: underline dotted; }
+#recent-runs-table th[role="button"]:focus-visible { outline: 2px solid var(--accent-weak); }

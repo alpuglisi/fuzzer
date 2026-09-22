@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block crumb %}Overview{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/overview.css">{% endblock %}
+{% block content %}
+{% if not has_store or kpi is none %}
+<div class="ov-empty card">
+  <h2>No runs yet</h2>
+  <p class="muted">Nothing has been recorded to the store yet. Launch a tool — or run
+    the full auto pipeline — then come back here for findings, run history, and
+    detection quality.</p>
+  <a class="ov-btn ov-btn-primary" href="/launch">&#9654; Launch auto</a>
+</div>
+{% else %}
+
+<div class="kpi-row">
+  <a class="kpi-tile" href="/results">
+    <div class="kpi-label">Findings</div>
+    <div class="kpi-value">{{ kpi.findings_total }}</div>
+    <div class="kpi-sub">
+      {% if kpi.severity_bars %}
+        {% for b in kpi.severity_bars %}<span class="sev-dot sev-{{ b.severity | lower }}"
+          aria-hidden="true"></span>{{ b.count }} {{ b.severity }}{% if not loop.last %}, {% endif %}{% endfor %}
+      {% else %}no findings{% endif %}
+    </div>
+  </a>
+
+  <a class="kpi-tile" href="/results">
+    <div class="kpi-label">Runs</div>
+    <div class="kpi-value">{{ kpi.runs_total }}</div>
+    <div class="kpi-sub">{{ kpi.runs_7d }} in last 7d</div>
+  </a>
+
+  <a class="kpi-tile" href="{{ '/runs/%d' % kpi.newest_run.id if kpi.newest_run else '/results' }}">
+    <div class="kpi-label">Last run</div>
+    {% if kpi.newest_run %}
+    <div class="kpi-value">{{ kpi.newest_run.findings }}
+      finding{{ 's' if kpi.newest_run.findings != 1 else '' }}</div>
+    <div class="kpi-sub">{{ kpi.newest_run.tool }} &rarr; {{ kpi.newest_run.target or '—' }}<br>
+      {{ kpi.newest_run.started_at or '' }}</div>
+    {% else %}
+    <div class="kpi-value">&mdash;</div>
+    {% endif %}
+  </a>
+
+  <a class="kpi-tile"
+     href="{{ '/runs/%d' % kpi.detection_quality.run_id if kpi.detection_quality else '/results' }}">
+    <div class="kpi-label">Detection quality</div>
+    {% if kpi.detection_quality %}
+    <div class="kpi-value">{{ '%.2f' % kpi.detection_quality.f1 }} F1</div>
+    <div class="kpi-sub">MCC
+      {{ '%.2f' % kpi.detection_quality.mcc if kpi.detection_quality.mcc is not none else '—' }}</div>
+    {% else %}
+    <div class="kpi-value">&mdash;</div>
+    <div class="kpi-sub">unscored</div>
+    {% endif %}
+  </a>
+
+  <a class="kpi-tile"
+     href="{{ '/runs/%d' % kpi.efficiency.run_id if kpi.efficiency else '/results' }}">
+    <div class="kpi-label">Efficiency</div>
+    {% if kpi.efficiency %}
+    <div class="kpi-value">{{ kpi.efficiency.requests_per_finding }} req/finding</div>
+    <div class="kpi-sub">{{ kpi.efficiency.total_requests }} requests total</div>
+    {% else %}
+    <div class="kpi-value">&mdash;</div>
+    <div class="kpi-sub">unscored</div>
+    {% endif %}
+  </a>
+</div>
+
+<div class="ov-grid">
+  <div class="card ov-panel-a">
+    <h2>Recent runs</h2>
+    {% if recent_runs %}
+    <table id="recent-runs-table">
+      <thead><tr><th>Run</th><th>Tool</th><th>Target</th><th>Started</th><th>Findings</th></tr></thead>
+      <tbody>
+        {% for r in recent_runs %}
+        <tr>
+          <td><a href="/runs/{{ r.id }}">#{{ r.id }}</a></td>
+          <td>{{ r.tool }}</td>
+          <td><code>{{ r.target or '' }}</code></td>
+          <td>{{ r.started_at or '' }}</td>
+          <td>{{ r.findings }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <script type="application/json" id="recent-runs-data">{{ recent_runs | tojson }}</script>
+    {% else %}
+    <p class="muted">No runs recorded yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="card ov-panel-b">
+    <h2>Findings by severity</h2>
+    {% if kpi.severity_bars %}
+    <div class="sev-bar" role="img"
+         aria-label="Findings by severity: {% for b in kpi.severity_bars %}{{ b.count }} {{ b.severity }}{% if not loop.last %}, {% endif %}{% endfor %}">
+      {% for b in kpi.severity_bars %}
+      <div class="sev-seg sev-{{ b.severity | lower }}"
+           style="width: {{ (b.count / kpi.findings_total * 100) | round(1) }}%"></div>
+      {% endfor %}
+    </div>
+    <ul class="sev-legend">
+      {% for b in kpi.severity_bars %}
+      <li><span class="sev-dot sev-{{ b.severity | lower }}" aria-hidden="true"></span>
+        {{ b.severity }} &mdash; {{ b.count }}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">No findings recorded yet.</p>
+    {% endif %}
+    <p class="muted ov-deferred">Trend sparkline deferred: uPlot is not yet vendored
+      (<code>static/vendor/uplot/</code>).</p>
+  </div>
+
+  <div class="card ov-panel-c">
+    <h2>Quick actions</h2>
+    <div class="ov-actions">
+      <a class="ov-btn ov-btn-primary" href="/launch">&#9654; Launch auto</a>
+      <a class="ov-btn ov-btn-secondary" href="/proxy">Open proxy</a>
+      <a class="ov-btn ov-btn-tertiary" href="/ml">Model registry / Compare</a>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script type="module" src="/static/js/overview.js"></script>{% endblock %}

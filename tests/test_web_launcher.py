@@ -18,7 +18,7 @@ def _client(authorized=False, pipeline=None):
 
 def test_index_offers_both_modes_and_does_not_run():
     client = _client()
-    r = client.get("/")
+    r = client.get("/launch")
     assert r.status_code == 200
     body = r.text.lower()
     assert "automatic" in body and "manual" in body
@@ -46,7 +46,7 @@ def test_automatic_runs_injected_pipeline_when_authorized():
 
     client = _client(authorized=True, pipeline=fake_pipeline)
     # Loading the page must NOT trigger the pipeline.
-    client.get("/")
+    client.get("/launch")
     assert calls == []
     # Only an explicit POST does.
     r = client.post("/api/run/automatic")
