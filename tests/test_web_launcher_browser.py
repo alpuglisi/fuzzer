@@ -77,7 +77,9 @@ def test_launcher_dry_run_and_run_in_browser(tmp_path):
                                  "web_port": port}, environ={})
     server = _Server(create_app(cfg), port)
     server.start()
-    base = f"http://127.0.0.1:{port}/"
+    # Launcher moved off "/" to "/launcher" (U1/CC-UI-0028): "/" now renders the
+    # Overview dashboard.
+    base = f"http://127.0.0.1:{port}/launcher"
     try:
         with sync_playwright() as pw:
             # The pinned Playwright may expect a browser build that isn't installed;

@@ -16,8 +16,10 @@ def _client(authorized=False, pipeline=None):
 
 
 def test_index_offers_both_modes_and_does_not_run():
+    # Launcher moved off "/" to "/launcher" (U1/CC-UI-0028): "/" now renders the
+    # Overview dashboard, and Launcher keeps its own no-auto-run route.
     client = _client()
-    r = client.get("/")
+    r = client.get("/launcher")
     assert r.status_code == 200
     body = r.text.lower()
     assert "automatic" in body and "manual" in body
@@ -45,7 +47,7 @@ def test_automatic_runs_injected_pipeline_when_authorized():
 
     client = _client(authorized=True, pipeline=fake_pipeline)
     # Loading the page must NOT trigger the pipeline.
-    client.get("/")
+    client.get("/launcher")
     assert calls == []
     # Only an explicit POST does.
     r = client.post("/api/run/automatic")

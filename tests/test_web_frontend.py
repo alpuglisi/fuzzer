@@ -9,6 +9,10 @@ routes (`/`, `/proxy`, `/results`, `/ml`, `/diagnostics`) and split
 templates, ES modules, and CSS partials. This module covers the route/no-JS
 layer of the R-09 test strategy: `TestClient` runs no JS, so its body *is* the
 no-JS assertion.
+
+U1 (CC-UI-0028) added the Overview dashboard as the new landing route ("/")
+and moved Launcher to its own route ("/launcher") so the dashboard doesn't
+overload it (R-10) -- routes below and SECTIONS are updated accordingly.
 """
 
 from __future__ import annotations
@@ -24,7 +28,8 @@ from tests._webclient import web_client  # noqa: E402
 # Every section route, its nav id, and one string that must appear only when the
 # section actually rendered (not just the shared shell chrome).
 SECTIONS = [
-    ("/", "launcher", "Activities"),
+    ("/", "overview", "No runs yet"),
+    ("/launcher", "launcher", "Activities"),
     ("/proxy", "proxy", "Proxy workbench"),
     ("/results", "results", "Review runs"),
     ("/ml", "ml", "Machine learning"),
@@ -49,6 +54,7 @@ def test_static_shell_css_is_served():
 
 def test_static_section_css_is_served():
     for path, needle in [
+        ("/static/css/overview.css", ".kpi-row"),
         ("/static/css/launcher.css", ".launch"),
         ("/static/css/proxy.css", "#flow-table"),
         ("/static/css/results.css", "Results section"),
@@ -70,6 +76,7 @@ def test_static_shell_js_is_served():
 def test_static_section_js_modules_are_served():
     for path, needle in [
         ("/static/js/common.js", "export function subscribe"),
+        ("/static/js/overview.js", "initSortableTable"),
         ("/static/js/launcher.js", "initLaunchForms"),
         ("/static/js/proxy.js", "initRepeater"),
     ]:
@@ -128,7 +135,7 @@ def test_section_route_is_deep_linkable_and_marks_active_nav(path, section, need
 def test_sidebar_links_are_real_hrefs_not_hashes():
     body = _client().get("/").text
     assert '<nav class="tabs"' in body
-    for path in ("/", "/proxy", "/results", "/ml", "/diagnostics"):
+    for path in ("/", "/launcher", "/proxy", "/results", "/ml", "/diagnostics"):
         assert f'href="{path}"' in body
     # no hash-based nav left
     assert 'href="/#' not in body
@@ -144,10 +151,10 @@ def test_shell_context_on_run_and_not_found_pages():
     assert 'data-section="results"' in nf.text
 
 
-# --- Launcher section content (unchanged behavior, now on its own route) -------
+# --- Launcher section content (unchanged behavior; moved to "/launcher" by U1) -
 
 def test_launcher_previews_activities_from_the_command_spec():
-    body = _client().get("/").text
+    body = _client().get("/launcher").text
     # activities come from the command-spec registry (Phase 0.1)
     assert "greybox-run" in body and "mutate-run" in body
     # gate pills surface which activities send traffic / need authorization
@@ -155,7 +162,7 @@ def test_launcher_previews_activities_from_the_command_spec():
 
 
 def test_launcher_renders_a_form_per_activity():
-    body = _client().get("/").text
+    body = _client().get("/launcher").text
     # one form per non-subcommand activity (session is subcommand-only → note, no form)
     assert body.count('class="launch-form"') >= 8
     assert 'data-command="auto"' in body
@@ -173,14 +180,14 @@ def test_run_buttons_gated_by_authorization():
     # unauthorized: traffic tools' Run is disabled; read-only tools stay enabled.
     # Matched on the (whitespace-independent) gate title so the layout can evolve.
     gate = 'title="set authorized:true to run traffic tools"'
-    unauth = _client(authorized=False).get("/").text
+    unauth = _client(authorized=False).get("/launcher").text
     assert unauth.count(gate) == 7
-    auth = _client(authorized=True).get("/").text
+    auth = _client(authorized=True).get("/launcher").text
     assert gate not in auth
 
 
 def test_category_picker_rendered_for_auto():
-    body = _client().get("/").text
+    body = _client().get("/launcher").text
     assert 'data-catgroup="categories"' in body
     # populated from the known injection categories
     assert 'class="cat"' in body
@@ -188,13 +195,13 @@ def test_category_picker_rendered_for_auto():
 
 def test_plugins_panel_and_endpoint():
     client = _client()
-    assert "Plugins" in client.get("/").text
+    assert "Plugins" in client.get("/launcher").text
     data = client.get("/api/plugins").json()
     assert "plugins" in data and isinstance(data["plugins"], list)
 
 
 def test_session_is_subcommand_note_not_a_form():
-    body = _client().get("/").text
+    body = _client().get("/launcher").text
     # session has subparsers → rendered as a CLI note, not a launch form
     assert 'data-command="session"' not in body
     assert "fuzzlab session &lt;sub&gt;" in body

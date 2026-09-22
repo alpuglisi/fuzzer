@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}fuzzlab &mdash; Overview{% endblock %}
+{% block crumb %}Overview{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/overview.css">{% endblock %}
+{% block content %}
+<section class="panel" aria-labelledby="overview-h1">
+  <h1 id="overview-h1" class="visually-hidden">Overview</h1>
+
+  {% if total_runs == 0 %}
+  {# R-10 empty state: one centered onboarding card, not a grid of zeros. #}
+  <div class="card ov-empty">
+    <h2>No runs yet</h2>
+    <p class="muted">Launch a tool with <code>--store</code>, or run automatic mode, to see
+      findings, scores, and recent activity here.</p>
+    <a class="btn primary" href="/launcher">Launch auto</a>
+  </div>
+  {% else %}
+
+  <div class="kpi-row" role="list">
+    <a class="kpi-tile" role="listitem" href="/results" data-kpi="findings">
+      <div class="kpi-label">Findings</div>
+      <div class="kpi-value">{{ total_findings }}</div>
+      <div class="kpi-sub">
+        {% for sev in ("critical", "high", "medium", "low", "info") %}
+        {% if severity[sev] %}<span class="sev-chip sev-{{ sev }}">{{ severity[sev] }} {{ sev }}</span>{% endif %}
+        {% endfor %}
+        {% if total_findings == 0 %}<span class="muted">none confirmed</span>{% endif %}
+      </div>
+    </a>
+
+    <a class="kpi-tile" role="listitem" href="/results" data-kpi="runs">
+      <div class="kpi-label">Runs</div>
+      <div class="kpi-value">{{ total_runs }}</div>
+      <div class="kpi-sub">{{ runs_last_7d }} in last 7d</div>
+    </a>
+
+    <a class="kpi-tile" role="listitem"
+       href="{{ '/runs/' ~ last_run.id if last_run else '/results' }}" data-kpi="last-run">
+      <div class="kpi-label">Last run</div>
+      {% if last_run %}
+      <div class="kpi-value kpi-value-sm">
+        <span class="pill status-{{ last_run.status }}">{{ last_run.status }}</span>
+      </div>
+      <div class="kpi-sub">{{ last_run.tool }} &rarr; <code>{{ last_run.target or '' }}</code>
+        <br><span class="muted" data-started="{{ last_run.started_at or '' }}">{{ last_run.started_at or '' }}</span></div>
+      {% else %}
+      <div class="kpi-value">&mdash;</div>
+      <div class="kpi-sub muted">no runs</div>
+      {% endif %}
+    </a>
+
+    <a class="kpi-tile" role="listitem"
+       href="{{ '/runs/' ~ detection_quality.run_id if detection_quality else '/ml' }}"
+       data-kpi="detection-quality">
+      <div class="kpi-label">Detection quality</div>
+      {% if detection_quality %}
+      <div class="kpi-value">{{ "%.2f"|format(detection_quality.f1) }}</div>
+      <div class="kpi-sub">F1
+        {% if detection_quality.mcc is not none %}&middot; MCC {{ "%.2f"|format(detection_quality.mcc) }}
+        {% elif detection_quality.precision is not none and detection_quality.recall is not none %}
+        &middot; P {{ "%.2f"|format(detection_quality.precision) }} / R {{ "%.2f"|format(detection_quality.recall) }}
+        {% endif %}
+      </div>
+      {% else %}
+      <div class="kpi-value">&mdash;</div>
+      <div class="kpi-sub muted">unscored</div>
+      {% endif %}
+    </a>
+
+    <a class="kpi-tile" role="listitem"
+       href="{{ '/runs/' ~ efficiency.run_id if efficiency else '/diagnostics' }}"
+       data-kpi="efficiency">
+      <div class="kpi-label">Efficiency</div>
+      {% if efficiency and efficiency.requests_per_finding is not none %}
+      <div class="kpi-value">{{ efficiency.requests_per_finding }}</div>
+      <div class="kpi-sub">req/finding
+        {% if efficiency.requests is not none %}&middot; {{ efficiency.requests | int }} total{% endif %}</div>
+      {% else %}
+      <div class="kpi-value">&mdash;</div>
+      <div class="kpi-sub muted">no budgeted run yet</div>
+      {% endif %}
+    </a>
+  </div>
+
+  <div class="ov-grid">
+    <div class="card ov-panel-a" aria-labelledby="ov-recent-h2">
+      <h2 id="ov-recent-h2">Recent runs</h2>
+      <table id="ov-recent-runs" data-sortable="1">
+        <caption class="visually-hidden">The 10 newest runs, newest first</caption>
+        <thead><tr>
+          <th scope="col" data-sort="id">run</th>
+          <th scope="col" data-sort="tool">tool</th>
+          <th scope="col" data-sort="target">target</th>
+          <th scope="col" data-sort="started_at">started</th>
+          <th scope="col" data-sort="findings">findings</th>
+          <th scope="col" data-sort="status">status</th>
+        </tr></thead>
+        <tbody>
+          {% for r in recent_runs %}
+          <tr>
+            <td><a href="/runs/{{ r.id }}">#{{ r.id }}</a></td>
+            <td>{{ r.tool }}</td>
+            <td><code>{{ r.target or '' }}</code></td>
+            <td>{{ r.started_at or '' }}</td>
+            <td>{{ r.findings }}</td>
+            <td><span class="pill status-{{ r.status }}">{{ r.status }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card ov-panel-b" aria-labelledby="ov-sev-h2">
+      <h2 id="ov-sev-h2">Findings by severity</h2>
+      {% if total_findings %}
+      <div class="sev-bar" role="img"
+           aria-label="{% for sev in ('critical','high','medium','low','info') %}{% if severity[sev] %}{{ severity[sev] }} {{ sev }}, {% endif %}{% endfor %}">
+        {% for sev in ("critical", "high", "medium", "low", "info") %}
+        {% if severity[sev] %}
+        <div class="sev-seg sev-{{ sev }}" style="width:{{ (severity[sev] / total_findings * 100) | round(2) }}%"
+             title="{{ sev }}: {{ severity[sev] }}"></div>
+        {% endif %}
+        {% endfor %}
+      </div>
+      <ul class="sev-legend">
+        {% for sev in ("critical", "high", "medium", "low", "info") %}
+        <li><span class="sev-dot sev-{{ sev }}"></span>{{ sev }} <b>{{ severity[sev] }}</b></li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted">No findings recorded yet.</p>
+      {% endif %}
+    </div>
+
+    <div class="card ov-panel-c" aria-labelledby="ov-actions-h2">
+      <h2 id="ov-actions-h2">Quick actions</h2>
+      <div class="ov-actions">
+        <a class="btn primary" href="/launcher#launcher-auto">Launch auto</a>
+        <a class="btn" href="/proxy">Open proxy</a>
+        <a class="btn ghost" href="/ml">Model registry</a>
+        <a class="btn ghost" href="/results">Compare runs</a>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="/static/js/overview.js"></script>{% endblock %}

@@ -65,10 +65,11 @@ bugs — the research-platform diagnostics of decision D2.
   runner, Phase 1 the launcher UI — per-tool forms, dry-run preview, live output, the D14
   category picker, and the plugins panel.)*
 - **FR-UI-7** The panel is organized as a **multi-page app with real per-section
-  routes**: **Launcher** (`/`, run controls), **Proxy** (`/proxy`, traffic
-  review/edit/drop/forward/repeat), **Results** (`/results`, runs dashboard),
-  **ML** (`/ml`, classifier/ranker/conformal/anomaly/active-learning/bandit/mutation —
-  kept **separate** from the primary panel), and **Diagnostics** (`/diagnostics`, a
+  routes**: **Overview** (`/`, the landing dashboard), **Launcher** (`/launcher`, run
+  controls), **Proxy** (`/proxy`, traffic review/edit/drop/forward/repeat), **Results**
+  (`/results`, runs dashboard), **ML** (`/ml`,
+  classifier/ranker/conformal/anomaly/active-learning/bandit/mutation — kept
+  **separate** from the primary panel), and **Diagnostics** (`/diagnostics`, a
   TensorBoard-like view for performance review and deep troubleshooting), plus
   `/runs/{id}` (a Results sub-page). Each route is independently deep-linkable, renders
   its full section server-side, and degrades fully without JavaScript (a plain GET on any
@@ -84,7 +85,11 @@ bugs — the research-platform diagnostics of decision D2.
   (`?repeater_tab=`), and raw bytes never appear on the wire. U1–U5 build out each
   section's content on top of this split. **U3 (CC-UI-0030, 2026-09-22)** filled in the
   Proxy route's content: History / Intercept / Repeater re-laid on the shared
-  `<message-editor>` (FR-UI-9) plus resizable panes and a sub-nav.)*
+  `<message-editor>` (FR-UI-9) plus resizable panes and a sub-nav. **Superseded
+  again at U1 (CC-UI-0028, 2026-09-22)**: `/` now renders the new Overview
+  dashboard (FR-UI-10) rather than the Launcher, which moved to its own route,
+  `/launcher`, with unchanged behavior — see FR-UI-10 and NAV in
+  `fuzzlab/web/app.py`.)*
 - **FR-UI-9 (shared message editor)** *(added U3, CC-UI-0030, R-04)* The Proxy
   section's History (read-only detail), Intercept (held-flow edit), and Repeater
   (request edit / response view) byte editors share one component,
@@ -136,6 +141,33 @@ bugs — the research-platform diagnostics of decision D2.
   gave the sidebar real per-section `href`s. The Overview dashboard and the Findings / Proxy
   rebuilds still follow in Wave 1 (U1–U5), per `docs/UI_LAYOUT_REDESIGN.md` and
   `docs/UI_IMPLEMENTATION_PLAN.md`.)*
+- **FR-UI-10** *(added CC-UI-0028, 2026-09-22)* **Overview dashboard** — the landing
+  route (`/`) is a read-only, single-aggregate-endpoint summary of the store, per
+  resolved marker R-10 in `UI_IMPLEMENTATION_PLAN.md`:
+  - a **KPI tile row of 5**, each clickable through to a filtered/detail view:
+    (1) Findings (total + severity-split sub-line), (2) Runs (total + "N in last
+    7d"), (3) Last run (status badge + tool→target + timestamp), (4) Detection
+    quality (latest *scored* run's F1, + MCC or P/R sub-line), (5) Efficiency
+    (`pipeline_requests_per_finding`, + total requests sub-line);
+  - **Panel A — Recent runs**: the ~10 newest runs, newest first;
+  - **Panel B — Findings by severity**: a horizontal segmented bar (severity
+    derived read-only from `finding.vuln_class` via a fixed category→severity map,
+    since the store has no `finding.severity` column — see
+    `fuzzlab/web/results.py::severity_of`/`_SEVERITY_BY_VULN_CLASS`);
+  - **Panel C — Quick actions**: primary Launch auto, secondary Open proxy,
+    tertiary Model registry / Compare runs;
+  - **Empty state** (0 runs): one centered onboarding card ("No runs yet" + a
+    primary Launch-auto action) instead of a grid of zeros;
+  - **Partial-empty state** (a run exists but is unscored/unbudgeted): tiles 4/5
+    show an em-dash, never a bare `0`.
+  Served from one aggregate read (`fuzzlab/web/results.py::overview_summary`) —
+  counts + pre-aggregated severity + the joined recent-runs list in a handful of
+  queries, no heavy per-run join per KPI. Strictly read-only: never creates the
+  store, never writes a result-table row (NFR-UI-read-only). *(Realized: U1,
+  CC-UI-0028 — `sections/overview.html`, `js/overview.js` (a small hand-rolled
+  click-to-sort for the recent-runs table; not yet the shared `DataTable` reserved
+  for U2/U5 by R-03, since `js/datatable.js` did not exist when this lane ran),
+  `css/overview.css`, `app.py::overview_page`/`_overview_context`.)*
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

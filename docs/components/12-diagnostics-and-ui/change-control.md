@@ -81,6 +81,82 @@ Newest first.
   by an integrator per `docs/MULTI_AGENT_ORCHESTRATION.md`; self-assessed
   effective from this lane's own full-suite run — see the lane's handback
   report for the pass/skip counts.
+### CC-UI-0028 — Overview dashboard: new landing route "/", Launcher moved to "/launcher" (lane U1) (2026-09-22)
+- Change: built the Overview dashboard (`FR-UI-10`, resolved marker R-10 in
+  `docs/UI_IMPLEMENTATION_PLAN.md`) as the panel's new landing route:
+  - `fuzzlab/web/results.py`: added `severity_of()` (a fixed, read-only
+    `vuln_class` → severity bucket map — critical/high/medium/low/info — since
+    `finding` has no `severity` column, only `confidence`, which the oracle
+    actually uses for the detection *mechanism*, e.g. "error-signature", not a
+    severity level) and `overview_summary(store, recent_limit=10)`: one
+    aggregate read (total findings, severity breakdown, total runs, runs in the
+    last 7 days, the ~10 newest runs, the latest scored run's detection quality,
+    the latest budgeted run's efficiency).
+  - `fuzzlab/web/app.py`: `GET /` now renders `sections/overview.html` via a new
+    `_overview_context`/`_read_overview` (empty-store-safe, never creates the
+    store); the **Launcher** moved from `/` to a new `GET /launcher` route with
+    otherwise unchanged behavior/context (`_launcher_context` unchanged). `NAV`
+    gained an "Overview" entry (`href="/"`, first in the Workbench group) and the
+    existing "Launcher" entry's `href` changed to `/launcher`.
+  - New files: `fuzzlab/web/templates/sections/overview.html`,
+    `fuzzlab/web/static/css/overview.css`, `fuzzlab/web/static/js/overview.js`
+    (a small hand-rolled click-to-sort for the recent-runs table — progressive
+    enhancement only, the table fully renders server-side without it).
+  - Findings-by-severity is a plain CSS horizontal segmented bar over the
+    existing `--crit/--high/--med/--low/--info` design tokens (`tokens.css`,
+    already present for exactly this purpose); no chart library added (R-10
+    explicitly calls uPlot poor for this shape).
+- Impact (other components / project): the panel's landing URL now serves
+  different content — a person/bookmark/script that opened `/` expecting the
+  Launcher must now use `/launcher` (also true of the Playwright browser-smoke
+  test, updated in this change — see Deliverables). No backend/store schema
+  change (severity is derived, not stored) and no other component's contract
+  changed. `docs/UI_IMPLEMENTATION_PLAN.md`'s R-03-resolved shared `DataTable`
+  (reserved for U2's Findings workbench, reused by U1's recent-runs table and
+  U5's store explorer) **did not exist in this lane's worktree** (`js/
+  datatable.js` absent) — flagged, not guessed at: this lane built its own
+  minimal recent-runs table instead of the shared component, so U2 (which is
+  expected to land `js/datatable.js`) and U5 should reconcile Overview's table
+  onto the shared component once it exists, per the parallel-lane merge
+  protocol in `docs/MULTI_AGENT_ORCHESTRATION.md`.
+- Risk (level; mitigation): low — strictly read-only (never creates the store,
+  never writes a result-table row; verified by a dedicated test asserting row
+  counts are unchanged after repeated `GET /`) and additive (one new route +
+  one relocated route, both GET, both already covered by the existing
+  loopback/control-plane hardening middleware, which wraps every route by
+  construction). The route move is a real behavior change for anyone who had
+  `/` open expecting the Launcher; mitigated by moving it to a clearly-related,
+  discoverable URL (`/launcher`, linked from the sidebar and from Overview's own
+  quick actions) rather than removing it, and by updating every test that
+  depended on `/` == Launcher (see Deliverables) so the suite still pins the
+  Launcher's exact behavior, just at its new address.
+- Deliverables:
+  - [x] `fuzzlab/web/results.py::severity_of`/`overview_summary` — done.
+  - [x] `app.py` routes (`/` → Overview, `/launcher` → Launcher) + NAV update — done.
+  - [x] `sections/overview.html`, `css/overview.css`, `js/overview.js` — done.
+  - [x] New `tests/test_web_overview.py` (14 tests: severity mapping, the
+    aggregate on an empty/seeded/unscored store, recent-runs capping/order, the
+    empty state never creating the store, KPI tiles, partial-empty em-dashes,
+    the severity bar, quick actions, nav active-state, and a no-writes
+    assertion) — done, all passing.
+  - [x] Updated existing suites that assumed `/` == Launcher:
+    `tests/test_web_launcher.py`, `tests/test_web_frontend.py` (SECTIONS table +
+    the Launcher-content block), `tests/test_web_launcher_browser.py` (Playwright
+    smoke's base URL) — done; `tests/test_web_security.py` needed no change (its
+    `/` assertions are status/header-only, not content).
+  - [x] Full repo test suite run, confirmed green (see Effectiveness) — done.
+  - [x] `docs/components/12-diagnostics-and-ui/requirements.md` — `FR-UI-7`
+    updated in place (route map) + new `FR-UI-10` added — done.
+  - [x] `CHANGELOG.md` line — done.
+  - [ ] Reconcile Overview's recent-runs table onto the shared `DataTable` once
+    U2 lands `js/datatable.js` — todo, owned by whichever of U2/U5 lands second
+    (flagged above, not this lane's to build).
+- Effectiveness (assessed 2026-09-22): intent achieved — `/` renders the Overview
+  spec from R-10 (5 tiles, recent-runs table, severity bar, quick actions, both
+  empty states), `/launcher` preserves the pre-existing Launcher behavior
+  unchanged, and the full local test suite passes with no regressions (see the
+  commit's reported pass count). The one open item (shared `DataTable`
+  reconciliation) is explicitly deferred to U2/U5 above, not silently dropped.
 
 ### CC-UI-0027 — Incidental: CLI `--dry-run` flag surfaces in the launcher form (lane D0a) (2026-09-22)
 - Change: lane D0a added a `--dry-run` flag to the `build_parser()` of `crawl`,
