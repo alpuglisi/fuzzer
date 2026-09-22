@@ -154,7 +154,7 @@ tracked in the requirements files, not here.
   `generalizes` verdict — the generalization evidence. The live run against an external
   validation lab is on-host; the manifest-generated second target plugs in as a
   `TargetSpec`.
-- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- two emitters (php_current, python_fastapi) built, Tier-A depth for the second; real app reproduction planned]` (D8, target shape pinned by **D20**/
+- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- three emitters (php_current, python_fastapi, php_laravel) built; Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself pending human sign-off]` (D8, target shape pinned by **D20**/
   `CR-LAB-0001`): the "lab as a compiler" — one manifest plus a safety matrix,
   seed, and env-profile generate the app, labels, docs, and oracle tests, with a
   **binary** verdict derived from `(transform, sink context)` (a partially
@@ -318,7 +318,15 @@ tracked in the requirements files, not here.
   disables `/docs`/`/redoc`/`/openapi.json` in that scaffold (FastAPI serves
   them by default regardless of any debug flag); passes Tier 0/Tier 3 against
   its own sample manifest. A manifest reproducing today's real ~30-page PHP
-  app byte-identically (the actual Phase 0 exit criterion) remains planned.
+  app byte-identically (`LAB_PHASE_0_PLAN.md`'s original, literal wording of
+  the Phase 0 exit criterion) remains planned in that literal sense — no tool
+  in this repo diffs generated source against `puppy-fort-factory/`'s actual
+  file bytes, for either `php_current` or `php_laravel`. **Superseded for the
+  Layer-A/cutover purpose by D-open-1** (`docs/LAB_IMPLEMENTATION_PLAN.md`
+  §4.3.6.7, decided 2026-09-22): the operative exit bar for closing Phase 0 on
+  the 16 `PFF-` real-page cases is functional **parity/coverage**, not a
+  literal source-text diff (impossible in any case once the reproduction
+  target is a Laravel reimplementation rather than raw PHP) — verified below.
   A **second, Laravel/Eloquent/Blade-idiom PHP emitter**
   (`fuzzlab/labgen/emitters/php_laravel/`, `CC-LAB-0029`, lane L-P3.3a) is now
   built as a **foundation only**: a `StackEnv` (`stack_env.py`) carrying a
@@ -398,10 +406,29 @@ tracked in the requirements files, not here.
   `_CANONICAL_CELL_KEY`) with two more keys the coverage question needs:
   `ground_truth_case_by_family` (`search.php`'s one profile spanning
   `PFF-0002`/`PFF-0003`) and `secondary_ground_truth_cases` (`login.php`'s
-  boilerplate `PFF-1008` password condition). Currently green: 13 of 16
-  `PFF-` cases covered, 3 exempted (`PFF-1002` -- `track.php` has no sink at
-  all; `PFF-0007`/`PFF-0008` -- DOM XSS, per `D-open-1`/`D-open-2` above), 0
-  uncovered.
+  boilerplate `PFF-1008` password condition). Currently green: 12 of 16
+  `PFF-` cases covered, 4 exempted (`PFF-1002` -- `track.php` has no sink at
+  all; `PFF-0007`/`PFF-0008` -- DOM XSS, per `D-open-1`/`D-open-2` above;
+  `PFF-0003` -- `search.php`'s reflected-XSS case, added by `CC-LAB-0058`
+  once `/search.php`'s single canonical cell was resolved in favor of the
+  co-located SQLi, `PFF-0002`), 0 uncovered.
+
+  **Layer A closed (`CC-LAB-0062`, Wave A2, 2026-09-22).** `docs/
+  PARALLEL_LANE_BUILD_PLAN.md`'s Wave A2 lane re-ran this gate
+  (`tests/test_labgen_cutover_gate.py`, all 16 tests including the two that
+  exercise it against the live repo state) and confirmed the 12/4/0 split
+  above plus every `L-P3.3c-G1`..`G6` change-control entry
+  (`CC-LAB-0046`..`CC-LAB-0051`) present and marked done — the "Checkable
+  gate condition" `docs/PARALLEL_LANE_BUILD_PLAN.md`'s Wave A2 entry names.
+  This closes Phase 0's exit criterion **as scoped to Layer A by D-open-1**:
+  every server-side real page in `lab/ground-truth/labels.json` now either
+  reproduces through an emitted `php_laravel` cell or carries a reviewed
+  exemption. It does **not** close `FR-LAB-8` itself (the atomic cutover that
+  deletes `puppy-fort-factory/` remains unscheduled, pending human sign-off,
+  `L-P3.3c-CUT`), and it is a functional parity/coverage result, not a
+  literal byte-for-byte source-text diff against `puppy-fort-factory/`'s
+  actual file bytes (no such tool exists in this repo — see the note above,
+  where this section first introduces the generator).
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

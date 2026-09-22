@@ -14,6 +14,20 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB (`CC-LAB-0062`, Wave A2, build lane A2): verified the Phase-0
+  manifest-generator exit criterion, scoped to Layer A per D-open-1 —
+  re-ran the parity/cutover coverage gate (`fuzzlab.labgen.cutover_gate
+  .assert_cutover_coverage()`, `tests/test_labgen_cutover_gate.py`, 16/16
+  passing) against the live repo, confirming all six `L-P3.3c-G1`..`G6`
+  page groups done and a clean 12 covered / 4 exempted / 0 uncovered split
+  over the 16 `PFF-` real-page cases. Closes Phase 0's exit criterion for
+  Layer A in `docs/DECISIONS_AND_ROADMAP.md` and `docs/ARCHITECTURE.md`;
+  corrected stale 13/3 counts in `docs/components/01-target-lab
+  /requirements.md` (`FR-LAB-8`/`FR-LAB-51`) to the current 12/4/0 split.
+  No code changed; `L-P3.3c-CUT` (deleting `puppy-fort-factory/`) remains
+  unscheduled pending human sign-off. Documented that this is a functional
+  parity/coverage proof, not a literal byte-for-byte source-text diff — no
+  such tool exists in this repo for either `php_current` or `php_laravel`.
 - UI (`CC-UI-0032`, `FR-UI-14`, build lane U5): built out the **Diagnostics tab**
   (cross-run trend charts, intra-run metric series with server-side LTTB
   downsampling + client-side EMA smoothing, candidate-score/bandit/model-registry

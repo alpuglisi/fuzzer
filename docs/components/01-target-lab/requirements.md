@@ -36,11 +36,18 @@ and measured. Authorized, lab-only.
 - **FR-LAB-8** (Lab track) Migrate the existing hand-built Puppy Fort Factory
   app's content into the generator (Phase 3) rather than keep it as a
   permanent separate fixture. (D20) **Status (2026-09-22, `FR-LAB-51`/
-  `CC-LAB-0053`): still open, not satisfied.** The migration itself (server-side
-  pages, `FR-LAB-44`..`50`) and the parity/cutover coverage gate that verifies it
-  (`FR-LAB-51`) are both done, and the gate reports 13 of 16 `PFF-` cases
-  covered by an emitted `php_laravel` cell with the remaining 3 exempted
-  (`lab/ground-truth/migration-exemptions.yaml`). This requirement is
+  `CC-LAB-0053`, reconfirmed by `CC-LAB-0062`): still open, not satisfied.**
+  The migration itself (server-side pages, `FR-LAB-44`..`50`) and the
+  parity/cutover coverage gate that verifies it (`FR-LAB-51`) are both done,
+  and the gate reports **12 of 16** `PFF-` cases covered by an emitted
+  `php_laravel` cell with the remaining **4 exempted**
+  (`lab/ground-truth/migration-exemptions.yaml`; `CC-LAB-0058` moved
+  `PFF-0003` from covered to exempted after `PFF-0002` was chosen as
+  `/search.php`'s one canonical cell) and 0 uncovered — this is Layer A
+  (the 16 real-page `PFF-` cases) fully closed per D-open-1's scope
+  resolution (`docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.7), not the whole
+  ~30-page app in the literal, byte-for-byte sense `LAB_PHASE_0_PLAN.md`'s
+  original exit-criterion wording used. This requirement itself is
   satisfied only once `L-P3.3c-CUT` actually retires the fixture (deletes
   `puppy-fort-factory/`, re-points `lab/compose.yaml`/`deploy.sh`/
   `filtermodel.py`'s WAF-rules path) — deliberately not scheduled yet, pending
@@ -1197,11 +1204,17 @@ lane) can submit a payload as
      entry is a diff a reviewer sees. `load_exemptions()` raises on a malformed or
      duplicate entry rather than silently treating the register as empty. Today's register
      lists `PFF-1002` (`track.php` performs no database query at all — no sink for any op
-     the safety matrix models to apply to, per plan §4.3.6.6's own finding) and
+     the safety matrix models to apply to, per plan §4.3.6.6's own finding),
      `PFF-0007`/`PFF-0008` (DOM XSS, client-rendered, never reaches the server — exempted
      per the D-open-1/D-open-2 decisions, plan §4.3.6.7, both decided 2026-09-22: Layer B
      reproduction is not required for the cutover, and DOM XSS/`L-P3.3c-DOM` is out of the
-     cutover's "full coverage" bar, deferred backlog instead).
+     cutover's "full coverage" bar, deferred backlog instead), and (added by `CC-LAB-0058`)
+     `PFF-0003` (`search.php`'s reflected-XSS case — real, but `/search.php`'s single
+     `php_laravel` page profile can render only one canonical cell at that real URL, and
+     `PFF-0002`, the co-located LIKE-clause SQLi, was chosen canonical; `PFF-0003`'s shape
+     remains authored/tested as one of `FR-LAB-49`'s illustrative-URL cells). Status
+     (`CC-LAB-0062`, 2026-09-22): live gate result is 12 covered / 4 exempted / 0
+     uncovered — Layer A closed.
   4. **Deliberately its own module**, `fuzzlab.labgen.cutover_gate`, not an addition to
      `fuzzlab.labgen.regression_gate`: that gate diffs two already-loaded `GroundTruth`
      snapshots (schema-shaped, manifest-independent by design); this one walks manifest

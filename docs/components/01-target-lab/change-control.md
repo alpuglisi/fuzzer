@@ -3,6 +3,116 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0062 — Wave A2: byte-identical/parity manifest reproduction verified, Phase 0 exit criterion closed for Layer A (2026-09-22)
+- Change: pure verification, no code/schema/manifest change. Dispatched as
+  `docs/PARALLEL_LANE_BUILD_PLAN.md`'s Wave A2 lane (the "byte-identical
+  full-manifest reproduction" capstone), gated on `CC-LAB-0059`'s (Wave A0)
+  confirmation that Layer A is closed with no `G7..Gn` lanes needed.
+  1. **Re-ran the parity/cutover coverage gate against the live repo.**
+     `fuzzlab.labgen.cutover_gate.assert_cutover_coverage()`/
+     `diff_cutover_coverage()` (`FR-LAB-51`, `CC-LAB-0053`) is the "manifest
+     diff tool" the lane's own "Checkable gate condition" names.
+     `tests/test_labgen_cutover_gate.py` (16 tests, including
+     `test_every_real_pff_case_is_covered_or_exempted` and
+     `test_covered_and_exempted_partition_every_labels_json_case`, both of
+     which run the gate against the actual `lab/ground-truth/labels.json` +
+     `lab/ground-truth/migration-exemptions.yaml` + every real
+     `lab/manifests/*.yaml`, not a synthetic fixture) — 16/16 passed. Live
+     result: **12 covered / 4 exempted / 0 uncovered** across the 16 `PFF-`
+     real-page cases, matching `CC-LAB-0058`'s/`CC-LAB-0059`'s own recorded
+     split exactly (unchanged since Wave A0's reconciliation — no new page
+     or case since `CC-LAB-0059`).
+  2. **Confirmed all six `L-P3.3c-G1`..`G6` change-control entries
+     (`CC-LAB-0046` through `CC-LAB-0051`) are present and every one of
+     their own deliverables checklists shows `[x] ... done`** — the other
+     half of the lane's "Checkable gate condition."
+  3. **Scope note (per this lane's own dispatch, not re-litigated here):**
+     `docs/LAB_PHASE_0_PLAN.md`'s original exit-criterion wording ("emits
+     source and labels byte-identical to today's hand-authored
+     `puppy-fort-factory/` + `lab/ground-truth/*`") predates the Layer A/B
+     split and is superseded, for the cutover-readiness question, by
+     **D-open-1** (`docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.7, decided
+     2026-09-22): the operative bar is Layer-A (server-side, 16 `PFF-`
+     cases) functional parity/coverage, not literal Layer-B reproduction.
+     Grepped the repo (`fuzzlab/`, `tests/`) for any tool that diffs
+     generated output against `puppy-fort-factory/`'s actual file bytes:
+     **none exists**, for either `php_current` (whose own real-page test,
+     `tests/test_labgen_php_current_real_pages.py`, explicitly scopes
+     itself to 4 of the 12 covered pages and states in its own docstring
+     that "live regeneration-and-diff against the running container is
+     separate, on-host work") or `php_laravel` (a Laravel reimplementation,
+     for which a literal source-text byte match against the old raw-PHP
+     files is not a meaningful target in the first place). This is reported
+     plainly, not papered over: **the literal, whole-repo byte-diff gate
+     `LAB_PHASE_0_PLAN.md` originally described was never built**, and
+     nothing in this verification pass builds it. What passed, and is what
+     the Wave A2 lane spec itself defines as the closing condition, is the
+     parity/coverage gate above.
+  4. **Doc corrections (stale counts found while verifying).**
+     `docs/components/01-target-lab/requirements.md`'s `FR-LAB-8` status
+     note and `FR-LAB-51`'s own body still said "13 of 16 covered, 3
+     exempted" — the pre-`CC-LAB-0058` count, never updated when `CC-LAB-
+     0058` moved `PFF-0003` from covered to exempted (`CC-LAB-0059`'s own
+     deliverables explicitly left `requirements.md` untouched, "not this
+     lane's" call at the time). Corrected in place to 12/4/0, with
+     `PFF-0003` added to `FR-LAB-51`'s exemption list. Not a code defect
+     (no behavior was ever wrong — only the living-doc prose lagged the
+     gate's own already-correct live result), so no `docs/bugs/BUG-NNNN`
+     entry: this is ordinary "keep the specs current" bookkeeping
+     (`CLAUDE.md` checklist item 6), not the bug protocol.
+  5. **Phase-0 exit criterion closed for Layer A.** Updated
+     `docs/DECISIONS_AND_ROADMAP.md` (Lab track section) and
+     `docs/ARCHITECTURE.md` (Manifest-driven generator entry, both its
+     bracket build-status tag and its prose) to record this closure,
+     explicitly scoped to Layer A per D-open-1, and explicitly distinct
+     from `FR-LAB-8`/`L-P3.3c-CUT` (the atomic cutover itself), which
+     remains unscheduled, pending human sign-off, and untouched by this
+     entry.
+- Impact (other components / project): none outside LAB — no code, schema,
+  manifest, or ground-truth file changed; this closes a project-level
+  milestone (Phase 0's exit criterion, Layer-A scope) in the docs that track
+  it, and corrects two stale counts in a living spec. No other component's
+  interfaces or contracts changed.
+- Risk (level; mitigation or accepted-risk justification): none — read-only
+  verification plus documentation edits; no runtime or generated-file
+  behavior changed. The one substantive judgment call (treating the
+  parity/coverage gate, not a literal byte-diff, as satisfying "byte-
+  identical" for closure purposes) is not this entry's own call to make —
+  it is D-open-1's, already decided and cited throughout; this entry only
+  reports the verification against that already-resolved scope, and states
+  plainly, per §3 above, exactly what was and was not built.
+- Deliverables:
+  - [x] Re-ran `tests/test_labgen_cutover_gate.py` against the live repo —
+    16/16 passed, 12/4/0 split confirmed — done.
+  - [x] Confirmed `CC-LAB-0046`..`CC-LAB-0051` (G1–G6) present and done —
+    done.
+  - [x] `docs/DECISIONS_AND_ROADMAP.md` — Layer-A closure note added — done.
+  - [x] `docs/ARCHITECTURE.md` — build-status tag + prose updated — done.
+  - [x] `docs/components/01-target-lab/requirements.md` — `FR-LAB-8`/
+    `FR-LAB-51` stale 13/3 counts corrected to 12/4/0, `PFF-0003` added to
+    `FR-LAB-51`'s exemption list — done.
+  - [x] `CHANGELOG.md` — done.
+  - [x] This change-control entry — done.
+  - [x] Full suite (`pytest -q -m "not slow"`): 1683 passed, 8 skipped, 15
+    deselected — done, green, zero new failures (no code touched).
+  - [ ] Not this lane: `L-P3.3c-CUT` itself (deletes `puppy-fort-factory/`,
+    re-points deploy config) — remains blocked on human sign-off, per plan
+    §4.3.6.5.
+  - [ ] Not this lane: building the literal whole-repo byte-diff tool
+    `LAB_PHASE_0_PLAN.md`'s original wording described (§3 above) — real
+    future work if that literal claim is ever wanted, not something this
+    lane's own checkable gate condition required.
+- Effectiveness (assessed 2026-09-22): met, for the lane's own defined
+  closing condition — the parity/cutover coverage gate is green (12/4/0)
+  against the live repo, all six `G1`..`G6` entries are done, and the
+  project-level docs (`DECISIONS_AND_ROADMAP.md`, `ARCHITECTURE.md`,
+  `requirements.md`) now reflect that Layer A is closed while `FR-LAB-8`
+  itself is not. The literal, original "byte-identical to
+  `puppy-fort-factory/`'s actual file bytes" reading of the Phase 0 exit
+  criterion is **not** met and no tool exists to check it — recorded
+  honestly above rather than silently substituted, per this lane's own
+  dispatch instructions.
+
 ### CC-LAB-0061 — Tier 2 conformance-suite live wiring (lane T2, extends FR-LAB-52) (2026-09-22)
 - Change: `fuzzlab/labgen/conformance/tier2.py` was `"[design -- not exercised
   by this task's own test suite]"` (no working confirmation logic, only the
