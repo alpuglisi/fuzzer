@@ -3,6 +3,168 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0024 — Wire M10 grey-box confirmation into the oracle pipeline (2026-09-22)
+- Change: built the seam layer for the M10 grey-box mechanism whose pure decision
+  logic (`fuzzlab/greybox/confirm.py::greybox_confirms()`/`m10_evidence()`) and
+  source protocols (`fuzzlab/greybox/coverage.py::CoverageSource`,
+  `fuzzlab/greybox/dbfault.py::DbFaultSource`, plus their `InMemory*` fakes and live
+  `File*` readers) were already built and unit-tested in an earlier Phase 3 lane.
+  Added `GreyboxConfirmationStrategy` to `fuzzlab/oracle/strategies.py`: mechanism
+  `grey-box-coverage`, `applies()` scoped to `category in ("sql-injection", "xss")`
+  (a cross-cutting secondary layer, same pattern as M8 alongside M1 for
+  command-injection — not one class). It takes an optional `CoverageSource` and an
+  optional `DbFaultSource` by constructor injection (both default `None`) and
+  no-ops (`confirm()` returns `None`, no probe sent) when neither is given — same
+  seam shape as the M6 `BrowserExecutor`/M8 `OobListener`. When at least one source
+  is given, it further requires the `sender` to expose `send_correlated(url, param,
+  value, *, method, location) -> (Probe, request_id)` (the contract already
+  established for the live grey-box run driver, `fuzzlab/greybox/run.py`'s
+  `RequestsCorrelatingSender`) so its one probe can be matched back to the
+  coverage/DB-fault side channel by a fresh `X-Fzl-Cov`-style id; without a
+  `send_correlated`-capable sender it also no-ops (fail-closed, never a guess).
+  Wired into `default_strategies(coverage=None, dbfault=None)`,
+  `Oracle(coverage=None, dbfault=None)` (`fuzzlab/oracle/oracle.py`),
+  `run_pipeline(coverage=None, dbfault=None)` (`fuzzlab/harness/pipeline.py`), and
+  `run_auto(coverage=None, dbfault=None)` (`fuzzlab/harness/auto.py`); `fuzzlab
+  auto` gained `--greybox-coverage-file DIR`/`--greybox-dbfault-file DIR` (default
+  off, same shape as `--oob`), which construct `FileCoverageSource`/
+  `FileDbFaultSource` against that directory only when passed.
+- **Provenance note**: this lane was originally built on the diverged branch
+  `claude/trusting-noether-heon0n` as `CC-FUZZ-0020`/`FR-FUZZ-9` (its own local
+  numbering), independently of this branch's Wave 1a–3 dispatch. Cherry-picked and
+  renumbered on merge into this branch — `CC-FUZZ-0020` and `FR-FUZZ-9` here
+  already belonged to this branch's own D0a (`--dry-run` on `fuzz`/`auto`) and
+  B0's coverage-frontier `metric_series` emitter, an unrelated same-numbered
+  collision from independent, non-communicating concurrent work (see
+  `docs/PREVENTIVE_ACTIONS.md` PA-0031 — pre-assigned numbers only prevent
+  collisions *within* one dispatch; they cannot prevent collisions against a
+  wholly separate branch neither dispatch knew existed). No functional content
+  changed from the original commit; only IDs and cross-references were
+  renumbered (`CC-FUZZ-0020`→`0024`, `FR-FUZZ-9`→`11`) and this note added.
+- Impact (other components / project): FUZZ only — additive. `Oracle.__init__` and
+  `default_strategies()`/`run_pipeline()`/`run_auto()` gained optional
+  `coverage=None`/`dbfault=None` keywords; every existing caller that omits them is
+  unaffected (no behavior change, same as `oob=None`/`browser=None`). Sql-injection
+  and xss candidates that the black-box strategies leave unconfirmed can now be
+  confirmed via covered-sink (+DB-fault for sqli) evidence, *once* both an
+  instrumented lab's coverage/DB-fault side channel and a correlating oracle probe
+  sender exist — neither exists yet in this repo, so in a live `fuzzlab auto` run
+  today the new flags construct real `FileCoverageSource`/`FileDbFaultSource`
+  readers but the strategy still no-ops (the shipped `RequestsProbeSender`/
+  `SeamProbeSender` do not implement `send_correlated`). That live correlating
+  sender and the on-host pcov/DB-fault shim remain out of scope here (on-host
+  last-mile work, `docs/ON_HOST_TASKS.md`) — this change is deliberately scoped to
+  the offline-buildable wiring layer only, not the live plumbing.
+- Risk (level; mitigation): low — pure additive wiring with every new keyword
+  defaulting to `None`/off, so no existing caller's behavior changes (verified by
+  the full fast suite staying green). The one new behavior (sending a probe) is
+  gated behind *both* an injected source and a `send_correlated`-capable sender, so
+  it cannot fire against any sender or run configuration that exists in this repo
+  today. Mitigated further by: (1) fail-closed by construction — `confirm()`
+  returns `None` on either gate missing or when `greybox_confirms()` itself returns
+  `False`, never a guess; (2) `applies()` scoped tightly to the two categories
+  `greybox_confirms()` actually has a rule for, so it never masquerades as a
+  confirmer for classes it cannot judge; (3) tests on the real strategy against
+  real `InMemoryCoverageSource`/`InMemoryDbFaultSource` fakes (not mocks of this
+  strategy's own code, per PA-0005), including the full `Oracle.confirm()` pipeline
+  end to end.
+- Deliverables:
+  - [x] `GreyboxConfirmationStrategy` (M10, categories `sql-injection`/`xss`,
+    constructor-injected `CoverageSource`/`DbFaultSource`, fail-closed no-op
+    without a source or a correlating sender) — `fuzzlab/oracle/strategies.py` —
+    done.
+  - [x] Wired into `default_strategies()`, `Oracle`, `run_pipeline()`, `run_auto()`,
+    and `fuzzlab auto --greybox-coverage-file`/`--greybox-dbfault-file` — done.
+  - [x] Tests with real `InMemoryCoverageSource`/`InMemoryDbFaultSource` fakes (not
+    mocks of our own code): `tests/test_oracle_greybox.py` (12 tests) — done,
+    re-run clean against this branch's tree (22/22 with `test_oracle_oob.py`
+    combined) at merge time.
+  - [x] `requirements.md` `FR-FUZZ-11` added; `docs/ARCHITECTURE.md` Oracle status
+    note updated — done.
+  - [x] Full suite green on this branch's merged tree — done (see merge commit).
+  - [ ] Live correlating oracle probe sender (a `send_correlated`-capable
+    `RequestsProbeSender`/`SeamProbeSender` variant attaching a real `X-Fzl-Cov`
+    header) and the on-host pcov/DB-fault shim behind `FileCoverageSource`/
+    `FileDbFaultSource` — on-host last-mile, tracked in `docs/ON_HOST_TASKS.md`,
+    not started here.
+- Effectiveness (assessed 2026-09-22): effective for the wiring layer —
+  `tests/test_oracle_greybox.py` proves the strategy confirms sqli only with both
+  sink-covered and db-fault evidence, confirms xss with sink-covered evidence
+  alone, no-ops without a source, no-ops without a `send_correlated`-capable
+  sender, is registered in `default_strategies()`, and integrates through the full
+  `Oracle.confirm()` pipeline. Live-target effectiveness is unverified and
+  unverifiable in this sandbox — it depends on on-host infra this change does not
+  build (tracked above, not a regression this lane introduced).
+
+### CC-FUZZ-0023 — Build M8 out-of-band (OOB) callback mechanism (2026-09-22)
+- Change: implemented the previously-unbuilt M8 mechanism from
+  `docs/architecture/oracle-confirmation.md` — out-of-band callback confirmation for
+  blind injection classes with no direct response difference. Added
+  `fuzzlab/oracle/oob.py::OobListener`: a loopback-only (`127.0.0.1`/`localhost`
+  only — raises `ValueError` on any other host), in-memory, per-run HTTP callback
+  tracker (`register()` mints an unguessable token, `callback_url()` gives the URL to
+  embed in a payload, `wait_for()` polls for a hit); it binds no socket until
+  `start()` is called (default-off, mirroring the M6 `BrowserExecutor`/proxy/desync
+  dual-use gating pattern in this project — not a general-purpose, publicly reachable
+  collaborator-style service). Added `CommandInjectionOobStrategy` (mechanism
+  `oob-callback`, category `command-injection`) to `fuzzlab/oracle/strategies.py`:
+  embeds a fresh canary URL in `curl`/`wget` shell-fetch payloads and confirms only if
+  that exact token is later requested; it takes the listener by injection and no-ops
+  (returns `None`, no probe sent) when none is given, so it never reaches for a real
+  listener on its own. Wired into `default_strategies(oob=...)`, `Oracle(oob=...)`
+  (`fuzzlab/oracle/oracle.py`), `run_pipeline(oob=...)`
+  (`fuzzlab/harness/pipeline.py`), and `run_auto(oob=...)`
+  (`fuzzlab/harness/auto.py`); `fuzzlab auto` gained `--oob` (default off, same shape
+  as `--browser`), which constructs and starts the listener only when passed and
+  tears it down in a `finally` block after the run.
+- **Provenance note**: this lane was originally built on the diverged branch
+  `claude/trusting-noether-heon0n` as `CC-FUZZ-0019`/`FR-FUZZ-8` (its own local
+  numbering), independently of this branch's Wave 1a–3 dispatch. Cherry-picked and
+  renumbered on merge — `CC-FUZZ-0019` and `FR-FUZZ-8` here already belonged to
+  this branch's own C1/M8-wiring lane (an unrelated, same-numbered lane about
+  wiring mutation-engine *variants* into the attempt path — a task-numbering
+  coincidence with oracle mechanism "M8", not the same M8). No functional content
+  changed from the original commit; only IDs and cross-references were renumbered
+  (`CC-FUZZ-0019`→`0023`, `FR-FUZZ-8`→`10`) and this note added.
+- Impact (other components / project): FUZZ only — additive. `Oracle.__init__` and
+  `default_strategies()`/`run_pipeline()`/`run_auto()` gained an optional `oob=None`
+  keyword; every existing caller that omits it is unaffected (no behavior change,
+  same as `browser=None`). Blind command injection (Tier 3,
+  `docs/architecture/oracle-confirmation.md`) now has a working M8 confirmer
+  alongside the existing M1 timing one — `applies()` scopes both to the
+  `command-injection` category, so the oracle tries timing first, OOB second, and a
+  target that suppresses timing signal but still executes the shell fragment (fetches
+  the canary) is now confirmable. No schema change (findings already carry an
+  arbitrary `mechanism` string). No traffic sent unless `--oob`/`--authorized` are
+  both given, and the listener never leaves loopback.
+- Risk (level; mitigation): low-medium — a new local network listener is more
+  sensitive than a pure library change. Mitigated by: (1) the loopback-only guard in
+  `OobListener.__init__` (raises before binding on any non-loopback host); (2)
+  default-off at every layer (constructor argument defaults to `None`; CLI flag
+  defaults to `False`); (3) no DNS component, no external reachability, no
+  persistence beyond the process — it cannot function as a general-purpose OOB
+  interaction/collaborator service; (4) real tests exercising the actual socket (not
+  a mock) confirm it only ever records a hit for the exact token requested and never
+  cross-wires tokens; (5) fail-closed by construction — `confirm()` returns `None` on
+  timeout or when no listener is injected, never a guess.
+- Deliverables:
+  - [x] `OobListener` (loopback-only, default-off, real HTTP listener + token
+    register/callback_url/wait_for) — `fuzzlab/oracle/oob.py` — done.
+  - [x] `CommandInjectionOobStrategy` (M8, category `command-injection`) — done.
+  - [x] Wired into `default_strategies()`, `Oracle`, `run_pipeline()`, `run_auto()`,
+    and `fuzzlab auto --oob` — done.
+  - [x] Tests on the real listener and the real strategy (not mocks of our own code):
+    `tests/test_oracle_oob.py` (10 tests) — done.
+  - [x] `requirements.md` `FR-FUZZ-10` added; `docs/ARCHITECTURE.md` Oracle status
+    note updated — done.
+  - [x] Full suite green on this branch's merged tree — done (see merge commit).
+- Effectiveness (assessed 2026-09-22): effective — `tests/test_oracle_oob.py` proves
+  the listener records a real hit end to end (real socket, real HTTP request via
+  `urllib`), times out cleanly on a benign/secure target, does not cross-wire two
+  concurrent tokens, and that `Oracle.confirm()` reaches a `mechanism="oob-callback"`
+  verdict through the full pipeline wiring (not the strategy in isolation). Full
+  fast suite on this branch's merged tree: see the merge commit for the exact count.
+
 ### CC-FUZZ-0022 — `--dry-run` CLI flag on `greybox-run` (lane D0b) (2026-09-22)
 - Change: `fuzzlab/greybox/greybox_cli.py::build_parser()` gained `--dry-run` (via
   the shared `fuzzlab/cli_dryrun.add_dry_run_flag()`), and `main()` checks
