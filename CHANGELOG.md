@@ -14,6 +14,15 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Governance: codified this session's multi-agent orchestration policy as a canonical doc,
+  `docs/MULTI_AGENT_ORCHESTRATION.md` (parallelism/idle-lane policy, independent
+  verification discipline, pre-assigned bookkeeping numbers to avoid concurrent-lane ID
+  collisions, delegation mechanism-fidelity requirement, and when to flag risk vs. proceed
+  autonomously), with a summary + pointer added to `CLAUDE.md` and the concrete
+  numbering rule added as `PA-0031` in `docs/PREVENTIVE_ACTIONS.md` — so a policy that had
+  only existed as this session's own working practice (and a one-off explainer file sent
+  to the user) survives past this session and is enforced/read the same way every other
+  project rule is.
 - Planning: revised `docs/VULN_CORPUS_EXPANSION_PLAN.md` via a 3-cycle
   review→research→revise pass — added a commonality×exploitability scoring
   rubric to merge Phase 1's two research angles into one ranked list, concrete

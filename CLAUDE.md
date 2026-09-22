@@ -108,6 +108,22 @@ ERROR_LOG line — that is the exact corner that has been cut before.
   are project-level: record such changes in `CHANGELOG.md`. Component change-control is for
   the 13 architecture components only.
 
+## Multi-agent / multi-lane orchestration (when working via concurrent AI agents)
+
+If you are an orchestrating session dispatching concurrent build lanes/sub-agents against
+this repo: read `docs/MULTI_AGENT_ORCHESTRATION.md` before dispatching anything. In brief —
+run independent lanes in parallel and never let an eligible one sit idle; always
+independently verify a lane's work yourself before merging (re-run tests, read the diff,
+check bookkeeping — never trust a self-report alone); restrict to offline-buildable work
+and flag (never silently build or skip) anything carrying genuine cross-component/
+downstream risk or that you cannot actually verify in the current environment;
+**pre-assign each concurrent lane its own bookkeeping numbers** before dispatch rather than
+"claim the next free one" (`PA-0031`) — this is the single biggest source of avoidable
+merge friction across concurrent lanes; and when your own instructions to a sub-agent
+specify *how* a task must be done (not just what it must produce), require that sub-agent
+to confirm which mechanism it actually used, and to stop and flag rather than silently
+substitute if the specified one is unavailable.
+
 ## Canonical policy docs (the detail behind this summary)
 
 - `docs/components/README.md` — change-control policy + the CHANGELOG relationship + entry
@@ -117,6 +133,9 @@ ERROR_LOG line — that is the exact corner that has been cut before.
 - `CHANGELOG.md` / `ERROR_LOG.md` — their own headers restate their format.
 - `docs/DECISIONS_AND_ROADMAP.md` — settled decisions (D-numbers) and the phased plan.
 - `docs/ON_HOST_RUNBOOK.md` — how to run the on-host (lab) activities.
+- `docs/MULTI_AGENT_ORCHESTRATION.md` — multi-lane/multi-agent orchestration policy:
+  parallelism, independent verification, pre-assigned bookkeeping numbers, delegation
+  mechanism fidelity, and when to flag risk instead of proceeding autonomously.
 
 If this summary and a canonical doc ever disagree, the canonical doc wins — and fix this
 file to match.

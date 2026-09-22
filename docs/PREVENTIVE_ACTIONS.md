@@ -265,3 +265,15 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   PA-0026's "enumerate every precondition, not only the one that motivated the
   change" discipline from allowlist adapters to live HTTP+ORM conformance harnesses.
   (from BUG-0028)
+- **PA-0031** — Before dispatching a wave of concurrently-running agent lanes that will
+  each add sequential bookkeeping IDs (`CC-<CODE>-NNNN`, `FR-<CODE>-N`, or a
+  `BUG-NNNN`/`PA-NNNN` pair), pre-assign each lane its own reserved, non-overlapping
+  number(s) in its dispatch prompt rather than instructing it to "claim the next free
+  one." Branching from the same trunk tip, concurrent lanes computing "next free"
+  independently almost always compute the *same* number, and every resulting collision
+  costs a manual renumber-and-reconcile pass across `CHANGELOG.md` and the affected
+  component's `change-control.md`/`requirements.md`. This is a process rule for the
+  orchestrating session, not a fix for a code defect — see
+  `docs/MULTI_AGENT_ORCHESTRATION.md` for the full rationale and the rejected
+  alternatives (fragment files, batched reconciliation, fewer/larger lanes, a merge-queue
+  bot).
