@@ -185,6 +185,28 @@ class PostParamSource(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class DomUrlSource(TemplateModule):
+    """The (non-)source for a client-only DOM-XSS cell (L-P3.3c-DOM,
+    ``reviews.php``/``feedback.php``): no PHP variable is extracted at all,
+    because the tainted value (a URL fragment or query-string parameter)
+    never reaches the server -- it is read and written entirely by the
+    sink's own embedded ``<script>`` block. Publishes ``value_expr = 'null'``
+    (a PHP placeholder ``render_only``'s ``return view(...)`` needs but
+    which the Blade view never meaningfully reads) purely so this module
+    satisfies every other source's context contract."""
+
+    def __init__(self) -> None:
+        super().__init__("dom_url_source", "source", _SOURCE_ENV, "dom_url_source.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = "null"
+        new_ctx.setdefault("bound", False)
+        new_ctx.setdefault("dom_write_prop", "innerHTML")
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 class ReadStoredFieldSource(TemplateModule):
     """A source that is **not** a request parameter: an already-stored value
     read back through Eloquent (a model attribute written by an earlier
@@ -440,6 +462,24 @@ class RuntimeFieldAllowlistTransform(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class DomTextContentTransform(TemplateModule):
+    """The ``dom_text_content`` op (L-P3.3c-DOM): the client-side DOM write
+    uses ``Node.textContent`` instead of ``Element.innerHTML``. The DOM
+    analogue of :class:`HtmlEntityEscapeTransform` -- except there is no
+    PHP-side call to make (the value never reaches PHP at all), so this
+    flips the client-side write mechanism (``dom_write_prop``) rather than
+    wrapping ``value_expr``."""
+
+    def __init__(self) -> None:
+        super().__init__("dom_text_content", "transform", _TRANSFORM_ENV, "dom_text_content.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["dom_write_prop"] = "textContent"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 # --- sinks ----------------------------------------------------------------
 #
 # Every sink branches on `bound` where a bound form exists at all, so one
@@ -587,6 +627,29 @@ class OrmEntityBulkAssignSink(TemplateModule):
 
     def __init__(self) -> None:
         super().__init__("orm_entity_bulk_assign", "sink", _SINK_ENV, "orm_entity_bulk_assign.php.j2")
+
+
+class DomInnerhtmlEchoSink(TemplateModule):
+    """The DOM-XSS sink (L-P3.3c-DOM, ``reviews.php``/``feedback.php``): a
+    Blade view whose ``<script>`` block reads a URL fragment or
+    query-string parameter and assigns it to ``dom_write_prop`` of a target
+    element -- ``innerHTML`` (vulnerable, the default) or ``textContent``
+    (secure, :class:`DomTextContentTransform`), decided entirely by the
+    cell's transform, exactly like every other sink here never escaping
+    anything itself. Unlike every other HTML sink, the value it writes is
+    never passed in from the controller at all (there is no PHP-observable
+    value to pass): the read and the write both happen inside this one
+    ``<script>`` block, matching the real pages' own shape exactly
+    (``puppy-fort-factory/reviews.php``'s/``feedback.php``'s comments state
+    plainly that the tainted value never reaches the server).
+
+    Requires ``dom_location`` (``"hash"`` or ``"query"``), ``dom_param_name``,
+    ``dom_target_id``, ``dom_prefix`` and ``dom_suffix`` in the assembly
+    context -- render-only metadata a page profile supplies; there is no
+    safe default for which parameter/element a page reads and targets."""
+
+    def __init__(self) -> None:
+        super().__init__("dom_innerhtml_echo", "sink", _SINK_ENV, "dom_innerhtml_echo.blade.php.j2")
 
 
 # --- views (the `view` module category, L-P3.3c-G2) -----------------------
@@ -847,6 +910,8 @@ SOURCES: dict[str, Module] = {
     "post_param": PostParamSource(),
     "read_stored_field": ReadStoredFieldSource(),
     "all_post_params": AllPostParamsSource(),
+    # L-P3.3c-DOM (reviews.php/feedback.php): no PHP source at all.
+    "dom_url_source": DomUrlSource(),
 }
 #: Transform ops. Every name here must also have a row for every sink family
 #: it is authored against in ``lab/safety_matrix.yaml`` -- an op this emitter
@@ -864,6 +929,8 @@ TRANSFORMS: dict[str, Module] = {
     "attr_value_allowlist": AttrValueAllowlistTransform(),
     "unfiltered_body_update": UnfilteredBodyUpdateTransform(),
     "runtime_field_allowlist": RuntimeFieldAllowlistTransform(),
+    # L-P3.3c-DOM (reviews.php/feedback.php): the client-side write mechanism.
+    "dom_text_content": DomTextContentTransform(),
 }
 #: Sinks. The three HTML sinks render a **Blade view** body rather than a
 #: controller statement; :data:`VIEW_SINKS` names them so the emitter knows
@@ -882,6 +949,8 @@ SINKS: dict[str, Module] = {
     "html_attribute_quoted_echo": HtmlAttributeQuotedEchoSink(),
     "sql_string_literal_like": SqlStringLiteralLikeSink(),
     "orm_entity_bulk_assign": OrmEntityBulkAssignSink(),
+    # L-P3.3c-DOM: reviews.php/feedback.php's client-only DOM-XSS sink.
+    "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

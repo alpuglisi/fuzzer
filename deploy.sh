@@ -1,37 +1,39 @@
 #!/usr/bin/env bash
 #
-# deploy.sh - copy the Puppy Fort Factory web app into the Apache web root.
+# deploy.sh - assemble the generated PHP lab (php_laravel) and copy it into a
+# bare-metal (non-Docker) LAMP web root.
 #
-# By default the app is deployed to the web root so it is served at
-# http://localhost/ (not a subdirectory).
+# `L-P3.3c-CUT`: the app this script deploys is no longer the hand-built
+# `puppy-fort-factory/` directory -- it is generated fresh from
+# `fuzzlab.labgen.assemble` (the same manifest-derived cell set the cutover
+# coverage gate proves covers every non-exempted `PFF-` case), then
+# `composer install`ed. The containerized path (`lab/compose.yaml` /
+# `lab/web.Dockerfile`) does the equivalent at image-build time; this script
+# is the manual alternative documented in `docs/ON_HOST_RUNBOOK.md`.
 #
 # Usage:
-#   ./deploy.sh [SOURCE_DIR]
+#   ./deploy.sh
 #
 # Defaults:
-#   SOURCE_DIR : the puppy-fort-factory/ folder next to this script
-#   destination: /var/www/html   (served at http://localhost/)
+#   destination: /var/www/html/pff-lab   (Apache DocumentRoot must point at
+#                                          $DEST/public, NOT $DEST itself --
+#                                          Laravel's front controller lives
+#                                          under public/)
 #
 # Override with environment variables:
-#   DEST_ROOT=/var/www/html     # web root to deploy into (http://localhost/)
-#   DEST=/var/www/html/pff      # exact destination (subdir -> http://localhost/pff/)
-#   WWW_USER=www-data           # owner user  for the deployed files
-#   WWW_GROUP=www-data          # owner group for the deployed files
-#   CLEAN=1                     # delete files at the destination that are
-#                               #   not in the source (mirror the source)
-#   ASSUME_YES=1                # skip the CLEAN confirmation prompt
-#   FORCE_CONFIG=1              # overwrite an existing config/config.php
-#                               #   (by default it is preserved)
+#   DEST           destination app root (default /var/www/html/pff-lab)
+#   WWW_USER       owner user  for the deployed files (default www-data)
+#   WWW_GROUP      owner group for the deployed files (default www-data)
+#   ASSUME_YES=1   skip the confirmation prompt before wiping DEST
+#   SKIP_COMPOSER=1   skip `composer install` (e.g. for an air-gapped re-run
+#                      that only wants the generated tree refreshed)
 #
 # Examples:
-#   ./deploy.sh                                        # serve at http://localhost/
-#   DEST=/var/www/html/puppy-fort-factory ./deploy.sh  # serve in a subdirectory
-#   CLEAN=1 ./deploy.sh                                # mirror (prune stale files)
-#   ./deploy.sh ~/fuzzer/puppy-fort-factory            # explicit source
+#   ./deploy.sh
+#   DEST=/var/www/html/pff-lab ASSUME_YES=1 ./deploy.sh
 
 set -euo pipefail
 
-APP_NAME="puppy-fort-factory"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
@@ -39,19 +41,28 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
     exit 0
 fi
 
-SRC="${1:-$SCRIPT_DIR/$APP_NAME}"
-DEST_ROOT="${DEST_ROOT:-/var/www/html}"
-DEST="${DEST:-$DEST_ROOT}"
+DEST="${DEST:-/var/www/html/pff-lab}"
 WWW_USER="${WWW_USER:-www-data}"
 WWW_GROUP="${WWW_GROUP:-www-data}"
 
-# Normalise SRC (strip any trailing slash) and validate it looks like the app.
-SRC="${SRC%/}"
-if [ ! -f "$SRC/index.php" ] || [ ! -f "$SRC/config/config.php" ]; then
-    echo "ERROR: '$SRC' does not look like the $APP_NAME app" >&2
-    echo "       (expected index.php and config/config.php inside it)." >&2
-    echo "       Pass the path to the $APP_NAME folder as the first argument." >&2
-    exit 1
+PYTHON="$(command -v python3 || command -v python || true)"
+[ -n "$PYTHON" ] || { echo "ERROR: python3/python not found on PATH." >&2; exit 1; }
+
+# --- 1. assemble the generated app into a scratch directory ------------------
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+echo "Assembling the generated php_laravel lab into $TMP ..."
+( cd "$SCRIPT_DIR" && "$PYTHON" -m fuzzlab.labgen.assemble --out "$TMP" )
+
+# --- 2. install real Laravel dependencies -------------------------------------
+if [ "${SKIP_COMPOSER:-0}" != "1" ]; then
+    command -v composer >/dev/null 2>&1 || {
+        echo "ERROR: composer not found on PATH (needed for the generated Laravel app's" >&2
+        echo "       own dependencies). Install it, or set SKIP_COMPOSER=1 to skip this" >&2
+        echo "       step (only useful if DEST already has a vendor/ you trust)." >&2
+        exit 1
+    }
+    ( cd "$TMP" && composer install --no-dev --no-interaction --no-progress --prefer-dist )
 fi
 
 # Use sudo when not already root.
@@ -66,15 +77,13 @@ if [ "$(id -u)" -ne 0 ]; then
     fi
 fi
 
-echo "Source     : $SRC"
 echo "Destination: $DEST"
 echo "Owner      : $WWW_USER:$WWW_GROUP"
 echo
 
-# CLEAN mirrors the source and prunes anything else at the destination. Since
-# the default destination is the web root, guard it behind a confirmation.
-if [ "${CLEAN:-0}" = "1" ]; then
-    echo "WARNING: CLEAN=1 will DELETE everything in $DEST that is not part of the app."
+if [ -d "$DEST" ]; then
+    echo "WARNING: $DEST already exists and will be REPLACED (the app is generated,"
+    echo "         never hand-edited in place -- see this script's header)."
     if [ "${ASSUME_YES:-0}" != "1" ]; then
         if [ -t 0 ]; then
             read -r -p "Proceed? [y/N] " ans
@@ -83,38 +92,20 @@ if [ "${CLEAN:-0}" = "1" ]; then
                 *) echo "Aborted."; exit 1 ;;
             esac
         else
-            echo "Refusing to CLEAN non-interactively without ASSUME_YES=1." >&2
+            echo "Refusing to replace an existing $DEST non-interactively without ASSUME_YES=1." >&2
             exit 1
         fi
     fi
+    $SUDO rm -rf "$DEST"
 fi
 
-$SUDO mkdir -p "$DEST"
-
-# Preserve an existing config.php (holds DB credentials) unless FORCE_CONFIG=1.
-STASH=""
-if [ -f "$DEST/config/config.php" ] && [ "${FORCE_CONFIG:-0}" != "1" ]; then
-    STASH="$(mktemp)"
-    $SUDO cp "$DEST/config/config.php" "$STASH"
-    echo "Preserving existing config/config.php (set FORCE_CONFIG=1 to overwrite)."
-fi
+$SUDO mkdir -p "$(dirname "$DEST")"
 
 # Copy. Prefer rsync; fall back to cp.
 if command -v rsync >/dev/null 2>&1; then
-    RSYNC_OPTS=(-a --exclude '.git' --exclude '*.csv')
-    [ "${CLEAN:-0}" = "1" ] && RSYNC_OPTS+=(--delete)
-    $SUDO rsync "${RSYNC_OPTS[@]}" "$SRC"/ "$DEST"/
+    $SUDO rsync -a "$TMP"/ "$DEST"/
 else
-    if [ "${CLEAN:-0}" = "1" ]; then
-        echo "Note: rsync not found; CLEAN=1 ignored (cp cannot prune)."
-    fi
-    $SUDO cp -a "$SRC"/. "$DEST"/
-fi
-
-# Restore the preserved config.php.
-if [ -n "$STASH" ]; then
-    $SUDO cp "$STASH" "$DEST/config/config.php"
-    rm -f "$STASH"
+    $SUDO cp -a "$TMP"/. "$DEST"/
 fi
 
 # Ownership and permissions.
@@ -126,21 +117,18 @@ else
 fi
 $SUDO find "$DEST" -type d -exec chmod 755 {} +
 $SUDO find "$DEST" -type f -exec chmod 644 {} +
-
-# Work out the URL to show.
-if [ "$DEST" = "$DEST_ROOT" ]; then
-    URL="http://localhost/"
-else
-    URL="http://localhost/$(basename "$DEST")/"
-fi
+# Laravel needs storage/ and bootstrap/cache/ writable by the web server.
+$SUDO chmod -R ug+rwX "$DEST/storage" "$DEST/bootstrap/cache"
 
 echo
 echo "Done. Deployed to $DEST"
 echo
 echo "Next steps:"
 echo "  1. Import the database (first time only):"
-echo "       sudo mysql < \"$SRC/sql/schema.sql\""
-echo "  2. Set your DB credentials in:"
-echo "       $DEST/config/config.php"
-echo "  3. Browse to:"
-echo "       $URL"
+echo "       sudo mysql < \"$SCRIPT_DIR/lab/sql/schema.sql\""
+echo "  2. Set the DB_HOST/DB_DATABASE/DB_USERNAME/DB_PASSWORD env vars (or edit"
+echo "     $DEST/.env) to match — the deployed .env ships lab defaults only."
+echo "  3. Point your Apache vhost's DocumentRoot at:"
+echo "       $DEST/public"
+echo "     (NOT $DEST itself — Laravel's front controller lives under public/)."
+echo "  4. Browse to your vhost's URL."

@@ -4,7 +4,7 @@
 #
 # Runs every activity in ON_HOST_RUNBOOK.md Part E, in order, against the lab you own
 # on loopback:
-#   1. (Re)build the instrumented lab image (pcov + the cov.php coverage/db-fault shim).
+#   1. (Re)build the instrumented lab image (pcov + the FzlCoverage coverage/db-fault middleware).
 #   2. Wait for the web tier to be healthy.
 #   3. Self-test the side channel with curl (proves coverage + db_fault are captured).
 #   4. Snapshot the DB baseline (deterministic resets, T3.5).
@@ -54,7 +54,7 @@ FUZZLAB=(fuzzlab)
 command -v fuzzlab >/dev/null 2>&1 || FUZZLAB=(python -m fuzzlab.cli)
 
 # --- 1. build + start the instrumented lab -----------------------------------
-say "1/6  Building the instrumented lab (pcov + cov.php shim) and re-seeding the DB"
+say "1/6  Building the instrumented lab (pcov + FzlCoverage middleware) and re-seeding the DB"
 export FZL_COV_DIR="${COV_DIR}"
 mkdir -p "${COV_DIR}"
 chmod 777 "${COV_DIR}" 2>/dev/null || true      # the container (www-data) must write here
@@ -96,7 +96,7 @@ d = pathlib.Path(sys.argv[1])
 def load(name):
     p = d / name
     if not p.exists():
-        raise SystemExit(f"  FAIL: {p} was not written — is the cov.php shim installed "
+        raise SystemExit(f"  FAIL: {p} was not written — is the FzlCoverage middleware installed "
                          f"and is {d} bind-mounted into the container? "
                          f"(check lab/web.Dockerfile + lab/compose.yaml)")
     return json.loads(p.read_text())
@@ -105,12 +105,13 @@ files = cov.get("files") or {}
 if not files:
     raise SystemExit("  FAIL: benign request recorded no covered lines. pcov is loaded "
                      "(checked above), so this points at the shim's collection logic in "
-                     "puppy-fort-factory/includes/cov.php (e.g. \\pcov\\collect() filter "
+                     "the FzlCoverage middleware (e.g. \\pcov\\collect() filter "
                      "or the app path prefix), not the image.")
 fault = load("selftest_fault")
 if not fault.get("db_fault"):
     raise SystemExit("  FAIL: error-based SQLi did not set db_fault — check that the "
-                     "app throws on SQL errors (mysqli default) and the shim's handler.")
+                     "app throws on SQL errors (an uncaught Illuminate\\Database\\"
+                     "QueryException) and the FzlCoverage middleware's handler.")
 print(f"  OK: coverage captured ({sum(len(v) for v in files.values())} app lines) "
       f"and db_fault=1 on the error-based SQLi probe.")
 PY

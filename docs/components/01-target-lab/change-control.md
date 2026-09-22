@@ -3,6 +3,329 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0067 — L-P3.3c-CUT: the atomic cutover, retiring `puppy-fort-factory/` (FR-LAB-62) (2026-09-22)
+- Change: executed the atomic cutover (`docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.5/
+  §4.3.6.6), authorized by the project owner with explicit sign-off that the deletion
+  is largely irreversible in the working tree (backups held independently). Pre-flight:
+  re-ran `fuzzlab.labgen.cutover_gate.diff_cutover_coverage()` and reconfirmed 100%
+  covered-or-exempted (14 covered, 2 exempted -- `PFF-0003` `search.php`'s documented
+  multi-sink downgrade, `PFF-1002` `track.php`'s no-sink page -- 0 uncovered) before
+  touching anything, per the plan's explicit pre-flight instruction.
+
+  **Landed as two commits, in the plan's own internal order within commit 1** (re-home
+  Layer-C assets, then re-point compose/deploy, then ground-truth `target`, then tests,
+  then docs; commit 2 is only the deletion):
+
+  1. **Layer-C re-homing.**
+     - `puppy-fort-factory/config/waf-rules.json` -> `lab/waf-rules.json` (`git mv`,
+       byte-identical) -- the shared ruleset `fuzzlab.mutation.filtermodel` and the new
+       WAF middleware both read; `filtermodel.py`'s `_LAB_RULES` path re-pointed.
+     - `puppy-fort-factory/sql/schema.sql` -> `lab/sql/schema.sql` (`git mv`,
+       byte-identical) -- same seeding contract, only the mount path changes.
+       `fuzzlab.labgen.conformance.live_boot.REAL_SCHEMA_SQL` (a production-code
+       constant, not a test literal -- the MariaDB-backed live-boot mode imports this
+       file verbatim) re-pointed to match; this path was not in the plan's own
+       enumerated file list but would have silently broken after the deletion commit
+       had it been missed, so it is called out here explicitly.
+     - `puppy-fort-factory/includes/waf.php` -> a Laravel middleware in the
+       `php_laravel` stack skeleton (`app/Http/Middleware/FzlWaf.php`), registered
+       globally in `bootstrap/app.php` (`$middleware->append([FzlWaf::class,
+       FzlCoverage::class])`, WAF first so it can block before the coverage shim
+       instruments a request) -- same `PFF_WAF`/`PFF_WAF_MODE` env-var toggle
+       semantics, same default-OFF (D16), same `block`/`sanitize`/`log` modes. The
+       pure filtering logic (pattern-match, sanitize, leaf-path walk) is factored into
+       a framework-free `app/Support/WafFilter.php` (no `Illuminate\*` types), called
+       by both the middleware and a new standalone offline test driver
+       (`tests/php/waf_selftest.php`, replacing `puppy-fort-factory/tests/
+       waf_selftest.php`) -- PA-0003/PA-0021: one shared implementation, two callers,
+       never a second copy of the filtering logic that could drift from what the
+       middleware actually enforces. `WafFilter.php`'s ruleset path defaults to
+       `storage_path('app/waf-rules.json')`, a copy `fuzzlab.labgen.assemble` places
+       there at build time from the single-source `lab/waf-rules.json`, so the
+       deployed/containerized app never needs a sibling `lab/` checkout at runtime.
+     - `puppy-fort-factory/includes/cov.php` -> `app/Http/Middleware/
+       FzlCoverage.php`, same scaffold, registered second in the middleware chain.
+       Same `X-Fzl-Cov` opt-in contract and side-channel JSON shape
+       (`{"files": {...}, "db_fault": bool, "db_error": "..."}`) `scripts/
+       greybox_e2e.sh` and `fuzzlab.greybox.{coverage,dbfault}.File*Source` already
+       read -- unchanged on the Python-reader side. `db_fault` capture differs from
+       the retired shim by necessity: the migrated controllers go through Laravel's
+       query builder (`DB::table()`/`DB::select()`), not raw `mysqli`, so the
+       middleware catches an uncaught `Illuminate\Database\QueryException` around
+       the request (re-thrown after recording, so Laravel's own exception handler
+       still renders its usual response) rather than reading PHP's
+       `error_get_last()`.
+     - `puppy-fort-factory/VULNERABILITIES.md` -> **generated**: new module
+       `fuzzlab.labgen.vuln_map` renders `lab/VULNERABILITIES.md` from
+       `lab/ground-truth/labels.json` + `migration-exemptions.yaml` (nothing else),
+       so the human-readable map cannot state anything the machine-readable ground
+       truth does not itself state -- closing exactly the drift risk a hand-written
+       vulnerability map carries (this is the file the retired app's own bug history,
+       `BUG-0004`, found stale once already).
+  2. **Real-build assembly (new capability this lane needed and built).** Neither
+     `fuzzlab.labgen.cli.render_manifest` (renders one manifest's cells only, no
+     scaffold/route assembly) nor `conformance.live_boot.LiveBootHarness._assemble`
+     (assembles exactly one manifest's cells for an ephemeral test boot) could
+     produce "the whole real lab app" for a real deploy target -- neither existed
+     for that purpose before this lane. New module `fuzzlab.labgen.assemble`
+     generalizes the harness's own assembly step from one manifest to every
+     `lab/manifests/*.yaml` cell the `php_laravel` emitter supports, deduplicated by
+     `cell_id` -- the identical manifest-discovery-and-`supports()`-gated walk
+     `cutover_gate.compute_php_laravel_coverage` already uses (PA-0001/PA-0027: one
+     derived walk feeding both the coverage gate's proof and the real build, never
+     two independently-maintained enumerations that could disagree about which
+     cells count). Verified directly: `collect_cells()` returns all 43
+     `php_laravel`-supported cells across every manifest; `assemble_lab()` into a
+     scratch directory produces a `routes/web.php` that passes `php -l`.
+  3. **Runtime wiring re-pointed.**
+     - `lab/web.Dockerfile`: rewritten as a two-stage build -- a `python:3.12-slim`
+       `gen` stage (`pip install -e .` then `python3 -m fuzzlab.labgen.assemble --out
+       /app`) feeding a `php:8.3-apache-bookworm` final stage (adds `pdo_mysql`
+       alongside the existing `mysqli` -- the migrated controllers' query builder
+       needs it; keeps pcov + the `$PHPIZE_DEPS`/`php -m` build-time verification
+       per PA-0009; adds `composer` and a real `composer install --no-dev` for
+       Laravel's own dependencies, which the hand-built, vendor-free app never
+       needed; repoints the Apache `DocumentRoot` to `.../public` with
+       `AllowOverride All` for Laravel's own `.htaccess` front-controller rewrite).
+     - `lab/compose.yaml`: `db`'s seed mount re-pointed to `./sql/schema.sql`; `web`'s
+       build context widened to the repo root (`context: ..`, `dockerfile:
+       lab/web.Dockerfile`) so the `gen` stage can see `fuzzlab/`/`lab/manifests/`;
+       the app bind-mount is **removed** (the app is now a build artifact, not a
+       hand-edited tree -- editing a page means editing its manifest/emitter and
+       rebuilding); `web`'s environment re-pointed from the old app's
+       `PFF_DB_HOST/USER/PASS/NAME` keys to Laravel's own `DB_CONNECTION`/`DB_HOST`/
+       `DB_PORT`/`DB_DATABASE`/`DB_USERNAME`/`DB_PASSWORD` (Dotenv never overwrites an
+       already-set process env var, so these override the baked-in `.env` without a
+       rebuild, exactly like the retired app's `PFF_DB_*` keys did).
+     - `deploy.sh`: rewritten for the bare-metal/manual path -- assembles the
+       generated app into a scratch directory via `fuzzlab.labgen.assemble`, runs a
+       real `composer install`, then copies the result into a destination web root
+       (default `/var/www/html/pff-lab`), documenting that Apache's `DocumentRoot`
+       must point at `<dest>/public` (Laravel's front controller, not the app root).
+       Verified with `bash -n` (no `shellcheck` available in this environment).
+     - `fuzzlab/mutation/filtermodel.py`: `_LAB_RULES` re-pointed to `lab/waf-rules.
+       json`.
+  4. **Ground truth.** `lab/ground-truth/labels.json` and `injection-points.json`'s
+     `"target"` changed from `"puppy-fort-factory"` to `"php_laravel"` (minimal,
+     surgical string edit -- not a re-serialization, which would have reformatted
+     unrelated array literals and produced a much larger, harder-to-review diff).
+     Metadata only, per §4.3.6.6a: the cutover coverage gate and
+     `regression_gate.assert_no_regression` do not diff on this field.
+  5. **Tests updated** (all five named in the plan, plus the five `php_laravel`
+     real-page test modules whose own local regression-baseline `target=` string
+     literals -- unrelated to the real ground truth they load, but a literal grep
+     match -- were brought in line for consistency):
+     - `tests/test_lab_waf.py`: `RULES`/`DRIVER` re-pointed at `lab/waf-rules.json`/
+       `tests/php/waf_selftest.php`; `test_waf_is_default_off_in_config` now asserts
+       against `FzlWaf.php`/`bootstrap/app.php` instead of the retired
+       `includes/waf.php`.
+     - `tests/test_mutation_xss.py`: `_RULES` re-pointed at `lab/waf-rules.json`.
+     - `tests/test_labels_contract.py`: asserts `gt.target == "php_laravel"`.
+     - `tests/test_labgen_php_current_real_pages.py`: docstring re-pointed to cite
+       `lab/ground-truth/labels.json` directly (cross-checked against the generated
+       `lab/VULNERABILITIES.md`) as its oracle -- this test has no code path that
+       reads `VULNERABILITIES.md`, only docstring prose, so no assertion changed.
+     - `tests/test_labgen_php_laravel_real_pages_{auth,numeric,dom,g2,forms}.py`:
+       their local `GroundTruth(target="puppy-fort-factory", ...)` regression-gate
+       baseline fixtures changed to `target="php_laravel"` (the field is decorative
+       in these tests -- `regression_gate` does not diff on it -- but left as the
+       old literal it would have been a stray, confusing grep hit).
+     - New `tests/php/waf_selftest.php` (offline WAF driver, see point 1 above).
+  6. **Docs updated:** `README.md` (directory map + `lab/VULNERABILITIES.md`
+     pointer), `docs/ARCHITECTURE.md` (#1 target lab -- status tag, generated-app
+     description, WAF bullet, and a dedicated cutover-completion paragraph),
+     `lab/README.md` ("What it does" rewritten for the two-stage build and
+     middleware), `docs/ON_HOST_RUNBOOK.md` (bare-LAMP alternative now points at
+     `deploy.sh`; the D-open-1 gap note updated from "after the cutover" to "the
+     cutover landed"; Part E's shim description updated for the middleware
+     mechanism and the `QueryException`-based `db_fault` capture),
+     `docs/LAB_PHASE_0_PLAN.md` (a dated update note marking the anticipated cutover
+     done, its own original text left as historical record), and
+     `docs/LAB_IMPLEMENTATION_PLAN.md` itself (both `L-P3.3c-CUT` tracking-table rows
+     marked **DONE**, plus a completion note under §4.3.6.6c).
+  7. **Deletion, as a separate commit:** `git rm -r puppy-fort-factory/`, once
+     commit 1's own full test run (fast suite + the live-boot slow suite) was green
+     and a whole-repo grep for `puppy-fort-factory` outside git history/CHANGELOG/
+     ERROR_LOG/bug-report prose and this change-control log's own historical
+     narrative came back clean.
+
+- Verification: `python3 -m pytest -q -m "not slow"` and the live-boot slow suite
+  (`tests/test_labgen_conformance_live_boot.py`,
+  `tests/test_labgen_conformance_live_boot_mariadb.py`) both run green before and
+  after each commit; exact pass/skip counts recorded in this lane's own report (see
+  the session's final summary for the literal numbers, reproducible by re-running
+  the same commands). `fuzzlab.labgen.cutover_gate.diff_cutover_coverage()`
+  re-confirmed 100% covered-or-exempted after the deletion commit, with the
+  directory gone. `php -l` on every new/changed PHP file (`FzlWaf.php`,
+  `FzlCoverage.php`, `WafFilter.php`, `bootstrap/app.php`, plus a generated
+  `routes/web.php` from a real `assemble_lab()` run into a scratch directory) and
+  `bash -n` on `deploy.sh` and the updated `scripts/greybox_e2e.sh`.
+- Bookkeeping: `requirements.md` FR-LAB-8 marked satisfied and FR-LAB-1's status
+  note added in place; new `requirements.md` `FR-LAB-62` for the cutover itself;
+  `docs/ARCHITECTURE.md`/`README.md`/`lab/README.md`/`docs/ON_HOST_RUNBOOK.md`/
+  `docs/LAB_PHASE_0_PLAN.md`/`docs/LAB_IMPLEMENTATION_PLAN.md` updated (point 6
+  above); one dated `CHANGELOG.md` line (two, one per commit, distinguishing
+  "re-pointing landed" from "fixture deleted"). No genuine code defect was hit
+  along the way (the `REAL_SCHEMA_SQL` production-code path not being in the
+  plan's own enumerated file list is a plan-completeness gap this entry calls out
+  explicitly, not a code defect this lane shipped and then fixed), so the full bug
+  protocol (`ERROR_LOG.md`/`docs/bugs/`/`docs/PREVENTIVE_ACTIONS.md`) does not
+  apply here.
+
+### CC-LAB-0066 — L-P3.3c-DOM: DOM-based XSS sink class, `reviews.php`/`feedback.php` (FR-LAB-61) (2026-09-22)
+- Change: built lane **L-P3.3c-DOM** for real, following the exact G1-G6 methodology
+  (safety-matrix row additions, Cell/manifest entries, the unified URL-pinning mechanism,
+  live-boot extension, `requirements.md` documentation). This lane was explicitly out of
+  the L-P3.3c-G1..G6 cutover's scope (`D-open-2`,
+  `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.7, decided 2026-09-22: "a new client-side sink
+  class, not a migration, belongs in its own lane") and is now separately prioritized,
+  per that decision's own terms, not blocked on anything.
+
+  Ground truth (`puppy-fort-factory/reviews.php`/`feedback.php`, read directly and cited
+  by line): `reviews.php` reads `#author=` from `location.hash` and assigns it to
+  `document.getElementById('greeting').innerHTML` with no escaping (its own comment:
+  "a server-side scanner and the raw HTML both miss it too" -- `PFF-0007`); `feedback.php`
+  reads `?ref=` from `location.search` and assigns it to
+  `document.getElementById('fb-status').innerHTML`, likewise unescaped, likewise never
+  read server-side (`PFF-0008`). Both are labelled `vuln_class: "xss-dom"`,
+  `sink_context: "dom"` in `lab/ground-truth/labels.json` -- a distinct vuln_class from
+  plain `xss`, kept distinct here rather than conflated, since neither the source nor the
+  sink is server-rendered.
+
+  **Safety matrix** (`lab/safety_matrix.yaml`, additive under the existing `version: 1`):
+  a genuinely new sink family, `dom_html_sink` (required concern the existing
+  `html_tag_break`, reached through a sink with no server-side rendering step at all --
+  what makes it a new family rather than a rendering of `html_body`), with `raw_concat`
+  reused for the unescaped `no_effect` baseline (a genuinely matching op -- checked the
+  existing vocabulary first, per this task's own reuse-discipline instruction) and one
+  new op, `dom_text_content` (the client-side write uses `Node.textContent` instead of
+  `Element.innerHTML` -- there is no PHP-side escaping call to make, since the value
+  never reaches PHP, so this is not a rendering of `html_entity_escape`), scored
+  `neutralises`.
+
+  **Modules**, registered in *both* `fuzzlab.labgen.modules` (`php_current`, unrendered --
+  for the shared minimal-pair vocabulary only, exactly `CC-LAB-0051`'s precedent for
+  `html_attribute_quoted_echo`/`sql_string_literal_like`) and
+  `fuzzlab.labgen.emitters.php_laravel.modules` (rendered): `dom_url_source` (a source
+  that extracts no PHP variable at all -- the tainted value never reaches the server),
+  `dom_text_content` (a transform that flips a client-side write-mechanism flag,
+  `dom_write_prop`, rather than wrapping a PHP expression -- the same `bound`-flag-
+  threading pattern `ParamBindTransform` already uses), and `dom_innerhtml_echo` (a Blade
+  view whose `<script>` block does the client-side read *and* write itself, branching on
+  `dom_write_prop` -- `innerHTML` vulnerable, `textContent` secure). New
+  `("xss-dom", "dom_html_sink")` entry in `php_laravel`'s `_MODULE_SET_BY_SHAPE`;
+  `php_current`'s own shape map is deliberately not widened (unaffected, same as G6).
+
+  **Cells**: `lab/manifests/phase3_php_laravel_real_pages_dom.yaml`, four cells
+  (`LABGEN-PLRP-DOM-0001`/`-0001-SAFE` for `reviews.php`, `LABGEN-PLRP-DOM-0002`/
+  `-0002-SAFE` for `feedback.php`), through the unified URL-pinning mechanism
+  (`_REAL_PAGE_KEY`/`_CANONICAL_CELL_KEY`, `CC-LAB-0052`): each canonical cell is served
+  at the real `.php`-suffixed URL `labels.json` labels the case at, and its authored
+  secure twin gets the standard `.php`-suffixed twin URL.
+
+  **Migration exemptions**: `lab/ground-truth/migration-exemptions.yaml`'s `PFF-0007`/
+  `PFF-0008` entries are **removed** -- both cases are covered for real now, not exempt --
+  and `fuzzlab.labgen.cutover_gate`'s pinned exemption-register test
+  (`tests/test_labgen_cutover_gate.py::test_the_exemption_register_names_exactly_the_expected_cases`)
+  is updated to `{PFF-1002, PFF-0003}`.
+
+  **Static precheck**: `fuzzlab.labgen.conformance.static_precheck.STATIC_PRECHECK_BY_SHAPE`
+  gained `("xss-dom", "dom_html_sink") -> UNINFORMATIVE` -- a PHP taint checker (Psalm) has
+  literally no PHP-observable data flow to analyze for this shape.
+
+  **Live-boot**: `fuzzlab.labgen.conformance.live_boot.LiveBootHarness` now live-boots this
+  manifest too (`tests/test_labgen_conformance_live_boot.py::test_live_boot_dom_manifest_serves_reviews_and_feedback`,
+  run for real against a real `php artisan serve` in this environment, not just
+  skip-guarded) -- the one live-boot proof in this component with no server-side round
+  trip to differentiate on at all: both real pinned URLs return HTTP 200 and embed the
+  right client-side shape (`innerHTML` vs. `textContent`), never a JS-*execution* proof
+  (headless, JS-executing crawling stays the documented D-open-1 gap,
+  `docs/ON_HOST_RUNBOOK.md`).
+- Impact (other components / project): none outside LAB. `fuzzlab.labgen.modules`
+  (`php_current`) gained three registered-but-unrendered modules, exactly the G6
+  precedent; its own `_MODULE_SET_BY_SHAPE` is untouched.
+- Risk (level; mitigation or accepted-risk justification): **low**. The new shape's
+  verdict-relevant vocabulary (`xss-dom`/`dom_html_sink`) is disjoint from every existing
+  `(vuln_class, sink_context.family)` pair, so nothing pre-existing can be affected by the
+  new matrix rows or module registrations (additive-only, checked by the full suite
+  below). One accepted, documented scope limit, carried over unchanged from D-open-1: no
+  headless/JS-executing verification exists in this harness, so "the generated page
+  behaves like the real one when actually executed by a browser" remains a claim proven
+  only by static/live-boot inspection of the served markup/script text, not by JS
+  execution.
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml`: `dom_html_sink`/`dom_text_content` rows -- done
+  - [x] `fuzzlab/labgen/modules/__init__.py` + 3 new templates (`php_current`,
+        registered-but-unrendered) -- done
+  - [x] `fuzzlab/labgen/emitters/php_laravel/modules.py` + 3 new templates (rendered) --
+        done
+  - [x] `fuzzlab/labgen/emitters/php_laravel/__init__.py`: `_MODULE_SET_BY_SHAPE` entry +
+        `/reviews.php`/`/feedback.php` page profiles -- done
+  - [x] `lab/manifests/phase3_php_laravel_real_pages_dom.yaml` (4 cells) -- done
+  - [x] `lab/ground-truth/migration-exemptions.yaml`: `PFF-0007`/`PFF-0008` removed -- done
+  - [x] `fuzzlab/labgen/conformance/static_precheck.py`: new shape row -- done
+  - [x] `fuzzlab/labgen/conformance/live_boot.py` + a new live-boot test, run for real --
+        done
+  - [x] `tests/test_labgen_php_laravel_real_pages_dom.py` (17 tests: shape/manifest
+        coverage, verdict-vs-label agreement for both canonical cells and both authored
+        secure twins, the tainted-value-never-in-the-controller property, the
+        innerHTML/textContent branch in the rendered view, URL pinning + regression gate,
+        minimal pair, Tier-0/Tier-3, `lab-generate --check`) -- done
+  - [x] Updated `tests/test_labgen_modules.py`, `tests/test_labgen_php_laravel_harder_shapes.py`
+        (the all-`SINKS` determinism/no-escaping sweeps, extended for the new modules) and
+        `tests/test_labgen_cutover_gate.py` (exemption-register pin) -- done
+  - [x] Bookkeeping: this entry, `FR-LAB-61`, `docs/ARCHITECTURE.md`,
+        `docs/LAB_IMPLEMENTATION_PLAN.md`, `CHANGELOG.md` -- done
+- Effectiveness (assessed 2026-09-22): both canonical cells derive VULNERABLE matching
+  their `PFF-0007`/`PFF-0008` labels, both authored secure twins derive SECURE, both real
+  URLs (`/reviews.php`, `/feedback.php`) are served exactly as labelled, the live-boot
+  proof passed for real against a real `php artisan serve` (6/6 live-boot tests in
+  `tests/test_labgen_conformance_live_boot.py`, ~165s), and the full fast suite is green:
+  **1565 passed, 8 skipped, 12 deselected** (`pytest -q -m "not slow"`).
+
+### CC-LAB-0065 — `live_boot_available()`'s network probe now exercises a real, bounded composer round trip instead of a raw socket connect (FR-LAB-60) (2026-09-22)
+- Change: fixed `BUG-0031` (a genuine code defect, full bug protocol applied). In
+  `fuzzlab/labgen/conformance/live_boot.py`, replaced `_network_reachable()` (a bare
+  `socket.create_connection((host, 443))`) with `_composer_network_probe()`, which runs
+  a real `composer show -a --no-interaction psr/log` (the cheapest composer subcommand
+  that still performs a real Packagist metadata fetch through composer's own HTTP
+  client — the same proxy-aware transport `composer install` itself uses) from a scratch
+  cwd, with an explicit, enforced `timeout=` (`NETWORK_PROBE_TIMEOUT_S = 20.0`) that
+  reports unavailable (never raises, never hangs) on `subprocess.TimeoutExpired` or any
+  `OSError`. `live_boot_available()` now gates on this instead. `_run()` (every real
+  subprocess step of the live-boot pipeline: `composer install`, `artisan
+  key:generate`) now wraps a `subprocess.TimeoutExpired` in a clear `LiveBootError`
+  naming the command and bound, rather than letting it propagate uncaught — every call
+  site already passed an explicit `timeout=`, so this is a fail-clearly-not-a-hang
+  clarity fix at the shared helper, not a new timeout. New test module
+  `tests/test_labgen_conformance_live_boot_probe.py` (7 tests, not skip-guarded) covers
+  the probe's and `_run`'s own failure-handling via monkeypatched `subprocess.run`.
+- Impact (other components / project): none outside LAB — both changed functions are
+  private to `live_boot.py` and reached only through `live_boot_available()`, whose
+  public contract (a `bool`, `True` only when the environment can actually complete the
+  real dependent operation) is unchanged, only made accurate. No other component reads
+  or gates on `_network_reachable`/`_composer_network_probe` directly.
+- Risk (level; mitigation or accepted-risk justification): low. The probe now shells out
+  to `composer` (already a hard runtime dependency of this same module, on the same PATH
+  `live_boot_available()` already checks) rather than opening a raw socket — strictly
+  more representative of the real operation, and explicitly bounded so a slow/hung
+  network reports `False` (skip) at worst, never a hang, matching the pre-existing
+  fail-closed contract of every other `*_available()` probe in this project (PA-0005).
+- Deliverables:
+  - [x] `_composer_network_probe()` replacing `_network_reachable()` — done
+  - [x] `_run()` wraps `subprocess.TimeoutExpired` in `LiveBootError` — done
+  - [x] `tests/test_labgen_conformance_live_boot_probe.py` (7 new tests) — done
+  - [x] `docs/bugs/BUG-0031-*.md`, `PA-0034`, `ERROR_LOG.md`, `CHANGELOG.md` — done
+  - [x] `requirements.md` — `FR-LAB-60` added — done
+- Effectiveness (assessed 2026-09-22): the new probe correctly reports `False` on a
+  simulated timeout, missing composer, and a real nonzero exit (unit tests, all
+  passing); it correctly reports `True` in this session's own sandbox, matching that
+  sandbox's real `composer diagnose`-confirmed connectivity. The existing live-boot
+  test suite (`tests/test_labgen_conformance_live_boot.py`,
+  `..._live_boot_mariadb.py`) was re-run end to end after the change and stayed green
+  (see this change's own bug report for the full pass counts and the honest note that
+  the originally reported hang could not be reproduced on demand in this sandbox).
+
 ### CC-LAB-0064 — orm_entity_bulk_assign (mass-assignment) module implementation, php_current emitter (2026-09-22)
 - Change: implements code generation for the `orm_entity_bulk_assign` sink
   family (one of the 20 new sink families `CC-LAB-0063`/`FR-LAB-58` added as

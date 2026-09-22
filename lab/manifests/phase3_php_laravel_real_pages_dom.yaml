@@ -1,0 +1,79 @@
+# Phase-3 php_laravel REAL-PAGE reproduction: the DOM-based XSS pages.
+#
+# Lane L-P3.3c-DOM (docs/LAB_IMPLEMENTATION_PLAN.md §4.3.6.4/§4.3.6.7). This
+# lane was explicitly OUT of the L-P3.3c-G1..G6 cutover's scope (D-open-2,
+# decided 2026-09-22: "a client-side sink class, not a migration, belongs in
+# its own lane") and is built here now that it has been separately
+# prioritized -- not a migration group, a brand-new module/shape (per D-open-2
+# itself), reproducing the two real pages exempted in
+# lab/ground-truth/migration-exemptions.yaml for exactly this reason:
+#
+#   - reviews.php   -> PFF-0007 (GET, `#author=` read from location.hash,
+#                                 written via .innerHTML with no escaping --
+#                                 puppy-fort-factory/VULNERABILITIES.md
+#                                 finding #6)
+#   - feedback.php  -> PFF-0008 (GET, `?ref=` read from location.search,
+#                                 written via .innerHTML with no escaping --
+#                                 VULNERABILITIES.md finding #7)
+#
+# Both are the shape's defining property: the tainted value never reaches the
+# server at all -- "a server-side scanner and the raw HTML both miss it too"
+# (VULNERABILITIES.md). The new `dom_html_sink` sink family and
+# `dom_text_content` op (lab/safety_matrix.yaml) express that: `raw_concat`
+# (reused) scores the vulnerable .innerHTML baseline VULNERABLE, and
+# `dom_text_content` (new) scores the .textContent-based secure twin SECURE.
+#
+# URLs: `route.path` keeps the real app's exact `.php` suffix (§4.3.6.6a),
+# exactly like every other real-page group -- T-LAB0.9's additive-only
+# regression gate treats a relocated PFF- case as build-breaking.
+#
+# Cell IDs: LABGEN-PLRP-DOM-<page-number>, `-SAFE` for the authored secure
+# twin (neither labels.json case has a secure counterpart; both are authored
+# here, same convention as G1/G3's numeric/auth twins).
+#
+# Verdicts are never asserted in a manifest; they are derived by
+# fuzzlab.labgen.verdict.verdict() from (transform, sink_context) against
+# lab/safety_matrix.yaml. tests/test_labgen_php_laravel_real_pages_dom.py
+# asserts, for each labeled cell, that the derived verdict equals the verdict
+# lab/ground-truth/labels.json already carries for that PFF- case -- read
+# from labels.json itself, never restated here as a literal.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # --- reviews.php / PFF-0007 --------------------------------------------
+  - cell_id: LABGEN-PLRP-DOM-0001
+    class: xss-dom
+    stack_profile: php_laravel
+    route: { method: GET, path: /reviews.php }
+    sink_context:
+      family: dom_html_sink
+      required_neutralizations: [html_tag_break]
+    transform: []
+
+  - cell_id: LABGEN-PLRP-DOM-0001-SAFE
+    class: xss-dom
+    stack_profile: php_laravel
+    route: { method: GET, path: /reviews.php }
+    sink_context:
+      family: dom_html_sink
+      required_neutralizations: [html_tag_break]
+    transform: [dom_text_content]
+
+  # --- feedback.php / PFF-0008 --------------------------------------------
+  - cell_id: LABGEN-PLRP-DOM-0002
+    class: xss-dom
+    stack_profile: php_laravel
+    route: { method: GET, path: /feedback.php }
+    sink_context:
+      family: dom_html_sink
+      required_neutralizations: [html_tag_break]
+    transform: []
+
+  - cell_id: LABGEN-PLRP-DOM-0002-SAFE
+    class: xss-dom
+    stack_profile: php_laravel
+    route: { method: GET, path: /feedback.php }
+    sink_context:
+      family: dom_html_sink
+      required_neutralizations: [html_tag_break]
+    transform: [dom_text_content]

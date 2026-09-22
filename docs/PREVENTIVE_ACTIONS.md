@@ -318,3 +318,32 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   prose (this plan doc's Status section) rather than mechanically enforced — caught
   before it recurred a second time by applying PA-0033's own rule proactively this time,
   rather than waiting for a review to catch it.
+- **PA-0034** — A capability probe that gates whether a real, potentially slow or
+  hanging operation runs (a `pytest.mark.skipif(not xxx_available(), ...)`-style guard,
+  or any equivalent pre-flight check) must exercise the **actual operation path** —
+  the same client/transport/binary the real, gated operation itself uses, doing the
+  smallest real instance of the same real work — never a different, easier-to-check
+  proxy for it (a raw `socket.create_connection` standing in for a real, proxy-aware
+  HTTPS client's request; a version-string check standing in for actually invoking the
+  tool; etc.). A raw TCP connect can succeed on a path (unproxied egress) the real
+  operation does not take (a required HTTPS proxy), so it answers a related but
+  different question than "will the real operation complete." This generalizes
+  PA-0025's fail-closed doctrine ("a wrapper's status conclusion must be independently
+  verified against what the real underlying thing actually did, never inferred from an
+  easier-to-observe stand-in") from tool-oracle *output* classification to pre-flight
+  *capability* probes specifically — a context PA-0025's own wording does not cover
+  (see `BUG-0031`'s recurrence review for why this is a new rule rather than a
+  stretching of PA-0025's stated scope). Every such probe must also enforce its **own**
+  bounded, explicit timeout on that real operation and report unavailable (never raise,
+  never hang) if it is exceeded — passing this probe is never, by itself, a guarantee
+  that every later real step of the operation it gates is also bounded: each of those
+  later steps (e.g. the real `composer install` a live-boot probe gates) must enforce
+  its own timeout independently, at the shared helper that runs it, not left to each
+  call site to remember. The PA-0002 sweep for this class checked every other
+  `*_available()`-style probe in `fuzzlab/` (`php_available`/`python_available` in
+  `tier0.py`, `sqlglot_available` in `mutation/semantics.py`, `mariadb_available` in
+  `live_boot.py`): each of those already directly tests the actual capability it gates
+  (a CLI binary on PATH, or an actual import-and-parse of the library in question), not
+  a proxy signal for it — only `live_boot_available()`'s network half
+  (`_network_reachable`, now `_composer_network_probe`) had this defect. (from
+  BUG-0031)

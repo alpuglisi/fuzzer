@@ -1,0 +1,23 @@
+{# Blade view body for a DOM-based XSS sink (L-P3.3c-DOM): the tainted value
+   is read AND written entirely client-side -- {{ dom_param_name }} never
+   reaches this (or any) server. Mirrors the real puppy-fort-factory page's
+   own <script> block exactly: read from location.{{ dom_location }}, then
+   assign to {{ dom_write_prop }} with no escaping of its own -- the cell's
+   transform alone decides whether that assignment is the unsafe innerHTML
+   form or the safe textContent form (a sink never escapes anything itself;
+   see modules.py's docstring, decision 2). #}
+<div id="{{ dom_target_id }}"></div>
+<script>
+(function () {
+{% if dom_location == 'hash' %}
+  var m = location.hash.match(/{{ dom_param_name }}=([^&]*)/);
+  var raw = m ? decodeURIComponent(m[1]) : null;
+{% else %}
+  var raw = new URLSearchParams(location.search).get('{{ dom_param_name }}');
+{% endif %}
+  if (raw) {
+    document.getElementById('{{ dom_target_id }}').{{ dom_write_prop }} =
+      '{{ dom_prefix }}' + raw + '{{ dom_suffix }}';
+  }
+})();
+</script>

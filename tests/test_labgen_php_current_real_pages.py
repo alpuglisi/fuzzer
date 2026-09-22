@@ -3,19 +3,23 @@ Ryder's Puppy Fort Factory's actual pages (`lab/manifests/phase0_real_pages_samp
 
 Proves the module inventory built for one illustrative SQLi pair (see
 `tests/test_labgen_php_current.py`) generalizes to real page shapes drawn
-from `puppy-fort-factory/VULNERABILITIES.md` and
-`lab/ground-truth/labels.json` (`PFF-0001`, `PFF-0004`, `PFF-0005`,
-`PFF-0006`), spanning two vulnerability classes and three sink-context
-families, without a wholly new per-page template each time -- only a
-handful of new source/transform/sink/complexity modules
-(`fuzzlab/labgen/modules/`) plus a per-page static-parameter profile
-(`fuzzlab.labgen.emitters.php_current._PAGE_PARAMS`).
+from `lab/ground-truth/labels.json` (`PFF-0001`, `PFF-0004`, `PFF-0005`,
+`PFF-0006`; cross-checked against `lab/VULNERABILITIES.md`, the generated
+vulnerability map -- `L-P3.3c-CUT` retired the hand-written
+`puppy-fort-factory/VULNERABILITIES.md` these pages used to cite, in favor
+of a map generated from the manifests plus `labels.json` itself, so it
+cannot drift from the cells it describes), spanning two vulnerability
+classes and three sink-context families, without a wholly new per-page
+template each time -- only a handful of new source/transform/sink/
+complexity modules (`fuzzlab/labgen/modules/`) plus a per-page static-
+parameter profile (`fuzzlab.labgen.emitters.php_current._PAGE_PARAMS`).
 
 Does not require the live containerized lab: this test only compares the
 rendered PHP's structure/logic against the pages' *documented* behavior
-(`puppy-fort-factory/VULNERABILITIES.md`), never runs it against a real
-database. Live regeneration-and-diff against the running container is
-separate, on-host work.
+(`lab/ground-truth/labels.json`, cross-checked against the generated
+`lab/VULNERABILITIES.md`), never runs it against a real database. Live
+regeneration-and-diff against the running container is separate, on-host
+work.
 """
 
 from __future__ import annotations

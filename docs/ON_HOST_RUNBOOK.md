@@ -44,8 +44,11 @@ live work) and the phase plans.
    denied for user 'root'`. If you see a DB error, check `./labctl.sh logs` and that
    `.env` was copied.
 
-   *Manual (bare LAMP) alternative:* follow `puppy-fort-factory/README.md` — it now
-   creates the `pff` user (never root) and `config/config.php` defaults to it.
+   *Manual (bare LAMP) alternative:* run `./deploy.sh` from the repo root — it
+   assembles the generated app (`fuzzlab.labgen.assemble`), runs `composer install`,
+   and copies the result into a web root (default `/var/www/html/pff-lab`; point your
+   vhost's DocumentRoot at `<dest>/public`). It creates the `pff` DB user (never
+   root) via `lab/sql/schema.sql`.
 
 4. **Reset to a clean DB** whenever you want a fresh run:
    ```bash
@@ -97,21 +100,23 @@ The lab's test accounts are `admin/admin123`, `alice/password1`, `bob/letmein`.
    ```
    Re-run per identity (`anonymous`, `alice`, …) to get results per identity. Expect
    `product.php?id` and `search.php?q` to be confirmed and the secure pages to stay
-   clean (`puppy-fort-factory/VULNERABILITIES.md` is the map).
+   clean (`lab/VULNERABILITIES.md`, generated, is the map).
 
 4. **Two-lab validation:** repeat Part C against a second lab (e.g. an external
    JWT-auth app) using `--host <that-host>` and its own saved credentials, to confirm
    dynamic login detection and per-host credentials across mechanisms (cookie vs JWT).
 
 > **Known, deliberate gap after the `L-P3.3c-CUT` cutover (D-open-1, decided
-> 2026-09-22 — `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.7):** `puppy-fort-factory/`
-> today serves 10 JS-rendered pages plus a JS-injected "Discover" nav, which exist
-> specifically to give the crawler above something a static spider provably cannot
-> see. No `labgen` emitter reproduces client-rendered pages, and the decision was to
-> accept losing this **live, on-host crawler-discoverability exercise** rather than
-> build JS-rendering into the generator (that would be new emitter capability, not a
-> migration). Once the generated lab is the only target, running Part C's crawl step
-> exercises server-rendered discovery only; there is no on-host equivalent of
+> 2026-09-22, cutover landed 2026-09-22 —
+> `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.7):** the retired hand-built
+> `puppy-fort-factory/` app used to serve 10 JS-rendered pages plus a JS-injected
+> "Discover" nav, which existed specifically to give the crawler above something a
+> static spider provably cannot see. No `labgen` emitter reproduces client-rendered
+> pages, and the decision was to accept losing this **live, on-host
+> crawler-discoverability exercise** rather than build JS-rendering into the
+> generator (that would be new emitter capability, not a migration). Now that the
+> generated lab is the only target, running Part C's crawl step exercises
+> server-rendered discovery only; there is no on-host equivalent of
 > "watch the spider find a JS-injected nav link" any more. This does not affect any
 > automated test: every consumer of the JS pages (`tests/test_labels_contract.py`,
 > `tests/test_auto.py`, `tests/test_oracle_browser.py`) reads `lab/ground-truth/`
@@ -234,16 +239,23 @@ build time, so a genuinely broken build now fails loudly instead of at run time.
 ### E.2 What was built (so you can trust/inspect it)
 
 - **Image (T3.1)** — `lab/web.Dockerfile` installs pcov (`pcov.enabled=1`,
-  `pcov.directory=/var/www/html`). `auto_prepend_file` is **single-valued**, so the WAF
-  and the coverage shim are chained through `puppy-fort-factory/includes/prepend.php`
-  (do **not** add a second `auto_prepend_file` line — the last one silently wins). Both
-  self-gate, so the default app and every ground-truth label are unchanged.
-- **Shim (T3.1/T3.4)** — `puppy-fort-factory/includes/cov.php` is a no-op unless a request
-  carries `X-Fzl-Cov`. When present it writes one JSON file per request to
+  `pcov.directory=/var/www/html`). Since `L-P3.3c-CUT`, the WAF and the coverage shim
+  are Laravel middleware in the generated app (`app/Http/Middleware/FzlWaf.php` then
+  `FzlCoverage.php`, registered in that order in `bootstrap/app.php` — order matters:
+  the WAF may block and exit a hostile request before the coverage shim instruments
+  it). Both self-gate, so the default app and every ground-truth label are unchanged.
+- **Shim (T3.1/T3.4)** — `FzlCoverage` (`app/Http/Middleware/FzlCoverage.php`, the
+  generated app's successor to the retired `puppy-fort-factory/includes/cov.php`) is a
+  no-op unless a request carries `X-Fzl-Cov`. When present it writes one JSON file per
+  request to
   `/tmp/fzl-cov/<id>`: `{"files": {path: [lines]}, "db_fault": bool, "db_error": "…"}`.
-  `db_fault` is captured **per request** from PHP's error state (PHP 8's default mysqli
-  throws on a SQL error → a fatal in `error_get_last()`), so there is no racy DB-log
-  tailing — the coverage and the fault share one correlation-keyed file.
+  `db_fault` is captured **per request** by catching an uncaught
+  `Illuminate\Database\QueryException` around the request (the migrated controllers go
+  through Laravel's query builder, `DB::table()`/`DB::select()`, whose wrapped SQL
+  errors surface this way — the Laravel equivalent of the retired shim's raw
+  `mysqli`/`error_get_last()` fatal), then re-thrown so Laravel's own exception
+  handler still renders its usual response. No racy DB-log tailing — the coverage and
+  the fault share one correlation-keyed file.
 - **Side channel** — `lab/compose.yaml` bind-mounts the host `${FZL_COV_DIR:-/tmp/fzl-cov}`
   into the container so fuzzlab reads back what the shim writes.
 - **Readers (T3.2/T3.4)** — `greybox/coverage.py::FileCoverageSource` and

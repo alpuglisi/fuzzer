@@ -194,7 +194,7 @@ def test_the_regression_gate_accepts_the_migrated_urls_and_rejects_idiomatic_one
     build-breaking *relocation*, so the idiomatic extension-less route Laravel
     would otherwise use fails the gate for every migrated case."""
     baseline = contract.GroundTruth(
-        target="puppy-fort-factory",
+        target="php_laravel",
         cases=[cases[case_id] for case_id in sorted(CELL_TO_CASE.values())],
     )
 

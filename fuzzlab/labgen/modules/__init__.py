@@ -634,12 +634,82 @@ class CrossFileRequireDepth(TemplateModule):
         super().__init__("cross_file_require", "depth", _DEPTH_ENV, "cross_file_require.php.j2")
 
 
+# --- L-P3.3c-DOM: DOM-based XSS (reviews.php/feedback.php) -----------------
+#
+# A genuinely different shape from every other one in this file: the tainted
+# value is read AND written entirely client-side (a URL fragment or
+# query-string parameter assigned to an element's `innerHTML` by embedded
+# JavaScript) and never reaches the server -- there is no PHP variable to
+# extract into, escape or bind. Registered here (unrendered by
+# `php_current`'s own `_MODULE_SET_BY_SHAPE`, exactly like L-P3.3c-G6's
+# `html_attribute_quoted_echo`/`sql_string_literal_like` before it) purely
+# for the shared minimal-pair vocabulary
+# (:mod:`fuzzlab.labgen.minimal_pair` classifies every emitter's composition
+# positions against this package's registries and raises for a name it
+# cannot find) -- `php_laravel` is the emitter that actually renders this
+# shape (docs/LAB_IMPLEMENTATION_PLAN.md's `L-P3.3c-DOM`).
+
+
+class DomUrlSource(TemplateModule):
+    """The (non-)source for a client-only DOM-XSS cell: no PHP variable is
+    extracted at all, because the tainted value never reaches the server.
+    Publishes ``value_expr = 'null'`` (a PHP placeholder no template
+    meaningfully reads) and ``bound=False`` only so this module still
+    satisfies every other source's context contract."""
+
+    def __init__(self) -> None:
+        super().__init__("dom_url_source", "source", _SOURCE_ENV, "dom_url_source.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = "null"
+        new_ctx.setdefault("bound", False)
+        new_ctx.setdefault("dom_write_prop", "innerHTML")
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class DomTextContentTransform(TemplateModule):
+    """The ``dom_text_content`` op: the client-side DOM write uses
+    ``Node.textContent`` instead of ``Element.innerHTML``. The DOM analogue
+    of ``html_entity_escape`` -- except there is no PHP-side call to make,
+    since the value never reaches PHP, so this flips a client-side write
+    mechanism (``dom_write_prop``) rather than wrapping ``value_expr``."""
+
+    def __init__(self) -> None:
+        super().__init__("dom_text_content", "transform", _TRANSFORM_ENV, "dom_text_content.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["dom_write_prop"] = "textContent"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class DomInnerhtmlEchoSink(TemplateModule):
+    """The DOM-XSS sink: a ``<script>`` block that reads a URL fragment or
+    query-string parameter and assigns it to ``dom_write_prop`` of a target
+    element -- ``innerHTML`` (vulnerable) or ``textContent`` (secure,
+    ``dom_text_content``), decided entirely by the cell's transform, exactly
+    like every other sink in this package never escaping anything itself.
+    Requires ``dom_location`` (``"hash"`` or ``"query"``), ``dom_param_name``,
+    ``dom_target_id``, ``dom_prefix`` and ``dom_suffix`` in the assembly
+    context -- render-only metadata a page profile supplies; there is no
+    safe default for which parameter/element a page reads and targets."""
+
+    def __init__(self) -> None:
+        super().__init__("dom_innerhtml_echo", "sink", _SINK_ENV, "dom_innerhtml_echo.php.j2")
+
+
 SOURCES: dict[str, Module] = {
     "get_param": GetParamSource(),
     "post_param": PostParamSource(),
     "read_stored_field": ReadStoredFieldSource(),
     # CC-LAB-0064: mass-assignment's whole-array source (vs. one named param).
     "all_post_params": AllPostParamsSource(),
+    # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
+    "dom_url_source": DomUrlSource(),
 }
 TRANSFORMS: dict[str, Module] = {
     "identity": IdentityTransform(),
@@ -658,6 +728,9 @@ TRANSFORMS: dict[str, Module] = {
     # orm_entity_bulk_assign rows).
     "unfiltered_body_update": UnfilteredBodyUpdateTransform(),
     "runtime_field_allowlist": RuntimeFieldAllowlistTransform(),
+    # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
+    "dom_text_content": DomTextContentTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -678,6 +751,9 @@ SINKS: dict[str, Module] = {
     "sql_string_literal_like": SqlStringLiteralLikeSink(),
     # CC-LAB-0064: mass-assignment's sink family.
     "orm_entity_bulk_assign": OrmEntityBulkAssignSink(),
+    # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
+    "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

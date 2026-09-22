@@ -1,10 +1,14 @@
 """Offline model of the lab WAF (Phase 8 T8.3, FR-MUT-3 seam).
 
-Mirrors the PHP lab WAF (`puppy-fort-factory/includes/waf.php`) from the **shared**
-`waf-rules.json`, so filter-transformation learning is testable offline without the live
-container. One ruleset, two consumers: the PHP filter enforces it on the wire; this
-models it here. Live, the same learner (T8.3 `learn.py`) observes real canary round-trips
-through the proxy/HTTP seam instead of this model.
+Mirrors the Laravel lab WAF middleware (`FzlWaf`, in the `php_laravel` stack skeleton)
+from the **shared** `waf-rules.json`, so filter-transformation learning is testable
+offline without the live container. One ruleset, two consumers: the lab middleware
+enforces it on the wire; this models it here. Live, the same learner (T8.3 `learn.py`)
+observes real canary round-trips through the proxy/HTTP seam instead of this model.
+
+`lab/waf-rules.json` (re-pointed here by `L-P3.3c-CUT`, `CC-LAB-NNNN`, from the
+hand-built `puppy-fort-factory/config/waf-rules.json`) is now the sole source of truth
+for the ruleset, alongside `lab/safety_matrix.yaml` and `lab/compose.yaml`.
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _LAB_RULES = (Path(__file__).resolve().parents[2] /
-              "puppy-fort-factory" / "config" / "waf-rules.json")
+              "lab" / "waf-rules.json")
 
 
 def php_pattern_to_regex(pattern: str) -> re.Pattern:

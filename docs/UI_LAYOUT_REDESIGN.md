@@ -1,6 +1,7 @@
 # Web UI Layout Redesign
 
-Component: **UI** (#12, `fuzzlab/web/`) · Status: `[proposed]` · Last updated: 2026-09-21
+Component: **UI** (#12, `fuzzlab/web/`) · Status: `[R0, R1, R2, R3 built]` ·
+Last updated: 2026-09-22
 
 Related: `docs/UI_REVAMP_PLAN.md` (the feature revamp, Phases 0–4), `ARCHITECTURE.md` #12,
 `DECISIONS_AND_ROADMAP.md` (D11 local web app). This doc redesigns the **layout / IA**;
@@ -185,13 +186,39 @@ in-page state persist in `localStorage`.
 
 - **R0 — shell + tokens (no behavior change).** Add `shell.html` (sidebar + top context bar),
   `tokens.css` (theme + density), and extract shared JS (DataTable, message editor, list→
-  detail, prefs). Render the *existing* sections inside the shell first.
+  detail, prefs). Render the *existing* sections inside the shell first. `[built; CC-UI-0021]`
 - **R1 — routes per section + Overview.** Split `index.html` into per-section templates behind
-  real routes; add the Overview dashboard. Retire the hash-tabs.
+  real routes; add the Overview dashboard. Retire the hash-tabs. `[built; CC-UI-0025, FR-UI-9]`
+  — real routes (`/`, `/launch`, `/proxy`, `/runs`, `/ml`, `/diagnostics`; `/runs/{id}`
+  unchanged), each its own template under `templates/sections/` extending `base.html`; the
+  sidebar's `href`s mark the active section server-side (`section` context var, no client
+  router); `app.js`'s hash-tab switching (`initTabs`) removed. The Overview dashboard
+  (`results.overview_summary()`) ships the fixed-layout KPI row + recent-runs table + quick
+  actions from §11's "lean to fixed first" call — composable widgets remain a later option.
+  Findings-by-category (not "by severity" — see FR-UI-9) is a horizontal chip row for now;
+  the segmented-bar/sparkline treatment described in §6 is left for a follow-up pass once a
+  charting story exists (R3+/Phase 4).
 - **R2 — Findings workbench.** Faceted filters + saved views over the existing `finding`/
-  `attempt` data; wire "send to Repeater / open request".
+  `attempt` data; wire "send to Repeater / open request". `[built; CC-UI-0026, FR-UI-10]`
+  — `/findings` (facet plane + table) and `/findings/{id}` (detail: location, linked
+  attempt/candidate, full evidence), both server-rendered per R1's route pattern;
+  `results.list_findings/finding_facets/finding_detail` (category derived by joining out
+  to the linked candidate's audit-rule evidence — the store has no `category` column on
+  `finding`); saved views are per-viewer `localStorage` (name -> querystring); "send to
+  Repeater" reuses the existing `RepeaterController.create_tab` write path History's
+  flow-to-Repeater pivot already established, reconstructing a raw request from the
+  finding's `url`/`method`/`param` + `evidence['payload']` (no raw bytes are stored for a
+  finding) via `results.build_finding_raw_request()`.
 - **R3 — Proxy workbench rebuild.** Re-lay Proxy on the shared message editor + resizable
-  panes + sub-nav (folding in Phase 2.1–2.4).
+  panes + sub-nav (folding in Phase 2.1–2.4). `[built; CC-UI-0027, FR-UI-11]` — a
+  Burp/ZAP-style sub-nav (History / Intercept / Repeater / Scope & Match-Replace as
+  sibling panels of the one `/proxy` document, `?tab=` deep-linkable), a shared Pretty/
+  Raw/Hex message-editor component wrapping every raw-bytes surface, and resizable
+  list|detail split panes for History/Intercept; every id the existing Proxy JS/routes
+  depend on is unchanged. The two named engineering gaps (response-intercept hook;
+  live/byte-exact replay) were confirmed already closed by prior work (CC-PROXY-0015;
+  `Repeater.send`'s raw-path forwarding) rather than left open — see new engine-level
+  coverage in `tests/test_proxy_repeater.py`.
 - Phases **3 (ML)** and **4 (Diagnostics)** then land as sections in the shell rather than new
   top tabs.
 

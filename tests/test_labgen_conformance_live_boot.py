@@ -378,3 +378,48 @@ def test_live_boot_g4_manifest_stored_bio_round_trips_write_then_read() -> None:
         assert "&lt;script&gt;alert(&#039;secure-g4&#039;)&lt;/script&gt;" in read_resp2.body, (
             read_resp2.body[:800]
         )
+
+
+@pytest.mark.slow
+def test_live_boot_dom_manifest_serves_reviews_and_feedback() -> None:
+    """`reviews.php`/`feedback.php` (L-P3.3c-DOM, `PFF-0007`/`PFF-0008`): the
+    app boots and both real pinned URLs return a real HTTP 200 whose body
+    embeds the client-side `<script>` block this generator claims to
+    reproduce -- the read AND the write happen entirely in that script, so
+    (unlike every other live-boot test in this module) there is no server
+    round trip to differentiate on. This proves reachability and the
+    presence of the vulnerable (`innerHTML`) vs. secure (`textContent`)
+    JS-assignment shape, never a JS-*execution* proof -- headless,
+    JS-executing crawling is a deliberate, documented gap (D-open-1,
+    `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.7; `docs/ON_HOST_RUNBOOK.md`)."""
+    manifest = load_manifest("lab/manifests/phase3_php_laravel_real_pages_dom.yaml")
+    emitter = LaravelEmitter()
+    cells = {c.cell_id: c for c in manifest.cells}
+
+    with LiveBootHarness(emitter, list(manifest.cells)) as harness:
+        vuln_reviews_url = served_url_for(cells["LABGEN-PLRP-DOM-0001"])
+        secure_reviews_url = served_url_for(cells["LABGEN-PLRP-DOM-0001-SAFE"])
+        vuln_feedback_url = served_url_for(cells["LABGEN-PLRP-DOM-0002"])
+        secure_feedback_url = served_url_for(cells["LABGEN-PLRP-DOM-0002-SAFE"])
+        assert vuln_reviews_url == "/reviews.php"
+        assert vuln_feedback_url == "/feedback.php"
+
+        resp = harness.get(vuln_reviews_url)
+        assert resp.status == 200, resp.body[:500]
+        assert "location.hash" in resp.body
+        assert ".innerHTML =" in resp.body
+
+        resp = harness.get(secure_reviews_url)
+        assert resp.status == 200, resp.body[:500]
+        assert ".textContent =" in resp.body
+        assert ".innerHTML =" not in resp.body
+
+        resp = harness.get(vuln_feedback_url)
+        assert resp.status == 200, resp.body[:500]
+        assert "location.search" in resp.body
+        assert ".innerHTML =" in resp.body
+
+        resp = harness.get(secure_feedback_url)
+        assert resp.status == 200, resp.body[:500]
+        assert ".textContent =" in resp.body
+        assert ".innerHTML =" not in resp.body

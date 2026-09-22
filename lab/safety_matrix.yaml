@@ -674,3 +674,36 @@ entries:
     sink_family: webhook_signature_verification
     effect: neutralises
     neutralizes: [weak_signature_comparison]
+
+  # --- L-P3.3c-DOM: DOM-based XSS (originally puppy-fort-factory/reviews.php,
+  # feedback.php -- VULNERABILITIES.md findings #6/#7) ---------------------
+  # `dom_html_sink`: a genuinely new family, not a rendering of `html_body`.
+  # Every family above describes a value that reaches a *server-rendered*
+  # HTML/SQL position; here the tainted value (a URL fragment or query-string
+  # parameter) is read AND written entirely client-side by embedded
+  # JavaScript, via `Element.innerHTML`, and never reaches the server at all
+  # -- reviews.php's own comment states it plainly: "a server-side scanner
+  # and the raw HTML both miss it too." The required concern is still
+  # `html_tag_break` (an unescaped value can open a new tag in the DOM the
+  # same way it can in server-rendered HTML) -- reached through a sink with
+  # no server-side rendering step, which is what makes it a new family rather
+  # than a new rendering of `html_body`.
+  #
+  # `raw_concat` is reused (a genuinely matching baseline op -- no
+  # transformation at all, the same meaning it has at every other family in
+  # this file).
+  - op: raw_concat
+    sink_family: dom_html_sink
+    effect: no_effect
+
+  # `dom_text_content`: the client-side write uses `Node.textContent`
+  # instead of `Element.innerHTML`. A new op, not a rendering of
+  # `html_entity_escape` -- there is no PHP-side escaping function to apply
+  # at all (the value never reaches PHP); the DOM analogue of "escape it" is
+  # "never let the browser parse it as markup in the first place." The
+  # browser never interprets a `textContent` assignment as HTML, so this
+  # fully closes `html_tag_break` at this sink.
+  - op: dom_text_content
+    sink_family: dom_html_sink
+    effect: neutralises
+    neutralizes: [html_tag_break]

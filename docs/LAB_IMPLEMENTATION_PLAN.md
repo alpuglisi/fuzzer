@@ -1056,8 +1056,8 @@ invariant.
 | `L-P3.3c-G4` | stored second-order pair (`edit_profile` → `profile`) | L-P3.3b, L-P2.1, L-P2.3 | G1–G3, G5, G6 |
 | `L-P3.3c-G5` | escaped-echo forms (`contact`, `newsletter`) | L-P3.3b | G1–G4, G6 |
 | `L-P3.3c-G6` | `search.php` + the `raw_concat × html_attribute_quoted` matrix row | L-P3.3b, L-P1.2b | G1–G5 |
-| `L-P3.3c-DOM` | DOM-XSS sink class (`reviews`, `feedback`) | **new family work — not L-P3.3b** | deferred backlog, not scheduled with L-P3.3c (D-open-2, decided 2026-09-22: out of cutover scope) |
-| `L-P3.3c-CUT` | the atomic cutover | G1–G6 (done) + the parity gate | — (strictly last; does not wait on DOM or Layer B, per D-open-1/D-open-2) |
+| `L-P3.3c-DOM` | DOM-XSS sink class (`reviews`, `feedback`) | **new family work — not L-P3.3b** | **BUILT** (`CC-LAB-0066`/`FR-LAB-61`, 2026-09-22) — separately prioritized after D-open-2's deferral; no longer backlog |
+| `L-P3.3c-CUT` | the atomic cutover | G1–G6 (done) + the parity gate | **DONE** (`CC-LAB-0067`/`FR-LAB-62`, 2026-09-22) — see §4.3.6.5/§4.3.6.6 |
 
 G3 and G4 name L-P2.2 (`identity_session.py`) and L-P2.1
 (`identity.py`/`lab/identities/identities.yaml`) as real dependencies,
@@ -1210,6 +1210,20 @@ of component 01-target-lab:
 - `docs/ARCHITECTURE.md` (#1 target lab) and `README.md`, per 4.3.6.5.
 - One `CHANGELOG.md` line for the cutover.
 
+**Update, 2026-09-22 (`CC-LAB-0067`/`FR-LAB-62`): done.** `L-P3.3c-CUT` landed as
+two commits per §4.3.6.6 point 4 (re-pointing with the fixture still present, then a
+second, separate commit doing only the `git rm -r puppy-fort-factory/`), both green
+against the full fast suite plus the live-boot slow suite. Concretely: `lab/waf-rules.
+json`, `lab/sql/schema.sql`, `lab/VULNERABILITIES.md` (generated,
+`fuzzlab.labgen.vuln_map`), the `FzlWaf`/`FzlCoverage`/`WafFilter` Laravel middleware
+(the `includes/waf.php`/`includes/cov.php` successors), `fuzzlab.labgen.assemble`
+(the new real-build entry point `lab/web.Dockerfile`'s `gen` stage and `deploy.sh`
+both call), `lab/compose.yaml`/`lab/web.Dockerfile`/`deploy.sh` re-pointed,
+`fuzzlab/mutation/filtermodel.py` re-pointed, `labels.json`/`injection-points.json`'s
+`target` changed to `"php_laravel"`, the five named tests updated, and the docs listed
+above updated. The cutover coverage gate re-confirmed green (14 covered + 2 exempted,
+0 uncovered) after the deletion commit.
+
 #### 4.3.6.7 Open decisions for the user
 
 Two questions here were scope decisions, not evidence questions, and were
@@ -1287,6 +1301,17 @@ label strings in the app source itself (labels live only in
 table. **No new pages or cases have been added since this plan was
 written. Layer A is closed** — 13 done + 1 exempt + 2 deferred = 16,
 matching `labels.json` exactly. No `G7…Gn` lanes are dispatched.
+
+**Update, 2026-09-22 (`CC-LAB-0066`/`FR-LAB-61`): built.** `L-P3.3c-DOM`
+was separately prioritized and built for real, per this decision's own
+terms ("to be picked up as its own lane whenever prioritized") — not a
+reversal of the decision that it was out of the *cutover's* scope, which
+still holds (this lane's build did not touch `L-P3.3c-CUT` or wait on it).
+`PFF-0007`/`PFF-0008`'s exemption entries are now removed from
+`lab/ground-truth/migration-exemptions.yaml`: both cases are covered by a
+real `php_laravel` cell. The atomic cutover itself has since executed too
+(`L-P3.3c-CUT`, `CC-LAB-0067`/`FR-LAB-62`): `puppy-fort-factory/` is deleted
+and the generator is the sole source of the PHP target lab.
 
 ### 4.4 Cross-cutting: `stack` field + fingerprint-independence gate
 
@@ -1520,8 +1545,8 @@ either condition changes.
 | L-P3.3c-G4 | stored second-order pair: `edit_profile` → `profile` | L-P3.3b, L-P2.1, L-P2.3 | 3 | M — one `stored_second_order` cell, not two pages |
 | L-P3.3c-G5 | escaped-echo forms: `contact`, `newsletter` | L-P3.3b | 3 | S |
 | L-P3.3c-G6 | `search.php` (3 sinks) + the missing `raw_concat × html_attribute_quoted` matrix row | L-P3.3b, L-P1.2b | 3 | L — the only sub-lane that edits `lab/safety_matrix.yaml`; serialize it against any other matrix-touching lane |
-| L-P3.3c-DOM | DOM-XSS sink class: `reviews`, `feedback` | **new capability, not L-P3.3b** | — | L — D-open-2 decided 2026-09-22 (out of cutover scope); deferred backlog, dispatch only if separately prioritized, not part of L-P3.3c's wave |
-| L-P3.3c-CUT | atomic cutover: re-home Layer-C assets, re-point consumers, delete the fixture | G1–G6 (done) + the parity gate green | 4 | Strictly last; separate revertable commit (§4.3.6.5/4.3.6.6); does not wait on L-P3.3c-DOM or Layer B reproduction (D-open-1/D-open-2 decided 2026-09-22) |
+| L-P3.3c-DOM | DOM-XSS sink class: `reviews`, `feedback` | **new capability, not L-P3.3b** | — | **BUILT** (`CC-LAB-0066`/`FR-LAB-61`, 2026-09-22) — D-open-2's deferral was lifted once this lane was separately prioritized; new `dom_html_sink` safety-matrix family + `dom_text_content` op, both real pages served at their real URLs, live-boot proof passed |
+| L-P3.3c-CUT | atomic cutover: re-home Layer-C assets, re-point consumers, delete the fixture | G1–G6 (done) + the parity gate green | 4 | **DONE** (`CC-LAB-0067`/`FR-LAB-62`, 2026-09-22) — landed as two commits (re-pointing, then the fixture deletion); did not wait on L-P3.3c-DOM or Layer B reproduction (D-open-1/D-open-2 decided 2026-09-22) |
 | L-P3.4 | `stack` field + fingerprint-gate wiring (§4.4) | any 2 of {L-P3.1, L-P3.2, L-P3.3a} | 2 | Needs a second stack name to exist; the gate half needs exactly two stacks landed, not all three |
 
 **Wave 1 (12 lanes, zero dependencies — dispatch all of them now):** L-P0.9,

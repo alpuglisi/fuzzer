@@ -13,6 +13,71 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- Process: reconciled three independently-diverged lines forked from `a341e55`
+  (`origin/main`, `claude/vuln-corpus-expansion-zjl1iw`, and this session's own
+  `claude/trusting-noether-heon0n`) into one branch, `reconcile-all-lines`, built
+  from `claude/vuln-corpus-expansion-zjl1iw` (which had already reconciled itself
+  against `main`) with `claude/trusting-noether-heon0n` merged in on top. Kept:
+  the executed `L-P3.3c-CUT` atomic cutover (`puppy-fort-factory/` deleted, lab
+  re-pointed at the generator) and `L-P3.3c-DOM` (DOM-XSS sink class), both
+  renumbered — `CC-LAB-0059/0060/0061` → `CC-LAB-0065/0066/0067`,
+  `FR-LAB-56/57/58` → `FR-LAB-60/61/62`, `BUG-0029` → `BUG-0031`, `PA-0032` →
+  `PA-0034` (the originals of each were already taken by `vuln-corpus-
+  expansion-zjl1iw`'s own, unrelated content of the same numbers). Discarded as
+  duplicates (identical or superseded code already present on the merge base):
+  the M8/M10 oracle mechanisms (byte-identical, already correctly attributed as
+  `CC-FUZZ-0023`/`0024`) and the single-file `app.js`/`app.css` R0-R3 UI
+  rebuild (superseded by the already-integrated per-section MPA UI, U0-U6) —
+  before discarding the UI, ported the one genuine capability gap found:
+  `RepeaterController.create_from_finding` now reconstructs a finding's
+  "send to Repeater" request with the oracle's recorded `evidence['payload']`
+  and the finding's own run's target (`results.build_finding_raw_request`),
+  not just a bare, valueless param. Discarded outright (a real, but
+  independently-reinvented, code choice — the already-landed line's own
+  direct-call implementation in `greybox/run.py`/`catalog.record_variant` was
+  kept instead): this session's separate `fuzzlab/scheduler/variants.py`
+  candidate-source module for the same mutation-variant-into-attempt-path
+  wiring, and its two dedicated test files. Kept additively (no real
+  collision, distinct registry keys/dict entries): the site-architecture
+  corpus expansion and `orm_entity_bulk_assign` mass-assignment codegen lane.
+  Full bookkeeping sweep found and fixed one further stale/duplicate spot the
+  above renumbering missed (a second, orphaned `FR-MUT-8` entry in
+  `docs/components/09-mutation-engine/requirements.md`, and several
+  in-source-comment cross-references to the old `CC-LAB`/`FR-LAB`/`BUG`/`PA`
+  numbers in `fuzzlab/labgen/{assemble,vuln_map}.py`,
+  `fuzzlab/labgen/conformance/live_boot.py`, and their tests). Verified
+  clean: no duplicate `CC-<CODE>-NNNN`/`FR-<CODE>-N`/`PA-NNNN` headers or
+  `BUG-NNNN` filenames repo-wide, `puppy-fort-factory/` genuinely deleted
+  with zero remaining live-path references (compose/deploy/Dockerfile/
+  `filtermodel.py` all comment-only historical mentions), the cutover
+  coverage gate green, the fast suite (1769 passed, 8 skipped, 16 deselected)
+  and the live-boot + MariaDB slow suite (12 passed) both green post-merge.
+- LAB: `L-P3.3c-CUT` — executed the atomic cutover (commit 1 of 2): re-homed the WAF
+  ruleset/DB schema/coverage-and-WAF shims/vulnerability map off the hand-built
+  `puppy-fort-factory/` app and onto `lab/`-owned locations and a new
+  `fuzzlab.labgen.assemble` real-build entry point (Laravel middleware
+  `FzlWaf`/`FzlCoverage`, backed by framework-free `WafFilter`; generated
+  `lab/VULNERABILITIES.md`), re-pointed `lab/compose.yaml`/`lab/web.Dockerfile`/
+  `deploy.sh`/`fuzzlab/mutation/filtermodel.py`, and updated ground truth's `target`
+  metadata and the five affected tests — with `puppy-fort-factory/` still present and
+  the full test suite green, so the fixture-deletion commit that follows is a clean,
+  separately revertable step. CC-LAB-0067, FR-LAB-8/FR-LAB-62.
+- LAB: `L-P3.3c-CUT` — deleted `puppy-fort-factory/` (commit 2 of 2), now that the
+  generator is the single source of the PHP target lab and the cutover coverage gate
+  re-confirms 100% covered-or-exempted with the directory gone. CC-LAB-0067.
+- Docs: closed decision **D21** (`docs/DECISIONS_AND_ROADMAP.md`) — formalized
+  the already-shipped "per-project SQLite files + small global config DB"
+  storage layout as settled, closing out a stale "decide at Phase 0" deferred
+  item noticed during a change-control audit. No code change.
+- LAB: built lane L-P3.3c-DOM for real (`reviews.php`/`feedback.php`'s DOM-based XSS,
+  `PFF-0007`/`PFF-0008`) — explicitly deferred out of the L-P3.3c-G1..G6 cutover's scope
+  (D-open-2) and now separately prioritized. New `dom_html_sink` safety-matrix family +
+  `dom_text_content` op, new `dom_url_source`/`dom_text_content`/`dom_innerhtml_echo`
+  modules (registered in both `php_current` and `php_laravel` for the shared minimal-pair
+  vocabulary, rendered only by `php_laravel`), a new 4-cell manifest, both real pages
+  served at their real `.php` URLs, the two `PFF-` cases removed from
+  `migration-exemptions.yaml` (now covered, not exempt), and a real live-boot proof.
+  CC-LAB-0066/FR-LAB-61.
 
 - LAB: implemented code generation for `orm_entity_bulk_assign`
   (mass-assignment, registry-only since `CC-LAB-0063`/`FR-LAB-58`) in
@@ -470,6 +535,23 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   distinguishing original-backlog UI lanes from infrastructure scope pulled
   in by adopting the authoritative UI plan. Still plan-only — no lane
   executed.
+- LAB: fixed `live_boot_available()`'s network-reachability probe, which tested a bare
+  raw-socket TCP connect instead of the actual, proxy-aware composer-driven Packagist
+  round trip `composer install` itself performs — in a sandbox where real HTTPS only
+  completes through a configured proxy, the raw-socket probe could report "available"
+  without predicting whether the real, gated operation would complete in bounded time,
+  letting a live-boot test hang instead of pass/skip. Replaced with
+  `_composer_network_probe()` (a real, bounded `composer show -a` round trip); `_run()`
+  now wraps a `subprocess.TimeoutExpired` from any pipeline step in a clear
+  `LiveBootError` instead of letting it propagate uncaught. `CC-LAB-0065`/`FR-LAB-60`,
+  `BUG-0031`, `PA-0034`.
+- Docs: added `docs/VULN_CORPUS_EXPANSION_PLAN_SITE_ARCHETYPES.md` — a
+  proposed extension to `docs/VULN_CORPUS_EXPANSION_PLAN.md` that sources
+  corpus collection from concrete popular-website categories and their
+  real architectures/tech stacks (rather than a generic feature catalog
+  alone), reusing the base plan's Phase 3 CWE-mapping/pair-manufacturing/
+  validation methodology unchanged. **Planning only — not executed**; per
+  explicit instruction, dispatch awaits separate human go-ahead.
 - Research: Phase 3 CWE mapping for the "file handling" corpus cell
   (`docs/research/corpus-examples/file-handling/{php,node,python}/manifest.yaml`,
   12 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each

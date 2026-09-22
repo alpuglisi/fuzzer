@@ -15,6 +15,7 @@ listener but sends nothing until a proxied client drives in-scope traffic throug
 
 from __future__ import annotations
 
+import json
 import threading
 from dataclasses import dataclass, field
 from typing import Any
@@ -341,43 +342,42 @@ class RepeaterController:
                                raw.decode("latin-1", "replace"), use_tls=use_tls)
 
     def create_from_finding(self, finding_id: int) -> dict[str, Any] | None:
-        """Seed a tab from a confirmed finding's location (U2/CC-UI-0029, R-07's
-        "send to Repeater / open request" pivot for the Findings workbench).
+        """Seed a tab from a finding's location + oracle-recorded payload (U2/
+        CC-UI-0029, R-07's "send to Repeater" pivot for the Findings workbench).
 
         Unlike `create_from_flow`, `finding`/`attempt` don't persist raw bytes
-        (only proxy flow history does) -- this reconstructs a minimal, best-effort
-        raw request from the finding's own `url`/`method`/`param` (already-stored,
-        non-secret fields) against the configured target host. It is never a
-        byte-exact replay of the original traffic; the tab name says so.
+        (only proxy flow history does) -- this reconstructs a request from the
+        finding's own `url`/`method`/`param` plus the oracle's recorded
+        `evidence['payload']` (most confirming strategies record one — see
+        `oracle/strategies.py`) via :func:`results.build_finding_raw_request`, against
+        the finding's own run's target (falling back to the configured target host).
+        ``None`` if the finding (or the store) does not exist. It is never a
+        byte-exact replay of the original traffic.
         """
         from fuzzlab.web import results
         thread_store = self._thread_store()
         if thread_store is None and not results.store_exists(self._path()):
             return None
-        from urllib.parse import urlparse
-
         from fuzzlab.core.store import Store
         own = thread_store or Store(self._path())
         try:
             row = own.conn.execute(
-                "SELECT url, method, param FROM finding WHERE id=?", (finding_id,)
-            ).fetchone()
+                "SELECT f.url, f.method, f.param, f.evidence, t.base_url "
+                "FROM finding f LEFT JOIN target t ON t.run_id = f.run_id "
+                "WHERE f.id=?", (finding_id,)).fetchone()
+            if row is None:
+                return None
+            try:
+                evidence = json.loads(row["evidence"]) if row["evidence"] else {}
+            except (ValueError, TypeError):
+                evidence = {}
         finally:
             if own is not thread_store:
                 own.close()
-        if row is None:
-            return None
-        parsed = urlparse(self.cfg.get("target_base_url", "") or "")
-        host = parsed.hostname or "127.0.0.1"
-        use_tls = parsed.scheme == "https"
-        port = parsed.port or (443 if use_tls else 80)
-        method = (row["method"] or "GET").upper()
-        path = row["url"] or "/"
-        if row["param"] and method == "GET" and "?" not in path:
-            path = f"{path}?{row['param']}="
-        raw = f"{method} {path} HTTP/1.1\r\nHost: {host}\r\n\r\n"
-        return self.create_tab(f"finding #{finding_id} (reconstructed)", host, port,
-                               raw, use_tls=use_tls)
+        base_url = row["base_url"] or self.cfg.get("target_base_url", "")
+        raw, host, port, use_tls = results.build_finding_raw_request(
+            row["url"], row["method"], row["param"], evidence.get("payload", ""), base_url)
+        return self.create_tab(f"finding #{finding_id}", host, port, raw, use_tls=use_tls)
 
     def send(self, tab_id: int, raw: str | None = None) -> dict[str, Any] | None:
         """Replay a tab (optionally edited); returns the raw response as text."""

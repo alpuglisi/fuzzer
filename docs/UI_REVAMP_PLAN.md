@@ -2,6 +2,12 @@
 
 Component: **UI** (#12, `fuzzlab/web/`) · Status: `[proposed]` · Last updated: 2026-09-21
 
+> **Layout note (2026-09-22):** the companion `docs/UI_LAYOUT_REDESIGN.md` R0 and R1 have
+> shipped — the panel is now a multi-page app with real per-section routes and an Overview
+> dashboard (CC-UI-0025, FR-UI-9) instead of the single hash-tab document this plan's Phase
+> 0.2 originally described. The feature phases below (1–4) are unaffected: they land as
+> further sections/routes in that same shell.
+
 Related: `ARCHITECTURE.md` #11 (proxy), #12 (diagnostics/UI), #13 (plugins);
 `DECISIONS_AND_ROADMAP.md` (D2, D5, D11, D14, D15); `components/12-diagnostics-and-ui/`.
 
