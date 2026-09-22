@@ -195,6 +195,10 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
         "target_literal": "{ theme: 'light', notifications: true }",
     },
     "object_property_bulk_set": {"value_expr": "mergedPreferences"},
+    # CC-LAB-0076: ReDoS.
+    "unescaped_regex_construct": {"value_expr": "searchTerm"},
+    "regex_escape_construct": {"value_expr": "searchTerm"},
+    "regex_highlight_match": {"value_expr": "highlightRegex", "content_literal": "'x'"},
 }
 
 

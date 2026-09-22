@@ -1,0 +1,7 @@
+// regex_highlight_match (JS/node_express-specific sink family,
+// CC-LAB-0076): highlights matches of a constructed RegExp inside fixed
+// content and responds with the result. Vocabulary-only registration in
+// this PHP-oriented package -- node_express is the emitter that actually
+// renders it (see this project's L-P3.3c-DOM/CC-LAB-0070 precedent for the
+// same "registered here, rendered elsewhere" shape).
+echo preg_replace('/' . {{ value_expr }} . '/i', '<mark>$0</mark>', $content);

@@ -3,6 +3,86 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0025 — Build the M1 timing-differential ReDoS oracle mechanism (`RegexDosStrategy`) (2026-09-22)
+- Change: built `RegexDosStrategy` (`fuzzlab/oracle/strategies.py`), the
+  `("regular-expression", "redos")` confirmation strategy
+  `docs/architecture/oracle-confirmation.md` previously listed only as
+  deferred ("could use M1 timing later"). Companion change to
+  `CC-LAB-0076` (`docs/components/01-target-lab/change-control.md`), whose
+  `node_express` ReDoS lab cells needed a real confirmation mechanism.
+  - Registered `category = "regular-expression"` (the reference-folder name
+    the oracle-confirmation doc's own "out of scope" list already used),
+    `vuln_class = "redos"`, `mechanism = "differential-timing"` (M1); added
+    to `default_strategies()` and `_CATEGORY_TO_CLASS`.
+  - This is a genuinely new M1 *variant*, not a reuse of the existing
+    `ConfirmationStrategy._confirm_timing` helper (already shared by
+    `SqliTimingStrategy`/`CommandInjectionStrategy`) with a new template
+    list: `_confirm_timing`'s templates each embed an explicit,
+    attacker-*requested* delay (`SLEEP({d})`/`sleep {d}`) it checks the
+    target both exceeds AND tracks; a ReDoS payload requests no duration at
+    all (the blowup is an emergent property of the target's own content,
+    which the strategy neither sees nor controls). `RegexDosStrategy`
+    instead escalates across `_REDOS_TEMPLATES` -- several independent,
+    single-nesting-level classic catastrophic-backtracking shapes -- and
+    confirms when **at least two** independently clear a robust-baseline
+    threshold (`Baseline.exceeds`, reused from `fuzzlab/oracle/baseline.py`,
+    with `floor`/`k` overridden per-strategy to this mechanism's own
+    bounded, tens-to-low-hundreds-of-milliseconds probe magnitude rather
+    than `_confirm_timing`'s multi-second-tuned defaults). Full design
+    rationale, including the nesting-depth-escalation alternative that was
+    calibrated and explicitly rejected as unsafely explosive, is in
+    `docs/architecture/oracle-confirmation.md`'s new "`regular-expression`
+    (ReDoS, CWE-1333)" section and the class's own docstring.
+  - `docs/architecture/oracle-confirmation.md` updated: new section
+    describing the built mechanism (moved out of the "Out of scope" list at
+    the bottom, which is updated to say so).
+- Impact (other components / project): additive only -- one new strategy
+  class, two registry entries (`default_strategies()`,
+  `_CATEGORY_TO_CLASS`), no existing strategy's behavior changed. Consumed
+  by `CC-LAB-0076`'s `node_express` ReDoS cells as the class this shape
+  needs when scanned live; not yet wired into any live scanning run against
+  an external target, and not wired into `fuzzlab/harness/multitarget.py`
+  (both out of this change's scope).
+- Risk (level; mitigation or accepted-risk justification): Medium,
+  documented plainly rather than understated. Unlike every other M1 use in
+  this file (SQLi/command-injection, each of which supplies its own exact
+  requested delay), this mechanism's confirmation is inherently
+  probabilistic against an arbitrary black-box target: it can only detect
+  ReDoS when the target's own content happens to contain a run of the
+  character class one of `_REDOS_TEMPLATES` targets, which the strategy has
+  no way to know in advance. Mitigated by using several templates
+  targeting different common run shapes (letters, digits, an alternation)
+  to raise the odds, and by stating this limitation explicitly in the
+  class's own docstring and in the architecture doc rather than presenting
+  this mechanism as equivalent-confidence to the SQLi/cmdi M1 uses. The
+  probe-magnitude side of the risk (an uncalibrated timing probe either
+  never firing or blowing up unboundedly against a real target) is
+  mitigated by the `floor`/`k` calibration recorded in `CC-LAB-0076` and by
+  every template in `_REDOS_TEMPLATES` being single-nesting-level only
+  (nesting-depth escalation was calibrated and rejected specifically
+  because of its unbounded-blowup risk).
+- Deliverables:
+  - [x] `RegexDosStrategy` class + `_REDOS_TEMPLATES` — done
+  - [x] Registered in `default_strategies()` / `_CATEGORY_TO_CLASS` — done
+  - [x] Unit tests against a deterministic fake sender
+    (`tests/test_oracle_redos.py`: confirms on a vulnerable fake, stays
+    fail-closed on a secure/escaped fake, on a single-slow-reading fake,
+    and on a within-jitter fake) — done
+  - [x] `docs/architecture/oracle-confirmation.md` updated from "deferred"
+    to describe the real, built mechanism — done
+  - [x] `requirements.md` (`FR-FUZZ-12`) — done
+- Effectiveness (assessed 2026-09-22): unit tests pass and correctly
+  distinguish a simulated vulnerable target (confirms, needs >=2 templates
+  above threshold) from a simulated secure one (does not confirm) and from
+  ordinary jitter (does not confirm on a single slow reading or a
+  within-tolerance gap). The underlying real-world mechanism (that a real
+  regex engine really does blow up on these templates, and that escaping
+  really does prevent it) is proven with real execution in `CC-LAB-0076`'s
+  `tests/test_labgen_redos.py`, not re-proven here (this entry's own tests
+  are decision-logic tests against a fake sender, consistent with how this
+  file's other M1/M8/M10 strategies are tested). Not yet assessed against
+  a live external target.
+
 ### CC-FUZZ-0024 — Wire M10 grey-box confirmation into the oracle pipeline (2026-09-22)
 - Change: built the seam layer for the M10 grey-box mechanism whose pure decision
   logic (`fuzzlab/greybox/confirm.py::greybox_confirms()`/`m10_evidence()`) and

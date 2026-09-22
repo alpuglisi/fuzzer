@@ -747,6 +747,41 @@ class ObjectPropertyBulkSetSink(TemplateModule):
         )
 
 
+class UnescapedRegexConstructTransform(TemplateModule):
+    """CC-LAB-0076: vocabulary-only registration of the JS/node_express
+    ``unescaped_regex_construct`` op. Registered here purely so
+    :mod:`fuzzlab.labgen.minimal_pair` recognizes the name; node_express's
+    own transform module is the one that actually renders it."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unescaped_regex_construct", "transform", _TRANSFORM_ENV, "unescaped_regex_construct.php.j2"
+        )
+
+
+class RegexEscapeConstructTransform(TemplateModule):
+    """CC-LAB-0076: vocabulary-only registration of the JS/node_express
+    ``regex_escape_construct`` op -- the secure twin of
+    :class:`UnescapedRegexConstructTransform`. Same vocabulary-only
+    rationale."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "regex_escape_construct", "transform", _TRANSFORM_ENV, "regex_escape_construct.php.j2"
+        )
+
+
+class RegexHighlightMatchSink(TemplateModule):
+    """CC-LAB-0076: vocabulary-only registration of the JS/node_express
+    ``regex_highlight_match`` sink family -- responds with content
+    highlighted by whichever regex-construction transform ran upstream.
+    Vocabulary-only in this PHP-oriented package; node_express is the
+    emitter that actually renders it."""
+
+    def __init__(self) -> None:
+        super().__init__("regex_highlight_match", "sink", _SINK_ENV, "regex_highlight_match.php.j2")
+
+
 SOURCES: dict[str, Module] = {
     "get_param": GetParamSource(),
     "post_param": PostParamSource(),
@@ -809,6 +844,11 @@ TRANSFORMS: dict[str, Module] = {
     # either op for real.
     "unguarded_deep_merge": UnguardedDeepMergeTransform(),
     "proto_key_filtered_merge": ProtoKeyFilteredMergeTransform(),
+    # CC-LAB-0076: ReDoS -- vocabulary-only, same discipline as
+    # unguarded_deep_merge above. node_express is the only emitter that
+    # renders either op for real.
+    "unescaped_regex_construct": UnescapedRegexConstructTransform(),
+    "regex_escape_construct": RegexEscapeConstructTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -836,6 +876,10 @@ SINKS: dict[str, Module] = {
     # dom_innerhtml_echo above. node_express is the only emitter that
     # renders it.
     "object_property_bulk_set": ObjectPropertyBulkSetSink(),
+    # CC-LAB-0076: ReDoS -- vocabulary-only, same discipline as
+    # object_property_bulk_set above. node_express is the only emitter that
+    # renders it.
+    "regex_highlight_match": RegexHighlightMatchSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

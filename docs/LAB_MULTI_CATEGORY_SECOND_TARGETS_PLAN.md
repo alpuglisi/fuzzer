@@ -540,7 +540,7 @@ one's own pilot:
 
 | # | Category | Status | Sites picked (stack) | New stack(s) needed | Branch | Bookkeeping block reserved | Notes |
 |---|---|---|---|---|---|---|---|
-| 1 | E-commerce/marketplaces | **Piloting — CWE selection done (§9.4a); Walmart/Node cell 1 of 2 landed (CC-LAB-0070, CWE-1321 prototype pollution); Rails Phase A (skeleton + live-boot harness) landed (CC-LAB-0071); next: CWE-1333 (ReDoS, separate lane) + Rails Phase B (the actual webhook-signature/CWE-915/CWE-502 modules)** | Shopify (Ruby on Rails); Walmart (Node/Express — reuses existing) | Ruby on Rails | `claude/second-target-cat1-ecommerce` | `CC-LAB-0070`-`0071` used; `CC-LAB-0072`-`0089` still reserved, not yet used | See §9.4a for full detail (site-pair rationale, functionality findings, CWE shortlists, breadth ranking). |
+| 1 | E-commerce/marketplaces | **Piloting — CWE selection done (§9.4a); Walmart/Node cells 2 of 2 landed (CC-LAB-0070 CWE-1321 prototype pollution; CC-LAB-0076 CWE-1333 ReDoS, plus its own M1 timing-differential oracle mechanism, CC-FUZZ-0025); Rails Phase A (skeleton + live-boot harness) landed (CC-LAB-0071); Rails Phase B (webhook-signature/CWE-915/CWE-502 modules) in progress by a concurrent lane on this same branch, not yet landed as of this row's edit; next: wire node_express + the new oracle strategy into multitarget.py, finish Rails Phase B, Phase C page design** | Shopify (Ruby on Rails); Walmart (Node/Express — reuses existing) | Ruby on Rails | `claude/second-target-cat1-ecommerce` | `CC-LAB-0070`-`0071`, `0076` used (ReDoS lane, `0072`-`0075`/`0077`-`0089` left for the concurrent Rails lane per its own pre-assigned/reserved block — see that lane's own commits for its actual numbers); `CC-FUZZ-0025`/`FR-FUZZ-12` used in the FUZZ component for the new oracle mechanism | See §9.4a for full detail (site-pair rationale, functionality findings, CWE shortlists, breadth ranking). |
 | 2 | Social / UGC platforms | Not started | — | Likely Python/Django (Instagram) is the strongest new-stack candidate; Facebook (PHP/Hack+HHVM) may or may not warrant a *new* stack vs. reusing `php_laravel`/`php_current` as an approximation — this is exactly the kind of call §9.1 asks the picking session to make and record, not this table to pre-decide. Discord flagged in §9.1 step 1 as likely excluded (realtime/Elixir, not a request/response fit). YouTube likely excluded (Google-internal infra, no portable app-language claim). | — | — | Open for another session to pick up. |
 | 3 | SaaS / productivity / collaboration | Not started | — | Candidates per the survey: Slack (PHP/Hack web tier + Java realtime — itself two stacks), Notion (sharded Postgres + Kafka, but no named app-framework/language beyond "engineering blog doesn't name one" — check before committing), Atlassian (Java/Kotlin+Spring, Node+Express, or Python — Atlassian itself uses 3 stacks, pick the one most distinct from what's already built), Microsoft 365/Teams (Node.js backend + React/TS front end), Google Workspace (OT + Spanner/Bigtable — confirmed at the algorithm/storage level, not at a portable app-framework level; may not be a sensible single-stack pick without further research). | — | — | Open. Flag: Google Workspace's confirmed detail is algorithmic/storage, not framework-level — whoever picks this category should research further (per the standing instruction to do more research if needed) before treating it as buildable, or should pick two of the other four sites instead. |
 | 4 | Media / streaming / content platforms | Not started | — | Candidates: Netflix (Java/Spring Boot + a Federated GraphQL gateway), Spotify (Java/Spring + Kafka), Twitch (Go, post-monolith-migration — genuinely distinct paradigm from the others), Disney+ (excluded per §9.1 step 1 — infrastructure-only, unconfirmed at application-code level). | — | — | Open. Twitch/Go vs. Netflix-or-Spotify/Java+Spring reads as the most architecturally distinct pair from the current research, but the picking session should verify against §9.1's full procedure rather than take this as decided. |
@@ -718,7 +718,25 @@ step 5's Node cells is **done** — `CC-LAB-0070`/`FR-LAB-64`, a real
 `unguarded_deep_merge`/`proto_key_filtered_merge` pair at a BFF-style
 `/api/preferences` endpoint, proved with a real, executed `node` subprocess
 adversarial test (see `docs/components/01-target-lab/change-control.md`'s
-`CC-LAB-0070` entry for full detail). CWE-1333 (ReDoS) remains a separate,
-later lane per its own timing-differential oracle requirement, not attempted
-here. The Rails skeleton (Phase A) and Phase C page design remain the next
-work.
+`CC-LAB-0070` entry for full detail).
+
+**Progress update (2026-09-22, ReDoS lane):** the CWE-1333 (ReDoS) half of
+step 5's Node cells is now also **done** — `CC-LAB-0076`/`FR-LAB-69`, a real
+`unescaped_regex_construct`/`regex_escape_construct` pair at a search/
+highlight `/api/search` endpoint, proved with a real, executed `node`
+subprocess timing test (measured ~55-70ms vulnerable vs. <1ms secure on a
+calibrated payload/content pair, 5x flakiness check, no variance observed --
+see `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0076` entry).
+This also required, and built, the timing-differential (M1) oracle mechanism
+this shape's own §9.4a decision flagged as needed:
+`RegexDosStrategy` (`fuzzlab/oracle/strategies.py`, `CC-FUZZ-0025`/
+`FR-FUZZ-12`) -- a genuinely new M1 *variant* (escalating independent
+evil-regex shapes rather than a requested delay), fitted into the existing
+`ConfirmationStrategy` taxonomy and documented in
+`docs/architecture/oracle-confirmation.md`, which no longer lists ReDoS as
+deferred. Both Walmart/Node cells §9.4a's "Decided" block named are
+therefore now built. Not done here (explicitly out of this lane's scope):
+wiring `node_express`/the new oracle strategy into `multitarget.py`, and
+running the oracle mechanism against a live target. The Rails skeleton
+(Phase A, `CC-LAB-0071`, done by a concurrent lane on this same branch) and
+Phase C page design remain the next work.

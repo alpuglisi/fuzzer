@@ -155,6 +155,55 @@ rewards) derives from it.
     (renumbered from that branch's own `FR-FUZZ-9` — see the change-control
     entry's provenance note for why).
 
+- **FR-FUZZ-12** *(M1 timing-differential ReDoS confirmation,
+  `CC-FUZZ-0025`, 2026-09-22).* The oracle supports **M1 differential
+  timing** confirmation for the `regular-expression` (ReDoS, CWE-1333)
+  reference category, closing the gap
+  `docs/architecture/oracle-confirmation.md` previously listed only as
+  deferred:
+  - `RegexDosStrategy` (`fuzzlab.oracle.strategies`): `vuln_class="redos"`,
+    `mechanism="differential-timing"`, `category="regular-expression"`.
+    Registered in `default_strategies()` and `_CATEGORY_TO_CLASS`.
+  - A genuinely new M1 *variant*, not a new template list for the existing
+    `ConfirmationStrategy._confirm_timing` helper: that helper's shape
+    (used by `SqliTimingStrategy`/`CommandInjectionStrategy`) requires an
+    explicit, attacker-*requested* delay it checks the target both exceeds
+    AND tracks (`SLEEP({d})`/`sleep {d}`, `elapsed >= d - tolerance`). A
+    ReDoS payload has no requested duration — the blowup is an emergent
+    property of the target's own content, which this strategy neither sees
+    nor controls (only the pattern is attacker-supplied). `RegexDosStrategy`
+    instead escalates across `_REDOS_TEMPLATES` (several independent,
+    single-nesting-level classic catastrophic-backtracking shapes) and
+    confirms when **at least two** independently clear a robust-baseline
+    threshold (`Baseline.exceeds`, `floor`/`k` overridden per-strategy to
+    this mechanism's own bounded, tens-to-low-hundreds-of-milliseconds
+    probe magnitude) — substituting "two independent evil shapes" for
+    "two requested durations."
+  - Stated limitation: this can only detect ReDoS when the target's own
+    content already contains a run of the character class a template
+    targets — inherently probabilistic against an arbitrary black-box
+    target, unlike every other M1 use in this component (each of which
+    supplies its own exact requested delay). Documented in the class's own
+    docstring and in `docs/architecture/oracle-confirmation.md`'s new
+    "`regular-expression` (ReDoS, CWE-1333)" section, not silently equated
+    with the SQLi/command-injection M1 uses.
+  - A nesting-depth-escalation alternative (deepening a single evil shape
+    per rung, so a fixed content run-length could still produce a rising
+    trend the way two requested delays do) was calibrated and explicitly
+    rejected: it compounds the already-exponential blowup so violently
+    that even one extra level of nesting hung well past any CI-safe bound
+    against ordinary content.
+  - Proof status: `RegexDosStrategy`'s decision logic is unit-tested
+    against a deterministic fake sender (`tests/test_oracle_redos.py`),
+    same convention this component's other timing/M8/M10 strategies use.
+    The underlying mechanism itself (a real regex engine really blowing up
+    on these templates, and escaping really preventing it) is proven with
+    real Node.js execution and real measured wall-clock timing in
+    `docs/components/01-target-lab/requirements.md`'s `FR-LAB-69`
+    (`tests/test_labgen_redos.py`), not re-proven here. Not yet run against
+    a live external target or wired into `fuzzlab/harness/multitarget.py`
+    (both out of this requirement's scope).
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

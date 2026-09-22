@@ -1899,9 +1899,9 @@ lane) can submit a payload as
     a stub that merely rejects the whole body). See
     `tests/test_labgen_prototype_pollution.py`.
   - CWE-1333 (ReDoS), the second Node cell §9.4a's Category-1 decision
-    names, is explicitly deferred to a later, separate lane (a different,
-    timing-differential oracle mechanism) -- out of this requirement's
-    scope.
+    names, was explicitly deferred to a later, separate lane at the time
+    this requirement was written (a different, timing-differential oracle
+    mechanism) -- now built, see **FR-LAB-69** below.
 
 - **FR-LAB-65** *(`ruby_rails` emitter Phase A: real skeleton + live-boot
   harness; `CC-LAB-0071`, 2026-09-22).* This project's first Ruby-on-Rails
@@ -1972,6 +1972,178 @@ lane) can submit a payload as
     widening `SUPPORTED_CONTEXT_DEPTHS`/`_MODULE_SET_BY_SHAPE` to full
     depth, wiring this stack into `multitarget.py`/Tier 2, and touching
     `lab/safety_matrix.yaml` for this stack.
+    **Now built -- see FR-LAB-66/67/68 below.**
+
+- **FR-LAB-66** *(`ruby_rails` Phase B, webhook-signature verification;
+  `CC-LAB-0072`/`CC-LAB-0075`, 2026-09-22).* First code-generation
+  implementation, in any stack, of the existing
+  `webhook_signature_verification` sink family (`lab/safety_matrix.yaml`)
+  -- Shopify's own `X-Shopify-Hmac-SHA256` mechanism
+  (`docs/research/site-architecture-survey-functionality-shopify.md` §1,
+  plan §9.4a's "Decided" block, item 1).
+  - New shape `("webhook_signature", "webhook_signature_verification")` in
+    `RailsEmitter._MODULE_SET_BY_SHAPE`. New source
+    `raw_request_body` (`request.body.read`) and new sink
+    `webhook_signature_verification` (recomputes an HMAC-SHA256 over the
+    raw body with a fixed lab secret and compares it to the
+    `X-Shopify-Hmac-SHA256` header). Reuses the existing
+    `naive_string_compare`/`constant_time_compare` op vocabulary verbatim
+    (`lab/safety_matrix.yaml` already had these rows from an earlier,
+    Node-only corpus pass; no new op minted).
+  - New manifest `lab/manifests/webhook_signature_rails_sample.yaml`
+    (`LABGEN-RR-0002` vulnerable/naive-`==`, `LABGEN-RR-0003` secure/
+    `ActiveSupport::SecurityUtils.secure_compare`).
+  - Proved for real, two ways
+    (`tests/test_labgen_ruby_rails_webhook_signature_live_boot.py`): (1) a
+    real HTTP round trip against both booted twins, forging a real valid
+    HMAC and a tampered one, confirming both twins correctly accept/reject
+    (the naive-vs-constant-time difference is a timing side channel, not a
+    functional bypass, per `lab/safety_matrix.yaml`'s own `partial`/D20
+    framing); (2) a real, isolated Ruby timing microbenchmark
+    (`RailsLiveBootHarness.run_ruby`, new in this change -- see
+    `CC-LAB-0075`) run inside the booted cell's own `bundle exec`,
+    demonstrating that plain `String#==` is measurably timing-variable by
+    early-vs-late mismatch position (~4.8x ratio measured) while the real
+    `ActiveSupport::SecurityUtils.secure_compare` from this app's own
+    resolved gem is not (~1.02x). Deliberately uses large (200,000-byte)
+    synthetic strings to make the effect measurable within a bounded,
+    non-flaky test, not this cell's own ~44-byte digest.
+
+- **FR-LAB-67** *(`ruby_rails` Phase B, CWE-915 mass assignment;
+  `CC-LAB-0073`/`CC-LAB-0075`, 2026-09-22).* First Ruby/Rails-idiomatic
+  instance of the existing `orm_entity_bulk_assign` sink family
+  (`lab/safety_matrix.yaml`, previously implemented only by `php_laravel`'s
+  own `DB::table(...)->update()` twin) -- Rails' own unrestricted
+  `permit!` vs an explicit `permit(:a, :b)` strong-parameters allowlist
+  (plan §9.4a's "Decided" block, item 2).
+  - New shape `("mass_assignment", "orm_entity_bulk_assign")` in
+    `RailsEmitter._MODULE_SET_BY_SHAPE`. New source `all_params_nested`
+    (`params.require(:user)`) and two new, Rails-strong-parameters-
+    specific ops in `lab/safety_matrix.yaml`/`ruby_rails.modules`:
+    `permit_bang_unrestricted` (`no_effect`) and
+    `strong_params_explicit_allowlist` (`neutralises`,
+    `[mass_assignment]`) -- genuinely new, since no other stack's op
+    vocabulary already names Rails' own `permit!` escape hatch. New sink
+    `orm_entity_bulk_assign` (Rails' own `ActiveRecord#update!` against
+    the checked-in `users` table).
+  - Extends the FR-LAB-65 skeleton with a new migration
+    (`db/migrate/20260922000001_add_role_to_users.rb`) adding the one
+    privilege-relevant column (`role`) the pair needs, seeding one real
+    `shopper1` row via the migration's own `up` block (this stack's
+    per-run-SQLite analogue of `php_laravel`'s `LiveBootHarness`-side
+    `REAL_SCHEMA_SQL` seed).
+  - New manifest `lab/manifests/mass_assignment_rails_sample.yaml`
+    (`LABGEN-RR-0004` vulnerable, `LABGEN-RR-0005` secure).
+  - Proved for real
+    (`tests/test_labgen_ruby_rails_mass_assignment_live_boot.py`): a real
+    HTTP PATCH against each booted twin with a `role` field alongside the
+    legitimate `bio` field -- the vulnerable twin's real ActiveRecord write
+    sets `role` to the attacker's value (`"admin"`), the secure twin's real
+    write silently drops it (stays `"customer"`). Each twin gets its own
+    fresh harness (and therefore its own fresh per-run database) so one
+    twin's write cannot leak into the other's assertion.
+
+- **FR-LAB-68** *(`ruby_rails` Phase B, CWE-502 insecure deserialization;
+  `CC-LAB-0074`/`CC-LAB-0075`, 2026-09-22).* First Ruby/Psych instance of
+  the existing `object_deserialization` sink family
+  (`lab/safety_matrix.yaml`, not previously implemented by any emitter in
+  code) -- `YAML.unsafe_load` vs `YAML.safe_load`, CVE-2013-0156's own
+  mechanism applied directly rather than through Rails' historical XML-
+  parameter-parser entry point (plan §9.4a's "Decided" block, item 3).
+  - New shape `("insecure_deserialization", "object_deserialization")` in
+    `RailsEmitter._MODULE_SET_BY_SHAPE`. New source `post_param`
+    (reused shared-vocabulary name). Two new Psych-specific ops in
+    `lab/safety_matrix.yaml`/`ruby_rails.modules`: `yaml_unsafe_load`
+    (`no_effect`) and `yaml_safe_load` (`neutralises`,
+    `[insecure_deserialization]`). New sink `object_deserialization`
+    (reports the parsed value's real Ruby class, or the raised exception's
+    class, as JSON).
+  - `app/controllers/application_controller.rb` (the FR-LAB-65 skeleton)
+    now `require "ostruct"` globally, so a `!ruby/object:OpenStruct` YAML
+    tag is loadable at all -- required for both twins, since requiring a
+    stdlib class is not itself the vulnerability.
+  - New manifest `lab/manifests/insecure_deserialization_rails_sample.yaml`
+    (`LABGEN-RR-0006` vulnerable, `LABGEN-RR-0007` secure).
+  - Proved for real
+    (`tests/test_labgen_ruby_rails_insecure_deserialization_live_boot.py`):
+    a real HTTP POST carrying a `!ruby/object:OpenStruct` YAML payload --
+    the vulnerable twin's real response reports `parsed_class: "OpenStruct"`
+    (an attacker-chosen Ruby object was actually constructed server-side);
+    the secure twin's real response reports
+    `error: "Psych::DisallowedClass"` (rejected before construction). A
+    third test confirms both twins still parse ordinary plain YAML
+    identically (the minimal-pair invariant, proven over a real HTTP round
+    trip).
+
+- **CC-LAB-0075 cross-reference** *(shared Phase-B harness/tooling
+  infrastructure the three requirements above depend on, 2026-09-22).*
+  Not a new vulnerability shape itself: `RailsLiveBootHarness` gained
+  `raw_body`/`headers` params on `request`/`post` (a webhook-signature
+  check needs the exact raw bytes it signs, which `data`'s own
+  `application/x-www-form-urlencoded` encoding would otherwise re-encode
+  out from under a forged signature) and a `run_ruby` method (a real,
+  isolated `bundle exec ruby` microbenchmark inside an already-installed
+  cell's app directory). `fuzzlab.labgen.conformance.tier0` gained
+  `ruby_available`/`lint_ruby`/`lint_ruby_emitted_files` (the Ruby analogue
+  of `lint_php`/`lint_python`, this project's first). `ApplicationController`
+  gained `skip_forgery_protection` (every Phase B cell is a non-GET write
+  endpoint a real HTTP client hits directly, with no browser CSRF-token
+  round trip of its own -- CSRF is orthogonal to every vulnerability class
+  this lane builds). `fuzzlab.labgen.conformance.static_precheck` gained
+  `UNINFORMATIVE` rows for the two genuinely new shapes (webhook-signature,
+  insecure-deserialization); the mass-assignment shape reused its existing
+  `CC-LAB-0063`/`0064` row (keyed on `(vuln_class, sink_family)` only, not
+  `stack_profile`).
+
+- **FR-LAB-69** *(ReDoS, CWE-1333, `node_express`; `CC-LAB-0076`,
+  2026-09-22).* Per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
+  §9.4a's decided Category-1 (e-commerce) Walmart/Node cell list (the
+  second Node cell, deferred by `FR-LAB-64` above until this shape's own
+  timing-differential oracle mechanism existed -- see `FR-FUZZ-12`,
+  `docs/components/07-fuzzing-harness-and-oracle/requirements.md`), the
+  `node_express` emitter gained a real, dedicated vulnerable/secure pair
+  for CWE-1333:
+  - A genuinely new `(vuln_class, sink_context.family)` shape,
+    `("redos", "regex_highlight_match")`, on a new `/api/search` route
+    (`_ROUTE_PARAMS`): a search/highlight endpoint that builds a `RegExp`
+    from a user-supplied search term and highlights matches inside fixed
+    content.
+  - Vulnerable: `unescaped_regex_construct` -- `new RegExp(term, 'gi')`
+    with no escaping, so a pathological pattern (e.g. `(a+)+$`) causes
+    catastrophic backtracking. Secure: `regex_escape_construct` -- escapes
+    every regex metacharacter (a new `escapeRegExp` helper, included
+    unconditionally in every generated controller) before constructing the
+    pattern, so it can only ever match itself literally.
+  - `content_literal` (the endpoint's fixed, searched content) is a
+    calibrated 22-character run of `'a'` embedded in otherwise-ordinary
+    product copy, chosen so the vulnerable twin's blowup against `(a+)+$`
+    is a clear, reliably-reproducible tens-of-milliseconds event -- never
+    an open-ended multi-second/multi-minute hang.
+  - Registered in `node_express`'s own `_MODULE_SET_BY_SHAPE` and,
+    vocabulary-only (the `L-P3.3c-DOM`/`FR-LAB-64` precedent), in the
+    shared `fuzzlab.labgen.modules` registry.
+  - New manifest `lab/manifests/redos_node_sample.yaml`
+    (`LABGEN-RD-0001` VULNERABLE/trivial, `LABGEN-RD-0002` SECURE), two new
+    `lab/safety_matrix.yaml` rows plus a new `redos` concern in the
+    matrix's concern vocabulary, and a new `static_precheck.py` row
+    (UNINFORMATIVE -- no Node-oriented static ReDoS tool has been
+    exercised against this shape in this project).
+  - Proved for real, not simulated: `tests/test_labgen_redos.py` renders
+    both twins for real and runs each as a real Node.js subprocess, timed
+    with `process.hrtime.bigint()` inside the subprocess (excluding Node
+    startup and Python subprocess overhead) against a benign term and
+    `(a+)+$`. Measured: vulnerable twin ~55-70ms on the evil term (vs. <1ms
+    on a benign term on the same handler); secure twin <1ms on both.
+    Repeated 5x with no observed flakiness.
+  - Judgment call, stated explicitly: the test's confirmation thresholds
+    (`_VULNERABLE_FLOOR_MS=20`, `_SECURE_CEILING_MS=5`) sit with wide
+    margin on both sides of the measured ~55-70ms/<1ms gap specifically so
+    ordinary CI scheduling jitter cannot flip the verdict, while staying
+    tight enough that a regression removing the escaping (or the
+    calibrated content run) would still fail the test.
+  - Out of this requirement's scope: wiring this stack into
+    `fuzzlab/harness/multitarget.py`; running the new oracle mechanism
+    against a live target.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

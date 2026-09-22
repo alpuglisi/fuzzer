@@ -89,6 +89,18 @@ STATIC_PRECHECK_BY_SHAPE: dict[tuple[str, str], StaticPrecheckStatus] = {
     # ("xss", "html_body") case, where an absent htmlspecialchars() is a
     # textbook finding).
     ("mass_assignment", "orm_entity_bulk_assign"): StaticPrecheckStatus.UNINFORMATIVE,
+    # --- CC-LAB-0072/0074 (ruby_rails Phase B): webhook-signature and
+    # insecure-deserialization, the two genuinely new (vuln_class,
+    # sink_family) shapes this lane adds. Both UNINFORMATIVE for the same
+    # underlying reason as the mass-assignment row directly above: a static
+    # PHP/Ruby taint tool has no business-logic awareness of "is this the
+    # provider's own shared secret" (webhook-signature) or "which loader
+    # call the surrounding code chose" as a security-relevant fact distinct
+    # from an ordinary method call (insecure-deserialization) -- there is no
+    # missing-sanitizer-shaped tell to key on, unlike the plain
+    # ("xss", "html_body") case.
+    ("webhook_signature", "webhook_signature_verification"): StaticPrecheckStatus.UNINFORMATIVE,
+    ("insecure_deserialization", "object_deserialization"): StaticPrecheckStatus.UNINFORMATIVE,
     # --- L-P3.3c-DOM: DOM-based XSS (reviews.php/feedback.php) --------------
     # UNINFORMATIVE, and more sharply than every SQL shape above: a Psalm-style
     # PHP taint checker analyzes PHP data flow, and this shape's taint never
@@ -113,6 +125,17 @@ STATIC_PRECHECK_BY_SHAPE: dict[tuple[str, str], StaticPrecheckStatus] = {
     # as the conservative default until one actually is, not as a claim that
     # no tool could ever find it.
     ("prototype_pollution", "object_property_bulk_set"): StaticPrecheckStatus.UNINFORMATIVE,
+    # --- CC-LAB-0076: ReDoS (regex_highlight_match) -------------------------
+    # UNINFORMATIVE, same conservative-default reasoning as the prototype-
+    # pollution row above: a static ReDoS checker (e.g. `eslint-plugin-
+    # redos`/`safe-regex`) genuinely *could* flag `new RegExp(userInput)` as
+    # a pattern built from unescaped user input, but no such tool has been
+    # exercised against this shape in this project yet -- marked
+    # UNINFORMATIVE until one actually is, not as a claim that no tool could
+    # ever find it. This shape's real confirmation mechanism is the new
+    # timing-differential (M1) oracle strategy, not a static checker at all
+    # (see docs/architecture/oracle-confirmation.md).
+    ("redos", "regex_highlight_match"): StaticPrecheckStatus.UNINFORMATIVE,
 }
 
 

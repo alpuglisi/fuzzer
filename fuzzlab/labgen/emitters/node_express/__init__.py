@@ -22,6 +22,15 @@ that can write onto ``Object.prototype``), grounded in the Walmart
 (Node/Express BFF) functionality/CWE research (see
 ``docs/research/site-architecture-survey-functionality-walmart.md``).
 
+CC-LAB-0076 adds a fifth shape, ``redos``/``regex_highlight_match``
+(CWE-1333) -- also genuinely new to this project's corpus and specific to
+regex-engine backtracking behavior: a search/highlight endpoint builds a
+``RegExp`` straight from a user-supplied search term with no escaping,
+so a pathological pattern causes catastrophic backtracking. Same Walmart
+research grounding (CVE-2024-45296, ``path-to-regexp``); needed a new
+timing-differential (M1) oracle mechanism, built alongside this shape --
+see ``docs/architecture/oracle-confirmation.md``.
+
 **Multi-file output, unlike ``php_current``.** Per Addendum D, a routed,
 multi-file emitter needs a ``route``-category *accumulator* module
 (``app.js``'s route-registration lines) fed by one fragment per cell,
@@ -73,6 +82,19 @@ _ESCAPE_HTML_HELPER = (
     "}\n"
 )
 
+# CC-LAB-0076: a second small, fixed helper every generated controller
+# includes unconditionally, same rationale as _ESCAPE_HTML_HELPER above (its
+# presence in every controller, used or not, keeps the vulnerable/secure
+# diff confined to the transform region). The standard MDN-recommended
+# regex-metacharacter escape: turns any of the regex-special characters into
+# their literal, escaped form so a string built with it can only ever match
+# itself.
+_ESCAPE_REGEXP_HELPER = (
+    "function escapeRegExp(value) {\n"
+    "    return String(value).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');\n"
+    "}\n"
+)
+
 
 class _ModuleSet(NamedTuple):
     """Same shape as ``php_current``'s ``_ModuleSet``: which source/sink/
@@ -97,6 +119,12 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     # baseline above.
     ("prototype_pollution", "object_property_bulk_set"): _ModuleSet(
         "post_body_json", "object_property_bulk_set", "render_only"
+    ),
+    # CC-LAB-0076: ReDoS (CWE-1333) -- also a genuinely new,
+    # JS/Node-runtime-specific shape (regex-engine backtracking behavior),
+    # not part of the original Tier-A baseline above.
+    ("redos", "regex_highlight_match"): _ModuleSet(
+        "get_query_param", "regex_highlight_match", "render_only"
     ),
 }
 
@@ -128,6 +156,25 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
         "var_name": "incomingPreferences",
         "target_var": "currentPreferences",
         "target_literal": "{ theme: 'light', notifications: true }",
+    },
+    # CC-LAB-0076: a BFF-style "search results" endpoint (Walmart
+    # functionality research) that highlights matches of a user-supplied
+    # search term inside its (fixed, render-only) content -- content_literal
+    # is this shape's render-only metadata, the regex_highlight_match sink's
+    # own analogue of object_property_bulk_set's target_literal. The 22-'a'
+    # run is deliberate, calibrated lab content (see
+    # docs/architecture/oracle-confirmation.md's M1 ReDoS section and
+    # tests/test_labgen_redos.py): real product copy plausibly contains a
+    # run of a repeated character (a SKU, a repeated-letter brand name), and
+    # this run's length was chosen so the vulnerable twin's catastrophic
+    # backtracking against a classic evil pattern (`(a+)+$`) is a clear,
+    # reliably-reproducible tens-of-milliseconds-scale event -- never an
+    # open-ended, multi-second (let alone multi-minute) hang -- while the
+    # secure twin's escaped construction stays sub-millisecond regardless.
+    "/api/search": {
+        "var_name": "searchTerm",
+        "param_name": "q",
+        "content_literal": "'Comfortable running shoes with breathable mesh ' + 'a'.repeat(22) + '!'",
     },
 }
 
@@ -195,6 +242,8 @@ class NodeExpressEmitter(Emitter):
             "const pool = require('../db');\n"
             "\n"
             f"{_ESCAPE_HTML_HELPER}"
+            "\n"
+            f"{_ESCAPE_REGEXP_HELPER}"
             "\n"
             f"{complexity_result.code}\n"
             f"module.exports = {ctx['handler_name']};\n"

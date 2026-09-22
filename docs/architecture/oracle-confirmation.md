@@ -81,6 +81,76 @@ is the `references/` folder holding that class's payloads.
 Command injection with visible output also uses **M4/M5** (a marker in the
 response); only the blind case needs OOB.
 
+### `regular-expression` (ReDoS, CWE-1333) — M1, timing-differential (built, CC-LAB-0076)
+
+| Class (ref) | Mechanism | Confirmation detail |
+| --- | --- | --- |
+| `regular-expression` | M1 (escalating-shape variant) | independent classic catastrophic-backtracking shapes each measured far above baseline (`RegexDosStrategy`, `fuzzlab/oracle/strategies.py`) |
+
+Previously listed only in "Out of scope" below ("`regular-expression` (ReDoS
+— could use M1 timing later)"). Built for real by the `node_express`
+CWE-1333 lab lane (`CC-LAB-0076`/`FR-LAB-69`-`70`), because M1 as it existed
+(`ConfirmationStrategy._confirm_timing`, used by `SqliTimingStrategy`/
+`CommandInjectionStrategy`) does not fit ReDoS unchanged, and this is worth
+recording precisely rather than glossing over:
+
+- **`_confirm_timing`'s shape.** Its templates each embed an explicit,
+  attacker-*requested* delay (`SLEEP({d})`/`sleep {d}`) that a vulnerable
+  target is expected to honor almost exactly. Confirmation checks two
+  things across two escalating delays: latency clears a robust baseline
+  threshold (`Baseline.exceeds`, `k`/`floor`), AND latency tracks the
+  requested duration (`elapsed >= d - tolerance`).
+- **Why ReDoS cannot reuse that unchanged.** A ReDoS payload requests no
+  duration at all -- how long a pathological regex pattern takes to
+  (fail to) match is an emergent property of the regex engine's own
+  backtracking over the *target's own content*, which the oracle does not
+  see or control (only the pattern, sent as the probe value, is
+  attacker-controlled in this shape). There is nothing to compare the
+  measured latency *against* the way `_confirm_timing` compares it to `d`.
+- **The built mechanism (`RegexDosStrategy`).** Still M1 in spirit --
+  "latency rises far above baseline across multiple escalating probes,
+  never one slow response" -- but escalates a different axis: several
+  independent, single-nesting-level classic catastrophic-backtracking
+  shapes (`_REDOS_TEMPLATES`: `(a+)+$`, `(a|a)*$`, `(a|aa)+$`,
+  `([a-zA-Z]+)*$`, `(\d+)+$`), each targeting a different common "run of a
+  repeated character class" a target's real content might contain.
+  Confirmation requires **at least two** independent templates to each
+  clear a robust-baseline threshold — substituting "two independent evil
+  shapes" for `_confirm_timing`'s "two requested durations," since no
+  requested duration exists here. `floor`/`k` are overridden per-strategy
+  (`floor=0.02s`, `k=4.0`) to fit this mechanism's own, deliberately
+  bounded probe magnitude (tens-to-low-hundreds of milliseconds), never
+  `_confirm_timing`'s multi-second-tuned `floor=1.5`.
+- **Nesting depth was tried and rejected.** Deepening a single evil shape
+  by even one level (`(a+)+$` -> `((a+)+)+$`) was calibrated as an
+  alternative escalation axis (so a fixed content run-length could still
+  produce a "rising trend" the way `_confirm_timing`'s two delays do) and
+  found to compound the already-exponential blowup so violently that even
+  depth 2 hung well past any CI-safe bound against ordinary lab content
+  (tens of seconds, trending toward unbounded) -- rejected as unsafe for
+  this project's own use, let alone for probing a live target. This is why
+  the built mechanism escalates *which* evil shape, never how deeply
+  nested one is.
+- **Stated limitation.** This can only detect ReDoS when the target's own
+  content already contains a run of the character class a template
+  targets -- a black-box confirmer has no way to know that shape in
+  advance. Multiple templates targeting different common runs raise the
+  odds without needing that knowledge, but coverage here is inherently
+  probabilistic, unlike every other M1 use (each of which can supply its
+  own exact requested delay). Flagged here, not silently treated as
+  equivalent-confidence to the SQLi/command-injection M1 uses.
+- **Proof status.** `RegexDosStrategy`'s decision logic is unit-tested
+  against a deterministic fake sender (`tests/test_oracle_redos.py`, same
+  convention `test_oracle_vectors.py` uses for `_confirm_timing`'s other
+  callers). The underlying mechanism itself -- that a real regex engine
+  really does blow up on these templates against realistic content, and
+  that escaping really does prevent it -- is proven separately, with real
+  Node.js execution and real measured wall-clock timing (not a Python
+  simulation), against this project's own `node_express` ReDoS lab cells:
+  `tests/test_labgen_redos.py`. It has not yet been run against an
+  arbitrary external target or wired into `fuzzlab/harness/multitarget.py`
+  -- both explicitly out of this lane's scope.
+
 ### Tier 4 — grey-box augmentation (Phase 3)
 
 M10 layers onto every tier: a confirmed finding that also shows the vulnerable sink
@@ -108,9 +178,11 @@ are **not deterministic injection confirmations**, so the oracle does not own th
 `insecure-source-code-management`, `java-rmi`, `json-web-token` /
 `saml-injection` / `oauth-misconfiguration` (auth-token tampering — a distinct
 check family), `mass-assignment`, `orm-leak`, `prompt-injection`, `race-condition`
-(a scheduling test, not a single-request oracle), `regular-expression` (ReDoS —
-could use M1 timing later), `tabnabbing`, `xs-leak`. Several of these become their
-own checks in later phases; this document tracks only oracle confirmation.
+(a scheduling test, not a single-request oracle), `tabnabbing`, `xs-leak`. Several
+of these become their own checks in later phases; this document tracks only
+oracle confirmation. (`regular-expression` — ReDoS — is no longer in this list:
+it is now built, via a timing-differential M1 variant; see its own section
+above.)
 
 ## Category selection by run mode (D14)
 

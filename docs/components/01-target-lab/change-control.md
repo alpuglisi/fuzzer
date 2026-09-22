@@ -3,6 +3,111 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0076 — CWE-1333 (ReDoS) vulnerable/secure pair, node_express (FR-LAB-69) (2026-09-22)
+- Change: per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a's decided
+  Category-1 (e-commerce) Walmart/Node cell list, the `node_express` emitter
+  gained a real, dedicated vulnerable/secure pair for CWE-1333 -- a
+  search/highlight endpoint (`/api/search`) that builds a `RegExp` straight
+  from a user-supplied search term to highlight matches inside its own
+  content. Sequenced after CWE-1321 prototype pollution
+  (`CC-LAB-0070`/`FR-LAB-64`) as planned.
+  - A genuinely new `(vuln_class, sink_context.family)` shape,
+    `("redos", "regex_highlight_match")`, registered in
+    `fuzzlab.labgen.emitters.node_express`'s own `_MODULE_SET_BY_SHAPE`
+    (`__init__.py`) and vocabulary-only in the shared, PHP-oriented
+    `fuzzlab.labgen.modules` registry (the `L-P3.3c-DOM`/`CC-LAB-0070`
+    precedent: registered so `fuzzlab.labgen.minimal_pair` recognizes the
+    names, rendered for real only by `node_express`).
+  - Two new transform ops in `node_express/modules.py`:
+    `unescaped_regex_construct` (vulnerable -- `new RegExp(term, 'gi')`,
+    no escaping) and `regex_escape_construct` (secure -- escapes regex
+    metacharacters via a new `escapeRegExp` helper, included unconditionally
+    in every generated controller alongside the existing `escapeHtml`
+    helper, before constructing the `RegExp`). One new sink,
+    `regex_highlight_match` (highlights matches inside a fixed
+    `content_literal`, requires it in the assembly context with no safe
+    default, same convention as `object_property_bulk_set`'s
+    `target_literal`).
+  - New route profile `/api/search` (`_ROUTE_PARAMS`): `content_literal` is
+    a deliberately calibrated 22-character run of `'a'` embedded in
+    otherwise-ordinary product copy -- calibrated (see
+    `docs/architecture/oracle-confirmation.md`'s M1 ReDoS section) so the
+    vulnerable twin's catastrophic backtracking against a classic evil
+    pattern (`(a+)+$`) is a clear, reliably-reproducible tens-of-
+    milliseconds-scale event, never an open-ended multi-second (let alone
+    multi-minute) hang.
+  - New manifest `lab/manifests/redos_node_sample.yaml` (`LABGEN-RD-0001`
+    vulnerable / `LABGEN-RD-0002` secure), two new `lab/safety_matrix.yaml`
+    rows (`unescaped_regex_construct`: `no_effect`;
+    `regex_escape_construct`: `neutralises` `[redos]`) plus a new `redos`
+    concern documented in the matrix's own concern-vocabulary comment
+    block, and a new `("redos", "regex_highlight_match")` `UNINFORMATIVE`
+    row in `fuzzlab.labgen.conformance.static_precheck`.
+  - A real, executed adversarial proof (not a Python simulation, and not a
+    simulated timing number): both twins are rendered for real and each run
+    as a real Node.js subprocess, timed with `process.hrtime.bigint()`
+    *inside* the subprocess around exactly the `handler(req, res)` call
+    (excluding Node startup and Python subprocess overhead) against a
+    benign term and the classic evil pattern `(a+)+$`
+    (`tests/test_labgen_redos.py`). Measured: vulnerable twin ~55-70ms on
+    the evil term vs. <1ms on a benign term; secure twin <1ms on both.
+    Repeated 5x manually by this change's author with no observed
+    flakiness (see the change's own final report / PR description for the
+    exact numbers).
+  - Companion CC-FUZZ-0025 (below) builds the M1 timing-differential oracle
+    mechanism this shape needs to be confirmed against a live target
+    (out of scope for `multitarget.py` wiring here, per this lane's
+    explicit task scope).
+- Impact (other components / project): `node_express` module inventory
+  widened (additive; no existing module/route/registry entry changed
+  behavior). `fuzzlab.labgen.modules` (shared, PHP-oriented) gained three
+  vocabulary-only entries, same non-breaking pattern as `CC-LAB-0070`.
+  `lab/safety_matrix.yaml`/`static_precheck.py` gained additive rows only
+  (matrix `version` unchanged at `1`). Cross-component: `fuzzlab/oracle/`
+  (component FUZZ) gained the new `RegexDosStrategy` -- see `CC-FUZZ-0025`
+  in `docs/components/07-fuzzing-harness-and-oracle/change-control.md`.
+  Not wired into `fuzzlab/harness/multitarget.py` (explicitly out of this
+  lane's scope, per the dispatching task).
+- Risk (level; mitigation or accepted-risk justification): Low-medium. The
+  code-generation/verdict-derivation side (matrix rows, manifest, emitter
+  templates) is low risk -- purely additive, same shape as three prior
+  CC-LAB entries (`-0064`, `-0066`, `-0070`). The one genuinely novel risk
+  is the timing-differential lab content itself: an uncalibrated "evil
+  regex vs. content" pair could either (a) never actually blow up (false
+  sense of coverage) or (b) blow up unboundedly (a CI hang or, in the
+  worst case, a real denial-of-service if ever pointed at a live target
+  outside a bounded test). Mitigated by real calibration before landing
+  (measured the vulnerable/secure gap directly, tried and explicitly
+  rejected a nesting-depth-escalation design after it hung well past any
+  CI-safe bound in a throwaway calibration script -- see this entry's
+  timing numbers above and `docs/architecture/oracle-confirmation.md`'s M1
+  ReDoS section for the rejected alternative) and by every real-execution
+  test in this change enforcing an explicit `timeout=10` bound on its
+  `node`/`subprocess.run` call.
+- Deliverables:
+  - [x] `node_express` transform/sink modules + Jinja2 templates (vulnerable
+    + secure) — done
+  - [x] Shared `fuzzlab.labgen.modules` vocabulary-only registration — done
+  - [x] `lab/manifests/redos_node_sample.yaml` (2 cells) — done
+  - [x] `lab/safety_matrix.yaml` rows + concern-vocabulary doc comment —
+    done
+  - [x] `static_precheck.py` row — done
+  - [x] Real, executed timing proof (`tests/test_labgen_redos.py`, real
+    Node subprocess, 5x flakiness check) — done
+  - [x] `docs/PREVENTIVE_ACTIONS.md`/bug protocol — not triggered; no code
+    defect found during this change (see this lane's final report for the
+    explicit statement)
+  - [x] `requirements.md` (`FR-LAB-69`/`70`) — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a/§9.5 progress
+    update — done
+- Effectiveness (assessed 2026-09-22): both cells derive their expected
+  verdict (`LABGEN-RD-0001` VULNERABLE/trivial, `LABGEN-RD-0002` SECURE);
+  both render, lint clean (`node --check`), and regenerate byte-identically
+  (Tier 3); the real Node timing proof reproduces the intended
+  vulnerable/secure gap with no observed flakiness across 5 runs. Full test
+  suite green alongside every pre-existing test (see the change's own
+  final report for exact pass/skip counts).
+
 ### CC-LAB-0071 — `ruby_rails` emitter Phase A: real Rails 8.1 skeleton + live-boot harness (FR-LAB-65) (2026-09-22)
 - Change: per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §2 (the
   original Phase A spec, written for `node_express` but reused structurally

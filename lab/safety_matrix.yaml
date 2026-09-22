@@ -82,6 +82,13 @@
 #     (added CC-LAB-0070; reuses the concern-id vocabulary already named for
 #     this class in `lab/patterns/sourcing/crosswalk.yaml`'s `proto_pollution`
 #     sourcing class, rather than minting a second name for the same concept)
+#   redos — attacker-controlled search/pattern text reaches an unescaped
+#     `RegExp` construction, letting regex metacharacters (rather than a
+#     literal string) drive the match, so a pathological pattern shape (e.g.
+#     `(a+)+$`) causes catastrophic backtracking against the sink's own
+#     content -- a regex-engine-timing mechanism, CWE-1333 (added
+#     CC-LAB-0076; needed a new timing-differential (M1) oracle mechanism,
+#     see `docs/architecture/oracle-confirmation.md`)
 version: 1
 entries:
   # --- SQL sinks -----------------------------------------------------
@@ -538,6 +545,17 @@ entries:
     sink_family: orm_entity_bulk_assign
     effect: neutralises
     neutralizes: [mass_assignment]
+  # CC-LAB-0073 (ruby_rails Phase B): Rails' own strong-parameters idiom --
+  # `permit!` accepts every key unconditionally (a distinct architecture
+  # from every op above: none of them is Rails' own escape-hatch method),
+  # `permit(:a, :b)` is Rails' explicit allowlist form.
+  - op: permit_bang_unrestricted
+    sink_family: orm_entity_bulk_assign
+    effect: no_effect
+  - op: strong_params_explicit_allowlist
+    sink_family: orm_entity_bulk_assign
+    effect: neutralises
+    neutralizes: [mass_assignment]
 
   # --- ssrf: server-side fetch with attacker-influenced target ------------
   # From docs/research/corpus-examples/ssrf/{node,php,python}/.
@@ -597,6 +615,19 @@ entries:
     sink_family: object_deserialization
     effect: no_effect
   - op: json_loads_type_check
+    sink_family: object_deserialization
+    effect: neutralises
+    neutralizes: [insecure_deserialization]
+  # CC-LAB-0074 (ruby_rails Phase B): Ruby/Psych's own two loader entry
+  # points -- `YAML.unsafe_load` (CVE-2013-0156's own mechanism: Psych's
+  # `init_with` hook honors a `!ruby/object:...` tag, constructing an
+  # attacker-chosen object) vs `YAML.safe_load` (restricted to plain
+  # scalar/array/hash types; a `!ruby/object:...` tag raises
+  # Psych::DisallowedClass instead).
+  - op: yaml_unsafe_load
+    sink_family: object_deserialization
+    effect: no_effect
+  - op: yaml_safe_load
     sink_family: object_deserialization
     effect: neutralises
     neutralizes: [insecure_deserialization]
@@ -737,3 +768,23 @@ entries:
     sink_family: object_property_bulk_set
     effect: neutralises
     neutralizes: [proto_pollution]
+
+  # --- ReDoS: unescaped regex construction from a user-supplied term ------
+  # From the Walmart (Node/Express BFF) functionality/CWE research
+  # (docs/research/site-architecture-survey-functionality-walmart.md,
+  # CWE-1333, CC-LAB-0076) -- a search/highlight endpoint that builds a
+  # `RegExp` straight from the user's search term. `regex_highlight_match`
+  # is a genuinely new sink family: unlike every SQL/HTML family above, the
+  # "danger" here is not what the value writes into a downstream text
+  # position but what the regex ENGINE does when asked to match a
+  # pathologically-shaped pattern -- a timing/availability mechanism this
+  # matrix has not scored before, needing the new M1 timing-differential
+  # oracle mechanism (docs/architecture/oracle-confirmation.md) to confirm
+  # rather than any existing single-request mechanism.
+  - op: unescaped_regex_construct
+    sink_family: regex_highlight_match
+    effect: no_effect
+  - op: regex_escape_construct
+    sink_family: regex_highlight_match
+    effect: neutralises
+    neutralizes: [redos]

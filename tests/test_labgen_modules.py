@@ -235,6 +235,10 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
     "unguarded_deep_merge": {"value_expr": "$__wholeBody"},
     "proto_key_filtered_merge": {"value_expr": "$__wholeBody"},
     "object_property_bulk_set": {"value_expr": "$__wholeBody"},
+    # CC-LAB-0076: ReDoS -- vocabulary-only in this PHP-oriented registry.
+    "unescaped_regex_construct": {},
+    "regex_escape_construct": {},
+    "regex_highlight_match": {"value_expr": "$term"},
 }
 
 

@@ -13,6 +13,25 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- LAB/FUZZ (`claude/second-target-cat1-ecommerce`): CWE-1333 (ReDoS)
+  vulnerable/secure pair for `node_express` (`unescaped_regex_construct` vs.
+  `regex_escape_construct`, `regex_highlight_match` sink family, a search/
+  highlight endpoint at `/api/search`), plus the M1 timing-differential
+  oracle mechanism ReDoS needed (`RegexDosStrategy`,
+  `fuzzlab/oracle/strategies.py`) — a genuinely new M1 *variant* (escalating
+  independent evil-regex shapes, never a requested delay) built and fitted
+  into the existing `ConfirmationStrategy`/M1 taxonomy rather than bolted on
+  separately (`docs/architecture/oracle-confirmation.md` updated from
+  "deferred" to describe the real, built mechanism). Proven with real
+  execution throughout: a real Node subprocess, timed with
+  `process.hrtime.bigint()` inside the process, measures the vulnerable
+  twin at ~55-70ms vs. the secure twin's <1ms on the same calibrated
+  payload/content pair (`tests/test_labgen_redos.py`, 5x flakiness check,
+  no variance observed); the new oracle strategy's decision logic is unit-
+  tested against a deterministic fake sender
+  (`tests/test_oracle_redos.py`). `CC-LAB-0076`/`CC-FUZZ-0025`,
+  `FR-LAB-69`-`70`. Sequenced after CWE-1321 prototype pollution per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a/§9.5's own plan.
 - Docs (`claude/second-target-cat1-ecommerce`): independently re-verified both
   Category-1 lanes (CWE-1321 prototype pollution `CC-LAB-0070`/`FR-LAB-64` and
   the `ruby_rails` Phase A skeleton/live-boot harness `CC-LAB-0071`/`FR-LAB-65`)

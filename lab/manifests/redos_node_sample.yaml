@@ -1,0 +1,50 @@
+# ReDoS sample manifest (CC-LAB-0076), node_express.
+#
+# First illustrative pair for the `regex_highlight_match` sink family
+# (lab/safety_matrix.yaml's `redos` concern, CWE-1333, added by
+# CC-LAB-0076/FR-LAB-69). Grounded in the Walmart (Node/Express BFF)
+# functionality/CWE research
+# (docs/research/site-architecture-survey-functionality-walmart.md,
+# CVE-2024-45296 / `path-to-regexp`): a search/highlight endpoint that
+# builds a `RegExp` straight from the user's own search term to highlight
+# matches inside the endpoint's own content.
+#
+# Every manifest in this project targets exactly one `stack_profile`
+# (confirmed against every existing manifest's fingerprint-gate log line,
+# and required by `fuzzlab.labgen.cli`'s own `--emitter`-scoped `--check`
+# run) -- this shape is JS/Node-runtime-specific (regex-engine backtracking
+# timing is not something this project's PHP/Python stacks demonstrate
+# here), so there is no sibling manifest for another stack_profile, unlike
+# `lab/manifests/mass_assignment_sample.yaml`'s php_laravel twin -- same
+# discipline as `lab/manifests/prototype_pollution_node_sample.yaml`.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: the search term is interpolated directly into `new
+  # RegExp(term, 'gi')` with no escaping, so an attacker-supplied
+  # pathological pattern (e.g. `(a+)+$`) causes catastrophic backtracking
+  # against this endpoint's own content (which happens to contain a run of
+  # repeated characters -- see the emitter's `_ROUTE_PARAMS['/api/search']`
+  # docstring for the calibration detail).
+  - cell_id: LABGEN-RD-0001
+    class: redos
+    stack_profile: node_express
+    route: { method: GET, path: /api/search }
+    sink_context:
+      family: regex_highlight_match
+      required_neutralizations: [redos]
+    transform: [unescaped_regex_construct]
+
+  # Secure twin: the only difference is the transform region
+  # (regex_escape_construct instead of unescaped_regex_construct) -- the
+  # minimal-pair invariant. Every regex metacharacter in the term is
+  # escaped before the RegExp is built, so the same adversarial pattern can
+  # only ever match itself literally, regardless of content.
+  - cell_id: LABGEN-RD-0002
+    class: redos
+    stack_profile: node_express
+    route: { method: GET, path: /api/search }
+    sink_context:
+      family: regex_highlight_match
+      required_neutralizations: [redos]
+    transform: [regex_escape_construct]
