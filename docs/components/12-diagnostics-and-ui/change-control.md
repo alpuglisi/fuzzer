@@ -3,6 +3,114 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0029 — Lane U2: Findings workbench (faceted filters + saved views + shared DataTable) (2026-09-22)
+- Change: per `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U2) and its resolved R-03/R-07/R-11,
+  added the Findings workbench: `GET /findings` (list) and `GET /findings/{id}` (detail),
+  reading `finding`/`attempt` via the new `fuzzlab.web.findingsview` module (mirrors
+  `web/results.py`/`web/proxyview.py`: pure, read-only functions over the shared store,
+  never creates the store file). **Facet sidebar** (severity, vuln class, method,
+  mechanism/`confidence`, endpoint — 5 groups per R-03) implemented as the APG Disclosure
+  pattern (`<button aria-expanded aria-controls>` per group, native checkboxes with the
+  live count inside each `<label>`, `fieldset`/`role=group`) with **live counts**
+  recomputed against every *other* active group's filter (OR within a group, AND across
+  groups) — all client-side over one bounded (`limit=5000`) fetched snapshot
+  (`GET /api/findings`), matching D4's "hand-roll tables/filters, no virtualization" and
+  R-03's "a few thousand rows is fine" ceiling. Top **quick-filter** (debounced substring
+  over url/param/vuln_class/mechanism) + **applied-filter chips**
+  (`role=group` "Applied filters", each a `<button aria-label="Remove filter: …">`, focus
+  moved to the quick-filter input on removal — never to `<body>`, per R-11) + "Clear all".
+  **Severity** has no store column (the schema has none — see `NFR-UI-read-only`'s "the UI
+  reads" posture and `docs/ARCHITECTURE.md`'s store-as-contract); `findingsview.
+  derive_severity(vuln_class)` computes a UI-only, advisory band via substring rules,
+  documented as never written back and never treated as a stored/scored fact. Rendered as
+  a text+color `.badge` (never color alone, R-11).
+  **Saved views** persist server-side (`saved_views` table, migration 12 —
+  `CC-CORE-0019`; see that entry for the store-contract change and its bookkeeping-number
+  note) via `fuzzlab.web.savedviews` + `GET/POST/PUT/DELETE /api/views?table=`; a spec is
+  `{version, name, filter:{text, facets}, sort}` (R-03's shape, `predicates` deferred —
+  no caller needs Tenable-style predicates yet). `localStorage` (try/catch-wrapped) holds
+  only throwaway per-viewer state (collapsed facet groups, the last-applied view id, a
+  draft quick-filter string) per R-07's state-decision rule.
+  **"Send to Repeater / open request" pivot** follows U0's PRG+303 pattern exactly:
+  `POST /findings/repeater/from-finding` (a real `<form>`, both on the list's per-row
+  action and the detail page) → `RepeaterController.create_from_finding` →
+  `RedirectResponse(..., 303)` to `/proxy?repeater_tab=ID` — opaque tab id only, never
+  bytes on the wire. `finding`/`attempt` carry no raw request bytes (only proxy flow
+  history does, via the existing `create_from_flow`), so `create_from_finding`
+  reconstructs a minimal, best-effort request line from the finding's own
+  `url`/`method`/`param` against the configured target host; the tab name says
+  "(reconstructed)" so it is never mistaken for a byte-exact replay.
+  **Ground truth**: the detail view renders `primary_endpoint`/`primary_role`/
+  `related_endpoints`/`flow_variant` (CR-LAB-0001 Addendum B /
+  `fuzzlab.labels.contract.Case`) when a finding's `evidence` JSON happens to carry them
+  — additive/optional, matched by key, never required or invented. Note the honest
+  current state: the oracle (`fuzzlab/oracle/oracle.py`, the sole finding-writer) never
+  reads ground truth (D9/D10 fail-closed: it must not know the answer) and no existing
+  writer currently attaches these keys to `verdict.evidence`, so this renders today only
+  if/when a future harness-integration or plugin chooses to carry them through — the
+  detail template and `findingsview._ground_truth_fields` are the reading side of that
+  contract, built ahead of a writer per the lane's own scope (`app.py` read routes only).
+  **Shared `js/datatable.js`** (new standalone ES module, D3): native `<table>` (not
+  `role="grid"` — read-only sort + row-link, not a composite widget, per R-11), every
+  cell via `textContent` (never innerHTML — url/param/payload are target-derived,
+  untrusted), a real `<a href>` in the primary cell wrapped around JS-rendered content
+  (row-click is an enhancement on top), named row-action buttons, a fixed severity rank
+  map for non-lexicographic sort, and `safeHref()` (http/https/relative-only, blocks
+  `javascript:`/`data:`) applied to every rendered pivot href. API: `createDataTable(root,
+  {caption, columns:[{key,label,render,sortValue,sortable}], data, getRowId, rowHref,
+  onRowClick, rowActions, textFilterKeys, emptyMessage, liveRegion}) ->
+  {setData, setTextFilter, setFilter, setSort, getSort, getVisible, element}`. Files:
+  `sections/findings.html`, `templates/finding.html` (detail; alongside `templates/
+  run.html`, not under `sections/` — a record detail page, not a section route), `js/
+  findings.js`, `js/datatable.js`, `css/findings.css`; `app.py` gained the `findings` NAV
+  entry (Workbench group, after Proxy) and `_read_findings`/`_read_finding`/
+  `_saved_views` read helpers.
+- Impact (other components / project): read-only over `finding`/`attempt` (no schema
+  change to either); the one write surface (`saved_views`) is view *definitions* a person
+  authored in the panel, not tool output — `CC-CORE-0019` covers that table's own impact.
+  `fuzzlab/web/app.py` and `fuzzlab/web/proxycontrol.py` (new `RepeaterController.
+  create_from_finding`) are shared with U0/U3/U6's prior changes to those files but this
+  lane only adds routes/methods, touching no existing route/method body. `js/datatable.js`
+  is new and currently has exactly one consumer (this lane); U1 (recent-runs table) and
+  U5 (store explorer) are documented in `docs/UI_IMPLEMENTATION_PLAN.md` §3 to reuse it
+  *minus* the facet sidebar — **flagging for the integrator**: those are concurrent
+  Wave-1 lanes and neither imports/depends on `datatable.js` as written here, so there is
+  no code collision today, but their own dispatch prompts should point at this file's
+  actual API (above) rather than assume a different shape, since none of the three lanes
+  coordinated the exact signature ahead of time.
+- Risk (level; mitigation): low — additive routes/files, no result-table writes, no
+  change to `NFR-UI-localhost`/`NFR-UI-control-plane-hardened` (the existing
+  `SecurityGateMiddleware` covers the new POST route the same as every other `/proxy/
+  repeater/from-*` route). The reconstructed-request pivot could mislead someone into
+  treating it as a byte-exact replay; mitigated by the explicit "(reconstructed)" tab
+  name and this entry's documentation, plus `test_create_from_finding_reconstructs_a_
+  request_not_byte_exact`. XSS-shaped `url`/`param`/`evidence` values are covered by
+  `test_finding_detail_page_renders_untrusted_fields_dom_safe` (Jinja autoescape) and
+  `datatable.js`'s `textContent`-only rendering (exercised transitively by the list page;
+  no headless-browser test in this lane — see Deliverables).
+- Deliverables:
+  - [x] `fuzzlab.web.findingsview` (list/detail, derived severity, ground-truth pass-through) — done.
+  - [x] `fuzzlab.web.savedviews` (CRUD over `saved_views`) — done.
+  - [x] Migration 12 (`saved_views`) — done (`CC-CORE-0019`).
+  - [x] `RepeaterController.create_from_finding` — done.
+  - [x] Routes: `/findings`, `/findings/{id}`, `/api/findings`, `/findings/repeater/
+    from-finding` (PRG+303), `/api/views` (GET/POST/PUT/DELETE) — done.
+  - [x] `sections/findings.html`, `templates/finding.html`, `js/datatable.js`, `js/
+    findings.js`, `css/findings.css` — done.
+  - [x] Tests: filter/facet derivation, saved-view round-trip (store + HTTP), DOM-safe
+    rendering of untrusted fields, PRG+303 pivot, reads-only — done
+    (`tests/test_web_findings.py`, 16 tests).
+  - [ ] Real-browser/headless a11y smoke of the facet Disclosure + DataTable keyboard
+    model (focus-visible ring, `aria-sort` toggling, chip-removal focus target) — not
+    done in this lane; existing precedent (`test_web_launcher_browser.py`, `test_web_
+    repeater_browser.py`) shows the pattern other lanes used for this, left as a
+    follow-up rather than expanding this lane's scope past its `app.py`-read-routes
+    + shared-file remit.
+- Effectiveness (assessed 2026-09-22): effective for the stated scope — filter+saved-view
+  round-trip, DOM-safe untrusted-field rendering, and the "send to Repeater" PRG pivot are
+  all covered by passing tests; the workbench renders against both an empty store and a
+  seeded one without creating the store file on a bare read.
+
 ### CC-UI-0027 — Incidental: CLI `--dry-run` flag surfaces in the launcher form (lane D0a) (2026-09-22)
 - Change: lane D0a added a `--dry-run` flag to the `build_parser()` of `crawl`,
   `audit`, `fuzz`, `auto`, `mutate-run`, and `proxy` (see CC-CRAWL-0007,

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}fuzzlab &mdash; Findings{% endblock %}
+{% block crumb %}Findings{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/findings.css">{% endblock %}
+{% block content %}
+<section class="panel" aria-labelledby="findings-h1">
+  <h1 id="findings-h1" class="visually-hidden">Findings workbench</h1>
+
+  <div class="card" id="views-card">
+    <h2 class="visually-hidden">Saved views</h2>
+    <div class="views-row" id="views-row" role="group" aria-label="Saved views">
+      <span class="muted">Views:</span>
+      <!-- populated: one chip button per saved view, plus "Save current…" -->
+    </div>
+  </div>
+
+  <div class="findings-layout">
+    <aside class="facets" aria-label="Filter findings">
+      <div class="facet-quick">
+        <label for="quick-filter" class="visually-hidden">Quick filter</label>
+        <input type="search" id="quick-filter"
+               placeholder="Filter by URL, param, endpoint&hellip;" autocomplete="off">
+      </div>
+
+      <div id="facet-groups">
+        <!-- one <fieldset> per group, built in JS: severity, vuln class, method,
+             mechanism, endpoint. Each group's <button aria-expanded aria-controls>
+             is the APG Disclosure header (R-11); checkboxes carry the live count
+             inside their own <label>. -->
+      </div>
+    </aside>
+
+    <div class="findings-main">
+      <div class="chips-row" role="group" aria-label="Applied filters" id="chips-row">
+        <!-- one <button aria-label="Remove filter: …"> per active facet/quick-filter
+             chip, plus "Clear all". Empty (no children) when nothing is applied. -->
+      </div>
+      <p class="visually-hidden" aria-live="polite" id="findings-live"></p>
+      <p class="muted" id="findings-empty" hidden>No findings recorded yet. Run a tool
+        with <code>--store</code> (or use automatic mode), then refresh.</p>
+      <div id="findings-table"></div>
+      <!-- "send to Repeater" row action (R-07, PRG + 303): shared with the finding
+           detail page's own form. JS only sets the hidden id and submits — a real
+           POST navigation, never a fetch, never bytes on the wire. -->
+      <form method="post" action="/findings/repeater/from-finding"
+            id="row-to-repeater-form" class="visually-hidden">
+        <input type="hidden" name="finding_id" id="row-to-repeater-id" value="">
+      </form>
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="/static/js/findings.js"></script>{% endblock %}

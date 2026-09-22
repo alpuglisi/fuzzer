@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}fuzzlab finding #{{ detail.id }}{% endblock %}
+{% block crumb %}Finding #{{ detail.id }}{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/css/findings.css">{% endblock %}
+{% block content %}
+<p><a href="/findings">&larr; all findings</a></p>
+<h1>Finding #{{ detail.id }}
+  <span class="badge sev-{{ detail.severity }}">{{ detail.severity }}</span></h1>
+<p class="muted">Run <a href="/runs/{{ detail.run_id }}">#{{ detail.run_id }}</a>
+  &middot; {{ detail.created_at or '' }}</p>
+
+<div class="card">
+  <h2>Location</h2>
+  <dl class="kv">
+    <dt>Vuln class</dt><dd>{{ detail.vuln_class or '' }}</dd>
+    <dt>URL</dt><dd><code>{{ detail.url or '' }}</code></dd>
+    <dt>Method</dt><dd>{{ detail.method or '' }}</dd>
+    <dt>Param</dt><dd>{{ detail.param or '' }}</dd>
+    <dt>Mechanism</dt><dd>{{ detail.confidence or '' }}</dd>
+    <dt>Case id</dt><dd><code>{{ detail.case_id or '' }}</code></dd>
+  </dl>
+
+  <!-- "send to Repeater / open request" pivot, PRG + 303 (R-07): a real POST
+       creates the tab server-side (findings carry no raw bytes, so it's
+       reconstructed from url/method/param), then a 303 redirect to
+       /proxy?repeater_tab=ID carries only the opaque tab id — never bytes —
+       on the wire; works with JS off too. -->
+  <form method="post" action="/findings/repeater/from-finding">
+    <input type="hidden" name="finding_id" value="{{ detail.id }}">
+    <button type="submit">&rarr; Repeater</button>
+  </form>
+</div>
+
+{% if detail.ground_truth %}
+<div class="card">
+  <h2>Multi-artifact ground truth</h2>
+  <p class="muted">From the LAB push (CR-LAB-0001 Addendum B) &mdash; where the
+    untrusted value is actually used, and the rest of the flow it travels through.</p>
+  <dl class="kv">
+    <dt>Primary endpoint</dt><dd><code>{{ detail.ground_truth.primary_endpoint or '' }}</code></dd>
+    <dt>Primary role</dt><dd>{{ detail.ground_truth.primary_role or '' }}</dd>
+    <dt>Flow variant</dt><dd>{{ detail.ground_truth.flow_variant or 'direct' }}</dd>
+  </dl>
+  {% set related = detail.ground_truth.related_endpoints or [] %}
+  {% if related %}
+  <h3>Related endpoints</h3>
+  <table>
+    <caption class="visually-hidden">Related endpoints in this finding's flow</caption>
+    <thead><tr><th scope="col">endpoint</th><th scope="col">role</th></tr></thead>
+    <tbody>
+      {% for e in related %}
+      <tr><td><code>{{ e.endpoint or '' }}</code></td><td>{{ e.role or '' }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Evidence</h2>
+  {% if detail.evidence %}
+  <dl class="kv">
+    {% for k, v in detail.evidence | dictsort %}
+    <dt>{{ k }}</dt><dd><code>{{ v }}</code></dd>
+    {% endfor %}
+  </dl>
+  {% else %}
+  <p class="muted">No evidence recorded.</p>
+  {% endif %}
+</div>
+
+{% if detail.attempt %}
+<div class="card">
+  <h2>Confirming attempt</h2>
+  <dl class="kv">
+    <dt>Attempt</dt><dd>#{{ detail.attempt.id }}</dd>
+    <dt>Payload family</dt><dd>{{ detail.attempt.payload_family or '' }}</dd>
+    <dt>Reward</dt><dd>{{ detail.attempt.reward }}</dd>
+    <dt>Model score (advisory)</dt><dd>{{ detail.attempt.score }}</dd>
+    <dt>Uncertainty (advisory)</dt><dd>{{ detail.attempt.uncertainty }}</dd>
+  </dl>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,172 @@
+/* Findings workbench (U2/CC-UI-0029) — facet sidebar + DataTable + saved views,
+ * layered on the shared shell.css primitives (.card, table, buttons). Severity
+ * badges reuse the severity color tokens from tokens.css; never color alone
+ * (R-11) — the badge text itself names the level.
+ */
+
+.findings-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: .9rem;
+  align-items: start;
+}
+
+@media (max-width: 760px) {
+  .findings-layout { grid-template-columns: 1fr; }
+}
+
+.facets {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .6rem .7rem;
+  position: sticky;
+  top: 0;
+}
+
+.facet-quick input {
+  width: 100%;
+  margin-bottom: .6rem;
+}
+
+.facet-group {
+  border: 0;
+  padding: 0;
+  margin: 0 0 .5rem;
+}
+
+.facet-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: .3rem 0;
+  font-weight: 600;
+  font-size: .85rem;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.facet-group-header .chev { color: var(--muted); }
+.facet-group-header[aria-expanded="false"] .chev { transform: rotate(-90deg); }
+
+.facet-options {
+  list-style: none;
+  margin: .35rem 0 0;
+  padding: 0;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.facet-options li { margin: .1rem 0; }
+
+.facet-options label {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  font-size: .85rem;
+  cursor: pointer;
+}
+
+.facet-options .fcount { color: var(--muted); margin-left: auto; }
+
+.chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  align-items: center;
+  min-height: 1.6rem;
+  margin-bottom: .5rem;
+}
+
+.chip-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  background: var(--accent-weak);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: .15rem .5rem;
+  font-size: .8rem;
+  cursor: pointer;
+}
+
+.chip-filter .x { font-weight: 700; }
+
+.chip-clear {
+  border-radius: 999px;
+  font-size: .8rem;
+  padding: .15rem .6rem;
+}
+
+.views-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  align-items: center;
+}
+
+.chip-view {
+  border-radius: 999px;
+  padding: .15rem .6rem;
+  font-size: .8rem;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  cursor: pointer;
+}
+
+.chip-view.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.chip-view.pinned::before { content: "\2605 "; }
+
+.view-save {
+  display: inline-flex;
+  gap: .3rem;
+  align-items: center;
+  margin-left: .4rem;
+}
+
+.view-save input {
+  width: 12rem;
+}
+
+/* Severity badges — text + color, per R-11 (never color alone). */
+.badge {
+  display: inline-block;
+  border-radius: 4px;
+  padding: .05rem .45rem;
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .02em;
+  border: 1px solid transparent;
+  vertical-align: middle;
+}
+
+.badge.sev-critical { color: #fff; background: var(--crit); }
+.badge.sev-high { color: #fff; background: var(--high); }
+.badge.sev-medium { color: #1a1d21; background: var(--med); }
+.badge.sev-low { color: #1a1d21; background: var(--low); }
+.badge.sev-info { color: #fff; background: var(--info); }
+
+.dt-empty { color: var(--muted); text-align: center; padding: 1rem 0; }
+.dt-clickable { cursor: pointer; }
+.dt-actions { white-space: nowrap; }
+
+.kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: .2rem .8rem;
+  margin: 0;
+}
+
+.kv dt { color: var(--muted); font-size: .85rem; }
+.kv dd { margin: 0; }

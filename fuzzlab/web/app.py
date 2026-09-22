@@ -31,7 +31,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from fuzzlab.core.config import Config, load_config
-from fuzzlab.web import commandspec, results
+from fuzzlab.web import commandspec, findingsview, results, savedviews
 from fuzzlab.web.proxycontrol import RepeaterController
 from fuzzlab.web.runner import Runner, build_argv, display_command
 from fuzzlab.web.sse import sse_response
@@ -217,6 +217,7 @@ NAV: list[dict[str, Any]] = [
     {"group": "Workbench", "links": [
         {"id": "launcher", "label": "Launcher", "href": "/", "icon": "▸"},
         {"id": "proxy", "label": "Proxy", "href": "/proxy", "icon": "⇄"},
+        {"id": "findings", "label": "Findings", "href": "/findings", "icon": "⚑"},
         {"id": "results", "label": "Results", "href": "/results", "icon": "▤"},
     ]},
     {"group": "Analysis", "links": [
@@ -300,6 +301,37 @@ def _read_flow(cfg: Config, flow_id: int) -> dict | None:
     from fuzzlab.web import proxyview
     with Store(path) as store:
         return proxyview.flow_detail(store, flow_id)
+
+
+def _read_findings(cfg: Config) -> list[dict]:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return []
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        return findingsview.list_findings(store)
+
+
+def _read_finding(cfg: Config, finding_id: int) -> dict | None:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return None
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        return findingsview.finding_detail(store, finding_id)
+
+
+# --- saved views (U2/CC-UI-0029): the one write path this section owns; the
+# store file IS created on first save (an explicit user action), same posture
+# as the Repeater's "create tab" (never an implicit side effect of a GET).
+
+def _saved_views(cfg: Config, table_key: str) -> list[dict]:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return []
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        return savedviews.list_views(store, table_key)
 
 
 # --- template context builders (rendering lives in templates/, via jinja2) ----
@@ -456,6 +488,99 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     def results_page(request: Request):
         return templates.TemplateResponse(
             request, "sections/results.html", _results_context(cfg, _read_runs(cfg)))
+
+    @app.get("/findings", response_class=HTMLResponse)
+    def findings_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/findings.html", _shell_context(cfg, active="findings"))
+
+    @app.get("/api/findings")
+    def api_findings():
+        return {"findings": _read_findings(cfg)}
+
+    @app.get("/findings/{finding_id}", response_class=HTMLResponse)
+    def finding_html(request: Request, finding_id: int):
+        detail = _read_finding(cfg, finding_id)
+        if detail is None:
+            return templates.TemplateResponse(
+                request, "not_found.html",
+                {"run_id": finding_id, "kind": "Finding", "back_href": "/findings",
+                 **_shell_context(cfg, active="findings")}, status_code=404)
+        return templates.TemplateResponse(
+            request, "finding.html",
+            {"detail": detail, **_shell_context(cfg, active="findings")})
+
+    # --- "send to Repeater / open request" pivot, PRG + 303 (R-07) -------------
+    # Same pattern as U0's /proxy/repeater/from-flow: a real <form method="post">
+    # (works with JS off) creates the Repeater tab server-side, then a 303
+    # redirect carries only the opaque tab id in the query string. Findings don't
+    # persist raw bytes (only proxy flow history does), so `create_from_finding`
+    # reconstructs a minimal request from the finding's own url/method/param —
+    # never bytes from the URL, never a fetch, never a fabricated "original".
+    @app.post("/findings/repeater/from-finding")
+    async def repeater_from_finding_prg(request: Request):
+        from urllib.parse import parse_qsl
+        body = (await request.body()).decode("utf-8", errors="replace")
+        form = dict(parse_qsl(body))
+        try:
+            finding_id = int(form.get("finding_id", ""))
+        except (TypeError, ValueError):
+            return RedirectResponse(url="/findings", status_code=303)
+        tab = repeater_ctl.create_from_finding(finding_id)
+        if tab is None:
+            return RedirectResponse(url="/findings", status_code=303)
+        return RedirectResponse(url=f"/proxy?repeater_tab={tab['id']}", status_code=303)
+
+    # --- saved views (U2/CC-UI-0029, R-03): server-side, per `table_key` -------
+    @app.get("/api/views")
+    def views_list(table: str):
+        return {"views": _saved_views(cfg, table)}
+
+    @app.post("/api/views")
+    async def views_create(request: Request):
+        body = await request.json()
+        table_key = body.get("table")
+        name = (body.get("name") or "").strip()
+        if not table_key or not name:
+            return JSONResponse({"error": "table and name are required"}, status_code=400)
+        spec = body.get("spec") or {}
+        if not isinstance(spec, dict):
+            return JSONResponse({"error": "spec must be an object"}, status_code=400)
+        from fuzzlab.core.store import Store
+        with Store(cfg.get("store_path", "fuzzlab.db")) as store:
+            view = savedviews.create_view(store, table_key, name, spec,
+                                          bool(body.get("pinned", False)))
+        return {"view": view}
+
+    @app.put("/api/views/{view_id}")
+    async def views_update(view_id: int, request: Request):
+        body = await request.json()
+        spec = body.get("spec")
+        if spec is not None and not isinstance(spec, dict):
+            return JSONResponse({"error": "spec must be an object"}, status_code=400)
+        path = cfg.get("store_path", "fuzzlab.db")
+        if not results.store_exists(path):
+            return JSONResponse({"error": f"view {view_id} not found"}, status_code=404)
+        from fuzzlab.core.store import Store
+        with Store(path) as store:
+            view = savedviews.update_view(
+                store, view_id, name=body.get("name"), spec=spec,
+                pinned=body.get("pinned"))
+        if view is None:
+            return JSONResponse({"error": f"view {view_id} not found"}, status_code=404)
+        return {"view": view}
+
+    @app.delete("/api/views/{view_id}")
+    def views_delete(view_id: int):
+        path = cfg.get("store_path", "fuzzlab.db")
+        if not results.store_exists(path):
+            return JSONResponse({"error": f"view {view_id} not found"}, status_code=404)
+        from fuzzlab.core.store import Store
+        with Store(path) as store:
+            ok = savedviews.delete_view(store, view_id)
+        if not ok:
+            return JSONResponse({"error": f"view {view_id} not found"}, status_code=404)
+        return {"deleted": True}
 
     @app.get("/ml", response_class=HTMLResponse)
     def ml_page(request: Request):

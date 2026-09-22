@@ -2,5 +2,5 @@
 {% block title %}not found{% endblock %}
 {% block crumb %}Not found{% endblock %}
 {% block content %}
-<p>Run {{ run_id }} not found. <a href="/results">Back</a></p>
+<p>{{ kind or 'Run' }} {{ run_id }} not found. <a href="{{ back_href or '/results' }}">Back</a></p>
 {% endblock %}
