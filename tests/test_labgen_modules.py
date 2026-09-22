@@ -227,7 +227,7 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
         "dom_suffix": "-post",
         "dom_write_prop": "innerHTML",
     },
-    # CC-LAB-0090: registered in the shared vocabulary so minimal_pair can
+    # CC-LAB-0210: registered in the shared vocabulary so minimal_pair can
     # classify them (php_current's shape map does not use any of them).
     # None of the three real templates reference a Jinja variable (see
     # fuzzlab.labgen.modules' own docstring for these classes), so any

@@ -100,7 +100,7 @@ STATIC_PRECHECK_BY_SHAPE: dict[tuple[str, str], StaticPrecheckStatus] = {
     # step further: those shapes at least have a PHP-observable call for the
     # checker to mis-trust as a sanitizer).
     ("xss-dom", "dom_html_sink"): StaticPrecheckStatus.UNINFORMATIVE,
-    # --- CC-LAB-0090: open redirect (category 5, Booking.com pilot) --------
+    # --- CC-LAB-0210: open redirect (category 5, Booking.com pilot) --------
     # INFORMATIVE: a vulnerable cell's `redirect($value)` sink is fed a
     # request-parameter value with no check applied at all -- the same
     # textbook "value reaches a sensitive sink with nothing between source

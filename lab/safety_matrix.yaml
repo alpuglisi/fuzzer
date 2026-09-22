@@ -78,7 +78,7 @@
 #   open_redirect — a server-issued redirect's target is built from tainted
 #     input with no check that it stays on this site, letting an attacker
 #     send a user through a trusted domain to an arbitrary external
-#     destination (CWE-601) (added CC-LAB-0090)
+#     destination (CWE-601) (added CC-LAB-0210)
 version: 1
 entries:
   # --- SQL sinks -----------------------------------------------------
@@ -712,7 +712,7 @@ entries:
     effect: neutralises
     neutralizes: [html_tag_break]
 
-  # --- CC-LAB-0090: open redirect (category 5 pilot, Booking.com's real
+  # --- CC-LAB-0210: open redirect (category 5 pilot, Booking.com's real
   # affiliate/partner-redirect and post-checkout-continuation behavior --
   # docs/research/category5-travel-functionality-and-cwe-research.md
   # §1.1/§2.1, CWE-601) ------------------------------------------------

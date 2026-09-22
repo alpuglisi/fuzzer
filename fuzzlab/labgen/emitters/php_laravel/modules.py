@@ -392,7 +392,7 @@ class UrlSchemeAllowlistTransform(TemplateModule):
 
 
 class RedirectTargetAllowlistTransform(TemplateModule):
-    """The ``redirect_target_allowlist`` op (CC-LAB-0090, `open_redirect`
+    """The ``redirect_target_allowlist`` op (CC-LAB-0210, `open_redirect`
     concern): rewrites ``value_expr`` so only a same-origin relative path
     survives -- otherwise the inert default ``'/'``.
 
@@ -692,7 +692,7 @@ class DomInnerhtmlEchoSink(TemplateModule):
 
 
 class HttpRedirectReturnSink(TemplateModule):
-    """The ``http_redirect_return`` sink family (CC-LAB-0090, `open_redirect`
+    """The ``http_redirect_return`` sink family (CC-LAB-0210, `open_redirect`
     concern): a server-issued HTTP redirect (Laravel's ``redirect()``
     helper, an HTTP 3xx ``Location:`` header) whose target is
     ``value_expr``.
@@ -1010,7 +1010,7 @@ TRANSFORMS: dict[str, Module] = {
     "runtime_field_allowlist": RuntimeFieldAllowlistTransform(),
     # L-P3.3c-DOM (reviews.php/feedback.php): the client-side write mechanism.
     "dom_text_content": DomTextContentTransform(),
-    # CC-LAB-0090 (open_redirect, category 5's Booking.com pilot app).
+    # CC-LAB-0210 (open_redirect, category 5's Booking.com pilot app).
     "redirect_target_allowlist": RedirectTargetAllowlistTransform(),
 }
 #: Sinks. The three HTML sinks render a **Blade view** body rather than a
@@ -1032,13 +1032,13 @@ SINKS: dict[str, Module] = {
     "orm_entity_bulk_assign": OrmEntityBulkAssignSink(),
     # L-P3.3c-DOM: reviews.php/feedback.php's client-only DOM-XSS sink.
     "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
-    # CC-LAB-0090 (open_redirect, category 5's Booking.com pilot app).
+    # CC-LAB-0210 (open_redirect, category 5's Booking.com pilot app).
     "http_redirect_return": HttpRedirectReturnSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),
     "render_only": RenderOnlyComplexity(),
-    # CC-LAB-0090 (open_redirect, category 5's Booking.com pilot app).
+    # CC-LAB-0210 (open_redirect, category 5's Booking.com pilot app).
     "redirect_response": RedirectResponseComplexity(),
 }
 #: ``view``-category modules (L-P3.3c-G2). Selected per page by the emitter's

@@ -3,7 +3,7 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0090 — category 5 (Travel/booking) pilot, first increment: `open_redirect` (CWE-601) shape on `php_laravel`, Booking.com's own app (FR-LAB-64, FR-LAB-65) (2026-09-22)
+### CC-LAB-0210 — category 5 (Travel/booking) pilot, first increment: `open_redirect` (CWE-601) shape on `php_laravel`, Booking.com's own app (FR-LAB-78, FR-LAB-79) (2026-09-22)
 - Change: the first buildable increment of category 5's Booking.com half
   (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5;
   `docs/research/category5-travel-functionality-and-cwe-research.md`'s
@@ -55,7 +55,7 @@ Component code: **LAB**. Entry format and required fields: see
      cover the rest of Booking.com's researched functionality or the
      research doc's other shortlisted candidates (price-integrity
      duplicate, CWE-1236 CSV-export) — later increments in the same
-     reserved `CC-LAB-0090`-`0119` block.
+     reserved `CC-LAB-0210`-`0119` block.
   5. **New, separate ground-truth directory**
      `lab/ground-truth-booking-clone/` (`labels.json`,
      `injection-points.json`, `expectedresults.csv`; one case, `BKNG-0001`)
@@ -77,14 +77,14 @@ Component code: **LAB**. Entry format and required fields: see
      (default `{}`; every pre-existing construction unchanged) — the first
      caller of this harness that needed a response header, not only
      status/body.
-  7. `docs/components/01-target-lab/requirements.md`: `FR-LAB-64`/
-     `FR-LAB-65` (not `FR-LAB-63`/`64` as first drafted — `CC-LAB-0069`
+  7. `docs/components/01-target-lab/requirements.md`: `FR-LAB-78`/
+     `FR-LAB-79` (not `FR-LAB-63`/`64` as first drafted — `CC-LAB-0069`
      already cites `FR-LAB-63`, a real collision the adequacy reviewer
      caught before implementation).
   8. `tests/test_labgen_open_redirect.py`: verdict-derivation, Tier 0
      (lint + minimal-pair), Tier 3 (regen-diff, unique-path), CLI `--check`,
      a two-ground-truth-directories-load-independently smoke test (the
-     first test in this repo to do so — `FR-LAB-65`), and the live-boot
+     first test in this repo to do so — `FR-LAB-79`), and the live-boot
      test above.
 - Impact (other components / project): additive-only across
   `lab/safety_matrix.yaml`, both `modules.py` registries (php_current
@@ -119,7 +119,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] `lab/ground-truth-booking-clone/` (3 files, `BKNG-0001`) — done
   - [x] `fuzzlab/labgen/conformance/static_precheck.py`: new entry — done
   - [x] `fuzzlab/labgen/conformance/live_boot.py`: `HttpResponse.headers` — done
-  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-64`/`65` — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-78`/`65` — done
   - [x] `tests/test_labgen_open_redirect.py` (10 tests, all green including
         the real live-boot test) — done
   - [x] `CHANGELOG.md` line — done

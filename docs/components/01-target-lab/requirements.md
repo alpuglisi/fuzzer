@@ -1838,13 +1838,13 @@ lane) can submit a payload as
     `puppy-fort-factory/` still present and every test green, a second doing
     only the `git rm -r puppy-fort-factory/` once the first commit's own
     full test run (fast suite + the live-boot slow suite) was green.
-- **FR-LAB-64** *(open-redirect shape, `php_laravel`; `CC-LAB-0090`,
+- **FR-LAB-78** *(open-redirect shape, `php_laravel`; `CC-LAB-0210`,
   2026-09-22).* Category 5's (Travel/booking/marketplaces,
   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5) Booking.com
   pilot's first increment. Note on numbering: `FR-LAB-63` is already spoken
   for (`CC-LAB-0069`'s title cites it, although no `requirements.md` heading
   for it exists — a pre-existing bookkeeping gap in that earlier entry, not
-  this one's to fix); this entry is `FR-LAB-64` to avoid a real collision.
+  this one's to fix); this entry is `FR-LAB-78` to avoid a real collision.
   - A genuinely new `(vuln_class, sink_context.family)` shape,
     `("open_redirect", "http_redirect_location")`: a server-issued HTTP
     redirect (Laravel's `redirect()` helper) whose target is a tainted
@@ -1886,7 +1886,7 @@ lane) can submit a payload as
     Extranet) or the research doc's other shortlisted candidates
     (price-integrity duplicate, CWE-1236 CSV-export) — those are later,
     separate increments inside this category's reserved
-    `CC-LAB-0090`-`0119` block, tracked in
+    `CC-LAB-0210`-`0119` block, tracked in
     `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4.
   - Real live-boot proof
     (`tests/test_labgen_open_redirect.py::test_live_boot_redirect_manifest_blocks_the_bypass_shapes_the_allowlist_is_meant_to_catch`),
@@ -1903,7 +1903,7 @@ lane) can submit a payload as
     `HttpResponse` gained an additive `headers: dict[str, str]` field
     (default `{}`, every pre-existing construction unchanged) and
     `LiveBootHarness.request()` now populates it from the real response.
-- **FR-LAB-65** *(second, independent ground-truth directory; `CC-LAB-0090`,
+- **FR-LAB-79** *(second, independent ground-truth directory; `CC-LAB-0210`,
   2026-09-22).* The ground-truth label contract (`fuzzlab.labels.contract`)
   now has a real, tested precedent for more than one `ground_truth_dir`
   serving more than one distinct lab app sharing an emitter/stack:

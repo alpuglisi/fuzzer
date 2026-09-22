@@ -425,7 +425,7 @@ tracked in the requirements files, not here.
 
   **Multi-category, multi-app expansion begun (`docs/LAB_MULTI_CATEGORY_
   SECOND_TARGETS_PLAN.md` §9, category 5 pilot's first increment,
-  `CC-LAB-0090`/`FR-LAB-64`/`FR-LAB-65`, 2026-09-22).** The `php_laravel`
+  `CC-LAB-0210`/`FR-LAB-78`/`FR-LAB-79`, 2026-09-22).** The `php_laravel`
   emitter now renders more than one lab-app *identity*, not just one
   (`puppy-fort-factory`'s migrated pages plus illustrative pages): a new,
   standalone Booking.com-themed app (`lab/manifests/

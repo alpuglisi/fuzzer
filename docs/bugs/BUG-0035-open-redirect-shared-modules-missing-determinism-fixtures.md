@@ -1,8 +1,8 @@
-# BUG-0034 — `CC-LAB-0090`'s new shared-vocabulary modules shipped without their `_DETERMINISM_CTX_BY_MODULE` fixture entries
+# BUG-0035 — `CC-LAB-0210`'s new shared-vocabulary modules shipped without their `_DETERMINISM_CTX_BY_MODULE` fixture entries
 
 ## Description
 
-`CC-LAB-0090` (category 5's Booking.com pilot, the `open_redirect`/CWE-601
+`CC-LAB-0210` (category 5's Booking.com pilot, the `open_redirect`/CWE-601
 shape) registered three new modules in the shared, cross-stack
 `fuzzlab.labgen.modules` registries (`redirect_target_allowlist` — a
 transform, `http_redirect_return` — a sink, `redirect_response` — a
@@ -44,7 +44,7 @@ completeness for the shared package's own registries.
 `_DETERMINISM_CTX_BY_MODULE` (`tests/test_labgen_modules.py`) is a
 hand-kept dict, one entry per module name across all four shared
 registries, that a same-file guard test (`test_every_registered_module_
-has_a_determinism_ctx_fixture`) asserts stays exhaustive. `CC-LAB-0090`
+has_a_determinism_ctx_fixture`) asserts stays exhaustive. `CC-LAB-0210`
 added three new registry entries in `fuzzlab/labgen/modules/__init__.py`
 without adding the three corresponding fixture entries in this
 test-adjacent table — an authoring omission in the same change, not a
@@ -71,7 +71,7 @@ very first run against the new code).
    relevant to the change, but neither imports or exercises
    `tests/test_labgen_modules.py`'s shared-package completeness table.
 4. **Why was the whole-repo suite not run before that push?** The
-   change's own scope (`CC-LAB-0090`) touches two registries — the
+   change's own scope (`CC-LAB-0210`) touches two registries — the
    `php_laravel`-specific one (covered by the harder-shapes test file) and
    the shared, cross-stack one (covered by a *different* test file,
    `test_labgen_modules.py`, not obviously implied by "I changed
@@ -97,7 +97,7 @@ Added the three missing `_DETERMINISM_CTX_BY_MODULE` entries
 matching the file's own `L-P3.3c-DOM` precedent's comment convention
 (`tests/test_labgen_modules.py`). Verified with a second whole-repo
 `pytest tests/` run: 1618 passed, 30 skipped, 0 failed. Delivered in the
-same `CC-LAB-0090` change-control entry (its Effectiveness section records
+same `CC-LAB-0210` change-control entry (its Effectiveness section records
 both whole-repo run results), on this same branch, before the change was
 considered complete or a PR opened.
 
@@ -139,6 +139,6 @@ change. This is a sharpening of `CLAUDE.md`'s own Definition-of-Done step 2
 ("run the suite; keep it green") for the specific case where "the suite"
 that matters is not obviously implied by which production file was edited.
 
-Sweep (`PA-0002`): this change (`CC-LAB-0090`) is the only change in this
+Sweep (`PA-0002`): this change (`CC-LAB-0210`) is the only change in this
 session/branch that touched a shared, cross-stack registry; no other
 instance of this gap exists to remediate.

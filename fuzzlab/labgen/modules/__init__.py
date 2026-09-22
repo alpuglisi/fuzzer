@@ -715,7 +715,7 @@ class DomInnerhtmlEchoSink(TemplateModule):
         super().__init__("dom_innerhtml_echo", "sink", _SINK_ENV, "dom_innerhtml_echo.php.j2")
 
 
-# --- CC-LAB-0090: open redirect (category 5, Booking.com pilot) -----------
+# --- CC-LAB-0210: open redirect (category 5, Booking.com pilot) -----------
 #
 # Registered here (unrendered by `php_current`'s own `_MODULE_SET_BY_SHAPE`,
 # exactly like L-P3.3c-DOM's `dom_url_source`/`dom_text_content`/
@@ -794,7 +794,7 @@ TRANSFORMS: dict[str, Module] = {
     # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
     "dom_text_content": DomTextContentTransform(),
-    # CC-LAB-0090: registered for the shared minimal-pair vocabulary only --
+    # CC-LAB-0210: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
     # php_laravel is what actually renders it.
     "redirect_target_allowlist": RedirectTargetAllowlistTransform(),
@@ -821,7 +821,7 @@ SINKS: dict[str, Module] = {
     # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
     "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
-    # CC-LAB-0090: registered for the shared minimal-pair vocabulary only --
+    # CC-LAB-0210: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
     # php_laravel is what actually renders it.
     "http_redirect_return": HttpRedirectReturnSink(),
@@ -829,7 +829,7 @@ SINKS: dict[str, Module] = {
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),
     "render_only": RenderOnlyComplexity(),
-    # CC-LAB-0090: registered for the shared minimal-pair vocabulary only --
+    # CC-LAB-0210: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
     # php_laravel is what actually renders it.
     "redirect_response": RedirectResponseComplexity(),
