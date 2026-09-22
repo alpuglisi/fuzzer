@@ -3,6 +3,55 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0009 — Reach the main harness's attempt path, not just `mutate-run` (Lane C1/M8-wiring) (2026-09-22)
+- Change: companion entry to `CC-FUZZ-0019` (see that entry for the full
+  mechanism — this one records the MUT-side of the same change). T8.5's "emit
+  accepted variants into the attempt path" previously only reached the
+  standalone `fuzzlab mutate-run` CLI's own attempt/summary loop
+  (`fuzzlab/mutation/run.py::run_mutation`); `fuzzlab/mutation/operators.py`
+  (T8.1), `semantics.py` (T8.1) and `catalog.record_variant` (T8.5) are now also
+  called directly from `fuzzlab/greybox/run.py` (the FUZZ component's own
+  harness), so `greybox-run` generates, probes, and — via the same destructive-
+  gated `record_variant` — writes back mutation variants too, without going
+  through `mutate-run`/`MutationSearch`/`HttpFilter`'s live-WAF-learning loop at
+  all (that remains `mutate-run`'s job; this is a lighter, offline-generated
+  variant set bounded by `max_mutation_variants` per attack probe, screened by
+  whether it actually hit/reached new code when the harness sent it — no
+  separate live WAF-caught/evaded round-trip like `MutationSearch` runs). No
+  code in `fuzzlab/mutation/` itself changed; this is purely a new consumer of
+  its existing public surface (`default_operators`, `SemanticsValidator`,
+  `record_variant`).
+- Impact (other components / project): `payload_variant` (migration 8) now has
+  two writers — `mutate-run` (unchanged) and `greybox-run` (new, opt-in). Both
+  go through the same `record_variant`/destructive-gate function (PA-0003:
+  single shared write path), so the gate and schema stay consistent across
+  writers. FUZZ (`greybox/run.py`) gained an import-time dependency on this
+  component; no circular import (this component's own live-search code path
+  only imports `fuzzlab.greybox.run` inside a function body, for
+  `mutation/run.py::make_coverage_fn`, which is unaffected).
+- Risk (level; mitigation): low — no existing MUT code changed, only a new
+  external caller of already-tested functions (`default_operators`,
+  `SemanticsValidator.preserves`, `record_variant`, all covered by
+  `tests/test_mutation_operators.py` and `tests/test_mutation_catalog.py`
+  already). The `url-encode` operator is deliberately skipped by the new
+  caller (double-encoding over the probe transport — see `CC-FUZZ-0019`); no
+  change to which operators `mutate-run` itself uses.
+- Deliverables:
+  - [x] No `fuzzlab/mutation/` source changes required — verified the existing
+    public surface (`default_operators`, `SemanticsValidator`, `record_variant`)
+    is sufficient for the new caller — done.
+  - [x] `tests/test_greybox_live.py` regression tests proving the new caller
+    round-trips correctly through `record_variant`/`payload_variant` (see
+    `CC-FUZZ-0019` for the list) — done.
+  - [x] `docs/components/09-mutation-engine/requirements.md` FR-MUT-6 updated
+    in place to reflect the now-dual write-back path — done.
+  - [x] CHANGELOG.md line (shared with `CC-FUZZ-0019`) — done.
+- Effectiveness (assessed 2026-09-22): effective — `payload_variant` rows now
+  originate from `greybox-run` when `--mutation-variants` is passed, proven by
+  `test_run_greybox_consumes_mutation_variants_into_attempt_path`, with no
+  change to `mutate-run`'s own behavior or existing MUT test suite (still
+  green).
+
 ### CC-MUT-0008 — Fix `SemanticsValidator` fail-open on untrusted SQL comment-append; fix AST case-sensitivity (2026-09-22)
 - Change: `fuzzlab/mutation/semantics.py` — added `introduces_line_comment(original,
   mutated)` (true when `mutated` carries a `--` marker `original` didn't) and made

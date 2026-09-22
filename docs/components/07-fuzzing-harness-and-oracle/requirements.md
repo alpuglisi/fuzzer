@@ -1,10 +1,10 @@
 # Fuzzing Harness and Oracle — Requirement Specification
 
-Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5); harness generalization ongoing]`
-· Last updated: 2026-09-21
+Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5); harness generalization ongoing; greybox-run consumes mutation-engine variants (opt-in)]`
+· Last updated: 2026-09-22 · see CC-FUZZ-0019
 
-Related: `ARCHITECTURE.md` #7; `DECISIONS_AND_ROADMAP.md` (D1, D5, D7, Phase 2/3);
-`./change-control.md`.
+Related: `ARCHITECTURE.md` #7; `DECISIONS_AND_ROADMAP.md` (D1, D5, D7, Phase 2/3,
+Phase 8); `./change-control.md`.
 
 ## 1. Purpose
 Send payloads at candidates, extract per-attempt features and reward, and — via a
@@ -50,6 +50,15 @@ rewards) derives from it.
   sending anything.
 - **FR-FUZZ-7** Serialize timing-sensitive sends at concurrency 1 per host via the
   shared budget mutex.
+- **FR-FUZZ-8** The live grey-box run (`greybox/run.py::run_greybox`) can, opt-in
+  (`--mutation-variants` / `mutation_variants=True`, off by default), also probe
+  each point's sqli/xss attacks with a bounded set of the mutation engine's
+  semantics-preserving variants (component #9, MUT), through the same
+  attempt/reward/coverage path as the built-in probes; a variant that hits or
+  reaches new code is written back to `payload_variant` via MUT's existing
+  destructive-gated `catalog.record_variant` — the harness's own consumer of
+  Phase 8 T8.5's write-back path, alongside the standalone `mutate-run` CLI.
+  Added by `CC-FUZZ-0019` (Lane C1/M8-wiring).
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
@@ -65,12 +74,15 @@ rewards) derives from it.
 Reads `candidate` rows (and scheduler choices); writes `attempt` rows (features,
 reward) and, via the oracle, `finding` rows (labels, evidence). Reads grey-box
 coverage/fault signals when available. Authenticates via the session manager;
-sends via the `core/` HTTP client.
+sends via the `core/` HTTP client. Optionally (FR-FUZZ-8) reads mutation-engine
+operators/validator (component #9, MUT) and writes accepted variants to
+`payload_variant` via MUT's `catalog.record_variant`.
 
 ## 6. Dependencies (components)
 `core/`, session manager, payload scheduler, indicator DB & catalogs; grey-box
-instrumentation for reward and coverage/fault labels. (The oracle itself depends
-on `core/` and the target lab, plus grey-box signals when available.)
+instrumentation for reward and coverage/fault labels; mutation engine (MUT,
+optional — FR-FUZZ-8). (The oracle itself depends on `core/` and the target lab,
+plus grey-box signals when available.)
 
 ## 7. Acceptance criteria
 - Confirms the lab's known blind-SQLi injection points with the differential

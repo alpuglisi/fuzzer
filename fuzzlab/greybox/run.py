@@ -34,12 +34,26 @@ from fuzzlab.greybox.confirm import greybox_confirms
 from fuzzlab.greybox.coverage import (CoverageFrontier, app_lines, encode_coverage)
 from fuzzlab.greybox.recorder import record_attempt_signals
 from fuzzlab.greybox.reward import GreyboxSignal, shaped_reward
+from fuzzlab.mutation.catalog import record_variant
+from fuzzlab.mutation.operators import default_operators
+from fuzzlab.mutation.semantics import SemanticsValidator
 from fuzzlab.oracle.probe import Probe
 
 DEFAULT_APP_ROOT = "/var/www/html"
 _SQL_ERR = re.compile(
     r"SQL syntax|mysqli|SQLSTATE|you have an error|unclosed quotation|"
     r"mysqli_sql_exception|Warning.*mysql", re.I)
+
+# ProbeSpec.kind ("sqli"/"xss") -> the mutation engine's own class taxonomy
+# ("sql-injection"/"xss", per fuzzlab/mutation/operators.py and DEFAULT_BASES).
+_MUTATION_CLASS: dict[str, str] = {"sqli": "sql-injection", "xss": "xss"}
+
+# Operators skipped when generating *live-sendable* variants: url-encode pre-encodes the
+# payload as a Python string, but the probe transport (requests' `params=`/`data=`) then
+# percent-encodes it again, so the app would only ever see the once-decoded, still-encoded
+# text -- not a useful WAF-evasion probe here. mutate-run's live search (T8.4/T8.5) still
+# uses it against a raw HTTP layer; this harness's correlated sender does not expose that.
+_MUTATION_SKIP_OPS: frozenset[str] = frozenset({"url-encode"})
 
 
 @dataclass(frozen=True)
@@ -54,10 +68,18 @@ class GreyboxPoint:
 
 @dataclass(frozen=True)
 class ProbeSpec:
-    """One payload to send at a point."""
+    """One payload to send at a point.
+
+    ``base``/``operators`` are set only on mutation-engine-derived variants (T8.5
+    wiring, `mutation_variant_probes`) -- they carry the provenance needed to write the
+    variant back to `payload_variant` (`fuzzlab.mutation.catalog.record_variant`) if it
+    turns out to be an "accepted" one (screening hit or new coverage) once probed.
+    """
     family: str
     value: str
     kind: str                        # 'baseline' | 'sqli' | 'xss'
+    base: str | None = None          # mutation variants only: the payload it was derived from
+    operators: tuple[str, ...] = ()  # mutation variants only: the operator chain applied
 
 
 # A compact, deterministic probe set: a benign baseline (normal code path), an
@@ -160,23 +182,83 @@ def _record_metric(store, run_id: int, key: str, value: float) -> None:
     store.conn.commit()
 
 
+def mutation_variant_probes(base_specs: Iterable[ProbeSpec], *,
+                            max_variants: int = 2,
+                            validator: SemanticsValidator | None = None) -> list[ProbeSpec]:
+    """Semantics-preserving mutation-engine variants of each sqli/xss base probe.
+
+    T8.5 wiring: the mutation engine (`fuzzlab/mutation/operators.py`, T8.1) already
+    generates meaning-preserving payload variants and the semantics validator
+    (T8.1/NFR-MUT-semantics) already judges which are safe to send; this is what was
+    missing -- turning those into extra :class:`ProbeSpec` entries the **main harness's**
+    attempt loop (`run_greybox`, below) sends and records exactly like any other probe,
+    rather than only through the standalone `mutate-run` CLI. Offline/local: it makes no
+    network calls of its own, it just proposes candidates for the caller to send.
+
+    At most ``max_variants`` operators are tried per base probe (one variant each), to
+    keep the extra request cost per point small and bounded (NFR-MUT-bounded).
+    """
+    validator = validator or SemanticsValidator()
+    out: list[ProbeSpec] = []
+    for spec in base_specs:
+        mutation_class = _MUTATION_CLASS.get(spec.kind)
+        if mutation_class is None:
+            continue
+        ops = [op for op in default_operators(mutation_class)
+               if op.id not in _MUTATION_SKIP_OPS][:max_variants]
+        for op in ops:
+            variants = op.apply(spec.value)
+            if not variants:
+                continue
+            variant = variants[0]
+            if not validator.preserves(spec.value, variant, mutation_class,
+                                       trusted=not op.surface):
+                continue
+            out.append(ProbeSpec(family=f"mutation:{op.id}", value=variant, kind=spec.kind,
+                                 base=spec.value, operators=(op.id,)))
+    return out
+
+
+def _record_accepted_variant(store, run_id: int, spec: ProbeSpec, mutation_class: str, *,
+                             new_lines: int, allow_destructive: bool) -> int | None:
+    """Write a mutation-derived probe back to `payload_variant` if it was "accepted":
+    it produced a screening hit or reached new code when actually probed live. Goes
+    through the same destructive gate as `mutate-run` (NFR-MUT-safe) -- refused variants
+    are neither persisted nor (already) sent again."""
+    return record_variant(
+        store, run_id, spec.base, spec.value, list(spec.operators), mutation_class,
+        semantics_ok=True, coverage_gain=float(new_lines),
+        allow_destructive=allow_destructive)
+
+
 def run_greybox(*, base_url: str, store, run_id: int,
                 points: Sequence[GreyboxPoint], sender,
                 coverage_source, dbfault_source, lab_control=None,
                 reset_between: bool = False, app_root: str = DEFAULT_APP_ROOT,
                 probes: Iterable[ProbeSpec] = DEFAULT_PROBES,
-                settle: float = 0.0, logger=None) -> dict:
+                settle: float = 0.0, logger=None,
+                mutation_variants: bool = False, max_mutation_variants: int = 2,
+                allow_destructive: bool = False) -> dict:
     """Drive the live grey-box run; return a summary dict.
 
     Writes one ``attempt`` row per (point, probe) with the shaped reward and the
     grey-box coverage / db_fault columns, plus grey-box ``run_metrics`` totals.
+
+    ``mutation_variants`` (T8.5 wiring, opt-in): also probe each point's sqli/xss attacks
+    with a bounded set of the mutation engine's semantics-preserving variants
+    (`mutation_variant_probes`), through the exact same attempt/reward/coverage path as
+    the built-in probes; a variant that turns out to hit or reach new code is written
+    back to ``payload_variant`` (`fuzzlab.mutation.catalog.record_variant`), same as
+    `mutate-run` does. Off by default -- it is additional live traffic, bounded by
+    ``max_mutation_variants`` per attack probe.
     """
     probes = tuple(probes)
     include = (app_root.rstrip("/") + "/",)
     frontier = CoverageFrontier()          # run-wide exploration total only (a metric)
     summary = {"points": len(points), "attempts": 0, "db_faults": 0,
                "novel_lines": 0, "m10_would_confirm": 0, "max_reward": 0.0,
-               "baseline_reward": 0.0, "newcode_reward": 0.0, "coverage_lines_seen": 0}
+               "baseline_reward": 0.0, "newcode_reward": 0.0, "coverage_lines_seen": 0,
+               "mutation_variants_probed": 0, "mutation_variants_recorded": 0}
 
     if lab_control is not None:
         lab_control.snapshot("baseline")
@@ -188,6 +270,12 @@ def run_greybox(*, base_url: str, store, run_id: int,
         # NOT global-frontier consumption — otherwise the baseline, running first, eats
         # all the novelty and every attack shows novel=0 (BUG-0016).
         ordered = sorted(probes, key=lambda s: s.kind != "baseline")   # baselines first
+        if mutation_variants:
+            # Appended after the base probes (baseline already sorted first above), so
+            # each variant's per-point baseline is already established when it runs.
+            ordered = ordered + mutation_variant_probes(
+                (s for s in ordered if s.kind != "baseline"),
+                max_variants=max_mutation_variants)
         baseline_probe: Probe | None = None
         baseline_cov: set[tuple[str, int]] = set()
         for spec in ordered:
@@ -224,6 +312,7 @@ def run_greybox(*, base_url: str, store, run_id: int,
                 "sink_covered": sink_covered,
                 "db_fault": fault.faulted,
                 "screening": screening,
+                "mutation_variant": spec.base is not None,
             }
             attempt_id = _insert_attempt(store, run_id, spec.family, features, reward)
             record_attempt_signals(
@@ -242,6 +331,14 @@ def run_greybox(*, base_url: str, store, run_id: int,
                 summary["db_faults"] += 1
             if greybox_confirms(_class_for(spec, pt.vuln_class), signal):
                 summary["m10_would_confirm"] += 1
+            if spec.base is not None:            # mutation-engine-derived probe (T8.5)
+                summary["mutation_variants_probed"] += 1
+                if screening > 0 or new_lines > 0:      # "accepted": it did something
+                    recorded_id = _record_accepted_variant(
+                        store, run_id, spec, _MUTATION_CLASS[spec.kind],
+                        new_lines=new_lines, allow_destructive=allow_destructive)
+                    if recorded_id is not None:
+                        summary["mutation_variants_recorded"] += 1
             if logger:
                 logger.info("greybox attempt", extra={
                     "url": pt.url, "family": spec.family, "reward": reward,
@@ -260,6 +357,11 @@ def run_greybox(*, base_url: str, store, run_id: int,
     _record_metric(store, run_id, "greybox_m10_would_confirm",
                    summary["m10_would_confirm"])
     _record_metric(store, run_id, "greybox_frontier_size", frontier.size)
+    if mutation_variants:
+        _record_metric(store, run_id, "greybox_mutation_variants_probed",
+                       summary["mutation_variants_probed"])
+        _record_metric(store, run_id, "greybox_mutation_variants_recorded",
+                       summary["mutation_variants_recorded"])
     return summary
 
 

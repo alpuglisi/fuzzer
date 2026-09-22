@@ -14,6 +14,16 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- FUZZ/MUT: wired the mutation engine's accepted, semantics-preserving payload
+  variants (Phase 8 T8.5, previously reaching only the standalone `mutate-run`
+  CLI) into the **main harness's** attempt path — `greybox/run.py::run_greybox`
+  now optionally (`--mutation-variants` on `greybox-run`) probes each sqli/xss
+  attack with a bounded set of mutation-engine variants through the same
+  attempt/reward/coverage pipeline as the built-in probes, and writes back the
+  ones that hit or reach new code to `payload_variant` via the existing
+  destructive-gated `catalog.record_variant`, same as `mutate-run` does — so
+  `greybox-run` actually consumes mutation variants, not just `mutate-run`
+  (Lane C1/M8-wiring, `CC-FUZZ-0019`/`CC-MUT-0009`).
 - UI (CC-UI-0026): lane U6 — control-plane hardening for the web launcher's POST/PUT/
   DELETE surface (`fuzzlab/web/app.py`'s new `SecurityGateMiddleware`): a Host allow-
   list on every request (DNS-rebinding defense, rolled ourselves) plus, on state-
