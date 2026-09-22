@@ -33,6 +33,12 @@ def _seed(store) -> int:
     store.conn.execute(
         "INSERT INTO run_plugin (run_id, name, version, priority) VALUES (?,?,?,?)",
         (run_id, "sample", "1.0", 10))
+    store.conn.execute(
+        "INSERT INTO fingerprint_signal "
+        "(run_id, category, name, version, confidence, evidence, source_url) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (run_id, "language", "PHP", "8.3", 0.9, "header x-powered-by: PHP/8.3",
+         "http://127.0.0.1:8080/p.php"))
     store.conn.commit()
     return run_id
 
@@ -49,6 +55,11 @@ def test_build_report_captures_the_run(tmp_path):
         assert rep["findings"][0]["vuln_class"] == "sqli"
         assert {"name": "logistic", "version": 1, "feature_version": 1} in rep["models"]
         assert rep["plugins"] == [{"name": "sample", "version": "1.0", "priority": 10}]
+        assert rep["technologies"] == [{
+            "category": "language", "name": "PHP", "version": "8.3", "confidence": 0.9,
+            "evidence": "header x-powered-by: PHP/8.3",
+            "source_url": "http://127.0.0.1:8080/p.php",
+        }]
         repro = rep["reproducibility"]
         assert repro["feature_versions"] == [1] and repro["model_versions"] == {"logistic": 1}
         assert repro["plugins"] == {"sample": "1.0"} and repro["schema_version"] >= 10
@@ -84,6 +95,16 @@ def test_format_text_summarizes(tmp_path):
         assert "fuzzlab run #" in text and "1 finding(s)" in text
         assert "metric tp = 4.0" in text and "logistic v1" in text
         assert "sqli GET /p.php [id]" in text
+        assert "[language] PHP 8.3 (confidence=0.9)" in text
+
+
+def test_empty_technologies_omits_the_text_section(tmp_path):
+    with Store(tmp_path / "u.db") as store:
+        run_id = store.start_run("auto", "h")
+        store.conn.commit()
+        rep = build_report(store, run_id)
+        assert rep["technologies"] == []
+        assert "technologies:" not in format_text(rep)
 
 
 def test_cli_prints_report(tmp_path, capsys):

@@ -27,6 +27,27 @@
     &middot; pages {{ c.pages }}</div>
 </div>
 
+{% if report and report.technologies %}
+<div class="card">
+  <h2>Technologies ({{ report.technologies | length }})</h2>
+  <p class="muted">Passively fingerprinted from the run's baseline probe response
+    (server, language/framework, CMS, JS libraries, WAF/CDN, DBMS). Confidence is
+    0.0&ndash;1.0 (0.95 = an explicit version/generator string; 0.5 = a weak,
+    shared-name cookie alone). Sends no additional traffic.</p>
+  {% for category, items in report.technologies | groupby('category') %}
+  <div>
+    <strong>{{ category }}</strong>
+    <ul>
+      {% for t in items %}
+      <li><code>{{ t.name }}</code>{% if t.version %} <code>{{ t.version }}</code>{% endif %}
+        <span class="muted">(confidence {{ '%.2f' | format(t.confidence) }}{% if t.source_url %}, from <code>{{ t.source_url }}</code>{% endif %})</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 <div class="card">
   <h2>Findings ({{ detail.findings | length }})</h2>
   {% if detail.findings %}

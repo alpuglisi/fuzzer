@@ -3,6 +3,33 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0022 — Wire `identify_technologies()` into `run_pipeline` (2026-09-22)
+- Change: `harness/pipeline.py::run_pipeline`'s existing fingerprint step (the one
+  baseline probe already sent to populate the `target` row) now also calls
+  `core.fingerprint.identify_technologies()` on the same response and writes every
+  matched `Signal` to the new `fingerprint_signal` table (CC-CORE-0021,
+  CC-AUD-0016) — no additional request. The existing `target` row write is
+  unchanged (same call to `fingerprint()`, same columns).
+- Impact (other components / project): every `fuzzlab auto` run now records a rich,
+  multi-technology fingerprint alongside the existing narrow one, with zero traffic
+  or behavior change to anything already reading the `target` table (`report.py`,
+  `results.py`, `run.html`'s existing fingerprint line). UI reads the new table for
+  its "Technologies" panel and the reproducibility report (companion CC-UI entry).
+- Risk (level; mitigation): low — purely additive: one more function call and one
+  more set of INSERTs inside the same existing `if points:` block and the same
+  `store.conn.commit()`, on data already in hand. Mitigated by
+  `tests/test_pipeline.py`'s existing end-to-end test (unchanged, still passes) plus
+  two new tests: technology signals (PHP/Apache) land in `fingerprint_signal` from
+  the same fake sender's headers already used for the `target` row, and a dedicated
+  test asserting the recorded version/confidence/evidence/source_url shape.
+- Deliverables:
+  - [x] `run_pipeline` calls `identify_technologies()` on the baseline probe and
+    writes `fingerprint_signal` rows — done.
+  - [x] `tests/test_pipeline.py` additions (2 tests) — done.
+- Effectiveness (assessed 2026-09-22): effective — the existing scored end-to-end
+  test still passes unchanged, and the new tests confirm technology rows are
+  recorded with the correct category/name/version/confidence/evidence/source_url.
+
 ### CC-FUZZ-0021 — Test coverage for browserexec.py's pure URL helpers (2026-09-22)
 - Change: `fuzzlab/tools/browserexec.py` had zero test coverage (its
   `PlaywrightBrowserExecutor.run()` needs a real browser and is on-host-only by

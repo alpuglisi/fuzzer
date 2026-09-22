@@ -39,6 +39,11 @@ def build_report(store, run_id: int | None = None) -> dict:
     target = _one(store, "SELECT base_url, dbms, framework, waf FROM target "
                          "WHERE run_id=? ORDER BY id DESC LIMIT 1", (run_id,))
 
+    technologies = [dict(r) for r in store.conn.execute(
+        "SELECT category, name, version, confidence, evidence, source_url "
+        "FROM fingerprint_signal WHERE run_id=? "
+        "ORDER BY category, name, confidence DESC", (run_id,))]
+
     fired = {int(r["fired"]): int(r["c"]) for r in store.conn.execute(
         "SELECT fired, COUNT(*) c FROM evaluation WHERE run_id=? GROUP BY fired",
         (run_id,))}
@@ -76,6 +81,7 @@ def build_report(store, run_id: int | None = None) -> dict:
     return {
         "run": run,
         "target": target,
+        "technologies": technologies,
         "counts": counts,
         "findings": findings,
         "metrics": metrics,
@@ -107,6 +113,13 @@ def format_text(report: dict) -> str:
     if tgt:
         lines.append(f"  target: {tgt['base_url']}  dbms={tgt['dbms']} "
                      f"framework={tgt['framework']} waf={tgt['waf']}")
+    technologies = report.get("technologies") or []
+    if technologies:
+        lines.append("  technologies:")
+        for t in technologies:
+            version = f" {t['version']}" if t.get("version") else ""
+            lines.append(f"    - [{t['category']}] {t['name']}{version} "
+                         f"(confidence={t['confidence']})")
     c = report["counts"]
     lines.append(f"  counts: {c['candidates']} candidate(s), "
                  f"{c['evaluations_fired']}/{c['evaluations']} evaluations fired, "

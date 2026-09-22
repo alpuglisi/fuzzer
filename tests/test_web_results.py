@@ -32,6 +32,12 @@ def _seed(path):
             "INSERT INTO target (run_id, base_url, dbms, framework, waf, fingerprint) "
             "VALUES (?,?,?,?,?,?)",
             (run_id, "http://127.0.0.1:8080", "MySQL", "PHP/8.3", None, "{}"))
+        store.conn.execute(
+            "INSERT INTO fingerprint_signal "
+            "(run_id, category, name, version, confidence, evidence, source_url) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (run_id, "language", "PHP", "8.3", 0.9, "header x-powered-by: PHP/8.3",
+             "http://127.0.0.1:8080/product.php"))
         for k, v in {"tp": 4, "fp": 0, "fn": 4, "tn": 8,
                      "pipeline_requests": 57}.items():
             store.conn.execute(
@@ -95,6 +101,27 @@ def test_run_html_page_surfaces_reproducibility_report(tmp_path):
     assert "Reproducibility report" in body
     assert f"/runs/{run_id}/report.json" in body           # download link present
     assert "No plugins active for this run." in body       # this seed has none
+
+
+def test_run_html_page_surfaces_technologies_panel(tmp_path):
+    path = tmp_path / "r.db"
+    run_id = _seed(path)
+    r = _client(path).get(f"/runs/{run_id}")
+    assert r.status_code == 200
+    body = r.text
+    assert "Technologies (1)" in body
+    assert "language" in body and "PHP" in body and "8.3" in body
+    assert "confidence 0.90" in body
+
+
+def test_run_html_page_omits_technologies_panel_when_none_recorded(tmp_path):
+    path = tmp_path / "r.db"
+    with Store(path) as store:
+        run_id = store.start_run("auto", "h")
+        store.conn.commit()
+    r = _client(path).get(f"/runs/{run_id}")
+    assert r.status_code == 200
+    assert "Technologies (" not in r.text
 
 
 def test_run_report_json_matches_build_report_exactly(tmp_path):

@@ -14,6 +14,21 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- CORE/AUD/FUZZ/UI: added web application/service technology fingerprinting.
+  `core.fingerprint.identify_technologies()` passively detects server,
+  language/framework, CMS, JS-library, WAF/CDN, and DBMS signals (a ~45-entry
+  first-party signature table) from the same baseline probe `run_pipeline`
+  already sends — no new traffic — with per-signal version/confidence/
+  evidence, stored in a new `fingerprint_signal` table (migration 13). Surfaced
+  in the web UI as a "Technologies" panel on the run-detail page and in the
+  reproducibility report (JSON and text). The existing narrow single-value
+  fingerprint (`target` table, `Fingerprint`/`fingerprint()`) is untouched —
+  deliberately not unified with the new detector, to avoid regressing its
+  established match-precedence behavior. Planned via 5 review/research/revise
+  passes (see `CC-AUD-0016` for the design journey); a bounded active
+  marker-path-probing follow-up and a standalone launcher activity were
+  considered and explicitly deferred. `CC-CORE-0021`, `CC-AUD-0016`,
+  `CC-FUZZ-0022`, `CC-UI-0034`.
 - IND/FUZZ: closed a test-coverage gap on two previously-untested legacy
   modules. `tests/test_indicator_db.py` guards `build_sql_db.py`'s own
   documented invariant (every `indicator_type` has a matching `fetcher.py`

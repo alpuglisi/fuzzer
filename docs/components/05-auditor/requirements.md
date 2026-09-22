@@ -1,6 +1,6 @@
 # Auditor / Fetcher — Requirement Specification
 
-Component code: **AUD** · Status: `[built; to harden]` · Last updated: 2026-09-21
+Component code: **AUD** · Status: `[built; to harden]` · Last updated: 2026-09-22 · see CC-AUD-0016
 
 Related: `ARCHITECTURE.md` #5; `DECISIONS_AND_ROADMAP.md` (D5, D6, D9, Phase 2);
 `./change-control.md`.
@@ -30,6 +30,21 @@ budget where a vulnerability is plausible.
   versioned feature vector; never emit a vulnerability label.
 - **FR-AUD-6** Read discovered surface from the shared store and write candidates
   back to it (no direct tool-to-tool calls). (D5)
+- **FR-AUD-7** Web application/service **technology fingerprinting**: passively
+  identify every matching technology (not only one per category) from a single
+  already-fetched response — server software, language/framework, CMS, JS
+  libraries/meta-frameworks, WAF/CDN, and DBMS error hints — each with an optional
+  version, a deterministic confidence, human-readable evidence, and the source URL,
+  written to `fingerprint_signal` (CORE migration 13). Sends no additional
+  requests; deduped by (category, name), keeping the highest-confidence match.
+  Additive to, and independent of, FR-AUD-4's narrow single-value fingerprint
+  (`target` table) — the two detectors are deliberately not unified, to avoid
+  changing the narrow one's established match-precedence behavior.
+  *(Realized: `core.fingerprint.identify_technologies()`, CC-AUD-0016; wired into
+  `run_pipeline`, CC-FUZZ-0022; surfaced in the web UI, CC-UI-0034.)* Bounded active
+  marker-path probing to improve CMS-detection recall further is an open,
+  deliberately deferred follow-up (needs its own scope/safety design), not part of
+  this requirement's current realization.
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that
@@ -42,9 +57,10 @@ budget where a vulnerability is plausible.
 
 ## 5. Interfaces and data contracts
 Reads `page`, `endpoint`, `parameter` from the store; writes `candidate` rows
-(rule evidence, `features_json` + `feature_version`) and `target` fingerprint
-data. Reads indicators/rules from the indicator DB & catalogs. Authenticates via
-the session manager. Runs standalone or in the discovery pipeline.
+(rule evidence, `features_json` + `feature_version`), `target` fingerprint data,
+and `fingerprint_signal` rows (FR-AUD-7). Reads indicators/rules from the
+indicator DB & catalogs. Authenticates via the session manager. Runs standalone or
+in the discovery pipeline.
 
 ## 6. Dependencies (components)
 `core/`, session manager, crawler, indicator DB & catalogs.

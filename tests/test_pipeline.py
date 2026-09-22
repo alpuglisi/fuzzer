@@ -66,6 +66,31 @@ def test_run_pipeline_scored_end_to_end(tmp_path):
             "SELECT key, value FROM run_metrics WHERE run_id=?", (run_id,))}
         assert metrics["pipeline_findings"] == 3.0
         assert metrics["pipeline_scored"] == 1.0
+        # The same baseline probe also feeds the richer multi-technology signal set
+        # (no extra request) — at least the PHP/Apache signals from every response's
+        # shared headers should have landed.
+        signals = {(r["category"], r["name"]) for r in store.conn.execute(
+            "SELECT category, name FROM fingerprint_signal WHERE run_id=?", (run_id,))}
+        assert ("language", "PHP") in signals
+        assert ("server", "Apache") in signals
+
+
+def test_run_pipeline_records_technology_signal_evidence_and_confidence(tmp_path):
+    gt = contract.load(GT_DIR)
+    plan = RunPlan("automatic", ["sql-injection", "xss"], scored=True, source="ground-truth")
+    with Store(tmp_path / "u.db") as store:
+        run_id = store.start_run("pipeline", "h")
+        run_pipeline(_points(), store, run_id, PipelineSender(), plan, ground_truth=gt)
+
+        row = store.conn.execute(
+            "SELECT version, confidence, evidence, source_url FROM fingerprint_signal "
+            "WHERE run_id=? AND category='language' AND name='PHP'", (run_id,)
+        ).fetchone()
+        assert row is not None
+        assert row["version"] == "8.3"
+        assert 0.0 < row["confidence"] <= 1.0
+        assert "x-powered-by" in row["evidence"].lower()
+        assert row["source_url"] == "http://localhost/product.php"
 
 
 def test_pipeline_unscored_when_plan_unscored(tmp_path):

@@ -4,8 +4,8 @@ Component code: **UI** · Status: `[built — command-spec-driven launcher, cont
 hardening middleware, the app shell (sidebar nav + theme/density), Overview,
 Findings workbench + saved views, the Proxy workbench (shared message-editor +
 splitter), a read-only advisory ML tab, a Diagnostics chart tab + read-only store
-explorer, and a per-run reproducibility report]` · Last updated: 2026-09-22 ·
-see CC-UI-0032
+explorer, a per-run reproducibility report, and a per-run technology-fingerprint
+panel]` · Last updated: 2026-09-22 · see CC-UI-0034
 
 Related: `ARCHITECTURE.md` #12; `DECISIONS_AND_ROADMAP.md` (D2, D5, D11);
 `./change-control.md`.
@@ -201,6 +201,15 @@ bugs — the research-platform diagnostics of decision D2.
   both go through `fuzzlab.report.format_json`. Pure read; no traffic; a missing
   store or run id is a 404, never a store-creation side effect.
   *(Realized: CC-UI-0032.)*
+- **FR-UI-19** A run's detail page shows a "Technologies" panel: every web
+  application/service technology signal recorded for the run (FR-AUD-7), grouped
+  by category, each with its name, version (when known), and confidence — only
+  rendered when at least one signal exists. `fuzzlab.report.build_report`'s
+  `technologies` list (and `format_text`'s matching section) carry the same data,
+  so the JSON/text reports and the page agree. Pure read of already-stored data
+  (NFR-UI-read-only); untrusted fields (name/version/evidence/source_url, since
+  they derive from response content) render only via autoescaped `{{ }}`, never
+  `|safe`. *(Realized: CC-UI-0034.)*
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

@@ -3,6 +3,27 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0021 — Add `fingerprint_signal` table (migration 13) (2026-09-22)
+- Change: `core/migrations.py` gains migration 13, `fingerprint_signal(id, run_id,
+  category, name, version, confidence, evidence, source_url)` — one append-only row
+  per matched web application/service technology signal (server, language,
+  framework, cms, js-library, waf-cdn, dbms), indexed on `(run_id, category, name)`.
+  Additive: the existing `target` table/columns are untouched. Part of the new
+  fingerprinting feature (AUD/FUZZ/UI companion entries in this session).
+- Impact (other components / project): AUD's `identify_technologies()` and FUZZ's
+  `run_pipeline` write it; UI's report/run-detail read it. No other component reads
+  or writes this table.
+- Risk (level; mitigation): low — new table only, forward-only migration, applied
+  once via the existing idempotent runner. Mitigated by the existing schema-version
+  tests (`store.schema_version() == max(v for v, _ in migrations.MIGRATIONS)`,
+  already derived from the registry rather than a hardcoded literal, so they pass
+  unchanged) plus the new writer/reader tests in the AUD/FUZZ/UI entries.
+- Deliverables:
+  - [x] Migration 13 (`fingerprint_signal` table + index) — done.
+- Effectiveness (assessed 2026-09-22): effective — the table is created and used
+  end-to-end by `run_pipeline` (writer) and `report.build_report`/`run.html` (readers)
+  in the companion changes; full suite green.
+
 ### CC-CORE-0020 — Doc-currency fix: requirements.md/ARCHITECTURE.md said "planned" (2026-09-22)
 - Change: `docs/components/02-core-library/requirements.md`'s Status header read
   `[planned] (Phase 0)`, and `docs/ARCHITECTURE.md` #2 read `[built; plugin registry

@@ -2,9 +2,9 @@
 
 Component code: **CORE** · Status: `[built — store + migrations 1-12, config, structured
 logging, budget+mutex, versioned features, the HTTP send seam, plugin registry,
-per-host credential store, and metric_series/log_scalar/MetricLogger]` (Phase 0,
-extended through Phases 1-10 as later phases needed new store contracts) ·
-Last updated: 2026-09-22 · see CC-CORE-0019
+per-host credential store, metric_series/log_scalar/MetricLogger, saved_views, and
+fingerprint_signal]` (Phase 0, extended through Phases 1-10 as later phases needed
+new store contracts) · Last updated: 2026-09-22 · see CC-CORE-0021
 
 Related: `ARCHITECTURE.md` #2; `DECISIONS_AND_ROADMAP.md` (D5, D6); the store
 contract; `./change-control.md`.
@@ -56,6 +56,11 @@ plugin registry. It is the layer that makes the store the integration bus.
   (named filter/sort/column presets a viewer can save and reuse), explicitly not a
   result table (`finding`/`attempt`/`candidate`); the UI writing it does not violate
   NFR-UI-read-only.
+- **FR-CORE-10** Provide a `fingerprint_signal(id, run_id, category, name, version,
+  confidence, evidence, source_url)` table (migration 13), indexed on `(run_id,
+  category, name)` — the auditor's web application/service technology-fingerprint
+  signals (FR-AUD-7), one append-only row per matched technology. Additive to, and
+  independent of, the existing `target` table.
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers

@@ -3,6 +3,64 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0016 — Web application/service technology fingerprinting: `identify_technologies()` (2026-09-22)
+- Change: `core/fingerprint.py` gains `Signal` and `identify_technologies(headers,
+  body, cookies, source_url) -> list[Signal]`, an additive, passive, multi-signal
+  detector over a first-party ~45-entry signature table spanning server (Apache/
+  nginx/IIS/LiteSpeed/Caddy), language/framework (PHP/ASP.NET/Express/Rails/Django/
+  Laravel/CodeIgniter/Flask), CMS (WordPress/Drupal/Joomla!/Magento/Shopify/Wix/
+  Squarespace/TYPO3/Ghost), JS libraries/meta-frameworks (jQuery/React/Vue.js/
+  Angular/Bootstrap/Next.js), WAF/CDN (Cloudflare/Sucuri/Akamai/AWS CloudFront/
+  Imperva/Fastly/ModSecurity), and DBMS error hints. Each match carries a category,
+  an optional version (regex-extracted where the signature captures one), a
+  deterministic confidence (0.95 = explicit version/generator string down to 0.5 =
+  cookie-name-only), human-readable evidence, and the source URL. Matches are
+  deduped by (category, name), keeping the highest-confidence (version-bearing on a
+  tie) signal. Deliberately **not** a refactor of the existing `fingerprint()`/
+  `Fingerprint` (single-value-per-category, used by the `target` table) into a
+  shared implementation — unifying them risked subtly changing `fingerprint()`'s
+  exact existing match-precedence semantics that `tests/test_fewer_requests.py`
+  depends on, for a DRY benefit judged not worth that regression risk. Passive
+  only: every signature matches against a response the caller already fetched: no
+  new requests. Bounded, opt-in **active** marker-path probing to improve CMS-
+  detection recall further (e.g. checking `/wp-login.php`-style well-known paths
+  when passive signals are inconclusive) was considered and deliberately deferred —
+  it needs its own scope/safety design (a fixed small path list, a request cap, a
+  deny-list interaction) distinct from this passive pass, not a hurried addition
+  here.
+- Impact (other components / project): FUZZ's `run_pipeline` calls this on the same
+  baseline probe it already sends for `fingerprint()`, no new traffic. Writes
+  `fingerprint_signal` rows (CC-CORE-0021). UI reads them for the new "Technologies"
+  panel and the reproducibility report (companion entries). Sets up a reusable
+  signal source for a future evasion-technique feature to read WAF/CDN detections
+  from, without building that consumption here.
+- Risk (level; mitigation): low — new, additive functions and a new signature
+  table; zero changes to `fingerprint()`/`Fingerprint`'s existing code or behavior
+  (verified: `tests/test_fewer_requests.py`'s 10 tests pass unchanged). Regex
+  patterns are all anchored to specific, well-known technology markers (not broad
+  wildcards) to keep false-positive risk low. Mitigated by 10 new unit tests
+  (`tests/test_fingerprint_technologies.py`): server/language header extraction incl.
+  version; generator-tag beats asset-path confidence and dedupes; jQuery version
+  extraction; cookie-only signal correctly scored low-confidence; WAF+DBMS
+  co-detection; ModSecurity block-page detection; empty response yields no signals;
+  source_url propagation; multiple independent technologies all reported
+  simultaneously (not capped at one, unlike the legacy detector); `Signal` field
+  shape.
+- Deliverables:
+  - [x] `Signal` dataclass + `identify_technologies()` + ~45-entry signature table
+    — done.
+  - [x] `tests/test_fingerprint_technologies.py` (10 tests) — done.
+  - [x] `fingerprint()`/`Fingerprint` left byte-for-byte unchanged — verified.
+- Effectiveness (assessed 2026-09-22): effective in tests — a single synthetic
+  response with WordPress/jQuery/Cloudflare/MySQL markers correctly yields four
+  independent, correctly-categorized, correctly-confidence-scored signals; the
+  existing narrow detector's own test suite is unaffected.
+- Open questions carried forward: bounded active marker-path probing (v1b, above);
+  a dedicated standalone `fuzzlab fingerprint` launcher activity (considered for
+  this change and deferred — the existing `auto`/`--authorized` traffic path already
+  covers when fingerprinting runs, without a second CLI entry point's own
+  authorization surface to maintain).
+
 ### CC-AUD-0015 — Fix (BUG-0028): `--append` no longer resets `occurrences` every run (2026-09-22)
 - Change: `fuzzlab/tools/fetcher.py::setup_results_db(append=True)`'s "collapse
   duplicates left by an older run" migration now only runs when the

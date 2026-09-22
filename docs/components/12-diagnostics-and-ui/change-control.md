@@ -3,6 +3,41 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0034 — Technologies panel: surface web app/service fingerprinting in the UI (2026-09-22)
+- Change: `fuzzlab.report.build_report` now additionally includes a `technologies`
+  list (category/name/version/confidence/evidence/source_url, sorted by category,
+  name, confidence desc) read from the new `fingerprint_signal` table (CC-CORE-0021,
+  CC-AUD-0016, CC-FUZZ-0022); `format_text` gained a matching `technologies:` block.
+  `run.html`'s run-detail page gained a new "Technologies" card (grouped by
+  category via Jinja's `groupby`, one entry per detected technology with its
+  version and confidence, only rendered when at least one signal was recorded) —
+  purely additive; the existing one-line DBMS/framework/WAF summary (driven by the
+  unrelated `target` table via `results.run_detail`) is untouched. Because
+  `/runs/{id}/report.json` and `fuzzlab report --json` both go through the same
+  `build_report`/`format_json`, they stay byte-identical (CC-UI-0032's guarantee)
+  with the new field included on both.
+- Impact (other components / project): none behavioral elsewhere — pure read-only
+  rendering of already-stored data (NFR-UI-read-only), no new POST/PUT/DELETE
+  route, so no new surface for the control-plane hardening middleware (CC-UI-0026)
+  to reason about. `t.name`/`t.version`/`t.evidence`/`t.source_url` are untrusted
+  (attacker-influenced response content) and render only via Jinja2's `{{ }}`
+  autoescaping, never `|safe`, consistent with FR-UI-12's textContent-only
+  invariant for untrusted fields.
+- Risk (level; mitigation): low — additive template block + one new report field;
+  no new endpoints. Mitigated by 2 new `tests/test_report.py` assertions (the
+  `technologies` list appears in the JSON report and the text report; an empty-
+  technologies run omits the text section) and 2 new `tests/test_web_results.py`
+  tests (the panel renders with the right category/name/version/confidence when a
+  signal exists; it is entirely absent from the page when none were recorded).
+- Deliverables:
+  - [x] `build_report`/`format_text` technologies field — done.
+  - [x] `run.html` "Technologies" card — done.
+  - [x] Tests (4 total across `test_report.py`/`test_web_results.py`) — done.
+- Effectiveness (assessed 2026-09-22): effective — a run with a recorded PHP signal
+  shows "Technologies (1)" with its category/name/version/confidence in the
+  rendered page, and the report JSON/text both carry it; a run with none shows
+  neither.
+
 ### CC-UI-0033 — Doc-currency fix: requirements.md said "planned" (2026-09-22)
 - Change: `docs/components/12-diagnostics-and-ui/requirements.md`'s Status header
   read `[planned]`, stale against this log's 32 entries of built work — the FR list

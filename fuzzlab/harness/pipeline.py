@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 
 from fuzzlab.audit import InjectionPoint, evaluate
 from fuzzlab.core.dedup import TemplateClusterer
-from fuzzlab.core.fingerprint import fingerprint
+from fuzzlab.core.fingerprint import fingerprint, identify_technologies
 from fuzzlab.core.runmode import RunPlan
 from fuzzlab.harness import integration
 from fuzzlab.harness.scoring import ScoreReport, score
@@ -61,7 +61,8 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
     if pages_html:
         points = _dedup(points, pages_html)
 
-    # Fingerprint from a baseline probe and record the target row (T2.5).
+    # Fingerprint from a baseline probe and record the target row (T2.5), plus the
+    # full multi-technology signal set from the same response (no extra request).
     if points:
         probe = sender.send(points[0].url, points[0].param, "1")
         fp = fingerprint(probe.headers, probe.text)
@@ -72,6 +73,16 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
             (run_id, f"{origin.scheme}://{origin.netloc}", fp.dbms, fp.framework,
              fp.waf, json.dumps(fp.as_dict())),
         )
+        signals = identify_technologies(probe.headers, probe.text,
+                                        source_url=points[0].url)
+        for sig in signals:
+            store.conn.execute(
+                "INSERT INTO fingerprint_signal "
+                "(run_id, category, name, version, confidence, evidence, source_url) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (run_id, sig.category, sig.name, sig.version, sig.confidence,
+                 sig.evidence, sig.source_url),
+            )
         store.conn.commit()
 
     # Audit: rules-as-data, scoped to the plan's categories (T2.3 / D14 / D15).

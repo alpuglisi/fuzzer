@@ -369,6 +369,21 @@ CREATE TABLE saved_views (
 CREATE INDEX idx_saved_views_table ON saved_views(table_key, is_pinned DESC, id DESC);
 """
 
+# --- migration 13: web technology fingerprint signals ------------------------
+_M0013 = """
+CREATE TABLE fingerprint_signal (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id     INTEGER NOT NULL REFERENCES run(id),
+    category   TEXT NOT NULL,        -- server|language|framework|cms|js-library|waf-cdn|dbms
+    name       TEXT NOT NULL,
+    version    TEXT,
+    confidence REAL NOT NULL,
+    evidence   TEXT NOT NULL,
+    source_url TEXT
+);
+CREATE INDEX idx_fingerprint_signal_run ON fingerprint_signal(run_id, category, name);
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -383,6 +398,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (10, _M0010),
     (11, _M0011),
     (12, _M0012),
+    (13, _M0013),
 ]
 
 

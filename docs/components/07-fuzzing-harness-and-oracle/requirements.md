@@ -1,7 +1,7 @@
 # Fuzzing Harness and Oracle — Requirement Specification
 
 Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5); harness generalization ongoing]`
-· Last updated: 2026-09-21
+· Last updated: 2026-09-22 · see CC-FUZZ-0022
 
 Related: `ARCHITECTURE.md` #7; `DECISIONS_AND_ROADMAP.md` (D1, D5, D7, Phase 2/3);
 `./change-control.md`.
@@ -64,6 +64,11 @@ rewards) derives from it.
   a bandit-off run against a bandit-on run of the same workload. Optional/
   advisory: absent a store or run id, behavior is unchanged. *(Realized:
   CC-FUZZ-0020.)*
+- **FR-FUZZ-10** `run_pipeline`'s existing fingerprint step (the one baseline probe
+  already sent to populate the `target` row, T2.5) also runs the auditor's
+  `identify_technologies()` (FR-AUD-7) over the same response and writes every
+  matched signal to `fingerprint_signal` — no additional request. *(Realized:
+  CC-FUZZ-0022.)*
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
