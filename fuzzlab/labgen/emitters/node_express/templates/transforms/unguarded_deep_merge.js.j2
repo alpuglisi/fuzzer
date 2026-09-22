@@ -1,0 +1,21 @@
+// unguarded_deep_merge transform: recurses into {{ value_expr }}'s own keys
+// and writes each one onto {{ target_var }}, with no check that a key is
+// '__proto__'/'constructor'/'prototype' -- a key of that shape reaches
+// {{ target_var }}[key], which for those three names does not create an
+// own property at all but instead walks/rewrites the shared prototype
+// chain (CWE-1321).
+function deepMerge(target, source) {
+    for (const key in source) {
+        if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+            if (typeof target[key] !== 'object' || target[key] === null) {
+                target[key] = {};
+            }
+            deepMerge(target[key], source[key]);
+        } else {
+            target[key] = source[key];
+        }
+    }
+    return target;
+}
+const {{ target_var }} = {{ target_literal }};
+const mergedPreferences = deepMerge({{ target_var }}, {{ value_expr }});

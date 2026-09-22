@@ -182,6 +182,19 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
     "html_body_echo": {"value_expr": "bio", "css_class": "bio"},
     "single_statement": {"body": "    // x\n", "handler_name": "handleX"},
     "render_only": {"body": "    // x\n", "handler_name": "handleX"},
+    # CC-LAB-0070: prototype pollution.
+    "post_body_json": {"var_name": "incomingPreferences"},
+    "unguarded_deep_merge": {
+        "value_expr": "incomingPreferences",
+        "target_var": "currentPreferences",
+        "target_literal": "{ theme: 'light', notifications: true }",
+    },
+    "proto_key_filtered_merge": {
+        "value_expr": "incomingPreferences",
+        "target_var": "currentPreferences",
+        "target_literal": "{ theme: 'light', notifications: true }",
+    },
+    "object_property_bulk_set": {"value_expr": "mergedPreferences"},
 }
 
 

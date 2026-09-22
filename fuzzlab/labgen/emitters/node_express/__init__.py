@@ -15,6 +15,13 @@ well-documented, value-context shapes -- ``sqli``/``sql_numeric_literal``,
 identifier/alias/connector-position SQLi or escaping-context-mismatch XSS
 on this stack; those stay deferred for Node/Express.
 
+CC-LAB-0070 adds a fourth shape, ``prototype_pollution``/
+``object_property_bulk_set`` (CWE-1321) -- genuinely new to this project's
+corpus and specific to the JS/Node runtime (an unguarded recursive merge
+that can write onto ``Object.prototype``), grounded in the Walmart
+(Node/Express BFF) functionality/CWE research (see
+``docs/research/site-architecture-survey-functionality-walmart.md``).
+
 **Multi-file output, unlike ``php_current``.** Per Addendum D, a routed,
 multi-file emitter needs a ``route``-category *accumulator* module
 (``app.js``'s route-registration lines) fed by one fragment per cell,
@@ -85,6 +92,12 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("sqli", "sql_numeric_literal"): _ModuleSet("get_query_param", "sql_numeric_lookup", "single_statement"),
     ("sqli", "sql_string_literal"): _ModuleSet("post_body_param", "sql_string_literal_lookup", "single_statement"),
     ("xss", "html_body"): _ModuleSet("read_stored_field", "html_body_echo", "render_only"),
+    # CC-LAB-0070: prototype pollution (CWE-1321) -- a genuinely new,
+    # JS/Node-runtime-specific shape, not part of the original Tier-A
+    # baseline above.
+    ("prototype_pollution", "object_property_bulk_set"): _ModuleSet(
+        "post_body_json", "object_property_bulk_set", "render_only"
+    ),
 }
 
 #: Per-route static context (table/column/param names, or the stored field
@@ -106,6 +119,16 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
         "password_param": "password",
     },
     "/api/profile": {"var_name": "bio", "stored_expr": "currentUser.bio", "css_class": "bio"},
+    # CC-LAB-0070: a BFF-style "update account/cart preferences" endpoint
+    # (Walmart functionality research), deep-merging the whole request body
+    # onto a live preferences object -- target_var/target_literal are this
+    # shape's render-only metadata, the object_property_bulk_set transforms'
+    # own analogue of the mass-assignment family's `allowed_fields`.
+    "/api/preferences": {
+        "var_name": "incomingPreferences",
+        "target_var": "currentPreferences",
+        "target_literal": "{ theme: 'light', notifications: true }",
+    },
 }
 
 

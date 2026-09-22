@@ -75,6 +75,13 @@
 #   weak_signature_comparison — a webhook/HMAC signature is verified with a
 #     non-constant-time or type-juggling-prone comparison, or verification
 #     is skipped/bypassable entirely (added CC-LAB-0063)
+#   proto_pollution — attacker-controlled `__proto__`/`constructor.prototype`
+#     keys reach an unguarded recursive object merge, letting the merge write
+#     onto the shared `Object.prototype` chain instead of (or in addition to)
+#     the intended target object -- a JS/Node-runtime-only mechanism, CWE-1321
+#     (added CC-LAB-0070; reuses the concern-id vocabulary already named for
+#     this class in `lab/patterns/sourcing/crosswalk.yaml`'s `proto_pollution`
+#     sourcing class, rather than minting a second name for the same concept)
 version: 1
 entries:
   # --- SQL sinks -----------------------------------------------------
@@ -707,3 +714,26 @@ entries:
     sink_family: dom_html_sink
     effect: neutralises
     neutralizes: [html_tag_break]
+
+  # --- prototype pollution: unguarded recursive merge onto a live object --
+  # From the Walmart (Node/Express BFF) functionality/CWE research
+  # (docs/research/site-architecture-survey-functionality-walmart.md,
+  # CWE-1321, CC-LAB-0070) -- a dedicated vulnerable/secure pair
+  # demonstrating the real pollution mechanism (a live recursive merge of a
+  # user-supplied JSON body into a settings object), distinct from the
+  # incidental CWE-1321 side effect already noted (not demonstrated) in
+  # docs/research/corpus-examples/insecure-deserialization/node/manifest.yaml.
+  # `object_property_bulk_set` is a genuinely new sink family: unlike
+  # `orm_entity_bulk_assign` (a persisted-entity write), the tainted key set
+  # here is written directly onto a live in-memory JS object, so an
+  # attacker-chosen `__proto__`/`constructor`/`prototype` key can escape the
+  # target object entirely and land on the object's own prototype chain --
+  # a mechanism `orm_entity_bulk_assign`'s SQL-identifier-charset sink
+  # cannot even express (SQL has no prototype-chain equivalent).
+  - op: unguarded_deep_merge
+    sink_family: object_property_bulk_set
+    effect: no_effect
+  - op: proto_key_filtered_merge
+    sink_family: object_property_bulk_set
+    effect: neutralises
+    neutralizes: [proto_pollution]

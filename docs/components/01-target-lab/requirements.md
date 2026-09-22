@@ -1839,6 +1839,70 @@ lane) can submit a payload as
     only the `git rm -r puppy-fort-factory/` once the first commit's own
     full test run (fast suite + the live-boot slow suite) was green.
 
+- **FR-LAB-64** *(prototype pollution, CWE-1321, `node_express`; `CC-LAB-0070`,
+  2026-09-22).* Per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a's
+  decided Category-1 (e-commerce) Walmart/Node cell list, the `node_express`
+  emitter gained a real, dedicated vulnerable/secure pair for CWE-1321 --
+  distinct from the incidental `cwe_unique` mention already present in
+  `docs/research/corpus-examples/insecure-deserialization/node/manifest.yaml`
+  (a bracket-lookup gadget side effect, never an actual pollution
+  mechanism):
+  - A genuinely new `(vuln_class, sink_context.family)` shape,
+    `("prototype_pollution", "object_property_bulk_set")`, at a BFF-style
+    `POST /api/preferences` endpoint that deep-merges the whole JSON
+    request body onto a live, in-memory preferences object.
+    `lab/safety_matrix.yaml` gained one new sink family
+    (`object_property_bulk_set`, required concern `proto_pollution` --
+    reusing the concern-id vocabulary `lab/patterns/sourcing/crosswalk.yaml`
+    already named for this class) and two new ops, both additive under the
+    existing `version: 1`: `unguarded_deep_merge` (`no_effect` -- no
+    `__proto__`/`constructor`/`prototype` key guard) and
+    `proto_key_filtered_merge` (`neutralises`, `neutralizes:
+    [proto_pollution]` -- those three keys are skipped before ever reaching
+    the merge's own assignment).
+  - New modules -- `post_body_json` (the whole-body source, vs. one named
+    field), `unguarded_deep_merge`/`proto_key_filtered_merge` (the two
+    merge transforms) and `object_property_bulk_set` (the sink, which never
+    itself decides which keys are legitimate, matching every other sink's
+    convention) -- registered in **both** `fuzzlab.labgen.modules`
+    (vocabulary-only there; no PHP emitter renders this JS/Node-runtime-
+    specific mechanism, since a PHP array has no `Object.prototype`-style
+    shared prototype chain for CWE-1321 to affect at all) and
+    `fuzzlab.labgen.emitters.node_express.modules` (rendered, via a new
+    `_MODULE_SET_BY_SHAPE` entry) -- the same "registered in the shared
+    vocabulary even where only one emitter renders it" discipline
+    `L-P3.3c-DOM`'s `dom_url_source` established.
+  - New sink family `object_property_bulk_set` is genuinely distinct from
+    the existing `orm_entity_bulk_assign` (mass-assignment) family: that
+    family writes a *persisted* entity through a SQL identifier-charset
+    guard; this one writes directly onto a *live in-memory* JS object,
+    where an attacker-chosen `__proto__`/`constructor`/`prototype` key can
+    escape the target object entirely and land on the shared prototype
+    chain -- a mechanism SQL has no equivalent for at all.
+  - New manifest `lab/manifests/prototype_pollution_node_sample.yaml`: two
+    cells (`LABGEN-PP-0001` vulnerable / `LABGEN-PP-0002` secure),
+    `stack_profile: node_express` -- no sibling manifest for another stack,
+    since this shape has no cross-stack equivalent (unlike
+    `mass_assignment_sample.yaml`'s `php_laravel` twin).
+  - `fuzzlab.labgen.conformance.static_precheck.STATIC_PRECHECK_BY_SHAPE`
+    gained `("prototype_pollution", "object_property_bulk_set") ->
+    UNINFORMATIVE` -- the conservative default; unlike some of this
+    registry's other rows, no Node-oriented static tool has actually been
+    spot-checked against this shape in this project yet, so the row makes
+    no claim about what a real tool could or could not find.
+  - Proved for real, not simulated: both twins are rendered and each
+    executed as a real `node` subprocess (Node v22.22.2, confirmed on the
+    build host) against a real `{"__proto__": {"polluted": true}}` payload,
+    asserting `Object.prototype`'s own state afterward -- `true` for the
+    vulnerable twin, `false` for the secure twin -- plus a third check that
+    both twins still merge an ordinary, non-adversarial key correctly (not
+    a stub that merely rejects the whole body). See
+    `tests/test_labgen_prototype_pollution.py`.
+  - CWE-1333 (ReDoS), the second Node cell §9.4a's Category-1 decision
+    names, is explicitly deferred to a later, separate lane (a different,
+    timing-differential oracle mechanism) -- out of this requirement's
+    scope.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

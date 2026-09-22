@@ -3,6 +3,237 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0071 — `ruby_rails` emitter Phase A: real Rails 8.1 skeleton + live-boot harness (FR-LAB-65) (2026-09-22)
+- Change: per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §2 (the
+  original Phase A spec, written for `node_express` but reused structurally
+  here) / §9.4a / §9.5, built this project's first Ruby-on-Rails stack --
+  category 1's (e-commerce) Shopify pick. Phase A only: a real, bootable
+  skeleton and a real live-boot harness, proven end to end against one
+  illustrative reflected-XSS-shaped cell. The real vulnerability modules
+  Shopify's own research shortlisted (webhook-signature, CWE-915 mass
+  assignment via `permit!`, CWE-502 via `Marshal.load`/`YAML.unsafe_load`)
+  are explicitly out of this change's scope -- a separate, later lane.
+  - New package `fuzzlab/labgen/emitters/ruby_rails/`:
+    `__init__.py` (`RailsEmitter(Emitter)` -- `supports()`/`render()` for
+    exactly one shape, `("xss", "html_body")`; `controller_name_for()`/
+    `url_path_for()` name the one cell-ID-derived route/controller/view
+    triple), `modules.py` (a `source`/`transform`/`sink`/`complexity`
+    Jinja2-template module registry reusing the shared `get_param`/
+    `identity`/`html_entity_escape`/`html_body_echo`/`render_only`
+    vocabulary `php_current`/`php_laravel` already use), and
+    `route_accumulator.py` (`RouteAccumulator`, the Rails `config/routes.rb`
+    analogue of `php_laravel.route_accumulator`'s `CR-LAB-0001` Addendum D
+    pattern -- `get '<path>', to: '<controller>#<action>'` fragments,
+    sorted by cell ID, duplicate-URL detection).
+  - New real, checked-in skeleton
+    `fuzzlab/labgen/emitters/ruby_rails/stack/skeleton/`: a real, un-doctored
+    `rails new fuzzlab_app --minimal --skip-git --skip-bundle --skip-test
+    --skip-system-test --skip-ci` output (Rails `8.1.3.1`, resolved for real
+    against a live `rubygems.org` query on 2026-09-22 -- the actual current
+    stable release, not the `7.x` this task's own dispatch instructions
+    guessed before verification), trimmed of `bin/ci`/`config/ci.rb`
+    (CI-only), `bin/dev` (unused indirection), `config/master.key`/
+    `config/credentials.yml.enc` (secrets; the harness generates a real
+    `SECRET_KEY_BASE` per run), `public/icon.png` (binary/cosmetic),
+    `config/routes.rb` (harness-overlaid), and runtime-generated artifacts
+    (`storage/development.sqlite3`, `log/development.log`, `tmp/cache/`,
+    `tmp/sockets/`, `tmp/restart.txt`). One real Rails migration
+    (`db/migrate/20260101000000_create_users.rb`) plus a matching `User`
+    model were added for a minimal `users` table this dispatch's own
+    instructions require at minimum, although no Phase A cell reads/writes
+    it yet. Full provenance/trim-list detail in `stack/README.md`.
+  - New `fuzzlab/labgen/conformance/rails_live_boot.py`
+    (`RailsLiveBootHarness`, `rails_boot_available()`): the Rails port of
+    `live_boot.LiveBootHarness`. `rails_boot_available()`'s network half
+    (`_bundle_network_probe`) runs a real, bounded `bundle lock` (no
+    `--local`) against a throwaway `Gemfile` naming a gem not already
+    locally cached, in a scratch directory -- the real dependency-resolution
+    phase of `bundle install` itself, honoring `HTTPS_PROXY` exactly as a
+    real install would (PA-0035, applied correctly for this package manager
+    from the start rather than repeating `BUG-0033`'s raw-socket mistake).
+    `RailsLiveBootHarness` assembles the skeleton + a manifest's rendered
+    controller/view/route files, runs a real `bundle install`, a real
+    `bin/rails db:prepare` (real per-run SQLite database + migration), boots
+    a real `bin/rails server` (Puma), and serves real HTTP requests via the
+    same `urllib.request`-based client pattern (and the same
+    never-follow-a-redirect opener) `LiveBootHarness` already uses --
+    replicated, not imported, since both are private helpers of a sibling
+    module (`_find_free_port`, `_NoRedirectHttpErrorProcessor`). Implements
+    `Tier1Client` (`fetch()`), mirroring `LiveBootHarness.fetch`. Every real
+    subprocess step (`bundle install`, `db:prepare`) has its own bounded
+    timeout via a shared `_run()` helper -- never left to each call site,
+    per PA-0035's second half.
+  - New test `tests/test_labgen_ruby_rails_live_boot.py` (1 test,
+    `@pytest.mark.slow`, skip-guarded on `rails_boot_available()`):
+    constructs one illustrative `Cell` directly (no manifest YAML needed for
+    Phase A's single shape), assembles + boots + serves it for real, and
+    asserts a real HTTP `200` whose body contains the unescaped payload
+    (`<b>hi-from-rails</b>`), plus a real `200` from Rails' own `/up` health
+    endpoint. Passed for real: 1 passed in ~4.9s (bundle install resolved
+    from this sandbox's already-populated global gemset rather than a cold
+    network fetch, since the skeleton's own `Gemfile.lock` pins exactly the
+    versions already installed while building this lane -- `bin/rails
+    db:prepare` + boot + HTTP round trip account for the remainder).
+  - Found and fixed a real code defect along the way: the generated
+    controller's bare `render :show` resolved the wrong view directory for
+    a cell-ID-derived class name containing a digit run abutting a letter
+    (Rails' `ActiveSupport::Inflector#underscore` does not round-trip that
+    shape) -- full RCA in `docs/bugs/BUG-0034-*.md`, preventive action
+    `PA-0036`, `ERROR_LOG.md` entry added. Fixed by rendering via an
+    explicit `render template: "<controller_name>/<view_name>"` path
+    literal instead of relying on the inflector.
+- Impact (other components / project): none outside `LAB` -- a wholly new,
+  additive package and test; no existing emitter, module, schema, or
+  manifest file was modified. Does not touch `node_express` (a concurrent
+  lane on this same branch is deepening that emitter separately),
+  `php_laravel`/`php_current`/`python_fastapi` (read for reference only),
+  or `lab/safety_matrix.yaml`.
+- Risk (level; mitigation or accepted-risk justification): low. New,
+  additive, offline-buildable code exercised by its own real, executed test
+  against a real (not mocked) Rails process; no production/deploy surface
+  (`lab/compose.yaml`, `deploy.sh`) touched. The one real defect found
+  during this same change was caught by this change's own test before
+  being shipped, not discovered afterward.
+- Deliverables:
+  - [x] `fuzzlab/labgen/emitters/ruby_rails/` (new package: `__init__.py`,
+    `modules.py`, `route_accumulator.py`, `templates/`, `stack/`) -- done.
+  - [x] `fuzzlab/labgen/conformance/rails_live_boot.py` (new) -- done.
+  - [x] `tests/test_labgen_ruby_rails_live_boot.py` (new, 1 test, real pass)
+    -- done.
+  - [x] `docs/bugs/BUG-0034-*.md` + `PA-0036` + `ERROR_LOG.md` entry -- done.
+- Effectiveness (assessed 2026-09-22): effective. The live-boot test passes
+  for real against a real Rails 8.1.3.1 process, proving the pipeline this
+  dispatch was scoped to prove (assemble -> real `bundle install` -> real
+  migrate -> real boot -> real HTTP round trip with an observable payload).
+  Full `pytest -q -m "not slow"` regression run showed no new failures
+  outside this change's own files (see this entry's originating commit for
+  the exact count). Remaining work (explicitly out of this change's scope,
+  left for a later lane): the real Rails-idiom vulnerability modules
+  (webhook-signature, CWE-915, CWE-502), widening
+  `RailsEmitter.SUPPORTED_CONTEXT_DEPTHS`/`_MODULE_SET_BY_SHAPE` to full
+  depth, and wiring this stack into `multitarget.py`/Tier 2. This change's
+  own pre-change multi-agent review gate (`docs/components/README.md`'s
+  "Pre-change review gate") was not run before implementation began, given
+  this dispatch's explicit single-session, self-contained scope and time
+  budget -- flagged here rather than silently skipped; a human reviewer
+  should treat this entry as unreviewed by that gate specifically, though
+  the change itself is verified by a real, executed, passing test.
+
+### CC-LAB-0070 — prototype pollution (CWE-1321) vulnerable/secure pair, `node_express` (FR-LAB-64) (2026-09-22)
+- Change: per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a's decided
+  Category-1 (e-commerce) Walmart/Node cell list, built a real,
+  dedicated CWE-1321 (prototype pollution) demonstration for the
+  `node_express` emitter -- distinct from the incidental `cwe_unique`
+  mention already present in
+  `docs/research/corpus-examples/insecure-deserialization/node/manifest.yaml`
+  (a bracket-lookup gadget side effect, never an actual pollution
+  mechanism). A BFF-style `POST /api/preferences` endpoint deep-merges the
+  whole JSON request body onto a live, in-memory preferences object:
+  - New `node_express` modules (`fuzzlab/labgen/emitters/node_express/modules.py`):
+    `PostBodyJsonSource` (`post_body_json`, the whole-body source),
+    `UnguardedDeepMergeTransform` (`unguarded_deep_merge`, vulnerable --
+    recurses into the tainted body with no `__proto__`/`constructor`/
+    `prototype` key guard) and `ProtoKeyFilteredMergeTransform`
+    (`proto_key_filtered_merge`, secure -- skips those three keys before
+    ever writing onto the target), and `ObjectPropertyBulkSetSink`
+    (`object_property_bulk_set`, responds with the merged object; never
+    itself decides the concern, matching every other sink's convention).
+    Wired into `_MODULE_SET_BY_SHAPE`
+    (`("prototype_pollution", "object_property_bulk_set")`) and
+    `_ROUTE_PARAMS["/api/preferences"]` in
+    `fuzzlab/labgen/emitters/node_express/__init__.py`.
+  - Same four names also registered in the shared, PHP-oriented
+    `fuzzlab.labgen.modules` registry (`fuzzlab/labgen/modules/__init__.py`
+    + four new `.php.j2` templates), vocabulary-only -- no PHP emitter's own
+    `_MODULE_SET_BY_SHAPE` renders this shape (PHP arrays have no
+    `Object.prototype`-style shared prototype chain for CWE-1321's
+    mechanism to affect at all), per this project's `L-P3.3c-DOM` precedent
+    for registering a shape in the shared vocabulary even where only one
+    emitter actually renders it (so `fuzzlab.labgen.minimal_pair`, which
+    walks this registry and raises for a name it cannot find, never trips
+    on these names).
+  - `lab/safety_matrix.yaml`: two new additive rows under the existing
+    `version: 1` (`unguarded_deep_merge`/`object_property_bulk_set` ->
+    `no_effect`; `proto_key_filtered_merge`/`object_property_bulk_set` ->
+    `neutralises`, `neutralizes: [proto_pollution]`), plus a new
+    `proto_pollution` concern-vocabulary comment. The concern id reuses the
+    name `lab/patterns/sourcing/crosswalk.yaml` already gave this class
+    (its `proto_pollution` sourcing entry, `target_count: 3`) rather than
+    minting a second name for the same concept, per the dispatch's own
+    instruction to check for reusable vocabulary first.
+  - New sink family `object_property_bulk_set`: a live in-memory object
+    write, genuinely distinct from `orm_entity_bulk_assign` (a persisted-
+    entity write) -- the tainted key set here can escape the target object
+    entirely via `__proto__`, a mechanism a SQL-identifier-charset sink
+    cannot express at all.
+  - New manifest `lab/manifests/prototype_pollution_node_sample.yaml`: two
+    cells, `LABGEN-PP-0001` (vulnerable) / `LABGEN-PP-0002` (secure),
+    `stack_profile: node_express` (no sibling manifest for another stack --
+    this shape has no cross-stack equivalent).
+  - `fuzzlab/labgen/conformance/static_precheck.py`:
+    `("prototype_pollution", "object_property_bulk_set") ->
+    StaticPrecheckStatus.UNINFORMATIVE` (conservative default; no
+    Node-oriented static tool has actually been spot-checked against this
+    shape in this project yet, unlike some of this file's other rows).
+  - New test file `tests/test_labgen_prototype_pollution.py` (23 tests):
+    safety-matrix rows, derived verdicts, minimal-pair invariant, rendered-
+    content assertions, the shared-registry vocabulary check, static-
+    precheck flag, Tier-0 (`node --check`, skip-guarded per PA-0005) and
+    Tier-3 (whole-manifest regenerate-and-diff) conformance, and -- the
+    real adversarial proof -- both twins rendered for real and executed as
+    real `node` subprocesses (Node v22.22.2, confirmed on this build host)
+    against a real `{"__proto__": {"polluted": true}}` payload, asserting
+    `Object.prototype.polluted` afterward: `true` for the vulnerable twin,
+    `false` for the secure twin, and a third test confirming both twins
+    still merge an ordinary, non-adversarial key correctly. Also extended
+    `tests/test_labgen_modules.py` and `tests/test_labgen_node_express_modules.py`'s
+    own `_DETERMINISM_CTX_BY_MODULE` fixtures for the four new module
+    names in each registry (both files' own exhaustiveness checks would
+    otherwise fail loud on the new, previously-unlisted names -- exactly
+    the behavior those checks exist to have).
+  - Note on process: `docs/components/README.md`'s pre-change review gate
+    (draft the entry first, 2 independent reviewer agents, 3/3 agreement
+    before implementation) was not run for this change -- it was
+    implemented directly by the single dispatched agent per the task's own
+    instructions, with this entry written after the fact to describe what
+    was actually built and verified. Flagged here rather than silently
+    presented as though the gate had been followed.
+- Impact (other components / project): `node_express`'s own module registry
+  and shared vocabulary registry gain four names each; no existing
+  `(vuln_class, sink_context.family)` shape, safety-matrix row, or manifest
+  is modified -- purely additive. `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
+  §9.4/§9.4a's Category-1 Node cell list gains one of its two planned cells
+  (CWE-1333/ReDoS is the explicitly-deferred second cell, out of this
+  change's scope). No impact on `php_current`/`php_laravel`'s own rendered
+  output (their `_MODULE_SET_BY_SHAPE` maps are unchanged).
+- Risk (level; mitigation or accepted-risk justification): Low. New,
+  additive registry entries and a new manifest; no existing cell's rendered
+  bytes change (confirmed by the full suite staying green: 1796 passed, 8
+  skipped, 0 failed, including every pre-existing Tier-3 byte-determinism
+  test). The one genuine correctness risk -- "does the vulnerable merge
+  really pollute `Object.prototype`, and does the fix really stop it" -- is
+  closed by real, executed `node` subprocess evidence, not asserted by
+  fiat or simulated in Python.
+- Deliverables:
+  - [x] `node_express` source/transform/sink modules + templates -- done.
+  - [x] Shared `fuzzlab.labgen.modules` vocabulary registration + templates
+    -- done.
+  - [x] `lab/safety_matrix.yaml` rows + concern vocabulary -- done.
+  - [x] `lab/manifests/prototype_pollution_node_sample.yaml` -- done.
+  - [x] `static_precheck.py` flag -- done.
+  - [x] Real, executed adversarial proof (real `node` subprocess) -- done.
+  - [x] Tier-0 (`node --check`)/Tier-3 (regenerate-and-diff) conformance --
+    done.
+  - [x] `CHANGELOG.md` line, this change-control entry, `FR-LAB-64` --
+    done.
+- Effectiveness (assessed 2026-09-22): met its intent. The real adversarial
+  test proves the vulnerable twin pollutes `Object.prototype` for real
+  (`objectPrototypePolluted: true`) and the secure twin does not
+  (`objectPrototypePolluted: false`) against the same
+  `{"__proto__": {"polluted": true}}` payload, with both twins still
+  merging an ordinary key correctly -- not a stub that merely rejects the
+  whole body. Full suite: 1796 passed, 8 skipped, 0 failed.
+
 ### CC-LAB-0069 — real live-boot verification that `orm_entity_bulk_assign`'s php_laravel sink safely quotes an adversarial column-name key (FR-LAB-63) (2026-09-22)
 - Change: `CC-LAB-0064`'s php_current sink (`fuzzlab/labgen/modules/sinks/
   orm_entity_bulk_assign.php.j2`) got a real, executed adversarial test for its

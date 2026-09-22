@@ -1,0 +1,47 @@
+# Prototype-pollution sample manifest (CC-LAB-0070), node_express.
+#
+# First illustrative pair for the `object_property_bulk_set` sink family
+# (lab/safety_matrix.yaml's `proto_pollution` concern, CWE-1321, added by
+# CC-LAB-0070/FR-LAB-64). Grounded in the Walmart (Node/Express BFF)
+# functionality/CWE research
+# (docs/research/site-architecture-survey-functionality-walmart.md): a
+# BFF-style "update account/cart preferences" endpoint that deep-merges
+# whatever JSON body the request carries onto a live, in-memory preferences
+# object.
+#
+# Every manifest in this project targets exactly one `stack_profile`
+# (confirmed against every existing manifest's fingerprint-gate log line,
+# and required by `fuzzlab.labgen.cli`'s own `--emitter`-scoped `--check`
+# run) -- this shape is JS/Node-runtime-specific (CWE-1321 has no
+# prototype-chain equivalent in this project's PHP/Python stacks), so there
+# is no sibling manifest for another stack_profile, unlike
+# `lab/manifests/mass_assignment_sample.yaml`'s php_laravel twin.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: the recursive merge writes every key of the request body
+  # onto the live preferences object with no guard, so a
+  # `{"__proto__": {"polluted": true}}`-shaped body pollutes
+  # Object.prototype itself, not just the target object.
+  - cell_id: LABGEN-PP-0001
+    class: prototype_pollution
+    stack_profile: node_express
+    route: { method: POST, path: /api/preferences }
+    sink_context:
+      family: object_property_bulk_set
+      required_neutralizations: [proto_pollution]
+    transform: [unguarded_deep_merge]
+
+  # Secure twin: the only difference is the transform region
+  # (proto_key_filtered_merge instead of unguarded_deep_merge) -- the
+  # minimal-pair invariant. `__proto__`/`constructor`/`prototype` keys are
+  # skipped before they ever reach the merge's own assignment, so the same
+  # adversarial body leaves Object.prototype untouched.
+  - cell_id: LABGEN-PP-0002
+    class: prototype_pollution
+    stack_profile: node_express
+    route: { method: POST, path: /api/preferences }
+    sink_context:
+      family: object_property_bulk_set
+      required_neutralizations: [proto_pollution]
+    transform: [proto_key_filtered_merge]

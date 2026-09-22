@@ -539,7 +539,7 @@ one's own pilot:
 
 | # | Category | Status | Sites picked (stack) | New stack(s) needed | Branch | Bookkeeping block reserved | Notes |
 |---|---|---|---|---|---|---|---|
-| 1 | E-commerce/marketplaces | **Piloting — functionality + CWE research done for both sites (§9.4a); next: CWE selection + Phase A (Rails skeleton)** | Shopify (Ruby on Rails); Walmart (Node/Express — reuses existing) | Ruby on Rails | `claude/second-target-cat1-ecommerce` | `CC-LAB-0070`-`0089` (reserved, not yet used) | See §9.4a for full detail (site-pair rationale, functionality findings, CWE shortlists, breadth ranking). |
+| 1 | E-commerce/marketplaces | **Piloting — CWE selection done (§9.4a); Walmart/Node cell 1 of 2 landed (CC-LAB-0070, CWE-1321 prototype pollution); next: CWE-1333 (ReDoS, separate lane) + Phase A (Rails skeleton)** | Shopify (Ruby on Rails); Walmart (Node/Express — reuses existing) | Ruby on Rails | `claude/second-target-cat1-ecommerce` | `CC-LAB-0070` used (prototype pollution); `CC-LAB-0071`-`0089` still reserved, not yet used | See §9.4a for full detail (site-pair rationale, functionality findings, CWE shortlists, breadth ranking). |
 | 2 | Social / UGC platforms | Not started | — | Likely Python/Django (Instagram) is the strongest new-stack candidate; Facebook (PHP/Hack+HHVM) may or may not warrant a *new* stack vs. reusing `php_laravel`/`php_current` as an approximation — this is exactly the kind of call §9.1 asks the picking session to make and record, not this table to pre-decide. Discord flagged in §9.1 step 1 as likely excluded (realtime/Elixir, not a request/response fit). YouTube likely excluded (Google-internal infra, no portable app-language claim). | — | — | Open for another session to pick up. |
 | 3 | SaaS / productivity / collaboration | Not started | — | Candidates per the survey: Slack (PHP/Hack web tier + Java realtime — itself two stacks), Notion (sharded Postgres + Kafka, but no named app-framework/language beyond "engineering blog doesn't name one" — check before committing), Atlassian (Java/Kotlin+Spring, Node+Express, or Python — Atlassian itself uses 3 stacks, pick the one most distinct from what's already built), Microsoft 365/Teams (Node.js backend + React/TS front end), Google Workspace (OT + Spanner/Bigtable — confirmed at the algorithm/storage level, not at a portable app-framework level; may not be a sensible single-stack pick without further research). | — | — | Open. Flag: Google Workspace's confirmed detail is algorithmic/storage, not framework-level — whoever picks this category should research further (per the standing instruction to do more research if needed) before treating it as buildable, or should pick two of the other four sites instead. |
 | 4 | Media / streaming / content platforms | Not started | — | Candidates: Netflix (Java/Spring Boot + a Federated GraphQL gateway), Spotify (Java/Spring + Kafka), Twitch (Go, post-monolith-migration — genuinely distinct paradigm from the others), Disney+ (excluded per §9.1 step 1 — infrastructure-only, unconfirmed at application-code level). | — | — | Open. Twitch/Go vs. Netflix-or-Spotify/Java+Spring reads as the most architecturally distinct pair from the current research, but the picking session should verify against §9.1's full procedure rather than take this as decided. |
@@ -699,3 +699,13 @@ next steps, in order, per §9.1-§9.3's discipline:
    research), prove conformance (§5), wire into `multitarget.py` (§6).
 5. Update §9.4/§9.4a at every step above — do not wait until the category
    is fully done to report progress.
+
+**Progress update (2026-09-22):** the CWE-1321 (prototype pollution) half of
+step 5's Node cells is **done** — `CC-LAB-0070`/`FR-LAB-64`, a real
+`unguarded_deep_merge`/`proto_key_filtered_merge` pair at a BFF-style
+`/api/preferences` endpoint, proved with a real, executed `node` subprocess
+adversarial test (see `docs/components/01-target-lab/change-control.md`'s
+`CC-LAB-0070` entry for full detail). CWE-1333 (ReDoS) remains a separate,
+later lane per its own timing-differential oracle requirement, not attempted
+here. The Rails skeleton (Phase A) and Phase C page design remain the next
+work.

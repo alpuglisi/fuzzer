@@ -715,6 +715,38 @@ class DomInnerhtmlEchoSink(TemplateModule):
         super().__init__("dom_innerhtml_echo", "sink", _SINK_ENV, "dom_innerhtml_echo.php.j2")
 
 
+class PostBodyJsonSource(TemplateModule):
+    """CC-LAB-0070: vocabulary-only registration of the JS/node_express
+    ``post_body_json`` source (the whole JSON request body). PHP has no
+    Object.prototype-style prototype chain, so nothing PHP-side can
+    meaningfully render the shape this feeds (``object_property_bulk_set``);
+    registered here purely so :mod:`fuzzlab.labgen.minimal_pair` (which
+    walks this registry and raises for a name it cannot find) recognizes
+    the name. ``node_express`` is the emitter that actually renders it, in
+    its own registry (``fuzzlab.labgen.emitters.node_express.modules``)."""
+
+    def __init__(self) -> None:
+        super().__init__("post_body_json", "source", _SOURCE_ENV, "post_body_json.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = "$__wholeBody"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class ObjectPropertyBulkSetSink(TemplateModule):
+    """CC-LAB-0070: vocabulary-only registration of the JS/node_express
+    ``object_property_bulk_set`` sink family -- responds with the object a
+    deep-merge transform built. Vocabulary-only in this PHP-oriented
+    package; ``node_express`` is the emitter that actually renders it."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "object_property_bulk_set", "sink", _SINK_ENV, "object_property_bulk_set.php.j2"
+        )
+
+
 SOURCES: dict[str, Module] = {
     "get_param": GetParamSource(),
     "post_param": PostParamSource(),
@@ -724,7 +756,34 @@ SOURCES: dict[str, Module] = {
     # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
     "dom_url_source": DomUrlSource(),
+    # CC-LAB-0070: prototype pollution -- vocabulary-only, same discipline as
+    # dom_url_source above. node_express is the only emitter that renders it.
+    "post_body_json": PostBodyJsonSource(),
 }
+class UnguardedDeepMergeTransform(TemplateModule):
+    """CC-LAB-0070: vocabulary-only registration of the JS/node_express
+    ``unguarded_deep_merge`` op. A PHP array has no prototype chain for this
+    op's real mechanism (CWE-1321) to affect at all, so this fragment
+    renders only a documentary comment; ``node_express``'s own registry
+    holds the module that actually performs the merge."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unguarded_deep_merge", "transform", _TRANSFORM_ENV, "unguarded_deep_merge.php.j2"
+        )
+
+
+class ProtoKeyFilteredMergeTransform(TemplateModule):
+    """CC-LAB-0070: vocabulary-only registration of the JS/node_express
+    ``proto_key_filtered_merge`` op -- the secure twin of
+    :class:`UnguardedDeepMergeTransform`. Same vocabulary-only rationale."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "proto_key_filtered_merge", "transform", _TRANSFORM_ENV, "proto_key_filtered_merge.php.j2"
+        )
+
+
 TRANSFORMS: dict[str, Module] = {
     "identity": IdentityTransform(),
     "param_bind": ParamBindTransform(),
@@ -745,6 +804,11 @@ TRANSFORMS: dict[str, Module] = {
     # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
     "dom_text_content": DomTextContentTransform(),
+    # CC-LAB-0070: prototype pollution -- vocabulary-only, same discipline as
+    # dom_text_content above. node_express is the only emitter that renders
+    # either op for real.
+    "unguarded_deep_merge": UnguardedDeepMergeTransform(),
+    "proto_key_filtered_merge": ProtoKeyFilteredMergeTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -768,6 +832,10 @@ SINKS: dict[str, Module] = {
     # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
     "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
+    # CC-LAB-0070: prototype pollution -- vocabulary-only, same discipline as
+    # dom_innerhtml_echo above. node_express is the only emitter that
+    # renders it.
+    "object_property_bulk_set": ObjectPropertyBulkSetSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

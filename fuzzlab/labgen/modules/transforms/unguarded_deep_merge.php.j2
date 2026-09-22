@@ -1,0 +1,8 @@
+// unguarded_deep_merge (JS/node_express-specific op, CC-LAB-0070): a
+// recursive merge with no `__proto__`/`constructor`/`prototype` key guard
+// -- a JS-runtime-only vulnerability mechanism (CWE-1321, prototype
+// pollution). A PHP array has no shared prototype to pollute, so nothing
+// PHP-side can meaningfully render this op; registered for the shared
+// vocabulary only, per the same discipline as this package's DOM-XSS
+// fragments (see their own headers). node_express's own transform module
+// is the one that actually performs the merge.

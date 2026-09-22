@@ -227,6 +227,14 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
         "dom_suffix": "-post",
         "dom_write_prop": "innerHTML",
     },
+    # CC-LAB-0070: prototype pollution -- registered in the shared vocabulary
+    # so minimal_pair can classify it (no php_current/php_laravel shape map
+    # uses any of these; node_express is the emitter that actually renders
+    # this shape).
+    "post_body_json": {},
+    "unguarded_deep_merge": {"value_expr": "$__wholeBody"},
+    "proto_key_filtered_merge": {"value_expr": "$__wholeBody"},
+    "object_property_bulk_set": {"value_expr": "$__wholeBody"},
 }
 
 

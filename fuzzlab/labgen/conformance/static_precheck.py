@@ -100,6 +100,19 @@ STATIC_PRECHECK_BY_SHAPE: dict[tuple[str, str], StaticPrecheckStatus] = {
     # step further: those shapes at least have a PHP-observable call for the
     # checker to mis-trust as a sanitizer).
     ("xss-dom", "dom_html_sink"): StaticPrecheckStatus.UNINFORMATIVE,
+    # --- CC-LAB-0070: prototype pollution (object_property_bulk_set) -------
+    # UNINFORMATIVE. Not by the same "PHP has no observable flow" reasoning
+    # as the DOM-XSS row above -- a Node/Express static analyzer (e.g. a
+    # CodeQL/eslint-plugin-security prototype-pollution query) genuinely
+    # *could* flag an unguarded `for...in` + bracket-assignment recursive
+    # merge, unlike this component's SQL/mass-assignment rows above, whose
+    # "no informative static tell" claim rests on real spot-checks recorded
+    # elsewhere in this file's own history. This row has had no such
+    # spot-check run against it yet (no Node-oriented static tool has been
+    # exercised against this shape in this project) -- marked UNINFORMATIVE
+    # as the conservative default until one actually is, not as a claim that
+    # no tool could ever find it.
+    ("prototype_pollution", "object_property_bulk_set"): StaticPrecheckStatus.UNINFORMATIVE,
 }
 
 

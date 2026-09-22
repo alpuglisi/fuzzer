@@ -13,6 +13,25 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- LAB (`CC-LAB-0070`, `FR-LAB-64`, `claude/second-target-cat1-ecommerce`):
+  built a real CWE-1321 (prototype pollution) vulnerable/secure pair for
+  the `node_express` emitter — a BFF-style `/api/preferences` endpoint
+  deep-merging a JSON request body onto a live settings object, with no
+  guard (vulnerable, `unguarded_deep_merge`) or with
+  `__proto__`/`constructor`/`prototype` keys skipped (secure,
+  `proto_key_filtered_merge`), new `object_property_bulk_set` sink family.
+  Registered in both `node_express`'s own module registry (rendered) and
+  the shared `fuzzlab.labgen.modules` registry (vocabulary-only, per the
+  `L-P3.3c-DOM` precedent). New manifest
+  `lab/manifests/prototype_pollution_node_sample.yaml`; new
+  `lab/safety_matrix.yaml` rows and `proto_pollution` concern (reusing the
+  concern-id already named in `lab/patterns/sourcing/crosswalk.yaml` rather
+  than minting a second name). Proved for real: both twins rendered and
+  executed as real `node` subprocesses against a real
+  `{"__proto__": {"polluted": true}}` payload — the vulnerable twin
+  pollutes `Object.prototype`, the secure twin does not (see
+  `tests/test_labgen_prototype_pollution.py`). Full test suite: 1796
+  passed, 8 skipped, 0 failed.
 - Docs (`claude/second-target-cat1-ecommerce`): closed the functionality-
   research gap for category 1's pilot pair. Added
   `docs/research/site-architecture-survey-functionality-shopify.md` and
