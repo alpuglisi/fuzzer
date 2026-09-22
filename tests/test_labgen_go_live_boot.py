@@ -1,5 +1,5 @@
 """Real, executed live-boot proof for `go_net_http` (category 4 pilot,
-`CC-LAB-0090`/`FR-LAB-64`, Phase A). Mirrors
+`CC-LAB-0170`/`FR-LAB-76`, Phase A). Mirrors
 `tests/test_labgen_ruby_rails_live_boot.py`'s convention: skip-guarded on
 the real capability probe (never a bare socket check -- `PA-0035`/
 `BUG-0033`), one real assemble+build+boot+HTTP round trip proving a real

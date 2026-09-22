@@ -1,5 +1,5 @@
 """Composable Go rendering modules for the ``go_net_http`` emitter (category
-4 pilot, ``CC-LAB-0090``/``FR-LAB-64``).
+4 pilot, ``CC-LAB-0170``/``FR-LAB-76``).
 
 Mirrors ``fuzzlab.labgen.emitters.node_express.modules``' module-composition
 shape (source/transform/sink/complexity categories, a ``Module``/
@@ -18,7 +18,7 @@ picked for this stack's first live-boot proof. The vulnerable/secure split
 reuses ``lab/safety_matrix.yaml``'s existing ``webhook_signature_verification``
 sink family and its existing ``naive_string_compare``/``constant_time_compare``
 ops verbatim — no new safety-matrix entry was needed (a scope reduction
-found during implementation of ``CC-LAB-0090``, which had drafted a new
+found during implementation of ``CC-LAB-0170``, which had drafted a new
 ``hmac_signature_check`` family before this family's prior existence, added
 by ``CC-LAB-0063``, was found).
 """

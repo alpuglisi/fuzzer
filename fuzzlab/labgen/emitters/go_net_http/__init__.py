@@ -1,6 +1,6 @@
 """``go_net_http``: this project's first Go stack (category 4 pilot,
 ``docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`` §9.4/§9.5, Twitch pick;
-``CC-LAB-0090``/``FR-LAB-64``).
+``CC-LAB-0170``/``FR-LAB-76``).
 
 Implements :class:`fuzzlab.labgen.emitter.Emitter` for Go's standard-library
 ``net/http`` (no third-party router/framework — matching Twitch's own

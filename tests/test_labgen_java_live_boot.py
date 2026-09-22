@@ -1,5 +1,5 @@
 """Real, executed live-boot proof for `java_spring_boot` (category 4
-pilot, `CC-LAB-0091`/`FR-LAB-65`, Phase A). Mirrors
+pilot, `CC-LAB-0171`/`FR-LAB-77`, Phase A). Mirrors
 `tests/test_labgen_go_live_boot.py`'s convention: skip-guarded on the real
 capability probe (never a bare socket check -- `PA-0035`/`BUG-0033`), one
 real assemble+package+boot+HTTP round trip proving a real, observable
@@ -17,10 +17,10 @@ type-selection step at all: it accepts a plain, flat JSON object matching
 shape the vulnerable twin requires. This test asserts exactly that
 observable, real difference -- **not** a working `ysoserial`-style RCE
 gadget chain (neither twin has one on its classpath; see
-`CC-LAB-0091`'s change-control entry for why that is a deliberate,
+`CC-LAB-0171`'s change-control entry for why that is a deliberate,
 declared scope boundary, not an oversight) and **not** a timing side
 channel (CWE-502 has none to prove here) -- the same honest "code-path
-proof, not a working exploit" scoping `CC-LAB-0090`'s own live-boot test
+proof, not a working exploit" scoping `CC-LAB-0170`'s own live-boot test
 used for CWE-347's non-functional timing property.
 """
 

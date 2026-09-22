@@ -1,5 +1,5 @@
 """Composable Java rendering modules for the ``java_spring_boot`` emitter
-(category 4 pilot, ``CC-LAB-0091``/``FR-LAB-65``).
+(category 4 pilot, ``CC-LAB-0171``/``FR-LAB-77``).
 
 Mirrors ``fuzzlab.labgen.emitters.go_net_http.modules``' module-composition
 shape exactly, ported to Java/Spring MVC. Phase A scope only (one shape):

@@ -1,5 +1,5 @@
 """Conformance-suite pass for `go_net_http` (category 4 pilot,
-`CC-LAB-0090`/`FR-LAB-64`, T-LAB0.7 Tier 3).
+`CC-LAB-0170`/`FR-LAB-76`, T-LAB0.7 Tier 3).
 
 - Tier 0 (lint): `go vet`/`gofmt -l` on the rendered output -- owned by
   `tests/test_labgen_go_net_http.py` already; this module focuses on the

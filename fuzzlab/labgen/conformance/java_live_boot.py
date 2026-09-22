@@ -1,6 +1,6 @@
 """Live-boot conformance harness for ``java_spring_boot`` (category 4 pilot,
 ``docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`` §9.4/§9.5 — Phase A,
-``CC-LAB-0091``/``FR-LAB-65``). This is the Java/Maven port of
+``CC-LAB-0171``/``FR-LAB-77``). This is the Java/Maven port of
 ``fuzzlab.labgen.conformance.go_live_boot.GoLiveBootHarness``, built the
 same way: entirely inside this project's own offline test suite, using the
 real ``mvn``/``java`` CLIs.
@@ -29,7 +29,7 @@ supported cell's one rendered file," nothing more.
 ``go_net_http``'s own).** This stack's one illustrative shape
 (Jackson-deserialize a POST body, acknowledge it) is stateless -- no
 read/write to persisted data -- so this harness has no ``_seed_db``/
-``query_db`` at all. See ``CC-LAB-0091``'s change-control entry for the
+``query_db`` at all. See ``CC-LAB-0171``'s change-control entry for the
 explicit scope call and when this stack gets a real per-run database
 (Phase B).
 
@@ -105,7 +105,7 @@ def _maven_env() -> dict[str, str]:
     the JVM need ``HOME``/``JAVA_TOOL_OPTIONS`` (this sandbox's proxy/
     truststore configuration is injected via ``JAVA_TOOL_OPTIONS``, per
     ``/root/.ccr/README.md``) to run at all. Replacing the environment
-    instead of inheriting it is exactly the bug `CC-LAB-0090` found and
+    instead of inheriting it is exactly the bug `CC-LAB-0170` found and
     fixed in its own Go probe -- applied correctly here from the start."""
     return dict(os.environ)
 

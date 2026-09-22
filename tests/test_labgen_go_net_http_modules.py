@@ -1,5 +1,5 @@
 """Module-composition unit tests for `go_net_http` (category 4 pilot,
-`CC-LAB-0090`/`FR-LAB-64`).
+`CC-LAB-0170`/`FR-LAB-76`).
 
 Mirrors `tests/test_labgen_node_express_modules.py`'s convention exactly,
 scoped to `fuzzlab.labgen.emitters.go_net_http.modules`'s own registries

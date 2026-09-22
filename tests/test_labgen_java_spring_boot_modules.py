@@ -1,5 +1,5 @@
 """Module-composition unit tests for `java_spring_boot` (category 4 pilot,
-`CC-LAB-0091`/`FR-LAB-65`).
+`CC-LAB-0171`/`FR-LAB-77`).
 
 Mirrors `tests/test_labgen_go_net_http_modules.py`'s convention exactly,
 scoped to `fuzzlab.labgen.emitters.java_spring_boot.modules`'s own

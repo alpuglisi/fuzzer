@@ -1,5 +1,5 @@
 """Emitter-level tests for `go_net_http` (category 4 pilot,
-`CC-LAB-0090`/`FR-LAB-64`): `GoEmitter.render`/`render_route_accumulator`,
+`CC-LAB-0170`/`FR-LAB-76`): `GoEmitter.render`/`render_route_accumulator`,
 plus a real, executed `go vet`/`gofmt -l`-equivalent Tier 0 lint pass over
 the rendered output -- this project's Go analogue of `node --check`
 (`tests/test_labgen_node_express.py`'s own convention), skip-guarded when

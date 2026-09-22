@@ -13,7 +13,7 @@ and `PlaybackResumeRequest.java` are new, hand-written.
 
 **Trim list:** none beyond dependency choice. No GraphQL/DGS dependency
 (`spring-boot-starter-graphql`, the Netflix DGS framework itself) is
-included in this Phase A skeleton — see `CC-LAB-0091`'s change-control
+included in this Phase A skeleton — see `CC-LAB-0171`'s change-control
 entry for the explicit scope call (the CWE-502 shape this stack's Phase A
 proves lives in *how a request body is deserialized*, not in GraphQL's own
 query-execution model; the GraphQL/DGS federation layer is Phase B work).
@@ -39,7 +39,7 @@ deserializer binds to without any polymorphism.
 
 **What is deliberately *not* here yet (Phase B, not this dispatch):** a
 per-run database (this Phase A's one illustrative cell is stateless — see
-`CC-LAB-0091`'s explicit scope call), the GraphQL/DGS federation layer and
+`CC-LAB-0171`'s explicit scope call), the GraphQL/DGS federation layer and
 its CWE-862 field-authorization pick
 (`docs/research/site-architecture-survey-functionality-netflix.md` §2),
 and any actual `ysoserial`-style gadget chain on the classpath (this Phase

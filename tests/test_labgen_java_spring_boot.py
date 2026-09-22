@@ -1,12 +1,12 @@
 """Emitter-level tests for `java_spring_boot` (category 4 pilot,
-`CC-LAB-0091`/`FR-LAB-65`): `JavaEmitter.render`, plus a real, executed
+`CC-LAB-0171`/`FR-LAB-77`): `JavaEmitter.render`, plus a real, executed
 `mvn -q compile` Tier 0 lint pass over the rendered output -- this
 project's JVM analogue of `go vet` (`tests/test_labgen_go_net_http.py`'s
 own convention). Skip-guarded on `java_boot_available()` since compiling
 against Spring Boot needs the same resolved dependencies the live-boot
 harness needs (PA-0005/PA-0035 pattern; the trade-off -- Tier 0 for this
 stack is not fully offline -- is acknowledged, not silently assumed,
-per `CC-LAB-0091`'s own adequacy review).
+per `CC-LAB-0171`'s own adequacy review).
 """
 
 from __future__ import annotations

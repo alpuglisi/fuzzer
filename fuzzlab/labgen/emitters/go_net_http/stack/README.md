@@ -38,7 +38,7 @@ start.
 
 **What is deliberately *not* here yet (Phase B, not this dispatch):** a
 per-run database (this Phase A's one illustrative cell is stateless — see
-`CC-LAB-0090`'s explicit scope call), a real router/framework dependency
+`CC-LAB-0170`'s explicit scope call), a real router/framework dependency
 (deferred until/unless a Phase-B shape actually needs one beyond
 `net/http.ServeMux`), and the richer EventSub message-ID/timestamp/replay-
 window checks `docs/research/site-architecture-survey-functionality-twitch.md`

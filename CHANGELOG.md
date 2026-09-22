@@ -4,9 +4,28 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-22 (cross-branch review, by the category 1 pilot session)
+- Docs/LAB: reviewed this branch's code and tests (no code defects found —
+  the Go webhook-signature and Java Jackson-deserialization vulnerable/
+  secure pairs are correct, and both real live-boot tests pass in this
+  sandbox). Found and fixed a real cross-branch bookkeeping-ID collision:
+  this branch's `go_net_http`/`java_spring_boot` Phase A work had claimed
+  `CC-LAB-0090`/`0091` and `FR-LAB-64`/`65`, the same IDs independently
+  claimed by categories 2, 3, and 5's own Phase A work on their own
+  branches (all four branches picked "next free after category 1's
+  0070-0089 block" without seeing each other). Renumbered this branch's
+  IDs to `CC-LAB-0170`/`0171` and `FR-LAB-76`/`77` (category 4's assigned
+  block, `0170`-`0209`) across every file referencing them (code
+  docstrings, tests, manifests, `lab/safety_matrix.yaml`, and this
+  branch's own bookkeeping docs) via exact-token replacement; full suite
+  reverified green (1808 passed, 8 skipped) after the rename. See
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s category-4 tracker
+  row and this component's `CC-LAB-0170`/`0171` entries for the corrected
+  IDs going forward.
+
 ## 2026-09-22 (category 4 pilot, Phase A build — Netflix/Java)
 - LAB: `java_spring_boot` Phase A — this project's first JVM/Java
-  target-lab stack (`CC-LAB-0091`/`FR-LAB-65`). A real Maven/Spring Boot
+  target-lab stack (`CC-LAB-0171`/`FR-LAB-77`). A real Maven/Spring Boot
   3.4.1 skeleton (`spring-boot-starter-web` only, no GraphQL/DGS
   dependency — see the entry's explicit scope call), a `JavaEmitter`
   rendering one illustrative shape (a playback-resume endpoint, CWE-502:
@@ -34,7 +53,7 @@ changed, and the reason. Reference the commit hash where useful.
 
 ## 2026-09-22 (category 4 pilot, Phase A build)
 - LAB: `go_net_http` Phase A — this project's first Go target-lab stack
-  (`CC-LAB-0090`/`FR-LAB-64`). A real, checked-in `net/http`-only skeleton,
+  (`CC-LAB-0170`/`FR-LAB-76`). A real, checked-in `net/http`-only skeleton,
   a `GoEmitter` rendering one illustrative shape (an EventSub-webhook-
   receiver-shaped handler, CWE-347: Go's `==` vs. `crypto/hmac.Equal`),
   and `GoLiveBootHarness` (real `go build`, real boot, real HTTP) —
@@ -45,7 +64,7 @@ changed, and the reason. Reference the commit hash where useful.
   capability-probe/boot-subprocess environment bug that made
   `go_boot_available()` under-report, and a route-accumulator bug that
   double-registered a vulnerable/secure twin pair at the same path) —
-  see `CC-LAB-0090`'s Effectiveness note. Reuses `lab/safety_matrix.yaml`'s
+  see `CC-LAB-0170`'s Effectiveness note. Reuses `lab/safety_matrix.yaml`'s
   existing `webhook_signature_verification` family/ops verbatim (no new
   entry needed — a scope reduction found and corrected during
   implementation). Tier 0 (`go vet`/`gofmt -l`) and Tier 3
@@ -89,7 +108,7 @@ changed, and the reason. Reference the commit hash where useful.
   project-preferred for expanding real coverage; CWE-862 (GraphQL
   field-authorization) and CWE-918 (SSRF) are recorded as Phase B
   follow-ups for the respective stacks, not declined. Reserved
-  `CC-LAB-0090`-`0129` for this category's build (two brand-new emitters —
+  `CC-LAB-0170`-`0129` for this category's build (two brand-new emitters —
   Java/Spring Boot and Go — a larger block than a single-stack category,
   sized comparably to category 1's Ruby-on-Rails-only reservation). Updated
   §9.2's stack-reuse ledger with the Ruby-on-Rails row category 1 had left
