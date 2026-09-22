@@ -1,0 +1,156 @@
+"""Composable rendering modules for the ``spring_boot`` emitter (`CC-LAB-0090`,
+TrackerNest, category 3's Atlassian pick).
+
+Mirrors ``fuzzlab.labgen.emitters.python_fastapi.modules``'s module-
+composition architecture (small, independently authored ``source``/``sink``/
+``complexity`` Jinja2 fragments an emitter composes per cell) but is a fully
+independent implementation scoped to this package, per this project's "no
+stack's emitter package imports another's" isolation rule
+(``docs/LAB_IMPLEMENTATION_PLAN.md`` Phase 3).
+
+**Why this stack's shape has no separate ``transform`` category.** The
+``ssti``/``template_render`` concern (`lab/safety_matrix.yaml`) is not a
+"tainted value passes through zero-or-more transforms before a fixed sink"
+shape the way SQLi/XSS are -- the vulnerable and secure ops
+(``user_supplied_template_compile`` vs. ``file_loaded_template_name``, per
+`docs/research/corpus-examples/ssti/php/manifest.yaml`'s own
+``suggested_op`` values) describe two different things the **sink itself**
+does with the tainted value (compile it as an expression, vs. use it only to
+select among a fixed, developer-defined set of template bodies) -- so here
+the op selects which **sink** module renders, not a pipeline stage applied
+before a fixed one. ``Cell.transform.ops`` is still the field that carries
+this (per ``fuzzlab.labgen.schema.Cell``'s general "ops applied" contract),
+interpreted this way by this emitter specifically.
+
+Same determinism discipline as every other stack's module system: the one
+:class:`jinja2.Environment` here sets ``trim_blocks=True, lstrip_blocks=True,
+keep_trailing_newline=True`` explicitly, and templates are only ever given
+already-computed, already-ordered values.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+TEMPLATES_ROOT = Path(__file__).parent / "templates"
+
+
+def _make_env(subdir: str) -> Environment:
+    return Environment(
+        loader=FileSystemLoader(str(TEMPLATES_ROOT / subdir)),
+        trim_blocks=True,
+        lstrip_blocks=True,
+        keep_trailing_newline=True,
+        undefined=StrictUndefined,
+        autoescape=False,
+    )
+
+
+SOURCE_ENV = _make_env("sources")
+SINK_ENV = _make_env("sinks")
+COMPLEXITY_ENV = _make_env("complexities")
+
+
+@dataclass(frozen=True)
+class RenderResult:
+    code: str
+    context: dict[str, Any]
+
+
+class Module:
+    name: str
+    category: str
+    cardinality: str = "per_cell"
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:  # pragma: no cover - abstract
+        raise NotImplementedError
+
+
+class TemplateModule(Module):
+    def __init__(self, name: str, category: str, env: Environment, template_name: str):
+        self.name = name
+        self.category = category
+        self._env = env
+        self._template_name = template_name
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        template = self._env.get_template(self._template_name)
+        code = template.render(**ctx)
+        return RenderResult(code=code, context=dict(ctx))
+
+
+class QueryParamSource(TemplateModule):
+    """Extracts one query parameter via ``HttpServletRequest.getParameter``
+    -- deliberately the raw Servlet API, not a typed ``@RequestParam``
+    argument (a ``@RequestParam String`` still arrives untyped/uncoerced for
+    a String parameter, but manual ``getParameter`` access matches how the
+    real Confluence OGNL-injection CVEs' vulnerable code paths actually
+    pulled the tainted value -- see
+    docs/research/category3-saas-functionality-and-cwe-research.md sec 4).
+    Publishes ``value_expr`` -- same contract as every other stack's source
+    module."""
+
+    def __init__(self) -> None:
+        super().__init__("query_param", "source", SOURCE_ENV, "query_param.java.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = ctx["var_name"]
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class UserSuppliedTemplateCompileSink(TemplateModule):
+    """The vulnerable op: the tainted value is evaluated as an OGNL
+    expression via ``Ognl.getValue()`` -- CWE-1336, the real shape behind
+    CVE-2021-26084/CVE-2022-26134 (application-level: compiling tainted
+    input as an expression at all, not a specific OGNL library CVE)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "user_supplied_template_compile", "sink", SINK_ENV, "user_supplied_template_compile.java.j2"
+        )
+
+
+class FileLoadedTemplateNameSink(TemplateModule):
+    """The secure twin: the tainted value only ever selects among a fixed,
+    developer-defined ``Map`` of macro bodies -- never compiled/evaluated as
+    an expression, matching this concern's ``file_loaded_template_name``
+    neutralizing op in `lab/safety_matrix.yaml`."""
+
+    def __init__(self) -> None:
+        super().__init__("file_loaded_template_name", "sink", SINK_ENV, "file_loaded_template_name.java.j2")
+
+
+class SingleHandlerComplexity(TemplateModule):
+    def __init__(self) -> None:
+        super().__init__("single_handler", "complexity", COMPLEXITY_ENV, "single_handler.java.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        template = self._env.get_template(self._template_name)
+        code = template.render(
+            class_name=ctx["class_name"],
+            route_path=ctx["route_path"],
+            handler_name=ctx["handler_name"],
+            body=ctx["body"],
+        )
+        return RenderResult(code=code, context=dict(ctx))
+
+
+SOURCES: dict[str, Module] = {
+    "query_param": QueryParamSource(),
+}
+#: Keyed by the op name that selects this sink (see this module's own
+#: docstring for why the op selects the sink here, not a pre-sink
+#: transform).
+SINKS: dict[str, Module] = {
+    "user_supplied_template_compile": UserSuppliedTemplateCompileSink(),
+    "file_loaded_template_name": FileLoadedTemplateNameSink(),
+}
+COMPLEXITIES: dict[str, Module] = {
+    "single_handler": SingleHandlerComplexity(),
+}

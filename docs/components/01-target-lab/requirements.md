@@ -1839,6 +1839,40 @@ lane) can submit a payload as
     only the `git rm -r puppy-fort-factory/` once the first commit's own
     full test run (fast suite + the live-boot slow suite) was green.
 
+- **FR-LAB-64** *(`spring_boot`: the fourth emitter, category 3's Atlassian
+  pick, "TrackerNest"; `CC-LAB-0090`, 2026-09-22).* Per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` sec 9 (the 12-app
+  category expansion) and its own functionality/CWE research
+  (`docs/research/category3-saas-functionality-and-cwe-research.md`), a
+  new Java/Kotlin+Spring Boot emitter (`fuzzlab.labgen.emitters.spring_boot`)
+  supporting exactly one shape as of this entry:
+  `(vuln_class="ssti", sink_context.family="template_render")`, TrackerNest's
+  `/wiki/pages/render` OGNL-injection cell (real Confluence
+  CVE-2021-26084/CVE-2022-26134 shape — an attacker-supplied string
+  compiled/evaluated as an OGNL expression via the real `ognl:ognl:3.4.13`
+  library, vs. the secure twin's fixed macro-name-only lookup). A real,
+  checked-in, minimal Spring Boot project skeleton
+  (`fuzzlab/labgen/emitters/spring_boot/stack/skeleton/`, hand-authored to
+  the shape Spring Initializr would produce — `start.spring.io` itself is
+  unreachable from this build sandbox, see the skeleton's own `README.md`),
+  a real capability probe (`spring_boot_boot_available()`, a bounded real
+  Maven Central round trip, `PA-0035`/`BUG-0033`), and a live-boot harness
+  (`fuzzlab.labgen.conformance.live_boot_spring_boot.SpringBootLiveBootHarness`)
+  that assembles, real-builds (`mvn package`), boots (`java -jar`), and
+  proves one real HTTP payload differential per cell (one cell per harness
+  instance — the twin pair shares a route, so they are never live-booted
+  together, mirroring `mass_assignment_laravel_sample.yaml`'s own precedent).
+  Tier 0 (`mvn compile`) and Tier 3 (`regenerate_and_diff_emitter`/
+  `render_whole_sample`) conformance cover both cells.
+  **Deliberately out of scope for this entry** (tracked for a follow-on
+  `CC-LAB-009x`): the XXE (`/issues/{id}/import`) and insecure-
+  deserialization (`/integrations/webhook-payload`) cells `docs/research/
+  category3-saas-functionality-and-cwe-research.md` sec 6b also designs for
+  TrackerNest; ground truth (`labels.json`/`injection-points.json`); wiring
+  into `fuzzlab.harness.multitarget`. **Tier 1/2 status: `[design]`-only**
+  beyond the one proven live-boot cell, matching `python_fastapi`/
+  `node_express`'s own stated status for a newly-built stack.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

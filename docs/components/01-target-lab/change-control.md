@@ -83,15 +83,24 @@ Component code: **LAB**. Entry format and required fields: see
   Jackson DTO parse — an observable class-instantiation-of-attacker-chosen-type
   differential (CWE-502), not full RCE.
 - Deliverables:
-  - [ ] `stack/skeleton/` with provenance README (php_laravel's convention) — todo
-  - [ ] `StackEnv`-equivalent Python module (separate from the skeleton) — todo
-  - [ ] `Emitter` subclass + 1 cell (SSTI/OGNL), vulnerable+secure twin — todo
-  - [ ] `spring_boot_boot_available()` capability probe — todo
-  - [ ] `SpringBootLiveBootHarness` + 1 executed live-boot test — todo
-  - [ ] Tier 0/Tier 3 conformance for the one cell — todo
-  - [ ] `requirements.md` FR-LAB-64 entry — todo
-  - [ ] `CHANGELOG.md` line — todo
-- Effectiveness (assessed <date> or pending): pending
+  - [x] `stack/skeleton/` with provenance README (php_laravel's convention) — done (`stack/README.md` documents the `start.spring.io`-unreachable substitution honestly)
+  - [x] `StackEnv`-equivalent Python module (separate from the skeleton) — done (`stack_env.py`, digest-pinned `eclipse-temurin:21-jre-alpine` base image resolved live)
+  - [x] `Emitter` subclass + 1 cell (SSTI/OGNL), vulnerable+secure twin — done (`__init__.py`/`modules.py`, `lab/manifests/ssti_spring_boot_sample.yaml`)
+  - [x] `spring_boot_boot_available()` capability probe — done (`live_boot_spring_boot.py`, verified real against Maven Central in this sandbox)
+  - [x] `SpringBootLiveBootHarness` + 1 executed live-boot test — done, and extended to both twin cells (`tests/test_labgen_spring_boot_live_boot.py`, 2 tests, real `mvn package` + `java -jar` + real HTTP, both PASSED — `macroExpr=7*7` evaluates to `49` on the vulnerable twin, is treated as an unrecognized macro name on the secure twin)
+  - [x] Tier 0/Tier 3 conformance for the one cell — done (`tests/test_labgen_spring_boot_conformance.py`: `mvn compile` per cell, `regenerate_and_diff_emitter`/`render_whole_sample`); plus `tests/test_labgen_spring_boot.py` unit coverage (supports/render-determinism/verdict/unsupported-cell fail-loud) — 13/13 tests passed in this sandbox
+  - [x] `requirements.md` FR-LAB-64 entry — done
+  - [x] `CHANGELOG.md` line — done
+- Effectiveness (assessed 2026-09-22): **met**, with one real divergence
+  from this entry's own "Change" text above, reflected back per this
+  project's pre-change-review convention rather than silently diverging:
+  the route actually built is `/wiki/pages/render`, not
+  `/wiki/pages/{id}/render` — `fuzzlab.labgen.schema.Route`/`Cell` has no
+  path-parameter concept, so the `{id}` segment in this entry's original
+  description and the research doc's original §6b design was not
+  buildable as written; both are corrected to the flat path actually
+  implemented (see `docs/research/category3-saas-functionality-and-cwe-research.md`
+  sec 6b's own updated row). Otherwise: Every deliverable above is real and executed, not merely written: a real `mvn package` builds the assembled skeleton+cell, a real `java -jar` boots it, and a real HTTP payload differential is observed for both twins of the one in-scope cell — the same bar `php_laravel`'s first live-boot entry (`CC-LAB-0054`) set. Full non-slow suite re-run after this change: 1532 passed, 15 failed (all pre-existing, unrelated to this entry — `gitleaks` not installed in this sandbox, affecting only `lab-generate --check`'s secret-scanner gate on `php_laravel`/harder-shapes manifests; confirmed by inspection that none reference `spring_boot`/`ssti`/`TrackerNest`), 52 skipped, consistent with this sandbox's pre-existing tool gaps, not a regression this entry introduced.
 - Pre-change review gate: drafted, reviewed by 2 independent agents (accuracy:
   1 finding, fixed — the node_express-provenance-README claim above; adequacy:
   5 findings, all incorporated above — scope narrowed to 1 cell, environment

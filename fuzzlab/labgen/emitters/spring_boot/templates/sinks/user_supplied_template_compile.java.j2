@@ -1,0 +1,9 @@
+        try {
+            Object macroResult = ognl.Ognl.getValue({{ value_expr }}, new Object());
+            return org.springframework.http.ResponseEntity.ok(
+                "Rendered macro result: " + String.valueOf(macroResult)
+            );
+        } catch (ognl.OgnlException e) {
+            return org.springframework.http.ResponseEntity.status(400)
+                .body("Macro evaluation error: " + e.getMessage());
+        }

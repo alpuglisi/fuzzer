@@ -13,6 +13,17 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- `fuzzlab/labgen/emitters/spring_boot/` (new): the project's fourth
+  emitter and first JVM stack, TrackerNest (category 3's Atlassian pick) —
+  a real, checked-in minimal Spring Boot skeleton, a `SpringBootEmitter`
+  rendering the SSTI/OGNL twin pair (`lab/manifests/ssti_spring_boot_sample.yaml`),
+  a real capability probe and live-boot harness
+  (`fuzzlab/labgen/conformance/live_boot_spring_boot.py`), and Tier 0/3
+  conformance — to prove a real OGNL-injection payload differential
+  end to end (`macroExpr=7*7` -> `49` vulnerable-side, an unrecognized
+  macro name secure-side) grounded in the real Confluence
+  CVE-2021-26084/CVE-2022-26134 shape. 13 new tests, all passing against
+  a real `mvn package` + `java -jar` boot. `CC-LAB-0090`/`FR-LAB-64`.
 - Docs: `docs/components/01-target-lab/change-control.md` — drafted
   `CC-LAB-0090` (TrackerNest's Java/Kotlin+Spring Boot emitter, Tier-A depth)
   and passed it through this repo's mandatory 2-reviewer pre-change review

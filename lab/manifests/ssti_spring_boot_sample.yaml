@@ -1,0 +1,35 @@
+# SSTI sample manifest (`CC-LAB-0090`/`FR-LAB-64`), `spring_boot`.
+#
+# TrackerNest's (category 3, Atlassian pick) first cell -- see
+# docs/research/category3-saas-functionality-and-cwe-research.md sec 6b for
+# the page/vulnerability-class design and sec 4 for the CWE research this
+# twin pair is grounded in (real Confluence CVE-2021-26084/CVE-2022-26134
+# OGNL-injection shape). The vulnerable twin evaluates the tainted
+# `macroExpr` query parameter as an OGNL expression
+# (`user_supplied_template_compile`, `lab/safety_matrix.yaml`'s `ssti`
+# entry); the secure twin only ever selects among a fixed, developer-defined
+# macro map by name (`file_loaded_template_name`), never compiling tainted
+# input as an expression -- both share the same route so they are never
+# live-booted together, matching `mass_assignment_laravel_sample.yaml`'s own
+# twin-pair convention (see `fuzzlab/labgen/conformance/
+# live_boot_spring_boot.py`'s test, which boots one cell at a time).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-SSTI-0001
+    class: ssti
+    stack_profile: spring_boot
+    route: { method: GET, path: /wiki/pages/render }
+    sink_context:
+      family: template_render
+      required_neutralizations: [server_template_injection]
+    transform: [user_supplied_template_compile]
+
+  - cell_id: LABGEN-SSTI-0002
+    class: ssti
+    stack_profile: spring_boot
+    route: { method: GET, path: /wiki/pages/render }
+    sink_context:
+      family: template_render
+      required_neutralizations: [server_template_injection]
+    transform: [file_loaded_template_name]
