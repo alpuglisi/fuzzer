@@ -1,7 +1,7 @@
 # Fuzzing Harness and Oracle — Requirement Specification
 
-Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5); harness generalization ongoing; greybox-run consumes mutation-engine variants (opt-in)]`
-· Last updated: 2026-09-22 · see CC-FUZZ-0019
+Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5); harness generalization ongoing; greybox-run consumes mutation-engine variants (opt-in); coverage-frontier growth emitted to metric_series]`
+· Last updated: 2026-09-22 · see CC-FUZZ-0021
 
 Related: `ARCHITECTURE.md` #7; `DECISIONS_AND_ROADMAP.md` (D1, D5, D7, Phase 2/3,
 Phase 8); `./change-control.md`.
@@ -59,6 +59,17 @@ rewards) derives from it.
   destructive-gated `catalog.record_variant` — the harness's own consumer of
   Phase 8 T8.5's write-back path, alongside the standalone `mutate-run` CLI.
   Added by `CC-FUZZ-0019` (Lane C1/M8-wiring).
+- **FR-FUZZ-9** `run_greybox()` emits the run-wide `CoverageFrontier`'s growth
+  to `core/store.py`'s `metric_series` table (component #2, CORE) once per
+  attempt, via a buffered `MetricLogger(store, run_id, source="coverage")`
+  and the private `_record_coverage_metric()` helper: `key="coverage/lines"`,
+  `step=` the running attempt count, `value=` the frontier's current `.size`.
+  Always on (no flag — read-side-only addition, no new traffic or behavior
+  change to the attempt path itself); additive alongside the pre-existing
+  `greybox_frontier_size` end-of-run `run_metrics` total, which is unchanged.
+  Added by `CC-FUZZ-0021` (lane B0's coverage-frontier emitter, Wave 1b,
+  sequenced after `CC-FUZZ-0019`/`CC-FUZZ-0020` per the file-overlap note in
+  `docs/PARALLEL_LANE_BUILD_PLAN.md`).
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
@@ -84,13 +95,16 @@ reward) and, via the oracle, `finding` rows (labels, evidence). Reads grey-box
 coverage/fault signals when available. Authenticates via the session manager;
 sends via the `core/` HTTP client. Optionally (FR-FUZZ-8) reads mutation-engine
 operators/validator (component #9, MUT) and writes accepted variants to
-`payload_variant` via MUT's `catalog.record_variant`.
+`payload_variant` via MUT's `catalog.record_variant`. Writes `metric_series`
+rows (`source="coverage"`, `key="coverage/lines"`) via `core/store.py`'s
+`log_scalar`/`MetricLogger` (FR-FUZZ-9).
 
 ## 6. Dependencies (components)
 `core/`, session manager, payload scheduler, indicator DB & catalogs; grey-box
 instrumentation for reward and coverage/fault labels; mutation engine (MUT,
 optional — FR-FUZZ-8). (The oracle itself depends on `core/` and the target lab,
-plus grey-box signals when available.)
+plus grey-box signals when available.) `core/store.py`'s `metric_series` table
+and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
 
 ## 7. Acceptance criteria
 - Confirms the lab's known blind-SQLi injection points with the differential

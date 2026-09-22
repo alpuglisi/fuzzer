@@ -319,6 +319,61 @@ def test_run_greybox_mutation_variants_off_by_default(tmp_path):
     assert n_variants == 0
 
 
+# --- B0's coverage-frontier emitter (CC-FUZZ-0021): metric_series rows -------
+
+def test_run_greybox_emits_coverage_metric_series(tmp_path):
+    """Each attempt writes a `metric_series` row (source='coverage',
+    key='coverage/lines') tracking the run-wide frontier's growth, additive
+    alongside the existing `greybox_frontier_size` run_metrics total."""
+    app = "/var/www/html/product.php"
+    probes = (ProbeSpec("baseline", "1", "baseline"),
+              ProbeSpec("sqli-error", "'", "sqli"))
+    sender = FakeSender([
+        (Probe(200, "ok"), {app: [10, 11]}, False),                    # baseline
+        (Probe(500, "You have an error in your SQL syntax"),
+         {app: [10, 11, 40, 41, 42]}, True),                           # sqli error
+    ])
+    cov, fault = DictCoverage(sender), DictFault(sender)
+    point = GreyboxPoint(url="http://127.0.0.1:8080/product.php", param="id",
+                         method="GET", location="query", vuln_class="sqli-error")
+    with Store(tmp_path / "u.db") as store:
+        run_id = store.start_run("greybox", "127.0.0.1")
+        summary = run_greybox(base_url="http://127.0.0.1:8080", store=store,
+                              run_id=run_id, points=[point], sender=sender,
+                              coverage_source=cov, dbfault_source=fault,
+                              probes=probes)
+        rows = store.conn.execute(
+            "SELECT source, key, step, value FROM metric_series "
+            "WHERE run_id=? ORDER BY step", (run_id,)).fetchall()
+
+    assert [dict(r) for r in rows] == [
+        {"source": "coverage", "key": "coverage/lines", "step": 1, "value": 2.0},
+        {"source": "coverage", "key": "coverage/lines", "step": 2, "value": 5.0},
+    ]
+    # Matches the run-wide frontier total recorded via the pre-existing path.
+    assert rows[-1]["value"] == summary["novel_lines"]
+
+
+def test_run_greybox_coverage_metric_series_isolated_per_run(tmp_path):
+    """Two runs against the same store don't cross-contaminate each other's
+    coverage/lines series (metric_series is keyed by run_id)."""
+    app = "/var/www/html/a.php"
+    probes = (ProbeSpec("baseline", "1", "baseline"),)
+    with Store(tmp_path / "u.db") as store:
+        for expected_lines in (1, 3):
+            sender = FakeSender([(Probe(200, "ok"), {app: list(range(expected_lines))}, False)])
+            cov, fault = DictCoverage(sender), DictFault(sender)
+            point = GreyboxPoint("http://h/a.php", "id", "GET", "query", None)
+            run_id = store.start_run("greybox", "h")
+            run_greybox(base_url="http://h", store=store, run_id=run_id,
+                       points=[point], sender=sender, coverage_source=cov,
+                       dbfault_source=fault, probes=probes)
+            values = [r["value"] for r in store.conn.execute(
+                "SELECT value FROM metric_series WHERE run_id=? AND key='coverage/lines' "
+                "ORDER BY step", (run_id,)).fetchall()]
+            assert values == [float(expected_lines)]
+
+
 def test_requests_correlating_sender_sets_header(monkeypatch):
     captured = {}
 

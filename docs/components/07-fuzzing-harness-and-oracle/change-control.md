@@ -3,6 +3,66 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0021 — coverage-frontier `metric_series` emitter (lane B0, Wave 1b) (2026-09-22)
+- Change: `fuzzlab/greybox/run.py::run_greybox()` now emits a per-attempt
+  `metric_series` row tracking the run-wide `CoverageFrontier`'s growth,
+  additive alongside the pre-existing `greybox_frontier_size` `run_metrics`
+  end-of-run total. New private helper `_record_coverage_metric(logger, step,
+  frontier)` writes `source="coverage"`, `key="coverage/lines"`, `step=`
+  the running attempt count, `value=` the frontier's current `.size` — per
+  `docs/UI_IMPLEMENTATION_PLAN.md` §3 (B0)'s resolved schema notes (R-05),
+  which name `coverage/lines` as the worked example key for this exact
+  source. `run_greybox()` opens one `fuzzlab.core.store.MetricLogger(store,
+  run_id, source="coverage")` at the top of the run (alongside the existing
+  `frontier = CoverageFrontier()`), calls `_record_coverage_metric` once per
+  attempt right after `summary["attempts"] += 1`, and flushes it once at the
+  end of the run before the summary is returned. Follows the same
+  small-function-slotted-into-the-loop pattern lane C1 established in this
+  file (`mutation_variant_probes` / `_record_accepted_variant`) specifically
+  so this sub-lane could land cleanly after it. No existing coverage-tracking
+  or attempt-path behavior changed — this is additive metric emission only;
+  `frontier`, `summary`, the `attempt`/`run_metrics` writes, and the
+  mutation-variant wiring (`CC-FUZZ-0019`) are all untouched.
+- Impact (other components / project): FUZZ only for the write path (new
+  dependency on `fuzzlab.core.store.MetricLogger`/`metric_series`, landed by
+  `CC-CORE-0018`). Enables — but does not itself build — a future UI reader
+  (`docs/UI_IMPLEMENTATION_PLAN.md`'s U5 lane, "metric_series tab" /
+  Datasette-style store exploration) to chart per-run coverage-frontier
+  growth. This is the one B0 emitter sub-lane the build plan
+  (`docs/PARALLEL_LANE_BUILD_PLAN.md`, "B0/C1 file-overlap risk" note) flagged
+  as needing to land after C1's M8-wiring (`CC-FUZZ-0019`) rather than in
+  parallel with it, since both touch `run.py`'s attempt/summary loop; it was
+  dispatched only after confirming `CC-FUZZ-0019`/`CC-FUZZ-0020` were already
+  merged into the base branch. No interface/contract change to
+  `run_greybox()`'s signature or return value (`summary` dict unchanged).
+- Risk (level; mitigation): low — purely additive write path (one buffered
+  `MetricLogger` per run, flushed once at the end plus its own
+  `flush_every=200` periodic flush; non-finite values are dropped with a
+  warning by `log_scalar`/`MetricLogger.log` itself, never reaching this
+  component). No change to reward shaping, screening, M10 confirmation, or
+  the `attempt`/`run_metrics` tables. `MetricLogger` holds `store.conn` for
+  the lifetime of one `run_greybox()` call on the same thread that already
+  drives every other `store.conn` write in this function, so PA-0023
+  (thread-affine `sqlite3` connection handles) does not apply — no new
+  cross-thread caching is introduced.
+- Deliverables:
+  - [x] `_record_coverage_metric()` helper + wiring into `run_greybox()`'s
+    attempt loop and end-of-run flush — done.
+  - [x] Tests: `tests/test_greybox_live.py::test_run_greybox_emits_coverage_metric_series`
+    and `::test_run_greybox_coverage_metric_series_isolated_per_run` — done.
+  - [x] Confirmed lane C1's existing tests in `tests/test_greybox_live.py`
+    pass unmodified (18/18, including the 16 pre-existing C1/base tests) —
+    done.
+  - [x] `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    updated in place with the new emission behavior — done.
+  - [x] `CHANGELOG.md` line — done.
+- Effectiveness (assessed 2026-09-22): intent achieved — `run_greybox()` now
+  writes `coverage/lines` rows to `metric_series` per attempt, verified by
+  the new tests reading them back directly from the store (values match the
+  frontier's growth exactly, isolated correctly per `run_id`), with no
+  regression in any pre-existing `test_greybox_live.py`/`test_greybox.py`
+  test.
+
 ### CC-FUZZ-0020 — `--dry-run` CLI flag on `fuzz` + `auto` (lane D0a) (2026-09-22)
 - Change: `fuzzlab/tools/blind_sqli_fuzzer.py::build_parser()` and
   `fuzzlab/harness/auto_cli.py::build_parser()` both gained `--dry-run` (via the
