@@ -64,23 +64,33 @@ function seriesColor(i) {
 function buildOpts(state) {
   const tok = readTokens();
   const d = DENSITY[currentDensity()];
-  const runs = state.data.series.map((s) => s.run_id);
   const isEnvelope = state.data.mode === "envelope";
 
+  // `label`/`color`/`kind` are optional per-series overrides (added for the ML tab's
+  // arm/histogram series, which aren't "runs"); omitting them keeps Diagnostics' own
+  // multi-run overlay behavior (label "run {run_id}", palette-assigned color) unchanged.
   const series = [{}];
   const bands = [];
   if (isEnvelope) {
-    runs.forEach((rid, i) => {
-      const color = seriesColor(i);
-      series.push({ label: `run ${rid} min`, stroke: "transparent", width: 0 });
-      series.push({ label: `run ${rid} max`, stroke: color, width: 1.5,
+    state.data.series.forEach((s, i) => {
+      const color = s.color || seriesColor(i);
+      const label = s.label || `run ${s.run_id}`;
+      series.push({ label: `${label} min`, stroke: "transparent", width: 0 });
+      series.push({ label: `${label} max`, stroke: color, width: 1.5,
                    fill: color + "33" });
       bands.push({ series: [series.length - 2, series.length - 1], fill: color + "33" });
     });
   } else {
-    runs.forEach((rid, i) => {
-      series.push({ label: `run ${rid}`, stroke: seriesColor(i), width: 1.75,
-                   points: { show: state.data.series[i].x.length <= 60 } });
+    state.data.series.forEach((s, i) => {
+      const color = s.color || seriesColor(i);
+      const label = s.label || `run ${s.run_id}`;
+      if (s.kind === "bars") {
+        series.push({ label, stroke: "transparent", fill: color,
+                     paths: uPlot.paths.bars({ size: [0.85, 100] }) });
+      } else {
+        series.push({ label, stroke: color, width: s.width ?? 1.75,
+                     points: { show: s.x.length <= 60 } });
+      }
     });
   }
 
@@ -223,4 +233,11 @@ export function createChart(el, { id, data, tableEl }) {
   };
   REGISTRY.set(id, handle);
   return handle;
+}
+
+// Exposed so a caller building its own per-series overrides (e.g. a bars-mode
+// series' `color`) can match the app's current design tokens, resolved the same
+// way createChart resolves its own axis/grid colors.
+export function tokens() {
+  return readTokens();
 }
