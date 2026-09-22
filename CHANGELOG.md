@@ -14,6 +14,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Core: lane B0-table — additive migration 11 adds `metric_series(run_id, source,
+  key, step, ts, value)`, the shared cross-run scalar-series table for future
+  per-step emitters (GBT/logistic, bandit loop, coverage frontier,
+  `MutationSearch`), plus the write path they'll use: a central
+  `open_store()` (WAL, `busy_timeout=10000`, `synchronous=NORMAL`,
+  `foreign_keys=ON`) that `connect()` now aliases, `log_scalar(...)`, and a
+  buffered `MetricLogger` context manager — non-finite values rejected at
+  emit. Per-component emitters are out of scope for this lane (`CC-CORE-0018`).
 - Lab (`CC-LAB-0059`, Wave A0): mechanically reconfirmed the Layer-A
   reconciliation against the live repo — all 16 `PFF-` cases in
   `lab/ground-truth/labels.json` still accounted for (12 covered / 4

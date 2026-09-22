@@ -691,6 +691,7 @@ detail):
 | `model` (versions, calibration) | ML training | ML inference |
 | `request_budget` | all tools | budget manager, UI |
 | coverage / fault signals | grey-box hooks | fuzzer, scheduler, mutation |
+| `metric_series` (cross-run scalars: `run_id, source, key, step, ts, value`; migration 11) | per-step emitters (GBT/logistic, bandit loop, coverage frontier, `MutationSearch`, stage timing — landing as later, separate lanes) via `core.store.log_scalar`/`MetricLogger` | diagnostics UI (U5) |
 
 ## Dependency ordering
 

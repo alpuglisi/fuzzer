@@ -3,6 +3,63 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0018 — Migration 11: `metric_series` table + `open_store()`/`log_scalar`/`MetricLogger` (B0-table, Phase 4b) (2026-09-22)
+- Change: migration 11 (append-only registry; head → 11) adds `metric_series(id, run_id,
+  source, key, step, ts, value)`, the generic cross-run scalar-series sink for per-step
+  emitters (GBT/logistic training curves, bandit posterior/regret, coverage-frontier
+  growth, `MutationSearch` reward/novelty, stage wall-clock/throughput — those emitters
+  themselves are separate lanes, not part of this change). `run_id INTEGER REFERENCES
+  run(id)` (the store's actual runs table is `run`, singular — matches every other
+  migration; R-05's "`runs(id)`" phrasing was generic, not a literal table name);
+  `value REAL NOT NULL`; two indexes for the two read patterns: `idx_metric_series_run
+  (run_id, source, key, step)` (one series within a run) and
+  `idx_metric_series_overlay (source, key, run_id, step)` (cross-run overlay). Also:
+  added `fuzzlab.core.store.open_store()`, the central WAL-configured connection
+  constructor R-08 calls for (`journal_mode=WAL`, `busy_timeout=10000`,
+  `synchronous=NORMAL`, `foreign_keys=ON`, connect-time `timeout=10.0`); `connect()` is
+  now a thin backward-compatible alias for it (previously `connect()` set
+  `busy_timeout=5000` with no connect-time `timeout=` — now centralized and raised to
+  match R-08's resolved design). Added `log_scalar(store, run_id, source, key, step,
+  value, ts=None)` (accepts a `Store` or a raw connection from `open_store()`) and
+  `MetricLogger(store, run_id, source, flush_every=200)`, a buffered context-manager
+  writer that batches an `executemany` every `flush_every` rows and flushes on
+  `__exit__`/exception. Both reject non-finite (`NaN`/`inf`) values — dropped with a
+  `UserWarning`, never written — per R-05 (no `is_nan` column, no NaN read-branch).
+- Impact (other components / project): additive only; no existing table, column, or
+  pragma value that any current caller depended on changed in a breaking way (raising
+  `busy_timeout` 5000→10000 and adding connect `timeout=10.0` only widens the lock-wait
+  window). This is the **table-only** slice of the B0 lane — the GBT/logistic,
+  bandit-loop, coverage-frontier, and `MutationSearch` emitters that will write through
+  `log_scalar`/`MetricLogger` are separate, later lanes (reserved `CC-ML-0009`,
+  `CC-SCHED-0005`, `CC-FUZZ-0021`, `CC-MUT-0011` per
+  `docs/PARALLEL_LANE_BUILD_PLAN.md`), not built here. The diagnostics UI (U5) reads this
+  table once it lands.
+- Risk (level; mitigation): low — one additive table + two indexes + a new always-central
+  connection constructor that the existing `connect()` now simply delegates to. Mitigated
+  by `tests/test_core_foundations.py::test_migrations_are_idempotent` (now also asserts
+  `metric_series` exists), `test_open_store_is_wal_smoke` (R-08's required WAL smoke
+  test), `test_metric_series_schema_and_indexes`, `test_log_scalar_roundtrip`,
+  `test_log_scalar_accepts_raw_connection`, `test_log_scalar_rejects_non_finite`
+  (parametrized NaN/+inf/-inf), `test_metric_logger_flushes_every_n`, and
+  `test_metric_logger_drops_non_finite_and_flushes_on_exception`. Full suite (excluding
+  pre-existing, unrelated collection failures in this environment from a missing
+  `covertable` package and an unavailable `starlette.testclient` — both present before
+  this change, confirmed via `git stash`): 486 passed / 2 skipped / 2 pre-existing
+  failures unrelated to this change (`test_web_commandspec.py`, same `covertable`-driven
+  registration gap, reproduced identically on the pre-change tree).
+- Deliverables:
+  - [x] Migration 11 (`metric_series` table + both indexes) — done.
+  - [x] Central `open_store()` (WAL/busy_timeout/synchronous/foreign_keys/timeout),
+    `connect()` kept as an alias — done.
+  - [x] `log_scalar()` + `MetricLogger` (buffered, `flush_every=200` default,
+    non-finite rejection) — done.
+  - [x] R-08 WAL smoke test — done.
+  - [ ] Per-component emitters (GBT/logistic, bandit-loop, coverage-frontier,
+    `MutationSearch`) — explicitly out of scope for this lane; separate dispatches.
+- Effectiveness (assessed 2026-09-22): effective — migration is additive/reversible-safe
+  (no data touched, no column type changed), the full suite is unaffected, and the write
+  path (`log_scalar`/`MetricLogger`) is ready for the emitter lanes to adopt.
+
 ### CC-CORE-0017 — Credentials keyed by bare hostname (BUG-0007) (2026-09-21)
 - Change: `CredentialStore` now normalizes the host to its bare hostname
   (`_norm_host`: strips scheme/port) on `set`/`get`/`require`/`delete`, so credentials
