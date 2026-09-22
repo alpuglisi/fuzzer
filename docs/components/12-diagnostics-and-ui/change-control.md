@@ -35,9 +35,10 @@ Newest first.
 - Deliverables:
   - [x] `docs/UI_IMPLEMENTATION_PLAN.md` (policy + deliverables + lane map) — done.
   - [x] Round 1 research (R-01…R-06) dispatched + folded in — done.
-  - [ ] Round 2 (R-07…R-10: MPA pivot/state, SQLite concurrency, test strategy, Overview content)
-    — dispatched; pending fold-in.
-  - [ ] Round 3 — pending.
+  - [x] Round 2 (R-07 MPA pivot/state, R-08 SQLite WAL concurrency, R-09 test strategy, R-10
+    Overview content) — folded in.
+  - [ ] Round 3 (R-11 accessibility, R-12 uPlot theming/responsive, R-13 loopback security) —
+    dispatched; pending fold-in.
 - Effectiveness (assessed 2026-09-22): effective so far — round-1 research converted five open
   design forks into concrete, executable specs with cited sources; re-assess after rounds 2–3 and
   once the first lanes (U0/B0/X0) build against it.

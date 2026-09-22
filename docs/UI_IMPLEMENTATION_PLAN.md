@@ -67,6 +67,20 @@ independence), **depends on**, **sub-lanes** (recursive independent splits), **a
 > page load, which is required (a stored theme/density would otherwise flash); it's a per-page
 > inline snippet, not a vendored lib, so it's within policy. Revisit HTMX only for a future
 > per-widget *live/partial* need (e.g. streaming a running job's output), never for section nav.
+> ✅ **[R-07 resolved · round 2]** **Cross-section pivots & state (pattern for all lanes).**
+> State-mutating pivots (Findings "send to Repeater" / "open request") = **Post/Redirect/Get with
+> 303**: the row is a `<form method="post">` → `POST /proxy/repeater/from-flow` calls the existing
+> `create_from_flow(flow_id)` (whose SQLite tab row *is* the handoff) → **`RedirectResponse(...,
+> status_code=303)`** to `/proxy?repeater_tab=ID`. (FastAPI's default 307 re-POSTs to the GET route
+> → 405; 303 forces GET, keeps the POST out of history, makes refresh safe.) **Never put seed bytes
+> in the URL** — they carry Authorization/Cookie/token and URLs leak via logs/history/Referer; keep
+> real bytes server-side (redaction is a render-time transform) and put only the opaque tab id on
+> the wire. **State decision rule:** deep-linkable view or pointer to shared data → **URL query**
+> (`?view=`, filter, sort, `?sel=id`); durable/sensitive content → **server/SQLite**; per-viewer
+> convenience (scroll, drafts, column widths, collapsed groups) → **session/localStorage**. Detail
+> = real route `/findings/{id}`; a highlight = `?sel=id`. Treat every `?…=ID` as a **hint** (fall
+> back to default; never 404 the page). Guard double-submit (disable-on-submit; optional idempotency
+> key). Back/Forward + per-state restore come free from real GET URLs — the MPA payoff.
 
 ### U1 — Overview dashboard  *(Wave 1)*
 - **Scope:** landing route (`/`): KPI row (recent runs, findings by severity, last-run score),
@@ -75,6 +89,21 @@ independence), **depends on**, **sub-lanes** (recursive independent splits), **a
 - **Depends on:** U0. **Sub-lanes:** KPI tiles / recent-runs / quick-actions.
 - **Acceptance:** renders with an empty store and with seeded runs; no result-table writes.
 > 🔎 **[R-03]** covers the reusable read-only table used here for recent runs.
+> ✅ **[R-10 resolved · round 2]** **Overview spec.** KPI tile row (5, big numbers, each clickable →
+> filtered view): (1) **Findings** = `len(findings)` + severity-split sub-line; (2) **Runs** =
+> `len(runs)` + "N in last 7d"; (3) **Last run** = newest run's status badge + tool→target +
+> relative time; (4) **Detection quality** = latest *completed* run `scores.F1` (sub: MCC or P/R;
+> em-dash if unscored); (5) **Efficiency** = `run_metrics.requests_per_finding` (sub: total
+> requests). Panels: **A — Recent runs table** (primary; MLflow/W&B pattern; ~10 newest, row → run
+> detail; the shared DataTable minus the sidebar); **B — Findings by severity** as a horizontal
+> segmented/stacked bar (uPlot is poor at donuts) + an optional uPlot **sparkline** of F1- or
+> findings-per-run (the cheap "trend" panel, uPlot already loaded); **C — Quick actions** (primary
+> Launch auto, secondary Open proxy, tertiary Model registry / Compare). Serve from **one aggregate
+> endpoint** (counts + pre-aggregated findings-by-severity + latest ~10 runs joined) — no heavy
+> per-run joins on load. **Skip** (enterprise noise): asset inventory, SLA countdowns, remediation
+> tickets, compliance widgets, scheduled-scan calendars. **Empty state** (0 runs) = one centered
+> onboarding card ("No runs yet" + a primary Launch-auto action), not a grid of zeros;
+> **partial-empty** (unscored) = em-dash in tiles 4/5, never `0`. Reuse severity/status color tokens.
 
 ### U2 — Findings workbench  *(Wave 1)*
 - **Scope:** faceted filters + saved views over `finding`/`attempt`; list→detail; "send to
@@ -206,10 +235,36 @@ independence), **depends on**, **sub-lanes** (recursive independent splits), **a
 - **Depends on:** — . **Sub-lanes:** table first, then one emitter per component in parallel.
 - **Acceptance:** migration is additive + reversible-safe; each emitter unit-tested; existing
   suites unaffected.
-> 🔎 **[R-05]** (shared) **Scalar time-series schema + emitter patterns** — how MLflow/TensorBoard
-> model scalar series in a relational/columnar store; validate our `(run_id, source, key, step,
-> ts, value)` shape (indexing, cardinality, downsampling for read); the emitter API contributors
-> call.
+> ✅ **[R-05 resolved · round 1]** Our `(run_id, source, key, step, ts, value)` matches MLflow's own
+> `metrics` shape — correct model. Refinements: `run_id INTEGER REFERENCES runs(id)`; `value REAL
+> NOT NULL` and **reject non-finite at emit** (drop + warn; no `is_nan` column, no NaN read-branch);
+> `source` = subsystem bucket mirroring existing `run_metrics` prefixes (`gbt`, `logreg`, `bandit`,
+> `coverage`, `rank`, `ml`); `key` = slash-delimited path (`train/loss`, `regret/cumulative`,
+> `posterior/arm_3/mean`, `coverage/lines`); indexes `(run_id,source,key,step)` [one series] and
+> `(source,key,run_id,step)` [cross-run overlay]; **keys must be bounded** (no per-example/feature
+> keys; distributions stored **pre-binned**). **Read-side downsampling = LTTB** (~1000 pts/series;
+> preserves loss spikes / regret jumps that bucket-averaging erases), ~30 lines pure Python
+> server-side; offer a min/max-per-bucket **envelope** mode for the bandit CI band. Emitter API:
+> `log_scalar(store, run_id, source, key, step, value, ts=None)` + a buffered `MetricLogger(store,
+> run_id, source, flush_every=200)` context manager (GBT rounds, logistic iters, bandit pulls,
+> coverage steps).
+> ✅ **[R-08 resolved · round 2]** **WAL is right for this multi-process, single-host, local layout**
+> (readers never block writers → the UI charts live while a loop writes); single-writer still holds,
+> so brief write locks are the whole game. **Central `open_store()`** that every process *and test*
+> routes through: `journal_mode=WAL` (persistent — flip on an idle store, re-assert harmlessly) +
+> per-connection `busy_timeout=10000`, `synchronous=NORMAL` (WAL-safe; drops a per-commit fsync),
+> `foreign_keys=ON` if used (`sqlite3.connect(path, timeout=10.0)`). **Writer:** one dedicated
+> long-lived connection per loop (pinned to its thread); buffer + `executemany` in **`BEGIN
+> IMMEDIATE`…COMMIT every ~200 rows or ~1 s**; never hold the write txn across a compute step; flush
+> on exit/exception. `BEGIN IMMEDIATE` is the rule for every read-then-write path (busy_timeout does
+> NOT rescue a DEFERRED→write upgrade — instant SQLITE_BUSY). **UI reads stay short/self-contained**
+> (one SELECT per poll, commit/close at once) or they pin WAL frames and `-wal` grows unbounded;
+> keep default PASSIVE auto-checkpoint + a periodic `PRAGMA wal_checkpoint(TRUNCATE)` from the loop
+> to cap `-wal`. **De-risk global WAL:** `-wal`/`-shm` sidecars → any backup/copy/delete touching
+> only `.db` gets a stale DB (checkpoint-TRUNCATE or `VACUUM INTO` before copy, or copy all three);
+> WAL needs write access to the store's *directory*; `:memory:` fixtures ignore it; add a smoke test
+> asserting `PRAGMA journal_mode == 'wal'`. **Sequencing:** `open_store()`/WAL is a **CORE
+> prerequisite** landing with B0's migration, adopted by all writers (labgen, crawler, auditor, …).
 
 ### X0 — Register `lab-generate` in the launcher  *(Wave 0)*
 - **Scope:** add a `build_parser()` to `fuzzlab/labgen/cli.py` and a `_REGISTRY` entry (with a
@@ -251,10 +306,13 @@ independence), **depends on**, **sub-lanes** (recursive independent splits), **a
 | R-04 | HTTP message editor / repeater UX + resizable panes + highlighting | U3 | 1 | ✅ resolved |
 | R-05 | Diagnostics/experiment-tracking UX + scalar-series schema | U5, B0 | 1 | ✅ resolved |
 | R-06 | Read-only ML model-internals presentation | U4 | 1 | ✅ resolved |
-| R-07 | **Cross-section state/pivot in an MPA** — carrying a seed ("send to Repeater", "open request") + selection/filter across a full-page navigation | U0, U2, U3 | 2 | 🔎 dispatched |
-| R-08 | **SQLite concurrency for `metric_series`** — WAL/busy_timeout under our per-request connection model; safe writer(loop)+reader(UI)+labgen coexistence | B0, CORE | 2 | 🔎 dispatched |
-| R-09 | **Test strategy for the MPA + canvas charts + DataTable** — route/no-JS/active-nav/deep-link tests; asserting uPlot canvas + facets in a real browser | all UI, process | 2 | 🔎 dispatched |
-| R-10 | **Overview dashboard content** — which KPIs/widgets a security+ML overview should lead with (VM-tool patterns), read-only + fast | U1 | 2 | 🔎 dispatched |
+| R-07 | **Cross-section state/pivot in an MPA** — carrying a seed ("send to Repeater", "open request") + selection/filter across a full-page navigation | U0, U2, U3 | 2 | ✅ resolved (PRG+303) |
+| R-08 | **SQLite concurrency for `metric_series`** — WAL/busy_timeout under our per-request connection model; safe writer(loop)+reader(UI)+labgen coexistence | B0, CORE | 2 | ✅ resolved (WAL) |
+| R-09 | **Test strategy for the MPA + canvas charts + DataTable** — route/no-JS/active-nav/deep-link tests; asserting uPlot canvas + facets in a real browser | all UI, process | 2 | ✅ resolved (node:test + TestClient + Playwright) |
+| R-10 | **Overview dashboard content** — which KPIs/widgets a security+ML overview should lead with (VM-tool patterns), read-only + fast | U1 | 2 | ✅ resolved |
+| R-11 | **Accessibility & keyboard model** across the shell — ARIA for the DataTable/grid, facet disclosure, resizable splitter, canvas-chart alternatives, focus order | all UI | 3 | 🔎 dispatched |
+| R-12 | **uPlot theming/density/responsive integration** — wiring tokens + density (row→chart sizing), ResizeObserver, and the shared chart-component API | U4, U5 | 3 | 🔎 dispatched |
+| R-13 | **Loopback web-app security hardening** — DNS-rebinding, CSRF, Origin/Host checks for the new POST routes (pivot, saved-views, launch) on a local server | U0, all POST | 3 | 🔎 dispatched |
 
 ## 6. Refinement log
 
@@ -266,10 +324,17 @@ independence), **depends on**, **sub-lanes** (recursive independent splits), **a
   byte-exact); U5/B0 = TensorBoard-style controls, validated `metric_series` schema + `MetricLogger`
   emitter, **LTTB** server-side downsample → EMA client-side; U4 = advisory-framed read-only panels
   (PR/reliability/weights/nDCG/conformal/anomaly/Beta-posteriors), lead with the advisory banner.
-- **Round 2 — dispatched 2026-09-22.** Four web agents on the gaps round 1 exposed: R-07
-  cross-section pivot/state in an MPA, R-08 SQLite concurrency for `metric_series`, R-09 test
-  strategy for the MPA+charts+DataTable, R-10 Overview KPI/widget selection. Findings pending.
-- Round 3 — pending.
+- **Round 2 — complete (2026-09-22).** Four web agents (R-07…R-10) returned; folded in. Outcomes:
+  U0 gains the **PRG+303** cross-section pivot + a URL/server/localStorage state decision rule
+  (R-07); B0 gains a **WAL + `open_store()`** concurrency design and batched-`BEGIN IMMEDIATE`
+  writer with checkpoint policy (R-08); §7 gains a **three-layer test strategy** (`node:test` units
+  + `TestClient` route/no-JS + Playwright via offscreen table & `window.__charts`, no new deps,
+  R-09); U1 gains a concrete **Overview spec** (5 KPI tiles + recent-runs table + severity bar +
+  quick actions + empty states, R-10).
+- **Round 3 — dispatched 2026-09-22.** Three web agents on the finer gaps rounds 1–2 exposed:
+  R-11 accessibility & keyboard model across the shell, R-12 uPlot theming/density/responsive
+  integration + shared chart component, R-13 loopback web-app security hardening (DNS-rebinding /
+  CSRF / Origin-Host) for the new POST surface. Findings pending.
 
 ## 7. Process / bookkeeping (per CLAUDE.md)
 
@@ -278,3 +343,22 @@ where the proxy/store change, `11-intercepting-proxy` / `02-core-library`; `ARCH
 #12 edits; a decision entry where a lane settles one; per-component change-control entries
 (CC-UI-*, CC-CORE-* for the B0 migration); `CHANGELOG.md`; and tests (route tests, command-spec
 introspection, dry-run-sends-nothing, loopback-refusal, redaction, real-browser smokes).
+
+> ✅ **[R-09 resolved · round 2]** **Test strategy — three layers, ~zero new deps.** **(A) Unit
+> (pure JS)** via **`node:test`** (built into Node; `node --test`) for DataTable filter/sort, LTTB,
+> EMA, and the HTTP/JSON tokenizer — keep pure logic in modules that touch no `window`/`document`
+> at import (`*.core.js`, `downsample.js`, `smoothing.js`, `tokenizer.js`) with relative-path ESM so
+> the same files load in Node *and* the browser. **(B) Route + no-JS** via pytest + Starlette
+> `TestClient` (already have): assert `response.template.name` + `response.context["active"]`
+> (compute `active` in the handler) instead of HTML-string matching; TestClient runs no JS, so its
+> body *is* the no-JS assertion; one parametrized test over every section route covers routing +
+> deep-link + template + active-nav; add stable hooks (`aria-current="page"`, `data-section`).
+> **(C) Real-browser smoke** via Playwright/Chromium (already have): assert charts through the
+> **shipped offscreen `<table>` fallback** + a small **`window.__charts`** hook (post-LTTB/EMA
+> arrays per chart id, read via `page.evaluate`) + the `.u-legend` DOM — **never canvas pixels**;
+> `expect.poll` for readiness (uPlot has no animations), fixed viewport + deviceScaleFactor, seeded
+> fixtures, loopback server. Push each assertion to the lowest layer that can prove it. **No new
+> dependencies** (the Node runner is built in; the `window.__charts` hook + offscreen table ship
+> anyway for a11y). Per-lane: U0 = parametrized route/no-JS + one nav smoke; U2 = filter/sort units
+> + server-rendered rows + filter/sort browser smoke; U3 = tokenizer unit + byte-exact editor smoke;
+> U4/U5 = LTTB/EMA units + `window.__charts`/table chart assertions.
