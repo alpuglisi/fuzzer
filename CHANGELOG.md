@@ -14,6 +14,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Core: lane B0-table — additive migration 11 adds `metric_series(run_id, source,
+  key, step, ts, value)`, the shared cross-run scalar-series table for future
+  per-step emitters (GBT/logistic, bandit loop, coverage frontier,
+  `MutationSearch`), plus the write path they'll use: a central
+  `open_store()` (WAL, `busy_timeout=10000`, `synchronous=NORMAL`,
+  `foreign_keys=ON`) that `connect()` now aliases, `log_scalar(...)`, and a
+  buffered `MetricLogger` context manager — non-finite values rejected at
+  emit. Per-component emitters are out of scope for this lane (`CC-CORE-0018`).
 - Planning: added `docs/PARALLEL_LANE_BUILD_PLAN.md`, organizing the
   remaining safe-to-build-now backlog (lab-track page migration + conformance
   wiring, UI/diagnostics tabs, M8/M10 mutation-oracle wiring) into pre-numbered,
