@@ -14,6 +14,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Planning: extended `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s Phase 3 with a
+  deliberate-vulnerability-injection requirement — after a CWE is matched to a
+  collected feature/language example, alter that real code so it manufactures a
+  matched vulnerable/safe pair (more than one per CWE), require every pair to pass
+  a structural + behavioral/static validation check before it's trusted, and hard-gate
+  any data reaching a lab-generation-facing file behind an explicit `validated: true`
+  flag — nothing collected or altered feeds `safety_matrix.yaml`/module templates
+  until fully validated.
 - LAB: real MariaDB-backed live-boot mode (`fuzzlab.labgen.conformance.live_boot
   .MariaDbServer`, starting a real local `mariadbd` and importing the real
   `puppy-fort-factory/sql/schema.sql` verbatim) re-proves every real-page manifest

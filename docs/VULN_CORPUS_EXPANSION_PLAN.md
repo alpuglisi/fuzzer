@@ -359,6 +359,101 @@ already covers. The `suggested_op`/`suggested_sink_family` fields are
 proposals for the human/agent doing that later change to accept, rename,
 or merge — not a guarantee the exact name survives into the matrix.
 
+**Pair generation: alter collected code to manufacture a matched pair.**
+A CWE assignment on its own doesn't guarantee the collected example is
+paired the way `safety_matrix.yaml` needs (an `(op, sink_family)` row is
+inherently a vulnerable-shape/neutralized-shape contrast, and Phase 2's
+"pairing where feasible" requirement can still leave a cell half-populated
+if the wild didn't offer both sides). Once a CWE is assigned to a
+feature+language cell's collected example(s), close that gap deliberately
+rather than continuing to search for a naturally-occurring match:
+
+1. Take the collected source for that cell (whichever role — vulnerable or
+   idiomatic — is on hand) and **produce an altered variant that is
+   deliberately made vulnerable to the matched CWE**, using the collected
+   code's own real structure/idiom as the base rather than a synthetic
+   stand-in. If the collected example was already the idiomatic/safe side,
+   the alteration introduces the flaw (e.g. removes the parameter binding,
+   swaps an allowlist for raw concatenation); if it was already the
+   vulnerable side, the alteration produces the corresponding fixed
+   counterpart. Either direction is fine — what matters is that the
+   resulting two files differ *only* in the specific mechanism the CWE
+   describes, the same minimal-pair discipline `fuzzlab.labgen.minimal_pair`
+   already enforces for generator output (see that module and its `pair_by`/
+   content-confinement fix from this session for the actual invariant being
+   mirrored here, even though this corpus predates and feeds the generator
+   rather than being generator output itself).
+2. **Generate more than one such pair per CWE.** A single pair proves the
+   alteration is *possible*, not that it's *representative* — produce at
+   least 2 distinct pairs per CWE (from different collected examples, or
+   different plausible injection points in the same example if only one
+   source example exists for that cell), so a later human/agent reviewing
+   the corpus can see the CWE's shape hold across more than one instance
+   before it's trusted enough to justify a new `safety_matrix.yaml` row.
+3. Store the altered pair alongside (never overwriting) the original
+   collected file: add `vulnerable-<n>-altered.<ext>` /
+   `idiomatic-<n>-altered.<ext>` naming for a manufactured pair, distinct
+   from the `<role>-<n>.<ext>` naming Phase 2 uses for as-collected source,
+   so it's visible from the directory listing alone which files are
+   real-as-found vs. deliberately modified. Each manufactured file gets its
+   own `manifest.yaml` entry with a `derived_from` field pointing at the
+   original collected file's own entry, plus the `cwe` field already
+   established above — never a bare copy with no traceable origin.
+
+**Validation: every pair must be confirmed before it's trusted.** An
+altered pair is a claim ("this side is vulnerable to the matched CWE, this
+side isn't") until it's actually checked — mirroring why this session built
+a real live-boot harness for the generator itself rather than trusting a
+rendered file's syntax validity alone (`fuzzlab/labgen/conformance/
+live_boot.py`). Before a pair counts as validated:
+
+1. **Structural check:** confirm the vulnerable and safe sides of a pair
+   differ only in the mechanism the CWE describes — the same confinement
+   check `minimal_pair.py` performs on generator output, applied here by a
+   human/agent diffing the pair directly (an automated equivalent isn't
+   assumed to exist for arbitrary collected languages/frameworks; do this
+   by inspection unless a suitable static tool is already in hand for that
+   language).
+2. **Behavioral check, where the language/stack allows it:** actually
+   exercise the vulnerable side and confirm it's exploitable (a real
+   payload triggers the described effect) and the safe side isn't, the same
+   standard this session's live-boot work applied to the `php_laravel`
+   emitter's own output. Where standing the collected code up to actually
+   run it isn't practical (a fragment with no runnable harness around it,
+   a language/framework this project has no runtime for), fall back to a
+   static-analysis tool appropriate to that CWE/language (e.g. a linter or
+   SAST rule that specifically flags the CWE) as the next-best evidence,
+   and record in the `manifest.yaml` entry which validation method was
+   actually used (`validated_by: dynamic|static|manual-review`) — never
+   silently treat a weaker check as equivalent to a stronger one without
+   saying so.
+3. **No silent pass.** A pair that fails validation (the alteration didn't
+   actually introduce/fix the described flaw, or the two sides differ in
+   more than the declared mechanism) is not corrected quietly and re-marked
+   valid — log what was wrong, fix it, and re-run the validation from step 1
+   before it counts.
+
+**Validated data only reaches lab-generation-facing files.** The corpus
+collected and altered in Phases 2-3 (everything under
+`docs/research/corpus-examples/`) is reference/staging material — it must
+**never** be read directly by anything that builds the actual generated lab.
+A pair is only eligible to inform a real `lab/safety_matrix.yaml` row, a new
+per-stack module template, or a new manifest cell once its `manifest.yaml`
+entry carries `validated: true` (set only after step 2 above passes, not
+step 1 alone). Concretely:
+- Every example's `manifest.yaml` entry defaults to `validated: false`
+  the moment it's created (collected, altered, or otherwise) — this is a
+  gate a human/agent has to explicitly flip, not an implicit "assume good."
+- The handoff into `safety_matrix.yaml`/module templates described above
+  (`suggested_op`/`suggested_sink_family`) only ever gets acted on for
+  entries where `validated: true` — an unvalidated entry can be *read* for
+  planning purposes (deciding what to validate next) but must never be the
+  direct source of a new matrix row or module template.
+- If a check-in or status update needs to report progress before every
+  pair is validated, report it as "N of M pairs validated" — do not round
+  up, and do not let an in-progress corpus look complete by omitting the
+  distinction.
+
 ## Candidate feature/vulnerability list
 
 *(To be filled in once Phase 1 research lands.)*
