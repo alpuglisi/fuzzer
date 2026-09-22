@@ -13,6 +13,13 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- LAB: added a real live-boot test (`CC-LAB-0069`/`FR-LAB-63`) proving the
+  php_laravel `orm_entity_bulk_assign` sink's lack of an identifier-charset
+  guard (unlike php_current's post-`BUG-0031` guard) is safe in practice, not
+  just assumed — a real HTTP POST with a syntax-injection-shaped field name
+  gets a real `500` from Laravel's own Query Builder grammar rejecting the
+  malformed identifier, with the database provably untouched (checked via
+  `LiveBootHarness.query_db`, not inferred from the status code alone).
 - Process: reconciled three independently-diverged lines forked from `a341e55`
   (`origin/main`, `claude/vuln-corpus-expansion-zjl1iw`, and this session's own
   `claude/trusting-noether-heon0n`) into one branch, `reconcile-all-lines`, built

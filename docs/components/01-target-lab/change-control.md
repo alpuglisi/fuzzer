@@ -3,6 +3,46 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0069 — real live-boot verification that `orm_entity_bulk_assign`'s php_laravel sink safely quotes an adversarial column-name key (FR-LAB-63) (2026-09-22)
+- Change: `CC-LAB-0064`'s php_current sink (`fuzzlab/labgen/modules/sinks/
+  orm_entity_bulk_assign.php.j2`) got a real, executed adversarial test for its
+  identifier-charset guard after `BUG-0031` found the guard's absence let a
+  `$_POST` array key smuggle raw SQL syntax. The php_laravel twin
+  (`DB::table(...)->update($array)`, no identifier-charset guard of its own) had
+  no equivalent executed test — it relied on Laravel's Query Builder grammar
+  always quoting a dynamic column name, an assumption about framework behavior
+  never itself verified against the real framework. New
+  `tests/test_labgen_mass_assignment_live_boot.py` closes that gap: boots the
+  real generated Laravel app (`LiveBootHarness`, real `composer install`, real
+  `php artisan serve`, a real per-run SQLite database), POSTs a real HTTP
+  request whose body carries a syntax-injection-shaped field name
+  (`bio);DROP_TABLE_users;--'`) alongside a legitimate `bio` field to the
+  vulnerable (`unfiltered_body_update`) twin specifically — the one cell with
+  no allowlist standing between the request body and the sink — and reads the
+  real database back afterward.
+- Impact (other components / project): none — verification only, no production
+  code changed. Confirms (does not alter) `CC-LAB-0064`'s existing behavior.
+- Risk (level; mitigation or accepted-risk justification): none — read-only
+  verification against an already-shipped sink.
+- Deliverables:
+  - [x] `tests/test_labgen_mass_assignment_live_boot.py` (new, 1 test,
+    `@pytest.mark.slow`, skip-guarded on `live_boot_available()`) — done.
+- Effectiveness (assessed 2026-09-22): effective, and the result is now real
+  evidence rather than an assumption. Observed directly: a real HTTP `POST`
+  with the adversarial key returns a real `500` (Laravel's own `DB::table()
+  ->update()` fails closed on the malformed identifier — SQLite reports it as
+  invalid rather than executing it as SQL text), and — checked directly, not
+  inferred from the status code alone — the `users` table is unchanged
+  (`sqlite_master` table list identical before/after) and the seeded row's
+  `bio` value is unchanged (the legitimate field was *not* partially applied
+  before the failure). No table was created or dropped; no row was inserted,
+  deleted, or partially written. This is fail-closed, not fail-open behavior —
+  the php_laravel twin does not need php_current's identifier-charset guard to
+  be safe against this specific attack, because Laravel's own grammar layer
+  already refuses the malformed identifier before any SQL text is built from
+  it. The finding is now load-bearing evidence in this repo, not an assumption
+  about framework internals.
+
 ### CC-LAB-0068 — `live_boot_available()`'s network probe now exercises a real, bounded composer round trip instead of a raw socket connect (FR-LAB-60) (2026-09-22)
 - Change: fixed `BUG-0033` (a genuine code defect, full bug protocol applied). In
   `fuzzlab/labgen/conformance/live_boot.py`, replaced `_network_reachable()` (a bare
