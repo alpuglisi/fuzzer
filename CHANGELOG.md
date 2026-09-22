@@ -13,6 +13,14 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- Docs (`claude/second-target-cat1-ecommerce`): independently re-verified both
+  Category-1 lanes (CWE-1321 prototype pollution `CC-LAB-0070`/`FR-LAB-64` and
+  the `ruby_rails` Phase A skeleton/live-boot harness `CC-LAB-0071`/`FR-LAB-65`)
+  — reran the full suite (1796 passed, 8 skipped, matching both lanes' own
+  reports), confirmed no bookkeeping-ID collision between the two concurrent
+  lanes, and added the missing `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
+  §9.2 stack-reuse-ledger row for Ruby on Rails (the ledger's own policy
+  requires a row the moment a category picks a stack; neither lane added it).
 - LAB (`CC-LAB-0071`, `FR-LAB-65`, `claude/second-target-cat1-ecommerce`):
   built this project's first Ruby-on-Rails stack, `ruby_rails` (category 1's
   Shopify pick), Phase A only — a real, trimmed, checked-in Rails 8.1.3.1

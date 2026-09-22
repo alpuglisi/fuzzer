@@ -492,6 +492,7 @@ one, not build two.
 | PHP, synchronous procedural | Built | Original lab, `php_current` | Foundation-tier depth. |
 | Node/Express, synchronous API | Shallow (Tier-A), being deepened | §§1-6 above (pre-expansion plan) | Not yet full depth; whichever category picks Node/Express as one of its two should coordinate with whoever is deepening it rather than starting a second effort. |
 | Python, async API (FastAPI/Pydantic) | Shallow (Tier-A) | Original Phase 3 lane | Exists; available to reuse if a category's pick lands here specifically (not just "Python" generically — see §9.1 step 2's paradigm distinction, e.g. this is NOT the same stack as Django). |
+| Ruby on Rails, synchronous MVC | Built (Phase A only — one illustrative reflected-XSS shape; the real Rails-idiom vuln modules — webhook-signature, CWE-915 `permit!`, CWE-502 `Psych.load` — are a follow-up lane) | Category 1 (E-commerce, Shopify pick), `CC-LAB-0071`/`FR-LAB-65`, `fuzzlab/labgen/emitters/ruby_rails/` | Rails 8.1.3.1 (verified live against rubygems.org, not guessed), `--minimal` skeleton, SQLite dev/test DB. A category wanting "Ruby" (e.g. category 5's Airbnb, category 6's Stripe) should check whether Rails specifically fits before building a second Ruby stack — see §9.1 step 2's paradigm-distinction rule. |
 | *(add a row per new stack the moment a category picks it — before building it, not after)* | — | — | — |
 
 ### 9.3 Multi-session coordination contract (read this before touching any code)
