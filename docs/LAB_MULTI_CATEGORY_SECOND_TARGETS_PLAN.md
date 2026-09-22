@@ -622,10 +622,57 @@ Headline findings:
   — the research explicitly declines to recommend this without an
   explicit scope call, rather than silently picking it.
 
-**Not yet decided — next actual step:** which 2-3 CWEs (from the two
-shortlists above) become this app's actual manifest cells, and how the
-two sites' pages compose into one coherent app identity (per §4's Phase C
-steps) — see §9.5 below.
+**Decided (2026-09-22, project owner authorized proceeding on whatever this
+session would have recommended given unavailability for further
+questions):**
+
+- **CWE-943 (NoSQL injection): declined**, per the research's own
+  recommendation — `node_express`'s module inventory is committed to
+  `mysql2`/relational persistence; giving one app a second, non-relational
+  datastore for a single page is a bigger architectural change than this
+  pilot's scope justifies. Not picked up by any category unless a future
+  category's own site-pair genuinely needs MongoDB as its primary store.
+- **Shopify (Rails) cells — 3, matching this project's established
+  per-app cell count:**
+  1. **Webhook-signature verification** (extends the existing
+     `webhook-signature` corpus class with a Rails idiom) — vulnerable:
+     naive `==` string compare of the recomputed HMAC; secure: Rails'
+     own `ActiveSupport::SecurityUtils.secure_compare`. Strongest
+     grounding of the three (a real, specific Shopify mechanism).
+  2. **CWE-915, mass assignment** via unguarded `permit!` vs. an explicit
+     `.permit(:field, :field2)` allowlist, on a product/admin update
+     endpoint.
+  3. **CWE-502, insecure deserialization** via `YAML.load`/`Psych.load`
+     vs. `YAML.safe_load`, on an admin bulk-import feature (e.g.
+     importing product data with embedded metadata).
+  The `order`/`pluck` identifier-position SQLi variant (§9.4a) is
+  deferred, not dropped — a good candidate for a follow-up increment
+  once the base 3 are proven, not blocking this pilot's first pass.
+- **Walmart (Node/Express) cells — 2 for this pass, both genuinely new
+  CWE IDs to the corpus:**
+  1. **CWE-1321, prototype pollution** — vulnerable: an unguarded deep-merge
+     (e.g. lodash `merge`/a hand-rolled recursive merge) of a user-supplied
+     JSON body into a live settings/config object, letting a
+     `__proto__`/`constructor.prototype` key pollute `Object.prototype`;
+     secure: a merge that rejects those keys (or builds onto an
+     `Object.create(null)` base). Placed on a BFF-style "update account/
+     cart preferences" endpoint, matching the real functionality research.
+  2. **CWE-1333, ReDoS** — vulnerable: a user-supplied search term used
+     directly to construct a `RegExp` with no escaping/bounding (e.g. a
+     "highlight my search term in results" feature); secure: escape regex
+     metacharacters before constructing the pattern (treat the term as a
+     literal). **Needs a genuinely different oracle mechanism** (a
+     timing-differential confirmation, not a single-request one) —
+     sequence this second, after prototype pollution is proven, since it's
+     the harder of the two to get right; do not let it block landing
+     prototype pollution first if it runs long.
+- **Page/app identity:** given the research's own synthesis (§9.4a), the
+  two apps are NOT merged into one — they stay two separate generated
+  apps (matching "2 new apps per category," not one combined app), each
+  with its own coherent identity: a Shopify-style merchant storefront +
+  admin app (webhook config, product management, checkout-adjacent
+  discount handling) for the Rails pick, and a Walmart-style BFF-fronted
+  storefront (account/cart preferences, search) for the Node pick.
 
 ### 9.5 What's actually next (this session's pilot)
 
@@ -638,16 +685,17 @@ next steps, in order, per §9.1-§9.3's discipline:
    (Node/Express) specifically.~~ **Done — see §9.4a and the two research
    docs it links.**
 3. ~~Stack-specific CWE research for each.~~ **Done — see §9.4a.**
-4. **Next:** finalize which CWEs from §9.4a's two shortlists become this
-   app's actual manifest cells (a real selection, not "build everything
-   researched" — 2-3 per site is the right scale, matching every other
-   category's app so far in this project), then: build the Rails
-   skeleton/live-boot harness (this category's version of §2's Phase A,
-   for a stack that doesn't exist in this project at all yet — the
-   biggest single piece of new work in this pilot), deepen `node_express`
-   per §3's Phase B (already-scoped, reusable as-is), design and build
-   the pages (§4's Phase C, now corpus-grounded per the real
-   Shopify/Walmart research in §9.4a), prove conformance (§5), wire into
-   `multitarget.py` (§6).
+4. ~~Finalize which CWEs become this app's actual manifest cells.~~ **Done
+   — see §9.4a's "Decided" block: 3 Rails cells (webhook-signature idiom,
+   CWE-915, CWE-502), 2 Node cells (CWE-1321, CWE-1333). CWE-943 declined.**
+5. **Next (in progress):** build the Rails skeleton/live-boot harness
+   (this category's version of §2's Phase A, for a stack that doesn't
+   exist in this project at all yet — the biggest single piece of new
+   work in this pilot) and, in parallel, deepen `node_express`'s module
+   inventory with the two new Node cells (§3's Phase B, extended with the
+   specific CWE-1321/1333 modules §9.4a names — these are additive to
+   what §3 originally scoped generically). Then: design and build the
+   pages (§4's Phase C, now corpus-grounded per the real Shopify/Walmart
+   research), prove conformance (§5), wire into `multitarget.py` (§6).
 5. Update §9.4/§9.4a at every step above — do not wait until the category
    is fully done to report progress.
