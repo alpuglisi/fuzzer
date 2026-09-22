@@ -3,6 +3,49 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0023 — UI implementation plan + build policy + round-1 research (2026-09-22)
+- Change: added `docs/UI_IMPLEMENTATION_PLAN.md`, the single tracked plan for the remaining web UI
+  work (companion to `UI_REVAMP_PLAN.md`, `UI_LAYOUT_REDESIGN.md`, and the LAB plan). It records
+  the **settled build policy** ("no build step, ever; offline + loopback; hand-roll where vanilla
+  is cheap; vendor exactly one zero-dependency static file only where hand-rolling is expensive")
+  and the **five locked decisions** (D1 MPA routes; D2 vendor one zero-dep chart lib; D3 split
+  assets, no bundler; D4 hand-roll tables; D5 include `lab-generate` in the launcher). It breaks
+  the outstanding work into clear, executable, lane-organized deliverables — **U0** (MPA routes +
+  asset split, the enabling refactor), **U1** Overview, **U2** Findings, **U3** Proxy rebuild,
+  **U4** ML, **U5** Diagnostics + store explorer, **B0** `metric_series` + emitters, **X0**
+  `lab-generate` in the launcher — with per-deliverable scope/files/deps/sub-lanes/acceptance and a
+  wave/dependency map for concurrent-agent dispatch. It runs a research-refinement loop (mark gaps
+  → dispatch one web agent per gap → fold findings back, ×3). **Round 1** (six agents, R-01…R-06)
+  is folded in: full-page MPA, no HTMX; **uPlot 1.6.32** as the vendored chart lib (canvas;
+  re-theme on `[data-theme]`; columnar data; offscreen-table a11y fallback); findings facet
+  sidebar + **SQLite-backed saved views** + a hand-rolled DataTable (no virtualization,
+  `textContent`-only, scheme-checked pivots); one shared `<message-editor>` (byte-exact textarea,
+  vanilla grid splitter, hand-rolled highlighting); TensorBoard-style diagnostics controls +
+  validated `metric_series(run_id, source, key, step, ts, value)` schema + a buffered
+  `MetricLogger` emitter + **LTTB** server-side downsampling → client-side EMA; advisory-framed
+  read-only ML panels (PR/reliability/weights/nDCG/conformal/anomaly/Beta-posteriors). Realizes
+  more of FR-UI-8.
+- Impact (other components / project): documentation/planning only — no code, schema, or contract
+  change yet. Flags forthcoming work in CORE (the `metric_series` migration + WAL/concurrency in
+  B0) and a `saved_views` table (U2); those land under their own change-control when built. Does
+  not alter any invariant.
+- Risk (level; mitigation): none (planning). The plan itself carries the invariants forward
+  (no-auto-run / loopback / authorized / read-only / redaction / no-build-offline) into every lane
+  and its acceptance criteria.
+- Deliverables:
+  - [x] `docs/UI_IMPLEMENTATION_PLAN.md` (policy + deliverables + lane map) — done.
+  - [x] Round 1 research (R-01…R-06) dispatched + folded in — done.
+  - [x] Round 2 (R-07 MPA pivot/state, R-08 SQLite WAL concurrency, R-09 test strategy, R-10
+    Overview content) — folded in.
+  - [x] Round 3 (R-11 accessibility, R-12 uPlot theming/responsive, R-13 loopback security) —
+    folded in; added lane **U6 — control-plane hardening** and two §2 invariants (accessible;
+    not-itself-an-attack-surface).
+- Effectiveness (assessed 2026-09-22): effective — the 3-round research loop (13 markers) converted
+  every open UI design fork into concrete, cited, executable spec and surfaced one net-new lane
+  (U6) that a security tool needs to keep its own control plane off the attack surface. Deliverables
+  are lane/wave-organized for distributed builds. Re-assess once the first lanes (U0/B0/X0/U6)
+  build against it.
+
 ### CC-UI-0022 — Launch view rebuilt as the approved master-detail (2026-09-21)
 - Change: rebuilt the Launcher section inside the R0 shell to match the **approved mockup**
   (`docs/UI_LAYOUT_REDESIGN.md`), replacing the old stacked cards (Target/Scope/Mode,

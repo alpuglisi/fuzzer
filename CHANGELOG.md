@@ -60,6 +60,28 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   scope questions (whether the JS-rendered crawler surface must be reproduced, and whether
   DOM XSS blocks the cutover) are left explicitly open for the user. Documentation only —
   no code, tests, or manifests touched.
+- Docs (UI): added `docs/UI_IMPLEMENTATION_PLAN.md` — a single tracked plan for the remaining web
+  UI work: the settled build policy (no build step; hand-roll where cheap; vendor one zero-dep
+  static file only for charts), the five locked decisions, the outstanding deliverables (U0, U1–U5,
+  B0, X0) as clear/executable/lane-organized spec blocks, and a wave/dependency map sized for
+  parallel-agent dispatch. Includes a research-refinement loop (mark gaps → web-research agents →
+  fold findings back). Round 1 folded in: full-page MPA (no HTMX); charts = **uPlot 1.6.32**
+  (vendored, canvas, re-theme on `[data-theme]`); findings facet sidebar + SQLite-backed saved
+  views + hand-rolled DataTable; one shared byte-exact message editor with a vanilla splitter and
+  hand-rolled highlighting; TensorBoard-style diagnostics + validated `metric_series` schema +
+  `MetricLogger` + LTTB downsampling; advisory-framed read-only ML panels. Reason: prepare the UI
+  track for distributed, out-of-order lane builds. CC-UI-0023, FR-UI-8.
+- Docs (UI): completed the plan's 3-round research-refinement loop (13 web-research markers).
+  Round 2 added the PRG+303 cross-section pivot + a URL/server/localStorage state rule (U0), a
+  WAL + `open_store()` SQLite-concurrency design for `metric_series` (B0/CORE), a zero-new-dep
+  three-layer test strategy (§7), and a concrete Overview spec (U1). Round 3 added a cross-cutting
+  accessibility spec (native `<table>` not `role=grid`; APG Disclosure/Splitter; canvas +
+  visually-hidden table; not-color-alone per theme), the shared `createChart` uPlot wrapper
+  (probe-resolved tokens, destroy+recreate on theme/density, ResizeObserver, leak-safe teardown),
+  and a **new lane U6 — control-plane hardening** (Host allow-list + Origin/`Sec-Fetch-Site`
+  same-origin + `/api/*` custom-header + tight CSP; Starlette ≥ 1.0.1 for CVE-2026-48710; the
+  same-site-lab landmine), plus two §2 invariants (accessible; not-itself-an-attack-surface).
+  CC-UI-0023.
 
 ## 2026-09-21
 
