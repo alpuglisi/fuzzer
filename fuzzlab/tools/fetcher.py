@@ -829,6 +829,31 @@ def parse_args():
     return build_parser().parse_args()
 
 
+def run_audit_loop(targets, fetcher, rules, results_db, unhandled, verbose=True):
+    """Audit every target, stopping cleanly (not crashing) on Ctrl-C.
+
+    Each page's own fetch/rule failures are already handled inside `audit_page`
+    (a per-page `except Exception`); this loop additionally catches
+    `KeyboardInterrupt`, which `except Exception` does not, so an interrupted run
+    still returns to the caller normally — with every finding already committed by
+    `audit_page` intact — instead of a raw traceback that skips
+    `results_db.close()`, `print_summary()`, and the store-consolidation step
+    entirely (mirroring `LocalSpider.crawl()`'s equivalent guard in `spider.py`).
+    Returns the number of targets actually audited (may be fewer than
+    ``len(targets)`` if interrupted).
+    """
+    audited = 0
+    try:
+        for target, source in targets:
+            audit_page(target, source, fetcher, rules, results_db, unhandled,
+                      verbose=verbose)
+            audited += 1
+    except KeyboardInterrupt:
+        print(f"\n[-] Interrupted by user after {audited}/{len(targets)} target(s); "
+              f"results gathered so far are saved.")
+    return audited
+
+
 def print_summary(conn, out_name):
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*), IFNULL(SUM(occurrences), 0) FROM findings")
@@ -858,8 +883,11 @@ if __name__ == "__main__":
         if not args.base_url:
             sys.exit("--identity requires --base-url (the target base URL for login).")
         from fuzzlab.tools.authhttp import make_auth
-        session_manager, seam = make_auth(args.base_url, timeout=args.timeout / 1000,
-                                          store_path=args.store)
+        try:
+            session_manager, seam = make_auth(args.base_url, timeout=args.timeout / 1000,
+                                              store_path=args.store)
+        except Exception as exc:                    # noqa: BLE001 - clean top-level error
+            sys.exit(f"[!] Authentication setup failed for {args.identity}@{args.base_url}: {exc}")
         log.info("auditing authenticated", extra={"identity": args.identity})
 
     targets = load_urls(args.spider_db)
@@ -871,14 +899,16 @@ if __name__ == "__main__":
         print(f"Loaded {len(targets)} targets and {len(rules)} rules. Beginning audit...")
 
         unhandled = set()
-        results_db = setup_results_db(args.out, append=args.append)
+        try:
+            results_db = setup_results_db(args.out, append=args.append)
+        except sqlite3.Error as exc:
+            sys.exit(f"[!] Could not open the results database {args.out!r}: {exc}")
         with ContentFetcher(engine=args.engine, timeout_ms=args.timeout,
                             identity=args.identity, seam_client=seam,
                             session_manager=session_manager,
                             auth_base_url=args.base_url) as fetcher:
-            for target, source in targets:
-                audit_page(target, source, fetcher, rules, results_db, unhandled,
-                           verbose=not args.quiet)
+            run_audit_loop(targets, fetcher, rules, results_db, unhandled,
+                          verbose=not args.quiet)
 
         if unhandled:
             print(f"\n[!] {len(unhandled)} indicator rule(s) have no handler and were "

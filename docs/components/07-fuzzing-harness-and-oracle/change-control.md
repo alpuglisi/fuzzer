@@ -3,6 +3,69 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0025 — Robustness: `auto_cli.py` broadens exception handling beyond `RunModeError` (2026-09-22)
+- Change: `harness/auto_cli.py::main()` previously caught only `RunModeError`
+  (the D15 fail-safe) around `run_auto(...)`; anything else — a network error, an
+  ML training failure in `--score`/`--rank`, a browser-exec error — produced a raw
+  traceback instead of a clean message, inconsistent with `RunModeError`'s own
+  `p.error()`-based clean exit. Added `except KeyboardInterrupt` (clean message,
+  exit 0, matching the codebase's established convention — `proxy/cli.py`,
+  `mutate-run`) and `except Exception` (clean `p.error()` message, exit 2). Moved
+  `scheduler.save(store)` into a `finally` so a bandit run interrupted or errored
+  partway through still persists whatever posteriors it had already learned in
+  memory, not only on a clean finish — previously only the success path saved
+  them.
+- Impact (other components / project): none behavioral on a successful run (the
+  success path's `scheduler.save(store)` call is unchanged in effect, just
+  relocated to `finally`); `--authorized`/D15/existing clean-exit paths unaffected
+  (`SystemExit`/`KeyboardInterrupt` are `BaseException`, not caught by the new
+  `except Exception`, verified by test).
+- Risk (level; mitigation): low — additive exception handling + a relocated,
+  already-safe call (`ThompsonBandit.save()` is a pure UPSERT+commit over
+  whatever's in its in-memory posterior dict, safe to call with partial or empty
+  state). Mitigated by 3 new tests in `tests/test_auto_cli.py` (this module's CLI
+  wrapper had zero prior coverage — `tests/test_auto.py` only exercises
+  `harness.auto.run_auto` directly): a `KeyboardInterrupt` during `run_auto` is
+  reported cleanly; a non-`RunModeError` exception exits cleanly via `p.error()`;
+  a bandit run's posteriors are persisted to the store even when interrupted
+  partway through.
+- Deliverables:
+  - [x] Broadened exception handling + `finally`-based scheduler save — done.
+  - [x] `tests/test_auto_cli.py` (3 tests) — done.
+- Effectiveness (assessed 2026-09-22): effective — all 3 new tests pass; the
+  existing `test_auto.py`/`test_harness.py` suites (21 tests touching `auto`)
+  pass unchanged.
+
+### CC-FUZZ-0024 — Fix (BUG-0029): `blind_sqli_fuzzer.py` Ctrl-C no longer discards results (2026-09-22)
+- Change: `tools/blind_sqli_fuzzer.py::run_fuzzing_cycle()`'s per-payload loop now
+  catches `KeyboardInterrupt` internally and returns the timing observations
+  (`rows`) collected before the interrupt, instead of letting the exception
+  propagate past the function and skip `main()`'s `save_dataset(rows, ...)` call
+  entirely — previously a long fuzz run interrupted anywhere after its first
+  payload lost 100% of its real, already-obtained results with no crash to signal
+  the loss. Full RCA: `docs/bugs/BUG-0029-fuzzer-keyboard-interrupt-discards-collected-rows.md`.
+- Impact (other components / project): none outside this file — `main()`'s
+  existing `save_dataset`/store-consolidation code is unchanged; it now simply
+  receives a (possibly shorter) `rows` list instead of never being reached on the
+  interrupt path.
+- Risk (level; mitigation): low — additive `try/except` around an existing loop;
+  the per-request `requests.RequestException` handling (skip one payload) is
+  unchanged. Mitigated by 5 new tests in
+  `tests/test_blind_sqli_fuzzer_robustness.py` (this module had zero prior
+  coverage of `run_fuzzing_cycle`/`establish_baseline`): a clean run returns every
+  row; an interrupt partway through returns a non-empty, strictly-partial set; an
+  interrupt on the very first call returns `[]` without crashing; a per-request
+  error still only skips that one payload (regression guard); an unreachable
+  target raises a clear `ConnectionError` from `establish_baseline`.
+- Deliverables:
+  - [x] `run_fuzzing_cycle` catches `KeyboardInterrupt` and returns partial `rows`
+    — done.
+  - [x] `tests/test_blind_sqli_fuzzer_robustness.py` (5 tests) — done.
+  - [x] Full bug protocol: `BUG-0029`, `PA-0031`, `ERROR_LOG.md` entry — done.
+- Effectiveness (assessed 2026-09-22): effective — the interrupt-partway-through
+  test proves rows collected before the interrupt survive; the existing
+  `test_fuzzer_seam.py` suite passes unchanged.
+
 ### CC-FUZZ-0023 — One-command on-host script for Part D (2026-09-22)
 - Change: added `scripts/auto_pipeline_e2e.sh`, a one-command runner for
   `docs/ON_HOST_RUNBOOK.md` Part D (Phase 2 automatic run + request-reduction

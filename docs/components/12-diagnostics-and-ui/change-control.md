@@ -3,6 +3,47 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0035 — Robustness: top-level `fuzzlab <command>` dispatcher backstop (2026-09-22)
+- Change: `fuzzlab/cli.py::main()` had zero exception handling around any
+  subcommand dispatch (every `if command == "...": return X.main(rest)` branch,
+  and the `runpy.run_module(...)` delegation for `crawl`/`audit`/`fuzz`/
+  `build-db`). Wrapped the whole dispatch in `try/except`: `KeyboardInterrupt` →
+  clean message, exit 0 (matching every other command's established convention —
+  `proxy/cli.py`, `mutate-run`, `auto`); any other exception → clean
+  `"fuzzlab <command> failed: ..."` message to stderr, exit 1. This is explicitly
+  a **defense-in-depth backstop**, not the primary fix for any one command — every
+  affected tool is independently runnable as `python -m fuzzlab.<module>` too
+  (D11), bypassing this dispatcher entirely, so the real fix for each command had
+  to live in (and does live in, per the companion `session`/`mutate-run`/`auto`
+  entries in this session) that command's own `main()`. The backstop's value is
+  covering commands this pass didn't individually harden (`greybox-run`, `proxy`,
+  `web`, `lab-generate`) and the still-unguarded tail sections this pass
+  deliberately left in `crawl`/`audit`/`fuzz` (e.g. `spider.py`'s post-crawl store
+  consolidation) without touching every one of them individually. Verified
+  `SystemExit`/`KeyboardInterrupt` are `BaseException`, not caught by the new
+  `except Exception`, so every existing `p.error()`/`sys.exit()` clean-exit
+  convention already used throughout these commands is unaffected.
+- Impact (other components / project): none behavioral for a successful run.
+  Every subcommand's own return value/exit code passes through unchanged; only an
+  otherwise-unhandled exception or interrupt now gets a clean message here instead
+  of a raw traceback.
+- Risk (level; mitigation): low — additive, outermost-layer-only exception
+  handling. Mitigated by 7 new tests in `tests/test_cli.py` (this dispatcher had
+  zero prior direct coverage — `tests/test_web_runner.py` only checks the `argv`
+  the web launcher constructs to invoke it as a *subprocess*, never `main()`'s own
+  dispatch/error-handling): help/no-args/version/unknown-command; dispatch to a
+  subcommand's `main()` with the right `rest` args; a subcommand's
+  `KeyboardInterrupt` and a subcommand's generic exception are both caught
+  cleanly; and — the critical safety property — a subcommand's own `SystemExit`
+  (the established clean-exit convention) still propagates through unmodified,
+  proving the backstop cannot mask an intentional clean exit.
+- Deliverables:
+  - [x] Top-level `try/except` around the dispatch — done.
+  - [x] `tests/test_cli.py` (7 tests) — done.
+- Effectiveness (assessed 2026-09-22): effective — all 7 new tests pass,
+  including the `SystemExit`-propagation guarantee; `tests/test_web_runner.py`
+  passes unchanged.
+
 ### CC-UI-0034 — Technologies panel: surface web app/service fingerprinting in the UI (2026-09-22)
 - Change: `fuzzlab.report.build_report` now additionally includes a `technologies`
   list (category/name/version/confidence/evidence/source_url, sorted by category,

@@ -246,6 +246,34 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   full-suite run to surface the failure one at a time. This is PA-0002's sweep obligation
   applied across concurrently-developed, not-yet-merged branches, not only the already-
   merged codebase. (from BUG-0026)
+- **PA-0031** — A `try/except KeyboardInterrupt` (or any interrupt/cancellation
+  handler) placed around a multi-step sequence must be able to recover whatever
+  partial work an inner step already completed, not just avoid a raw traceback at
+  the outer layer. A clean "interrupted by user" message with no crash looks like
+  correct, graceful handling even when it silently discards every already-completed
+  unit of work an inner loop collected in a local variable that was never returned
+  — verify by asking "what does the outer handler actually have access to when it
+  fires," not by observing that the process exits cleanly. When a loop's job is to
+  accumulate results for a caller to persist (a list built up across iterations, a
+  buffer, a counter), the interrupt (or any early-exit exception) must be caught
+  *inside* that loop and the partial accumulation returned/flushed, not caught only
+  by a handler wrapping the whole call from outside, where the accumulated value is
+  already out of reach. This generalizes PA-0002's sweep obligation with a specific
+  target: grep every `except KeyboardInterrupt` in the codebase and check whether
+  the code that raises it is a step *before* a persistence call the handler skips
+  past (this bug's exact shape) versus a step *after* which nothing more needed
+  saving. Shares its "looks like it handled this gracefully but actually silently
+  discarded good data" theme with PA-0030/BUG-0028 (a migration overwriting already-
+  correct persisted state), a different mechanism reaching the same class of
+  failure: code that appears to behave correctly under casual observation while
+  quietly destroying real, already-obtained data. PA-0002 sweep: grepped every
+  `except KeyboardInterrupt` in `fuzzlab/` (8 sites, excluding labgen) — `spider.py`'s
+  writes results incrementally per URL (nothing accumulated in memory to lose);
+  `proxy/cli.py`'s `finally: history.flush(); store.close()` already covers its
+  state; `cli.py`/`mutation/cli.py`/`auto_cli.py`'s handlers (this same change,
+  `CC-UI-0035`/`CC-MUT-0012`/`CC-FUZZ-0025`) don't wrap an in-memory accumulator
+  either. Only `blind_sqli_fuzzer.py` had the dangerous shape; now fixed. (from
+  BUG-0029)
 - **PA-0029** — When a function combines two independently-computable verdicts about the
   same question (e.g. an AST/structural check and a textual/canonical check; a fast-path
   heuristic and a slow-path authority) by letting one "win" whenever it is decisive, that

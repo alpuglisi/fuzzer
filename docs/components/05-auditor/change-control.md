@@ -3,6 +3,44 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0017 — Robustness: `fetcher.py` Ctrl-C no longer skips cleanup/consolidation (2026-09-22)
+- Change: factored the `__main__` block's per-target loop into a new
+  `run_audit_loop(targets, fetcher, rules, results_db, unhandled, verbose)`
+  function that catches `KeyboardInterrupt` (which `audit_page`'s own per-page
+  `except Exception` does not — `KeyboardInterrupt` doesn't inherit from
+  `Exception`) and returns normally instead of propagating. Previously a Ctrl-C
+  mid-audit skipped `results_db.close()`, `print_summary()`, and the
+  `--store` consolidation step entirely, leaking the results-DB connection and
+  silently dropping the (already-committed, still-safe-in-`audit_results.db`)
+  findings from ever reaching the unified store on that run — mirroring
+  `LocalSpider.crawl()`'s equivalent guard in `spider.py`, which this file's loop
+  had never matched. Also wrapped `setup_results_db()` (a bad/unwritable `--out`
+  path) and `make_auth()` (a malformed `--base-url` or unreachable login target,
+  only when `--identity` is given) in clean top-level error messages instead of
+  raw tracebacks — both were previously the only unguarded calls in this
+  `__main__` block, inconsistent with `load_urls`/`load_indicators`'s existing
+  `except sqlite3.Error` handling in the same file.
+- Impact (other components / project): none behavioral on a clean run — the
+  extracted loop's per-page logic is unchanged, just no longer inlined in
+  `__main__`. An interrupted `--store` run now still consolidates whatever the
+  audit reached before the interrupt into the unified store, rather than silently
+  skipping that step.
+- Risk (level; mitigation): low — a refactor (extract function) plus additive
+  exception handling; no change to `audit_page`'s own per-page error handling.
+  Mitigated by 4 new tests in `tests/test_fetcher_audit_loop.py` (this loop had
+  zero prior coverage): a clean run audits every target; an interrupt mid-loop
+  returns instead of raising and leaves the connection usable for the caller's
+  cleanup; an interrupt on the first target returns 0 without crashing; a
+  per-target fetch error (already handled by `audit_page`) still lets the loop
+  continue to every remaining target (regression guard).
+- Deliverables:
+  - [x] `run_audit_loop()` extracted with `KeyboardInterrupt` handling — done.
+  - [x] `setup_results_db()`/`make_auth()` clean-error guards — done.
+  - [x] `tests/test_fetcher_audit_loop.py` (4 tests) — done.
+- Effectiveness (assessed 2026-09-22): effective — the interrupt-mid-loop test
+  proves the connection stays usable for cleanup afterward; the existing
+  `tests/test_fetcher_results_db.py` suite passes unchanged.
+
 ### CC-AUD-0016 — Web application/service technology fingerprinting: `identify_technologies()` (2026-09-22)
 - Change: `core/fingerprint.py` gains `Signal` and `identify_technologies(headers,
   body, cookies, source_url) -> list[Signal]`, an additive, passive, multi-signal

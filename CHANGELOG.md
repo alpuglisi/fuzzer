@@ -14,6 +14,27 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- SESS/AUD/FUZZ/MUT/UI: robustness review of fuzzlab's primary CLI driver
+  scripts (`fuzzlab/cli.py`, `session/cli.py`, `mutation/cli.py`,
+  `harness/auto_cli.py`, `tools/fetcher.py`, `tools/blind_sqli_fuzzer.py`) found
+  a consistent gap: each script's per-item work loop is well-guarded, but its
+  top-level orchestration (CLI arg coercion, credential prompts,
+  `KeyboardInterrupt`, store consolidation) was inconsistently guarded, from
+  good (`blind_sqli_fuzzer.py`) to nonexistent (`mutation/cli.py`,
+  `session/cli.py`, `fuzzlab/cli.py`). Fixed the confirmed findings: a genuine
+  data-loss **bug** — `blind_sqli_fuzzer.py` silently discarded every completed
+  timing observation on Ctrl-C (`BUG-0029`, `PA-0031`) — plus robustness
+  hardening in `fetcher.py` (Ctrl-C previously skipped cleanup/store
+  consolidation and leaked the results-DB connection), `session/cli.py`
+  (credentials-adjacent — unguarded prompts/keyring writes), `mutation/cli.py`
+  and `auto_cli.py` (raw tracebacks on network/training errors; a bandit run's
+  learned posteriors are now saved even when interrupted), and a top-level
+  `fuzzlab/cli.py` defense-in-depth backstop. Planned via 5 review/research/
+  revise passes (a subagent audit, personally re-verified against the actual
+  code before acting on it — see the individual `CC-*` entries for what each
+  pass changed). 30 new tests across 6 new test files, closing zero-coverage
+  gaps on every one of these entry points. `CC-SESS-0011`, `CC-AUD-0017`,
+  `CC-FUZZ-0024`, `CC-FUZZ-0025`, `CC-MUT-0012`, `CC-UI-0035`.
 - SESS/FUZZ/SCHED/ML/PLUG: added one-command on-host scripts for every
   remaining `docs/ON_HOST_RUNBOOK.md` part that lacked one — Part C
   (`scripts/identity_auth_e2e.sh`), Part D (`scripts/auto_pipeline_e2e.sh`),

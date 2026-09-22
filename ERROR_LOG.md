@@ -18,6 +18,31 @@ Format per entry:
 
 ---
 
+## 2026-09-22 — FUZZ: `blind_sqli_fuzzer.py` discarded every completed observation on Ctrl-C (BUG-0029)
+
+- **Symptom:** found during a requested robustness review of fuzzlab's primary CLI
+  driver scripts. `run_fuzzing_cycle()` collected timing observations into a local
+  `rows` list returned only when its payload loop finished normally; `main()`'s
+  `except KeyboardInterrupt` wraps the whole baseline→cycle→save sequence, but
+  because the interrupt is raised *inside* `run_fuzzing_cycle` and that function
+  never returns on that path, `save_dataset(rows, args.output)` was never reached
+  — a long fuzz run interrupted anywhere after its first payload lost 100% of its
+  real, already-obtained results, with no crash to signal that anything was lost.
+- **Root cause:** the interrupt handler was placed at the wrong layer to recover
+  the partial work an inner loop had already done — a clean top-level message was
+  mistaken for "handling the interrupt" when the actual need was to salvage
+  in-progress `rows`. Full RCA in
+  `docs/bugs/BUG-0029-fuzzer-keyboard-interrupt-discards-collected-rows.md`.
+- **Remediation:** `run_fuzzing_cycle`'s payload loop now catches
+  `KeyboardInterrupt` internally and returns the rows collected so far; `main()`'s
+  existing `save_dataset(rows, args.output)` call then naturally persists the
+  partial results, unchanged. `fuzzlab/tools/blind_sqli_fuzzer.py`, `CC-FUZZ-0024`.
+  New `tests/test_blind_sqli_fuzzer_robustness.py` (this module had zero prior
+  coverage): 5 tests covering the clean run, the interrupt-partway-through case,
+  interrupt-on-first-call, the unchanged per-request-error behavior, and
+  `establish_baseline`'s unreachable-target error. `PA-0031`.
+- **Status:** Fixed.
+
 ## 2026-09-22 — AUD: `fetcher.py --append` recomputed `occurrences` from the row count on every run (BUG-0028)
 
 - **Symptom:** long-standing "Open / low priority" entry below: repeated

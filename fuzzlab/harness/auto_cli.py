@@ -103,9 +103,20 @@ def main(argv: list[str]) -> int:
                               browser=browser, scheduler=scheduler, plugins=plugins)
         except RunModeError as exc:
             p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
+        except KeyboardInterrupt:
+            print("\n[-] Interrupted by user; results and any learned posteriors "
+                  "gathered so far are saved.")
+            return 0
+        except Exception as exc:         # noqa: BLE001 - clean top-level error
+            p.error(f"auto failed: {exc}")
+        finally:
+            # Runs on every path above, including RunModeError/Exception's p.error()
+            # (which raises SystemExit -- this still fires before it propagates) and
+            # the KeyboardInterrupt return -- so a bandit run interrupted or errored
+            # partway through does not lose whatever posteriors it already learned.
+            if scheduler is not None:
+                scheduler.save(store)
 
-        if scheduler is not None:
-            scheduler.save(store)                # persist what this run learned
         ml = None
         if args.score:
             from fuzzlab.ml.train import train_and_score

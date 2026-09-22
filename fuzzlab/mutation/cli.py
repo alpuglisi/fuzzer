@@ -63,22 +63,28 @@ def main(argv: list[str]) -> int:
             args.url, args.param, cov_dir=args.cov_dir, app_root=args.app_root,
             method=args.method, location=args.location)
 
-    with Store(args.store) as store:
-        run_id = store.start_run("mutate", urlparse(args.url).hostname or args.url)
-        oracle = None
-        if args.confirm_oracle:
-            # store/run_id attached so a genuine confirmation actually writes the
-            # `finding` row -- an Oracle with neither is a pure dry-run that never
-            # persists (see Oracle._write_finding's guard), which would silently
-            # defeat the point of --confirm-oracle.
-            from fuzzlab.oracle import Oracle
-            oracle = Oracle(store=store, run_id=run_id)
-        summary = mrun.run_mutation(
-            url=args.url, param=args.param, store=store, run_id=run_id, sender=sender,
-            bases=bases, vuln_class=args.vuln_class, method=args.method,
-            location=args.location, coverage_fn=coverage_fn, seed=args.seed,
-            budget=args.budget, allow_destructive=args.allow_destructive, oracle=oracle)
-        _print_summary(args, summary, run_id)
+    try:
+        with Store(args.store) as store:
+            run_id = store.start_run("mutate", urlparse(args.url).hostname or args.url)
+            oracle = None
+            if args.confirm_oracle:
+                # store/run_id attached so a genuine confirmation actually writes the
+                # `finding` row -- an Oracle with neither is a pure dry-run that never
+                # persists (see Oracle._write_finding's guard), which would silently
+                # defeat the point of --confirm-oracle.
+                from fuzzlab.oracle import Oracle
+                oracle = Oracle(store=store, run_id=run_id)
+            summary = mrun.run_mutation(
+                url=args.url, param=args.param, store=store, run_id=run_id, sender=sender,
+                bases=bases, vuln_class=args.vuln_class, method=args.method,
+                location=args.location, coverage_fn=coverage_fn, seed=args.seed,
+                budget=args.budget, allow_destructive=args.allow_destructive, oracle=oracle)
+            _print_summary(args, summary, run_id)
+    except KeyboardInterrupt:
+        print("\n[-] Interrupted by user; any bypasses already recorded stay in the store.")
+        return 0
+    except Exception as exc:                        # noqa: BLE001 - clean top-level error
+        p.error(f"mutate-run failed: {exc}")
     return 0
 
 

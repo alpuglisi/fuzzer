@@ -137,17 +137,26 @@ def run_fuzzing_cycle(sender, url, param, baseline, payloads, args):
 
         # Measure the payload a few times and take the median to resist jitter.
         latencies, status, size = [], None, None
-        for _ in range(args.repeats):
-            try:
-                latency, status, size = sender.get(
-                    url, param, payload, args.timeout
-                )
-            except requests.RequestException as exc:
-                print(f"[-] Request error on {payload[:24]!r}: {exc}")
-                latency = None
-                break
-            latencies.append(latency)
-            time.sleep(args.pause)
+        try:
+            for _ in range(args.repeats):
+                try:
+                    latency, status, size = sender.get(
+                        url, param, payload, args.timeout
+                    )
+                except requests.RequestException as exc:
+                    print(f"[-] Request error on {payload[:24]!r}: {exc}")
+                    latency = None
+                    break
+                latencies.append(latency)
+                time.sleep(args.pause)
+        except KeyboardInterrupt:
+            # A long run can be mid-payload for a while (--repeats x --pause); losing
+            # every already-completed observation to an interrupt here would throw away
+            # real timing data the caller already paid the request cost for. Stop the
+            # cycle and let the caller save what was gathered, same as a clean finish.
+            print(f"\n[-] Interrupted mid-payload ({payload[:24]!r}); "
+                  f"saving {len(rows)} completed observation(s).")
+            return rows
 
         if not latencies:
             continue

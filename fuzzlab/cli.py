@@ -53,47 +53,65 @@ def main(argv: list[str] | None = None) -> int:
         print(f"fuzzlab {__version__}")
         return 0
 
-    if command == "web":
-        from fuzzlab.web.app import web_main
-        return web_main(rest)
+    # Every branch below (and each subcommand's own `main()`) is independently
+    # runnable as `python -m fuzzlab.<module>` too (D11), so this try/except is a
+    # defense-in-depth backstop, not the primary fix for any one command — it exists
+    # so a command whose own module doesn't (yet) guard a particular failure path
+    # still gets a clean message here instead of a raw traceback. `SystemExit` (every
+    # `sys.exit(...)`/`argparse` `.error()` call already used throughout these
+    # commands) is a `BaseException`, not caught by `except Exception` below, so this
+    # never interferes with an existing clean-exit path.
+    try:
+        if command == "web":
+            from fuzzlab.web.app import web_main
+            return web_main(rest)
 
-    if command == "session":
-        from fuzzlab.session import cli as session_cli
-        return session_cli.main(rest)
+        if command == "session":
+            from fuzzlab.session import cli as session_cli
+            return session_cli.main(rest)
 
-    if command == "auto":
-        from fuzzlab.harness import auto_cli
-        return auto_cli.main(rest)
+        if command == "auto":
+            from fuzzlab.harness import auto_cli
+            return auto_cli.main(rest)
 
-    if command == "greybox-run":
-        from fuzzlab.greybox import greybox_cli
-        return greybox_cli.main(rest)
+        if command == "greybox-run":
+            from fuzzlab.greybox import greybox_cli
+            return greybox_cli.main(rest)
 
-    if command == "proxy":
-        from fuzzlab.proxy import cli as proxy_cli
-        return proxy_cli.main(rest)
+        if command == "proxy":
+            from fuzzlab.proxy import cli as proxy_cli
+            return proxy_cli.main(rest)
 
-    if command == "mutate-run":
-        from fuzzlab.mutation import cli as mutation_cli
-        return mutation_cli.main(rest)
+        if command == "mutate-run":
+            from fuzzlab.mutation import cli as mutation_cli
+            return mutation_cli.main(rest)
 
-    if command == "report":
-        from fuzzlab.report import cli as report_cli
-        return report_cli.main(rest)
+        if command == "report":
+            from fuzzlab.report import cli as report_cli
+            return report_cli.main(rest)
 
-    if command == "lab-generate":
-        from fuzzlab.labgen import cli as labgen_cli
-        return labgen_cli.main(rest)
+        if command == "lab-generate":
+            from fuzzlab.labgen import cli as labgen_cli
+            return labgen_cli.main(rest)
 
-    module = _TOOL_MODULES.get(command)
-    if module is None:
-        print(f"unknown command: {command}\n\n{_USAGE}", file=sys.stderr)
-        return 2
+        module = _TOOL_MODULES.get(command)
+        if module is None:
+            print(f"unknown command: {command}\n\n{_USAGE}", file=sys.stderr)
+            return 2
 
-    # Delegate to the tool's module main, preserving its own argument parsing.
-    sys.argv = [module, *rest]
-    runpy.run_module(module, run_name="__main__")
-    return 0
+        # Delegate to the tool's module main, preserving its own argument parsing.
+        sys.argv = [module, *rest]
+        runpy.run_module(module, run_name="__main__")
+        return 0
+    except KeyboardInterrupt:
+        # Matches the exit code every other command in this toolkit already uses on
+        # a clean interrupt (proxy/cli.py, mutate-run, auto), not the POSIX 128+SIGINT
+        # convention, for consistency across `fuzzlab <command>` as a whole.
+        print("\n[-] Interrupted by user.", file=sys.stderr)
+        return 0
+    except Exception as exc:             # noqa: BLE001 - clean top-level backstop
+        print(f"[!] fuzzlab {command} failed: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

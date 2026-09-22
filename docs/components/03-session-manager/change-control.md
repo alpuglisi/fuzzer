@@ -3,6 +3,42 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0011 — Robustness: `session/cli.py` clean error handling around credentials (2026-09-22)
+- Change: `session/cli.py::main()` had zero exception handling around
+  `load_config()`/`CredentialStore.open()`, the `input()`/`getpass.getpass()`
+  prompts, and `store.set(...)` — a non-interactive invocation (no TTY, e.g. run
+  from a script with stdin closed), an unavailable OS keyring backend, or an
+  unreachable `--base-url` on `print` all produced a raw traceback instead of a
+  clear message, the weakest error handling of any script reviewed given this
+  file handles credentials. Added: `EOFError`/`KeyboardInterrupt` around the
+  prompts → "needs an interactive terminal" message; a try/except around
+  `store.set(...)` → "Could not save credentials: ..."; a try/except around
+  `CredentialStore.open(cfg)` → "Could not open the credential store: ..."; and
+  broadened `print`'s exception handling beyond `SessionAuthError` alone to also
+  catch a general connection/network failure with a clear "Could not reach
+  <base-url>: ..." message.
+- Impact (other components / project): none — credentials are never printed or
+  logged in any new error path (the error messages surface only the exception
+  text, never the password, consistent with `Credential.__repr__`'s existing
+  never-leak-the-password discipline).
+- Risk (level; mitigation): low — additive exception handling only; the
+  underlying `CredentialStore`/`SessionManager` logic is untouched. Mitigated by
+  7 new tests in `tests/test_session_cli.py` (this file had zero prior test
+  coverage despite touching secrets — `test_session_manager.py`/
+  `test_credentials.py` test the manager/store, never the CLI entry point):
+  the happy path stores and can read back the credential; `--username` skips the
+  `input()` prompt; a simulated non-interactive terminal (`EOFError`) gives the
+  clean message; a keyring-backend failure gives a clean message; `print`'s
+  `SessionAuthError` and a generic connection failure both give clean messages;
+  a credential-store-open failure gives a clean message.
+- Deliverables:
+  - [x] Exception handling around `main()`'s credential/prompt/login paths —
+    done.
+  - [x] `tests/test_session_cli.py` (7 tests) — done.
+- Effectiveness (assessed 2026-09-22): effective — all 7 new tests pass; the
+  existing `test_session_manager.py`/`test_credentials.py` suites (69 tests
+  touching session/credential) pass unchanged.
+
 ### CC-SESS-0010 — One-command on-host script for Part C (2026-09-22)
 - Change: added `scripts/identity_auth_e2e.sh`, a one-command runner for
   `docs/ON_HOST_RUNBOOK.md` Part C (Phase 1 authenticated per-identity run):

@@ -36,13 +36,26 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str]) -> int:
     args = build_parser().parse_args(argv)
-    cfg = load_config()
-    store = CredentialStore.open(cfg)
+    try:
+        cfg = load_config()
+        store = CredentialStore.open(cfg)
+    except Exception as exc:                        # noqa: BLE001 - clean top-level error
+        print(f"[!] Could not open the credential store: {exc}")
+        return 1
 
     if args.cmd == "set-credential":
-        username = args.username or input("username: ")
-        password = getpass.getpass("password: ")
-        store.set(args.host, args.identity, username, password)
+        try:
+            username = args.username or input("username: ")
+            password = getpass.getpass("password: ")
+        except (EOFError, KeyboardInterrupt):
+            print("\n[!] set-credential needs an interactive terminal "
+                  "(pass --username and run from a TTY, or provide input on stdin).")
+            return 1
+        try:
+            store.set(args.host, args.identity, username, password)
+        except Exception as exc:                    # noqa: BLE001 - clean top-level error
+            print(f"[!] Could not save credentials: {exc}")
+            return 1
         print(f"stored credentials for {args.identity}@{args.host}")
         return 0
 
@@ -55,6 +68,9 @@ def main(argv: list[str]) -> int:
             header = mgr.session_header(args.host, args.identity, args.base_url)
         except SessionAuthError as exc:
             print(f"login failed: {exc}")
+            return 1
+        except Exception as exc:                    # noqa: BLE001 - clean top-level error
+            print(f"[!] Could not reach {args.base_url}: {exc}")
             return 1
         print(header or "(no session header detected)")
         return 0

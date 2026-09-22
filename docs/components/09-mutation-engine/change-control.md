@@ -3,6 +3,32 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0012 — Robustness: `mutation/cli.py` clean error handling (2026-09-22)
+- Change: `mutation/cli.py::main()` had zero exception or `KeyboardInterrupt`
+  handling anywhere — unlike `blind_sqli_fuzzer.py`'s equivalent driver, a
+  network error or Ctrl-C during the live WAF probing `mrun.run_mutation()`
+  performs produced a raw traceback. Wrapped the `Store`/`run_mutation` block in
+  `try/except`: `KeyboardInterrupt` → clean message noting any bypasses already
+  recorded stay in the store (the `Store` context manager's own commit-on-exit
+  behavior already made this true; the fix is reporting it cleanly, not new
+  persistence logic), exit 0; any other exception → clean `p.error()` message,
+  exit 2 (matching the `--authorized`/no-base-payloads guards already using
+  `p.error()` in this file).
+- Impact (other components / project): none — additive exception handling only;
+  `run_mutation`'s own semantics (destructive gate, `--confirm-oracle`, the
+  oracle/advisory split) are untouched.
+- Risk (level; mitigation): low. Mitigated by 3 new tests in
+  `tests/test_mutation_cli.py` (this file had zero prior coverage — every
+  existing `test_mutation_*.py` file tests the operators/search/catalog/filter
+  modules, never `mutation/cli.py`): a `KeyboardInterrupt` during `run_mutation`
+  is reported cleanly; a network error exits cleanly via `p.error()`; the
+  existing `--authorized` gate still refuses before sending anything.
+- Deliverables:
+  - [x] Exception/`KeyboardInterrupt` handling around `main()`'s run — done.
+  - [x] `tests/test_mutation_cli.py` (3 tests) — done.
+- Effectiveness (assessed 2026-09-22): effective — all 3 new tests pass; the
+  existing `test_mutation_*.py` suites (64 tests) pass unchanged.
+
 ### CC-MUT-0011 — Advanced evasion operators: `double-url-encode` + `unicode-fullwidth` (2026-09-22)
 - Change: two new `ANY`-class, provably meaning-preserving `MutationOperator`s.
   `double-url-encode` percent-encodes the payload twice (many WAFs decode once
