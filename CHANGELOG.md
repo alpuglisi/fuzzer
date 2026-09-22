@@ -13,6 +13,10 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- Docs: closed decision **D21** (`docs/DECISIONS_AND_ROADMAP.md`) — formalized
+  the already-shipped "per-project SQLite files + small global config DB"
+  storage layout as settled, closing out a stale "decide at Phase 0" deferred
+  item noticed during a change-control audit. No code change.
 - LAB: built lane L-P3.3c-DOM for real (`reviews.php`/`feedback.php`'s DOM-based XSS,
   `PFF-0007`/`PFF-0008`) — explicitly deferred out of the L-P3.3c-G1..G6 cutover's scope
   (D-open-2) and now separately prioritized. New `dom_html_sink` safety-matrix family +

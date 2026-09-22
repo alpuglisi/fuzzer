@@ -371,6 +371,16 @@ additional target alongside a permanently-kept original. `LAB_PHASE_0_PLAN.md`
 corrected to match; nothing about Phase 0's own exit criterion changes (it
 still just proves reproduction, not cutover).
 
+### D21 — Storage layout: per-project SQLite files plus a small global config DB
+
+Closes out a Phase-0 loose end noticed during a 2026-09-22 change-control
+audit: this had been sitting in "Deferred decisions" as "decide at Phase 0"
+since early in the project, but Phase 0 has been `[built]` for a long time and
+already ships this exact shape. Formalized as settled, no code change: each
+project gets its own SQLite store file; a small separate global database holds
+cross-project config. See the (now-struck-through) entry under "Deferred
+decisions" below for the original framing.
+
 ### Deferred decisions (revisit at the noted point)
 
 - **Classifier false-positive tolerance (conformal α)** — decide at the
@@ -380,8 +390,14 @@ still just proves reproduction, not cutover).
   core toolkit works.
 - **Full from-scratch HTTP parser** — reconsider after the toolkit works end to
   end (per D4).
-- **One DB file per project vs one global DB** — decide at Phase 0; leaning
-  per-project files plus a small global config database.
+- ~~**One DB file per project vs one global DB** — decide at Phase 0; leaning
+  per-project files plus a small global config database.~~ **Decided (D21,
+  2026-09-22, closing out a Phase-0 loose end noticed during a change-control
+  audit — Phase 0 has been `[built]` since early in the project and already
+  ships this shape):** per-project SQLite files plus a small global config
+  database, as originally leaned. No code change; this only formalizes the
+  already-shipped architecture as a settled decision rather than leaving it
+  perpetually "deferred."
 
 ## Cross-cutting principles (apply to every component)
 
