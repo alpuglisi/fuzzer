@@ -14,6 +14,25 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- MUT: added advanced evasion operators `double-url-encode` and
+  `unicode-fullwidth` — provably meaning-preserving WAF-bypass encoding
+  tricks (double percent-encoding; Unicode fullwidth substitution folded
+  back by NFKC), `ANY`-class like `url-encode` so both flow through
+  `MutationSearch`/`FilterLearner`/`mutate-run` automatically.
+  `SemanticsValidator.canonicalize()` now URL-decodes and NFKC-normalizes
+  to an interleaved, bounded fixpoint (was a single decode pass) so
+  multiply-encoded/fullwidth variants, including compositions of both in
+  either order, still prove equivalent — an `apply_chain` composition test
+  caught a real ordering bug in a first two-separate-passes draft. A third
+  candidate, null-byte insertion, was designed and deliberately dropped:
+  its effect is backend-dependent (string truncation) and not provably
+  meaning-preserving in general, the same unsound-acceptance class BUG-0027
+  hardened this validator against. Planned via 5 review/research/revise
+  passes (see `CC-MUT-0011`); request-shape-level evasion (HTTP parameter
+  pollution, Content-Type switching, path-normalization tricks, header/
+  method case randomization) was scoped out as a documented follow-up — it
+  needs a new request-shaping abstraction, not the payload-string
+  `MutationOperator` interface. `CC-MUT-0011`.
 - CORE/AUD/FUZZ/UI: added web application/service technology fingerprinting.
   `core.fingerprint.identify_technologies()` passively detects server,
   language/framework, CMS, JS-library, WAF/CDN, and DBMS signals (a ~45-entry

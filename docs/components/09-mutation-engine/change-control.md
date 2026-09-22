@@ -3,6 +3,70 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0011 — Advanced evasion operators: `double-url-encode` + `unicode-fullwidth` (2026-09-22)
+- Change: two new `ANY`-class, provably meaning-preserving `MutationOperator`s.
+  `double-url-encode` percent-encodes the payload twice (many WAFs decode once
+  before pattern-matching; some backends/proxies decode recursively).
+  `unicode-fullwidth` substitutes every ASCII punctuation/letter/digit character
+  (0x21-0x7E) with its Unicode "fullwidth form" (U+FF01-FF5E, the standard
+  +0xFEE0 offset) — a WAF signature matching ASCII literally misses it, while a
+  backend or database engine that NFKC-normalizes still sees the original
+  character. Both register in `operators.py::_ALL` like every other operator, so
+  `default_operators()`, `MutationSearch`, `FilterLearner`, and `mutate-run`
+  consume them automatically with zero additional wiring (verified: no other
+  module hardcodes the operator id list).
+  `SemanticsValidator.canonicalize()` (`mutation/semantics.py`) was extended to
+  make both **provably** meaning-preserving rather than merely claimed so:
+  URL-decoding is now a bounded fixpoint loop (was a single `unquote()` pass) so a
+  multiply-encoded variant still normalizes back to the original, and NFKC
+  normalization was added (folds fullwidth/compatibility Unicode forms to ASCII).
+  The two normalizations are **interleaved in one fixpoint loop**, not run as two
+  separate passes — testing an `apply_chain` composition of the two new operators
+  (double-encode, then fullwidth) surfaced a real bug in a first draft that ran
+  them as sequential passes: fullwidth-substituting an already percent-encoded
+  string's literal `%`/digits (`%2520` -> `％２５２０`) needs an NFKC pass before
+  `unquote` can recognize the escape again, and the reverse composition
+  (fullwidth, then percent-encoding its UTF-8 bytes) needs `unquote` before NFKC
+  can fold it — a single-order two-pass design silently failed one of these two
+  composition orders. `test_apply_chain_is_deterministic_and_preserving`, an
+  existing test that runs every operator in a chain, caught this immediately.
+  A single-layer-encoded input still reaches its fixpoint after one iteration
+  (unchanged from before), so this is additive to every existing operator/test.
+  A third technique, null-byte insertion, was designed and then deliberately
+  **dropped** from this change: unlike the encoding tricks above, its real-world
+  effect (string truncation in some legacy backends) is not provably meaning-
+  preserving in general, and teaching `canonicalize()` to treat a null byte as
+  inert (the same way it treats a vetted `/* */` comment) would be dishonest about
+  what the technique actually does on a real target — the exact class of unsound
+  "looks equivalent but isn't" acceptance `BUG-0027`/`CC-MUT-0010` just hardened
+  this validator against, in the same session.
+- Impact (other components / project): none outside MUT — additive operators and
+  a strictly more capable (never less capable) canonicalizer. `payload_variant`
+  rows recorded via `mutate-run` now include these operators when selected by the
+  scheduler/search; no schema change.
+- Risk (level; mitigation): low — new operators only trigger when selected; the
+  canonicalize change is additive (verified: every existing `test_mutation_*.py`
+  test — 64 total across the component — passes unchanged). Mitigated by: 6 new
+  operator-specific tests (`double-url-encode` round-trips through two decodes and
+  is not already recoverable by one decode; `unicode-fullwidth` NFKC-normalizes
+  back to the original and widens every non-space char; a no-op guard for a
+  payload the operator can't change; the double-encode-then-fullwidth composition
+  bug reproduced and now passing); 2 new `canonicalize()` tests (a 2x and 3x
+  URL-encoded payload both unwind correctly; a fullwidth payload folds back to
+  ASCII); the existing generic "every surface variant preserves semantics" test
+  (both SQLi and XSS) automatically covers the new operators with zero test
+  changes, since it iterates `default_operators()`.
+- Deliverables:
+  - [x] `double-url-encode` + `unicode-fullwidth` operators — done.
+  - [x] `canonicalize()` bounded, interleaved unquote+NFKC fixpoint — done.
+  - [x] Null-byte insertion designed, then rejected as architecturally unsound
+    for this validator — documented, not built.
+  - [x] Tests (8 new: 6 operator-level, 2 canonicalize-level) — done.
+- Effectiveness (assessed 2026-09-22): effective — both operators produce
+  distinct-looking variants that `SemanticsValidator.preserves()` correctly
+  accepts individually and in the composition that first exposed the ordering
+  bug; every pre-existing mutation test still passes.
+
 ### CC-MUT-0010 — Fix (BUG-0027): `SemanticsValidator` AST verdict overrode canonicalize (2026-09-22)
 - Change: `fuzzlab/mutation/semantics.py::SemanticsValidator.preserves()` now checks
   `canonicalize()` equality first and treats it as authoritative when it decides;

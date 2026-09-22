@@ -7,24 +7,63 @@ A mutation must preserve meaning; this validator refutes ones that don't. Two ch
   native build may be unavailable (the tests skip-guard it, like `cryptography`), so it
   falls back to the canonical check.
 * **Canonical equivalence** — normalize away the surface variation the operators
-  introduce (single URL-decode, strip SQL inline comments, collapse whitespace,
+  introduce (URL-decode to a fixpoint, NFKC-fold Unicode compatibility forms — e.g. a
+  fullwidth apostrophe back to `'` — strip SQL inline comments, collapse whitespace,
   lowercase) and require the canonical forms to match. This proves the surface operators
-  (encoding/whitespace/comment/case) preserve meaning and rejects anything that drifted.
+  (encoding/whitespace/comment/case, plus the evasion operators below) preserve meaning
+  and rejects anything that drifted.
 
 Vetted-equivalent operators (tautology swaps) are meaning-preserving *by construction*
 from a human-vetted table; the canonicalizer can't prove tautology equivalence, so those
 are trusted via provenance (`preserves(..., trusted=True)`) rather than re-derived.
+
+Advanced evasion operators (`double-url-encode`, `unicode-fullwidth`; see
+`mutation/operators.py`) are surface operators too — encoding tricks, not
+meaning-changing ones — so they go through the same canonical-equivalence proof, not a
+separate trust path. A technique whose real-world effect is backend-dependent and not
+provably meaning-preserving in general (e.g. null-byte truncation, which some legacy
+string handling treats as an end-of-string marker) is deliberately not implemented here;
+forcing it through this validator by teaching canonicalize() to treat it as inert would
+be dishonest about what it actually does on a real target — see CC-MUT-0011.
 """
 
 from __future__ import annotations
 
 import re
+import unicodedata
 import urllib.parse
 
 _SQL_COMMENT = re.compile(r"/\*.*?\*/", re.S)
 _WS = re.compile(r"\s+")
 _LINE_COMMENT = re.compile(r"--")
 _SQL_LIKE_CLASSES = ("sql-injection", "command-injection")
+_MAX_DECODE_DEPTH = 6
+
+
+def _fully_unquote(s: str) -> str:
+    """Repeatedly URL-decode and NFKC-normalize to a joint fixpoint (bounded).
+
+    A single-layer-encoded input reaches its fixpoint after one iteration, identical
+    to the previous single-decode behavior — purely additive. A multiply-encoded
+    surface variant (e.g. `double-url-encode`, a documented WAF-evasion technique:
+    many WAFs decode once before pattern-matching while some backends decode
+    recursively) now also canonicalizes to the same form as the original.
+
+    The two normalizations are interleaved, not applied as two separate passes, because
+    either can unlock further work for the other depending on operator composition
+    order: percent-encoding a fullwidth character's UTF-8 bytes needs an unquote pass
+    before NFKC can fold it, while fullwidth-substituting an already percent-encoded
+    string's literal `%`/digits (`%2520` -> `％２５２０`) needs an NFKC pass before
+    `unquote` can recognize the escape again. The bound is defensive only: once neither
+    transform changes the string, the loop exits, and it always terminates well before
+    the bound in practice.
+    """
+    for _ in range(_MAX_DECODE_DEPTH):
+        decoded = unicodedata.normalize("NFKC", urllib.parse.unquote(s))
+        if decoded == s:
+            break
+        s = decoded
+    return s
 
 
 def _comment_provenance_differs(a: str, b: str) -> bool:
@@ -43,7 +82,7 @@ def _comment_provenance_differs(a: str, b: str) -> bool:
 
 def canonicalize(payload: str, vuln_class: str = "sql-injection") -> str:
     """Normalize away meaning-preserving surface variation for comparison."""
-    s = urllib.parse.unquote(payload)                 # single URL-decode
+    s = _fully_unquote(payload)          # URL-decode + NFKC-fold to a joint fixpoint
     if vuln_class in _SQL_LIKE_CLASSES:
         s = _SQL_COMMENT.sub(" ", s)                  # /**/ -> space
     return _WS.sub(" ", s).strip().lower()

@@ -1,6 +1,6 @@
 # Mutation Engine — Requirement Specification
 
-Component code: **MUT** · Status: `[built — operators/validator/XSS, filter model + learner, bandit/coverage search, destructive-gated variant write-back, and the live HttpFilter + fuzzlab mutate-run driver; live WAF evasion verified on-host]` (Phase 8) · Last updated: 2026-09-21 · see CC-MUT-0006
+Component code: **MUT** · Status: `[built — operators/validator/XSS, filter model + learner, bandit/coverage search, destructive-gated variant write-back, advanced evasion operators (double-url-encode, unicode-fullwidth), and the live HttpFilter + fuzzlab mutate-run driver; live WAF evasion verified on-host]` (Phase 8) · Last updated: 2026-09-22 · see CC-MUT-0011
 
 Related: `ARCHITECTURE.md` #9; `DECISIONS_AND_ROADMAP.md` (D1, Phase 8);
 `./change-control.md`.
@@ -42,6 +42,14 @@ feedback and the scheduler.
   writes a `finding` row; only a confirming `Oracle.confirm()` does, preserving
   the oracle/advisory split (FR-FUZZ-5). Surfaced as `fuzzlab mutate-run
   --confirm-oracle`. *(Realized: CC-MUT-0009.)*
+- **FR-MUT-9** Advanced evasion operators: `double-url-encode` (percent-encode the
+  payload twice) and `unicode-fullwidth` (substitute ASCII punctuation/letters/
+  digits with their Unicode fullwidth forms) — `ANY`-class, surface operators like
+  `url-encode`, provably meaning-preserving via the same `SemanticsValidator`
+  path (no separate trust mechanism). A third candidate, null-byte insertion, was
+  designed and deliberately not implemented: its effect is backend-dependent
+  (string truncation in some legacy handling) and not provably meaning-preserving
+  in general, unlike the two operators above. *(Realized: CC-MUT-0011.)*
 
 ## 4. Non-functional requirements
 - **NFR-MUT-semantics** A mutation must preserve intended semantics; a validator
@@ -51,7 +59,13 @@ feedback and the scheduler.
   beyond canonicalize, never on a difference that turns on `--` comment presence
   (AST discards all comment styles as trivia and cannot vouch for that
   distinction). Fixed after shipping the opposite invariant (a decisive AST verdict
-  could override canonicalize either way): BUG-0027, CC-MUT-0010.
+  could override canonicalize either way): BUG-0027, CC-MUT-0010. Extended for
+  FR-MUT-9: `canonicalize()`'s URL-decode is now a bounded fixpoint loop
+  interleaved with NFKC Unicode normalization (was a single decode pass), so a
+  multiply-encoded or fullwidth-substituted variant — including a composition of
+  both, in either order — still proves equivalent to the original. Additive: a
+  single-layer-encoded input reaches its fixpoint after one iteration, unchanged
+  from before.
 - **NFR-MUT-safe** Never emit destructive payloads through the default-on path;
   the destructive gate still applies to generated payloads.
 - **NFR-MUT-bounded** Search is budget-bounded and reproducible under a fixed seed.
@@ -78,3 +92,12 @@ evasion, not a component dependency.)
 - Whether the lab needs a configurable WAF to exercise filter-evasion learning.
 - Operator set and how to bound the semantics-preservation proof per operator.
 - Trust/review workflow for LLM-expanded catalog entries.
+- **Request-shape-level evasion** (deferred at CC-MUT-0011): HTTP parameter
+  pollution, per-request Content-Type switching, path-segment normalization
+  tricks (`/..;/`-style), and HTTP method/header case randomization are
+  well-known WAF-evasion techniques that do **not** fit the existing
+  `MutationOperator.apply(payload: str) -> list[str]` interface — they reshape
+  the request (duplicate parameters, swap encoding, alter headers), not just the
+  payload string. Building them needs a new `RequestVariant`-style abstraction
+  distinct from `MutationOperator`, plus wiring through the HTTP send seam; a
+  separate future change, not shoehorned into the string-transform interface.

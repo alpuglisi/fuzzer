@@ -56,6 +56,25 @@ def _url_encode(payload: str) -> list[str]:
     return [urllib.parse.quote(payload, safe="")]
 
 
+# --- advanced evasion operators (WAF-bypass encoding tricks; still provably
+# meaning-preserving — SemanticsValidator.canonicalize() fully URL-decodes and
+# NFKC-normalizes, so both round-trip back to the original) ------------------
+def _double_url_encode(payload: str) -> list[str]:
+    # Percent-encode twice: many WAFs decode once before pattern-matching, while
+    # some backends (or an intermediate proxy) decode recursively.
+    once = urllib.parse.quote(payload, safe="")
+    return [urllib.parse.quote(once, safe="")]
+
+
+def _unicode_fullwidth(payload: str) -> list[str]:
+    # Substitute each ASCII punctuation/letter/digit char (0x21-0x7E) with its
+    # Unicode "fullwidth form" (U+FF01-FF5E, offset +0xFEE0). Some WAF signatures
+    # match ASCII only, while a backend that NFKC-normalizes (or a database engine
+    # that folds Unicode compatibility forms) still sees the original character.
+    out = "".join(chr(ord(c) + 0xFEE0) if 0x21 <= ord(c) <= 0x7E else c for c in payload)
+    return [out] if out != payload else []
+
+
 _WS = re.compile(r" +")
 
 def _whitespace(payload: str) -> list[str]:
@@ -107,6 +126,8 @@ _ALL: tuple[MutationOperator, ...] = (
     MutationOperator("case-toggle", "case", ("sql-injection", "xss"), _case_toggle),
     MutationOperator("sql-equivalent", "equivalent", ("sql-injection",),
                      _sql_equivalent, surface=False),
+    MutationOperator("double-url-encode", "encoding", (ANY,), _double_url_encode),
+    MutationOperator("unicode-fullwidth", "encoding", (ANY,), _unicode_fullwidth),
 )
 
 
