@@ -14,6 +14,11 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- UI: rebuilt the Diagnostics tab into a TensorBoard-like `metric_series` chart viewer
+  (server-side LTTB/envelope downsampling, uPlot 1.6.32 vendored) plus a read-only,
+  redacting store explorer; the shared `charts.js` wrapper was generalized so the ML
+  tab (U4) can reuse it instead of a second implementation (`CC-UI-0031`,
+  `FR-UI-16`/`FR-UI-17`).
 - UI: rebuilt the Proxy workbench (History/Intercept/Repeater/Scope·Match-Replace) on a
   shared `<message-editor>` ES module + a hand-rolled resizable splitter + an in-page
   sub-nav — Raw|Pretty(+Hex) tabs, a status/timing strip, CSS-Custom-Highlight Ctrl-F

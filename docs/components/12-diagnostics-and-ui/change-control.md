@@ -3,6 +3,58 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0031 — Lane U5: Diagnostics metric charts + read-only store explorer (2026-09-22)
+- Change: rebuilt the `/diagnostics` tab (a U0 placeholder) into a TensorBoard-like
+  metric-series viewer plus a Datasette-style store explorer. `fuzzlab/web/diagview.py`
+  reads every populated `metric_series` `(source, key)`, server-downsamples it
+  (`fuzzlab/web/downsample.py`: LTTB for line series, a min/max envelope bucketer for
+  bandit posterior/regret CI-band series, R-05/R-08), and hands the result plus a
+  capped offscreen-table row list to the template — so the page is informative even
+  with JS disabled. `fuzzlab/web/storeview.py` provides read-only, paginated browsing
+  of any store table via `GET /api/store/tables` / `GET /api/store/{table}`, redacting
+  any column whose name matches a secret-like substring
+  (password/secret/token/credential/cookie/authorization) and rendering every BLOB
+  column as `<blob: N bytes>` rather than raw bytes — both at render time, before the
+  data leaves the server. New shared front-end infra: `static/js/charts.js` (uPlot
+  wrapper: theme/density retheme via destroy+rebuild, debounced `ResizeObserver`, the
+  `window.__charts` registry, an offscreen `<table>` fallback kept in sync with the
+  data — `mode: "line"` per-run trend lines, `mode: "envelope"` a min/max band via
+  uPlot's native `bands` feature), `static/js/downsample.js` (client-side LTTB/envelope,
+  pure and Node-testable), `static/js/smoothing.js` (client-side EMA for the
+  Diagnostics smoothing slider), and uPlot 1.6.32 vendored to
+  `static/vendor/uplot/`. `charts.js` was generalized after this lane landed
+  (per-series `label`/`color`/`width` overrides + an opt-in `kind: "bars"` path, all
+  additive/backward-compatible) so lane U4's ML tab could reuse this one wrapper
+  instead of the near-duplicate implementation it had built independently and
+  concurrently — see U4's own entry for that reconciliation.
+- Impact (other components / project): `static/js/charts.js`/`downsample.js` +
+  vendored uPlot are now the one shared chart implementation for both Diagnostics and
+  the ML tab (U4). Purely read-only — no result table or `saved_views`/`metric_series`
+  writes. The store explorer is a *generic* table browser (any table, not just result
+  tables), so its redaction rule is deliberately over-inclusive (e.g. a plain
+  `token_exp` timestamp column is masked purely because its name contains "token") —
+  a conscious trade favoring never leaking a secret over precision.
+- Risk (level; mitigation): medium (a generic store browser is a new read surface over
+  every table, including ones that can hold credential-adjacent data) — mitigated by
+  `tests/test_web_diagnostics.py` (redaction-by-column-name and never-render-raw-blob
+  regressions, seeded with a real `Authorization: Bearer <token>` header and a
+  `token_exp` field and asserting neither ever appears in a response), route/no-JS
+  tests for both the empty-store and seeded-metrics cases, `node --test` coverage of
+  the pure LTTB/envelope/EMA functions, a real-browser smoke asserting chart content
+  via `window.__charts` + the offscreen table (never canvas pixels), and the unchanged
+  full suite.
+- Deliverables:
+  - [x] Per-metric-series charts (line + envelope modes) over `metric_series` — done.
+  - [x] Server-side LTTB/envelope downsampling — done.
+  - [x] Read-only, redacting store explorer — done.
+  - [x] Shared `charts.js`/`downsample.js`/`smoothing.js` + vendored uPlot — done.
+  - [x] Generalized `charts.js` for U4 reuse (post-landing) — done.
+- Effectiveness (assessed 2026-09-22): effective — every populated metric series
+  renders as its own chart with a working offscreen-table fallback, the store explorer
+  never leaks a secret-bearing column or raw blob in the tests exercising it, and U4's
+  ML tab now renders through this same chart wrapper with no second implementation to
+  maintain.
+
 ### CC-UI-0029 — Lane U3: Proxy workbench rebuild on shared message-editor + splitter + sub-nav (2026-09-22)
 - Change: replaced the Proxy section's single long page with an in-page sub-nav
   (History/Intercept/Repeater/Scope·Match-Replace, APG Tabs pattern) and a new shared ES

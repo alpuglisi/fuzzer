@@ -163,6 +163,23 @@ bugs — the research-platform diagnostics of decision D2.
   toggle. The one documented newline transform (`\n`→`\r\n` on send/forward) stays in
   `toWire` (`js/http.js`), applied only at the actual network call site — never inside
   the editor component. *(Realized: Wave-1 lane U3, CC-UI-0029.)*
+- **FR-UI-16** The Diagnostics tab renders one chart per populated `metric_series`
+  `(source, key)`, downsampled server-side before transmission (LTTB for a plain trend
+  line; a min/max envelope for a CI-band-style series, e.g. bandit posterior/regret) so
+  the client never receives more than ~1000 points per series. Every chart exposes its
+  post-downsample data via `window.__charts` (id → a handle with `getData()`) and ships
+  an offscreen `<table>` fallback (capped rows) kept in sync with the data — informative
+  with JS disabled, and the surface real-browser tests assert against instead of canvas
+  pixels. The shared chart wrapper (`static/js/charts.js`, over vendored uPlot 1.6.32)
+  is the one implementation any section rendering a chart uses — Diagnostics and the ML
+  tab (FR-UI-15) both import it rather than each hand-rolling their own.
+  *(Realized: Wave-1 lane U5, CC-UI-0031.)*
+- **FR-UI-17** The Diagnostics tab offers read-only, paginated browsing of any store
+  table (`GET /api/store/tables`, `GET /api/store/{table}`). Any column whose name
+  matches a secret-like substring (password/secret/token/credential/cookie/
+  authorization) is redacted, and any BLOB-valued column renders only as
+  `<blob: N bytes>` — both at render time, before the response leaves the server; the
+  explorer never writes to the store. *(Realized: Wave-1 lane U5, CC-UI-0031.)*
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is
