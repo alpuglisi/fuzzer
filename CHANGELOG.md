@@ -14,6 +14,15 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- UI (`CC-UI-0032`, `FR-UI-14`, build lane U5): built out the **Diagnostics tab**
+  (cross-run trend charts, intra-run metric series with server-side LTTB
+  downsampling + client-side EMA smoothing, candidate-score/bandit/model-registry
+  snapshot panels) and a read-only, injection-safe **store explorer** (`FR-UI-2`)
+  over `run_metrics`/`metric_series`/`candidate`/`bandit_posteriors`/`model` —
+  because U5 was dispatched from a pre-Wave-2 base, it independently built its own
+  `chart.js`/`datatable.js`/vendored uPlot; these were reconciled by hand onto the
+  already-landed U4 (`CC-UI-0031`) and U2 (`CC-UI-0029`) versions rather than
+  merged raw, to avoid silently clobbering already-consumed shared infrastructure.
 - UI (`CC-UI-0029`, `FR-UI-13`, build lane U2): added the **Findings workbench**
   (`/findings`, `/findings/{id}`) — a faceted filter sidebar (severity, vuln
   class, method, mechanism, endpoint; live counts; APG Disclosure a11y

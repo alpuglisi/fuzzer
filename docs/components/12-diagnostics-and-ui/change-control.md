@@ -3,6 +3,138 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0032 — Lane U5: Diagnostics tab + store explorer (2026-09-22)
+- Change: per `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U5) and its resolved
+  R-02/R-05/R-12, built out the Diagnostics section (previously a stub since
+  U0/CC-UI-0025's MPA split): cross-run scalar trend lines over `run_metrics`
+  (`fuzzlab.web.diagnostics.run_metrics_trend`); intra-run/cross-run overlay
+  step series over `metric_series` (`metric_series_data`), read-side
+  downsampled server-side via a ~40-line pure-Python **LTTB** implementation
+  (`diagnostics.lttb`, R-05: "≈1000 pts/series, preserves loss spikes/regret
+  jumps a naive stride/average erases") — then **EMA smoothing applied
+  client-side, after downsampling** (`chart.js::ema`), matching R-05's
+  specified render order; snapshot panels for candidate-score distribution
+  (pre-binned server-side, never raw per-candidate rows), bandit arm
+  posteriors (`bandit_posteriors`, posterior mean derived client-visible),
+  and the model-registry timeline (`model`). Controls per R-05: a run
+  multi-select with per-run color (stable palette index by run id), a metric
+  picker grouped by `source` (collapsible `<details>`) with a substring
+  filter, an EMA slider (0–0.99), an x-axis toggle (step/relative-time/
+  wall-clock — the latter two currently fall back to step order pending a
+  timestamp array in the series payload, noted as a known gap below), and a
+  y-axis log toggle. Also built the **store explorer** (FR-UI-14, previously
+  unimplemented), used to satisfy `FR-UI-2`'s realized annotation: read-only,
+  Datasette-style browsing of any table in the store via
+  `GET /api/store/tables` + `GET /api/store/tables/{name}`, with the table
+  name re-validated against `sqlite_master` server-side before every use
+  (never taken from the request unchecked) — the actual injection-safety
+  mechanism, with a strict-identifier regex as defense-in-depth on top. New
+  files: `fuzzlab/web/diagnostics.py` (pure query/LTTB/store-explorer module,
+  mirrors `results.py`/`proxyview.py`), `fuzzlab/web/static/js/diagnostics.js`,
+  `fuzzlab/web/static/css/diagnostics.css`, `tests/test_web_diagnostics.py`.
+  Extended `fuzzlab/web/templates/sections/diagnostics.html` (was a stub) and
+  added nine `GET /api/diagnostics/*` + `GET /api/store/*` read routes plus a
+  `_with_store` helper to `fuzzlab/web/app.py` — no writes, no new backend
+  beyond these read routes (matches the U5 acceptance criteria verbatim).
+- Impact (other components / project): additive-only — no schema change (uses
+  `run_metrics`/`metric_series`/`candidate`/`bandit_posteriors`/`model`,
+  `metric_series` already landed via lane B0-table before this lane started),
+  no change to any existing route or template. **Shared-infra reconciliation
+  (PA-0031 merge protocol):** this lane was dispatched from a pre-Wave-2 base
+  where `js/chart.js`/`js/datatable.js`/vendored uPlot did not yet exist, and
+  independently built its own complete copies of all three, duplicating work
+  U4 (`CC-UI-0031`, `js/chart.js` + vendored uPlot 1.6.32) and U2
+  (`CC-UI-0029`, `js/datatable.js`) had already landed by the time this lane
+  merged. Rather than a raw merge (which would have silently clobbered the
+  already-landed, already-consumed versions), the integrator reconciled by
+  hand: `chart.js` — U5's `createChart(el, {id, type, data, series, opts})`
+  contract and handle shape were compatible with U4's landed version, so only
+  U5's unique `ema(values, alpha)` client-side smoothing helper (used by the
+  EMA slider above) was appended to U4's file; U5's own `chart.js` and
+  vendored uPlot copies were discarded in favor of U4's. `datatable.js` — U5's
+  `mount(el, {columns, data, onRowClick, rowActions, textFilterKeys}) →
+  {setData, setFilter, destroy}` contract was incompatible with U2's landed
+  `createDataTable(root, {caption, columns, data, ...}) → {setData,
+  setTextFilter, setFilter, setSort, getSort, getVisible, element}` (row-based
+  `render(row)` vs. value-based `render(value)`, no self-mount/`destroy()` on
+  U2's side since it mounts via `root.replaceChildren()`), so `diagnostics.js`
+  was adapted to call U2's actual API rather than landing a second, divergent
+  DataTable implementation; U5's own `datatable.js` was discarded entirely. No
+  other component's contract changed.
+- Risk (level; mitigation): low-medium.
+  - **Store explorer injection risk** (the highest-consequence risk this lane
+    touches): mitigated by construction — `diagnostics._resolve_table` always
+    re-reads the caller's table name against a live `sqlite_master` query and
+    only ever interpolates the name *that query itself returned*, never the
+    raw request value, so no string an attacker controls can reach raw SQL
+    beyond selecting among tables that already exist; `limit`/`offset` are
+    separately `int()`-cast, clamped, and bound as parameters regardless.
+    Covered by `test_web_diagnostics.py`'s injection-attempt parametrized
+    tests (both the pure-function and the HTTP-route layer) asserting the
+    store is provably untouched afterward, plus a BLOB-column test (never
+    emits raw bytes into JSON).
+  - **Client-side rendering risk**: the store explorer renders arbitrary,
+    fuzzer-written row content (URLs, payloads, bodies) — `datatable.js`
+    writes every cell via `textContent` only; a static test greps
+    `datatable.js`/`diagnostics.js`/`chart.js` for any live (non-comment)
+    `innerHTML` use.
+  - **Vendoring provenance**: uPlot's provenance is documented under
+    `CC-UI-0031` (U4 vendored it first; this lane reuses that copy as-is).
+  - **x-axis wall-clock/relative-time toggle is not fully wired**: the
+    `metric_series` read path (`diagnostics.metric_series_data`) does not yet
+    return per-point timestamps in the JSON payload (only `step`), so
+    `diagnostics.js` currently falls back to step-order for both
+    "relative-time" and "wall-clock" x-axis modes rather than real
+    wall-clock ticks. `metric_series.ts` already exists in the store
+    (per B0's schema) and is queried in the SQL but simply not yet returned
+    on the wire — a small, low-risk follow-up (a later change-control entry),
+    not a functional regression since step order is still monotonic and
+    correctly labeled in the axis-toggle UI's semantics for now.
+  - **Not independently browser-tested**: `playwright` is not installed in
+    this environment (`tests/test_web_repeater_browser.py`'s own
+    `importorskip("playwright")` pattern confirms other browser tests already
+    skip here too), so the R-09 "dark-mode/density correct" acceptance point
+    and the `window.__charts` a11y-table contract are exercised only by
+    static/manual code review against the R-12 spec, not an automated
+    browser assertion, in this environment. Flagged for the integrator to
+    re-run with a browser-capable runner before considering R-09/R-11
+    coverage complete for this tab.
+- Deliverables:
+  - [x] `fuzzlab/web/diagnostics.py` — pure LTTB/trend/series/snapshot/store-
+    explorer query functions — done.
+  - [x] `GET /api/diagnostics/{runs,metrics,trend,series,candidates/{id},
+    bandit,models}` + `GET /api/store/{tables,tables/{name}}` read routes in
+    `fuzzlab/web/app.py` — done.
+  - [x] Reused U4's vendored uPlot 1.6.32 (`/static/vendor/uplot/`) — done.
+  - [x] `js/chart.js` shared `createChart()` wrapper (R-12: tokens, density,
+    ResizeObserver, retheme, teardown, `window.__charts`, a11y table) — done;
+    U5's unique `ema()` helper merged into U4's landed file (see the
+    reconciliation note above).
+  - [x] `js/diagnostics.js` adapted to call U2's landed `js/datatable.js`
+    (`createDataTable`) rather than duplicating a second `DataTable` (see the
+    reconciliation note above).
+  - [x] `js/diagnostics.js` page orchestration + `sections/diagnostics.html`
+    extended with the controls/panels/store-explorer markup — done.
+  - [x] `css/diagnostics.css` — done.
+  - [x] `tests/test_web_diagnostics.py` (28 tests: LTTB correctness, pure
+    query functions, API routes, read-only-no-store-file guarantee,
+    injection-attempt rejection, BLOB summarization, static innerHTML guard)
+    — done, all passing against the reconciled tree.
+  - [ ] Wire real timestamps into `metric_series_data`'s response for the
+    wall-clock/relative-time x-axis modes — todo (follow-up).
+  - [ ] Browser-driven (Playwright) dark-mode/density/`window.__charts`
+    verification — todo, blocked on a browser-capable test environment.
+- Effectiveness (assessed 2026-09-22): effective for the acceptance criteria
+  that are testable in this environment — charts/panels/store-explorer render
+  from `run_metrics`/`metric_series`/`candidate`/`bandit_posteriors`/`model`
+  with no new backend beyond the listed read routes; the store explorer is
+  provably read-only and injection-safe (parametrized SQL-injection tests
+  against both the pure functions and the live HTTP routes all pass and leave
+  the store unmodified). Dark-mode/density correctness and the R-09
+  `window.__charts` browser contract are implemented per spec but not
+  machine-verified here (no Playwright) — re-assess once a browser-capable
+  run confirms them.
+
 ### CC-UI-0031 — Lane U4: ML tab — read-only, advisory model-internals panels (2026-09-22)
 - Change: per `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U4) and its resolved R-06/R-02/R-12,
   filled in the `/ml` section (previously a placeholder card, U0) with read-only,

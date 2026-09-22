@@ -287,3 +287,20 @@ export function createChart(el, { id, type = "line", data, series = [], opts = {
   window.__charts.set(id, handle);
   return handle;
 }
+
+// --- client-side helpers used alongside createChart (R-05) ---------------
+
+// EMA smoothing, applied client-side AFTER server-side downsampling (the
+// render order R-05 specifies), so the slider is instant with no re-fetch.
+export function ema(values, alpha) {
+  if (!alpha || alpha <= 0) return values.slice();
+  const out = new Array(values.length);
+  let prev = null;
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (v == null) { out[i] = prev; continue; }
+    prev = prev == null ? v : alpha * prev + (1 - alpha) * v;
+    out[i] = prev;
+  }
+  return out;
+}

@@ -368,6 +368,22 @@ def _saved_views(cfg: Config, table_key: str) -> list[dict]:
         return savedviews.list_views(store, table_key)
 
 
+# --- diagnostics + store explorer (U5/CC-UI-0032, FR-UI-2) -------------------
+#
+# Same read-only-over-the-store shape as `_read_runs`/`_read_flows` above: never
+# creates the store file, opens a short-lived `Store` per request, and delegates
+# all query logic to the pure `fuzzlab.web.diagnostics` module so it's testable
+# without FastAPI.
+
+def _with_store(cfg: Config, fn: Callable[[Any], Any], default: Any) -> Any:
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return default
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        return fn(store)
+
+
 # --- template context builders (rendering lives in templates/, via jinja2) ----
 
 def _activities() -> list[dict]:
@@ -636,6 +652,72 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     def diagnostics_page(request: Request):
         return templates.TemplateResponse(
             request, "sections/diagnostics.html", _shell_context(cfg, active="diagnostics"))
+
+    # --- diagnostics API (U5/CC-UI-0032) — cross-run trends, intra-run series,
+    # snapshots; all read-only, no new backend beyond these routes (R-05/R-12). ---
+
+    @app.get("/api/diagnostics/runs")
+    def diag_runs() -> dict[str, Any]:
+        from fuzzlab.web import diagnostics as diag
+        return {"runs": _with_store(cfg, diag.list_runs_brief, [])}
+
+    @app.get("/api/diagnostics/metrics")
+    def diag_metrics() -> dict[str, Any]:
+        from fuzzlab.web import diagnostics as diag
+        return _with_store(cfg, diag.metric_keys, {"run_metrics": [], "series": {}})
+
+    @app.get("/api/diagnostics/trend")
+    def diag_trend(run_ids: str = "", keys: str = "") -> dict[str, Any]:
+        from fuzzlab.web import diagnostics as diag
+        ids = [int(x) for x in run_ids.split(",") if x.strip().isdigit()]
+        key_list = [k for k in keys.split(",") if k.strip()]
+        return _with_store(
+            cfg, lambda s: diag.run_metrics_trend(s, ids, key_list), {"runs": [], "series": {}})
+
+    @app.get("/api/diagnostics/series")
+    def diag_series(
+        run_ids: str = "", source: str = "", key: str = "", max_points: int = 1000,
+    ) -> dict[str, Any]:
+        from fuzzlab.web import diagnostics as diag
+        ids = [int(x) for x in run_ids.split(",") if x.strip().isdigit()]
+        return _with_store(
+            cfg,
+            lambda s: diag.metric_series_data(s, ids, source, key, max_points=max_points),
+            {"source": source, "key": key, "series": {}},
+        )
+
+    @app.get("/api/diagnostics/candidates/{run_id}")
+    def diag_candidates(run_id: int) -> dict[str, Any]:
+        from fuzzlab.web import diagnostics as diag
+        return _with_store(
+            cfg, lambda s: diag.candidate_score_histogram(s, run_id),
+            {"run_id": run_id, "edges": [], "counts": [], "n": 0})
+
+    @app.get("/api/diagnostics/bandit")
+    def diag_bandit() -> dict[str, Any]:
+        from fuzzlab.web import diagnostics as diag
+        return {"arms": _with_store(cfg, diag.bandit_arms, [])}
+
+    @app.get("/api/diagnostics/models")
+    def diag_models() -> dict[str, Any]:
+        from fuzzlab.web import diagnostics as diag
+        return {"models": _with_store(cfg, diag.model_registry_timeline, [])}
+
+    # --- store explorer (FR-UI-2) — strictly read-only, injection-safe. -----
+
+    @app.get("/api/store/tables")
+    def store_tables() -> dict[str, Any]:
+        from fuzzlab.web import diagnostics as diag
+        return {"tables": _with_store(cfg, diag.list_tables, [])}
+
+    @app.get("/api/store/tables/{name}")
+    def store_table(name: str, limit: int = 100, offset: int = 0):
+        from fuzzlab.web import diagnostics as diag
+        page = _with_store(
+            cfg, lambda s: diag.browse_table(s, name, limit=limit, offset=offset), None)
+        if page is None:
+            return JSONResponse({"error": f"no such table {name!r}"}, status_code=404)
+        return page
 
     @app.get("/api/status")
     def status() -> dict[str, Any]:

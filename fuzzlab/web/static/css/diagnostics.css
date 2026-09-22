@@ -1,0 +1,98 @@
+/* Diagnostics + store explorer (U5/CC-UI-0032) — layered on shell.css's
+ * shared `.card`/table/button primitives; only diagnostics-specific layout
+ * lives here (D3: per-section CSS partials, no bundler).
+ */
+
+.diag-controls {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 1fr;
+  gap: 1rem;
+  margin-top: .5rem;
+}
+@media (max-width: 900px) {
+  .diag-controls { grid-template-columns: 1fr; }
+}
+
+.diag-control-group h4 { margin-top: 0; }
+
+.diag-run-list {
+  display: flex; flex-direction: column; gap: .2rem;
+  max-height: 160px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 8px; padding: .4rem .5rem;
+  background: var(--surface2);
+}
+.diag-run-chip {
+  display: flex; align-items: center; gap: .4rem;
+  font-size: .82rem; padding: .12rem 0;
+}
+
+.diag-metric-picker input[type="search"] {
+  width: 100%; padding: .35rem .55rem; margin-bottom: .4rem;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); color: var(--text); font: inherit;
+}
+.diag-metric-groups {
+  max-height: 180px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 8px; padding: .3rem .5rem;
+  background: var(--surface2);
+}
+.diag-metric-groups summary {
+  cursor: pointer; font-size: .8rem; font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .03em; padding: .25rem 0;
+}
+.diag-metric-list { display: flex; flex-wrap: wrap; gap: .3rem; padding: .2rem 0 .5rem; }
+.diag-metric-btn {
+  font-size: .78rem; padding: .2rem .55rem; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--text);
+}
+.diag-metric-btn.active {
+  background: var(--accent-weak); color: var(--accent); border-color: var(--accent);
+}
+
+.diag-inline {
+  display: flex; align-items: center; gap: .4rem; font-size: .85rem;
+  margin: .3rem 0; color: var(--text);
+}
+.diag-inline select, .diag-inline input[type="range"] { accent-color: var(--accent); }
+#diag-ema-value { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 2.6em; }
+
+.diag-chart-card h3 { margin-top: 0; }
+.chart-cell {
+  position: relative;
+  width: 100%;
+  min-height: var(--chart-h, 220px);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+:root[data-density="compact"] .chart-cell { --chart-h: 170px; }
+.chart-cell:empty::before {
+  content: attr(data-chart-empty);
+  display: block; padding: 2.5rem 1rem; text-align: center;
+  color: var(--muted); font-size: .85rem;
+}
+/* uPlot's own legend is DOM (not canvas), so it inherits tokens naturally;
+   only line-height is tied to the density `--row` token here. */
+.chart-cell .u-legend { font-size: .78rem; line-height: var(--row); color: var(--text); }
+
+.diag-two-col {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;
+}
+@media (max-width: 900px) { .diag-two-col { grid-template-columns: 1fr; } }
+.diag-table table { font-size: .8rem; }
+
+.store-explorer-controls {
+  display: flex; align-items: center; gap: .8rem; flex-wrap: wrap;
+  margin: .5rem 0 .7rem;
+}
+.store-explorer-controls select, .store-explorer-controls input[type="search"] {
+  padding: .35rem .55rem; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); color: var(--text); font: inherit;
+}
+.store-table-wrap {
+  max-height: 420px; overflow: auto;
+  border: 1px solid var(--border); border-radius: 8px;
+}
+.store-table-wrap table { font-size: .78rem; }
+.store-table-wrap td { font-family: var(--mono); white-space: pre; max-width: 32ch;
+  overflow: hidden; text-overflow: ellipsis; }

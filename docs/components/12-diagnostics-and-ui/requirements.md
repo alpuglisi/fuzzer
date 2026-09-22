@@ -48,6 +48,13 @@ bugs — the research-platform diagnostics of decision D2.
   scripting, power use) that works without the web app.
 - **FR-UI-2** Datasette (or equivalent) over the store for ad-hoc exploration of
   pages, candidates, attempts, findings, and flows.
+  *(Realized: lane U5, CC-UI-0032, 2026-09-22 — a read-only store explorer on the
+  Diagnostics tab (`GET /api/store/tables`, `GET /api/store/tables/{name}`),
+  covering every ordinary table in the store, not only the five named above.
+  Table names are always re-validated against `sqlite_master` before use
+  (never interpolated from the request unchecked), and every cell renders
+  client-side via `textContent` only — see `fuzzlab/web/diagnostics.py` and
+  `js/datatable.js`.)*
 - **FR-UI-3** A `run_metrics` table populated per run (requests, findings,
   precision, budget used, timing).
 - **FR-UI-4** Structured audit and debug logs carrying `run_id`, `tool`,
@@ -265,6 +272,26 @@ bugs — the research-platform diagnostics of decision D2.
     element}` — is intended for reuse by U1's recent-runs table and U5's
     store explorer (each minus the facet sidebar, which is Findings-specific
     UI built in `js/findings.js`, not part of the shared module).
+- **FR-UI-14** *(added CC-UI-0032, lane U5, R-05)* The **Diagnostics** route
+  (`/diagnostics`) is a TensorBoard-like view over the store: cross-run scalar
+  trend lines over `run_metrics` (one line per selected metric key, x = the
+  selected runs); intra-run and cross-run overlay step series over
+  `metric_series` (one line per run for a chosen `source`/`key`), downsampled
+  server-side to ≈1000 points/series via LTTB before being sent, with EMA
+  smoothing (0–0.99, a slider) applied client-side *after* that downsampling
+  so it is instant; an x-axis toggle (step / relative-time / wall-clock) and
+  a y-axis log toggle; a run multi-select with a stable per-run color; and a
+  metric picker grouped by `source` (collapsible) with a substring filter.
+  Snapshot panels: a pre-binned candidate-score histogram per run, the
+  current bandit arm posteriors (`bandit_posteriors`, with posterior mean),
+  and the model-registry timeline (`model`). Charts render via the shared,
+  vendored charting library (uPlot 1.6.32, MIT, first vendored by lane U4)
+  behind one wrapper (`js/chart.js`'s `createChart()`) that resolves design
+  tokens for canvas colors, buckets sizing by density, is responsive via a
+  debounced `ResizeObserver`, and fully rebuilds on theme/density change. No
+  websocket streaming — a manual page refresh (or re-running the query)
+  picks up new data from an active run. See FR-UI-2 for the store-explorer
+  half of this same route.
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

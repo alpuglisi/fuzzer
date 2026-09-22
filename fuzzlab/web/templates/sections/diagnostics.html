@@ -1,14 +1,90 @@
 {% extends "base.html" %}
 {% block title %}fuzzlab &mdash; Diagnostics{% endblock %}
 {% block crumb %}Diagnostics{% endblock %}
+{% block styles %}
+<link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+<link rel="stylesheet" href="/static/css/diagnostics.css">
+{% endblock %}
 {% block content %}
-<section class="panel" aria-labelledby="diagnostics-h1">
+<section class="panel" aria-labelledby="diagnostics-h1" id="diagnostics-root">
   <h1 id="diagnostics-h1" class="visually-hidden">Diagnostics</h1>
+
   <div class="card">
     <h2>Diagnostics</h2>
-    <p class="muted">A TensorBoard-like view: cross-run metric trends, intra-run reward
-      / coverage / latency series, bandit arm state, and a store explorer. Arrives in
-      Phase 4; time-series charts need the new metric-series instrumentation.</p>
+    <p class="muted">A TensorBoard-like view over the store: cross-run metric
+      trends, intra-run step series, bandit arm state, and the model registry.
+      Manual refresh &mdash; reload the page (or re-run the query) to see new
+      data from an active run.</p>
+
+    <div class="diag-controls">
+      <div class="diag-control-group">
+        <h4>Runs</h4>
+        <div id="diag-run-list" class="diag-run-list" aria-label="Select runs"></div>
+      </div>
+      <div class="diag-control-group diag-metric-picker">
+        <h4>Metric</h4>
+        <input type="search" id="diag-metric-filter" placeholder="Filter metric keys&hellip;"
+               aria-label="Filter metric keys">
+        <div id="diag-metric-groups" class="diag-metric-groups"></div>
+      </div>
+      <div class="diag-control-group">
+        <h4>Display</h4>
+        <label class="diag-inline">EMA smoothing
+          <input type="range" id="diag-ema" min="0" max="0.99" step="0.01" value="0">
+          <span id="diag-ema-value">0.00</span>
+        </label>
+        <label class="diag-inline">X axis
+          <select id="diag-xaxis">
+            <option value="step">step</option>
+            <option value="relative-time">relative time</option>
+            <option value="wall-clock">wall clock</option>
+          </select>
+        </label>
+        <label class="diag-inline">
+          <input type="checkbox" id="diag-ylog"> log Y
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div class="card diag-chart-card">
+    <h3>Cross-run trend (<code>run_metrics</code>)</h3>
+    <div id="diag-trend-chart" class="chart-cell" data-chart-empty="Select runs and a run_metrics key above."></div>
+  </div>
+
+  <div class="card diag-chart-card">
+    <h3>Intra-run / cross-run series (<code>metric_series</code>)</h3>
+    <div id="diag-series-chart" class="chart-cell" data-chart-empty="Select runs and a series key above."></div>
+  </div>
+
+  <div class="card diag-two-col">
+    <div>
+      <h3>Bandit arm state</h3>
+      <div id="diag-bandit-table" class="diag-table"></div>
+    </div>
+    <div>
+      <h3>Model registry timeline</h3>
+      <div id="diag-model-table" class="diag-table"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Store explorer</h3>
+    <p class="muted">Read-only browsing over every table in the store (FR-UI-2)
+      &mdash; a lightweight, Datasette-style view. No writes happen from this
+      page.</p>
+    <div class="store-explorer-controls">
+      <label class="diag-inline">Table
+        <select id="store-table-select" aria-label="Store table"></select>
+      </label>
+      <input type="search" id="store-filter" placeholder="Filter rows&hellip;" aria-label="Filter rows">
+      <span id="store-table-meta" class="muted"></span>
+      <span class="spacer"></span>
+      <button type="button" id="store-prev" disabled>&larr; prev</button>
+      <button type="button" id="store-next" disabled>next &rarr;</button>
+    </div>
+    <div id="store-table" class="store-table-wrap" role="region" aria-label="Store table contents"></div>
   </div>
 </section>
 {% endblock %}
+{% block scripts %}<script type="module" src="/static/js/diagnostics.js"></script>{% endblock %}

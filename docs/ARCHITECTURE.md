@@ -728,10 +728,31 @@ tracked in the requirements files, not here.
   weights" panel R-06 calls for renders a documented not-available state rather than a
   value — closing it is a future ML-component change, out of this lane's read-only
   scope.
-  **Pending:** U5 (the TensorBoard-like diagnostics tab + a `metric_series` time-series
-  table / Phase 4; Datasette-style store exploration — U5 should reuse this lane's
-  `static/vendor/uplot/`, `static/js/chart.js`, and U2's `static/js/datatable.js` rather
-  than re-vendoring/rebuilding). U0/U1/U2/U3/U4/U6 and D0a/D0b have all landed.
+  U0/U1/U2/U3/U4/U6 and D0a/D0b have all landed.
+- **U5 — Diagnostics tab + store explorer (`docs/UI_IMPLEMENTATION_PLAN.md` §3,
+  CC-UI-0032, 2026-09-22, Phase 3/4, Wave 2, built on U0/U4/U2):** filled in
+  `/diagnostics` (previously a stub) with a TensorBoard-like view over the
+  `metric_series` time-series table (migration 11, `CC-CORE-0018`): cross-run
+  trend charts over `run_metrics`, intra-run/cross-run step-series overlays with
+  server-side LTTB downsampling (R-05) and client-side EMA smoothing applied
+  after downsampling, plus snapshot panels (candidate-score histogram, bandit
+  arm posteriors, model-registry timeline). Also shipped the read-only,
+  Datasette-style **store explorer** (`FR-UI-2`/`FR-UI-14`): any store table,
+  browsable via `GET /api/store/tables` + `GET /api/store/tables/{name}`, with
+  the table name always re-validated against a live `sqlite_master` query before
+  use — the actual injection-safety mechanism (`tests/test_web_diagnostics.py`
+  covers this with parametrized injection-attempt cases). U5 was dispatched from
+  a pre-Wave-2 base and, per PA-0031's merge protocol, independently built its
+  own `static/js/chart.js`, `static/js/datatable.js`, and a second vendored copy
+  of uPlot before U4's and U2's versions had landed; the integrator reconciled
+  these by hand at merge time onto the already-landed versions rather than
+  merging raw — U5's unique `ema()` client-side smoothing helper was merged into
+  U4's `chart.js`, and `static/js/diagnostics.js` was adapted to call U2's
+  landed `createDataTable()` API rather than landing a second `DataTable`
+  implementation; U5's own `chart.js`/`datatable.js`/vendored uPlot copies were
+  discarded. Known gap: the wall-clock/relative-time x-axis modes fall back to
+  step order pending real per-point timestamps in the `metric_series_data` wire
+  payload (a follow-up, not a regression — step order is still monotonic).
 - **Reproducible evaluation report** `[built]` (Phase 10 T10.4, `fuzzlab/report/`): a
   deterministic report over a stored run (run/config identity, target, counts, findings,
   metrics, deployed models, active plugins), canonical JSON for diffing; read-only
