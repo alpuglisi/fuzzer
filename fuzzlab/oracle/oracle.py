@@ -35,10 +35,10 @@ class _CostCounter:
 
 class Oracle:
     def __init__(self, strategies: list[ConfirmationStrategy] | None = None,
-                 store=None, run_id: int | None = None, browser=None, scheduler=None,
-                 plugins=None):
+                 store=None, run_id: int | None = None, browser=None, oob=None,
+                 scheduler=None, plugins=None):
         self.strategies = (list(strategies) if strategies is not None
-                           else default_strategies(browser=browser))
+                           else default_strategies(browser=browser, oob=oob))
         if plugins is not None:                          # register_oracle: plugin-supplied
             self.strategies += list(plugins.oracles())   # confirmers (the only writer path)
         self.plugins = plugins

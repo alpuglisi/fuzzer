@@ -14,6 +14,13 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- FUZZ: built the previously-unbuilt M8 out-of-band (OOB) callback oracle mechanism —
+  `fuzzlab/oracle/oob.py::OobListener` (a loopback-only, default-off local canary
+  tracker) plus `CommandInjectionOobStrategy`, confirming blind command injection
+  when a target executes an injected shell fragment that fetches a unique canary URL
+  but leaves no timing/response signal. Wired through `Oracle(oob=...)`,
+  `run_pipeline`/`run_auto`, and the new `fuzzlab auto --oob` flag (default off, same
+  gating shape as `--browser`/the proxy's `--authorized`). `CC-FUZZ-0019`/`FR-FUZZ-8`.
 - LAB: fixed `live_boot_available()`'s network-reachability probe, which tested a bare
   raw-socket TCP connect instead of the actual, proxy-aware composer-driven Packagist
   round trip `composer install` itself performs — in a sandbox where real HTTPS only

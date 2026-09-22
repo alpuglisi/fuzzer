@@ -19,6 +19,7 @@ from fuzzlab.oracle.browser import (
     StoreStep,
 )
 from fuzzlab.oracle.context import breakout_for, is_unescaped, type_reflection
+from fuzzlab.oracle.oob import OobListener
 from fuzzlab.oracle.probe import Candidate, Sender, Verdict
 
 # --- error signatures (M2) ---------------------------------------------------
@@ -50,6 +51,20 @@ _CMDI_TIMING_TEMPLATES = [
     "$(sleep {d})",
     "`sleep {d}`",
     "1; sleep {d}",
+]
+
+# Command-injection OOB templates (M8; {url} = the loopback canary URL). Shell
+# separators pair with tools any target OS's shell/base image is overwhelmingly
+# likely to have (curl/wget), so this needs no DNS component.
+_CMDI_OOB_TEMPLATES = [
+    "; curl {url}",
+    "| curl {url}",
+    "|| curl {url}",
+    "& curl {url}",
+    "&& curl {url}",
+    "$(curl {url})",
+    "`curl {url}`",
+    "; wget -q -O- {url}",
 ]
 
 # Open-redirect body sinks (meta refresh) and /etc/passwd content marker (M7).
@@ -282,6 +297,40 @@ class CommandInjectionStrategy(ConfirmationStrategy):
         return self._confirm_timing(candidate, sender, _CMDI_TIMING_TEMPLATES)
 
 
+class CommandInjectionOobStrategy(ConfirmationStrategy):
+    """M8: blind command injection confirmed by an out-of-band callback.
+
+    For the blind case where no timing skew or response difference is
+    observable (output suppressed, egress delayed): embed a unique loopback
+    canary URL in a shell-fetch payload and confirm only if that exact token
+    is later requested. Needs an injected, already-started `OobListener`
+    (lab loopback only, default-off, same seam shape as the M6
+    `BrowserExecutor`); without one this strategy no-ops (fail-closed), never
+    reaching for a real network listener on its own.
+    """
+    vuln_class = "command-injection"
+    mechanism = "oob-callback"
+    category = "command-injection"
+
+    def __init__(self, listener: OobListener | None = None, timeout: float = 1.5):
+        self._listener = listener
+        self._timeout = timeout
+
+    def confirm(self, candidate, sender):
+        if self._listener is None:
+            return None
+        for template in _CMDI_OOB_TEMPLATES:
+            token = self._listener.register()
+            canary = self._listener.callback_url(token)
+            self._send(sender, candidate, template.format(url=canary))
+            hit = self._listener.wait_for(token, timeout=self._timeout)
+            if hit is not None:
+                return Verdict(True, self.vuln_class, self.mechanism,
+                               {"canary": canary, "template": template,
+                                "hit_path": hit.path, "remote_addr": hit.remote_addr})
+        return None
+
+
 # --- browser-execution XSS (M6): stored + DOM. Need an injected BrowserExecutor. ---
 def _xss_exec_payloads(token: str) -> list[str]:
     """Payloads that, if they execute, call the sentinel with the token."""
@@ -341,16 +390,21 @@ class StoredXssStrategy(_BrowserXssStrategy):
         return self._executor.run(ExecRequest(url=candidate.url, store=store), token)
 
 
-def default_strategies(browser: BrowserExecutor | None = None) -> list[ConfirmationStrategy]:
+def default_strategies(browser: BrowserExecutor | None = None,
+                       oob: OobListener | None = None) -> list[ConfirmationStrategy]:
     """Cheapest/strongest first, per category. `applies()` scopes each to its category.
 
     The M6 browser strategies are included with the injected ``browser`` (or without,
-    in which case they no-op — stored/DOM XSS stays unconfirmed until a browser is set).
+    in which case they no-op — stored/DOM XSS stays unconfirmed until a browser is
+    set). Likewise the M8 OOB strategy is included with the injected, already-started
+    ``oob`` listener (or without, in which case it no-ops — blind command injection
+    still confirms via M1 timing, just not via OOB callback).
     """
     return [SqliErrorStrategy(), SqliBooleanStrategy(), SqliTimingStrategy(),
             ReflectedXssStrategy(), DomXssStrategy(browser), StoredXssStrategy(browser),
             OpenRedirectStrategy(), SstiStrategy(),
-            PathTraversalStrategy(), CommandInjectionStrategy()]
+            PathTraversalStrategy(), CommandInjectionStrategy(),
+            CommandInjectionOobStrategy(oob)]
 
 
 # Reference-style category -> the oracle vuln_class we have a strategy for.

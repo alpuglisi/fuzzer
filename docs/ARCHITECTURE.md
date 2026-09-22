@@ -480,17 +480,20 @@ tracked in the requirements files, not here.
   which consolidates a crawl, runs scoped rules + oracle confirmation, and — with a
   ground-truth contract — scores TP/FP. The legacy `tools/blind_sqli_fuzzer.py`
   remains as the original single-class fuzzer.
-- **Oracle** `[built; M8/M10 pending]`: a **class-pluggable** deterministic confirmer
+- **Oracle** `[built; M10 pending]`: a **class-pluggable** deterministic confirmer
   (`oracle/oracle.py`, `oracle/strategies.py`, `oracle/probe.py`) — the **only**
   writer of `finding` labels — over 7 vuln classes (sqli, reflected/DOM/stored XSS,
   open-redirect, SSTI, file-inclusion, command-injection). Built mechanisms:
   M1 differential timing, M2 error signature, M3 boolean/response differential,
   M4 SSTI evaluation marker, M5 reflected-canary-in-context, M6 browser execution
   (stored/DOM XSS via an injected `BrowserExecutor` — `oracle/browser.py`,
-  `tools/browserexec.py`), M7 file-content marker (LFI/traversal), and M9
-  redirect-target control. **Pending:** M8 out-of-band callback and M10 grey-box
-  (the grey-box reward hook is wired via `greybox/confirm.py`; its live signal is
-  on-host). Findings are written in path-normalized form via `core/urls.to_path`.
+  `tools/browserexec.py`), M7 file-content marker (LFI/traversal), M8 out-of-band
+  callback (blind command injection, via an injected, already-started
+  `OobListener` — `oracle/oob.py`, a loopback-only local canary tracker;
+  default-off, wired through `fuzzlab auto --oob`), and M9 redirect-target control.
+  **Pending:** M10 grey-box (the grey-box reward hook is wired via
+  `greybox/confirm.py`; its live signal is on-host). Findings are written in
+  path-normalized form via `core/urls.to_path`.
   Each injection class registers the mechanism(s) that prove it; full mechanism set
   and the injection-class → mechanism mapping (derived from `references/`):
   `architecture/oracle-confirmation.md`.
@@ -793,7 +796,7 @@ Suite: 390 passed / 4 skipped (the skips need a native build unavailable in the 
     logging), indicator DB + payload catalogs, ground-truth label contract, and the
     integration harness.
   - **Deterministic wins (Phase 2):** the generalized fuzzing harness and the
-    class-pluggable **oracle** (mechanisms M1–M7 + M9 across 7 vuln classes; the sole
+    class-pluggable **oracle** (mechanisms M1–M9 across 7 vuln classes; the sole
     finding-writer), driven by `fuzzlab auto` with TP/FP scoring against ground truth.
   - **Bandit scheduler (Phase 4):** Thompson sampling with context buckets,
     catalog priors, cost-normalized selection, hierarchical backoff, persisted
@@ -835,7 +838,8 @@ Suite: 390 passed / 4 skipped (the skips need a native build unavailable in the 
     `run_plugin` recording (migration 10), and the pipeline wiring (T10.2 — HTTP seam,
     auditor, oracle; `fuzzlab auto --plugins`) and the `register_payload_source` consumer
     (mutation `PayloadPool`) are built — all seven hooks wired.
-  - **Oracle mechanisms:** M8 (out-of-band) and M10 (grey-box) still to build.
+  - **Oracle mechanisms:** M8 (out-of-band, `oracle/oob.py` — blind command
+    injection, via `fuzzlab auto --oob`) is built; M10 (grey-box) still to build.
   - **Intercepting proxy (Phase 6):** the full offline stack is built — byte-exact
     dual-path core (`RawMessage` + `h11`), scope, match-and-replace, flow history
     (migration 6, FTS5), repeater, interception, manual-login session capture, the

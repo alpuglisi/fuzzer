@@ -1,7 +1,7 @@
 # Fuzzing Harness and Oracle — Requirement Specification
 
-Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5); harness generalization ongoing]`
-· Last updated: 2026-09-21
+Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5/M8); harness generalization ongoing]`
+· Last updated: 2026-09-22
 
 Related: `ARCHITECTURE.md` #7; `DECISIONS_AND_ROADMAP.md` (D1, D5, D7, Phase 2/3);
 `./change-control.md`.
@@ -50,6 +50,42 @@ rewards) derives from it.
   sending anything.
 - **FR-FUZZ-7** Serialize timing-sensitive sends at concurrency 1 per host via the
   shared budget mutex.
+- **FR-FUZZ-8** The oracle supports **M8 out-of-band (OOB) callback** confirmation
+  for blind injection classes with no observable direct-response difference. Scope
+  and contract:
+  - `fuzzlab.oracle.oob.OobListener` is a loopback-only (`127.0.0.1`/`localhost`
+    only; any other host raises) local HTTP callback tracker. It binds no socket
+    until `start()` is called (default-off — never binds implicitly), mints
+    unguessable per-probe tokens (`register()`), gives the URL to embed in a payload
+    (`callback_url(token)`), and reports whether that exact token was later
+    requested (`wait_for(token, timeout)`, `hits(token)`). It is a process-local test
+    fixture for this lab — no DNS component, no external reachability, no
+    persistence — never a general-purpose, publicly reachable interaction/
+    collaborator service (Safety, `CLAUDE.md`).
+  - `CommandInjectionOobStrategy` (`fuzzlab.oracle.strategies`) is a
+    `ConfirmationStrategy` for `vuln_class="command-injection"`,
+    `category="command-injection"`, `mechanism="oob-callback"`. It takes an
+    `OobListener` by injection (constructor arg, default `None`) exactly like the M6
+    `BrowserExecutor` seam: with a listener, it embeds a fresh canary URL in a
+    shell-fetch payload (`curl`/`wget`) per attempt and confirms iff that token is
+    requested before `timeout`; without one, it no-ops (`confirm()` returns `None`
+    immediately, no probe sent) — fail-closed, and it never constructs a listener of
+    its own.
+  - Wiring: `default_strategies(oob=None)`, `Oracle(oob=None)`,
+    `run_pipeline(oob=None)`, `run_auto(oob=None)` all take the listener as an
+    optional keyword that defaults to `None` (no behavior change for existing
+    callers). `fuzzlab auto --oob` is the only place that constructs and `start()`s a
+    real `OobListener`; it is default-off and torn down (`stop()`) at the end of the
+    run regardless of outcome.
+  - Applies alongside the existing M1 timing strategy for the same category (both
+    `applies()` on `category="command-injection"`); the oracle tries the cheaper M1
+    timing check first, then M8, so a target that suppresses timing signal but still
+    executes the shell fragment is still confirmable.
+  - Other blind classes named in `docs/architecture/oracle-confirmation.md` Tier 3
+    (blind SSRF, blind XXE, blind insecure-deserialization) can register their own
+    `ConfirmationStrategy` against the same `OobListener` seam later — M8 the
+    *mechanism* is now built and pluggable; wiring every blind class onto it is
+    tracked as future work, not blocked on anything.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

@@ -10,9 +10,12 @@ Implemented mechanisms: differential timing (M1) for SQLi *and* command injectio
 error signature (M2) and boolean/response differential (M3) for SQLi,
 evaluation-marker (M4) for SSTI, reflected-canary-in-executable-context (M5) for
 reflected XSS, file-content-marker (M7) for path traversal/LFI,
-redirect-target-control (M9) for open redirect, and browser execution (M6) for
+redirect-target-control (M9) for open redirect, browser execution (M6) for
 stored + DOM XSS (via an injected `BrowserExecutor`; the live Playwright executor is
-`fuzzlab/tools/browserexec.py`). Out-of-band (M8) and grey-box (M10) come later.
+`fuzzlab/tools/browserexec.py`), and out-of-band callback (M8) for blind command
+injection (via an injected, already-started `OobListener` — `oracle/oob.py`, a
+loopback-only local canary tracker; default-off, wired through `--oob` on
+`fuzzlab auto`). Grey-box (M10) comes later.
 
 Each class is one `ConfirmationStrategy`; `applies()` scopes it to its vuln_class, so
 adding a vector is adding a strategy (+ a `category_to_oracle_class` mapping). Which

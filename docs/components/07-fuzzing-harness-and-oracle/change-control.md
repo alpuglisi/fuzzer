@@ -3,6 +3,66 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0019 — Build M8 out-of-band (OOB) callback mechanism (2026-09-22)
+- Change: implemented the previously-unbuilt M8 mechanism from
+  `docs/architecture/oracle-confirmation.md` — out-of-band callback confirmation for
+  blind injection classes with no direct response difference. Added
+  `fuzzlab/oracle/oob.py::OobListener`: a loopback-only (`127.0.0.1`/`localhost`
+  only — raises `ValueError` on any other host), in-memory, per-run HTTP callback
+  tracker (`register()` mints an unguessable token, `callback_url()` gives the URL to
+  embed in a payload, `wait_for()` polls for a hit); it binds no socket until
+  `start()` is called (default-off, mirroring the M6 `BrowserExecutor`/proxy/desync
+  dual-use gating pattern in this project — not a general-purpose, publicly reachable
+  collaborator-style service). Added `CommandInjectionOobStrategy` (mechanism
+  `oob-callback`, category `command-injection`) to `fuzzlab/oracle/strategies.py`:
+  embeds a fresh canary URL in `curl`/`wget` shell-fetch payloads and confirms only if
+  that exact token is later requested; it takes the listener by injection and no-ops
+  (returns `None`, no probe sent) when none is given, so it never reaches for a real
+  listener on its own. Wired into `default_strategies(oob=...)`, `Oracle(oob=...)`
+  (`fuzzlab/oracle/oracle.py`), `run_pipeline(oob=...)`
+  (`fuzzlab/harness/pipeline.py`), and `run_auto(oob=...)`
+  (`fuzzlab/harness/auto.py`); `fuzzlab auto` gained `--oob` (default off, same shape
+  as `--browser`), which constructs and starts the listener only when passed and
+  tears it down in a `finally` block after the run.
+- Impact (other components / project): FUZZ only — additive. `Oracle.__init__` and
+  `default_strategies()`/`run_pipeline()`/`run_auto()` gained an optional `oob=None`
+  keyword; every existing caller that omits it is unaffected (no behavior change,
+  same as `browser=None`). Blind command injection (Tier 3,
+  `docs/architecture/oracle-confirmation.md`) now has a working M8 confirmer
+  alongside the existing M1 timing one — `applies()` scopes both to the
+  `command-injection` category, so the oracle tries timing first, OOB second, and a
+  target that suppresses timing signal but still executes the shell fragment (fetches
+  the canary) is now confirmable. No schema change (findings already carry an
+  arbitrary `mechanism` string). No traffic sent unless `--oob`/`--authorized` are
+  both given, and the listener never leaves loopback.
+- Risk (level; mitigation): low-medium — a new local network listener is more
+  sensitive than a pure library change. Mitigated by: (1) the loopback-only guard in
+  `OobListener.__init__` (raises before binding on any non-loopback host); (2)
+  default-off at every layer (constructor argument defaults to `None`; CLI flag
+  defaults to `False`); (3) no DNS component, no external reachability, no
+  persistence beyond the process — it cannot function as a general-purpose OOB
+  interaction/collaborator service; (4) real tests exercising the actual socket (not
+  a mock) confirm it only ever records a hit for the exact token requested and never
+  cross-wires tokens; (5) fail-closed by construction — `confirm()` returns `None` on
+  timeout or when no listener is injected, never a guess.
+- Deliverables:
+  - [x] `OobListener` (loopback-only, default-off, real HTTP listener + token
+    register/callback_url/wait_for) — `fuzzlab/oracle/oob.py` — done.
+  - [x] `CommandInjectionOobStrategy` (M8, category `command-injection`) — done.
+  - [x] Wired into `default_strategies()`, `Oracle`, `run_pipeline()`, `run_auto()`,
+    and `fuzzlab auto --oob` — done.
+  - [x] Tests on the real listener and the real strategy (not mocks of our own code):
+    `tests/test_oracle_oob.py` (10 tests) — done.
+  - [x] `requirements.md` FR-FUZZ-8 added; `docs/ARCHITECTURE.md` Oracle status note
+    updated (`[built; M8/M10 pending]` → `[built; M10 pending]`) — done.
+  - [x] Full fast suite green (`pytest -m "not slow"`) — done.
+- Effectiveness (assessed 2026-09-22): effective — `tests/test_oracle_oob.py` proves
+  the listener records a real hit end to end (real socket, real HTTP request via
+  `urllib`), times out cleanly on a benign/secure target, does not cross-wire two
+  concurrent tokens, and that `Oracle.confirm()` reaches a `mechanism="oob-callback"`
+  verdict through the full pipeline wiring (not the strategy in isolation). Full fast
+  suite: 1536 passed, 8 skipped, 11 deselected (no regressions).
+
 ### CC-FUZZ-0018 — Expose `build_parser()` for the command-spec registry (2026-09-21)
 - Change: the fuzz/oracle activities factor their argparse setup into `build_parser()`, with
   `main()` delegating — `fuzzlab/tools/blind_sqli_fuzzer.py` (`parse_args()` delegates;
