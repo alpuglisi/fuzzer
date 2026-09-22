@@ -57,6 +57,17 @@ Revision history:
   fixed a stale reference in Wave A1's exception-path text that would have
   had a future G7…Gn lane collide with T1/T2/A2's already-claimed
   `CC-LAB-0060`–`0062` (corrected to `CC-LAB-0063`+).
+- v7 (2026-09-22): revised after review round 6 (three reviewers; 2 approve
+  with minor notes, 1 needs-revision). Fixed: **v6's own UI-numbering fix
+  missed D0a's UI number** — D0a fires in Wave 1a but its (conditional) UI
+  number had been left at `CC-UI-0032`, *after* all five Wave-2 UI lanes,
+  instead of slotting in right after U6 like its other five component
+  numbers correctly do. Renumbered: `U0=0025 → U6=0026 → D0a=0027 → U1=0028
+  → U2=0029 → U3=0030 → U4=0031 → U5=0032`. Also added a scope-transparency
+  note to Known Risks: U0, U6, U1, and B0 are infrastructure/dependency
+  scope pulled in by adopting `UI_IMPLEMENTATION_PLAN.md` wholesale, not
+  part of the original eight-item backlog (U2/U3/U4/U5 do map directly and
+  are already annotated as such).
 
 Scope: the three backlog groups called out as "safe to build now (offline, no
 missing precondition)" — lab track / manifest generator, UI/diagnostics, and
@@ -294,13 +305,14 @@ number, and `CC-UI-0025` (U0, below) is still correctly the next-free one.
 ### Wave 1 (per `UI_IMPLEMENTATION_PLAN.md` §4 — gated on U0 landing)
 
 **U1 — Overview dashboard**
-- Reserved: `CC-UI-0027`
+- Reserved: `CC-UI-0028` (after D0a's conditional `CC-UI-0027` — D0a is Wave
+  1a, dispatched before this Wave-2 lane; see D0a's entry below)
 
 **U2 — Findings workbench** *(the R2 "Findings workbench" item from the original backlog)*
-- Reserved: `CC-UI-0028`
+- Reserved: `CC-UI-0029`
 
 **U3 — Proxy workbench rebuild** *(the R3 "Proxy rebuild" item from the original backlog)*
-- Reserved: `CC-UI-0029` + `CC-PROXY-0018` (after D0a's `CC-PROXY-0017` —
+- Reserved: `CC-UI-0030` + `CC-PROXY-0018` (after D0a's `CC-PROXY-0017` —
   D0a is Wave 1a, dispatched before this Wave-2 lane)
 - Note the safety posture: proxy/desync tooling stays default-off and
   lab-only per CLAUDE.md; this lane must not flip that default (also
@@ -308,13 +320,13 @@ number, and `CC-UI-0025` (U0, below) is still correctly the next-free one.
   lane list).
 
 **U4 — ML tab**
-- Reserved: `CC-UI-0030` + `CC-ML-0010` (after B0's GBT/logistic emitter
+- Reserved: `CC-UI-0031` + `CC-ML-0010` (after B0's GBT/logistic emitter
   claims `CC-ML-0009` above — verify ordering at dispatch time)
 - Also needs D2 (charting library, already resolved: uPlot 1.6.32) — no
   further research gate.
 
 **U5 — Diagnostics + store explorer** *(covers both the "metric_series tab" and "Datasette-style store exploration" items from the original backlog — they're one lane per the authoritative plan, not two)*
-- Reserved: `CC-UI-0031`
+- Reserved: `CC-UI-0032`
 - Enriched by B0 landing but not blocked by it, per that document.
 
 All five Wave-1 lanes share `docs/components/12-diagnostics-and-ui/`
@@ -335,8 +347,11 @@ bookkeeping files — follow the **merge protocol** above.
 - **D0a — non-greybox tools** *(dispatch in Wave 1a, file-disjoint from C1;
   a single change touching six commands across five other components — each
   gets its own reserved number, per PA-0031, not just a UI one)*
-  - Reserved: `CC-UI-0032` (if surfaced/documented through the web UI) +
-    `CC-CRAWL-0007` (`crawl`, current highest `CC-CRAWL-0006`) +
+  - Reserved: `CC-UI-0027` (if surfaced/documented through the web UI — this
+    also slots ahead of Wave 2's U1–U5, since D0a is Wave 1a; round 6 review
+    caught this same UI-numbering gap that v6 had already fixed for the
+    other five components) + `CC-CRAWL-0007` (`crawl`, current highest
+    `CC-CRAWL-0006`) +
     `CC-AUD-0015` (`audit`, current highest `CC-AUD-0014`) +
     `CC-FUZZ-0020` (`fuzz` + `auto` — both land in the FUZZ component; one
     entry covers both since it's one lane/commit) + `CC-MUT-0010`
@@ -443,6 +458,20 @@ merges.
 
 ## Known risks to flag before dispatch (per MULTI_AGENT_ORCHESTRATION.md — flag, don't silently resolve)
 
+- **Scope-transparency note: U0, U6, U1, and B0 are not from the original
+  backlog.** They're pulled in by adopting `docs/UI_IMPLEMENTATION_PLAN.md`'s
+  lane map wholesale (the right call — see Lane group B's intro — since it's
+  the authoritative, already-decided plan for this component). U2 (Findings
+  workbench), U3 (Proxy rebuild), U4 (ML tab), and U5 (metric_series +
+  store exploration) map directly to original backlog items and are
+  annotated as such inline. U0 (the MPA route-split enabling refactor), U6
+  (control-plane hardening), U1 (Overview dashboard — has no backlog
+  antecedent at all), and B0 (the `metric_series` table + emitters, which
+  U5 needs to be useful) are infrastructure/dependency work the original ask
+  didn't name but that adopted plan requires or bundles in. Not unsafe or
+  wasted — U0 and B0 are genuine prerequisites — but whoever approves this
+  plan for dispatch should know Wave 1a/2 include this additional scope,
+  not just the eight originally-requested items.
 - **X0 ("register `lab-generate` in the launcher") is already done** —
   confirmed as `CC-UI-0024` in `docs/components/12-diagnostics-and-ui/change-control.md`,
   landed in `fuzzlab/web/commandspec.py` with matching tests.
