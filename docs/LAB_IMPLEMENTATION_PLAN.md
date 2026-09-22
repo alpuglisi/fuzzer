@@ -1250,6 +1250,44 @@ left open deliberately until the project owner decided them.
   something `L-P3.3c-CUT` waits on. `PFF-0007`/`PFF-0008` are exempted
   in `lab/ground-truth/migration-exemptions.yaml` citing this decision.
 
+#### 4.3.6.7a Layer-A reconciliation, reconfirmed (2026-09-22, `CC-LAB-0059`)
+
+Mechanically reconfirmed against the live repo state, not just re-read from
+this plan: `lab/ground-truth/labels.json` carries exactly **16** `PFF-`
+cases (`PFF-0001…0008`, `PFF-1001…1008`) — unchanged since the Phase-0
+label-contract commit (`git log` on the file shows a single commit
+touching it, ever). All 16 are accounted for. Reading
+`lab/ground-truth/migration-exemptions.yaml` directly (the file
+`cutover_gate.py` itself reads) gives the precise, currently-live split —
+**12 covered / 4 exempted / 0 uncovered**, matching `CC-LAB-0058`'s own
+recorded result exactly (this plan's earlier "13 done / 1 exempt / 2
+deferred" framing in §4.3.6.3/Wave A0 of `docs/PARALLEL_LANE_BUILD_PLAN.md`
+predates `CC-LAB-0058` and is now one case off on the partition, not the
+total):
+
+- **12 covered** — all of `L-P3.3c-G1`…`L-P3.3c-G6`'s pages
+  (`product`/`blog_post`/`products`/`api/products`/`login`/`register`/
+  `profile`+`edit_profile`/`contact`/`newsletter`/`search`), `CC-LAB-0046`
+  through `CC-LAB-0051`, minus `PFF-0003` (see below).
+- **4 exempted**, each with a dated reason in the register: `PFF-1002`
+  (`track.php`, no sink to model — unchanged from `CC-LAB-0053`);
+  `PFF-0007`/`PFF-0008` (the `reviews.php`/`feedback.php` DOM-XSS pair,
+  D-open-1/D-open-2 above — unchanged from `CC-LAB-0053`); and
+  `PFF-0003` (search.php's reflected-XSS case), added by `CC-LAB-0058` —
+  not because G6 left it unbuilt, but because `/search.php`'s single page
+  profile can only own one canonical cell at that real URL, and
+  `PFF-0002` (the co-located LIKE-clause SQLi) was chosen canonical.
+  `PFF-0003`'s shape is still authored and tested as one of G6's six
+  `LABGEN-PL-RP-000x` cells at its illustrative twin URL; only the
+  real-app-URL/live-boot identity is exempted.
+
+A repo-wide grep for `PFF-` under `puppy-fort-factory/` turned up no
+label strings in the app source itself (labels live only in
+`lab/ground-truth/`, as designed) and no pages absent from the §4.3.6.3
+table. **No new pages or cases have been added since this plan was
+written. Layer A is closed** — 13 done + 1 exempt + 2 deferred = 16,
+matching `labels.json` exactly. No `G7…Gn` lanes are dispatched.
+
 ### 4.4 Cross-cutting: `stack` field + fingerprint-independence gate
 
 **Depends on:** at least one of 4.1/4.2/4.3 landing (needs a second stack
