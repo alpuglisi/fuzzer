@@ -25,6 +25,12 @@ from fuzzlab.scheduler.context import (
     context_parents,
 )
 from fuzzlab.scheduler.uniform import UniformScheduler
+from fuzzlab.scheduler.variants import (
+    VariantCandidate,
+    load_variant_candidates,
+    variant_probe_specs,
+)
 
 __all__ = ["Beta", "ThompsonBandit", "UniformScheduler", "context_for",
-           "context_parents", "arm_priors", "catalog_families", "catalog_priors"]
+           "context_parents", "arm_priors", "catalog_families", "catalog_priors",
+           "VariantCandidate", "load_variant_candidates", "variant_probe_specs"]

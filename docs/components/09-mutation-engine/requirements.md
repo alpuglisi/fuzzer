@@ -1,6 +1,6 @@
 # Mutation Engine — Requirement Specification
 
-Component code: **MUT** · Status: `[built — operators/validator/XSS, filter model + learner, bandit/coverage search, destructive-gated variant write-back, and the live HttpFilter + fuzzlab mutate-run driver; live WAF evasion verified on-host]` (Phase 8) · Last updated: 2026-09-22 · see CC-MUT-0008
+Component code: **MUT** · Status: `[built — operators/validator/XSS, filter model + learner, bandit/coverage search, destructive-gated variant write-back, the read-back candidate source into the live attempt path, and the live HttpFilter + fuzzlab mutate-run driver; live WAF evasion verified on-host]` (Phase 8) · Last updated: 2026-09-22 · see CC-MUT-0009
 
 Related: `ARCHITECTURE.md` #9; `DECISIONS_AND_ROADMAP.md` (D1, Phase 8);
 `./change-control.md`.
@@ -39,6 +39,13 @@ feedback and the scheduler.
   AST or canonical-form comparison of the fragment would otherwise conclude. Added
   after BUG-0026 (CC-MUT-0008) found the validator accepting such a mutation by
   default; see PA-0028.
+- **FR-MUT-8** `payload_variant` rows are read back in as candidates for the live
+  fuzz/attempt path, not left write-only: `fuzzlab.scheduler.variants` (SCHED)
+  provides `load_variant_candidates`/`variant_probe_specs`, scoped by vuln_class/
+  sink_context like the existing catalog candidate source (`catalog_families`/
+  `catalog_priors`), and `fuzzlab greybox-run --mutation-variants` feeds them into
+  `run_greybox` **alongside** the default probes (never replacing them). See
+  FR-SCHED-9 (the scheduler-side half of the same requirement) and CC-MUT-0009.
 
 ## 4. Non-functional requirements
 - **NFR-MUT-semantics** A mutation must preserve intended semantics; a validator
@@ -53,7 +60,9 @@ feedback and the scheduler.
 ## 5. Interfaces and data contracts
 Reads catalog payloads and canary/filter observations; reads coverage signals and
 scheduler operator choices; writes new payload candidates back to the
-catalog/`attempt` path.
+`payload_variant` catalog. A scheduler-owned reader (`fuzzlab.scheduler.variants`,
+FR-MUT-8/FR-SCHED-9) reads `payload_variant` back in and feeds it to the live
+grey-box `attempt` path.
 
 ## 6. Dependencies (components)
 `core/`, indicator DB & catalogs, payload scheduler, oracle, grey-box

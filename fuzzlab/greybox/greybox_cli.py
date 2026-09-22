@@ -64,6 +64,15 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Probe an authenticated surface as this identity (optional)")
     p.add_argument("--settle", type=float, default=0.0,
                    help="Seconds to wait after each request for the shim to flush")
+    p.add_argument("--mutation-variants", action="store_true",
+                   help="Also probe with mutation-engine variants (payload_variant table, "
+                        "from `fuzzlab mutate-run`) alongside the default probes. Default "
+                        "off. Scoped to the run's known vuln classes (ground-truth points) "
+                        "when any are known, else pooled across all recorded variants.")
+    p.add_argument("--mutation-limit", type=int, default=25,
+                   help="Max mutation-engine variants to add as probes (default 25; "
+                        "newest first) — bounds how much --mutation-variants adds to "
+                        "attempt volume")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
     return p
@@ -115,21 +124,39 @@ def main(argv: list[str]) -> int:
         dbfault_source = FileDbFaultSource(args.cov_dir)
         lab_control = ScriptLabControl(args.labctl) if args.labctl else None
 
+        probes = gbrun.DEFAULT_PROBES
+        variants_added = 0
+        if args.mutation_variants:
+            from fuzzlab.scheduler.variants import variant_probe_specs
+            # Scope to the run's known vuln classes (ground-truth points carry one)
+            # when any are known; otherwise pool across every recorded variant class.
+            known_classes = sorted({pt.vuln_class for pt in points if pt.vuln_class})
+            extra = variant_probe_specs(
+                store, vuln_classes=known_classes or None, limit=args.mutation_limit)
+            probes = tuple(probes) + tuple(extra)   # additive: never replaces the defaults
+            variants_added = len(extra)
+
         summary = gbrun.run_greybox(
             base_url=args.base_url, store=store, run_id=run_id, points=points,
             sender=sender, coverage_source=coverage_source,
             dbfault_source=dbfault_source, lab_control=lab_control,
-            reset_between=args.reset, app_root=args.app_root, settle=args.settle)
+            reset_between=args.reset, app_root=args.app_root, settle=args.settle,
+            probes=probes)
 
-        _print_summary(args, source, counts, points, skipped, summary, run_id)
+        _print_summary(args, source, counts, points, skipped, summary, run_id,
+                      variants_added)
     return 0
 
 
-def _print_summary(args, source, counts, points, skipped, summary, run_id) -> None:
+def _print_summary(args, source, counts, points, skipped, summary, run_id,
+                   variants_added: int = 0) -> None:
     print(f"\ngreybox run (source={source}; run_id={run_id})")
     if counts:
         print(f"  crawl imported: {counts.get('endpoint', 0)} endpoint(s), "
               f"{counts.get('parameter', 0)} parameter(s)")
+    if args.mutation_variants:
+        print(f"  mutation-engine variants added as probes: {variants_added} "
+              f"(--mutation-variants, limit {args.mutation_limit})")
     print(f"  points probed: {summary['points']}   attempts: {summary['attempts']}")
     print(f"  novel app lines (frontier growth): {summary['novel_lines']}")
     print(f"  db_fault attempts: {summary['db_faults']}")

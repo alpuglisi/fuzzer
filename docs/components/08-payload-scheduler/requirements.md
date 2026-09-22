@@ -1,6 +1,9 @@
 # Payload Scheduler (Bandit) — Requirement Specification
 
-Component code: **SCHED** · Status: `[planned]` (Phase 4) · Last updated: 2026-09-21
+Component code: **SCHED** · Status: `[partial — bandit core/priors/backoff built;
+mutation-variant candidate source built (FR-SCHED-9); wired into the live grey-box
+attempt path via fuzzlab greybox-run --mutation-variants]` (Phase 4/8) ·
+Last updated: 2026-09-22 · see CC-SCHED-0005
 
 Related: `ARCHITECTURE.md` #8; `DECISIONS_AND_ROADMAP.md` (D1, D5, Phase 4);
 `./change-control.md`.
@@ -30,6 +33,16 @@ from oracle and grey-box reward.
   over no learning.
 - **FR-SCHED-8** Take reward from the oracle (confirmed finding) and, when
   available, grey-box coverage (dense reward).
+- **FR-SCHED-9** Provide a candidate source over the mutation engine's
+  `payload_variant` table (`fuzzlab.scheduler.variants`), mirroring the existing
+  static-catalog candidate source (`catalog_families`/`catalog_priors` over
+  `references/<category>/payloads/*.txt`): read variants back in, optionally scoped
+  by vuln_class/sink_context/run, and hand them to the live attempt path
+  (`greybox.run.run_greybox`) as additional `ProbeSpec`s **alongside** — never
+  instead of — the existing default/catalog probes. Any caller that can increase
+  real attempt traffic (e.g. `fuzzlab greybox-run --mutation-variants`) is gated by
+  the same `--authorized` requirement as every other request-sending path (D11).
+  See FR-MUT-8 (the mutation-engine-side half of the same requirement).
 
 ## 4. Non-functional requirements
 - **NFR-SCHED-reproducible** Given a fixed seed and posteriors, selection is
@@ -42,7 +55,10 @@ from oracle and grey-box reward.
 ## 5. Interfaces and data contracts
 Reads `candidate` rows and `target` fingerprint; reads/writes `bandit_posteriors`;
 reads reward from `finding`/`attempt` and grey-box signals. Emits a per-candidate
-family choice consumed by the fuzzing harness.
+family choice consumed by the fuzzing harness. Also reads the mutation engine's
+`payload_variant` table (FR-SCHED-9, `fuzzlab.scheduler.variants`) as an additional,
+optionally-scoped candidate source, emitting `greybox.run.ProbeSpec`s consumed by
+`run_greybox` alongside its default probes.
 
 ## 6. Dependencies (components)
 `core/`, auditor (candidates), fuzzing harness and oracle (rewards), grey-box

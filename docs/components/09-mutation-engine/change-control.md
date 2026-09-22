@@ -3,6 +3,67 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0009 — Read `payload_variant` back in as live-attempt candidates (close a confirmed wiring gap) (2026-09-22)
+- Change: a change-control/roadmap audit confirmed (by grep, not inference) that
+  `payload_variant` (written by `fuzzlab/mutation/{run.py,catalog.py}`) was never read
+  back in anywhere in the scheduler/candidate/fuzzer attempt pipeline — the live
+  `attempt` path (`fuzzlab/greybox/run.py::run_greybox`) only ever sent its fixed
+  `DEFAULT_PROBES`. New `fuzzlab/scheduler/variants.py` (SCHED component; see mirrored
+  CC-SCHED-0005) adds `load_variant_candidates`/`variant_probe_specs`, which read
+  `payload_variant` rows — optionally scoped by `vuln_class`/`sink_context`/`run_id`,
+  bounded by `limit`, and excluding non-semantics-preserving rows by default — and map
+  them to `greybox.run.ProbeSpec`s (`family="mut:<vuln_class>:<row id>"`, so an
+  `attempt.payload_family` traces back to its exact `payload_variant` row). This mirrors
+  the existing catalog candidate-source seam (`catalog_families`/`catalog_priors`
+  reading `references/<cat>/payloads/*.txt`) but reads the mutation engine's DB-backed
+  catalog instead of files. Wired into the CLI: `fuzzlab greybox-run --mutation-variants`
+  (default off) and `--mutation-limit` (default 25) merge these probes **additively**
+  into `run_greybox`'s probe set — never replacing the defaults — scoped to the run's
+  known vuln classes when any are known (ground-truth points), else pooled across all
+  recorded variants. No new gate needed: `greybox-run` already refuses to run at all
+  without `--authorized` (D11), unconditionally, so the new candidate source inherits
+  the same authorization gate as every other request-sending path in this project —
+  verified by a dedicated test that `--mutation-variants` alone (no `--authorized`)
+  still refuses.
+- Impact (other components / project): SCHED (new module, exported from
+  `fuzzlab.scheduler`) and the greybox CLI (`fuzzlab/greybox/greybox_cli.py`) both
+  changed; this entry is mirrored in `docs/components/08-payload-scheduler/
+  change-control.md` (CC-SCHED-0005) per CLAUDE.md's per-component change-control rule.
+  Requirements: FR-MUT-8 (this doc) and FR-SCHED-9 (mirrored). No schema change (reads
+  the existing migration-8 `payload_variant` table); no change to default behavior
+  (opt-in flag, off by default, so every existing `greybox-run` invocation is
+  unaffected).
+- Risk (level; mitigation): low-medium — this is a new path that can send real requests
+  (mutation-engine variants against the live lab), but it is default-off, additive
+  (never replaces the existing probes), bounded by `--mutation-limit`, and gated by the
+  same unconditional `--authorized` check every other `greybox-run` probe already goes
+  through. Mitigated by `tests/test_scheduler_variants.py` (10 tests: round-trip of a
+  real `payload_variant` row; vuln_class/sink_context/run_id scoping; `semantics_ok`
+  filtering on by default; `limit`; the `ProbeSpec` shape and family->row traceability;
+  vuln_class->probe-kind mapping; and an end-to-end test that seeds a real row, converts
+  it, and drives a real `run_greybox` call against a test-double sender, asserting the
+  resulting `attempt` row's `payload_family`/`reward`/`db_fault` and that the actual
+  mutation-engine payload string — not the base payload — was sent) and
+  `tests/test_greybox_cli_mutation_variants.py` (4 tests: the new flags parse and
+  default off; `--authorized` is still required with `--mutation-variants` set; `main()`
+  merges the real variant into the probe set additively when the flag is set; `main()`
+  uses only the defaults, ignoring an existing `payload_variant` row, when the flag is
+  not set). Full suite: 1591 passed, 8 skipped, 12 deselected (no regressions).
+- Deliverables:
+  - [x] `fuzzlab/scheduler/variants.py` (`VariantCandidate`, `load_variant_candidates`,
+    `variant_probe_specs`) — done.
+  - [x] Exported from `fuzzlab.scheduler` — done.
+  - [x] `fuzzlab greybox-run --mutation-variants`/`--mutation-limit`, additive wiring
+    into `run_greybox`, `--authorized`-gated — done.
+  - [x] Round-trip + CLI-wiring tests (no regressions) — done.
+  - [x] FR-MUT-8, FR-SCHED-9, `docs/ARCHITECTURE.md` Phase 8 status — done.
+- Effectiveness (assessed 2026-09-22): effective — a real `payload_variant` row now
+  reaches a real `attempt` row through the live grey-box path via the new,
+  `--authorized`-gated, default-off, additive candidate source; the previously-confirmed
+  gap (variants written but never read back in) is closed for the offline/test-double
+  path. Live-lab confirmation that this measurably improves attempt yield is future
+  on-host work, not claimed here.
+
 ### CC-MUT-0008 — Fix `SemanticsValidator` fail-open on untrusted SQL comment-append; fix AST case-sensitivity (2026-09-22)
 - Change: `fuzzlab/mutation/semantics.py` — added `introduces_line_comment(original,
   mutated)` (true when `mutated` carries a `--` marker `original` didn't) and made

@@ -3,6 +3,58 @@
 Component code: **SCHED**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SCHED-0005 — Mutation-variant candidate source, wired into the live attempt path (2026-09-22)
+- Change: closes a confirmed wiring gap (verified by grep, not inference): the mutation
+  engine's `payload_variant` table (MUT, migration 8) was write-only — nothing in the
+  scheduler/candidate/fuzzer pipeline read it back in as candidates. New
+  `fuzzlab/scheduler/variants.py` adds `VariantCandidate`, `load_variant_candidates`
+  (reads `payload_variant`, optionally scoped by `vuln_class`/`vuln_classes`/
+  `sink_context`/`run_id`, bounded by `limit`, `semantics_ok`-filtered by default) and
+  `variant_probe_specs` (maps rows to `greybox.run.ProbeSpec`s, `family="mut:<vuln_class>:
+  <row id>"` for traceability back to the exact row). This is the same candidate-source
+  shape as the existing static-catalog reader (`catalog_families`/`catalog_priors` over
+  `references/<category>/payloads/*.txt`), extended to a second, DB-backed catalog
+  rather than replacing the first. Exported from `fuzzlab.scheduler`. Wired into
+  `fuzzlab greybox-run` via two new opt-in flags, `--mutation-variants` (default off)
+  and `--mutation-limit` (default 25): when set, the resulting probes are appended to
+  (never substituted for) `run_greybox`'s `DEFAULT_PROBES`, scoped to the run's known
+  vuln classes when the points carry one (ground-truth runs), else pooled across all
+  recorded variants. `greybox-run` already refuses to run at all without `--authorized`
+  (D11) regardless of this flag, so the new source inherits that same gate rather than
+  needing (or getting) a separate one.
+- Impact (other components / project): mirrored in
+  `docs/components/09-mutation-engine/change-control.md` (CC-MUT-0009) since it reads
+  MUT's table and closes MUT's own stated "still sent through the attempt path" gap
+  (see the `payload_variant` migration comment in `fuzzlab/core/migrations.py`).
+  Requirements: FR-SCHED-9 (this doc) and FR-MUT-8 (mirrored). No schema change; default
+  behavior unchanged (opt-in, off by default).
+- Risk (level; mitigation): low-medium — a new path that, once opted into, sends real
+  mutation-engine payloads at the (lab) target. Mitigated by: default-off, additive
+  (never replaces the default probes), `--mutation-limit`-bounded, and gated by the
+  existing unconditional `--authorized` check on `greybox-run`. Tests:
+  `tests/test_scheduler_variants.py` (10 — round-trip of a real `payload_variant` row;
+  scoping by vuln_class/sink_context/run_id; `semantics_ok` filtering; `limit`;
+  `ProbeSpec` shape + family-to-row traceability; vuln_class->kind mapping; and an
+  end-to-end real-`Store`-plus-fake-sender `run_greybox` call proving the actual variant
+  string is sent and produces a real, correctly-attributed `attempt` row — not a mock of
+  this module's own internals) and `tests/test_greybox_cli_mutation_variants.py` (4 —
+  flag parsing/defaults; `--authorized` still required with the new flag set; `main()`
+  merges variants additively when set; `main()` ignores a real, present
+  `payload_variant` row when the flag is not set). Full suite: 1591 passed, 8 skipped,
+  12 deselected — no regressions.
+- Deliverables:
+  - [x] `fuzzlab/scheduler/variants.py` + `fuzzlab.scheduler` export — done.
+  - [x] `fuzzlab greybox-run --mutation-variants`/`--mutation-limit`, additive,
+    `--authorized`-gated wiring — done.
+  - [x] Round-trip + CLI tests, no regressions — done.
+  - [x] FR-SCHED-9, FR-MUT-8, `docs/ARCHITECTURE.md` Phase 8 status — done.
+  - [ ] On-lab: measure whether mutation-variant probes actually raise attempt yield
+    vs the default set alone — on-host, future work.
+- Effectiveness (assessed 2026-09-22): effective for the wiring gap itself — a real
+  `payload_variant` row now demonstrably reaches a real `attempt` row through the live
+  grey-box path, additively and behind the standard authorization gate; whether it
+  improves live-lab yield is unmeasured pending on-host use.
+
 ### CC-SCHED-0004 — Cost-normalized selection (T4.4) + hierarchical backoff (T4.5) (2026-09-21)
 - Change: `ThompsonBandit` gained two opt-in refinements. **Cost-normalized** (T4.4):
   `update(context, arm, reward, cost=…)` records a running mean cost; with

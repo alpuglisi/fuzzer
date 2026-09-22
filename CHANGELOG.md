@@ -13,6 +13,14 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- SCHED/MUT: closed a confirmed wiring gap where the mutation engine's
+  `payload_variant` table was write-only — added `fuzzlab/scheduler/variants.py`
+  (a candidate source reading `payload_variant` back in, scoped like the existing
+  static-catalog reader) and wired it into `fuzzlab greybox-run --mutation-variants`
+  (default off, additive to the default probes, `--authorized`-gated like every other
+  request-sending path), so mutation-engine variants now actually reach the live
+  attempt path instead of sitting unused in the store (CC-MUT-0009, CC-SCHED-0005,
+  FR-MUT-8, FR-SCHED-9).
 - FUZZ: wired M10 grey-box confirmation into the real oracle pipeline —
   `GreyboxConfirmationStrategy` (constructor-injected `CoverageSource`/
   `DbFaultSource`, both default `None`, fail-closed no-op without a source or a
