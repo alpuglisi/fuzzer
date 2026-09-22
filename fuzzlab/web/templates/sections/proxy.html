@@ -1,39 +1,84 @@
 {% extends "base.html" %}
 {% block crumb %}Proxy{% endblock %}
 {% block content %}
+{#
+  R3 (docs/UI_LAYOUT_REDESIGN.md #9): the Proxy workbench is re-laid onto a Burp/ZAP-style
+  sub-nav (History / Intercept / Repeater / Scope & Match-Replace as sibling panels inside
+  one document, not a stack of always-visible cards) plus a shared message-editor component
+  (Pretty / Raw / Hex views over the same raw bytes — the "Raw" view is the actual byte-exact
+  edit surface; "Pretty"/"Hex" are read-only derived views, computed client-side from the
+  same text, never re-sent as truth) and resizable list|detail split panes. All ids that the
+  workbench's existing JS (initProxy/initIntercept/initRepeater/initScope in app.js) and its
+  backend routes (/api/proxy/*) already rely on are unchanged — this is a re-lay, not a
+  rewrite of the wiring.
+#}
+{% macro msg_editor(id, editable=False, rows=10, placeholder='') %}
+<div class="msg-editor" data-editor="{{ id }}">
+  <div class="msg-editor-tabs" role="tablist">
+    <button type="button" class="mv-tab active" data-mv="raw" role="tab">Raw</button>
+    <button type="button" class="mv-tab" data-mv="pretty" role="tab">Pretty</button>
+    <button type="button" class="mv-tab" data-mv="hex" role="tab">Hex</button>
+  </div>
+  <div class="flow-raw mv-panel" data-mv-panel="pretty" hidden></div>
+  <pre class="flow-raw mv-panel" data-mv-panel="hex" hidden></pre>
+  {% if editable %}
+  <textarea id="{{ id }}" class="pending-raw mv-panel" data-mv-panel="raw" rows="{{ rows }}"
+            spellcheck="false" placeholder="{{ placeholder }}"></textarea>
+  {% else %}
+  <pre id="{{ id }}" class="flow-raw mv-panel" data-mv-panel="raw"></pre>
+  {% endif %}
+</div>
+{% endmacro %}
 <section class="panel">
   <div class="card">
     <h2>Proxy workbench</h2>
     <p class="muted" id="proxy-status">Proxy: checking…</p>
     <p class="muted">History, live Intercept (pause / edit / drop / forward), Repeater, and
-      Scope / Match-Replace are all below. Intercept, Repeater sends, and Scope /
+      Scope / Match-Replace are sub-tabs below. Intercept, Repeater sends, and Scope /
       Match-Replace need the in-process proxy (<code>fuzzlab web --with-proxy --authorized</code>).</p>
   </div>
 
-  <div class="card">
+  <nav class="subnav proxy-subnav" aria-label="Proxy workbench">
+    <button type="button" data-tab="history" class="active">History</button>
+    <button type="button" data-tab="intercept">Intercept</button>
+    <button type="button" data-tab="repeater">Repeater</button>
+    <button type="button" data-tab="scope">Scope &amp; Match-Replace</button>
+  </nav>
+
+  <div class="card subnav-panel" id="history-panel" data-panel="history">
     <h2>History</h2>
-    <div class="field">
-      <input type="text" id="flow-search" placeholder="search url / host / head…">
-      <button type="button" id="flow-refresh">Refresh</button>
-    </div>
-    <table id="flow-table">
-      <thead><tr><th>#</th><th>method</th><th>url</th><th>host</th><th>status</th>
-        <th>ms</th><th>proto</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <p class="muted" id="flow-empty" hidden>No flows recorded yet. Start the proxy
-      (<code>fuzzlab web --with-proxy --authorized</code>, or <code>fuzzlab proxy</code>)
-      and drive traffic through it.</p>
-    <div id="flow-detail" hidden>
-      <h3>Flow <span id="flow-detail-id"></span>
-        <span class="muted">— stored bytes are redacted</span>
-        <button type="button" id="flow-to-repeater">&rarr; Repeater</button></h3>
-      <h4>Request</h4><pre class="flow-raw" id="flow-req"></pre>
-      <h4>Response</h4><pre class="flow-raw" id="flow-resp"></pre>
+    <div class="split" data-split-id="history">
+      <div class="split-a">
+        <div class="field">
+          <input type="text" id="flow-search" placeholder="search url / host / head…">
+          <button type="button" id="flow-refresh">Refresh</button>
+        </div>
+        <table id="flow-table">
+          <thead><tr><th>#</th><th>method</th><th>url</th><th>host</th><th>status</th>
+            <th>ms</th><th>proto</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p class="muted" id="flow-empty" hidden>No flows recorded yet. Start the proxy
+          (<code>fuzzlab web --with-proxy --authorized</code>, or <code>fuzzlab proxy</code>)
+          and drive traffic through it.</p>
+      </div>
+      <div class="split-resizer" title="drag to resize"></div>
+      <div class="split-b">
+        <div id="flow-detail" hidden>
+          <h3>Flow <span id="flow-detail-id"></span>
+            <span class="muted">— stored bytes are redacted</span>
+            <button type="button" id="flow-to-repeater">&rarr; Repeater</button></h3>
+          <h4>Request</h4>
+          {{ msg_editor("flow-req") }}
+          <h4>Response</h4>
+          {{ msg_editor("flow-resp") }}
+        </div>
+        <p class="muted" id="history-detail-empty">Select a flow on the left to inspect it.</p>
+      </div>
     </div>
   </div>
 
-  <div class="card" id="intercept-card">
+  <div class="card subnav-panel" id="intercept-card" data-panel="intercept" hidden>
     <h2>Intercept</h2>
     <p class="muted" id="intercept-unavailable" hidden>Not running in-process. Start with
       <code>fuzzlab web --with-proxy --authorized</code> to pause, edit, drop, and forward
@@ -44,28 +89,37 @@
         <label class="cat"><input type="checkbox" id="intercept-resp"> and responses</label>
         <span class="muted" id="intercept-count"></span>
       </div>
-      <table id="pending-table">
-        <thead><tr><th>#</th><th>dir</th><th>method</th><th>target</th><th>host</th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <p class="muted" id="pending-empty" hidden>No flows held. Toggle intercept on and
-        drive traffic through the proxy.</p>
-      <div id="pending-detail" hidden>
-        <h3>Editing held flow <span id="pending-id"></span>
-          <span class="muted">— edit the raw bytes, then Forward (or Drop)</span></h3>
-        <textarea id="pending-raw" class="pending-raw" rows="12" spellcheck="false"></textarea>
-        <div class="actions">
-          <button type="button" id="pending-forward">Forward</button>
-          <button type="button" id="pending-drop">Drop</button>
+      <div class="split" data-split-id="intercept">
+        <div class="split-a">
+          <table id="pending-table">
+            <thead><tr><th>#</th><th>dir</th><th>method</th><th>target</th><th>host</th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <p class="muted" id="pending-empty" hidden>No flows held. Toggle intercept on and
+            drive traffic through the proxy.</p>
+        </div>
+        <div class="split-resizer" title="drag to resize"></div>
+        <div class="split-b">
+          <div id="pending-detail" hidden>
+            <h3>Editing held flow <span id="pending-id"></span>
+              <span class="muted">— edit the raw bytes, then Forward (or Drop)</span></h3>
+            {{ msg_editor("pending-raw", editable=True, rows=12) }}
+            <div class="actions">
+              <button type="button" id="pending-forward">Forward</button>
+              <button type="button" id="pending-drop">Drop</button>
+            </div>
+          </div>
+          <p class="muted" id="pending-detail-empty">Select a held flow on the left.</p>
         </div>
       </div>
     </div>
   </div>
 
-  <div class="card" id="repeater-card">
+  <div class="card subnav-panel" id="repeater-card" data-panel="repeater" hidden>
     <h2>Repeater</h2>
-    <p class="muted">Save a raw request as a tab and replay it byte-exact. Use
-      &ldquo;&rarr; Repeater&rdquo; on a History flow to seed one.
+    <p class="muted">Save a raw request as a tab and replay it byte-exact (the saved/edited
+      bytes go on the wire verbatim — no reserialization). Use &ldquo;&rarr;
+      Repeater&rdquo; on a History flow to seed one.
       {% if not authorized %}Sending is disabled until <code>authorized: true</code>.{% endif %}</p>
     <div class="field">
       <label for="rep-tab-select">Tabs</label>
@@ -89,17 +143,17 @@
     </details>
     <div id="rep-editor" hidden>
       <h4>Request</h4>
-      <textarea id="rep-raw" class="pending-raw" rows="10" spellcheck="false"></textarea>
+      {{ msg_editor("rep-raw", editable=True, rows=10) }}
       <div class="actions">
         <button type="button" id="rep-send"
           {% if not authorized %}disabled title="set authorized:true to replay"{% endif %}>Send</button>
       </div>
       <h4>Response</h4>
-      <pre class="flow-raw" id="rep-resp"></pre>
+      {{ msg_editor("rep-resp") }}
     </div>
   </div>
 
-  <div class="card" id="scope-card">
+  <div class="card subnav-panel" id="scope-card" data-panel="scope" hidden>
     <h2>Scope · Match-Replace</h2>
     <p class="muted" id="scope-unavailable" hidden>Not running in-process. Start with
       <code>fuzzlab web --with-proxy --authorized</code> to manage scope and rewrites.</p>

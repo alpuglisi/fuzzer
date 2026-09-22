@@ -3,6 +3,92 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0027 — R3: Proxy workbench re-lay (sub-nav + shared message editor + split panes) (2026-09-22)
+- Change: built R3 of the layout redesign (`docs/UI_LAYOUT_REDESIGN.md` §9) — re-laying the
+  Proxy workbench (unchanged since R1 moved it to its own route) onto the shared patterns R0-R2
+  established, per the doc's exact scope ("re-lay Proxy on the shared message editor +
+  resizable panes + sub-nav (folding in Phase 2.1-2.4)"). No new backend surface was needed:
+  before touching anything, the two engineering gaps `docs/UI_REVAMP_PLAN.md` §8 named for this
+  phase (response interception; byte-exact/live replay) were checked against the current
+  `fuzzlab/proxy/*` state (per new `FR-UI-12`) and found **already closed** by prior work:
+  response interception by `CC-PROXY-0015` (an awaited, opt-in response hook in
+  `ProxyEngine.handle_request` + `Interceptor.intercept_responses`, default off so the
+  request-only path stays byte-exact); byte-exact replay by `Repeater.send`, which already
+  forwards a tab's saved/edited raw bytes verbatim (no `h11`/parsed-path reserialization). Both
+  were previously only exercised incidentally; this lane added dedicated engine-level coverage
+  (`tests/test_proxy_repeater.py`) confirming a duplicate/conflicting `Content-Length` and an
+  edited body round-trip byte-for-byte through `Repeater.send`, matching the rigor
+  `test_proxy_response_intercept.py` already gave the other gap. **This is therefore a UI-only
+  change** (`fuzzlab/web/*`); no PROXY engine files were modified and no new CC-PROXY entry was
+  needed.
+  - **Sub-nav** (`templates/sections/proxy.html`): the workbench's four cards (History /
+    Intercept / Repeater / Scope & Match-Replace) become sibling `.subnav-panel`s of one
+    `/proxy` document, switched by a `.proxy-subnav` button bar (`app.js::initProxySubnav`),
+    exactly one visible at a time (History by default, server-rendered so it degrades
+    correctly with JS off — every panel still renders, just all visible). Selection is
+    reflected in `?tab=` via `history.replaceState` (deep-linkable, no client router, per the
+    project's MPA policy) and the R2 "send to Repeater" `?repeater_tab=` deep-link now also
+    switches to the Repeater sub-tab (`selectProxyTab("repeater")`).
+  - **Shared message editor** (the `msg_editor()` Jinja macro + `app.js::wireMsgEditor`/
+    `initMessageEditors`/`hexDump`/`renderPretty`): wraps every raw-bytes surface (History's
+    request/response, Intercept's held-flow editor, Repeater's request/response) in a
+    Pretty/Raw/Hex tab set. "Raw" is the exact same textarea/`<pre>` element (same `id`) the
+    pre-existing JS already reads/writes — the true edit/display surface, unchanged. "Pretty"
+    (parsed start-line + indented header lines + body) and "Hex" (offset/hex/ASCII dump) are
+    read-only, computed client-side from that same text when their tab is opened
+    (`root._flRefresh()` re-renders the currently-active derived view whenever the code that
+    loads a new flow/tab sets the raw panel's content, via a new `refreshMsgEditor(id)` call
+    added at each of those 5 call sites) — never re-sent as truth, so the byte-exact raw path
+    (FR-PROXY-4, NFR-PROXY-byte-exact) is untouched.
+  - **Resizable split panes** (`app.js::initSplitResizers`, `.split`/`.split-resizer` in
+    `app.css`): a drag handle between the list (table) and detail pane for History and
+    Intercept, persisting the chosen list-column width per split id in `localStorage` (a
+    per-viewer convenience, wrapped in try/catch).
+  - Every DOM id the pre-existing `initProxy`/`initIntercept`/`initRepeater`/`initScope`
+    functions (unchanged by this rebuild) and the `/api/proxy/*` routes depend on is preserved
+    — verified by a new regression test enumerating them all.
+  - `tests/test_web_repeater_browser.py` updated to click the Repeater sub-nav tab before its
+    existing element interactions (the Repeater card is no longer always-visible).
+  - New requirements `FR-UI-11` (the sub-nav + message-editor + split-pane pattern) and
+    `FR-UI-12` (check named engineering gaps against current code before a rebuild, not the
+    plan's original wording) record this in the living spec.
+- Impact (other components / project): UI only, read-only over the store (NFR-UI-read-only
+  holds — no new writes). No schema change. No PROXY engine change (the response-intercept and
+  byte-exact-replay gaps were confirmed already closed, not built here). Backward compatible
+  with R1/R2: the Findings "send to Repeater" `?repeater_tab=` deep-link still works, now also
+  switching the Repeater sub-tab into view.
+- Risk (level; mitigation): low — a DOM/CSS/JS re-lay over unchanged routes/controllers, plus
+  two new pure-Python/JS-free engine tests. Mitigated by: `tests/test_web_proxy_workbench_relayout.py`
+  (sub-nav markup + all 4 tabs, panel visibility defaults matching the JS default, every
+  pre-existing id preserved, message-editor markup present on every raw surface, split panes
+  present, the new JS functions are actually shipped in `/static/app.js`); `node --check` on
+  the edited `app.js`; `tests/test_proxy_repeater.py` (4 new engine-level Repeater tests:
+  verbatim forward of saved bytes incl. a duplicate/conflicting `Content-Length`, an edited
+  replay forwarding exactly the edited bytes and persisting them so a second unedited send
+  repeats the edit, history recording the exact bytes sent, unknown-tab `KeyError`); the
+  updated `test_web_repeater_browser.py` real-browser smoke still passes (create tab, edit in
+  the raw textarea, send, see the echoed edited target) after clicking the new sub-nav tab;
+  full fast suite (`pytest -q -m "not slow"`): 1615 passed, 8 skipped, 12 deselected — no
+  regressions (the 12 deselected are the pre-existing `slow`-marked tests; the working tree
+  also carries a large, separate, concurrent `L-P3.3c-CUT` lab-migration lane's uncommitted
+  changes to `fuzzlab/mutation/filtermodel.py`/`lab/*`/`puppy-fort-factory/*`, none of which
+  this change touches or depends on).
+- Deliverables:
+  - [x] Sub-nav (`.proxy-subnav`, `initProxySubnav`, `?tab=` deep-linking) — done.
+  - [x] Shared message editor (`msg_editor()` macro, `wireMsgEditor`/`initMessageEditors`/
+    `hexDump`/`renderPretty`/`refreshMsgEditor`) wrapping all 5 raw surfaces — done.
+  - [x] Resizable split panes (`initSplitResizers`, History + Intercept) — done.
+  - [x] Confirmed both named engineering gaps already closed (CC-PROXY-0015; `Repeater.send`)
+    rather than assumed open; new `tests/test_proxy_repeater.py` — done.
+  - [x] `tests/test_web_proxy_workbench_relayout.py` (6 tests) added — done.
+  - [x] `tests/test_web_repeater_browser.py` updated for the sub-nav click — done.
+  - [x] `FR-UI-11`/`FR-UI-12` — done.
+  - [x] Full fast suite: 1615 passed / 8 skipped / 12 deselected — done.
+- Effectiveness (assessed 2026-09-22): effective — the Proxy workbench now shares the same
+  sub-nav and message-editor idioms as the rest of the redesigned shell, with the two
+  engineering gaps the revamp plan called out verified (not just assumed) closed, closing R3
+  and the full R0-R3 layout-redesign sequence.
+
 ### CC-UI-0026 — R2: Findings workbench (facets + saved views + send-to-Repeater) (2026-09-22)
 - Change: built R2 of the layout redesign (`docs/UI_LAYOUT_REDESIGN.md` §6/§9) on top of R1's
   routes/shell — a faceted Findings workbench over the existing `finding`/`attempt` data, plus

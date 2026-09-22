@@ -117,8 +117,39 @@ bugs — the research-platform diagnostics of decision D2.
   *(Realized: R2 of the layout redesign —
   `results.list_findings/finding_facets/finding_detail/build_finding_raw_request`,
   `RepeaterController.create_from_finding`, `templates/sections/findings.html` +
-  `templates/finding.html`; CC-UI-0026. R3 (Proxy rebuild) is next per
-  `docs/UI_LAYOUT_REDESIGN.md`.)*
+  `templates/finding.html`; CC-UI-0026.)*
+
+- **FR-UI-11** The **Proxy workbench** (`/proxy`) is laid out on a shared, reusable
+  **sub-nav + message-editor** pattern rather than a stack of always-visible cards:
+  (a) a **sub-nav** with one panel per Proxy sub-view (History, Intercept, Repeater,
+  Scope & Match-Replace), exactly one visible at a time, selection reflected in `?tab=`
+  via `history.replaceState` (deep-linkable/bookmarkable, no client router — the
+  project's MPA policy holds); (b) a shared **message-editor** component (Pretty / Raw /
+  Hex views over the same raw-bytes text) wrapping every raw request/response surface in
+  the workbench (History's request/response, Intercept's held-flow editor, Repeater's
+  request/response) — "Raw" is the actual byte-exact edit/display surface (unchanged
+  from before this rebuild); "Pretty" (parsed start-line + indented headers + body) and
+  "Hex" (offset/hex/ASCII dump) are read-only views derived client-side from that same
+  text on demand, never sent anywhere as truth; (c) resizable list|detail **split panes**
+  for History and Intercept, persisting the chosen list-column width per-viewer. This is
+  a DOM/CSS/JS re-lay only: every id the pre-existing Proxy JS (`initProxy`/
+  `initIntercept`/`initRepeater`/`initScope`) and the `/api/proxy/*` routes depend on is
+  unchanged. *(Realized: R3 of the layout redesign —
+  `templates/sections/proxy.html`'s `msg_editor()` macro + sub-nav markup, `app.js`'s
+  `initProxySubnav`/`initMessageEditors`/`initSplitResizers`/`wireMsgEditor`; CC-UI-0027.)*
+
+- **FR-UI-12** Before building or re-building any Proxy-tab surface, the two engineering
+  gaps `docs/UI_REVAMP_PLAN.md` §8 named for the Proxy workbench (response interception;
+  byte-exact/live replay, not a stored-history reconstruction) must be checked against
+  the current state of `fuzzlab/proxy/*`, not assumed open from the plan's original
+  wording — closing a gap that is already closed would be wasted, undocumented rework,
+  and leaving a gap open because a UI-only pass didn't check would ship a UI that still
+  cannot do what its own plan promises. *(Verified at R3: both were already closed —
+  response interception by CC-PROXY-0015 (`ProxyEngine.handle_request`'s awaited,
+  opt-in response hook + `Interceptor.intercept_responses`); byte-exact replay by
+  `Repeater.send`'s pre-existing raw-path forwarding (no reserialization). Confirmed
+  with new engine-level tests, `tests/test_proxy_repeater.py`, rather than left as an
+  unverified assumption.)*
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

@@ -706,7 +706,23 @@ tracked in the requirements files, not here.
   oracle evidence). "Send to Repeater" pivots a finding by reconstructing its request from
   `url`/`method`/`param` + `evidence['payload']` (no raw bytes are stored for a finding) and
   reusing the same `RepeaterController.create_tab` write path History's flow pivot already
-  established (CC-UI-0026, FR-UI-10). R3 still adds a Proxy rebuild.
+  established (CC-UI-0026, FR-UI-10). **R3 built:** the **Proxy workbench re-lay** — a
+  Burp/ZAP-style **sub-nav** (History / Intercept / Repeater / Scope & Match-Replace as
+  sibling panels in the one `/proxy` document, `?tab=` deep-linkable via
+  `history.replaceState`, no client router) and a shared **message-editor** component
+  (Pretty / Raw / Hex views over the same raw bytes — "Raw" is the pre-existing byte-exact
+  edit/display surface, unchanged; "Pretty"/"Hex" are read-only views derived client-side
+  on demand) wrapping every raw-bytes surface (History's request/response, Intercept's held
+  flow, Repeater's request/response), plus resizable list|detail split panes for
+  History/Intercept. Purely a DOM re-lay: every id the existing `initProxy`/`initIntercept`/
+  `initRepeater`/`initScope` JS and the `/api/proxy/*` routes depend on is unchanged. The two
+  engineering gaps `docs/UI_REVAMP_PLAN.md` §8 named for this phase were confirmed **already
+  closed** by prior work, not left open: response interception (CC-PROXY-0015, an awaited,
+  opt-in response hook in `ProxyEngine.handle_request` + `Interceptor.intercept_responses`)
+  and byte-exact replay (`Repeater.send` already forwards a tab's saved/edited raw bytes
+  verbatim, no reserialization — confirmed with new engine-level tests,
+  `tests/test_proxy_repeater.py`, that a duplicate/conflicting `Content-Length` and an edited
+  body round-trip unmodified). (CC-UI-0027, FR-UI-11.)
   **Pending:** the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
   `metric_series` time-series table (Phase 4), Datasette-style store exploration, a
   `--dry-run` mode, and a plain CLI entry point per tool for headless use

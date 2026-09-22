@@ -13,6 +13,28 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- LAB: `L-P3.3c-CUT` — executed the atomic cutover (commit 1 of 2): re-homed the WAF
+  ruleset/DB schema/coverage-and-WAF shims/vulnerability map off the hand-built
+  `puppy-fort-factory/` app and onto `lab/`-owned locations and a new
+  `fuzzlab.labgen.assemble` real-build entry point (Laravel middleware
+  `FzlWaf`/`FzlCoverage`, backed by framework-free `WafFilter`; generated
+  `lab/VULNERABILITIES.md`), re-pointed `lab/compose.yaml`/`lab/web.Dockerfile`/
+  `deploy.sh`/`fuzzlab/mutation/filtermodel.py`, and updated ground truth's `target`
+  metadata and the five affected tests — with `puppy-fort-factory/` still present and
+  the full test suite green, so the fixture-deletion commit that follows is a clean,
+  separately revertable step. CC-LAB-0061, FR-LAB-8/FR-LAB-58.
+- LAB: `L-P3.3c-CUT` — deleted `puppy-fort-factory/` (commit 2 of 2), now that the
+  generator is the single source of the PHP target lab and the cutover coverage gate
+  re-confirms 100% covered-or-exempted with the directory gone. CC-LAB-0061.
+- UI: built R3 of the layout redesign (the Proxy workbench rebuild) — re-laid Proxy
+  (History/Intercept/Repeater/Scope & Match-Replace) onto a Burp/ZAP-style sub-nav plus
+  a shared Pretty/Raw/Hex message-editor component and resizable list|detail split
+  panes, without changing any pre-existing id, route, or backend behavior. Confirmed
+  (rather than assumed) that the plan's two named engineering gaps — response
+  interception and byte-exact replay — were already closed by prior work
+  (CC-PROXY-0015; `Repeater.send`'s raw-path forwarding), adding dedicated engine-level
+  tests (`tests/test_proxy_repeater.py`) for the latter. Closes the R0-R3 layout
+  redesign sequence. CC-UI-0027, FR-UI-11/12.
 - UI: built R2 of the layout redesign — a **Findings workbench** (`/findings`,
   `/findings/{id}`) with a faceted filter plane (`vuln_class`, `confidence`, a
   `category` derived from the linked candidate's audit-rule evidence, `run_id`,

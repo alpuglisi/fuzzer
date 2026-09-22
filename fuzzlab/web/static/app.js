@@ -198,6 +198,151 @@ function initLaunchForms() {
   }
 }
 
+// --- Proxy workbench: shared message editor (Pretty / Raw / Hex) (R3) ---
+// One reusable component wraps every raw-bytes surface (History's request/response,
+// Intercept's held-flow editor, Repeater's request/response) per
+// docs/UI_LAYOUT_REDESIGN.md's "one reusable message editor everywhere" borrow from
+// Burp/ZAP. "Raw" is the actual edit/display surface (the pre-existing textarea/pre,
+// same id as before this rebuild — no wiring changed); "Pretty"/"Hex" are read-only
+// views computed client-side from that same text on demand, never sent anywhere.
+function hexDump(text) {
+  if (!text) return "(empty)";
+  const lines = [];
+  for (let off = 0; off < text.length; off += 16) {
+    const chunk = text.slice(off, off + 16);
+    const bytes = [];
+    for (let i = 0; i < chunk.length; i++) bytes.push(chunk.charCodeAt(i) & 0xff);
+    const hex = bytes.map((b) => b.toString(16).padStart(2, "0")).join(" ");
+    const ascii = bytes.map((b) => (b >= 0x20 && b < 0x7f) ? String.fromCharCode(b) : ".").join("");
+    lines.push(off.toString(16).padStart(8, "0") + "  " + hex.padEnd(47, " ") + "  " + ascii);
+  }
+  return lines.join("\n");
+}
+
+function renderPretty(text) {
+  if (!text) return "(empty)";
+  const m = text.match(/\r?\n\r?\n/);
+  const head = m ? text.slice(0, m.index) : text;
+  const body = m ? text.slice(m.index + m[0].length) : "";
+  const lines = head.split(/\r?\n/).filter((l, i) => i === 0 || l.length);
+  let out = (lines[0] || "") + "\n";
+  for (const h of lines.slice(1)) out += "  " + h + "\n";
+  if (body) out += "\n" + body;
+  return out;
+}
+
+// Wire one `.msg-editor` root: clicking a tab shows its panel and (for the derived
+// Pretty/Hex views) renders it from the raw panel's current text. Idempotent — safe
+// to call more than once on the same root.
+function wireMsgEditor(root) {
+  if (!root || root.dataset.mvWired) return;
+  root.dataset.mvWired = "1";
+  const panels = {
+    raw: root.querySelector('[data-mv-panel="raw"]'),
+    pretty: root.querySelector('[data-mv-panel="pretty"]'),
+    hex: root.querySelector('[data-mv-panel="hex"]'),
+  };
+  if (!panels.raw) return;
+  function rawText() {
+    return "value" in panels.raw ? panels.raw.value : panels.raw.textContent;
+  }
+  function activate(view) {
+    for (const t of root.querySelectorAll(".mv-tab")) t.classList.toggle("active", t.dataset.mv === view);
+    for (const [name, el] of Object.entries(panels)) if (el) el.hidden = name !== view;
+    if (view === "pretty" && panels.pretty) panels.pretty.textContent = renderPretty(rawText());
+    if (view === "hex" && panels.hex) panels.hex.textContent = hexDump(rawText());
+  }
+  for (const t of root.querySelectorAll(".mv-tab")) {
+    t.addEventListener("click", () => activate(t.dataset.mv));
+  }
+  // exposed so code that sets the raw panel's content afresh (a new flow/tab loaded)
+  // can re-render whichever view is currently active.
+  root._flRefresh = () => {
+    const active = root.querySelector(".mv-tab.active");
+    activate(active ? active.dataset.mv : "raw");
+  };
+}
+
+function initMessageEditors() {
+  document.querySelectorAll(".msg-editor").forEach(wireMsgEditor);
+}
+
+// Call after setting a raw panel's content by id, so an already-active Pretty/Hex tab
+// re-renders from the new text instead of showing the previous flow's derived view.
+function refreshMsgEditor(id) {
+  const el = document.getElementById(id);
+  const root = el && el.closest(".msg-editor");
+  if (root && root._flRefresh) root._flRefresh();
+}
+
+// --- Proxy workbench: sub-nav (History / Intercept / Repeater / Scope) (R3) ---
+// A Burp/ZAP-style sub-nav inside the one /proxy document (MPA — no client router);
+// the active sub-tab is reflected in `?tab=` via history.replaceState so it stays
+// deep-linkable/bookmarkable without a full navigation.
+function initProxySubnav() {
+  const nav = document.querySelector(".proxy-subnav");
+  if (!nav) return; // not the proxy page
+  const buttons = Array.from(nav.querySelectorAll("button[data-tab]"));
+  const panels = Array.from(document.querySelectorAll(".subnav-panel[data-panel]"));
+  function show(tab) {
+    for (const b of buttons) b.classList.toggle("active", b.dataset.tab === tab);
+    for (const p of panels) p.hidden = p.dataset.panel !== tab;
+  }
+  for (const b of buttons) b.addEventListener("click", () => {
+    show(b.dataset.tab);
+    try {
+      const params = new URLSearchParams(window.location.search);
+      params.set("tab", b.dataset.tab);
+      history.replaceState(null, "", "?" + params.toString());
+    } catch (e) { /* history API unavailable; tab still switches visually */ }
+  });
+  const params = new URLSearchParams(window.location.search);
+  const want = params.get("tab");
+  show(buttons.some((b) => b.dataset.tab === want) ? want : "history");
+}
+
+// Selects a proxy sub-nav tab programmatically (e.g. a deep-link that must land on a
+// specific sub-tab, such as `?repeater_tab=` always meaning the Repeater tab).
+function selectProxyTab(tab) {
+  const btn = document.querySelector(`.proxy-subnav button[data-tab="${tab}"]`);
+  if (btn) btn.click();
+}
+
+// --- Proxy workbench: resizable list|detail split panes (R3) ---
+// A drag handle between a table (list) and its detail pane, persisting the chosen
+// list-column width per split id in localStorage (a per-viewer convenience, wrapped
+// in try/catch so a blocked/absent store just falls back to the CSS default).
+function initSplitResizers() {
+  document.querySelectorAll(".split").forEach((split) => {
+    const handle = split.querySelector(".split-resizer");
+    if (!handle || handle.dataset.wired) return;
+    handle.dataset.wired = "1";
+    const key = "fl-split-" + (split.dataset.splitId || "default");
+    try {
+      const saved = parseInt(localStorage.getItem(key) || "", 10);
+      if (saved > 0) split.style.setProperty("--split-a", saved + "px");
+    } catch (e) { /* ignore */ }
+    let dragging = false;
+    handle.addEventListener("mousedown", (e) => {
+      dragging = true; handle.classList.add("dragging"); e.preventDefault();
+    });
+    document.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const rect = split.getBoundingClientRect();
+      const w = Math.max(200, Math.min(rect.width - 220, e.clientX - rect.left));
+      split.style.setProperty("--split-a", w + "px");
+    });
+    document.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false; handle.classList.remove("dragging");
+      try {
+        const w = parseInt(getComputedStyle(split).getPropertyValue("--split-a"), 10);
+        if (w > 0) localStorage.setItem(key, String(w));
+      } catch (e) { /* ignore */ }
+    });
+  });
+}
+
 // --- Proxy tab: flow history (read-only) ---
 // Flow url/host/head come from recorded traffic (untrusted), so rows are built with
 // DOM APIs and textContent — never string-interpolated HTML.
@@ -217,7 +362,10 @@ function initProxy() {
     document.getElementById("flow-detail-id").textContent = "#" + f.id;
     document.getElementById("flow-req").textContent = f.raw_request || "(none)";
     document.getElementById("flow-resp").textContent = f.raw_response || "(none)";
+    refreshMsgEditor("flow-req"); refreshMsgEditor("flow-resp");
     detail.hidden = false;
+    const placeholder = document.getElementById("history-detail-empty");
+    if (placeholder) placeholder.hidden = true;
   }
 
   const toRep = document.getElementById("flow-to-repeater");
@@ -275,6 +423,12 @@ function initIntercept() {
   const idSpan = document.getElementById("pending-id");
   let selectedId = null;
 
+  function hideDetail() {
+    detail.hidden = true;
+    const placeholder = document.getElementById("pending-detail-empty");
+    if (placeholder) placeholder.hidden = false;
+  }
+
   async function applyToggle() {
     await postJSON("/api/proxy/intercept",
       { on: onBox.checked, responses: respBox.checked });
@@ -287,7 +441,10 @@ function initIntercept() {
     selectedId = f.id;
     idSpan.textContent = "#" + f.id + " (" + f.direction + ")";
     rawArea.value = f.raw;
+    refreshMsgEditor("pending-raw");
     detail.hidden = false;
+    const placeholder = document.getElementById("pending-detail-empty");
+    if (placeholder) placeholder.hidden = true;
   }
 
   async function poll() {
@@ -309,19 +466,19 @@ function initIntercept() {
     empty.hidden = pending.length > 0;
     count.textContent = pending.length ? `· ${pending.length} held` : "";
     if (selectedId != null && !pending.some((f) => f.id === selectedId)) {
-      detail.hidden = true; selectedId = null;   // it was forwarded/dropped elsewhere
+      hideDetail(); selectedId = null;   // it was forwarded/dropped elsewhere
     }
   }
 
   document.getElementById("pending-forward").addEventListener("click", async () => {
     if (selectedId == null) return;
     await postJSON(`/api/proxy/intercept/${selectedId}/forward`, { raw: toWire(rawArea.value) });
-    detail.hidden = true; selectedId = null; poll();
+    hideDetail(); selectedId = null; poll();
   });
   document.getElementById("pending-drop").addEventListener("click", async () => {
     if (selectedId == null) return;
     await postJSON(`/api/proxy/intercept/${selectedId}/drop`, {});
-    detail.hidden = true; selectedId = null; poll();
+    hideDetail(); selectedId = null; poll();
   });
 
   fetch("/api/proxy/status").then((r) => r.json()).then((s) => {
@@ -351,6 +508,7 @@ function initRepeater() {
     select.value = String(id);
     rawArea.value = tab.raw;
     respPre.textContent = "";
+    refreshMsgEditor("rep-raw"); refreshMsgEditor("rep-resp");
     editor.hidden = false;
   }
 
@@ -384,6 +542,7 @@ function initRepeater() {
       { raw: toWire(rawArea.value) });
     respPre.textContent = status === 200 ? (data.response || "(empty)")
       : "error: " + (data.error || status);
+    refreshMsgEditor("rep-resp");
   });
 
   document.addEventListener("repeater-select", (e) => loadTabs(e.detail));
@@ -392,6 +551,7 @@ function initRepeater() {
   // the created-tab id travels as a query param instead of an in-page event).
   const params = new URLSearchParams(window.location.search);
   const wantTab = params.get("repeater_tab");
+  if (wantTab != null) selectProxyTab("repeater");
   loadTabs(wantTab != null ? wantTab : undefined);
 }
 
@@ -546,6 +706,7 @@ function initScope() {
 document.addEventListener("DOMContentLoaded", () => {
   initShell();
   initLaunchNav(); initLaunchForms();
+  initProxySubnav(); initMessageEditors(); initSplitResizers();
   initProxy(); initIntercept(); initRepeater(); initScope();
   initFindings(); initFindingDetail();
 });

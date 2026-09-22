@@ -327,6 +327,48 @@ th {
   background: var(--surface2); color: var(--text);
 }
 
+/* --- Proxy workbench sub-nav (R3) --------------------------------------- */
+.subnav {
+  display: flex; gap: .3rem; margin: 0 0 .8rem; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border); padding-bottom: 0;
+}
+.subnav button {
+  background: transparent; color: var(--muted); border: 1px solid transparent;
+  border-radius: 8px 8px 0 0; padding: .5rem .9rem; font-weight: 600; font-size: .88rem;
+  margin-bottom: -1px;
+}
+.subnav button:hover { color: var(--text); filter: none; }
+.subnav button.active {
+  color: var(--accent); border-color: var(--border); border-bottom-color: var(--surface);
+  background: var(--surface);
+}
+
+/* --- resizable list|detail split panes (History / Intercept) ------------ */
+.split {
+  display: grid; grid-template-columns: var(--split-a, 340px) 6px 1fr;
+  gap: 0 .9rem; align-items: start;
+}
+.split-resizer {
+  cursor: col-resize; align-self: stretch; border-radius: 3px; background: var(--border);
+}
+.split-resizer:hover, .split-resizer.dragging { background: var(--accent); }
+.split-b { min-width: 0; }
+@media (max-width: 900px) {
+  .split { grid-template-columns: 1fr; }
+  .split-resizer { display: none; }
+}
+
+/* --- shared message editor: Pretty / Raw / Hex (R3) ---------------------- */
+.msg-editor { margin: 0 0 .6rem; }
+.msg-editor-tabs { display: flex; gap: .25rem; margin-bottom: .3rem; }
+.mv-tab {
+  background: var(--surface2); color: var(--muted); border: 1px solid var(--border);
+  border-radius: 6px; padding: .18rem .55rem; font-size: .74rem; font-weight: 600;
+}
+.mv-tab:hover { color: var(--text); filter: none; }
+.mv-tab.active { color: var(--accent); border-color: var(--accent); background: var(--accent-weak); }
+.mv-panel[data-mv-panel="pretty"] { white-space: pre-wrap; overflow-wrap: anywhere; }
+
 /* --- Overview dashboard (R1) --------------------------------------------- */
 .kpirow {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

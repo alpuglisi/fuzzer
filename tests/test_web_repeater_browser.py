@@ -96,6 +96,9 @@ def test_repeater_create_and_send_in_browser(tmp_path):
             pg.set_default_timeout(15000)
             pg.goto(f"http://127.0.0.1:{web_port}/")
             pg.click('nav.tabs a[data-tab="proxy"]')
+            # R3: Repeater is a sub-nav tab inside the Proxy workbench, not an
+            # always-visible card — select it before touching its controls.
+            pg.click('.proxy-subnav button[data-tab="repeater"]')
             pg.click("#repeater-card details summary")
             pg.fill("#rep-new-host", "127.0.0.1")
             pg.fill("#rep-new-port", str(up_port))

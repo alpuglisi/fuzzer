@@ -1,6 +1,6 @@
 # Web UI Layout Redesign
 
-Component: **UI** (#12, `fuzzlab/web/`) · Status: `[R0, R1 built; R2/R3 proposed]` ·
+Component: **UI** (#12, `fuzzlab/web/`) · Status: `[R0, R1, R2, R3 built]` ·
 Last updated: 2026-09-22
 
 Related: `docs/UI_REVAMP_PLAN.md` (the feature revamp, Phases 0–4), `ARCHITECTURE.md` #12,
@@ -210,7 +210,15 @@ in-page state persist in `localStorage`.
   finding's `url`/`method`/`param` + `evidence['payload']` (no raw bytes are stored for a
   finding) via `results.build_finding_raw_request()`.
 - **R3 — Proxy workbench rebuild.** Re-lay Proxy on the shared message editor + resizable
-  panes + sub-nav (folding in Phase 2.1–2.4).
+  panes + sub-nav (folding in Phase 2.1–2.4). `[built; CC-UI-0027, FR-UI-11]` — a
+  Burp/ZAP-style sub-nav (History / Intercept / Repeater / Scope & Match-Replace as
+  sibling panels of the one `/proxy` document, `?tab=` deep-linkable), a shared Pretty/
+  Raw/Hex message-editor component wrapping every raw-bytes surface, and resizable
+  list|detail split panes for History/Intercept; every id the existing Proxy JS/routes
+  depend on is unchanged. The two named engineering gaps (response-intercept hook;
+  live/byte-exact replay) were confirmed already closed by prior work (CC-PROXY-0015;
+  `Repeater.send`'s raw-path forwarding) rather than left open — see new engine-level
+  coverage in `tests/test_proxy_repeater.py`.
 - Phases **3 (ML)** and **4 (Diagnostics)** then land as sections in the shell rather than new
   top tabs.
 
