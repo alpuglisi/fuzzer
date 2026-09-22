@@ -14,6 +14,11 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Planning: added `docs/PARALLEL_LANE_BUILD_PLAN.md`, organizing the
+  remaining safe-to-build-now backlog (lab-track page migration + conformance
+  wiring, UI/diagnostics tabs, M8/M10 mutation-oracle wiring) into pre-numbered,
+  file-disjoint build lanes/waves for concurrent dispatch — no lane executed
+  yet, plan only, per `docs/MULTI_AGENT_ORCHESTRATION.md`.
 - Research: Phase 3 CWE mapping for the "file handling" corpus cell
   (`docs/research/corpus-examples/file-handling/{php,node,python}/manifest.yaml`,
   12 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each
