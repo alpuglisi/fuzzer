@@ -18,6 +18,28 @@ Format per entry:
 
 ---
 
+## 2026-09-22 — MUT: `SemanticsValidator.preserves()` let AST equivalence override canonicalize in both directions (BUG-0027)
+
+- **Symptom:** `tests/test_mutation_operators.py::test_every_surface_variant_preserves_semantics`
+  and `::test_sql_equivalent_needs_trusted_provenance` failed (previously logged
+  2026-09-21 as "found, not fixed," reproduced again here): a case-toggle surface
+  variant was wrongly rejected, and an unvetted `-- x` line-comment append was
+  wrongly accepted as meaning-preserving (fail-open — the more serious of the two).
+- **Root cause:** `preserves()` trusted a decisive `sqlglot` AST-equality verdict
+  over `canonicalize()`'s verdict whenever AST could decide. The two checks disagree
+  on exactly the surface operators this validator exists to validate: AST equality
+  is case-sensitive where SQL keywords/identifiers are not (too strict), and it
+  discards **all** comment styles (`--` and `/* */`) as trivia where canonicalize
+  intentionally recognizes only `/* */` as safe (too permissive) — full RCA in
+  `docs/bugs/BUG-0027-semantics-validator-ast-overrides-canonicalize.md`.
+- **Remediation:** `canonicalize()` equality is now checked first and is
+  authoritative when it decides; AST equivalence is consulted only when canonicalize
+  disagrees, and only when the two payloads don't differ in `--` comment presence
+  (`_comment_provenance_differs`), since AST can never be trusted to vouch for that.
+  `fuzzlab/mutation/semantics.py`, `CC-MUT-0010`. Two regression tests added to
+  `tests/test_mutation_operators.py` (one per direction). `PA-0029`.
+- **Status:** Fixed.
+
 ## 2026-09-22 — UI: sibling parallel-build lanes' web tests broke against U6's control-plane hardening middleware once merged (BUG-0026)
 
 - **Symptom:** after lane U6 (control-plane hardening) merged, rebasing lane U2 (Findings
@@ -87,7 +109,7 @@ Format per entry:
   lane's hand-off report so it can be routed to whoever owns MUT; a code defect, so it
   needs the full `docs/bugs/BUG-NNNN` + `PA-NNNN` protocol from that owner, not just
   this line.
-- **Status:** Open (not caused by, and not remediated by, `CC-LAB-0040`).
+- **Status:** Fixed — see the 2026-09-22 entry above (`BUG-0027`, `CC-MUT-0010`).
 
 ## 2026-09-21 — `lab-generate --check` gate tests stopped exercising their gate when an emitter's supported shapes were widened
 

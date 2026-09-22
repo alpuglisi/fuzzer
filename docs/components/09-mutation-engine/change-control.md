@@ -3,6 +3,42 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0010 — Fix (BUG-0027): `SemanticsValidator` AST verdict overrode canonicalize (2026-09-22)
+- Change: `fuzzlab/mutation/semantics.py::SemanticsValidator.preserves()` now checks
+  `canonicalize()` equality first and treats it as authoritative when it decides;
+  a decisive `sqlglot` AST-equivalence verdict is consulted only when canonicalize
+  disagrees, and only when the two payloads don't differ in `--` line-comment
+  presence (new `_comment_provenance_differs()` helper) — AST equality is provably
+  blind to comments (both `--` and `/* */` are lexer trivia to it) and so cannot be
+  trusted to vouch for a `--` difference canonicalize deliberately doesn't recognize
+  as safe. Fixes two long-standing, previously-logged-but-undiagnosed test failures:
+  a case-toggle surface variant was wrongly rejected (AST is case-sensitive;
+  canonicalize isn't), and an unvetted `-- x` comment append was wrongly accepted as
+  meaning-preserving (fail-open — the more serious direction, since it let the
+  validator rubber-stamp an arbitrary, unvetted transformation).
+- Impact (other components / project): `MutationSearch`/`FilterLearner`
+  (`fuzzlab/mutation/search.py`, `fuzzlab/mutation/learn.py`) both gate accepted
+  variants through this validator — they now correctly accept case-toggle variants
+  and correctly refuse a payload whose only "safety" was AST's comment-blindness.
+  No change to the operator set, the `Candidate`/`Oracle` contract, or any other
+  component; the fix is contained to `preserves()`'s internal decision order.
+- Risk (level; mitigation): low — narrows an over-permissive path (comment
+  fail-open) and widens an over-strict one (case fail-closed) without touching any
+  other call site's signature. Mitigated by the two pre-existing failing tests now
+  passing, two new targeted regression tests (`test_ast_never_approves_an_unvetted_
+  line_comment_injection`, `test_ast_never_rejects_a_case_toggle_canonicalize_
+  already_accepts`), and the full `tests/test_mutation_*.py` suite (48 passed).
+- Deliverables:
+  - [x] `preserves()` reordered: canonicalize authoritative, AST only widens and
+    never on a comment-provenance difference — done.
+  - [x] `_comment_provenance_differs()` helper — done.
+  - [x] Regression tests (both directions) — done.
+  - [x] Full bug protocol: `BUG-0027`, `PA-0029`, `ERROR_LOG.md` entry (closes the
+    2026-09-21 "found, not fixed" line) — done.
+- Effectiveness (assessed 2026-09-22): effective — both previously-failing tests now
+  pass; full project suite green modulo the pre-existing, unrelated LAB-track
+  failures (unaffected by this change).
+
 ### CC-MUT-0009 — Oracle-confirm a recorded bypass, optionally (CC-MUT-0006 nice-to-have) (2026-09-22)
 - Change: `run_mutation` takes an optional `oracle=` parameter (default `None`,
   behavior unchanged); when given, every recorded WAF-bypass variant triggers an

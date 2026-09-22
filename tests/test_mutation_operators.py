@@ -106,3 +106,26 @@ def test_ast_equivalence_when_sqlglot_present():
     assert v.use_ast is True
     assert v.preserves("SELECT 1 UNION SELECT 2", "SELECT 1 UNION/**/SELECT 2",
                        "sql-injection")
+
+
+# --- BUG-0027 regression: AST must never override canonicalize -------------
+# (fail-open direction) An AST-decisive verdict must never launder an unvetted
+# `--` comment injection into "meaning preserving", since sqlglot discards
+# comments as trivia and cannot tell a vetted /* */ insertion from an
+# arbitrary trailing comment that would truncate the rest of a real query.
+def test_ast_never_approves_an_unvetted_line_comment_injection():
+    v = SemanticsValidator()
+    assert not v.preserves("1 or 1=1", "1 or 1=1 -- x", "sql-injection")
+    assert not v.preserves("id=1 and 2=2", "id=1 and 2=2 --", "sql-injection")
+
+
+# (fail-closed direction) Canonicalize's case-insensitive comparison must
+# decide case-toggle variants before AST ever gets a say, since sqlglot's tree
+# equality is sensitive to identifier/keyword case even though SQL keywords
+# and unquoted identifiers are case-insensitive.
+def test_ast_never_rejects_a_case_toggle_canonicalize_already_accepts():
+    v = SemanticsValidator()
+    assert v.preserves("1 union select password from users",
+                       "1 UNION SELECT PASSWORD FROM USERS", "sql-injection")
+    assert v.preserves("1 union select password from users",
+                       "1 uNiOn SeLeCt pAsSwOrD fRoM uSeRs", "sql-injection")

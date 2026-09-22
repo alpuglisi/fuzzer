@@ -45,7 +45,13 @@ feedback and the scheduler.
 
 ## 4. Non-functional requirements
 - **NFR-MUT-semantics** A mutation must preserve intended semantics; a validator
-  rejects transformations that change meaning.
+  rejects transformations that change meaning. `SemanticsValidator.preserves()`
+  treats canonicalize-equivalence as authoritative for the recognized surface-
+  operator envelope; a decisive AST-equivalence verdict may only widen acceptance
+  beyond canonicalize, never on a difference that turns on `--` comment presence
+  (AST discards all comment styles as trivia and cannot vouch for that
+  distinction). Fixed after shipping the opposite invariant (a decisive AST verdict
+  could override canonicalize either way): BUG-0027, CC-MUT-0010.
 - **NFR-MUT-safe** Never emit destructive payloads through the default-on path;
   the destructive gate still applies to generated payloads.
 - **NFR-MUT-bounded** Search is budget-bounded and reproducible under a fixed seed.

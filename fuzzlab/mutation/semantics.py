@@ -23,7 +23,22 @@ import urllib.parse
 
 _SQL_COMMENT = re.compile(r"/\*.*?\*/", re.S)
 _WS = re.compile(r"\s+")
+_LINE_COMMENT = re.compile(r"--")
 _SQL_LIKE_CLASSES = ("sql-injection", "command-injection")
+
+
+def _comment_provenance_differs(a: str, b: str) -> bool:
+    """True if a `--` line comment appears in one string but not the other.
+
+    `sqlglot` discards *every* comment style (`--` and `/* */`) as lexer trivia
+    when it builds a syntax tree, so AST equivalence cannot distinguish a vetted
+    `/* */` insertion (the one comment-insertion operator this validator is
+    meant to accept) from an arbitrary, unvetted `--` comment append — which in
+    a real query can truncate everything after it. `canonicalize()` only
+    normalizes `/* */`, by design, so a `--` difference it still sees must never
+    be laundered through the AST path.
+    """
+    return bool(_LINE_COMMENT.search(a)) != bool(_LINE_COMMENT.search(b))
 
 
 def canonicalize(payload: str, vuln_class: str = "sql-injection") -> str:
@@ -64,14 +79,24 @@ class SemanticsValidator:
         """Does ``mutated`` mean the same as ``original``?
 
         ``trusted=True`` accepts a vetted-equivalent transform by provenance (used for
-        the vetted-equivalence operators). Otherwise require AST or canonical equivalence.
+        the vetted-equivalence operators). Otherwise, canonical equivalence is the
+        authoritative proof for the surface operators (it defines exactly what surface
+        variation is recognized as safe); AST equivalence can only *widen* acceptance
+        beyond it for a genuinely unparseable-by-canonicalize difference, and never for
+        one that turns on comment provenance (`_comment_provenance_differs`), since AST
+        comparison is comment-blind and would otherwise rubber-stamp an unvetted comment
+        injection as meaning-preserving.
         """
         if mutated == original:
             return True
         if trusted:
             return True
+        if canonicalize(original, vuln_class) == canonicalize(mutated, vuln_class):
+            return True
+        if _comment_provenance_differs(original, mutated):
+            return False
         if self.use_ast and vuln_class == "sql-injection":
             verdict = self._ast_equiv(original, mutated)
             if verdict is not None:
                 return verdict                        # decisive AST comparison
-        return canonicalize(original, vuln_class) == canonicalize(mutated, vuln_class)
+        return False

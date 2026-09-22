@@ -14,6 +14,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- MUT: fixed `SemanticsValidator.preserves()` (BUG-0027) — a decisive `sqlglot`
+  AST-equivalence verdict was overriding `canonicalize()` in both directions,
+  wrongly rejecting a case-toggle surface variant and, more seriously, wrongly
+  *accepting* an unvetted `--` comment injection as meaning-preserving (fail-
+  open) since AST comparison discards all comment styles as trivia.
+  Canonicalize is now authoritative; AST may only widen acceptance and never on
+  a comment-provenance difference. Closes the 2026-09-21 ERROR_LOG "found, not
+  fixed" entry (`CC-MUT-0010`, `PA-0029`).
 - Docs: corrected five components' `requirements.md` Status headers
   (CORE, SCHED, ML, UI, PLUG) that still read `[planned]` despite each
   component's change-control log showing extensive built work — a "living

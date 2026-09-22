@@ -246,3 +246,24 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   full-suite run to surface the failure one at a time. This is PA-0002's sweep obligation
   applied across concurrently-developed, not-yet-merged branches, not only the already-
   merged codebase. (from BUG-0026)
+- **PA-0029** — When a function combines two independently-computable verdicts about the
+  same question (e.g. an AST/structural check and a textual/canonical check; a fast-path
+  heuristic and a slow-path authority) by letting one "win" whenever it is decisive, that
+  priority must be justified by showing the two checks agree on the full class of inputs
+  the more-trusted one is used to decide — not merely by the test cases that happen to
+  exercise it. Before landing such a combinator, construct at least one input on which the
+  two checks are expected to disagree in *each* direction (the stricter one wrongly
+  rejecting; the looser one wrongly accepting) and confirm the combinator resolves both
+  correctly, not just the direction the feature was written for. A `None`/inconclusive
+  fallback design (only defer to the second check when the first can't decide) hides this
+  risk particularly well, because every test written against the first check's "decisive"
+  path will look correct in isolation while the untested disagreement direction ships
+  silently — here, `sqlglot` AST equivalence was trusted over `canonicalize()` whenever
+  decisive, and every existing test happened to be a case where the two agreed, so the
+  fail-open (an unvetted `--` comment silently "proven" meaning-preserving) and the
+  fail-closed (a case-toggle wrongly rejected) both shipped unnoticed until each got its
+  own dedicated test. PA-0002 sweep: grepped every `... is not None` branch across
+  `fuzzlab/` for another "two independently-computable verdicts, one overrides the other
+  when decisive" combinator; every other hit is an optional-dependency guard (store,
+  run_id, scheduler, plugins) on a single code path, not two competing verdict engines —
+  no other instance of this bug class found. (from BUG-0027)
