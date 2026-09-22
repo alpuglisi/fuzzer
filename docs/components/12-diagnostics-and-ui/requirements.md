@@ -82,7 +82,35 @@ bugs — the research-platform diagnostics of decision D2.
   **POST/Redirect/GET with a 303** (R-07): the state-changing action is a real
   `<form method="post">`, the redirect carries only an opaque id in the query string
   (`?repeater_tab=`), and raw bytes never appear on the wire. U1–U5 build out each
-  section's content on top of this split.)*
+  section's content on top of this split. **U3 (CC-UI-0030, 2026-09-22)** filled in the
+  Proxy route's content: History / Intercept / Repeater re-laid on the shared
+  `<message-editor>` (FR-UI-9) plus resizable panes and a sub-nav.)*
+- **FR-UI-9 (shared message editor)** *(added U3, CC-UI-0030, R-04)* The Proxy
+  section's History (read-only detail), Intercept (held-flow edit), and Repeater
+  (request edit / response view) byte editors share one component,
+  `js/msgeditor.js`'s `<message-editor>`: `{editable, bytes, meta}` in as
+  properties, `getBytes()` out. Request panes are **editable** (a plain
+  `<textarea>`, whose `.value` is the single byte-exact source of truth) with
+  **Raw as the only editable mode and the default**; Response panes are
+  **read-only** (Raw | Pretty | Hex). Pretty and Hex render into a read-only
+  `<pre>` mirror built only with `createElement`/`textContent` (never
+  `innerHTML`, consistent with the untrusted-flow-content discipline
+  `js/proxy.js` already follows for table rows). A status/timing strip shows
+  status+reason/elapsed-ms/byte-length/content-type. A CRLF/non-printing-byte
+  toggle changes **display only** (Unicode control-picture glyphs), never the
+  underlying bytes. Ctrl-F search paints match ranges via the **CSS Custom
+  Highlight API** (`CSS.highlights`/`Highlight`) over the read-only mirror —
+  never by span-injecting the buffer — with graceful no-paint degradation
+  where unsupported; an editable Raw pane shows a synced read-only overlay of
+  the same bytes only for the duration of a search, the textarea underneath
+  untouched. No vendored highlighting/editor library. A companion
+  `attachSplitter()` in the same module is a **vanilla CSS-grid resizable
+  splitter** (one `--a` grid-track custom property + pointer-capture drag +
+  arrow-key a11y + localStorage-persisted size, no library) used for the
+  request/response pane pairs, each with a horizontal/vertical layout toggle.
+  The existing `toWire()` CRLF-restore in `common.js` remains the single
+  documented `\n`→`\r\n` normalization point applied right before a
+  byte-exact send; `msgeditor.js` does not duplicate it.
 - **FR-UI-8** The panel is framed by an **app shell**: a persistent **left-sidebar
   navigation** (grouped Workbench / Analysis sections, rendered from one `NAV` source of
   truth as real `<a href>` links with server-computed active state —

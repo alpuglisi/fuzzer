@@ -3,6 +3,85 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0030 — Proxy workbench rebuild: shared message editor + resizable panes + sub-nav (lane U3) (2026-09-22)
+- Change: re-laid the Proxy section's History / Intercept / Repeater byte editors
+  on one new shared custom element, `<message-editor>`
+  (`fuzzlab/web/static/js/msgeditor.js`), per the resolved R-04 marker in
+  `docs/UI_IMPLEMENTATION_PLAN.md` §3 (U3):
+  - API: `{editable, bytes, meta}` in as properties, `getBytes()` out. The
+    editable pane is a plain `<textarea>` (`.value` is the single byte-exact
+    source of truth); Raw is the only editable mode and the default. Pretty
+    (hand-rolled HTTP tokenizer, JSON body pretty-print when the content-type
+    says so) and read-only Hex (response only) render into a separate
+    read-only `<pre>` mirror, built entirely with `createElement`/`textContent`
+    — never `innerHTML`, matching the existing untrusted-flow-content
+    discipline already in `proxy.js`.
+  - A status/timing strip (status+reason, elapsed ms, byte length,
+    content-type).
+  - A CRLF/non-printing-byte display toggle (Unicode control-picture glyphs;
+    display only, never touches the underlying bytes).
+  - Ctrl-F in-message search painted via `CSS.highlights`/the Custom Highlight
+    API over the read-only mirror's text nodes — never by span-injecting the
+    buffer. For an editable Raw pane (which can't host highlight ranges), the
+    search briefly shows a synced read-only overlay of the same bytes; the
+    textarea underneath is never touched and `getBytes()` still reads only it.
+  - No vendored highlighting/editor library — hand-rolled tokenizer + DOM,
+    per R-04's explicit "hand-roll, do not vendor" verdict.
+  - `attachSplitter()`: a vanilla CSS-grid resizable splitter (one rewritable
+    `--a` grid-track custom property + pointer-capture drag + arrow-key a11y +
+    localStorage persistence, try/catch-guarded) — no library — used for the
+    request/response pane pairs in History's flow detail and in Repeater, each
+    with a "stack vertically" layout toggle.
+  - A sticky in-page sub-nav (`.proxy-subnav`) linking the four Proxy cards
+    (History / Intercept / Repeater / Scope · Match-Replace).
+  - `sections/proxy.html`, `js/proxy.js`, and `css/proxy.css` were extended
+    (not replaced) to wire the new editors into the existing History/Intercept/
+    Repeater flows; the editable editors keep the exact element ids the
+    pre-existing tests target (`#pending-raw`, `#rep-raw`) and the read-only
+    response mirror keeps `#rep-resp`, so `toWire()`'s CRLF-restore
+    (`fuzzlab/web/static/js/common.js`) remains the one documented
+    `\n`→`\r\n` normalization point applied right before a byte-exact send —
+    `msgeditor.js` does not duplicate it.
+- Impact (other components / project): UI-only markup/JS change plus an
+  incidental PROXY-facing note (this lane's dual bookkeeping — see
+  `CC-PROXY-0018` for the PROXY-component entry; no PROXY backend code
+  changed). No new routes, no schema change, no change to
+  `NFR-UI-control-plane-hardened`'s request-gating. Does not touch
+  `RepeaterController`'s per-thread fix (BUG-0021/`CC-PROXY-0016`). Does not
+  flip proxy/desync tooling's default-off, lab-only posture (CLAUDE.md Safety)
+  — the `--authorized` gate on Repeater sends and the "not running in-process"
+  fallbacks are unchanged.
+- Risk (level; mitigation): low-medium — a real-DOM-structure change to a
+  route already covered by a Playwright browser test
+  (`tests/test_web_repeater_browser.py`). Mitigated by: keeping the exact ids
+  that test drives (`#rep-new-host`/`#rep-new-port`/`#rep-new-raw`/`#rep-create`/
+  `#rep-editor`/`#rep-raw`/`#rep-send`/`#rep-resp`) live in the light DOM (no
+  shadow root, by design, specifically so automation and section CSS keep
+  working); `getBytes()` reading only the plain textarea's `.value` so
+  byte-exact editing is unchanged; running the full suite unmodified after the
+  change (see Deliverables/Effectiveness for the pass/skip counts). The CSS
+  Custom Highlight API is feature-detected (`'highlights' in CSS && typeof
+  Highlight === 'function'`) and search degrades to "no paint" rather than
+  throwing where unsupported.
+- Deliverables:
+  - [x] `fuzzlab/web/static/js/msgeditor.js` — new shared `<message-editor>`
+    custom element + `attachSplitter()` — done.
+  - [x] `sections/proxy.html` extended: sub-nav, `message-editor` markup for
+    History detail / Intercept / Repeater, resizable-split containers + layout
+    toggles — done.
+  - [x] `js/proxy.js` extended: wires flow detail / intercept / repeater to the
+    new editors' `{bytes, meta, getBytes()}` API instead of raw
+    textarea/`<pre>` access; `toWire()` usage unchanged — done.
+  - [x] `css/proxy.css` extended: sub-nav, `message-editor` layout/toolbar/
+    search-highlight, `.me-split` splitter styles, all via existing design
+    tokens (no raw hex) — done.
+  - [x] Full test suite run unmodified; existing Repeater browser test and
+    intercept/history/scope suites green — see Effectiveness for counts.
+- Effectiveness (assessed 2026-09-22): pending full independent verification
+  by an integrator per `docs/MULTI_AGENT_ORCHESTRATION.md`; self-assessed
+  effective from this lane's own full-suite run — see the lane's handback
+  report for the pass/skip counts.
+
 ### CC-UI-0027 — Incidental: CLI `--dry-run` flag surfaces in the launcher form (lane D0a) (2026-09-22)
 - Change: lane D0a added a `--dry-run` flag to the `build_parser()` of `crawl`,
   `audit`, `fuzz`, `auto`, `mutate-run`, and `proxy` (see CC-CRAWL-0007,

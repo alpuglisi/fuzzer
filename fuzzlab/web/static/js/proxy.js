@@ -1,10 +1,31 @@
-// Proxy section (U0/CC-UI-0025): History (read-only) + Intercept + Repeater +
+// Proxy section (U0/CC-UI-0025; re-laid on the shared message editor by U3/
+// CC-UI-0030 · CC-PROXY-0018, R-04): History (read-only) + Intercept + Repeater +
 // Scope/Match-Replace. Flow url/host/head come from recorded traffic (untrusted),
 // so rows are built with DOM APIs and textContent — never string-interpolated
 // HTML. The "send to Repeater" pivot is a real <form method="post"> to
 // /proxy/repeater/from-flow (PRG + 303, R-07): this module only fills the hidden
 // flow_id input before the browser submits it — no fetch, no seeded bytes in a URL.
+//
+// The held/active byte editors (History detail, Intercept, Repeater) are all
+// `<message-editor>` instances (js/msgeditor.js) — importing it here registers
+// the custom element. `getBytes()` still returns the plain-textarea value for
+// the editable ones, so the existing `toWire()` CRLF-restore stays the single
+// documented normalization point right before a byte-exact send.
 import { postJSON, delJSON, toWire } from "/static/js/common.js";
+import { attachSplitter } from "/static/js/msgeditor.js";
+
+// Wire a request/response split pane + its "stack vertically" toggle button.
+function initSplit(splitId, buttonId, storageKey) {
+  const split = document.getElementById(splitId);
+  if (!split) return;
+  attachSplitter(split, { storageKey });
+  const btn = document.getElementById(buttonId);
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    const vertical = split.classList.toggle("vertical");
+    btn.setAttribute("aria-pressed", String(vertical));
+  });
+}
 
 // --- History (read-only) ---
 function initProxy() {
@@ -20,8 +41,12 @@ function initProxy() {
     if (!r.ok) return;
     const f = await r.json();
     document.getElementById("flow-detail-id").textContent = "#" + f.id;
-    document.getElementById("flow-req").textContent = f.raw_request || "(none)";
-    document.getElementById("flow-resp").textContent = f.raw_response || "(none)";
+    const reqEd = document.getElementById("flow-req-editor");
+    const respEd = document.getElementById("flow-resp-editor");
+    reqEd.bytes = f.raw_request || "(none)";
+    reqEd.meta = { label: "Request" };
+    respEd.bytes = f.raw_response || "(none)";
+    respEd.meta = { label: "Response", status: f.status, elapsed_ms: f.elapsed_ms };
     if (toRepId) toRepId.value = String(f.id);
     detail.hidden = false;
   }
@@ -47,6 +72,7 @@ function initProxy() {
 
   document.getElementById("flow-refresh").addEventListener("click", load);
   if (search) search.addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
+  initSplit("flow-split", "flow-split-layout", "fuzzlab.proxy.flowSplit");
   fetch("/api/proxy/status").then((r) => r.json()).then((s) => {
     const el = document.getElementById("proxy-status");
     if (!el) return;
@@ -69,7 +95,7 @@ function initIntercept() {
   const tbody = document.querySelector("#pending-table tbody");
   const empty = document.getElementById("pending-empty");
   const detail = document.getElementById("pending-detail");
-  const rawArea = document.getElementById("pending-raw");
+  const editor = document.getElementById("pending-editor");
   const idSpan = document.getElementById("pending-id");
   let selectedId = null;
 
@@ -84,7 +110,8 @@ function initIntercept() {
   function selectFlow(f) {
     selectedId = f.id;
     idSpan.textContent = "#" + f.id + " (" + f.direction + ")";
-    rawArea.value = f.raw;
+    editor.bytes = f.raw;
+    editor.meta = { label: f.direction === "response" ? "Response" : "Request" };
     detail.hidden = false;
   }
 
@@ -113,7 +140,7 @@ function initIntercept() {
 
   document.getElementById("pending-forward").addEventListener("click", async () => {
     if (selectedId == null) return;
-    await postJSON(`/api/proxy/intercept/${selectedId}/forward`, { raw: toWire(rawArea.value) });
+    await postJSON(`/api/proxy/intercept/${selectedId}/forward`, { raw: toWire(editor.getBytes()) });
     detail.hidden = true; selectedId = null; poll();
   });
   document.getElementById("pending-drop").addEventListener("click", async () => {
@@ -137,9 +164,9 @@ function initRepeater() {
   const card = document.getElementById("repeater-card");
   if (!card) return;
   const select = document.getElementById("rep-tab-select");
-  const editor = document.getElementById("rep-editor");
-  const rawArea = document.getElementById("rep-raw");
-  const respPre = document.getElementById("rep-resp");
+  const editorWrap = document.getElementById("rep-editor");
+  const reqEd = document.getElementById("rep-editor-msg");
+  const respEd = document.getElementById("rep-resp-editor");
   const sendBtn = document.getElementById("rep-send");
   // The PRG "send to Repeater" pivot (R-07) lands back here with ?repeater_tab=ID —
   // an opaque hint, server-rendered onto the card; fall back to no selection if it
@@ -149,11 +176,13 @@ function initRepeater() {
 
   function selectId(id) {
     const tab = tabs.find((t) => String(t.id) === String(id));
-    if (!tab) { editor.hidden = true; return; }
+    if (!tab) { editorWrap.hidden = true; return; }
     select.value = String(id);
-    rawArea.value = tab.raw;
-    respPre.textContent = "";
-    editor.hidden = false;
+    reqEd.bytes = tab.raw;
+    reqEd.meta = { label: "Request" };
+    respEd.bytes = "";
+    respEd.meta = { label: "Response" };
+    editorWrap.hidden = false;
   }
 
   async function loadTabs(thenSelect) {
@@ -183,12 +212,13 @@ function initRepeater() {
     const id = select.value;
     if (!id) return;
     const { status, data } = await postJSON(`/api/proxy/repeater/tabs/${id}/send`,
-      { raw: toWire(rawArea.value) });
-    respPre.textContent = status === 200 ? (data.response || "(empty)")
-      : "error: " + (data.error || status);
+      { raw: toWire(reqEd.getBytes()) });
+    respEd.bytes = status === 200 ? (data.response || "(empty)") : "error: " + (data.error || status);
+    respEd.meta = { label: "Response" };
   });
 
   loadTabs(seedTab || null);
+  initSplit("rep-split", "rep-split-layout", "fuzzlab.proxy.repSplit");
 }
 
 // --- Scope + Match-Replace ---

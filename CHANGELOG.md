@@ -14,6 +14,22 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- UI/PROXY (`CC-UI-0030`, `CC-PROXY-0018`, build lane U3): rebuilt the Proxy
+  workbench's History / Intercept / Repeater byte editors on one shared
+  `<message-editor>` ES module (`fuzzlab/web/static/js/msgeditor.js`, R-04) —
+  Raw (the only editable mode, plain `<textarea>`, byte-exact) | Pretty
+  (hand-rolled tokenizer, DOM-built, never innerHTML) | read-only Hex on
+  responses, a status/timing strip, a CRLF/non-printing-byte display toggle,
+  and Ctrl-F search painted via the CSS Custom Highlight API over a read-only
+  mirror (never span-injected into the buffer). Added a vanilla CSS-grid
+  resizable splitter (`attachSplitter()`, no library) for the request/response
+  panes in History detail and Repeater, plus a sub-nav for jumping between the
+  four Proxy cards. Backend (`RepeaterController`, BUG-0021's per-thread fix)
+  is unchanged; the editable textareas keep the ids the existing Playwright/
+  API tests target (`#rep-raw`, `#pending-raw`, `#rep-resp`) and the
+  `toWire()` CRLF-restore in `common.js` remains the single byte-exact send
+  path. Proxy/desync tooling stays default-off and lab-only — no safety-gate
+  change.
 - LAB (`CC-LAB-0060`, `FR-LAB-57`, build lane T1): wired `fuzzlab.labgen
   .conformance.tier1`'s public API (`build_tier1_case`/`run_tier1_case`/
   `evaluate_tier1_response`) against a real in-process app+DB for the first
