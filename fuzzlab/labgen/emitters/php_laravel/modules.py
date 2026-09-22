@@ -99,6 +99,8 @@ _SOURCE_ENV = _make_env("sources")
 _TRANSFORM_ENV = _make_env("transforms")
 _SINK_ENV = _make_env("sinks")
 _COMPLEXITY_ENV = _make_env("complexities")
+_VIEW_ENV = _make_env("views")
+_WRITE_ENV = _make_env("writes")
 
 
 @dataclass(frozen=True)
@@ -464,6 +466,246 @@ class HtmlAttributeUnquotedEchoSink(TemplateModule):
         )
 
 
+class HtmlAttributeQuotedEchoSink(TemplateModule):
+    """Echoes the value into a **quoted** HTML attribute -- the reflected
+    search box (``puppy-fort-factory/search.php``'s ``value="<?= $q ?>"``),
+    rendered as a Blade view body. Added by lane L-P3.3c-G6 together with the
+    ``(raw_concat, html_attribute_quoted)`` safety-matrix row.
+
+    The mirror image of its unquoted sibling: here the quote that would close
+    the attribute *is* one of the characters ``e()``/``htmlspecialchars()``
+    escapes, so entity escaping is the context-correct fix and the matrix
+    scores it ``neutralises`` rather than ``partial``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "html_attribute_quoted_echo", "sink", _SINK_ENV, "html_attribute_quoted_echo.blade.php.j2"
+        )
+
+
+class SqlStringLiteralLikeSink(TemplateModule):
+    """A ``LIKE '%<value>%'`` catalogue search at a quoted-string-literal
+    position (``puppy-fort-factory/search.php``'s ``WHERE name LIKE '%$q%'``).
+
+    Same ``sql_string_literal`` family as :class:`SqlStringLiteralLookupSink`
+    -- per the plan's §4.3.6.2 shape-gap analysis the ``LIKE`` wildcards are
+    not verdict-relevant to ``sql_syntax_break``, so this is a second
+    *rendering* of one family, never a new family, a new matrix row or a
+    ``sql_like_pattern`` concept. It exists because the equality sink folds a
+    login-style password condition in as boilerplate, which a search page does
+    not have.
+
+    Both branches use ``whereRaw()`` and differ only in whether the value is
+    bound -- the minimal-pair shape §4.3.6.3a requires on this stack, where
+    the idiomatic secure form (``->where('name', 'like', ...)``) would differ
+    from its vulnerable twin by the whole statement construction."""
+
+    def __init__(self) -> None:
+        super().__init__("sql_string_literal_like", "sink", _SINK_ENV, "sql_string_literal_like.php.j2")
+
+
+# --- views (the `view` module category, L-P3.3c-G2) -----------------------
+#
+# CR-LAB-0001 Addendum D names `"view"` as a module *category* alongside
+# `source`/`transform`/`sink`/`complexity`/`route`, and
+# `fuzzlab.labgen.minimal_pair`'s own docstring already anticipates it. Until
+# this lane nothing needed it: the three HTML sinks render a **Blade view
+# body** and the emitter writes that body to a second file, so the "view" was
+# a property of the sink, not a module of its own.
+#
+# `api/products.php` is the first page that breaks that: it is a JSON API
+# endpoint, so there is no HTML body for a sink to render, yet the response
+# still has a *presentation layer* -- the field set, the field order and the
+# casts the endpoint's consumers (the fetch-based JS pages) depend on. In
+# Laravel that layer is an **Eloquent API Resource**
+# (`Illuminate\Http\Resources\Json\JsonResource`), which is precisely a view
+# for a JSON response. So the category is real, and a JSON view is its first
+# member.
+#
+# Shape convention (chosen to mirror the Blade sinks position-for-position,
+# so a reader who knows one knows the other):
+#
+#   * `render(ctx).code` is the **view artifact's file content** -- exactly
+#     what a Blade sink's `.code` is (the emitter writes it to a second,
+#     `role="view"` file), rather than a statement inside the controller.
+#   * `render(ctx).context["view_bridge_code"]` is the *one* controller-side
+#     statement that hands the composed result to that view -- the analogue
+#     of `render_only`'s `return view(...)` line, kept in the context so the
+#     emitter appends it to the controller body without a second template
+#     call.
+#
+# The bridge statement deliberately rebinds `$rows`, which lets the existing
+# `single_statement` complexity close the method unchanged
+# (`return response()->json($rows);`). That is why this category costs one
+# new module and no new complexity: the JSON view changes *what* `$rows` is,
+# not *how* the method returns it.
+#
+# Why a view module's name is NOT in the `// Module composition:` provenance
+# line: `fuzzlab.labgen.minimal_pair` classifies every name on that line
+# through `fuzzlab.labgen.modules`' registries and *raises* for one it cannot
+# find (see this module's docstring, decision 1), and registering a
+# Laravel-only module in that shared, cross-stack package is exactly the
+# change L-P3.3b recorded as an open question rather than making. The
+# established precedent is the `route` category, which is likewise a real
+# module category whose name never appears in the composition line. The view
+# category is recorded in its own `// View category: <name>` provenance line
+# instead -- identical between a minimal pair's twins, so it lands in the
+# checker's common prefix and confines the declared difference to the
+# transform/sink region exactly as before.
+
+#: Casts a JSON view may apply to a field, mapped to the PHP expression
+#: wrapper each one renders. `None` means "pass the stored value through".
+#: An explicit, closed set: a page profile naming a cast that is not here
+#: fails loud rather than reaching PHP source unvalidated.
+JSON_FIELD_CASTS: dict[str | None, str] = {
+    None: "{expr}",
+    "int": "(int) {expr}",
+    "float": "(float) {expr}",
+    "string": "(string) {expr}",
+}
+
+
+class ViewModule(Module):
+    """Base class for a ``view``-category module: the presentation layer of a
+    response whose sink produced data rather than markup.
+
+    Two-part contract (see this section's comment for the reasoning):
+    ``render(ctx).code`` is the view artifact's own file content, and
+    ``render(ctx).context["view_bridge_code"]`` is the single controller
+    statement that routes the composed result through it.
+    """
+
+    category = "view"
+
+
+class JsonViewModule(ViewModule):
+    """The ``json_view`` module: a Laravel **Eloquent API Resource** class as
+    the view for a JSON endpoint.
+
+    Renders the endpoint's declared response shape -- the ordered field set
+    and each field's cast, from the page profile's ``json_fields`` -- rather
+    than letting the raw database row shape become the API contract by
+    default. ``$wrap`` is pinned to ``null`` in the generated class so the
+    response is a bare JSON array, which is what a JSON feed's consumers
+    actually parse.
+
+    ``json_fields`` is required and validated, never defaulted: guessing
+    which columns an endpoint publishes is the same class of decision
+    :class:`IdentifierAllowlistTransform` refuses to guess, and a field name
+    reaches PHP source verbatim and is never quoted or escaped for you.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.name = "json_view"
+        self._env = _VIEW_ENV
+        self.template_name = "json_view.php.j2"
+        self._template_name = self.template_name
+
+    @staticmethod
+    def _fields(ctx: dict[str, Any]) -> list[dict[str, str]]:
+        try:
+            raw = tuple(ctx["json_fields"])
+        except KeyError as exc:
+            raise ValueError(
+                "json_view module needs a 'json_fields' context value (an ordered tuple of "
+                "(field_name, cast) pairs naming this endpoint's declared JSON response shape) "
+                "-- the emitter's page profile must supply it; there is no safe default, and a "
+                "raw database row shape is not an API contract"
+            ) from exc
+        if not raw:
+            raise ValueError(
+                "json_view 'json_fields' is empty -- a JSON view that publishes no field renders "
+                "an endpoint with no response shape at all; supply the real fields in the "
+                "emitter's page profile"
+            )
+        fields: list[dict[str, str]] = []
+        for entry in raw:
+            name, cast = entry
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", str(name)):
+                raise ValueError(
+                    f"json_view field name {name!r} is not a bare identifier "
+                    "([A-Za-z_][A-Za-z0-9_]*) -- field names are emitted into PHP source "
+                    "verbatim and are never escaped or quoted for you"
+                )
+            if cast not in JSON_FIELD_CASTS:
+                raise ValueError(
+                    f"json_view field {name!r} names cast {cast!r}, which is not one of "
+                    f"{sorted(k for k in JSON_FIELD_CASTS if k is not None)} (or None for no "
+                    "cast) -- an unknown cast would reach PHP source unvalidated"
+                )
+            # Author order is preserved, never sorted: field order is part of
+            # the response shape this view declares (NFR-LAB-reproducible).
+            fields.append({"key": str(name), "expr": JSON_FIELD_CASTS[cast].format(expr=f"$this->{name}")})
+        return fields
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        fields = self._fields(ctx)
+        resource_class = ctx["resource_class"]
+        template = self._env.get_template(self._template_name)
+        code = template.render(resource_class=resource_class, json_fields=fields)
+        new_ctx = dict(ctx)
+        new_ctx["json_fields_rendered"] = tuple(field["key"] for field in fields)
+        # The one controller-side statement: the composed rows are handed to
+        # this cell's JSON view, which is what makes the endpoint's response
+        # shape the view's declaration rather than the row shape's accident.
+        new_ctx["view_bridge_code"] = (
+            "// json_view: the rows are handed to this endpoint's own JSON view (an Eloquent\n"
+            "// API Resource collection), which declares the field set, the field order and\n"
+            "// each field's cast -- the JSON analogue of a Blade view.\n"
+            f"$rows = \\App\\Http\\Resources\\{resource_class}::collection($rows);"
+        )
+        return RenderResult(code=code, context=new_ctx)
+
+
+# --- writes (stored-write endpoints, L-P3.3c-G4) ---------------------------
+#
+# A `stored_second_order` cell has two endpoints, not one: the *write* endpoint
+# the payload is submitted to (`Cell.route`) and the *read*/sink endpoint it
+# later executes on (`Cell.sink_endpoint`). Every module category above renders
+# the read side; this category renders the write side, which no existing
+# emitter emits at all -- `php_current` models a stored cell by rendering the
+# sink page only and leaving the real app's write page unreproduced (see
+# `fuzzlab.labgen.emitters.php_current.PhpCurrentEmitter._render_depth`, which
+# returns no fragments for `stored_second_order`). Reproducing a real page pair
+# needs both halves, which is what the plan's per-page inventory calls G4's
+# "stored-write sink" module (§4.3.6.3).
+#
+# **Never named in a cell's `// Module composition:` line.** That line is read
+# by the shared `fuzzlab.labgen.minimal_pair` checker, which classifies every
+# position by looking the name up in `fuzzlab.labgen.modules`' registries and
+# *raises* for a name it cannot find (see this module's docstring, decision 1).
+# The write endpoint is also not a composition position in any meaningful
+# sense: it carries no transform, so it is byte-identical between a minimal
+# pair's twins by construction. It is emitted as its own method on its own
+# controller instead.
+
+
+class StoredFieldWriteModule(TemplateModule):
+    """The write half of a ``stored_second_order`` cell: an Eloquent attribute
+    assignment plus ``save()``, persisting the tainted request parameter into
+    the owning identity's stored field **verbatim**.
+
+    Storing raw is deliberate and is not the modelled defect: Eloquent binds
+    the value, so the write is not an injection point (the real
+    ``puppy-fort-factory/edit_profile.php`` likewise stores ``bio`` through a
+    prepared statement). The cell's transform pipeline applies at the *read*
+    endpoint, which is where its verdict is decided -- so this fragment is
+    identical for a vulnerable cell and its secure twin, and the minimal-pair
+    invariant is unaffected by its existence.
+
+    Requires ``stored_model``, ``stored_field``, ``owner_param``,
+    ``write_param_name``, ``write_method_name`` and ``sink_url_path`` in the
+    assembly context. Raises (via :class:`jinja2.StrictUndefined`) rather than
+    inventing a default for any of them -- which model and column a write
+    endpoint persists into is exactly the decision a page profile exists to
+    state.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("stored_field_write", "write", _WRITE_ENV, "stored_field_write.php.j2")
+
+
 # --- complexities ---------------------------------------------------------
 
 
@@ -478,7 +720,14 @@ class SingleStatementComplexity(TemplateModule):
 
     def render(self, ctx: dict[str, Any]) -> RenderResult:
         template = self._env.get_template(self._template_name)
-        code = template.render(body=ctx["body"], method_name=ctx["method_name"])
+        # The whole context is passed, not two hand-picked keys: the page
+        # profile's optional real-page tail flags (`session_login`,
+        # `register_insert` -- see `php_laravel._SESSION_LOGIN_KEY`) are read
+        # by the template, and re-listing them here would be a second place
+        # that has to learn every new key (PA-0001/PA-0003's one-place rule).
+        # Every pre-existing profile declares none of them, so their rendering
+        # is byte-identical to before.
+        code = template.render(**ctx)
         return RenderResult(code=code, context=dict(ctx))
 
 
@@ -539,10 +788,34 @@ SINKS: dict[str, Module] = {
     "html_body_echo": HtmlBodyEchoSink(),
     "html_js_url_echo": HtmlJsUrlEchoSink(),
     "html_attribute_unquoted_echo": HtmlAttributeUnquotedEchoSink(),
+    # L-P3.3c-G6 (search.php): a quoted-attribute Blade sink for the new
+    # `raw_concat x html_attribute_quoted` matrix pair, and a LIKE-pattern
+    # rendering of the existing `sql_string_literal` family.
+    "html_attribute_quoted_echo": HtmlAttributeQuotedEchoSink(),
+    "sql_string_literal_like": SqlStringLiteralLikeSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),
     "render_only": RenderOnlyComplexity(),
+}
+#: ``view``-category modules (L-P3.3c-G2). Selected per page by the emitter's
+#: own page profile (``view_category``), never by the verdict-relevant shape
+#: vocabulary -- the same reasoning as ``_SOURCE_OVERRIDE_KEY``: which
+#: presentation layer a page uses is render-only metadata and must never fork
+#: ``class`` x ``sink_context.family``, which the safety matrix is keyed on.
+VIEWS: dict[str, Module] = {
+    "json_view": JsonViewModule(),
+}
+#: Write-endpoint modules (L-P3.3c-G4). Its own registry, deliberately *not*
+#: folded into :data:`SOURCES`/:data:`SINKS`/:data:`COMPLEXITIES`: those four
+#: registries are the composition vocabulary the shared
+#: :mod:`fuzzlab.labgen.minimal_pair` checker classifies a cell's
+#: ``// Module composition:`` line against, and a name it cannot find there
+#: makes every cell of this stack fail the minimal-pair gate with a setup
+#: error. A write endpoint is a second *endpoint*, not a position in the read
+#: path's composition -- see this category's section comment above.
+WRITES: dict[str, Module] = {
+    "stored_field_write": StoredFieldWriteModule(),
 }
 
 #: The sink modules whose rendered code is a Blade **view** body (emitted as

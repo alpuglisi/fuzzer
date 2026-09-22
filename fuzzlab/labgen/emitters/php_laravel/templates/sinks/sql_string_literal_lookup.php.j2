@@ -1,10 +1,27 @@
+{# The second condition is OPTIONAL: it is rendered only for a page profile
+   that declares `password_var` (a login-style page, whose already-hashed
+   secret is folded into the same statement as sink boilerplate -- never this
+   cell's own injection point). A page profile without it -- e.g. the real
+   register.php, whose duplicate-username check is a single-condition
+   `SELECT id FROM users WHERE username = ?` -- renders the statement alone.
+   `password_hash_fn`, likewise optional, wraps the secret in the hash function
+   the reproduced page actually applies (real login.php: md5). #}
+{% if password_var is defined %}
+{% if password_hash_fn is defined %}
+{% set password_expr = password_hash_fn ~ "($request->input('" ~ password_param ~ "'))" %}
+{% else %}
+{% set password_expr = "$request->input('" ~ password_param ~ "')" %}
+{% endif %}
+{% endif %}
 {% if bound %}
 // The query builder's where() binds the value for you; the second condition
 // is sink boilerplate (an already-hashed secret), never this cell's own
 // injection point.
 $rows = DB::table('{{ table }}')
     ->where('{{ column }}', {{ value_expr }})
-    ->where('{{ password_var }}', $request->input('{{ password_param }}'))
+{% if password_var is defined %}
+    ->where('{{ password_var }}', {{ password_expr }})
+{% endif %}
     ->get()
     ->all();
 {% else %}
@@ -12,7 +29,9 @@ $rows = DB::table('{{ table }}')
 // inside the statement, so the closing quote is reachable from the value.
 $rows = DB::table('{{ table }}')
     ->whereRaw("{{ column }} = '" . {{ value_expr }} . "'")
-    ->where('{{ password_var }}', $request->input('{{ password_param }}'))
+{% if password_var is defined %}
+    ->where('{{ password_var }}', {{ password_expr }})
+{% endif %}
     ->get()
     ->all();
 {% endif %}

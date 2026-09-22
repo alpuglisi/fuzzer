@@ -1,0 +1,88 @@
+# Phase-3 php_laravel REAL-PAGE manifest: the escaped-echo form pages
+# (lane L-P3.3c-G5, docs/LAB_IMPLEMENTATION_PLAN.md §4.3.6, group G5 of
+# §4.3.6.4's table).
+#
+# Unlike lab/manifests/phase3_php_laravel_sample.yaml -- whose pages are
+# ILLUSTRATIVE Laravel routes invented to exercise the module inventory --
+# every cell here reproduces a REAL puppy-fort-factory/ page, in
+# Laravel/Eloquent/Blade idiom, as the migration §4.3 step 6 / D20 §7.2 calls
+# for:
+#
+#   - contact.php    (PFF-1005, POST `message`) -- escaped echo, no DB write
+#   - newsletter.php (PFF-1006, POST `email`)   -- escaped echo, no DB write
+#
+# Both are **secure-only** cells, with no vulnerable twin, and that is
+# deliberate, not an omission: §4.3.6.3's "secure-only cells are legal"
+# finding (fuzzlab/labgen/minimal_pair.py is a standalone offline checker over
+# two already-rendered results, not a schema constraint -- nothing requires a
+# cell to have a twin). puppy-fort-factory/VULNERABILITIES.md and
+# lab/ground-truth/labels.json both label these two pages as true negatives
+# with `vuln_class: none`, so authoring a vulnerable twin here would invent a
+# vulnerability the real app does not have and that no PFF- case covers.
+# The minimal-pair invariant is still *verified* for both cells, against the
+# same cell with its pipeline emptied (the `_weakened_twin` convention
+# fuzzlab.labgen.cli's own --check uses) -- see
+# tests/test_labgen_php_laravel_real_pages_forms.py.
+#
+# `class: xss` names the *shape* each cell is the secure case of (the sink is
+# an HTML body position); the derived verdict is SECURE, matching
+# labels.json's `expected_vulnerable: false`. Verdicts are never asserted in a
+# manifest: they are derived by fuzzlab.labgen.verdict.verdict() from
+# (transform, sink_context) against lab/safety_matrix.yaml, whose
+# (html_entity_escape, html_body) row neutralizes html_tag_break.
+#
+# ROUTES KEEP THE `.php` SUFFIX. Per §4.3.6.6a this is load-bearing, not a
+# stylistic slip: T-LAB0.9's additive-only regression gate
+# (fuzzlab/labgen/regression_gate.py) fails a build that *relocates* an
+# existing ground-truth case, so a migrated cell served at an idiomatic
+# extension-less Laravel route would invalidate the very labels it reproduces.
+# The emitter's page profiles pin these URLs (`url_path`), so
+# routes/web.php really does register `Route::get('/contact.php', ...)`.
+#
+# Cell IDs are prefixed LABGEN-PLRP- ("php_laravel real pages") to keep them
+# out of the illustrative LABGEN-PL-/LABGEN-EX-/LABGEN-HS- namespaces, out of
+# php_current's own LABGEN-RP- real-page namespace, and out of the PFF-
+# ground-truth namespace itself; the numeric suffix mirrors the PFF- case each
+# cell reproduces, so the mapping the cutover lane's coverage gate
+# (§4.3.6.6 point 3) needs is legible from the ID. Nothing here is yet wired
+# to a build that touches puppy-fort-factory/ or lab/ground-truth/ -- that
+# wiring is L-P3.3c-CUT.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # --- contact.php (PFF-1005) -------------------------------------------
+  # Real page: the POSTed `message` is echoed back inside
+  # `<blockquote class="bio">` through the app's e() helper, and nothing is
+  # written to the database. In Laravel idiom the escape is the e() helper
+  # applied in the controller (modules.py decision 2), and the Blade view
+  # echoes what it is handed.
+  - cell_id: LABGEN-PLRP-1005
+    class: xss
+    stack_profile: php_laravel
+    route: { method: POST, path: /contact.php }
+    param: { location: body }
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: [html_entity_escape]
+
+  # --- newsletter.php (PFF-1006) ----------------------------------------
+  # Same shape on a different real page (the POSTed `email` echoed back
+  # through e() inside `<p class="notice ok">`), which is what proves the
+  # module set is reused rather than re-authored per page -- the same point
+  # phase0_real_pages_sample.yaml makes with product.php/blog_post.php.
+  #
+  # The real page's FILTER_VALIDATE_EMAIL check is not modelled: it gates
+  # which *message* is shown, not whether the reflection is escaped, and the
+  # safety matrix has no op for it (the same reasoning that exempts
+  # track.php's intval cast, §4.3.6.3). This cell's security comes from the
+  # escaped echo, which the matrix does model.
+  - cell_id: LABGEN-PLRP-1006
+    class: xss
+    stack_profile: php_laravel
+    route: { method: POST, path: /newsletter.php }
+    param: { location: body }
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: [html_entity_escape]

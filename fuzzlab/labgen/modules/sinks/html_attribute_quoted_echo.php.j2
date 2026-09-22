@@ -1,0 +1,7 @@
+// A *quoted* HTML attribute value -- the reflected-search-box shape
+// (puppy-fort-factory/search.php's `value="<?= $q ?>"`). Unlike the unquoted
+// sibling sink, htmlspecialchars() IS the context-correct escaping here (the
+// quote that would close the attribute is one of the characters it escapes),
+// so this family's secure twin is simply the entity-escaped one. Like every
+// sink in this registry it escapes nothing itself; the cell's transform decides.
+echo '<form method="get" action=""><input type="text" name="{{ attr_name }}" value="' . {{ value_expr }} . '"></form>';

@@ -1,0 +1,15 @@
+    public function {{ write_method_name }}(Request $request)
+    {
+        // Stored-write endpoint for a `stored_second_order` cell: the tainted
+        // request parameter is persisted VERBATIM into the owning identity's
+        // stored field. Storing raw is not itself the defect -- Eloquent binds
+        // the value, so there is no SQL injection here, exactly as the real
+        // page's prepared statement does. The defect lives at the *read*
+        // endpoint, where this cell's transform pipeline decides whether the
+        // stored value is escaped before it reaches the HTML sink.
+        $storedOwner = {{ stored_model }}::findOrFail((int) $request->query('{{ owner_param }}', 1));
+        $storedOwner->{{ stored_field }} = $request->input('{{ write_param_name }}');
+        $storedOwner->save();
+
+        return redirect('{{ sink_url_path }}');
+    }

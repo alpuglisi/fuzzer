@@ -1,5 +1,46 @@
+{# The method tail is the page's own behavior after its statement runs.
+   Default: return the rows as JSON (every illustrative page -- unchanged).
+   `session_login` / `register_insert` are the two REAL-page tails lane
+   L-P3.3c-G3 needs (login.php establishes a session and redirects;
+   register.php inserts the new account after its duplicate check). They are
+   flags on this existing complexity rather than new composition modules on
+   purpose -- see `php_laravel._SESSION_LOGIN_KEY`. Both twins of a minimal
+   pair render the identical tail, so the pair still differs only in its
+   transform region. #}
     public function {{ method_name }}(Request $request)
     {
 {{ body }}
+{% if session_login is defined %}
+        if ($rows) {
+            // A real login page establishes a session for the matched user.
+            $request->session()->put('user_id', (int) $rows[0]->{{ session_login.id_column }});
+            $request->session()->put('username', $rows[0]->{{ session_login.name_column }});
+            return redirect('{{ session_login.redirect_to }}');
+        }
+        return response()->json(['error' => '{{ session_login.error_message }}'], 401);
+{% elif register_insert is defined %}
+        if ($rows) {
+            return response()->json(['error' => '{{ register_insert.taken_message }}'], 409);
+        }
+        // The insert is prepared too: every value is bound by the query
+        // builder, never spliced into the statement text.
+        DB::table('{{ table }}')->insert([
+{% for column in register_insert.columns %}
+{% if column == 'password' %}
+            '{{ column }}' => {{ register_insert.password_hash_fn }}($request->input('{{ register_insert.password_param }}')),
+{% elif column == 'bio' %}
+            '{{ column }}' => '',
+{% elif column == register_insert.email_param %}
+            '{{ column }}' => $request->input('{{ register_insert.email_param }}'),
+{% elif column == register_insert.full_name_param %}
+            '{{ column }}' => $request->input('{{ register_insert.full_name_param }}'),
+{% else %}
+            '{{ column }}' => {{ value_expr }},
+{% endif %}
+{% endfor %}
+        ]);
+        return response()->json(['registered' => true]);
+{% else %}
         return response()->json($rows);
+{% endif %}
     }

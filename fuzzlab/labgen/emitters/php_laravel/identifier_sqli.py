@@ -49,7 +49,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Mapping
 
-from fuzzlab.labgen.emitters.php_laravel import _PAGE_PROFILES, _url_path_for
+from fuzzlab.labgen.emitters.php_laravel import _PAGE_PROFILES, served_url_for
 from fuzzlab.labgen.identifier_sqli_assertion import (
     IdentifierSqliAssertionError,
     IdentifierSqliAssertionResult,
@@ -71,24 +71,31 @@ __all__ = [
 
 def probe_cell_for(cell: Cell) -> Cell:
     """``cell`` with its ``route`` rewritten to the URL ``php_laravel``
-    actually serves it at (``/cell/<cell-slug>``).
+    actually serves it at.
+
+    That URL comes from
+    :func:`fuzzlab.labgen.emitters.php_laravel.served_url_for` -- the *same*
+    function ``route_fragment_for`` registers the route with, never a second
+    copy of the rule (PA-0003/PA-0021). Usually ``/cell/<cell-slug>``; for a
+    cell reproducing a migrated real page's canonical URL (plan §4.3.6.6a) it
+    is that page's real ``.php``-suffixed URL, and probing a hand-rebuilt
+    ``/cell/<slug>`` there would hit a route this build does not serve --
+    exactly the failure this adapter exists to prevent, one level deeper.
 
     This is the entire Laravel-specific adaptation (see the module
     docstring). ``sink_endpoint`` is asserted absent rather than rewritten:
-    this emitter renders ``context_depth == "direct"`` cells only, so a cell
-    carrying a second endpoint could not have been rendered in the first
-    place, and silently rewriting one would invent a URL no generated route
-    serves.
+    identifier-SQLi is a ``direct``-depth shape on this stack, so a cell
+    carrying a second endpoint could not be an identifier-SQLi cell in the
+    first place, and silently rewriting one would invent a URL no generated
+    route serves.
     """
     if cell.sink_endpoint is not None:
         raise IdentifierSqliAssertionError(
             f"{cell.cell_id}: carries a sink_endpoint ({cell.sink_endpoint.path!r}), which "
-            "php_laravel does not render yet (it renders context_depth 'direct' only) -- there "
-            "is no generated Laravel route for that endpoint to probe"
+            "identifier-SQLi does not reach on this stack (it is a 'direct'-depth shape) -- "
+            "there is no generated Laravel route for that endpoint to probe"
         )
-    return dataclasses.replace(
-        cell, route=dataclasses.replace(cell.route, path=_url_path_for(cell.cell_id))
-    )
+    return dataclasses.replace(cell, route=dataclasses.replace(cell.route, path=served_url_for(cell)))
 
 
 def probe_params_for(cell: Cell) -> dict[str, str]:

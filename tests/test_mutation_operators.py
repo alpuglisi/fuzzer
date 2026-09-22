@@ -6,7 +6,7 @@ from fuzzlab.core import migrations
 from fuzzlab.core.store import Store
 from fuzzlab.mutation.operators import (ANY, apply_chain, default_operators)
 from fuzzlab.mutation.semantics import (SemanticsValidator, canonicalize,
-                                        sqlglot_available)
+                                        introduces_line_comment, sqlglot_available)
 
 SQLI = "1 union select password from users"
 
@@ -69,6 +69,31 @@ def test_sql_equivalent_needs_trusted_provenance():
         # a tautology swap is NOT canonical-equal, so it is accepted only as trusted
         assert v.preserves(base, x, "sql-injection", trusted=True)
     assert not v.preserves(base, "1 or 1=1 -- x", "sql-injection")  # not vetted → refused
+
+
+# --- BUG-0026: untrusted `--` comment injection must fail closed ------------
+def test_untrusted_line_comment_introduction_is_rejected():
+    v = SemanticsValidator()
+    base = "1 or 1=1"
+    mutated = base + " -- x"
+    assert introduces_line_comment(base, mutated)
+    assert not v.preserves(base, mutated, "sql-injection")           # untrusted -> refused
+    assert v.preserves(base, mutated, "sql-injection", trusted=True)  # vetted -> accepted
+
+
+def test_no_default_surface_operator_introduces_a_line_comment():
+    # PA-0027: derive the checked set from the operator registry itself (every
+    # *surface* operator, whatever they are today) rather than restating which
+    # operator ids are "safe" as a hand-picked literal list.
+    v = SemanticsValidator()
+    for op in default_operators():
+        if not op.surface:
+            continue                                    # vetted-equivalent: trusted, not surface
+        for base in (SQLI, "1 or 1=1", "<svg onload=x>"):
+            for variant in op.apply(base):
+                assert not introduces_line_comment(base, variant)
+                # and, consistently, the validator must accept it untrusted
+                assert v.preserves(base, variant, "sql-injection")
 
 
 # --- the validator refutes meaning changes -----------------------------------

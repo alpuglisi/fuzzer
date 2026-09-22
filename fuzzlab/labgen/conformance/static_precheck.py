@@ -71,6 +71,15 @@ STATIC_PRECHECK_BY_SHAPE: dict[tuple[str, str], StaticPrecheckStatus] = {
     # recorded as confirmation.
     ("xss", "url_javascript_scheme"): StaticPrecheckStatus.UNINFORMATIVE,
     ("xss", "html_attribute_unquoted"): StaticPrecheckStatus.UNINFORMATIVE,
+    # --- L-P3.3c-G6: search.php's quoted-attribute reflection -------------
+    # INFORMATIVE, unlike its unquoted sibling above, and for the same reason
+    # the safety matrix scores the two families' `html_entity_escape` rows
+    # differently: at a *quoted* attribute the vulnerable cell simply has no
+    # escaping at all, which is the textbook missing-`htmlspecialchars()`
+    # finding a taint engine is expected to report -- exactly `(xss,
+    # html_body)`'s situation. The unquoted family is uninformative because
+    # there the escaping is *present* and only the context is wrong.
+    ("xss", "html_attribute_quoted"): StaticPrecheckStatus.INFORMATIVE,
 }
 
 

@@ -18,6 +18,34 @@ Format per entry:
 
 ---
 
+## 2026-09-22 — MUT: `SemanticsValidator` fail-open on untrusted SQL comment-append (fixed)
+
+- **Symptom:** `tests/test_mutation_operators.py::test_every_surface_variant_preserves_semantics`
+  and `::test_sql_equivalent_needs_trusted_provenance` failed. The second is the
+  security-relevant one: `SemanticsValidator.preserves("1 or 1=1", "1 or 1=1 -- x",
+  "sql-injection")` (untrusted) returned `True` — an untrusted `--` comment-append was
+  accepted as semantics-preserving. First recorded as "found, not fixed" by lane
+  L-P3.4 (see the entry immediately below/prior in this log) and re-confirmed by
+  several subsequent `pytest` runs without being fixed until now.
+- **Root cause:** (1) the AST-equivalence path returned a decisive verdict from
+  `sqlglot` ASTs that discard comments as non-semantic trivia, so a `--`-appended
+  fragment parsed identically to the original and was accepted before any
+  provenance check — `canonicalize()`'s comment-stripping only covers `/* */` block
+  comments, the shape the surface operators actually emit, so it never even ran.
+  (2) Separately, `_ast_equiv()` compared AST nodes with case-sensitive `==`,
+  rejecting a genuinely meaning-preserving `case-toggle` variant.
+- **Remediation:** added `introduces_line_comment()` and made `preserves()` refuse
+  (fail-closed) any untrusted mutation that introduces a `--` marker, before the
+  AST/canonical checks run; made `_ast_equiv()` compare lowercased re-rendered SQL
+  text instead of raw node equality. New regression tests derive the checked
+  operator set from `default_operators()` (PA-0027 discipline) rather than hardcoding
+  operator ids. Full suite: 1494 passed, 8 skipped.
+- **Status:** Fixed (see `docs/bugs/BUG-0026-semantics-validator-fail-open-on-untrusted-sql-comment.md`,
+  `docs/PREVENTIVE_ACTIONS.md` PA-0028, `docs/components/09-mutation-engine/change-control.md`
+  CC-MUT-0008).
+
+---
+
 ## 2026-09-22 — LAB: `php_laravel`'s stack-local module names would have failed every minimal-pair gate (found during L-P3.3b, fixed in the same lane)
 
 - **Symptom:** while wiring the Laravel emitter into `fuzzlab lab-generate --check` (§4.3

@@ -1,0 +1,30 @@
+namespace App\Http\Resources;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\JsonResource;
+
+/*
+ * This endpoint's JSON view: an Eloquent API Resource, which is Laravel's own
+ * view layer for a JSON response -- the analogue of a Blade view for a page
+ * that returns markup. It declares the response shape (which fields, in which
+ * order, with which casts) so the endpoint's contract is this file rather than
+ * whatever columns the query happened to select.
+ */
+class {{ resource_class }} extends JsonResource
+{
+    /*
+     * A bare JSON array, not a wrapped object: `$wrap = null` is pinned here
+     * rather than left at the framework default, because a JSON feed's
+     * consumers parse the array directly.
+     */
+    public static $wrap = null;
+
+    public function toArray(Request $request): array
+    {
+        return [
+{% for field in json_fields %}
+            '{{ field.key }}' => {{ field.expr }},
+{% endfor %}
+        ];
+    }
+}

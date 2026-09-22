@@ -216,3 +216,29 @@ entries:
     sink_family: html_attribute_unquoted
     effect: neutralises
     neutralizes: [html_tag_break]
+
+  # --- L-P3.3c-G6: search.php's quoted-attribute reflection ---------------
+  # The `html_attribute_quoted` family has existed since Phase 0, but only
+  # ever paired with `html_entity_escape` (the `neutralises` row above): there
+  # was no row for the *unescaped* baseline at this family, so the no-op end
+  # of the family -- which is exactly what puppy-fort-factory/search.php does
+  # in `value="<?= $q ?>"` -- could not be scored at all. Adding it makes the
+  # family symmetric with every other one in this file, each of which carries
+  # both a `raw_concat` baseline and at least one transform row.
+  #
+  # Brand-new (op, sink_family) pair, so per this file's own append-only rule
+  # this is an addition under the SAME `version: 1`, exactly as L-P1.2b's 15
+  # rows were: no existing pair's meaning changes, no existing cell's verdict
+  # moves, and a corpus generated under v1 before this landed re-derives
+  # identically.
+  #
+  # `no_effect`, and the required concern stays `html_tag_break`: a quoted
+  # attribute's boundary is the quote character, and an unescaped value
+  # carries its own `"` -- so the value can close the attribute, open a new
+  # one (`" onmouseover=alert(1) x="`) or close the tag outright. That is the
+  # same concern the `html_body` baseline names, reached through a different
+  # structural position; it is *not* a weaker variant of the unquoted family's
+  # `partial` mismatch row, because here nothing has been escaped at all.
+  - op: raw_concat
+    sink_family: html_attribute_quoted
+    effect: no_effect

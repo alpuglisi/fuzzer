@@ -11,15 +11,17 @@ for this category is explicit and load-bearing:
 
 :class:`RouteAccumulator` is intentionally the *only* place that assembles
 ``routes/web.php``: :meth:`RouteAccumulator.fragment_for_cell` produces one
-cell's route-registration line (called from
-:meth:`~fuzzlab.labgen.emitters.php_laravel.LaravelEmitter.render`, per
-cell) and :meth:`RouteAccumulator.render_file` assembles the whole file from
-however many fragments have been collected, **always sorting by cell ID at
-call time** -- never trusting the order fragments were collected in. Calling
-:meth:`render_file` twice with the same fragment dict (regardless of the
-dict's own insertion order -- Python dicts preserve insertion order, which
-is exactly the append-order trap Addendum D warns about) must be, and is,
-byte-identical.
+route-registration line (called from
+:meth:`~fuzzlab.labgen.emitters.php_laravel.LaravelEmitter.route_fragment_for`,
+one or more times per cell -- a ``stored_second_order`` cell registers a read
+route *and* a write route, so its "fragment" is two lines joined by
+``"\\n"``) and :meth:`RouteAccumulator.render_file` assembles the whole file
+from however many fragments have been collected, **always sorting by cell ID
+at call time** -- never trusting the order fragments were collected in.
+Calling :meth:`render_file` twice with the same fragment dict (regardless of
+the dict's own insertion order -- Python dicts preserve insertion order,
+which is exactly the append-order trap Addendum D warns about) must be, and
+is, byte-identical.
 
 **Why this lives outside ``Emitter.render()``'s per-cell return value:**
 ``fuzzlab.labgen.conformance.tier3.render_whole_sample`` -- the shared,
@@ -42,13 +44,36 @@ the real ``routes/web.php`` is a whole-manifest step
 and documented here as the pattern a future multi-cell Tier-3 run should
 follow until/unless a sibling lane extends ``tier3.py`` with accumulator-
 aware merging.
+
+**URL-pinning consolidation (lane L-P3.3c).** Which URL/method a cell's
+fragment is registered at is decided entirely by the caller (see
+``fuzzlab.labgen.emitters.php_laravel._served_route_for``), never re-derived
+here -- this module renders a fragment for the values it is handed and
+detects a genuine collision (:meth:`RouteAccumulator.render_file`'s
+duplicate-URL check), which is what makes it safe for several independent,
+formerly-incompatible URL-pinning mechanisms to have been replaced by one.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 
 from fuzzlab.labgen.emitter import EmittedFile
+
+
+class DuplicateRouteError(ValueError):
+    """Raised when two cells' route fragments register the same URL -- see
+    :meth:`RouteAccumulator.render_file`."""
+
+
+#: The URL inside one ``Route::<verb>(...)`` registration line. Anchored on
+#: the exact prefix this module itself emits (PA-0022: a mechanical match
+#: must not be a loose substring) and applied per-match (``finditer``, not
+#: ``search``) rather than per-fragment: a ``stored_second_order`` cell's
+#: fragment holds two such lines (read + write), and every one of them must
+#: be checked for a collision, not only the first.
+_ROUTE_URL_RE = re.compile(r"Route::[a-z]+\('([^']*)'")
 
 _HEADER = (
     "<?php\n"
@@ -68,20 +93,57 @@ class RouteAccumulator:
     category = "route"
     cardinality = "accumulator"
 
-    def fragment_for_cell(self, *, cell_id: str, controller_class: str, url_path: str) -> str:
-        """One cell's route-registration line.
+    #: HTTP methods a route line may be registered with. Laravel's ``Route``
+    #: facade exposes one lowercase helper per method; an unsupported method
+    #: raises rather than rendering a call that does not exist, and rather
+    #: than silently degrading to ``GET`` (which would misreport a reproduced
+    #: real page's own HTTP method).
+    _METHOD_HELPERS: dict[str, str] = {
+        "GET": "get",
+        "POST": "post",
+        "PUT": "put",
+        "PATCH": "patch",
+        "DELETE": "delete",
+    }
 
-        ``url_path`` is derived from the cell ID (see
-        ``LaravelEmitter._url_path_for_cell``), not the manifest's
-        ``cell.route.path`` verbatim: a vulnerable cell and its secure twin
-        share one logical page (``cell.route.path``) but are two distinct
-        cells that must coexist as two distinct routes in one generated
-        build -- exactly how ``php_current`` already gives twins two
+    def fragment_for_cell(
+        self, *, cell_id: str, controller_class: str, url_path: str, method: str = "GET", action: str = "show"
+    ) -> str:
+        """One route-registration line.
+
+        ``url_path``/``method`` are decided entirely by the caller
+        (``fuzzlab.labgen.emitters.php_laravel._served_route_for``) -- this
+        method never derives a URL or a method itself, so the route that gets
+        registered and the route an oracle probes cannot drift apart
+        (PA-0003/PA-0021).
+
+        For most cells ``url_path`` is a **cell-ID-derived** URL rather than
+        the manifest's ``cell.route.path`` verbatim: a vulnerable cell and its
+        secure twin share one logical page (``cell.route.path``) but are two
+        distinct cells that must coexist as two distinct routes in one
+        generated build -- exactly how ``php_current`` already gives twins two
         distinct *files* (``generated/<cell_id>.php`` each) while both
-        annotate the same logical ``cell.route.path`` in a comment.
+        annotate the same logical ``cell.route.path`` in a comment. The
+        exception is the one cell per real page that owns that page's exact
+        URL (a migrated ``puppy-fort-factory/`` page, lane L-P3.3c): it keeps
+        the real app's exact ``.php``-suffixed URL, because T-LAB0.9's
+        additive-only regression gate reads a moved case as a regression
+        (plan §4.3.6.6a).
+
+        ``method``/``action`` default to ``"GET"``/``"show"``, which is every
+        pre-existing cell's registration byte-for-byte. They are parameters
+        because a real page keeps its own method (``POST /login.php``) and a
+        ``stored_second_order`` cell (L-P3.3c-G4) also registers a **write**
+        endpoint, whose controller action is not ``show``.
         """
+        helper = self._METHOD_HELPERS.get(method.upper())
+        if helper is None:
+            raise ValueError(
+                f"{cell_id}: no Laravel Route helper for HTTP method {method!r} "
+                f"-- known methods: {sorted(self._METHOD_HELPERS)}"
+            )
         return (
-            f"Route::get('{url_path}', [\\App\\Http\\Controllers\\{controller_class}::class, 'show'])"
+            f"Route::{helper}('{url_path}', [\\App\\Http\\Controllers\\{controller_class}::class, '{action}'])"
             f"; // cell: {cell_id}"
         )
 
@@ -92,7 +154,30 @@ class RouteAccumulator:
         regardless of the mapping's own iteration/insertion order -- so two
         calls with the same fragment set are byte-identical no matter what
         order the fragments were collected in.
+
+        Raises :class:`DuplicateRouteError` if two cells' fragments register
+        the same URL. Laravel would silently dispatch only the first matching
+        route, so the second cell would exist as a file and a label but be
+        unreachable -- a silently-uncovered case, which is exactly what the
+        migration's parity gate exists to prevent. With the unified,
+        canonical-cell-per-page URL mechanism this should be structurally
+        unreachable (each real page names at most one canonical cell), so
+        this check is defense in depth against an authoring mistake in a page
+        profile, not the primary mechanism that prevents collisions.
         """
+        by_url: dict[str, list[str]] = {}
+        for cell_id in sorted(fragments):
+            for match in _ROUTE_URL_RE.finditer(fragments[cell_id]):
+                by_url.setdefault(match.group(1), []).append(cell_id)
+        collisions = {url: ids for url, ids in by_url.items() if len(ids) > 1}
+        if collisions:
+            raise DuplicateRouteError(
+                "routes/web.php would register the same URL for more than one cell, so all but "
+                "the first would be unreachable: "
+                + "; ".join(f"{url!r} <- {', '.join(ids)}" for url, ids in sorted(collisions.items()))
+                + " -- at most one cell per page may own the page's real URL (see "
+                "fuzzlab.labgen.emitters.php_laravel's _CANONICAL_CELL_KEY)"
+            )
         sorted_lines = [fragments[cell_id] for cell_id in sorted(fragments)]
         body = "\n".join(sorted_lines)
         return _HEADER + (body + "\n" if body else "")

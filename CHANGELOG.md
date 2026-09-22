@@ -14,6 +14,43 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB: consolidated lane L-P3.3c's six concurrent sub-lanes (G1–G6, migrating real
+  `puppy-fort-factory/` pages onto the `php_laravel` emitter) onto one unified
+  URL-pinning mechanism (`_REAL_PAGE_KEY`/`_CANONICAL_CELL_KEY`, generalizing G3's
+  design, of which the already-merged G5 mechanism is the trivial single-cell case),
+  replacing five independent, mutually-incompatible mechanisms the sub-lanes built
+  without seeing each other's code — because the URL-naming bikeshed was blocking four
+  lanes' merges. Migrated every lane's manifests, tests and genuine findings (G1's
+  numeric-page twins, G2's `json_view` module category, G3's session/register-insert
+  auth pages + `auth_session.py` adapter, G4's `stored_second_order`/write-endpoint
+  support, G6's `search.php` + `html_attribute_quoted` shape — left deliberately
+  unpinned, open for `L-P3.3c-CUT`) onto the single mechanism; reconciled
+  `route_accumulator.fragment_for_cell`'s method/action parameter shape and its
+  duplicate-URL guard into one. Full suite: 1494 passed / 8 skipped, 0 failed (the two
+  `test_mutation_operators.py` MUT failures flagged as pre-existing/out-of-scope by this
+  task's brief were independently fixed by `BUG-0026` (commit `c6953c4`), already on this
+  branch before this change landed) (`CC-LAB-0046`..`0049`/`0051`/`0052`, `FR-LAB-44`..
+  `47`/`49`/`50`).
+- MUT: fixed `SemanticsValidator` (`fuzzlab/mutation/semantics.py`) failing open on an
+  untrusted SQL `--` comment-append (accepted as semantics-preserving without vetted
+  provenance) and failing closed on a case-insensitive SQL `case-toggle` (AST equality
+  was case-sensitive) — chronic failures in
+  `tests/test_mutation_operators.py::test_every_surface_variant_preserves_semantics` and
+  `::test_sql_equivalent_needs_trusted_provenance`, first noted found-not-fixed by lane
+  L-P3.4 and re-confirmed by many subsequent runs. See `BUG-0026`, `PA-0028`,
+  `CC-MUT-0008`.
+- LAB: reproduced the real `contact.php` and `newsletter.php` pages (`PFF-1005`/`PFF-1006`)
+  as `php_laravel` cells — the first page group of the `puppy-fort-factory/` migration
+  (lane L-P3.3c-G5, `CC-LAB-0050`, `FR-LAB-48`). Both are secure-only escaped-echo
+  (`xss`/`html_body` + `html_entity_escape`) cells in the new
+  `lab/manifests/phase3_laravel_real_pages_forms.yaml`, deriving the SECURE verdict
+  `lab/ground-truth/labels.json` already carries, and needing no new module. Their routes
+  **keep the real app's exact `.php`-suffixed URLs** via a new `url_path` page-profile pin,
+  because T-LAB0.9's additive-only gate would otherwise see every migrated case *relocate*
+  to Laravel's idiomatic extension-less path — now enforced by a test against the real
+  regression gate rather than by plan prose. Tier-0/Tier-3 conformance for this emitter is
+  swept over every committed manifest's cells, computed from `Emitter.supports()`
+  (PA-0024/PA-0027).
 - LAB: made the metadata leakage probe a required `fuzzlab lab-generate --check` gate
   and gave it the per-class thresholds `docs/LAB_IMPLEMENTATION_PLAN.md` §2.3 decided on
   (lane L-P1.3, `CC-LAB-0045`, `FR-LAB-43`) — `leakage_probe.run_leakage_gate` now wraps

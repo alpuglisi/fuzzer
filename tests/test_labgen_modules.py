@@ -196,6 +196,15 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
     },
     "html_js_url_echo": {"value_expr": "$link", "css_class": "share"},
     "html_attribute_unquoted_echo": {"value_expr": "$theme", "css_class": "theme", "attr_name": "theme"},
+    # L-P3.3c-G6: registered in the shared vocabulary so minimal_pair can
+    # classify them (php_current's shape map does not use either).
+    "html_attribute_quoted_echo": {"value_expr": "$q", "css_class": "search", "attr_name": "q"},
+    "sql_string_literal_like": {
+        "value_expr": "$q",
+        "bound": False,
+        "table": "products",
+        "column": "name",
+    },
     "single_statement": {"body": "    // x\n", "handler_name": "handle_x"},
     "render_only": {"body": "    // x\n", "handler_name": "handle_x"},
 }

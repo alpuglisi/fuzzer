@@ -1,0 +1,18 @@
+{% if bound %}
+// whereRaw() with a real `?` placeholder: the LIKE wildcards are added to the
+// *binding*, never to the statement text, so the quoted string literal the
+// value lands in is closed by the driver and not reachable from the value.
+$rows = DB::table('{{ table }}')
+    ->whereRaw('{{ column }} LIKE ?', ['%' . {{ value_expr }} . '%'])
+    ->get()
+    ->all();
+{% else %}
+// whereRaw() takes raw SQL: the value is spliced between the LIKE wildcards
+// inside a quoted string literal, so the closing quote is reachable from it --
+// the same statement construction as the bound branch above, differing only in
+// the binding (the minimal-pair shape this stack's authoring rules require).
+$rows = DB::table('{{ table }}')
+    ->whereRaw("{{ column }} LIKE '%" . {{ value_expr }} . "%'")
+    ->get()
+    ->all();
+{% endif %}

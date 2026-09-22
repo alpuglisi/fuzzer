@@ -1,0 +1,132 @@
+# Phase-3 php_laravel REAL-page manifest: puppy-fort-factory/search.php.
+#
+# Lane L-P3.3c-G6 (docs/LAB_IMPLEMENTATION_PLAN.md §4.3.6, row G6 of
+# §4.3.6.4's table) -- the app migration's largest single page: ONE query
+# parameter (`q`) reaching THREE distinct sinks, each authored as a
+# vulnerable/secure twin pair, so six cells in total.
+#
+# Unlike lab/manifests/phase3_php_laravel_sample.yaml (illustrative Laravel
+# pages, extension-less routes, LABGEN-PL- IDs), every cell here reproduces a
+# REAL page of the fixture app, read directly from puppy-fort-factory/
+# search.php and cross-checked against puppy-fort-factory/VULNERABILITIES.md
+# and lab/ground-truth/labels.json:
+#
+#   * `WHERE name LIKE '%$q%'`        -> sqli / sql_string_literal  (PFF-0002)
+#   * `<strong><?= $q ?></strong>`    -> xss  / html_body           (PFF-0003)
+#   * `value="<?= $q ?>"`             -> xss  / html_attribute_quoted
+#
+# The third sink is the page's third documented vulnerability
+# (VULNERABILITIES.md: "`q` is echoed back into the page (and into the input
+# value attribute) without escaping"); labels.json folds it into PFF-0003's
+# single xss-reflected case rather than numbering it separately, so this
+# manifest reproduces the behavior without claiming a case ID for it. It is
+# also the reason this lane exists: `raw_concat x html_attribute_quoted` had
+# no row in lab/safety_matrix.yaml until now (§4.3.6.2).
+#
+# THE SQLi SHAPE IS NOT A NEW FAMILY. `LIKE '%$q%'` is a quoted string-literal
+# position; the LIKE wildcards are not verdict-relevant to `sql_syntax_break`,
+# so this is `sql_string_literal` with a `get_param` source (§4.3.6.2), never a
+# `sql_like_pattern` family. What differs from login.php is only the *sink
+# rendering* (a catalogue LIKE filter vs. an equality-plus-password lookup),
+# carried by the emitter's page profile as render-only metadata.
+#
+# ROUTE PATHS KEEP THE REAL `.php` SUFFIX -- deliberately, not accidentally
+# (§4.3.6.6a). `cell.route.path` is what a candidate ground truth's per-case
+# `url` is derived from, and fuzzlab/labgen/regression_gate.py fails a build
+# that relocates an existing PFF- case. Laravel's idiomatic `/search` would
+# relocate both of this page's cases and correctly break the cutover.
+#
+# Cell IDs are prefixed LABGEN-PL-RP- ("php_laravel real pages"), keeping them
+# out of the illustrative LABGEN-PL-/LABGEN-EX-/LABGEN-HS- namespaces and out
+# of the real PFF- ground-truth namespace; nothing here is wired to a build
+# that touches puppy-fort-factory/ or lab/ground-truth/.
+#
+# Verdicts are NEVER asserted here: they are derived by
+# fuzzlab.labgen.verdict.verdict() from (transform, sink_context) against
+# lab/safety_matrix.yaml v1, and tests/test_labgen_php_laravel_search_page.py
+# asserts every cell's derived verdict matches the label labels.json already
+# carries for that case (NFR-LAB-label-accuracy).
+#
+# Each pair is a MINIMAL pair in the §4.3.6.3a sense: on Laravel the safe form
+# is the default, so the secure twin keeps the same construction and differs
+# only in the transform region -- `whereRaw('name LIKE ?', [...])` against
+# `whereRaw("name LIKE '%" . $q . "%'")`, and `e($q)` against `$q` for the two
+# Blade echoes. Never `->where(...)` against `->whereRaw(...)`, which would
+# differ by the whole statement and be correctly rejected.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # --- sink 1 of 3: WHERE name LIKE '%q%' (PFF-0002) ---------------------
+  # Vulnerable: the value is spliced between the LIKE wildcards inside a
+  # quoted string literal it can close.
+  - cell_id: LABGEN-PL-RP-0001
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /search.php }
+    param: { location: query }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  # The secure twin: same whereRaw() construction, the value bound.
+  - cell_id: LABGEN-PL-RP-0002
+    class: sqli
+    stack_profile: php_laravel
+    route: { method: GET, path: /search.php }
+    param: { location: query }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
+
+  # --- sink 2 of 3: the HTML body reflection (PFF-0003) ------------------
+  - cell_id: LABGEN-PL-RP-0003
+    class: xss
+    stack_profile: php_laravel
+    route: { method: GET, path: /search.php }
+    param: { location: query }
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: []
+
+  - cell_id: LABGEN-PL-RP-0004
+    class: xss
+    stack_profile: php_laravel
+    route: { method: GET, path: /search.php }
+    param: { location: query }
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: [html_entity_escape]
+
+  # --- sink 3 of 3: value="<?= $q ?>", a QUOTED attribute ---------------
+  # The cell the new `(raw_concat, html_attribute_quoted)` matrix row exists
+  # for. The required concern is still `html_tag_break`: an unescaped value
+  # carries its own `"`, so it can close the attribute, add another
+  # (`" onmouseover=alert(1) x="`), or close the tag.
+  - cell_id: LABGEN-PL-RP-0005
+    class: xss
+    stack_profile: php_laravel
+    route: { method: GET, path: /search.php }
+    param: { location: query }
+    sink_context:
+      family: html_attribute_quoted
+      required_neutralizations: [html_tag_break]
+    transform: []
+
+  # The secure twin. Note the asymmetry with html_attribute_unquoted, which is
+  # what makes the two families distinct rather than redundant: at a QUOTED
+  # attribute entity escaping is the context-correct fix and the matrix scores
+  # it `neutralises` -> SECURE; at an unquoted one the same op is only
+  # `partial` -> still VULNERABLE.
+  - cell_id: LABGEN-PL-RP-0006
+    class: xss
+    stack_profile: php_laravel
+    route: { method: GET, path: /search.php }
+    param: { location: query }
+    sink_context:
+      family: html_attribute_quoted
+      required_neutralizations: [html_tag_break]
+    transform: [html_entity_escape]

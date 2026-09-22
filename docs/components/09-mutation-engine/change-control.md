@@ -3,6 +3,45 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0008 — Fix `SemanticsValidator` fail-open on untrusted SQL comment-append; fix AST case-sensitivity (2026-09-22)
+- Change: `fuzzlab/mutation/semantics.py` — added `introduces_line_comment(original,
+  mutated)` (true when `mutated` carries a `--` marker `original` didn't) and made
+  `SemanticsValidator.preserves()` refuse (return `False`) any *untrusted* mutation for
+  a SQL-like `vuln_class` that introduces one, before the AST/canonical checks run —
+  those checks cannot see that a `--` comment truncates everything after it once the
+  fragment is concatenated into the real query, so they were fail-opening on it
+  (`sqlglot` discards comments as non-semantic trivia; `canonicalize()` only strips
+  bounded `/* */` block comments). `trusted=True` is unaffected — still accepted by
+  provenance. Also fixed `_ast_equiv()` to compare `pa.sql().lower() == pb.sql().lower()`
+  instead of raw `sqlglot` node `==`, which was case-sensitive and wrongly rejected a
+  genuinely meaning-preserving `case-toggle` variant (SQL keywords/unquoted identifiers
+  are case-insensitive; `canonicalize()` already lowercases for the same reason).
+- Impact: fixes the two chronically-failing tests
+  (`tests/test_mutation_operators.py::test_every_surface_variant_preserves_semantics`,
+  `::test_sql_equivalent_needs_trusted_provenance`) without special-casing their literal
+  inputs — the fix is a general fail-closed rule plus a general case-normalization fix.
+  Both `fuzzlab/mutation/learn.py` and `fuzzlab/mutation/search.py` call
+  `SemanticsValidator.preserves()` directly and inherit the corrected behavior with no
+  code change of their own (PA-0002 sweep: no other equivalence/validator predicate
+  exists in `fuzzlab/mutation/`). No schema change; no new dependency; no traffic.
+  New regression tests derive the checked operator set from `default_operators()`
+  (PA-0027 discipline) rather than a hardcoded operator-id literal.
+- Risk (level; mitigation): low — a validator-only correctness fix, narrower in one
+  direction (rejects more) and case-normalizing in the other (accepts a previously
+  wrongly-rejected true positive). Mitigated by the full suite: 1494 passed, 8 skipped,
+  0 failed (was 2 failed before this change, same suite otherwise).
+- Deliverables:
+  - [x] `introduces_line_comment()` + fail-closed gate in `preserves()` — done.
+  - [x] Case-insensitive `_ast_equiv()` — done.
+  - [x] `docs/bugs/BUG-0026-semantics-validator-fail-open-on-untrusted-sql-comment.md`
+    (Five Whys RCA) — done.
+  - [x] `docs/PREVENTIVE_ACTIONS.md` PA-0028 — done.
+  - [x] Regression tests in `tests/test_mutation_operators.py` — done.
+- Effectiveness (assessed 2026-09-22): effective — both previously-chronic failures
+  pass, the full suite is green, and the fix is structural (a rule over any `--`-
+  introducing transform, checked against the operator registry) rather than a literal
+  special-case for the two test inputs.
+
 ### CC-MUT-0007 — Expose `build_parser()` for the command-spec registry (2026-09-21)
 - Change: `fuzzlab/mutation/cli.py` now factors its argparse setup into `build_parser()`;
   `main()` keeps the `p` reference (so `p.error(...)` still works) and delegates parsing.
