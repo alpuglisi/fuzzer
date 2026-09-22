@@ -40,6 +40,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-840, CWE-20]
+  suggested_op: client_trusted_amount
+  suggested_sink_family: payment_charge_amount
 
 - file: vulnerable-2.py
   role: vulnerable
@@ -64,6 +67,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-362, CWE-367]
+  suggested_op: unlocked_check_then_act
+  suggested_sink_family: db_counter_increment
 
 - file: idiomatic-1.py
   role: idiomatic
@@ -86,6 +92,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-840, CWE-20]
+  suggested_op: server_recomputed_amount
+  suggested_sink_family: payment_charge_amount
 
 # Skipped for no license (cited/described in prose only, per this
 # corpus's license-handling rule -- no source text copied from any of

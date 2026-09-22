@@ -14,6 +14,31 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Research: Phase 3 CWE mapping for the "ecommerce-logic" corpus cell
+  (`docs/research/corpus-examples/ecommerce-logic/{php,node,python}/manifest.yaml`,
+  10 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each
+  entry per `docs/VULN_CORPUS_EXPANSION_PLAN.md` Phase 3's handoff spec:
+  CWE-840+CWE-20 (`client_trusted_amount` vs. `server_recomputed_amount` into
+  a new `payment_charge_amount` sink family) for the client-trusted-price/
+  amount shapes (Node's 3 vulnerable + 2 idiomatic entries, Python's and
+  PHP's price-recomputation entries), and CWE-362+CWE-367 (`unlocked_check_
+  then_act` into a new `single_use_resource_redemption`/`db_counter_increment`
+  sink family, named per the actual counter being raced) for the non-atomic
+  coupon-redemption race entries (PHP's `mucms` example, Python's
+  `MasaiShop` example) — none of `lab/safety_matrix.yaml`'s current SQLi/XSS
+  vocabulary fits a business-logic shape, so all six proposed names are new.
+  Flagging a schema-fit concern for whoever does this feature's actual
+  `safety_matrix.yaml` handoff: the race-condition shapes don't really cash
+  out as an `(op, sink_family)` "transform applied to a sink" pair the way
+  SQLi/XSS do — there's no vulnerable-side *transform* to size the effect of,
+  the defect is the *absence* of a lock/transaction around an existing
+  check-then-act, and the corpus itself is missing a real, licensed "locked"
+  idiomatic counterpart in every language collected (see the PHP and Python
+  manifests' own "Skipped for no license" notes) — this class may need a
+  distinct vocabulary/gate design rather than being forced into the
+  injection-class `op`/`sink_family`/`effect` triple. Documentation/metadata-
+  only: no source files altered, no pairs built, no validation attempted;
+  `validated: false`/`validated_by: []` left unchanged on all 10 entries.
 - Research: Phase 3 CWE mapping for the "user-generated content / stored XSS"
   corpus cell
   (`docs/research/corpus-examples/ugc-xss/{php,node,python}/manifest.yaml`,

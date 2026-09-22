@@ -46,6 +46,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-362, CWE-367]
+  suggested_op: unlocked_check_then_act
+  suggested_sink_family: single_use_resource_redemption
 
 - file: idiomatic-1.php
   role: idiomatic
@@ -70,6 +73,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-840, CWE-20]
+  suggested_op: server_recomputed_amount
+  suggested_sink_family: payment_charge_amount
 
 # Skipped for no license (cited/described in prose only, per this
 # corpus's license-handling rule -- no source text copied from any of
