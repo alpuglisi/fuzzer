@@ -15,6 +15,13 @@
 # (§4.3.6.6.5's `track.php` finding, or the D-open-1/D-open-2 decisions
 # recorded in §4.3.6.7); this file must never assert a resolution beyond what
 # that section actually says.
+# PFF-0007/PFF-0008 (reviews.php/feedback.php's DOM-based XSS) were exempted
+# here under D-open-2 until lane L-P3.3c-DOM built real php_laravel coverage
+# for them (docs/components/01-target-lab/change-control.md's CC-LAB-0060
+# entry) -- both cases are now COVERED (see
+# lab/manifests/phase3_php_laravel_real_pages_dom.yaml and
+# fuzzlab.labgen.emitters.php_laravel._PAGE_PROFILES['/reviews.php']/
+# ['/feedback.php']), so their entries are removed rather than kept stale.
 exemptions:
   - pff_case: PFF-1002
     reason: >-
@@ -24,26 +31,6 @@ exemptions:
       intval_cast op to express "safe because there is nothing to inject
       into." No php_laravel cell is emitted for this page (plan
       §4.3.6.6, "Two findings that change the naive reading of this table").
-  - pff_case: PFF-0007
-    reason: >-
-      reviews.php's DOM XSS (location.hash `author` written via innerHTML,
-      rendering: js) never reaches the server, so no php_current/php_laravel
-      emitter models it. D-open-1, decided 2026-09-22 (plan §4.3.6.7): Layer B
-      (JS-rendered pages) reproduction is not required for the cutover --
-      accepted losing the live crawler-discoverability runbook exercise
-      (documented in docs/ON_HOST_RUNBOOK.md) rather than building
-      JS-rendering into the generator. D-open-2, decided 2026-09-22 (plan
-      §4.3.6.7): DOM XSS (L-P3.3c-DOM) is out of the cutover's "full
-      coverage" bar -- a new client-side sink class, not a migration; it
-      remains backlog, not something L-P3.3c-CUT waits on.
-  - pff_case: PFF-0008
-    reason: >-
-      feedback.php's DOM XSS (the `ref` query param used client-side only,
-      written via innerHTML, rendering: js) never reaches the server, so no
-      php_current/php_laravel emitter models it. Same two decisions as
-      PFF-0007 above: D-open-1, decided 2026-09-22 (plan §4.3.6.7, Layer B
-      not required) and D-open-2, decided 2026-09-22 (plan §4.3.6.7, DOM XSS
-      out of cutover scope, L-P3.3c-DOM remains backlog).
   - pff_case: PFF-0003
     reason: >-
       search.php's reflected XSS (the HTML-body echo and the quoted

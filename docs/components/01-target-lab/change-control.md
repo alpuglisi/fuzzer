@@ -3,6 +3,117 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0060 — L-P3.3c-DOM: DOM-based XSS sink class, `reviews.php`/`feedback.php` (FR-LAB-57) (2026-09-22)
+- Change: built lane **L-P3.3c-DOM** for real, following the exact G1-G6 methodology
+  (safety-matrix row additions, Cell/manifest entries, the unified URL-pinning mechanism,
+  live-boot extension, `requirements.md` documentation). This lane was explicitly out of
+  the L-P3.3c-G1..G6 cutover's scope (`D-open-2`,
+  `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.7, decided 2026-09-22: "a new client-side sink
+  class, not a migration, belongs in its own lane") and is now separately prioritized,
+  per that decision's own terms, not blocked on anything.
+
+  Ground truth (`puppy-fort-factory/reviews.php`/`feedback.php`, read directly and cited
+  by line): `reviews.php` reads `#author=` from `location.hash` and assigns it to
+  `document.getElementById('greeting').innerHTML` with no escaping (its own comment:
+  "a server-side scanner and the raw HTML both miss it too" -- `PFF-0007`); `feedback.php`
+  reads `?ref=` from `location.search` and assigns it to
+  `document.getElementById('fb-status').innerHTML`, likewise unescaped, likewise never
+  read server-side (`PFF-0008`). Both are labelled `vuln_class: "xss-dom"`,
+  `sink_context: "dom"` in `lab/ground-truth/labels.json` -- a distinct vuln_class from
+  plain `xss`, kept distinct here rather than conflated, since neither the source nor the
+  sink is server-rendered.
+
+  **Safety matrix** (`lab/safety_matrix.yaml`, additive under the existing `version: 1`):
+  a genuinely new sink family, `dom_html_sink` (required concern the existing
+  `html_tag_break`, reached through a sink with no server-side rendering step at all --
+  what makes it a new family rather than a rendering of `html_body`), with `raw_concat`
+  reused for the unescaped `no_effect` baseline (a genuinely matching op -- checked the
+  existing vocabulary first, per this task's own reuse-discipline instruction) and one
+  new op, `dom_text_content` (the client-side write uses `Node.textContent` instead of
+  `Element.innerHTML` -- there is no PHP-side escaping call to make, since the value
+  never reaches PHP, so this is not a rendering of `html_entity_escape`), scored
+  `neutralises`.
+
+  **Modules**, registered in *both* `fuzzlab.labgen.modules` (`php_current`, unrendered --
+  for the shared minimal-pair vocabulary only, exactly `CC-LAB-0051`'s precedent for
+  `html_attribute_quoted_echo`/`sql_string_literal_like`) and
+  `fuzzlab.labgen.emitters.php_laravel.modules` (rendered): `dom_url_source` (a source
+  that extracts no PHP variable at all -- the tainted value never reaches the server),
+  `dom_text_content` (a transform that flips a client-side write-mechanism flag,
+  `dom_write_prop`, rather than wrapping a PHP expression -- the same `bound`-flag-
+  threading pattern `ParamBindTransform` already uses), and `dom_innerhtml_echo` (a Blade
+  view whose `<script>` block does the client-side read *and* write itself, branching on
+  `dom_write_prop` -- `innerHTML` vulnerable, `textContent` secure). New
+  `("xss-dom", "dom_html_sink")` entry in `php_laravel`'s `_MODULE_SET_BY_SHAPE`;
+  `php_current`'s own shape map is deliberately not widened (unaffected, same as G6).
+
+  **Cells**: `lab/manifests/phase3_php_laravel_real_pages_dom.yaml`, four cells
+  (`LABGEN-PLRP-DOM-0001`/`-0001-SAFE` for `reviews.php`, `LABGEN-PLRP-DOM-0002`/
+  `-0002-SAFE` for `feedback.php`), through the unified URL-pinning mechanism
+  (`_REAL_PAGE_KEY`/`_CANONICAL_CELL_KEY`, `CC-LAB-0052`): each canonical cell is served
+  at the real `.php`-suffixed URL `labels.json` labels the case at, and its authored
+  secure twin gets the standard `.php`-suffixed twin URL.
+
+  **Migration exemptions**: `lab/ground-truth/migration-exemptions.yaml`'s `PFF-0007`/
+  `PFF-0008` entries are **removed** -- both cases are covered for real now, not exempt --
+  and `fuzzlab.labgen.cutover_gate`'s pinned exemption-register test
+  (`tests/test_labgen_cutover_gate.py::test_the_exemption_register_names_exactly_the_expected_cases`)
+  is updated to `{PFF-1002, PFF-0003}`.
+
+  **Static precheck**: `fuzzlab.labgen.conformance.static_precheck.STATIC_PRECHECK_BY_SHAPE`
+  gained `("xss-dom", "dom_html_sink") -> UNINFORMATIVE` -- a PHP taint checker (Psalm) has
+  literally no PHP-observable data flow to analyze for this shape.
+
+  **Live-boot**: `fuzzlab.labgen.conformance.live_boot.LiveBootHarness` now live-boots this
+  manifest too (`tests/test_labgen_conformance_live_boot.py::test_live_boot_dom_manifest_serves_reviews_and_feedback`,
+  run for real against a real `php artisan serve` in this environment, not just
+  skip-guarded) -- the one live-boot proof in this component with no server-side round
+  trip to differentiate on at all: both real pinned URLs return HTTP 200 and embed the
+  right client-side shape (`innerHTML` vs. `textContent`), never a JS-*execution* proof
+  (headless, JS-executing crawling stays the documented D-open-1 gap,
+  `docs/ON_HOST_RUNBOOK.md`).
+- Impact (other components / project): none outside LAB. `fuzzlab.labgen.modules`
+  (`php_current`) gained three registered-but-unrendered modules, exactly the G6
+  precedent; its own `_MODULE_SET_BY_SHAPE` is untouched.
+- Risk (level; mitigation or accepted-risk justification): **low**. The new shape's
+  verdict-relevant vocabulary (`xss-dom`/`dom_html_sink`) is disjoint from every existing
+  `(vuln_class, sink_context.family)` pair, so nothing pre-existing can be affected by the
+  new matrix rows or module registrations (additive-only, checked by the full suite
+  below). One accepted, documented scope limit, carried over unchanged from D-open-1: no
+  headless/JS-executing verification exists in this harness, so "the generated page
+  behaves like the real one when actually executed by a browser" remains a claim proven
+  only by static/live-boot inspection of the served markup/script text, not by JS
+  execution.
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml`: `dom_html_sink`/`dom_text_content` rows -- done
+  - [x] `fuzzlab/labgen/modules/__init__.py` + 3 new templates (`php_current`,
+        registered-but-unrendered) -- done
+  - [x] `fuzzlab/labgen/emitters/php_laravel/modules.py` + 3 new templates (rendered) --
+        done
+  - [x] `fuzzlab/labgen/emitters/php_laravel/__init__.py`: `_MODULE_SET_BY_SHAPE` entry +
+        `/reviews.php`/`/feedback.php` page profiles -- done
+  - [x] `lab/manifests/phase3_php_laravel_real_pages_dom.yaml` (4 cells) -- done
+  - [x] `lab/ground-truth/migration-exemptions.yaml`: `PFF-0007`/`PFF-0008` removed -- done
+  - [x] `fuzzlab/labgen/conformance/static_precheck.py`: new shape row -- done
+  - [x] `fuzzlab/labgen/conformance/live_boot.py` + a new live-boot test, run for real --
+        done
+  - [x] `tests/test_labgen_php_laravel_real_pages_dom.py` (17 tests: shape/manifest
+        coverage, verdict-vs-label agreement for both canonical cells and both authored
+        secure twins, the tainted-value-never-in-the-controller property, the
+        innerHTML/textContent branch in the rendered view, URL pinning + regression gate,
+        minimal pair, Tier-0/Tier-3, `lab-generate --check`) -- done
+  - [x] Updated `tests/test_labgen_modules.py`, `tests/test_labgen_php_laravel_harder_shapes.py`
+        (the all-`SINKS` determinism/no-escaping sweeps, extended for the new modules) and
+        `tests/test_labgen_cutover_gate.py` (exemption-register pin) -- done
+  - [x] Bookkeeping: this entry, `FR-LAB-57`, `docs/ARCHITECTURE.md`,
+        `docs/LAB_IMPLEMENTATION_PLAN.md`, `CHANGELOG.md` -- done
+- Effectiveness (assessed 2026-09-22): both canonical cells derive VULNERABLE matching
+  their `PFF-0007`/`PFF-0008` labels, both authored secure twins derive SECURE, both real
+  URLs (`/reviews.php`, `/feedback.php`) are served exactly as labelled, the live-boot
+  proof passed for real against a real `php artisan serve` (6/6 live-boot tests in
+  `tests/test_labgen_conformance_live_boot.py`, ~165s), and the full fast suite is green:
+  **1565 passed, 8 skipped, 12 deselected** (`pytest -q -m "not slow"`).
+
 ### CC-LAB-0059 — `live_boot_available()`'s network probe now exercises a real, bounded composer round trip instead of a raw socket connect (FR-LAB-56) (2026-09-22)
 - Change: fixed `BUG-0029` (a genuine code defect, full bug protocol applied). In
   `fuzzlab/labgen/conformance/live_boot.py`, replaced `_network_reachable()` (a bare

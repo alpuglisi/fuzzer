@@ -207,6 +207,18 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
     },
     "single_statement": {"body": "    // x\n", "handler_name": "handle_x"},
     "render_only": {"body": "    // x\n", "handler_name": "handle_x"},
+    # L-P3.3c-DOM: registered in the shared vocabulary so minimal_pair can
+    # classify them (php_current's shape map does not use any of them).
+    "dom_url_source": {"dom_param_name": "ref", "dom_location": "query"},
+    "dom_text_content": {},
+    "dom_innerhtml_echo": {
+        "dom_location": "query",
+        "dom_param_name": "ref",
+        "dom_target_id": "fb-status",
+        "dom_prefix": "pre-",
+        "dom_suffix": "-post",
+        "dom_write_prop": "innerHTML",
+    },
 }
 
 

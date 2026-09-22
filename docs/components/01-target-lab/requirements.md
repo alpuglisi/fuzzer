@@ -1530,6 +1530,58 @@ lane) can submit a payload as
     actual dependent operation's path, not an easier-to-check stand-in for
     it (`PA-0032`).
 
+- **FR-LAB-57** *(DOM-based XSS sink class, `php_laravel`; `CC-LAB-0060`,
+  2026-09-22).* Lane `L-P3.3c-DOM`, explicitly deferred out of the
+  `L-P3.3c-G1..G6` cutover's scope (D-open-2, decided 2026-09-22: "a new
+  client-side sink class, not a migration"), now built for real as its own,
+  separately-prioritized lane:
+  - A genuinely new `(vuln_class, sink_context.family)` shape,
+    `("xss-dom", "dom_html_sink")` — distinct from `xss`/`html_body` and
+    every other HTML shape this component supports, because the tainted
+    value is read **and** written entirely client-side by embedded
+    JavaScript and never reaches the server at all (matching
+    `lab/ground-truth/labels.json`'s own `vuln_class: "xss-dom"`,
+    `sink_context: "dom"` for `PFF-0007`/`PFF-0008`). `lab/safety_matrix.yaml`
+    gained one new sink family (`dom_html_sink`, required concern
+    `html_tag_break`) and one new op (`dom_text_content` — the client-side
+    write uses `Node.textContent` instead of `Element.innerHTML`; `raw_concat`
+    is reused for the unescaped baseline), both additive under the existing
+    `version: 1`.
+  - New modules — `dom_url_source` (a no-op: no PHP variable is ever
+    extracted), `dom_text_content` (a transform that flips the client-side
+    write mechanism rather than wrapping a PHP expression) and
+    `dom_innerhtml_echo` (a Blade-view sink whose `<script>` block does the
+    client-side read *and* write itself) — registered in **both**
+    `fuzzlab.labgen.modules` (`php_current`, unrendered — for the shared
+    minimal-pair vocabulary only, the same discipline `CC-LAB-0051` set) and
+    `fuzzlab.labgen.emitters.php_laravel.modules` (rendered, via a new
+    `_MODULE_SET_BY_SHAPE` entry).
+  - `puppy-fort-factory/reviews.php` (`PFF-0007`, `#author=` from
+    `location.hash`) and `feedback.php` (`PFF-0008`, `?ref=` from
+    `location.search`) are reproduced as real `php_laravel` pages
+    (`lab/manifests/phase3_php_laravel_real_pages_dom.yaml`), each with an
+    authored secure twin (`dom_text_content`), through the unified
+    URL-pinning mechanism (`_REAL_PAGE_KEY`/`_CANONICAL_CELL_KEY`,
+    `CC-LAB-0052`) — both real `.php`-suffixed URLs served exactly as
+    `labels.json` labels them.
+  - `lab/ground-truth/migration-exemptions.yaml`'s `PFF-0007`/`PFF-0008`
+    entries are **removed** (no longer exempt — now covered for real), and
+    `fuzzlab.labgen.cutover_gate`'s coverage gate reflects it
+    (`test_the_exemption_register_names_exactly_the_expected_cases` updated
+    to `{PFF-1002, PFF-0003}`).
+  - `fuzzlab.labgen.conformance.static_precheck.STATIC_PRECHECK_BY_SHAPE`
+    gained `("xss-dom", "dom_html_sink") -> UNINFORMATIVE`: a PHP taint
+    checker has no PHP-observable flow to analyze at all for this shape (the
+    value never touches a PHP variable), more sharply uninformative than
+    every SQL/escaping-context-mismatch shape already in that registry.
+  - `fuzzlab.labgen.conformance.live_boot.LiveBootHarness` live-boots this
+    manifest too (`test_live_boot_dom_manifest_serves_reviews_and_feedback`,
+    `tests/test_labgen_conformance_live_boot.py`): the one live-boot proof in
+    this component with no server-side round trip to differentiate on at
+    all — both real pinned URLs return 200 and embed the right client-side
+    shape (`innerHTML` vs. `textContent`), never a JS-*execution* proof
+    (headless, JS-executing crawling stays the documented D-open-1 gap).
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

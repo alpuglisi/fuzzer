@@ -376,9 +376,26 @@ def test_no_sink_escapes_anything_itself(sink_name: str) -> None:
         "attr_name": "a",
         "password_var": "secret_hash",
         "password_param": "secret",
+        # L-P3.3c-DOM's dom_innerhtml_echo sink's own render-only metadata.
+        "dom_location": "query",
+        "dom_param_name": "p",
+        "dom_target_id": "t",
+        "dom_prefix": "pre-",
+        "dom_suffix": "-post",
+        "dom_write_prop": "innerHTML",
     }
     code = SINKS[sink_name].render(ctx).code
-    if sink_name in VIEW_SINKS:
+    if sink_name == "dom_innerhtml_echo":
+        # The one VIEW_SINK with no controller-passed value at all
+        # (L-P3.3c-DOM): the tainted value is read AND written entirely
+        # client-side, so there is no `$value` for this sink to echo -- the
+        # shared `ctx["value_expr"]`/MARKER_EXPR above is simply irrelevant to
+        # it by design (see modules.py's DomInnerhtmlEchoSink docstring). Its
+        # own "never escapes" evidence is the innerHTML/textContent branch
+        # asserted directly in tests/test_labgen_php_laravel_real_pages_dom.py.
+        assert "$value" not in code
+        assert "MARKER_EXPR" not in code
+    elif sink_name in VIEW_SINKS:
         # A view fragment reads the value the controller passed in, so its
         # marker is the Blade variable rather than the raw expression.
         assert "{!! $value !!}" in code

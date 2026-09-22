@@ -80,6 +80,17 @@ STATIC_PRECHECK_BY_SHAPE: dict[tuple[str, str], StaticPrecheckStatus] = {
     # html_body)`'s situation. The unquoted family is uninformative because
     # there the escaping is *present* and only the context is wrong.
     ("xss", "html_attribute_quoted"): StaticPrecheckStatus.INFORMATIVE,
+    # --- L-P3.3c-DOM: DOM-based XSS (reviews.php/feedback.php) --------------
+    # UNINFORMATIVE, and more sharply than every SQL shape above: a Psalm-style
+    # PHP taint checker analyzes PHP data flow, and this shape's taint never
+    # touches a single PHP variable -- the value is read and written entirely
+    # by client-side JavaScript embedded in the response. There is no PHP
+    # source, no PHP sink and no PHP-observable flow for the checker to find
+    # clean *or* vulnerable; a clean PHP scan is evidence of nothing here
+    # (the same reasoning as the escaping-context-mismatch rows above, one
+    # step further: those shapes at least have a PHP-observable call for the
+    # checker to mis-trust as a sanitizer).
+    ("xss-dom", "dom_html_sink"): StaticPrecheckStatus.UNINFORMATIVE,
 }
 
 

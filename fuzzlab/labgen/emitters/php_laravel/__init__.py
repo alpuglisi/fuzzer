@@ -27,12 +27,15 @@ Built in four lanes:
   ``xss``  / ``url_javascript_scheme``       Blade view, ``javascript:`` URL
   ``xss``  / ``html_attribute_unquoted``     Blade view, unquoted attribute
   ``xss``  / ``html_attribute_quoted``       Blade view, quoted attribute
+  ``xss-dom`` / ``dom_html_sink``             Blade view, client-only ``<script>`` read+write
   =========================================  ======================================
 
-  The last row is **L-P3.3c-G6**'s addition, not L-P3.3b's original set: it
-  is the one shape this emitter carries that ``php_current`` does not (its
-  matrix pair ``(raw_concat, html_attribute_quoted)`` did not exist until
-  that lane), so this stack's inventory is a strict superset of
+  The last two rows are not L-P3.3b's original set: ``html_attribute_quoted``
+  is **L-P3.3c-G6**'s addition (its matrix pair ``(raw_concat,
+  html_attribute_quoted)`` did not exist until that lane) and
+  ``dom_html_sink`` is **L-P3.3c-DOM**'s (a brand-new family -- the tainted
+  value never reaches the server at all). Neither shape exists on
+  ``php_current``, so this stack's inventory is a strict superset of
   ``php_current``'s rather than equal to it. ``php_current`` is not the
   migration target (§4.3.6.6b).
 
@@ -90,6 +93,17 @@ Built in four lanes:
     see that page's own profile comment and the exemption entry for the full
     reasoning (a real multi-sink page composition was the alternative, ruled
     out as a disproportionate architecture change, not attempted here).
+
+  * **L-P3.3c-DOM** -- ``/reviews.php`` (PFF-0007), ``/feedback.php``
+    (PFF-0008): the DOM-based XSS sink class explicitly deferred out of the
+    G1-G6 cutover's scope (D-open-2, ``docs/LAB_IMPLEMENTATION_PLAN.md``
+    §4.3.6.7) and built here as its own, separately-prioritized lane. A
+    genuinely new shape (``dom_html_sink``), not a rendering of any existing
+    one: the tainted value (a URL fragment/query-string parameter) is read
+    AND written entirely client-side by embedded JavaScript and never
+    reaches the server at all (:data:`SOURCES`'s ``dom_url_source`` renders
+    no PHP variable read). Now that this lane has landed, the two cases are
+    no longer entries in ``lab/ground-truth/migration-exemptions.yaml``.
 
   Real ``puppy-fort-factory/`` page reproduction depends on L-P3.3b; every
   *other* route in :data:`_PAGE_PROFILES` remains an illustrative Laravel
@@ -201,6 +215,15 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     # php_laravel's inventory is a strict *superset* of php_current's rather
     # than equal to it (php_current is not the migration target; §4.3.6.6b).
     ("xss", "html_attribute_quoted"): _ModuleSet("get_param", "html_attribute_quoted_echo", "render_only"),
+    # L-P3.3c-DOM (reviews.php/feedback.php): the tainted value never reaches
+    # the server at all, so the source is a no-op (DomUrlSource) and the sink
+    # (DomInnerhtmlEchoSink) does the client-side read AND write itself.
+    # vuln_class is "xss-dom", not "xss": lab/ground-truth/labels.json labels
+    # PFF-0007/PFF-0008 with their own distinct vuln_class (sink_context
+    # "dom") precisely because this is not a server-rendered XSS reached
+    # through a request parameter -- it is worth keeping the two classes
+    # visibly distinct rather than conflating them under "xss".
+    ("xss-dom", "dom_html_sink"): _ModuleSet("dom_url_source", "dom_innerhtml_echo", "render_only"),
 }
 
 # ---------------------------------------------------------------------------
@@ -719,6 +742,36 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         # URL" state this resolution exists to close. `PFF-0003` is named in
         # `lab/ground-truth/migration-exemptions.yaml` instead.
         "ground_truth_case": "PFF-0002",
+    },
+    # --- L-P3.3c-DOM: reviews.php/feedback.php's DOM-based XSS -------------
+    # The real page: a `<script>` block reads `#author=` from `location.hash`
+    # and writes it via `.innerHTML` with no escaping (VULNERABILITIES.md
+    # finding #6, PFF-0007). The value never reaches the server -- `var_name`
+    # is descriptive only, never a `$_GET`/`$request` key.
+    "/reviews.php": {
+        "var_name": "author",
+        "dom_location": "hash",
+        "dom_param_name": "author",
+        "dom_target_id": "greeting",
+        "dom_prefix": '<p class="notice ok">Thanks for your review, ',
+        "dom_suffix": "!</p>",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-PLRP-DOM-0001",
+        "ground_truth_case": "PFF-0007",
+    },
+    # The real page: a `<script>` block reads `?ref=` from `location.search`
+    # and writes it via `.innerHTML` with no escaping (VULNERABILITIES.md
+    # finding #7, PFF-0008). The server never uses `ref` either.
+    "/feedback.php": {
+        "var_name": "ref",
+        "dom_location": "query",
+        "dom_param_name": "ref",
+        "dom_target_id": "fb-status",
+        "dom_prefix": '<p class="notice ok">Thanks for visiting from ',
+        "dom_suffix": "!</p>",
+        "real_page": True,
+        "canonical_cell_id": "LABGEN-PLRP-DOM-0002",
+        "ground_truth_case": "PFF-0008",
     },
 }
 

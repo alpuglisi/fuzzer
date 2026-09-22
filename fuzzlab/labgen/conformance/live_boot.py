@@ -37,7 +37,13 @@ unpinned page (no single cell owned its real URL, pending the
 decision (``LABGEN-PL-RP-0001`` canonical, ``PFF-0003`` exempted -- see
 ``fuzzlab.labgen.emitters.php_laravel._PAGE_PROFILES['/search.php']``) and
 this module's MariaDB-backed mode below now live-boots it too, real HTTP
-proof included.
+proof included. **L-P3.3c-DOM** (``CC-LAB-0060``) adds a seventh manifest,
+``dom`` (``reviews.php``/``feedback.php``, ``PFF-0007``/``PFF-0008``): the
+one manifest live-booted here with no server-side round trip to
+differentiate on at all -- the read and the write both happen inside the
+generated page's own ``<script>`` block, so the proof is that the real,
+pinned URL serves and embeds the right client-side shape (``innerHTML`` vs.
+``textContent``), not a payload differential.
 
 **The seeded ``users`` row (:data:`SEED_USERNAME`/:data:`SEED_PASSWORD`,
 user id :data:`SEED_USER_ID`).** One row serves both the auth group's real

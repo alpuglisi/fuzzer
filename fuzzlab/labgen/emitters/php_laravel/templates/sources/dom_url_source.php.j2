@@ -1,0 +1,4 @@
+// dom_url_source: no PHP variable is read at all -- the tainted value
+// ({{ dom_param_name }}, from location.{{ dom_location }}) never reaches the
+// server, so there is nothing for this source to extract. It is read and
+// written entirely by this cell's own Blade view <script> block.

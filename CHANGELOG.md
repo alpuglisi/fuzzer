@@ -13,6 +13,15 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- LAB: built lane L-P3.3c-DOM for real (`reviews.php`/`feedback.php`'s DOM-based XSS,
+  `PFF-0007`/`PFF-0008`) — explicitly deferred out of the L-P3.3c-G1..G6 cutover's scope
+  (D-open-2) and now separately prioritized. New `dom_html_sink` safety-matrix family +
+  `dom_text_content` op, new `dom_url_source`/`dom_text_content`/`dom_innerhtml_echo`
+  modules (registered in both `php_current` and `php_laravel` for the shared minimal-pair
+  vocabulary, rendered only by `php_laravel`), a new 4-cell manifest, both real pages
+  served at their real `.php` URLs, the two `PFF-` cases removed from
+  `migration-exemptions.yaml` (now covered, not exempt), and a real live-boot proof.
+  CC-LAB-0060/FR-LAB-57.
 
 - UI: built R1 of the layout redesign (`docs/UI_LAYOUT_REDESIGN.md`) — real,
   deep-linkable per-section routes (`/`, `/launch`, `/proxy`, `/runs`, `/ml`,

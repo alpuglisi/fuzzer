@@ -352,16 +352,35 @@ tracked in the requirements files, not here.
   derivation and one `route_accumulator.fragment_for_cell(method=, action=)`
   signature, so every migrated page's real route keeps the app's exact
   `.php`-suffixed URL (T-LAB0.9's additive-only regression gate does not see
-  those cases *relocate*) through a single mechanism rather than five. The
-  DOM-XSS sink class (`PFF-0007`/`PFF-0008` -- no sink family exists yet) is,
-  per `D-open-2` (decided 2026-09-22), formally out of the cutover's "full
-  coverage" bar and deferred backlog rather than something `L-P3.3c-CUT`
-  waits on; per `D-open-1` (decided 2026-09-22), the cutover does not require
-  reproducing the JS-rendered (Layer B) pages either -- both cases are
+  those cases *relocate*) through a single mechanism rather than five.
+  Per `D-open-1` (decided 2026-09-22), the cutover does not require
+  reproducing the JS-rendered (Layer B) pages in general -- that case remains
   recorded in `lab/ground-truth/migration-exemptions.yaml`
   (`CC-LAB-0053`/`FR-LAB-51`, below). The atomic cutover itself that deletes
   the hand-built directory remains unrelated to this consolidation and
   unscheduled, pending human sign-off (plan §4.3.6.5).
+
+  **The DOM-XSS sink class, built (`L-P3.3c-DOM`, `CC-LAB-0060`/`FR-LAB-57`,
+  2026-09-22).** `D-open-2` (decided 2026-09-22) formally put this shape out
+  of the G1-G6 cutover's "full coverage" bar as deferred backlog, "to be
+  picked up as its own lane whenever prioritized" -- it was then separately
+  prioritized and built for real, not as part of `L-P3.3c-CUT`. A genuinely
+  new `(vuln_class, sink_context.family)` pair, `("xss-dom",
+  "dom_html_sink")`: the tainted value (a URL fragment/query-string
+  parameter) is read *and* written entirely client-side and never reaches
+  the server, so the new `dom_url_source` module renders no PHP variable
+  read at all, and the new `dom_innerhtml_echo` Blade-view sink's `<script>`
+  block does the client-side read and write itself, branching on
+  `dom_write_prop` (`innerHTML` vulnerable / `textContent` secure, the new
+  `dom_text_content` op). `reviews.php` (`PFF-0007`) and `feedback.php`
+  (`PFF-0008`) are now real `php_laravel` pages
+  (`lab/manifests/phase3_php_laravel_real_pages_dom.yaml`), each with an
+  authored secure twin, served at their real `.php` URLs through the same
+  unified mechanism as G1-G6, and live-booted for real
+  (`fuzzlab.labgen.conformance.live_boot`) -- the one live-boot proof with no
+  server round trip to differentiate on, only the served markup/script's
+  `innerHTML`/`textContent` shape. `PFF-0007`/`PFF-0008` are **no longer**
+  in `lab/ground-truth/migration-exemptions.yaml` (covered, not exempt).
 
   **The parity/cutover coverage gate** (`CC-LAB-0053`/`FR-LAB-51`,
   `fuzzlab/labgen/cutover_gate.py`, plan §4.3.6.6 point 3) is the precondition
@@ -379,9 +398,11 @@ tracked in the requirements files, not here.
   `_CANONICAL_CELL_KEY`) with two more keys the coverage question needs:
   `ground_truth_case_by_family` (`search.php`'s one profile spanning
   `PFF-0002`/`PFF-0003`) and `secondary_ground_truth_cases` (`login.php`'s
-  boilerplate `PFF-1008` password condition). Currently green: 13 of 16
-  `PFF-` cases covered, 3 exempted (`PFF-1002` -- `track.php` has no sink at
-  all; `PFF-0007`/`PFF-0008` -- DOM XSS, per `D-open-1`/`D-open-2` above), 0
+  boilerplate `PFF-1008` password condition). Currently green: 14 of 16
+  `PFF-` cases covered (`PFF-0007`/`PFF-0008` moved from exempted to covered
+  once `L-P3.3c-DOM` landed, `CC-LAB-0060`), 2 exempted (`PFF-1002` --
+  `track.php` has no sink at all; `PFF-0003` -- `search.php`'s
+  simultaneously-true reflected-XSS case, downgraded per `CC-LAB-0058`), 0
   uncovered.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,

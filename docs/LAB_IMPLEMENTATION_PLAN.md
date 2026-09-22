@@ -1056,7 +1056,7 @@ invariant.
 | `L-P3.3c-G4` | stored second-order pair (`edit_profile` → `profile`) | L-P3.3b, L-P2.1, L-P2.3 | G1–G3, G5, G6 |
 | `L-P3.3c-G5` | escaped-echo forms (`contact`, `newsletter`) | L-P3.3b | G1–G4, G6 |
 | `L-P3.3c-G6` | `search.php` + the `raw_concat × html_attribute_quoted` matrix row | L-P3.3b, L-P1.2b | G1–G5 |
-| `L-P3.3c-DOM` | DOM-XSS sink class (`reviews`, `feedback`) | **new family work — not L-P3.3b** | deferred backlog, not scheduled with L-P3.3c (D-open-2, decided 2026-09-22: out of cutover scope) |
+| `L-P3.3c-DOM` | DOM-XSS sink class (`reviews`, `feedback`) | **new family work — not L-P3.3b** | **BUILT** (`CC-LAB-0060`/`FR-LAB-57`, 2026-09-22) — separately prioritized after D-open-2's deferral; no longer backlog |
 | `L-P3.3c-CUT` | the atomic cutover | G1–G6 (done) + the parity gate | — (strictly last; does not wait on DOM or Layer B, per D-open-1/D-open-2) |
 
 G3 and G4 name L-P2.2 (`identity_session.py`) and L-P2.1
@@ -1249,6 +1249,15 @@ left open deliberately until the project owner decided them.
   backlog, to be picked up as its own lane whenever prioritized, not
   something `L-P3.3c-CUT` waits on. `PFF-0007`/`PFF-0008` are exempted
   in `lab/ground-truth/migration-exemptions.yaml` citing this decision.
+
+  **Update, 2026-09-22 (`CC-LAB-0060`/`FR-LAB-57`): built.** `L-P3.3c-DOM`
+  was separately prioritized and built for real, per this decision's own
+  terms ("to be picked up as its own lane whenever prioritized") — not a
+  reversal of the decision that it was out of the *cutover's* scope, which
+  still holds (this lane's build did not touch `L-P3.3c-CUT` or wait on it).
+  `PFF-0007`/`PFF-0008`'s exemption entries are now removed from
+  `lab/ground-truth/migration-exemptions.yaml`: both cases are covered by a
+  real `php_laravel` cell.
 
 ### 4.4 Cross-cutting: `stack` field + fingerprint-independence gate
 
@@ -1482,7 +1491,7 @@ either condition changes.
 | L-P3.3c-G4 | stored second-order pair: `edit_profile` → `profile` | L-P3.3b, L-P2.1, L-P2.3 | 3 | M — one `stored_second_order` cell, not two pages |
 | L-P3.3c-G5 | escaped-echo forms: `contact`, `newsletter` | L-P3.3b | 3 | S |
 | L-P3.3c-G6 | `search.php` (3 sinks) + the missing `raw_concat × html_attribute_quoted` matrix row | L-P3.3b, L-P1.2b | 3 | L — the only sub-lane that edits `lab/safety_matrix.yaml`; serialize it against any other matrix-touching lane |
-| L-P3.3c-DOM | DOM-XSS sink class: `reviews`, `feedback` | **new capability, not L-P3.3b** | — | L — D-open-2 decided 2026-09-22 (out of cutover scope); deferred backlog, dispatch only if separately prioritized, not part of L-P3.3c's wave |
+| L-P3.3c-DOM | DOM-XSS sink class: `reviews`, `feedback` | **new capability, not L-P3.3b** | — | **BUILT** (`CC-LAB-0060`/`FR-LAB-57`, 2026-09-22) — D-open-2's deferral was lifted once this lane was separately prioritized; new `dom_html_sink` safety-matrix family + `dom_text_content` op, both real pages served at their real URLs, live-boot proof passed |
 | L-P3.3c-CUT | atomic cutover: re-home Layer-C assets, re-point consumers, delete the fixture | G1–G6 (done) + the parity gate green | 4 | Strictly last; separate revertable commit (§4.3.6.5/4.3.6.6); does not wait on L-P3.3c-DOM or Layer B reproduction (D-open-1/D-open-2 decided 2026-09-22) |
 | L-P3.4 | `stack` field + fingerprint-gate wiring (§4.4) | any 2 of {L-P3.1, L-P3.2, L-P3.3a} | 2 | Needs a second stack name to exist; the gate half needs exactly two stacks landed, not all three |
 
