@@ -1533,6 +1533,52 @@ lane) can submit a payload as
     in-sandbox confirmation mechanism now exists where none did before) but
     does not close it.
 
+- **FR-LAB-57** *(`CC-LAB-0060`, 2026-09-22 — wires `fuzzlab.labgen.
+  conformance.tier1`'s own public API against a real in-process app+DB, for
+  whichever stacks already have a real `Tier1Client`; extends `FR-LAB-52`'s
+  `LiveBootHarness` scope, does not change it.)* `tier1.py`'s
+  `build_tier1_case`/`run_tier1_case`/`evaluate_tier1_response` must be
+  provably exercisable against a real running app, not only a hand-written
+  fake client — for any stack that already has a real, on-host-independent
+  `Tier1Client` implementation. Today that is `php_laravel`, via
+  `LiveBootHarness.fetch()` (`FR-LAB-52`'s existing harness, unmodified and
+  reused as-is; this requirement adds no new harness code, only tests that
+  drive the existing one through `tier1.py`'s own public functions instead
+  of `LiveBootHarness.get()`/`.post()` directly).
+  1. **Real Tier-1 cases, real differential.** `TestTier1RealLiveBoot` in
+     `tests/test_labgen_conformance_tier1.py` builds real `Tier1Case`
+     objects for `product.php`'s real vulnerable/secure twin
+     (`LABGEN-RPL-PRODUCT`/`LABGEN-RPL-PRODUCT-BOUND`, `lab/manifests/
+     phase3_php_laravel_real_pages_numeric.yaml`) and runs each through
+     `run_tier1_case()` against a real `LiveBootHarness` — the same real
+     boolean-injection differential `FR-LAB-52`'s own
+     `test_live_boot_numeric_manifest_sqli_twin_round_trips_a_payload`
+     proves by hand-inspecting `harness.get()` responses, now proven through
+     `evaluate_tier1_response`'s own marker-in-body decision logic instead.
+     Both twins' real `Tier1Outcome.matches_expectation` is asserted `True`.
+  2. **Real Tier-1 negative.** The same test module runs `contact.php`/
+     `newsletter.php` (`LABGEN-PLRP-1005`/`1006`, `lab/manifests/
+     phase3_laravel_real_pages_forms.yaml`, secure-only escaped-echo forms)
+     through `build_tier1_case()`/`run_tier1_case()` with a raw
+     `<script>...</script>` payload and `expected_vulnerable=False`,
+     asserting the real response never reflects it unescaped.
+  3. **Skip-guarded and marked slow**, exactly matching `FR-LAB-52`'s own
+     convention: `live_boot_available()` (composer + php on `PATH`, real
+     Packagist reachability) gates the whole `TestTier1RealLiveBoot` class,
+     and each test carries `@pytest.mark.slow` — a real `composer install`
+     against Packagist, unchanged wall-clock-time profile from `FR-LAB-52`.
+  4. **Still synthetic, in-sandbox, never the real target (D11).** Exactly
+     like `FR-LAB-52`/`FR-LAB-54`/`FR-LAB-55`: `LiveBootHarness` assembles
+     and boots its own throwaway build in a temp directory; nothing here
+     sends traffic to the real, loopback-only Ryder's Puppy Fort Factory
+     lab target, so no `--authorized` flag applies (D11 unchanged).
+  5. **Stacks with no real `Tier1Client` yet remain design-only.** `tier1.py`
+     itself is unmodified in behavior — only its module docstring is
+     updated to state the current, stack-by-stack status accurately.
+     `OnHostRequiredError` is still raised for any case run with `client=None`,
+     and a Tier-1 pass is still never recorded as Tier-2 oracle confirmation
+     (`tier2.py`'s own scope is untouched by this requirement).
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

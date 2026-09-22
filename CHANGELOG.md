@@ -14,6 +14,19 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB (`CC-LAB-0060`, `FR-LAB-57`, build lane T1): wired `fuzzlab.labgen
+  .conformance.tier1`'s public API (`build_tier1_case`/`run_tier1_case`/
+  `evaluate_tier1_response`) against a real in-process app+DB for the first
+  time, reusing `CC-LAB-0054`'s existing `LiveBootHarness` (unmodified) as a
+  real `Tier1Client` — no longer purely "[design]" for the `php_laravel`
+  stack. `tests/test_labgen_conformance_tier1.py` gained a skip-guarded,
+  `@pytest.mark.slow` `TestTier1RealLiveBoot` class proving a real
+  vulnerable/secure SQLi differential (`product.php`'s twin) and a real
+  escaped-XSS negative (`contact.php`/`newsletter.php`) through `tier1.py`'s
+  own decision logic against a genuinely booted Laravel app — synthetic,
+  in-sandbox only, never the real loopback-only lab target (D11), so no
+  `--authorized` flag applies. `tier2.py` and its own tests are untouched
+  (out of scope for this lane; owned by lane T2).
 - CLI/D0a: added a headless `--dry-run` flag to every plain CLI entry point except
   `fuzzlab greybox-run` (owned by lane D0b) — `crawl`, `audit`, `fuzz`, `auto`,
   `mutate-run`, `proxy` — that plans and prints the exact command it would run and
