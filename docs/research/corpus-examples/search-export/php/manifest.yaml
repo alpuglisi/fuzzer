@@ -1,0 +1,61 @@
+# Corpus cell: search/filtering + reporting/exports/dashboards (merged
+# feature row, per docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 1 row 5) -- PHP.
+#
+# Pairing status: matched pair present (raw-concat vulnerable vs.
+# escaped-concat idiomatic search-filter WHERE building), plus two
+# additional vulnerable-shape examples (CSV export reusing the same
+# raw WHERE, and a standalone XXE-in-XML-parsing example) that broaden
+# coverage beyond the single-parameter trivial case, per this cell's
+# assignment note to prioritize shapes beyond fuzzlab's existing
+# raw-concat/param-bind SQLi modeling.
+#
+# gitleaks: available (`which gitleaks` -> /usr/bin/gitleaks). Every file
+# in this directory was scanned with `gitleaks detect --source <file>
+# --no-git` before being committed; idiomatic-1.php's hardcoded DB
+# credentials were the one hit and are redacted below (redacted: true).
+# All other files scanned clean and were also skimmed manually for PII
+# per the plan's manual-read requirement; none found.
+
+- file: vulnerable-1.php
+  role: vulnerable
+  repo: Shadowss/TravianZ
+  commit_sha: 3dbe9c71ecf345e533dfc6381d67760d8de8d415
+  license: "GPL-3.0 (copyleft -- smallest illustrative fragment kept per the plan's copyleft handling rule, not a full-file copy; upstream file is a2b2.php)"
+  pattern: "multi-branch $_GET-driven filter builds a raw-concat WHERE clause reused unparameterized across 3 separate queries (count, page listing, running-balance subquery) in the same request"
+  notes: "Beyond-trivial shape: one tainted filter value threaded through multiple sinks, not a single one-shot concat. Fragment extracted from a much larger page (a2b2.php); trimmed to the filter-building + 3 query sites only, consistent with GPLv3's 'smallest fragment' handling."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: vulnerable-2.php
+  role: vulnerable
+  repo: sn123686-dev/student-management-system
+  commit_sha: 3d9c8dcd26a032c9aeb360ba5ea80676acc6d424
+  license: "MIT (LICENSE file present; repo also states MIT in its README)"
+  pattern: "search+filter+course params concatenated into a WHERE clause via `sanitize()` (htmlspecialchars/strip_tags only -- an XSS mitigation, NOT SQL escaping), then reused for both the paginated listing AND a CSV export ($_GET['export']=csv) -- exactly the search+export combined shape this cell targets. A separate bulk-delete path in the same file also concatenates raw POSTed IDs into a `WHERE id IN (...)` clause."
+  notes: "Confirmed sanitize() (config.php) is `htmlspecialchars(strip_tags(trim($data)))` -- does not escape SQL metacharacters, so the WHERE-clause concatenation is genuinely SQLi-vulnerable despite the app calling a 'sanitize' function on every input. Full file copied (small, single-purpose page)."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: vulnerable-3.php
+  role: vulnerable
+  repo: rubennati/vulnerable-php-code-examples
+  commit_sha: e2af893e32fb8efa2d8a8dc952efa0b1f92c5709
+  license: MIT
+  pattern: "DOMDocument::loadXML() on raw user-supplied XML body ($_POST['xml']) with LIBXML_NOENT set, enabling external entity resolution (XXE, CWE-611) -- representative of the XML-report/import-parsing sink the assignment calls out (XXE in report/export template or import pipelines), kept generic since this cell did not turn up a real, permissively-licensed production report/export pipeline reaching this exact sink."
+  notes: "Repo is a small, purpose-built collection of individually-licensed vulnerable-PHP teaching snippets (MIT), not a report-export application itself -- labeled here as a tutorial/reference example per the plan's tutorial-code labeling requirement, illustrating the XXE half of this cell's CWE list (CWE-89/943/611/1336) since a real, license-clean XXE-in-report-generation example was not found within this collection pass."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-1.php
+  role: idiomatic
+  repo: dusova/wallst-consulting-website
+  commit_sha: 05aedad430180949869deca9d66439c34e9d3618
+  license: Apache-2.0
+  pattern: "category+search filters run through mysqli_real_escape_string() before being concatenated into a WHERE clause -- the 'escaped concat' idiom, contrasted with vulnerable-1.php/vulnerable-2.php's raw (unescaped) concat of the same shape."
+  notes: "Same code shape as the vulnerable pair (string-built WHERE clause, not a query-builder/ORM) but with the values escaped before concatenation -- illustrates the idiomatic-but-still-fragile intermediate step real codebases take before adopting parameter binding, rather than a fully parameterized ideal. redacted: true -- this file hardcoded a live-looking DB host/username/password (mysqli_connect(...)); gitleaks flagged it and the three constants were replaced with REDACTED_DB_* placeholders before first commit, per the plan's 'scrub before first commit, not after' rule."
+  validated: false
+  validated_by: []
+  redacted: true

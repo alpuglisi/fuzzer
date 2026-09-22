@@ -1,0 +1,47 @@
+# Corpus cell: search/filtering + reporting/exports/dashboards (merged
+# feature row, per docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 1 row 5) -- Node/JS.
+#
+# Pairing status: matched pair present for the SQLi/query-builder side
+# (vulnerable-1.js's mixed safe-param-bind/unsafe-raw-concat query
+# builder vs. idiomatic-1.js's fully parameterized knex.raw() builder),
+# plus one additional example (vulnerable-2.js) covering this cell's
+# SSTI-in-export-generation half, which had no license-clean, real-world
+# idiomatic counterpart turn up in this pass (see its notes).
+#
+# gitleaks: available (`which gitleaks` -> /usr/bin/gitleaks). Every file
+# in this directory was scanned with `gitleaks detect --source <file>
+# --no-git` before being committed -- all scanned clean. All files were
+# also skimmed manually for PII; none found.
+
+- file: vulnerable-1.js
+  role: vulnerable
+  repo: forcedotcom/package-manager
+  commit_sha: 6373a3888566e8b7d0b841e44a4b2148ae3ba003
+  license: Apache-2.0
+  pattern: "ORM/query-builder MISUSE, not raw-concat-everywhere: `filterColumns` values are correctly parameter-bound ($1, $2, ... via a `values` array) into the WHERE clause, but `req.query.sort_field`/`req.query.sort_dir` are interpolated RAW into the ORDER BY clause with no allowlist check against the same QUERY_DICTIONARY the filter path already validates against -- a classic 'half the query is parameterized, the sort/order field is forgotten' real-world SQLi bug shape (ORDER-BY injection), exactly the 'beyond the trivial case' shape this cell's assignment note asked to prioritize."
+  notes: "Salesforce's own open-source package-manager tool; large, real production codebase (not a tutorial). The same bug shape (safe WHERE param-binding + unsafe raw ORDER BY concat) recurs across sibling files in this repo (api/orggroups.js, api/packages.js, api/upgrades.js, api/licenses.js, api/filters.js) -- only orgs.js was collected as the representative example per the plan's 'stop early once additional candidates re-show the same shape' guidance."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: vulnerable-2.js
+  role: vulnerable
+  repo: jeffreyPG/node-api
+  commit_sha: 5183a88263859eff16980db1a1f0e446befef66a
+  license: MIT
+  pattern: "SSTI in a PDF/HTML report-generation pipeline (CWE-1336): user-authored report-editor content (`elementObj.content`) is compiled AS a Handlebars template via `extendedHandlebars.compile(content)` (with `@handlebars/allow-prototype-access` enabled, widening the blast radius) and then executed against the report's data object, rather than being treated as literal template data."
+  notes: "File trimmed from the upstream ~3080-line api.report.server.controller.js to the imports plus the single `_getElement` function that contains the SSTI-relevant compile/execute call, per the source-quality bar (the full file is a real production report builder, not a disk dump, but copying all ~3000 lines for one illustrative sink would bloat this corpus well past its per-example intent). No license-clean idiomatic counterpart (e.g. the same app rendering user content as data into a FIXED precompiled template) was found in this repo within this collection pass -- recorded as the vulnerable-only half of this shape; see php/manifest.yaml's XXE entry for the same kind of one-sided coverage on a different CWE in this cell."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-1.js
+  role: idiomatic
+  repo: emailparaojp/bibliotecaBrasil
+  commit_sha: 24ed639f3947c60a4147cf2f403cc966572f28c6
+  license: "MIT (declared explicitly in the repository's own README under a 'Licença' section: 'Distribuído sob a licença MIT'; no separate LICENSE file is present in the repo, so this is a declared-in-documentation license rather than a GitHub-detected LICENSE file, per the plan's 'no LICENSE file AND no license declared' skip condition -- a license IS declared here, so this repo was not skipped)"
+  pattern: "multi-field book-search endpoint (title/author/category/publisher/language/year/availability) builds a `where[]` array of `knex.raw()`-compatible placeholder fragments ('col LIKE ?', 'col = ?') with a parallel `params[]` array, joined with ' AND ' and passed through knex.raw(sql, params) -- every user-controlled value stays a bound parameter even though the WHERE clause itself is assembled dynamically from up to 6 optional filters."
+  notes: "Directly contrasts with vulnerable-1.js's mixed pattern: this file parameterizes EVERY dynamic piece of the query (filters AND the LIMIT/OFFSET values), including no unparameterized sort/order field (ordering is fixed: `ORDER BY l.titulo`), avoiding the exact gap vulnerable-1.js has."
+  validated: false
+  validated_by: []
+  redacted: false

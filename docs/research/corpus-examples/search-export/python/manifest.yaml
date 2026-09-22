@@ -1,0 +1,57 @@
+# Corpus cell: search/filtering + reporting/exports/dashboards (merged
+# feature row, per docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 1 row 5) -- Python.
+#
+# Pairing status: matched pair present (vulnerable-1.py / idiomatic-1.py
+# are from the SAME file of the SAME app -- an ORM `.extra(where=...)`
+# escape-hatch misuse next to that class's own safe `.filter(Q(...))`
+# search path), plus one additional idiomatic example (idiomatic-2.py)
+# showing a generic, reusable safe-filter pattern. This cell is HALF-
+# POPULATED for the SSTI/XXE half of the assignment's CWE list
+# (CWE-611/1336): no license-clean, real (non-tutorial, non-disk-dump)
+# Python report/export pipeline reaching a template engine or XML
+# parser with untrusted input was found within this collection pass --
+# recorded honestly per the plan's half-populated-cell handling rather
+# than padded with an unrelated shape. Candidates found (afirmeplay-edu/
+# afirmeplay_backend's report_routes.py imports render_template_string
+# but never calls it -- 6265-line single file, looked like a disk-dump-
+# style export and was excluded on the source-quality bar; several
+# other render_template_string/weasyprint report generators found in
+# this pass had no declared license and were skipped) are not included.
+#
+# gitleaks: available (`which gitleaks` -> /usr/bin/gitleaks). Every file
+# in this directory was scanned with `gitleaks detect --source <file>
+# --no-git` before being committed -- all scanned clean. All files were
+# also skimmed manually for PII; none found.
+
+- file: vulnerable-1.py
+  role: vulnerable
+  repo: hequan2017/chain
+  commit_sha: 0f19c369d4868fff16d06d7ffe8b7f74d94d5049
+  license: Apache-2.0
+  pattern: "Django ORM query-builder MISUSE (CWE-89 via an ORM escape hatch, not raw driver code): a bulk-action endpoint joins user-POSTed, comma-separated primary keys directly into a raw SQL fragment passed to `QuerySet.extra(where=[...])`, bypassing the ORM's own parameter binding for that one clause while the rest of the app uses the ORM normally."
+  notes: "Same file (asset/views.py) and app as idiomatic-1.py -- the contrast is intra-file: this class's bulk-delete action uses .extra(where=...) while its sibling list view's search filters (idiomatic-1.py) use .filter(Q(...)). Trimmed to the one method containing the vulnerable call plus enough surrounding context to show the taint source (request.POST.getlist); helper classes/imports referenced (Names, AssetProject) are from elsewhere in the same app and omitted for brevity, consistent with this being an illustrative fragment rather than a runnable file."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-1.py
+  role: idiomatic
+  repo: hequan2017/chain
+  commit_sha: 0f19c369d4868fff16d06d7ffe8b7f74d94d5049
+  license: Apache-2.0
+  pattern: "same file/app/commit as vulnerable-1.py: ordinary search/filter fields (name, project, business) reach the Django ORM through `.filter(Q(...))`, which parameter-binds every value -- the safe counterpart to vulnerable-1.py's raw `.extra(where=...)` bulk-action path in the same class hierarchy."
+  notes: "Chosen specifically because it comes from the identical repo/file/commit as the vulnerable example, showing that even a codebase with a real ORM-injection bug still does the ordinary search-filter case correctly elsewhere -- the injection is localized to the one method that reaches for `.extra()`, which is exactly the kind of 'ORM query-builder misuse' shape the assignment asked to prioritize over the trivial raw-concat case."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-2.py
+  role: idiomatic
+  repo: shopyo/shopyo
+  commit_sha: be89a2b730d2bcc521492ba6ca192bbb38928d43
+  license: MIT
+  pattern: "generic, reusable REST list-endpoint base class: filters come from `get_query_filters()` (overridable per-model) and reach the ORM via `Model.query.filter_by(**filters)`; the free-text `search` param is only used if the model defines its own `search()` method (never string-built); the `sort_by` param is validated with `hasattr(self.model_class, sort_by)` BEFORE being turned into a column reference for `.order_by()` -- i.e. an explicit allowlist-by-attribute-existence check on the exact field (sort column) that vulnerable examples in this same cell (node/vulnerable-1.js) leave unvalidated."
+  notes: "shopyo is an established open-source Flask e-commerce framework (not a tutorial/scratch repo). Included specifically because its `sort_by` handling is the direct fix for the ORDER-BY-injection gap shown in node/vulnerable-1.js (forcedotcom/package-manager), giving a cross-language illustration of the same mitigation (allowlist/validate the sort column before using it) even though the two files aren't from the same app."
+  validated: false
+  validated_by: []
+  redacted: false
