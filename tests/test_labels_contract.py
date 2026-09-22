@@ -18,7 +18,10 @@ def test_missing_ground_truth_dir_raises_actionable_error(tmp_path):
 
 def test_loads_and_cross_checks_real_ground_truth():
     gt = contract.load(GT_DIR)
-    assert gt.target == "puppy-fort-factory"
+    # `L-P3.3c-CUT`: the target is the generated php_laravel lab, not the
+    # retired hand-built `puppy-fort-factory/` app -- metadata only, the
+    # cutover coverage gate does not diff on this field.
+    assert gt.target == "php_laravel"
     # 8 vulnerable cases documented in VULNERABILITIES.md.
     assert len(gt.positives()) == 8
     assert gt.negatives()  # true negatives present for FP testing

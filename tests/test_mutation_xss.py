@@ -15,8 +15,9 @@ def _php_to_py(pattern: str) -> str:
 
 
 # The lab WAF's XSS signatures (shared ruleset) — the filter to avoid.
+# `L-P3.3c-CUT`: moved from `puppy-fort-factory/config/waf-rules.json`.
 _RULES = json.loads((Path(__file__).resolve().parents[1] /
-                     "puppy-fort-factory/config/waf-rules.json").read_text())
+                     "lab/waf-rules.json").read_text())
 XSS_PATTERNS = [_php_to_py(r["pattern"]) for r in _RULES["rules"]
                 if r["category"] == "xss"]
 

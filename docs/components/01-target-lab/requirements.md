@@ -1,7 +1,7 @@
 # Target Lab and Ground Truth — Requirement Specification
 
-Component code: **LAB** · Status: `[built app; generator Phase 0 foundation built (schema, verdict engine, determinism/name-leak gates, patterns/ scaffold, covering-array resolver, T-LAB0.8 mechanical sourcing tool); rest planned]`
-· Last updated: 2026-09-21
+Component code: **LAB** · Status: `[built; generator is the single source of the PHP lab since L-P3.3c-CUT (2026-09-22) -- the hand-built app is retired]`
+· Last updated: 2026-09-22
 
 Related: `ARCHITECTURE.md` #1; `DECISIONS_AND_ROADMAP.md` (D7, D8, D9, D10);
 `./change-control.md`.
@@ -12,14 +12,21 @@ machine-readable ground truth, against which the toolkit's tools are exercised
 and measured. Authorized, lab-only.
 
 ## 2. Scope
-- **In:** the Puppy Fort Factory app; ground-truth labels; grey-box
-  instrumentation; the containerized environment; later the manifest-driven
-  generator, tiers, and build profiles.
+- **In:** the generated PHP target lab (`fuzzlab.labgen.assemble` over the
+  `php_laravel` emitter — the single source of the PHP lab since `L-P3.3c-CUT`,
+  2026-09-22, `CC-LAB-0061`/`FR-LAB-58`; the hand-built "Puppy Fort Factory" app it
+  replaced is retired); ground-truth labels; grey-box instrumentation; the
+  containerized environment; the manifest-driven generator, tiers, and build
+  profiles.
 - **Out:** the tools themselves; anything reachable from a non-loopback network.
 
 ## 3. Functional requirements
 - **FR-LAB-1** Serve a deliberately vulnerable web app on localhost with a
-  documented mix of vulnerable and secure pages.
+  documented mix of vulnerable and secure pages. **Status (2026-09-22,
+  `L-P3.3c-CUT`): the served app is now the generated `php_laravel` app** (built by
+  `fuzzlab.labgen.assemble`, baked into `lab/web.Dockerfile`'s image), not the
+  retired hand-built app — the requirement's substance (a deliberately vulnerable,
+  documented, localhost-served app) is unchanged, only its referent.
 - **FR-LAB-2** Emit machine-readable ground truth out-of-band (`labels.json`,
   `expectedresults.csv`, `injection-points.json`) with opaque case IDs, never
   served by the app. (D9)
@@ -35,16 +42,15 @@ and measured. Authorized, lab-only.
 - **FR-LAB-7** (Lab track) Support two tiers: dense range and realistic shop.
 - **FR-LAB-8** (Lab track) Migrate the existing hand-built Puppy Fort Factory
   app's content into the generator (Phase 3) rather than keep it as a
-  permanent separate fixture. (D20) **Status (2026-09-22, `FR-LAB-51`/
-  `CC-LAB-0053`): still open, not satisfied.** The migration itself (server-side
-  pages, `FR-LAB-44`..`50`) and the parity/cutover coverage gate that verifies it
-  (`FR-LAB-51`) are both done, and the gate reports 13 of 16 `PFF-` cases
-  covered by an emitted `php_laravel` cell with the remaining 3 exempted
-  (`lab/ground-truth/migration-exemptions.yaml`). This requirement is
-  satisfied only once `L-P3.3c-CUT` actually retires the fixture (deletes
-  `puppy-fort-factory/`, re-points `lab/compose.yaml`/`deploy.sh`/
-  `filtermodel.py`'s WAF-rules path) — deliberately not scheduled yet, pending
-  human sign-off (plan §4.3.6.5).
+  permanent separate fixture. (D20) **Status (2026-09-22, `L-P3.3c-CUT`,
+  `CC-LAB-0061`/`FR-LAB-58`): satisfied.** The migration itself (server-side
+  pages, `FR-LAB-44`..`50`), the parity/cutover coverage gate (`FR-LAB-51`,
+  reporting 14 of 16 `PFF-` cases covered by an emitted `php_laravel` cell with the
+  remaining 2 exempted in `lab/ground-truth/migration-exemptions.yaml`), and the
+  atomic cutover itself are all now done: `puppy-fort-factory/` is deleted,
+  `lab/compose.yaml`/`deploy.sh`/`fuzzlab/mutation/filtermodel.py`'s WAF-rules path
+  are re-pointed at generator/`lab/`-owned locations, and the generator is the sole
+  source of the PHP target lab.
 - **FR-LAB-9** (Lab track) Own the pattern-provenance corpus (`patterns/`,
   OSV/GHSA-sourced pattern cards informing scenario briefs in original words
   only, never inlined as code) as a LAB subcomponent, not an IND catalog. (D20)
@@ -1581,6 +1587,57 @@ lane) can submit a payload as
     all — both real pinned URLs return 200 and embed the right client-side
     shape (`innerHTML` vs. `textContent`), never a JS-*execution* proof
     (headless, JS-executing crawling stays the documented D-open-1 gap).
+- **FR-LAB-58** *(the atomic cutover itself, `L-P3.3c-CUT`; `CC-LAB-0061`,
+  2026-09-22).* With the cutover coverage gate green (`FR-LAB-51`) and every
+  `L-P3.3c-G1..G6`/`L-P3.3c-DOM` sub-lane merged, the hand-built
+  `puppy-fort-factory/` app is retired and the generator becomes the single
+  source of the PHP target lab (D20 §7.2, satisfying `FR-LAB-8`). Concrete
+  change list (`docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.5):
+  - Layer-C assets re-homed: `config/waf-rules.json` -> `lab/waf-rules.json`
+    (shared with `fuzzlab.mutation.filtermodel`, unchanged consumer contract);
+    `sql/schema.sql` -> `lab/sql/schema.sql`; `includes/waf.php`/
+    `includes/cov.php` -> Laravel middleware in the `php_laravel` scaffold
+    (`app/Http/Middleware/FzlWaf.php`, backed by the framework-free
+    `app/Support/WafFilter.php` so `tests/test_lab_waf.py`'s offline driver
+    keeps exercising the *real* filtering logic with no framework bootstrap;
+    `app/Http/Middleware/FzlCoverage.php`), both registered globally in
+    `bootstrap/app.php`, same default-off (`PFF_WAF`)/opt-in (`X-Fzl-Cov`)
+    toggle semantics as the retired PHP shims; `VULNERABILITIES.md` ->
+    **generated** (`fuzzlab.labgen.vuln_map`, rendered from `labels.json` +
+    `migration-exemptions.yaml`, so the human-readable map cannot state
+    anything the machine-readable ground truth does not itself state).
+  - `fuzzlab.labgen.assemble` (new module): the real-build entry point that
+    generalizes `conformance.live_boot.LiveBootHarness._assemble` from one
+    manifest's cells to every `lab/manifests/*.yaml` cell the `php_laravel`
+    emitter supports (the same derivation `cutover_gate.
+    compute_php_laravel_coverage` already proved sufficient — PA-0001/
+    PA-0027, one derived walk, not two). `lab/web.Dockerfile` gained a `gen`
+    build stage that runs it; `deploy.sh` (the bare-metal/manual path) calls
+    it directly.
+  - Runtime wiring re-pointed: `lab/compose.yaml` no longer bind-mounts an
+    app directory (the app is a build artifact of the generator, never
+    hand-edited in place) and its `db` seed mount + `fuzzlab.mutation.
+    filtermodel`'s WAF-rules path both point at `lab/`-owned locations;
+    `lab/web.Dockerfile` is a two-stage build (`gen` then `php:8.3-apache` +
+    `composer install` for Laravel's own dependencies, which the hand-built
+    vendor-free app never needed).
+  - Ground truth: `lab/ground-truth/labels.json`/`injection-points.json`'s
+    `target` changed from `"puppy-fort-factory"` to `"php_laravel"`
+    (metadata only — `tests/test_labels_contract.py` updated to match; the
+    coverage gate does not diff on this field, per §4.3.6.6a).
+  - Route paths keep the real app's exact `.php`-suffixed URLs (§4.3.6.6a);
+    `php_current` is **not** retired (§4.3.6.6b — it remains the second
+    stack `L-P3.4`'s fingerprint-independence gate needs).
+  - Deliberate, decided gaps this lane does not close (D-open-1/D-open-2,
+    both decided 2026-09-22, out of this lane's scope): Layer B (the 10
+    JS-rendered pages) has no generator emitter and its live, on-host
+    crawler-discoverability exercise is lost — documented in
+    `docs/ON_HOST_RUNBOOK.md` as a known, deliberate gap, not a defect.
+  - Landed as two commits per the plan's "kept separate and revertable"
+    instruction: one doing all the re-pointing/re-homing with
+    `puppy-fort-factory/` still present and every test green, a second doing
+    only the `git rm -r puppy-fort-factory/` once the first commit's own
+    full test run (fast suite + the live-boot slow suite) was green.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

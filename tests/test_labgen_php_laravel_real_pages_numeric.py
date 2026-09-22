@@ -138,7 +138,7 @@ def test_served_url_for_matches_what_route_fragment_for_registers(emitter, manif
 
 def test_the_regression_gate_accepts_the_real_urls_and_rejects_idiomatic_ones(emitter, manifest, cases) -> None:
     baseline = contract.GroundTruth(
-        target="puppy-fort-factory",
+        target="php_laravel",
         cases=[cases[case_id] for case_id in sorted(CELL_TO_CASE.values())],
     )
 

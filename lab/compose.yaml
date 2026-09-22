@@ -1,4 +1,6 @@
-# Target lab: Puppy Fort Factory (PHP/Apache + MariaDB), containerized (D7).
+# Target lab: the generated PHP lab (Laravel/`php_laravel` + MariaDB), containerized
+# (D7). `L-P3.3c-CUT` re-points this file at the generator's own output -- the
+# hand-built `puppy-fort-factory/` app it used to mount is retired.
 #
 # Safety: the web tier is published on LOOPBACK ONLY (127.0.0.1) and the database
 # is not published at all. This deliberately vulnerable app must never be exposed
@@ -21,7 +23,7 @@ services:
     volumes:
       # Fresh install needs only schema.sql (it creates + seeds everything,
       # including posts). Mounted read-only under the init hook.
-      - ../puppy-fort-factory/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro,Z
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro,Z
       - pff-db-data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
@@ -32,28 +34,44 @@ services:
 
   web:
     build:
-      context: .
-      dockerfile: web.Dockerfile
+      # The repo root: the build's `gen` stage runs the real generator
+      # (`fuzzlab.labgen.assemble`), which needs `fuzzlab/` and
+      # `lab/manifests/` in its build context, not just `lab/`.
+      context: ..
+      dockerfile: lab/web.Dockerfile
     depends_on:
       db:
         condition: service_healthy
     environment:
-      PFF_DB_HOST: db
-      PFF_DB_USER: ${PFF_DB_USER:-pff}
-      PFF_DB_PASS: ${PFF_DB_PASS:-pff_lab_pw}
-      PFF_DB_NAME: ${PFF_DB_NAME:-puppy_fort}
-      # Lab WAF (D16): the configurable request prefilter. DEFAULT OFF — the app is
-      # unchanged and all ground-truth labels stay valid until a filter-evasion
-      # experiment enables it. Toggle without a rebuild (only a restart):
+      # The generated app is a real Laravel app: it reads Laravel's own
+      # DB_* env vars (not the old app's PFF_DB_HOST/... config.php keys).
+      # These override the baked-in `.env`'s defaults without a rebuild
+      # (Dotenv never overwrites an already-set process env var).
+      DB_CONNECTION: mysql
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_DATABASE: ${PFF_DB_NAME:-puppy_fort}
+      DB_USERNAME: ${PFF_DB_USER:-pff}
+      DB_PASSWORD: ${PFF_DB_PASS:-pff_lab_pw}
+      APP_URL: http://127.0.0.1:${PFF_WEB_PORT:-8080}
+      # Lab WAF (D16): the configurable request prefilter, now a Laravel
+      # middleware (FzlWaf). DEFAULT OFF — the app is unchanged and all
+      # ground-truth labels stay valid until a filter-evasion experiment
+      # enables it. Toggle without a rebuild (only a restart):
       #   PFF_WAF=on PFF_WAF_MODE=block|sanitize|log
       PFF_WAF: ${PFF_WAF:-off}
       PFF_WAF_MODE: ${PFF_WAF_MODE:-block}
-      # Grey-box coverage side channel (Phase 3). The cov.php shim writes one JSON
-      # file per instrumented request here; the host bind-mount below lets fuzzlab
-      # read them back. Only written when a request carries X-Fzl-Cov.
+      # Grey-box coverage side channel (Phase 3). The FzlCoverage middleware
+      # writes one JSON file per instrumented request here; the host
+      # bind-mount below lets fuzzlab read them back. Only written when a
+      # request carries X-Fzl-Cov.
       FZL_COV_DIR: /tmp/fzl-cov
     volumes:
-      - ../puppy-fort-factory:/var/www/html:Z
+      # No app bind mount: the app is a build artifact of the generator
+      # (baked into the image by web.Dockerfile's `gen` stage), not a
+      # hand-edited tree to live-edit. Editing a page now means editing its
+      # manifest/emitter and rebuilding, not editing a file under this mount.
+      #
       # Grey-box coverage side channel: shared host<->container dir (Phase 3 T3.1).
       # Host path is created by scripts/greybox_e2e.sh; loopback-only lab data.
       - ${FZL_COV_DIR:-/tmp/fzl-cov}:/tmp/fzl-cov:Z

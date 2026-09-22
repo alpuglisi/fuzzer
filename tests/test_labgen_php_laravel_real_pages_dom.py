@@ -229,7 +229,7 @@ def test_the_canonical_cells_get_the_real_url_and_twins_get_a_distinct_one(emitt
 
 def test_the_regression_gate_accepts_the_real_urls_and_rejects_idiomatic_ones(emitter, manifest, cases) -> None:
     baseline = contract.GroundTruth(
-        target="puppy-fort-factory",
+        target="php_laravel",
         cases=[cases[case_id] for case_id in sorted(CELL_TO_CASE.values())],
     )
 

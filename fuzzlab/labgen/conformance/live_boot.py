@@ -60,8 +60,8 @@ page. Confirmed directly against the skeleton's own ``app/Models/User.php``
 before relying on it, not assumed.
 
 **Why SQLite here, MariaDB in the real lab.** Per this task's own scope: the
-production lab target (``puppy-fort-factory/`` today, this generator's output
-after the eventual ``L-P3.3c-CUT`` atomic cutover) is deliberately MariaDB,
+production lab target (the generator's own output, per ``L-P3.3c-CUT`` --
+the hand-built ``puppy-fort-factory/`` this replaced) is deliberately MariaDB,
 matching ``lab/sql/schema.sql`` -- identifier-position SQL injection can
 behave differently across SQL dialects (this is exactly why
 ``tier1.py``'s own docstring calls an in-memory-SQLite substitute unsound for
@@ -249,7 +249,7 @@ def _find_free_port() -> int:
 # task closes the gap with.
 #
 # **Real schema, real seed data.** :data:`REAL_SCHEMA_SQL` is
-# ``puppy-fort-factory/sql/schema.sql`` itself, imported verbatim
+# ``lab/sql/schema.sql`` itself, imported verbatim
 # (``mariadb < schema.sql``) -- never a port or a synthetic equivalent (that
 # is exactly what the SQLite path above is, and exactly what this mode
 # exists to go beyond). Because that file both creates the schema AND seeds
@@ -270,11 +270,12 @@ def _find_free_port() -> int:
 # not); nothing here is deployed or exposed.
 
 
-#: ``puppy-fort-factory/sql/schema.sql`` -- read and imported for real
-#: (never moved, forked, or edited: this task's own additive-only
-#: constraint), the actual schema/seed data `lab/compose.yaml`'s `db`
-#: service provisions a fresh MariaDB from.
-REAL_SCHEMA_SQL = Path(__file__).resolve().parents[3] / "puppy-fort-factory" / "sql" / "schema.sql"
+#: ``lab/sql/schema.sql`` -- read and imported for real (re-pointed here by
+#: `L-P3.3c-CUT`, `CC-LAB-0061`/`FR-LAB-58`, from the retired
+#: ``lab/sql/schema.sql`` -- moved, never forked, so this is
+#: still the same one file, not a second copy), the actual schema/seed data
+#: `lab/compose.yaml`'s `db` service provisions a fresh MariaDB from.
+REAL_SCHEMA_SQL = Path(__file__).resolve().parents[3] / "lab" / "sql" / "schema.sql"
 
 #: The identity this harness provisions on the local `mariadbd`, matching
 #: `lab/compose.yaml`'s own `PFF_DB_NAME`/`PFF_DB_USER`/`PFF_DB_PASS` default
@@ -305,7 +306,7 @@ def mariadb_available() -> bool:
     the `mariadb`/`mariadb-admin` client binaries on PATH, the system
     `service` command and the `mariadb` init script (so this harness can
     actually start/stop a real server), and
-    ``puppy-fort-factory/sql/schema.sql`` itself. A missing tool or fixture
+    ``lab/sql/schema.sql`` itself. A missing tool or fixture
     SKIPS the check; it never silently reports a pass."""
     return (
         shutil.which("mariadb") is not None
@@ -399,7 +400,7 @@ class MariaDbServer:
 
     def provision(self) -> None:
         """Drop any stale same-named database/user from a prior run, import
-        the REAL `puppy-fort-factory/sql/schema.sql` verbatim (`mariadb <
+        the REAL `lab/sql/schema.sql` verbatim (`mariadb <
         schema.sql` -- it creates and seeds the database itself, so no
         separate `CREATE DATABASE` step is needed here), and create the
         least-privilege application user `lab/compose.yaml` itself connects
@@ -519,7 +520,7 @@ def _harness_env_content(*, app_key: str) -> bytes:
 
 #: Minimal SQLite schema covering exactly the tables the currently-driven
 #: real-page manifests' rendered controllers touch (``products``, ``posts``,
-#: ``users``) -- **not** a port of ``puppy-fort-factory/sql/schema.sql``
+#: ``users``) -- **not** a port of ``lab/sql/schema.sql``
 #: (read for shape only, per this task's instructions; that file is not
 #: touched or moved). Widen this alongside whichever new manifest a future
 #: extension of :data:`DRIVABLE_MANIFEST_TABLES` needs.
@@ -650,7 +651,7 @@ class LiveBootHarness:
         already-started, already-provisioned :class:`MariaDbServer`, this
         harness points the assembled app's `.env` at it (`DB_CONNECTION=mysql`)
         instead of the default per-run SQLite database, and skips seeding
-        (that server's REAL `puppy-fort-factory/sql/schema.sql` import already
+        (that server's REAL `lab/sql/schema.sql` import already
         seeded real rows -- see :class:`MariaDbServer`'s own docstring for why
         this harness does not re-seed on top of it). ``None`` (the default)
         keeps this class's original SQLite behavior byte-for-byte -- this
@@ -731,7 +732,7 @@ class LiveBootHarness:
     def _seed_db(self) -> None:
         assert self._app_dir is not None
         if self._mariadb_server is not None:
-            # Real puppy-fort-factory/sql/schema.sql already seeded real rows
+            # Real lab/sql/schema.sql already seeded real rows
             # (MariaDbServer.provision()) -- nothing to add here, see that
             # class's own docstring for why a second, synthetic seed step
             # would be exactly the PA-0003/PA-0021 drift this mode exists to
