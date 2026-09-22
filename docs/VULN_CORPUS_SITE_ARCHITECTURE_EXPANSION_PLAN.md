@@ -200,20 +200,168 @@ rather than inventing them from memory.
   `docs/VULN_CORPUS_EXPANSION_PLAN.md` apply unchanged to work under this
   extension; this document does not restate or supersede them.
 
-## Open questions / not decided here
+## Resolved scoping decisions (from the review/research/revise cycle)
 
-- Final directory/naming scheme for the added architecture-tag axis (Step 5).
-- How Step 1's category list and Step 2's confidence-level bar will be scored
-  (the base plan's Phase 1 commonality x exploitability rubric may or may not
-  transfer directly to a site-popularity-driven list — not resolved here).
-- Whether Step 2's iterative research passes need an explicit stopping rule
-  (the base plan's Phase 1 does not currently define one for this angle).
-- Sequencing against the base plan's own wave 2 (rows 7-11) work already in
-  flight — not decided here; this document only proposes the extension, it
-  does not reprioritize the base plan's existing queue.
+These were "open questions" in the first draft. Resolved here so the plan is
+directly executable rather than needing another round of judgment calls
+mid-execution:
+
+- **Directory/naming scheme (Step 5):** reuse the base plan's
+  `docs/research/corpus-examples/<function>/<language>/manifest.yaml` +
+  `<role>-<n>.<ext>` layout unchanged, and add the architecture tag as an
+  additional manifest field (`architecture: <tag>`, e.g. `shopify-storefront`,
+  `express-rest-cart`, `django-drf`) rather than a new directory level. A new
+  directory level per architecture would fragment already-small cells (the
+  base plan's own floor is 2 examples per cell) into cells of 1; a manifest
+  field keeps the existing per-language cell intact while still making the
+  architecture distinguishable in the metadata Step 5 requires. The file name
+  itself additionally embeds a short architecture slug
+  (`<role>-<architecture-slug>-<n>.<ext>`, e.g. `vulnerable-express-cart-1.js`)
+  so it's visible from the directory listing alone, satisfying the base
+  plan's "distinguishable from the file listing" requirement without a
+  metadata lookup.
+- **Category list and site count (Step 1) — frozen for this plan's
+  execution:** 6 categories, 5 sites each (30 sites), chosen for overlap with
+  the base plan's existing feature rows so architecture findings feed
+  directly into the base plan's already-highest-priority cells rather than
+  opening entirely new feature territory:
+  1. **E-commerce / marketplaces** (feeds base plan row 6)
+  2. **Social / UGC platforms** (feeds base plan row 3)
+  3. **SaaS / productivity / collaboration tools** (feeds base plan rows 1-2)
+  4. **Media / streaming / content platforms** (feeds base plan row 10)
+  5. **Travel / booking / marketplaces** (feeds base plan row 15)
+  6. **Fintech / payments** (feeds base plan row 6/9)
+- **Confidence bar for Step 2 (resolved, not the base plan's Phase 1
+  commonality/exploitability rubric — a different question):** an
+  architecture write-up is "done" once at least **two independent, citable
+  sources** (an engineering blog post, a public tech-stack disclosure such as
+  BuiltWith/StackShare/job postings naming the stack, a conference talk, or
+  directly observable public signals such as response headers/asset
+  fingerprints) agree on a given stack claim, or **one primary source**
+  (the company's own engineering blog, published documentation, or an
+  official open-source repo) states it directly. A claim that can't clear
+  either bar after a reasonable search is recorded as "unconfirmed" rather
+  than stated as fact, and is not used to justify a GitHub search in Step 3.
+  This is the stopping rule for Step 2's "iterative...until a documented,
+  defensible level of confidence" language.
+- **Sequencing against the base plan's existing queue:** this extension does
+  not reprioritize or pause the base plan's own wave 2 (rows 7-11). It runs
+  as additional, separately-tracked work feeding the same corpus directory
+  and the same rows 1, 2, 3, 6, 9, 10, 15 the base plan already scored highly
+  — an architecture-grounded reinforcement of cells the base plan already
+  prioritized, not a competing queue.
+
+## Tooling constraints in this execution environment
+
+The base plan's Phase 3 validation section specifies a two-tier check
+(structural diff via difftastic, then behavioral via a sandboxed dynamic
+execution run under gVisor, or a static-analysis fallback via Semgrep/
+Bandit/Psalm/eslint-plugin-security). Checked at execution time in this
+remote session:
+
+- **No gVisor/container runtime available** — the dynamic-execution tier is
+  **not available in this environment**. Any pair collected here is capped at
+  the static-analysis validation tier; it cannot reach the base plan's
+  `validated_by: [dynamic]` status from this session. This is recorded
+  per-entry (`validated_by: [static-review]` or `[bandit]`, etc.) rather than
+  silently upgraded.
+- **difftastic not installed, no package-manager access to add a system
+  binary** in this environment — structural-diff checks in this execution use
+  a manual side-by-side read of the pair (confirming the only difference is
+  the declared CWE mechanism) instead, noted as `validated_by:
+  [manual-review]` per the base plan's existing vocabulary for this case.
+- **Semgrep installed via pip but non-functional in this environment**
+  (`cffi`/`cryptography` native-module load failure in the sandbox — not a
+  config issue, a broken native dependency at the OS level here). Not usable
+  this session.
+- **Bandit installed and functional** (Python static analysis, used for any
+  Python-language entries).
+- **detect-secrets installed and functional**, used in place of gitleaks
+  (not available via pip; no system package manager access to install the Go
+  binary) for the base plan's secrets-scrubbing step — equivalent
+  regex/entropy-based scanning, same "any match gets redacted before first
+  commit" rule applies.
+
+None of this changes the base plan's rule that unvalidated
+(`validated: false`) entries never inform a `safety_matrix.yaml` row — it
+only means every entry collected in this environment is validated at the
+static tier and is explicitly a candidate for a follow-up dynamic-tier pass
+in an environment with sandboxed execution available, not yet at the base
+plan's strongest tier.
+
+## Wave 1 execution scope (this pass)
+
+Executing the full 30-site x N-architecture matrix in one pass is not
+proportionate to a single research/execution session — the base plan's own
+Phase 2 scope cap (~90-375 examples total, stop and check in past ~400)
+governs the *combined* corpus, and this extension adds to the same budget,
+not a separate one. Wave 1, executed immediately following this plan
+revision, is scoped as:
+
+- **All 6 categories get Step 1 fully done** (5 sites each, 30 sites,
+  identified and justified — this is cheap, it's a list).
+- **2 of the 6 categories get Steps 2-7 carried through in this pass**:
+  category 1 (e-commerce/marketplaces) and category 2 (social/UGC), chosen
+  as the two feeding the base plan's two highest-signal existing rows (row 6
+  and row 3, both priority 9). The remaining 4 categories get Step 1 only in
+  this wave; Steps 2-7 for those are follow-up work, tracked in this plan's
+  Status section below rather than attempted incompletely here.
+- **Within each of the 2 executed categories: one concrete
+  architecture/function combination is carried all the way through Step 8's
+  proposal stage** (not full `safety_matrix.yaml` integration — see below).
+- **Step 8, for this pass, stops at the proposal stage**: producing the
+  `suggested_op`/`suggested_sink_family`/`cwe` fields the base plan's Phase 3
+  already defines as the handoff artifact, matching the base plan's own
+  existing precedent (every prior corpus-collection commit in `CHANGELOG.md`
+  for this project is documentation/metadata-only; `suggested_op`/
+  `suggested_sink_family` fields are proposals, not applied changes; the base
+  plan's own Status checklist keeps "proposals acted on" as a separate,
+  still-unchecked line item). Actually editing `lab/safety_matrix.yaml` or
+  adding a new per-stack module template is a change to component **FUZZ**/
+  **LAB** and requires its own `docs/components/<n>-*/change-control.md`
+  entry and (if scope/interfaces change) a `requirements.md` update per
+  `CLAUDE.md`'s Definition of Done — it is deliberately not bundled into this
+  corpus-collection pass, the same way the base plan has never bundled it
+  into any of its own corpus-collection commits either.
 
 ## Status
 
-- [ ] Not dispatched. This document is planning only, per the instruction
-      that created it — no research, collection, or code changes have been
-      performed as part of this plan.
+- [x] Review/research/revise cycle complete — open questions resolved above,
+      tooling constraints checked against this execution environment,
+      wave 1 scope frozen.
+- [x] Step 1: all 6 categories x 5 sites identified, sourced —
+      `docs/research/site-architecture-survey.md`.
+- [x] Step 2-7 for category 1 (e-commerce/marketplaces) — one
+      architecture/function combination carried through
+      (`woocommerce-cart-hook`, PHP): real GPL-3.0 WooCommerce core hook
+      excerpt collected (Step 3-4), organized into
+      `docs/research/corpus-examples/ecommerce-logic/php/` with the
+      `architecture` manifest field (Step 5), CWE-840/CWE-20 assigned citing
+      the MITRE CWE index (Step 6), a manufactured vulnerable counterpart
+      built and validated at the static/manual-review tier — no dynamic
+      sandbox available in this environment (Step 7).
+- [x] Step 2-7 for category 2 (social/UGC) — one architecture/function
+      combination carried through (`django-contrib-comments`, Python): real
+      BSD-3-Clause django-contrib-comments template collected (Step 3-4),
+      organized into `docs/research/corpus-examples/ugc-xss/python/` (Step
+      5), CWE-79 assigned citing the MITRE CWE index (Step 6), a manufactured
+      vulnerable counterpart (`|safe` anti-pattern) built and validated at
+      the static/manual-review tier (Step 7).
+- [x] Step 8 proposal stage for both executed categories — `suggested_op`/
+      `suggested_sink_family` fields appended to each new manifest entry
+      (`hook_delegated_recompute`/`trust_client_price_input` for category 1;
+      `default_autoescape` reused/`raw_concat` reused for category 2). Not
+      yet applied to `lab/safety_matrix.yaml` — see below.
+- [ ] Categories 3-6 (SaaS, media/streaming, travel/booking, fintech):
+      Step 1 only in this wave (done, see the survey doc); Steps 2-7
+      deferred to a follow-up wave.
+- [ ] `lab/safety_matrix.yaml` integration: explicitly out of scope for this
+      wave — tracked as follow-up component-change work (its own
+      `docs/components/<n>-*/change-control.md` entry, per `CLAUDE.md`), not
+      bundled into this corpus-collection pass, matching the base plan's own
+      established precedent for every prior corpus-collection commit.
+- [ ] Dynamic-tier validation for both new pairs (`validated_by: [dynamic]`)
+      — deferred to an environment with a sandboxed execution runtime
+      available; both pairs are `validated: true` at the static/manual-review
+      tier only in the interim, which the base plan's own `validated_by`
+      vocabulary already accommodates.

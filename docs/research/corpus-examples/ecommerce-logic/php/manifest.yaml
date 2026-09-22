@@ -77,6 +77,84 @@
   suggested_op: server_recomputed_amount
   suggested_sink_family: payment_charge_amount
 
+# --- added by docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md wave 1,
+# category 1 (e-commerce/marketplaces), architecture: woocommerce-cart-hook.
+# The idiomatic side is verbatim WooCommerce core (GPL-3.0-only -- kept to
+# the single calculate_totals() method per this corpus's copyleft-handling
+# rule, prominently flagged here and in each entry's license field so this
+# GPL provenance survives into any later handoff). The vulnerable side is
+# NOT a same-file edit of the idiomatic side (unlike this cell's
+# vulnerable-1.php/idiomatic-1.php, which aren't a same-file pair either) --
+# it is a manufactured plugin-style callback hooked on the real
+# 'woocommerce_before_calculate_totals' action the idiomatic side fires,
+# reproducing the exact "custom checkout price override trusts $_POST"
+# anti-pattern this cell's own "Skipped for no license" notes below
+# describe finding in the wild (hamzamamdouh298/shop_4K) but could not
+# license-clear -- this fills that gap with a manufactured equivalent
+# instead. Commit pinned via `git ls-remote
+# https://github.com/woocommerce/woocommerce.git trunk` at collection time
+# (2026-09-22).
+
+- file: idiomatic-woocommerce-hook-1.php
+  role: idiomatic
+  architecture: woocommerce-cart-hook
+  repo: woocommerce/woocommerce
+  commit_sha: c4ed11e2a9102f400f3b975043a2a29ecf4236e5
+  license: GPL-3.0-only
+  tutorial_or_course_project: false
+  pattern: "WC_Cart::calculate_totals() delegates all line-item/total recalculation to a fresh WC_Cart_Totals instance and fires 'woocommerce_before_calculate_totals'/'woocommerce_after_calculate_totals' as the documented extension points -- it is the real hook surface the vulnerable side's manufactured callback attaches to, not itself a price-recomputation routine"
+  notes: >
+    Verbatim excerpt (single method only, per the GPL-3.0 copyleft-handling
+    rule) of WC_Cart::calculate_totals(). Source file path in the origin
+    repo: plugins/woocommerce/includes/class-wc-cart.php.
+    **License note: GPL-3.0-only (copyleft) -- do not let this snippet or
+    its manufactured pair below quietly seed an emitter/module template
+    without this flag surviving; see this plan's Step 8 scoping, which
+    already stops at the proposal stage for exactly this reason.**
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe: []
+  suggested_op: hook_delegated_recompute   # distinct mechanism from
+                             # server_recomputed_amount (idiomatic-1.php,
+                             # above) -- that one recomputes inline in the
+                             # same function; this one delegates to a
+                             # collaborator object via an action hook.
+                             # Proposed as new.
+  suggested_sink_family: payment_charge_amount
+
+- file: vulnerable-woocommerce-hook-1.php
+  role: vulnerable
+  architecture: woocommerce-cart-hook
+  derived_from: idiomatic-woocommerce-hook-1.php
+  repo: woocommerce/woocommerce
+  commit_sha: c4ed11e2a9102f400f3b975043a2a29ecf4236e5
+  license: GPL-3.0-only
+  tutorial_or_course_project: false
+  pattern: "manufactured: a callback hooked on the real 'woocommerce_before_calculate_totals' action (fired by idiomatic-woocommerce-hook-1.php) that sets each cart item's price from $_POST['custom_price'] with no re-validation against the product's own canonical price -- CWE-840 business logic error / price tampering, the same real-world WooCommerce-plugin CVE shape as several actually-disclosed 'checkout price override' plugin vulnerabilities"
+  notes: >
+    Manufactured per docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 3's "Pair
+    generation" methodology, using WooCommerce's own real hook name/calling
+    convention as the base rather than a synthetic stand-in -- not a
+    same-file diff of the idiomatic side (the idiomatic side doesn't itself
+    contain price logic to alter; it only fires the hook this file attaches
+    to), so the "structural check" applied here is a manual read confirming
+    the hook name and $cart argument shape match the idiomatic side's real
+    action, not a line-level diff. No dynamic-execution validation available
+    in this session's environment (see this plan's "Tooling constraints"
+    section); validated at the structural/manual-review tier only.
+    **License note: derived from GPL-3.0-only code -- see the idiomatic
+    entry's license note above; the same caution applies here.**
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe: [CWE-840, CWE-20]
+  suggested_op: trust_client_price_input   # the exact gap this cell's
+                             # "Skipped for no license" note (below) flagged
+                             # as found-in-the-wild-but-unlicensed
+                             # (hamzamamdouh298/shop_4K); proposed as new
+  suggested_sink_family: payment_charge_amount
+
 # Skipped for no license (cited/described in prose only, per this
 # corpus's license-handling rule -- no source text copied from any of
 # these):

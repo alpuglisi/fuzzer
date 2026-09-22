@@ -18,6 +18,35 @@ Format per entry:
 
 ---
 
+## 2026-09-22 — Research tooling: Semgrep installs but panics at import in this remote execution environment (Environment)
+
+- **Symptom:** following `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s Phase 3
+  validation tooling (Semgrep as the primary cross-stack static-analysis
+  check) while executing wave 1 of
+  `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`, `pip install
+  semgrep` succeeded but every invocation (`semgrep --version` and later)
+  crashed: `pyo3_runtime.PanicException: Python API call failed` inside
+  `cryptography`'s Rust bindings (`_cffi_backend`/`cryptography.hazmat._rust`
+  failing to load), reached via `semgrep -> pyjwt -> cryptography`.
+- **Root cause:** an environment-level native-dependency mismatch in this
+  remote execution container (the installed `cryptography` wheel's compiled
+  Rust extension does not load correctly against this container's Python/
+  system libraries) — not a bug in this repo's own code, and not something a
+  code change in `fuzzlab` can fix.
+- **Remediation:** none attempted beyond the standard `pip install` (rebuilding
+  `cryptography`/`cffi` from source, or switching container base images, is
+  outside this session's scope). Worked around by using Bandit (functional,
+  Python-only) plus manual/structural review for the PHP and HTML/template
+  entries collected in that wave, and recording each affected corpus
+  `manifest.yaml` entry's `validated_by` as `[manual-review]` rather than
+  implying a Semgrep pass that didn't happen. See
+  `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`'s "Tooling
+  constraints in this execution environment" section for the full list of
+  validation-tooling gaps found (gVisor and difftastic also unavailable).
+- **Status:** Environment (fixed outside the repo — no `fuzzlab` code defect,
+  so no `docs/bugs/BUG-NNNN-*.md`/preventive-action entry applies; this is
+  purely a note for whoever next tries to run Semgrep in a similar container).
+
 ## 2026-09-22 — LAB: `LiveBootHarness` silently followed real redirects and its seeded schema lacked Eloquent timestamp columns (fixed)
 
 - **Symptom:** extending `LiveBootHarness` coverage to the auth/G4 real-page manifests

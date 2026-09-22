@@ -86,3 +86,68 @@
                              # idiomatic-1.py, a second independent instance
                              # -- reused, not a new name
   suggested_sink_family: html_body
+
+# --- added by docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md wave 1,
+# category 2 (social/UGC), architecture: django-contrib-comments. Sourced
+# from django/django-contrib-comments's own default comment-list template,
+# not a teaching app -- this is the real default rendering path used by a
+# production Django comments app, contrasted with the documented real-world
+# anti-pattern (adding |safe to "fix" comment formatting) called out in
+# Django's own template-autoescaping docs and widely repeated in Django
+# tutorials/Stack Overflow answers. Commit pinned via `git ls-remote
+# https://github.com/django/django-contrib-comments.git master` at
+# collection time (2026-09-22).
+
+- file: idiomatic-django-comments-1.html
+  role: idiomatic
+  architecture: django-contrib-comments
+  repo: django/django-contrib-comments
+  commit_sha: 4ad4c701f2a17ca62f040e94d73c2eb08af320e9
+  license: BSD-3-Clause
+  license_copyright_line: "Copyright (c) 2013, Django Software Foundation and individual contributors"
+  tutorial_or_course_project: false
+  pattern: "comment.comment rendered with Django's default autoescaping (no |safe, no autoescape-off block) -- the template relies entirely on Django's template-engine default rather than an explicit sanitizer call"
+  notes: >
+    Verbatim copy of django_comments/templates/comments/list.html from the
+    pinned commit (file path unchanged in the repo). Source file path in the
+    origin repo: django_comments/templates/comments/list.html.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe: [CWE-79]
+  suggested_op: default_autoescape   # relying on the template engine's
+                             # default escaping (no explicit op applied) is
+                             # a distinct shape from bleach_clean (sanitizes
+                             # on ingest) or html_entity_escape (explicit
+                             # escape call) already in the matrix -- proposed
+                             # as new since it's "no code change, rely on
+                             # framework default" rather than an active
+                             # transform
+  suggested_sink_family: html_body
+
+- file: vulnerable-django-comments-1.html
+  role: vulnerable
+  architecture: django-contrib-comments
+  derived_from: idiomatic-django-comments-1.html
+  repo: django/django-contrib-comments
+  commit_sha: 4ad4c701f2a17ca62f040e94d73c2eb08af320e9
+  license: BSD-3-Clause
+  license_copyright_line: "Copyright (c) 2013, Django Software Foundation and individual contributors"
+  tutorial_or_course_project: false
+  pattern: "manufactured: idiomatic-django-comments-1.html with |safe added to {{ comment.comment }}, disabling Django's autoescaping for that value -- the single, well-documented real-world anti-pattern (Django's own autoescaping docs warn against exactly this on user-controlled values)"
+  notes: >
+    Manufactured per docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 3's "Pair
+    generation" methodology -- differs from idiomatic-django-comments-1.html
+    only in the added |safe filter (confirmed via `diff`: single-line,
+    single-token change). No dynamic-execution validation available in this
+    session's environment (see this plan's "Tooling constraints" section);
+    validated at the structural/manual-review tier only.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe: [CWE-79]
+  suggested_op: raw_concat   # |safe opts the value out of autoescaping
+                             # entirely -- same "no transform at all" shape
+                             # already covered by the existing raw_concat
+                             # rows; reused
+  suggested_sink_family: html_body

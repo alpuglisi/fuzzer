@@ -14,6 +14,35 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Bookkeeping: added an `ERROR_LOG.md` entry for the Semgrep-panics-at-import
+  environment issue hit while validating wave 1 below (Status: Environment —
+  not a `fuzzlab` code defect, so no `docs/bugs/` report applies).
+- Research: revised `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`
+  (review/research/revise cycle) — resolved its open questions (directory/
+  naming scheme, category/site-count freeze, Step 2 confidence bar,
+  sequencing against the base plan), recorded this environment's actual
+  tooling constraints (no gVisor sandbox, no difftastic, Semgrep installed
+  but non-functional here, Bandit/detect-secrets functional), and froze a
+  wave-1 execution scope. Then executed wave 1: Step 1 (`docs/research/
+  site-architecture-survey.md`, all 6 categories x 5 sites, sourced) plus
+  Steps 2-7 for 2 of the 6 categories (e-commerce/marketplaces,
+  social/UGC), one architecture/function combination each —
+  `woocommerce-cart-hook` (PHP, real GPL-3.0-only WooCommerce core hook
+  excerpt + a manufactured trust-client-price vulnerable counterpart,
+  CWE-840/CWE-20) added to `docs/research/corpus-examples/ecommerce-logic/
+  php/manifest.yaml`, and `django-contrib-comments` (Python/Django, real
+  BSD-3-Clause default comment template + a manufactured `|safe`-anti-
+  pattern vulnerable counterpart, CWE-79) added to `docs/research/
+  corpus-examples/ugc-xss/python/manifest.yaml`. Both pairs
+  `validated: true` at the static/manual-review tier only (no dynamic
+  sandbox available this session — recorded explicitly rather than
+  implied). CWE identification for both cited the MITRE CWE index
+  (https://cwe.mitre.org/data/index.html). Step 8 stops at the
+  `suggested_op`/`suggested_sink_family` proposal stage, matching this
+  project's existing corpus-collection precedent — no change to
+  `lab/safety_matrix.yaml` in this pass. Categories 3-6 (SaaS, media/
+  streaming, travel/booking, fintech): Step 1 only this wave, Steps 2-7
+  deferred.
 - Planning: added `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`, a
   proposed extension to `docs/VULN_CORPUS_EXPANSION_PLAN.md` that sources
   corpus candidates top-down from popular-website categories and their real
