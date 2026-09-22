@@ -411,12 +411,17 @@ decisions" below for the original framing.
   classifier phase (Phase 5); a value judgment, leaning to a high abstain rate
   and low false-flag rate.
 - ~~**Second target app** — decide when generalization becomes a goal, after
-  the core toolkit works.~~ **Partially decided (2026-09-22):** a second
-  manifest-generated app on `node_express` (over an external lab like Juice
-  Shop/WAVSEP, and over `python_fastapi`) — see
-  `docs/LAB_SECOND_TARGET_NODE_EXPRESS_PLAN.md` for the full plan and
-  rationale. **Still open within that plan:** whether its pages are original
-  content or corpus-grounded (that plan's §4) — not yet built either way.
+  the core toolkit works.~~ **Decided (2026-09-22), scope expanded same
+  day:** not one second target — **12 new manifest-generated apps, 2 per
+  researched website category** (6 categories in
+  `docs/research/site-architecture-survey.md`), each on the *actual*
+  real-world tech stack of the sites it's modeled on (new emitters built as
+  needed, not approximated onto existing ones), using corpus-grounded pages
+  and stack-specific CWE research. See
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9 for the full scope,
+  the multi-session coordination contract, and the live per-category
+  tracker. Piloting category 1 (E-commerce) as of this date; categories 2-6
+  open for concurrent sessions per that plan's own coordination rules.
 - **Full from-scratch HTTP parser** — reconsider after the toolkit works end to
   end (per D4).
 - ~~**One DB file per project vs one global DB** — decide at Phase 0; leaning

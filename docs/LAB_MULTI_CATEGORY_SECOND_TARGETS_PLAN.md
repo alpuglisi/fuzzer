@@ -111,7 +111,7 @@ requirements this plan did not previously scope:
    and the existing corpus (`docs/research/corpus-examples/`) already
    cover, and against the CWE Top 25, and prefer classes that **expand**
    real coverage over classes that duplicate it — mirroring the reasoning
-   `docs/LAB_SECOND_TARGET_NODE_EXPRESS_PLAN.md`'s own §4 recommendation
+   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s own §4 recommendation
    already used for the single-app version of this plan (prefer SSRF/SSTI/
    header-injection/insecure-deserialization/webhook-signature-shaped
    classes the current `php_laravel` lab doesn't model at all, over a
@@ -404,3 +404,188 @@ bug protocol for any genuine code defect surfaced along the way. If this
 plan is executed via concurrent build lanes, pre-assign each lane's
 bookkeeping numbers before dispatch per `docs/MULTI_AGENT_ORCHESTRATION.md`
 §3/`PA-0031`, rather than letting each lane claim "the next free" one.
+
+## 9. §0b answered — the 12-app expansion is now the plan (2026-09-22)
+
+The project owner answered every §0b question directly:
+
+1. **Stack fidelity is literal.** New emitters get built as needed for
+   whatever a chosen site's real stack actually is — not mapped onto the
+   three existing emitters as an approximation, and not kept universally
+   on `node_express`. This is explicitly the larger-scope reading; treat
+   it as authorized, not as something to re-confirm per category.
+2. **Site-pair selection is driven by architectural distinctness** — for
+   each category, pick the 2 of its 5 researched sites whose real stacks
+   are most different from each other (and, where possible, from stacks
+   already built for other categories — see the reuse note in §9.2).
+3. **This 12-app initiative subsumes §§1-7.** The single-`node_express`-app
+   plan above is not a separate, 13th build — §§1-7 remain useful as a
+   worked template (the phase breakdown, the "verify the probe correctly
+   the first time" discipline, the bookkeeping conventions) but
+   `node_express` is no longer pre-selected as *the* second target; it is
+   simply whichever category's distinctness pick happens to name it (or
+   doesn't).
+4. **Commit to all 6 categories, pilot one at a time, document
+   continuously** so other Claude Code sessions can be assigned to the
+   remaining categories concurrently. This is the operative instruction
+   for how this section is structured below — §9.3 is the coordination
+   contract every category (this session's pilot and every future
+   session's category) must follow, precisely because concurrent sessions
+   on this exact repository have already caused a real, costly bookkeeping-
+   collision incident this session (three independently-diverged branches,
+   reconciled at real effort cost — see the `reconcile-all-lines` work
+   earlier this session). Do not repeat that failure mode here.
+
+### 9.1 Site-pair/stack-selection methodology (apply this per category, don't re-derive it)
+
+For each category, from its 5 researched sites in
+`docs/research/site-architecture-survey.md`:
+
+1. **Filter out sites whose real architecture isn't a sensible generator
+   target.** This generator models request/response HTTP applications
+   (`Cell`/`Route`/`Pipeline` IR — a page, a parameter, a sink). A site
+   whose documented architecture is fundamentally a realtime/protocol
+   system (e.g. Discord's WebSocket/Elixir presence layer) or an
+   infrastructure-only case study with no confirmed application-language
+   claim (e.g. Disney+, Trip.com — both explicitly marked "unconfirmed at
+   the application-code level" in the survey) is not a good candidate;
+   note the exclusion and its reason rather than silently skipping it.
+2. **Group the remaining sites by (language, architectural paradigm)** —
+   paradigm meaning things like "traditional synchronous MVC monolith"
+   vs. "async/microservice API" vs. "service-oriented with a BFF layer."
+   Two sites in the same language *and* the same paradigm are not
+   architecturally distinct for this purpose even if their companies
+   differ (e.g. Etsy's legacy PHP monolith and WooCommerce's PHP/WordPress
+   plugin model are both "PHP, synchronous, template-rendering" — picking
+   both would not add distinctness).
+3. **Pick the 2 groups that are most different from each other**, then
+   pick one representative site from each.
+4. **Reuse-vs-new check, in this order of preference (distinctness still
+   wins if it conflicts):** if two groups are comparably distinct and one
+   of them matches a stack this project has *already built* (currently:
+   PHP via `php_current`/`php_laravel`, Node/Express via `node_express`),
+   prefer the group that reuses an existing stack for one of the category's
+   two picks — this keeps total new-emitter count down without sacrificing
+   the distinctness goal, since the *other* pick still has to be genuinely
+   different from it. Do not let this override reason 3 outright: a
+   category with no site landing anywhere near an existing stack should
+   still get its two most-distinct real picks, new emitters and all.
+5. **Record the pick and the reasoning in that category's own tracker
+   entry (§9.4)** — which sites, which stacks, which groups were
+   considered and rejected, and why. This is what lets a cold session
+   verify a prior category's choice rather than re-deriving it, and lets
+   `docs/PREVENTIVE_ACTIONS.md`-style review catch a bad pick before a lot
+   of build effort follows it.
+
+### 9.2 Stack-reuse ledger — check this before starting any category's Phase A
+
+Every category's site-pair selection can create or reuse a stack. Whoever
+picks up a category **must** check this ledger first (last-decided-first
+order) and update it immediately after their own pick, so a later category
+doesn't duplicate a stack another category already justified building —
+two categories both wanting, say, "a Ruby on Rails emitter" should share
+one, not build two.
+
+| Stack (language + paradigm) | Status | Built for / by | Notes |
+|---|---|---|---|
+| PHP, synchronous MVC (Laravel) | Built | Original lab, `php_laravel` | Full depth. |
+| PHP, synchronous procedural | Built | Original lab, `php_current` | Foundation-tier depth. |
+| Node/Express, synchronous API | Shallow (Tier-A), being deepened | §§1-6 above (pre-expansion plan) | Not yet full depth; whichever category picks Node/Express as one of its two should coordinate with whoever is deepening it rather than starting a second effort. |
+| Python, async API (FastAPI/Pydantic) | Shallow (Tier-A) | Original Phase 3 lane | Exists; available to reuse if a category's pick lands here specifically (not just "Python" generically — see §9.1 step 2's paradigm distinction, e.g. this is NOT the same stack as Django). |
+| *(add a row per new stack the moment a category picks it — before building it, not after)* | — | — | — |
+
+### 9.3 Multi-session coordination contract (read this before touching any code)
+
+Binding on every session working any category of this plan, including this
+one's own pilot:
+
+1. **One git branch per category**, named
+   `claude/second-target-cat<N>-<short-slug>` (e.g.
+   `claude/second-target-cat1-ecommerce`). Never work a category's build
+   directly on `main` or on another category's branch.
+2. **Pre-assigned bookkeeping number BLOCKS per category, reserved in this
+   document before that category's build starts** — not "claim the next
+   free number," which is exactly the failure mode `PA-0031` already
+   exists to prevent and which this session's own branch-reconciliation
+   cost real effort to fix. §9.4's tracker table is where each category's
+   block gets recorded. A session starting a category must add its row
+   (with its reserved block) to §9.4 in the *same commit* that starts any
+   other work, so a concurrently-starting session sees it.
+3. **Check `docs/research/site-architecture-survey.md`, §9.2's stack-reuse
+   ledger, and §9.4's tracker for updates from other sessions before
+   assuming any of them are stale** — these are the shared coordination
+   surface; a session that hasn't fetched `main` recently before reading
+   them is reading stale state.
+4. **Full bookkeeping per this project's standard convention** — same as
+   every other change in this repository (`CHANGELOG.md`, `CC-LAB-NNNN`,
+   `requirements.md`, the full bug protocol for genuine defects) — applies
+   per category, not once for the whole 12-app effort.
+5. **Progress reporting, continuously, not just at completion:** update
+   this document's §9.4 tracker row for your category at every phase
+   transition (research done, stack decided, emitter skeleton built,
+   module inventory depth reached, conformance proven, wired into
+   `multitarget.py`) — not just when the whole category is finished. This
+   is what lets the project owner (and other sessions) see live status
+   without asking.
+6. **Merge discipline:** when a category's branch is ready, open a PR into
+   `main` (this repo's own established convention this session, per
+   `alpuglisi/fuzzer#1`/`#2`) rather than pushing directly, given the
+   proven risk of concurrent-branch collisions on this exact repository.
+   Before opening it, rebase/merge `main` in and resolve against
+   whatever other categories have already landed — do not assume `main`
+   is where you left it.
+
+### 9.4 Category tracker (update this table, don't let it go stale)
+
+| # | Category | Status | Sites picked (stack) | New stack(s) needed | Branch | Bookkeeping block reserved | Notes |
+|---|---|---|---|---|---|---|---|
+| 1 | E-commerce/marketplaces | **Piloting** | Shopify (Ruby on Rails); Walmart (Node/Express — reuses existing) | Ruby on Rails | `claude/second-target-cat1-ecommerce` | `CC-LAB-0070`-`0089` (reserved, not yet all used) | Amazon excluded (AWS-microservices, no single app-language claim confirmed — not a sensible single-stack target); Etsy/WooCommerce excluded as redundant with Shopify's PHP-adjacent... no — Etsy/WooCommerce are PHP, genuinely distinct from Rails, but both landed in the same (PHP, synchronous, template-rendering) group as each other per §9.1 step 2, and PHP is already a built stack (§9.2) — Walmart's Node/Express pick was preferred over a second PHP pick specifically per §9.1 step 4's reuse preference. Functionality research and CWE research for this pair: **not started yet** — next step. |
+| 2 | Social / UGC platforms | Not started | — | Likely Python/Django (Instagram) is the strongest new-stack candidate; Facebook (PHP/Hack+HHVM) may or may not warrant a *new* stack vs. reusing `php_laravel`/`php_current` as an approximation — this is exactly the kind of call §9.1 asks the picking session to make and record, not this table to pre-decide. Discord flagged in §9.1 step 1 as likely excluded (realtime/Elixir, not a request/response fit). YouTube likely excluded (Google-internal infra, no portable app-language claim). | — | — | Open for another session to pick up. |
+| 3 | SaaS / productivity / collaboration | Not started | — | Candidates per the survey: Slack (PHP/Hack web tier + Java realtime — itself two stacks), Notion (sharded Postgres + Kafka, but no named app-framework/language beyond "engineering blog doesn't name one" — check before committing), Atlassian (Java/Kotlin+Spring, Node+Express, or Python — Atlassian itself uses 3 stacks, pick the one most distinct from what's already built), Microsoft 365/Teams (Node.js backend + React/TS front end), Google Workspace (OT + Spanner/Bigtable — confirmed at the algorithm/storage level, not at a portable app-framework level; may not be a sensible single-stack pick without further research). | — | — | Open. Flag: Google Workspace's confirmed detail is algorithmic/storage, not framework-level — whoever picks this category should research further (per the standing instruction to do more research if needed) before treating it as buildable, or should pick two of the other four sites instead. |
+| 4 | Media / streaming / content platforms | Not started | — | Candidates: Netflix (Java/Spring Boot + a Federated GraphQL gateway), Spotify (Java/Spring + Kafka), Twitch (Go, post-monolith-migration — genuinely distinct paradigm from the others), Disney+ (excluded per §9.1 step 1 — infrastructure-only, unconfirmed at application-code level). | — | — | Open. Twitch/Go vs. Netflix-or-Spotify/Java+Spring reads as the most architecturally distinct pair from the current research, but the picking session should verify against §9.1's full procedure rather than take this as decided. |
+| 5 | Travel / booking / marketplaces | Not started | — | Candidates: Booking.com (PHP+MariaDB — same language-family caveat as category 1/2's PHP sites, check §9.2 before assuming reuse), Airbnb (Ruby on Rails + Java/Dropwizard — Rails may already be built by the time this category starts, per §9.2's ledger; check it), Expedia (Java/Spring Boot, later Kotlin), TripAdvisor (event-driven microservices + GraphQL BFF — no single portable app-language claim as clearly named as the others), Trip.com (excluded per §9.1 step 1 — unconfirmed at the application-language level). | — | — | Open. |
+| 6 | Fintech / payments | Not started | — | Candidates: PayPal (historically Java, now diversifying to Node.js for high-traffic pages — itself two stacks, and Node may already be built, check §9.2), Stripe (Ruby — same caveat as Rails re: §9.2 if category 1 or 5 already built a Ruby stack; Stripe is Ruby generically, not Rails specifically, worth checking if that's a meaningfully different stack for this purpose or the same group), Wise (Java-based microservice fleet), Cash App (Kotlin + Java, state-machine payment lifecycle — a genuinely distinctive *functional* pattern worth preserving in page design even if the stack overlaps another Java/Kotlin pick), Venmo (Python on Kubernetes + DynamoDB + Celery — check against category 2's Python pick before assuming this is the same group). | — | — | Open. This category has the most cross-category stack-reuse-checking to do before picking (Node, Ruby, Java/Kotlin, and Python all plausibly already exist elsewhere by the time this category starts) — the picking session should read §9.2 particularly carefully. |
+
+**Bookkeeping-block allocation note:** `CC-LAB-0070`-`0089` is reserved for
+category 1 (the pilot) as a generous block (Ruby on Rails is a full new
+emitter — skeleton, live-boot harness, module inventory, conformance — a
+comparable scope to `php_laravel`'s own history, which used far more than
+20 entries across its full build; this block may need extending, and if so
+extend it in this table rather than letting the next category's block
+overlap it). Categories 2-6 should each reserve their own block **in this
+table, in the same commit that starts their work** — suggested size 20-30
+per category given category 1's own scope, but the picking session should
+size it based on how many new stacks its own picks actually require (a
+category needing 2 new emitters needs a bigger block than one reusing an
+existing stack for one of its two picks).
+
+### 9.5 What's actually next (this session's pilot)
+
+Category 1 (E-commerce) is now **piloting**, per §9.4's row. The concrete
+next steps, in order, per §9.1-§9.3's discipline:
+
+1. Create `claude/second-target-cat1-ecommerce` and do all pilot work there
+   (not on `main`).
+2. Functionality/feature research for Shopify (Rails) and Walmart
+   (Node/Express) specifically — what real pages/flows each actually has
+   (checkout, cart, seller/admin dashboard, search/catalog, reviews if
+   any), cited, not invented — closing the gap §0a item 2 identified.
+3. Stack-specific CWE research for each: what vulnerability classes are
+   realistically introduced by *Rails-the-framework* specifically (mass
+   assignment via unguarded `strong_parameters`, ERB/`raw`-bypassed
+   auto-escaping, YAML deserialization via `Marshal`/`Psych` defaults,
+   etc. — researched against the real Rails CWE landscape and
+   `cwe.mitre.org/top25`, not assumed from general Ruby knowledge) and by
+   *Express-the-framework* specifically, cross-checked against what
+   `lab/safety_matrix.yaml`/the corpus already cover so the picks add
+   breadth (§0a items 3-4) rather than repeat SQLi/XSS a third and fourth
+   time.
+4. Only then: build the Rails skeleton/live-boot harness (this category's
+   version of §2's Phase A, for a stack that doesn't exist in this project
+   at all yet — the biggest single piece of new work in this pilot),
+   deepen `node_express` per §3's Phase B (already-scoped, reusable
+   as-is), design and build the pages (§4's Phase C, now corpus-grounded
+   per real Shopify/Walmart research instead of the generic corpus
+   examples), prove conformance (§5), wire into `multitarget.py` (§6).
+5. Update §9.4's tracker row at every step above — do not wait until the
+   category is fully done to report progress.

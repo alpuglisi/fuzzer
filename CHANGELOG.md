@@ -13,7 +13,26 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
-- Docs: added `docs/LAB_SECOND_TARGET_NODE_EXPRESS_PLAN.md` — the
+- Docs: renamed `docs/LAB_SECOND_TARGET_NODE_EXPRESS_PLAN.md` ->
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` and added its §9,
+  recording the project owner's answers to §0b's open questions: stack
+  fidelity is literal (new emitters built as needed, not approximated onto
+  existing ones), site-pair selection is driven by architectural
+  distinctness, the 12-app expansion subsumes the single-`node_express`-app
+  plan, and all 6 researched categories are committed to with one piloted
+  at a time. Added: a reusable site-pair/stack-selection methodology
+  (§9.1), a cross-category stack-reuse ledger to prevent two categories
+  independently building the same new emitter (§9.2), a multi-session
+  coordination contract (§9.3 — per-category git branches, pre-reserved
+  bookkeeping number blocks recorded before work starts, continuous
+  tracker updates, PR-based merging) written specifically to prevent a
+  repeat of this session's own costly branch-collision incident
+  (`alpuglisi/fuzzer#1`/`#2`), and a live per-category tracker (§9.4) with
+  category 1 (E-commerce: Shopify/Rails + Walmart/Node, reasoning
+  recorded) marked piloting and categories 2-6 open with researched
+  candidate stacks listed for whoever picks each one up next. Planning
+  only for §9 itself; the pilot's own execution has not started.
+- Docs: added `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` — the
   implementation plan for closing the "second target app" deferred decision
   (`docs/DECISIONS_AND_ROADMAP.md`) with a second manifest-generated app on
   `node_express`. Records the two decisions already made (second target =
