@@ -14,6 +14,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Planning: added `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`, a
+  proposed extension to `docs/VULN_CORPUS_EXPANSION_PLAN.md` that sources
+  corpus candidates top-down from popular-website categories and their real
+  architectures/tech stacks (rather than the base plan's feature-first
+  angle), converging on the same `manifest.yaml`/validation-gate output.
+  Cites the MITRE CWE index (<https://cwe.mitre.org/data/index.html>) as the
+  CWE-identification source. Planning only — not dispatched, no research or
+  collection performed.
 - Research: Phase 3 CWE mapping for the "file handling" corpus cell
   (`docs/research/corpus-examples/file-handling/{php,node,python}/manifest.yaml`,
   12 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each
