@@ -10,6 +10,13 @@ uncertainty); `update` folds a reward in [0, 1] into that arm's posterior. Extra
 - **Hierarchical backoff (T4.5):** when ``backoff`` is on, a fresh (context, arm) is
   seeded from the first coarser context that has data (borrowing strength), then
   specializes.
+- **Per-pull metrics (CC-SCHED-0005, R-05):** when a :class:`~fuzzlab.core.store.
+  MetricLogger` is attached (:meth:`ThompsonBandit.attach_metrics`), every ``update()``
+  call (one bandit pull) emits ``regret/cumulative`` (pseudo-regret: the best posterior
+  mean known in this context *before* this pull, minus the observed reward, summed
+  over pulls) and ``posterior/arm_<N>/mean`` for the arm just played, under
+  ``source="bandit"``. Purely additive/observational — never changes selection or
+  update math. Caller flushes with :meth:`flush_metrics` at run end.
 
 Posteriors (and costs) persist in `bandit_posteriors`. Deterministic: the RNG is
 injected, so tests seed it and assert exact behavior.
@@ -19,9 +26,12 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import TYPE_CHECKING, Iterable, Mapping
 
 from fuzzlab.scheduler.context import context_parents
+
+if TYPE_CHECKING:
+    from fuzzlab.core.store import MetricLogger
 
 
 def _clamp01(x: float) -> float:
@@ -57,6 +67,11 @@ class ThompsonBandit:
         self._backoff = backoff
         self._backoff_strength = backoff_strength
         self._cost_floor = cost_floor
+        # Optional per-pull metric emission (CC-SCHED-0005) — None until attached.
+        self._metrics: "MetricLogger | None" = None
+        self._metric_step = 0
+        self._cum_regret = 0.0
+        self._arm_ids: dict[str, int] = {}   # arm -> stable "arm_<N>" index, first-seen order
 
     def _seed(self, context: str, arm: str) -> Beta:
         """Prior for a fresh (context, arm): parent posterior (backoff) else catalog."""
@@ -104,10 +119,40 @@ class ThompsonBandit:
         return [arm for _s, arm in scored]
 
     def update(self, context: str, arm: str, reward: float, cost: float = 1.0) -> None:
+        if self._metrics is not None:
+            # Pseudo-regret: best posterior mean known in this context BEFORE this
+            # pull's update (including the arm about to be played), minus the reward
+            # actually observed. A pull that plays/updates the already-best arm with a
+            # full reward contributes ~0 regret; a miss on a strong arm contributes more.
+            known = [self._posterior(context, a).mean
+                     for (c_, a) in self._post if c_ == context]
+            pre_mean = self._posterior(context, arm).mean
+            best_mean = max(known + [pre_mean]) if known else pre_mean
+
         self._posterior(context, arm).update(reward)
         c = self._cost.setdefault((context, arm), [0.0, 0.0])
         c[0] += max(0.0, float(cost))
         c[1] += 1.0
+
+        if self._metrics is not None:
+            self._metric_step += 1
+            self._cum_regret += max(0.0, best_mean - _clamp01(reward))
+            self._metrics.log("regret/cumulative", self._metric_step, self._cum_regret)
+            idx = self._arm_ids.setdefault(arm, len(self._arm_ids))
+            self._metrics.log(f"posterior/arm_{idx}/mean", self._metric_step,
+                              self._posterior(context, arm).mean)
+
+    def attach_metrics(self, metrics: "MetricLogger | None") -> None:
+        """Attach (or clear, with ``None``) a :class:`MetricLogger` so every future
+        :meth:`update` (bandit pull) emits ``regret/cumulative`` and
+        ``posterior/arm_<N>/mean`` into ``metric_series`` (CC-SCHED-0005). Purely
+        observational — does not affect selection or posterior math."""
+        self._metrics = metrics
+
+    def flush_metrics(self) -> None:
+        """Flush any buffered per-pull metrics. No-op if no logger is attached."""
+        if self._metrics is not None:
+            self._metrics.flush()
 
     def mean(self, context: str, arm: str) -> float:
         return self._posterior(context, arm).mean

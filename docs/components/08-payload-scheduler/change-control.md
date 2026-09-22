@@ -3,6 +3,64 @@
 Component code: **SCHED**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SCHED-0005 — Per-pull metric emission: regret/cumulative + posterior/arm_<N>/mean (R-05) (2026-09-22)
+- Change: `ThompsonBandit` (`fuzzlab/scheduler/bandit.py`) gained optional per-pull
+  metric emission into the shared `metric_series` sink added by B0/CC-CORE-0018.
+  `attach_metrics(metrics: MetricLogger | None)` attaches (or clears) a
+  `fuzzlab.core.store.MetricLogger`; every subsequent `update(context, arm, reward,
+  cost=…)` call (one bandit pull) then, under `source="bandit"`: (1) logs
+  `regret/cumulative` — a running sum of pseudo-regret, computed each pull as
+  `max(0, best_known_posterior_mean_in_context_before_this_pull - reward)`, using the
+  bandit's own belief state (no extra caller-supplied "optimal arm" needed); and (2)
+  logs `posterior/arm_<N>/mean` for the arm just played, where `<N>` is a stable,
+  first-seen-order index per distinct arm name (assigned once, reused every pull of
+  that arm). `flush_metrics()` flushes any buffered rows (no-op if nothing attached).
+  With no `attach_metrics` call (the default), `update()`'s selection/posterior math
+  and its return value are byte-for-byte unchanged — purely additive/observational.
+  Wired into the existing `fuzzlab auto --bandit` path in
+  `fuzzlab/harness/auto_cli.py`: right after `scheduler.load(store)`, a
+  `MetricLogger(store, run_id, "bandit")` is attached; right before
+  `scheduler.save(store)`, `scheduler.flush_metrics()` commits the buffer. No change
+  to `fuzzlab/oracle/oracle.py` (the actual per-candidate confirmation loop that
+  calls `scheduler.update()`) was needed — it already just calls `update()`, which now
+  emits when a logger is attached upstream.
+- Impact (other components / project): unblocks R-05's diagnostics UX (U5 "bandit
+  cumulative-regret + per-arm posterior-mean" panel) — `metric_series` now actually
+  receives `bandit` rows during a `--bandit` run, not just the `gbt`/`logreg` writers
+  from other Wave-1b lanes. CORE (`metric_series`/`log_scalar`/`MetricLogger`, read
+  only) and the oracle (`fuzzlab/oracle/oracle.py`, unchanged — still just calls
+  `scheduler.update()`) are the only other components touched/consulted; both are
+  additive/read-only from the oracle's side. `fuzzlab/mutation/search.py`'s
+  `MutationSearch` also holds a `ThompsonBandit` but has no `store`/`run_id` to attach
+  a logger to yet — left un-wired (out of scope; no behavior change there).
+- Risk (level; mitigation): low — new methods (`attach_metrics`, `flush_metrics`) plus
+  a guarded `if self._metrics is not None:` block inside `update()`; the default
+  (unattached) path is untouched code executing the same statements as before this
+  change. Non-finite values can't reach `metric_series` (rejected by
+  `log_scalar`/`MetricLogger.log` itself, per CC-CORE-0018). Mitigated by tests:
+  `tests/test_scheduler.py` (rows land with `source="bandit"`, expected keys/steps,
+  cumulative regret non-decreasing, posterior mean rises with reward, attaching a
+  logger does not change selection/posterior outputs vs. an unattached bandit with the
+  same seed) and `tests/test_auto.py::test_run_auto_with_bandit_emits_metric_series`
+  (end-to-end through a real `run_auto()` pass — the same call path
+  `auto_cli.py`/`harness/pipeline.py`/`oracle.py` use in production). Full suite green
+  (see CHANGELOG entry for the pass/skip count run for this change).
+- Deliverables:
+  - [x] `ThompsonBandit.attach_metrics`/`flush_metrics` + per-pull emission in
+    `update()` — done.
+  - [x] Wired into `fuzzlab auto --bandit` (`auto_cli.py`) — done.
+  - [x] Tests: unit (`test_scheduler.py`) + end-to-end via `run_auto`
+    (`test_auto.py`) — done.
+  - [x] `requirements.md` updated (new `FR-SCHED-9`) — done.
+  - [ ] Wire the same attach into `MutationSearch` (`fuzzlab/mutation/search.py`) once
+    it gains a `store`/`run_id` — later, tracked as a MUT-side follow-up (out of this
+    lane's scope: MUT owns that file, and it currently has no store handle to attach
+    to at all).
+- Effectiveness (assessed 2026-09-22): effective — `metric_series` rows with
+  `source="bandit"`, `regret/cumulative`, and `posterior/arm_<N>/mean` are written on
+  every pull of a real `--bandit` run (verified via `run_auto` in the test above);
+  live-lab UI rendering of the R-05 diagnostics panel is a later U5 lane's job.
+
 ### CC-SCHED-0004 — Cost-normalized selection (T4.4) + hierarchical backoff (T4.5) (2026-09-21)
 - Change: `ThompsonBandit` gained two opt-in refinements. **Cost-normalized** (T4.4):
   `update(context, arm, reward, cost=…)` records a running mean cost; with

@@ -99,6 +99,8 @@ def main(argv: list[str]) -> int:
             scheduler = ThompsonBandit(priors=arm_priors(default_strategies()),
                                        cost_normalized=True, backoff=True)
             scheduler.load(store)                # resume posteriors + costs from prior runs
+            from fuzzlab.core.store import MetricLogger
+            scheduler.attach_metrics(MetricLogger(store, run_id, source="bandit"))
         plugins = None
         if args.plugins:
             from fuzzlab.plugins import PluginManager
@@ -112,6 +114,7 @@ def main(argv: list[str]) -> int:
             p.error(str(exc))            # D15 fail-safe: loud, non-zero exit
 
         if scheduler is not None:
+            scheduler.flush_metrics()            # commit any buffered per-pull metrics
             scheduler.save(store)                # persist what this run learned
         ml = None
         if args.score:
