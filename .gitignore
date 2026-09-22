@@ -20,6 +20,7 @@ lab/.snapshots/
 # background-agent scratch git worktrees (isolated checkouts for in-progress
 # parallel work; never a deliverable, never committed)
 .claude/worktrees/
+.claude/lane-worktrees/
 # local build cache: the github/advisory-database mirror the T-LAB0.8
 # pattern-corpus sourcing script (fuzzlab/tools/pattern_corpus_sourcing.py)
 # clones/pulls into -- multi-gigabyte upstream data, never the deliverable
