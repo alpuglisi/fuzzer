@@ -1838,6 +1838,81 @@ lane) can submit a payload as
     `puppy-fort-factory/` still present and every test green, a second doing
     only the `git rm -r puppy-fort-factory/` once the first commit's own
     full test run (fast suite + the live-boot slow suite) was green.
+- **FR-LAB-64** *(the `django` emitter exists, Phase A scope; `CC-LAB-0090`,
+  2026-09-22).* A new `Emitter` implementation
+  (`fuzzlab.labgen.emitters.django.DjangoEmitter`) for category 2's
+  (Social/UGC platforms) new-stack pick — Instagram/Python-Django, per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9 and
+  `docs/research/category2-social-ugc-functionality-and-cwe-research.md`.
+  **Phase A scope only**: exactly one shape, `(sqli,
+  sql_numeric_literal)` — the same first shape `php_laravel`'s own L-P3.3a
+  foundation lane and `node_express`'s own Phase A plan both picked — with
+  a real vulnerable twin (unparameterized string-concatenated
+  `connection.cursor()` query) and a real secure twin (a parameterized
+  `%s` placeholder on the same raw cursor, never the ORM on either twin —
+  deliberately isolating the vulnerable/secure axis to string-concat-vs.
+  -parameterized-placeholder, the same axis every other stack's first
+  shape proves, rather than confounding it with "ORM vs. raw SQL").
+  Module composition (`fuzzlab.labgen.emitters.django.modules`) follows
+  `node_express.modules`' own Tier-A/Phase-A port of the shared
+  source/transform/sink/complexity category shape (`CR-LAB-0001` Addendum
+  C) — its own registries, no import from or registration into
+  `fuzzlab.labgen.modules` or any sibling emitter's registry. A
+  `route`-category accumulator (`fuzlab_django_lab/urls.py`, Addendum D)
+  is fed one fragment per supported cell via
+  `DjangoEmitter.render_route_accumulator()`, sorted by cell ID at render
+  time (verified deterministic across two calls with reversed cell order —
+  `tests/test_labgen_django_conformance.py`). Passes Tier 0 (`python -m
+  py_compile` on every generated view + the accumulator) and Tier 3
+  (whole-manifest regenerate-and-diff, byte-deterministic) —
+  `lab/manifests/phase_a_django_sample.yaml`,
+  `tests/test_labgen_django_conformance.py`. The full module-inventory
+  depth (mirroring `node_express`'s own three Tier-A shapes, let alone
+  `php_laravel`'s full nine) is explicitly out of scope — a separate,
+  later Phase B.
+- **FR-LAB-65** *(`DjangoLiveBootHarness` proves a real boot + real HTTP
+  payload differential; `CC-LAB-0090`, 2026-09-22).*
+  `fuzzlab.labgen.conformance.django_live_boot.DjangoLiveBootHarness`
+  structurally mirrors `php_laravel`'s own `LiveBootHarness`
+  (`build()`/`_assemble()`/`request()`/`get()`/`post()`/`query_db()`/
+  `close()`/context-manager protocol, the same bounded-timeout-at-every-
+  subprocess-step discipline via its own `_run()`, and reuses
+  `live_boot.py`'s existing `_NoRedirectHttpErrorProcessor`/
+  `_NO_REDIRECT_OPENER` directly rather than reimplementing it — `BUG-0028`'s
+  fix, generic `urllib` plumbing with no Laravel-specific behavior). The
+  actual boot mechanism is new and venv-based, never Docker/`composer`: a
+  real `python -m venv` + `pip install django==5.2.17` + `manage.py
+  migrate --no-input` + `manage.py runserver` boot, **forced to
+  `127.0.0.1`** regardless of `DJANGO_STACK_ENV.entrypoint_cmd`'s nominal
+  `0.0.0.0` string (`CLAUDE.md`'s non-negotiable Safety section — loopback-
+  only, never exposed; the same real-vs-nominal-field distinction
+  `LiveBootHarness.build()` already has for `php_laravel`, now stated
+  explicitly here rather than left to silent analogy). A real capability
+  probe, `django_boot_available()`, exercises the actual operation path
+  (a real, bounded `pip download django==5.2.17 --no-deps` round trip
+  through whatever proxy is configured — `PA-0035`, generalizing
+  `BUG-0033`'s `composer` fix to `pip`), never a bare socket/DNS check.
+  **`DEBUG = False`/`ALLOWED_HOSTS` are forced** in the generated
+  `settings.py` (`fuzzlab.labgen.emitters.django.stack_env.
+  settings_py_content()`) — a correctness requirement, not a follow-up
+  (mirrors `php_laravel`'s own `APP_DEBUG=false`, D20): left on, Django's
+  own debug page would leak a full traceback + `SECRET_KEY`-adjacent
+  settings on exactly the unhandled-exception path the vulnerable twin's
+  SQLi payload triggers, contaminating this cell's single labeled
+  vulnerability class with an unlabeled full-disclosure secondary one —
+  **verified against the real served HTTP response body, not merely
+  `settings.py`'s source text**
+  (`tests/test_labgen_django_live_boot_single_shape.py::
+  test_django_live_boot_debug_false_no_traceback_leak`). Real, executed,
+  skip-guarded (PA-0005) proof, observed directly this session: a real
+  `GET` with a syntax-breaking payload (`1' OR '1'='1`) against the
+  vulnerable twin returns a real `500` with **no** stack trace (Django's
+  plain error page, confirming `DEBUG = False` is enforced in practice,
+  not just asserted); the identical payload against the secure twin's
+  parameterized query returns a real `404` (safely treated as a
+  non-matching literal string, never executed as SQL) — the same
+  syntax-break-vs.-safely-bound differential every other stack's first
+  live-boot test proves.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

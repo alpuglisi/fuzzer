@@ -159,7 +159,7 @@ tracked in the requirements files, not here.
   `generalizes` verdict — the generalization evidence. The live run against an external
   validation lab is on-host; the manifest-generated second target plugs in as a
   `TargetSpec`.
-- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- three emitters (php_current, python_fastapi, php_laravel) built; Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself pending human sign-off]` (D8, target shape pinned by **D20**/
+- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- four emitters (php_current, python_fastapi, php_laravel, django) built, django at Phase-A/foundation depth; node_express at Tier-A depth; Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself done]` (D8, target shape pinned by **D20**/
   `CR-LAB-0001`): the "lab as a compiler" — one manifest plus a safety matrix,
   seed, and env-profile generate the app, labels, docs, and oracle tests, with a
   **binary** verdict derived from `(transform, sink context)` (a partially
@@ -486,6 +486,44 @@ tracked in the requirements files, not here.
   documented in `docs/ON_HOST_RUNBOOK.md`; `php_current` is **not**
   retired (it stays as the second stack `L-P3.4`'s fingerprint-independence
   gate needs).
+  **A fourth stack emitter, `django` (`fuzzlab/labgen/emitters/django/`,
+  `CC-LAB-0090`, Phase A), is now built** — category 2's (Social/UGC
+  platforms) new-stack pick (Instagram/Python-Django,
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9), a genuinely new
+  paradigm distinct from `python_fastapi`'s async-API shape (Django's
+  synchronous, template-rendering MVC monolith paradigm). Phase-A/
+  foundation depth only, mirroring `php_laravel`'s own L-P3.3a and
+  `node_express`'s own Phase A scope: one shape, `(sqli,
+  sql_numeric_literal)`, both twins via a raw `connection.cursor()` sink
+  (string-concat vs. parameterized `%s`, never the ORM on either twin, to
+  isolate exactly the axis every other stack's first shape proves); its own
+  fully independent module-composition registry
+  (`emitters/django/modules.py`), no cross-import with any sibling
+  emitter's registry; a `route`-category accumulator
+  (`fuzlab_django_lab/urls.py`) fed one fragment per cell, sorted by cell
+  ID; passes Tier 0 (`python -m py_compile`)/Tier 3 (regenerate-and-diff)
+  against `lab/manifests/phase_a_django_sample.yaml`. A real, venv-based
+  (never Docker/`composer`) live-boot harness,
+  `fuzzlab/labgen/conformance/django_live_boot.py`'s
+  `DjangoLiveBootHarness`, structurally mirrors `LiveBootHarness`
+  (reusing its existing `_NoRedirectHttpErrorProcessor` directly rather
+  than reimplementing it) but boots via a real `python -m venv` + `pip
+  install django==5.2.17` + `manage.py migrate` + `manage.py runserver`,
+  forced to `127.0.0.1` independent of `entrypoint_cmd`'s nominal
+  `0.0.0.0` string; a real capability probe (`django_boot_available()`)
+  exercises a real, bounded `pip download` round trip, never a bare
+  socket check (`PA-0035`, generalizing `BUG-0033`'s `composer` fix to
+  `pip`). The generated `settings.py` forces `DEBUG = False`/a real
+  `ALLOWED_HOSTS` — a correctness requirement, not a follow-up, mirroring
+  `php_laravel`'s own `APP_DEBUG=false` (D20) — **verified against the
+  real served HTTP response body**, not merely settings source text: a
+  real adversarial `GET` against the vulnerable twin returns a real `500`
+  with no stack-trace leak, while the secure twin's parameterized query
+  returns a real `404` (safely treated as a non-matching literal), proven
+  end to end in `tests/test_labgen_django_live_boot_single_shape.py`. The
+  full module-inventory depth (mirroring `node_express`'s own three
+  Tier-A shapes) and corpus-grounded page design (Phase C) are separate,
+  later work — not attempted here.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

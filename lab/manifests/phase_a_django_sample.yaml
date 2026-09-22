@@ -1,0 +1,36 @@
+# Phase A django sample manifest (category 2 pilot, `CC-LAB-0090`).
+#
+# Proves fuzzlab.labgen.emitters.django's Phase A module inventory --
+# exactly one shape, sql_numeric_literal SQLi, the same first shape
+# php_laravel's own L-P3.3a foundation lane and node_express's Phase A plan
+# both picked -- against a minimal, self-contained vulnerable/secure pair.
+# Not a migration of any real app -- django is a brand-new stack with no
+# pre-existing hand-built pages to reproduce. Cell IDs are prefixed
+# LABGEN-DJ- ("django") to keep them out of every other stack's namespace
+# and the real PFF- ground-truth namespace.
+#
+# Two cells, one vulnerable/secure pair, one sink-context family -- the
+# minimal proof this Phase A lane's own scope calls for (a full
+# module-inventory depth, mirroring node_express's three Tier-A shapes, is
+# a separate, later Phase B; not attempted here).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # --- /api/products: raw concat into a numeric SQL literal position ----
+  - cell_id: LABGEN-DJ-0001
+    class: sqli
+    stack_profile: django
+    route: { method: GET, path: /api/products }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  - cell_id: LABGEN-DJ-0002
+    class: sqli
+    stack_profile: django
+    route: { method: GET, path: /api/products }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]

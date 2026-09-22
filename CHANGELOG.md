@@ -13,6 +13,34 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- LAB: built `django` (category 2 pilot's new-stack pick, Instagram/Python-
+  Django) Phase A — `CC-LAB-0090`/`FR-LAB-64`/`FR-LAB-65`, pre-change review
+  gate cleared (2 independent reviewer agents, 8 findings incorporated: a
+  scoped `StackEnv`-reuse correction, forced `DEBUG=False`/`ALLOWED_HOSTS`,
+  a real digest-pinned `base_image`, explicit loopback-only binding, reuse
+  of the existing `_NoRedirectHttpErrorProcessor` + up-front Django/ORM
+  default enumeration per `PA-0030`/`BUG-0028`, an `ARCHITECTURE.md`
+  deliverable, and a dependency-provenance record). A new
+  `fuzzlab.labgen.emitters.django.DjangoEmitter` (one shape, `sqli`/
+  `sql_numeric_literal`, both twins via a raw `connection.cursor()` sink
+  to isolate the string-concat-vs-parameterized axis, never the ORM), its
+  own module-composition registry mirroring `node_express`'s Phase-A port
+  shape, a real trimmed `django-admin startproject` skeleton (real Django
+  5.2.17, resolved live against PyPI; base image digest resolved via AWS's
+  public ECR mirror after Docker Hub's own rate limit was hit), and a
+  `DjangoLiveBootHarness` (real `venv` + `pip install` + `manage.py
+  migrate`/`runserver`, forced to `127.0.0.1` independent of the nominal
+  `entrypoint_cmd` string, reusing `live_boot.py`'s existing no-redirect
+  opener). Passes Tier 0/Tier 3 for real (`tests/test_labgen_django_
+  conformance.py`, 4 passed) and a real live-boot payload differential
+  (`tests/test_labgen_django_live_boot_single_shape.py`, 3 passed): the
+  vulnerable twin's adversarial payload returns a real 500 with **no**
+  stack-trace/`SECRET_KEY` leak (confirming `DEBUG=False` is enforced in
+  the actual served response, not just asserted), the secure twin returns
+  a real 404. No regression in the broader suite (`pytest tests/ -q -m
+  "not slow"`, 1521 passed; 30 pre-existing failures are this sandbox's
+  own missing `gitleaks`/`numpy`, unrelated to this change). Full record:
+  `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0090` entry.
 - LAB: started category 2 (Social/UGC platforms) of the 12-app multi-category
   second-targets plan, on branch `claude/category-2-build-bomomg`, per
   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9's coordination

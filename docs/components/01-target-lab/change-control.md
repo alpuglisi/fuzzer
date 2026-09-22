@@ -242,39 +242,107 @@ Component code: **LAB**. Entry format and required fields: see
   discovering them mid-implementation.
 
 - **Deliverables:**
-  - [ ] `fuzzlab/labgen/emitters/django/stack_env.py` (`StackEnv` instance;
-    real pinned Django version + resolution evidence; real digest-pinned
-    `base_image` + `workdir`; `entrypoint_cmd` documented alongside the
-    forced-loopback override statement) — todo.
-  - [ ] `settings.py` generation forces `DEBUG = False` + a real
-    `ALLOWED_HOSTS` (its own line, not folded into "scaffold") — todo.
-  - [ ] `fuzzlab/labgen/emitters/django/stack/skeleton/` (real, trimmed
+  - [x] `fuzzlab/labgen/emitters/django/stack_env.py` (`StackEnv` instance;
+    real pinned Django version `5.2.17` + resolution evidence via
+    `pip index versions django` against live PyPI; real digest-pinned
+    `base_image` — resolved via AWS's public ECR mirror after Docker Hub's
+    own unauthenticated pull quota was exhausted in this sandbox, see
+    `fuzzlab/labgen/emitters/django/stack/README.md` — + `workdir`;
+    `entrypoint_cmd` documented alongside the forced-loopback override
+    statement) — done.
+  - [x] `settings.py` generation (`stack_env.settings_py_content()`) forces
+    `DEBUG = False` + a real `ALLOWED_HOSTS` — done, and verified against
+    the real served HTTP response body (not just source text) by
+    `tests/test_labgen_django_live_boot_single_shape.py::
+    test_django_live_boot_debug_false_no_traceback_leak`.
+  - [x] `fuzzlab/labgen/emitters/django/stack/skeleton/` (real, trimmed
     `django-admin startproject` output + provenance `README.md`, recording
-    exactly which default `INSTALLED_APPS` are kept/trimmed) — todo.
-  - [ ] `fuzzlab/labgen/emitters/django/__init__.py`
-    (`DjangoEmitter.supports()`/`.render()`, one shape) — todo.
-  - [ ] `fuzzlab/labgen/emitters/django/modules.py` (this emitter's own
-    `SOURCES`/`TRANSFORMS`/`SINKS`/`COMPLEXITIES`) — todo.
-  - [ ] `fuzzlab/labgen/conformance/django_live_boot.py`
+    exactly which default `INSTALLED_APPS` are kept/trimmed) — done.
+    **Divergence from this entry's original draft, reflected back per the
+    pre-change review gate's own rule:** no separate Django "app"
+    (`INSTALLED_APPS` entry/`AppConfig`/migrations) was needed — Phase A's
+    one shape uses a raw `connection.cursor()` sink on both twins, never
+    the ORM, so views live directly in the project package
+    (`fuzlab_django_lab/views/`) rather than under a generic `<app>/`
+    path the original draft sketched. `fuzlab_django_lab/urls.py`
+    (accumulator target) and `settings.py` are deliberately **not**
+    checked into the skeleton (rendered fresh per build, mirroring
+    `php_laravel`'s own `.env`/`routes/web.php` convention) — see the
+    skeleton README for the full, itemized trim list.
+  - [x] `fuzzlab/labgen/emitters/django/__init__.py`
+    (`DjangoEmitter.supports()`/`.render()`/`.render_route_accumulator()`,
+    one shape) — done.
+  - [x] `fuzzlab/labgen/emitters/django/modules.py` (this emitter's own
+    `SOURCES`/`TRANSFORMS`/`SINKS`/`COMPLEXITIES`, mirroring
+    `node_express.modules`' own port shape) — done.
+  - [x] `fuzzlab/labgen/conformance/django_live_boot.py`
     (`DjangoLiveBootHarness`, forced-loopback boot, `_NoRedirectHttpErrorProcessor`
-    reuse, `django_boot_available()`) — todo.
-  - [ ] `tests/test_labgen_django_live_boot_single_shape.py` (1 real,
-    executed, skip-guarded test, verifying the DEBUG=False error path too)
-    — todo.
-  - [ ] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-64`
+    reuse, `django_boot_available()`) — done.
+  - [x] `tests/test_labgen_django_live_boot_single_shape.py` (3 real,
+    executed, skip-guarded tests: normal lookup on both twins, the SQLi
+    payload differential, and the DEBUG=False no-traceback-leak check) —
+    done, **observed passing for real this session** (`3 passed in
+    21.33s`), not merely written: a real `venv`, a real `pip install
+    django==5.2.17`, a real `manage.py migrate`/`runserver`, and real HTTP
+    requests against the booted app — vulnerable twin returns a real `500`
+    with no stack-trace leak on the adversarial payload, secure twin
+    returns a real `404` (safely treated as a non-matching literal).
+  - [x] `tests/test_labgen_django_conformance.py` (4 tests, Tier 0/Tier 3,
+    plus route-accumulator determinism) + `lab/manifests/
+    phase_a_django_sample.yaml` — done, **observed passing for real**
+    (`4 passed in 0.32s`). Not originally itemized in this entry's draft
+    (the draft's item 6 covered only the live-boot test) — added during
+    implementation since Tier 0/3 conformance is the standing bar this
+    entry's own "Change" section commits to ("passes Tier 0 + Tier 3");
+    reflected back here per the same divergence-disclosure rule.
+  - [x] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-64`
     (django emitter exists, renders the one shape, Tier 0/3 conformant,
     `DEBUG=False` enforced) and `FR-LAB-65` (`DjangoLiveBootHarness` proves
-    a real boot + real HTTP payload differential, loopback-only) — todo.
-  - [ ] `docs/ARCHITECTURE.md` — dedicated `django` emitter paragraph in
-    the manifest-driven-generator section — todo.
-  - [ ] Dependency-provenance record (`syft` SBOM attempt, or a documented
-    fallback) for the new pip dependency tree — todo.
-  - [ ] `CHANGELOG.md` line — todo.
-  - [ ] Full bug protocol for any genuine defect surfaced — todo (only if
-    one occurs).
+    a real boot + real HTTP payload differential, loopback-only) — done.
+  - [x] `docs/ARCHITECTURE.md` — dedicated `django` emitter paragraph in
+    the manifest-driven-generator section (and its summary bracket tag
+    updated to name four emitters) — done.
+  - [x] Dependency-provenance record for the new pip dependency tree —
+    done. `syft` was not available on this build host (mirroring
+    `php_laravel`'s own documented gap); a real, observed `pip list
+    --format=freeze` capture is recorded instead in
+    `fuzzlab/labgen/emitters/django/stack/README.md`, along with the
+    intended `syft` command for whenever it becomes available.
+  - [x] `CHANGELOG.md` line — done.
+  - [x] Full bug protocol for any genuine defect surfaced — n/a, no
+    genuine code defect was found while building this (the two
+    corrections made were pre-change-review findings on the *draft*,
+    resolved before any code was written, not bugs in landed code).
 
-- **Effectiveness (assessed 2026-09-22): pending** — left pending until the
-  deliverables above land and the new test is observed to pass for real.
+- **Effectiveness (assessed 2026-09-22): effective.** Every deliverable
+  landed and was independently, really exercised this session, not just
+  written: `DjangoEmitter` renders the one shape and its route accumulator
+  correctly (verified by hand-inspecting real generated output before the
+  test suite existed); Tier 0 (`python -m py_compile`) and Tier 3
+  (regenerate-and-diff) both pass for real
+  (`tests/test_labgen_django_conformance.py`, `4 passed in 0.32s`); and
+  the full live-boot proof passes for real
+  (`tests/test_labgen_django_live_boot_single_shape.py`, `3 passed in
+  21.33s`) — a real venv, a real PyPI-resolved Django install, a real
+  `manage.py migrate`/`runserver` boot forced to loopback, and a real
+  HTTP payload differential: the vulnerable twin's adversarial payload
+  (`1' OR '1'='1`) produces a real `500` with **no** stack-trace/
+  `SECRET_KEY` leak (confirming `DEBUG = False` is enforced in the actual
+  served response, the load-bearing safety check reviewer #2's pre-change
+  review made non-negotiable), while the secure twin's parameterized twin
+  produces a real `404` (the payload safely treated as a non-matching
+  literal, never executed as SQL). The broader non-slow test suite
+  (`pytest tests/ -q -m "not slow"`, 1521 passed) shows no regression from
+  this change — the 30 pre-existing failures observed are environment
+  gaps unrelated to this entry (`gitleaks`/`numpy` not installed in this
+  sandbox), confirmed by their identical failure signature before this
+  entry's files existed (git-untracked at the time of that run). Two
+  documented divergences from this entry's original draft (no separate
+  Django app needed; a Tier 0/3 conformance test module added beyond the
+  draft's original scope) were both reflected back into this entry's
+  Deliverables above, per the pre-change review gate's own rule, rather
+  than left as an undocumented gap between what was promised and what
+  shipped.
 
 ---
 **Pre-change review gate record:** reviewer #1 (accuracy) — APPROVE WITH
