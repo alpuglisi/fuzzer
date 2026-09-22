@@ -28,47 +28,48 @@ function histogramColumns(hist) {
   return [centers, hist.counts];
 }
 
-// Bars-path chart (histograms, small per-arm comparisons over a numeric x). uPlot's
-// bar-path renderer (`uPlot.paths.bars`) lives on the default export itself, so this
-// dynamically imports the vendored module rather than threading it through
-// charts.js's generic `createChart` (which stays chart-shape-agnostic).
-// Note: the bar fill color is resolved once at mount time. createChart's own
-// stroke/grid/axis colors DO re-resolve on every theme/density rebuild (R-12), but a
-// custom `fill` baked into a caller-supplied series object does not — an acceptable
-// trade for this advisory-only tab (a bar chart's fill staying its light-mode accent
-// after a dark-mode toggle, until the page is next loaded) rather than teaching
-// charts.js a series-factory-function API for this one caller.
+// All three helpers below go through the shared `createChart` (static/js/charts.js,
+// also used by Diagnostics/U5): its `data.series[]` items are normally one-per-run
+// ({run_id, x, y}, labeled "run {run_id}"), but every series here is a single-run
+// panel with its own caller-supplied `label` (and, for bars, `kind`/`color`), which
+// charts.js's buildOpts uses verbatim when present — added generically so this tab
+// doesn't need a second hand-rolled wrapper (R-12). charts.js assumes its caller's
+// `el` already carries `role="img"` + an aria-label (Diagnostics sets it server-side
+// since its labels are static); this tab's labels include a run-time-formatted value
+// (conformal's t_lo/t_hi), so each helper sets both attributes here instead.
 function mountBars(id, xs, ys, label) {
   const el = document.getElementById(`chart-${id}`);
   if (!el || !xs || !xs.length) return;
-  import("/static/vendor/uplot/uPlot.esm.js").then(({ default: uPlot }) => {
-    createChart(el, {
-      id, label,
-      data: [xs, ys],
-      series: [{}, { label, stroke: "transparent", fill: tokens().accent,
-        paths: uPlot.paths.bars({ size: [0.85, 100] }) }],
-    });
+  el.setAttribute("role", "img");
+  el.setAttribute("aria-label", label);
+  createChart(el, {
+    id,
+    data: { mode: "line", series: [
+      { run_id: id, x: xs, y: ys, label, color: tokens().accent, kind: "bars" },
+    ] },
   });
 }
 
-function mountLine(id, xs, ys, label, extra) {
+function mountLine(id, xs, ys, label) {
   const el = document.getElementById(`chart-${id}`);
   if (!el || !xs || !xs.length) return;
+  el.setAttribute("role", "img");
+  el.setAttribute("aria-label", label);
   createChart(el, {
-    id, label,
-    data: [xs, ys],
-    series: [{}, { label }],
-    ...(extra || {}),
+    id,
+    data: { mode: "line", series: [{ run_id: id, x: xs, y: ys, label }] },
   });
 }
 
 function mountMultiLine(id, xs, seriesList, label) {
   const el = document.getElementById(`chart-${id}`);
   if (!el || !xs || !xs.length) return;
+  el.setAttribute("role", "img");
+  el.setAttribute("aria-label", label);
   createChart(el, {
-    id, label,
-    data: [xs, ...seriesList.map((s) => s.ys)],
-    series: [{}, ...seriesList.map((s) => ({ label: s.label, width: s.width ?? 1.5 }))],
+    id,
+    data: { mode: "line", series: seriesList.map((s, i) => (
+      { run_id: `${id}-${i}`, x: xs, y: s.ys, label: s.label, width: s.width })) },
   });
 }
 

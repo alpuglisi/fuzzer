@@ -1,92 +1,86 @@
-// fuzzlab control panel — pure downsampling helpers (U4/U5; R-05/R-12).
+// fuzzlab control panel — pure downsampling logic (U5, per R-05/R-08/R-09).
 //
-// Kept dependency-free and DOM-free (no `window`/`document` at import) so the exact
-// same module loads under `node --test` (unit tests) and in the browser (charts.js),
-// per the R-09 test strategy. Two algorithms:
+// Touches no `window`/`document` at import, so this module loads unmodified in
+// both Node (`node --test`, R-09 layer A) and the browser (relative-path ESM,
+// no build step). Two modes, both operating on COLUMNAR data `[xs, ys]` (uPlot's
+// native shape; x in unix seconds):
 //
-//   - `lttb` (Largest-Triangle-Three-Buckets): picks a representative subset of a
-//     single (x, y) series that preserves visual shape — spikes and turning points
-//     survive where a naive stride/average would flatten them. Used for long
-//     intra-run step series (bandit regret, mutation reward/novelty, training loss)
-//     before handing them to uPlot (~1000 pts/series, per the plan's read-side
-//     downsampling note).
-//   - `envelopeBuckets`: a simpler min/max-per-bucket reduction for CI-band-style
-//     series (e.g. a posterior-mean series someone wants to show with its bucketed
-//     range) — trivially correct, no shape heuristic needed for a band.
+//   - `lttb(xs, ys, threshold)` — Largest-Triangle-Three-Buckets. Preserves visual
+//     shape (spikes/jumps) far better than naive bucket-averaging; used for scalar
+//     trend lines (training curves, coverage growth, mutation reward/novelty).
+//   - `envelope(xs, ys, threshold)` — per-bucket [min, max], for the bandit
+//     posterior/regret CI band (R-08's "min/max envelope mode"): shows the true
+//     spread within a bucket instead of erasing it the way an average would.
+//
+// Both keep the series's first and last point untouched and are no-ops when the
+// series already has ≤ `threshold` points, so charts with little data never lose
+// precision they didn't need to give up.
 
-/**
- * Largest-Triangle-Three-Buckets downsampling of one (xs, ys) series.
- *
- * Always keeps the first and last point. Returns `{xs, ys}` unchanged (by reference)
- * when already at or under `threshold` points, or `threshold` < 3 (nothing sensible
- * to bucket).
- */
 export function lttb(xs, ys, threshold) {
   const n = xs.length;
-  if (threshold >= n || threshold < 3 || n < 3) {
-    return { xs: xs.slice(), ys: ys.slice() };
+  if (threshold >= n || threshold <= 2 || n === 0) {
+    return [xs.slice(), ys.slice()];
   }
+
   const outXs = [xs[0]];
   const outYs = [ys[0]];
-  // Fixed-size buckets over the interior points (endpoints are handled separately).
+
+  // Bucket size excludes the fixed first/last points.
   const bucketSize = (n - 2) / (threshold - 2);
-  let a = 0; // index of the previously-selected point
+  let a = 0; // index of the last picked point
+
   for (let i = 0; i < threshold - 2; i++) {
-    const bucketStart = Math.floor((i + 0) * bucketSize) + 1;
-    const bucketEnd = Math.floor((i + 1) * bucketSize) + 1;
+    // Average point of the NEXT bucket (for the triangle's third vertex).
     const nextStart = Math.floor((i + 1) * bucketSize) + 1;
-    const nextEnd = Math.floor((i + 2) * bucketSize) + 1;
-    // Average point of the NEXT bucket, used as one triangle vertex.
+    const nextEnd = Math.min(Math.floor((i + 2) * bucketSize) + 1, n);
     let avgX = 0, avgY = 0;
-    const nStart = Math.min(nextStart, n - 1);
-    const nEnd = Math.min(nextEnd, n);
-    const nCount = Math.max(1, nEnd - nStart);
-    for (let j = nStart; j < nEnd; j++) { avgX += xs[j]; avgY += ys[j]; }
-    avgX /= nCount; avgY /= nCount;
+    const nextCount = Math.max(1, nextEnd - nextStart);
+    for (let j = nextStart; j < nextEnd; j++) { avgX += xs[j]; avgY += ys[j]; }
+    avgX /= nextCount;
+    avgY /= nextCount;
+
+    // This bucket's range to pick the largest triangle from.
+    const rangeStart = Math.floor(i * bucketSize) + 1;
+    const rangeEnd = Math.min(Math.floor((i + 1) * bucketSize) + 1, n);
 
     const ax = xs[a], ay = ys[a];
-    let maxArea = -1, chosen = bucketStart;
-    const bStart = Math.max(bucketStart, 0);
-    const bEnd = Math.min(bucketEnd, n);
-    for (let j = bStart; j < bEnd; j++) {
-      const area = Math.abs((ax - avgX) * (ys[j] - ay) - (ax - xs[j]) * (avgY - ay));
-      if (area > maxArea) { maxArea = area; chosen = j; }
+    let bestArea = -1, bestIdx = rangeStart;
+    for (let j = rangeStart; j < rangeEnd; j++) {
+      const area = Math.abs(
+        (ax - avgX) * (ys[j] - ay) - (ax - xs[j]) * (avgY - ay)
+      ) * 0.5;
+      if (area > bestArea) { bestArea = area; bestIdx = j; }
     }
-    outXs.push(xs[chosen]);
-    outYs.push(ys[chosen]);
-    a = chosen;
+    outXs.push(xs[bestIdx]);
+    outYs.push(ys[bestIdx]);
+    a = bestIdx;
   }
+
   outXs.push(xs[n - 1]);
   outYs.push(ys[n - 1]);
-  return { xs: outXs, ys: outYs };
+  return [outXs, outYs];
 }
 
-/**
- * Min/max-per-bucket reduction of one (xs, ys) series into `buckets` buckets, for a
- * CI-band-style display. Returns `{xs, min, max}` (bucket-representative x = the
- * bucket's first x). Empty input yields empty arrays; `buckets` <= 0 or >= n returns
- * every point as its own bucket (min === max === ys[i]).
- */
-export function envelopeBuckets(xs, ys, buckets) {
+export function envelope(xs, ys, threshold) {
   const n = xs.length;
-  if (n === 0) return { xs: [], min: [], max: [] };
-  if (buckets <= 0 || buckets >= n) {
-    return { xs: xs.slice(), min: ys.slice(), max: ys.slice() };
+  if (threshold >= n || threshold <= 0 || n === 0) {
+    return [xs.slice(), ys.slice(), ys.slice()];
   }
-  const size = n / buckets;
   const outXs = [], outMin = [], outMax = [];
-  for (let i = 0; i < buckets; i++) {
-    const start = Math.floor(i * size);
-    const end = Math.min(n, Math.floor((i + 1) * size));
+  const bucketSize = n / threshold;
+  for (let i = 0; i < threshold; i++) {
+    const start = Math.floor(i * bucketSize);
+    const end = i === threshold - 1 ? n : Math.floor((i + 1) * bucketSize);
     if (start >= end) continue;
-    let lo = Infinity, hi = -Infinity;
+    let mn = ys[start], mx = ys[start], sumX = 0;
     for (let j = start; j < end; j++) {
-      if (ys[j] < lo) lo = ys[j];
-      if (ys[j] > hi) hi = ys[j];
+      if (ys[j] < mn) mn = ys[j];
+      if (ys[j] > mx) mx = ys[j];
+      sumX += xs[j];
     }
-    outXs.push(xs[start]);
-    outMin.push(lo);
-    outMax.push(hi);
+    outXs.push(sumX / (end - start));
+    outMin.push(mn);
+    outMax.push(mx);
   }
-  return { xs: outXs, min: outMin, max: outMax };
+  return [outXs, outMin, outMax];
 }
