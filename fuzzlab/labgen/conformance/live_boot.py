@@ -272,7 +272,7 @@ def _find_free_port() -> int:
 
 #: ``lab/sql/schema.sql`` -- read and imported for real (re-pointed here by
 #: `L-P3.3c-CUT`, `CC-LAB-0067`/`FR-LAB-62`, from the retired
-#: ``lab/sql/schema.sql`` -- moved, never forked, so this is
+#: ``puppy-fort-factory/sql/schema.sql`` -- moved, never forked, so this is
 #: still the same one file, not a second copy), the actual schema/seed data
 #: `lab/compose.yaml`'s `db` service provisions a fresh MariaDB from.
 REAL_SCHEMA_SQL = Path(__file__).resolve().parents[3] / "lab" / "sql" / "schema.sql"

@@ -6,7 +6,7 @@ offline without the live container. One ruleset, two consumers: the lab middlewa
 enforces it on the wire; this models it here. Live, the same learner (T8.3 `learn.py`)
 observes real canary round-trips through the proxy/HTTP seam instead of this model.
 
-`lab/waf-rules.json` (re-pointed here by `L-P3.3c-CUT`, `CC-LAB-NNNN`, from the
+`lab/waf-rules.json` (re-pointed here by `L-P3.3c-CUT`, `CC-LAB-0067`, from the
 hand-built `puppy-fort-factory/config/waf-rules.json`) is now the sole source of truth
 for the ruleset, alongside `lab/safety_matrix.yaml` and `lab/compose.yaml`.
 """
