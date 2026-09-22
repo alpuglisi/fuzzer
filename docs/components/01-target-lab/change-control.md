@@ -3,6 +3,102 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0050 — L-P3.3c-G5: `contact.php` + `newsletter.php` reproduced as `php_laravel` cells, with `.php`-pinned routes (2026-09-22)
+*(`CC-LAB-0050` and `FR-LAB-48` were pre-assigned to this sub-lane by the orchestrating
+session, with `CC-LAB-0046`..`0049`/`0051` and `FR-LAB-44`..`0047`/`49` reserved for the five
+concurrent sibling sub-lanes G1–G4/G6 — so no merge-time renumbering should be needed.)*
+- Change: executed group **G5** of `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6's per-page
+  migration table — the two real **escaped-echo form pages** of `puppy-fort-factory/`,
+  reproduced in Laravel/Blade idiom on the `php_laravel` emitter, in four pieces:
+  1. **A new real-page manifest**, `lab/manifests/phase3_laravel_real_pages_forms.yaml`,
+     with two cells: `LABGEN-PLRP-1005` (`contact.php`, POST `message`, `PFF-1005`) and
+     `LABGEN-PLRP-1006` (`newsletter.php`, POST `email`, `PFF-1006`). Both are
+     `(xss, html_body)` with a single `html_entity_escape` op, so the derived verdict is
+     SECURE — exactly the label `lab/ground-truth/labels.json` already carries for both
+     cases. Kept as its own manifest rather than appended to
+     `phase3_php_laravel_sample.yaml` for two reasons: that file is the *illustrative*
+     inventory (its own header says so, and its test asserts a closed 20-cell verdict map),
+     and five sibling sub-lanes were editing this area concurrently. The cell-ID prefix is
+     `LABGEN-PLRP-` ("php_laravel real pages"), numerically mirroring the `PFF-` case each
+     cell reproduces so the cutover's coverage gate has a legible mapping; it collides with
+     neither `php_current`'s `LABGEN-RP-` real pages nor the `PFF-` ground-truth namespace.
+  2. **No new modules, verified rather than assumed.** The plan predicted "no new modules"
+     for this group; re-reading L-P3.3b's live inventory confirmed it. The only thing the
+     real pages needed that the illustrative `html_body` page did not is the **taint
+     origin**: `contact.php`/`newsletter.php` reflect a POST body parameter, not a stored
+     field, so their page profiles use the existing `source_override: post_param`
+     mechanism (the shape's default source is `read_stored_field`, the stored-XSS origin).
+     No new sink family, op, safety-matrix row or template was added, and no other
+     emitter — `php_current` included — was touched.
+  3. **Migrated routes keep the real app's exact `.php` URL** (§4.3.6.6a, the single most
+     likely way to get this lane wrong). A page profile may now pin the URL its cells are
+     served at via a new `url_path` key, so `routes/web.php` emits
+     `Route::get('/contact.php', …)` instead of this stack's default cell-ID-derived
+     `/cell/<slug>`. Without the pin, every migrated `PFF-` case would *relocate* and
+     T-LAB0.9's additive-only gate (`fuzzlab/labgen/regression_gate.py`) would correctly
+     fail the cutover. Three details make the pin safe rather than a new footgun:
+     `_url_path_for()` gained an optional page argument (its previous single-argument
+     behavior is unchanged, so illustrative pages and their twins keep their own URLs);
+     `route_fragment_for()` refuses a *second* cell claiming an already-claimed pinned URL,
+     since a page that needs a vulnerable cell plus a secure twin cannot pin one path for
+     both; and the identifier-SQLi route-rewrite adapter
+     (`emitters/php_laravel/identifier_sqli.py`) now resolves the same pin, so an oracle
+     can never probe a URL the generated app does not serve. The pin is routing metadata
+     and is popped before the render context, like `source_override`.
+  4. **The conformance sweep is `supports()`-derived and spans every manifest**
+     (§4.3.6.6 point 1 — the `BUG-0022`/`PA-0024` pattern, with `PA-0027(b)`'s
+     derived-set rule): `tests/test_labgen_php_laravel_real_pages_forms.py` runs Tier-3
+     regenerate-and-diff, the one-unique-path-per-file check and Tier-0 `php -l` over every
+     cell of every committed manifest this emitter supports — computed from
+     `Emitter.supports()`, never a hand-kept list — plus a guard test asserting that derived
+     set really spans more than this group's own manifest (otherwise the sweeps could pass
+     vacuously). The per-page acceptance criteria of §4.3.6.6 point 2 are each asserted from
+     a source of truth: the expected verdict, URL, method and parameter location are read
+     out of `labels.json` (not restated), and the URL constraint is demonstrated against the
+     **real** regression gate — the pinned `.php` URLs pass `assert_no_regression`, the
+     idiomatic extension-less ones raise `RegressionGateError`.
+- Impact (other components / project): none outside LAB. No shared module was touched
+  (`fuzzlab/labgen/modules.py`, `minimal_pair.py`, `regression_gate.py`, `conformance/` and
+  every other emitter are unchanged); `puppy-fort-factory/` is read-only evidence here and
+  is not modified or deleted (that is L-P3.3c-CUT). `lab/ground-truth/` is unchanged — this
+  lane *reads* it as the oracle. The new manifest is picked up automatically by the existing
+  `lab/manifests/*.yaml` glob sweeps (`test_labgen_gates.py`,
+  `test_labgen_corpus_analysis.py`, `test_labgen_php_laravel_harder_shapes.py`'s PA-0024
+  test), all of which stay green.
+- Risk (level; mitigation or accepted-risk justification): **low–medium**. (a) *Pinned-URL
+  collision* — mitigated by the fail-loud claim check plus a test. (b) *Concurrent sibling
+  sub-lanes* editing `_PAGE_PROFILES` and this emitter's docstrings: mitigated by keeping
+  every change additive and localized (new profile keys/entries, one new optional
+  parameter), but textual merge conflicts in `_PAGE_PROFILES`, `docs/ARCHITECTURE.md`'s
+  php_laravel paragraph and `requirements.md` are expected and must be resolved by the
+  merging session, not force-resolved. (c) **Accepted, and flagged for L-P3.3c-CUT:**
+  `RouteAccumulator.fragment_for_cell` hardcodes `Route::get`, so these POST-only real pages
+  (and G3's `login.php`/`register.php`) register a GET route. Harmless today — nothing runs
+  the generated app — but a real cutover build must register the method
+  `cell.route.method`/`labels.json` names, or a POST to `/contact.php` would 405. Left
+  deliberately to one cross-group fix rather than six conflicting edits to a shared
+  accumulator. (d) The sink fragment wraps the value in a `div` where the real pages use
+  `blockquote`/`p`, and `newsletter.php`'s `FILTER_VALIDATE_EMAIL` check is not modelled —
+  both documented in the manifest/profiles as not verdict-relevant (the sink *context family*
+  is what the matrix is keyed on; the matrix has no op for the email check, the same
+  reasoning that exempts `track.php`'s int cast).
+- Deliverables:
+  - [x] `lab/manifests/phase3_laravel_real_pages_forms.yaml` (2 cells, `PFF-1005`/`PFF-1006`) — done
+  - [x] `url_path` route pin + fail-loud single-claim guard in `emitters/php_laravel/__init__.py` — done
+  - [x] `contact.php`/`newsletter.php` page profiles (with `post_param` source override) — done
+  - [x] identifier-SQLi adapter resolves the pin — done
+  - [x] `tests/test_labgen_php_laravel_real_pages_forms.py` (16 tests: label-derived verdicts,
+        route/method/param agreement with ground truth, the real regression gate both ways,
+        pin-collision guard, minimal pair, `supports()`-derived Tier-0/Tier-3 sweeps over every
+        manifest, `lab-generate --check`) — done
+  - [x] Bookkeeping: this entry, `FR-LAB-48`, `docs/ARCHITECTURE.md`, `CHANGELOG.md` — done
+  - [ ] Not this lane: the other page groups, DOM XSS (`PFF-0007`/`0008`), the cutover — pending
+- Effectiveness (assessed 2026-09-22): the two `PFF-` cases are reproduced and pass every
+  §4.3.6.6 point-2 criterion; full suite 1413 passed / 8 skipped with the 2 pre-existing
+  MUT failures in `tests/test_mutation_operators.py` unchanged and untouched by this lane.
+  The URL-pin decision is now enforced by a test against the real gate rather than by a
+  paragraph of plan prose, which is the part most likely to have been got wrong silently.
+
 ### CC-LAB-0045 — L-P1.3: the metadata leakage probe becomes a required `--check` gate, with per-class thresholds (2026-09-22)
 *(`CC-LAB-0045` was pre-assigned to this lane by the orchestrating session, with
 `CC-LAB-0044` reserved for the concurrent lane L-P3.3b — so, unlike CC-LAB-0040..0043,

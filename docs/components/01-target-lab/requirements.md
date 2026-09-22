@@ -1001,8 +1001,51 @@ lane) can submit a payload as
   6. **`context_depth` other than `direct` is refused, not flattened.** The depth-hop
      fragments are not ported to Laravel yet, so `render()` raises rather than emitting a
      `same_file_helper`/`cross_file` cell as `direct` and mislabelling the depth its corpus
-     record claims. Real `puppy-fort-factory/` page reproduction remains §4.3 step 6
-     (L-P3.3c). (`CC-LAB-0044`)
+     record claims. Real `puppy-fort-factory/` page reproduction is §4.3 step 6
+     (L-P3.3c), now under way per page group — see FR-LAB-48. (`CC-LAB-0044`)
+
+- **FR-LAB-48** *(L-P3.3c-G5, `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6 group G5; number
+  pre-assigned to this lane by the orchestrating session, concurrently with G1–G4/G6, so no
+  post-merge renumbering was needed.)* The two real **escaped-echo form pages** of
+  `puppy-fort-factory/` are reproduced as `php_laravel` cells — a first, partial delivery of
+  FR-LAB-8's migration, which lands per page group and completes at L-P3.3c-CUT:
+  1. **Two secure-only cells** in `lab/manifests/phase3_laravel_real_pages_forms.yaml`:
+     `LABGEN-PLRP-1005` (`contact.php`, POST `message`) and `LABGEN-PLRP-1006`
+     (`newsletter.php`, POST `email`), reproducing ground-truth cases `PFF-1005` and
+     `PFF-1006`. Both are `(xss, html_body)` cells whose single transform op is
+     `html_entity_escape`, so `verdict()` derives SECURE — the label `lab/ground-truth/
+     labels.json` already carries (`expected_vulnerable: false`, "reflected through
+     htmlspecialchars" / "escaped echo; no DB write"). No new module, sink family, safety-
+     matrix row or page-profile mechanism was needed beyond the URL pin below; the shape is
+     rendered by L-P3.3b's existing inventory.
+  2. **No vulnerable twin, by design.** §4.3.6.3's finding that secure-only cells are legal
+     (`fuzzlab.labgen.minimal_pair` is a standalone offline checker over two rendered
+     results, not a schema constraint): both real pages are labelled true negatives with
+     `vuln_class: none`, so a twin would invent a vulnerability neither the real app nor any
+     `PFF-` case has. The minimal-pair invariant is still *verified* for each cell against
+     the same cell with its pipeline emptied (the `_weakened_twin` convention
+     `fuzzlab.labgen.cli --check` uses), so §4.3.6.3a's inverted-default hazard is checked
+     rather than assumed.
+  3. **A migrated page's route keeps the real app's exact `.php`-suffixed URL**
+     (§4.3.6.6a). A page profile may now **pin** the URL its cells are served at
+     (`url_path`), so `routes/web.php` registers `Route::get('/contact.php', …)` rather than
+     this stack's default cell-ID-derived `/cell/<slug>` URL. This is a correctness
+     requirement, not a style choice: T-LAB0.9's additive-only gate
+     (`fuzzlab.labgen.regression_gate`) fails a build that *relocates* an existing
+     ground-truth case, and a test asserts exactly that against the real gate — the pinned
+     URLs pass it and the idiomatic extension-less ones raise `RegressionGateError`. A
+     pinned URL is owned by exactly one cell: a second cell claiming it raises, since a page
+     needing a vulnerable cell *and* a secure twin cannot pin (both would register one
+     path). Illustrative pages pin nothing and keep their previous behavior unchanged, and
+     the identifier-SQLi route-rewrite adapter (FR-LAB-42.5) resolves the same pin, so an
+     oracle always probes the URL the generated app really serves.
+  4. **The whole-manifest conformance sweep is computed from `Emitter.supports()`**
+     (§4.3.6.6 point 1, the BUG-0022/PA-0024 pattern, PA-0027(b)): Tier-3
+     regenerate-and-diff, the unique-path check and Tier-0 `php -l` all run over every cell
+     of every committed manifest this emitter supports — never a hand-maintained cell list —
+     so a later page group's change that breaks an earlier group's page fails loudly, and a
+     guard test asserts the derived set really spans more than this group's own manifest.
+     `fuzzlab lab-generate --check` passes end to end on the new manifest. (`CC-LAB-0050`)
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

@@ -14,6 +14,18 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB: reproduced the real `contact.php` and `newsletter.php` pages (`PFF-1005`/`PFF-1006`)
+  as `php_laravel` cells — the first page group of the `puppy-fort-factory/` migration
+  (lane L-P3.3c-G5, `CC-LAB-0050`, `FR-LAB-48`). Both are secure-only escaped-echo
+  (`xss`/`html_body` + `html_entity_escape`) cells in the new
+  `lab/manifests/phase3_laravel_real_pages_forms.yaml`, deriving the SECURE verdict
+  `lab/ground-truth/labels.json` already carries, and needing no new module. Their routes
+  **keep the real app's exact `.php`-suffixed URLs** via a new `url_path` page-profile pin,
+  because T-LAB0.9's additive-only gate would otherwise see every migrated case *relocate*
+  to Laravel's idiomatic extension-less path — now enforced by a test against the real
+  regression gate rather than by plan prose. Tier-0/Tier-3 conformance for this emitter is
+  swept over every committed manifest's cells, computed from `Emitter.supports()`
+  (PA-0024/PA-0027).
 - LAB: made the metadata leakage probe a required `fuzzlab lab-generate --check` gate
   and gave it the per-class thresholds `docs/LAB_IMPLEMENTATION_PLAN.md` §2.3 decided on
   (lane L-P1.3, `CC-LAB-0045`, `FR-LAB-43`) — `leakage_probe.run_leakage_gate` now wraps

@@ -285,8 +285,16 @@ tracked in the requirements files, not here.
   `lab/manifests/phase3_php_laravel_sample.yaml` (20 cells) passes
   `fuzzlab lab-generate --check` end to end through the CLI's
   `EMITTER_REGISTRY`, which `php_laravel` is now registered in. Not carried:
-  the `context_depth` axis (non-`direct` cells are refused, never flattened)
-  and the `puppy-fort-factory/` migration onto this emitter (lane L-P3.3c).
+  the `context_depth` axis (non-`direct` cells are refused, never flattened).
+  The `puppy-fort-factory/` migration onto this emitter (lane L-P3.3c) is
+  **under way, one page group at a time**: `contact.php` and `newsletter.php`
+  (`PFF-1005`/`PFF-1006`) are reproduced as secure-only escaped-echo cells in
+  `lab/manifests/phase3_laravel_real_pages_forms.yaml` (`CC-LAB-0050`,
+  FR-LAB-48), whose generated routes keep the real app's exact `.php`-suffixed
+  URLs so T-LAB0.9's additive-only regression gate does not see those cases
+  *relocate*. The remaining page groups, the DOM-XSS sink class
+  (`PFF-0007`/`PFF-0008` — no sink family exists yet) and the atomic cutover
+  that deletes the hand-built directory are still pending.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

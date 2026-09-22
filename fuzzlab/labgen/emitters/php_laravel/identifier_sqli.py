@@ -87,7 +87,8 @@ def probe_cell_for(cell: Cell) -> Cell:
             "is no generated Laravel route for that endpoint to probe"
         )
     return dataclasses.replace(
-        cell, route=dataclasses.replace(cell.route, path=_url_path_for(cell.cell_id))
+        cell,
+        route=dataclasses.replace(cell.route, path=_url_path_for(cell.cell_id, cell.route.path)),
     )
 
 
