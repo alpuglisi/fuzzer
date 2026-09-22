@@ -14,6 +14,16 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB (lane T2, `CC-LAB-0061`): wired `fuzzlab/labgen/conformance/tier2.py`
+  (previously design-only) against a real, synthetic, in-sandbox
+  `php_laravel` live-boot app, following the same precedent `CC-LAB-0054`
+  established for Tier 1 — new `LiveBootTier2Oracle`, a real `Tier2Oracle`
+  that adds a control/baseline differential on top of Tier 1's bare
+  evidence-marker check, fails closed (inconclusive) when the control itself
+  can't distinguish vulnerable from not. Never touches the real,
+  loopback-only lab target and needs no `--authorized` (D11). 9 real tests
+  in `tests/test_labgen_conformance_tier2.py`, including 2 genuine live-boot
+  confirmations against `product.php`'s real numeric-SQLi twin — all pass.
 - Planning: added `docs/PARALLEL_LANE_BUILD_PLAN.md`, organizing the
   remaining safe-to-build-now backlog (lab-track page migration + conformance
   wiring, UI/diagnostics tabs, M8/M10 mutation-oracle wiring) into pre-numbered,

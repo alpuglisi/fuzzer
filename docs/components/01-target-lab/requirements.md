@@ -1495,9 +1495,43 @@ lane) can submit a payload as
     silently patch around it.
   - Still, as `FR-LAB-52`/`FR-LAB-54` already state, **not** a Tier-2,
     oracle-grade, container-based, dialect-correct oracle confirmation of a
-    label (`tier2.py`'s own claim is unchanged) — this requirement proves
-    boot + real, observable behavior against the real engine and real
-    schema, which is a stronger, but still narrower, claim than that.
+    label (see `FR-LAB-56` for `tier2.py`'s own, now real but still
+    synthetic-in-sandbox, claim) — this requirement proves boot + real,
+    observable behavior against the real engine and real schema, which is a
+    stronger, but still narrower, claim than a full Tier-2 confirmation.
+
+- **FR-LAB-56** *(wires `fuzzlab.labgen.conformance.tier2` — previously
+  `"[design -- not exercised]"`, no working confirmation logic — against a
+  real, synthetic, in-sandbox app, mirroring `FR-LAB-52`'s Tier-1 precedent;
+  `CC-LAB-0061`.)* `tier2.py` gains a real `Tier2Oracle` implementation,
+  `LiveBootTier2Oracle`, built on the existing, unmodified
+  `fuzzlab.labgen.conformance.live_boot.LiveBootHarness` (never the real,
+  loopback-only lab target; no `--authorized` needed, D11). It adds a real
+  control/baseline differential on top of what a bare Tier-1 evidence-marker
+  check can show: it sends the case's real payload request and a second
+  real request for a caller-supplied inert control value at the same
+  param/location, and reports `confirmed_vulnerable` only when the evidence
+  marker is present in the payload response and genuinely absent from the
+  control response — never guessing a verdict when the control itself
+  cannot distinguish vulnerable from not (a real `inconclusive` detail is
+  reported instead, fail-closed per `PA-0025`, matching
+  `fuzzlab.labgen.identifier_sqli_assertion.IdentifierSqliTier2Oracle`'s own
+  convention — a second, pre-existing, real `Tier2Oracle` this requirement
+  does not change). New `Tier2Client` protocol names the minimal
+  `.get()`/`.post()` shape it needs, satisfied structurally by
+  `LiveBootHarness` without a new import dependency between the two
+  conformance modules. Proven for real (not just offline) against
+  `phase3_php_laravel_real_pages_numeric.yaml`'s `product.php` vulnerable
+  (`LABGEN-RPL-PRODUCT`) / secure (`LABGEN-RPL-PRODUCT-BOUND`) twins — a
+  real positive and a real negative confirmation for the same `1 OR 1=1`
+  boolean-injection payload.
+  - Still **not** the production-grade, dialect-sensitive, container-based,
+    real-target oracle T-LAB0.7 describes as Tier 2's own bar — that remains
+    `IdentifierSqliTier2Oracle`'s/a future real-target oracle's job, exactly
+    as `FR-LAB-52`/`FR-LAB-54`/`FR-LAB-55` already state for the equivalent
+    Tier-1 live-boot claim. `LiveBootTier2Oracle` narrows that gap (a real,
+    in-sandbox confirmation mechanism now exists where none did before) but
+    does not close it.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
