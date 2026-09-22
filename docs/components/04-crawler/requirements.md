@@ -1,6 +1,6 @@
 # Crawler / Spider — Requirement Specification
 
-Component code: **CRAWL** · Status: `[built; to harden]` · Last updated: 2026-09-21
+Component code: **CRAWL** · Status: `[built; to harden]` · Last updated: 2026-09-22 · see CC-CRAWL-0007
 
 Related: `ARCHITECTURE.md` #4; `DECISIONS_AND_ROADMAP.md` (D5, D6, Phase 2);
 `./change-control.md`.
@@ -17,11 +17,21 @@ fuzzer.
 
 ## 3. Functional requirements
 - **FR-CRAWL-1** Hybrid fetch: cheap HTTP first, escalate to a headless browser
-  only when a page is client-rendered.
+  only when a page is client-rendered. *(Realized: `fuzzlab crawl --engine
+  hybrid` fetches statically and escalates a page to a lazily-started
+  Playwright browser only when `core.hybrid.needs_browser()` says the static
+  HTML looks client-rendered; the existing `auto`/`playwright`/`requests`
+  engines are unchanged. CC-CRAWL-0007.)*
 - **FR-CRAWL-2** Capture fetch/XHR endpoints and JS-extracted endpoints, not just
   static anchors.
 - **FR-CRAWL-3** Deduplicate by DOM-skeleton template cluster (MinHash), recording
-  a `template_cluster_id`, and normalize URLs.
+  a `template_cluster_id`, and normalize URLs. *(Realized: every crawled page is
+  assigned a `template_cluster_id` (via `core.dedup.TemplateClusterer`, one
+  clusterer per crawl) and persisted in `discovered_pages.template_cluster_id`
+  — added via the existing ALTER-TABLE upgrade path, so older result
+  databases pick it up. A future auditor pass can use it to audit one
+  representative per cluster; the crawler itself still records every page.
+  CC-CRAWL-0007.)*
 - **FR-CRAWL-4** Crawl as a state machine (state = DOM-skeleton hash + identity),
   reaching pages behind multi-step flows.
 - **FR-CRAWL-5** Crawl per identity, using the session manager; detect logout and

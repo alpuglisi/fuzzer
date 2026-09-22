@@ -3,6 +3,51 @@
 Component code: **CRAWL**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CRAWL-0007 — Wire template dedup + hybrid engine into the fetch loop (2026-09-22)
+- Change: `fuzzlab/tools/spider.py` now wires the two Phase 2 algorithms from
+  CC-CRAWL-0005 into the live crawl loop, completing that entry's deferred
+  "wire into spider.py fetch loop" deliverable (T2.8). Every fetcher
+  (`_fetch_static`, `_goto_and_parse`, `_fetch_rendered`) now returns a 7th
+  tuple element, `raw_html` (the unparsed HTML, `None` for non-HTML
+  responses); `crawl()` feeds it through a per-crawl `TemplateClusterer`
+  (`self._clusterer`) and persists the resulting `template_cluster_id` via a
+  new `discovered_pages` column (added by `StorageManager._init_db()`'s
+  existing ALTER-TABLE upgrade path, so older result databases pick it up
+  automatically). Added a new opt-in `--engine hybrid`: fetches static first,
+  and only escalates a specific page to a lazily-started Playwright browser
+  when `core.hybrid.needs_browser()` says the static HTML looks
+  client-rendered; the existing `auto`/`playwright`/`requests` engines are
+  behavior-unchanged (same fetch path, same `rendered` flag semantics). The
+  `finally` block's browser-teardown condition changed from `engine ==
+  "playwright"` to `self._pw is not None` so a hybrid crawl that never
+  escalated closes cleanly, and one that did still tears its browser down.
+- Impact (other components / project): crawls now cluster near-duplicate
+  pages (a future auditor pass can read `template_cluster_id` to audit one
+  representative per cluster instead of every page) and `--engine hybrid`
+  gives a cheaper default than always launching a browser, without touching
+  callers of the existing engines or `store_adapter.import_spider` (which
+  only reads `url`/`status_code`/`source`, unaffected by the new column).
+- Risk (level; mitigation): low — purely additive (new column, new opt-in
+  engine value); the three existing engines take the same code paths as
+  before, just returning one more tuple element they already had access to
+  internally. Mitigated by `tests/test_spider.py` (new; no prior coverage of
+  this file): `StorageManager` persists/upgrades `template_cluster_id`
+  (including an old-schema DB missing the column); `_fetch_static` captures
+  raw HTML; same-skeleton pages cluster together across a crawl while a
+  structurally different page does not; the hybrid engine escalates only the
+  page that needs it, never starts a browser when nothing needs one, and
+  never escalates when Playwright isn't installed; `requests`/`playwright`
+  regression checks confirm the `rendered` flag is unchanged.
+- Deliverables:
+  - [x] `template_cluster_id` column + `StorageManager` read/write — done.
+  - [x] `raw_html` threaded through all three fetchers — done.
+  - [x] `--engine hybrid` (static-first, lazy browser escalation) — done.
+  - [x] `tests/test_spider.py` (10 tests) — done.
+- Effectiveness (assessed 2026-09-22): effective in unit tests — clustering
+  and hybrid escalation behave as designed against synthetic HTML; live
+  request-reduction measurement against the lab is still open (needs a
+  browser + lab, consistent with CC-CRAWL-0005's own note).
+
 ### CC-CRAWL-0006 — Expose `build_parser()` for the command-spec registry (2026-09-21)
 - Change: `fuzzlab/tools/spider.py` now factors its argparse setup into `build_parser()`
   (returns the `ArgumentParser`); `parse_args()` delegates to it. Added `prog="fuzzlab

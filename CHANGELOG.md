@@ -14,6 +14,12 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- CRAWL: `fuzzlab crawl` now computes and persists a `template_cluster_id`
+  per page (DOM-skeleton MinHash) for every engine, and adds a new opt-in
+  `--engine hybrid` that fetches static-first and escalates a page to
+  Playwright only when it looks client-rendered — wires the CC-CRAWL-0005
+  algorithms into the live fetch loop; existing engines unchanged
+  (`CC-CRAWL-0007`, realizes `FR-CRAWL-1`/`FR-CRAWL-3`).
 - MUT: `fuzzlab mutate-run --confirm-oracle` optionally re-checks each recorded
   WAF-bypass variant with the oracle's own confirmation strategies and writes a
   `finding` only when it independently confirms — opt-in, the oracle stays the

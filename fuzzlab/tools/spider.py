@@ -7,6 +7,8 @@ import requests
 from bs4 import BeautifulSoup
 
 from fuzzlab.core import get_logger
+from fuzzlab.core.dedup import TemplateClusterer
+from fuzzlab.core.hybrid import needs_browser
 
 # Configure logging for production-ready output
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -45,7 +47,8 @@ class StorageManager:
         ''')
         # Add columns that older result databases won't have.
         for col, decl in (("title", "TEXT"), ("content", "TEXT"),
-                          ("rendered", "INTEGER DEFAULT 0"), ("source", "TEXT DEFAULT 'link'")):
+                          ("rendered", "INTEGER DEFAULT 0"), ("source", "TEXT DEFAULT 'link'"),
+                          ("template_cluster_id", "TEXT")):
             try:
                 self.cursor.execute(f"ALTER TABLE discovered_pages ADD COLUMN {col} {decl}")
             except sqlite3.OperationalError:
@@ -62,13 +65,15 @@ class StorageManager:
         return self.cursor.fetchone()[0]
 
     def mark_visited(self, url, status_code, depth, title=None, content=None,
-                     rendered=0, source='link'):
+                     rendered=0, source='link', template_cluster_id=None):
         """Records a URL (and any parsed content). Returns False if already present."""
         try:
             self.cursor.execute('''
-                INSERT INTO discovered_pages (url, status_code, depth, title, content, rendered, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (url, status_code, depth, title, content, int(rendered), source))
+                INSERT INTO discovered_pages
+                    (url, status_code, depth, title, content, rendered, source, template_cluster_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (url, status_code, depth, title, content, int(rendered), source,
+                  template_cluster_id))
             self.conn.commit()
             return True
         except sqlite3.IntegrityError:
@@ -124,15 +129,26 @@ class LocalSpider:
                 "pip install playwright && playwright install chromium"
             )
             engine = "requests"
+        if engine == "hybrid" and not _PLAYWRIGHT_AVAILABLE:
+            logging.warning(
+                "Playwright is not installed; the 'hybrid' engine will behave like "
+                "'requests' (no page will ever escalate to a browser). Install it with: "
+                "pip install playwright && playwright install chromium"
+            )
         self.engine = engine
         logging.info(f"Crawler engine: {self.engine}")
 
-        # Playwright handles (created lazily in crawl()).
+        # Playwright handles (created lazily — in crawl() for the 'playwright' engine;
+        # on first escalation for 'hybrid', since most hybrid pages never need one).
         self._pw = None
         self._browser = None
         self._page = None
         # URLs requested by JavaScript (fetch/XHR) during the current navigation.
         self._xhr_urls = []
+        # T2.6: DOM-skeleton clustering so near-duplicate pages (same structure,
+        # different data) share a `template_cluster_id` — one clusterer per crawl so
+        # ids stay consistent across every page it sees.
+        self._clusterer = TemplateClusterer()
 
     # ----- browser lifecycle (Playwright engine only) -----
     def _start_browser(self):
@@ -187,18 +203,23 @@ class LocalSpider:
         return urlparse(url).hostname in ['localhost', '127.0.0.1']
 
     # ----- fetchers -----
+    # Every fetcher returns (status, content_type, title, text, links, xhr_links,
+    # raw_html) — `raw_html` is the unparsed HTML (None for a non-HTML response),
+    # used for template clustering (T2.6) and the hybrid engine's needs_browser()
+    # escalation check (T2.7).
     def _fetch_static(self, url):
         """No JavaScript. Parses the raw HTML with BeautifulSoup."""
         resp = self.session.get(url, timeout=self.timeout_ms / 1000)
         ct = resp.headers.get('Content-Type', '')
-        title, text, links = None, None, []
+        title, text, links, raw_html = None, None, [], None
         if 'text/html' in ct:
-            soup = BeautifulSoup(resp.text, 'html.parser')
+            raw_html = resp.text
+            soup = BeautifulSoup(raw_html, 'html.parser')
             if soup.title and soup.title.string:
                 title = soup.title.string.strip()
             text = soup.get_text(" ", strip=True)
             links = [a['href'] for a in soup.find_all('a', href=True)]
-        return resp.status_code, ct, title, text, links, []
+        return resp.status_code, ct, title, text, links, [], raw_html
 
     def _fetch_rendered(self, url):
         """Renders with headless Chromium, then reads links and text from the live DOM.
@@ -220,7 +241,7 @@ class LocalSpider:
         status = response.status if response else 0
         ct = (response.headers or {}).get('content-type', '') if response else ''
 
-        title, text, links = None, None, []
+        title, text, links, raw_html = None, None, [], None
         if 'text/html' in ct or ct == '':
             # Let JavaScript-driven fetch()/render settle (best effort).
             try:
@@ -235,7 +256,11 @@ class LocalSpider:
                 text = self._page.inner_text('body')
             except Exception:
                 text = None
-        return status, ct, title, text, links, list(dict.fromkeys(self._xhr_urls))
+            try:
+                raw_html = self._page.content()
+            except Exception:
+                raw_html = None
+        return status, ct, title, text, links, list(dict.fromkeys(self._xhr_urls)), raw_html
 
     def crawl(self):
         queue = [(self.start_url, 0, 'link')]
@@ -253,16 +278,31 @@ class LocalSpider:
                     continue
 
                 try:
+                    used_playwright = False
                     if self.engine == "playwright":
-                        status, ct, title, text, raw_links, xhr_links = self._fetch_rendered(current_url)
+                        status, ct, title, text, raw_links, xhr_links, raw_html = \
+                            self._fetch_rendered(current_url)
+                        used_playwright = True
+                    elif self.engine == "hybrid":
+                        status, ct, title, text, raw_links, xhr_links, raw_html = \
+                            self._fetch_static(current_url)
+                        if _PLAYWRIGHT_AVAILABLE and needs_browser(raw_html):
+                            if self._pw is None:
+                                self._start_browser()
+                            status, ct, title, text, raw_links, xhr_links, raw_html = \
+                                self._fetch_rendered(current_url)
+                            used_playwright = True
                     else:
-                        status, ct, title, text, raw_links, xhr_links = self._fetch_static(current_url)
+                        status, ct, title, text, raw_links, xhr_links, raw_html = \
+                            self._fetch_static(current_url)
 
                     content = (text or "")[:8000]
+                    cluster_id = self._clusterer.cluster_id(raw_html) if raw_html else None
                     self.storage.mark_visited(
                         current_url, status, depth, title, content,
-                        rendered=1 if self.engine == "playwright" else 0,
+                        rendered=1 if used_playwright else 0,
                         source=source,
+                        template_cluster_id=cluster_id,
                     )
                     crawled += 1
                     logging.info(
@@ -292,7 +332,7 @@ class LocalSpider:
         except KeyboardInterrupt:
             logging.info("Crawl interrupted by user.")
         finally:
-            if self.engine == "playwright":
+            if self._pw is not None:
                 self._stop_browser()
             if crawled == 0:
                 logging.warning(
@@ -317,9 +357,11 @@ def build_parser():
     p.add_argument("--max-depth", type=int, default=4, help="Maximum crawl depth (default: 4)")
     p.add_argument("--db", default="spider_results.db", help="SQLite output database")
     p.add_argument(
-        "--engine", choices=["auto", "playwright", "requests"], default="auto",
+        "--engine", choices=["auto", "playwright", "requests", "hybrid"], default="auto",
         help="auto (default): use Playwright if installed, else static requests. "
-             "playwright: render JavaScript. requests: static HTML only.",
+             "playwright: render JavaScript for every page. requests: static HTML only. "
+             "hybrid: fetch static first, escalate a page to Playwright only when it "
+             "looks client-rendered.",
     )
     p.add_argument("--timeout", type=int, default=10000, help="Per-page timeout in ms (default: 10000)")
     p.add_argument(
