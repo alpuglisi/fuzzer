@@ -14,6 +14,18 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- FUZZ (`CC-FUZZ-0022`, `NFR-FUZZ-dry-run`, build lane D0b): added `--dry-run` to
+  `fuzzlab greybox-run`'s CLI (`fuzzlab/greybox/greybox_cli.py`), reusing the
+  shared `fuzzlab/cli_dryrun.py` plan/report helper the same way lane D0a's
+  `CC-FUZZ-0020` did for `fuzz`/`auto` — plans and prints the exact argv/command,
+  sends nothing, short-circuits before `--authorized`/`Store`/sender/coverage-
+  source construction. Completes lane group B's D0 (`--dry-run` on every CLI
+  entry point); sequenced after Wave C1's `CC-FUZZ-0019` M8-wiring for the
+  genuine file overlap on `greybox_cli.py`. The preview automatically reflects
+  C1's `--mutation-variants`/`--max-mutation-variants`/`--allow-destructive`
+  flags too, via the existing generic `argparse` introspection in
+  `fuzzlab/web/commandspec.py` — no extra wiring needed. Tests added to
+  `tests/test_cli_dry_run.py`; full suite green (see test run for counts).
 - SCHED (`CC-SCHED-0005`, `FR-SCHED-9`, build lane B0-bandit-emitter): wired the
   bandit loop into B0's `metric_series` sink (`CC-CORE-0018`) — `ThompsonBandit.
   attach_metrics`/`flush_metrics` (`fuzzlab/scheduler/bandit.py`) emit

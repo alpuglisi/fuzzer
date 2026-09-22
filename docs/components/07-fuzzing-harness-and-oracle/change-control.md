@@ -3,6 +3,57 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0022 — `--dry-run` CLI flag on `greybox-run` (lane D0b) (2026-09-22)
+- Change: `fuzzlab/greybox/greybox_cli.py::build_parser()` gained `--dry-run` (via
+  the shared `fuzzlab/cli_dryrun.add_dry_run_flag()`), and `main()` checks
+  `args.dry_run` first — before the `--authorized` gate and before any
+  `contract.load()`/points-sourcing/`Store()`/sender/coverage-source/dbfault-source/
+  lab-control construction — and calls `fuzzlab/cli_dryrun.report("greybox-run",
+  args)`, reusing the web launcher's existing dry-run plan/report logic
+  (`fuzzlab/web/commandspec.spec()` + `fuzzlab/web/runner.build_argv()`/
+  `display_command()`, CC-UI-0013/0015), then returns 0 before any probe/side-
+  channel read happens. No traffic is sent. `greybox-run` was already registered
+  in `fuzzlab/web/commandspec.py`'s `_REGISTRY` (introspecting
+  `greybox_cli.build_parser()` directly), so the planned argv/display
+  automatically reflects every flag on the parser — including the
+  `--mutation-variants`/`--max-mutation-variants`/`--allow-destructive` flags Lane
+  C1/M8-wiring (`CC-FUZZ-0019`) added to this same parser — with no separate
+  wiring needed for those three flags specifically. Sequenced after Wave C1
+  (genuine file overlap on `fuzzlab/greybox/greybox_cli.py`, per the build plan's
+  D0b entry), on top of `CC-FUZZ-0019`. Deliberately bypasses the `--authorized`
+  requirement for the dry-run preview itself (nothing is sent either way,
+  mirroring D0a's `CC-FUZZ-0020` and the web launcher's own dry-run route).
+  Unchanged when `--dry-run` is absent. Completes lane group B's D0
+  (`--dry-run` on every CLI entry point); D0a (`CC-FUZZ-0020`, plus CC-CRAWL-0007/
+  CC-AUD-0015/CC-MUT-0010/CC-PROXY-0017/conditional CC-UI-0027) covered the other
+  six commands.
+- Impact (other components / project): FUZZ only, plus an incidental UI effect —
+  `greybox-run`'s introspected `build_parser()` now surfaces a `--dry-run` checkbox
+  in the web launcher automatically alongside the pre-existing mutation-variant
+  flags (no `fuzzlab/web/app.py` change; the web launcher already has its own
+  dry-run route, unaffected by this CLI-level flag). No schema/store change.
+- Risk (level; mitigation): low — additive flag, short-circuits before any side
+  effect, placed ahead of the `--authorized` check by design (documented above so
+  it isn't mistaken for a gate bypass on real execution). Mitigated by
+  `tests/test_cli_dry_run.py` (new greybox-run cases: flag present; the plan
+  reflects `--mutation-variants`/`--max-mutation-variants`/`--allow-destructive`
+  when passed; `run_greybox`/`points_from_store`/`RequestsCorrelatingSender`/
+  `Store.__init__`/`import_spider` patched to raise if called; a case also asserts
+  `would_execute: False` is reported when `--authorized` is absent) and the
+  unchanged full suite otherwise.
+- Deliverables:
+  - [x] `--dry-run` on `greybox-run`'s parser — done.
+  - [x] Short-circuit ahead of the `--authorized` gate in `main()`, calling the
+    shared `cli_dryrun.report()` — done.
+  - [x] Dry-run preview correctly reflects the C1-added mutation-variant flags —
+    done (verified via `introspect()`'s generic parser walk, no special-casing
+    needed; covered by a dedicated test).
+  - [x] Tests confirming the plan is reported and nothing runs — done.
+- Effectiveness (assessed 2026-09-22): effective — `fuzzlab greybox-run --dry-run`
+  prints the planned argv/command (including any mutation-variant flags passed)
+  and returns 0 without constructing a `Store`, sender, coverage/dbfault source, or
+  lab control, and without reading `--ground-truth`/`--spider-db`; verified
+  directly and via the new tests.
 ### CC-FUZZ-0021 — coverage-frontier `metric_series` emitter (lane B0, Wave 1b) (2026-09-22)
 - Change: `fuzzlab/greybox/run.py::run_greybox()` now emits a per-attempt
   `metric_series` row tracking the run-wide `CoverageFrontier`'s growth,

@@ -74,12 +74,19 @@ def build_parser() -> argparse.ArgumentParser:
                         "(default: refused, matches `mutate-run`)")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
+    from fuzzlab.cli_dryrun import add_dry_run_flag
+    add_dry_run_flag(p)
     return p
 
 
 def main(argv: list[str]) -> int:
     p = build_parser()
     args = p.parse_args(argv)
+
+    if args.dry_run:
+        from fuzzlab.cli_dryrun import report
+        report("greybox-run", args)
+        return 0
 
     if not args.authorized:
         p.error("refusing to send probes without --authorized (lab-only)")
