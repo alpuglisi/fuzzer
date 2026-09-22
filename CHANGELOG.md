@@ -14,6 +14,19 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Research: Phase 3 CWE mapping for the "auth-session" corpus cell
+  (`docs/research/corpus-examples/auth-session/{php,node,python}/manifest.yaml`,
+  12 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each
+  entry per `docs/VULN_CORPUS_EXPANSION_PLAN.md` Phase 3's handoff spec
+  (CWE-347 for the JWT algorithm/key-confusion pairs, CWE-330/CWE-338 for the
+  weak/predictable token-generation pairs; new proposed vocabulary — e.g.
+  `jwt_alg_unchecked`/`jwt_alg_allowlist`/`jwt_alg_none_default`/
+  `jwt_none_alg_opt_in`/`predictable_token_source`/`weak_prng_token`/
+  `csprng_token` against `jwt_signature_verification`/`session_token_generation`
+  — since none of `lab/safety_matrix.yaml`'s current SQLi/XSS ops or sink
+  families fit an auth/session shape). Documentation/metadata-only: no source
+  files altered, no pairs built, no validation attempted; `validated: false`/
+  `validated_by: []` left unchanged on all 12 entries.
 - Research: Phase 3 CWE mapping for the "access control" corpus cell
   (`docs/research/corpus-examples/access-control/{php,node,python}/manifest.yaml`,
   10 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each

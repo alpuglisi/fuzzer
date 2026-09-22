@@ -23,6 +23,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-347]
+  suggested_op: jwt_alg_unchecked
+  suggested_sink_family: jwt_signature_verification
 
 - file: idiomatic-1.php
   role: idiomatic
@@ -37,6 +40,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-347]
+  suggested_op: jwt_alg_allowlist
+  suggested_sink_family: jwt_signature_verification
 
 - file: vulnerable-2.php
   role: vulnerable
@@ -51,6 +57,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-330]
+  suggested_op: predictable_token_source
+  suggested_sink_family: session_token_generation
 
 - file: idiomatic-2.php
   role: idiomatic
@@ -65,3 +74,6 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-330]
+  suggested_op: csprng_token
+  suggested_sink_family: session_token_generation
