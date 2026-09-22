@@ -14,6 +14,19 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB (planning): decided the two open questions in
+  `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.7 blocking `L-P3.3c`'s remaining
+  scope. D-open-1: retiring `puppy-fort-factory/` does **not** require
+  reproducing Layer B (the JS-rendered pages) — every automated consumer
+  already reads ground-truth JSON, not the PHP files, so only the manual
+  live-crawler runbook exercise is affected; that gap must be documented in
+  `docs/ON_HOST_RUNBOOK.md` rather than built around. D-open-2: DOM XSS
+  (`L-P3.3c-DOM`, `PFF-0007`/`PFF-0008`) is **out** of the cutover's "full
+  coverage" bar — it is new sink-class capability, not a migration, and
+  blocking the whole cutover on it would hold back everything already built;
+  `L-P3.3c-DOM` becomes ordinary deferred backlog instead. Both cases are to
+  be listed in `lab/ground-truth/migration-exemptions.yaml` citing these
+  decisions. This unblocks `L-P3.3c-CUT` from waiting on either.
 - LAB: consolidated lane L-P3.3c's six concurrent sub-lanes (G1–G6, migrating real
   `puppy-fort-factory/` pages onto the `php_laravel` emitter) onto one unified
   URL-pinning mechanism (`_REAL_PAGE_KEY`/`_CANONICAL_CELL_KEY`, generalizing G3's

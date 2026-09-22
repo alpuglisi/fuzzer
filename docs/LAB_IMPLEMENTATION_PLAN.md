@@ -980,8 +980,8 @@ invariant.
 | `L-P3.3c-G4` | stored second-order pair (`edit_profile` → `profile`) | L-P3.3b, L-P2.1, L-P2.3 | G1–G3, G5, G6 |
 | `L-P3.3c-G5` | escaped-echo forms (`contact`, `newsletter`) | L-P3.3b | G1–G4, G6 |
 | `L-P3.3c-G6` | `search.php` + the `raw_concat × html_attribute_quoted` matrix row | L-P3.3b, L-P1.2b | G1–G5 |
-| `L-P3.3c-DOM` | DOM-XSS sink class (`reviews`, `feedback`) | **new family work — not L-P3.3b** | — (see 4.3.6.7) |
-| `L-P3.3c-CUT` | the atomic cutover | **all** of the above | — (strictly last) |
+| `L-P3.3c-DOM` | DOM-XSS sink class (`reviews`, `feedback`) | **new family work — not L-P3.3b** | deferred backlog, not scheduled with L-P3.3c (D-open-2, decided 2026-09-22: out of cutover scope) |
+| `L-P3.3c-CUT` | the atomic cutover | G1–G6 (done) + the parity gate | — (strictly last; does not wait on DOM or Layer B, per D-open-1/D-open-2) |
 
 G3 and G4 name L-P2.2 (`identity_session.py`) and L-P2.1
 (`identity.py`/`lab/identities/identities.yaml`) as real dependencies,
@@ -1136,35 +1136,43 @@ of component 01-target-lab:
 
 #### 4.3.6.7 Open decisions for the user
 
-Two questions here are scope decisions, not evidence questions, and are
-left open deliberately:
+Two questions here were scope decisions, not evidence questions, and were
+left open deliberately until the project owner decided them.
 
-- **D-open-1: does retiring the fixture require reproducing Layer B?**
-  The 10 JS-rendered pages and the injected "Discover" nav exist to give
-  the CRAWL component something a static spider provably cannot see, and
-  no emitter models client-rendered pages. **Evidence narrowing the
-  question:** a sweep of the test suite found that every automated
-  consumer of the JS pages reads *ground-truth JSON*, not the PHP files —
-  `tests/test_labels_contract.py` asserts the client-only set from
-  `injection-points.json`, `tests/test_auto.py` asserts those points are
-  skipped by the non-browser path, and `tests/test_oracle_browser.py`
-  uses `/feedback.php` only as a synthetic URL string. All of these keep
-  passing after the directory is deleted, because `labels.json` and
-  `injection-points.json` survive it. What is genuinely lost is the
-  **live, on-host crawler exercise** — running the JS-executing spider
-  against a real app whose nav is JS-injected — which is manual/runbook
-  work, not pytest. So the decision is narrower than it first appears:
-  accept losing the live crawler-discoverability target, or keep a
-  minimal JS-rendered surface in the generator for it. Not a blocker for
-  Layer A either way.
-- **D-open-2: is DOM XSS (`L-P3.3c-DOM`) in or out of the cutover's
-  definition of "full coverage"?** `PFF-0007`/`PFF-0008` are labeled
-  vulnerable cases, so a literal reading of D20 §7.2 says the fixture
-  cannot retire without them — but building a client-side sink class is a
-  new capability, not a migration, and plausibly belongs in its own lane.
-  If it stays in, L-P3.3c is blocked on it; if it comes out, it goes in
-  the exemption register and D20 §7.2's "every real page" is formally
-  narrowed to server-side cells.
+- **D-open-1 [DECIDED, 2026-09-22]: does retiring the fixture require
+  reproducing Layer B? No.** The 10 JS-rendered pages and the injected
+  "Discover" nav exist to give the CRAWL component something a static
+  spider provably cannot see, and no emitter models client-rendered
+  pages. **Evidence narrowing the question:** a sweep of the test suite
+  found that every automated consumer of the JS pages reads *ground-truth
+  JSON*, not the PHP files — `tests/test_labels_contract.py` asserts the
+  client-only set from `injection-points.json`, `tests/test_auto.py`
+  asserts those points are skipped by the non-browser path, and
+  `tests/test_oracle_browser.py` uses `/feedback.php` only as a synthetic
+  URL string. All of these keep passing after the directory is deleted,
+  because `labels.json` and `injection-points.json` survive it. What is
+  genuinely lost is the **live, on-host crawler exercise** — running the
+  JS-executing spider against a real app whose nav is JS-injected — which
+  is manual/runbook work, not pytest, and not a blocker for Layer A.
+  **Decision:** accept losing the live crawler-discoverability target
+  rather than build JS-rendering into the generator (that would be new
+  emitter capability, not a migration, and would block the cutover on
+  work orthogonal to it). `docs/ON_HOST_RUNBOOK.md` must document this as
+  a known, deliberate gap for anyone running that exercise after the
+  cutover. The Layer-B `PFF-` cases are exempted in
+  `lab/ground-truth/migration-exemptions.yaml` citing this decision.
+- **D-open-2 [DECIDED, 2026-09-22]: is DOM XSS (`L-P3.3c-DOM`) in or out
+  of the cutover's definition of "full coverage"? Out.**
+  `PFF-0007`/`PFF-0008` are labeled vulnerable cases, so a literal
+  reading of D20 §7.2 says the fixture cannot retire without them — but
+  building a client-side sink class is a new capability, not a migration,
+  and belongs in its own lane rather than gating everything already
+  built. **Decision:** D20 §7.2's "every real page" is formally narrowed
+  to server-side cells for this migration. `L-P3.3c-DOM` is not
+  scheduled as part of `L-P3.3c` or its cutover — it remains real
+  backlog, to be picked up as its own lane whenever prioritized, not
+  something `L-P3.3c-CUT` waits on. `PFF-0007`/`PFF-0008` are exempted
+  in `lab/ground-truth/migration-exemptions.yaml` citing this decision.
 
 ### 4.4 Cross-cutting: `stack` field + fingerprint-independence gate
 
@@ -1398,8 +1406,8 @@ either condition changes.
 | L-P3.3c-G4 | stored second-order pair: `edit_profile` → `profile` | L-P3.3b, L-P2.1, L-P2.3 | 3 | M — one `stored_second_order` cell, not two pages |
 | L-P3.3c-G5 | escaped-echo forms: `contact`, `newsletter` | L-P3.3b | 3 | S |
 | L-P3.3c-G6 | `search.php` (3 sinks) + the missing `raw_concat × html_attribute_quoted` matrix row | L-P3.3b, L-P1.2b | 3 | L — the only sub-lane that edits `lab/safety_matrix.yaml`; serialize it against any other matrix-touching lane |
-| L-P3.3c-DOM | DOM-XSS sink class: `reviews`, `feedback` | **new capability, not L-P3.3b** | — | L — blocked on a decision, not on a lane; see §4.3.6.7 D-open-2 |
-| L-P3.3c-CUT | atomic cutover: re-home Layer-C assets, re-point consumers, delete the fixture | **all** G-sub-lanes + the parity gate green | 4 | Strictly last; separate revertable commit (§4.3.6.5/4.3.6.6) |
+| L-P3.3c-DOM | DOM-XSS sink class: `reviews`, `feedback` | **new capability, not L-P3.3b** | — | L — D-open-2 decided 2026-09-22 (out of cutover scope); deferred backlog, dispatch only if separately prioritized, not part of L-P3.3c's wave |
+| L-P3.3c-CUT | atomic cutover: re-home Layer-C assets, re-point consumers, delete the fixture | G1–G6 (done) + the parity gate green | 4 | Strictly last; separate revertable commit (§4.3.6.5/4.3.6.6); does not wait on L-P3.3c-DOM or Layer B reproduction (D-open-1/D-open-2 decided 2026-09-22) |
 | L-P3.4 | `stack` field + fingerprint-gate wiring (§4.4) | any 2 of {L-P3.1, L-P3.2, L-P3.3a} | 2 | Needs a second stack name to exist; the gate half needs exactly two stacks landed, not all three |
 
 **Wave 1 (12 lanes, zero dependencies — dispatch all of them now):** L-P0.9,
