@@ -1,0 +1,98 @@
+# Access control / IDOR-BOLA corpus — PHP
+# Feature: Authorization / access control (CWE-639/862/863), incl. the
+# social-object variant folded into this row per the plan's boundary rule.
+# See docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 2 for the collection method.
+
+- file: vulnerable-1.php
+  role: vulnerable
+  repo: cupengus1/vulnerable-shop
+  commit_sha: 4467ed6badcaa408a82576aef15519bb608c4426
+  license: MIT
+  license_note: >
+    No separate LICENSE file in the repo, but the README explicitly states
+    "Dự án này được phân phối dưới giấy phép MIT License" (this project is
+    distributed under the MIT License) with a link to the canonical MIT
+    text and an MIT badge — treated as a declared license per Phase 2's
+    license-handling rule, though there is no copyright-holder line to
+    reproduce (README states the license, not a copyright notice).
+  notes: >
+    Full file copied as-is. This is a deliberately-built vulnerable-shop
+    teaching repo (Vietnamese-language comments); the SAME file naturally
+    contains both the active vulnerable code AND a complete, real fixed
+    version of it in a commented-out block written by the same author for
+    the same teaching purpose (see pattern below) — a same-file
+    contrastive pair, left intact rather than split, since splitting it
+    would misrepresent which block is actually live in this commit.
+  pattern: >
+    order_detail.php reads $_GET['id'] and queries
+    "SELECT ... FROM orders o JOIN users u ... WHERE o.id = $order_id" with
+    no user_id/session check at all (also raw string interpolation, a
+    separate SQLi concern not the focus here) — any logged-in user can view
+    any other user's order by changing ?id=. The file's own commented-out
+    FIX_START/FIX_END block (left in place, inactive) shows the real
+    corrected version: validates the id, reads $_SESSION['user_id'], and
+    adds "AND o.user_id = ?" to the query for non-admins.
+  validated: false
+  validated_by: []
+
+- file: vulnerable-2.php
+  role: vulnerable
+  repo: AhmedFatehy/E-commerce
+  commit_sha: 42a5cb8157d4b25a5b20d16cf9338165be928839
+  license: MIT
+  copyright: "Copyright (c) 2021 Ayondip Jana"
+  notes: >
+    Full file copied as-is (short file). Real student e-commerce project;
+    forms a matched pair with idiomatic-1.php and idiomatic-2.php (same
+    shape: order fetched by a caller-supplied id with vs. without a
+    session-ownership check).
+  pattern: >
+    process.php reads order-id from $_POST and fetches/updates the order
+    ("select * from orders where id='$order_id'", later an UPDATE on the
+    same id) with no check that the order belongs to $_SESSION['USER_ID'] —
+    an authenticated user can complete or manipulate another user's order
+    by supplying its id (also raw string interpolation; SQLi is a separate
+    concern not the focus here).
+  validated: false
+  validated_by: []
+
+- file: idiomatic-1.php
+  role: idiomatic
+  repo: Jamexuu/Papernest-with-Payment
+  commit_sha: 9aecc7fcd2bfcc1482c9bf19a258fa42b821d59a
+  license: MIT
+  copyright: "Copyright (c) 2025 James Francis Mercado"
+  notes: >
+    Full file copied as-is (short file, trailing HTML/markup after the PHP
+    block omitted is not present — file kept whole). Clean pairing example:
+    combines a parameterized query with the ownership check in one
+    statement.
+  pattern: >
+    success.php fetches the order with a parameterized query
+    "SELECT * FROM orders WHERE id = ? AND user_id = ?" passing both
+    $order_id and $_SESSION['user_id'] as bind params — the ownership
+    check is enforced inside the query itself, not as a separate
+    after-the-fact comparison.
+  validated: false
+  validated_by: []
+
+- file: idiomatic-2.php
+  role: idiomatic
+  repo: decodelover/syre_bijouteries
+  commit_sha: ff9069e8c569293c0583375537fe44311675439e
+  license: MIT
+  copyright: "Copyright (c) 2025 Syre Bijouteries"
+  notes: >
+    Full file copied as-is (short file). The access-control mechanism
+    (ownership check) is correct, but note the query itself uses raw
+    string interpolation rather than a prepared statement — a separate
+    SQLi concern, out of scope for this feature's corpus, left as-is
+    since Phase 2 collects real code with its real imperfections rather
+    than laundering it into a textbook-clean example.
+  pattern: >
+    cancel-order.php's own comment says "Get order and verify ownership":
+    the SELECT explicitly ANDs "user_id = " . $_SESSION['user_id'] onto the
+    WHERE clause, and treats a zero-row result as "Order not found" before
+    allowing the cancel action to proceed.
+  validated: false
+  validated_by: []

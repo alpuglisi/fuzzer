@@ -1,0 +1,70 @@
+# Access control / IDOR-BOLA corpus — Python
+# Feature: Authorization / access control (CWE-639/862/863), incl. the
+# social-object variant folded into this row per the plan's boundary rule.
+# See docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 2 for the collection method.
+#
+# CELL STATUS: only 2 examples (the floor), not the usual 3-5 target.
+# Several otherwise-good real vulnerable-Flask/Django-IDOR candidates were
+# found and rejected purely on the license gate (no LICENSE file and no
+# license declared anywhere in the repo): himanshu140505/PYTHON,
+# LamaHosam6/Secure_Web_App, n0psn0ps/FernbachAPI, melaku2402/flaskweb-,
+# Riteshhhh22/GymFit-Management. Per Phase 2's license-handling rule these
+# were cited/described here for context but their source was NOT copied:
+# each had a Flask route (typically `/profile/<id>` or `/api/user/<id>`)
+# reading a user/order id straight from the URL with no session-ownership
+# check — the same shape as vulnerable-1.py below, just unlicensed.
+
+- file: vulnerable-1.py
+  role: vulnerable
+  repo: openhackai/OpenHack
+  commit_sha: 4e1f532e01c3ecca007e07ff4c06770c1c4a9919
+  license: MIT
+  copyright: "Copyright (c) 2026 OpenHack"
+  notes: >
+    QUALITY CAVEAT (flagged per Phase 2's tutorial/non-production labeling
+    rule, generalized to this file's own nature): this is NOT a live
+    application route — it is a real, published, MIT-licensed source file
+    from a security-review tool's own prompt/documentation library
+    (openhack/prompts/flask/idor.py), written to teach the tool's LLM
+    reviewer what Flask IDOR shapes look like. The vulnerable/safe Flask
+    snippets embedded in it were written specifically to illustrate the
+    contrast, similar in spirit to a Juliet-style synthetic pair, though
+    they are real committed file content, not paraphrased from memory.
+    Full file copied as-is (it is itself organized as parallel
+    vulnerable/safe snippets across several ORM call shapes -
+    Invoice.query.get_or_404, db.session.get, Flask-RESTful Resource -
+    so importing the whole file preserves more of that variety than
+    extracting just one snippet would).
+  pattern: >
+    Multiple parallel Flask examples of "URL id -> ORM lookup with no
+    filter_by(user_id=current_user.id)/ownership check", contrasted inline
+    against the corrected filter_by(...) form for the same route shape.
+  validated: false
+  validated_by: []
+
+- file: idiomatic-1.py
+  role: idiomatic
+  repo: timluh98/FS-Webapp
+  commit_sha: a01089943d6a6850b97ab7ddd7f6eb51304850ac
+  license: MIT
+  copyright: "Copyright (c) 2023 Johann Estrada Pox & Tim Luhmann"
+  notes: >
+    Excerpt from app.py (650 lines total; the three order-confirmation
+    routes plus the specific imports they need are kept verbatim, the rest
+    of the file - unrelated routes, models, config - is trimmed). Real,
+    live Flask-Login marketplace app (parts/suppliers/orders), not a
+    teaching fixture. Forms a matched pair with vulnerable-1.py (same
+    shape: order id from the URL, with vs. without a check against
+    current_user.id).
+  pattern: >
+    confirm_payment() and confirm_completion() both call
+    Order.query.get_or_404(order_id) and then explicitly compare
+    `order.user_id != current_user.id`, flashing an error and redirecting
+    instead of proceeding when the caller doesn't own the order.
+    confirm_shipping() uses the equivalent supplier-side check
+    (`purchase.part.supplier_id == current_user.id` across the order's
+    line items) since that route's actor is the supplier, not the buyer -
+    included to show the same access-control idiom applied to two
+    different "ownership" relations on the same object.
+  validated: false
+  validated_by: []

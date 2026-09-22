@@ -1,0 +1,94 @@
+# Access control / IDOR-BOLA corpus — Node.js
+# Feature: Authorization / access control (CWE-639/862/863), incl. the
+# social-object variant folded into this row per the plan's boundary rule.
+# See docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 2 for the collection method.
+
+- file: vulnerable-1.js
+  role: vulnerable
+  repo: OWASP/NodeGoat
+  commit_sha: c5cb68a7084e4ae7dcc60e6a98768720a81841e8
+  license: Apache-2.0
+  notes: >
+    Excerpted verbatim (full file is short). OWASP's own official "A4:
+    Insecure Direct Object References" tutorial lesson. LICENSE file present
+    but contains no filled-in copyright holder line (standard Apache-2.0
+    boilerplate); attributed to the OWASP Foundation / NodeGoat project as
+    the upstream copyright holder. This is a canonical, widely-cited
+    reference implementation (OWASP's own teaching project), not a random
+    tutorial repo.
+  pattern: >
+    displayAllocations() reads userId from the URL route param
+    (req.params.userId) and passes it straight to the DB lookup with no
+    check that it matches the logged-in session's own user id. The file's
+    own comment (lines 12-15, left in as-collected) documents the exact fix
+    inline: "take user id from session instead of from URL param" — a
+    same-file contrastive note, though not a separate runnable fixed file.
+  validated: false
+  validated_by: []
+
+- file: vulnerable-2.js
+  role: vulnerable
+  repo: GuusK/disruptIT
+  commit_sha: ad09689d5c006ee5611e5b308cabfba1a9b998c2
+  license: MIT
+  copyright: "Copyright (c) 2017 Guus Klinkenberg"
+  notes: >
+    Excerpt from routes/index.js (the module wrapper, other ~500 lines of
+    unrelated routes, and shared `Barc` setup are trimmed; the route and its
+    two required declarations are kept verbatim). Naturally-occurring pair
+    with idiomatic-2.js: both routes are literally adjacent in the same
+    file, in the same commit, in the same repo — the wild offered both
+    sides of this contrast without any alteration needed.
+  pattern: >
+    GET /tickets/:id/barcode has no `auth` middleware at all (unlike the
+    sibling /tickets/:id route a few lines above it) and does no ownership
+    check before rendering a barcode image keyed directly off the URL's
+    :id — forced browsing / IDOR via an unauthenticated, unchecked object
+    reference.
+  validated: false
+  validated_by: []
+
+- file: idiomatic-1.js
+  role: idiomatic
+  repo: JUSICK/fixed_idor_example_SuperTets-Express
+  commit_sha: 83f2ce9128986e456cd77f474753cdad1a28c7c2
+  license: MIT
+  copyright: "Copyright (c) 2026 JUICE"
+  redacted: true
+  notes: >
+    Full file copied (repo's own stated purpose is demonstrating "an
+    insecure IDOR implementation and its fixed version"; this is the fixed
+    version — app.js on this repo's default branch has already had the fix
+    applied). Two hardcoded demo credentials/secrets (a JWT signing key and
+    two fixture user passwords) were redacted before commit per Phase 2's
+    secrets-scrubbing rule, even though they're toy in-memory fixture data,
+    not live secrets. Matched vulnerable-shape counterpart in vulnerable-1.js
+    and vulnerable-2.js (different repos, same shape: URL-supplied id vs.
+    the caller's authenticated identity).
+  pattern: >
+    GET /api/users/:id decodes the caller's JWT and explicitly checks
+    `decoded.userId !== requestedId`, returning 403 "IDOR attempt blocked"
+    before any data lookup happens — ownership is verified from the
+    authenticated token, not trusted from the URL.
+  validated: false
+  validated_by: []
+
+- file: idiomatic-2.js
+  role: idiomatic
+  repo: GuusK/disruptIT
+  commit_sha: ad09689d5c006ee5611e5b308cabfba1a9b998c2
+  license: MIT
+  copyright: "Copyright (c) 2017 Guus Klinkenberg"
+  notes: >
+    Excerpt from routes/index.js (module wrapper and unrelated routes
+    trimmed; the `auth` middleware definition and the one route are kept
+    verbatim, since the route depends on `auth`). Naturally-occurring pair
+    with vulnerable-2.js — see that entry's notes.
+  pattern: >
+    GET /tickets/:id requires the `auth` middleware (redirects to /login if
+    no session user) and, after loading the ticket, explicitly checks
+    `ticket.ownedBy.email !== req.session.passport.user` before rendering
+    it, returning 403 Forbidden on a mismatch — both authentication and an
+    object-ownership check are present.
+  validated: false
+  validated_by: []
