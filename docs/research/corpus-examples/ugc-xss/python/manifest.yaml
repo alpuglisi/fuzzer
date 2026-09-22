@@ -1,0 +1,69 @@
+# Vuln-corpus Phase 2 manifest — feature: user-generated content (comments/
+# reviews/forums), language: Python. See docs/VULN_CORPUS_EXPANSION_PLAN.md
+# Phase 2 for the schema/rules this file follows.
+#
+# Pairing note: vulnerable-1.py and idiomatic-1.py are the vulnerable/secure
+# route pair from a *single real file* deliberately built for this exact
+# contrast (jwilliamsresearch/os3-security-studio's own insecure()/secure()
+# routes) -- the closest thing Phase 2 found to a naturally-occurring
+# Juliet-style good()/bad() pair in the wild. idiomatic-2.py is a second,
+# independently-sourced idiomatic example (a real production app, not a
+# teaching app) showing the same bleach.clean()-on-ingest idiom.
+
+- file: vulnerable-1.py
+  role: vulnerable
+  repo: jwilliamsresearch/os3-security-studio
+  commit_sha: c3b995f2d0abcd3c9fcd1e2f6242eb089c84288b
+  license: MIT
+  license_copyright_line: "Copyright (c) 2025 James Williams"
+  tutorial_or_course_project: true
+  pattern: "comment stored completely unsanitized; Jinja2 template renders it with the |safe filter (disables autoescaping) -> stored XSS on every later view of the comment list"
+  notes: >
+    Repository is dual-licensed (MIT for code, CC BY 4.0 for educational
+    content per its LICENSE.md); this is source code, covered by the MIT
+    grant. Deliberately built as a teaching app pairing an insecure route
+    with a secure one for the same feature (see idiomatic-1.py, same file) --
+    labeled tutorial_or_course_project per Phase 2's rule so Phase 3 does not
+    mistake it for production-derived prevalence evidence. Source file path
+    in the origin repo: app/routes/xss.py (insecure() route) plus
+    templates/xss/insecure.html.
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-1.py
+  role: idiomatic
+  repo: jwilliamsresearch/os3-security-studio
+  commit_sha: c3b995f2d0abcd3c9fcd1e2f6242eb089c84288b
+  license: MIT
+  license_copyright_line: "Copyright (c) 2025 James Williams"
+  tutorial_or_course_project: true
+  pattern: "same |safe-rendered comment field as vulnerable-1.py, but bleach.clean() sanitizes the comment on the way into storage, so the value the template later marks |safe has already been through an allowlist sanitizer"
+  notes: >
+    Secure sibling route to vulnerable-1.py in the same source file --
+    Phase 2's closest real-world analogue to a Juliet-style matched
+    good()/bad() pair. Same dual-license note and tutorial_or_course_project
+    flag as vulnerable-1.py applies. Source file path in the origin repo:
+    app/routes/xss.py (secure() route) plus templates/xss/secure.html.
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-2.py
+  role: idiomatic
+  repo: hotosm/tasking-manager
+  commit_sha: 2b917a14ea7b0b76935c4e2d6985ab25764cd1c9
+  license: BSD-2-Clause
+  license_copyright_line: "Copyright (c) 2017, Humanitarian OpenStreetMap Team"
+  tutorial_or_course_project: false
+  pattern: "task/comment free-text field run through bleach.clean() (default allowlist) before being persisted as task history"
+  notes: >
+    HOT Tasking Manager is a real, actively used production application
+    (OpenStreetMap task-mapping coordination), independent of the
+    os3-security-studio teaching app above -- a second, production-derived
+    instance of the same bleach.clean()-on-ingest idiom, at much larger
+    scale/maturity. Source file path in the origin repo:
+    backend/models/postgis/task.py (TaskHistory.set_comment_action).
+  validated: false
+  validated_by: []
+  redacted: false

@@ -1,0 +1,66 @@
+# Vuln-corpus Phase 2 manifest — feature: user-generated content (comments/
+# reviews/forums), language: PHP. See docs/VULN_CORPUS_EXPANSION_PLAN.md
+# Phase 2 for the schema/rules this file follows.
+#
+# Pairing note: vulnerable-1.php (raw echo of comment_content) is matched by
+# BOTH idiomatic-1.php (wp_kses_post allowlist sanitizer) and idiomatic-2.php
+# (htmlspecialchars per-field escaping) -- two independently-sourced real
+# idiomatic shapes for the same sink, kept as separate entries rather than
+# picking just one, per Phase 2's "push toward the upper end... when a
+# feature genuinely has multiple meaningfully different shapes" guidance.
+
+- file: vulnerable-1.php
+  role: vulnerable
+  repo: common-repository/bp-groupblog
+  commit_sha: 473c5eb2b52e44ab04be502332a1c4aadcd60bb2
+  license: GPL-3.0
+  tutorial_or_course_project: false
+  pattern: "authenticated AJAX endpoint echoes stored comment_content with zero escaping/sanitization (stored XSS via comment inline-edit UI)"
+  notes: >
+    common-repository/bp-groupblog is an automated git mirror of the
+    WordPress.org plugin SVN repository for "BP GroupBlog" (a real, published
+    WordPress/BuddyPress plugin); its own license.txt is GPLv3. Per this
+    corpus's copyleft-handling rule, only the single relevant function (plus
+    minimal class context) was copied, not the whole file -- see
+    themes/p2/inc/ajax.php in the source repo for the full file. Source file
+    path in the origin repo: themes/p2/inc/ajax.php.
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-1.php
+  role: idiomatic
+  repo: common-repository/reckoning
+  commit_sha: fb035503c9039b591f6110ec89393fafd95b3946
+  license: MIT
+  license_copyright_line: "Copyright (c) 2014 Shawn Patrick Rice <rice@shawnrice.org>"
+  tutorial_or_course_project: false
+  pattern: "same comment_content sink as vulnerable-1.php, but passed through wp_kses_post() (WordPress's allowlist HTML sanitizer) before output"
+  notes: >
+    common-repository/reckoning is an automated git mirror of the
+    WordPress.org plugin SVN repository for "Reckoning" (a real, published
+    WordPress plugin), which is itself MIT-licensed per its own plugin file
+    header (in addition to the repo's LICENSE.txt). The author email in the
+    copyright line is the plugin author's own public attribution contact,
+    kept verbatim as required by the MIT license's attribution term -- it is
+    not third-party PII. Source file path in the origin repo: reckoning.php.
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-2.php
+  role: idiomatic
+  repo: GiovanniSalmeri/yellow-comment
+  commit_sha: 7e0dff77527747e8ca36ce51a05823105b660931
+  license: GPL-2.0
+  tutorial_or_course_project: false
+  pattern: "per-field htmlspecialchars() escaping of stored comment metadata (author name, uid) before HTML interpolation -- classic escape-on-output idiom, as opposed to idiomatic-1.php's allowlist-sanitizer idiom"
+  notes: >
+    Real comment-rendering plugin for the Datenstrom Yellow CMS. Per this
+    corpus's copyleft-handling rule (repo's LICENSE.md is GPLv2), only the
+    single relevant method (renderCommentHtml, comment-rendering fragment)
+    was copied, not the whole file. Source file path in the origin repo:
+    comment.php.
+  validated: false
+  validated_by: []
+  redacted: false

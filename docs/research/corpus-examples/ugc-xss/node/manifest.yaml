@@ -1,0 +1,62 @@
+# Vuln-corpus Phase 2 manifest — feature: user-generated content (comments/
+# reviews/forums/chat), language: JavaScript/Node. See
+# docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 2 for the schema/rules this file
+# follows.
+#
+# Pairing note: vulnerable-1.js and vulnerable-2.js are two independently
+# sourced real projects (gitment and its actively-maintained successor
+# gitalk) sharing the exact same unsanitized-comment-HTML-sink shape, kept
+# as separate entries per Phase 2's "meaningfully different shapes... worth
+# keeping distinct" guidance (different codebases/render mechanisms:
+# template-literal innerHTML vs. JSX dangerouslySetInnerHTML). Both are
+# matched by idiomatic-1.jsx, which shows the same JSX dangerouslySetInnerHTML
+# sink with a real sanitizer (DOMPurify) interposed.
+
+- file: vulnerable-1.js
+  role: vulnerable
+  repo: imsun/gitment
+  commit_sha: 474ab9738d73e894c49168cc7946e8f32aa72cd2
+  license: MIT
+  license_copyright_line: "Copyright (c) 2016 imsun"
+  tutorial_or_course_project: false
+  pattern: "server-rendered comment body_html interpolated into a template literal assigned to element.innerHTML, no client-side sanitizer call anywhere in the render path (stored XSS via a real, published comment widget)"
+  notes: >
+    gitment is a real, widely-embedded GitHub-Issues-backed comment widget.
+    Source file path in the origin repo: src/theme/default.js
+    (renderComments function).
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: vulnerable-2.js
+  role: vulnerable
+  repo: gitalk/gitalk
+  commit_sha: 409cd990dc3d060fde1d228332baa7e4862a84ff
+  license: MIT
+  license_copyright_line: "Copyright (c) 2017 aotu.io"
+  tutorial_or_course_project: false
+  pattern: "same comment body_html sink as vulnerable-1.js, via React dangerouslySetInnerHTML instead of a template-literal innerHTML assignment; still no client-side sanitizer call in this render path"
+  notes: >
+    gitalk is gitment's actively-maintained successor project (also a real,
+    widely-embedded GitHub-Issues-backed comment widget). Recorded as an
+    independent second instance of the same anti-pattern in a different,
+    still-maintained codebase. Source file path in the origin repo:
+    src/component/comment.jsx (render method).
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-1.jsx
+  role: idiomatic
+  repo: MeetDOD/CareerInsight
+  commit_sha: 55d37c41ddb76cc1f74682460c1d2954036ad9e6
+  license: MIT
+  license_copyright_line: "Copyright (c) 2025 Meet Ashok Dodiya"
+  tutorial_or_course_project: false
+  pattern: "same dangerouslySetInnerHTML sink as vulnerable-2.js, but the comment body is passed through DOMPurify.sanitize() first"
+  notes: >
+    Real Q&A-style app (answers with threaded comments). Source file path in
+    the origin repo: frontend/src/Riverflow/AnswerList.jsx.
+  validated: false
+  validated_by: []
+  redacted: false

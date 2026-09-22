@@ -14,6 +14,104 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Research: Phase 2 corpus collection for the "e-commerce (cart/checkout/
+  payment/coupons, incl. billing/invoicing/subscriptions)" feature row
+  (priority 9, row 6) of `docs/VULN_CORPUS_EXPANSION_PLAN.md` — added
+  `docs/research/corpus-examples/ecommerce-logic/{node,php,python}/` with
+  10 real, license-triaged, commit-pinned examples (5 Node/2 PHP/3 Python)
+  covering business-logic price/quantity tampering (CWE-840, client-
+  trusted charge amounts) and single-use-resource race conditions
+  (CWE-362/367/841, non-atomic coupon-redemption check-then-act), as the
+  plan anticipated for this harder-to-grep class: the PHP cell landed at
+  the 2-example floor and pairs two different real shapes (a coupon race
+  and a price-recomputation idiomatic contrast) rather than a same-shape
+  pair, and Python's race example has no locked idiomatic counterpart
+  under an acceptable license — both gaps documented honestly in their
+  manifests rather than padded. `gitleaks` scanned every copied file
+  (redacted two hardcoded Stripe test-mode keys it flagged in Node
+  sources; zero leaks in the final copies); reference/staging only, not
+  read by lab-generation code per the plan's Phase 3 handoff gate.
+- Research: Phase 2 corpus collection for the "Authentication / session
+  management" feature row (priority 9, row 2) of
+  `docs/VULN_CORPUS_EXPANSION_PLAN.md` — added
+  `docs/research/corpus-examples/auth-session/{php,node,python}/` with 12
+  real, license-triaged, commit-pinned examples (4 per language, two
+  matched vulnerable/idiomatic pairs each). Covers CWE-347 JWT algorithm/
+  key confusion in all three stacks (firebase/php-jwt CVE-2015-2965,
+  auth0/node-jsonwebtoken GHSA-8cf7-32gw-wr33, PyJWT GHSA-jq35-7prp-9v3f —
+  each pair is the library's own real pre-fix/post-fix commit, not a
+  synthetic recreation) and CWE-330 weak/predictable token generation
+  (InvoicePlane CVE-2021-29023 reset token, a HubSpot OAuth-quickstart
+  session secret via `Math.random()` vs. an Auth0 OIDC sample's
+  `crypto.randomBytes()`, and DOAJ's own weaker login-code vs. its
+  stronger `uuid4()`-based reset token in the same file). Session-fixation
+  and reset-token-flow-binding shapes were surveyed but not added, to
+  avoid padding past the plan's 3-5-per-cell target once two solid pairs
+  per language were in hand — noted explicitly in each `manifest.yaml` as
+  a gap for a possible follow-up pass. `gitleaks` (installed) scanned
+  every file; no leaks found, no redaction needed. Reference/staging
+  only, not read by lab generation per the plan's validation gate.
+- Research: Phase 2 corpus collection for the "Authorization / access
+  control" feature row (priority 9, row 1) of
+  `docs/VULN_CORPUS_EXPANSION_PLAN.md` — added
+  `docs/research/corpus-examples/access-control/{php,node,python}/` with
+  10 real, license-triaged, commit-pinned examples (4 PHP, 4 Node, 2
+  Python — Python held at the 2-example floor since several otherwise-good
+  vulnerable-IDOR candidates had no declared license and were cited-only
+  per the plan's license gate). Covers the classic "my-resource-by-ID"
+  IDOR/BOLA shape (CWE-639/862/863): route param trusted with no
+  session-ownership check vs. the same lookup scoped by
+  `current_user`/`$_SESSION['user_id']`, including one naturally-occurring
+  same-repo pair (GuusK/disruptIT) where the vulnerable and fixed shapes
+  sit in adjacent routes of the same file/commit, and one same-file
+  contrastive example (cupengus1/vulnerable-shop) where the real fix is
+  left in as an inactive commented-out block alongside the active
+  vulnerable code. Gitleaks (installed) found no leaks; two demo
+  credentials found by manual review (a hardcoded JWT secret, two fixture
+  passwords in an in-memory user array) were redacted regardless
+  (`redacted: true`) since they were credential-shaped even though not
+  live secrets.
+
+- Research: Phase 2 corpus collection for the "search/filtering (merged
+  with reporting/exports/dashboards)" feature row (priority 9, row 5) of
+  `docs/VULN_CORPUS_EXPANSION_PLAN.md` — added
+  `docs/research/corpus-examples/search-export/{php,node,python}/` with
+  10 real, license-triaged, commit-pinned examples (4 PHP, 3 Node, 3
+  Python) prioritizing shapes beyond fuzzlab's existing raw-concat/
+  param-bind SQLi modeling: multi-param WHERE-clause building reused
+  across count/list/export queries, an ORM `.extra(where=...)`/raw-
+  ORDER-BY escape-hatch misuse contrasted with the same app's safe
+  `.filter(Q(...))`/parameterized-builder path, and SSTI in a Handlebars-
+  based report-export pipeline (CWE-89/943/1336); the Python cell's XXE/
+  SSTI half is recorded half-populated (no license-clean real example
+  found this pass) and the PHP XXE example is a labeled tutorial
+  snippet, per Phase 2's honesty rules. `gitleaks` scanned every copied
+  file (one hardcoded DB credential found and redacted before commit);
+  reference/staging only, not read by lab generation per the plan's
+  validation gate.
+- Research: Phase 2 corpus collection for the "file handling" feature row
+  (priority 9, row 4) of `docs/VULN_CORPUS_EXPANSION_PLAN.md` — added
+  `docs/research/corpus-examples/file-handling/{php,node,python}/` with
+  12 real, license-triaged, commit-pinned examples (4 per language, two
+  matched vulnerable/idiomatic pairs each: an upload handler with no/weak
+  extension check vs. an allowlist+content-type check, and a download/serve
+  endpoint with an unconfined user-supplied path vs. a realpath/allowlist-
+  confined one) covering CWE-434 unrestricted upload and CWE-22 path
+  traversal. `gitleaks` scanned every copied file (no leaks; one unrelated
+  hardcoded demo credential found by manual read in a source file's
+  unrelated config block was excluded from the excerpt rather than copied
+  in and redacted). Reference/staging only, not read by lab generation per
+  the plan's validation gate.
+- Research: Phase 2 corpus collection for the "user-generated content"
+  feature row (priority 9, row 3) of `docs/VULN_CORPUS_EXPANSION_PLAN.md`
+  — added `docs/research/corpus-examples/ugc-xss/{php,node,python}/` with
+  9 real, license-triaged, commit-pinned examples (3 per language, each
+  with a matched vulnerable/idiomatic pair per Phase 2's pairing rule)
+  covering stored-XSS-via-comment-rendering and sanitizer-vs-raw-output
+  contrasts, deliberately beyond fuzzlab's existing basic reflected
+  `html_body`/`html_attribute_quoted` shapes. `gitleaks` scanned every
+  copied file (no leaks); reference/staging only, not read by lab
+  generation per the plan's validation gate.
 - Planning: completed `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s Phase 1 — merged
   real research on common web-app feature areas and on which are
   disproportionately exploited (OWASP Top 10/WSTG, CWE Top 25, PortSwigger,
