@@ -101,6 +101,18 @@ bugs — the research-platform diagnostics of decision D2.
   presentation cannot conflict with another's. *(Realized: Wave-0 lane U0, CC-UI-0025 —
   supersedes the hash-based section switching described under FR-UI-7/FR-UI-8's
   "Realized" notes, which is retired.)*
+- **FR-UI-10** Control-plane hardening: every request to the web control panel is checked
+  against an exact host:port allow-list (self-derived from the server's own bound
+  address — never a client-supplied header); every POST/PUT/DELETE additionally requires
+  Origin-exact-match + `Sec-Fetch-Site: same-origin` (same-site is rejected too) or,
+  absent Fetch Metadata, a matching Referer; `/api/*` routes additionally require a
+  custom `X-Fuzzlab-Client: 1` header. Any check failing responds 421/403 and never
+  reaches route logic (fail-closed). Every response carries a fixed CSP +
+  nosniff/frame-options/referrer-policy/COOP/CORP, and `Cache-Control: no-store` on
+  `/api/*`/`/results`/`/runs/*`. This gate is independent of, and does not weaken, the
+  existing `authorized` no-auto-run gate (FR-UI-5 et al.), which stays sourced only from
+  server-side `Config`. *(Realized: Wave-0 lane U6, CC-UI-0026; prerequisite: Starlette
+  `>=1.0.1,<2`, CVE-2026-48710 "BadHost".)*
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

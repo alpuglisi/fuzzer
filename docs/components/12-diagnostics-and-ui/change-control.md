@@ -3,6 +3,51 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0026 — Lane U6: control-plane hardening middleware + Starlette pin (2026-09-22)
+- Change: added `ControlPlaneHardening`, a global ASGI middleware in `fuzzlab/web/app.py`
+  (pure ASGI, not `BaseHTTPMiddleware`, so it doesn't interfere with the launcher's SSE
+  stream), registered on every request: (a) an exact host:port allow-list self-derived
+  from the ASGI connection's own bound address (`scope["server"]`, never client-supplied)
+  — rejects DNS-rebinding-style Host headers with **421**; (b) on POST/PUT/DELETE, an
+  Origin-exact-match + `Sec-Fetch-Site: same-origin` gate (same-site is deliberately
+  rejected too — the lab is same-site on a sibling port) with a Referer fallback for
+  clients that send no Fetch Metadata, plus a custom `X-Fuzzlab-Client: 1` header
+  requirement on `/api/*` to force a CORS preflight a cross-origin page can't satisfy —
+  any failure is **403**, fail-closed. Every response (including rejections) also gets a
+  fixed offline CSP + `X-Content-Type-Options: nosniff` / `X-Frame-Options: DENY` /
+  `Referrer-Policy: same-origin` / COOP/CORP `same-origin`, plus `Cache-Control: no-store`
+  on `/api/*`, `/results`, `/runs/*`. Bumped the `web` extra's Starlette pin to
+  `>=1.0.1,<2` (CVE-2026-48710 "BadHost"); installed/tested against 1.6.0. Added
+  `X-Fuzzlab-Client: 1` to the shared `postJSON`/`delJSON` fetch helpers
+  (`fuzzlab/web/static/js/http.js`, used by every section's state-changing request) so
+  existing UI actions keep passing the new `/api/*` gate.
+- Impact (other components / project): a global gate in front of every route added by
+  U0–U5; does not change any route's own logic. Verified (unchanged): the `authorized`
+  no-auto-run gate is still read only from server-side `Config`, never the request body,
+  on every gated route. **Open finding, not fixed here (out of this lane's file scope):**
+  `RepeaterController.create_tab`/`send` (`fuzzlab/web/proxycontrol.py`) accepts an
+  arbitrary client-supplied `host`/`port` for replay, restricted only by `authorized` —
+  by design, a general-purpose repeater, but flagged for a deliberate scope-hosts
+  decision (document as intentional, or add a scope check) rather than left silent.
+- Risk (level; mitigation): medium (a global middleware guarding every current and
+  future POST/PUT/DELETE route) — mitigated by `tests/test_web_hardening.py` (23 tests:
+  the full acceptance matrix — wrong Host, cross-site/same-site-cross-origin POST,
+  missing `/api/*` header, Referer fallback, DELETE/PUT, `authorized`-gate independence,
+  headers present on success *and* on a rejected response, `Cache-Control: no-store`
+  scoping) plus the unchanged full suite (1423 passed / 24 skipped, same 6 pre-existing
+  unrelated failures — the +23 over the prior baseline is exactly this lane's new tests).
+- Deliverables:
+  - [x] Host allow-list (421 on mismatch) — done.
+  - [x] Origin/Sec-Fetch-Site/Referer CSRF gate + `/api/*` custom-header requirement
+    (403 fail-closed) — done.
+  - [x] CSP + security headers on every response — done.
+  - [x] Starlette `>=1.0.1,<2` pin (CVE-2026-48710) — done.
+  - [x] `X-Fuzzlab-Client` added to shared fetch helpers — done.
+- Effectiveness (assessed 2026-09-22): effective — the full acceptance matrix passes,
+  no existing UI action (launcher run, proxy intercept/scope/match-replace/repeater)
+  regressed, and the repeater's unrestricted-destination finding is now on record for a
+  deliberate follow-up decision instead of silently unnoticed.
+
 ### CC-UI-0025 — Lane U0: MPA routes + asset split (retire hash-tab shell) (2026-09-22)
 - Change: replaced the single-page hash-switched shell (`templates/index.html`,
   `static/app.js`, `static/app.css`, client-side `initTabs()`) with five real routes —

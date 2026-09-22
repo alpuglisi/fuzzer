@@ -14,6 +14,11 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- UI: added a global control-plane hardening middleware (Host allow-list + Origin/
+  Sec-Fetch-Site/Referer CSRF gate + `X-Fuzzlab-Client` on `/api/*` + security headers)
+  to `fuzzlab/web/app.py`, guarding every current and future POST/PUT/DELETE route; pinned
+  `starlette>=1.0.1,<2` (CVE-2026-48710 "BadHost"), a hard prerequisite since the hardening
+  keys off Host/path validation (`CC-UI-0026`, `FR-UI-10`).
 - UI: retired the hash-tab single-page shell for real per-section MPA routes (`/`,
   `/proxy`, `/results`, `/ml`, `/diagnostics`) — the Wave-0 enabling refactor Wave-1 lanes
   (U1–U5) build on. Split `templates`/`static/app.js`/`static/app.css` per section, with
