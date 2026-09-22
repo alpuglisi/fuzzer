@@ -3,6 +3,287 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0090 — `django` emitter Phase A: real bootable skeleton + `DjangoLiveBootHarness` (FR-LAB-64/FR-LAB-65) (2026-09-22)
+
+- **Change:** Adds the `django` stack as category 2's new-stack pick
+  (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9, category 2 —
+  Instagram/Python-Django; §9.2 ledger row; site-pair reasoning and
+  functionality/CWE research in
+  `docs/research/category2-social-ugc-functionality-and-cwe-research.md`).
+  Scoped identically to `php_laravel`'s own foundation lane (L-P3.3a) and
+  §2's `node_express` Phase A plan: a **minimal, real** skeleton + boot
+  harness + **one** illustrative rendered shape proving the scaffold end to
+  end — not the full module-inventory depth (a separate, later Phase B).
+
+  New files:
+
+  1. `fuzzlab/labgen/emitters/django/stack_env.py` — a `StackEnv` instance,
+     importing the existing frozen dataclass from
+     `fuzzlab.labgen.emitters.php_laravel.stack_env` (confirmed by
+     reviewer #1: the dataclass itself —
+     `language/framework/framework_version/base_image/workdir/
+     entrypoint_cmd/is_multi_file/scaffold_files/accumulators/file_roles`
+     — carries no Laravel-specific fields and is genuinely reusable data).
+     **Correction from reviewer #1: this reuse is scoped to the dataclass
+     only.** `env_file_content()`/`index_php_content()` are two methods
+     defined on that same module-level class that *are* hard-coded PHP/
+     Laravel content (`.env` keys, a literal `<?php` front controller,
+     `Illuminate\Http\Request`) — the Django `StackEnv` instance will
+     **not** call either method; Django's own `settings.py`/`manage.py`
+     content gets its own rendering in this emitter's scaffold code,
+     written from scratch, never routed through those two methods.
+     - `language="python"`, `framework="django"`, `framework_version`
+       pinned to a real resolved PyPI release. Reviewer #1 independently
+       confirmed `5.2.17` is real and current (`pip index versions
+       django` against live PyPI, this session) — resolve and record the
+       exact patch version + resolution timestamp/evidence at
+       implementation time, the same dated-evidence discipline
+       `php_laravel`'s `composer.lock`-based resolution used.
+     - **`base_image`/`workdir` (addition #2, reviewer #2 — both fields
+       are mandatory on the dataclass with no default, so a real value is
+       required, not just a nice-to-have):** this lane, like
+       `node_express`'s own Phase A plan (§1's environment check — "no
+       container/Docker daemon needed for this part"), is **venv-based,
+       not container-based** — `DjangoLiveBootHarness` boots a real local
+       `venv` + `pip install`, never a Docker image, mirroring exactly how
+       `node_express`'s own Phase A plan scoped its local boot-and-serve
+       harness. `base_image` is still populated with a real,
+       digest-pinned value (an official `python:<version>-slim` image,
+       resolved for real via `docker manifest inspect`/`buildx
+       imagetools` at implementation time, evidence recorded in this
+       entry once resolved) — carried as forward-looking metadata for a
+       possible future container-based path (the same role it already
+       plays for `php_laravel`, whose own `LiveBootHarness` also boots
+       locally via `php artisan serve`, not the container), not consumed
+       by this lane's actual boot mechanism. `workdir` gets a real,
+       consistent convention value (e.g. `/srv/app`), recorded alongside.
+     - **`entrypoint_cmd` and loopback binding (addition #5, reviewer #2):**
+       nominal `entrypoint_cmd = ("python", "manage.py", "runserver",
+       "0.0.0.0:8000")` (mirroring the real `manage.py runserver` command
+       shape). Per `CLAUDE.md`'s non-negotiable Safety section (loopback-
+       only, never exposed) **and** matching the *actual* precedent this
+       draft is modeled on — reviewer #2 found `php_laravel`'s own
+       `StackEnv.entrypoint_cmd` nominally says `--host=0.0.0.0` too, but
+       the real `LiveBootHarness.build()` code silently overrides this to
+       `--host=127.0.0.1` (`live_boot.py:813`) when it actually boots the
+       process — `DjangoLiveBootHarness.build()` will likewise force
+       `runserver 127.0.0.1:<port>` in the real subprocess invocation,
+       **independent of** the nominal `entrypoint_cmd` field's string.
+       Stated explicitly here rather than left to silent analogy, per
+       reviewer #2's finding.
+     - `is_multi_file=True`. `scaffold_files` = the project-level files
+       rendered once (`manage.py`, `<project>/settings.py`,
+       `<project>/urls.py`, `<project>/wsgi.py`).
+     - **`DEBUG`/`ALLOWED_HOSTS` (addition #1, reviewer #2 — the single
+       most important addition):** the generated `settings.py` **forces
+       `DEBUG = False`** and a real, non-wildcard `ALLOWED_HOSTS =
+       ["127.0.0.1", "localhost"]` — a **correctness requirement, not an
+       optional follow-up**, exactly the framing `php_laravel`'s own
+       `StackEnv.env_file_content()` docstring already gives
+       `APP_DEBUG=false` (citing D20): Django's own default debug page
+       (`DEBUG = True`, `django-admin startproject`'s own default) renders
+       a full traceback, local variable dump, and `SECRET_KEY`-adjacent
+       settings on any unhandled exception — and the one illustrative
+       shape this lane builds (a raw `cursor.execute(f"...")` SQLi cell)
+       will readily trigger exactly that exception path on a malformed
+       payload. Left on, this contaminates every generated page's single
+       labeled vulnerability class with an unlabeled full-disclosure
+       secondary one — the same reasoning that already forced `php_laravel`
+       and FastAPI's `/docs`. Its own Deliverables line, below, not folded
+       silently into "scaffold."
+     - `accumulators = ("<app>/urls.py",)`, one Django-idiomatic
+       `urlpatterns` list fed one route fragment per cell, sorted by cell
+       ID (the existing accumulator rule). Reviewer #1 confirmed
+       `RouteAccumulator`'s actual code (`_ROUTE_URL_RE`, the
+       `Route::[a-z]+(...)` literal templating, `use Illuminate\Support\
+       Facades\Route;` header) is saturated with Laravel-specific syntax
+       with no realistic shared core — so this is a **new**
+       `DjangoRouteAccumulator` (Django's `path(...)`/`urlpatterns` idiom),
+       not a shared refactor, confirming the draft's own hedge was right
+       to resolve as "own thing."
+  2. `fuzzlab/labgen/emitters/django/stack/skeleton/` — a real, trimmed
+     `django-admin startproject fuzzlab_django_lab` output (real command;
+     dev-only tooling and unused default apps trimmed), checked in with a
+     `README.md` recording the exact `django-admin`/Django version and the
+     trim list — mirroring `php_laravel/stack/skeleton/README.md`'s own
+     convention (confirmed by reviewer #1 to be a real, existing file to
+     mirror).
+  3. `fuzzlab/labgen/emitters/django/__init__.py` — `DjangoEmitter(Emitter)`
+     implementing `supports()`/`render()` (confirmed by reviewer #1 to
+     match the real `Emitter` ABC contract — "declare unsupported and
+     skip," byte-identical reproduction) for exactly **one** illustrative
+     shape: `(vuln_class="sqli", sink_context.family="sql_numeric_literal")`
+     — the same first shape `php_laravel`'s own L-P3.3a picked and the same
+     class §2's `node_express` plan calls "a single illustrative cell."
+     Vulnerable twin: a raw `cursor.execute(f"...{param}...")` (Django's own
+     documented raw-SQL-cursor footgun, `django.db.connection.cursor()`).
+     Secure twin: Django ORM's parameterized `.get(pk=...)` /
+     parameterized `cursor.execute(sql, [param])`.
+  4. `fuzzlab/labgen/emitters/django/modules.py` — this emitter's own
+     `SOURCES`/`TRANSFORMS`/`SINKS`/`COMPLEXITIES` registries (module
+     composition per `CR-LAB-0001` Addendum C — never one monolithic
+     per-shape template), scoped to the one shape above; a brand-new,
+     separate registry from `fuzzlab.labgen.modules` and
+     `fuzzlab.labgen.emitters.php_laravel.modules`, per every existing
+     emitter's own established convention.
+  5. `fuzzlab/labgen/conformance/django_live_boot.py` — `DjangoLiveBootHarness`,
+     structurally mirroring `fuzzlab.labgen.conformance.live_boot.
+     LiveBootHarness` (`build()`/`_assemble()`/`request()`/`get()`/
+     `post()`/`query_db()`/`close()`/context-manager protocol, confirmed by
+     reviewer #1 as an accurate description of that module's real public
+     API), for a real `venv` + `pip install django==<pinned>` + `manage.py
+     migrate` + `manage.py runserver 127.0.0.1:<port>` boot (loopback-forced
+     per the addition above), using the same `urllib.request`-based HTTP
+     client and the same bounded-timeout-at-every-subprocess-step
+     discipline (`_run()`'s existing pattern — an explicit `timeout=` on
+     every `subprocess.run`, wrapped into a clear `LiveBootError` on
+     `TimeoutExpired`).
+     - **No silent redirect-following (addition #4a, reviewer #2 /
+       `PA-0030`/`BUG-0028`):** `DjangoLiveBootHarness.request()` builds its
+       own opener from `_NoRedirectHttpErrorProcessor` (confirmed by
+       reviewer #1 to genuinely exist at `live_boot.py`'s
+       `_NoRedirectHttpErrorProcessor`/`_NO_REDIRECT_OPENER`, built exactly
+       to fix `BUG-0028` — "must observe the raw redirect, never chase it")
+       — reused directly (the class has no Laravel-specific behavior; it is
+       generic `urllib` plumbing) rather than reimplemented, so every 2xx/
+       3xx/4xx/5xx response is handed back to the caller exactly as the
+       server sent it.
+     - **Django/ORM defaults enumerated up front (addition #4b, reviewer #2
+       / `PA-0030`/`BUG-0028` — the exact failure class `BUG-0028` names:
+       before extending this harness family to a new behavior category,
+       enumerate what it needs from both the HTTP client's and the
+       framework/ORM's own defaults):**
+       - A real `manage.py migrate` creates Django's own default tables
+         (`auth_user`, `django_session`, `django_content_type`, etc.) for
+         whatever `INSTALLED_APPS` the trimmed skeleton keeps — the
+         skeleton's own README (per deliverable 2) records exactly which
+         default apps are kept vs. trimmed, so this is inspectable, not
+         assumed.
+       - Django's `CsrfViewMiddleware` is on by default and will reject an
+         unsafe (`POST`/`PUT`/etc.) request with no valid CSRF token —
+         the one illustrative shape here is a `GET`-only lookup, so this
+         does not block Phase A's own test, but it is recorded now (rather
+         than discovered later, `BUG-0028`-style) so Phase B's first
+         `POST`-shaped cell doesn't hit it as a surprise: the harness will
+         need either a `@csrf_exempt` view convention (matching how
+         `php_laravel`'s own vulnerable/secure twins are plain,
+         unauthenticated demo endpoints) or a real CSRF-token round trip,
+         decided when that cell is actually built, not here.
+       - Django models default to an auto-incrementing integer `id` primary
+         key unless a model explicitly overrides it — the one illustrative
+         model uses this default, recorded so a later cell that needs a
+         non-default PK shape doesn't silently inherit an unstated
+         assumption.
+     - **A real capability probe**, `django_boot_available()` (per
+       `PA-0035`, confirmed correctly analogous by reviewer #1): a real,
+       bounded `pip download django==<pinned> --no-deps -d <scratch dir>`
+       against the real PyPI index through whatever proxy is configured —
+       never a bare socket/DNS check.
+  6. One minimal, real, executed test (new module,
+     `tests/test_labgen_django_live_boot_single_shape.py`,
+     `@pytest.mark.slow`, skip-guarded on `django_boot_available()`):
+     assemble + real `venv`/`pip install` + real `manage.py migrate` +
+     real boot (loopback-only) + a real HTTP GET proving the vulnerable
+     twin's raw-cursor SQLi differential (a `'` payload breaks the query /
+     returns an error or wrong-row response) against the secure twin's
+     parameterized equivalent (same payload, safely bound, correct
+     single-row response) — the same bar `php_laravel`'s and (per plan §2
+     task 4) `node_express`'s own first live-boot tests set. With `DEBUG =
+     False` forced (deliverable above), the vulnerable twin's error-path
+     response is Django's plain 500 page, not a stack-trace/secret leak —
+     verified directly by this test, not just asserted by the settings
+     value.
+  7. **`docs/ARCHITECTURE.md` update (addition #3, reviewer #2):** a
+     dedicated paragraph for the `django` emitter in the "Manifest-driven
+     generator" section, matching how `python_fastapi` and `php_laravel`
+     were each recorded there when they landed.
+  8. **Dependency provenance (addition #6, reviewer #2):** attempt a real
+     CycloneDX SBOM (`syft`, matching `php_laravel`'s own attempt) for the
+     lane's `venv`/pip dependency tree; if unavailable in this environment,
+     document the gap explicitly (a `pip list --format=freeze` capture as
+     the fallback record) rather than silently omitting any provenance
+     record, mirroring `php_laravel`'s own documented-gap convention.
+
+- **Impact (other components / project):** Adds one new emitter (parallel
+  to `php_current`/`php_laravel`/`node_express`/`python_fastapi`) and one
+  new conformance harness module. No existing emitter, module registry, or
+  harness is modified — `fuzzlab.labgen.emitter.Emitter`'s interface is
+  consumed, not changed; `StackEnv`'s dataclass is imported/reused as data,
+  its two PHP-specific methods are not touched or called.
+  `fuzzlab/harness/multitarget.py`'s `TargetSpec` is unaffected until Phase
+  E (§6) wires a booted Django instance into it — out of scope here.
+  Registers category 2's Django pick in
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.2 (already recorded
+  as "research done" in a prior commit; this entry moves that row to
+  "skeleton/harness in progress" once landed).
+
+- **Risk (level: moderate — revised up from the original draft's
+  "low-moderate," addition #7, reviewer #2):** A new package-manager
+  integration (`pip`) and a new capability probe are, per this component's
+  own recent history (`BUG-0029`/`BUG-0033`), exactly the class of code
+  most likely to hide a defect — mitigated by building
+  `django_boot_available()` as a real, bounded, proxy-respecting probe from
+  the first commit (`PA-0035`), not a placeholder later hardened. Real
+  subprocess boot (`venv`, `pip install`, `manage.py migrate`/`runserver`)
+  can be slow in a constrained sandbox — mitigated by `@pytest.mark.slow` +
+  skip-guarding on the capability probe. Two risks the original draft
+  under-stated, now explicitly mitigated above: (1) **ground-truth
+  contamination** if Django's default debug page were left on (an
+  unlabeled full-disclosure vulnerability on every generated page,
+  undermining every cell's single-labeled-class guarantee this whole
+  project's ground-truth contract depends on) — mitigated by forcing
+  `DEBUG = False`/`ALLOWED_HOSTS` from the first commit, verified by the
+  live-boot test itself, not merely asserted; (2) **harness-fidelity risk**
+  of the same class `BUG-0028` already proved real in this exact code
+  family (silent redirect-following, un-enumerated framework/ORM defaults)
+  — mitigated by reusing the existing `_NoRedirectHttpErrorProcessor`
+  directly and by enumerating Django's own default behaviors (migrate-
+  created tables, CSRF middleware, auto-PK) up front rather than
+  discovering them mid-implementation.
+
+- **Deliverables:**
+  - [ ] `fuzzlab/labgen/emitters/django/stack_env.py` (`StackEnv` instance;
+    real pinned Django version + resolution evidence; real digest-pinned
+    `base_image` + `workdir`; `entrypoint_cmd` documented alongside the
+    forced-loopback override statement) — todo.
+  - [ ] `settings.py` generation forces `DEBUG = False` + a real
+    `ALLOWED_HOSTS` (its own line, not folded into "scaffold") — todo.
+  - [ ] `fuzzlab/labgen/emitters/django/stack/skeleton/` (real, trimmed
+    `django-admin startproject` output + provenance `README.md`, recording
+    exactly which default `INSTALLED_APPS` are kept/trimmed) — todo.
+  - [ ] `fuzzlab/labgen/emitters/django/__init__.py`
+    (`DjangoEmitter.supports()`/`.render()`, one shape) — todo.
+  - [ ] `fuzzlab/labgen/emitters/django/modules.py` (this emitter's own
+    `SOURCES`/`TRANSFORMS`/`SINKS`/`COMPLEXITIES`) — todo.
+  - [ ] `fuzzlab/labgen/conformance/django_live_boot.py`
+    (`DjangoLiveBootHarness`, forced-loopback boot, `_NoRedirectHttpErrorProcessor`
+    reuse, `django_boot_available()`) — todo.
+  - [ ] `tests/test_labgen_django_live_boot_single_shape.py` (1 real,
+    executed, skip-guarded test, verifying the DEBUG=False error path too)
+    — todo.
+  - [ ] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-64`
+    (django emitter exists, renders the one shape, Tier 0/3 conformant,
+    `DEBUG=False` enforced) and `FR-LAB-65` (`DjangoLiveBootHarness` proves
+    a real boot + real HTTP payload differential, loopback-only) — todo.
+  - [ ] `docs/ARCHITECTURE.md` — dedicated `django` emitter paragraph in
+    the manifest-driven-generator section — todo.
+  - [ ] Dependency-provenance record (`syft` SBOM attempt, or a documented
+    fallback) for the new pip dependency tree — todo.
+  - [ ] `CHANGELOG.md` line — todo.
+  - [ ] Full bug protocol for any genuine defect surfaced — todo (only if
+    one occurs).
+
+- **Effectiveness (assessed 2026-09-22): pending** — left pending until the
+  deliverables above land and the new test is observed to pass for real.
+
+---
+**Pre-change review gate record:** reviewer #1 (accuracy) — APPROVE WITH
+CORRECTIONS, 1 item, incorporated. Reviewer #2 (adequacy) — APPROVE WITH
+ADDITIONS, 7 items, all incorporated; explicitly found no issue with the
+change's fundamental scope, phasing, or stack pick. Proposer (this session)
+accepts all findings as correct. 3/3 agreement reached on this revision —
+implementation may begin.
+
 ### CC-LAB-0069 — real live-boot verification that `orm_entity_bulk_assign`'s php_laravel sink safely quotes an adversarial column-name key (FR-LAB-63) (2026-09-22)
 - Change: `CC-LAB-0064`'s php_current sink (`fuzzlab/labgen/modules/sinks/
   orm_entity_bulk_assign.php.j2`) got a real, executed adversarial test for its
