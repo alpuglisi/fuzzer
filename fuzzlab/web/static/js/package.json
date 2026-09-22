@@ -1,5 +1,0 @@
-{
-  "private": true,
-  "type": "module",
-  "description": "Declares these static/js/*.js files as ES modules for Node's module resolver (tests/js/*.test.mjs imports them with `node --test`; never fetched by the browser, which already treats <script type=\"module\"> as ESM regardless of this file, and there is still no build step/bundler)."
-}
