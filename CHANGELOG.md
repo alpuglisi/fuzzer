@@ -13,6 +13,15 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- Docs: added `docs/research/category3-saas-functionality-and-cwe-research.md`
+  — closes the §0a items 2-3 functionality/CWE research gap for category 3's
+  two picks (Slack, Atlassian) and records Phase C's page/vulnerability-class
+  design for the two new apps ("Huddle Hub", "TrackerNest"): webhook-
+  signature-verification bypass, SSRF, and header injection for Huddle Hub;
+  server-side template/expression injection (OGNL-shaped, per real
+  CVE-2021-26084/CVE-2022-26134), XXE, and insecure deserialization for
+  TrackerNest — all classes currently unbuilt in any `lab/manifests/*.yaml`,
+  chosen for breadth per the plan's own §0a item 4 constraint.
 - Docs: `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4/§9.2/§9.6 —
   category 3 (SaaS/productivity/collaboration) claimed as piloting on
   `claude/category-3-build-iuu5k9`, reserved `CC-LAB-0090`-`0119`, and
