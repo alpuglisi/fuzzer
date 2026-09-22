@@ -104,3 +104,61 @@
   cwe: [CWE-639, CWE-862, CWE-306]
   suggested_op: ownership_check_after_fetch
   suggested_sink_family: db_row_by_id_lookup
+
+# --- added by docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md wave 2,
+# category 3 (SaaS/productivity/collaboration), architecture:
+# wekan-board-membership. The idiomatic side is verbatim Wekan core (MIT) --
+# the board's own isVisibleBy()/isActiveMember() membership-check methods.
+# The vulnerable side is a manufactured API route that fetches a board by
+# ID without calling either method, the same "endpoint added later, forgot
+# the existing check" shape this cell's GuusK::disruptIT pair (above)
+# documents for a ticket resource instead of a board. Commit pinned via
+# `git ls-remote https://github.com/wekan/wekan.git HEAD` at collection
+# time (2026-09-22).
+
+- file: idiomatic-wekan-board-1.js
+  role: idiomatic
+  architecture: wekan-board-membership
+  repo: wekan/wekan
+  commit_sha: 196c56769bbe246933076038f150bc4929174477
+  license: MIT
+  copyright: "Copyright (c) Lauri Ojansivu"
+  tutorial_or_course_project: false
+  pattern: "Board.isVisibleBy(user)/isActiveMember(userId): public boards are visible to everyone, private boards require the caller to be a logged-in, active member -- the membership-check primitive the vulnerable side's route skips calling"
+  notes: >
+    Verbatim excerpt of the isVisibleBy/isActiveMember method pair. Source
+    file path in the origin repo: models/boards.js.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe: []
+  suggested_op: membership_check_helper   # this is the check *definition*,
+                             # not a call site -- distinct from
+                             # ownership_check_after_fetch (GuusK entry,
+                             # above), which is a route that calls its
+                             # equivalent check inline. Proposed as new.
+  suggested_sink_family: keyed_resource_lookup
+
+- file: vulnerable-wekan-board-1.js
+  role: vulnerable
+  architecture: wekan-board-membership
+  derived_from: idiomatic-wekan-board-1.js
+  repo: wekan/wekan
+  commit_sha: 196c56769bbe246933076038f150bc4929174477
+  license: MIT
+  copyright: "Copyright (c) Lauri Ojansivu"
+  tutorial_or_course_project: false
+  pattern: "manufactured: a GET /api/boards/:boardId route that calls Boards.findOne({ _id: boardId }) directly and returns it, with no isVisibleBy()/isActiveMember() check -- IDOR/BOLA on the board object reference (CWE-639/862)"
+  notes: >
+    Manufactured per docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 3's "Pair
+    generation" methodology. No dynamic-execution validation available in
+    this session's environment; validated at the structural/manual-review
+    tier only.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe: [CWE-639, CWE-862]
+  suggested_op: no_ownership_check   # same shape/name already established
+                             # by this cell's other vulnerable entries
+                             # (GuusK, node-file below) -- reused
+  suggested_sink_family: db_row_by_id_lookup

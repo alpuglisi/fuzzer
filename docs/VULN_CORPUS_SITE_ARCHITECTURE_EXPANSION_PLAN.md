@@ -303,9 +303,14 @@ revision, is scoped as:
 - **2 of the 6 categories get Steps 2-7 carried through in this pass**:
   category 1 (e-commerce/marketplaces) and category 2 (social/UGC), chosen
   as the two feeding the base plan's two highest-signal existing rows (row 6
-  and row 3, both priority 9). The remaining 4 categories get Step 1 only in
-  this wave; Steps 2-7 for those are follow-up work, tracked in this plan's
-  Status section below rather than attempted incompletely here.
+  and row 3, both priority 9). The remaining 4 categories got Step 1 only in
+  wave 1.
+  **Superseded:** per explicit instruction not to defer, wave 2 (same
+  session) carried Steps 2-7 through for all 4 remaining categories as
+  well — see this plan's Status section for wave 2's results. The "one
+  category at a time, defer the rest" sequencing below described wave 1's
+  actual scope at the time it was written; it is not a hard rule that
+  blocks a later wave from doing more once asked.
 - **Within each of the 2 executed categories: one concrete
   architecture/function combination is carried all the way through Step 8's
   proposal stage** (not full `safety_matrix.yaml` integration — see below).
@@ -352,9 +357,24 @@ revision, is scoped as:
       (`hook_delegated_recompute`/`trust_client_price_input` for category 1;
       `default_autoescape` reused/`raw_concat` reused for category 2). Not
       yet applied to `lab/safety_matrix.yaml` — see below.
-- [ ] Categories 3-6 (SaaS, media/streaming, travel/booking, fintech):
-      Step 1 only in this wave (done, see the survey doc); Steps 2-7
-      deferred to a follow-up wave.
+- [x] Wave 2 (not deferred, per explicit instruction): Steps 2-7 for the
+      remaining 4 categories, one architecture/function combination each —
+      `wekan-board-membership` (JS/Node, MIT, category 3 SaaS/collaboration)
+      added to `docs/research/corpus-examples/access-control/node/`,
+      CWE-639/862; `peertube-video-upload` (TS/Node, AGPL-3.0-or-later,
+      category 4 media/streaming) added to `docs/research/corpus-examples/
+      file-handling/node/`, CWE-434; `qloapps-booking` (PHP, OSL-3.0,
+      category 5 travel/booking) added to `docs/research/corpus-examples/
+      ecommerce-logic/php/`, CWE-840/CWE-20; `firefly-blocked-account-gate`
+      (PHP, AGPL-3.0-or-later, category 6 fintech) added to
+      `docs/research/corpus-examples/auth-session/php/`, CWE-287/CWE-613.
+      All 4 pairs are real, license-verified, commit-pinned source plus a
+      manufactured vulnerable counterpart, validated at the static/
+      manual-review tier (same environment constraint as wave 1), with
+      Step 8 stopping at the `suggested_op`/`suggested_sink_family`
+      proposal stage. `docs/research/site-architecture-survey.md` Step 2
+      write-ups completed for all 6 categories (previously categories 1-2
+      only).
 - [ ] `lab/safety_matrix.yaml` integration: explicitly out of scope for this
       wave — tracked as follow-up component-change work (its own
       `docs/components/<n>-*/change-control.md` entry, per `CLAUDE.md`), not

@@ -14,6 +14,29 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Research: executed wave 2 of the site-architecture corpus expansion
+  (`docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`), per explicit
+  instruction not to defer categories 3-6. Completed Step 2 (architecture
+  write-ups, sourced) for all 4 remaining categories in `docs/research/
+  site-architecture-survey.md` (SaaS/collaboration, media/streaming,
+  travel/booking, fintech — 20 sites), and carried Steps 3-7 through for one
+  real architecture/function combination per category: `wekan-board-
+  membership` (JS, MIT) added to `docs/research/corpus-examples/
+  access-control/node/manifest.yaml` (CWE-639/862); `peertube-video-upload`
+  (TS, AGPL-3.0-or-later) added to `docs/research/corpus-examples/
+  file-handling/node/manifest.yaml` (CWE-434); `qloapps-booking` (PHP,
+  OSL-3.0) added to `docs/research/corpus-examples/ecommerce-logic/php/
+  manifest.yaml` (CWE-840/CWE-20); `firefly-blocked-account-gate` (PHP,
+  AGPL-3.0-or-later) added to `docs/research/corpus-examples/auth-session/
+  php/manifest.yaml` (CWE-287/CWE-613). Same methodology as wave 1: real,
+  license-verified, commit-pinned source paired with a manufactured
+  vulnerable counterpart, validated at the static/manual-review tier only
+  (no dynamic sandbox in this environment), CWE identification citing the
+  MITRE CWE index, Step 8 stopping at the `suggested_op`/
+  `suggested_sink_family` proposal stage (no `lab/safety_matrix.yaml`
+  change). All 6 categories now have both Step 1 (site list) and Step 2
+  (architecture write-up) complete; one architecture/function combination
+  per category has been carried through the full pipeline to Step 8.
 - Bookkeeping: added an `ERROR_LOG.md` entry for the Semgrep-panics-at-import
   environment issue hit while validating wave 1 below (Status: Environment —
   not a `fuzzlab` code defect, so no `docs/bugs/` report applies).

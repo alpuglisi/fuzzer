@@ -67,3 +67,62 @@
   cwe: [CWE-22]
   suggested_op: realpath_confine
   suggested_sink_family: fs_path_read
+
+# --- added by docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md wave 2,
+# category 4 (media/streaming/content platforms), architecture:
+# peertube-video-upload. The idiomatic side is verbatim PeerTube core
+# (AGPL-3.0-or-later) -- the real mimetype-allowlist check every video
+# upload passes through. The vulnerable side is a manufactured simplified
+# upload handler that skips it, trusting the client-declared filename/
+# Content-Type outright. Commit pinned via `git ls-remote
+# https://github.com/Chocobozzz/PeerTube.git HEAD` at collection time
+# (2026-09-22).
+
+- file: idiomatic-peertube-upload-1.ts
+  role: idiomatic
+  architecture: peertube-video-upload
+  repo: Chocobozzz/PeerTube
+  commit_sha: faa76bad2c1969a088ef1df38dc666dfe7259b5c
+  license: AGPL-3.0-or-later
+  tutorial_or_course_project: false
+  pattern: "commonVideoFileChecks(): rejects the upload with 415 unless isVideoFileMimeTypeValid(files) passes (mimetype allowlist against CONSTRAINTS_FIELDS.VIDEOS.EXTNAME), before any size/quota check runs"
+  notes: >
+    Verbatim excerpt (single function only, per the AGPL-3.0 copyleft-
+    handling rule). Source file path in the origin repo:
+    server/core/middlewares/validators/videos/shared/video-validators.ts.
+    **License note: AGPL-3.0-or-later (copyleft) -- do not let this
+    snippet or its manufactured pair below quietly seed an emitter/module
+    template without this flag surviving; Step 8 of the site-architecture
+    plan already stops at the proposal stage for exactly this reason.**
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe: []
+  suggested_op: mime_type_check   # same op already established for this
+                             # cell's PHP entries (no_extension_check's
+                             # paired mitigation) -- reused across languages
+  suggested_sink_family: fs_web_root_write
+
+- file: vulnerable-peertube-upload-1.ts
+  role: vulnerable
+  architecture: peertube-video-upload
+  derived_from: idiomatic-peertube-upload-1.ts
+  repo: Chocobozzz/PeerTube
+  commit_sha: faa76bad2c1969a088ef1df38dc666dfe7259b5c
+  license: AGPL-3.0-or-later
+  tutorial_or_course_project: false
+  pattern: "manufactured: an upload handler that moves the posted file into the public videos directory using its client-supplied originalname, with no equivalent of isVideoFileMimeTypeValid() -- CWE-434 unrestricted upload"
+  notes: >
+    Manufactured per docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 3's "Pair
+    generation" methodology. No dynamic-execution validation available in
+    this session's environment; validated at the structural/manual-review
+    tier only.
+    **License note: derived from AGPL-3.0-or-later code -- see the
+    idiomatic entry's license note above; the same caution applies here.**
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe: [CWE-434]
+  suggested_op: no_extension_check   # same op already established for
+                             # this cell's PHP entries -- reused
+  suggested_sink_family: fs_web_root_write

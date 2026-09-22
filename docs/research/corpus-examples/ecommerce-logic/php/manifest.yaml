@@ -155,6 +155,74 @@
                              # (hamzamamdouh298/shop_4K); proposed as new
   suggested_sink_family: payment_charge_amount
 
+# --- added by docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md wave 2,
+# category 5 (travel/booking/marketplaces), architecture: qloapps-booking.
+# The idiomatic side is a trimmed excerpt of QloApps core (OSL-3.0) --
+# Cart::getOrderTotal(), the server-side entry point that recomputes a
+# booking's total from cart contents. The vulnerable side is a manufactured
+# custom payment-module callback that trusts a posted total instead of
+# calling it -- the same CWE-840 shape as this cell's woocommerce-cart-hook
+# pair above, in a different real architecture (QloApps/PrestaShop-family
+# hotel-booking engine vs. WooCommerce e-commerce). suggested_op/
+# suggested_sink_family are reused from that pair rather than restated as
+# new, since the mechanism is identical. Commit pinned via `git ls-remote
+# https://github.com/Qloapps/QloApps.git HEAD` at collection time
+# (2026-09-22).
+
+- file: idiomatic-qloapps-booking-1.php
+  role: idiomatic
+  architecture: qloapps-booking
+  repo: Qloapps/QloApps
+  commit_sha: de6ecd72f0ce73750bea8d653c47efd9e2eb837b
+  license: OSL-3.0
+  tutorial_or_course_project: false
+  pattern: "Cart::getOrderTotal() signature and its Adapter_ProductPriceCalculator dependency wiring -- the real server-side entry point booking totals are always recomputed through, never taken from a client-supplied total"
+  notes: >
+    Trimmed excerpt (method signature and dependency setup only, per the
+    OSL-3.0 copyleft-handling rule -- the ~150-line tax/rounding/discount
+    body is omitted as not illustrative of this specific contrast).
+    Source file path in the origin repo: classes/Cart.php.
+    **License note: OSL-3.0 (copyleft) -- do not let this snippet or its
+    manufactured pair below quietly seed an emitter/module template
+    without this flag surviving; Step 8 of the site-architecture plan
+    stops at the proposal stage for exactly this reason.**
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe: []
+  suggested_op: server_recomputed_amount   # same top-level property as
+                             # idiomatic-1.php above (server derives the
+                             # amount, never trusts a client value) --
+                             # reused despite the different delegation
+                             # mechanism (service-locator adapter here vs.
+                             # inline DB lookup there)
+  suggested_sink_family: payment_charge_amount
+
+- file: vulnerable-qloapps-booking-1.php
+  role: vulnerable
+  architecture: qloapps-booking
+  derived_from: idiomatic-qloapps-booking-1.php
+  repo: Qloapps/QloApps
+  commit_sha: de6ecd72f0ce73750bea8d653c47efd9e2eb837b
+  license: OSL-3.0
+  tutorial_or_course_project: false
+  pattern: "manufactured: a custom payment-module postProcess() that reads Tools::getValue('total_price') from the request and passes it straight to validateOrder() as the charge amount, instead of calling $cart->getOrderTotal() -- CWE-840 price tampering, same shape as this cell's woocommerce-cart-hook vulnerable entry"
+  notes: >
+    Manufactured per docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 3's "Pair
+    generation" methodology. No dynamic-execution validation available in
+    this session's environment; validated at the structural/manual-review
+    tier only.
+    **License note: derived from OSL-3.0 code -- see the idiomatic entry's
+    license note above; the same caution applies here.**
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe: [CWE-840, CWE-20]
+  suggested_op: trust_client_price_input   # same op as this cell's
+                             # woocommerce-cart-hook vulnerable entry --
+                             # reused, identical mechanism
+  suggested_sink_family: payment_charge_amount
+
 # Skipped for no license (cited/described in prose only, per this
 # corpus's license-handling rule -- no source text copied from any of
 # these):

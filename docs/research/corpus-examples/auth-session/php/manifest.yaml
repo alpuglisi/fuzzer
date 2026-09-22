@@ -77,3 +77,68 @@
   cwe: [CWE-330]
   suggested_op: csprng_token
   suggested_sink_family: session_token_generation
+
+# --- added by docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md wave 2,
+# category 6 (fintech/payments), architecture: firefly-blocked-account-gate.
+# The idiomatic side is verbatim Firefly III core (AGPL-3.0-or-later) --
+# blocked-account status is re-validated by Authenticate middleware on
+# every request, not just at login (handle() calls authenticate(), which
+# reaches validateBlockedUser() on each request cycle). The vulnerable side
+# is a manufactured login controller where the same check runs only once,
+# at login time, with no per-request middleware re-validation -- a distinct
+# mechanism from this cell's existing JWT-alg and token-entropy entries, so
+# new op/sink_family names are proposed rather than reused. Commit pinned
+# via `git ls-remote https://github.com/firefly-iii/firefly-iii.git HEAD`
+# at collection time (2026-09-22).
+
+- file: idiomatic-firefly-blocked-check-1.php
+  role: idiomatic
+  architecture: firefly-blocked-account-gate
+  repo: firefly-iii/firefly-iii
+  commit_sha: 24dba21e4c44ebd6e41929ad4f53cd8c92ce6152
+  license: AGPL-3.0-or-later
+  tutorial_or_course_project: false
+  pattern: "validateBlockedUser(), called from the Authenticate middleware's handle() on every request (not just at login): logs the user out and throws AuthenticationException if their account is currently marked blocked"
+  notes: >
+    Verbatim excerpt (single method only, per the AGPL-3.0 copyleft-
+    handling rule). Source file path in the origin repo:
+    app/Http/Middleware/Authenticate.php.
+    **License note: AGPL-3.0-or-later (copyleft) -- see this cell's other
+    AGPL notes; Step 8 of the site-architecture plan stops at the proposal
+    stage for exactly this reason.**
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe: []
+  suggested_op: per_request_status_revalidation   # distinct mechanism from
+                             # this cell's jwt_alg_*/csprng_token/
+                             # weak_prng_token ops -- proposed as new
+  suggested_sink_family: session_authorization_state   # proposed as new;
+                             # none of this cell's existing families
+                             # (jwt_signature_verification,
+                             # session_token_generation) fit an
+                             # authorization-state-recheck shape
+
+- file: vulnerable-firefly-blocked-check-1.php
+  role: vulnerable
+  architecture: firefly-blocked-account-gate
+  derived_from: idiomatic-firefly-blocked-check-1.php
+  repo: firefly-iii/firefly-iii
+  commit_sha: 24dba21e4c44ebd6e41929ad4f53cd8c92ce6152
+  license: AGPL-3.0-or-later
+  tutorial_or_course_project: false
+  pattern: "manufactured: LoginController::login() checks blocked status once, inline, at login time only -- no equivalent check runs on later requests in the same session, so an account blocked mid-session stays fully authorized until the session naturally expires (CWE-287/CWE-613)"
+  notes: >
+    Manufactured per docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 3's "Pair
+    generation" methodology. No dynamic-execution validation available in
+    this session's environment; validated at the structural/manual-review
+    tier only.
+    **License note: derived from AGPL-3.0-or-later code -- see the
+    idiomatic entry's license note above; the same caution applies here.**
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe: [CWE-287, CWE-613]
+  suggested_op: login_time_only_check   # proposed as new, paired with
+                             # per_request_status_revalidation above
+  suggested_sink_family: session_authorization_state
