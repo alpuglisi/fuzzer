@@ -14,6 +14,17 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Planning: rewrote `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`
+  from scratch, per explicit instruction following `docs/bugs/BUG-0029-*.md`.
+  Restructures the 8 steps to be concise and executable, and replaces the
+  prior version's unenforced "more CWEs is better" prose (Step 6) with a
+  concrete per-entry research procedure, an explicit 2-CWE floor, and a
+  named mechanical enforcement path (`check-corpus-cwe-coverage.sh`). Keeps
+  the resolved scoping decisions (naming, frozen categories, confidence bar,
+  tooling constraints) from the prior version, tightened. Status section
+  reflects the real current state (waves 1-2 complete and CWE-remediated;
+  additional architecture/function combinations per category and dynamic-
+  tier validation remain open, explicitly, not silently deferred).
 - Bug fix: `docs/bugs/BUG-0029-corpus-expansion-agent-under-delivered-explicit-cwe-research-instruction.md`
   — the CWE research done for waves 1-2 of the site-architecture corpus
   expansion under-delivered `docs/VULN_CORPUS_EXPANSION_PLAN.md`/
