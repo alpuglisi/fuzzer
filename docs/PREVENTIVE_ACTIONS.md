@@ -277,3 +277,32 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   `docs/MULTI_AGENT_ORCHESTRATION.md` for the full rationale and the rejected
   alternatives (fragment files, batched reconciliation, fewer/larger lanes, a merge-queue
   bot).
+- **PA-0032** — Verification-fidelity is this project's single most common root-cause
+  shape (14 of the first 28 recorded bugs; see
+  `docs/reports/REPORT-0001-bug-log-trend-analysis.md`). Whenever a test, fixture,
+  self-test, or harness is authored **or extended to a new case** (a wider input, a new
+  manifest, a new environment, a new library/runtime version, a new endpoint or code
+  path), it must be built from, or checked against, a **real, captured instance** of what
+  the upstream producer, library, or environment actually does — a real library call's
+  actual return value, a real on-host run's actual output, a real server's actual
+  response — never a hand-authored approximation of what it is assumed to do. Repeat this
+  check at every point coverage is *extended*, not only at initial authoring — that is
+  where nearly every instance of this class actually surfaced. Generalizes and
+  cross-references PA-0006, PA-0008, PA-0009, PA-0010, PA-0011, PA-0013, PA-0015, PA-0016,
+  PA-0017, PA-0024, PA-0026, PA-0027, PA-0029, and PA-0030 — each a mechanism-specific
+  instance of this same shape, none superseded by this rule.
+- **PA-0033** — A preventive action must be worded at the level of the **underlying
+  mechanism** that produced the bug, never at the level of the specific **trigger or
+  symptom** that first surfaced it, and its PA-0002 sweep must enumerate every call
+  site/subcommand/path that shares that mechanism — not only the ones that share the
+  original trigger. Before considering a new preventive action finished, its author
+  states explicitly what the *mechanism* is (as distinct from the trigger) and checks at
+  least one plausible sibling path against that mechanism, even if that sibling path is
+  not currently failing. Generalizes PA-0018 (which re-scoped PA-0014 from "env/profile
+  change" to "any container recreate/remove operation" for one case) into a standing rule
+  for every future preventive action: the same failure mode recurred independently under
+  PA-0001 (→ BUG-0002, BUG-0025), PA-0003 (→ BUG-0007), PA-0010 (→ BUG-0024), PA-0014 (→
+  BUG-0017), and PA-0019 (→ BUG-0019) — five more times after PA-0018 first named the
+  shape, because PA-0018 itself was scoped only to container lifecycle rather than stated
+  as a rule about how *all* preventive actions must be worded. (from
+  `docs/reports/REPORT-0001-bug-log-trend-analysis.md`)

@@ -14,6 +14,18 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Bug-log retrospective: completed a project-wide trend analysis across all 28 recorded
+  bug investigations (`docs/reports/REPORT-0001-bug-log-trend-analysis.md`), reading each
+  in full and cross-tabulating root-cause shape, implicated libraries/tools, and the
+  activity underway when each surfaced. Found two dominant, repeating root-cause shapes
+  not previously named as such at the corpus level: (1) a test/fixture/self-test/harness
+  standing in for a real upstream/environment without being checked against what the real
+  thing actually produces (14/28 bugs — the single largest shape by far); (2) a prior
+  preventive action worded around its triggering symptom rather than its underlying
+  mechanism, so a sibling case recurred under a different trigger (9/28 bugs across 6
+  chains). Added **PA-0032** and **PA-0033** to `docs/PREVENTIVE_ACTIONS.md` to name both
+  shapes as standing rules, generalizing the many mechanism-specific PAs each shape had
+  already independently produced.
 - Governance: added a change-control gate to `CLAUDE.md` requiring the
   component change-control document to be completed before a change is
   implemented, and requiring two independently spawned AI agents to
