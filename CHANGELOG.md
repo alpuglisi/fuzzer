@@ -13,6 +13,29 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- LAB: started category 2 (Social/UGC platforms) of the 12-app multi-category
+  second-targets plan, on branch `claude/category-2-build-bomomg`, per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9's coordination
+  contract. Applied §9.1's site-pair methodology to category 2's 5
+  researched sites: excluded YouTube (infra-only, no portable
+  application-language claim) and Discord (realtime/Elixir, not a
+  request/response fit); picked Instagram (Python/Django — a new stack,
+  distinct from the existing `python_fastapi` async-API paradigm) and
+  Facebook (PHP/Hack — approximated via the existing `php_current`/
+  `php_laravel` stack rather than a new HHVM/Hack runtime emitter) as the
+  most architecturally distinct pair, dropping Reddit as redundant with
+  Instagram's (Python, synchronous monolith) group. Produced the
+  functionality research (real Instagram/Facebook feature sets, cited) and
+  stack-specific CWE research (Django- and PHP/Hack-idiomatic footguns tied
+  to those real features, cross-checked against `lab/safety_matrix.yaml`
+  for breadth) that §0a items 2-3 identified as missing —
+  `docs/research/category2-social-ugc-functionality-and-cwe-research.md`.
+  Registered the pick in the plan's §9.2 stack-reuse ledger (new Python/
+  Django row) and §9.4 tracker (category 2 -> Piloting, bookkeeping block
+  `CC-LAB-0090`-`0119` reserved). No component code changed yet — the
+  Django emitter build (Phase A) is next, gated on `CLAUDE.md`'s pre-change
+  review gate (change-control entry + 2 reviewer agents + 3/3 agreement),
+  not yet run.
 - Docs: renamed `docs/LAB_SECOND_TARGET_NODE_EXPRESS_PLAN.md` ->
   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` and added its §9,
   recording the project owner's answers to §0b's open questions: stack
