@@ -74,6 +74,49 @@ def test_prevalence_baseline_predicts_base_rate():
     assert m.predict_proba([[0.0], [9.0]]) == [0.3, 0.3]
 
 
+# --- per-step training callbacks (B0's GBT/logistic emitter, CC-ML-0009) -----
+
+def test_logistic_on_epoch_callback_fires_once_per_epoch_with_finite_loss():
+    X, y, _ = _dataset()
+    calls = []
+    LogisticRegression(epochs=15).fit(X, y, on_epoch=lambda step, m: calls.append((step, m)))
+    assert [c[0] for c in calls] == list(range(15))
+    for _, metrics in calls:
+        assert set(metrics) == {"train/loss", "train/l2_norm"}
+        assert all(math.isfinite(v) for v in metrics.values())
+    # loss should trend down over epochs of gradient descent
+    assert calls[-1][1]["train/loss"] < calls[0][1]["train/loss"]
+
+
+def test_logistic_fit_without_on_epoch_is_unaffected():
+    X, y, _ = _dataset()
+    baseline = LogisticRegression(epochs=15).fit(X, y).predict_proba(X)
+    with_cb = LogisticRegression(epochs=15).fit(
+        X, y, on_epoch=lambda step, m: None).predict_proba(X)
+    assert baseline == with_cb   # callback is purely observational
+
+
+def test_gbt_on_round_callback_fires_once_per_round_with_finite_loss():
+    from fuzzlab.ml.gbt import GradientBoostedTrees
+    X, y, _ = _dataset()
+    calls = []
+    GradientBoostedTrees(n_estimators=10).fit(
+        X, y, on_round=lambda step, m: calls.append((step, m)))
+    assert [c[0] for c in calls] == list(range(10))
+    for _, metrics in calls:
+        assert set(metrics) == {"train/loss", "train/mean_abs_update"}
+        assert all(math.isfinite(v) for v in metrics.values())
+
+
+def test_gbt_fit_without_on_round_is_unaffected():
+    from fuzzlab.ml.gbt import GradientBoostedTrees
+    X, y, _ = _dataset()
+    baseline = GradientBoostedTrees(n_estimators=10).fit(X, y).predict_proba(X)
+    with_cb = GradientBoostedTrees(n_estimators=10).fit(
+        X, y, on_round=lambda step, m: None).predict_proba(X)
+    assert baseline == with_cb   # callback is purely observational
+
+
 # --- conformal ---------------------------------------------------------------
 
 def test_conformal_decisions_and_calibration():

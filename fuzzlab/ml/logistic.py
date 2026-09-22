@@ -8,7 +8,7 @@ Advisory only: it scores/ranks candidates; it never writes labels.
 from __future__ import annotations
 
 import math
-from typing import Sequence
+from typing import Callable, Sequence
 
 
 def _sigmoid(z: float) -> float:
@@ -35,7 +35,16 @@ class LogisticRegression:
         return [[(row[j] - self._mean[j]) / self._std[j] for j in range(len(self._mean))]
                 for row in X]
 
-    def fit(self, X: Sequence[Sequence[float]], y: Sequence[int]) -> "LogisticRegression":
+    def fit(
+        self,
+        X: Sequence[Sequence[float]],
+        y: Sequence[int],
+        on_epoch: "Callable[[int, dict[str, float]], None] | None" = None,
+    ) -> "LogisticRegression":
+        """Fit by full-batch gradient descent. ``on_epoch``, if given, is called
+        after every epoch as ``on_epoch(step, {\"train/loss\": ..., \"train/l2_norm\": ...})``
+        with the (class-weighted) training log-loss and the L2 weight norm — purely
+        observational (metric emission), never touching the optimization path."""
         n, d = len(X), (len(X[0]) if X else 0)
         self._mean = [sum(r[j] for r in X) / n for j in range(d)]
         self._std = []
@@ -51,9 +60,10 @@ class LogisticRegression:
         w_pos = (n / (2.0 * pos)) if self.class_balanced else 1.0
         w_neg = (n / (2.0 * neg)) if self.class_balanced else 1.0
 
-        for _ in range(self.epochs):
+        for epoch in range(self.epochs):
             gw = [0.0] * d
             gb = 0.0
+            loss = 0.0
             for row, label in zip(Xs, y):
                 p = _sigmoid(sum(self._w[j] * row[j] for j in range(d)) + self._b)
                 weight = w_pos if label else w_neg
@@ -61,9 +71,14 @@ class LogisticRegression:
                 for j in range(d):
                     gw[j] += err * row[j]
                 gb += err
+                pc = min(1 - 1e-12, max(1e-12, p))
+                loss += weight * -(label * math.log(pc) + (1 - label) * math.log(1 - pc))
             for j in range(d):
                 self._w[j] -= self.lr * (gw[j] / n + self.l2 * self._w[j])
             self._b -= self.lr * (gb / n)
+            if on_epoch is not None:
+                l2_norm = math.sqrt(sum(w * w for w in self._w))
+                on_epoch(epoch, {"train/loss": loss / n, "train/l2_norm": l2_norm})
         return self
 
     def predict_proba(self, X: Sequence[Sequence[float]]) -> list[float]:

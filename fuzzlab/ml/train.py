@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 
+from fuzzlab.core.store import MetricLogger
 from fuzzlab.ml.baselines import PrevalenceBaseline, SigmaBaseline
 from fuzzlab.ml.conformal import ConformalGate
 from fuzzlab.ml.dataset import build_dataset
@@ -19,6 +20,26 @@ from fuzzlab.ml.logistic import LogisticRegression
 from fuzzlab.ml.metrics import group_kfold, pr_auc
 
 _MODELS = {"logistic": LogisticRegression, "gbt": GradientBoostedTrees}
+
+# Per-model ``metric_series`` source name (B0's GBT/logistic emitter,
+# CC-ML-0009): mirrors the existing subsystem-prefix convention (R-05).
+_METRIC_SOURCE = {"logistic": "logreg", "gbt": "gbt"}
+
+
+def _fit_with_metrics(model, X, y, store, run_id: int | None, name: str):
+    """Fit ``model`` on ``(X, y)``, emitting per-round/per-epoch scalars to
+    ``metric_series`` via :class:`MetricLogger` when ``run_id`` is given. Additive
+    only — with ``run_id is None`` (or an unrecognized model) this is exactly
+    ``model.fit(X, y)``."""
+    if run_id is None or name not in _METRIC_SOURCE:
+        return model.fit(X, y)
+    source = _METRIC_SOURCE[name]
+    with MetricLogger(store, run_id, source) as logger:
+        if name == "gbt":
+            return model.fit(X, y, on_round=lambda step, m: [
+                logger.log(k, step, v) for k, v in m.items()])
+        return model.fit(X, y, on_epoch=lambda step, m: [
+            logger.log(k, step, v) for k, v in m.items()])
 
 
 def _oof_scores(ds, model_factory, k: int) -> list[float]:
@@ -71,7 +92,8 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
         prevalence = pr_auc(ds.y, _oof_scores(ds, PrevalenceBaseline, k))
         sigma = pr_auc(ds.y, _oof_scores(ds, SigmaBaseline, k))
         gate = ConformalGate.calibrate(oof, ds.y, alpha=alpha)
-        model = _MODELS[name]().fit(ds.X, ds.y)          # deploy: fit on all data
+        model = _MODELS[name]()
+        _fit_with_metrics(model, ds.X, ds.y, store, run_id, name)   # deploy: fit on all data
         scores = model.predict_proba(ds.X)
         result.update(model=name, fallback=False, pr_auc=prauc,
                       baseline_prevalence=prevalence, baseline_sigma=sigma,

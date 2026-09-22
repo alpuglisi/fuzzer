@@ -14,6 +14,19 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- ML (`CC-ML-0009`, build lane B0 Wave 1b): wired per-round/per-epoch scalar
+  emission from `GradientBoostedTrees.fit`/`LogisticRegression.fit` (`fuzzlab/ml
+  /gbt.py`, `fuzzlab/ml/logistic.py`) into B0-table's `metric_series` sink via
+  `fuzzlab/ml/train.py`'s new `_fit_with_metrics` helper, using B0-table's
+  `MetricLogger` (`CC-CORE-0018`), so the classifier's training curves are
+  finally visible instead of only the end-of-run PR-AUC in `run_metrics`.
+  Additive/opt-in: a new `on_round`/`on_epoch` callback param on each model's
+  `fit()`, exercised only for the deploy fit and only when `train_and_score`
+  is given a `run_id`; existing training behavior/output is unchanged.
+  `source="gbt"`/`source="logreg"` per the subsystem-prefix schema note,
+  `key`s `train/loss`, `train/mean_abs_update` (GBT), `train/l2_norm`
+  (logistic).
+
 - LAB (`CC-LAB-0060`, `FR-LAB-57`, build lane T1): wired `fuzzlab.labgen
   .conformance.tier1`'s public API (`build_tier1_case`/`run_tier1_case`/
   `evaluate_tier1_response`) against a real in-process app+DB for the first

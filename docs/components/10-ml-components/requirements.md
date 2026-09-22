@@ -1,6 +1,6 @@
 # ML Components — Requirement Specification
 
-Component code: **ML** · Status: `[planned]` (Phases 5, 7, 10) · Last updated: 2026-09-21
+Component code: **ML** · Status: `[planned]` (Phases 5, 7, 10) · Last updated: 2026-09-22
 
 Related: `ARCHITECTURE.md` #10; `DECISIONS_AND_ROADMAP.md` (D1, D2, D10);
 `./change-control.md`.
@@ -32,6 +32,16 @@ the oracle owns truth (the oracle/advisory split).
   config change, not a code change.
 - **FR-ML-7** Train and evaluate against the lab's cell/transform splits with a
   permanent blind holdout, plus external validation (WAVSEP / Juice Shop) (D10).
+- **FR-ML-8 (training telemetry, CC-ML-0009)** When trained with a `run_id`, the
+  GBT and logistic classifiers (`FR-ML-1`) emit per-round/per-epoch scalar
+  training metrics (at minimum `train/loss`) to `core/`'s cross-run
+  `metric_series` sink (`log_scalar`/`MetricLogger`), under `source="gbt"` /
+  `source="logreg"` respectively, for the deploy fit only (not the per-fold
+  out-of-fold fits used for model selection/calibration). Without a `run_id`,
+  or when the training falls back to the prevalence baseline (no GBT/logistic
+  model is fit), no rows are emitted. Purely observational: emission never
+  changes what is fit or what scores/labels are written (`NFR-ML-advisory`,
+  `NFR-ML-reproducible` both hold unchanged).
 
 ## 4. Non-functional requirements
 - **NFR-ML-advisory** ML output is advisory: it can reorder, screen, or flag, but
@@ -47,6 +57,11 @@ the oracle owns truth (the oracle/advisory split).
 Reads `attempt`/`candidate`/`flow` features and oracle `finding` labels (for
 training); writes `candidate.score`, attempt scores/uncertainty, `model` rows
 (versions, calibration). Never writes `finding`. Runs as `core/` plugins.
+Optionally writes `core/`'s `metric_series` rows (`source="gbt"`/`"logreg"`,
+`key` a slash-delimited path such as `train/loss`) via `log_scalar`/
+`MetricLogger` when training is given a `run_id` (FR-ML-8) — read-only from
+ML's perspective of the rest of the system; no other component depends on
+these rows existing.
 
 ## 6. Dependencies (components)
 `core/`, the oracle (labels), and the component that produces each model's inputs
