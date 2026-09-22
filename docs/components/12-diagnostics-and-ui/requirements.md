@@ -89,6 +89,19 @@ bugs — the research-platform diagnostics of decision D2.
   forward from R1. Deep-linkable per-section routes, the Overview dashboard, and the Findings /
   Proxy rebuilds still follow in R1–R3, per `docs/UI_LAYOUT_REDESIGN.md`.)*
 
+- **FR-UI-9** The control panel is a true multi-page app: every top-level sidebar section
+  (Launcher, Proxy, Results, ML, Diagnostics) is served at its own GET route with its own
+  URL, is deep-linkable, and renders fully with JavaScript disabled (progressive
+  enhancement only, never a JS-only view). The current section is determined server-side
+  by the route handler and passed explicitly to the shared shell template, which renders
+  it as `aria-current="page"` on the matching sidebar link — never inferred from the URL
+  by client script. There is no client-side router; page-to-page navigation is native
+  browser `<a>`/`<form>` navigation. Section templates, per-section ES modules, and
+  per-section CSS partials are independent files so that a change to one section's
+  presentation cannot conflict with another's. *(Realized: Wave-0 lane U0, CC-UI-0025 —
+  supersedes the hash-based section switching described under FR-UI-7/FR-UI-8's
+  "Realized" notes, which is retired.)*
+
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is
   served separately from the vulnerable target (different origin/port; never in the

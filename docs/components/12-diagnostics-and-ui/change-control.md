@@ -3,6 +3,47 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0025 — Lane U0: MPA routes + asset split (retire hash-tab shell) (2026-09-22)
+- Change: replaced the single-page hash-switched shell (`templates/index.html`,
+  `static/app.js`, `static/app.css`, client-side `initTabs()`) with five real routes —
+  `/` (Launcher), `/proxy`, `/results`, `/ml`, `/diagnostics` — each its own Jinja2
+  template (`templates/sections/*.html`), ES module (`static/js/*.js`), and CSS partial
+  (`static/css/*.css`). `app.py` gains a single `NAV` list as the sidebar's source of
+  truth; each route handler passes an explicit `active` id (never derived from the
+  request path) that `base.html`'s nav loop compares to render `aria-current="page"`.
+  Shared browser chrome (theme/density/sidebar toggle, the proxy-status chip) and shared
+  HTTP helpers moved to `static/js/shell.js` / `static/js/http.js`, loaded on every page;
+  per-section behavior (`launcher.js`, `proxy.js`) loads only on its own route. The
+  existing no-FOUC inline theme/density script in `base.html`'s `<head>` is unchanged and
+  now runs on every full-page navigation, as required under an MPA. Added a skip-link +
+  `<main id="main" tabindex="-1" data-section>` landmark (WCAG 2.2 AA).
+- Impact (other components / project): this is the Wave-0 enabling refactor Wave-1 lanes
+  (U1 Overview, U2 Findings, U3 Proxy rebuild, U4 ML, U5 Diagnostics) build on — each gets
+  its own section/JS/CSS files to extend independently. Preserves the U0↔X0 activity-
+  grouping contract (`commandspec.py`'s `group` field, `app.py`'s `_group_activities`,
+  CC-UI-0024) unchanged — the Launcher's "Lab / authoring" group still renders. No-auto-
+  run, loopback-only, the `authorized` gate, and read-only-over-the-store are all
+  unchanged (no route added here writes result tables). U6 (control-plane hardening)
+  touches the same `app.py` and lands with or right after this change per the plan's wave
+  map — sequenced next.
+- Risk (level; mitigation): medium (touches the app's entire routing/template/asset
+  surface) — mitigated by a route/no-JS/active-nav test parametrized over every `NAV`
+  entry, updated content-invariant tests for every panel, updated browser-navigation
+  tests, and a new deep-link + active-nav Playwright smoke; full suite green at the
+  accepted baseline with no new failures.
+- Deliverables:
+  - [x] Real per-section routes + `NAV` source of truth + server-rendered active-nav —
+    done.
+  - [x] `templates/index.html` → `templates/sections/*.html` — done.
+  - [x] `static/app.js` → `static/js/{shell,http,launcher,proxy}.js`, `initTabs` retired
+    — done.
+  - [x] `static/app.css` → `static/css/*.css` per section — done.
+  - [x] Skip-link + `<main>` landmark — done.
+- Effectiveness (assessed 2026-09-22): effective — every section is reachable at its own
+  URL, deep-links work, TestClient's no-JS body renders each section correctly, and the
+  Playwright smoke confirms real-browser deep-link navigation + active-nav state; the
+  U0↔X0 grouping contract still renders correctly.
+
 ### CC-UI-0024 — Lane X0: register `lab-generate` in the launcher (own group) (2026-09-22)
 - Change: surfaced `fuzzlab lab-generate` as a launchable activity in the web launcher (Wave-0
   lane X0 of `docs/UI_IMPLEMENTATION_PLAN.md`). `fuzzlab/labgen/cli.py` already exposed

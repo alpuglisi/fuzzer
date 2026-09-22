@@ -14,6 +14,12 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- UI: retired the hash-tab single-page shell for real per-section MPA routes (`/`,
+  `/proxy`, `/results`, `/ml`, `/diagnostics`) — the Wave-0 enabling refactor Wave-1 lanes
+  (U1–U5) build on. Split `templates`/`static/app.js`/`static/app.css` per section, with
+  server-rendered active-nav (`aria-current="page"`) and no client-side router; added a
+  skip-link + `<main>` landmark. Preserves the U0↔X0 activity-grouping contract
+  (`CC-UI-0024`) (`CC-UI-0025`, `FR-UI-9`).
 - CORE/FUZZ/ML/MUT: added the `metric_series` per-step time-series table plus a central
   `open_store()` (WAL, `busy_timeout`, `synchronous=NORMAL`) and the `log_scalar`/
   `MetricLogger` write API (`CC-CORE-0018`, `FR-CORE-8`) — a backend prerequisite (UI lane

@@ -548,8 +548,12 @@ tracked in the requirements files, not here.
   change, hash-based section switching preserved; CC-UI-0021, FR-UI-8). The **Launch view** was
   then rebuilt as the approved **master-detail** — a grouped, gate-tagged activity picker →
   the selected activity's command-spec form (`initLaunchNav()`; CC-UI-0022), brought forward
-  from R1. R1 still adds deep-linkable per-section routes + an Overview dashboard, R2 a Findings
-  workbench, R3 a Proxy rebuild.
+  from R1. R1's deep-linkable per-section routes are now `[built]` (Wave-0 lane U0: the
+  hash-tab shell is retired for five real MPA routes — `/`, `/proxy`, `/results`, `/ml`,
+  `/diagnostics` — each with its own template/JS/CSS and server-rendered active-nav;
+  CC-UI-0025, FR-UI-9). **Pending:** the R1 Overview dashboard (U1), R2 Findings workbench
+  (U2), R3 Proxy rebuild (U3), the ML tab (U4), and the diagnostics tab (U5) — all now
+  unblocked and buildable independently on U0's per-section files.
   The backend `metric_series` per-step time-series table + `open_store()`/WAL +
   `log_scalar`/`MetricLogger` emitter API is now `[built]` (Phase 4b lane B0; CC-CORE-0018,
   FR-CORE-8), wired into the GBT/logistic training curve, bandit posterior/regret,
