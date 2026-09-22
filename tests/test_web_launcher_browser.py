@@ -113,8 +113,10 @@ def test_launcher_dry_run_and_run_in_browser(tmp_path):
                 arg=output.element_handle(), timeout=20000)
             assert "[exit" in output.inner_text()
 
-            # Proxy tab (Phase 2.1): switch tabs, see the seeded flow, open its detail.
-            page.click('nav.tabs a[data-tab="proxy"]')
+            # Proxy section (U0/CC-UI-0025): real navigation to /proxy, see the
+            # seeded flow, open its detail.
+            page.click('nav.tabs a[data-section="proxy"]')
+            page.wait_for_url("**/proxy")
             row = page.locator("#flow-table tbody tr").first
             row.wait_for(state="visible")
             assert "/product.php" in row.inner_text()

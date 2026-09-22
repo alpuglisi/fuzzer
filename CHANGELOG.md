@@ -14,6 +14,17 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- UI: lane U0 (`docs/UI_IMPLEMENTATION_PLAN.md` §3, `CC-UI-0025`) — replaced the
+  hash-switched single page with real per-section MPA routes (`/`, `/proxy`,
+  `/results`, `/ml`, `/diagnostics`), split `templates/index.html` into
+  `templates/sections/*.html`, `static/app.js` into per-section ES modules under
+  `static/js/` (plus a shared `common.js`/`shell.js`), and `static/app.css` into
+  per-section partials under `static/css/` (plus a shared `shell.css`); retired
+  the client-side `initTabs()` hash router (R-01) and gave the sidebar real
+  `href`s with server-rendered `aria-current="page"` active state. Converted the
+  Proxy "send to Repeater" pivot to POST/Redirect/GET with a 303 (R-07) — the tab
+  id travels as an opaque `?repeater_tab=` query hint, never raw request bytes —
+  as the enabling refactor every other Wave-1 UI lane depends on.
 - Planning: added `docs/PARALLEL_LANE_BUILD_PLAN.md`, organizing the
   remaining safe-to-build-now backlog (lab-track page migration + conformance
   wiring, UI/diagnostics tabs, M8/M10 mutation-oracle wiring) into pre-numbered,

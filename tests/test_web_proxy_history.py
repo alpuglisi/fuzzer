@@ -100,9 +100,10 @@ def test_api_flows_missing_store_is_empty_and_creates_nothing(tmp_path):
     assert not path.exists()
 
 
-def test_proxy_tab_renders_history_ui(tmp_path):
+def test_proxy_page_renders_history_ui(tmp_path):
+    # Proxy is its own route now (U0/CC-UI-0025), not a hash-switched panel on "/".
     path = tmp_path / "p.db"
     _seed(path)
-    body = _client(path).get("/").text
+    body = _client(path).get("/proxy").text
     assert 'id="flow-table"' in body and 'id="flow-search"' in body
-    assert 'id="tab-proxy"' in body
+    assert 'data-section="proxy"' in body

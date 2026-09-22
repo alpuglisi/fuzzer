@@ -637,12 +637,28 @@ tracked in the requirements files, not here.
   change, hash-based section switching preserved; CC-UI-0021, FR-UI-8). The **Launch view** was
   then rebuilt as the approved **master-detail** — a grouped, gate-tagged activity picker →
   the selected activity's command-spec form (`initLaunchNav()`; CC-UI-0022), brought forward
-  from R1. R1 still adds deep-linkable per-section routes + an Overview dashboard, R2 a Findings
-  workbench, R3 a Proxy rebuild.
-  **Pending:** the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
-  `metric_series` time-series table (Phase 4), Datasette-style store exploration, a
-  `--dry-run` mode, and a plain CLI entry point per tool for headless use
-  (`fuzzlab auto` exists today).
+  from R1.
+- **U0 — MPA routes + asset split (`docs/UI_IMPLEMENTATION_PLAN.md` §3, CC-UI-0025,
+  2026-09-22, the enabling refactor every Wave-1 UI lane depends on):** retired the
+  hash-based section switching from R0 in favor of **real per-section routes** —
+  `GET /` (Launcher), `/proxy`, `/results`, `/ml`, `/diagnostics`, plus `/runs/{id}` — each
+  independently deep-linkable, no-JS-renderable, and with server-computed sidebar active
+  state (`aria-current="page"`) from one `NAV` source of truth in `web/app.py`. Split
+  `templates/index.html` → `templates/sections/*.html`, `static/app.js` →
+  `static/js/{shell,common,launcher,proxy}.js`, `static/app.css` →
+  `static/css/{shell,launcher,proxy,results}.css` (D3: per-section modules/partials, no
+  bundler) — making U1–U5's sections file-disjoint. The Proxy "send to Repeater" pivot now
+  follows **POST/Redirect/GET with a 303** (R-07): a real `<form method="post">` to
+  `POST /proxy/repeater/from-flow`, then a 303 to `/proxy?repeater_tab=<id>` — an opaque id
+  only, never raw request bytes. Full-page MPA over HTMX per resolved R-01 (a loopback
+  full-page GET is sub-millisecond, so HTMX's benefit doesn't apply here).
+  Wave 1 (U1–U5) builds each section's real content on top of this split: an Overview
+  dashboard, a Findings workbench, a Proxy rebuild, the ML tab, and Diagnostics + store
+  explorer.
+  **Pending:** U1–U5 themselves (ML tab / Phase 3; the TensorBoard-like diagnostics tab +
+  a `metric_series` time-series table / Phase 4; Datasette-style store exploration), U6
+  control-plane hardening (Host/Origin/CSP on the new POST surface), a `--dry-run` mode,
+  and a plain CLI entry point per tool for headless use (`fuzzlab auto` exists today).
 - **Reproducible evaluation report** `[built]` (Phase 10 T10.4, `fuzzlab/report/`): a
   deterministic report over a stored run (run/config identity, target, counts, findings,
   metrics, deployed models, active plugins), canonical JSON for diffing; read-only

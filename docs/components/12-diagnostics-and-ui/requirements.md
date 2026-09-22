@@ -1,6 +1,6 @@
 # Diagnostics and UI — Requirement Specification
 
-Component code: **UI** · Status: `[planned]` · Last updated: 2026-09-21
+Component code: **UI** · Status: `[planned]` · Last updated: 2026-09-22
 
 Related: `ARCHITECTURE.md` #12; `DECISIONS_AND_ROADMAP.md` (D2, D5, D11);
 `./change-control.md`.
@@ -64,30 +64,50 @@ bugs — the research-platform diagnostics of decision D2.
   *(Realized: Phase 0.1 the command-spec registry, Phase 0.3 the dry-run/gated-run/SSE
   runner, Phase 1 the launcher UI — per-tool forms, dry-run preview, live output, the D14
   category picker, and the plugins panel.)*
-- **FR-UI-7** The panel is organized as a **tabbed shell**: **Launcher** (run controls),
-  **Proxy** (traffic review/edit/drop/forward/repeat), **Results** (runs dashboard),
-  **ML** (classifier/ranker/conformal/anomaly/active-learning/bandit/mutation — kept
-  **separate** from the primary panel), and **Diagnostics** (a TensorBoard-like view for
-  performance review and deep troubleshooting). Panels render server-side and degrade
-  without JavaScript. *(Realized incrementally: Phase 0.2 builds the shell + Results;
-  Proxy/ML/Diagnostics fill in Phases 2–4. Re-housed in the FR-UI-8 app shell at R0:
-  the five sections became a persistent left-sidebar nav, still switching the same
-  server-rendered `.panel` sections by hash — see D-UI-shell and CC-UI-0021.)*
+- **FR-UI-7** The panel is organized as a **multi-page app with real per-section
+  routes**: **Launcher** (`/`, run controls), **Proxy** (`/proxy`, traffic
+  review/edit/drop/forward/repeat), **Results** (`/results`, runs dashboard),
+  **ML** (`/ml`, classifier/ranker/conformal/anomaly/active-learning/bandit/mutation —
+  kept **separate** from the primary panel), and **Diagnostics** (`/diagnostics`, a
+  TensorBoard-like view for performance review and deep troubleshooting), plus
+  `/runs/{id}` (a Results sub-page). Each route is independently deep-linkable, renders
+  its full section server-side, and degrades fully without JavaScript (a plain GET on any
+  route returns the complete section). *(Realized incrementally: Phase 0.2 built the shell
+  + Results as hash-switched panels on one page; Proxy/ML/Diagnostics filled in Phases 2–4
+  the same way. **Superseded at U0 (CC-UI-0025, 2026-09-22)**: the hash-switched single
+  page and its client-side `initTabs()` router were retired in favor of the real routes
+  above — a full-page MPA per resolved marker R-01 in `UI_IMPLEMENTATION_PLAN.md`, chosen
+  over HTMX because a loopback full-page GET is sub-millisecond and HTMX's benefit doesn't
+  apply. State-mutating cross-section pivots (e.g. Proxy's "send to Repeater") follow
+  **POST/Redirect/GET with a 303** (R-07): the state-changing action is a real
+  `<form method="post">`, the redirect carries only an opaque id in the query string
+  (`?repeater_tab=`), and raw bytes never appear on the wire. U1–U5 build out each
+  section's content on top of this split.)*
 - **FR-UI-8** The panel is framed by an **app shell**: a persistent **left-sidebar
-  navigation** (grouped Workbench / Analysis sections) and a **top context bar** showing
-  the current target, scope, authorization state, and proxy status. The shell is shared by
-  every page (index, run detail, not-found) via one base template. A **design-token
-  stylesheet** (`tokens.css`) is the single source of truth for color, elevation, and
-  density; it supports **light / dark / system** theme (system by default, with an explicit
-  override) and a **compact density**, both persisted per-viewer in `localStorage` and
-  applied before first paint (no flash). The shell is chrome only: it changes no launcher /
-  proxy / results behavior and touches none of the NFR-UI invariants.
+  navigation** (grouped Workbench / Analysis sections, rendered from one `NAV` source of
+  truth as real `<a href>` links with server-computed active state —
+  `aria-current="page"` plus a non-color indicator, never color alone) and a **top context
+  bar** showing the current target, scope, authorization state, and proxy status. The
+  shell is shared by every route (every section, run detail, not-found) via one
+  `base.html` template; `app.py` computes the active section per request
+  (`_shell_context(cfg, active=...)`) rather than the client inferring it from a hash. A
+  **design-token stylesheet** (`tokens.css`) is the single source of truth for color,
+  elevation, and density; it supports **light / dark / system** theme (system by default,
+  with an explicit override) and a **compact density**, both persisted per-viewer in
+  `localStorage` and applied before first paint via an inline `<head>` script (no flash —
+  this script runs on every full-page MPA navigation, which is required under FR-UI-7's
+  real routes). The shell is chrome only: it changes no launcher / proxy / results
+  behavior and touches none of the NFR-UI invariants.
   *(Realized: R0 of the layout redesign — `base.html` shell, `tokens.css`, retokenized
   `app.css`, and `initShell()` for theme/density/collapse persistence + the proxy chip. The
   **Launch view** was then rebuilt as the approved **master-detail** (a grouped, gate-tagged
   activity picker → the selected activity's form; `initLaunchNav()`, CC-UI-0022) — brought
-  forward from R1. Deep-linkable per-section routes, the Overview dashboard, and the Findings /
-  Proxy rebuilds still follow in R1–R3, per `docs/UI_LAYOUT_REDESIGN.md`.)*
+  forward from R1. **U0 (CC-UI-0025, 2026-09-22)** split the shell's own assets into a
+  shared `css/shell.css` + `js/shell.js` (loaded on every route) plus one CSS partial and
+  one ES module per section (`css/<section>.css`, `js/<section>.js`, D3 — no bundler), and
+  gave the sidebar real per-section `href`s. The Overview dashboard and the Findings / Proxy
+  rebuilds still follow in Wave 1 (U1–U5), per `docs/UI_LAYOUT_REDESIGN.md` and
+  `docs/UI_IMPLEMENTATION_PLAN.md`.)*
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is
