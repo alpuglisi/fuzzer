@@ -32,6 +32,11 @@ the oracle owns truth (the oracle/advisory split).
   config change, not a code change.
 - **FR-ML-7** Train and evaluate against the lab's cell/transform splits with a
   permanent blind holdout, plus external validation (WAVSEP / Juice Shop) (D10).
+- **FR-ML-8** When given a `run_id`, `train_and_score`'s final full-data deploy fit (not
+  the OOF selection folds) emits `train/loss` metric_series points (source `gbt`/`logreg`
+  as appropriate) per round/epoch via `core.store.MetricLogger` (CC-CORE-0018), so a
+  future diagnostics UI tab can chart the training curve. Absent a `run_id`, behavior is
+  unchanged.
 
 ## 4. Non-functional requirements
 - **NFR-ML-advisory** ML output is advisory: it can reorder, screen, or flag, but

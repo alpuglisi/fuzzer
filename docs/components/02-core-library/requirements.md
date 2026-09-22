@@ -31,6 +31,22 @@ plugin registry. It is the layer that makes the store the integration bus.
 - **FR-CORE-6** Provide an HTTP send helper that requires a session context and
   records raw bytes.
 - **FR-CORE-7** Provide a plugin registry (entry points plus hooks).
+- **FR-CORE-8** Provide a `metric_series(run_id, source, key, step, ts, value)` table,
+  additive to `run_metrics`, for per-step time-series metrics (training curves, bandit
+  posterior/regret, coverage growth, mutation reward/novelty). `source` is a subsystem
+  bucket mirroring `run_metrics` prefixes (`gbt`, `logreg`, `bandit`, `coverage`, `rank`,
+  `ml`); `key` is a bounded, slash-delimited path (e.g. `train/loss`,
+  `posterior/arm_3/mean`) — never a per-example/per-feature key; distributions are stored
+  pre-binned, never raw. `value` is `REAL NOT NULL`; a non-finite value is rejected at
+  emit time (dropped + warned), never persisted. Indexed for both a single series
+  (`run_id, source, key, step`) and cross-run overlay queries (`source, key, run_id,
+  step`). All writes go through `core.store.log_scalar()` or the buffered
+  `core.store.MetricLogger` context manager — no other write path is permitted. All
+  SQLite connections are opened through `core.store.open_store()`, which sets
+  `journal_mode=WAL`, `busy_timeout=10000`, `synchronous=NORMAL`, `foreign_keys=ON`, and a
+  10s driver-level connect timeout; every writer loop uses one dedicated long-lived
+  connection pinned to its thread, and every read-then-write transaction uses `BEGIN
+  IMMEDIATE` (never relies on `busy_timeout` alone to rescue a DEFERRED-to-write upgrade).
 
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers

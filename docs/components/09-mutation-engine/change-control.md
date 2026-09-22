@@ -3,6 +3,26 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0008 — Emit reward/novelty metric_series from MutationSearch (2026-09-22)
+- Change: `MutationSearch` (`fuzzlab/mutation/search.py`) takes optional `store`/`run_id`
+  constructor args; when given, `search()` emits per-step `reward`/`novelty`
+  metric_series points (source `mutation`) via a buffered `core.store.MetricLogger`.
+  `run_mutation()` (`fuzzlab/mutation/run.py`) passes its own `store`/`run_id` through.
+- Impact (other components / project): read-only consumer of the CORE `metric_series`
+  table/API (CC-CORE-0018); a future UI diagnostics tab (Phase 4b) can chart mutation
+  search progress. No change to `MutationSearch`'s existing operator-selection, coverage-
+  climbing, or catalog-write behavior (FR-MUT-4/FR-MUT-6) — additive instrumentation
+  only, absent by default (no store/run_id → no-op).
+- Risk (level; mitigation): low — additive, optional-by-default. Mitigated by the
+  unchanged full suite (1395 passed / 23 skipped, same 6 pre-existing unrelated
+  failures) plus new unit tests over the emitted rows.
+- Deliverables:
+  - [x] `MutationSearch` optional `store`/`run_id` + per-step emission — done.
+  - [x] `run_mutation()` passes `store`/`run_id` through — done.
+- Effectiveness (assessed 2026-09-22): effective — emitted reward/novelty series match
+  the search's own step-by-step behavior in the new tests, with no change to the
+  existing search/catalog-write path.
+
 ### CC-MUT-0007 — Expose `build_parser()` for the command-spec registry (2026-09-21)
 - Change: `fuzzlab/mutation/cli.py` now factors its argparse setup into `build_parser()`;
   `main()` keeps the `p` reference (so `p.error(...)` still works) and delegates parsing.

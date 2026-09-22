@@ -550,10 +550,15 @@ tracked in the requirements files, not here.
   the selected activity's command-spec form (`initLaunchNav()`; CC-UI-0022), brought forward
   from R1. R1 still adds deep-linkable per-section routes + an Overview dashboard, R2 a Findings
   workbench, R3 a Proxy rebuild.
-  **Pending:** the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
-  `metric_series` time-series table (Phase 4), Datasette-style store exploration, a
-  `--dry-run` mode, and a plain CLI entry point per tool for headless use
-  (`fuzzlab auto` exists today).
+  The backend `metric_series` per-step time-series table + `open_store()`/WAL +
+  `log_scalar`/`MetricLogger` emitter API is now `[built]` (Phase 4b lane B0; CC-CORE-0018,
+  FR-CORE-8), wired into the GBT/logistic training curve, bandit posterior/regret,
+  coverage-frontier growth, and mutation reward/novelty emitters (CC-ML-0009, CC-FUZZ-0019,
+  CC-MUT-0008). Stage wall-clock/throughput emission is deferred (no single generic seam
+  across the harness/pipeline loops without restructuring them).
+  **Pending:** the ML tab (Phase 3), the TensorBoard-like diagnostics tab reading the now-
+  built `metric_series` table (Phase 4a), Datasette-style store exploration, a `--dry-run`
+  mode, and a plain CLI entry point per tool for headless use (`fuzzlab auto` exists today).
 - **Reproducible evaluation report** `[built]` (Phase 10 T10.4, `fuzzlab/report/`): a
   deterministic report over a stored run (run/config identity, target, counts, findings,
   metrics, deployed models, active plugins), canonical JSON for diffing; read-only

@@ -14,6 +14,15 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- CORE/FUZZ/ML/MUT: added the `metric_series` per-step time-series table plus a central
+  `open_store()` (WAL, `busy_timeout`, `synchronous=NORMAL`) and the `log_scalar`/
+  `MetricLogger` write API (`CC-CORE-0018`, `FR-CORE-8`) — a backend prerequisite (UI lane
+  B0, Phase 4b) for a future diagnostics tab to chart per-step metrics. Wired emitters into
+  the GBT/logistic training-curve deploy fit (`CC-ML-0009`, `FR-ML-8`), the bandit
+  posterior/regret loop in `Oracle.confirm` and the coverage-frontier growth loop in
+  `run_greybox` (`CC-FUZZ-0019`, `FR-FUZZ-8`), and `MutationSearch` reward/novelty
+  (`CC-MUT-0008`, `FR-MUT-7`). Stage wall-clock/throughput emission is deferred — no single
+  generic seam across the harness/pipeline loops without restructuring them.
 - LAB: made the metadata leakage probe a required `fuzzlab lab-generate --check` gate
   and gave it the per-class thresholds `docs/LAB_IMPLEMENTATION_PLAN.md` §2.3 decided on
   (lane L-P1.3, `CC-LAB-0045`, `FR-LAB-43`) — `leakage_probe.run_leakage_gate` now wraps

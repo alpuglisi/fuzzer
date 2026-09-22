@@ -30,6 +30,10 @@ feedback and the scheduler.
 - **FR-MUT-5** Optionally expand the catalog with an offline, **gated** LLM step
   (default off; human-reviewed before entries are trusted).
 - **FR-MUT-6** Write new payload candidates back into the catalog/attempts.
+- **FR-MUT-7** When given `store`/`run_id`, `MutationSearch.search()` emits per-step
+  `reward`/`novelty` metric_series points (source `mutation`) via
+  `core.store.MetricLogger` (CC-CORE-0018), so a future diagnostics UI tab can chart
+  search progress. Absent a store or run id, behavior is unchanged.
 
 ## 4. Non-functional requirements
 - **NFR-MUT-semantics** A mutation must preserve intended semantics; a validator

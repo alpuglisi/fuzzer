@@ -3,6 +3,42 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0018 — Add `metric_series` table + `open_store()`/WAL + `log_scalar`/`MetricLogger` (2026-09-22)
+- Change: additive migration 11 creates `metric_series(id, run_id, source, key, step, ts,
+  value)` — per-step time-series metrics (training curves, bandit posterior/regret,
+  coverage growth, mutation reward/novelty), complementing the existing per-run
+  `run_metrics` table. Two indexes: `(run_id, source, key, step)` for a single series,
+  `(source, key, run_id, step)` for cross-run overlay queries. `value REAL NOT NULL`;
+  non-finite values are rejected at emit time (dropped + `warnings.warn`), never stored —
+  no `is_nan` column, no NaN read-branch anywhere. Added a central `open_store()`
+  connection helper (`journal_mode=WAL`, `busy_timeout=10000`, `synchronous=NORMAL`,
+  `foreign_keys=ON`, `sqlite3.connect(path, timeout=10.0)`); existing `connect()` callers
+  are unaffected (`journal_mode=WAL` is idempotent — a harmless no-op on an already-WAL
+  store). Added `log_scalar(store, run_id, source, key, step, value, ts=None)`
+  (single-point, validated write) and `MetricLogger(store, run_id, source, flush_every=200,
+  flush_interval=1.0)` (buffered context manager; flushes via `executemany` under
+  `BEGIN IMMEDIATE ... COMMIT`; flushes on `__exit__` including on exception) as the sole
+  write path into `metric_series`.
+- Impact (other components / project): backend prerequisite (Phase 4b / UI lane B0) for a
+  future diagnostics UI tab to chart per-step metrics; also hardens the shared store's
+  SQLite concurrency model (WAL + `BEGIN IMMEDIATE` discipline) ahead of concurrent
+  readers/writers (UI polling, labgen, crawler, etc.). Consumed by FUZZ (`CC-FUZZ-0019`),
+  ML (`CC-ML-0009`), and MUT (`CC-MUT-0008`).
+- Risk (level; mitigation): low — additive schema change with a thin, idempotent
+  connection-setup helper; no existing store consumer's connection behavior changed.
+  Mitigated by the unchanged full suite (1395 passed / 23 skipped, same 6 pre-existing
+  environmental/unrelated failures as before this change) plus new migration/WAL/
+  `log_scalar`/`MetricLogger` unit tests.
+- Deliverables:
+  - [x] Migration 11 (`metric_series` + both indexes) — done.
+  - [x] `open_store()` (WAL/busy_timeout/synchronous/foreign_keys) — done.
+  - [x] `log_scalar` + non-finite rejection — done.
+  - [x] `MetricLogger` buffered emitter — done.
+- Effectiveness (assessed 2026-09-22): effective — migration applies cleanly to both a
+  fresh store and an already-populated pre-migration store; `PRAGMA journal_mode == 'wal'`
+  smoke test passes; four downstream components (ML/FUZZ/MUT, see their own entries) wired
+  real emitters against the new API with no regression.
+
 ### CC-CORE-0017 — Credentials keyed by bare hostname (BUG-0007) (2026-09-21)
 - Change: `CredentialStore` now normalizes the host to its bare hostname
   (`_norm_host`: strips scheme/port) on `set`/`get`/`require`/`delete`, so credentials

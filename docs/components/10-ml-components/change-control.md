@@ -3,6 +3,27 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0009 — Emit training-curve metric_series from the deploy fit (2026-09-22)
+- Change: `GradientBoostedTrees.fit`/`LogisticRegression.fit` (`fuzzlab/ml/gbt.py`,
+  `fuzzlab/ml/logistic.py`) gain additive `on_round`/`on_epoch` callback parameters.
+  `train_and_score()` (`fuzzlab/ml/train.py`) wires a `core.store.MetricLogger` into the
+  final full-data deploy fit only (not the OOF model-selection folds) when a `run_id` is
+  given, emitting `train/loss` metric_series points per round/epoch.
+- Impact (other components / project): read-only consumer of the CORE `metric_series`
+  table/API (CC-CORE-0018); a future UI diagnostics tab (Phase 4b) can chart training
+  curves. No change to `train_and_score`'s existing model-selection, scoring, or
+  `run_metrics` behavior — additive instrumentation only, absent by default (no `run_id`
+  → no-op).
+- Risk (level; mitigation): low — additive, optional-by-default. Mitigated by the
+  unchanged full suite (1395 passed / 23 skipped, same 6 pre-existing unrelated failures)
+  plus new unit tests over the callback wiring and the emitted rows.
+- Deliverables:
+  - [x] `on_round`/`on_epoch` callbacks on GBT/logistic `fit` — done.
+  - [x] `train_and_score` deploy-fit `train/loss` emission — done.
+- Effectiveness (assessed 2026-09-22): effective — the deploy fit's emitted series is
+  monotonically sensible over rounds/epochs in the new tests, with no change to the
+  existing model-selection/scoring path.
+
 ### CC-ML-0008 — Anomaly detector (ECOD) + XGBOD-style hybrid (T10.3) (2026-09-21)
 - Change: added the anomaly-detection tripwire (A.5). `fuzzlab/ml/anomaly.py::ECOD` is a
   parameter-free, pure-Python Empirical-CDF outlier detector (per-feature left/right/skew-

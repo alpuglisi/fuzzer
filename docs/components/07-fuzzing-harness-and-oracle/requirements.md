@@ -50,6 +50,12 @@ rewards) derives from it.
   sending anything.
 - **FR-FUZZ-7** Serialize timing-sensitive sends at concurrency 1 per host via the
   shared budget mutex.
+- **FR-FUZZ-8** When attached to a store and run (`store`/`run_id` provided),
+  `Oracle.confirm()` emits `posterior/<arm>/mean` and `regret/cumulative` metric_series
+  points (source `bandit`) after each scheduler update, and `run_greybox` emits
+  `coverage/lines` metric_series points (source `coverage`, the running
+  `CoverageFrontier` size) per probe — both via the buffered `core.store.MetricLogger`
+  (CC-CORE-0018). Optional/advisory: absent a store or run id, behavior is unchanged.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

@@ -3,6 +3,31 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0019 — Emit bandit posterior/regret + coverage-frontier metric_series (2026-09-22)
+- Change: `Oracle.confirm()` emits `posterior/<arm>/mean` and `regret/cumulative`
+  metric_series points (source `bandit`) after each `scheduler.update()` call, only when
+  both `store` and `run_id` are attached to the Oracle (optional — absent either, behavior
+  is unchanged). `run_greybox` (`fuzzlab/greybox/run.py`) emits `coverage/lines`
+  metric_series points (source `coverage`, the running `CoverageFrontier.size`) per probe
+  via a buffered `core.store.MetricLogger`, flushed at the end of the run. Both go through
+  the new `CC-CORE-0018` write API; no other write path touches `metric_series`.
+- Impact (other components / project): read-only consumer of the CORE `metric_series`
+  table/API (CC-CORE-0018); a future UI diagnostics tab (Phase 4b) can chart these series.
+  No change to `Oracle.confirm`'s finding-writing contract (FR-FUZZ-5) or to
+  `run_greybox`'s existing per-point differential-coverage reward logic (BUG-0016,
+  CC-FUZZ-0017) — the metric emission is additive instrumentation alongside it, not a
+  change to the reward/novelty computation.
+- Risk (level; mitigation): low — purely additive, optional-by-default (no store/run_id
+  → no-op) instrumentation. Mitigated by the unchanged full suite (1395 passed / 23
+  skipped, same 6 pre-existing unrelated failures) plus new unit/integration tests
+  asserting the emitted rows.
+- Deliverables:
+  - [x] `Oracle.confirm()` bandit posterior/regret emission — done.
+  - [x] `run_greybox` coverage-frontier growth emission — done.
+- Effectiveness (assessed 2026-09-22): effective — `tests/test_greybox_live.py::test_run_greybox_emits_coverage_frontier_growth_series`
+  and the oracle-side bandit emission tests confirm monotonically-sensible series are
+  recorded with no change to existing confirm/reward behavior.
+
 ### CC-FUZZ-0018 — Expose `build_parser()` for the command-spec registry (2026-09-21)
 - Change: the fuzz/oracle activities factor their argparse setup into `build_parser()`, with
   `main()` delegating — `fuzzlab/tools/blind_sqli_fuzzer.py` (`parse_args()` delegates;
