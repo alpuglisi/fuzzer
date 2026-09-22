@@ -209,6 +209,22 @@ class SpringBootLiveBootHarness:
         self._proc: subprocess.Popen | None = None
         self._port: int | None = None
 
+    @property
+    def app_dir(self) -> Path:
+        """The assembled app's real root directory (`CC-LAB-0092`) -- valid
+        only after ``build()``/``__enter__`` has run, and until ``close()``.
+        Public so a caller can reach real build output the harness itself
+        does not expose a dedicated method for (e.g. `target/classes`, for
+        the insecure-deserialization cell's live-boot test to run a small,
+        already-compiled Java helper against this exact assembled tree) --
+        the same private-attribute access
+        `tests/test_labgen_conformance_live_boot_mariadb.py` already reaches
+        for on `LiveBootHarness._app_dir` (`# noqa: SLF001`), made a real,
+        public, documented property here instead of repeating that pattern
+        a second time."""
+        assert self._app_dir is not None, "app_dir is only valid inside a build()'d/entered harness"
+        return self._app_dir
+
     # -- assembly ------------------------------------------------------------
 
     def _assemble(self) -> None:

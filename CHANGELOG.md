@@ -13,6 +13,22 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- `fuzzlab/labgen/emitters/spring_boot/`: TrackerNest's third and final
+  designed cell, insecure deserialization (`POST /integrations/webhook-
+  payload`, real `ObjectInputStream.readObject()`) — reuses two existing
+  `lab/safety_matrix.yaml` ops (no new entry needed), adds two fixed
+  skeleton support classes plus a test-only `SerializeFixtureTool` helper
+  that produces real Java-serialization-protocol fixture bytes (Python
+  cannot emit that wire format directly), a new public
+  `SpringBootLiveBootHarness.app_dir` property, and a `pom.xml`
+  `<mainClass>` fix for the now-two-`main()`s classpath. Real `mvn package`
+  + `java -jar` boot + real HTTP POST proves the differential: the
+  vulnerable twin constructs and reports an unexpected `Serializable`
+  type's name; the secure twin's `resolveClass()` allowlist rejects it with
+  a real HTTP 400 while still accepting the expected type. Closes
+  TrackerNest's full three-cell designed set (SSTI, XXE, insecure
+  deserialization) — 38 tests total for this stack, all passing.
+  `CC-LAB-0092`/`FR-LAB-66`.
 - `fuzzlab/labgen/emitters/spring_boot/`: TrackerNest's second cell, XXE
   (`POST /issues/import`, real `javax.xml.parsers.DocumentBuilderFactory`
   parse of the raw request body) — a new, additive

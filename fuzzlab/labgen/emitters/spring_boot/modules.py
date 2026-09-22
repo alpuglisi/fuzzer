@@ -165,6 +165,46 @@ class XmlExternalEntitiesDisabledSink(TemplateModule):
         )
 
 
+class RequestStreamSource(TemplateModule):
+    """A no-op source (`CC-LAB-0092`): the deserialization shape's sink
+    reads `request.getInputStream()` directly (binary data -- converting to
+    a `String` first, as `RawBodySource` does for the text-shaped XXE cell,
+    would corrupt it). Exists to keep this emitter's source/sink/complexity
+    composition contract uniform rather than special-casing this one shape
+    to skip a source module entirely."""
+
+    def __init__(self) -> None:
+        super().__init__("request_stream", "source", SOURCE_ENV, "request_stream.java.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = "request"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class FunctionExecutingDeserializeSink(TemplateModule):
+    """The vulnerable op (`CC-LAB-0092`): an unrestricted
+    `ObjectInputStream.readObject()` -- will construct any `Serializable`
+    class present on the classpath the stream names, matching
+    `lab/safety_matrix.yaml`'s `function_executing_deserialize` op
+    (CWE-502)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "function_executing_deserialize", "sink", SINK_ENV, "function_executing_deserialize.java.j2"
+        )
+
+
+class HandlerRegistryLookupSink(TemplateModule):
+    """The secure twin (`CC-LAB-0092`): a `resolveClass()`-override
+    allowlist permitting exactly one expected class name, matching
+    `lab/safety_matrix.yaml`'s `handler_registry_lookup` neutralizing op."""
+
+    def __init__(self) -> None:
+        super().__init__("handler_registry_lookup", "sink", SINK_ENV, "handler_registry_lookup.java.j2")
+
+
 class SingleHandlerComplexity(TemplateModule):
     def __init__(self) -> None:
         super().__init__("single_handler", "complexity", COMPLEXITY_ENV, "single_handler.java.j2")
@@ -184,6 +224,7 @@ class SingleHandlerComplexity(TemplateModule):
 SOURCES: dict[str, Module] = {
     "query_param": QueryParamSource(),
     "raw_body": RawBodySource(),
+    "request_stream": RequestStreamSource(),
 }
 #: Keyed by the op name that selects this sink (see this module's own
 #: docstring for why the op selects the sink here, not a pre-sink
@@ -193,6 +234,8 @@ SINKS: dict[str, Module] = {
     "file_loaded_template_name": FileLoadedTemplateNameSink(),
     "xml_external_entities_enabled": XmlExternalEntitiesEnabledSink(),
     "xml_external_entities_disabled": XmlExternalEntitiesDisabledSink(),
+    "function_executing_deserialize": FunctionExecutingDeserializeSink(),
+    "handler_registry_lookup": HandlerRegistryLookupSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_handler": SingleHandlerComplexity(),

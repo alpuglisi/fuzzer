@@ -1,5 +1,5 @@
-"""Conformance-suite pass for `spring_boot` (`CC-LAB-0090`/`CC-LAB-0091`,
-T-LAB0.7 Tiers 0/3).
+"""Conformance-suite pass for `spring_boot`
+(`CC-LAB-0090`/`CC-LAB-0091`/`CC-LAB-0092`, T-LAB0.7 Tiers 0/3).
 
 - Tier 0 (compile check): a real `mvn compile` of the checked-in skeleton
   overlaid with one cell's generated controller, skip-guarded on
@@ -41,12 +41,14 @@ from fuzzlab.labgen.emitters.spring_boot import SpringBootEmitter
 from fuzzlab.labgen.schema import load_manifest
 
 
-#: Every `spring_boot` manifest this stack has as of `CC-LAB-0091` (SSTI,
-#: `CC-LAB-0090`; XXE, `CC-LAB-0091`) -- both go through the same
-#: stack-agnostic Tier 0/3 checks below.
+#: Every `spring_boot` manifest this stack has as of `CC-LAB-0092` (SSTI,
+#: `CC-LAB-0090`; XXE, `CC-LAB-0091`; insecure deserialization, `CC-LAB-0092`
+#: -- TrackerNest's full, three-cell designed set) -- all go through the
+#: same stack-agnostic Tier 0/3 checks below.
 _MANIFEST_PATHS = [
     "lab/manifests/ssti_spring_boot_sample.yaml",
     "lab/manifests/xxe_spring_boot_sample.yaml",
+    "lab/manifests/insecure_deserialization_spring_boot_sample.yaml",
 ]
 
 
@@ -91,6 +93,8 @@ def test_ssti_and_xxe_manifests_render_to_disjoint_paths_when_combined() -> None
         ("lab/manifests/ssti_spring_boot_sample.yaml", "LABGEN-SSTI-0002"),
         ("lab/manifests/xxe_spring_boot_sample.yaml", "LABGEN-XXE-0001"),
         ("lab/manifests/xxe_spring_boot_sample.yaml", "LABGEN-XXE-0002"),
+        ("lab/manifests/insecure_deserialization_spring_boot_sample.yaml", "LABGEN-DESER-0001"),
+        ("lab/manifests/insecure_deserialization_spring_boot_sample.yaml", "LABGEN-DESER-0002"),
     ],
 )
 def test_tier0_mvn_compile_passes_for_each_cell(manifest_path: str, cell_id: str) -> None:

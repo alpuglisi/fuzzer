@@ -3,6 +3,132 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0092 — TrackerNest: insecure-deserialization cell, closing the three-cell set (FR-LAB-66) (2026-09-22)
+- Change: Extends `SpringBootEmitter`/`modules.py` with a third shape,
+  `(vuln_class="insecure_deserialization", sink_context.family="object_deserialization")`
+  — `POST /integrations/webhook-payload`, a real Java
+  `ObjectInputStream.readObject()` deserialization of the raw request body
+  (CWE-502). Reuses two **existing** `lab/safety_matrix.yaml` ops for this
+  sink_family (no new safety-matrix entry needed, unlike `CC-LAB-0091`'s
+  XXE entry): `function_executing_deserialize` (vulnerable — an
+  unrestricted `ObjectInputStream` that will construct any `Serializable`
+  class present on the classpath the stream names) and
+  `handler_registry_lookup` (secure — a `resolveClass()`-override allowlist
+  permitting exactly one expected class name, rejecting everything else
+  with `InvalidClassException`) — both already `neutralises`/`no_effect`
+  as needed, confirmed against the file directly. This is a deliberate
+  refinement of `CC-LAB-0090`'s original "Out of scope" wording ("a Jackson
+  mapper with polymorphic typing" as one option) down to the more specific
+  shape `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s own 2026-09-22
+  scoping note already recorded before this entry was drafted — cited here
+  for traceability, not restated as if newly decided.
+
+  Two new, fixed (not per-cell-generated) support classes checked into the
+  skeleton: `com.fuzzlab.trackernest.generated.WebhookEvent` (the
+  allowlisted, expected type) and `com.fuzzlab.trackernest.generated.UnexpectedType`
+  (a second, legitimately-`Serializable`-but-unexpected type, standing in
+  for whatever a real gadget-chain class would be, without actually
+  including one — no gadget chain, no RCE-capable class anywhere on this
+  classpath). Also checked into the skeleton:
+  `com.fuzzlab.trackernest.tools.SerializeFixtureTool` (a plain `main()`
+  class, no Spring dependency, compiled alongside the app but never invoked
+  by the running app itself) — verified end to end in a standalone
+  prototype before drafting this entry (compiled both support classes,
+  serialized instances of each, confirmed real Java-serialization-protocol
+  deserialization, with the allowlist correctly accepting `WebhookEvent`
+  bytes and rejecting `UnexpectedType` bytes with `InvalidClassException`).
+
+  **Harness change, an explicit deliverable** (the same class of gap
+  `CC-LAB-0091`'s own review caught for its fixture-file plan):
+  `SpringBootLiveBootHarness` gains a public `app_dir` property (previously
+  private, `_app_dir`, with no accessor — another test module in this repo
+  already reaches into the equivalent private attribute on the
+  `php_laravel` harness with a `# noqa: SLF001`, confirmed; this adds a
+  real, documented property instead of repeating that pattern here).
+  **Exact timing, stated explicitly:** the live-boot test enters
+  `with SpringBootLiveBootHarness(...) as harness:` (assembly + real
+  `mvn package`, which populates `target/classes` including the two new
+  support classes and the helper tool, + real boot all complete before the
+  `with` block's body runs), then invokes
+  `java -cp {harness.app_dir}/target/classes com.fuzzlab.trackernest.tools.SerializeFixtureTool <ClassName> <marker>`
+  to produce each fixture's real bytes. **Redundant-generation call made
+  explicitly:** each twin's live-boot test boots its own separate harness
+  instance (same-route twins are never booted together, per
+  `CC-LAB-0090`'s own precedent) and therefore regenerates both fixtures
+  against its own copy of `target/classes` rather than sharing bytes across
+  the two independent harness/test boundaries — accepted as-is (the
+  fixture classes are fixed/checked-in, byte-identical either way, and
+  regeneration is a sub-second local `java -cp` invocation, not a real
+  cost) rather than plumbing a shared-bytes mechanism for no measurable
+  benefit.
+
+  New manifest `lab/manifests/insecure_deserialization_spring_boot_sample.yaml`,
+  two cells. Live-boot proof: POST the real `WebhookEvent` fixture bytes to
+  both twins (both succeed, same shape); POST the real `UnexpectedType`
+  fixture bytes to both twins (vulnerable twin deserializes it and reports
+  the unexpected class's name in its response; secure twin returns a real
+  HTTP 400 naming the rejection). `pom.xml` gets
+  `<mainClass>com.fuzzlab.trackernest.TrackerNestApplication</mainClass>`
+  added to the `spring-boot-maven-plugin` config (currently a bare
+  `<plugin>` entry with no `<configuration>`) to disambiguate the
+  executable jar's entry point now that a second `main()`
+  (`SerializeFixtureTool`) exists in the tree. Tier 0 (`mvn compile`)/
+  Tier 3 (`regenerate_and_diff_emitter`) for the new cell.
+
+  **This closes TrackerNest's three-cell set** (SSTI `CC-LAB-0090`, XXE
+  `CC-LAB-0091`, insecure deserialization here) — the full page/
+  vulnerability-class design `docs/research/category3-saas-functionality-and-cwe-research.md`
+  §6b scoped for this app. **Explicitly still out of scope after this
+  entry**, restated per `CC-LAB-0090`/`CC-LAB-0091`'s own convention rather
+  than silently dropped: ground truth (`labels.json`/`injection-points.json`);
+  wiring into `multitarget.py`; "Huddle Hub" (the Slack pick, reusing
+  `php_laravel`, not yet started).
+- Impact (other components / project): Component 1 (LAB) only. No
+  safety-matrix change (reuses existing ops) — no existing manifest's
+  derived verdict changes. `pom.xml`'s new `<mainClass>` config is
+  additive/clarifying; re-verified that the SSTI/XXE cells' own live-boot
+  tests still pass unchanged with it present (see Effectiveness).
+- Risk (level; mitigation or accepted-risk justification): Low. No gadget
+  chain, no real RCE-capable class on the classpath — `UnexpectedType` is
+  an inert POJO with no dangerous method bodies. No JVM `SecurityManager`
+  is assumed or required (none is configured anywhere in this stack; the
+  allowlist design needs none). The live-boot test's fixture bytes are
+  generated fresh per test run by a helper this lab owns end to end, never
+  a downloaded/external payload.
+- Deliverables:
+  - [x] `WebhookEvent.java`/`UnexpectedType.java` skeleton support classes — done
+  - [x] `SerializeFixtureTool.java` skeleton helper — done
+  - [x] `SpringBootLiveBootHarness.app_dir` public property — done
+  - [x] `pom.xml` `<mainClass>` disambiguation — done (also fixed a real XML-comment `--` syntax error found while validating this exact edit — Maven's POM parser rejects `--` inside an XML comment; same class of mistake `CC-LAB-0090`'s own `pom.xml` header comments had already hit and fixed once)
+  - [x] `SpringBootEmitter` insecure-deserialization shape + 2 cells — done
+  - [x] `lab/manifests/insecure_deserialization_spring_boot_sample.yaml` — done
+  - [x] Live-boot test proving the real differential — done (`tests/test_labgen_spring_boot_deserialization_live_boot.py`, 2 tests, real `mvn package` + `java -jar` + real `SerializeFixtureTool`-generated bytes over real HTTP, both PASSED: the vulnerable twin constructs and reports `UnexpectedType` for bytes naming it; the secure twin returns a real HTTP 400 naming the rejection while still accepting real `WebhookEvent` bytes)
+  - [x] Tier 0/Tier 3 conformance — done (extended `tests/test_labgen_spring_boot_conformance.py` to a third manifest); `tests/test_labgen_spring_boot_deserialization.py` unit coverage (verdict/determinism/allowlist-presence/three-cell class-name disjointness) — 38/38 spring_boot tests passed in this sandbox (all three TrackerNest cells combined)
+  - [x] `requirements.md` FR-LAB-66 entry — done
+  - [x] `CHANGELOG.md` line — done
+- Effectiveness (assessed 2026-09-22): **met.** Every deliverable is real
+  and executed: a real `mvn package` builds the assembled skeleton+cell, a
+  real `java -jar` boots it, a real helper tool produces real Java-
+  serialization-protocol bytes against the harness's own compiled classes,
+  and a real HTTP POST with those bytes proves the payload differential for
+  both twins. Full non-slow suite re-run after this change: 1570 passed (up
+  from 1557 pre-`CC-LAB-0092`), 15 failed (the same pre-existing,
+  unrelated `gitleaks`-absence failures `CC-LAB-0090`/`0091`'s own
+  effectiveness notes already recorded — confirmed unchanged and unrelated
+  to `spring_boot`/deserialization/`TrackerNest`), 52 skipped — no
+  regression. This closes TrackerNest's full three-cell designed set.
+- Pre-change review gate: drafted, reviewed by 2 independent agents
+  (accuracy: no inaccuracies found, ACCURATE, with one traceability note
+  incorporated above — cite the plan doc's own prior refinement of
+  `CC-LAB-0090`'s wording rather than presenting the shape as newly
+  decided; adequacy: 4 findings — a missing public `app_dir` accessor
+  presented as if the plan already worked, unstated exact fixture-
+  generation timing, an unaddressed redundant-generation-across-twins
+  question, and a dropped out-of-scope-restatement convention — all
+  incorporated above). 3/3 agreement reached by incorporating every
+  concrete finding from both reviews without contesting any of them;
+  implementation proceeds on this revised entry.
+
 ### CC-LAB-0091 — TrackerNest: XXE cell, plus `xxe_entity_resolution`'s missing secure counterpart in `lab/safety_matrix.yaml` (FR-LAB-65) (2026-09-22)
 - Change: Four parts, revised after two-reviewer pre-change review (see
   below). (1) `lab/safety_matrix.yaml`: add one new, additive entry (no

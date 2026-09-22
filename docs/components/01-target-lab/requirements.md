@@ -1897,6 +1897,40 @@ lane) can submit a payload as
   designed cell, insecure deserialization; ground truth; `multitarget.py`
   wiring.
 
+- **FR-LAB-66** *(`spring_boot`: TrackerNest's third and final cell, insecure
+  deserialization; `CC-LAB-0092`, 2026-09-22).* Extends `FR-LAB-65`'s
+  `spring_boot` emitter with a third supported shape,
+  `(vuln_class="insecure_deserialization", sink_context.family="object_deserialization")`
+  — `POST /integrations/webhook-payload`, a real Java
+  `ObjectInputStream.readObject()` deserialization of the raw request body
+  (CWE-502). Reuses two **existing** `lab/safety_matrix.yaml` ops (no new
+  entry needed, unlike `FR-LAB-65`'s XXE addition):
+  `function_executing_deserialize` (vulnerable — unrestricted, constructs
+  any classpath-present `Serializable` type the stream names) and
+  `handler_registry_lookup` (secure — a `resolveClass()`-override allowlist
+  permitting exactly one expected class,
+  `com.fuzzlab.trackernest.generated.WebhookEvent`). Two new, fixed skeleton
+  support classes (`WebhookEvent`, `UnexpectedType` — an inert POJO
+  standing in for a real gadget-chain class, no RCE-capable code anywhere
+  on this classpath) and a test-only `SerializeFixtureTool` helper (a plain
+  `main()`, never Spring-managed) that produces real fixture bytes for the
+  live-boot proof, since Python cannot emit Java's serialization wire
+  format directly. Also adds `SpringBootLiveBootHarness.app_dir` (a public
+  property exposing the assembled app's real root directory, needed so the
+  live-boot test can run the fixture helper against the harness's own
+  compiled `target/classes`) and an explicit `<mainClass>` in `pom.xml`'s
+  `spring-boot-maven-plugin` config (disambiguating the executable jar's
+  entry point now that a second `main()` exists on the classpath).
+  Live-boot-proven: the vulnerable twin constructs and reports
+  `UnexpectedType` for bytes naming it; the secure twin returns a real HTTP
+  400 rejecting the same bytes while still correctly accepting real
+  `WebhookEvent` bytes. **This closes TrackerNest's full three-cell
+  designed set** (`FR-LAB-64` SSTI, `FR-LAB-65` XXE, this entry insecure
+  deserialization) per `docs/research/category3-saas-functionality-and-cwe-research.md`
+  sec 6b. **Still out of scope:** ground truth
+  (`labels.json`/`injection-points.json`); `multitarget.py` wiring; "Huddle
+  Hub" (the Slack pick, reusing `php_laravel`, not yet started).
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

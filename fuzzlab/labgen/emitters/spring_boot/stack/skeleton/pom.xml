@@ -63,6 +63,13 @@
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
+        <!-- CC-LAB-0092: explicit, since a second main() now exists on the
+             classpath (com.fuzzlab.trackernest.tools.SerializeFixtureTool,
+             a test-only helper, never Spring-managed); without this, the
+             repackage goal's main-class autodetection is ambiguous. -->
+        <configuration>
+          <mainClass>com.fuzzlab.trackernest.TrackerNestApplication</mainClass>
+        </configuration>
       </plugin>
     </plugins>
   </build>
