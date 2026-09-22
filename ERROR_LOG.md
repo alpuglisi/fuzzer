@@ -18,6 +18,39 @@ Format per entry:
 
 ---
 
+## 2026-09-22 — Corpus expansion: CWE research under-delivered the plan's explicit "more is better" instruction, recurring right after a related correction (fixed)
+
+- **Symptom:** every one of the 6 manufactured vulnerable/idiomatic pairs
+  added to `docs/research/corpus-examples/*/manifest.yaml` in waves 1-2 of
+  `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md` carried only 1-2
+  CWE IDs (several `cwe: []`), despite the plan's own Step 6 explicitly
+  stating "the more CWEs that are able to be implemented, the better" — and
+  the same shortfall recurred in wave 2 immediately after the user had
+  already corrected a different under-delivery (deferred category scope)
+  in the same conversation.
+- **Root cause:** CWE assignment was done by recall (the first plausible
+  CWE ID from memory) rather than by actually researching the MITRE CWE
+  index's class/parent/child/related-weakness structure for each entry's
+  mechanism; a written "more is better" instruction was treated as
+  satisfied once any CWE field was populated, with no mechanical check
+  forcing a real ceiling search. Same root-cause class as PA-0020 ("my own
+  missed self-check needs mechanical enforcement, not a clearer written
+  rule"), but PA-0020's existing enforcement (`check-error-log-bookkeeping.sh`)
+  is scoped only to `ERROR_LOG.md` bookkeeping, not to this deliverable —
+  see `docs/bugs/BUG-0029-*.md`'s "Prior-preventive-action failure
+  analysis" for the full account.
+- **Remediation:** re-researched and expanded all 6 existing entries' `cwe:`
+  lists against the MITRE index; added
+  `.claude/hooks/check-corpus-cwe-coverage.sh` (a new `Stop` hook) that
+  mechanically blocks the session from ending if a touched
+  `docs/research/corpus-examples/*/*/manifest.yaml` entry has fewer than 2
+  CWEs and no explicit rationale for the cap; rewrote
+  `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md` from scratch with
+  a Step 6 that names the actual research procedure and its enforcement
+  mechanism instead of repeating unenforced prose. New preventive action:
+  PA-0032 (`docs/PREVENTIVE_ACTIONS.md`).
+- **Status:** Fixed.
+
 ## 2026-09-22 — Research tooling: Semgrep installs but panics at import in this remote execution environment (Environment)
 
 - **Symptom:** following `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s Phase 3

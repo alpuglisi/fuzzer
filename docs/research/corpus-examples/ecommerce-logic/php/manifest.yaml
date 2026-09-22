@@ -114,7 +114,21 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
-  cwe: []
+  cwe: [CWE-602, CWE-840, CWE-20, CWE-345]
+  cwe_rationale: >
+    Researched against the MITRE CWE index (https://cwe.mitre.org/data/index.html)
+    for the trust-client-price mechanism this pair contrasts, not recalled:
+    CWE-602 (Client-Side Enforcement of Server-Side Security) is MITRE's own
+    canonical example for this exact shape -- its own description names an
+    e-commerce app that computes a price client-side and trusts the value
+    the client posts back; CWE-840 (Business Logic Errors) is the general
+    category this specific weakness instantiates; CWE-20 (Improper Input
+    Validation) is CWE-602's own listed parent relationship; CWE-345
+    (Insufficient Verification of Data Authenticity) applies because the
+    posted price is never checked against an authoritative source before
+    being trusted as a charge amount. Same rationale applies to this cell's
+    vulnerable-woocommerce-hook-1.php and both qloapps-booking entries
+    below, which share this exact mechanism -- not restated per entry.
   suggested_op: hook_delegated_recompute   # distinct mechanism from
                              # server_recomputed_amount (idiomatic-1.php,
                              # above) -- that one recomputes inline in the
@@ -148,7 +162,8 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
-  cwe: [CWE-840, CWE-20]
+  cwe: [CWE-602, CWE-840, CWE-20, CWE-345]
+  cwe_rationale: "See idiomatic-woocommerce-hook-1.php's cwe_rationale above -- same mechanism, researched once."
   suggested_op: trust_client_price_input   # the exact gap this cell's
                              # "Skipped for no license" note (below) flagged
                              # as found-in-the-wild-but-unlicensed
@@ -189,7 +204,8 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
-  cwe: []
+  cwe: [CWE-602, CWE-840, CWE-20, CWE-345]
+  cwe_rationale: "See idiomatic-woocommerce-hook-1.php's cwe_rationale above -- same mechanism, researched once."
   suggested_op: server_recomputed_amount   # same top-level property as
                              # idiomatic-1.php above (server derives the
                              # amount, never trusts a client value) --
@@ -217,7 +233,8 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
-  cwe: [CWE-840, CWE-20]
+  cwe: [CWE-602, CWE-840, CWE-20, CWE-345]
+  cwe_rationale: "See idiomatic-woocommerce-hook-1.php's cwe_rationale above -- same mechanism, researched once."
   suggested_op: trust_client_price_input   # same op as this cell's
                              # woocommerce-cart-hook vulnerable entry --
                              # reused, identical mechanism

@@ -19,7 +19,14 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-434]
+  cwe: [CWE-434, CWE-646, CWE-20, CWE-669]
+  cwe_rationale: >
+    Same mechanism/research as idiomatic-peertube-upload-1.ts's
+    cwe_rationale below (added as part of BUG-0029's remediation sweep):
+    no fileFilter at all means the file's dangerous-type-ness is never
+    checked (CWE-434, CWE-20, CWE-669 -- the parent relationships), and the
+    stored filename is taken directly from the client-supplied
+    `file.originalname` with no independent verification (CWE-646).
   suggested_op: no_extension_check
   suggested_sink_family: fs_web_root_write
 
@@ -34,7 +41,8 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-434]
+  cwe: [CWE-434, CWE-646, CWE-20, CWE-669]
+  cwe_rationale: "See vulnerable-1.js's cwe_rationale above -- same mechanism, researched once."
   suggested_op: mime_type_check
   suggested_sink_family: fs_web_root_write
 
@@ -49,7 +57,21 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-22]
+  cwe: [CWE-22, CWE-36, CWE-23, CWE-73]
+  cwe_rationale: >
+    Researched against the MITRE CWE index for this entry's two distinct
+    traversal branches (added as part of BUG-0029's remediation sweep):
+    CWE-22 (Path Traversal) is the parent weakness; CWE-36 (Absolute Path
+    Traversal) is CWE-22's own listed child and the precise fit for the
+    `path.isAbsolute()` branch, which passes a client-supplied absolute
+    path straight to `res.sendFile()`; CWE-23 (Relative Path Traversal) is
+    CWE-22's other listed child and fits the other branch
+    (`path.join(__dirname, file_path)`, traversable via `../` segments);
+    CWE-73 (External Control of File Name or Path) is the broader class
+    both instantiate -- `req.params.path` directly controls the resolved
+    filesystem path with no confinement check. Same rationale applies to
+    idiomatic-2.js below, which demonstrates the mitigation of the same
+    CWEs -- not restated there.
   suggested_op: unconfined_path
   suggested_sink_family: fs_path_read
 
@@ -64,7 +86,8 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-22]
+  cwe: [CWE-22, CWE-36, CWE-23, CWE-73]
+  cwe_rationale: "See vulnerable-2.js's cwe_rationale above -- same mechanism, researched once."
   suggested_op: realpath_confine
   suggested_sink_family: fs_path_read
 
@@ -97,7 +120,24 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
-  cwe: []
+  cwe: [CWE-434, CWE-646, CWE-20, CWE-669]
+  cwe_rationale: >
+    Researched against the MITRE CWE index for the missing-mimetype-check
+    mechanism this pair contrasts, not recalled: CWE-434 (Unrestricted
+    Upload of File with Dangerous Type) is the primary weakness class;
+    CWE-646 (Reliance on File Name or Extension of Externally-Supplied
+    File) applies because the vulnerable side (below) uses the client-
+    declared `originalname`/mimetype as its sole basis for accepting and
+    naming the file, exactly the anti-pattern CWE-646 names; CWE-20
+    (Improper Input Validation) is CWE-434's own listed parent relationship;
+    CWE-669 (Incorrect Resource Transfer Between Spheres) is CWE-434's own
+    listed parent -- the general class covering a resource (the uploaded
+    file) crossing from an untrusted sphere (the client) into a trusted one
+    (the server's public media directory) without adequate checks. Note:
+    the vulnerable side below additionally introduces CWE-22 (Path
+    Traversal), listed only on that entry since it is a second, distinct
+    mechanism (join() on an unsanitized filename) not present in this
+    idiomatic side at all.
   suggested_op: mime_type_check   # same op already established for this
                              # cell's PHP entries (no_extension_check's
                              # paired mitigation) -- reused across languages
@@ -122,7 +162,17 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
-  cwe: [CWE-434]
+  cwe: [CWE-434, CWE-646, CWE-20, CWE-669, CWE-22]
+  cwe_rationale: >
+    First four: see idiomatic-peertube-upload-1.ts's cwe_rationale above --
+    same missing-mimetype-check mechanism, researched once. CWE-22 (Path
+    Traversal) is additional and specific to this vulnerable entry: the
+    manufactured handler builds its destination path via
+    `join(CONFIG.STORAGE.VIDEOS_DIR, file.originalname)` with no
+    sanitization of `originalname` at all, so a filename like
+    `../../etc/cron.d/x` would resolve outside VIDEOS_DIR -- a second,
+    independently-substantiated weakness this specific manufactured file
+    introduces beyond the mimetype-check gap it was built to illustrate.
   suggested_op: no_extension_check   # same op already established for
                              # this cell's PHP entries -- reused
   suggested_sink_family: fs_web_root_write

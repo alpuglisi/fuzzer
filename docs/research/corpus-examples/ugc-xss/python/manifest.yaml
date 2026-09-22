@@ -30,7 +30,15 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-79]
+  cwe: [CWE-79, CWE-80, CWE-116, CWE-838]
+  cwe_rationale: >
+    Same |safe/autoescape-bypass mechanism and MITRE CWE index research as
+    idiomatic-django-comments-1.html's cwe_rationale elsewhere in this
+    corpus (added as part of BUG-0029's remediation sweep): CWE-79
+    (primary), CWE-80 (its listed child, the reflected-HTML variant),
+    CWE-116 (its listed parent, the general output-encoding-failure class),
+    CWE-838 (Jinja2's |safe is choosing no encoding for an HTML context
+    that requires one).
   suggested_op: raw_concat   # Jinja2's |safe filter opts the value out of
                              # autoescaping entirely -- functionally the same
                              # "no transform at all" shape as the existing
@@ -55,7 +63,8 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-79]
+  cwe: [CWE-79, CWE-80, CWE-116, CWE-838]
+  cwe_rationale: "See vulnerable-1.py's cwe_rationale above -- same mechanism, researched once."
   suggested_op: bleach_clean   # bleach.clean() on ingest is an allowlist
                              # HTML sanitizer, distinct from html_entity_escape
                              # (the matrix's only existing HTML-body transform,
@@ -81,7 +90,8 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-79]
+  cwe: [CWE-79, CWE-80, CWE-116, CWE-838]
+  cwe_rationale: "See vulnerable-1.py's cwe_rationale above -- same mechanism, researched once."
   suggested_op: bleach_clean   # same allowlist-sanitizer mechanism as
                              # idiomatic-1.py, a second independent instance
                              # -- reused, not a new name
@@ -114,7 +124,21 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
-  cwe: [CWE-79]
+  cwe: [CWE-79, CWE-80, CWE-116, CWE-838]
+  cwe_rationale: >
+    Researched against the MITRE CWE index for the |safe/autoescape
+    mechanism this pair contrasts, not recalled: CWE-79 (Improper
+    Neutralization of Input During Web Page Generation, 'Cross-site
+    Scripting') is the primary weakness class; CWE-80 (Improper
+    Neutralization of Script-Related HTML Tags in a Web Page, Basic XSS) is
+    CWE-79's own listed child and the specific variant this reflected-HTML
+    shape is; CWE-116 (Improper Encoding or Escaping of Output) is CWE-79's
+    listed parent relationship -- the general output-encoding failure class
+    CWE-79 instantiates for HTML specifically; CWE-838 (Inappropriate
+    Encoding for Output Context) applies because |safe is literally
+    choosing "no encoding" for a context (an HTML document body) that
+    requires one. Same rationale applies to vulnerable-django-comments-1.html
+    below, which shares this exact mechanism -- not restated there.
   suggested_op: default_autoescape   # relying on the template engine's
                              # default escaping (no explicit op applied) is
                              # a distinct shape from bleach_clean (sanitizes
@@ -145,7 +169,8 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
-  cwe: [CWE-79]
+  cwe: [CWE-79, CWE-80, CWE-116, CWE-838]
+  cwe_rationale: "See idiomatic-django-comments-1.html's cwe_rationale above -- same mechanism, researched once."
   suggested_op: raw_concat   # |safe opts the value out of autoescaping
                              # entirely -- same "no transform at all" shape
                              # already covered by the existing raw_concat

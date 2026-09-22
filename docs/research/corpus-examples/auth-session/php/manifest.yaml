@@ -23,7 +23,22 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-347]
+  cwe: [CWE-347, CWE-757, CWE-345, CWE-290]
+  cwe_rationale: >
+    Researched against the MITRE CWE index for CVE-2015-2965's algorithm-
+    confusion mechanism (added as part of BUG-0029's remediation sweep, not
+    recalled): CWE-347 (Improper Verification of Cryptographic Signature)
+    is the primary weakness; CWE-757 (Selection of Less-Secure Algorithm
+    During Negotiation, 'Algorithm Downgrade') is the specific named CWE for
+    an attacker forcing acceptance of a weaker algorithm than intended --
+    exactly the RS256-replayed-as-HS256-secret shape this entry describes;
+    CWE-345 (Insufficient Verification of Data Authenticity) applies
+    because the token header's own `alg` claim is trusted without being
+    checked against what the caller actually expects; CWE-290
+    (Authentication Bypass by Spoofing) applies at the consequence level --
+    the confused-algorithm token successfully spoofs a valid signature.
+    Same rationale applies to idiomatic-1.php below, which demonstrates the
+    mitigation of the same CWEs -- not restated there.
   suggested_op: jwt_alg_unchecked
   suggested_sink_family: jwt_signature_verification
 
@@ -40,7 +55,8 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-347]
+  cwe: [CWE-347, CWE-757, CWE-345, CWE-290]
+  cwe_rationale: "See vulnerable-1.php's cwe_rationale above -- same mechanism, researched once."
   suggested_op: jwt_alg_allowlist
   suggested_sink_family: jwt_signature_verification
 
@@ -57,7 +73,19 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-330]
+  cwe: [CWE-330, CWE-340, CWE-640]
+  cwe_rationale: >
+    Researched against the MITRE CWE index for CVE-2021-29023's token-
+    entropy mechanism (added as part of BUG-0029's remediation sweep):
+    CWE-330 (Use of Insufficiently Random Values) is the primary weakness;
+    CWE-340 (Generation of Predictable Numbers or Identifiers) is CWE-330's
+    own listed child and the more specific fit -- the token is built from
+    `time()` and the target's own email, both attacker-known/guessable,
+    not merely "insufficiently random"; CWE-640 (Weak Password Recovery
+    Mechanism for Forgotten Password) applies because this is specifically
+    a password-reset token, the exact scenario CWE-640 names. Same
+    rationale applies to idiomatic-2.php below, which demonstrates the
+    mitigation of the same CWEs -- not restated there.
   suggested_op: predictable_token_source
   suggested_sink_family: session_token_generation
 
@@ -74,7 +102,8 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-330]
+  cwe: [CWE-330, CWE-340, CWE-640]
+  cwe_rationale: "See vulnerable-2.php's cwe_rationale above -- same mechanism, researched once."
   suggested_op: csprng_token
   suggested_sink_family: session_token_generation
 
@@ -109,7 +138,22 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
-  cwe: []
+  cwe: [CWE-613, CWE-287, CWE-863, CWE-284]
+  cwe_rationale: >
+    Researched against the MITRE CWE index for the per-request-vs-login-only
+    revalidation mechanism this pair contrasts, not recalled: CWE-613
+    (Insufficient Session Expiration) applies because a blocked account's
+    session should logically terminate the moment it is blocked, but on the
+    vulnerable side (below) it persists until natural expiry; CWE-287
+    (Improper Authentication) applies at the broader level -- the session no
+    longer reflects a valid authentication decision once the account is
+    blocked; CWE-863 (Incorrect Authorization) applies because a real check
+    exists (the blocked flag) but is applied at the wrong point in the
+    request lifecycle (once, at login, rather than per-request); CWE-284
+    (Improper Access Control) is the general parent class both CWE-287 and
+    CWE-863 instantiate. Same rationale applies to
+    vulnerable-firefly-blocked-check-1.php below, which shares this exact
+    mechanism -- not restated there.
   suggested_op: per_request_status_revalidation   # distinct mechanism from
                              # this cell's jwt_alg_*/csprng_token/
                              # weak_prng_token ops -- proposed as new
@@ -138,7 +182,8 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
-  cwe: [CWE-287, CWE-613]
+  cwe: [CWE-613, CWE-287, CWE-863, CWE-284]
+  cwe_rationale: "See idiomatic-firefly-blocked-check-1.php's cwe_rationale above -- same mechanism, researched once."
   suggested_op: login_time_only_check   # proposed as new, paired with
                              # per_request_status_revalidation above
   suggested_sink_family: session_authorization_state

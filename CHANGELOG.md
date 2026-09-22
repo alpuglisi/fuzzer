@@ -14,6 +14,27 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Bug fix: `docs/bugs/BUG-0029-corpus-expansion-agent-under-delivered-explicit-cwe-research-instruction.md`
+  — the CWE research done for waves 1-2 of the site-architecture corpus
+  expansion under-delivered `docs/VULN_CORPUS_EXPANSION_PLAN.md`/
+  `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md` Step 6's explicit
+  "more CWEs is better" instruction (1-2 recalled CWEs per entry instead of
+  a real MITRE-index research pass), recurring immediately after a related
+  but distinct correction in the same conversation. Root cause: same class
+  as PA-0020 (a bug whose root cause is my own missed self-check needs
+  mechanical enforcement, not a clearer written rule), but PA-0020's own
+  enforcement was scoped only to `ERROR_LOG.md` bookkeeping. Corrective
+  action: re-researched and expanded the `cwe:` list (with a
+  `cwe_count_rationale:` field) for all 17 corpus entries this sweep
+  touched — the 12 entries added this session plus 5 pre-existing entries
+  in the same manifest files the sweep obligation (PA-0002) reached — citing
+  the MITRE CWE index's actual class/parent/child relationships per entry
+  instead of a recalled single ID; added `.claude/hooks/
+  check-corpus-cwe-coverage.sh` (new `Stop` hook, wired in
+  `.claude/settings.json`) that mechanically blocks the session from ending
+  if a touched corpus manifest entry has fewer than 2 CWEs and no
+  rationale. New preventive action: **PA-0032** (`docs/PREVENTIVE_ACTIONS.md`,
+  strengthens PA-0020's enforcement scope). `ERROR_LOG.md` entry added.
 - Research: executed wave 2 of the site-architecture corpus expansion
   (`docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`), per explicit
   instruction not to defer categories 3-6. Completed Step 2 (architecture

@@ -131,7 +131,24 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
-  cwe: []
+  cwe: [CWE-639, CWE-862, CWE-284, CWE-863]
+  cwe_rationale: >
+    Researched against the MITRE CWE index for the membership-check
+    mechanism this pair contrasts, not recalled: CWE-639 (Authorization
+    Bypass Through User-Controlled Key) applies because a board is looked
+    up by a client-controlled `boardId` with no ownership/membership check
+    at the point of use; CWE-862 (Missing Authorization) applies because no
+    authorization check runs at all on the vulnerable side; CWE-284
+    (Improper Access Control) is CWE-862's own listed parent, the general
+    class both CWE-639 and CWE-862 instantiate; CWE-863 (Incorrect
+    Authorization) additionally applies to the idiomatic side specifically,
+    since isVisibleBy()/isActiveMember() is a real authorization check that
+    can still be called incorrectly or omitted at a new call site (which is
+    exactly what the vulnerable side manufactures) -- distinguishing "no
+    check" (CWE-862) from "a check exists elsewhere but wasn't applied
+    here" (CWE-863) is the specific contrast this pair demonstrates. Same
+    rationale applies to vulnerable-wekan-board-1.js below, which shares
+    this exact mechanism -- not restated there.
   suggested_op: membership_check_helper   # this is the check *definition*,
                              # not a call site -- distinct from
                              # ownership_check_after_fetch (GuusK entry,
@@ -157,7 +174,8 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
-  cwe: [CWE-639, CWE-862]
+  cwe: [CWE-639, CWE-862, CWE-284, CWE-863]
+  cwe_rationale: "See idiomatic-wekan-board-1.js's cwe_rationale above -- same mechanism, researched once."
   suggested_op: no_ownership_check   # same shape/name already established
                              # by this cell's other vulnerable entries
                              # (GuusK, node-file below) -- reused

@@ -277,3 +277,16 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   `docs/MULTI_AGENT_ORCHESTRATION.md` for the full rationale and the rejected
   alternatives (fragment files, batched reconciliation, fewer/larger lanes, a merge-queue
   bot).
+- **PA-0032** — Strengthens PA-0020's *scope of enforcement* (not its diagnosis, which
+  PA-0032 reuses as-is): PA-0020 established that a bug whose root cause is "my own
+  missed or inconsistent self-check" needs mechanical enforcement, not a clearer written
+  rule — but its own enforcement artifact (`check-error-log-bookkeeping.sh`) only covers
+  one instance of that class (`ERROR_LOG.md` bookkeeping). Every future explicit,
+  quantitative "do more of X / don't stop at the minimum" instruction that produces a
+  checkable artifact (a list, a count, a set of records) must get its **own** concrete,
+  mechanical check at the time the instruction is first acted on — not a restatement of
+  the instruction's own wording in a planning document, and not deferred on the
+  assumption PA-0020's general principle already covers it by existing. First concrete
+  instance: `.claude/hooks/check-corpus-cwe-coverage.sh`, which blocks the session from
+  ending if a touched `docs/research/corpus-examples/*/*/manifest.yaml` entry has fewer
+  than 2 CWE IDs and no `cwe_count_rationale:` explaining the cap. (from BUG-0029)
