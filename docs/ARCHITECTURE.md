@@ -253,13 +253,27 @@ tracked in the requirements files, not here.
   Laravel-Ignition-debug-page correctness requirement D20 flags); a `route`
   accumulator module (`route_accumulator.py`) for `routes/web.php`, sorted
   by cell ID at render time per Addendum D's determinism rule; and
-  `LaravelEmitter` supporting exactly one trivial shape
-  (`sqli`/`sql_numeric_literal`), proven against a new minimal
-  `lab/manifests/phase3_php_laravel_sample.yaml` via the existing Tier 0/
-  Tier 3 conformance suite. The full module inventory (harder shapes ported
-  from `php_current`'s Phase-1 work) and the `puppy-fort-factory/` migration
-  onto this emitter are separate, later lanes (L-P3.3b, L-P3.3c) this
-  foundation unblocks but does not itself attempt.
+  `LaravelEmitter`, which lane **L-P3.3b** (`CC-LAB-0044`) has since taken to
+  the **full module inventory** — every shape `php_current` supports, ported
+  to Laravel/Eloquent/Blade idiom (`DB::select`/query-builder
+  `whereRaw()`/`orderByRaw()` for the four SQL shapes; a per-cell **Blade
+  view** for the three HTML shapes, making an HTML-sink cell a two-file
+  `controller` + `view` cell on this stack), rendered by this emitter's own
+  module registries (`emitters/php_laravel/modules.py` + its template tree),
+  with nothing imported from or added to `fuzzlab.labgen.modules`. Laravel is
+  the one stack the plan assigns full depth, since the Phase-1 hard-shape work
+  is directly portable to a second PHP stack. Two cross-cutting contracts fell
+  out of that port and now bind any future emitter on a shared checker: a
+  stack's module *names* are the project's shared composition vocabulary
+  (`fuzzlab.labgen.minimal_pair` classifies composition positions through
+  `fuzzlab.labgen.modules`' registries and raises for a name it cannot find),
+  and a sink never escapes anything itself (Blade sinks echo raw; the
+  `html_entity_escape` transform applies `e()` in the controller). The widened
+  `lab/manifests/phase3_php_laravel_sample.yaml` (20 cells) passes
+  `fuzzlab lab-generate --check` end to end through the CLI's
+  `EMITTER_REGISTRY`, which `php_laravel` is now registered in. Not carried:
+  the `context_depth` axis (non-`direct` cells are refused, never flattened)
+  and the `puppy-fort-factory/` migration onto this emitter (lane L-P3.3c).
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

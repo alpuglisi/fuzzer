@@ -144,6 +144,11 @@ PHP_LARAVEL_STACK_ENV = StackEnv(
     accumulators=("routes/web.php",),
     file_roles={
         "controller": "app/Http/Controllers/{cell_slug}Controller.php",
+        # An HTML-sink cell is a two-file cell on this stack: a controller
+        # plus its own Blade view (L-P3.3b's full-depth inventory). One view
+        # per cell, named from the cell ID like every other per-cell artifact
+        # here, so a minimal pair's twins never share a view file.
+        "view": "resources/views/cells/{cell_slug}.blade.php",
         "route": "routes/web.php",
     },
 )

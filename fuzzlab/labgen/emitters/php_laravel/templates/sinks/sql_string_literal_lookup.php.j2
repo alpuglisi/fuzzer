@@ -1,0 +1,18 @@
+{% if bound %}
+// The query builder's where() binds the value for you; the second condition
+// is sink boilerplate (an already-hashed secret), never this cell's own
+// injection point.
+$rows = DB::table('{{ table }}')
+    ->where('{{ column }}', {{ value_expr }})
+    ->where('{{ password_var }}', $request->input('{{ password_param }}'))
+    ->get()
+    ->all();
+{% else %}
+// whereRaw() takes raw SQL: the value is spliced into a quoted string literal
+// inside the statement, so the closing quote is reachable from the value.
+$rows = DB::table('{{ table }}')
+    ->whereRaw("{{ column }} = '" . {{ value_expr }} . "'")
+    ->where('{{ password_var }}', $request->input('{{ password_param }}'))
+    ->get()
+    ->all();
+{% endif %}

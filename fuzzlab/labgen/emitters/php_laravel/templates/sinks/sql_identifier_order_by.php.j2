@@ -1,0 +1,14 @@
+{% if bound %}
+// A bound parameter can carry the WHERE *value*, but no SQL dialect can bind
+// an ORDER BY *identifier* -- so the tainted identifier is still concatenated
+// into the statement text (safety matrix: param_bind has no_effect here).
+$rows = DB::select("SELECT id, {{ column }} FROM {{ table }} WHERE active = ? ORDER BY " . {{ value_expr }}, [1]);
+{% else %}
+// The query builder binds VALUES for you, but orderByRaw() takes raw SQL --
+// which is exactly why an identifier position is not a value position.
+$rows = DB::table('{{ table }}')
+    ->select('id', '{{ column }}')
+    ->orderByRaw({{ value_expr }})
+    ->get()
+    ->all();
+{% endif %}

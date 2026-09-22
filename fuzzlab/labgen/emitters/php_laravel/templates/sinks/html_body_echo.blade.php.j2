@@ -1,0 +1,5 @@
+{# Blade view body for an HTML-body sink. Blade's RAW echo is used on purpose:
+   a sink never escapes anything itself, so both twins of a minimal pair share
+   this fragment and the cell's transform alone decides whether the value was
+   escaped (see modules.py's module docstring, decision 2). #}
+<div class="{{ css_class }}">{!! $value !!}</div>

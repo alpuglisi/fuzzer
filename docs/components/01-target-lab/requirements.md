@@ -897,6 +897,56 @@ lane) can submit a payload as
      `run_identifier_sqli_oracle` against a cell and fails closed unless its outcome
      matches the cell's **derived** verdict. (`CC-LAB-0043`)
 
+- **FR-LAB-42** *(L-P3.3b, `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3 step 2; number
+  pre-assigned to this lane by the orchestrating session, so no post-merge renumbering was
+  needed.)* The **`php_laravel` emitter carries the full module inventory** — every shape
+  `php_current` supports, ported to Laravel/Eloquent/Blade idiom. Laravel is the one stack
+  the plan assigns "full depth", because Phase 1's hard-shape work is directly portable to
+  a second PHP stack:
+  1. **Seven shapes**, each rendered by this emitter's *own* module registries
+     (`fuzzlab.labgen.emitters.php_laravel.modules` — three sources, seven transform ops,
+     seven sinks, two complexities, with their own Jinja2 template tree): `(sqli,
+     sql_numeric_literal)` via `DB::select` raw-vs-bound; `(sqli, sql_string_literal)` via
+     the query builder's `whereRaw()` vs. `where()`; `(sqli, sql_identifier)` via
+     `orderByRaw()`; `(sqli, sql_join_alias)` (the alias substituted three times in one
+     statement); and `(xss, html_body)`, `(xss, url_javascript_scheme)`,
+     `(xss, html_attribute_unquoted)` as Blade views. Nothing is imported from or added to
+     `fuzzlab.labgen.modules` (`php_current`'s plain-PHP/PDO idiom).
+  2. **An HTML-sink cell is a two-file cell on this stack** — a controller (`role="controller"`)
+     plus its own per-cell Blade view (`role="view"`,
+     `resources/views/cells/<cell-slug>.blade.php`, a new `StackEnv.file_roles` entry),
+     because a Laravel controller returns a view rather than echoing. Both files carry the
+     `// Module composition: ...` provenance line, so the minimal-pair invariant is
+     evaluated on each of them.
+  3. **Two contracts this port establishes for any future second emitter on a shared
+     checker.** (a) A stack's module *names* are the project's shared composition
+     vocabulary, not per-stack names: `fuzzlab.labgen.minimal_pair` classifies each
+     composition position through `fuzzlab.labgen.modules`' registries and raises for a
+     name it cannot find, so a Laravel-only name would fail every cell's minimal-pair gate
+     with a setup error rather than a finding. (b) A sink never escapes anything itself —
+     in Blade terms the HTML sinks echo `{!! ... !!}` and the `html_entity_escape` transform
+     applies Laravel's `e()` helper in the controller, keeping the security-relevant
+     difference inside the declared transform region.
+  4. **The widened `lab/manifests/phase3_php_laravel_sample.yaml`** (20 cells: a pair per
+     value-context shape, a triple/quadruple per harder shape, verdicts always derived),
+     passing `fuzzlab lab-generate --check` end to end — name-leak and secret scanners,
+     determinism, minimal pair, Tier 0 `php -l` (run for real, all 28 emitted files) and
+     Tier 3 whole-sample regeneration. `php_laravel` is registered in the CLI's
+     `EMITTER_REGISTRY` (`--emitter php_laravel`), which is what makes that gate runnable.
+  5. **The identifier-SQLi oracle reaches Laravel-rendered cells through a route-rewrite
+     adapter only** (`fuzzlab.labgen.emitters.php_laravel.identifier_sqli`):
+     `fuzzlab.labgen.identifier_sqli_assertion` is genuinely stack-agnostic apart from one
+     assumption — that a cell is served at `cell.route.path`, true for filesystem-routed
+     `php_current` but not for this router-dispatched stack, which serves each cell at its
+     own cell-ID-derived `/cell/<slug>` URL so twins can coexist. The adapter rewrites the
+     route and delegates; no verdict derivation, oracle call, comparison or fail-closed
+     branch is re-implemented, and that shared module is unchanged.
+  6. **`context_depth` other than `direct` is refused, not flattened.** The depth-hop
+     fragments are not ported to Laravel yet, so `render()` raises rather than emitting a
+     `same_file_helper`/`cross_file` cell as `direct` and mislabelling the depth its corpus
+     record claims. Real `puppy-fort-factory/` page reproduction remains §4.3 step 6
+     (L-P3.3c). (`CC-LAB-0044`)
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.
@@ -1029,6 +1079,28 @@ None (it is the system under test).
   `tests/test_labgen_harder_shapes.py` and `tests/test_labgen_identifier_sqli_assertion.py`.
 
 ## 8. Open questions
+- (L-P3.3b) **`fuzzlab.labgen.minimal_pair`'s module-category map is sourced from one
+  emitter's registry.** It builds `_MODULE_CATEGORY` from `fuzzlab.labgen.modules`
+  (`php_current`'s) alone, so *every* stack that wants the real (rather than the naive)
+  minimal-pair checker must name its modules from that vocabulary — which `php_laravel`
+  now does deliberately (FR-LAB-42.3a). The alternative is a pluggable category map, or a
+  registry the checker can be handed: a small additive change to that shared module, not
+  made here because it is a sibling lane's file and no second stack needs it yet
+  (`node_express`/`python_fastapi` use the naive checker by their own Tier-0 convention).
+  Worth revisiting when a third stack reaches full depth.
+- (L-P3.3b) **`lab-generate` has no clean failure for an emitter/manifest stack
+  mismatch.** Rendering a manifest whose cells target another stack, but whose
+  `(class, family)` shapes the selected emitter supports, raises an uncaught `ValueError`
+  from the page-profile lookup (a traceback) rather than a CLI-level message. Pre-existing
+  and not specific to this stack (`--emitter php_current` on the Laravel manifest behaves
+  the same, and did before this lane), so it is recorded rather than fixed inside a lane
+  that does not own that surface. A `stack_profile`-aware skip, or a typed CLI error, is
+  the obvious remedy.
+- (L-P3.3b) **The `context_depth` axis is not ported to Laravel.** `php_current` renders
+  `same_file_helper`/`cross_file`/`stored_second_order` (`CC-LAB-0042`); `php_laravel`
+  refuses them (FR-LAB-42.6). Porting the depth fragments to Laravel idiom (a helper class
+  or trait, and a second route for a stored/second-order cell's injection point) is real
+  remaining work, and a cross-stack `context_depth` corpus needs it.
 - (L-P1.2b) **The `identifier_charset_filter` cells cannot be oracle-confirmed yet.**
   L-P1.2a's prober always wraps the probe value in `CASE WHEN ... END`, which a
   bare-identifier character filter rejects (HTTP 400), so the oracle correctly returns

@@ -1,0 +1,8 @@
+// identifier_charset_filter: a bare-identifier CHARACTER check (abort(400) on
+// mismatch -- Laravel's own abort idiom). It blocks every statement-breaking
+// character and leaves the actual defect untouched: any identifier-shaped
+// string still selects a column/alias, which is why the safety matrix scores
+// this `partial` rather than neutralising.
+if (! preg_match('/^[A-Za-z0-9_]+$/', (string) {{ value_expr }})) {
+    abort(400);
+}

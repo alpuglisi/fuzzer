@@ -51,6 +51,7 @@ from fuzzlab.labgen import corpus_analysis, fingerprint_gate, gates, minimal_pai
 from fuzzlab.labgen.conformance import tier0, tier3
 from fuzzlab.labgen.emitter import Emitter
 from fuzzlab.labgen.emitters.php_current import PhpCurrentEmitter
+from fuzzlab.labgen.emitters.php_laravel import LaravelEmitter
 from fuzzlab.labgen.schema import Cell, Manifest, ManifestError, Pipeline, load_manifest
 from fuzzlab.labgen.verdict import SafetyMatrix, SafetyMatrixError, load_safety_matrix
 
@@ -59,6 +60,13 @@ from fuzzlab.labgen.verdict import SafetyMatrix, SafetyMatrixError, load_safety_
 #: registers here without a CLI rewrite.
 EMITTER_REGISTRY: dict[str, type[Emitter]] = {
     "php_current": PhpCurrentEmitter,
+    # L-P3.3b: the Laravel emitter, once it carries the full shape inventory,
+    # is a real build target rather than a foundation -- so it registers here
+    # and `--emitter php_laravel --check` runs the whole offline gate suite
+    # over lab/manifests/phase3_php_laravel_sample.yaml (§4.3 step 3). The
+    # registry is looked up by name for exactly this reason: a new emitter
+    # registers without a CLI rewrite.
+    "php_laravel": LaravelEmitter,
 }
 
 DEFAULT_ROOT_SEED = "lab-generate-cli"
