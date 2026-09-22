@@ -12,6 +12,20 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-22
+
+- Docs (UI): added `docs/UI_IMPLEMENTATION_PLAN.md` — a single tracked plan for the remaining web
+  UI work: the settled build policy (no build step; hand-roll where cheap; vendor one zero-dep
+  static file only for charts), the five locked decisions, the outstanding deliverables (U0, U1–U5,
+  B0, X0) as clear/executable/lane-organized spec blocks, and a wave/dependency map sized for
+  parallel-agent dispatch. Includes a research-refinement loop (mark gaps → web-research agents →
+  fold findings back). Round 1 folded in: full-page MPA (no HTMX); charts = **uPlot 1.6.32**
+  (vendored, canvas, re-theme on `[data-theme]`); findings facet sidebar + SQLite-backed saved
+  views + hand-rolled DataTable; one shared byte-exact message editor with a vanilla splitter and
+  hand-rolled highlighting; TensorBoard-style diagnostics + validated `metric_series` schema +
+  `MetricLogger` + LTTB downsampling; advisory-framed read-only ML panels. Reason: prepare the UI
+  track for distributed, out-of-order lane builds. CC-UI-0023, FR-UI-8.
+
 ## 2026-09-21
 
 - LAB: carried the stack axis end to end and made the fingerprint-independence gate
