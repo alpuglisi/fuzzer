@@ -1,0 +1,63 @@
+# auth-session / node -- Phase 2 corpus (docs/VULN_CORPUS_EXPANSION_PLAN.md)
+#
+# Cell status: fully populated (2 matched vulnerable/idiomatic pairs, 4 files; floor is 2,
+# target 3-5). Covers two of the three vulnerability shapes named in this cell's assignment
+# (JWT alg:none acceptance; weak/predictable session-token/secret generation). No Node
+# example was collected for the third named shape (password-reset-token flow not bound to
+# session/expiry) -- collection stopped at 4 files once the two strongest, best-verified
+# real pairs were in hand, per the plan's 3-5-with-floor-2 target; a reset-token-flow pair
+# is a candidate for a follow-up pass rather than padding this cell with a weaker source.
+
+- file: vulnerable-1.js
+  role: vulnerable
+  repo: auth0/node-jsonwebtoken
+  commit_sha: 7e6a86b1c25e5fd05733c52c118848341aba1c4e
+  license: MIT
+  license_notice: "Copyright (c) 2015 Auth0, Inc. <support@auth0.com>"
+  pattern: "verify() silently sets options.algorithms = ['none'] whenever the token has no signature segment and the caller passed no explicit algorithms allow-list, so an unsigned alg:none token is accepted as verified by default."
+  ghsa: GHSA-8cf7-32gw-wr33
+  tutorial_or_course_code: false
+  notes: "Full, unmodified verify.js at the commit immediately before the fix in idiomatic-1.js, same file's history. This is the library's own module, not example/tutorial code -- it's the dependency millions of Node auth stacks import directly."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-1.js
+  role: idiomatic
+  repo: auth0/node-jsonwebtoken
+  commit_sha: 834503079514b72264fd13023a3b8d648afd6a16
+  license: MIT
+  license_notice: "Copyright (c) 2015 Auth0, Inc. <support@auth0.com>"
+  pattern: "The same branch now returns a JsonWebTokenError ('please specify \"none\" in \"algorithms\" to verify unsigned tokens') instead of defaulting to alg:none acceptance; the caller must opt in explicitly."
+  ghsa: GHSA-8cf7-32gw-wr33
+  tutorial_or_course_code: false
+  notes: "Full, unmodified verify.js at the direct successor commit to vulnerable-1.js in the same file's history (`git show 834503...^` == vulnerable-1.js's commit). Diff between the two files is exactly one changed line (`git diff` confirmed locally)."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: vulnerable-2.js
+  role: vulnerable
+  repo: HubSpot/oauth-quickstart-nodejs
+  commit_sha: 01d1b9a8c6e8144bc51edc6af0bcf2155831bda2
+  license: MIT
+  license_notice: "License declared as \"MIT\" in package.json; the repo has no separate LICENSE file."
+  pattern: "express-session `secret` (the HMAC key that signs the session-ID cookie) is Math.random().toString(36).substring(2) -- a non-cryptographic PRNG output used as a security-critical secret."
+  tutorial_or_course_code: true
+  notes: "HubSpot's own official OAuth quickstart/reference sample (real README, actively maintained, last pushed within the plan's recency window). Excerpted the session middleware setup only; the surrounding OAuth token-exchange and HubSpot API-call code was omitted as unrelated to the session-secret weakness."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-2.js
+  role: idiomatic
+  repo: auth0-blog/oidc-webapp
+  commit_sha: d15aacb4a25bbfc1c3ac59c1e06bf4f80d36db70
+  license: MIT
+  license_notice: "LICENSE file present in repo (MIT)."
+  pattern: "express-session `secret` (and the cookie-parser signing secret) is crypto.randomBytes(...).toString('hex') -- Node's CSPRNG -- instead of Math.random()."
+  tutorial_or_course_code: true
+  notes: "Auth0's own official blog-companion sample repo for an OIDC web-app walkthrough. Not the same repo as vulnerable-2.js (no naturally-occurring before/after commit pair was found for the HubSpot sample), so this is a cross-repo contrast of the same shape rather than a same-file before/after diff -- both sides are real, independently-published, currently-maintained code. Excerpted the session/cookie-parser setup only."
+  validated: false
+  validated_by: []
+  redacted: false

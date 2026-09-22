@@ -1,0 +1,66 @@
+# auth-session / python -- Phase 2 corpus (docs/VULN_CORPUS_EXPANSION_PLAN.md)
+#
+# Cell status: fully populated (2 matched vulnerable/idiomatic pairs, 4 files; floor is 2,
+# target 3-5). Covers two of the three vulnerability shapes named in this cell's assignment
+# (JWT alg/key confusion; weak/predictable session-adjacent-token generation). No Python
+# example was collected for the third named shape (password-reset-token flow not bound to
+# session/expiry as its own distinct issue) -- the weak-token pair below (vulnerable-2.py /
+# idiomatic-2.py) does cover DOAJ's actual password-reset-token code on the idiomatic side,
+# but the contrasting vulnerable side is a different token (a login code) in the same file
+# rather than a naturally-broken version of the reset token itself; see that entry's notes.
+# Collection stopped at 4 files once these two pairs were verified, per the plan's
+# 3-5-with-floor-2 target, rather than continuing to search for a closer-fitting pair.
+
+- file: vulnerable-1.py
+  role: vulnerable
+  repo: jpadilla/pyjwt
+  commit_sha: dcc27a9d3182a2349c30b160758785c6ce7a6508
+  license: MIT
+  license_notice: "Copyright (c) 2015-2022 José Padilla (LICENSE file)."
+  pattern: "PyJWS._verify_signature() infers `algorithms = [key.algorithm_name]` when verifying with a PyJWK and no explicit allow-list, then never checks the token header's alg against key.algorithm_name before using key.Algorithm to verify -- the allow-list check degenerates into comparing the key's algorithm against itself."
+  ghsa: GHSA-jq35-7prp-9v3f
+  tutorial_or_course_code: false
+  notes: "Excerpted _verify_signature() plus the imports it needs, trimmed from the full api_jws.py module (encode()/decode_complete()/header-validation helpers omitted as unrelated). Commit is the parent of 95791b17... (idiomatic-1.py) in the same file's history."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-1.py
+  role: idiomatic
+  repo: jpadilla/pyjwt
+  commit_sha: 95791b1759b8aa4f2203575d344d5c78564cdc81
+  license: MIT
+  license_notice: "Copyright (c) 2015-2022 José Padilla (LICENSE file)."
+  pattern: "_verify_signature() now raises InvalidAlgorithmError when the token header's alg does not equal key.algorithm_name for a PyJWK, before falling through to key.Algorithm -- the key's own bound algorithm is authoritative, not just the (often key-derived) allow-list."
+  ghsa: GHSA-jq35-7prp-9v3f
+  tutorial_or_course_code: false
+  notes: "Excerpted _verify_signature() with the same scope as vulnerable-1.py's excerpt. This commit ('Bundle security fixes and hardening into 2.13.0') also bundles unrelated fixes (JWKS-URI scheme allow-list, a detached-payload DoS fix, JWKS cache-preservation on fetch errors) -- omitted here as unrelated to the algorithm-confusion fix shown. Direct successor commit to vulnerable-1.py in the same file's history."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: vulnerable-2.py
+  role: vulnerable
+  repo: DOAJ/doaj
+  commit_sha: db2511f61e9033d10a3ea6d9fc90fa122b9e068a
+  license: Apache-2.0
+  license_notice: "Apache License, Version 2.0 (LICENSE file)."
+  pattern: "Passwordless-login code is ''.join(str(random.randint(0, 9)) for _ in range(6)) -- Python's `random` module (Mersenne Twister) used for a security-sensitive, emailed one-time code, rather than the `secrets` module or a CSPRNG."
+  tutorial_or_course_code: false
+  notes: "DOAJ (Directory of Open Access Journals) is a real, long-running, in-production nonprofit codebase, not a tutorial. Excerpted handle_login_code_request() only, trimmed from the full account.py view module. This is NOT the same code path as idiomatic-2.py's password-reset token (that one, in the same file, already uses uuid4()) -- it's DOAJ's separate passwordless-login-code feature, included here as the weak-PRNG-token contrast within the same file/commit rather than a literal before/after diff of one function. Flagged explicitly per the plan's pairing-requirement note: record honestly rather than force an artificial same-function pair."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-2.py
+  role: idiomatic
+  repo: DOAJ/doaj
+  commit_sha: db2511f61e9033d10a3ea6d9fc90fa122b9e068a
+  license: Apache-2.0
+  license_notice: "Apache License, Version 2.0 (LICENSE file)."
+  pattern: "Password-reset token is uuid.uuid4().hex -- on CPython, uuid4() draws from os.urandom() (a CSPRNG), giving a 122-bit-entropy value with no dependency on guessable inputs."
+  tutorial_or_course_code: false
+  notes: "Same file and commit as vulnerable-2.py (a few dozen lines away, in the account-update/re-verification flow). Excerpted the token-generation-and-storage step only, trimmed from the surrounding form-attribute handling and events/flash-message calls. See vulnerable-2.py's notes on why this is a same-repo adjacent-shape contrast rather than a same-function before/after diff."
+  validated: false
+  validated_by: []
+  redacted: false

@@ -1,0 +1,67 @@
+# auth-session / php -- Phase 2 corpus (docs/VULN_CORPUS_EXPANSION_PLAN.md)
+#
+# Cell status: fully populated (2 matched vulnerable/idiomatic pairs, 4 files; floor is 2,
+# target 3-5). Covers two of the three vulnerability shapes named in this cell's assignment
+# (JWT alg/key confusion; weak/predictable reset-token generation). No PHP example was
+# collected for the third named shape (session-token generator using rand()/mt_rand() as
+# the *session identifier* itself, as opposed to a password-reset token) -- real PHP
+# candidates found during collection (see research notes) were either unlicensed or reused
+# the same md5(uniqid(rand())) idiom already illustrated by the reset-token pair below, so
+# collection stopped rather than padding with a near-duplicate shape (per the plan's
+# "stop early... re-showing the same implementation shape" guidance).
+
+- file: vulnerable-1.php
+  role: vulnerable
+  repo: firebase/php-jwt
+  commit_sha: 10918f2a0181a53a2604c90b5904f9b33b0d3ba0
+  license: BSD-3-Clause
+  license_notice: "Copyright (c) 2011, Neuman Vong. All rights reserved."
+  pattern: "JWT decode() accepts an $algs allow-list parameter but never checks the token header's alg against it -- only checks alg is *some* implemented algorithm. Enables algorithm/key confusion (RS256 public key replayed as an HS256 HMAC secret)."
+  cve: CVE-2015-2965
+  tutorial_or_course_code: false
+  notes: "Commit immediately before the fix in idiomatic-1.php, same file's history. Verified via `git log --oneline -- Authentication/JWT.php` on a local clone of firebase/php-jwt."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-1.php
+  role: idiomatic
+  repo: firebase/php-jwt
+  commit_sha: b2c2be6a45fda769c8c2ffe5ec4259a9d1e46e5b
+  license: BSD-3-Clause
+  license_notice: "Copyright (c) 2011, Neuman Vong. All rights reserved."
+  pattern: "decode() now takes $allowed_algs and enforces in_array($header->alg, $allowed_algs) before verifying -- the token's claimed algorithm must be one the caller explicitly expects, not merely one the library knows how to implement."
+  cve: CVE-2015-2965
+  tutorial_or_course_code: false
+  notes: "Direct successor commit to vulnerable-1.php in the same file's history (`git show b2c2be6a45fda769c8c2ffe5ec4259a9d1e46e5b^` == vulnerable-1.php's commit). Commit message: 'Update decode() to require allowed algorithms arg when verifying'."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: vulnerable-2.php
+  role: vulnerable
+  repo: InvoicePlane/InvoicePlane
+  commit_sha: a479033943de0de61b62743fd6abb6d277b69f2d
+  license: MIT
+  license_notice: "Copyright (c) 2012-2014 InvoicePlane.com (LICENSE.txt; the InvoicePlane name/logo carry a separate, narrower trademark restriction not implicated by copying this source excerpt)."
+  pattern: "Password-reset token is md5(time() . $email . salt()) -- built mostly from attacker-known/guessable inputs (the target's own email, a coarse timestamp) rather than a CSPRNG."
+  cve: CVE-2021-29023
+  tutorial_or_course_code: false
+  notes: "Excerpted (not the full controller class) from Sessions::forgotPassword(); trimmed the bot-detection/rate-limiting/mail-sending branches as unrelated to the token weakness. Commit is the parent of aeddda43... (idiomatic-2.php) in the same file's history."
+  validated: false
+  validated_by: []
+  redacted: false
+
+- file: idiomatic-2.php
+  role: idiomatic
+  repo: InvoicePlane/InvoicePlane
+  commit_sha: aeddda4397395eb63b2636554976add2611ad0a8
+  license: MIT
+  license_notice: "Copyright (c) 2012-2014 InvoicePlane.com (LICENSE.txt)."
+  pattern: "Password-reset token is bin2hex(random_bytes(32)) -- a 256-bit CSPRNG-derived value with no dependency on guessable inputs."
+  cve: CVE-2021-29023
+  tutorial_or_course_code: false
+  notes: "New application/helpers/security_helper.php plus the updated Sessions.php caller, from the commit that fixes CVE-2021-29023 (direct successor to vulnerable-2.php's commit in the same file's history). Caller excerpt included as a trailing comment block rather than the full controller method, since only the helper is new code."
+  validated: false
+  validated_by: []
+  redacted: false
