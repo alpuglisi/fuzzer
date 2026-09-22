@@ -3,6 +3,59 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0059 — Wave A0: Layer-A reconciliation reconfirmed against live repo, no G7…Gn scope (2026-09-22)
+- Change: pure verification, no code/schema change. Dispatched as
+  `docs/PARALLEL_LANE_BUILD_PLAN.md`'s Wave A0 lane to mechanically
+  reconfirm `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.1/§4.3.6.3/§4.3.6.7's
+  Layer-A reconciliation against the live repo state (pages/cases may have
+  changed since the plan was written on 2026-09-22). Verified:
+  1. `lab/ground-truth/labels.json` carries exactly 16 `PFF-` cases
+     (`PFF-0001…0008`, `PFF-1001…1008`), unchanged since the Phase-0
+     label-contract commit (single commit in `git log` ever touches this
+     file).
+  2. `lab/ground-truth/migration-exemptions.yaml` lists exactly 4 exempted
+     cases (`PFF-1002`, `PFF-0007`, `PFF-0008`, `PFF-0003`), each citing a
+     dated decision already on record (`CC-LAB-0053`'s three plus
+     `CC-LAB-0058`'s `PFF-0003` addition) — giving a live 12 covered / 4
+     exempted / 0 uncovered split, matching `CC-LAB-0058`'s own recorded
+     result. All six `L-P3.3c-G1`…`L-P3.3c-G6` change-control entries
+     (`CC-LAB-0046` through `CC-LAB-0051`) are present and marked done.
+  3. A repo-wide grep for `PFF-` under `puppy-fort-factory/` found no label
+     strings in the app source (labels live only in `lab/ground-truth/`, by
+     design) and `find puppy-fort-factory -maxdepth 2 -iname '*.php'`
+     turned up no page absent from §4.3.6.3's table — no new pages or cases
+     added since the plan was written.
+  Added a dated confirmation note, `docs/LAB_IMPLEMENTATION_PLAN.md`
+  §4.3.6.7a, recording this reconciliation and its one clarification: the
+  plan's earlier "13 done / 1 exempt / 2 deferred" framing predates
+  `CC-LAB-0058` and is one case off on the partition (not the total) —
+  `PFF-0003` moved from "covered" to "exempted" for its real-URL/live-boot
+  claim specifically, while its shape remains authored/tested as one of
+  G6's own cells. **Conclusion: Layer A is closed. No `G7…Gn` lanes
+  dispatched** (Wave A1 of the build plan is skipped in full, as its own
+  text anticipates for this expected outcome).
+- Impact (other components / project): none — no code, schema, manifest, or
+  ground-truth file changed; this is a documentation-only reconciliation
+  check. Unblocks Wave A2 (the byte-identical manifest capstone) per the
+  build plan's own dependency table, which was gated on A0 confirming
+  closure.
+- Risk (level; mitigation or accepted-risk justification): none — read-only
+  verification; no runtime or generated-file behavior changed.
+- Deliverables:
+  - [x] `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.7a — confirmation note
+    added — done.
+  - [x] `CHANGELOG.md` — done.
+  - [x] This change-control entry — done.
+  - [ ] Not this lane: `docs/components/01-target-lab/requirements.md` —
+    no requirement's scope/interfaces/contracts changed by this
+    verification pass, so left untouched (FR-LAB-8's migration-completion
+    marking remains `L-P3.3c-CUT`'s call, not this reconciliation's).
+- Effectiveness (assessed 2026-09-22): confirmed directly against the live
+  repo state described above — `labels.json` (16 cases),
+  `migration-exemptions.yaml` (4 entries), and a `puppy-fort-factory/`
+  grep/`find` sweep for undocumented pages, all consistent with Layer A
+  being fully accounted for and closed.
+
 ### CC-LAB-0058 — real MariaDB-backed live-boot mode + `search.php` canonical-cell resolution (FR-LAB-55) (2026-09-22)
 - Change: two independent, purely additive extensions, both delivered together
   because the second is proven with the first:
