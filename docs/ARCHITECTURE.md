@@ -242,8 +242,10 @@ tracked in the requirements files, not here.
   `--check` so it can never fail a build. A stack-agnostic tiered conformance suite
   (`fuzzlab/labgen/conformance/`, `CC-LAB-0027`) any emitter must pass: Tier
   0 (lint + minimal-pair diff) and Tier 3 (whole-lab regeneration) are real,
-  fully exercised offline; `tier1.py`/`tier2.py` themselves remain
-  honestly-labeled `[design]` interfaces. As of `CC-LAB-0054`/`FR-LAB-52`
+  fully exercised offline; `tier1.py`/`tier2.py` originally remained
+  honestly-labeled `[design]` interfaces (`tier2.py` gained a real,
+  synthetic-in-sandbox implementation at `CC-LAB-0061`/`FR-LAB-56` below).
+  As of `CC-LAB-0054`/`FR-LAB-52`
   (2026-09-22), the live-boot on-host dependency Tier 1/2 needed is real for
   `php_laravel`: `fuzzlab/labgen/conformance/live_boot.py` assembles a real
   Laravel 13 skeleton (checked in, trimmed from a real `composer
@@ -280,7 +282,20 @@ tracked in the requirements files, not here.
   scope). Tier 2's real, dialect-correct, container-based oracle confirmation
   remains unbuilt (this MariaDB mode strengthens but does not replace it — it
   proves boot + observable behavior against the real engine, not an
-  oracle-grade verdict). A second
+  oracle-grade verdict). **`tier2.py` itself gains a real, synthetic-in-sandbox
+  `Tier2Oracle` (`CC-LAB-0061`/`FR-LAB-56`, 2026-09-22, lane T2 of
+  `docs/PARALLEL_LANE_BUILD_PLAN.md`)**: `LiveBootTier2Oracle`, built on the
+  existing, unmodified `live_boot.LiveBootHarness` (never the real,
+  loopback-only lab target, no `--authorized`), adds a real control/baseline
+  differential over Tier 1's bare marker check and fails closed
+  (`inconclusive`) rather than guessing when the control can't distinguish
+  vulnerable from not — proven for real against `product.php`'s numeric-SQLi
+  vulnerable/secure twins (a real positive and negative confirmation), plus 7
+  offline tests. `tier2.py` is no longer purely `[design]`, but this remains a
+  narrower, synthetic-in-sandbox claim than the production-grade, real-target
+  oracle T-LAB0.7 describes, which stays
+  `fuzzlab.labgen.identifier_sqli_assertion.IdentifierSqliTier2Oracle`'s (and
+  any future real-target oracle's) job. A second
   Phase-3 stack emitter (`fuzzlab/labgen/emitters/python_fastapi/`, Tier-A
   depth per `CR-LAB-0001` Addendum C's stack-pacing decision, `CC-LAB-0029`)
   is built: FastAPI + SQLAlchemy + Jinja2, the same three value-context

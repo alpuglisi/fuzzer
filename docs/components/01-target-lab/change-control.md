@@ -3,6 +3,101 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0061 — Tier 2 conformance-suite live wiring (lane T2, extends FR-LAB-52) (2026-09-22)
+- Change: `fuzzlab/labgen/conformance/tier2.py` was `"[design -- not exercised
+  by this task's own test suite]"` (no working confirmation logic, only the
+  `Tier2Oracle` protocol/`Tier2Outcome` dataclass/`run_tier2_case` plumbing).
+  This lane (`docs/PARALLEL_LANE_BUILD_PLAN.md` Lane group A / T2) wires it
+  against a REAL in-process app+DB, following the exact `php_laravel`
+  live-boot precedent `CC-LAB-0054` established for Tier 1 — a synthetic,
+  in-sandbox Laravel 13 + SQLite boot via the already-existing, unmodified
+  `fuzzlab.labgen.conformance.live_boot.LiveBootHarness`, **never** the
+  real, loopback-only Ryder's Puppy Fort Factory target, and needing no
+  `--authorized` flag (D11/CLAUDE.md Safety — verified against
+  `docs/DECISIONS_AND_ROADMAP.md` D11 before starting).
+  1. **New `LiveBootTier2Oracle`** (`tier2.py`, additive): a real
+     `Tier2Oracle` implementation that drives a `Tier2Client`
+     (structurally satisfied by `LiveBootHarness`'s existing `.get()`/
+     `.post()` — no change to `live_boot.py` needed or made) and adds a
+     genuine control/baseline differential on top of what Tier 1 alone can
+     show: it fetches the case's real payload response AND a second real
+     response for a caller-supplied inert control value at the same
+     param/location, and only reports `confirmed_vulnerable` when the
+     evidence marker is present in the payload response and genuinely
+     absent from the control response. A control value that itself
+     produces the marker is reported honestly as `inconclusive`
+     (`confirmed=False`, detail says why) rather than guessed either way —
+     fails closed, per PA-0025, matching
+     `fuzzlab.labgen.identifier_sqli_assertion.IdentifierSqliTier2Oracle`'s
+     own fail-closed convention (a second, independent, already-existing
+     real `Tier2Oracle` implementation this entry does not modify).
+  2. **New `Tier2Client` protocol** (`tier2.py`, additive): the minimal
+     `.get()`/`.post()` shape `LiveBootTier2Oracle` needs, satisfied
+     structurally by `LiveBootHarness` without this module importing it
+     directly.
+  3. **`tests/test_labgen_conformance_tier2.py`** (rewritten, additive over
+     the prior file's two offline interface tests, which are kept
+     unchanged): 9 tests total.
+     - 5 offline (no network, no live app): the original
+       `OnHostRequiredError`/fake-oracle wiring tests, plus new offline
+       tests of `LiveBootTier2Oracle`'s own control/payload differential
+       logic (confirm / does-not-confirm / inconclusive-control) against a
+       synthetic `_FakeTier2Client` test double, and one wiring test
+       through `run_tier2_case` itself.
+     - 2 real, on-host, `@pytest.mark.slow`, skip-guarded
+       (`live_boot.live_boot_available()`) tests: boot the REAL
+       `phase3_php_laravel_real_pages_numeric.yaml` manifest and run
+       `LiveBootTier2Oracle` against `product.php`'s real vulnerable
+       (`LABGEN-RPL-PRODUCT`) and secure (`LABGEN-RPL-PRODUCT-BOUND`)
+       twins for the classic `1 OR 1=1` boolean-injection payload — a real,
+       observed positive AND negative confirmation, not an inference from
+       source text.
+  4. **`tier2.py`'s own module/`run_tier2_case` docstrings updated** to
+     describe the new real, narrower, synthetic-in-sandbox claim precisely,
+     and to keep disclaiming (unchanged in substance from before this
+     change) that this is still not the production-grade, dialect-sensitive,
+     real-target container oracle T-LAB0.7 describes — that remains
+     `IdentifierSqliTier2Oracle`'s/a future real-target oracle's job.
+- **Shared-fixture check (per this lane's own dispatch instructions).**
+  `fuzzlab/labgen/conformance/live_boot.py` and
+  `tests/test_labgen_conformance_live_boot.py` already exist (built by
+  `CC-LAB-0054`/`CC-LAB-0056`/`CC-LAB-0058`, none of which are this wave's
+  T1/T2 lanes) and are imported read-only by this change — no edit was
+  needed or made to either file, so there is **no file-ownership conflict**
+  with lane T1 (which owns `tier1.py`, untouched here, and may also import
+  `live_boot.py` read-only the same way `LiveBootHarness.fetch()` already
+  does for `Tier1Client`). Scope stayed exactly `tier2.py` +
+  `tests/test_labgen_conformance_tier2.py`, per this lane's file ownership.
+- Impact (other components / project): none outside LAB. Purely additive to
+  `tier2.py` (new class + protocol + `__all__` entries; `run_tier2_case`'s
+  behavior/signature unchanged, only its error-message text and docstring
+  updated). No existing caller of `tier2.py` exists yet outside its own test
+  suite, so no other component's behavior changes.
+- Risk (level; mitigation or accepted-risk justification): **low**. Purely
+  additive to a conformance harness that gates nothing in `--check` or
+  production; reuses the already-proven, unmodified `LiveBootHarness`
+  (`CC-LAB-0054`/`0056`/`0058`) rather than building a second live-boot
+  mechanism. The new oracle's fail-closed `inconclusive` behavior can only
+  make a previously-impossible-to-detect ambiguous-control case reported
+  honestly, never silently mis-report a pass.
+- Verification: `pytest tests/test_labgen_conformance_tier2.py -q` → 9
+  passed (real run, this session, 2026-09-22; composer/php on PATH and
+  Packagist reachable in this sandbox, so both `@pytest.mark.slow` live-boot
+  tests ran for real rather than skipping). Full suite
+  (`pytest -q -m "not slow"`): 1443 passed, 38 skipped, 29 failed — all 29
+  failures confirmed pre-existing and unrelated (a missing `scipy`/stats
+  runtime dependency affecting `fingerprint_gate.py` and its callers;
+  reproduced identically on the pre-change commit via `git stash`, so this
+  change introduces zero new failures).
+- Rollback: revert `fuzzlab/labgen/conformance/tier2.py` and
+  `tests/test_labgen_conformance_tier2.py` to their prior state (this
+  entry's diff is additive-only within both files; no other file was
+  touched).
+- Effectiveness (assessed 2026-09-22): met — `tier2.py` now has a real,
+  in-sandbox live-boot confirmation path, proven by 2 genuine positive/
+  negative live-boot confirmations plus 7 offline tests, all green,
+  mirroring `CC-LAB-0054`'s own effectiveness bar for Tier 1.
+
 ### CC-LAB-0059 — Wave A0: Layer-A reconciliation reconfirmed against live repo, no G7…Gn scope (2026-09-22)
 - Change: pure verification, no code/schema change. Dispatched as
   `docs/PARALLEL_LANE_BUILD_PLAN.md`'s Wave A0 lane to mechanically
