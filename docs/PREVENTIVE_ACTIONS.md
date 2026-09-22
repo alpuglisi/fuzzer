@@ -229,3 +229,13 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   capability widening to exercise every newly-matching record; this rule covers the
   inverse direction — the *existing* tests must still test what they claim once the
   record count moves. (from BUG-0025)
+- **PA-0028** — A semantics/equivalence validator that accepts a mutation by default
+  (any fragment-level check — AST comparison, canonicalized-string comparison, or
+  otherwise — that returns "equivalent") must enumerate the transform shapes its
+  fragment-level checks are structurally blind to, i.e. any construct whose safety
+  depends on context **outside** the compared fragment (a SQL `--`/unterminated-comment
+  marker, whose effect is on whatever follows it in the real, concatenated statement),
+  and refuse those unconditionally absent explicit trusted provenance — checked before
+  the fragment-level checks run, not left to them. This is PA-0025's fail-closed
+  doctrine's "unprovable from the compared unit" case, applied to semantics validators:
+  the default posture for an unproven case is reject, not accept. (from BUG-0026)

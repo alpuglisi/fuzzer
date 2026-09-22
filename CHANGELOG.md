@@ -14,6 +14,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- MUT: fixed `SemanticsValidator` (`fuzzlab/mutation/semantics.py`) failing open on an
+  untrusted SQL `--` comment-append (accepted as semantics-preserving without vetted
+  provenance) and failing closed on a case-insensitive SQL `case-toggle` (AST equality
+  was case-sensitive) — chronic failures in
+  `tests/test_mutation_operators.py::test_every_surface_variant_preserves_semantics` and
+  `::test_sql_equivalent_needs_trusted_provenance`, first noted found-not-fixed by lane
+  L-P3.4 and re-confirmed by many subsequent runs. See `BUG-0026`, `PA-0028`,
+  `CC-MUT-0008`.
 - LAB: reproduced the real `contact.php` and `newsletter.php` pages (`PFF-1005`/`PFF-1006`)
   as `php_laravel` cells — the first page group of the `puppy-fort-factory/` migration
   (lane L-P3.3c-G5, `CC-LAB-0050`, `FR-LAB-48`). Both are secure-only escaped-echo
