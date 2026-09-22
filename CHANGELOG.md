@@ -14,6 +14,11 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- UI: rebuilt the Proxy workbench (History/Intercept/Repeater/Scope·Match-Replace) on a
+  shared `<message-editor>` ES module + a hand-rolled resizable splitter + an in-page
+  sub-nav — Raw|Pretty(+Hex) tabs, a status/timing strip, CSS-Custom-Highlight Ctrl-F
+  search over a read-only mirror, and a CRLF/non-printing toggle; Raw stays the only
+  editable view. Backend unchanged (`CC-UI-0029`, `FR-UI-14`).
 - Fix (BUG-0026): four parallel UI build lanes' web tests (U1, U2, U4, U5) built a bare
   `TestClient` with no headers, which U6's control-plane hardening middleware — merged
   concurrently in a sibling lane — correctly rejects as forged cross-origin; switched all

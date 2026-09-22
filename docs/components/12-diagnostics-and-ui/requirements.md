@@ -150,6 +150,19 @@ bugs — the research-platform diagnostics of decision D2.
   if unavailable) holds only throwaway per-viewer convenience state — last selected view
   id, an in-progress filter draft, which facet groups are collapsed — never durable or
   shared data. *(Realized: Wave-1 lane U2, CC-UI-0028.)*
+- **FR-UI-14** The Proxy section's History, Intercept, Repeater, and Scope/Match-Replace
+  views are switched by an in-page sub-nav (not separate routes) and render any raw HTTP
+  message through one shared `<message-editor>` component (`static/js/msgeditor.js`):
+  Raw (the only editable view, a plain `<textarea>` whose `.value` is the byte-exact
+  source of truth) | Pretty (view-only, never round-trips) tabs, plus a read-only Hex tab
+  on non-editable panes; a status/timing strip; Ctrl-F search painted via the CSS Custom
+  Highlight API over a read-only mirror (never by injecting markup into the live editable
+  buffer); and a CRLF/non-printing-char display toggle. Any two-pane view (request/
+  response) is joined by a hand-rolled, library-free resizable splitter (pointer-capture
+  drag, arrow-key `separator` a11y, persisted size) with a horizontal/vertical layout
+  toggle. The one documented newline transform (`\n`→`\r\n` on send/forward) stays in
+  `toWire` (`js/http.js`), applied only at the actual network call site — never inside
+  the editor component. *(Realized: Wave-1 lane U3, CC-UI-0029.)*
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

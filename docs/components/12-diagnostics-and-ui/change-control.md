@@ -3,6 +3,46 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0029 — Lane U3: Proxy workbench rebuild on shared message-editor + splitter + sub-nav (2026-09-22)
+- Change: replaced the Proxy section's single long page with an in-page sub-nav
+  (History/Intercept/Repeater/Scope·Match-Replace, APG Tabs pattern) and a new shared ES
+  module `static/js/msgeditor.js` exporting the `<message-editor>` custom element
+  (`{editable, bytes, meta}` in, `getBytes()` out) — Raw|Pretty tabs (+read-only Hex on
+  non-editable panes), a status/timing strip, Ctrl-F search painted via the CSS Custom
+  Highlight API over a read-only `<pre>` mirror (never span-injected into the live
+  `<textarea>`), and a CRLF/non-printing-char display toggle. Raw is the only editable
+  view; Pretty/Hex are derived, view-only renderings recomputed from the current bytes and
+  never written back. Also added `attachSplitter()` — a vanilla CSS-grid resizable
+  splitter (pointer-capture drag, arrow-key `separator`-role a11y, localStorage-persisted
+  px per orientation) — wired into History's flow detail and Repeater's request/response
+  panes with a horizontal/vertical layout toggle. Intercept uses one editable instance;
+  Repeater and History use an editable+read-only pair. `toWire` (`js/http.js`, unchanged)
+  remains the single documented CRLF-restore point, applied only at the Forward/Send call
+  sites. No library vendored; no build step.
+- Impact (other components / project): front-end only — `RepeaterController`/
+  `ProxyController` (PROXY component) and every `/api/proxy/*` route are unchanged. Kept
+  the DOM ids other suites assert on (`flow-table`, `flow-search`, `flow-refresh`,
+  `flow-empty`, `flow-detail*`, `flow-to-repeater`, `proxy-status`) and the
+  `initIntercept`/`initProxy` function names. Establishes `msgeditor.js` as a reusable
+  component other UI lanes could adopt for any future raw-message display. Did not touch
+  `app.py` — every backend route this lane needed already existed.
+- Risk (level; mitigation): medium (touches the Proxy page's entire DOM/JS surface,
+  including the pre-existing Repeater Playwright smoke's selectors) — mitigated by
+  updating that smoke test for the new markup, adding a byte-exact edit-and-forward
+  Intercept regression and a redaction/`innerHTML`-safety History regression (both
+  Playwright, skip cleanly without a browser), keeping the backend route tests untouched
+  and green, and a full-suite run at the accepted baseline.
+- Deliverables:
+  - [x] Shared `<message-editor>` custom element + vanilla splitter (`msgeditor.js`) —
+    done.
+  - [x] Sub-nav (History/Intercept/Repeater/Scope·Match-Replace) — done.
+  - [x] Intercept/Repeater/History rebuilt on the shared editor — done.
+  - [x] Byte-exact edit-and-forward + redaction/XSS-safety regressions — done.
+- Effectiveness (assessed 2026-09-22): effective — all four sub-views work through the
+  shared editor, the CRLF round-trip through `getBytes()`/`toWire` is proven byte-exact
+  against a real upstream, and redacted secrets never reach the DOM through the rebuilt
+  panels.
+
 ### CC-UI-0026 — Lane U6: control-plane hardening middleware + Starlette pin (2026-09-22)
 - Change: added `ControlPlaneHardening`, a global ASGI middleware in `fuzzlab/web/app.py`
   (pure ASGI, not `BaseHTTPMiddleware`, so it doesn't interfere with the launcher's SSE
