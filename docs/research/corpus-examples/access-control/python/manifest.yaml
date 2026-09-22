@@ -41,6 +41,9 @@
     against the corrected filter_by(...) form for the same route shape.
   validated: false
   validated_by: []
+  cwe: [CWE-639, CWE-862, CWE-915]
+  suggested_op: no_ownership_check
+  suggested_sink_family: db_row_by_id_lookup
 
 - file: idiomatic-1.py
   role: idiomatic
@@ -68,3 +71,6 @@
     different "ownership" relations on the same object.
   validated: false
   validated_by: []
+  cwe: [CWE-639, CWE-862]
+  suggested_op: ownership_check_after_fetch
+  suggested_sink_family: db_row_by_id_lookup

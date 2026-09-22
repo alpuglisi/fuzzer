@@ -25,6 +25,9 @@
     same-file contrastive note, though not a separate runnable fixed file.
   validated: false
   validated_by: []
+  cwe: [CWE-639, CWE-862]
+  suggested_op: no_ownership_check
+  suggested_sink_family: db_row_by_id_lookup
 
 - file: vulnerable-2.js
   role: vulnerable
@@ -47,6 +50,9 @@
     reference.
   validated: false
   validated_by: []
+  cwe: [CWE-639, CWE-862, CWE-306]
+  suggested_op: no_ownership_check
+  suggested_sink_family: keyed_resource_lookup
 
 - file: idiomatic-1.js
   role: idiomatic
@@ -72,6 +78,9 @@
     authenticated token, not trusted from the URL.
   validated: false
   validated_by: []
+  cwe: [CWE-639, CWE-862]
+  suggested_op: identity_match_before_fetch
+  suggested_sink_family: db_row_by_id_lookup
 
 - file: idiomatic-2.js
   role: idiomatic
@@ -92,3 +101,6 @@
     object-ownership check are present.
   validated: false
   validated_by: []
+  cwe: [CWE-639, CWE-862, CWE-306]
+  suggested_op: ownership_check_after_fetch
+  suggested_sink_family: db_row_by_id_lookup

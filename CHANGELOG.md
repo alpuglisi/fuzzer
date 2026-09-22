@@ -14,6 +14,21 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Research: Phase 3 CWE mapping for the "access control" corpus cell
+  (`docs/research/corpus-examples/access-control/{php,node,python}/manifest.yaml`,
+  10 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each
+  entry per `docs/VULN_CORPUS_EXPANSION_PLAN.md` Phase 3's handoff spec
+  (CWE-639/CWE-862 on every entry for the missing-ownership-check IDOR/BOLA
+  shape, plus CWE-306 where the vulnerable route also lacks any
+  authentication check and CWE-915 where a mass-assignment sub-pattern is
+  present; new proposed vocabulary — `no_ownership_check`,
+  `ownership_query_filter`, `ownership_check_after_fetch`,
+  `identity_match_before_fetch` against `db_row_by_id_lookup`/
+  `keyed_resource_lookup` — since none of `lab/safety_matrix.yaml`'s current
+  SQLi/XSS ops or sink families fit an access-control shape). Documentation/
+  metadata-only: no source files altered, no pairs built, no validation
+  attempted; `validated: false`/`validated_by: []` left unchanged on all 10
+  entries.
 - Planning: marked Phase 2 wave 1 (the six priority-9 feature rows) complete
   in `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s Status checklist, after
   independently re-verifying the full collected corpus (gitleaks re-scan

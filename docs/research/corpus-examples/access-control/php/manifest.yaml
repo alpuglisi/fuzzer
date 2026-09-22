@@ -34,6 +34,9 @@
     adds "AND o.user_id = ?" to the query for non-admins.
   validated: false
   validated_by: []
+  cwe: [CWE-639, CWE-862]
+  suggested_op: no_ownership_check
+  suggested_sink_family: db_row_by_id_lookup
 
 - file: vulnerable-2.php
   role: vulnerable
@@ -55,6 +58,9 @@
     concern not the focus here).
   validated: false
   validated_by: []
+  cwe: [CWE-639, CWE-862]
+  suggested_op: no_ownership_check
+  suggested_sink_family: db_row_by_id_lookup
 
 - file: idiomatic-1.php
   role: idiomatic
@@ -75,6 +81,9 @@
     after-the-fact comparison.
   validated: false
   validated_by: []
+  cwe: [CWE-639, CWE-862]
+  suggested_op: ownership_query_filter
+  suggested_sink_family: db_row_by_id_lookup
 
 - file: idiomatic-2.php
   role: idiomatic
@@ -96,3 +105,6 @@
     allowing the cancel action to proceed.
   validated: false
   validated_by: []
+  cwe: [CWE-639, CWE-862]
+  suggested_op: ownership_query_filter
+  suggested_sink_family: db_row_by_id_lookup
