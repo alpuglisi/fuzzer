@@ -14,6 +14,13 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Process: per direct instruction, added a pre-change review gate to
+  `docs/components/README.md` — for a substantive component change, the
+  change-control entry is now drafted first, reviewed by 2 independent
+  agents for accuracy and adequacy, and revised until all 3 parties (the
+  2 reviewers plus the proposing agent) agree, before implementation
+  begins. Reverses this doc's prior "do this as part of the change, not
+  afterward" wording for that class of change.
 - LAB: applied the site-architecture corpus's `suggested_op`/
   `suggested_sink_family` proposals to `lab/safety_matrix.yaml` (Step 8 of
   `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`) — 102 entries

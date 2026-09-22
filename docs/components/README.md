@@ -30,7 +30,42 @@ Every change updates **both** levels of log:
 Neither substitutes for the other. If a change touches more than one component,
 add an entry to each affected component's `change-control.md`. If a change alters
 the project architecture, also update `docs/ARCHITECTURE.md` (its maintenance
-rule). Do this as part of making the change, not afterward.
+rule).
+
+## Pre-change review gate (required, per direct instruction, 2026-09-22)
+
+**The change-control entry is now written *before* the change, not alongside it,
+and the change does not start until the entry is reviewed and agreed.** This
+reverses this section's own prior wording ("do this as part of making the change,
+not afterward") for a substantive code/architecture change — a documentation-only
+correction, a typo fix, or routine corpus-collection bookkeeping does not need this
+gate; a change to component code, schemas, or generator behavior does.
+
+The process:
+
+1. **Draft the change-control entry first** — `CC-<CODE>-NNNN`, every required
+   field (Change, Impact, Risk, Deliverables, Effectiveness left `pending`),
+   describing the change about to be made, grounded in the actual codebase (real
+   file paths, real function/class names, a real LOC estimate where feasible) —
+   not aspirational or vague.
+2. **Spawn 2 independent reviewer agents** against the draft, each checking its
+   **accuracy** (does it correctly describe the current code/architecture it
+   claims to change?) and its **adequacy** (does it actually cover the
+   change's real scope, risk, and impact — nothing hand-waved)?
+3. **Revise until all 3 parties agree** (the two reviewer agents plus the
+   agent proposing the change) — a 2/3 split is not enough; every raised
+   concern gets addressed in a revision, then re-reviewed.
+4. **Only once 3/3 agree does implementation begin.** The agreed entry is
+   committed as the change's change-control record; the code change that
+   follows should match what the entry described (a real divergence found
+   during implementation gets reflected back into the entry before the
+   change is considered done — this is a living draft until 3/3 agreement,
+   append-only once landed like every other change-control entry).
+
+This gate is scoped to substantive changes; it does not apply retroactively to
+already-landed entries, and does not change the `requirements.md`/`CHANGELOG.md`/
+`docs/ARCHITECTURE.md` update rules above — those still land together with the
+code once the gate has cleared.
 
 **Change-control logs are append-only.** Add a new entry for every change; never
 edit or delete an existing entry. All historical entries are kept as the record of
