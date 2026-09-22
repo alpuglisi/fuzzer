@@ -3,6 +3,36 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0015 — Fix (BUG-0028): `--append` no longer resets `occurrences` every run (2026-09-22)
+- Change: `fuzzlab/tools/fetcher.py::setup_results_db(append=True)`'s "collapse
+  duplicates left by an older run" migration now only runs when the
+  `idx_findings_target` unique index doesn't already exist — i.e. only for a
+  genuine pre-index database being migrated for the first time. Previously it ran
+  unconditionally on every `--append` call and recomputed `occurrences` from
+  `COUNT(*)` of rows per key, which is always `1` once the index exists (it already
+  collapses duplicates), silently discarding every prior run's true cumulative
+  count. Once migrated, `occurrences` is now left untouched by `setup_results_db`
+  and keeps accumulating correctly via `log_finding`'s `ON CONFLICT ... + 1`.
+- Impact (other components / project): `fuzzlab audit --append` (and anything
+  consolidating its `audit_results.db` into the unified store afterward) now
+  reports accurate cross-run observation counts; the default (non-append) path and
+  `log_finding`'s within-run behavior are unchanged.
+- Risk (level; mitigation): low — narrows an existing migration step to only its
+  intended one-time case; the new gate is a cheap `sqlite_master` lookup with no
+  other side effect. Mitigated by new `tests/test_fetcher_results_db.py` (this
+  file had zero test coverage before this fix): non-append clears the table;
+  append across three runs accumulates 3 → 5 → 6 instead of resetting; a genuine
+  pre-index database with literal duplicate rows is still correctly migrated on
+  first `--append`.
+- Deliverables:
+  - [x] Gate the collapse/recompute migration on index absence — done.
+  - [x] `tests/test_fetcher_results_db.py` (4 tests) — done.
+  - [x] Full bug protocol: `BUG-0028`, `PA-0030`, `ERROR_LOG.md` entry (closes the
+    long-standing "Open / low priority" line) — done.
+- Effectiveness (assessed 2026-09-22): effective — occurrences now accumulate
+  correctly across repeated `--append` runs in the new regression tests; the
+  pre-index migration path still works for a genuinely old database.
+
 ### CC-AUD-0014 — Expose `build_parser()` for the command-spec registry (2026-09-21)
 - Change: `fuzzlab/tools/fetcher.py` now factors its argparse setup into `build_parser()`;
   `parse_args()` delegates to it. Added `prog="fuzzlab audit"` for accurate usage.

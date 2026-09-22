@@ -18,6 +18,33 @@ Format per entry:
 
 ---
 
+## 2026-09-22 — AUD: `fetcher.py --append` recomputed `occurrences` from the row count on every run (BUG-0028)
+
+- **Symptom:** long-standing "Open / low priority" entry below: repeated
+  `--append` runs reset a finding's `occurrences` to the current row count
+  (always 1, since the unique index already collapses duplicates) before the
+  new audit's `log_finding` calls resumed counting from there — so the
+  cumulative count across runs was never actually preserved, only the count
+  since the counter last got reset.
+- **Root cause:** `setup_results_db(append=True)`'s "collapse duplicates left
+  by an older run" migration step is a one-time upgrade for a pre-index
+  database that still holds literal duplicate rows; it ran unconditionally on
+  every `--append` call with no check for whether that migration had already
+  happened, so on an already-migrated database it recomputed `occurrences`
+  from `COUNT(*)` of the (always-one) rows per key and overwrote the correct,
+  already-cumulative value. Full RCA in
+  `docs/bugs/BUG-0028-fetcher-append-recomputes-occurrences-every-run.md`.
+- **Remediation:** the migration step now runs only when `idx_findings_target`
+  doesn't already exist (a genuine pre-index database being migrated for the
+  first time); once it exists, `occurrences` is left untouched and keeps
+  accumulating via `log_finding`'s `ON CONFLICT ... + 1` across every
+  subsequent run. `fuzzlab/tools/fetcher.py`, `CC-AUD-0015`. New
+  `tests/test_fetcher_results_db.py` (no prior coverage existed): non-append
+  clears the table; append across three runs accumulates 3 → 5 → 6 instead of
+  resetting; a genuine pre-index database with literal duplicate rows is
+  still correctly migrated on first `--append`. `PA-0030`.
+- **Status:** Fixed.
+
 ## 2026-09-22 — MUT: `SemanticsValidator.preserves()` let AST equivalence override canonicalize in both directions (BUG-0027)
 
 - **Symptom:** `tests/test_mutation_operators.py::test_every_surface_variant_preserves_semantics`
@@ -790,7 +817,5 @@ Format per entry:
 
 ## Open / low priority
 
-- `fetcher.py` `--append` occurrence counter: repeated `--append` runs recompute
-  `occurrences` as the current row count (1 after de-duplication) before the new
-  audit bumps it, so cumulative counts across runs are not preserved. The default
-  (fresh) run is unaffected. **Status:** Open (low priority).
+- `fetcher.py` `--append` occurrence counter: **Fixed** — see the 2026-09-22 entry
+  above (`BUG-0028`, `CC-AUD-0015`).

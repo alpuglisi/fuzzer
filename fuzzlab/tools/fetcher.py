@@ -235,21 +235,34 @@ def setup_results_db(db_name="audit_results.db", append=False):
             pass
 
     if append:
-        # Collapse any duplicates left by an older run so the unique index applies.
         cursor.execute('''
-            UPDATE findings SET occurrences = (
-                SELECT COUNT(*) FROM findings f2
-                WHERE f2.category = findings.category
-                  AND f2.transaction_type = findings.transaction_type
-                  AND f2.target_identifier = findings.target_identifier
-            )
+            SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_findings_target'
         ''')
-        cursor.execute('''
-            DELETE FROM findings WHERE id NOT IN (
-                SELECT MIN(id) FROM findings
-                GROUP BY category, transaction_type, target_identifier
-            )
-        ''')
+        already_indexed = cursor.fetchone() is not None
+        if not already_indexed:
+            # A pre-index database may hold literal duplicate rows (one per
+            # occurrence, from before `log_finding` accumulated an `occurrences`
+            # count in place) — collapse them into one row per key, deriving the
+            # count from how many duplicate rows existed. Once the unique index
+            # is in place, `occurrences` is already accurate and cumulative
+            # across every past run via `log_finding`'s `ON CONFLICT ... +1`;
+            # re-running this recompute on every `--append` would overwrite that
+            # cumulative count with the current (always 1, post-dedup) row
+            # count, silently discarding prior runs' totals.
+            cursor.execute('''
+                UPDATE findings SET occurrences = (
+                    SELECT COUNT(*) FROM findings f2
+                    WHERE f2.category = findings.category
+                      AND f2.transaction_type = findings.transaction_type
+                      AND f2.target_identifier = findings.target_identifier
+                )
+            ''')
+            cursor.execute('''
+                DELETE FROM findings WHERE id NOT IN (
+                    SELECT MIN(id) FROM findings
+                    GROUP BY category, transaction_type, target_identifier
+                )
+            ''')
     else:
         cursor.execute('DELETE FROM findings')
 

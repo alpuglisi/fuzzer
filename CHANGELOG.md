@@ -14,6 +14,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- AUD: fixed `fetcher.py --append` (BUG-0028) — its one-time "collapse
+  duplicates from an old database" migration ran on every `--append` call,
+  not only when actually migrating a pre-index database, so it recomputed
+  `occurrences` from the current row count (always 1) and silently reset
+  each finding's cumulative cross-run observation count. Now gated on the
+  unique index's absence; `occurrences` accumulates correctly across
+  repeated `--append` runs (`CC-AUD-0015`, `PA-0030`). Closes the
+  long-standing "Open / low priority" ERROR_LOG entry.
 - MUT: fixed `SemanticsValidator.preserves()` (BUG-0027) — a decisive `sqlglot`
   AST-equivalence verdict was overriding `canonicalize()` in both directions,
   wrongly rejecting a case-toggle surface variant and, more seriously, wrongly

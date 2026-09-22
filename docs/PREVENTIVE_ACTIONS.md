@@ -267,3 +267,22 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   when decisive" combinator; every other hit is an optional-dependency guard (store,
   run_id, scheduler, plugins) on a single code path, not two competing verdict engines —
   no other instance of this bug class found. (from BUG-0027)
+- **PA-0030** — A schema-upgrade step meant to run exactly once, migrating a database
+  written by an older version into the current shape, must gate itself on detecting that
+  older shape (e.g. a schema-version row, a missing index/column, an absence check) —
+  never on a caller-supplied flag (like `--append`) or "runs every call" with no guard,
+  since a caller has no way to know from the outside whether the migration already
+  happened. When such a step *recomputes* a value from the current row/column shape
+  rather than merely adding a missing column, treat it as doubly dangerous: re-running it
+  after the shape has already changed doesn't just waste time, it overwrites already-
+  correct accumulated state with a value derived from the *new* shape's degenerate case
+  (here, `COUNT(*)` of rows already collapsed by a unique index is always 1, silently
+  discarding every prior run's true cumulative count). A plain `ALTER TABLE ADD COLUMN`
+  wrapped in a catch-the-"already exists"-error is fine to leave unconditional (adding a
+  column that's already there is a genuine no-op); a step that reads existing data and
+  writes a *derived* value is not, and needs the explicit gate. PA-0002 sweep: grepped
+  `fuzzlab/` for every `ALTER TABLE`/`CREATE ... IF NOT EXISTS` migration-shaped block
+  outside `core/migrations.py` (the numbered, schema-version-gated runner, already safe
+  by construction); the only other hits are `spider.py`'s and `fetcher.py`'s own
+  add-column-if-missing loops, which are the safe, genuinely idempotent shape — no other
+  instance of the dangerous recompute-on-every-call shape found. (from BUG-0028)
