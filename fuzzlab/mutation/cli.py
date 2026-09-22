@@ -36,6 +36,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--budget", type=int, default=40)
     p.add_argument("--allow-destructive", action="store_true",
                    help="Permit recording destructive variants (default: refused)")
+    p.add_argument("--confirm-oracle", action="store_true",
+                   help="Independently re-check each recorded bypass with the oracle's "
+                        "own confirmation strategies for --vuln-class at the same "
+                        "endpoint (advisory; the oracle stays the sole finding-writer)")
     p.add_argument("--authorized", action="store_true",
                    help="Required: confirm you are authorized to test this lab target")
     return p
@@ -61,11 +65,19 @@ def main(argv: list[str]) -> int:
 
     with Store(args.store) as store:
         run_id = store.start_run("mutate", urlparse(args.url).hostname or args.url)
+        oracle = None
+        if args.confirm_oracle:
+            # store/run_id attached so a genuine confirmation actually writes the
+            # `finding` row -- an Oracle with neither is a pure dry-run that never
+            # persists (see Oracle._write_finding's guard), which would silently
+            # defeat the point of --confirm-oracle.
+            from fuzzlab.oracle import Oracle
+            oracle = Oracle(store=store, run_id=run_id)
         summary = mrun.run_mutation(
             url=args.url, param=args.param, store=store, run_id=run_id, sender=sender,
             bases=bases, vuln_class=args.vuln_class, method=args.method,
             location=args.location, coverage_fn=coverage_fn, seed=args.seed,
-            budget=args.budget, allow_destructive=args.allow_destructive)
+            budget=args.budget, allow_destructive=args.allow_destructive, oracle=oracle)
         _print_summary(args, summary, run_id)
     return 0
 
@@ -73,13 +85,19 @@ def main(argv: list[str]) -> int:
 def _print_summary(args, summary, run_id) -> None:
     print(f"\nmutate-run ({args.vuln_class}; {args.url} [{args.param}]; run_id={run_id})")
     print(f"  bases: {summary['bases']}   blocked by WAF: {summary['blocked']}   "
-          f"bypasses found: {summary['bypasses']}   recorded: {summary['recorded']}")
+          f"bypasses found: {summary['bypasses']}   recorded: {summary['recorded']}"
+          + (f"   oracle-confirmed: {summary['oracle_confirmed']}"
+             if args.confirm_oracle else ""))
     for r in summary["results"]:
         tag = "BYPASS" if (r["evaded"] and r["semantics_ok"] and r["base_blocked"]) else "-"
         cov = f"  +{r['novel_lines']} new line(s)" if r["novel_lines"] else ""
+        oracle_note = ""
+        if args.confirm_oracle and r["recorded_id"] is not None:
+            oracle_note = ("  [oracle: CONFIRMED, finding written]"
+                           if r["oracle_confirmed"] else "  [oracle: not confirmed]")
         print(f"    [{tag}] base={r['base']!r}")
         print(f"           variant={r['variant']!r} via {r['operators']}"
-              f"  evaded={r['evaded']} semantics_ok={r['semantics_ok']}{cov}")
+              f"  evaded={r['evaded']} semantics_ok={r['semantics_ok']}{cov}{oracle_note}")
     if summary["recorded"]:
         print(f'\n  recorded variants:  sqlite3 {args.store} "SELECT base_payload, variant, '
               f'operators, bypassed_rule, coverage_gain FROM payload_variant '

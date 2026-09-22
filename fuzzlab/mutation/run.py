@@ -52,10 +52,24 @@ def run_mutation(*, url: str, param: str, store, run_id: int, sender,
                  bases: list[str], vuln_class: str = "sql-injection",
                  method: str = "GET", location: str = "query", coverage_fn=None,
                  seed: int = 0, budget: int = 40,
-                 allow_destructive: bool = False) -> dict:
-    """Search for a bypass per base; record the preserving evaders. Returns a summary."""
+                 allow_destructive: bool = False, oracle=None) -> dict:
+    """Search for a bypass per base; record the preserving evaders. Returns a summary.
+
+    ``oracle`` (optional, CC-MUT-0006 nice-to-have): when given, a recorded bypass is
+    also checked with ``Oracle.confirm()`` at the same (url, param, method, location),
+    scoped to ``vuln_class`` as the confirmation category. This is an **independent**
+    re-check via the oracle's own strategies, not a literal replay of the accepted
+    variant string — a `ConfirmationStrategy` crafts its own probe payload per class, it
+    does not take an arbitrary caller-supplied payload — so it answers "does the oracle
+    also confirm this class of vulnerability at this endpoint," a related but distinct
+    question from "did this exact variant trigger it." The oracle remains the sole
+    finding-writer (`finding` rows only ever come from `Oracle.confirm`, never written
+    here) — mutation stays advisory, matching M10's existing advisory/oracle split
+    (CC-FUZZ-0016). Never runs when `oracle` is omitted (default): behavior unchanged.
+    """
     flt = HttpFilter(sender, url, param, method=method, location=location)
-    summary = {"bases": 0, "blocked": 0, "bypasses": 0, "recorded": 0, "results": []}
+    summary = {"bases": 0, "blocked": 0, "bypasses": 0, "recorded": 0,
+              "oracle_confirmed": 0, "results": []}
     for base in bases:
         base_blocked = flt.caught(base)
         search = MutationSearch(flt, coverage_fn=coverage_fn, seed=seed, budget=budget,
@@ -63,16 +77,24 @@ def run_mutation(*, url: str, param: str, store, run_id: int, sender,
         res = search.search(base, vuln_class)
         bypass = bool(res.evaded and res.semantics_ok and base_blocked)
         recorded = None
+        oracle_confirmed = None
         if bypass:
             base_hits = flt.evaluate(base).hits
             recorded = record_search_result(
                 store, run_id, base, res, vuln_class,
                 bypassed_rule=(",".join(base_hits) or None),
                 allow_destructive=allow_destructive)
+            if oracle is not None:
+                from fuzzlab.oracle.probe import Candidate
+                candidate = Candidate(url=url, param=param, method=method,
+                                      location=location, category=vuln_class)
+                verdict = oracle.confirm(candidate, sender)
+                oracle_confirmed = bool(verdict is not None and verdict.confirmed)
         summary["bases"] += 1
         summary["blocked"] += 1 if base_blocked else 0
         summary["bypasses"] += 1 if bypass else 0
         summary["recorded"] += 1 if recorded is not None else 0
+        summary["oracle_confirmed"] += 1 if oracle_confirmed else 0
         summary["results"].append({
             "base": base,
             "base_blocked": base_blocked,
@@ -82,5 +104,6 @@ def run_mutation(*, url: str, param: str, store, run_id: int, sender,
             "semantics_ok": res.semantics_ok,
             "novel_lines": res.novel_lines,
             "recorded_id": recorded,
+            "oracle_confirmed": oracle_confirmed,
         })
     return summary

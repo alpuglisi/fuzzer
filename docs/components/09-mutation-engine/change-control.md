@@ -3,6 +3,44 @@
 Component code: **MUT**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-MUT-0009 — Oracle-confirm a recorded bypass, optionally (CC-MUT-0006 nice-to-have) (2026-09-22)
+- Change: `run_mutation` takes an optional `oracle=` parameter (default `None`,
+  behavior unchanged); when given, every recorded WAF-bypass variant triggers an
+  **independent** `Oracle.confirm()` check at the same (url, param, method,
+  location), scoped to `vuln_class` as the confirmation category. This is not a
+  literal replay of the accepted variant's exact payload — a `ConfirmationStrategy`
+  always crafts its own probe (no strategy takes a caller-supplied payload) — so it
+  answers "does the oracle also confirm this class of vulnerability here," a
+  related but distinct question from "did this exact variant trigger it." The
+  oracle remains the sole finding-writer: `run_mutation` itself writes no `finding`
+  row, only `Oracle.confirm()` does when store/run_id are attached to the `Oracle`
+  instance. Wired into `fuzzlab mutate-run` as an opt-in `--confirm-oracle` flag
+  (`fuzzlab/mutation/cli.py`), auto-surfaced in the launcher UI's form via the
+  existing `build_parser()`→command-spec path — no UI-side change needed.
+  `summary["oracle_confirmed"]` (a count) and each result's `oracle_confirmed`
+  (`None` when no oracle was given, else `True`/`False`) report the outcome.
+- Impact (other components / project): purely additive and opt-in — omitting
+  `oracle=`/`--confirm-oracle` leaves every existing caller's behavior identical
+  (verified by a dedicated test). Matches the existing oracle/advisory split
+  (CC-FUZZ-0016's M10 pattern): mutation stays advisory, the oracle stays the
+  fail-closed finding-writer. No schema change.
+- Risk (level; mitigation): low — opt-in, and reuses the already-tested
+  `Oracle.confirm()` seam unchanged. Mitigated by 3 new tests
+  (`tests/test_mutation_live.py`): omitting `oracle=` writes zero findings and
+  leaves `oracle_confirmed` `None` (pre-existing behavior untouched); a fake
+  sender that also leaks a SQL error on the oracle's own probes gets confirmed
+  and writes exactly one `finding`; a fake sender that evades the WAF but never
+  leaks a SQL error is correctly NOT confirmed (no finding written).
+- Deliverables:
+  - [x] `run_mutation(..., oracle=None)` — independent oracle re-check on a
+    recorded bypass — done.
+  - [x] `--confirm-oracle` CLI flag + summary/result reporting — done.
+  - [x] Tests: no-oracle unchanged, confirmed writes a finding, not-confirmed
+    writes none — done.
+- Effectiveness (assessed 2026-09-22): effective — the oracle correctly
+  distinguishes "evaded the WAF" from "the oracle also independently confirms a
+  vulnerability here," and only the latter ever produces a `finding` row.
+
 ### CC-MUT-0008 — Emit reward/novelty metric_series from MutationSearch (2026-09-22)
 - Change: `MutationSearch` (`fuzzlab/mutation/search.py`) takes optional `store`/`run_id`
   constructor args; when given, `search()` emits per-step `reward`/`novelty`

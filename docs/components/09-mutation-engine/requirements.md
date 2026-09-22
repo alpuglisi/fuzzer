@@ -34,6 +34,14 @@ feedback and the scheduler.
   `reward`/`novelty` metric_series points (source `mutation`) via
   `core.store.MetricLogger` (CC-CORE-0018), so a future diagnostics UI tab can chart
   search progress. Absent a store or run id, behavior is unchanged.
+- **FR-MUT-8** When given an `oracle=` (optional; default `None`, behavior
+  unchanged), `run_mutation` independently re-checks each recorded WAF-bypass
+  variant via `Oracle.confirm()` at the same endpoint, scoped to `vuln_class` —
+  an independent re-check via the oracle's own confirmation strategies, not a
+  literal replay of the variant's exact payload. `run_mutation` itself never
+  writes a `finding` row; only a confirming `Oracle.confirm()` does, preserving
+  the oracle/advisory split (FR-FUZZ-5). Surfaced as `fuzzlab mutate-run
+  --confirm-oracle`. *(Realized: CC-MUT-0009.)*
 
 ## 4. Non-functional requirements
 - **NFR-MUT-semantics** A mutation must preserve intended semantics; a validator

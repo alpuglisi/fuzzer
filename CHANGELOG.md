@@ -14,6 +14,11 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- MUT: `fuzzlab mutate-run --confirm-oracle` optionally re-checks each recorded
+  WAF-bypass variant with the oracle's own confirmation strategies and writes a
+  `finding` only when it independently confirms — opt-in, the oracle stays the
+  sole finding-writer, mutation stays advisory. Closes the CC-MUT-0006
+  nice-to-have (`CC-MUT-0009`, `FR-MUT-8`).
 - UI: a run's detail page now surfaces the reproducible evaluation report
   (schema/config/feature/model/plugin versions) plus a canonical-JSON download
   route byte-identical to `fuzzlab report --json` — closes the CC-UI-0009
