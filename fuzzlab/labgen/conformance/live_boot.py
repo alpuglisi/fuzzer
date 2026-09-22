@@ -31,9 +31,13 @@ real SQLi-bypass/bound-parameter twin against a real seeded ``users`` row,
 and ``register.php``'s real prepared ``INSERT``), ``g2`` (``products.php`` /
 ``api/products.php``'s real JSON feed), and ``g4`` (the
 ``edit_profile.php`` -> ``profile.php`` stored-second-order write-then-read
-round trip) (``CC-LAB-0056``). ``search.php`` remains genuinely unpinned
-(no single cell owns its real URL yet, pending the ``L-P3.3c-CUT`` decision
--- see that manifest's own header) and is not attempted here.
+round trip) (``CC-LAB-0056``). ``search.php`` was the sixth, genuinely
+unpinned page (no single cell owned its real URL, pending the
+``L-P3.3c-CUT`` decision); ``CC-LAB-0058``/``FR-LAB-55`` resolved that
+decision (``LABGEN-PL-RP-0001`` canonical, ``PFF-0003`` exempted -- see
+``fuzzlab.labgen.emitters.php_laravel._PAGE_PROFILES['/search.php']``) and
+this module's MariaDB-backed mode below now live-boots it too, real HTTP
+proof included.
 
 **The seeded ``users`` row (:data:`SEED_USERNAME`/:data:`SEED_PASSWORD`,
 user id :data:`SEED_USER_ID`).** One row serves both the auth group's real
@@ -167,6 +171,259 @@ def _find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+# ---------------------------------------------------------------------------
+# MariaDB-backed mode (`CC-LAB-0058`/`FR-LAB-55`)
+# ---------------------------------------------------------------------------
+#
+# Everything above this point (and the SQLite path of :class:`LiveBootHarness`
+# below) is `CC-LAB-0054`/`CC-LAB-0056`'s original, unmodified harness -- see
+# the module docstring's "Why SQLite here, MariaDB in the real lab" section
+# for the gap this closes: nobody had yet proven a `php_laravel`-emitted
+# build against the actual database engine `lab/compose.yaml` provisions.
+# This sandbox happens to carry a real, locally-installed `mariadb-server`
+# (confirmed via `service mariadb start` + `mariadb-admin ping` -- not
+# Docker, the bare binary), which is exactly the missing "real engine" this
+# task closes the gap with.
+#
+# **Real schema, real seed data.** :data:`REAL_SCHEMA_SQL` is
+# ``puppy-fort-factory/sql/schema.sql`` itself, imported verbatim
+# (``mariadb < schema.sql``) -- never a port or a synthetic equivalent (that
+# is exactly what the SQLite path above is, and exactly what this mode
+# exists to go beyond). Because that file both creates the schema AND seeds
+# real rows (``admin``/``alice``/``bob``, ten real products, four real
+# posts), this mode seeds nothing of its own for those tables -- it reads
+# back and asserts against the *real* seeded values schema.sql already
+# ships, never re-declaring a parallel seed fixture PA-0003/PA-0021 would
+# flag as a second, drifting source of the same facts.
+#
+# **The identity matches ``lab/compose.yaml``'s own defaults, literally**
+# (``PFF_DB_NAME``/``PFF_DB_USER``/``PFF_DB_PASS`` -> ``puppy_fort``/``pff``/
+# ``pff_lab_pw``) -- not a made-up test-only name -- so the seam this proves
+# (php_laravel output -> real MariaDB) is the same seam the real lab's own
+# compose file wires, per this task's own instruction. These are the lab's
+# already-public, checked-in-to-``lab/compose.yaml`` DEFAULT development
+# credentials for a deliberately-vulnerable, loopback-only lab target, not a
+# real secret (PA-0004/D12 govern *production* credentials, which this is
+# not); nothing here is deployed or exposed.
+
+
+#: ``puppy-fort-factory/sql/schema.sql`` -- read and imported for real
+#: (never moved, forked, or edited: this task's own additive-only
+#: constraint), the actual schema/seed data `lab/compose.yaml`'s `db`
+#: service provisions a fresh MariaDB from.
+REAL_SCHEMA_SQL = Path(__file__).resolve().parents[3] / "puppy-fort-factory" / "sql" / "schema.sql"
+
+#: The identity this harness provisions on the local `mariadbd`, matching
+#: `lab/compose.yaml`'s own `PFF_DB_NAME`/`PFF_DB_USER`/`PFF_DB_PASS` default
+#: values (`${PFF_DB_NAME:-puppy_fort}` etc.) -- see the module-level comment
+#: above for why these are the lab's own already-public dev defaults, not a
+#: secret this harness invents.
+MARIADB_DB_NAME = "puppy_fort"
+MARIADB_DB_USER = "pff"
+MARIADB_DB_PASSWORD = "pff_lab_pw"
+MARIADB_HOST = "127.0.0.1"
+MARIADB_PORT = 3306
+
+#: How long to wait for a just-(re)started `mariadbd` to answer `mariadb-admin
+#: ping` before giving up -- mirrors :data:`BOOT_TIMEOUT_S`'s role for `php
+#: artisan serve`, applied to the other real process this mode manages.
+MARIADB_BOOT_TIMEOUT_S = 30.0
+
+
+def mariadb_available() -> bool:
+    """The authoritative capability probe a caller (chiefly the pytest
+    suite) must check before constructing a :class:`MariaDbServer` --
+    PA-0005/PA-0008: a real capability check, never a fragile proxy, mirroring
+    :func:`live_boot_available`'s own convention for composer/php.
+
+    Deliberately does **not** itself start `mariadbd` (a probe must not have
+    the side effects of the thing it is probing for) -- it checks that the
+    real binaries and the real schema fixture this mode needs are present:
+    the `mariadb`/`mariadb-admin` client binaries on PATH, the system
+    `service` command and the `mariadb` init script (so this harness can
+    actually start/stop a real server), and
+    ``puppy-fort-factory/sql/schema.sql`` itself. A missing tool or fixture
+    SKIPS the check; it never silently reports a pass."""
+    return (
+        shutil.which("mariadb") is not None
+        and shutil.which("mariadb-admin") is not None
+        and shutil.which("service") is not None
+        and Path("/etc/init.d/mariadb").is_file()
+        and REAL_SCHEMA_SQL.is_file()
+    )
+
+
+class MariaDbServer:
+    """Starts (if not already running), provisions, and tears down a real
+    local `mariadbd` for one live-boot run -- via the system `service`
+    command (the more reliable, already-integrated-with-this-sandbox path;
+    see the module docstring), never a hand-rolled `mariadbd` invocation with
+    a bespoke datadir.
+
+    Use as a context manager:
+
+        with MariaDbServer() as db:
+            ...  # a real MariaDB is now reachable at db.host:db.port
+
+    **Cleanup (task instruction 6), on every exit path including a raised
+    exception** (PA-0012's "bounded, deterministic teardown" convention,
+    applied here to a system service + a database/user rather than an
+    asyncio server): the test database and user this run created are always
+    dropped, and the `mariadbd` service is stopped again **only if this
+    instance is the one that started it** -- a `mariadbd` this sandbox
+    already had running before the test (e.g. a human's own interactive
+    session) is left exactly as found, never stopped out from under them.
+    """
+
+    def __init__(
+        self,
+        *,
+        db_name: str = MARIADB_DB_NAME,
+        db_user: str = MARIADB_DB_USER,
+        db_password: str = MARIADB_DB_PASSWORD,
+        host: str = MARIADB_HOST,
+        port: int = MARIADB_PORT,
+    ) -> None:
+        self.db_name = db_name
+        self.db_user = db_user
+        self.db_password = db_password
+        self.host = host
+        self.port = port
+        self._we_started_service = False
+        self._provisioned = False
+
+    def _root_run(self, sql: str, *, timeout: float = 30.0) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["mariadb", "-u", "root", "-e", sql],
+            capture_output=True, text=True, timeout=timeout,
+        )
+
+    def _service_status_running(self) -> bool:
+        result = subprocess.run(
+            ["service", "mariadb", "status"], capture_output=True, text=True, timeout=15.0,
+        )
+        return result.returncode == 0
+
+    def _wait_for_ping(self) -> None:
+        deadline = time.monotonic() + MARIADB_BOOT_TIMEOUT_S
+        last: subprocess.CompletedProcess | None = None
+        while time.monotonic() < deadline:
+            last = subprocess.run(["mariadb-admin", "ping"], capture_output=True, text=True, timeout=5.0)
+            if last.returncode == 0:
+                return
+            time.sleep(0.25)
+        raise LiveBootError(
+            f"mariadbd did not answer 'mariadb-admin ping' within {MARIADB_BOOT_TIMEOUT_S}s: "
+            f"{last.stdout if last else ''}{last.stderr if last else ''}"
+        )
+
+    def start(self) -> None:
+        """Start the real system `mariadbd` if it is not already running
+        (never restarting/reconfiguring one that is), then wait for it to
+        answer pings for real -- never assumed ready the instant `service
+        start` returns."""
+        self._we_started_service = not self._service_status_running()
+        if self._we_started_service:
+            result = subprocess.run(
+                ["service", "mariadb", "start"], capture_output=True, text=True, timeout=60.0,
+            )
+            if result.returncode != 0:
+                raise LiveBootError(
+                    f"'service mariadb start' failed (exit {result.returncode}):\n"
+                    f"{result.stdout}\n{result.stderr}"
+                )
+        self._wait_for_ping()
+
+    def provision(self) -> None:
+        """Drop any stale same-named database/user from a prior run, import
+        the REAL `puppy-fort-factory/sql/schema.sql` verbatim (`mariadb <
+        schema.sql` -- it creates and seeds the database itself, so no
+        separate `CREATE DATABASE` step is needed here), and create the
+        least-privilege application user `lab/compose.yaml` itself connects
+        as (never root, matching that file's own `PFF_DB_HOST`/`PFF_DB_USER`
+        seam)."""
+        self._root_run(
+            f"DROP DATABASE IF EXISTS `{self.db_name}`; "
+            f"DROP USER IF EXISTS '{self.db_user}'@'{self.host}';"
+        )
+        schema_sql = REAL_SCHEMA_SQL.read_text("utf-8")
+        import_result = subprocess.run(
+            ["mariadb", "-u", "root"], input=schema_sql, capture_output=True, text=True, timeout=60.0,
+        )
+        if import_result.returncode != 0:
+            raise LiveBootError(
+                f"importing {REAL_SCHEMA_SQL} into a real MariaDB failed (exit "
+                f"{import_result.returncode}):\n{import_result.stdout}\n{import_result.stderr}"
+            )
+        user_result = self._root_run(
+            f"CREATE USER '{self.db_user}'@'{self.host}' IDENTIFIED BY '{self.db_password}'; "
+            f"GRANT ALL PRIVILEGES ON `{self.db_name}`.* TO '{self.db_user}'@'{self.host}'; "
+            "FLUSH PRIVILEGES;"
+        )
+        if user_result.returncode != 0:
+            raise LiveBootError(
+                f"provisioning the '{self.db_user}' MariaDB user failed (exit "
+                f"{user_result.returncode}):\n{user_result.stdout}\n{user_result.stderr}"
+            )
+        self._provisioned = True
+
+    def query(self, sql: str, params: tuple = ()) -> list[dict]:
+        """Read-only introspection over the real MariaDB database, mirroring
+        :meth:`LiveBootHarness.query_db`'s role for the SQLite path -- for a
+        test to observe a write a real HTTP request made, without a second,
+        parallel HTTP-response-parsing mechanism.
+
+        Deliberately shells out to the real `mariadb` client in batch mode
+        (`-B`, tab-separated with a header row) rather than adding a Python
+        MySQL driver dependency this project does not otherwise need
+        (PA-0005: no runtime dependency the project has not declared) -- the
+        harness's PHP side already talks to MariaDB through Laravel's own
+        `pdo_mysql` driver, so a *second*, Python-side one would exist only
+        for this introspection helper. `%s`-style placeholders in `sql` are
+        substituted with `params` as quoted literals before the query is
+        sent -- a plain, test-harness-only substitution (never used to
+        compose an HTTP request this harness sends, only this read-only
+        assertion helper), good enough for the fixed, hand-written queries
+        this module's own tests pass it."""
+        for value in params:
+            literal = "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'" if isinstance(value, str) else str(value)
+            sql = sql.replace("%s", literal, 1)
+        result = subprocess.run(
+            ["mariadb", "-h", self.host, "-P", str(self.port), "-u", self.db_user,
+             f"-p{self.db_password}", self.db_name, "-B", "-e", sql],
+            capture_output=True, text=True, timeout=30.0,
+        )
+        if result.returncode != 0:
+            raise LiveBootError(f"query against real MariaDB failed (exit {result.returncode}): {result.stderr}")
+        lines = result.stdout.splitlines()
+        if not lines:
+            return []
+        header = lines[0].split("\t")
+        return [dict(zip(header, line.split("\t"))) for line in lines[1:]]
+
+    def teardown(self) -> None:
+        """Drop the test database/user unconditionally, then stop `mariadbd`
+        again -- but only if :meth:`start` is the one that started it (see
+        the class docstring). Runs both steps even if one fails, and never
+        raises: teardown must not itself become the reason a test run leaks
+        state (PA-0012's bounded-teardown convention)."""
+        if self._provisioned:
+            self._root_run(
+                f"DROP DATABASE IF EXISTS `{self.db_name}`; "
+                f"DROP USER IF EXISTS '{self.db_user}'@'{self.host}';"
+            )
+        if self._we_started_service:
+            subprocess.run(["service", "mariadb", "stop"], capture_output=True, text=True, timeout=30.0)
+
+    def __enter__(self) -> "MariaDbServer":
+        self.start()
+        self.provision()
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.teardown()
 
 
 #: A harness-only ``.env`` -- SQLite, debug off (matches
@@ -306,10 +563,28 @@ class LiveBootHarness:
     subprocess rather than an asyncio server).
     """
 
-    def __init__(self, emitter: Emitter, cells: list[Cell], *, install_timeout: float = 240.0) -> None:
+    def __init__(
+        self,
+        emitter: Emitter,
+        cells: list[Cell],
+        *,
+        install_timeout: float = 240.0,
+        mariadb_server: "MariaDbServer | None" = None,
+    ) -> None:
+        """``mariadb_server`` (``CC-LAB-0058``/``FR-LAB-55``): when given an
+        already-started, already-provisioned :class:`MariaDbServer`, this
+        harness points the assembled app's `.env` at it (`DB_CONNECTION=mysql`)
+        instead of the default per-run SQLite database, and skips seeding
+        (that server's REAL `puppy-fort-factory/sql/schema.sql` import already
+        seeded real rows -- see :class:`MariaDbServer`'s own docstring for why
+        this harness does not re-seed on top of it). ``None`` (the default)
+        keeps this class's original SQLite behavior byte-for-byte -- this
+        parameter is additive, never a change to an existing caller's
+        behavior."""
         self._emitter = emitter
         self._cells = [c for c in cells if emitter.supports(c.vuln_class, c.sink_context)]
         self._install_timeout = install_timeout
+        self._mariadb_server = mariadb_server
         self._tmp: tempfile.TemporaryDirectory | None = None
         self._app_dir: Path | None = None
         self._proc: subprocess.Popen | None = None
@@ -344,6 +619,31 @@ class LiveBootHarness:
 
     def _write_env(self) -> None:
         assert self._app_dir is not None
+        if self._mariadb_server is not None:
+            db = self._mariadb_server
+            lines = (
+                "APP_NAME=FuzzlabPhpLaravelLiveBootHarness",
+                "APP_ENV=testing",
+                "APP_KEY=",
+                "APP_DEBUG=false",
+                "APP_URL=http://127.0.0.1",
+                "",
+                "LOG_CHANNEL=stack",
+                "LOG_LEVEL=error",
+                "",
+                "DB_CONNECTION=mysql",
+                f"DB_HOST={db.host}",
+                f"DB_PORT={db.port}",
+                f"DB_DATABASE={db.db_name}",
+                f"DB_USERNAME={db.db_user}",
+                f"DB_PASSWORD={db.db_password}",
+                "",
+                "SESSION_DRIVER=file",
+                "CACHE_STORE=file",
+                "",
+            )
+            (self._app_dir / ".env").write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
+            return
         db_path = self._app_dir / "database" / "database.sqlite"
         db_path.parent.mkdir(parents=True, exist_ok=True)
         db_path.touch()
@@ -355,6 +655,13 @@ class LiveBootHarness:
 
     def _seed_db(self) -> None:
         assert self._app_dir is not None
+        if self._mariadb_server is not None:
+            # Real puppy-fort-factory/sql/schema.sql already seeded real rows
+            # (MariaDbServer.provision()) -- nothing to add here, see that
+            # class's own docstring for why a second, synthetic seed step
+            # would be exactly the PA-0003/PA-0021 drift this mode exists to
+            # avoid.
+            return
         db_path = self._app_dir / "database" / "database.sqlite"
         import sqlite3
 

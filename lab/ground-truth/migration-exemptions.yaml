@@ -44,3 +44,22 @@ exemptions:
       PFF-0007 above: D-open-1, decided 2026-09-22 (plan §4.3.6.7, Layer B
       not required) and D-open-2, decided 2026-09-22 (plan §4.3.6.7, DOM XSS
       out of cutover scope, L-P3.3c-DOM remains backlog).
+  - pff_case: PFF-0003
+    reason: >-
+      search.php's reflected XSS (the HTML-body echo and the quoted
+      value="..." attribute echo, both real and both folded by labels.json
+      into this one case) cannot currently be reproduced at its real
+      /search.php URL simultaneously with PFF-0002 (the LIKE-clause SQLi at
+      the same URL, also real and also currently true): the Cell IR renders
+      one route from exactly one cell, with no multi-sink page composition,
+      so /search.php's single php_laravel page profile must pick ONE
+      canonical cell (CC-LAB-0058/FR-LAB-55, docs/LAB_IMPLEMENTATION_PLAN.md
+      §4.3.6.6 point 3 / L-P3.3c-CUT). PFF-0002 was chosen canonical (higher
+      severity, and the shape every other real-page group with the same
+      choice already canonicalizes); this is a genuine, reviewed downgrade
+      from "covered" to "exempted" for PFF-0003, not a silent drop -- the six
+      LABGEN-PL-RP-000x cells (including the two that render this exact
+      XSS shape) remain authored and individually tested at their
+      illustrative twin URLs; only the real-URL/live-boot claim is affected.
+      Building real multi-sink page composition is tracked as future work,
+      not something L-P3.3c-CUT waits on.

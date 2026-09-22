@@ -82,10 +82,14 @@ Built in four lanes:
     the two secure-only escaped-echo form pages -- the trivial case of the
     unified mechanism (a page with exactly one cell, no twin).
   * **G6** -- ``/search.php`` (PFF-0002/PFF-0003): one ``?q=`` reaching three
-    sinks across six cells. **Deliberately left with no canonical cell** --
-    see :data:`_CANONICAL_CELL_KEY` for why that is a legal, explicitly
-    flagged state rather than an oversight, open for ``L-P3.3c-CUT`` to
-    resolve.
+    sinks across six cells. **Resolved by ``L-P3.3c-CUT`` (`CC-LAB-0058`/
+    `FR-LAB-55`), Path B**: ``LABGEN-PL-RP-0001`` (the ``LIKE``-clause SQLi
+    cell, ``PFF-0002``) is canonical at the real ``/search.php`` URL;
+    ``PFF-0003`` (the two real XSS reflections at the same URL) is a genuine,
+    documented downgrade to ``lab/ground-truth/migration-exemptions.yaml`` --
+    see that page's own profile comment and the exemption entry for the full
+    reasoning (a real multi-sink page composition was the alternative, ruled
+    out as a disproportionate architecture change, not attempted here).
 
   Real ``puppy-fort-factory/`` page reproduction depends on L-P3.3b; every
   *other* route in :data:`_PAGE_PROFILES` remains an illustrative Laravel
@@ -250,14 +254,19 @@ _REAL_PAGE_KEY = "real_page"
 #:   entry); it was an autonomous call made to unblock four lanes' merges,
 #:   not a settled design.
 #: * **``None``, explicitly.** The page is real but the mechanism
-#:   deliberately claims no cell for its exact URL yet -- L-P3.3c-G6's
-#:   ``search.php``, whose six cells (three sink behaviors x
-#:   vulnerable/secure) cannot all answer ``GET /search.php`` and whose
-#:   canonical-cell choice is a policy decision this consolidation pass does
-#:   not make, left for ``L-P3.3c-CUT`` (which owns emitting the candidate
-#:   ground truth the regression gate runs against). Every cell of such a
-#:   page keeps the illustrative cell-ID-derived ``/cell/<slug>`` URL, exactly
-#:   as if :data:`_REAL_PAGE_KEY` were absent.
+#:   deliberately claims no cell for its exact URL yet. No current profile
+#:   uses this value any more -- L-P3.3c-G6's ``search.php`` was the one
+#:   example (six cells, three sink behaviors x vulnerable/secure, that
+#:   cannot all answer ``GET /search.php``); ``L-P3.3c-CUT`` resolved it
+#:   (`CC-LAB-0058`/`FR-LAB-55`) by naming ``LABGEN-PL-RP-0001`` canonical and
+#:   exempting the other real case (``PFF-0003``) in
+#:   ``lab/ground-truth/migration-exemptions.yaml`` rather than leaving the
+#:   choice open -- see that page's own profile comment. ``None`` remains a
+#:   legal value of this mechanism (fail-loud still requires the key to be
+#:   present, never silently defaulted) for a future page that needs the same
+#:   "still open" flag. Every cell of a page using it keeps the illustrative
+#:   cell-ID-derived ``/cell/<slug>`` URL, exactly as if :data:`_REAL_PAGE_KEY`
+#:   were absent.
 _CANONICAL_CELL_KEY = "canonical_cell_id"
 
 #: Page-profile key: the ``lab/ground-truth/`` case ID a real-page profile
@@ -645,7 +654,7 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "canonical_cell_id": "LABGEN-PLRP-1006",
         "ground_truth_case": "PFF-1006",
     },
-    # --- L-P3.3c-G6: search.php, a REAL page left DELIBERATELY UNPINNED ----
+    # --- L-P3.3c-G6: search.php, RESOLVED by L-P3.3c-CUT (Path B) -----------
     # puppy-fort-factory/search.php, the largest single page of the
     # migration: ONE query parameter (`q`) reaching THREE sinks -- a
     # `LIKE '%q%'` SQL string literal (PFF-0002), an HTML body reflection
@@ -654,14 +663,38 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # than numbering separately). One profile serves all six cells of the
     # page (three sink behaviors x vulnerable/secure).
     #
-    # `canonical_cell_id: None` is the explicit, flagged-open state (see
-    # :data:`_CANONICAL_CELL_KEY`): Laravel cannot register six
-    # `GET /search.php` routes, and which cell should be canonical -- or
-    # whether the `Cell` IR needs a multi-sink page composition that does not
-    # exist today -- is a policy decision this consolidation pass does not
-    # make. **Still open for L-P3.3c-CUT**, which owns emitting the candidate
-    # ground truth the regression gate runs against. Every cell here keeps
-    # the illustrative cell-ID-derived URL until that decision lands.
+    # **Resolution (`CC-LAB-0058`/`FR-LAB-55`), Path B of that change's own
+    # task brief.** `PFF-0002` and `PFF-0003` are both real, simultaneously
+    # true at the real `/search.php` URL -- but the `Cell` IR has no
+    # multi-sink page composition (a page profile is shared render-only
+    # metadata across cells; a route/controller is rendered from exactly one
+    # cell, per :func:`_served_route_for`'s own three-case docstring), and
+    # building one would mean either (a) a controller template that composes
+    # more than one cell's sink transform into one response -- forking the
+    # "one cell, one verdict-relevant shape" invariant every module-set/
+    # minimal-pair mechanism in this emitter is built on (see
+    # :data:`_SOURCE_OVERRIDE_KEY`/:data:`_SINK_OVERRIDE_KEY`'s own repeated
+    # "must never fork the verdict-relevant vocabulary" rule) -- or (b) a new
+    # `Cell.sink_context` shape representing "more than one family," which
+    # would ripple through the safety matrix, the minimal-pair checker, and
+    # every whole-manifest regression test (`PA-0024`). Both are real
+    # architecture changes, not a small, contained extension -- so this
+    # resolution takes Path B: pick ONE cell canonical, exempt the other.
+    #
+    # **`LABGEN-PL-RP-0001` (the SQLi-vulnerable `LIKE` cell, `PFF-0002`) is
+    # canonical.** Reasoning: (1) severity -- an unauthenticated catalogue
+    # SQL injection is the more consequential of the two simultaneously-real
+    # findings, next to a reflected-XSS that needs a victim to click a
+    # crafted link; (2) precedent -- every other real-page group with a
+    # SQLi/XSS choice to make on one URL (G1, G3) already canonicalizes the
+    # SQLi cell; (3) it is what this task's own MariaDB-backed live-boot proof
+    # (`CC-LAB-0058`) exercises for real at `GET /search.php?q=...` against
+    # the real `products` table. `PFF-0003` (the two XSS reflections --
+    # `html_body` and `html_attribute_quoted`, both already folded into that
+    # one case by `labels.json`) is a genuine, documented downgrade from
+    # "covered" to "exempted" -- see
+    # `lab/ground-truth/migration-exemptions.yaml`'s `PFF-0003` entry for the
+    # honest reason, never silently dropped.
     "/search.php": {
         "var_name": "q",
         "param_name": "q",
@@ -672,18 +705,20 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "source_override": "get_param",
         "sink_override_by_family": {"sql_string_literal": "sql_string_literal_like"},
         "real_page": True,
-        "canonical_cell_id": None,  # still open for L-P3.3c-CUT -- see above
-        "ground_truth_case": None,  # spans PFF-0002/PFF-0003; no single case per cell
-        # Per-family mapping instead (`_GROUND_TRUTH_CASE_BY_FAMILY_KEY`): the
-        # third sink (a quoted attribute) has no case of its own -- labels.json
-        # folds it into PFF-0003's single xss-reflected case (see this
-        # manifest's own docstring), so it maps to the same case id as
-        # html_body.
-        "ground_truth_case_by_family": {
-            "sql_string_literal": "PFF-0002",
-            "html_body": "PFF-0003",
-            "html_attribute_quoted": "PFF-0003",
-        },
+        "canonical_cell_id": "LABGEN-PL-RP-0001",
+        # A single page-wide case now, exactly like every other one-case real
+        # page (`login.php`, `product.php`, ...) -- attributed only to the
+        # canonical cell, per `_GROUND_TRUTH_CASE_KEY`'s own gating rule.
+        # `_GROUND_TRUTH_CASE_BY_FAMILY_KEY` is deliberately NOT set any more
+        # (contrast the pre-`CC-LAB-0058` version of this profile): that
+        # mechanism's per-family lookup is unconditional (never gated on
+        # `canonical_cell_id`), so leaving `html_body`/`html_attribute_quoted`
+        # mapped to `PFF-0003` there would still mark it "covered" even though
+        # no cell of this page serves `/search.php` for those families any
+        # more -- exactly the dishonest "covered while unservable at its real
+        # URL" state this resolution exists to close. `PFF-0003` is named in
+        # `lab/ground-truth/migration-exemptions.yaml` instead.
+        "ground_truth_case": "PFF-0002",
     },
 }
 
@@ -771,9 +806,11 @@ def _served_route_for(page_path: str, cell_id: str, method: str) -> tuple[str, s
       ``/cell/<slug>`` URL, method ``GET`` -- the pre-L-P3.3c behavior,
       unchanged.
     * **Real page, no canonical cell yet** (:data:`_CANONICAL_CELL_KEY` is
-      ``None``): the deliberately-unpinned state (L-P3.3c-G6's
-      ``search.php``). Every cell of that page falls back to the
-      illustrative behavior above until ``L-P3.3c-CUT`` resolves it.
+      ``None``): the deliberately-unpinned state -- no current profile uses
+      it (L-P3.3c-G6's ``search.php`` was the one example, resolved by
+      `CC-LAB-0058`/`FR-LAB-55`; see that page's own profile comment). Every
+      cell of a page in this state falls back to the illustrative behavior
+      above until a human resolves it.
     * **Real page with a canonical cell**: the canonical cell is served at
       the page's own path and ``method``; every other cell of that page gets
       :func:`_twin_url_for`'s variant URL, at its own ``method``.

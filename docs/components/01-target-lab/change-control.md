@@ -3,6 +3,102 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0058 — real MariaDB-backed live-boot mode + `search.php` canonical-cell resolution (FR-LAB-55) (2026-09-22)
+- Change: two independent, purely additive extensions, both delivered together
+  because the second is proven with the first:
+  1. **A real MariaDB-backed `LiveBootHarness` mode.**
+     `fuzzlab.labgen.conformance.live_boot.MariaDbServer` starts a real local
+     `mariadbd` (the system `service` command — this sandbox's own
+     already-installed `mariadb-server` 10.11.14, not Docker), imports the REAL
+     `puppy-fort-factory/sql/schema.sql` verbatim (never a port or a synthetic
+     equivalent, unlike `CC-LAB-0054`'s SQLite `_SCHEMA_SQL`), and provisions a
+     least-privilege application user matching `lab/compose.yaml`'s own default
+     `PFF_DB_NAME`/`PFF_DB_USER`/`PFF_DB_PASS` values (`puppy_fort`/`pff`/
+     `pff_lab_pw`). `LiveBootHarness` gained an additive `mariadb_server`
+     parameter (`None` — the default — keeps the original SQLite behavior
+     byte-for-byte); when given, it points the assembled app's `.env` at the
+     real MariaDB (`DB_CONNECTION=mysql`) instead of SQLite and skips the
+     SQLite seed step. Cleanup is unconditional on every exit path: the test
+     database/user are always dropped, and `mariadbd` is stopped again only if
+     this run is the one that started it. `mariadb_available()` mirrors
+     `live_boot_available()`'s own capability-probe convention. New test
+     module `tests/test_labgen_conformance_live_boot_mariadb.py` (6 tests,
+     `@pytest.mark.slow`, skip-guarded) re-proves every group the SQLite
+     harness drives (`forms`/`numeric`/`auth`/`g2`/`g4`) plus `search.php`'s
+     newly-canonical cell, against the real engine and real seed data.
+  2. **`search.php`'s canonical-cell decision, resolved (Path B of this
+     change's own task brief).** `PFF-0002` (LIKE-clause SQLi) and `PFF-0003`
+     (reflected XSS) are both real and simultaneously true at the same real
+     `/search.php` URL. A real multi-sink page composition (one route
+     genuinely exhibiting both) was evaluated and rejected as a
+     disproportionate architecture change (it would fork the "one cell, one
+     verdict-relevant shape" invariant every module-set/minimal-pair mechanism
+     in `LaravelEmitter` depends on — see `_SOURCE_OVERRIDE_KEY`'s own
+     repeated rule). `_PAGE_PROFILES['/search.php']['canonical_cell_id']` is
+     now `"LABGEN-PL-RP-0001"` (was `None`); every other cell of that manifest
+     is a twin at its own `.php`-suffixed variant URL. `PFF-0003` moves from
+     "covered" to a genuine, reviewed exemption
+     (`lab/ground-truth/migration-exemptions.yaml`'s new entry, with the full
+     reasoning) — `assert_cutover_coverage()` stays green: 12 covered, 4
+     exempted (was 13 covered, 3 exempted), 0 uncovered.
+- Real, observed MariaDB-vs-SQLite differences found and reported, not papered
+  over (full detail in the new test module's own docstring):
+  1. The classic `-- ` (trailing-space) SQL comment `CC-LAB-0056`'s own
+     auth-bypass payload used does not survive Laravel's `TrimStrings`
+     middleware against real MySQL/MariaDB's stricter comment grammar (which
+     requires the trailing whitespace `TrimStrings` strips) — a genuine 500
+     against real MariaDB where SQLite bypassed cleanly (SQLite's own `--`
+     comment needs no trailing whitespace). The underlying SQLi auth bypass
+     is still real against MariaDB with a dialect-appropriate payload (`#`).
+  2. The real `puppy-fort-factory/sql/schema.sql` has no `users.updated_at`
+     column; G4's Eloquent-backed write leg (`$storedOwner->save()`, default
+     `$timestamps = true`) genuinely 500s against the real schema — a real
+     compatibility gap in the `php_laravel` skeleton's default `User` model,
+     first surfaced by this proof (masked until now by the SQLite harness's
+     own synthetic schema, which added the column specifically to work
+     around this, per `BUG-0028`). Documented, asserted precisely in the new
+     test, and left as future work — fixing the skeleton is out of this
+     change's additive-only scope.
+- Risk (level; mitigation or accepted-risk justification): **low**. Purely
+  additive to a conformance harness that gates nothing in `--check` or
+  production, plus a page-profile metadata change (`search.php`'s
+  `canonical_cell_id`) that only affects route registration for that one
+  page's already-authored cells — no cell's `vuln_class`/`sink_context`/
+  `transform` changed, so no verdict changed, confirmed by
+  `tests/test_labgen_php_laravel_search_page.py`'s existing verdict-derivation
+  tests staying green unchanged. The MariaDB mode starts/stops a real system
+  service; mitigated by never touching a `mariadbd` this run did not itself
+  start, and by dropping only the one test database/user this run itself
+  created (verified manually: `SHOW DATABASES`/`mysql.user` clean of both
+  before and after a full local run, no pre-existing sandbox database
+  touched).
+- Deliverables:
+  - [x] `fuzzlab/labgen/conformance/live_boot.py`: `MariaDbServer`,
+        `mariadb_available()`, `REAL_SCHEMA_SQL`, `MARIADB_DB_NAME`/
+        `MARIADB_DB_USER`/`MARIADB_DB_PASSWORD`/`MARIADB_HOST`/`MARIADB_PORT`,
+        `LiveBootHarness(..., mariadb_server=...)` — done
+  - [x] `fuzzlab/labgen/emitters/php_laravel/__init__.py`:
+        `_PAGE_PROFILES['/search.php']` now names `canonical_cell_id`/
+        `ground_truth_case`, drops `ground_truth_case_by_family` — done
+  - [x] `lab/ground-truth/migration-exemptions.yaml`: new `PFF-0003` entry — done
+  - [x] `tests/test_labgen_conformance_live_boot_mariadb.py` (new, 6 tests) — done
+  - [x] `tests/test_labgen_php_laravel_search_page.py`: 3 tests updated for the
+        now-resolved canonical cell — done
+  - [x] `tests/test_labgen_cutover_gate.py`: pinned exemption-set assertion
+        updated (now includes `PFF-0003`) — done
+  - [x] `docs/components/01-target-lab/requirements.md` (`FR-LAB-55`, plus the
+        `FR-LAB-54` search.php note marked superseded) — done
+  - [x] `docs/LAB_IMPLEMENTATION_PLAN.md` (search.php status note replaced, new
+        MariaDB-mode note added) — done
+  - [x] `CHANGELOG.md` — done
+- Verification: `pytest -m slow tests/test_labgen_conformance_live_boot_mariadb.py -v`
+  (6 passed, real local `mariadb-server` + `php`/`composer` + Packagist
+  reachability available in this environment; 163s real wall time — real
+  `composer install`/`mariadbd` start-stop per test, not mocked);
+  `fuzzlab.labgen.cutover_gate.assert_cutover_coverage()` — clean, 12
+  covered / 4 exempted / 0 uncovered; full suite `pytest -q` — see the run
+  recorded alongside this entry's commit for the exact pass/skip counts.
+
 ### CC-LAB-0056 — `live_boot.py`: real on-host live-boot proof for the auth/G2/G4 real-page manifest groups (FR-LAB-54) (2026-09-22)
 - Change: extends `CC-LAB-0054`/`FR-LAB-52`'s `fuzzlab.labgen.conformance.live_boot`
   harness's proven coverage from 2 to 5 of the 6 `phase3_php_laravel_real_pages_*`/

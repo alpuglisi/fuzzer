@@ -14,6 +14,20 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB: real MariaDB-backed live-boot mode (`fuzzlab.labgen.conformance.live_boot
+  .MariaDbServer`, starting a real local `mariadbd` and importing the real
+  `puppy-fort-factory/sql/schema.sql` verbatim) re-proves every real-page manifest
+  group `LiveBootHarness` drives against the actual database engine `lab/compose.yaml`
+  is built around (previously only proven against a SQLite test-harness substitute) —
+  and resolves `search.php`'s long-open canonical-cell decision (`LABGEN-PL-RP-0001`,
+  the LIKE-clause SQLi cell, is now canonical; `PFF-0003`'s reflected XSS is a genuine,
+  documented downgrade to `lab/ground-truth/migration-exemptions.yaml`, a real
+  multi-sink page composition having been judged out of scope). Surfaced two real,
+  reported MySQL-vs-SQLite dialect/schema differences (a `TrimStrings`-vs-MariaDB
+  `--`-comment interaction, and a real schema/Eloquent-timestamps gap in G4's write
+  path) — see `CC-LAB-0058`/`FR-LAB-55` for the full detail — why: closes a real
+  verification gap (never before proven against the actual target DB engine) and
+  removes the last manifest the live-boot harness could not drive.
 - Governance: codified this session's multi-agent orchestration policy as a canonical doc,
   `docs/MULTI_AGENT_ORCHESTRATION.md` (parallelism/idle-lane policy, independent
   verification discipline, pre-assigned bookkeeping numbers to avoid concurrent-lane ID

@@ -1399,13 +1399,12 @@ lane) can submit a payload as
      read URL AND write URL (canonical or twin, per `FR-LAB-50`'s unified
      mechanism) derived from the emitter's own `route_fragment_for()`
      output rather than re-derived (PA-0001/PA-0021).
-  - **`search.php` is explicitly not attempted.**
-    `lab/manifests/phase3_php_laravel_real_pages_search.yaml`'s own header
-    documents that all six of its cells are still without a canonical
-    URL-owning cell pending the `L-P3.3c-CUT` policy decision (`CC-LAB-0052`/
-    `0053`) — there is no single stable `/search.php` URL to live-boot
-    against yet, and inventing one here would mean making a canonical-cell
-    choice this project has explicitly deferred to a human decision.
+  - **`search.php` was explicitly not attempted at the time of this
+    requirement.** `lab/manifests/phase3_php_laravel_real_pages_search.yaml`'s
+    own header documented that all six of its cells were still without a
+    canonical URL-owning cell pending the `L-P3.3c-CUT` policy decision
+    (`CC-LAB-0052`/`0053`). *(Superseded by `FR-LAB-55`/`CC-LAB-0058`,
+    2026-09-22: that decision is now made — `search.php` is driven too.)*
   - **`BUG-0028` (full bug protocol).** Extending coverage surfaced two real
     defects in `LiveBootHarness` itself (not in any emitted code), both
     invisible until a real redirect and a real Eloquent `->save()` were
@@ -1420,6 +1419,85 @@ lane) can submit a payload as
     dialect-correct verdict confirmation — this requirement only extends
     which real-page groups get a real boot + real, observable behavior,
     unchanged in kind from `FR-LAB-52`'s own scope statement.
+
+- **FR-LAB-55** *(extends `FR-LAB-52`/`FR-LAB-54`'s live-boot scope with a
+  real MariaDB backend, and resolves `search.php`'s open canonical-cell
+  decision; `CC-LAB-0058`.)* Two additions, both real, both on-host, neither
+  touching `lab/compose.yaml`/`deploy.sh`/`fuzzlab/mutation/filtermodel.py`/
+  `puppy-fort-factory/`:
+  1. **A real MariaDB-backed live-boot mode.** `fuzzlab.labgen.conformance
+     .live_boot.MariaDbServer` starts a real local `mariadbd` (via the system
+     `service` command, never a hand-rolled datadir invocation — reusing the
+     sandbox's already-integrated init script), imports the REAL
+     `puppy-fort-factory/sql/schema.sql` verbatim (`mariadb < schema.sql` —
+     never a port or a synthetic equivalent, unlike `FR-LAB-52`'s own SQLite
+     `_SCHEMA_SQL`), and provisions the least-privilege application identity
+     matching `lab/compose.yaml`'s own default `PFF_DB_NAME`/`PFF_DB_USER`/
+     `PFF_DB_PASS` values (`puppy_fort`/`pff`/`pff_lab_pw` — the lab's own
+     already-public dev defaults, not a secret this requirement invents).
+     `LiveBootHarness` gains an additive `mariadb_server` parameter (`None`
+     keeps the original SQLite behavior byte-for-byte) that points the
+     assembled app's `.env` at it (`DB_CONNECTION=mysql`) and skips the
+     SQLite seed step (the real schema already seeds real rows). Cleanup is
+     unconditional on every exit path (`PA-0012`): the test database/user are
+     always dropped, and `mariadbd` is stopped again only if this run is the
+     one that started it (a service already running before the test — e.g. a
+     human's own session — is left exactly as found). `mariadb_available()`
+     mirrors `live_boot_available()`'s own capability-probe convention
+     (`PA-0005`/`PA-0008`): checks the real `mariadb`/`mariadb-admin`
+     binaries, the `service` command, `/etc/init.d/mariadb`, and
+     `puppy-fort-factory/sql/schema.sql` — never starts anything as a probe
+     side effect. `tests/test_labgen_conformance_live_boot_mariadb.py`
+     (skip-guarded, `pytest.mark.slow`) re-proves every group the SQLite
+     harness drives — `forms`/`numeric`/`auth`/`g2`/`g4` — plus (2) below,
+     against the real engine and the real seeded data (`admin`/`alice`/`bob`,
+     ten real products, four real posts — never the SQLite harness's own
+     synthetic seed).
+  2. **`search.php`'s canonical-cell decision, resolved (Path B).** `PFF-0002`
+     (the `LIKE`-clause SQLi) and `PFF-0003` (the reflected XSS, both
+     `html_body` and `html_attribute_quoted`) are both real and
+     simultaneously true at the same real `/search.php` URL. A real
+     multi-sink page composition (one route genuinely exhibiting both) was
+     evaluated and judged a disproportionate architecture change for this
+     requirement's scope (it would fork the "one cell, one verdict-relevant
+     shape" invariant every module-set/minimal-pair mechanism in
+     `LaravelEmitter` depends on) — so `_PAGE_PROFILES['/search.php']` now
+     names `LABGEN-PL-RP-0001` (the SQLi cell) `canonical_cell_id`, served at
+     the real `/search.php` URL; every other cell of that manifest is a twin
+     at its own `.php`-suffixed variant URL, unchanged mechanism. `PFF-0003`
+     is a genuine, reviewed downgrade from covered to exempted
+     (`lab/ground-truth/migration-exemptions.yaml`'s new `PFF-0003` entry) —
+     `fuzzlab.labgen.cutover_gate.assert_cutover_coverage()` stays green (12
+     covered, 4 exempted, 0 uncovered), never silently dropped.
+  - **Real, observed MariaDB-vs-SQLite differences, reported per this
+    requirement's own instruction rather than papered over** (see
+    `tests/test_labgen_conformance_live_boot_mariadb.py`'s module docstring
+    for the full detail): (a) the classic `-- ` (trailing-space) SQL comment
+    used by `FR-LAB-54`'s own auth-bypass payload does not survive Laravel's
+    `TrimStrings` middleware against real MySQL/MariaDB's stricter comment
+    grammar (which requires the trailing whitespace `TrimStrings` removes) —
+    SQLite's own `--` comment needs no such whitespace, so this is a genuine
+    dialect difference, not a harness bug; the underlying SQLi auth bypass is
+    still real against MariaDB with a dialect-appropriate payload (`#`,
+    MySQL's bare to-end-of-line comment, immune to trimming). (b) The real
+    schema has no `users.updated_at` column (only `created_at`, no `ON
+    UPDATE` companion); `FR-LAB-54`'s G4 write leg goes through Eloquent
+    (`$storedOwner->save()`, default `$timestamps = true`), so it genuinely
+    500s against the real schema — a real compatibility gap in the
+    `php_laravel` skeleton's default `User` model (framework-default
+    timestamps vs. a real schema that never modeled `updated_at`), first
+    surfaced by this real proof (the SQLite harness's own synthetic schema
+    had silently added the missing column, per `FR-LAB-54`'s own `BUG-0028`
+    fix, masking the gap). Left as documented future work, not fixed here:
+    this requirement is additive-only in scope, and the fix belongs to
+    whichever future change resolves G4's cutover-readiness, not to a
+    conformance harness whose job is to observe and report a real gap, not
+    silently patch around it.
+  - Still, as `FR-LAB-52`/`FR-LAB-54` already state, **not** a Tier-2,
+    oracle-grade, container-based, dialect-correct oracle confirmation of a
+    label (`tier2.py`'s own claim is unchanged) — this requirement proves
+    boot + real, observable behavior against the real engine and real
+    schema, which is a stronger, but still narrower, claim than that.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

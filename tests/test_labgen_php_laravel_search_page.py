@@ -5,14 +5,16 @@ a quoted attribute reflection) across six cells, `docs/LAB_IMPLEMENTATION_PLAN
 `(raw_concat, html_attribute_quoted)` safety-matrix row and the
 `sink_override_by_family`/`html_attribute_quoted` module-set mechanism.
 
-**Still open for L-P3.3c-CUT** (unchanged by the consolidation pass, which
-preserves this lane's flag verbatim rather than resolving it): `search.php`
-is deliberately left with no canonical cell -- see
-`fuzzlab.labgen.emitters.php_laravel._CANONICAL_CELL_KEY`'s docstring. Every
-cell here is served at its illustrative, cell-ID-derived URL, exactly as if
-the page were not "real" for routing purposes; only `cell.route.path` (which
-the regression gate diffs by `case_id`, not by what a route actually serves)
-carries the real `/search.php` string.
+**Resolved by L-P3.3c-CUT (`CC-LAB-0058`/`FR-LAB-55`), Path B**: `search.php`
+no longer has an open canonical-cell decision -- `LABGEN-PL-RP-0001` (the
+`LIKE`-clause SQLi cell, `PFF-0002`) is canonical and served at the real
+`/search.php` URL; every other cell of this manifest is a twin served at its
+own `.php`-suffixed variant URL (`_twin_url_for`). `PFF-0003` (the two real
+XSS reflections at that same real URL) is a genuine, documented downgrade to
+`lab/ground-truth/migration-exemptions.yaml` -- see that page's own profile
+comment in `fuzzlab.labgen.emitters.php_laravel._PAGE_PROFILES['/search.php']`
+for the full reasoning (a real multi-sink page composition was the
+alternative, ruled out as a disproportionate architecture change).
 """
 
 from __future__ import annotations
@@ -65,30 +67,35 @@ def test_the_manifest_covers_all_six_search_php_cells(manifest) -> None:
     assert {c.route.path for c in manifest.cells} == {"/search.php"}
 
 
-def test_search_php_is_deliberately_left_with_no_canonical_cell(manifest) -> None:
-    """The flag this lane raised, preserved verbatim by the consolidation
-    pass rather than resolved: `real_page` is set (it IS a real page), but
-    `canonical_cell_id` is explicitly `None` -- still open for
-    `L-P3.3c-CUT`."""
+def test_search_php_now_names_a_canonical_cell(manifest) -> None:
+    """L-P3.3c-CUT resolved the flag this lane raised (`CC-LAB-0058`/
+    `FR-LAB-55`): `real_page` is set (it IS a real page) and
+    `canonical_cell_id` now names `LABGEN-PL-RP-0001`, the SQLi-vulnerable
+    `LIKE` cell -- no longer the deliberately-open `None`."""
     profile = _PAGE_PROFILES["/search.php"]
     assert profile[_REAL_PAGE_KEY] is True
-    assert _CANONICAL_CELL_KEY in profile
-    assert profile[_CANONICAL_CELL_KEY] is None
+    assert profile[_CANONICAL_CELL_KEY] == "LABGEN-PL-RP-0001"
 
 
-def test_every_cell_therefore_keeps_its_illustrative_cell_id_derived_url(emitter, manifest) -> None:
+def test_the_canonical_cell_is_served_at_the_real_url_others_at_twin_urls(emitter, manifest) -> None:
     for cell in manifest.cells:
         url = served_url_for(cell)
-        assert url == f"/cell/{cell.cell_id.lower()}"
-        assert "'/search.php'" not in emitter.route_fragment_for(cell)
+        if cell.cell_id == "LABGEN-PL-RP-0001":
+            assert url == "/search.php"
+            assert "'/search.php'" in emitter.route_fragment_for(cell)
+        else:
+            assert url == f"/search.{cell.cell_id.lower()}.php"
+            assert "'/search.php'" not in emitter.route_fragment_for(cell)
 
 
-def test_the_routes_file_registers_six_distinct_cell_id_urls_no_collision(emitter, manifest) -> None:
+def test_the_routes_file_registers_one_real_url_and_five_twin_urls_no_collision(emitter, manifest) -> None:
     fragments = {c.cell_id: emitter.route_fragment_for(c) for c in manifest.cells}
     content = assemble_routes_file(fragments).content.decode("utf-8")
     assert content.count("Route::get(") == 6
+    assert content.count("'/search.php'") == 1
     for cell in manifest.cells:
-        assert f"/cell/{cell.cell_id.lower()}" in content
+        if cell.cell_id != "LABGEN-PL-RP-0001":
+            assert f"/search.{cell.cell_id.lower()}.php" in content
 
 
 def test_the_quoted_attribute_shape_is_registered_and_scores_correctly(matrix) -> None:

@@ -182,7 +182,11 @@ def test_the_exemption_register_names_exactly_the_expected_cases() -> None:
     removing, or renaming an exemption) is a visible, reviewed diff here --
     not a silent change to what the gate accepts."""
     exemptions = load_exemptions()
-    assert set(exemptions) == {"PFF-1002", "PFF-0007", "PFF-0008"}
+    # PFF-0003 (CC-LAB-0058/FR-LAB-55): search.php's real, simultaneously-true
+    # reflected-XSS case, genuinely downgraded from covered to exempted once
+    # PFF-0002 (the LIKE-clause SQLi at the same real URL) was made canonical
+    # -- see lab/ground-truth/migration-exemptions.yaml's own entry.
+    assert set(exemptions) == {"PFF-1002", "PFF-0007", "PFF-0008", "PFF-0003"}
     for case_id, reason in exemptions.items():
         assert reason.strip(), case_id
 

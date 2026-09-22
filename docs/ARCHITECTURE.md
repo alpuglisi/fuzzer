@@ -259,9 +259,28 @@ tracked in the requirements files, not here.
   (`products.php`/`api/products.php`, including a real, parsed JSON
   response), and the stored-second-order pair (`edit_profile.php` ->
   `profile.php`, a real write-then-read round trip) — 5 of 6 real-page
-  manifest groups now live-boot-proven; only `search.php` remains
-  deliberately unpinned pending `L-P3.3c-CUT`. Tier 2's real, dialect-correct,
-  container-based oracle confirmation remains unbuilt. A second
+  manifest groups live-boot-proven at that point; `search.php` remained
+  unpinned pending `L-P3.3c-CUT`. **Resolved and extended
+  (`CC-LAB-0058`/`FR-LAB-55`, 2026-09-22)**: `search.php`'s canonical-cell
+  decision is made (`LABGEN-PL-RP-0001`, the LIKE-clause SQLi cell; the
+  reflected-XSS case `PFF-0003` is a documented exemption instead — a real
+  multi-sink page composition was judged out of scope) -- all 6 real-page
+  manifest groups are now live-boot-proven. This change also added a real
+  **MariaDB-backed** mode (`live_boot.MariaDbServer`, a real local `mariadbd`
+  + the real `puppy-fort-factory/sql/schema.sql` imported verbatim), closing
+  the gap the SQLite-only proof above always disclosed: every driven group is
+  now also proven against the actual database engine `lab/compose.yaml`
+  provisions, not only a test-harness substitute
+  (`tests/test_labgen_conformance_live_boot_mariadb.py`, skip-guarded on a
+  real local MariaDB). This surfaced two real, reported MySQL-vs-SQLite
+  differences (a `TrimStrings`/`--`-comment dialect interaction, and a real
+  schema/Eloquent-timestamps gap in the G4 write path) — see that test
+  module's own docstring and `CC-LAB-0058` for the full detail; neither is
+  fixed here (documented future work, out of this additive-only change's
+  scope). Tier 2's real, dialect-correct, container-based oracle confirmation
+  remains unbuilt (this MariaDB mode strengthens but does not replace it — it
+  proves boot + observable behavior against the real engine, not an
+  oracle-grade verdict). A second
   Phase-3 stack emitter (`fuzzlab/labgen/emitters/python_fastapi/`, Tier-A
   depth per `CR-LAB-0001` Addendum C's stack-pacing decision, `CC-LAB-0029`)
   is built: FastAPI + SQLAlchemy + Jinja2, the same three value-context

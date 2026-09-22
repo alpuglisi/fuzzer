@@ -173,11 +173,7 @@ default one).
    a genuine write-then-read round trip proving the vulnerable cell's stored
    payload survives unescaped while the secure twin's is entity-escaped) —
    5 of the 6 `phase3_php_laravel_real_pages_*`/`phase3_laravel_real_pages_*`
-   manifests now driven. Only `search.php` remains undriven, and deliberately
-   so: its own manifest header documents all six of its cells as still
-   without a canonical URL-owning cell pending the `L-P3.3c-CUT` policy
-   decision (`CC-LAB-0052`/`0053`) — there is no single stable `/search.php`
-   URL to live-boot against yet. Extending coverage also surfaced and fixed
+   manifests driven at that point. Extending coverage also surfaced and fixed
    two real defects in the harness itself (`BUG-0028`): it silently followed
    a real login's own `302` redirect (masking success as a `404`), and its
    seeded schema lacked the columns Eloquent's default timestamps need
@@ -189,8 +185,50 @@ default one).
    dialect-sensitive identifier/alias-position SQLi shapes), and still
    performs no real, container-based, dialect-correct oracle confirmation
    (`tier2.py`'s "the only tier that actually confirms a label" claim is
-   unchanged). See `docs/components/01-target-lab/requirements.md`
-   FR-LAB-52/FR-LAB-54 for the full scope statement.
+   unchanged).
+
+   **`search.php` status (`CC-LAB-0051`/`0052`/`0053` history, RESOLVED
+   `CC-LAB-0058`/`FR-LAB-55`, 2026-09-22).** `search.php` was the one
+   remaining undriven manifest: its page profile named no canonical cell
+   (`canonical_cell_id: None`), since `PFF-0002` (the `LIKE`-clause SQLi) and
+   `PFF-0003` (the reflected XSS) are both real and simultaneously true at
+   the same real URL, and the `Cell` IR has no multi-sink page composition to
+   serve both from one route. `L-P3.3c-CUT` resolved this (Path B of that
+   change's own task brief, a real multi-sink composition judged a
+   disproportionate architecture change, not attempted): `LABGEN-PL-RP-0001`
+   (the SQLi cell) is now canonical at the real `/search.php` URL; `PFF-0003`
+   is a genuine, documented downgrade from covered to exempted
+   (`lab/ground-truth/migration-exemptions.yaml`). **This note supersedes the
+   two contradictory statements previously in this document and in
+   `fuzzlab.labgen.emitters.php_laravel`'s own module docstring** ("still
+   open for `L-P3.3c-CUT`") — both now point here / to that page profile's
+   own updated comment as current truth.
+
+   **MariaDB-backed mode (`CC-LAB-0058`/`FR-LAB-55`, 2026-09-22).** The
+   harness above proves boot + real HTTP against a per-run SQLite database —
+   an explicitly-scoped test-harness substitute, never the real lab's
+   MariaDB. `fuzzlab.labgen.conformance.live_boot.MariaDbServer` closes that
+   gap: it starts a real local `mariadbd`, imports the REAL
+   `puppy-fort-factory/sql/schema.sql` verbatim, and points the assembled
+   app's `.env` at it (`DB_CONNECTION=mysql`). Every manifest group this
+   harness drives — `forms`/`numeric`/`auth`/`g2`/`g4`, plus `search.php`'s
+   now-resolved canonical cell — is re-proven against the real engine
+   (`tests/test_labgen_conformance_live_boot_mariadb.py`, skip-guarded on a
+   real local MariaDB via `mariadb_available()`). This surfaced two real,
+   observed MariaDB-vs-SQLite differences, reported rather than papered
+   over — see that test module's own docstring for the full detail: (1) the
+   classic `-- ` (trailing-space) SQL comment does not survive Laravel's
+   `TrimStrings` middleware against real MySQL/MariaDB's stricter comment
+   grammar (SQLite's `--` needs no trailing whitespace) — the underlying
+   auth-bypass vulnerability is still real against MariaDB, just needs a
+   dialect-appropriate payload (`#`); (2) the real schema has no
+   `users.updated_at` column, so G4's Eloquent-backed write leg
+   (`$storedOwner->save()`) genuinely 500s against the real schema — a real
+   compatibility gap in the `php_laravel` skeleton's default `User` model,
+   first surfaced by this proof, left as documented future work (fixing it
+   is a skeleton change, out of this task's additive-only scope). See
+   `docs/components/01-target-lab/requirements.md` FR-LAB-52/FR-LAB-54/
+   FR-LAB-55 for the full scope statement.
 5. Tests: an end-to-end CLI test using the existing example manifest
    (`lab/manifests/example_phase0_scaffold.yaml`), asserting `--check` passes
    on a clean tree and fails loud on each individual gate's own known-bad
