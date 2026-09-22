@@ -539,7 +539,7 @@ one's own pilot:
 
 | # | Category | Status | Sites picked (stack) | New stack(s) needed | Branch | Bookkeeping block reserved | Notes |
 |---|---|---|---|---|---|---|---|
-| 1 | E-commerce/marketplaces | **Piloting** | Shopify (Ruby on Rails); Walmart (Node/Express — reuses existing) | Ruby on Rails | `claude/second-target-cat1-ecommerce` | `CC-LAB-0070`-`0089` (reserved, not yet all used) | Amazon excluded (AWS-microservices, no single app-language claim confirmed — not a sensible single-stack target); Etsy/WooCommerce excluded as redundant with Shopify's PHP-adjacent... no — Etsy/WooCommerce are PHP, genuinely distinct from Rails, but both landed in the same (PHP, synchronous, template-rendering) group as each other per §9.1 step 2, and PHP is already a built stack (§9.2) — Walmart's Node/Express pick was preferred over a second PHP pick specifically per §9.1 step 4's reuse preference. Functionality research and CWE research for this pair: **not started yet** — next step. |
+| 1 | E-commerce/marketplaces | **Piloting — functionality + CWE research done for both sites (§9.4a); next: CWE selection + Phase A (Rails skeleton)** | Shopify (Ruby on Rails); Walmart (Node/Express — reuses existing) | Ruby on Rails | `claude/second-target-cat1-ecommerce` | `CC-LAB-0070`-`0089` (reserved, not yet used) | See §9.4a for full detail (site-pair rationale, functionality findings, CWE shortlists, breadth ranking). |
 | 2 | Social / UGC platforms | Not started | — | Likely Python/Django (Instagram) is the strongest new-stack candidate; Facebook (PHP/Hack+HHVM) may or may not warrant a *new* stack vs. reusing `php_laravel`/`php_current` as an approximation — this is exactly the kind of call §9.1 asks the picking session to make and record, not this table to pre-decide. Discord flagged in §9.1 step 1 as likely excluded (realtime/Elixir, not a request/response fit). YouTube likely excluded (Google-internal infra, no portable app-language claim). | — | — | Open for another session to pick up. |
 | 3 | SaaS / productivity / collaboration | Not started | — | Candidates per the survey: Slack (PHP/Hack web tier + Java realtime — itself two stacks), Notion (sharded Postgres + Kafka, but no named app-framework/language beyond "engineering blog doesn't name one" — check before committing), Atlassian (Java/Kotlin+Spring, Node+Express, or Python — Atlassian itself uses 3 stacks, pick the one most distinct from what's already built), Microsoft 365/Teams (Node.js backend + React/TS front end), Google Workspace (OT + Spanner/Bigtable — confirmed at the algorithm/storage level, not at a portable app-framework level; may not be a sensible single-stack pick without further research). | — | — | Open. Flag: Google Workspace's confirmed detail is algorithmic/storage, not framework-level — whoever picks this category should research further (per the standing instruction to do more research if needed) before treating it as buildable, or should pick two of the other four sites instead. |
 | 4 | Media / streaming / content platforms | Not started | — | Candidates: Netflix (Java/Spring Boot + a Federated GraphQL gateway), Spotify (Java/Spring + Kafka), Twitch (Go, post-monolith-migration — genuinely distinct paradigm from the others), Disney+ (excluded per §9.1 step 1 — infrastructure-only, unconfirmed at application-code level). | — | — | Open. Twitch/Go vs. Netflix-or-Spotify/Java+Spring reads as the most architecturally distinct pair from the current research, but the picking session should verify against §9.1's full procedure rather than take this as decided. |
@@ -559,33 +559,95 @@ size it based on how many new stacks its own picks actually require (a
 category needing 2 new emitters needs a bigger block than one reusing an
 existing stack for one of its two picks).
 
+### 9.4a Category 1 (E-commerce) detail — functionality + CWE research (done)
+
+**Site-pair rationale:** Shopify (Ruby on Rails) + Walmart (Node/Express).
+Amazon excluded (AWS-microservices, no single app-language claim
+confirmed — not a sensible single-stack target). Etsy/WooCommerce excluded:
+both are PHP, landing in the same (PHP, synchronous, template-rendering)
+group as each other per §9.1 step 2, and PHP is already a built stack
+(§9.2) — Walmart's Node/Express pick was preferred over a second PHP pick
+per §9.1 step 4's reuse preference.
+
+**Shopify functionality + Rails-CWE research** — full detail in
+`docs/research/site-architecture-survey-functionality-shopify.md`.
+Headline findings:
+- Real, concrete grounding: Shopify's `X-Shopify-Hmac-SHA256` webhook-
+  verification mechanism maps directly onto the existing `webhook-
+  signature` corpus class — a strong candidate page (Rails'
+  `ActiveSupport::SecurityUtils.secure_compare` vs. a naive `==` compare).
+  Checkout is a separate PCI-scoped subsystem with a serverless
+  customization layer ("Shopify Functions") for discount/shipping logic.
+- Top CWE picks for genuine breadth: **CWE-915** (mass assignment via
+  Rails `permit!` — the ID exists elsewhere in the corpus but never as a
+  Rails idiom) and **CWE-502** (insecure deserialization via
+  `Psych.load`/`YAML.load` — exists elsewhere only as a Python/pickle
+  idiom). Third pick: the `order`/`pluck` identifier-position SQLi
+  variant, Rails' analogue of the identifier-position shapes this
+  corpus's PHP entries already value.
+- Sourcing caveat: `shopify.dev` direct fetch was blocked by this
+  sandbox's egress proxy; those claims are WebSearch-relayed, not
+  directly fetched. CVE numbers not independently re-verified against
+  NVD. Both flagged for follow-up before formal citation.
+
+**Walmart functionality + Node-CWE research** — full detail in
+`docs/research/site-architecture-survey-functionality-walmart.md`.
+Headline findings:
+- Real, primary-sourced grounding (Walmart's own Global Tech Blog): Node
+  was adopted specifically as an orchestration/BFF layer aggregating
+  legacy Java services; order management is a BPM-orchestrated state
+  machine (payment auth → inventory reservation → routing → pick/pack →
+  ship). A BFF aggregation endpoint mishandling one aggregated service's
+  error differently than another (fail-open on an inventory timeout,
+  correctly hard-failing on a pricing error) is a plausible, architecture-
+  motivated logic-flaw placement — flagged as design synthesis, not a
+  sourced fact.
+- Top CWE pick for genuine breadth: **CWE-1333 (ReDoS)** — genuinely
+  absent from the corpus, tied to a real, current Express-ecosystem CVE
+  (`path-to-regexp`, CVE-2024-45296), and the project's own
+  `docs/architecture/oracle-confirmation.md` already flags ReDoS as a
+  deferred class needing a timing-differential (M1) oracle rather than a
+  single-request one — a different confirmation shape than every other
+  class this session has built so far, worth planning for explicitly.
+- Second pick, **corrected from the dispatch brief's assumption**:
+  **CWE-1321 (Prototype Pollution)** is not fully absent — the ID appears
+  once incidentally and is already named as a first-wave sourcing class
+  in `lab/patterns/sourcing/crosswalk.yaml`. What's actually missing is a
+  **dedicated vulnerable/secure pair demonstrating the real pollution
+  mechanism** (a live deep-merge, not an incidental side-effect) — still
+  worth building, described accurately.
+- **Flagged, not decided:** CWE-943 (NoSQL injection) would require
+  giving this one app a second, non-relational persistence layer
+  (`node_express`'s module inventory is committed to `mysql2`/relational)
+  — the research explicitly declines to recommend this without an
+  explicit scope call, rather than silently picking it.
+
+**Not yet decided — next actual step:** which 2-3 CWEs (from the two
+shortlists above) become this app's actual manifest cells, and how the
+two sites' pages compose into one coherent app identity (per §4's Phase C
+steps) — see §9.5 below.
+
 ### 9.5 What's actually next (this session's pilot)
 
 Category 1 (E-commerce) is now **piloting**, per §9.4's row. The concrete
 next steps, in order, per §9.1-§9.3's discipline:
 
-1. Create `claude/second-target-cat1-ecommerce` and do all pilot work there
-   (not on `main`).
-2. Functionality/feature research for Shopify (Rails) and Walmart
-   (Node/Express) specifically — what real pages/flows each actually has
-   (checkout, cart, seller/admin dashboard, search/catalog, reviews if
-   any), cited, not invented — closing the gap §0a item 2 identified.
-3. Stack-specific CWE research for each: what vulnerability classes are
-   realistically introduced by *Rails-the-framework* specifically (mass
-   assignment via unguarded `strong_parameters`, ERB/`raw`-bypassed
-   auto-escaping, YAML deserialization via `Marshal`/`Psych` defaults,
-   etc. — researched against the real Rails CWE landscape and
-   `cwe.mitre.org/top25`, not assumed from general Ruby knowledge) and by
-   *Express-the-framework* specifically, cross-checked against what
-   `lab/safety_matrix.yaml`/the corpus already cover so the picks add
-   breadth (§0a items 3-4) rather than repeat SQLi/XSS a third and fourth
-   time.
-4. Only then: build the Rails skeleton/live-boot harness (this category's
-   version of §2's Phase A, for a stack that doesn't exist in this project
-   at all yet — the biggest single piece of new work in this pilot),
-   deepen `node_express` per §3's Phase B (already-scoped, reusable
-   as-is), design and build the pages (§4's Phase C, now corpus-grounded
-   per real Shopify/Walmart research instead of the generic corpus
-   examples), prove conformance (§5), wire into `multitarget.py` (§6).
-5. Update §9.4's tracker row at every step above — do not wait until the
-   category is fully done to report progress.
+1. ~~Create `claude/second-target-cat1-ecommerce` and do all pilot work
+   there (not on `main`).~~ **Done.**
+2. ~~Functionality/feature research for Shopify (Rails) and Walmart
+   (Node/Express) specifically.~~ **Done — see §9.4a and the two research
+   docs it links.**
+3. ~~Stack-specific CWE research for each.~~ **Done — see §9.4a.**
+4. **Next:** finalize which CWEs from §9.4a's two shortlists become this
+   app's actual manifest cells (a real selection, not "build everything
+   researched" — 2-3 per site is the right scale, matching every other
+   category's app so far in this project), then: build the Rails
+   skeleton/live-boot harness (this category's version of §2's Phase A,
+   for a stack that doesn't exist in this project at all yet — the
+   biggest single piece of new work in this pilot), deepen `node_express`
+   per §3's Phase B (already-scoped, reusable as-is), design and build
+   the pages (§4's Phase C, now corpus-grounded per the real
+   Shopify/Walmart research in §9.4a), prove conformance (§5), wire into
+   `multitarget.py` (§6).
+5. Update §9.4/§9.4a at every step above — do not wait until the category
+   is fully done to report progress.

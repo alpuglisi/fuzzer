@@ -13,6 +13,18 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- Docs (`claude/second-target-cat1-ecommerce`): closed the functionality-
+  research gap for category 1's pilot pair. Added
+  `docs/research/site-architecture-survey-functionality-shopify.md` and
+  `-walmart.md` — real, cited functionality/pages for both sites plus
+  stack-specific CWE shortlists (Rails: mass assignment via `permit!`,
+  Psych/YAML deserialization, `order`/`pluck` identifier-position SQLi;
+  Node/Express: ReDoS via `path-to-regexp`, prototype pollution — the
+  latter corrected mid-research from "absent" to "ID present incidentally,
+  no dedicated demonstration page," an honest revision worth preserving).
+  Updated `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4/§9.4a with
+  the findings and next steps. Research only — no manifests, modules, or
+  `lab/safety_matrix.yaml` changes yet.
 - Docs: renamed `docs/LAB_SECOND_TARGET_NODE_EXPRESS_PLAN.md` ->
   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` and added its §9,
   recording the project owner's answers to §0b's open questions: stack
