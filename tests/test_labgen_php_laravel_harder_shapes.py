@@ -88,6 +88,11 @@ REQUIRED_SHAPES = {
     ("xss", "html_body"),
     ("xss", "url_javascript_scheme"),
     ("xss", "html_attribute_unquoted"),
+    # CC-LAB-0064: mass-assignment, added to php_current first then here, to
+    # keep this full-depth invariant true (php_laravel's own
+    # OrmEntityBulkAssignSink uses DB::table()->update(), not php_current's
+    # PDO -- a genuine Laravel-idiomatic equivalent, not a port).
+    ("mass_assignment", "orm_entity_bulk_assign"),
 }
 
 
@@ -376,9 +381,27 @@ def test_no_sink_escapes_anything_itself(sink_name: str) -> None:
         "attr_name": "a",
         "password_var": "secret_hash",
         "password_param": "secret",
+        "id_column": "id",
+        # L-P3.3c-DOM's dom_innerhtml_echo sink's own render-only metadata.
+        "dom_location": "query",
+        "dom_param_name": "p",
+        "dom_target_id": "t",
+        "dom_prefix": "pre-",
+        "dom_suffix": "-post",
+        "dom_write_prop": "innerHTML",
     }
     code = SINKS[sink_name].render(ctx).code
-    if sink_name in VIEW_SINKS:
+    if sink_name == "dom_innerhtml_echo":
+        # The one VIEW_SINK with no controller-passed value at all
+        # (L-P3.3c-DOM): the tainted value is read AND written entirely
+        # client-side, so there is no `$value` for this sink to echo -- the
+        # shared `ctx["value_expr"]`/MARKER_EXPR above is simply irrelevant to
+        # it by design (see modules.py's DomInnerhtmlEchoSink docstring). Its
+        # own "never escapes" evidence is the innerHTML/textContent branch
+        # asserted directly in tests/test_labgen_php_laravel_real_pages_dom.py.
+        assert "$value" not in code
+        assert "MARKER_EXPR" not in code
+    elif sink_name in VIEW_SINKS:
         # A view fragment reads the value the controller passed in, so its
         # marker is the Blade variable rather than the raw expression.
         assert "{!! $value !!}" in code
@@ -574,12 +597,23 @@ def test_tier0_lint_passes_for_every_cell_including_the_blade_views(emitter, man
 def test_the_routes_file_carries_one_sorted_line_per_cell(emitter, manifest) -> None:
     fragments = {c.cell_id: emitter.route_fragment_for(c) for c in manifest.cells}
     content = assemble_routes_file(fragments).content.decode("utf-8")
-    route_lines = [line for line in content.splitlines() if line.startswith("Route::get(")]
+    # An illustrative page is served at its own cell's declared HTTP method
+    # (`_served_route_for` -- fixed to stop hardcoding GET, since this
+    # manifest already has illustrative POST cells, e.g. LABGEN-PL-0003/4's
+    # `/login` twins, that a hardcoded-GET route could never actually be
+    # exercised at), so `Route::<verb>(` varies per cell, not just `get`.
+    route_lines = [line for line in content.splitlines() if line.startswith("Route::")]
     assert len(route_lines) == len(manifest.cells)
-    # Sorted by cell ID, never by append order (Addendum D determinism rule).
-    assert route_lines == sorted(route_lines)
+    # Sorted by cell ID, never by append order or by HTTP verb (Addendum D
+    # determinism rule) -- extract each line's trailing `// cell: <ID>`
+    # rather than comparing line text, since verb now varies per cell and
+    # "Route::get(" < "Route::post(" would otherwise mask a real ordering
+    # bug (or hide one) independent of cell-ID order.
+    line_cell_ids = [line.rsplit("// cell: ", 1)[1] for line in route_lines]
+    assert line_cell_ids == sorted(line_cell_ids)
     for cell in manifest.cells:
         assert f"/cell/{cell.cell_id.lower()}" in content
+        assert f"Route::{cell.route.method.lower()}(" in content
 
 
 def test_cli_check_passes_end_to_end_on_the_widened_manifest(tmp_path) -> None:

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "target": "puppy-fort-factory",
+  "target": "php_laravel",
   "cases": [
     {
       "case_id": "PFF-0001",

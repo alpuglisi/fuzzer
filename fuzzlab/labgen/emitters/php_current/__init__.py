@@ -104,6 +104,13 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("xss", "html_attribute_unquoted"): _ModuleSet(
         "get_param", "html_attribute_unquoted_echo", "render_only"
     ),
+    # CC-LAB-0064: mass-assignment (orm_entity_bulk_assign). The transform is
+    # never fixed here (per _ModuleSet's own contract) -- the manifest cell's
+    # own transform pipeline picks unfiltered_body_update (vulnerable) or
+    # runtime_field_allowlist (secure).
+    ("mass_assignment", "orm_entity_bulk_assign"): _ModuleSet(
+        "all_post_params", "orm_entity_bulk_assign", "single_statement"
+    ),
 }
 
 #: Per-real-page static context (table/column/param names, or the stored
@@ -186,6 +193,20 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
         "css_class": "theme",
         "attr_name": "theme",
         "attr_default": "default",
+    },
+    # CC-LAB-0064: account_settings.php POSTs a field=>value map that is bulk-
+    # assigned onto the current user's own row. `allowed_fields` is what the
+    # `runtime_field_allowlist` transform allows (mirrors `allowed_identifiers`'
+    # role for `identifier_allowlist` above) -- the real fields this endpoint
+    # legitimately lets a user edit about themselves; `role`/`is_admin` are
+    # real columns on the same table the vulnerable twin's unfiltered write can
+    # still reach, since they are simply absent from the allowlist, not from
+    # the table itself.
+    "/account_settings.php": {
+        "var_name": "postFields",
+        "table": "users",
+        "id_column": "id",
+        "allowed_fields": ("display_name", "bio", "avatar_url"),
     },
 }
 

@@ -1,0 +1,54 @@
+# header-injection / python -- part of the cell (see
+# ../php/manifest.yaml's header). Entry 3 of this cell's 5 pairs.
+
+- file: idiomatic-emailmessage-structured-3.py
+  role: idiomatic
+  architecture: emailmessage-structured-headers
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "email.message.EmailMessage's __setitem__ used for each header -- the stdlib email package validates/folds header values per RFC 5322 rather than raw-concatenating"
+  notes: "Manufactured, representing a real, common safe Python stdlib email-construction shape."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-93, CWE-20]
+  cwe_unique: [CWE-1053, CWE-1059]
+  cwe_rationale: >
+    Shared (this cell's core class, see ../php/manifest.yaml's
+    idiomatic-phpmailer-secureheader-1.php entry): CWE-93, CWE-20.
+    Unique: CWE-1053 (Missing Documentation for Design) -- flagged
+    generally, since relying on EmailMessage's __setitem__ folding logic
+    as the security boundary here is not documented anywhere near the
+    call site itself; CWE-1059 (Insufficient Technical Documentation) --
+    `guest_email` is used directly as the `To` header with no format
+    validation against RFC 5322's own address-syntax rules documented
+    anywhere in this function.
+  suggested_op: structured_mail_headers
+  suggested_sink_family: email_header_value
+
+- file: vulnerable-raw-header-string-3.py
+  role: vulnerable
+  architecture: emailmessage-structured-headers
+  derived_from: idiomatic-emailmessage-structured-3.py
+  license: "N/A (synthetic -- represents the real raw-f-string-header
+    anti-pattern EmailMessage's own header setters exist to prevent)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: an f-string header block with no CRLF stripping, sent via smtplib's raw sendmail()"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-93, CWE-20]
+  cwe_unique: [CWE-349, CWE-833]
+  cwe_rationale: >
+    Shared: see idiomatic-emailmessage-structured-3.py above.
+    Unique: CWE-349 (Acceptance of Extraneous Untrusted Data With Trusted
+    Data) -- the trusted literal header lines and the untrusted
+    interpolated fields are concatenated into one f-string with no
+    boundary between them once built; CWE-833 (Deadlock) -- flagged
+    generally as a residual concern for the synchronous `smtplib.SMTP`
+    call this function makes with no timeout shown.
+  suggested_op: raw_header_concat
+  suggested_sink_family: email_header_value

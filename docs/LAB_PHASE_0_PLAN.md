@@ -40,6 +40,14 @@ open:
    generator *can* reproduce it, as the prerequisite for the later cutover,
    which remains a distinct, later step (Phase 3+), not something Phase 0 or
    Phase 1 does.
+
+   **Update, 2026-09-22 (`L-P3.3c-CUT`, `CC-LAB-0061`/`FR-LAB-58`): done.**
+   The cutover this section anticipated has landed — see
+   `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.5/§4.3.6.6 for the concrete change
+   list and the parity-gate evidence, and `docs/ARCHITECTURE.md` §1 for the
+   current-state summary. `puppy-fort-factory/` no longer exists in the repo;
+   this document's own text above is left as the historical record of the
+   decision, not updated to present tense.
 2. **Architecture Option A (single core, per-stack emitter plugins)** — the
    report's own recommendation — is confirmed, specifically *because* it is
    the modular choice: adding a stack means writing one emitter against a

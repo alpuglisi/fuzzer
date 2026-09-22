@@ -289,3 +289,83 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   different root cause from PA-0019's bookkeeping-recall gap (that one is about
   recalling *what to record*; this one is about recalling *what was already
   authorized*). (from BUG-0029)
+- **PA-0033** — Strengthens PA-0020's *scope of enforcement* (not its diagnosis, which
+  PA-0033 reuses as-is): PA-0020 established that a bug whose root cause is "my own
+  missed or inconsistent self-check" needs mechanical enforcement, not a clearer written
+  rule — but its own enforcement artifact (`check-error-log-bookkeeping.sh`) only covers
+  one instance of that class (`ERROR_LOG.md` bookkeeping). Every future explicit,
+  quantitative "do more of X / don't stop at the minimum" instruction that produces a
+  checkable artifact (a list, a count, a set of records) must get its **own** concrete,
+  mechanical check at the time the instruction is first acted on — not a restatement of
+  the instruction's own wording in a planning document, and not deferred on the
+  assumption PA-0020's general principle already covers it by existing. Concrete
+  instance: `.claude/hooks/check-corpus-cwe-coverage.sh`, which blocks the session from
+  ending if a touched `docs/research/corpus-examples/*/*/manifest.yaml` entry has fewer
+  than 2 `cwe_unique` CWEs, or if any `cwe_unique` ID is also claimed unique by another
+  touched entry — a CWE relevant to more than one entry belongs in `cwe_shared` and does
+  not count toward either entry's floor. (Initially built as a simpler length check on a
+  flat `cwe:` field; tightened to the shared/unique split and cross-entry uniqueness
+  check after the first version still allowed copy-pasting the same CWEs across sibling
+  entries, which a direct follow-up instruction correctly identified as not meeting the
+  actual intent.) (from BUG-0030)
+
+  Extended again per this same principle when a follow-up direct instruction ("at least
+  5 pairs, not one example per CWE") surfaced a second uncovered quantitative floor:
+  `check-corpus-cwe-coverage.sh` now also aggregates every `manifest.yaml` under a
+  touched cell directory (`docs/research/corpus-examples/<cell>/`) and blocks the
+  session if that cell has fewer than 5 `role: vulnerable` entries. Same failure mode as
+  the original PA-0033 gap — a quantitative "at least N" instruction was tracked only in
+  prose (this plan doc's Status section) rather than mechanically enforced — caught
+  before it recurred a second time by applying PA-0033's own rule proactively this time,
+  rather than waiting for a review to catch it.
+- **PA-0034** — Two related rules, from a PR review that found real defects a
+  same-session test suite and a 4-round change-control review both missed (from
+  `BUG-0031`, code-generation, and `BUG-0032`, an enforcement hook — recurrence of the
+  same root cause one layer apart):
+  1. Any new code-generation sink/template that constructs a SQL statement (or other
+     executable text) from a runtime-computed *identifier* (not just a bound value), or
+     that combines a request-derived value with a request-derived HTTP verb/route/
+     auth-context assumption for the first time in a given code path, needs at least one
+     test that renders the actual code and executes it against an adversarial input
+     *orthogonal* to the feature's own intended demonstration (a malformed identifier, a
+     mismatched HTTP verb, an absent auth context) — not only assertions that prove the
+     feature's own happy path. A feature's own tests passing proves it does what it was
+     built to do; it does not prove it doesn't also do something else unsafe.
+  2. Any mechanical check built to enforce a quantitative/structural floor (PA-0033's own
+     class of artifact) must, before being trusted, be run against at least one synthetic
+     fixture *constructed to be malformed in the specific way the check claims to catch*
+     — not validated solely by confirming it flags the real corpus's/codebase's own
+     currently-known problems, since self-authored data rarely reproduces the malformed
+     shape a future author might actually produce. Strengthens PA-0033: building the
+     check is necessary but not sufficient; the check needs its own adversarial
+     self-check before "mechanical enforcement exists" can be trusted. (from BUG-0031,
+     BUG-0032)
+- **PA-0035** — A capability probe that gates whether a real, potentially slow or
+  hanging operation runs (a `pytest.mark.skipif(not xxx_available(), ...)`-style guard,
+  or any equivalent pre-flight check) must exercise the **actual operation path** —
+  the same client/transport/binary the real, gated operation itself uses, doing the
+  smallest real instance of the same real work — never a different, easier-to-check
+  proxy for it (a raw `socket.create_connection` standing in for a real, proxy-aware
+  HTTPS client's request; a version-string check standing in for actually invoking the
+  tool; etc.). A raw TCP connect can succeed on a path (unproxied egress) the real
+  operation does not take (a required HTTPS proxy), so it answers a related but
+  different question than "will the real operation complete." This generalizes
+  PA-0025's fail-closed doctrine ("a wrapper's status conclusion must be independently
+  verified against what the real underlying thing actually did, never inferred from an
+  easier-to-observe stand-in") from tool-oracle *output* classification to pre-flight
+  *capability* probes specifically — a context PA-0025's own wording does not cover
+  (see `BUG-0033`'s recurrence review for why this is a new rule rather than a
+  stretching of PA-0025's stated scope). Every such probe must also enforce its **own**
+  bounded, explicit timeout on that real operation and report unavailable (never raise,
+  never hang) if it is exceeded — passing this probe is never, by itself, a guarantee
+  that every later real step of the operation it gates is also bounded: each of those
+  later steps (e.g. the real `composer install` a live-boot probe gates) must enforce
+  its own timeout independently, at the shared helper that runs it, not left to each
+  call site to remember. The PA-0002 sweep for this class checked every other
+  `*_available()`-style probe in `fuzzlab/` (`php_available`/`python_available` in
+  `tier0.py`, `sqlglot_available` in `mutation/semantics.py`, `mariadb_available` in
+  `live_boot.py`): each of those already directly tests the actual capability it gates
+  (a CLI binary on PATH, or an actual import-and-parse of the library in question), not
+  a proxy signal for it — only `live_boot_available()`'s network half
+  (`_network_reachable`, now `_composer_network_probe`) had this defect. (from
+  BUG-0033)

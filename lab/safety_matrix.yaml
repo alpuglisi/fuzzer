@@ -24,6 +24,57 @@
 #   js_context_break — attacker input reaches a JavaScript execution context
 #     (e.g. the body of a `javascript:` URL), where HTML-entity escaping is
 #     the wrong escaping (added L-P1.2b)
+#   ownership_check_bypass — a lookup by ID/key returns or acts on a resource
+#     without verifying the requester owns/is a member of it (IDOR) (added
+#     CC-LAB-0063)
+#   jwt_algorithm_confusion — JWT signature verification does not pin/
+#     restrict the accepted algorithm, so an attacker-chosen `alg` (e.g.
+#     `none`, or a public-key algorithm swapped for an HMAC one) is honored
+#     (added CC-LAB-0063)
+#   weak_token_entropy — a session/reset/API token is derived from a
+#     non-cryptographic, predictable source (added CC-LAB-0063)
+#   stale_authorization_state — an authorization decision (e.g. "is this
+#     account blocked") is taken from a value cached at an earlier point
+#     (e.g. login time) rather than revalidated for the current request
+#     (added CC-LAB-0063)
+#   price_integrity_bypass — a payment/charge amount is taken from
+#     client-supplied input rather than recomputed server-side from trusted
+#     data (added CC-LAB-0063)
+#   race_condition_toctou — a check-then-act gap (e.g. "is this coupon
+#     unused?" then "mark it used") allows the same single-use resource to
+#     be redeemed, or the same counter incremented, more than once under
+#     concurrent requests (added CC-LAB-0063)
+#   unrestricted_file_upload — an uploaded file's true type/executability is
+#     not verified, allowing a web-executable file into a web-served path
+#     (added CC-LAB-0063)
+#   path_traversal — a filesystem path built from tainted input can escape
+#     its intended base directory (added CC-LAB-0063)
+#   sql_order_by_injection — tainted input selects the `ORDER BY`
+#     column/direction with no fixed allowlist — the sort-clause-scoped
+#     sibling of `sql_identifier_substitution` (added CC-LAB-0063)
+#   server_template_injection — tainted input becomes template *source*
+#     compiled/evaluated at render time, not just data interpolated into a
+#     fixed, file-loaded template (added CC-LAB-0063)
+#   xxe_entity_resolution — the XML parser resolves external entities
+#     declared in a document it parses (added CC-LAB-0063)
+#   mass_assignment — tainted request-body fields are written into a
+#     persisted entity beyond the fields the endpoint intends to accept
+#     (added CC-LAB-0063)
+#   ssrf_request_forgery — server-side code fetches a URL whose host/scheme
+#     is attacker-influenced, reaching internal/otherwise-unreachable
+#     network targets (added CC-LAB-0063)
+#   insecure_deserialization — tainted bytes are deserialized by a mechanism
+#     that can construct/execute more than plain data (objects, closures,
+#     code), not just parse a fixed data format (added CC-LAB-0063)
+#   email_header_injection — tainted input reaches a raw mail-header string
+#     with no CR/LF stripping, allowing extra headers/recipients to be
+#     injected (added CC-LAB-0063)
+#   http_header_injection — tainted input reaches a raw HTTP response header
+#     with no CR/LF stripping, allowing response-splitting/extra headers
+#     (added CC-LAB-0063)
+#   weak_signature_comparison — a webhook/HMAC signature is verified with a
+#     non-constant-time or type-juggling-prone comparison, or verification
+#     is skipped/bypassable entirely (added CC-LAB-0063)
 version: 1
 entries:
   # --- SQL sinks -----------------------------------------------------
@@ -242,3 +293,417 @@ entries:
   - op: raw_concat
     sink_family: html_attribute_quoted
     effect: no_effect
+
+  # --- CC-LAB-0063: applying corpus-collected suggested_op/suggested_sink_
+  # family proposals to the matrix (site-architecture expansion plan, Step 8
+  # handoff) ------------------------------------------------------------
+  # All entries below are brand-new (op, sink_family) pairs (new sink
+  # families throughout), so per this file's own append-only rule they are
+  # additions under the SAME `version: 1`: no existing pair's meaning
+  # changes, no existing cell's verdict moves, and a corpus generated under
+  # v1 before these landed re-derives identically. Each group cites the
+  # `docs/research/corpus-examples/<cell>/` manifests whose
+  # `suggested_op`/`suggested_sink_family` fields it accepts (verbatim,
+  # unrenamed/unmerged — see that plan's Step 8 handoff note on
+  # `template_render` vs `template_render_pipeline` staying two distinct,
+  # unmerged families below despite the conceptual overlap, since merging
+  # them is a design decision for a later change, not this one).
+
+  # --- access-control: IDOR / broken object-level authorization ----------
+  # From docs/research/corpus-examples/access-control/{node,php,python}/.
+  # Two sink families: `db_row_by_id_lookup` (a direct primary-key fetch)
+  # and `keyed_resource_lookup` (a fetch/action keyed by some other
+  # attacker-visible identifier, e.g. a board/room key). Both require
+  # `ownership_check_bypass`.
+  - op: no_ownership_check
+    sink_family: db_row_by_id_lookup
+    effect: no_effect
+  - op: no_ownership_check
+    sink_family: keyed_resource_lookup
+    effect: no_effect
+  - op: identity_match_before_fetch
+    sink_family: db_row_by_id_lookup
+    effect: neutralises
+    neutralizes: [ownership_check_bypass]
+  - op: ownership_check_after_fetch
+    sink_family: db_row_by_id_lookup
+    effect: neutralises
+    neutralizes: [ownership_check_bypass]
+  - op: ownership_query_filter
+    sink_family: db_row_by_id_lookup
+    effect: neutralises
+    neutralizes: [ownership_check_bypass]
+  - op: membership_check_helper
+    sink_family: keyed_resource_lookup
+    effect: neutralises
+    neutralizes: [ownership_check_bypass]
+
+  # --- auth-session: JWT algorithm confusion, weak token entropy, stale
+  # authorization state -----------------------------------------------------
+  # From docs/research/corpus-examples/auth-session/{node,php,python}/.
+  - op: jwt_alg_none_default
+    sink_family: jwt_signature_verification
+    effect: no_effect
+  - op: jwt_none_alg_opt_in
+    sink_family: jwt_signature_verification
+    effect: neutralises
+    neutralizes: [jwt_algorithm_confusion]
+  - op: jwt_alg_unchecked
+    sink_family: jwt_signature_verification
+    effect: no_effect
+  - op: jwt_alg_allowlist
+    sink_family: jwt_signature_verification
+    effect: neutralises
+    neutralizes: [jwt_algorithm_confusion]
+  - op: weak_prng_token
+    sink_family: session_token_generation
+    effect: no_effect
+  - op: predictable_token_source
+    sink_family: session_token_generation
+    effect: no_effect
+  - op: csprng_token
+    sink_family: session_token_generation
+    effect: neutralises
+    neutralizes: [weak_token_entropy]
+  - op: login_time_only_check
+    sink_family: session_authorization_state
+    effect: no_effect
+  - op: per_request_status_revalidation
+    sink_family: session_authorization_state
+    effect: neutralises
+    neutralizes: [stale_authorization_state]
+
+  # --- ecommerce-logic: client-trusted price, TOCTOU redemption/counter --
+  # From docs/research/corpus-examples/ecommerce-logic/{node,php,python}/.
+  - op: client_trusted_amount
+    sink_family: payment_charge_amount
+    effect: no_effect
+  - op: trust_client_price_input
+    sink_family: payment_charge_amount
+    effect: no_effect
+  - op: server_recomputed_amount
+    sink_family: payment_charge_amount
+    effect: neutralises
+    neutralizes: [price_integrity_bypass]
+  - op: hook_delegated_recompute
+    sink_family: payment_charge_amount
+    effect: neutralises
+    neutralizes: [price_integrity_bypass]
+  - op: unlocked_check_then_act
+    sink_family: single_use_resource_redemption
+    effect: no_effect
+  - op: unlocked_check_then_act
+    sink_family: db_counter_increment
+    effect: no_effect
+
+  # --- file-handling: unrestricted upload, path traversal -----------------
+  # From docs/research/corpus-examples/file-handling/{node,php,python}/.
+  # `mime_type_check` and `filename_charset_sanitize` are `partial` (D20):
+  # both narrow the attack surface but neither actually inspects file
+  # *content* (magic bytes) nor allowlists the *extension*, so each still
+  # leaves a spoofable gap `extension_allowlist_mime_check` closes fully.
+  # Likewise `path_prefix_check`: a string-prefix comparison on an
+  # unresolved path is a well-documented partial defense (symlink /
+  # non-separator-bounded-prefix bypasses) that `realpath_confine`
+  # (resolve first, then confine) closes fully.
+  - op: no_extension_check
+    sink_family: fs_web_root_write
+    effect: no_effect
+  - op: mime_type_check
+    sink_family: fs_web_root_write
+    effect: partial
+    neutralizes: [unrestricted_file_upload]
+  - op: filename_charset_sanitize
+    sink_family: fs_web_root_write
+    effect: partial
+    neutralizes: [unrestricted_file_upload]
+  - op: extension_allowlist_mime_check
+    sink_family: fs_web_root_write
+    effect: neutralises
+    neutralizes: [unrestricted_file_upload]
+  - op: unconfined_path
+    sink_family: fs_path_read
+    effect: no_effect
+  - op: path_prefix_check
+    sink_family: fs_path_read
+    effect: partial
+    neutralizes: [path_traversal]
+  - op: realpath_confine
+    sink_family: fs_path_read
+    effect: neutralises
+    neutralizes: [path_traversal]
+
+  # --- search-export: ORDER BY injection, SSTI, XXE, weaker SQL escaping --
+  # From docs/research/corpus-examples/search-export/{node,php,python}/.
+  # `driver_escape_string` (manual driver-level escaping, e.g.
+  # `mysqli_real_escape_string`) is `partial`, not `neutralises`, at the
+  # same `sql_string_literal` family `param_bind` already fully closes —
+  # matching this file's existing preference for parameterization as the
+  # only fully-neutralising SQL-string-literal transform (manual escaping
+  # misses non-string contexts and has documented multi-byte-encoding edge
+  # cases). `orm_raw_escape_hatch` and `template_compile_user_content` are
+  # each a lone vulnerable-side (`no_effect`) row: the corpus's idiomatic
+  # twins for those two shapes route around the sink entirely (parameterize
+  # or avoid it) rather than proposing a same-family secure transform, so
+  # neither family has a `neutralises` row yet — the same "vulnerable-only
+  # coverage, secure twin later" situation L-P3.3c-G6 and L-P1.2b's own
+  # additions started from.
+  - op: orm_order_by_unvalidated
+    sink_family: sql_order_by_clause
+    effect: no_effect
+  - op: identifier_allowlist
+    sink_family: sql_order_by_clause
+    effect: neutralises
+    neutralizes: [sql_order_by_injection, sql_identifier_substitution]
+  - op: driver_escape_string
+    sink_family: sql_string_literal
+    effect: partial
+    neutralizes: [sql_syntax_break]
+  - op: orm_raw_escape_hatch
+    sink_family: sql_where_clause_fragment
+    effect: no_effect
+  - op: template_compile_user_content
+    sink_family: template_render_pipeline
+    effect: no_effect
+  - op: xml_external_entities_enabled
+    sink_family: xml_parse_input
+    effect: no_effect
+
+  # --- ugc-xss: sanitizer/autoescape alternatives at the existing
+  # `html_body` family — new ops, no new sink family. From
+  # docs/research/corpus-examples/ugc-xss/{node,php,python}/.
+  - op: dompurify_sanitize
+    sink_family: html_body
+    effect: neutralises
+    neutralizes: [html_tag_break]
+  - op: wp_kses_post
+    sink_family: html_body
+    effect: neutralises
+    neutralizes: [html_tag_break]
+  - op: bleach_clean
+    sink_family: html_body
+    effect: neutralises
+    neutralizes: [html_tag_break]
+  - op: default_autoescape
+    sink_family: html_body
+    effect: neutralises
+    neutralizes: [html_tag_break]
+
+  # --- mass-assignment: unfiltered bulk ORM/entity writes ------------------
+  # From docs/research/corpus-examples/mass-assignment/node/. Every
+  # `neutralises` row here is a distinct allowlisting mechanism (typed
+  # schema, runtime field list, ORM `fields` option, hand-rolled mapping,
+  # typed GraphQL input) collected as independent architectures in the
+  # corpus; every `no_effect` row is that architecture's own unfiltered
+  # counterpart.
+  - op: unfiltered_object_assign
+    sink_family: orm_entity_bulk_assign
+    effect: no_effect
+  - op: typed_schema_allowlist
+    sink_family: orm_entity_bulk_assign
+    effect: neutralises
+    neutralizes: [mass_assignment]
+  - op: unfiltered_body_update
+    sink_family: orm_entity_bulk_assign
+    effect: no_effect
+  - op: runtime_field_allowlist
+    sink_family: orm_entity_bulk_assign
+    effect: neutralises
+    neutralizes: [mass_assignment]
+  - op: orm_update_no_fields_option
+    sink_family: orm_entity_bulk_assign
+    effect: no_effect
+  - op: orm_fields_option_allowlist
+    sink_family: orm_entity_bulk_assign
+    effect: neutralises
+    neutralizes: [mass_assignment]
+  - op: unfiltered_object_spread
+    sink_family: orm_entity_bulk_assign
+    effect: no_effect
+  - op: explicit_field_mapping
+    sink_family: orm_entity_bulk_assign
+    effect: neutralises
+    neutralizes: [mass_assignment]
+  - op: generic_scalar_input_assign
+    sink_family: orm_entity_bulk_assign
+    effect: no_effect
+  - op: typed_graphql_field_mapping
+    sink_family: orm_entity_bulk_assign
+    effect: neutralises
+    neutralizes: [mass_assignment]
+
+  # --- ssrf: server-side fetch with attacker-influenced target ------------
+  # From docs/research/corpus-examples/ssrf/{node,php,python}/.
+  # `hostname_allowlist` is `partial`: checking the *hostname string*
+  # against an allowlist before the fetch, with no check of the IP the
+  # allowlisted host actually resolves to at fetch time, is the well-
+  # documented DNS-rebinding gap `scheme_and_resolved_ip_allowlist` (which
+  # checks the resolved IP itself, not just the hostname) closes fully.
+  - op: unchecked_url_fetch
+    sink_family: server_side_http_fetch
+    effect: no_effect
+  - op: hostname_allowlist
+    sink_family: server_side_http_fetch
+    effect: partial
+    neutralizes: [ssrf_request_forgery]
+  - op: scheme_and_resolved_ip_allowlist
+    sink_family: server_side_http_fetch
+    effect: neutralises
+    neutralizes: [ssrf_request_forgery]
+
+  # --- insecure-deserialization: object/pickle/vm deserialization of
+  # tainted bytes ------------------------------------------------------
+  # From docs/research/corpus-examples/insecure-deserialization/
+  # {node,php,python}/. Every `neutralises` row either restricts
+  # deserialization to plain data (JSON) or gates it behind an
+  # authenticated-encryption step the attacker cannot forge without the
+  # server's own key.
+  - op: vm_script_execution
+    sink_family: object_deserialization
+    effect: no_effect
+  - op: handler_registry_lookup
+    sink_family: object_deserialization
+    effect: neutralises
+    neutralizes: [insecure_deserialization]
+  - op: function_executing_deserialize
+    sink_family: object_deserialization
+    effect: no_effect
+  - op: json_parse_only
+    sink_family: object_deserialization
+    effect: neutralises
+    neutralizes: [insecure_deserialization]
+  - op: unauthenticated_deserialize
+    sink_family: object_deserialization
+    effect: no_effect
+  - op: authenticated_encrypt_then_deserialize
+    sink_family: object_deserialization
+    effect: neutralises
+    neutralizes: [insecure_deserialization]
+  - op: unrestricted_unserialize
+    sink_family: object_deserialization
+    effect: no_effect
+  - op: json_decode_type_check
+    sink_family: object_deserialization
+    effect: neutralises
+    neutralizes: [insecure_deserialization]
+  - op: unrestricted_pickle_loads
+    sink_family: object_deserialization
+    effect: no_effect
+  - op: json_loads_type_check
+    sink_family: object_deserialization
+    effect: neutralises
+    neutralizes: [insecure_deserialization]
+
+  # --- ssti: template *source* vs template *name* selected from tainted
+  # input --------------------------------------------------------------
+  # From docs/research/corpus-examples/ssti/{node,php,python}/. Kept as its
+  # own `template_render` family, distinct from search-export's
+  # `template_render_pipeline` above (see this group's header note).
+  - op: user_supplied_template_compile
+    sink_family: template_render
+    effect: no_effect
+  - op: eval_string_template_compile
+    sink_family: template_render
+    effect: no_effect
+  - op: file_loaded_template_name
+    sink_family: template_render
+    effect: neutralises
+    neutralizes: [server_template_injection]
+
+  # --- header-injection: raw CRLF-bearing header construction -------------
+  # From docs/research/corpus-examples/header-injection/{node,php,python}/.
+  # Two sink families: `email_header_value` (a mail header) and
+  # `http_response_header_value` (an HTTP response header) — both require
+  # CR/LF stripping or a structured (non-string-concat) header API.
+  - op: raw_header_concat
+    sink_family: email_header_value
+    effect: no_effect
+  - op: strip_crlf
+    sink_family: email_header_value
+    effect: neutralises
+    neutralizes: [email_header_injection]
+  - op: structured_mail_options
+    sink_family: email_header_value
+    effect: neutralises
+    neutralizes: [email_header_injection]
+  - op: structured_mail_headers
+    sink_family: email_header_value
+    effect: neutralises
+    neutralizes: [email_header_injection]
+  - op: raw_socket_response_write
+    sink_family: http_response_header_value
+    effect: no_effect
+  - op: allowlist_and_runtime_crlf_rejection
+    sink_family: http_response_header_value
+    effect: neutralises
+    neutralizes: [http_header_injection]
+
+  # --- webhook-signature: HMAC/signature verification correctness ---------
+  # From docs/research/corpus-examples/webhook-signature/
+  # {node,php,python}/. `naive_string_compare` and `loose_equality_compare`
+  # are `partial`, not `no_effect`: unlike `no_signature_check`/
+  # `trust_post_data` (no verification performed at all), these DO compare
+  # the computed and provided signatures — they are just timing-unsafe
+  # (`===`/`==` short-circuit on first mismatch) and, for `==` in PHP,
+  # additionally vulnerable to the documented "magic hash" type-juggling
+  # collision. Both are a genuinely harder attack than a total bypass, so
+  # both stay VULNERABLE-but-harder (D20 `partial`), not `no_effect`.
+  - op: no_signature_check
+    sink_family: webhook_signature_verification
+    effect: no_effect
+  - op: trust_post_data
+    sink_family: webhook_signature_verification
+    effect: no_effect
+  - op: naive_string_compare
+    sink_family: webhook_signature_verification
+    effect: partial
+    neutralizes: [weak_signature_comparison]
+  - op: loose_equality_compare
+    sink_family: webhook_signature_verification
+    effect: partial
+    neutralizes: [weak_signature_comparison]
+  - op: constant_time_compare
+    sink_family: webhook_signature_verification
+    effect: neutralises
+    neutralizes: [weak_signature_comparison]
+  - op: constant_time_signature_and_timestamp_check
+    sink_family: webhook_signature_verification
+    effect: neutralises
+    neutralizes: [weak_signature_comparison]
+  - op: postback_verification
+    sink_family: webhook_signature_verification
+    effect: neutralises
+    neutralizes: [weak_signature_comparison]
+
+  # --- L-P3.3c-DOM: DOM-based XSS (originally puppy-fort-factory/reviews.php,
+  # feedback.php -- VULNERABILITIES.md findings #6/#7) ---------------------
+  # `dom_html_sink`: a genuinely new family, not a rendering of `html_body`.
+  # Every family above describes a value that reaches a *server-rendered*
+  # HTML/SQL position; here the tainted value (a URL fragment or query-string
+  # parameter) is read AND written entirely client-side by embedded
+  # JavaScript, via `Element.innerHTML`, and never reaches the server at all
+  # -- reviews.php's own comment states it plainly: "a server-side scanner
+  # and the raw HTML both miss it too." The required concern is still
+  # `html_tag_break` (an unescaped value can open a new tag in the DOM the
+  # same way it can in server-rendered HTML) -- reached through a sink with
+  # no server-side rendering step, which is what makes it a new family rather
+  # than a new rendering of `html_body`.
+  #
+  # `raw_concat` is reused (a genuinely matching baseline op -- no
+  # transformation at all, the same meaning it has at every other family in
+  # this file).
+  - op: raw_concat
+    sink_family: dom_html_sink
+    effect: no_effect
+
+  # `dom_text_content`: the client-side write uses `Node.textContent`
+  # instead of `Element.innerHTML`. A new op, not a rendering of
+  # `html_entity_escape` -- there is no PHP-side escaping function to apply
+  # at all (the value never reaches PHP); the DOM analogue of "escape it" is
+  # "never let the browser parse it as markup in the first place." The
+  # browser never interprets a `textContent` assignment as HTML, so this
+  # fully closes `html_tag_break` at this sink.
+  - op: dom_text_content
+    sink_family: dom_html_sink
+    effect: neutralises
+    neutralizes: [html_tag_break]

@@ -3,6 +3,11 @@
 Exercises the actual PHP filter logic offline via the committed self-test driver, using
 the same PHP the container runs. Skips (does not fail) where the `php` CLI is absent, so
 the suite stays green on machines without PHP.
+
+`L-P3.3c-CUT`: re-points at `lab/waf-rules.json` (moved from the retired
+`puppy-fort-factory/config/waf-rules.json`) and the `FzlWaf` Laravel middleware /
+`WafFilter` support class (the php_laravel scaffold's successor to `includes/waf.php`),
+via the standalone driver at `tests/php/waf_selftest.php`.
 """
 
 import json
@@ -13,9 +18,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-APP = ROOT / "puppy-fort-factory"
-RULES = APP / "config" / "waf-rules.json"
-DRIVER = APP / "tests" / "waf_selftest.php"
+STACK_DIR = ROOT / "fuzzlab" / "labgen" / "emitters" / "php_laravel" / "stack" / "skeleton"
+RULES = ROOT / "lab" / "waf-rules.json"
+DRIVER = ROOT / "tests" / "php" / "waf_selftest.php"
 PHP = shutil.which("php")
 
 
@@ -39,9 +44,11 @@ def test_ruleset_is_wellformed_json():
 def test_waf_is_default_off_in_config():
     # the app is unchanged unless PFF_WAF is enabled (preserves ground truth)
     assert "PFF_WAF=off" in (ROOT / "lab" / ".env.example").read_text()
-    assert "getenv('PFF_WAF')" in (APP / "includes" / "waf.php").read_text()
-    # wired globally without editing pages
-    assert "auto_prepend_file" in (ROOT / "lab" / "web.Dockerfile").read_text()
+    assert "getenv('PFF_WAF')" in (
+        STACK_DIR / "app" / "Http" / "Middleware" / "FzlWaf.php"
+    ).read_text()
+    # wired globally without editing routes/pages
+    assert "FzlWaf::class" in (STACK_DIR / "bootstrap" / "app.php").read_text()
 
 
 # --- filter behavior (needs the php CLI) -------------------------------------

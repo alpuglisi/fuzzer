@@ -44,7 +44,6 @@ feedback and the scheduler.
   AST or canonical-form comparison of the fragment would otherwise conclude. Added
   after BUG-0026 (CC-MUT-0008) found the validator accepting such a mutation by
   default; see PA-0028.
-
 ## 4. Non-functional requirements
 - **NFR-MUT-semantics** A mutation must preserve intended semantics; a validator
   rejects transformations that change meaning. This includes fail-closed handling

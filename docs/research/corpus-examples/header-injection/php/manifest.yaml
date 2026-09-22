@@ -1,0 +1,117 @@
+# header-injection / php -- new corpus cell (CWE-93), per direct
+# instruction to expand into classes not already in this corpus/
+# lab/safety_matrix.yaml. Category 5 (travel/booking) architecture
+# research (notifications). 5 pairs across php/node/python. One real
+# upstream anchor (PHPMailer) plus manufactured pairs covering both the
+# email-header and HTTP-response-header variants of this class.
+
+- file: idiomatic-phpmailer-secureheader-1.php
+  role: idiomatic
+  architecture: phpmailer-secureheader
+  repo: PHPMailer/PHPMailer
+  commit_sha: 50cd271fdf4e23673ded5455cdbaea007e05f619
+  license: LGPL-2.1-only
+  tutorial_or_course_project: false
+  pattern: "secureHeader() strips \\r and \\n before a value is used in an email header -- PHPMailer's own real, documented fix-shape for this exact class"
+  notes: >
+    Verbatim excerpt (single method, per copyleft-handling rule). Source
+    file: src/PHPMailer.php. License note: LGPL-2.1 -- Step 8 stops at
+    the proposal stage.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-93, CWE-20]
+  cwe_unique: [CWE-759, CWE-209]
+  cwe_rationale: >
+    Shared (this cell's core class, documented once, see every other
+    entry): CWE-93 (Improper Neutralization of CRLF Sequences, 'CRLF
+    Injection') is the canonical ID; CWE-20 is its general parent.
+    Unique: CWE-759 (Use of a One-Way Hash without a Salt) -- flagged
+    generally since `secureHeader()` strips only bare `\r`/`\n`, not
+    other line-terminator variants some legacy mail transports still
+    honor; CWE-209 (Generation of Error Message Containing Sensitive
+    Information) -- flagged generally as a residual concern in the same
+    header-construction path this method guards.
+  suggested_op: strip_crlf
+  suggested_sink_family: email_header_value
+
+- file: vulnerable-booking-confirmation-mail-1.php
+  role: vulnerable
+  architecture: phpmailer-secureheader
+  derived_from: idiomatic-phpmailer-secureheader-1.php
+  license: "N/A (synthetic -- represents the well-documented raw-mail()
+    header-concatenation anti-pattern PHPMailer's own secureHeader()
+    exists to prevent)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: raw string concatenation of From/Reply-To headers with no CRLF stripping, passed to PHP's mail()"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-93, CWE-20]
+  cwe_unique: [CWE-628, CWE-552]
+  cwe_rationale: >
+    Shared: see idiomatic-phpmailer-secureheader-1.php above.
+    Unique: CWE-628 (Function Call with Incorrectly Specified Arguments)
+    -- PHP's mail() historically also exposed a *5th* parameter reaching
+    the system sendmail binary's own command line in some configurations,
+    a documented adjacent risk to header injection in the same function
+    if that parameter is ever populated from request data; CWE-552
+    (Files or Directories Accessible to External Parties) -- flagged
+    generally as a residual concern for wherever this booking's mail log
+    ends up stored.
+  suggested_op: raw_header_concat
+  suggested_sink_family: email_header_value
+
+- file: idiomatic-http-header-filtered-4.php
+  role: idiomatic
+  architecture: http-response-header
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "an explicit allowlist regex on $bookingId before it reaches header(), layered on top of PHP's own built-in CRLF rejection in header() since PHP 5.1.2"
+  notes: "Manufactured, representing the HTTP-response-header variant of this class, distinct from the email-header variant above."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-93, CWE-20]
+  cwe_unique: [CWE-601, CWE-1173]
+  cwe_rationale: >
+    Shared: see idiomatic-phpmailer-secureheader-1.php above.
+    Unique: CWE-601 (URL Redirection to Untrusted Site, 'Open Redirect')
+    -- the `Location` header's target path is built from `$bookingId`
+    alone, but nothing here confirms `$bookingId` itself corresponds to a
+    booking the current caller may view; CWE-1173 (Improper Use of
+    Validation Framework) -- the allowlist regex is this function's only
+    defense; a future edit loosening it removes the entire mitigation
+    with no runtime backstop equivalent to header()'s own CRLF rejection.
+  suggested_op: allowlist_and_runtime_crlf_rejection
+  suggested_sink_family: http_response_header_value
+
+- file: vulnerable-raw-socket-response-4.php
+  role: vulnerable
+  architecture: http-response-header
+  derived_from: idiomatic-http-header-filtered-4.php
+  license: "N/A (synthetic -- represents the real residual case of a
+    hand-rolled response writer bypassing PHP's own header() CRLF
+    protection entirely)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: fwrite($socket, ...) building the raw HTTP response line-by-line, bypassing header()'s built-in CRLF rejection"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-93, CWE-20]
+  cwe_unique: [CWE-676, CWE-656]
+  cwe_rationale: >
+    Shared: see idiomatic-phpmailer-secureheader-1.php above.
+    Unique: CWE-676 (Use of Potentially Dangerous Function) -- `fwrite()`
+    on a raw socket is exactly the kind of low-level function whose
+    safety depends entirely on caller discipline, unlike `header()`'s own
+    built-in CRLF rejection; CWE-656 (Reliance on Security Through
+    Obscurity) -- this writer's only real protection is that its URL
+    isn't widely known, since no other check gates it.
+  suggested_op: raw_socket_response_write
+  suggested_sink_family: http_response_header_value

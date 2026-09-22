@@ -371,24 +371,39 @@ additional target alongside a permanently-kept original. `LAB_PHASE_0_PLAN.md`
 corrected to match; nothing about Phase 0's own exit criterion changes (it
 still just proves reproduction, not cutover).
 
-**Layer A reproduction proven, cutover itself still pending (2026-09-22,
-`CC-LAB-0062`, Wave A2):** `docs/LAB_IMPLEMENTATION_PLAN.md`'s **D-open-1**
-resolved this exit criterion's scope to the 16 `PFF-` real-page (Layer A)
-cases in `lab/ground-truth/labels.json` — not the JS-rendered Layer-B pages,
-which the cutover deliberately does not wait on. Wave A2 re-ran the
-parity/cutover coverage gate (`fuzzlab.labgen.cutover_gate
-.assert_cutover_coverage()`, `tests/test_labgen_cutover_gate.py`) against the
-live repo and confirmed all six `L-P3.3c-G1`..`G6` page groups done and a
-clean 12 covered / 4 exempted / 0 uncovered split — **Phase 0's exit
-criterion is met for Layer A.** Two things this does *not* mean: (1) this is
-a functional parity/coverage proof, not the literal byte-for-byte source-text
-diff this section's first paragraph describes — no tool in this repo diffs
-generated output against `puppy-fort-factory/`'s actual file bytes, and one
-could not exist for `php_laravel` specifically since it is a Laravel
-reimplementation, not raw PHP; (2) `FR-LAB-8`/`L-P3.3c-CUT` (actually deleting
-`puppy-fort-factory/` and re-pointing deploy config) remains unscheduled,
-pending human sign-off, unaffected by this closure. See
-`docs/components/01-target-lab/change-control.md`'s `CC-LAB-0062` entry.
+**Layer A reproduction proven (2026-09-22, `CC-LAB-0062`, Wave A2), cutover
+since executed (`L-P3.3c-CUT`, `CC-LAB-0067`/`FR-LAB-62`):**
+`docs/LAB_IMPLEMENTATION_PLAN.md`'s **D-open-1** resolved this exit
+criterion's scope to the 16 `PFF-` real-page (Layer A) cases in
+`lab/ground-truth/labels.json` — not the JS-rendered Layer-B pages, which the
+cutover deliberately does not wait on. Wave A2 re-ran the parity/cutover
+coverage gate (`fuzzlab.labgen.cutover_gate.assert_cutover_coverage()`,
+`tests/test_labgen_cutover_gate.py`) against the live repo and confirmed all
+six `L-P3.3c-G1`..`G6` page groups done and a clean 12 covered / 4 exempted /
+0 uncovered split — **Phase 0's exit criterion was met for Layer A** at that
+point (later 14 covered / 2 exempted once `L-P3.3c-DOM` landed, `CC-LAB-0066`).
+This was always a functional parity/coverage proof, not the literal
+byte-for-byte source-text diff this section's first paragraph describes — no
+tool in this repo diffs generated output against `puppy-fort-factory/`'s
+actual file bytes, and one could not exist for `php_laravel` specifically
+since it is a Laravel reimplementation, not raw PHP. `FR-LAB-8`/`L-P3.3c-CUT`
+(actually deleting `puppy-fort-factory/` and re-pointing deploy config) has
+since executed, with the project owner's explicit sign-off: `puppy-fort-factory/`
+is deleted, `lab/compose.yaml`/`deploy.sh`/`fuzzlab/mutation/filtermodel.py`'s
+WAF-rules path are re-pointed at generator/`lab/`-owned locations, and the
+generator is the sole source of the PHP target lab. See
+`docs/components/01-target-lab/change-control.md`'s `CC-LAB-0062` and
+`CC-LAB-0067` entries.
+
+### D21 — Storage layout: per-project SQLite files plus a small global config DB
+
+Closes out a Phase-0 loose end noticed during a 2026-09-22 change-control
+audit: this had been sitting in "Deferred decisions" as "decide at Phase 0"
+since early in the project, but Phase 0 has been `[built]` for a long time and
+already ships this exact shape. Formalized as settled, no code change: each
+project gets its own SQLite store file; a small separate global database holds
+cross-project config. See the (now-struck-through) entry under "Deferred
+decisions" below for the original framing.
 
 ### Deferred decisions (revisit at the noted point)
 
@@ -399,8 +414,14 @@ pending human sign-off, unaffected by this closure. See
   core toolkit works.
 - **Full from-scratch HTTP parser** — reconsider after the toolkit works end to
   end (per D4).
-- **One DB file per project vs one global DB** — decide at Phase 0; leaning
-  per-project files plus a small global config database.
+- ~~**One DB file per project vs one global DB** — decide at Phase 0; leaning
+  per-project files plus a small global config database.~~ **Decided (D21,
+  2026-09-22, closing out a Phase-0 loose end noticed during a change-control
+  audit — Phase 0 has been `[built]` since early in the project and already
+  ships this shape):** per-project SQLite files plus a small global config
+  database, as originally leaned. No code change; this only formalizes the
+  already-shipped architecture as a settled decision rather than leaving it
+  perpetually "deferred."
 
 ## Cross-cutting principles (apply to every component)
 

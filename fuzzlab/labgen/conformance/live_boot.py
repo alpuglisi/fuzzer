@@ -37,7 +37,13 @@ unpinned page (no single cell owned its real URL, pending the
 decision (``LABGEN-PL-RP-0001`` canonical, ``PFF-0003`` exempted -- see
 ``fuzzlab.labgen.emitters.php_laravel._PAGE_PROFILES['/search.php']``) and
 this module's MariaDB-backed mode below now live-boots it too, real HTTP
-proof included.
+proof included. **L-P3.3c-DOM** (``CC-LAB-0066``) adds a seventh manifest,
+``dom`` (``reviews.php``/``feedback.php``, ``PFF-0007``/``PFF-0008``): the
+one manifest live-booted here with no server-side round trip to
+differentiate on at all -- the read and the write both happen inside the
+generated page's own ``<script>`` block, so the proof is that the real,
+pinned URL serves and embeds the right client-side shape (``innerHTML`` vs.
+``textContent``), not a payload differential.
 
 **The seeded ``users`` row (:data:`SEED_USERNAME`/:data:`SEED_PASSWORD`,
 user id :data:`SEED_USER_ID`).** One row serves both the auth group's real
@@ -54,8 +60,8 @@ page. Confirmed directly against the skeleton's own ``app/Models/User.php``
 before relying on it, not assumed.
 
 **Why SQLite here, MariaDB in the real lab.** Per this task's own scope: the
-production lab target (``puppy-fort-factory/`` today, this generator's output
-after the eventual ``L-P3.3c-CUT`` atomic cutover) is deliberately MariaDB,
+production lab target (the generator's own output, per ``L-P3.3c-CUT`` --
+the hand-built ``puppy-fort-factory/`` this replaced) is deliberately MariaDB,
 matching ``lab/sql/schema.sql`` -- identifier-position SQL injection can
 behave differently across SQL dialects (this is exactly why
 ``tier1.py``'s own docstring calls an in-memory-SQLite substitute unsound for
@@ -73,11 +79,18 @@ the one shape class where dialect matters for the *verdict itself*.
 
 **Skip-guarded, matching this project's PA-0005/T-LAB0.7 convention.**
 :func:`live_boot_available` is the one authoritative capability probe
-(``composer`` + ``php`` on PATH, plus real Packagist network reachability) a
-caller (chiefly the pytest suite) must check before constructing a
-:class:`LiveBootHarness` -- exactly like :func:`tier0.php_available` gates
-``php -l``. A missing tool or unreachable network SKIPS the check; it never
-silently reports a pass.
+(``composer`` + ``php`` on PATH, plus a real, bounded Packagist round trip
+made through composer's own HTTP client -- ``BUG-0033``: a bare raw-socket
+reachability check is not an accurate predictor of whether a real
+``composer install`` will complete in bounded time, e.g. when this
+environment's real HTTPS path requires a configured proxy a raw
+``socket.create_connection`` bypasses) a caller (chiefly the pytest suite)
+must check before constructing a :class:`LiveBootHarness` -- exactly like
+:func:`tier0.php_available` gates ``php -l``. A missing tool or unreachable
+network SKIPS the check; it never silently reports a pass, and every later
+real subprocess step in the pipeline (``composer install``, ``artisan
+key:generate``) also enforces its own bounded timeout independently -- the
+probe passing is never relied on alone to guarantee those won't hang.
 """
 
 from __future__ import annotations
@@ -123,28 +136,76 @@ class LiveBootError(RuntimeError):
     never an error)."""
 
 
-def _network_reachable(host: str = "repo.packagist.org", timeout: float = 5.0) -> bool:
-    try:
-        socket.create_connection((host, 443), timeout=timeout).close()
-        return True
-    except OSError:
+#: How long :func:`_composer_network_probe` may take before it reports the
+#: network unavailable rather than hang -- enforced by ``subprocess.run``'s
+#: own ``timeout``, never inferred from the probe "returning" on its own
+#: (``BUG-0033``: a probe that can only report success/failure, never hang,
+#: is the entire point of replacing a bare socket connect with it).
+NETWORK_PROBE_TIMEOUT_S = 20.0
+
+
+def _composer_network_probe(timeout: float = NETWORK_PROBE_TIMEOUT_S) -> bool:
+    """Actually attempt the real operation :func:`live_boot_available` must
+    predict the outcome of -- a real Packagist metadata round trip through
+    **composer's own HTTP client** (``composer show -a <pkg>``, the cheapest
+    composer subcommand that still performs one) -- instead of a bare
+    ``socket.create_connection`` to port 443 (``BUG-0033``).
+
+    Why the raw-socket version was wrong, concretely: in this project's own
+    sandboxed CI environment, outbound HTTPS only actually completes through
+    a configured HTTPS proxy (``HTTPS_PROXY``/``https_proxy``; see
+    ``/root/.ccr/README.md``). A raw TCP ``connect()`` to
+    ``repo.packagist.org:443`` can succeed (this environment's egress
+    accepts the TCP handshake) even though a *real* TLS/HTTP request outside
+    the proxied path is not the path ``composer install`` itself will use --
+    so the old probe's "yes, network available" answer did not predict
+    whether the real dependent operation (a real ``composer install``) would
+    complete in bounded time. This probe closes that gap by running the
+    *actual client* (``composer``, which honors ``HTTPS_PROXY`` exactly as
+    ``composer install`` will) against the *actual dependency* (Packagist),
+    not a substitute transport.
+
+    ``psr/log`` is queried with no local ``composer.json`` present (run from
+    a scratch cwd) so this never reads/writes this repo's own lockfile or
+    vendor state -- a read-only capability check, like every other
+    ``*_available()`` probe in this project (PA-0005/PA-0008).
+
+    Bounded and enforced by this function's own ``timeout`` -- a
+    :class:`subprocess.TimeoutExpired` or any other failure to run composer
+    reports unavailable (``False``), never propagates and never hangs the
+    caller: PA-0025's fail-closed doctrine ("a wrapper's status conclusion
+    must be independently verified against the real thing, not inferred"),
+    extended here from tool-oracle output classification to a pre-flight
+    capability probe."""
+    if shutil.which("composer") is None:
         return False
+    try:
+        result = subprocess.run(
+            ["composer", "show", "-a", "--no-interaction", "--no-ansi", "psr/log"],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=tempfile.gettempdir(),
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    return result.returncode == 0
 
 
 def live_boot_available() -> bool:
     """The authoritative capability probe this module's own tests (and any
     other caller) must gate on before constructing a
     :class:`LiveBootHarness` -- PA-0005/PA-0008: a real capability check
-    (composer + php on PATH, and Packagist actually reachable), never a
-    fragile proxy. Composer's own dry-run resolution against Packagist is
-    what this project's task brief verified by hand; this is that same
-    check, made mechanical and skip-guarding rather than assumed once and
-    hardcoded."""
+    (composer + php on PATH, and a real, bounded, composer-driven Packagist
+    round trip -- :func:`_composer_network_probe`, not a raw socket connect;
+    see its own docstring and ``BUG-0033`` for why the raw-socket version
+    was a fragile, misleading proxy for the real thing it needed to
+    predict)."""
     return (
         shutil.which("composer") is not None
         and shutil.which("php") is not None
         and SKELETON_DIR.is_dir()
-        and _network_reachable()
+        and _composer_network_probe()
     )
 
 
@@ -188,7 +249,7 @@ def _find_free_port() -> int:
 # task closes the gap with.
 #
 # **Real schema, real seed data.** :data:`REAL_SCHEMA_SQL` is
-# ``puppy-fort-factory/sql/schema.sql`` itself, imported verbatim
+# ``lab/sql/schema.sql`` itself, imported verbatim
 # (``mariadb < schema.sql``) -- never a port or a synthetic equivalent (that
 # is exactly what the SQLite path above is, and exactly what this mode
 # exists to go beyond). Because that file both creates the schema AND seeds
@@ -209,11 +270,12 @@ def _find_free_port() -> int:
 # not); nothing here is deployed or exposed.
 
 
-#: ``puppy-fort-factory/sql/schema.sql`` -- read and imported for real
-#: (never moved, forked, or edited: this task's own additive-only
-#: constraint), the actual schema/seed data `lab/compose.yaml`'s `db`
-#: service provisions a fresh MariaDB from.
-REAL_SCHEMA_SQL = Path(__file__).resolve().parents[3] / "puppy-fort-factory" / "sql" / "schema.sql"
+#: ``lab/sql/schema.sql`` -- read and imported for real (re-pointed here by
+#: `L-P3.3c-CUT`, `CC-LAB-0067`/`FR-LAB-62`, from the retired
+#: ``puppy-fort-factory/sql/schema.sql`` -- moved, never forked, so this is
+#: still the same one file, not a second copy), the actual schema/seed data
+#: `lab/compose.yaml`'s `db` service provisions a fresh MariaDB from.
+REAL_SCHEMA_SQL = Path(__file__).resolve().parents[3] / "lab" / "sql" / "schema.sql"
 
 #: The identity this harness provisions on the local `mariadbd`, matching
 #: `lab/compose.yaml`'s own `PFF_DB_NAME`/`PFF_DB_USER`/`PFF_DB_PASS` default
@@ -244,7 +306,7 @@ def mariadb_available() -> bool:
     the `mariadb`/`mariadb-admin` client binaries on PATH, the system
     `service` command and the `mariadb` init script (so this harness can
     actually start/stop a real server), and
-    ``puppy-fort-factory/sql/schema.sql`` itself. A missing tool or fixture
+    ``lab/sql/schema.sql`` itself. A missing tool or fixture
     SKIPS the check; it never silently reports a pass."""
     return (
         shutil.which("mariadb") is not None
@@ -338,7 +400,7 @@ class MariaDbServer:
 
     def provision(self) -> None:
         """Drop any stale same-named database/user from a prior run, import
-        the REAL `puppy-fort-factory/sql/schema.sql` verbatim (`mariadb <
+        the REAL `lab/sql/schema.sql` verbatim (`mariadb <
         schema.sql` -- it creates and seeds the database itself, so no
         separate `CREATE DATABASE` step is needed here), and create the
         least-privilege application user `lab/compose.yaml` itself connects
@@ -458,7 +520,7 @@ def _harness_env_content(*, app_key: str) -> bytes:
 
 #: Minimal SQLite schema covering exactly the tables the currently-driven
 #: real-page manifests' rendered controllers touch (``products``, ``posts``,
-#: ``users``) -- **not** a port of ``puppy-fort-factory/sql/schema.sql``
+#: ``users``) -- **not** a port of ``lab/sql/schema.sql``
 #: (read for shape only, per this task's instructions; that file is not
 #: touched or moved). Widen this alongside whichever new manifest a future
 #: extension of :data:`DRIVABLE_MANIFEST_TABLES` needs.
@@ -536,10 +598,24 @@ INSERT INTO posts (title, body) VALUES
 
 
 def _run(cmd: list[str], *, cwd: Path, timeout: float, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
-    result = subprocess.run(
-        cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env,
-    )
-    return result
+    """Run a real subprocess step of the live-boot pipeline (``composer
+    install``, ``artisan key:generate``, ...) with an enforced, bounded
+    ``timeout`` on every call site -- never left to the caller to remember
+    (``BUG-0033``/PA-0035: a passing capability probe is not a substitute
+    for every *later* real network/subprocess operation also being bounded
+    on its own). A hung network mid-install now raises a clear, immediate
+    :class:`LiveBootError` naming which step and after how long -- never an
+    uncaught :class:`subprocess.TimeoutExpired` and never an indefinite
+    hang."""
+    try:
+        return subprocess.run(
+            cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise LiveBootError(
+            f"{cmd[0]} did not complete within {timeout}s (cmd={cmd!r}): "
+            f"stdout={exc.stdout!r} stderr={exc.stderr!r}"
+        ) from exc
 
 
 @dataclass(frozen=True)
@@ -575,7 +651,7 @@ class LiveBootHarness:
         already-started, already-provisioned :class:`MariaDbServer`, this
         harness points the assembled app's `.env` at it (`DB_CONNECTION=mysql`)
         instead of the default per-run SQLite database, and skips seeding
-        (that server's REAL `puppy-fort-factory/sql/schema.sql` import already
+        (that server's REAL `lab/sql/schema.sql` import already
         seeded real rows -- see :class:`MariaDbServer`'s own docstring for why
         this harness does not re-seed on top of it). ``None`` (the default)
         keeps this class's original SQLite behavior byte-for-byte -- this
@@ -656,7 +732,7 @@ class LiveBootHarness:
     def _seed_db(self) -> None:
         assert self._app_dir is not None
         if self._mariadb_server is not None:
-            # Real puppy-fort-factory/sql/schema.sql already seeded real rows
+            # Real lab/sql/schema.sql already seeded real rows
             # (MariaDbServer.provision()) -- nothing to add here, see that
             # class's own docstring for why a second, synthetic seed step
             # would be exactly the PA-0003/PA-0021 drift this mode exists to

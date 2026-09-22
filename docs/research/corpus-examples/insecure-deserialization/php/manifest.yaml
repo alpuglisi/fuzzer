@@ -1,0 +1,117 @@
+# insecure-deserialization / php -- new corpus cell (CWE-502), per direct
+# instruction to expand into classes not already in this corpus/
+# lab/safety_matrix.yaml. Category 3 (SaaS/collaboration) architecture
+# research (background/async job processing). 5 pairs total across
+# php/node/python (see ../node/ and ../python/ for the other 3).
+
+- file: idiomatic-laravel-encrypted-command-1.php
+  role: idiomatic
+  architecture: laravel-queue-encrypted-command
+  repo: laravel/framework
+  commit_sha: a9cf9996942ff525e63f5c6b789466f4749bb996
+  license: MIT
+  tutorial_or_course_project: false
+  pattern: "CallQueuedHandler::getCommand()'s encrypted branch: unserialize() only runs on plaintext that has already passed the Encrypter's AEAD authentication -- a tampered payload fails decryption before unserialize() is ever reached"
+  notes: >
+    Verbatim excerpt of one branch of the real getCommand() method.
+    Source file: src/Illuminate/Queue/CallQueuedHandler.php. Paired with
+    vulnerable-laravel-raw-command-1.php below, the SAME real method's
+    other branch -- a naturally-occurring contrast, not manufactured.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-502, CWE-20]
+  cwe_unique: [CWE-320, CWE-1240]
+  cwe_rationale: >
+    Shared (this cell's core class, documented once, see every other
+    entry in this cell): CWE-502 (Deserialization of Untrusted Data) is
+    the canonical ID; CWE-20 is its general parent.
+    Unique: CWE-320 (Key Management Errors) -- this excerpt shows
+    authentication happening but not how the Encrypter's key itself is
+    provisioned/rotated, a real residual concern for the mitigation's
+    long-term soundness; CWE-1240 (Use of a Cryptographic Primitive with
+    a Risky Implementation) -- unserialize() is still reached immediately
+    after decrypt, so any future bug in the Encrypter's own AEAD
+    implementation reaches this same attacker-adjacent sink.
+  suggested_op: authenticated_encrypt_then_deserialize
+  suggested_sink_family: object_deserialization
+
+- file: vulnerable-laravel-raw-command-1.php
+  role: vulnerable
+  architecture: laravel-queue-encrypted-command
+  repo: laravel/framework
+  commit_sha: a9cf9996942ff525e63f5c6b789466f4749bb996
+  license: MIT
+  tutorial_or_course_project: false
+  pattern: "CallQueuedHandler::getCommand()'s raw branch: unserialize($data['command']) runs directly with no cryptographic authentication of any kind, kept for backward compatibility with unencrypted queue payloads"
+  notes: >
+    Verbatim excerpt, same real method as the idiomatic entry above --
+    its other branch, kept as-is (not manufactured).
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-502, CWE-20]
+  cwe_unique: [CWE-94, CWE-95]
+  cwe_rationale: >
+    Shared: see idiomatic-laravel-encrypted-command-1.php above.
+    Unique: CWE-94 (Improper Control of Generation of Code, 'Code
+    Injection') -- PHP object-injection gadget chains reachable via
+    unserialize() are a well-documented real path to code execution, not
+    merely data corruption; CWE-95 (Improper Neutralization of Directives
+    in Dynamically Evaluated Code) -- a gadget chain's __destruct()/
+    __wakeup() magic methods are, in effect, attacker-selected code paths
+    evaluated as a side effect of this single call.
+  suggested_op: unauthenticated_deserialize
+  suggested_sink_family: object_deserialization
+
+- file: idiomatic-apcu-session-json-5.php
+  role: idiomatic
+  architecture: apcu-cached-job-payload
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "json_decode() plus an is_array() type check on the cached job payload -- no code-execution-capable deserializer involved at all"
+  notes: >
+    Manufactured, representing a real, common PHP shared-memory-cache
+    pattern, distinct from the Laravel entries' queue-driver architecture.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-502, CWE-20]
+  cwe_unique: [CWE-330, CWE-922]
+  cwe_rationale: >
+    Shared: see idiomatic-laravel-encrypted-command-1.php above.
+    Unique: CWE-330 (Use of Insufficiently Random Values) -- the cache key
+    is derived directly from the caller-supplied session ID; if session
+    IDs are ever weak/predictable elsewhere in the app, this cache key is
+    guessable; CWE-922 (Insecure Storage of Sensitive Information) -- job
+    data is cached in APCu (process-shared memory) with no consideration
+    of whether it's sensitive enough to warrant a scoped/encrypted store.
+  suggested_op: json_decode_type_check
+  suggested_sink_family: object_deserialization
+
+- file: vulnerable-apcu-session-unserialize-5.php
+  role: vulnerable
+  architecture: apcu-cached-job-payload
+  derived_from: idiomatic-apcu-session-json-5.php
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: unserialize($raw) on the same APCu-cached value, with no allowed_classes restriction (unserialize()'s own second-argument allowlist, added specifically to mitigate this class of bug, unused)"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-502, CWE-20]
+  cwe_unique: [CWE-758, CWE-807]
+  cwe_rationale: >
+    Shared: see idiomatic-laravel-encrypted-command-1.php above.
+    Unique: CWE-758 (Reliance on Undefined, Unspecified, or
+    Implementation-Defined Behavior) -- PHP's unserialize() has real,
+    documented implementation-defined edge-case behavior on malformed
+    input across versions, distinct from the object-injection risk itself;
+    CWE-807 (Reliance on Untrusted Inputs in a Security Decision) -- the
+    mere presence of a cache entry at this key is treated as sufficient
+    grounds to deserialize it, with no independent trust signal.
+  suggested_op: unrestricted_unserialize
+  suggested_sink_family: object_deserialization

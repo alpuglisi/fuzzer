@@ -176,7 +176,7 @@ def test_auth_session_refuses_a_non_login_cell(manifest) -> None:
 
 
 def test_the_regression_gate_accepts_the_real_urls_and_rejects_idiomatic_ones(manifest, cases) -> None:
-    baseline = GroundTruth(target="puppy-fort-factory", cases=[cases[cid] for cid in sorted(CELL_TO_CASE.values())])
+    baseline = GroundTruth(target="php_laravel", cases=[cases[cid] for cid in sorted(CELL_TO_CASE.values())])
 
     def candidate_for(url_of: dict[str, str]) -> GroundTruth:
         return GroundTruth(

@@ -18,6 +18,118 @@ Format per entry:
 
 ---
 
+## 2026-09-22 — Mass-assignment codegen: smuggled SQLi, broken POST routing, and a nullable dereference, found by PR review (fixed, BUG-0031/PA-0034)
+
+- **Symptom:** PR #1's external review found the `orm_entity_bulk_assign`
+  code-generation increment (`CC-LAB-0064`/`FR-LAB-59`), which had passed its
+  own 21-test suite and a 4-round change-control review, had three real
+  defects: the php_current sink spliced an unvalidated `$_POST` array key
+  into a SQL identifier position (a real SQL injection, CWE-89, smuggled
+  into a cell classified mass-assignment-only); `php_laravel`'s
+  `_served_route_for()` hardcoded `GET` for illustrative pages, so the new
+  illustrative POST cells were served at the wrong HTTP method and could
+  never be exercised; and the php_laravel sink dereferenced
+  `$request->user()->id` unguarded, fatal on any unauthenticated request.
+- **Root cause:** the feature's own tests and its change-control review both
+  verified the code against the *design it was written to satisfy* (mass
+  assignment via a valid key; correct registry wiring; correct Eloquent
+  semantics), never against adversarial inputs orthogonal to that design (a
+  malformed identifier; a method-mismatched request; a null auth context) —
+  see `docs/bugs/BUG-0031-*.md` for the full Five Whys.
+- **Remediation:** identifier-charset guard on the SQL column name
+  (php_current); `_served_route_for()` now serves an illustrative page at
+  its cell's own declared method (verified backward-compatible against every
+  pre-existing illustrative cell, all of which are `GET`); PHP 8 nullsafe
+  `?->id` on the Laravel sink. New preventive action: **PA-0034**.
+- **Status:** Fixed.
+
+## 2026-09-22 — `check-corpus-cwe-coverage.sh` silently passed unannotated and unpaired corpus entries (fixed, BUG-0032/PA-0034)
+
+- **Symptom:** the same PR review found two gaps in the `Stop` hook built
+  specifically to mechanically enforce the corpus's CWE-coverage and
+  pairs-per-class floors (`PA-0033`): an entry with neither `cwe_unique:`
+  nor the legacy `cwe:` field at all fell through a bare `continue` with no
+  problem ever recorded; and the pairs-per-class floor only counted
+  `role: vulnerable` entries, so a cell with 5 orphaned vulnerable entries
+  and zero idiomatic counterparts satisfied the floor and passed.
+- **Root cause:** the hook was validated only by confirming it caught the
+  specific problems already present in the real, self-authored corpus at
+  build time — never against synthetic fixtures shaped like the exact
+  failure modes it claims to catch, which the author's own habits never
+  happened to produce. Same root-cause class as `BUG-0030` (`PA-0033`'s own
+  origin), recurring one layer up in the enforcement mechanism `BUG-0030`'s
+  fix built — see `docs/bugs/BUG-0032-*.md`'s prior-preventive-action
+  failure analysis.
+- **Remediation:** both gaps closed; verified against three synthetic
+  fixtures (missing-CWE-field entry; 5-vulnerable/3-idiomatic cell;
+  genuine 5/5 paired cell) since the real corpus never exercised these
+  shapes. Also fixed a related nit: the no-upstream diff fallback now uses
+  the merge-base with the default branch, so a manifest edit already
+  committed on a fresh, unpushed branch is still checked. Strengthens
+  **PA-0033** via the shared **PA-0034**.
+- **Status:** Fixed.
+
+## 2026-09-22 — Corpus expansion: CWE research under-delivered the plan's explicit "more is better" instruction, recurring right after a related correction (fixed)
+
+- **Symptom:** every one of the 6 manufactured vulnerable/idiomatic pairs
+  added to `docs/research/corpus-examples/*/manifest.yaml` in waves 1-2 of
+  `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md` carried only 1-2
+  CWE IDs (several `cwe: []`), despite the plan's own Step 6 explicitly
+  stating "the more CWEs that are able to be implemented, the better" — and
+  the same shortfall recurred in wave 2 immediately after the user had
+  already corrected a different under-delivery (deferred category scope)
+  in the same conversation.
+- **Root cause:** CWE assignment was done by recall (the first plausible
+  CWE ID from memory) rather than by actually researching the MITRE CWE
+  index's class/parent/child/related-weakness structure for each entry's
+  mechanism; a written "more is better" instruction was treated as
+  satisfied once any CWE field was populated, with no mechanical check
+  forcing a real ceiling search. Same root-cause class as PA-0020 ("my own
+  missed self-check needs mechanical enforcement, not a clearer written
+  rule"), but PA-0020's existing enforcement (`check-error-log-bookkeeping.sh`)
+  is scoped only to `ERROR_LOG.md` bookkeeping, not to this deliverable —
+  see `docs/bugs/BUG-0030-*.md`'s "Prior-preventive-action failure
+  analysis" for the full account.
+- **Remediation:** re-researched and expanded all 6 existing entries' `cwe:`
+  lists against the MITRE index; added
+  `.claude/hooks/check-corpus-cwe-coverage.sh` (a new `Stop` hook) that
+  mechanically blocks the session from ending if a touched
+  `docs/research/corpus-examples/*/*/manifest.yaml` entry has fewer than 2
+  CWEs and no explicit rationale for the cap; rewrote
+  `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md` from scratch with
+  a Step 6 that names the actual research procedure and its enforcement
+  mechanism instead of repeating unenforced prose. New preventive action:
+  PA-0033 (`docs/PREVENTIVE_ACTIONS.md`).
+- **Status:** Fixed.
+
+## 2026-09-22 — Research tooling: Semgrep installs but panics at import in this remote execution environment (Environment)
+
+- **Symptom:** following `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s Phase 3
+  validation tooling (Semgrep as the primary cross-stack static-analysis
+  check) while executing wave 1 of
+  `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`, `pip install
+  semgrep` succeeded but every invocation (`semgrep --version` and later)
+  crashed: `pyo3_runtime.PanicException: Python API call failed` inside
+  `cryptography`'s Rust bindings (`_cffi_backend`/`cryptography.hazmat._rust`
+  failing to load), reached via `semgrep -> pyjwt -> cryptography`.
+- **Root cause:** an environment-level native-dependency mismatch in this
+  remote execution container (the installed `cryptography` wheel's compiled
+  Rust extension does not load correctly against this container's Python/
+  system libraries) — not a bug in this repo's own code, and not something a
+  code change in `fuzzlab` can fix.
+- **Remediation:** none attempted beyond the standard `pip install` (rebuilding
+  `cryptography`/`cffi` from source, or switching container base images, is
+  outside this session's scope). Worked around by using Bandit (functional,
+  Python-only) plus manual/structural review for the PHP and HTML/template
+  entries collected in that wave, and recording each affected corpus
+  `manifest.yaml` entry's `validated_by` as `[manual-review]` rather than
+  implying a Semgrep pass that didn't happen. See
+  `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`'s "Tooling
+  constraints in this execution environment" section for the full list of
+  validation-tooling gaps found (gVisor and difftastic also unavailable).
+- **Status:** Environment (fixed outside the repo — no `fuzzlab` code defect,
+  so no `docs/bugs/BUG-NNNN-*.md`/preventive-action entry applies; this is
+  purely a note for whoever next tries to run Semgrep in a similar container).
 ## 2026-09-22 — Session process: agent paused to ask for continuation after explicit "work until tasks run out" instruction (fixed, BUG-0029/PA-0032)
 
 - **Symptom:** the user instructed the session to keep executing the approved
@@ -40,6 +152,26 @@ Format per entry:
   anyway: `docs/bugs/BUG-0029-session-paused-for-confirmation-despite-explicit-continue-instruction.md`
   (root-cause analysis, recurrence review against `BUG-0018`'s related-but-distinct
   agent-conduct failure) and `docs/PREVENTIVE_ACTIONS.md`'s **PA-0032**.
+
+## 2026-09-22 — LAB: `live_boot_available()`'s network probe tested a raw socket connect, not the real proxied composer-install path, letting a live-boot test hang instead of skip/pass (fixed)
+
+- **Symptom:** a background lane's incidental plain `pytest -q` run observed
+  `tests/test_labgen_conformance_live_boot.py::test_live_boot_forms_manifest_serves_real_pages`
+  hang indefinitely instead of completing or skipping (could not be reproduced on demand
+  in this session's own sandbox; investigated via code reading).
+- **Root cause:** `live_boot_available()`'s `_network_reachable()` probed a bare
+  `socket.create_connection((host, 443))` -- a different, easier operation than the real
+  one it gates (`composer install`'s real, proxy-aware HTTPS round trip through composer's
+  own HTTP client). In a sandbox where outbound HTTPS only actually completes through a
+  configured proxy, a raw TCP connect can report "reachable" without saying anything about
+  whether the real, proxied operation will complete in bounded time.
+- **Remediation:** replaced the raw-socket probe with `_composer_network_probe()`, which
+  runs a real, bounded (`timeout=`-enforced) `composer show -a psr/log` -- the actual
+  client and code path `composer install` itself uses -- and reports unavailable
+  (never hangs, never raises) on timeout/failure. `_run()` (every real subprocess step of
+  the pipeline) now wraps `subprocess.TimeoutExpired` in a clear `LiveBootError` instead of
+  letting it propagate uncaught. See `docs/bugs/BUG-0033-*.md` for the full RCA.
+- **Status:** Fixed (`CC-LAB-0068`/`FR-LAB-60`, `PA-0035`).
 
 ## 2026-09-22 — LAB: `LiveBootHarness` silently followed real redirects and its seeded schema lacked Eloquent timestamp columns (fixed)
 

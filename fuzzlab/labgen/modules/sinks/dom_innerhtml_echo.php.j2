@@ -1,0 +1,17 @@
+echo <<<HTML
+<div id="{{ dom_target_id }}"></div>
+<script>
+(function () {
+{% if dom_location == 'hash' %}
+  var m = location.hash.match(/{{ dom_param_name }}=([^&]*)/);
+  var raw = m ? decodeURIComponent(m[1]) : null;
+{% else %}
+  var raw = new URLSearchParams(location.search).get('{{ dom_param_name }}');
+{% endif %}
+  if (raw) {
+    document.getElementById('{{ dom_target_id }}').{{ dom_write_prop }} =
+      '{{ dom_prefix }}' + raw + '{{ dom_suffix }}';
+  }
+})();
+</script>
+HTML;

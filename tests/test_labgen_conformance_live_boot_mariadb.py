@@ -6,11 +6,11 @@ backed `tests/test_labgen_conformance_live_boot.py`).
 `php_laravel`-emitted build boots and serves real HTTP against a per-run
 SQLite database -- an explicitly-scoped test-harness substitute for the real
 lab's MariaDB (`lab/compose.yaml`'s `db` service, matching
-`puppy-fort-factory/sql/schema.sql`). Nobody had proven the generator's
+`lab/sql/schema.sql`). Nobody had proven the generator's
 output against the *actual* database engine the real lab is built around.
 This module does: it starts a real local `mariadbd` (`fuzzlab.labgen
 .conformance.live_boot.MariaDbServer`, via the system `service` command),
-imports the REAL `puppy-fort-factory/sql/schema.sql` verbatim (never a port
+imports the REAL `lab/sql/schema.sql` verbatim (never a port
 or a synthetic equivalent), points the assembled Laravel skeleton's `.env` at
 it (`DB_CONNECTION=mysql`), and re-runs the same real-HTTP proof already
 established against SQLite for `forms`/`numeric`/`auth`/`g2`/`g4`, plus (new,
@@ -21,7 +21,7 @@ established against SQLite for `forms`/`numeric`/`auth`/`g2`/`g4`, plus (new,
 Packagist -- the original harness's own probe) and the new
 `mariadb_available()` (the `mariadb`/`mariadb-admin` client binaries, the
 system `service` command and `/etc/init.d/mariadb` init script, and
-`puppy-fort-factory/sql/schema.sql` itself). SKIPS cleanly, never fails, in
+`lab/sql/schema.sql` itself). SKIPS cleanly, never fails, in
 any environment without a real local MariaDB. Marked `@pytest.mark.slow`
 (a real `composer install` plus a real `mariadbd` start/provision/stop per
 test).
@@ -54,7 +54,7 @@ harness's synthetic schema/data had been masking:
    real either way; only the exact classic-textbook payload happens to be
    SQLite-specific once combined with this scaffold's own `TrimStrings`
    default.
-2. **`puppy-fort-factory/sql/schema.sql`'s real `users` table has no
+2. **`lab/sql/schema.sql`'s real `users` table has no
    `updated_at` column** (only `created_at TIMESTAMP ... DEFAULT
    CURRENT_TIMESTAMP`, no `ON UPDATE` companion) -- unlike the SQLite
    harness's own synthetic schema, which added one specifically because
@@ -117,7 +117,7 @@ pytestmark = [
         reason=(
             "MariaDB-backed mode requires the real mariadb/mariadb-admin client "
             "binaries, the system 'service' command, /etc/init.d/mariadb, and "
-            "puppy-fort-factory/sql/schema.sql (PA-0005) -- see "
+            "lab/sql/schema.sql (PA-0005) -- see "
             "live_boot.mariadb_available()"
         ),
     ),
@@ -352,7 +352,7 @@ def test_live_boot_g4_manifest_mariadb() -> None:
     """`edit_profile.php` -> `profile.php` against the REAL schema.
 
     **The real, observed MariaDB-vs-SQLite schema gap (see this module's own
-    docstring, point 2):** the real `puppy-fort-factory/sql/schema.sql` has
+    docstring, point 2):** the real `lab/sql/schema.sql` has
     no `updated_at` column, but the write leg goes through Eloquent
     (`$storedOwner->save()`), which unconditionally sets one -- a genuine
     500 against the real schema, asserted here precisely rather than

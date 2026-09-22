@@ -1,0 +1,296 @@
+# mass-assignment / node -- new corpus cell, per direct instruction to
+# expand into vulnerability classes NOT already in this corpus or in
+# lab/safety_matrix.yaml (which currently implements only SQLi/XSS ops;
+# the corpus's 6 pre-existing cells -- access-control, auth-session,
+# ecommerce-logic, file-handling, search-export, ugc-xss -- do not cover
+# CWE-915 at all). Category 1 (e-commerce/marketplaces) architecture
+# research from docs/research/site-architecture-survey.md.
+#
+# 5 pairs (the floor this instruction set), one real-source-anchored pair
+# plus 4 manufactured pairs representing genuinely distinct real-world
+# framework shapes (Mongoose, Sequelize, plain Express spread, GraphQL) --
+# not 5 copies of the same shape. Manufactured entries cite the
+# well-documented public pattern they represent (framework's own docs)
+# rather than a specific repo, since no single upstream commit is claimed.
+# This wave concentrates on Node/TypeScript for tractability; PHP/Python
+# variants are follow-up work, noted here rather than silently omitted.
+
+- file: idiomatic-vendure-typed-input-1.ts
+  role: idiomatic
+  architecture: vendure-typed-graphql-input
+  repo: vendure-ecommerce/vendure
+  commit_sha: cccf0a72ec1b88a4e00ea3cffad4d30b35aaf7e7
+  license: GPL-3.0
+  tutorial_or_course_project: false
+  pattern: "ProductService.update() takes a schema-typed UpdateProductInput -- only fields the GraphQL schema declares on that input type can ever reach this method, an implicit allowlist enforced by the type system rather than application code"
+  notes: >
+    Verbatim excerpt (single method, per GPL-3.0 copyleft-handling rule).
+    Source file path: packages/core/src/service/services/product.service.ts.
+    License note: GPL-3.0 (copyleft) -- Step 8 stops at the proposal stage.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-915, CWE-20]
+  cwe_unique: [CWE-1287, CWE-732]
+  cwe_rationale: >
+    Shared (this cell's core class, documented once, see every other entry
+    below): CWE-915 (Improperly Controlled Modification of Dynamically-
+    Determined Object Attributes) is MITRE's own canonical mass-assignment
+    ID; CWE-20 (Improper Input Validation) is its general parent.
+    Unique: CWE-1287 (Improper Validation of Specified Type of Input) --
+    the mitigation's strength depends entirely on the GraphQL schema's own
+    input type staying narrow; if that type is ever loosened to a broader
+    scalar, the same code stops being protective; CWE-732 (Incorrect
+    Permission Assignment for Critical Resource) -- this is a multi-channel
+    e-commerce admin API; nothing in this excerpt confines the update to
+    the caller's own channel beyond the initial entity lookup context.
+  suggested_op: typed_schema_allowlist
+  suggested_sink_family: orm_entity_bulk_assign
+
+- file: vulnerable-vendure-typed-input-1.ts
+  role: vulnerable
+  architecture: vendure-typed-graphql-input
+  derived_from: idiomatic-vendure-typed-input-1.ts
+  repo: vendure-ecommerce/vendure
+  commit_sha: cccf0a72ec1b88a4e00ea3cffad4d30b35aaf7e7
+  license: GPL-3.0
+  tutorial_or_course_project: false
+  pattern: "manufactured: a REST admin endpoint added alongside the typed GraphQL API that Object.assign()s the raw request body onto the loaded entity, losing the schema's implicit allowlist entirely"
+  notes: >
+    Manufactured per docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 3's "Pair
+    generation" methodology. No dynamic-execution validation available in
+    this environment; validated at the structural/manual-review tier.
+    License note: derived from GPL-3.0 code -- same caution as above.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-915, CWE-20]
+  cwe_unique: [CWE-471, CWE-668]
+  cwe_rationale: >
+    Shared: see idiomatic-vendure-typed-input-1.ts above.
+    Unique: CWE-471 (Modification of Assumed-Immutable Data) -- fields like
+    `enabled`/internal pricing, ordinarily assumed stable outside the
+    typed admin flow, are overwritten from client data; CWE-668 (Exposure
+    of Resource to Wrong Sphere) -- the entire loaded entity is exposed to
+    an unfiltered merge, not a scoped subset.
+  suggested_op: unfiltered_object_assign
+  suggested_sink_family: orm_entity_bulk_assign
+
+- file: idiomatic-mongoose-allowlist-1.js
+  role: idiomatic
+  architecture: mongoose-field-allowlist
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "pick(req.body, ALLOWED_FIELDS) explicitly allowlists which keys reach findByIdAndUpdate(), independent of the framework's own type system (contrast: Vendure's mitigation above depends on GraphQL schema typing; this depends on an explicit runtime allowlist call)"
+  notes: >
+    Manufactured, representing a widely-documented real Mongoose pattern
+    (Mongoose's own guides warn against unmediated req.body updates) --
+    no single upstream commit is claimed as the source; see the pattern's
+    public documentation rather than a specific repo.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-915, CWE-20]
+  cwe_unique: [CWE-183, CWE-1284]
+  cwe_rationale: >
+    Shared: see idiomatic-vendure-typed-input-1.ts above.
+    Unique: CWE-183 (Permissive List of Allowed Inputs) -- flagging a
+    residual risk even in this mitigation: ALLOWED_FIELDS is a runtime
+    array a future edit could silently over-broaden, unlike a compiled
+    schema type; CWE-1284 (Improper Validation of Specified Type of Input)
+    -- `pick()` allowlists which keys pass through but does not itself
+    validate that e.g. `category` is the expected type/shape.
+  suggested_op: runtime_field_allowlist
+  suggested_sink_family: orm_entity_bulk_assign
+
+- file: vulnerable-mongoose-allowlist-1.js
+  role: vulnerable
+  architecture: mongoose-field-allowlist
+  derived_from: idiomatic-mongoose-allowlist-1.js
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: findByIdAndUpdate(id, req.body) with no allowlist at all -- any key in the posted JSON (price, sellerId, etc.) is persisted"
+  notes: >
+    Manufactured per Phase 3's "Pair generation" methodology, representing
+    a real, commonly-documented Mongoose anti-pattern.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-915, CWE-20]
+  cwe_unique: [CWE-639, CWE-841]
+  cwe_rationale: >
+    Shared: see idiomatic-vendure-typed-input-1.ts above.
+    Unique: CWE-639 (Authorization Bypass Through User-Controlled Key) --
+    `req.params.id` selects which product to overwrite with no ownership
+    check shown, compounding the field-level issue with an object-
+    reference one; CWE-841 (Improper Enforcement of Behavioral Workflow) --
+    the intended workflow (validate which fields may change, then persist)
+    is skipped entirely rather than corrupted mid-flow.
+  suggested_op: unfiltered_body_update
+  suggested_sink_family: orm_entity_bulk_assign
+
+- file: idiomatic-sequelize-allowlist-1.js
+  role: idiomatic
+  architecture: sequelize-fields-option
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "Model.update(req.body, { fields: [...] }) -- Sequelize's own built-in mechanism for this exact problem: fields not named in the option are silently ignored even if present in the update payload"
+  notes: >
+    Manufactured, representing Sequelize's own documented `fields` option
+    pattern -- no single upstream commit claimed.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-915, CWE-20]
+  cwe_unique: [CWE-706, CWE-863]
+  cwe_rationale: >
+    Shared: see idiomatic-vendure-typed-input-1.ts above.
+    Unique: CWE-706 (Use of Incorrectly-Resolved Name or Reference) -- the
+    `fields` allowlist is matched against the DB column names, not against
+    what the API's own documented request schema promises callers, a real
+    source of drift between the two; CWE-863 (Incorrect Authorization) --
+    the `fields` option controls *which columns* can change but nothing
+    shown confirms the caller is authorized to change *this* order at all
+    beyond the `where` clause.
+  suggested_op: orm_fields_option_allowlist
+  suggested_sink_family: orm_entity_bulk_assign
+
+- file: vulnerable-sequelize-allowlist-1.js
+  role: vulnerable
+  architecture: sequelize-fields-option
+  derived_from: idiomatic-sequelize-allowlist-1.js
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: Model.update(req.body, { where }) with the fields option omitted -- req.body can set status/total columns the order's own lifecycle otherwise only changes server-side"
+  notes: >
+    Manufactured per Phase 3's "Pair generation" methodology, representing
+    a real, commonly-documented Sequelize anti-pattern.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-915, CWE-20]
+  cwe_unique: [CWE-682, CWE-345]
+  cwe_rationale: >
+    Shared: see idiomatic-vendure-typed-input-1.ts above.
+    Unique: CWE-682 (Incorrect Calculation) -- `total` is normally a
+    computed column (derived from line items); accepting it directly from
+    the client lets the stored total silently diverge from what the items
+    actually sum to; CWE-345 (Insufficient Verification of Data
+    Authenticity) -- `status: "paid"` is accepted with no check against
+    an authoritative payment-confirmation source.
+  suggested_op: orm_update_no_fields_option
+  suggested_sink_family: orm_entity_bulk_assign
+
+- file: idiomatic-explicit-mapping-1.js
+  role: idiomatic
+  architecture: hand-rolled-field-mapping
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "every persisted field is assigned individually by name (profile.displayName = req.body.displayName, etc.) -- a new key in req.body has no effect unless a developer adds a matching line"
+  notes: >
+    Manufactured, representing a real, common hand-rolled mitigation shape
+    distinct from both the typed-schema and ORM-allowlist-option
+    mechanisms above.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-915, CWE-20]
+  cwe_unique: [CWE-1188, CWE-840]
+  cwe_rationale: >
+    Shared: see idiomatic-vendure-typed-input-1.ts above.
+    Unique: CWE-1188 (Insecure Default Initialization of Resource) -- this
+    mitigation's correctness is entirely a per-route developer habit, with
+    no shared default (unlike a framework-level `fields` option) that new
+    routes inherit automatically; CWE-840 (Business Logic Errors) --
+    flagged as a residual risk category here since the *set* of fields
+    considered "safe to expose" is a business decision re-litigated by
+    hand at every call site, not centrally enforced.
+  suggested_op: explicit_field_mapping
+  suggested_sink_family: orm_entity_bulk_assign
+
+- file: vulnerable-explicit-mapping-1.js
+  role: vulnerable
+  architecture: hand-rolled-field-mapping
+  derived_from: idiomatic-explicit-mapping-1.js
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: Object.assign(profile, { ...req.body }) -- every key the client sends is applied, including userId/role if present, despite the route's own requireAuth middleware establishing only who is calling"
+  notes: >
+    Manufactured per Phase 3's "Pair generation" methodology, representing
+    the real, commonly-documented object-spread anti-pattern.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-915, CWE-20]
+  cwe_unique: [CWE-99, CWE-390]
+  cwe_rationale: >
+    Shared: see idiomatic-vendure-typed-input-1.ts above.
+    Unique: CWE-99 (Improper Control of Resource Identifiers, 'Resource
+    Injection') -- if `req.body` includes `userId`, the profile record's
+    own identity binding can be altered by the same unmediated spread;
+    CWE-390 (Detection of Error Condition Without Action) -- `requireAuth`
+    detects "is someone logged in" but the route takes no further action
+    distinguishing what that identity may versus may not change.
+  suggested_op: unfiltered_object_spread
+  suggested_sink_family: orm_entity_bulk_assign
+
+- file: idiomatic-graphql-typed-input-2.js
+  role: idiomatic
+  architecture: apollo-typed-input-object
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "input is a schema-declared GraphQL input type ({ rating: Int, comment: String }); the resolver assigns only those two named fields explicitly"
+  notes: >
+    Manufactured, representing the same typed-input mitigation class as
+    idiomatic-vendure-typed-input-1.ts above but in a different, common
+    GraphQL server framework shape (Apollo/NestJS-style resolver map
+    rather than Vendure's service-class pattern).
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-915, CWE-20]
+  cwe_unique: [CWE-754, CWE-476]
+  cwe_rationale: >
+    Shared: see idiomatic-vendure-typed-input-1.ts above.
+    Unique: CWE-754 (Improper Check for Unusual or Exceptional Conditions)
+    -- neither `rating` nor `comment` null/range checks are shown, so a
+    malformed-but-typed input still reaches `.save()` unchecked; CWE-476
+    (NULL Pointer Dereference) -- `ctx.db.Review.findByPk(id)` is used
+    without a not-found guard before `review.rating = ...` is assigned.
+  suggested_op: typed_graphql_field_mapping
+  suggested_sink_family: orm_entity_bulk_assign
+
+- file: vulnerable-graphql-typed-input-2.js
+  role: vulnerable
+  architecture: apollo-typed-input-object
+  derived_from: idiomatic-graphql-typed-input-2.js
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: input is typed as a generic JSONObject scalar instead of a declared input type, so the GraphQL schema itself no longer constrains which keys are legal, and the resolver Object.assign()s it wholesale"
+  notes: >
+    Manufactured per Phase 3's "Pair generation" methodology, representing
+    a real, documented GraphQL anti-pattern (generic JSON scalars used
+    'for flexibility' defeating the type system's own allowlist property).
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-915, CWE-20]
+  cwe_unique: [CWE-354, CWE-1023]
+  cwe_rationale: >
+    Shared: see idiomatic-vendure-typed-input-1.ts above.
+    Unique: CWE-354 (Improper Validation of Integrity Check Value) --
+    nothing establishes the JSONObject payload's shape was the one the
+    client's own UI actually produced versus a hand-crafted request;
+    CWE-1023 (Incomplete Comparison with Missing Factors) -- the resolver
+    checks that `input` exists but never checks *which* keys it contains
+    before assigning them all.
+  suggested_op: generic_scalar_input_assign
+  suggested_sink_family: orm_entity_bulk_assign

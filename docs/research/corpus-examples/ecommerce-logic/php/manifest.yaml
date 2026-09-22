@@ -46,7 +46,25 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-362, CWE-367]
+  cwe_shared: [CWE-840]
+  cwe_unique: [CWE-362, CWE-367, CWE-667]
+  cwe_rationale: >
+    Shared (this cell's broader business-logic-error class, also carried
+    by idiomatic-1.php below and the woocommerce-cart-hook/qloapps-booking
+    pairs elsewhere in this file -- this entry and idiomatic-1.php are
+    explicitly NOT a matched-shape pair per this file's own header note,
+    so no other CWEs are shared between them): CWE-840 (Business Logic
+    Errors).
+    Unique to this entry, researched against the MITRE CWE index: CWE-362
+    (Concurrent Execution using Shared Resource with Improper
+    Synchronization, 'Race Condition') and CWE-367 (Time-of-check
+    Time-of-use Race Condition) are this entry's own primary, specific
+    mechanism (already correctly identified pre-BUG-0029, retained here);
+    CWE-667 (Improper Locking) -- per the pattern field, "no row lock, no
+    WHERE uses_left > 0 guard, and no transaction wrapping the read and
+    the write together" is specifically the absence of a lock around the
+    check-then-act sequence, a distinct, more precise MITRE ID than CWE-362
+    alone for *why* the race is exploitable.
   suggested_op: unlocked_check_then_act
   suggested_sink_family: single_use_resource_redemption
 
@@ -73,8 +91,244 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-840, CWE-20]
+  cwe_shared: [CWE-840]
+  cwe_unique: [CWE-1339, CWE-573]
+  cwe_rationale: >
+    Shared: see vulnerable-1.php's cwe_rationale above -- this cell's
+    broader business-logic-error class (not a matched-shape pair with that
+    entry; each has its own distinct unique mechanism).
+    Unique to this entry, researched against the MITRE CWE index: CWE-1339
+    (Insufficient Precision or Accuracy of a Real Number) -- `process()`
+    "accumulates the order total itself" in PHP application code (not a
+    DB-side SUM or gateway-computed total); PHP floating-point price
+    accumulation is a well-documented real-world source of rounding-error
+    bugs, a residual concern even in this correctly-recomputing entry;
+    CWE-573 (Improper Following of Specification by Caller) -- this is a
+    PayPal Express Checkout integration, whose documented flow requires a
+    later confirmation call (`DoExpressCheckoutPayment`) to re-verify the
+    amount matches what was set here; nothing in this excerpt confirms
+    that later step follows PayPal's own specified verification.
   suggested_op: server_recomputed_amount
+  suggested_sink_family: payment_charge_amount
+
+# --- added by docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md wave 1,
+# category 1 (e-commerce/marketplaces), architecture: woocommerce-cart-hook.
+# The idiomatic side is verbatim WooCommerce core (GPL-3.0-only -- kept to
+# the single calculate_totals() method per this corpus's copyleft-handling
+# rule, prominently flagged here and in each entry's license field so this
+# GPL provenance survives into any later handoff). The vulnerable side is
+# NOT a same-file edit of the idiomatic side (unlike this cell's
+# vulnerable-1.php/idiomatic-1.php, which aren't a same-file pair either) --
+# it is a manufactured plugin-style callback hooked on the real
+# 'woocommerce_before_calculate_totals' action the idiomatic side fires,
+# reproducing the exact "custom checkout price override trusts $_POST"
+# anti-pattern this cell's own "Skipped for no license" notes below
+# describe finding in the wild (hamzamamdouh298/shop_4K) but could not
+# license-clear -- this fills that gap with a manufactured equivalent
+# instead. Commit pinned via `git ls-remote
+# https://github.com/woocommerce/woocommerce.git trunk` at collection time
+# (2026-09-22).
+
+- file: idiomatic-woocommerce-hook-1.php
+  role: idiomatic
+  architecture: woocommerce-cart-hook
+  repo: woocommerce/woocommerce
+  commit_sha: c4ed11e2a9102f400f3b975043a2a29ecf4236e5
+  license: GPL-3.0-only
+  tutorial_or_course_project: false
+  pattern: "WC_Cart::calculate_totals() delegates all line-item/total recalculation to a fresh WC_Cart_Totals instance and fires 'woocommerce_before_calculate_totals'/'woocommerce_after_calculate_totals' as the documented extension points -- it is the real hook surface the vulnerable side's manufactured callback attaches to, not itself a price-recomputation routine"
+  notes: >
+    Verbatim excerpt (single method only, per the GPL-3.0 copyleft-handling
+    rule) of WC_Cart::calculate_totals(). Source file path in the origin
+    repo: plugins/woocommerce/includes/class-wc-cart.php.
+    **License note: GPL-3.0-only (copyleft) -- do not let this snippet or
+    its manufactured pair below quietly seed an emitter/module template
+    without this flag surviving; see this plan's Step 8 scoping, which
+    already stops at the proposal stage for exactly this reason.**
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-602, CWE-840]
+  cwe_unique: [CWE-829, CWE-668]
+  cwe_rationale: >
+    Shared (documented, not counted toward the floor -- applies to every
+    entry in this pair-of-pairs, see vulnerable-woocommerce-hook-1.php and
+    both qloapps-booking entries): CWE-602 (Client-Side Enforcement of
+    Server-Side Security) is MITRE's own canonical example for this exact
+    shape -- its description names an e-commerce app that computes a price
+    client-side and trusts the value posted back; CWE-840 (Business Logic
+    Errors) is the general category this weakness instantiates.
+    Unique to this entry (researched against the MITRE CWE index,
+    https://cwe.mitre.org/data/index.html, not recalled, and not claimed by
+    any other entry in this corpus): CWE-829 (Inclusion of Functionality
+    from Untrusted Control Sphere) -- the real `do_action(
+    'woocommerce_before_calculate_totals', $this)` hook this method fires
+    passes the live Cart object, by reference, to *every* registered
+    callback (core WooCommerce or any installed plugin) with no additional
+    guardrail beyond "this function is hooked" -- exactly CWE-829's own
+    description of including/trusting functionality from a control sphere
+    the framework itself doesn't fully vet; CWE-668 (Exposure of Resource
+    to Wrong Sphere) -- the *entire* `$this` Cart object (not a narrower,
+    purpose-built API) is exposed to each hooked callback, more state/
+    surface than a minimal extension point would need to grant.
+  suggested_op: hook_delegated_recompute   # distinct mechanism from
+                             # server_recomputed_amount (idiomatic-1.php,
+                             # above) -- that one recomputes inline in the
+                             # same function; this one delegates to a
+                             # collaborator object via an action hook.
+                             # Proposed as new.
+  suggested_sink_family: payment_charge_amount
+
+- file: vulnerable-woocommerce-hook-1.php
+  role: vulnerable
+  architecture: woocommerce-cart-hook
+  derived_from: idiomatic-woocommerce-hook-1.php
+  repo: woocommerce/woocommerce
+  commit_sha: c4ed11e2a9102f400f3b975043a2a29ecf4236e5
+  license: GPL-3.0-only
+  tutorial_or_course_project: false
+  pattern: "manufactured: a callback hooked on the real 'woocommerce_before_calculate_totals' action (fired by idiomatic-woocommerce-hook-1.php) that sets each cart item's price from $_POST['custom_price'] with no re-validation against the product's own canonical price -- CWE-840 business logic error / price tampering, the same real-world WooCommerce-plugin CVE shape as several actually-disclosed 'checkout price override' plugin vulnerabilities"
+  notes: >
+    Manufactured per docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 3's "Pair
+    generation" methodology, using WooCommerce's own real hook name/calling
+    convention as the base rather than a synthetic stand-in -- not a
+    same-file diff of the idiomatic side (the idiomatic side doesn't itself
+    contain price logic to alter; it only fires the hook this file attaches
+    to), so the "structural check" applied here is a manual read confirming
+    the hook name and $cart argument shape match the idiomatic side's real
+    action, not a line-level diff. No dynamic-execution validation available
+    in this session's environment (see this plan's "Tooling constraints"
+    section); validated at the structural/manual-review tier only.
+    **License note: derived from GPL-3.0-only code -- see the idiomatic
+    entry's license note above; the same caution applies here.**
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-602, CWE-840]
+  cwe_unique: [CWE-471, CWE-345]
+  cwe_rationale: >
+    Shared: see idiomatic-woocommerce-hook-1.php's cwe_rationale above --
+    same mechanism, researched once.
+    Unique to this entry: CWE-471 (Modification of Assumed-Immutable Data)
+    -- `$cart_item['data']->set_price(...)` mutates the live `WC_Product`
+    object obtained from `$cart->get_cart()`; within a single request that
+    price is exactly the "assumed-immutable" authoritative value the rest
+    of checkout relies on once loaded, and this callback modifies it from
+    attacker-controlled `$_POST` data -- distinct from CWE-602/840 (the
+    general trust-boundary violation) in naming *what specifically* gets
+    corrupted and how; CWE-345 (Insufficient Verification of Data
+    Authenticity) -- the posted price is cast with `floatval(
+    wp_unslash(...))` (unslashing is correct WordPress practice for
+    undoing its own magic-quotes layer, but a type cast is not
+    verification) and never checked against any authoritative source
+    before being trusted as a charge amount.
+  suggested_op: trust_client_price_input   # the exact gap this cell's
+                             # "Skipped for no license" note (below) flagged
+                             # as found-in-the-wild-but-unlicensed
+                             # (hamzamamdouh298/shop_4K); proposed as new
+  suggested_sink_family: payment_charge_amount
+
+# --- added by docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md wave 2,
+# category 5 (travel/booking/marketplaces), architecture: qloapps-booking.
+# The idiomatic side is a trimmed excerpt of QloApps core (OSL-3.0) --
+# Cart::getOrderTotal(), the server-side entry point that recomputes a
+# booking's total from cart contents. The vulnerable side is a manufactured
+# custom payment-module callback that trusts a posted total instead of
+# calling it -- the same CWE-840 shape as this cell's woocommerce-cart-hook
+# pair above, in a different real architecture (QloApps/PrestaShop-family
+# hotel-booking engine vs. WooCommerce e-commerce). suggested_op/
+# suggested_sink_family are reused from that pair rather than restated as
+# new, since the mechanism is identical. Commit pinned via `git ls-remote
+# https://github.com/Qloapps/QloApps.git HEAD` at collection time
+# (2026-09-22).
+
+- file: idiomatic-qloapps-booking-1.php
+  role: idiomatic
+  architecture: qloapps-booking
+  repo: Qloapps/QloApps
+  commit_sha: de6ecd72f0ce73750bea8d653c47efd9e2eb837b
+  license: OSL-3.0
+  tutorial_or_course_project: false
+  pattern: "Cart::getOrderTotal() signature and its Adapter_ProductPriceCalculator dependency wiring -- the real server-side entry point booking totals are always recomputed through, never taken from a client-supplied total"
+  notes: >
+    Trimmed excerpt (method signature and dependency setup only, per the
+    OSL-3.0 copyleft-handling rule -- the ~150-line tax/rounding/discount
+    body is omitted as not illustrative of this specific contrast).
+    Source file path in the origin repo: classes/Cart.php.
+    **License note: OSL-3.0 (copyleft) -- do not let this snippet or its
+    manufactured pair below quietly seed an emitter/module template
+    without this flag surviving; Step 8 of the site-architecture plan
+    stops at the proposal stage for exactly this reason.**
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-602, CWE-840]
+  cwe_unique: [CWE-820, CWE-682]
+  cwe_rationale: >
+    Shared: see idiomatic-woocommerce-hook-1.php's cwe_rationale above --
+    same weakness class, a different real architecture.
+    Unique to this entry (grounded in QloApps' own specific code, not the
+    same as WooCommerce's hook-based delegation, and distinct from
+    vulnerable-1.php's CWE-367/CWE-667 TOCTOU finding elsewhere in this
+    file -- this is a missing-synchronization concern on a *cached* value,
+    not a check-then-act race on a *counter*): CWE-820 (Missing
+    Synchronization) -- `getOrderTotal(..., $use_cache = true)` defaults to
+    reading a cached total shared across calls with no synchronization
+    shown against a cart mutated concurrently (e.g. a second request
+    changing room/occupancy) -- a caching parameter WooCommerce's shown
+    excerpt has no analogue for; CWE-682 (Incorrect
+    Calculation) -- the method's own signature threads five independent
+    optional parameters (`$with_taxes`, `$type`, `$products`, `$id_carrier`,
+    `$use_cache`) through a single total computation, a materially larger
+    combinatorial surface for a wrong-combination calculation bug than
+    WooCommerce's simpler no-argument `calculate_totals()`.
+  suggested_op: server_recomputed_amount   # same top-level property as
+                             # idiomatic-1.php above (server derives the
+                             # amount, never trusts a client value) --
+                             # reused despite the different delegation
+                             # mechanism (service-locator adapter here vs.
+                             # inline DB lookup there)
+  suggested_sink_family: payment_charge_amount
+
+- file: vulnerable-qloapps-booking-1.php
+  role: vulnerable
+  architecture: qloapps-booking
+  derived_from: idiomatic-qloapps-booking-1.php
+  repo: Qloapps/QloApps
+  commit_sha: de6ecd72f0ce73750bea8d653c47efd9e2eb837b
+  license: OSL-3.0
+  tutorial_or_course_project: false
+  pattern: "manufactured: a custom payment-module postProcess() that reads Tools::getValue('total_price') from the request and passes it straight to validateOrder() as the charge amount, instead of calling $cart->getOrderTotal() -- CWE-840 price tampering, same shape as this cell's woocommerce-cart-hook vulnerable entry"
+  notes: >
+    Manufactured per docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 3's "Pair
+    generation" methodology. No dynamic-execution validation available in
+    this session's environment; validated at the structural/manual-review
+    tier only.
+    **License note: derived from OSL-3.0 code -- see the idiomatic entry's
+    license note above; the same caution applies here.**
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-602, CWE-840]
+  cwe_unique: [CWE-441, CWE-841]
+  cwe_rationale: >
+    Shared: see idiomatic-woocommerce-hook-1.php's cwe_rationale above.
+    Unique to this entry, and distinct from vulnerable-woocommerce-hook-1.php's
+    unique CWEs (that entry poisons a value feeding into the normal
+    computation path; this one skips the computation path entirely):
+    CWE-441 (Unintended Proxy or Intermediary, 'Confused Deputy') -- the
+    payment-module controller calls `$this->module->validateOrder(...)`,
+    a store-owner-trusted, privileged operation, using an amount taken
+    directly from `Tools::getValue('total_price')` -- the module acts as a
+    confused deputy, exercising its own trusted privilege on the
+    attacker's behalf; CWE-841 (Improper Enforcement of Behavioral
+    Workflow) -- the real, intended workflow is Cart -> getOrderTotal() ->
+    Order -> Payment (shown in the idiomatic entry); this manufactured
+    controller never calls getOrderTotal() at all, skipping a required
+    workflow step rather than corrupting a value within it.
+  suggested_op: trust_client_price_input   # same op as this cell's
+                             # woocommerce-cart-hook vulnerable entry --
+                             # reused, identical mechanism
   suggested_sink_family: payment_charge_amount
 
 # Skipped for no license (cited/described in prose only, per this

@@ -13,7 +13,288 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- Process: reconciled three independently-diverged lines forked from `a341e55`
+  (`origin/main`, `claude/vuln-corpus-expansion-zjl1iw`, and this session's own
+  `claude/trusting-noether-heon0n`) into one branch, `reconcile-all-lines`, built
+  from `claude/vuln-corpus-expansion-zjl1iw` (which had already reconciled itself
+  against `main`) with `claude/trusting-noether-heon0n` merged in on top. Kept:
+  the executed `L-P3.3c-CUT` atomic cutover (`puppy-fort-factory/` deleted, lab
+  re-pointed at the generator) and `L-P3.3c-DOM` (DOM-XSS sink class), both
+  renumbered — `CC-LAB-0059/0060/0061` → `CC-LAB-0068/0066/0067`,
+  `FR-LAB-56/57/58` → `FR-LAB-60/61/62`, `BUG-0029` → `BUG-0033`, `PA-0032` →
+  `PA-0035` (the originals of each were already taken by `vuln-corpus-
+  expansion-zjl1iw`'s own, unrelated content of the same numbers). Discarded as
+  duplicates (identical or superseded code already present on the merge base):
+  the M8/M10 oracle mechanisms (byte-identical, already correctly attributed as
+  `CC-FUZZ-0023`/`0024`) and the single-file `app.js`/`app.css` R0-R3 UI
+  rebuild (superseded by the already-integrated per-section MPA UI, U0-U6) —
+  before discarding the UI, ported the one genuine capability gap found:
+  `RepeaterController.create_from_finding` now reconstructs a finding's
+  "send to Repeater" request with the oracle's recorded `evidence['payload']`
+  and the finding's own run's target (`results.build_finding_raw_request`),
+  not just a bare, valueless param. Discarded outright (a real, but
+  independently-reinvented, code choice — the already-landed line's own
+  direct-call implementation in `greybox/run.py`/`catalog.record_variant` was
+  kept instead): this session's separate `fuzzlab/scheduler/variants.py`
+  candidate-source module for the same mutation-variant-into-attempt-path
+  wiring, and its two dedicated test files. Kept additively (no real
+  collision, distinct registry keys/dict entries): the site-architecture
+  corpus expansion and `orm_entity_bulk_assign` mass-assignment codegen lane.
+  Full bookkeeping sweep found and fixed one further stale/duplicate spot the
+  above renumbering missed (a second, orphaned `FR-MUT-8` entry in
+  `docs/components/09-mutation-engine/requirements.md`, and several
+  in-source-comment cross-references to the old `CC-LAB`/`FR-LAB`/`BUG`/`PA`
+  numbers in `fuzzlab/labgen/{assemble,vuln_map}.py`,
+  `fuzzlab/labgen/conformance/live_boot.py`, and their tests). Verified
+  clean: no duplicate `CC-<CODE>-NNNN`/`FR-<CODE>-N`/`PA-NNNN` headers or
+  `BUG-NNNN` filenames repo-wide, `puppy-fort-factory/` genuinely deleted
+  with zero remaining live-path references (compose/deploy/Dockerfile/
+  `filtermodel.py` all comment-only historical mentions), the cutover
+  coverage gate green, the fast suite (1769 passed, 8 skipped, 16 deselected)
+  and the live-boot + MariaDB slow suite (12 passed) both green post-merge.
+- Process: merged `claude/vuln-corpus-expansion-zjl1iw`'s new tip (`caa7a9c`,
+  landed on that branch after `reconcile-all-lines` was already built from its
+  prior tip) into `reconcile-all-lines`. That commit independently minted
+  `CC-LAB-0065`, `BUG-0031`, `BUG-0032`, and `PA-0034` for unrelated content
+  (fixes to the `orm_entity_bulk_assign` mass-assignment codegen and its
+  CWE-coverage hook) — a second-order recurrence of exactly the collision
+  class this whole reconciliation exists to resolve, caused by the merge
+  target moving mid-reconciliation rather than any error in the prior pass.
+  Renumbered this branch's own colliding entries one more notch, since
+  `caa7a9c` had already landed on its own branch first: `CC-LAB-0065` →
+  `CC-LAB-0068`, `BUG-0031` → `BUG-0033` (file renamed), `PA-0034` → `PA-0035`.
+  Swept and fixed every cross-reference (`ERROR_LOG.md`, `docs/ARCHITECTURE.md`,
+  `docs/components/01-target-lab/{change-control,requirements}.md`,
+  `fuzzlab/labgen/conformance/live_boot.py`,
+  `tests/test_labgen_conformance_live_boot_probe.py`). `caa7a9c`'s own
+  content (`CC-LAB-0065`, `BUG-0031`/`0032`, `PA-0034`) kept its numbers
+  unchanged, per the same "never renumber the side that landed first"
+  discipline as the original reconciliation. Verified clean afterward: no
+  duplicate `CC-LAB`/`FR-LAB`/`PA`/`BUG` headers or filenames repo-wide.
+- LAB: `L-P3.3c-CUT` — executed the atomic cutover (commit 1 of 2): re-homed the WAF
+  ruleset/DB schema/coverage-and-WAF shims/vulnerability map off the hand-built
+  `puppy-fort-factory/` app and onto `lab/`-owned locations and a new
+  `fuzzlab.labgen.assemble` real-build entry point (Laravel middleware
+  `FzlWaf`/`FzlCoverage`, backed by framework-free `WafFilter`; generated
+  `lab/VULNERABILITIES.md`), re-pointed `lab/compose.yaml`/`lab/web.Dockerfile`/
+  `deploy.sh`/`fuzzlab/mutation/filtermodel.py`, and updated ground truth's `target`
+  metadata and the five affected tests — with `puppy-fort-factory/` still present and
+  the full test suite green, so the fixture-deletion commit that follows is a clean,
+  separately revertable step. CC-LAB-0067, FR-LAB-8/FR-LAB-62.
+- LAB: `L-P3.3c-CUT` — deleted `puppy-fort-factory/` (commit 2 of 2), now that the
+  generator is the single source of the PHP target lab and the cutover coverage gate
+  re-confirms 100% covered-or-exempted with the directory gone. CC-LAB-0067.
+- Docs: closed decision **D21** (`docs/DECISIONS_AND_ROADMAP.md`) — formalized
+  the already-shipped "per-project SQLite files + small global config DB"
+  storage layout as settled, closing out a stale "decide at Phase 0" deferred
+  item noticed during a change-control audit. No code change.
+- LAB: built lane L-P3.3c-DOM for real (`reviews.php`/`feedback.php`'s DOM-based XSS,
+  `PFF-0007`/`PFF-0008`) — explicitly deferred out of the L-P3.3c-G1..G6 cutover's scope
+  (D-open-2) and now separately prioritized. New `dom_html_sink` safety-matrix family +
+  `dom_text_content` op, new `dom_url_source`/`dom_text_content`/`dom_innerhtml_echo`
+  modules (registered in both `php_current` and `php_laravel` for the shared minimal-pair
+  vocabulary, rendered only by `php_laravel`), a new 4-cell manifest, both real pages
+  served at their real `.php` URLs, the two `PFF-` cases removed from
+  `migration-exemptions.yaml` (now covered, not exempt), and a real live-boot proof.
+  CC-LAB-0066/FR-LAB-61.
 
+- LAB: fixed 3 real defects PR #1's review found in the `orm_entity_bulk_
+  assign` mass-assignment codegen, plus 2 in its own CWE-coverage hook
+  (`CC-LAB-0065`, `BUG-0031`/`BUG-0032`/`PA-0034`) — a real SQL injection
+  (CWE-89) smuggled into the php_current sink via an unvalidated `$_POST`
+  array key used as a SQL identifier; php_laravel's illustrative POST cells
+  served as `GET` (broken routing, `_served_route_for()` hardcoded the
+  method); a fatal null dereference on `$request->user()->id` with no auth
+  setup; and `.claude/hooks/check-corpus-cwe-coverage.sh` silently passing
+  entries with no CWE field at all and cells with orphaned vulnerable-only
+  entries. All fixed, root-caused, and preventive-actioned per the bug
+  protocol; verified against synthetic fixtures and a real in-memory SQLite
+  execution proving the SQLi payload is dropped. Full suite re-run clean at
+  the same 29 pre-existing environment-only failures.
+- LAB: implemented code generation for `orm_entity_bulk_assign`
+  (mass-assignment, registry-only since `CC-LAB-0063`/`FR-LAB-58`) in
+  `php_current`'s shared `fuzzlab.labgen.modules` registry (1 new source,
+  2 new transforms, 1 new sink, 4 templates), drafted and reviewed through
+  the new pre-change gate before implementation. Mid-implementation, found
+  and closed two real gaps the reviewed draft missed: `php_current` needs
+  its own `_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS` entries to actually render
+  the shape, and `php_laravel` must carry every shape `php_current`
+  supports (a tested "full depth" invariant) — added the equivalent
+  `php_laravel` modules too, using Laravel's Query Builder
+  `DB::table()->update()` (which bypasses Eloquent's `$fillable`/
+  `$guarded` guard the same way raw PDO bypasses nothing) rather than the
+  Eloquent-model design an earlier draft had already ruled out. New
+  manifests `lab/manifests/mass_assignment_sample.yaml` (php_current) and
+  `lab/manifests/mass_assignment_laravel_sample.yaml` (php_laravel), 21
+  new tests (`tests/test_labgen_mass_assignment.py`), `CC-LAB-0064`/
+  `FR-LAB-59`. Verified: both stacks' cells render and derive the
+  intended verdict, `php -l` clean, full `labgen`-marked suite unchanged
+  at 29 pre-existing failures (this sandbox's missing `gitleaks`/`numpy`),
+  zero new regressions. Other 8 ops of this family, the other 19 new sink
+  families, and `python_fastapi`/`node_express` remain registry-only,
+  explicitly deferred.
+- Process: per direct instruction, added a pre-change review gate to
+  `docs/components/README.md` — for a substantive component change, the
+  change-control entry is now drafted first, reviewed by 2 independent
+  agents for accuracy and adequacy, and revised until all 3 parties (the
+  2 reviewers plus the proposing agent) agree, before implementation
+  begins. Reverses this doc's prior "do this as part of the change, not
+  afterward" wording for that class of change.
+- LAB: applied the site-architecture corpus's `suggested_op`/
+  `suggested_sink_family` proposals to `lab/safety_matrix.yaml` (Step 8 of
+  `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`) — 102 entries
+  (was 25), 20 new sink families, ~70 new ops, covering all 12 corpus cells
+  (the original 6 plus the 6 added below). Registry-only: no emitter/module
+  yet generates code for the new sink families. `CC-LAB-0063` / `FR-LAB-58`.
+- Research: added 6 brand-new vulnerability-class cells to the corpus
+  (`docs/research/corpus-examples/{mass-assignment,ssrf,
+  insecure-deserialization,ssti,header-injection,webhook-signature}/`),
+  per direct correction that the prior two waves had incorrectly limited
+  the site-architecture research to CWE classes already covered by this
+  corpus's existing 6 cells (`access-control`, `auth-session`,
+  `ecommerce-logic`, `file-handling`, `search-export`, `ugc-xss`) and by
+  `lab/safety_matrix.yaml` (SQLi/XSS ops only). Each new class maps to one
+  of the 6 site-architecture categories and to a base-plan priority-6 row
+  not yet collected (Mass Assignment/CWE-915 -> e-commerce/APIs-
+  integrations; SSRF/CWE-918 -> social-UGC/link-preview; Insecure
+  Deserialization/CWE-502 -> SaaS-collaboration/background-async; SSTI/
+  CWE-1336 -> media-streaming/content-management; Header Injection/CWE-93
+  -> travel-booking/notifications; Webhook Signature Verification/
+  CWE-347+345 -> fintech/APIs-integrations). Each class has 5 vulnerable/
+  idiomatic pairs (60 entries total, the floor this instruction set
+  requires) -- one pair anchored to real, license-verified, commit-pinned
+  upstream source per class (Vendure, metascraper, Laravel, Twig,
+  PHPMailer, Stripe's own webhook-verification code), the remaining 4
+  pairs per class manufactured against well-documented real-world
+  patterns (framework docs, public CVEs) and explicitly marked
+  `synthetic: true` with no fabricated repo attribution. Every entry
+  carries >= 2 CWEs unique to it (`cwe_shared`/`cwe_unique` split, per
+  PA-0033) -- `.claude/hooks/check-corpus-cwe-coverage.sh` passes clean
+  across the full 60-entry set after an iterative collision-fix pass (the
+  hook caught and this session fixed every cross-entry CWE-ID collision
+  it found). `.claude/hooks/check-corpus-cwe-coverage.sh` extended again
+  (per PA-0033) to mechanically enforce the new "at least 5 pairs per
+  class" floor itself, not just the CWE-uniqueness floor — it now blocks
+  the session if any touched corpus cell has fewer than 5 `role:
+  vulnerable` entries across its manifest.yaml files. Status section of
+  `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md` updated to record
+  this wave and the scope correction it makes.
+- Research + bookkeeping: redid the site-architecture corpus expansion's
+  Step 2 and Step 6 per direct follow-up instruction (deeper architecture
+  research; at least 2 CWEs unique to each entry, with CWEs shared across
+  entries documented but not counted toward that floor).
+  - Deepened `docs/research/site-architecture-survey.md`'s 4 weakest
+    architecture write-ups (Google Workspace, Cash App, Venmo, Trip.com)
+    with additional independent sources, resolving most of their previously
+    "unconfirmed" claims.
+  - Replaced every touched entry's flat `cwe:`/`cwe_rationale:` fields
+    (across all 5 manifest files this session has touched: `ecommerce-logic/
+    php`, `ugc-xss/python`, `access-control/node`, `file-handling/node`,
+    `auth-session/php` — 29 entries total, the 12 added in waves 1-2 plus 17
+    pre-existing entries sharing those files) with `cwe_shared:`/
+    `cwe_unique:`/`cwe_rationale:`, researching each entry's own actual code
+    for >= 2 CWEs not claimed by any other entry in the corpus.
+  - Extended `.claude/hooks/check-corpus-cwe-coverage.sh` to check
+    `cwe_unique` count *and* cross-entry uniqueness (not just presence) —
+    it caught 2 remaining flat-`cwe:` entries and one real cross-entry ID
+    collision (`CWE-367` independently claimed by two different entries)
+    the first time it ran against this pass's work; both fixed, hook now
+    passes clean.
+  - Updated `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`'s Step 6
+    section and PA-0033 (`docs/PREVENTIVE_ACTIONS.md`) to describe the
+    tightened shared/unique standard and its enforcement.
+- Planning: rewrote `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`
+  from scratch, per explicit instruction following `docs/bugs/BUG-0030-*.md`.
+  Restructures the 8 steps to be concise and executable, and replaces the
+  prior version's unenforced "more CWEs is better" prose (Step 6) with a
+  concrete per-entry research procedure, an explicit 2-CWE floor, and a
+  named mechanical enforcement path (`check-corpus-cwe-coverage.sh`). Keeps
+  the resolved scoping decisions (naming, frozen categories, confidence bar,
+  tooling constraints) from the prior version, tightened. Status section
+  reflects the real current state (waves 1-2 complete and CWE-remediated;
+  additional architecture/function combinations per category and dynamic-
+  tier validation remain open, explicitly, not silently deferred).
+- Bug fix: `docs/bugs/BUG-0030-corpus-expansion-agent-under-delivered-explicit-cwe-research-instruction.md`
+  — the CWE research done for waves 1-2 of the site-architecture corpus
+  expansion under-delivered `docs/VULN_CORPUS_EXPANSION_PLAN.md`/
+  `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md` Step 6's explicit
+  "more CWEs is better" instruction (1-2 recalled CWEs per entry instead of
+  a real MITRE-index research pass), recurring immediately after a related
+  but distinct correction in the same conversation. Root cause: same class
+  as PA-0020 (a bug whose root cause is my own missed self-check needs
+  mechanical enforcement, not a clearer written rule), but PA-0020's own
+  enforcement was scoped only to `ERROR_LOG.md` bookkeeping. Corrective
+  action: re-researched and expanded the `cwe:` list (with a
+  `cwe_count_rationale:` field) for all 17 corpus entries this sweep
+  touched — the 12 entries added this session plus 5 pre-existing entries
+  in the same manifest files the sweep obligation (PA-0002) reached — citing
+  the MITRE CWE index's actual class/parent/child relationships per entry
+  instead of a recalled single ID; added `.claude/hooks/
+  check-corpus-cwe-coverage.sh` (new `Stop` hook, wired in
+  `.claude/settings.json`) that mechanically blocks the session from ending
+  if a touched corpus manifest entry has fewer than 2 CWEs and no
+  rationale. New preventive action: **PA-0033** (`docs/PREVENTIVE_ACTIONS.md`,
+  strengthens PA-0020's enforcement scope). `ERROR_LOG.md` entry added.
+- Research: executed wave 2 of the site-architecture corpus expansion
+  (`docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`), per explicit
+  instruction not to defer categories 3-6. Completed Step 2 (architecture
+  write-ups, sourced) for all 4 remaining categories in `docs/research/
+  site-architecture-survey.md` (SaaS/collaboration, media/streaming,
+  travel/booking, fintech — 20 sites), and carried Steps 3-7 through for one
+  real architecture/function combination per category: `wekan-board-
+  membership` (JS, MIT) added to `docs/research/corpus-examples/
+  access-control/node/manifest.yaml` (CWE-639/862); `peertube-video-upload`
+  (TS, AGPL-3.0-or-later) added to `docs/research/corpus-examples/
+  file-handling/node/manifest.yaml` (CWE-434); `qloapps-booking` (PHP,
+  OSL-3.0) added to `docs/research/corpus-examples/ecommerce-logic/php/
+  manifest.yaml` (CWE-840/CWE-20); `firefly-blocked-account-gate` (PHP,
+  AGPL-3.0-or-later) added to `docs/research/corpus-examples/auth-session/
+  php/manifest.yaml` (CWE-287/CWE-613). Same methodology as wave 1: real,
+  license-verified, commit-pinned source paired with a manufactured
+  vulnerable counterpart, validated at the static/manual-review tier only
+  (no dynamic sandbox in this environment), CWE identification citing the
+  MITRE CWE index, Step 8 stopping at the `suggested_op`/
+  `suggested_sink_family` proposal stage (no `lab/safety_matrix.yaml`
+  change). All 6 categories now have both Step 1 (site list) and Step 2
+  (architecture write-up) complete; one architecture/function combination
+  per category has been carried through the full pipeline to Step 8.
+- Bookkeeping: added an `ERROR_LOG.md` entry for the Semgrep-panics-at-import
+  environment issue hit while validating wave 1 below (Status: Environment —
+  not a `fuzzlab` code defect, so no `docs/bugs/` report applies).
+- Research: revised `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`
+  (review/research/revise cycle) — resolved its open questions (directory/
+  naming scheme, category/site-count freeze, Step 2 confidence bar,
+  sequencing against the base plan), recorded this environment's actual
+  tooling constraints (no gVisor sandbox, no difftastic, Semgrep installed
+  but non-functional here, Bandit/detect-secrets functional), and froze a
+  wave-1 execution scope. Then executed wave 1: Step 1 (`docs/research/
+  site-architecture-survey.md`, all 6 categories x 5 sites, sourced) plus
+  Steps 2-7 for 2 of the 6 categories (e-commerce/marketplaces,
+  social/UGC), one architecture/function combination each —
+  `woocommerce-cart-hook` (PHP, real GPL-3.0-only WooCommerce core hook
+  excerpt + a manufactured trust-client-price vulnerable counterpart,
+  CWE-840/CWE-20) added to `docs/research/corpus-examples/ecommerce-logic/
+  php/manifest.yaml`, and `django-contrib-comments` (Python/Django, real
+  BSD-3-Clause default comment template + a manufactured `|safe`-anti-
+  pattern vulnerable counterpart, CWE-79) added to `docs/research/
+  corpus-examples/ugc-xss/python/manifest.yaml`. Both pairs
+  `validated: true` at the static/manual-review tier only (no dynamic
+  sandbox available this session — recorded explicitly rather than
+  implied). CWE identification for both cited the MITRE CWE index
+  (https://cwe.mitre.org/data/index.html). Step 8 stops at the
+  `suggested_op`/`suggested_sink_family` proposal stage, matching this
+  project's existing corpus-collection precedent — no change to
+  `lab/safety_matrix.yaml` in this pass. Categories 3-6 (SaaS, media/
+  streaming, travel/booking, fintech): Step 1 only this wave, Steps 2-7
+  deferred.
+- Planning: added `docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md`, a
+  proposed extension to `docs/VULN_CORPUS_EXPANSION_PLAN.md` that sources
+  corpus candidates top-down from popular-website categories and their real
+  architectures/tech stacks (rather than the base plan's feature-first
+  angle), converging on the same `manifest.yaml`/validation-gate output.
+  Cites the MITRE CWE index (<https://cwe.mitre.org/data/index.html>) as the
+  CWE-identification source. Planning only — not dispatched, no research or
+  collection performed.
 - FUZZ (`CC-FUZZ-0024`, `FR-FUZZ-11`): wired M10 grey-box confirmation into the real
   oracle pipeline — `GreyboxConfirmationStrategy` (constructor-injected
   `CoverageSource`/`DbFaultSource`, both default `None`, fail-closed no-op without a
@@ -286,6 +567,23 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   distinguishing original-backlog UI lanes from infrastructure scope pulled
   in by adopting the authoritative UI plan. Still plan-only — no lane
   executed.
+- LAB: fixed `live_boot_available()`'s network-reachability probe, which tested a bare
+  raw-socket TCP connect instead of the actual, proxy-aware composer-driven Packagist
+  round trip `composer install` itself performs — in a sandbox where real HTTPS only
+  completes through a configured proxy, the raw-socket probe could report "available"
+  without predicting whether the real, gated operation would complete in bounded time,
+  letting a live-boot test hang instead of pass/skip. Replaced with
+  `_composer_network_probe()` (a real, bounded `composer show -a` round trip); `_run()`
+  now wraps a `subprocess.TimeoutExpired` from any pipeline step in a clear
+  `LiveBootError` instead of letting it propagate uncaught. `CC-LAB-0068`/`FR-LAB-60`,
+  `BUG-0033`, `PA-0035`.
+- Docs: added `docs/VULN_CORPUS_EXPANSION_PLAN_SITE_ARCHETYPES.md` — a
+  proposed extension to `docs/VULN_CORPUS_EXPANSION_PLAN.md` that sources
+  corpus collection from concrete popular-website categories and their
+  real architectures/tech stacks (rather than a generic feature catalog
+  alone), reusing the base plan's Phase 3 CWE-mapping/pair-manufacturing/
+  validation methodology unchanged. **Planning only — not executed**; per
+  explicit instruction, dispatch awaits separate human go-ahead.
 - Research: Phase 3 CWE mapping for the "file handling" corpus cell
   (`docs/research/corpus-examples/file-handling/{php,node,python}/manifest.yaml`,
   12 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each

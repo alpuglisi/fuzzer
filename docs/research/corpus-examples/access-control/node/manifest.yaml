@@ -25,7 +25,23 @@
     same-file contrastive note, though not a separate runnable fixed file.
   validated: false
   validated_by: []
-  cwe: [CWE-639, CWE-862]
+  cwe_shared: [CWE-639, CWE-862]
+  cwe_unique: [CWE-359, CWE-710]
+  cwe_rationale: >
+    Shared (this pair's core class, documented once for both vulnerable-1.js
+    and idiomatic-1.js below): CWE-639 (Authorization Bypass Through
+    User-Controlled Key) and CWE-862 (Missing Authorization).
+    Unique to this entry, researched against the MITRE CWE index and not
+    claimed elsewhere in this corpus: CWE-359 (Exposure of Private
+    Information) -- `displayAllocations()` exposes another user's
+    investment-allocation records specifically (NodeGoat is deliberately a
+    financial-tracking teaching app), a distinct sensitivity concern from
+    the access-control mechanism itself; CWE-710 (Improper Adherence to
+    Coding Standards) -- per this entry's own notes, the file's own inline
+    comment (lines 12-15, left in as-collected) documents the correct fix
+    ("take user id from session instead of from URL param") but the code
+    does not implement it -- the vulnerability contradicts guidance already
+    present in the same file.
   suggested_op: no_ownership_check
   suggested_sink_family: db_row_by_id_lookup
 
@@ -50,7 +66,17 @@
     reference.
   validated: false
   validated_by: []
-  cwe: [CWE-639, CWE-862, CWE-306]
+  cwe_shared: [CWE-639, CWE-862]
+  cwe_unique: [CWE-306, CWE-799]
+  cwe_rationale: >
+    Shared: same core class as this cell's other pairs.
+    Unique to this entry: CWE-306 (Missing Authentication for Critical
+    Function) -- unlike every other entry in this cell (which has *some*
+    authentication and fails only on ownership), this route has no `auth`
+    middleware at all, per the pattern field; CWE-799 (Improper Control of
+    Interaction Frequency) -- with no authentication and no rate limit
+    shown, `:id` can be enumerated an unlimited number of times to harvest
+    every ticket's barcode.
   suggested_op: no_ownership_check
   suggested_sink_family: keyed_resource_lookup
 
@@ -78,7 +104,19 @@
     authenticated token, not trusted from the URL.
   validated: false
   validated_by: []
-  cwe: [CWE-639, CWE-862]
+  cwe_shared: [CWE-639, CWE-862]
+  cwe_unique: [CWE-209, CWE-798]
+  cwe_rationale: >
+    Shared: same core class as vulnerable-1.js/vulnerable-2.js above.
+    Unique to this entry: CWE-209 (Generation of Error Message Containing
+    Sensitive Information) -- the response body literally returns the
+    string "IDOR attempt blocked" per the pattern field, revealing to a
+    probing caller the app's internal detection/classification of their
+    request; CWE-798 (Use of Hard-coded Credentials) -- per this entry's
+    own notes, the upstream repo's real source (before this corpus's own
+    required redaction) shipped a hardcoded JWT signing key alongside
+    fixture passwords, a property of the collected repo distinct from the
+    IDOR mechanism itself.
   suggested_op: identity_match_before_fetch
   suggested_sink_family: db_row_by_id_lookup
 
@@ -101,6 +139,106 @@
     object-ownership check are present.
   validated: false
   validated_by: []
-  cwe: [CWE-639, CWE-862, CWE-306]
+  cwe_shared: [CWE-639, CWE-862]
+  cwe_unique: [CWE-178, CWE-311]
+  cwe_rationale: >
+    Shared: same core class as vulnerable-2.js above (this pair's own
+    naturally-occurring contrast).
+    Unique to this entry: CWE-178 (Improper Handling of Case Sensitivity)
+    -- the check compares `ticket.ownedBy.email !== req.session.passport.user`
+    with a case-sensitive `!==`; email addresses are commonly treated
+    case-insensitively elsewhere (mail transport, some login normalization),
+    so inconsistent casing between where `ownedBy.email` was stored and how
+    Passport.js populated the session value can make this exact-match check
+    silently wrong; CWE-311 (Missing Encryption of Sensitive Data) --
+    `req.session.passport.user` here holds a raw email address (PII) as the
+    session identity value; if the session store (file/Redis-backed, not
+    shown) doesn't encrypt session data at rest, this is unencrypted PII
+    persisted server-side, a data-handling concern distinct from the
+    ownership-check mechanism itself.
   suggested_op: ownership_check_after_fetch
+  suggested_sink_family: db_row_by_id_lookup
+
+# --- added by docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md wave 2,
+# category 3 (SaaS/productivity/collaboration), architecture:
+# wekan-board-membership. The idiomatic side is verbatim Wekan core (MIT) --
+# the board's own isVisibleBy()/isActiveMember() membership-check methods.
+# The vulnerable side is a manufactured API route that fetches a board by
+# ID without calling either method, the same "endpoint added later, forgot
+# the existing check" shape this cell's GuusK::disruptIT pair (above)
+# documents for a ticket resource instead of a board. Commit pinned via
+# `git ls-remote https://github.com/wekan/wekan.git HEAD` at collection
+# time (2026-09-22).
+
+- file: idiomatic-wekan-board-1.js
+  role: idiomatic
+  architecture: wekan-board-membership
+  repo: wekan/wekan
+  commit_sha: 196c56769bbe246933076038f150bc4929174477
+  license: MIT
+  copyright: "Copyright (c) Lauri Ojansivu"
+  tutorial_or_course_project: false
+  pattern: "Board.isVisibleBy(user)/isActiveMember(userId): public boards are visible to everyone, private boards require the caller to be a logged-in, active member -- the membership-check primitive the vulnerable side's route skips calling"
+  notes: >
+    Verbatim excerpt of the isVisibleBy/isActiveMember method pair. Source
+    file path in the origin repo: models/boards.js.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-639, CWE-862]
+  cwe_unique: [CWE-697, CWE-693]
+  cwe_rationale: >
+    Shared (this cell's own recurring core class): CWE-639 (Authorization
+    Bypass Through User-Controlled Key), CWE-862 (Missing Authorization).
+    Unique to this entry, researched against the MITRE CWE index: CWE-697
+    (Incorrect Comparison) -- `isActiveMember()` returns the result of
+    `Array.prototype.find()` (a member object or `undefined`), consumed by
+    the caller as an implicit boolean via `&&`; this truthy-coercion
+    pattern is correct here but fragile if reused with a strict `===`
+    comparison elsewhere in the codebase; CWE-693 (Protection Mechanism
+    Failure) -- `isVisibleBy()` is an opt-in method on the Board model,
+    with no framework-level (ORM row-security) guarantee that every code
+    path calling into board data actually invokes it -- exactly what the
+    vulnerable side below manufactures by not calling it.
+  suggested_op: membership_check_helper   # this is the check *definition*,
+                             # not a call site -- distinct from
+                             # ownership_check_after_fetch (GuusK entry,
+                             # above), which is a route that calls its
+                             # equivalent check inline. Proposed as new.
+  suggested_sink_family: keyed_resource_lookup
+
+- file: vulnerable-wekan-board-1.js
+  role: vulnerable
+  architecture: wekan-board-membership
+  derived_from: idiomatic-wekan-board-1.js
+  repo: wekan/wekan
+  commit_sha: 196c56769bbe246933076038f150bc4929174477
+  license: MIT
+  copyright: "Copyright (c) Lauri Ojansivu"
+  tutorial_or_course_project: false
+  pattern: "manufactured: a GET /api/boards/:boardId route that calls Boards.findOne({ _id: boardId }) directly and returns it, with no isVisibleBy()/isActiveMember() check -- IDOR/BOLA on the board object reference (CWE-639/862)"
+  notes: >
+    Manufactured per docs/VULN_CORPUS_EXPANSION_PLAN.md Phase 3's "Pair
+    generation" methodology. No dynamic-execution validation available in
+    this session's environment; validated at the structural/manual-review
+    tier only.
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-639, CWE-862]
+  cwe_unique: [CWE-200, CWE-425]
+  cwe_rationale: >
+    Shared: see idiomatic-wekan-board-1.js's cwe_rationale above.
+    Unique to this entry: CWE-200 (Exposure of Sensitive Information to an
+    Unauthorized Actor) -- the route returns the *entire* board document
+    via `JsonRoutes.sendResult`, not a filtered projection, so even setting
+    the wrong-board issue aside, any caller receives more of the board's
+    data (member lists, etc.) than a minimal response would expose; CWE-425
+    (Direct Request, 'Forced Browsing') -- this is a manufactured API
+    endpoint reachable by directly requesting a URL, bypassing whatever
+    normal UI-level navigation/authorization flow a legitimate client would
+    go through.
+  suggested_op: no_ownership_check   # same shape/name already established
+                             # by this cell's other vulnerable entries
+                             # (GuusK, node-file below) -- reused
   suggested_sink_family: db_row_by_id_lookup

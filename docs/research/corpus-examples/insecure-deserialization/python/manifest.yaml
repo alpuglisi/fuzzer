@@ -1,0 +1,52 @@
+# insecure-deserialization / python -- part of the cell (see
+# ../php/manifest.yaml's header). Entry 5 of this cell's 5 pairs.
+
+- file: idiomatic-job-cache-json-3.py
+  role: idiomatic
+  architecture: python-job-cache-json
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "json.loads() plus an explicit type check on the expected task_name field -- no code-execution-capable deserializer"
+  notes: "Manufactured, representing a real, common Python cache-backed job pattern."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-502, CWE-20]
+  cwe_unique: [CWE-573, CWE-696]
+  cwe_rationale: >
+    Shared (this cell's core class, see ../php/manifest.yaml's
+    idiomatic-laravel-encrypted-command-1.php entry): CWE-502, CWE-20.
+    Unique: CWE-573 (Improper Following of Specification by Caller) --
+    only `task_name`'s type is checked; the rest of the expected job
+    schema is unvalidated once parsing succeeds; CWE-696 (Incorrect
+    Behavior Order) -- the type check runs *after* the full payload is
+    already parsed, rather than bounding/validating the raw bytes first.
+  suggested_op: json_loads_type_check
+  suggested_sink_family: object_deserialization
+
+- file: vulnerable-job-cache-pickle-3.py
+  role: vulnerable
+  architecture: python-job-cache-json
+  derived_from: idiomatic-job-cache-json-3.py
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: pickle.loads(raw_bytes) -- pickle can reconstruct arbitrary Python objects, including ones whose __reduce__ method executes code during unpickling"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology; the __reduce__ code-execution mechanism cited is real and documented in Python's own pickle module docs, not invented."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-502, CWE-20]
+  cwe_unique: [CWE-441, CWE-306]
+  cwe_rationale: >
+    Shared: see idiomatic-job-cache-json-3.py above.
+    Unique: CWE-441 (Unintended Proxy or Intermediary, 'Confused Deputy')
+    -- the worker process acts on behalf of whoever last wrote to this
+    cache key, using its own execution privilege; CWE-306 (Missing
+    Authentication for Critical Function) -- nothing in this excerpt
+    confirms the cache backend itself requires authentication to write,
+    the precondition that makes cache poisoning possible in the first
+    place.
+  suggested_op: unrestricted_pickle_loads
+  suggested_sink_family: object_deserialization

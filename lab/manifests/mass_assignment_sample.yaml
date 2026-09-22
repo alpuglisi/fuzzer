@@ -1,0 +1,49 @@
+# Mass-assignment sample manifest (CC-LAB-0064), php_current.
+#
+# First illustrative pair for the `orm_entity_bulk_assign` sink family
+# (lab/safety_matrix.yaml's `mass_assignment` concern, added by CC-LAB-0063/
+# FR-LAB-58 as a registry-only entry, implemented here in php_current's
+# shared module registry per CC-LAB-0064/FR-LAB-59). Mirrors
+# `/account_settings.php`'s POST handler (php_current page profile in
+# `fuzzlab/labgen/emitters/php_current/__init__.py`): a user-editable-
+# profile PATCH-style endpoint that bulk-assigns whatever fields the
+# request body carries onto the current user's own row.
+#
+# php_laravel's own twin pair for this same shape (FR-LAB-59's "full depth"
+# follow-up) lives in the sibling
+# `lab/manifests/mass_assignment_laravel_sample.yaml` -- a separate file,
+# not mixed into this one, since every manifest in this project targets
+# exactly one `stack_profile` (confirmed against every existing manifest's
+# fingerprint-gate log line, and required by `fuzzlab.labgen.cli`'s own
+# `--emitter`-scoped `--check` run, which renders every cell in a manifest
+# through one chosen emitter).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: every POSTed key is written, including fields the endpoint
+  # never intended to expose (e.g. `role`, `is_admin` on the same `users`
+  # table) -- no transform filters the tainted key/value map before it
+  # reaches the sink.
+  - cell_id: LABGEN-MA-0001
+    class: mass_assignment
+    stack_profile: php_current
+    route: { method: POST, path: /account_settings.php }
+    sink_context:
+      family: orm_entity_bulk_assign
+      required_neutralizations: [mass_assignment]
+    transform: [unfiltered_body_update]
+
+  # Secure twin: the only difference is the transform region
+  # (runtime_field_allowlist instead of unfiltered_body_update) -- the
+  # minimal-pair invariant. Only `display_name`/`bio`/`avatar_url` (this
+  # page profile's `allowed_fields`) ever reach the sink; any other key the
+  # request carries is silently dropped by array_intersect_key() before the
+  # UPDATE is built.
+  - cell_id: LABGEN-MA-0002
+    class: mass_assignment
+    stack_profile: php_current
+    route: { method: POST, path: /account_settings.php }
+    sink_context:
+      family: orm_entity_bulk_assign
+      required_neutralizations: [mass_assignment]
+    transform: [runtime_field_allowlist]

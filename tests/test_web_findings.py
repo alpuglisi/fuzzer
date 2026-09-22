@@ -1,6 +1,8 @@
 """Tests for the Findings workbench (U2, CC-UI-0029): read-only findings view,
-saved-view round-trip, DOM-safe rendering of untrusted fields, and the
-"send to Repeater" PRG pivot.
+saved-view round-trip, DOM-safe rendering of untrusted fields, the
+"send to Repeater" PRG pivot, and the pure ``build_finding_raw_request`` helper
+that pivot uses to reconstruct a replayable request (including the oracle's
+recorded payload, when one was captured).
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from fuzzlab.core.store import Store  # noqa: E402
 from fuzzlab.web.app import create_app  # noqa: E402
 from fuzzlab.web.findingsview import derive_severity, finding_detail, list_findings  # noqa: E402
 from fuzzlab.web.proxycontrol import RepeaterController  # noqa: E402
+from fuzzlab.web.results import build_finding_raw_request  # noqa: E402
 from fuzzlab.web.savedviews import create_view, list_views  # noqa: E402
 from tests._webclient import web_client  # noqa: E402
 
@@ -241,15 +244,39 @@ def test_send_to_repeater_redirects_303_and_carries_only_the_tab_id(tmp_path):
     assert r2.status_code == 303 and r2.headers["location"] == "/findings"
 
 
-def test_create_from_finding_reconstructs_a_request_not_byte_exact(tmp_path):
+def test_create_from_finding_reconstructs_a_request_with_the_recorded_payload(tmp_path):
     path = tmp_path / "f.db"
-    _seed(path)
+    _seed(path, evidence={"dbms": "MySQL", "payload": "' OR SLEEP(2)-- -"})
     with Store(path) as store:
         fid = store.conn.execute(
             "SELECT id FROM finding WHERE vuln_class='sqli'").fetchone()["id"]
     ctrl = RepeaterController(_cfg(path, target_base_url="http://127.0.0.1:8080"))
     tab = ctrl.create_from_finding(fid)
     assert tab is not None
-    assert "GET /product.php" in tab["raw"]
-    assert "reconstructed" in tab["name"]
+    assert "GET /product.php?id=" in tab["raw"]
+    assert "SLEEP" in tab["raw"]
     assert ctrl.create_from_finding(999999) is None
+
+
+# --- build_finding_raw_request: pure, no store ------------------------------
+
+def test_build_finding_raw_request_get_query():
+    raw, host, port, tls = build_finding_raw_request(
+        "/product.php", "GET", "id", "' OR 1=1-- -", "http://127.0.0.1:8080")
+    assert raw.startswith("GET /product.php?id=")
+    assert "Host: 127.0.0.1" in raw
+    assert host == "127.0.0.1" and port == 8080 and tls is False
+
+
+def test_build_finding_raw_request_post_body_with_no_payload():
+    raw, host, port, tls = build_finding_raw_request(
+        "/search.php", "POST", "q", "", "https://127.0.0.1:8443")
+    assert raw.startswith("POST /search.php HTTP/1.1")
+    assert "Content-Length: 2" in raw and raw.endswith("q=")
+    assert host == "127.0.0.1" and port == 8443 and tls is True
+
+
+def test_build_finding_raw_request_falls_back_to_default_host():
+    raw, host, port, tls = build_finding_raw_request("/x", "GET", "", "", "")
+    assert host == "127.0.0.1" and port == 80 and tls is False
+    assert raw.startswith("GET /x HTTP/1.1")

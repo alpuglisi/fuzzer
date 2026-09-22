@@ -186,7 +186,11 @@ def test_the_exemption_register_names_exactly_the_expected_cases() -> None:
     # reflected-XSS case, genuinely downgraded from covered to exempted once
     # PFF-0002 (the LIKE-clause SQLi at the same real URL) was made canonical
     # -- see lab/ground-truth/migration-exemptions.yaml's own entry.
-    assert set(exemptions) == {"PFF-1002", "PFF-0007", "PFF-0008", "PFF-0003"}
+    # PFF-0007/PFF-0008 (reviews.php/feedback.php's DOM XSS) were removed from
+    # the register once L-P3.3c-DOM built real php_laravel coverage for them
+    # (CC-LAB-0066) -- see lab/ground-truth/migration-exemptions.yaml's own
+    # note.
+    assert set(exemptions) == {"PFF-1002", "PFF-0003"}
     for case_id, reason in exemptions.items():
         assert reason.strip(), case_id
 

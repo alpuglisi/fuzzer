@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "target": "puppy-fort-factory",
+  "target": "php_laravel",
   "points": [
     { "url": "/product.php", "method": "GET", "param": "id", "location": "query", "rendering": "server" },
     { "url": "/products.php", "method": "GET", "param": "category", "location": "query", "rendering": "server" },

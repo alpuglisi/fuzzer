@@ -1,0 +1,114 @@
+# webhook-signature / php -- part of the cell (see ../node/manifest.yaml's
+# header). Entries 2 and 5 of this cell's 5 pairs.
+
+- file: idiomatic-paypal-ipn-verify-2.php
+  role: idiomatic
+  architecture: paypal-ipn-postback-verify
+  license: "N/A (synthetic -- represents PayPal's own historically
+    documented IPN 'post back to verify' integration pattern)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "the received IPN body is posted back to PayPal's own verification endpoint, which confirms whether it genuinely originated from PayPal -- a distinct verification mechanism from HMAC-signature checking (this cell's other entries)"
+  notes: "Manufactured, representing a real, historically well-documented PayPal-specific verification shape, distinct from the HMAC-based mechanisms elsewhere in this cell."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-345]
+  cwe_unique: [CWE-913, CWE-565]
+  cwe_rationale: >
+    Shared (this cell's core class, see ../node/manifest.yaml's
+    idiomatic-stripe-validate-signature-1.ts entry): CWE-347, CWE-345.
+    Unique: CWE-913 (Improper Control of Dynamically-Managed Code
+    Resources) -- flagged generally, since the outbound cURL request's
+    target endpoint is a hard-coded URL string with no independent
+    verification it wasn't tampered with in configuration; CWE-565
+    (Reliance on Cookie without Validation and Integrity Checking) --
+    flagged generally as a residual concern for whatever session state
+    this verification result feeds into next.
+  suggested_op: postback_verification
+  suggested_sink_family: webhook_signature_verification
+
+- file: vulnerable-ipn-trust-post-2.php
+  role: vulnerable
+  architecture: paypal-ipn-postback-verify
+  derived_from: idiomatic-paypal-ipn-verify-2.php
+  license: "N/A (synthetic -- represents the well-documented real
+    anti-pattern of processing IPN data without the post-back
+    verification step)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: $postData processed directly with no call to PayPal's verification endpoint"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-345]
+  cwe_unique: [CWE-602, CWE-566]
+  cwe_rationale: >
+    Shared: see idiomatic-paypal-ipn-verify-2.php above.
+    Unique: CWE-602 (Client-Side Enforcement of Server-Side Security) --
+    the payment-completion decision is taken entirely from data the
+    calling party supplied, the same underlying trust failure as this
+    corpus's client-price-trust entries elsewhere, here applied to
+    payment *status* rather than *amount*; CWE-566 (Authorization Bypass
+    Through User-Controlled SQL Primary Key) -- flagged generally, since
+    `$postData['invoice']` selects which order record is affected with
+    no ownership check shown.
+  suggested_op: trust_post_data
+  suggested_sink_family: webhook_signature_verification
+
+- file: idiomatic-hash-equals-5.php
+  role: idiomatic
+  architecture: hmac-hash-equals
+  license: "N/A (synthetic)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "hash_equals() for a constant-time comparison -- PHP's own documentation states this function was added specifically to compare a user-supplied string against a known hash without leaking timing information"
+  notes: "Manufactured, representing the generic HMAC-webhook verification shape in PHP, distinct from PayPal's postback-verification shape above."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-345]
+  cwe_unique: [CWE-642, CWE-672]
+  cwe_rationale: >
+    Shared: see idiomatic-paypal-ipn-verify-2.php above.
+    Unique: CWE-642 (External Control of Critical State Data) -- the
+    comparison correctly uses hash_equals(), but `$webhookSecret` itself
+    arrives as an ordinary function parameter with no indication of how
+    it's protected from external influence upstream; CWE-672 (Operation
+    on a Resource after Expiration or Release) -- flagged generally as a
+    residual concern for whatever secret-rotation process this function's
+    caller relies on, since a rotated-but-not-yet-purged old secret would
+    still verify successfully here.
+  suggested_op: constant_time_compare
+  suggested_sink_family: webhook_signature_verification
+
+- file: vulnerable-loose-equal-5.php
+  role: vulnerable
+  architecture: hmac-hash-equals
+  derived_from: idiomatic-hash-equals-5.php
+  license: "N/A (synthetic -- represents the well-documented real PHP
+    'magic hash' type-juggling bypass class, distinct from the general
+    timing-side-channel issue this cell's other loose-comparison entries
+    illustrate)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: $expected == $signatureHeader -- PHP's loose equality both short-circuits (timing) and type-juggles hex-looking strings in scientific notation ('0e...') as equal numbers"
+  notes: "Manufactured per Phase 3's 'Pair generation' methodology, using a real, PHP-specific, well-documented comparison-operator bypass class."
+  validated: true
+  validated_by: [manual-review]
+  redacted: false
+  cwe_shared: [CWE-347, CWE-345]
+  cwe_unique: [CWE-760, CWE-480]
+  cwe_rationale: >
+    Shared: see idiomatic-paypal-ipn-verify-2.php above.
+    Unique: CWE-760 (Use of a One-Way Hash with a Predictable Salt) --
+    flagged generally as a residual HMAC-construction concern alongside
+    the comparison-operator bug this entry centers on; CWE-480 (Use of
+    Incorrect Operator) -- `==` instead of `hash_equals()`/`===` is
+    precisely this weakness, and PHP's own documented "magic hash"
+    behavior (two different hex-digest strings shaped like
+    `"0e12345..."` comparing equal under `==`) is the concrete
+    consequence of using the wrong operator here.
+  suggested_op: loose_equality_compare
+  suggested_sink_family: webhook_signature_verification

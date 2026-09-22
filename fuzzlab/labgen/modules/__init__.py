@@ -168,6 +168,24 @@ class ReadStoredFieldSource(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class AllPostParamsSource(TemplateModule):
+    """Extracts the WHOLE ``$_POST`` array (not one named parameter) into a
+    PHP variable and publishes it as ``value_expr`` -- the mass-assignment
+    family's source shape (``orm_entity_bulk_assign``, CC-LAB-0064).
+    ``GetParamSource``/``PostParamSource`` both extract exactly one named
+    parameter, the wrong shape for a bulk-assignment sink, which needs the
+    whole tainted key/value map to decide which fields get written."""
+
+    def __init__(self) -> None:
+        super().__init__("all_post_params", "source", _SOURCE_ENV, "all_post_params.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = f"${ctx['var_name']}"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 class IdentityTransform(TemplateModule):
     """The empty-pipeline transform: the tainted value is used as-is. Used
     whenever a cell's ``transform`` pipeline has no ops. Family-agnostic --
@@ -175,6 +193,51 @@ class IdentityTransform(TemplateModule):
 
     def __init__(self) -> None:
         super().__init__("identity", "transform", _TRANSFORM_ENV, "identity.php.j2")
+
+
+class UnfilteredBodyUpdateTransform(TemplateModule):
+    """The ``unfiltered_body_update`` op (CC-LAB-0064, `mass_assignment`
+    concern): ``value_expr`` passes through unchanged -- every key in the
+    whole tainted array reaches the sink, including any the endpoint never
+    intended to accept. Safety matrix: ``effect=no_effect`` (the vulnerable
+    twin)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unfiltered_body_update", "transform", _TRANSFORM_ENV, "unfiltered_body_update.php.j2"
+        )
+
+
+class RuntimeFieldAllowlistTransform(TemplateModule):
+    """The ``runtime_field_allowlist`` op (CC-LAB-0064, `mass_assignment`
+    concern): rewrites ``value_expr`` to only the keys also present in
+    ``allowed_fields`` (an ordered tuple the emitter's own page profile
+    supplies -- mirrors :class:`IdentifierAllowlistTransform`'s
+    ``allowed_identifiers`` context-key convention exactly, including its
+    "raise rather than invent a default allowlist" design). Safety matrix:
+    ``effect=neutralises``, ``neutralizes: [mass_assignment]``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "runtime_field_allowlist", "transform", _TRANSFORM_ENV, "runtime_field_allowlist.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        try:
+            allowed = tuple(ctx["allowed_fields"])
+        except KeyError as exc:
+            raise ValueError(
+                "runtime_field_allowlist transform needs an 'allowed_fields' context "
+                "value (an ordered tuple of the real fields this endpoint may update) "
+                "-- the emitter's page profile must supply it; there is no safe default"
+            ) from exc
+        allowed_php = _php_string_list(allowed)
+        value_expr = ctx["value_expr"]
+        new_ctx = dict(ctx)
+        new_ctx["allowed_fields_php"] = allowed_php
+        result = TemplateModule.render(self, new_ctx)
+        new_ctx["value_expr"] = f"array_intersect_key({value_expr}, array_flip([{allowed_php}]))"
+        return RenderResult(code=result.code, context=new_ctx)
 
 
 class ParamBindTransform(TemplateModule):
@@ -480,6 +543,40 @@ class SqlStringLiteralLikeSink(TemplateModule):
         super().__init__("sql_string_literal_like", "sink", _SINK_ENV, "sql_string_literal_like.php.j2")
 
 
+class OrmEntityBulkAssignSink(TemplateModule):
+    """The ``orm_entity_bulk_assign`` sink family (CC-LAB-0064,
+    mass-assignment): builds and executes a parameterized ``UPDATE ... SET
+    ...`` at runtime from whatever keys are present in ``value_expr``'s
+    array. Column *names* come from the array's own keys -- tainted when
+    unfiltered, allowlisted when the ``runtime_field_allowlist`` transform
+    has run first; bound *values* are always parameters, never
+    concatenated. Unlike every other sink here (each a single-line
+    ``{{ value_expr }}`` interpolation, since each handles exactly one
+    tainted scalar), this sink's template needs its own runtime PHP
+    ``foreach`` over the array to build both the SET-clause text and a
+    positionally-matching bound-values array -- real new surface, not a
+    reuse of :class:`SqlIdentifierOrderBySink`'s single-value-substitution
+    pattern. No Jinja-level loop is needed: the column set isn't known
+    until PHP runtime, since the keys are attacker-controlled.
+
+    One narrow exception to "a sink never filters anything itself": each
+    key is checked against a bare-identifier charset (``^[A-Za-z0-9_]+$``)
+    before it is spliced into ``$sql``, since PHP array keys survive far
+    more punctuation than a SQL identifier position can safely admit and
+    neither PDO nor any SQL dialect offers a binding mechanism for
+    identifiers. Without this, the vulnerable twin would smuggle a second,
+    unlabeled vulnerability class (raw SQL injection, CWE-89) into a cell
+    this corpus classifies as mass-assignment only. This does not narrow
+    *which* columns are legitimate (still the transform's job, per
+    `runtime_field_allowlist`) -- only a value that could never be a real
+    column name at all is rejected, so the mass-assignment vulnerability
+    itself (writing `role`, `is_admin`, or any other validly-shaped,
+    endpoint-unintended column) is untouched on the unfiltered twin."""
+
+    def __init__(self) -> None:
+        super().__init__("orm_entity_bulk_assign", "sink", _SINK_ENV, "orm_entity_bulk_assign.php.j2")
+
+
 class SingleStatementComplexity(TemplateModule):
     """The simplest complexity wrapper: the composed source/transform/sink
     body as the entire body of one function. Later complexity modules
@@ -551,10 +648,82 @@ class CrossFileRequireDepth(TemplateModule):
         super().__init__("cross_file_require", "depth", _DEPTH_ENV, "cross_file_require.php.j2")
 
 
+# --- L-P3.3c-DOM: DOM-based XSS (reviews.php/feedback.php) -----------------
+#
+# A genuinely different shape from every other one in this file: the tainted
+# value is read AND written entirely client-side (a URL fragment or
+# query-string parameter assigned to an element's `innerHTML` by embedded
+# JavaScript) and never reaches the server -- there is no PHP variable to
+# extract into, escape or bind. Registered here (unrendered by
+# `php_current`'s own `_MODULE_SET_BY_SHAPE`, exactly like L-P3.3c-G6's
+# `html_attribute_quoted_echo`/`sql_string_literal_like` before it) purely
+# for the shared minimal-pair vocabulary
+# (:mod:`fuzzlab.labgen.minimal_pair` classifies every emitter's composition
+# positions against this package's registries and raises for a name it
+# cannot find) -- `php_laravel` is the emitter that actually renders this
+# shape (docs/LAB_IMPLEMENTATION_PLAN.md's `L-P3.3c-DOM`).
+
+
+class DomUrlSource(TemplateModule):
+    """The (non-)source for a client-only DOM-XSS cell: no PHP variable is
+    extracted at all, because the tainted value never reaches the server.
+    Publishes ``value_expr = 'null'`` (a PHP placeholder no template
+    meaningfully reads) and ``bound=False`` only so this module still
+    satisfies every other source's context contract."""
+
+    def __init__(self) -> None:
+        super().__init__("dom_url_source", "source", _SOURCE_ENV, "dom_url_source.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = "null"
+        new_ctx.setdefault("bound", False)
+        new_ctx.setdefault("dom_write_prop", "innerHTML")
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class DomTextContentTransform(TemplateModule):
+    """The ``dom_text_content`` op: the client-side DOM write uses
+    ``Node.textContent`` instead of ``Element.innerHTML``. The DOM analogue
+    of ``html_entity_escape`` -- except there is no PHP-side call to make,
+    since the value never reaches PHP, so this flips a client-side write
+    mechanism (``dom_write_prop``) rather than wrapping ``value_expr``."""
+
+    def __init__(self) -> None:
+        super().__init__("dom_text_content", "transform", _TRANSFORM_ENV, "dom_text_content.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["dom_write_prop"] = "textContent"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class DomInnerhtmlEchoSink(TemplateModule):
+    """The DOM-XSS sink: a ``<script>`` block that reads a URL fragment or
+    query-string parameter and assigns it to ``dom_write_prop`` of a target
+    element -- ``innerHTML`` (vulnerable) or ``textContent`` (secure,
+    ``dom_text_content``), decided entirely by the cell's transform, exactly
+    like every other sink in this package never escaping anything itself.
+    Requires ``dom_location`` (``"hash"`` or ``"query"``), ``dom_param_name``,
+    ``dom_target_id``, ``dom_prefix`` and ``dom_suffix`` in the assembly
+    context -- render-only metadata a page profile supplies; there is no
+    safe default for which parameter/element a page reads and targets."""
+
+    def __init__(self) -> None:
+        super().__init__("dom_innerhtml_echo", "sink", _SINK_ENV, "dom_innerhtml_echo.php.j2")
+
+
 SOURCES: dict[str, Module] = {
     "get_param": GetParamSource(),
     "post_param": PostParamSource(),
     "read_stored_field": ReadStoredFieldSource(),
+    # CC-LAB-0064: mass-assignment's whole-array source (vs. one named param).
+    "all_post_params": AllPostParamsSource(),
+    # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
+    "dom_url_source": DomUrlSource(),
 }
 TRANSFORMS: dict[str, Module] = {
     "identity": IdentityTransform(),
@@ -569,6 +738,13 @@ TRANSFORMS: dict[str, Module] = {
     "identifier_allowlist": IdentifierAllowlistTransform(),
     "url_scheme_allowlist": UrlSchemeAllowlistTransform(),
     "attr_value_allowlist": AttrValueAllowlistTransform(),
+    # CC-LAB-0064: mass-assignment ops (lab/safety_matrix.yaml's
+    # orm_entity_bulk_assign rows).
+    "unfiltered_body_update": UnfilteredBodyUpdateTransform(),
+    "runtime_field_allowlist": RuntimeFieldAllowlistTransform(),
+    # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
+    "dom_text_content": DomTextContentTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -587,6 +763,11 @@ SINKS: dict[str, Module] = {
     # deliberately not widened to either.
     "html_attribute_quoted_echo": HtmlAttributeQuotedEchoSink(),
     "sql_string_literal_like": SqlStringLiteralLikeSink(),
+    # CC-LAB-0064: mass-assignment's sink family.
+    "orm_entity_bulk_assign": OrmEntityBulkAssignSink(),
+    # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
+    "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

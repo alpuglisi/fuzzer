@@ -48,9 +48,16 @@ fuzzlab/            the package
   web/              local web control panel / launcher (loopback only)
 lab/                containerized target (compose, Dockerfile, labctl.sh)
 lab/ground-truth/   labels.json, injection-points.json, expectedresults.csv
-puppy-fort-factory/ the deliberately vulnerable PHP/MySQL app
+lab/VULNERABILITIES.md  the lab's generated vulnerability map (do not hand-edit)
 docs/               architecture, decisions/roadmap, per-component specs + logs
 ```
+
+The target lab (PHP/MySQL, deliberately vulnerable) is entirely generated —
+`fuzzlab.labgen.assemble` renders it from `lab/manifests/*.yaml` and
+`fuzzlab/labgen/emitters/php_laravel/` at build time (`lab/web.Dockerfile` / `deploy.sh`).
+The hand-built `puppy-fort-factory/` app this replaced was retired by the atomic
+cutover (`L-P3.3c-CUT`, `docs/LAB_IMPLEMENTATION_PLAN.md` §4.3.6.5); `lab/ground-truth/`
+is unchanged by that cutover.
 
 ## Install
 
@@ -110,4 +117,5 @@ pytest        # 30 tests: store/migrations, config, budget, features, labels,
 - `docs/bugs/` — bug investigation documents (root-cause analysis per bug).
 - `docs/PREVENTIVE_ACTIONS.md` — the context-free rule list to follow while
   working (every rule derives from a bug investigation).
-- `puppy-fort-factory/VULNERABILITIES.md` — the lab's vulnerability map.
+- `lab/VULNERABILITIES.md` — the lab's vulnerability map, **generated** from
+  `lab/ground-truth/labels.json` (`python3 -m fuzzlab.labgen.vuln_map`) — do not hand-edit.

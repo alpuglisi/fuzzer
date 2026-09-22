@@ -1,0 +1,5 @@
+// runtime_field_allowlist transform: {{ value_expr }} is filtered down to only
+// the keys also present in a fixed allowlist of real, endpoint-owned fields
+// ({{ allowed_fields_php }}) via array_intersect_key(), before it reaches the
+// sink -- any other key the client sent is silently dropped here, never
+// written. Safety matrix: effect=neutralises, neutralizes: [mass_assignment].
