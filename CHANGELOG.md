@@ -14,6 +14,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Planning: added `docs/VULN_CORPUS_EXPANSION_PLAN.md`, a research plan for
+  broadening the generated lab beyond SQLi/XSS — Phase 1 catalogs common web-app
+  feature areas and cross-references which are disproportionately exploited in
+  practice (OWASP/CWE-grounded, not theoretical); Phase 2 (deferred until Phase 1
+  lands) collects real per-feature, per-language GitHub source examples; Phase 3
+  (CWE mapping) explicitly deferred further still. This is the research front end
+  of "Track A" (broaden vulnerability classes) from the earlier bottleneck/scope
+  discussion — additive, does not touch the generator itself yet.
 - LAB: extended `fuzzlab.labgen.conformance.live_boot.LiveBootHarness` real on-host
   live-boot proof to three more real-page manifest groups — `auth` (a real SQLi
   boolean-injection login bypass and a real `register.php` `INSERT`), `g2`
