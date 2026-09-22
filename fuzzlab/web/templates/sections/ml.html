@@ -1,11 +1,250 @@
 {% extends "base.html" %}
 {% block crumb %}ML{% endblock %}
-{% block styles %}<link rel="stylesheet" href="/static/css/ml.css">{% endblock %}
+{% block styles %}<link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+<link rel="stylesheet" href="/static/css/ml.css">{% endblock %}
 {% block content %}
-<div class="card">
-  <h2>Machine learning</h2>
-  <p class="muted">Classifier, ranker, conformal triage, anomaly detector, active
-    learning, the Thompson bandit, and mutation variants &mdash; kept separate from the
-    primary panel. Arrives in Phase 3 (the data already lives in the store).</p>
+<div class="ml-banner" role="note">
+  <span class="ic" aria-hidden="true">&#9432;</span>
+  <span><strong>Model output is advisory;</strong> confirmed findings come from the
+    oracle. Scores, ranks, and posteriors here inform triage — they never label a
+    request as a finding.</span>
+</div>
+
+<!-- Data for the charts this page mounts (createChart, static/js/ml.js). Server-
+     rendered numbers/tables above use the same values directly via Jinja; this blob
+     only feeds the uPlot-backed panels (training curve, reliability, histograms,
+     bandit density, mutation reward/novelty). -->
+<script type="application/json" id="ml-data">{{ ml | tojson }}</script>
+
+<div class="card ml-panel" data-panel="classifier">
+  <h3>Classifier</h3>
+  {% if ml.classifier.available %}
+  <p class="muted">Run #{{ ml.classifier.run_id }} &middot; model
+    <code>{{ ml.classifier.model }}</code> v{{ ml.classifier.version }} &middot;
+    feature set v{{ ml.classifier.feature_version }}</p>
+  <div class="meter-row">
+    <span class="meter-label">PR-AUC (this model)</span>
+    <span class="meter-track"><span class="meter-fill"
+      style="width:{{ ((ml.classifier.pr_auc or 0) * 100) | round(1) }}%"></span></span>
+    <span class="meter-value">{{ "%.3f"|format(ml.classifier.pr_auc or 0) }}</span>
+  </div>
+  <div class="meter-row">
+    <span class="meter-label">baseline: prevalence</span>
+    <span class="meter-track"><span class="meter-fill baseline"
+      style="width:{{ ((ml.classifier.baseline_prevalence or 0) * 100) | round(1) }}%"></span></span>
+    <span class="meter-value">{{ "%.3f"|format(ml.classifier.baseline_prevalence or 0) }}</span>
+  </div>
+  <div class="meter-row">
+    <span class="meter-label">baseline: sigma</span>
+    <span class="meter-track"><span class="meter-fill baseline"
+      style="width:{{ ((ml.classifier.baseline_sigma or 0) * 100) | round(1) }}%"></span></span>
+    <span class="meter-value">{{ "%.3f"|format(ml.classifier.baseline_sigma or 0) }}</span>
+  </div>
+  {% if ml.classifier.reliability.ece is not none %}
+  <p class="muted">Calibration (reliability diagram, {{ ml.classifier.score_label_pairs }}
+    scored + labelled candidates) &mdash; ECE
+    {{ "%.3f"|format(ml.classifier.reliability.ece) }} (lower = better calibrated).</p>
+  <div class="ml-grid">
+    <div id="chart-classifier-reliability" class="chart" data-chart="classifier-reliability"></div>
+    <div id="chart-classifier-scores" class="chart" data-chart="classifier-scores"></div>
+  </div>
+  {% endif %}
+  {% if ml.classifier.training_curve.steps %}
+  <div id="chart-classifier-loss" class="chart" data-chart="classifier-loss"></div>
+  {% endif %}
+  {% else %}
+  <p class="unavailable">No classifier run recorded yet (run <code>fuzzlab auto</code>
+    or <code>fuzzlab ml-train</code> against a seeded store).</p>
+  {% endif %}
+</div>
+
+<div class="card ml-panel" data-panel="ranker">
+  <h3>Ranker</h3>
+  {% if ml.ranker.available %}
+  <p class="muted">Run #{{ ml.ranker.run_id }} &middot; model
+    <code>{{ ml.ranker.model }}</code> v{{ ml.ranker.version }} &middot;
+    {{ ml.ranker.scored }} candidates ranked</p>
+  <div class="meter-row">
+    <span class="meter-label">nDCG@k</span>
+    <span class="meter-track"><span class="meter-fill"
+      style="width:{{ ((ml.ranker.ndcg or 0) * 100) | round(1) }}%"></span></span>
+    <span class="meter-value">{{ "%.3f"|format(ml.ranker.ndcg or 0) }}</span>
+  </div>
+  <div class="meter-row">
+    <span class="meter-label">nDCG@k (random)</span>
+    <span class="meter-track"><span class="meter-fill baseline"
+      style="width:{{ ((ml.ranker.ndcg_random or 0) * 100) | round(1) }}%"></span></span>
+    <span class="meter-value">{{ "%.3f"|format(ml.ranker.ndcg_random or 0) }}</span>
+  </div>
+  <div class="meter-row">
+    <span class="meter-label">precision@k</span>
+    <span class="meter-track"><span class="meter-fill"
+      style="width:{{ ((ml.ranker.precision or 0) * 100) | round(1) }}%"></span></span>
+    <span class="meter-value">{{ "%.3f"|format(ml.ranker.precision or 0) }}</span>
+  </div>
+  <div class="meter-row">
+    <span class="meter-label">precision@k (random)</span>
+    <span class="meter-track"><span class="meter-fill baseline"
+      style="width:{{ ((ml.ranker.precision_random or 0) * 100) | round(1) }}%"></span></span>
+    <span class="meter-value">{{ "%.3f"|format(ml.ranker.precision_random or 0) }}</span>
+  </div>
+  <div class="ml-grid">
+    <div id="chart-ranker-scores" class="chart" data-chart="ranker-scores"></div>
+    <div id="chart-ranker-uncertainty" class="chart" data-chart="ranker-uncertainty"></div>
+  </div>
+  {% else %}
+  <p class="unavailable">No ranker run recorded yet.</p>
+  {% endif %}
+</div>
+
+<div class="card ml-panel" data-panel="conformal">
+  <h3>Conformal triage</h3>
+  {% if ml.conformal.available %}
+  <p class="muted">Run #{{ ml.conformal.run_id }} &middot; target error rate
+    &alpha;={{ ml.conformal.alpha }} &middot; thresholds t<sub>lo</sub>=
+    {{ "%.3f"|format(ml.conformal.t_lo) }}, t<sub>hi</sub>=
+    {{ "%.3f"|format(ml.conformal.t_hi) }}</p>
+  {% set c = ml.conformal.counts %}
+  {% set total = ml.conformal.total if ml.conformal.total else 1 %}
+  <div class="stack-bar" role="img"
+       aria-label="{{ c.flag }} flagged, {{ c.abstain }} abstained, {{ c.drop }} dropped, of {{ ml.conformal.total }} scored candidates">
+    <span class="seg flag" style="width:{{ (c.flag / total * 100) | round(1) }}%">{{ c.flag if c.flag }}</span>
+    <span class="seg abstain" style="width:{{ (c.abstain / total * 100) | round(1) }}%">{{ c.abstain if c.abstain }}</span>
+    <span class="seg drop" style="width:{{ (c.drop / total * 100) | round(1) }}%">{{ c.drop if c.drop }}</span>
+  </div>
+  <div class="stack-legend">
+    <span><span class="sw flag"></span>flag ({{ c.flag }})</span>
+    <span><span class="sw abstain"></span>abstain ({{ c.abstain }})</span>
+    <span><span class="sw drop"></span>drop ({{ c.drop }})</span>
+  </div>
+  <div id="chart-conformal-scores" class="chart" data-chart="conformal-scores"></div>
+  {% else %}
+  <p class="unavailable">No calibrated model yet (conformal thresholds are written by
+    the classifier's training run).</p>
+  {% endif %}
+</div>
+
+<div class="card ml-panel" data-panel="anomaly">
+  <h3>Anomaly (ECOD tripwire)</h3>
+  {% if ml.anomaly.available %}
+  <p class="muted">Run #{{ ml.anomaly.run_id }}. Unusual &ne; malicious &mdash; ECOD
+    flags statistical outliers in the feature space, not confirmed vulnerabilities.</p>
+  <div class="stat-row">
+    <div class="stat-tile"><div class="n">{{ ml.anomaly.flagged | int }}</div><div class="l">flagged</div></div>
+    <div class="stat-tile"><div class="n">{{ ml.anomaly.rows }}</div><div class="l">candidates scored</div></div>
+    <div class="stat-tile"><div class="n">{{ "%.1f"|format((ml.anomaly.flagged_rate or 0) * 100) }}%</div>
+      <div class="l">flagged rate</div></div>
+  </div>
+  {% if not ml.anomaly.score_histogram_available %}
+  <p class="unavailable">Per-point ECOD scores aren't persisted (only the flagged
+    count is) &mdash; no score distribution to chart yet.</p>
+  {% endif %}
+  {% else %}
+  <p class="unavailable">No anomaly-detection run recorded yet.</p>
+  {% endif %}
+</div>
+
+<div class="card ml-panel" data-panel="active-learning">
+  <h3>Active learning &mdash; query queue</h3>
+  {% if ml.active_learning.available %}
+  <p class="muted">Top candidates by uncertainty sampling (score nearest the 0.5
+    boundary) &mdash; proposed next for the oracle, never auto-confirmed.</p>
+  {% if ml.active_learning.queue %}
+  <table>
+    <thead><tr><th>Candidate</th><th>URL</th><th>Param</th><th>Uncertainty</th></tr></thead>
+    <tbody>
+      {% for q in ml.active_learning.queue %}
+      <tr><td>#{{ q.id }}</td><td>{{ q.url }}</td><td>{{ q.param }}</td>
+        <td>{{ "%.3f"|format(q.uncertainty) }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="unavailable">No uncertainty-ranked candidates yet.</p>
+  {% endif %}
+  {% else %}
+  <p class="unavailable">No ranker run recorded yet (uncertainty sampling reads the
+    ranker's <code>rank_uncertainty</code>).</p>
+  {% endif %}
+  {% if not ml.active_learning.committee_available %}
+  <p class="unavailable">Query-by-committee disagreement is computed in memory and
+    never persisted (<code>fuzzlab/ml/active.py</code> writes no store rows) &mdash;
+    nothing to chart here yet.</p>
+  {% endif %}
+</div>
+
+<div class="card ml-panel" data-panel="bandit">
+  <h3>Bandit (Thompson posteriors)</h3>
+  {% if ml.bandit.available %}
+  <p class="muted">Beta posterior per (context, confirmation mechanism) &mdash; the
+    oracle's mechanism-ordering bandit, updated across every run to date.</p>
+  <table>
+    <thead><tr><th>Context</th><th>Arm</th><th>Mean (90% CI)</th><th>Pulls</th><th>Avg. cost</th></tr></thead>
+    <tbody>
+      {% for a in ml.bandit.arms %}
+      <tr>
+        <td>{{ a.context }}</td><td>{{ a.arm }}</td>
+        <td>
+          <span class="forest-ci">
+            <span class="bar" style="left:{{ (a.ci_lo * 100) | round(1) }}%;width:{{ ((a.ci_hi - a.ci_lo) * 100) | round(1) }}%"></span>
+            <span class="mean" style="left:{{ (a.mean * 100) | round(1) }}%"></span>
+          </span>
+          {{ "%.3f"|format(a.mean) }} ({{ "%.3f"|format(a.ci_lo) }}&ndash;{{ "%.3f"|format(a.ci_hi) }})
+        </td>
+        <td>{{ a.pulls }}</td>
+        <td>{{ "%.2f"|format(a.cost) if a.cost is not none else "&mdash;" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div id="chart-bandit-density" class="chart" data-chart="bandit-density"></div>
+  {% if ml.bandit.regret.steps %}
+  <p class="muted">Cumulative regret, run #{{ ml.bandit.run_id }}:</p>
+  <div id="chart-bandit-regret" class="chart" data-chart="bandit-regret"></div>
+  {% endif %}
+  {% else %}
+  <p class="unavailable">No bandit posteriors recorded yet.</p>
+  {% endif %}
+</div>
+
+<div class="card ml-panel" data-panel="mutation">
+  <h3>Mutation variants</h3>
+  {% if ml.mutation.available %}
+  {% if ml.mutation.run_id %}
+  <p class="muted">Run #{{ ml.mutation.run_id }}.</p>
+  {% if ml.mutation.reward.steps %}
+  <div class="ml-grid">
+    <div id="chart-mutation-reward" class="chart" data-chart="mutation-reward"></div>
+    <div id="chart-mutation-novelty" class="chart" data-chart="mutation-novelty"></div>
+  </div>
+  {% endif %}
+  {% endif %}
+  {% if ml.mutation.variants %}
+  <p class="muted">Recorded variants (evaded the filter and preserved semantics
+    &mdash; a variant the filter caught is never persisted, so there is no
+    killed/survived split to show; every row here already "survived").</p>
+  <table>
+    <thead><tr><th>Base</th><th>Variant</th><th>Operators</th><th>Vuln class</th>
+      <th>Bypassed rule</th><th>Coverage gain</th></tr></thead>
+    <tbody>
+      {% for v in ml.mutation.variants %}
+      <tr>
+        <td><code>{{ v.base_payload }}</code></td>
+        <td><code>{{ v.variant }}</code></td>
+        <td>{{ v.operators | join(", ") }}</td>
+        <td>{{ v.vuln_class }}</td>
+        <td>{{ v.bypassed_rule or "&mdash;" }}</td>
+        <td>{{ v.coverage_gain if v.coverage_gain is not none else "&mdash;" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="unavailable">No recorded variants yet.</p>
+  {% endif %}
+  {% else %}
+  <p class="unavailable">No mutation-search run recorded yet.</p>
+  {% endif %}
 </div>
 {% endblock %}
+{% block scripts %}<script type="module" src="/static/js/ml.js"></script>{% endblock %}

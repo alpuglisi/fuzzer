@@ -31,7 +31,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from fuzzlab.core.config import Config, load_config
-from fuzzlab.web import (commandspec, diagview, findingsview, results,
+from fuzzlab.web import (commandspec, diagview, findingsview, mlview, results,
                          savedviews, storeview)
 from fuzzlab.web.proxycontrol import RepeaterController
 from fuzzlab.web.runner import Runner, build_argv, display_command
@@ -401,6 +401,18 @@ def _diagnostics_context(cfg: Config, table: str | None, limit: int, offset: int
     }
 
 
+def _read_ml(cfg: Config) -> dict:
+    """The ML tab's read-only context (U4): empty-store placeholders when the store
+    doesn't exist yet, else one read-only pass over it (`web/mlview.py`, never a write,
+    never a re-train)."""
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return mlview.empty_context()
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        return mlview.ml_context(store)
+
+
 # --- template context builders (rendering lives in templates/, via jinja2) ----
 
 def _activities() -> list[dict]:
@@ -742,7 +754,8 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     @app.get("/ml", response_class=HTMLResponse)
     def ml_page(request: Request):
         return templates.TemplateResponse(
-            request, "sections/ml.html", _shell_context(cfg, "ml"))
+            request, "sections/ml.html",
+            {**_shell_context(cfg, "ml"), "ml": _read_ml(cfg)})
 
     @app.get("/diagnostics", response_class=HTMLResponse)
     def diagnostics_page(request: Request, table: str | None = None,
