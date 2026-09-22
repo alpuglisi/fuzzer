@@ -14,6 +14,10 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Fix (BUG-0026): four parallel UI build lanes' web tests (U1, U2, U4, U5) built a bare
+  `TestClient` with no headers, which U6's control-plane hardening middleware — merged
+  concurrently in a sibling lane — correctly rejects as forged cross-origin; switched all
+  four to the shared `web_client()` test fixture (`PA-0028`).
 - UI: added a global control-plane hardening middleware (Host allow-list + Origin/
   Sec-Fetch-Site/Referer CSRF gate + `X-Fuzzlab-Client` on `/api/*` + security headers)
   to `fuzzlab/web/app.py`, guarding every current and future POST/PUT/DELETE route; pinned

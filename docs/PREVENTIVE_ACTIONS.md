@@ -229,3 +229,20 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   capability widening to exercise every newly-matching record; this rule covers the
   inverse direction — the *existing* tests must still test what they claim once the
   record count moves. (from BUG-0025)
+- **PA-0028** — When a parallel build lane introduces a new cross-cutting runtime
+  contract that every caller must satisfy (a global middleware, a required header, a
+  changed connection/transport convention — anything a test client or consumer must
+  match regardless of which files it touches), that contract is a dependency every other
+  **in-flight** lane's tests implicitly have on it, not just a same-file conflict to
+  check for. File-level independence (no two lanes edit the same production file) is not
+  sufficient to judge lane independence when one lane's change reaches into how every
+  other lane's tests must construct their client/caller. At dispatch time, name such a
+  contract explicitly in sibling lanes' briefs when it's foreseeable (e.g. "a hardening
+  lane is landing a global middleware; route your test client through the shared fixture
+  it will add"). At integration time — immediately after merging a lane that adds such a
+  contract, before rebasing any other in-flight lane in — grep every other in-flight
+  lane's new files for the pattern the contract invalidates (here: `TestClient(create_app`
+  without the shared `web_client()` fixture), rather than waiting for each lane's own
+  full-suite run to surface the failure one at a time. This is PA-0002's sweep obligation
+  applied across concurrently-developed, not-yet-merged branches, not only the already-
+  merged codebase. (from BUG-0026)

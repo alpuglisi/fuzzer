@@ -18,6 +18,27 @@ Format per entry:
 
 ---
 
+## 2026-09-22 — UI: sibling parallel-build lanes' web tests broke against U6's control-plane hardening middleware once merged (BUG-0026)
+
+- **Symptom:** after lane U6 (control-plane hardening) merged, rebasing lane U2 (Findings
+  workbench) onto the shared branch produced 17 failures in `tests/test_web_findings.py`;
+  rebasing lane U1 (Overview dashboard) produced 5 failures in
+  `tests/test_web_overview.py`. A sweep of the still-unmerged lanes found the same latent
+  defect in `tests/test_web_ml.py` (U4) and `tests/test_web_diagnostics.py` (U5), not yet
+  surfaced by a full-suite run.
+- **Root cause:** each of those four lanes wrote its own bare `TestClient(create_app(cfg))`
+  test-client fixture, independently, before lane U6 — built concurrently in its own
+  isolated worktree — added both `ControlPlaneHardening` (which rejects a header-less
+  client request as forged cross-origin) and the one shared `tests/_web_client.py::
+  web_client()` fixture that satisfies it. No sibling lane could see U6's new shared
+  fixture at the time its own test file was written.
+- **Remediation:** switched all four test files to build their client via
+  `tests/_web_client.py::web_client()`. See `docs/bugs/BUG-0026-web-test-client-missing-
+  hardening-headers.md` for the full RCA and `PA-0028` for the preventive action.
+- **Status:** Fixed.
+
+---
+
 ## 2026-09-22 — LAB: `php_laravel`'s stack-local module names would have failed every minimal-pair gate (found during L-P3.3b, fixed in the same lane)
 
 - **Symptom:** while wiring the Laravel emitter into `fuzzlab lab-generate --check` (§4.3
