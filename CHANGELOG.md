@@ -14,6 +14,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- IND/FUZZ: closed a test-coverage gap on two previously-untested legacy
+  modules. `tests/test_indicator_db.py` guards `build_sql_db.py`'s own
+  documented invariant (every `indicator_type` has a matching `fetcher.py`
+  `RULES` handler and vice versa, every `reference` names an existing
+  `references/` dir) so a future drift fails a fast unit test instead of
+  silently narrowing rule coverage (`CC-IND-0003`). `tests/test_browserexec.py`
+  covers `browserexec.py`'s pure URL-placement helpers (`CC-FUZZ-0021`). No
+  code change in either.
 - AUD: fixed `fetcher.py --append` (BUG-0028) — its one-time "collapse
   duplicates from an old database" migration ran on every `--append` call,
   not only when actually migrating a pre-index database, so it recomputed

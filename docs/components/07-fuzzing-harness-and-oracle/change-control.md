@@ -3,6 +3,22 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0021 — Test coverage for browserexec.py's pure URL helpers (2026-09-22)
+- Change: `fuzzlab/tools/browserexec.py` had zero test coverage (its
+  `PlaywrightBrowserExecutor.run()` needs a real browser and is on-host-only by
+  design). Added `tests/test_browserexec.py` covering its two pure, browser-free
+  helpers, `_with_query`/`_with_fragment` (URL-encode a candidate's param/value
+  into the query string or fragment while preserving scheme/host/existing query).
+  No code change.
+- Impact (other components / project): none — test-only, closes a coverage gap on
+  logic the M6 DOM/stored-XSS confirmation path (CC-FUZZ-0014 et al.) depends on
+  for correct payload placement.
+- Risk (level; mitigation): none — test-only.
+- Deliverables:
+  - [x] `tests/test_browserexec.py` (4 tests) — done.
+- Effectiveness (assessed 2026-09-22): effective — all 4 tests pass against the
+  existing implementation.
+
 ### CC-FUZZ-0020 — Oracle-probes-per-finding metric_series (CC-FUZZ-0016 follow-up) (2026-09-22)
 - Change: `Oracle.confirm()` now counts every probe sent across the *whole* call —
   every confirmation mechanism it tries, not only the one that ultimately confirms

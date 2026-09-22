@@ -3,6 +3,30 @@
 Component code: **IND**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-IND-0003 — Regression coverage for the indicator↔rule↔reference registries (2026-09-22)
+- Change: `build_sql_db.py` had zero test coverage. Added `tests/test_indicator_db.py`
+  guarding the invariant the module's own comment states but nothing previously
+  enforced: every `INDICATORS` `indicator_type` has a matching `fetcher.py` `RULES`
+  handler key (and vice versa — no orphaned handler), every `reference` category
+  names an existing `references/<reference>/` directory, and
+  `build_indicator_database()` writes exactly the declared indicator set and is
+  idempotent (re-running doesn't duplicate rows). No code change — `audit_page()`
+  already degrades gracefully at runtime via its `unhandled` set, but nothing
+  caught a drift between the two registries silently narrowing rule coverage.
+- Impact (other components / project): a future edit that adds/renames an
+  `indicator_type` or a `RULES` key without updating the other, or a `reference`
+  pointing at a nonexistent `references/` folder, now fails a fast unit test instead
+  of silently landing in the auditor's `unhandled` set (or a broken payload lookup)
+  and only being noticed on a live run.
+- Risk (level; mitigation): none — test-only. Mitigated by confirming all 5 new
+  tests currently pass (the registries already agree; this is a durability
+  guardrail, not a fix for a live drift).
+- Deliverables:
+  - [x] `tests/test_indicator_db.py` (5 tests) — done.
+- Effectiveness (assessed 2026-09-22): effective — the tests currently pass, proving
+  the guardrail doesn't false-positive on the real data, and will fail loudly on
+  the next indicator/rule/reference drift.
+
 ### CC-IND-0002 — Relocated to packaged data path (2026-09-21)
 - Change: `php_indicators.db` moved to `fuzzlab/tools/data/php_indicators.db` and
   `build_sql_db.py` (now `fuzzlab/tools/build_sql_db.py`) defaults its output to
