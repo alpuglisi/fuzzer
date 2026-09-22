@@ -10,7 +10,9 @@ evaluation in `run_metrics`.
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 
+from fuzzlab.core.store import MetricLogger
 from fuzzlab.ml.baselines import PrevalenceBaseline, SigmaBaseline
 from fuzzlab.ml.conformal import ConformalGate
 from fuzzlab.ml.dataset import build_dataset
@@ -71,7 +73,18 @@ def train_and_score(store, run_id: int | None = None, *, model_kind: str = "logi
         prevalence = pr_auc(ds.y, _oof_scores(ds, PrevalenceBaseline, k))
         sigma = pr_auc(ds.y, _oof_scores(ds, SigmaBaseline, k))
         gate = ConformalGate.calibrate(oof, ds.y, alpha=alpha)
-        model = _MODELS[name]().fit(ds.X, ds.y)          # deploy: fit on all data
+        model = _MODELS[name]()
+        # B0: emit the deploy fit's training curve (train/loss per epoch/round) —
+        # the OOF folds above are model *selection*, not the deployed curve, so
+        # only this final full-data fit is instrumented.
+        source = "logreg" if name == "logistic" else "gbt"
+        cm = (MetricLogger(store, run_id, source) if run_id is not None
+             else nullcontext())
+        with cm as logger:
+            on_step = (lambda step, loss: logger.log("train/loss", step, loss)) \
+                if logger is not None else None
+            fit_kwargs = {"on_epoch": on_step} if name == "logistic" else {"on_round": on_step}
+            model.fit(ds.X, ds.y, **({} if on_step is None else fit_kwargs))
         scores = model.predict_proba(ds.X)
         result.update(model=name, fallback=False, pr_auc=prauc,
                       baseline_prevalence=prevalence, baseline_sigma=sigma,

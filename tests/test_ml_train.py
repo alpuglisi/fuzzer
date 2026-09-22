@@ -82,6 +82,41 @@ def test_train_and_score_with_gbt(tmp_path):
             (run_id,)).fetchone()["c"] == 20
 
 
+def test_train_and_score_emits_train_loss_series_logistic(tmp_path):
+    with Store(tmp_path / "u.db") as store:
+        run_id = _seed_rich(store)
+        train_and_score(store, run_id, model_kind="logistic")
+        rows = store.conn.execute(
+            "SELECT source, key, step, value FROM metric_series WHERE run_id=? "
+            "ORDER BY step", (run_id,)).fetchall()
+        assert rows, "expected metric_series rows for the deploy fit's training curve"
+        assert {r["source"] for r in rows} == {"logreg"}
+        assert {r["key"] for r in rows} == {"train/loss"}
+        assert [r["step"] for r in rows] == list(range(1, len(rows) + 1))
+        assert all(v["value"] == v["value"] for v in rows)  # finite (no NaN slipped through)
+
+
+def test_train_and_score_emits_train_loss_series_gbt(tmp_path):
+    with Store(tmp_path / "u.db") as store:
+        run_id = _seed_rich(store)
+        train_and_score(store, run_id, model_kind="gbt")
+        rows = store.conn.execute(
+            "SELECT source, key FROM metric_series WHERE run_id=?", (run_id,)).fetchall()
+        assert rows
+        assert {r["source"] for r in rows} == {"gbt"}
+        assert {r["key"] for r in rows} == {"train/loss"}
+
+
+def test_train_and_score_no_metric_series_without_run_id(tmp_path):
+    with Store(tmp_path / "u.db") as store:
+        run_id = _seed_rich(store)
+        # train_and_score with run_id=None must not try to write metric_series rows
+        # (no run to attribute them to).
+        train_and_score(store, run_id=None, model_kind="logistic")
+        assert store.conn.execute(
+            "SELECT COUNT(*) c FROM metric_series").fetchone()["c"] == 0
+
+
 def test_train_and_score_auto_selects_a_model(tmp_path):
     with Store(tmp_path / "u.db") as store:
         run_id = _seed_rich(store)
