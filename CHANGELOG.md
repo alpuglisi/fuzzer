@@ -14,6 +14,15 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB: `fuzzlab.labgen.minimal_pair.check_minimal_pair()` gained an optional `pair_by`
+  key function so two independently-authored cells rendering to different file paths
+  (lane L-P3.3c-G3's `login.php`/its secure twin, `CC-LAB-0048`) can be paired and
+  checked directly, without breaking existing path-based callers — and fixed a real
+  defect where its content-confinement check was silently skipped whenever the two
+  variants' `// Module composition: ...` sequences differed by name (the common case
+  for a real vulnerable/secure pair), letting an unrelated rewrite outside the
+  declared transform/sink region pass undetected (`CC-LAB-0055`/`FR-LAB-53`,
+  `docs/bugs/BUG-0027-*.md`, `docs/PREVENTIVE_ACTIONS.md` PA-0029).
 - LAB: built a real, on-host live-boot conformance harness for `php_laravel`
   (`CC-LAB-0054`/`FR-LAB-52`) — the Tier 1/2 gap `docs/LAB_IMPLEMENTATION_PLAN.md`
   ~line 154 named as blocked on on-host dependencies that "do not exist". A checked-in

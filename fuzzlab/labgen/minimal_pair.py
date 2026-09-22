@@ -72,6 +72,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Callable, Hashable
 
 from .emitter import EmittedFile, EmittedFiles
 from .modules import COMPLEXITIES, SINKS, SOURCES, TRANSFORMS
@@ -90,6 +91,13 @@ DEFAULT_VARIABLE_CATEGORIES: frozenset[str] = frozenset({"transform", "sink"})
 _COMPOSITION_RE = re.compile(r"^\s*//\s*Module composition:\s*(.+?)\s*$", re.MULTILINE)
 _FUNCTION_NAME_RE = re.compile(r"\bfunction\s+([A-Za-z_]\w*)\s*\(")
 _PHP_VARIABLE_RE = re.compile(r"\$[A-Za-z_]\w*")
+
+#: Default pairing key when ``pair_by`` is not given to :func:`check_minimal_pair`
+#: -- literal file path, exactly this checker's original (Phase-0) behavior.
+#: Kept as a named default (rather than inlining the lambda at the call site)
+#: so ``check_minimal_pair``'s docstring can point at one name.
+def _path_identity(f: EmittedFile) -> str:
+    return f.path
 
 
 class MinimalPairError(ValueError):
@@ -177,8 +185,42 @@ def check_identifier_stability(vulnerable_text: str, secure_text: str, *, label:
         )
 
 
+def _first_variable_marker_line(lines: list[str], comp: tuple[_CompositionEntry, ...]) -> int | None:
+    """Best-effort, PHP-oriented structural boundary: the index (into
+    ``lines``, which already excludes the composition comment line) of the
+    first line that is the self-identifying comment a ``transform`` module
+    renders (e.g. ``// param_bind transform: ...``, ``// identity
+    transform: ...`` -- every transform template in
+    ``fuzzlab.labgen.modules.transforms`` starts with this exact
+    ``// {name} transform:`` line, per this project's own module-template
+    convention).
+
+    This derives, from ``comp`` (one side's *own* parsed composition --
+    never the other side's), the line at which "the declared transform/sink
+    region" structurally *begins* in the assembled file: the emitter
+    concatenates source/depth fragments first, then transform fragments,
+    then the sink, then wraps the whole thing (see
+    ``fuzzlab.labgen.emitters.php_current``'s ``render()``), so nothing
+    before this line can legitimately belong to the transform/sink region.
+
+    Returns ``None`` when no ``transform``-category entry exists in ``comp``
+    at all, or its marker comment cannot be found in ``lines`` -- e.g. a
+    non-``php_current``-convention emitter -- so callers degrade gracefully
+    (no new false positive) rather than guessing. This is a *lower bound*
+    on the declared-variable region's start, not an exact bound on its end;
+    see :func:`_check_file_pair` for how it is used."""
+    first_transform = next((e for e in comp if e.category == "transform"), None)
+    if first_transform is None:
+        return None
+    marker = re.compile(r"^\s*//\s*" + re.escape(first_transform.name) + r"\s+transform:")
+    for i, line in enumerate(lines):
+        if marker.match(line):
+            return i
+    return None
+
+
 def _check_file_pair(vulnerable: EmittedFile, secure: EmittedFile, *, variable_categories: frozenset[str]) -> None:
-    label = vulnerable.path
+    label = f"{vulnerable.path}" if vulnerable.path == secure.path else f"{vulnerable.path} <-> {secure.path}"
     v_text = vulnerable.content.decode("utf-8")
     s_text = secure.content.decode("utf-8")
 
@@ -231,7 +273,69 @@ def _check_file_pair(vulnerable: EmittedFile, secure: EmittedFile, *, variable_c
             f"line {prefix_len + 1}:\n  vulnerable: {v_middle!r}\n  secure:     {s_middle!r}"
         )
 
+    # Identifier stability is checked before the new front-boundary
+    # confinement check below: a handler/function-name rename is *also* a
+    # difference that precedes a transform's own marker line (the function
+    # signature comes first), so without this ordering it would surface as
+    # a generic "differ before the declared transform/sink region" instead
+    # of the specific, more actionable "function/handler identifier" error
+    # this project's own Juliet-derived rule (playbook rule 6) exists to
+    # name precisely.
     check_identifier_stability(v_text, s_text, label=label)
+
+    # Content confinement when the compositions DO differ by name (the
+    # common case for a real vulnerable/secure pair -- their transform names
+    # are essentially always different, e.g. `identity` vs `param_bind`).
+    # Until this fix (`CC-LAB-0055`/`BUG-0029`), the check above was the
+    # *only* content-confinement check, and it is gated off entirely
+    # whenever `any_declared_difference` is True -- meaning a twin that
+    # legitimately renames its transform AND additionally rewrites something
+    # unrelated (e.g. its source line, an earlier table/column reference)
+    # passed silently, because nothing else ever inspected `v_middle`/
+    # `s_middle` in that branch. This is exactly the gap
+    # `docs/bugs/BUG-0029-*.md` documents.
+    #
+    # The fix does **not** rely on the two sides' composition names matching
+    # (that would just be the check above again) -- it derives a boundary
+    # from *each side's own* composition metadata independently: a
+    # `transform` module's own rendered comment line (`// {name} transform:
+    # ...`, a convention every transform template in
+    # `fuzzlab.labgen.modules.transforms` follows) marks where the
+    # source/depth fragments end and the transform/sink region begins in the
+    # assembled file (fragments concatenate in declared order -- see
+    # `fuzzlab.labgen.emitters.php_current`'s `render()`). Content before
+    # that line can never legitimately be part of "the transform/sink
+    # region", on *either* side, independent of whether the two sides'
+    # composition entries happen to share names. When the marker cannot be
+    # found on either side (e.g. a non-php_current-convention emitter), this
+    # degrades to no additional check -- never a false positive for a stack
+    # this heuristic does not understand.
+    #
+    # This closes the *leading* gap concretely (a rewrite anywhere before
+    # the transform region is now caught even when composition names
+    # differ). The *trailing* gap -- a rewrite inside the sink's own
+    # rendered SQL/HTML, past where a transform's own marker line ends, that
+    # coincides with content the composition already declares variable at
+    # the sink position -- is not fully closed by this fix: locating a
+    # reliable, per-module trailing boundary would need either re-rendering
+    # a module standalone (a line this checker's own docstring refuses to
+    # cross) or a second self-identifying-comment convention sinks do not
+    # yet follow uniformly. Recorded as a known residual gap, not silently
+    # assumed solved.
+    v_marker = _first_variable_marker_line(v_lines, v_comp)
+    s_marker = _first_variable_marker_line(s_lines, s_comp)
+    if v_marker is not None and s_marker is not None:
+        required_prefix = min(v_marker, s_marker)
+        if prefix_len < required_prefix:
+            raise MinimalPairViolation(
+                f"{label}: files differ before the declared transform/sink region even though "
+                f"composition sequences differ there (vulnerable={[e.name for e in v_comp]!r}, "
+                f"secure={[e.name for e in s_comp]!r}) -- content before line {required_prefix + 1} "
+                "(source/depth fragments, which no declared difference covers) must be identical "
+                f"between twins; first divergence is at line {prefix_len + 1}:\n"
+                f"  vulnerable: {v_lines[prefix_len : max(prefix_len + 1, required_prefix)]!r}\n"
+                f"  secure:     {s_lines[prefix_len : max(prefix_len + 1, required_prefix)]!r}"
+            )
 
 
 def check_minimal_pair(
@@ -239,6 +343,7 @@ def check_minimal_pair(
     secure: EmittedFiles,
     *,
     variable_categories: frozenset[str] = DEFAULT_VARIABLE_CATEGORIES,
+    pair_by: Callable[[EmittedFile], Hashable] | None = None,
 ) -> None:
     """Assert ``vulnerable`` and ``secure`` -- two :class:`EmittedFiles`
     results for the same cell, one rendered with its transform pipeline
@@ -249,16 +354,60 @@ def check_minimal_pair(
     evaluated at all (e.g. no composition comment to parse). Returns
     ``None`` (no exception) when the pair is valid. Never a silent pass on
     an actual violation.
+
+    ``pair_by`` (added for `CC-LAB-0055`, `FR-LAB-53`): how a file on one
+    side is matched to its counterpart on the other. Defaults to ``None``,
+    which pairs strictly by literal :attr:`EmittedFile.path` equality --
+    this checker's original (Phase-0) behavior, unchanged for every existing
+    caller that omits it.
+
+    Pass an explicit ``pair_by`` when the two sides are two *independently
+    authored* cells (e.g. two distinct, differently-named manifest cells one
+    lane's own authoring convention has already established as a
+    vulnerable/secure pair) rather than one cell rendered twice with only
+    its ``transform`` toggled -- the case strict path equality cannot
+    handle, since the two cells legitimately render to two different file
+    paths (see lane L-P3.3c-G3's `login.php`/`register.php` finding,
+    `docs/bugs/BUG-0029-*.md`). ``pair_by`` is a callable from
+    :class:`EmittedFile` to any hashable key; files on each side are grouped
+    by that key instead of by path, and a key present on one side but not
+    the other -- or naming more than one file on either side -- is reported
+    the same way a path mismatch always has been. A trivial
+    path-normalization hook (e.g. stripping a twin-URL suffix) is exactly
+    ``pair_by=lambda f: normalize(f.path)``; nothing about this checker
+    otherwise changes.
     """
-    v_by_path = {f.path: f for f in vulnerable}
-    s_by_path = {f.path: f for f in secure}
-    if set(v_by_path) != set(s_by_path):
+    key_fn: Callable[[EmittedFile], Hashable] = pair_by if pair_by is not None else _path_identity
+    v_by_key: dict[Hashable, EmittedFile] = {}
+    for f in vulnerable:
+        key = key_fn(f)
+        if key in v_by_key:
+            raise MinimalPairError(
+                f"pair_by maps more than one vulnerable file to the same key {key!r} "
+                f"({v_by_key[key].path!r} and {f.path!r}) -- pairing must be unambiguous"
+            )
+        v_by_key[key] = f
+    s_by_key: dict[Hashable, EmittedFile] = {}
+    for f in secure:
+        key = key_fn(f)
+        if key in s_by_key:
+            raise MinimalPairError(
+                f"pair_by maps more than one secure file to the same key {key!r} "
+                f"({s_by_key[key].path!r} and {f.path!r}) -- pairing must be unambiguous"
+            )
+        s_by_key[key] = f
+
+    if set(v_by_key) != set(s_by_key):
+        paired_by_note = "" if pair_by is None else " (paired via the given pair_by, not by literal path)"
         raise MinimalPairViolation(
-            f"file sets differ between variants: vulnerable={sorted(v_by_path)} "
-            f"secure={sorted(s_by_path)}"
+            f"file sets differ between variants{paired_by_note}: "
+            f"vulnerable={sorted(map(repr, v_by_key))} secure={sorted(map(repr, s_by_key))}"
         )
-    for path in sorted(v_by_path):
-        v_file, s_file = v_by_path[path], s_by_path[path]
+    for key in sorted(v_by_key, key=repr):
+        v_file, s_file = v_by_key[key], s_by_key[key]
         if v_file.role != s_file.role:
-            raise MinimalPairViolation(f"{path}: role differs (vulnerable={v_file.role!r}, secure={s_file.role!r})")
+            raise MinimalPairViolation(
+                f"{v_file.path} <-> {s_file.path}: role differs "
+                f"(vulnerable={v_file.role!r}, secure={s_file.role!r})"
+            )
         _check_file_pair(v_file, s_file, variable_categories=variable_categories)

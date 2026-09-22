@@ -3,6 +3,75 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0055 — `minimal_pair.py`: `pair_by` (path-independent pairing) + a real content-confinement defect fix (FR-LAB-53) (2026-09-22)
+- Change: two independent fixes to `fuzzlab/labgen/minimal_pair.py`, both closing gaps
+  lane L-P3.3c-G3 found and worked around rather than fixed (`CC-LAB-0048`; see also
+  `docs/bugs/BUG-0027-*.md`'s full RCA for the second):
+  1. **`pair_by` (enhancement, not a defect fix — the checker already did what its own
+     docstring said).** `check_minimal_pair(vulnerable, secure, *, pair_by=None)`: an
+     optional `EmittedFile -> Hashable` key function. `None` (the default) keeps the
+     original, literal-path pairing unchanged for every existing caller
+     (`fuzzlab/labgen/cli.py`, every `tests/test_labgen_*.py` lane test). When given,
+     files on each side are grouped by `pair_by(file)` instead of by path, so two
+     independently-authored cells that render to two different paths (G3's
+     `login.php`/its `.php`-suffixed secure-twin URL) can be compared directly, without
+     needing "each cell against its own weakened self" as G3's own test had to. An
+     ambiguous mapping (two files on one side sharing a key) raises `MinimalPairError`
+     (a setup problem), never silently picks one.
+  2. **Content-confinement defect fix (`BUG-0027`, full bug protocol).** The
+     "differ outside any declared transform/sink change" band check only ran when the
+     two variants' composition sequences were name-identical; whenever any position
+     legitimately differed by name (`any_declared_difference = True` — true for
+     essentially every real vulnerable/secure pair, since their transform names differ),
+     the check was skipped entirely for the whole file, not narrowed. Fixed by deriving,
+     from *each side's own* composition metadata independently (never from
+     name-matching between the two sides), a structural lower bound on where the
+     transform/sink region can begin: a `transform` module's own self-identifying
+     comment line (`// {name} transform: ...`, a convention every template in
+     `fuzzlab.labgen.modules.transforms` follows). Content found to differ before that
+     line is now a `MinimalPairViolation` regardless of whether composition names
+     match. `check_identifier_stability()` now runs before this new check, so a
+     handler/function-name rename still surfaces as the specific existing
+     "function/handler identifier" violation rather than the new generic one. The
+     symmetric trailing-region gap (a rewrite inside a sink's own rendered SQL/HTML) is
+     **not** closed — no sink template self-identifies the way transform templates do,
+     and closing it would need re-rendering a module standalone, which this checker's
+     docstring already refuses to do; recorded as a residual gap, not silently assumed
+     solved (`docs/bugs/BUG-0027-*.md`'s corrective-action section).
+- Impact (other components / project): none outside LAB. `fuzzlab/labgen/cli.py` and
+  `fuzzlab/labgen/conformance/tier0.py` (concurrently-owned; not modified by this
+  change) call `check_minimal_pair`/`get_minimal_pair_checker` without `pair_by`, so
+  both inherit the confinement-check fix automatically with no call-site change, and
+  neither loses any existing behavior.
+- Risk (level; mitigation or accepted-risk justification): **low** for `pair_by` (purely
+  additive, opt-in, default preserves exact prior behavior — regression-tested by
+  `test_default_pairing_still_rejects_two_differently_pathed_cells`). **Low-medium** for
+  the confinement fix: it can only make the checker *stricter* (catch a real class of
+  violation it previously missed), never more permissive, so the risk is a false
+  positive on an emitter that does not follow the `// {name} transform:` convention --
+  mitigated by degrading to the pre-fix (no additional check) behavior whenever the
+  marker cannot be found on either side, rather than raising on an unrecognized
+  convention.
+- Deliverables:
+  - [x] `check_minimal_pair(..., pair_by=None)` + `_first_variable_marker_line()` — done
+  - [x] `tests/test_labgen_minimal_pair.py`: 7 new tests (`test_default_pairing_
+        still_rejects_two_differently_pathed_cells`, `test_pair_by_lets_two_
+        differently_pathed_cells_be_compared`, `test_pair_by_still_reports_a_real_
+        violation`, `test_pair_by_ambiguous_mapping_raises_setup_error`,
+        `test_a_real_transform_rename_alone_still_passes`, `test_unrelated_rewrite_
+        before_the_transform_region_now_caught`, `test_content_confinement_runs_even_
+        when_variable_categories_is_narrowed`) — done
+  - [x] Bookkeeping: this entry, `FR-LAB-53`, `CHANGELOG.md`, `ERROR_LOG.md`,
+        `docs/bugs/BUG-0027-*.md`, `docs/PREVENTIVE_ACTIONS.md` PA-0029 — done
+- Effectiveness (assessed 2026-09-22): the real `php_current` positive fixture
+  (`real_pair`) still passes unchanged (no false positive introduced); a hand-verified
+  negative fixture that previously passed silently (declared transform rename plus an
+  unrelated source-line rewrite) now correctly raises; two independently-pathed
+  authored cells are now comparable via `pair_by` without reaching for the
+  own-weakened-twin workaround; full suite green: 1521 passed, 8 skipped (up from a
+  ~1512/8 baseline reported at the start of this lane -- the concurrent live-boot lane
+  changed that baseline independently, per this lane's own instructions to expect it).
+
 ### CC-LAB-0054 — real, on-host live-boot conformance harness for php_laravel (FR-LAB-52) (2026-09-22)
 - Change: built the Tier 1/2 live-boot capability `docs/LAB_IMPLEMENTATION_PLAN.md`
   ~line 154 named as blocked on on-host dependencies that "do not exist" — they now do,

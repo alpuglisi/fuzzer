@@ -18,6 +18,49 @@ Format per entry:
 
 ---
 
+## 2026-09-22 — LAB: `check_minimal_pair`'s content-confinement check silently disabled whenever the two variants' compositions differ by name (fixed)
+
+- **Symptom:** `fuzzlab.labgen.minimal_pair.check_minimal_pair()` returned `None` (no
+  violation) for a hand-constructed "secure twin" that both (a) legitimately renamed its
+  transform (`identity` -> `param_bind`, a real declared difference) and (b) rewrote an
+  unrelated line (its source, `$_GET` -> `$_POST`) with nothing to do with the declared
+  difference — exactly the failure mode the checker's own docstring says it exists to
+  catch. Demonstrated by the new
+  `tests/test_labgen_minimal_pair.py::test_unrelated_rewrite_before_the_transform_region_now_caught`.
+  Separately, the checker paired vulnerable/secure files strictly by literal path, so two
+  independently-authored cells rendering to two different paths (lane L-P3.3c-G3's
+  `login.php`/its secure twin, `CC-LAB-0048`) could not be compared directly at all.
+- **Root cause:** `_check_file_pair()` only validated the empirical content-diff band
+  (requiring it be empty) inside the `if not any_declared_difference:` branch — the branch
+  taken when the two compositions are name-identical. Whenever any composition position
+  legitimately differed by name (`any_declared_difference = True` — the case for
+  essentially every real vulnerable/secure pair, since their transform names differ), no
+  code path validated the band at all; the function fell straight through, regardless of
+  the band's size or location. Full RCA: `docs/bugs/BUG-0027-*.md`. The pairing limitation
+  was simply that `check_minimal_pair()` had no non-path way to match two `EmittedFile`s.
+- **Remediation:** added `pair_by` (an optional `EmittedFile -> Hashable` key function) to
+  `check_minimal_pair()`, defaulting to `None` (literal path pairing, unchanged for every
+  existing caller). Added a new, unconditional content-confinement check derived from each
+  side's *own* composition metadata independently (never from name-matching between the two
+  sides): a `transform` module's self-identifying comment line (`// {name} transform: ...`,
+  a convention every template in `fuzzlab.labgen.modules.transforms` already follows) marks
+  where the fixed source/depth fragments end and the transform/sink region begins; content
+  found to differ before that line, on either side, is now a `MinimalPairViolation`
+  regardless of whether the two sides' composition names match. New tests:
+  `test_default_pairing_still_rejects_two_differently_pathed_cells`,
+  `test_pair_by_lets_two_differently_pathed_cells_be_compared`,
+  `test_pair_by_still_reports_a_real_violation`,
+  `test_pair_by_ambiguous_mapping_raises_setup_error`,
+  `test_a_real_transform_rename_alone_still_passes`,
+  `test_unrelated_rewrite_before_the_transform_region_now_caught`,
+  `test_content_confinement_runs_even_when_variable_categories_is_narrowed`. Full suite:
+  1521 passed, 8 skipped (see `CC-LAB-0055`).
+- **Status:** Fixed (see `docs/bugs/BUG-0027-minimal-pair-confinement-check-disabled-when-composition-differs.md`,
+  `docs/PREVENTIVE_ACTIONS.md` PA-0029, `docs/components/01-target-lab/change-control.md`
+  CC-LAB-0055, `FR-LAB-53`).
+
+---
+
 ## 2026-09-22 — MUT: `SemanticsValidator` fail-open on untrusted SQL comment-append (fixed)
 
 - **Symptom:** `tests/test_mutation_operators.py::test_every_surface_variant_preserves_semantics`

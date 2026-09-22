@@ -1299,6 +1299,43 @@ lane) can submit a payload as
     named; see that document's own updated text for the current, accurate
     status.
 
+- **FR-LAB-53** *(`fuzzlab/labgen/minimal_pair.py`; lane L-P3.3c-G3's
+  (`CC-LAB-0048`) finding, closed here; `CC-LAB-0055`, `docs/bugs/BUG-0027-*.md`.)*
+  `check_minimal_pair()`'s two documented limitations are fixed:
+  1. **Path-independent pairing.** `check_minimal_pair(vulnerable, secure, *,
+     pair_by=None)` accepts an optional `EmittedFile -> Hashable` key
+     function. `None` (the default) is the original, unchanged literal-path
+     pairing — every existing caller (`fuzzlab.labgen.cli`, every
+     `tests/test_labgen_*.py` lane) keeps its exact prior behavior. When
+     given, files on each side are matched by `pair_by(file)` instead of
+     path, so two independently-authored cells that render to two different
+     paths (a manifest's own vulnerable/secure authoring convention, e.g.
+     G3's `login.php`/its `.php`-suffixed secure-twin URL) can be checked
+     directly against each other, rather than only each against its own
+     transform-emptied self. A `pair_by` that maps more than one file on one
+     side to the same key raises `MinimalPairError` (a setup problem, never
+     silently resolved by picking one).
+  2. **Content confinement independent of composition-name matching.** The
+     "differ outside any declared transform/sink change" check previously
+     ran *only* when the two variants' composition sequences were
+     name-identical -- disabled for essentially every real vulnerable/secure
+     pair, whose transform names legitimately differ. It is now derived
+     independently from *each side's own* composition metadata: a
+     `transform` module's self-identifying comment line (`// {name}
+     transform: ...`, a convention every template in
+     `fuzzlab.labgen.modules.transforms` follows) gives a structural lower
+     bound on where the transform/sink region begins in the assembled file;
+     content found to differ before that point is a `MinimalPairViolation`
+     regardless of whether the two sides' composition names match. This was
+     a genuine defect (`BUG-0027`), not merely an enhancement -- the checker
+     silently passed an input its own docstring says it must reject. The
+     symmetric trailing-region case (a rewrite inside a sink's own rendered
+     output) remains unclosed, since no sink template self-identifies the
+     way transform templates do and closing it would require re-rendering a
+     module standalone -- a line this checker's docstring already refuses to
+     cross; recorded as a residual, explicitly out-of-scope gap, the same
+     way the pre-existing equal-composition-length restriction already is.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

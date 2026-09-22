@@ -239,3 +239,16 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   the fragment-level checks run, not left to them. This is PA-0025's fail-closed
   doctrine's "unprovable from the compared unit" case, applied to semantics validators:
   the default posture for an unproven case is reject, not accept. (from BUG-0026)
+- **PA-0029** — Generalizes PA-0028 beyond semantics validators. Any checker whose "no
+  violation found" verdict is reached by a code path that **gates off entirely (rather
+  than narrows)** part of its own stated invariant under some condition must have a test
+  whose positive fixture exercises that gated-off branch with an **additional, unrelated**
+  defect injected into it — never only a fixture where the gating condition happens not to
+  trigger. A positive fixture that always takes the gated branch (e.g.
+  `fuzzlab.labgen.minimal_pair`'s own real vulnerable/secure pair, whose composition names
+  always legitimately differ) proves the gate does not false-positive; it proves nothing
+  about whether anything still runs when the gate is open. Every future condition added to
+  such a checker (a new module category folded into `DEFAULT_VARIABLE_CATEGORIES`, a new
+  gating boolean anywhere else) needs its own "declared difference alone passes, declared
+  difference *plus* an unrelated rewrite still fails" pair of tests, not one. (from
+  BUG-0027)
