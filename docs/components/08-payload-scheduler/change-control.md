@@ -3,6 +3,31 @@
 Component code: **SCHED**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SCHED-0006 — One-command on-host script for Part F (2026-09-22)
+- Change: added `scripts/bandit_e2e.sh`, a one-command runner for
+  `docs/ON_HOST_RUNBOOK.md` Part F (Phase 4 bandit-orders-the-oracle's-mechanisms,
+  T4.6): a control run (fixed order, no `--bandit`), `BANDIT_REPEATS` (default 5)
+  `--bandit` runs accumulated into one store (resetting the lab DB between
+  repeats, since POST probes are state-changing), then prints the learned
+  `bandit_posteriors` (context/arm/mean/cost_n) — with the BUG-0016 metric
+  caveat reproduced in the script's own output, so whoever runs it verifies the
+  bandit by what it **learns**, not by `pipeline_requests_per_finding` (which
+  this small lab's discovery-dominated request count won't move much even when
+  the bandit is working correctly). Same script conventions as the other
+  `scripts/*_e2e.sh` runners. `docs/ON_HOST_RUNBOOK.md` Part F gained a matching
+  "One command" callout.
+- Impact (other components / project): none functionally — operational script
+  plus a doc cross-reference; no source module changed.
+- Risk (level; mitigation): low — not exercised by the offline suite (needs the
+  live lab). Mitigated by `bash -n` syntax check and cross-checking every
+  `fuzzlab auto`/`crawl` flag and the `bandit_posteriors` column names
+  (`context`, `arm`, `alpha`, `beta`, `cost_n`) against `core/migrations.py`.
+- Deliverables:
+  - [x] `scripts/bandit_e2e.sh` — done.
+  - [x] Runbook Part F "One command" callout — done.
+- Effectiveness (assessed 2026-09-22): pending on-host run — verified statically
+  (syntax, flags, schema); not yet executed against a live lab.
+
 ### CC-SCHED-0005 — Doc-currency fix: requirements.md said "planned" (2026-09-22)
 - Change: `docs/components/08-payload-scheduler/requirements.md`'s Status header
   read `[planned] (Phase 4)`, stale against this log's 4 entries of built work

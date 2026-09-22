@@ -3,6 +3,37 @@
 Component code: **PLUG**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-PLUG-0006 — One-command on-host script for Part L (2026-09-22)
+- Change: added `scripts/plugins_report_transfer_e2e.sh`, a one-command runner
+  for `docs/ON_HOST_RUNBOOK.md` Part L (Phase 10 plugins, anomaly, report,
+  transfer): crawl + `fuzzlab auto --plugins` and print the recorded active
+  plugin set; the ECOD anomaly tripwire (`ml.anomaly.detect_anomalies`) over the
+  run's candidates; the reproducible report (`fuzzlab report`, human + canonical
+  JSON saved to a file); and an **optional** transfer-to-a-second-target step
+  (T10.6, `harness.multitarget`) that only runs when both `TRANSFER_BASE_URL`
+  and `TRANSFER_GT_DIR` are set (it needs an already-running external
+  validation lab, e.g. OWASP Juice Shop, that this repo does not provide — the
+  script skips it with an explanation otherwise, rather than failing). Same
+  script conventions as the other `scripts/*_e2e.sh` runners.
+  `docs/ON_HOST_RUNBOOK.md` Part L gained a matching "One command" callout.
+- Impact (other components / project): none functionally — operational script
+  plus a doc cross-reference. Exercises PLUG's active-set recording, ML's
+  anomaly detector, UI's report builder, and FUZZ's multitarget harness, but
+  changes no source module in any of them.
+- Risk (level; mitigation): low — not exercised by the offline suite (needs the
+  live lab, and the transfer step additionally needs a second lab). Mitigated by
+  `bash -n` syntax check, an embedded-Python-heredoc compile check (both the
+  anomaly and transfer blocks), and cross-checking `detect_anomalies`,
+  `TargetSpec`, `run_targets`, `transfer_summary`, `format_transfer`,
+  `make_probe_sender`, and `contract.load`'s actual signatures against the calls
+  made — all confirmed to match.
+- Deliverables:
+  - [x] `scripts/plugins_report_transfer_e2e.sh` — done.
+  - [x] Runbook Part L "One command" callout — done.
+- Effectiveness (assessed 2026-09-22): pending on-host run — verified statically
+  (syntax, flags, embedded Python, API signatures); not yet executed against a
+  live lab, and the transfer step additionally needs a second lab to exercise.
+
 ### CC-PLUG-0005 — Doc-currency fix: requirements.md said "planned" (2026-09-22)
 - Change: `docs/components/13-plugin-system/requirements.md`'s Status header read
   `[planned] (Phase 10)`, stale against this log's 4 entries of built work (entry-

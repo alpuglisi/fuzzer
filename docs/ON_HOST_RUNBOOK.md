@@ -70,6 +70,11 @@ Nothing runs against the target until you ask it to (no auto-run, D11).
 
 ## Part C — Phase 1: authenticated per-identity run
 
+> **One command:** `scripts/identity_auth_e2e.sh` (env knobs: `IDENTITY`,
+> `USERNAME`, `AUTH_STORE`, `SKIP_SET_CREDENTIAL=1`). Runs steps 1-3 below and
+> prints a findings summary; still interactive at step 1 (password prompt) unless
+> `SKIP_SET_CREDENTIAL=1`.
+
 The lab's test accounts are `admin/admin123`, `alice/password1`, `bob/letmein`.
 
 1. **Save credentials per host+identity** (stored in the OS keyring, D12 — never in the
@@ -104,6 +109,10 @@ The lab's test accounts are `admin/admin123`, `alice/password1`, `bob/letmein`.
    dynamic login detection and per-host credentials across mechanisms (cookie vs JWT).
 
 ## Part D — Phase 2: automatic run + request-reduction measurement
+
+> **One command:** `scripts/auto_pipeline_e2e.sh` (env knobs: `AUTO_STORE`,
+> `WITH_BROWSER=1`). Runs the detection benchmark, the D15 fail-safe check, and
+> prints the request-efficiency metrics/negatives/fingerprint.
 
 Automatic mode is wired as `fuzzlab auto` — it consolidates a crawl, resolves the
 plan (D14/D15), and runs the deterministic pipeline (scoped rules eval with
@@ -170,7 +179,10 @@ negatives → oracle confirm → target fingerprint → score → request metric
   the anti-pattern this replaces — see `docs/bugs/BUG-0014-*`.
 
 All parts (A–L) are `[run]`. The quickest wins are **Parts F, G, H, L**: same lab, extra
-flags, read `run_metrics`. Parts E, I, J, K each have a one-command `scripts/*_e2e.sh`.
+flags, read `run_metrics`. Every part from **C** through **L** now has a one-command
+`scripts/*_e2e.sh` (see the "One command" callout at the top of each part) — pull the
+repo, bring the lab up (Part A), install the toolkit (Part B), then work through
+`scripts/*_e2e.sh` in part order.
 
 ---
 
@@ -269,6 +281,10 @@ wired — the self-test in step 3 catches this first.)
 
 ## Part F — Phase 4: bandit orders the oracle's mechanisms (T4.6) `[run]`
 
+> **One command:** `scripts/bandit_e2e.sh` (env knobs: `CONTROL_STORE`,
+> `BANDIT_STORE`, `BANDIT_REPEATS`). Runs the control run, the repeated bandit
+> runs, and prints the learned posteriors.
+
 The bandit orders the oracle's confirmation mechanisms per context. There is no `--uniform`
 flag — the control is a run **without** `--bandit`.
 
@@ -307,6 +323,10 @@ flag — the control is a run **without** `--bandit`.
 
 ## Part G — Phase 5: detection classifier beats baselines (T5.5) `[run]`
 
+> **One command:** `scripts/classifier_e2e.sh` (env knobs: `SCORE_STORE`,
+> `CLASSIFIER_REPEATS`). Runs `auto --score`, checks `ml_pr_auc` against its
+> baselines, and prints the top advisory-scored candidates.
+
 Add `--score` to train the detection classifier over the store and write advisory
 candidate scores (never labels):
 ```bash
@@ -326,6 +346,10 @@ into the **same** `--store` (crawl → auto repeatedly) to build up candidates/f
 before expecting a strong PR-AUC.
 
 ## Part H — Phase 7: ranker + active learning (T7.4) `[run]`
+
+> **One command:** `scripts/ranker_e2e.sh` (env knobs: `RANK_STORE`, `AL_BUDGET`).
+> Runs `auto --rank`, checks `rank_ndcg`/`rank_precision` against their random
+> baselines, and prints active-learning query proposals.
 
 Add `--rank` to train the pointwise ranker (zero extra requests) and score ordering vs a
 random baseline:
@@ -522,6 +546,11 @@ observing the front-end's handling, not a successful smuggle against a hardened 
 Everything stays loopback, on infrastructure you own.
 
 ## Part L — Phase 10: plugins, anomaly, report, transfer `[run]`
+
+> **One command:** `scripts/plugins_report_transfer_e2e.sh` (env knobs:
+> `PLUGIN_STORE`; set `TRANSFER_BASE_URL` + `TRANSFER_GT_DIR` to also run step 4
+> against a second, already-running validation lab — skipped otherwise). Runs
+> steps 1-3 below unconditionally.
 
 1. **Plugins** — a sample plugin extends the toolkit with no core change. Install any
    package that exposes a `fuzzlab.plugins` entry point, then:

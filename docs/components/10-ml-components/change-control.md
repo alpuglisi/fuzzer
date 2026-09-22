@@ -3,6 +3,53 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0012 — One-command on-host script for Part H (2026-09-22)
+- Change: added `scripts/ranker_e2e.sh`, a one-command runner for
+  `docs/ON_HOST_RUNBOOK.md` Part H (Phase 7 ranker + active learning, T7.4):
+  crawl + `fuzzlab auto --rank`, prints `rank_ndcg`/`rank_precision` against
+  their random-baseline counterparts (the exit criterion) plus the top
+  rank-scored candidates, then proposes the next candidates to confirm via
+  `ml.active.propose_queries` (both `uncertainty` and `committee` methods,
+  budget configurable via `AL_BUDGET`). Same script conventions as the other
+  `scripts/*_e2e.sh` runners. `docs/ON_HOST_RUNBOOK.md` Part H gained a matching
+  "One command" callout.
+- Impact (other components / project): none functionally — operational script
+  plus a doc cross-reference; no source module changed.
+- Risk (level; mitigation): low — not exercised by the offline suite (needs the
+  live lab). Mitigated by `bash -n` syntax check, an embedded-Python-heredoc
+  compile check, and cross-checking `propose_queries`' actual signature
+  (`store, run_id, budget, method, *, n_members, seed`) against the call made.
+- Deliverables:
+  - [x] `scripts/ranker_e2e.sh` — done.
+  - [x] Runbook Part H "One command" callout — done.
+- Effectiveness (assessed 2026-09-22): pending on-host run — verified statically
+  (syntax, flags, embedded Python, API signature); not yet executed against a
+  live lab.
+
+### CC-ML-0011 — One-command on-host script for Part G (2026-09-22)
+- Change: added `scripts/classifier_e2e.sh`, a one-command runner for
+  `docs/ON_HOST_RUNBOOK.md` Part G (Phase 5 detection classifier beats
+  baselines, T5.5): `CLASSIFIER_REPEATS` (default 1) crawl+`fuzzlab auto --score`
+  passes accumulated into one store, then prints `ml_pr_auc` against its
+  `ml_pr_auc_prevalence`/`ml_pr_auc_sigma` baselines (the exit criterion,
+  computed and PASS/BELOW-BASELINE-labeled in the script) and the top
+  advisory-scored candidates. Documents the thin-data fallback
+  (`model='prevalence-fallback'`, no PR-AUC) inline and points at
+  `CLASSIFIER_REPEATS`/an existing `SCORE_STORE` as the fix. Same script
+  conventions as the other `scripts/*_e2e.sh` runners.
+  `docs/ON_HOST_RUNBOOK.md` Part G gained a matching "One command" callout.
+- Impact (other components / project): none functionally — operational script
+  plus a doc cross-reference; no source module changed.
+- Risk (level; mitigation): low — not exercised by the offline suite (needs the
+  live lab). Mitigated by `bash -n` syntax check, an embedded-Python-heredoc
+  compile check, and cross-checking every `fuzzlab auto`/`crawl` flag used
+  against the current `argparse` parsers.
+- Deliverables:
+  - [x] `scripts/classifier_e2e.sh` — done.
+  - [x] Runbook Part G "One command" callout — done.
+- Effectiveness (assessed 2026-09-22): pending on-host run — verified statically
+  (syntax, flags, embedded Python); not yet executed against a live lab.
+
 ### CC-ML-0010 — Doc-currency fix: requirements.md said "planned" (2026-09-22)
 - Change: `docs/components/10-ml-components/requirements.md`'s Status header read
   `[planned] (Phases 5, 7, 10)`, stale against this log's 9 entries of built work

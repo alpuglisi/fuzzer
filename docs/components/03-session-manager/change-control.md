@@ -3,6 +3,40 @@
 Component code: **SESS**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-SESS-0010 — One-command on-host script for Part C (2026-09-22)
+- Change: added `scripts/identity_auth_e2e.sh`, a one-command runner for
+  `docs/ON_HOST_RUNBOOK.md` Part C (Phase 1 authenticated per-identity run):
+  save credentials for one identity (`fuzzlab session set-credential`, prompts
+  for the password), confirm login detection (`session print`), then
+  crawl → audit → fuzz for that identity into one shared store, and print a
+  findings summary. Follows the existing `scripts/*_e2e.sh` conventions
+  (`set -euo pipefail`, `say`/`die` helpers, env-var knobs with documented
+  defaults, fail-loud reachability checks) established by
+  `greybox_e2e.sh`/`proxy_e2e.sh`/`waf_evasion_e2e.sh`/`h2_desync_e2e.sh`.
+  `docs/ON_HOST_RUNBOOK.md` Part C gained a "One command" callout pointing to it
+  (matching Parts E/I/J/K's existing callouts), and the "quickest wins" summary
+  now notes every part C-L has a one-command script.
+- Impact (other components / project): none functionally — an operational
+  convenience script plus a doc cross-reference; no source module changed. Every
+  command it runs is transcribed verbatim from the runbook's already-verified
+  `[run]` Part C prose, not new/unverified.
+- Risk (level; mitigation): low — a shell script, not exercised by the offline
+  test suite (needs the live lab). Mitigated by: `bash -n` syntax check passes;
+  every `fuzzlab` subcommand flag it passes (`crawl --start/--db/--store/
+  --identity`, `audit --spider-db/--store/--identity/--base-url`, `fuzz --url/
+  --param/--store/--identity/--authorized`, `session set-credential --host/
+  --identity/--username`, `session print --host/--identity/--base-url`) was
+  cross-checked against each CLI's actual `argparse` parser (`build_parser()`)
+  in this repo, not assumed from the runbook prose alone.
+- Deliverables:
+  - [x] `scripts/identity_auth_e2e.sh` — done.
+  - [x] Runbook Part C "One command" callout — done.
+- Effectiveness (assessed 2026-09-22): pending on-host run — the flags are
+  verified against the current CLI parsers and the script's syntax is valid,
+  but it has not yet been executed against a live lab (no lab available in this
+  environment). A future change-control entry should record the first on-host
+  run's outcome (append-only: this entry is not edited in place).
+
 ### CC-SESS-0009 — Expose `build_parser()` for the command-spec registry (2026-09-21)
 - Change: `fuzzlab/session/cli.py` now factors its argparse setup (including the
   `set-credential`/`print` subparsers) into `build_parser()`; `main()` delegates parsing.

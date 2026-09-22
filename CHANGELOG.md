@@ -14,6 +14,20 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- SESS/FUZZ/SCHED/ML/PLUG: added one-command on-host scripts for every
+  remaining `docs/ON_HOST_RUNBOOK.md` part that lacked one — Part C
+  (`scripts/identity_auth_e2e.sh`), Part D (`scripts/auto_pipeline_e2e.sh`),
+  Part F (`scripts/bandit_e2e.sh`), Part G (`scripts/classifier_e2e.sh`),
+  Part H (`scripts/ranker_e2e.sh`), and Part L
+  (`scripts/plugins_report_transfer_e2e.sh`). Every part from C through L now
+  has a `scripts/*_e2e.sh` runner, matching the convention Parts E/I/J/K
+  already established. Every command each script runs is transcribed from the
+  runbook's already-verified `[run]` prose and cross-checked against the
+  current `argparse` parsers/library signatures in this repo (not assumed);
+  none has been executed against a live lab yet (none is available in this
+  environment) — that's the next on-host session's job.
+  `CC-SESS-0010`, `CC-FUZZ-0023`, `CC-SCHED-0006`, `CC-ML-0011`, `CC-ML-0012`,
+  `CC-PLUG-0006`.
 - MUT: added advanced evasion operators `double-url-encode` and
   `unicode-fullwidth` — provably meaning-preserving WAF-bypass encoding
   tricks (double percent-encoding; Unicode fullwidth substitution folded

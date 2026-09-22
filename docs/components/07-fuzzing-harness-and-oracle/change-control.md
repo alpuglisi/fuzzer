@@ -3,6 +3,30 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0023 — One-command on-host script for Part D (2026-09-22)
+- Change: added `scripts/auto_pipeline_e2e.sh`, a one-command runner for
+  `docs/ON_HOST_RUNBOOK.md` Part D (Phase 2 automatic run + request-reduction
+  measurement): crawl + the ground-truth-scored `fuzzlab auto` detection
+  benchmark, an optional `--browser` pass (M6 DOM/stored XSS, opt-in via
+  `WITH_BROWSER=1`), the D15 no-ground-truth fail-safe check (asserts the
+  no-`--categories` call refuses loudly and mentions `--categories`, then
+  confirms the `--categories` call succeeds unscored), and a summary of
+  `pipeline_*` metrics, evaluation negatives, and the target fingerprint. Same
+  script conventions as the other `scripts/*_e2e.sh` runners.
+  `docs/ON_HOST_RUNBOOK.md` Part D gained a matching "One command" callout.
+- Impact (other components / project): none functionally — operational script
+  plus a doc cross-reference. Exercises FUZZ's `run_pipeline`/D15 fail-safe end
+  to end but changes no source module.
+- Risk (level; mitigation): low — not exercised by the offline suite (needs the
+  live lab). Mitigated by `bash -n` syntax check, an embedded-Python-heredoc
+  compile check, and cross-checking every `fuzzlab auto`/`crawl` flag used
+  against the current `argparse` parsers.
+- Deliverables:
+  - [x] `scripts/auto_pipeline_e2e.sh` — done.
+  - [x] Runbook Part D "One command" callout — done.
+- Effectiveness (assessed 2026-09-22): pending on-host run — verified statically
+  (syntax, flags, embedded Python); not yet executed against a live lab.
+
 ### CC-FUZZ-0022 — Wire `identify_technologies()` into `run_pipeline` (2026-09-22)
 - Change: `harness/pipeline.py::run_pipeline`'s existing fingerprint step (the one
   baseline probe already sent to populate the `target` row) now also calls
