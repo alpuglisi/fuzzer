@@ -14,6 +14,19 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Research: Phase 3 CWE mapping for the "file handling" corpus cell
+  (`docs/research/corpus-examples/file-handling/{php,node,python}/manifest.yaml`,
+  12 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each
+  entry per `docs/VULN_CORPUS_EXPANSION_PLAN.md` Phase 3's handoff spec
+  (CWE-434 for the upload-extension-check pairs, CWE-22 for the
+  path-traversal-confinement pairs; new proposed vocabulary — e.g.
+  `no_extension_check`/`mime_type_check`/`extension_allowlist_mime_check`/
+  `filename_charset_sanitize`/`realpath_confine`/`path_prefix_check` against
+  `fs_web_root_write`/`fs_path_read` — since none of `lab/safety_matrix.yaml`'s
+  current SQLi/XSS ops or sink families fit a file-handling shape).
+  Documentation/metadata-only: no source files altered, no pairs built, no
+  validation attempted; `validated: false`/`validated_by: []` left unchanged
+  on all 12 entries.
 - Research: Phase 3 CWE mapping for the "search-export" corpus cell
   (`docs/research/corpus-examples/search-export/{php,node,python}/manifest.yaml`,
   10 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each
