@@ -201,6 +201,12 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     # php_laravel's inventory is a strict *superset* of php_current's rather
     # than equal to it (php_current is not the migration target; §4.3.6.6b).
     ("xss", "html_attribute_quoted"): _ModuleSet("get_param", "html_attribute_quoted_echo", "render_only"),
+    # CC-LAB-0060: mass-assignment (orm_entity_bulk_assign), restoring the
+    # "Laravel carries every shape php_current supports" full-depth
+    # invariant after php_current gained this shape first.
+    ("mass_assignment", "orm_entity_bulk_assign"): _ModuleSet(
+        "all_post_params", "orm_entity_bulk_assign", "single_statement"
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -406,6 +412,19 @@ _WRITE_PROFILE_KEYS = frozenset({"stored_model", "stored_field", "owner_param", 
 _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # The original L-P3.3a illustrative pair (unchanged, kept rendering).
     "/example/product": {"var_name": "id", "param_name": "id", "table": "products", "column": "id"},
+    # CC-LAB-0060: mass-assignment illustrative pair. `allowed_fields` is what
+    # the `runtime_field_allowlist` transform allows -- the real fields this
+    # endpoint legitimately lets a user edit about themselves; `role`/
+    # `is_admin` are real columns on the same table the vulnerable twin's
+    # unfiltered write can still reach, since they are simply absent from the
+    # allowlist, not from the table itself. Mirrors
+    # `fuzzlab.labgen.emitters.php_current`'s `/account_settings.php` profile.
+    "/example/account_settings": {
+        "var_name": "postFields",
+        "table": "users",
+        "id_column": "id",
+        "allowed_fields": ("display_name", "bio", "avatar_url"),
+    },
     # POST string-literal lookup. `password_var`/`password_param` are sink
     # boilerplate (an already-hashed secret), not a second injection point.
     "/login": {

@@ -1,0 +1,23 @@
+// A bulk-assignment write: every key present in {{ value_expr }} at this point
+// (tainted when unfiltered, allowlisted when the runtime_field_allowlist
+// transform ran first) becomes a column this statement writes -- the sink
+// never filters anything itself, per this file's own "a sink never escapes
+// anything itself" convention, applied here to *which columns* rather than
+// *how a value is escaped*. Bound values are always parameters, never
+// concatenated; only the SET clause's column list is built from tainted keys.
+$__massAssignFields = {{ value_expr }};
+$__setClauses = [];
+$__boundValues = [];
+foreach ($__massAssignFields as $__col => $__val) {
+    $__setClauses[] = "$__col = ?";
+    $__boundValues[] = $__val;
+}
+if (!empty($__setClauses)) {
+    $sql = "UPDATE {{ table }} SET " . implode(', ', $__setClauses) . " WHERE {{ id_column }} = ?";
+    $__boundValues[] = $currentUser['id'];
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($__boundValues);
+    $row = ['updated_fields' => array_keys($__massAssignFields)];
+} else {
+    $row = ['updated_fields' => []];
+}

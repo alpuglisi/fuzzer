@@ -207,6 +207,14 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
     },
     "single_statement": {"body": "    // x\n", "handler_name": "handle_x"},
     "render_only": {"body": "    // x\n", "handler_name": "handle_x"},
+    # CC-LAB-0060: mass-assignment modules.
+    "all_post_params": {"var_name": "postFields"},
+    "unfiltered_body_update": {"value_expr": "$postFields"},
+    "runtime_field_allowlist": {
+        "value_expr": "$postFields",
+        "allowed_fields": ("display_name", "bio"),
+    },
+    "orm_entity_bulk_assign": {"value_expr": "$postFields", "table": "users", "id_column": "id"},
 }
 
 

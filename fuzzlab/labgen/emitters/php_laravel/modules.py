@@ -205,6 +205,26 @@ class ReadStoredFieldSource(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class AllPostParamsSource(TemplateModule):
+    """The WHOLE request body, read through ``$request->all()`` -- the
+    Laravel analogue of ``fuzzlab.labgen.modules.AllPostParamsSource``'s
+    ``$_POST`` read (CC-LAB-0060's follow-up, restoring the "Laravel carries
+    every shape php_current supports" full-depth invariant
+    ``tests/test_labgen_php_laravel_harder_shapes.py`` asserts).
+    ``GetParamSource``/``PostParamSource`` both extract exactly one named
+    parameter, the wrong shape for a bulk-assignment sink."""
+
+    def __init__(self) -> None:
+        super().__init__("all_post_params", "source", _SOURCE_ENV, "all_post_params.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = f"${ctx['var_name']}"
+        new_ctx.setdefault("bound", False)
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 # --- transforms -----------------------------------------------------------
 
 
@@ -376,6 +396,50 @@ class AttrValueAllowlistTransform(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class UnfilteredBodyUpdateTransform(TemplateModule):
+    """The ``unfiltered_body_update`` op (CC-LAB-0060, `mass_assignment`
+    concern): ``value_expr`` passes through unchanged -- every key in the
+    whole request body reaches the sink. Safety matrix: ``effect=no_effect``
+    (the vulnerable twin)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unfiltered_body_update", "transform", _TRANSFORM_ENV, "unfiltered_body_update.php.j2"
+        )
+
+
+class RuntimeFieldAllowlistTransform(TemplateModule):
+    """The ``runtime_field_allowlist`` op (CC-LAB-0060, `mass_assignment`
+    concern): rewrites ``value_expr`` to only the keys also present in
+    ``allowed_fields`` (an ordered tuple the emitter's own page profile
+    supplies -- mirrors :class:`IdentifierAllowlistTransform`'s
+    ``allowed_identifiers`` context-key convention exactly, including its
+    "raise rather than invent a default allowlist" design). Safety matrix:
+    ``effect=neutralises``, ``neutralizes: [mass_assignment]``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "runtime_field_allowlist", "transform", _TRANSFORM_ENV, "runtime_field_allowlist.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        try:
+            allowed = tuple(ctx["allowed_fields"])
+        except KeyError as exc:
+            raise ValueError(
+                "runtime_field_allowlist transform needs an 'allowed_fields' context "
+                "value (an ordered tuple of the real fields this endpoint may update) "
+                "-- the emitter's page profile must supply it; there is no safe default"
+            ) from exc
+        allowed_php = _php_string_list(allowed)
+        value_expr = ctx["value_expr"]
+        new_ctx = dict(ctx)
+        new_ctx["allowed_fields_php"] = allowed_php
+        result = TemplateModule.render(self, new_ctx)
+        new_ctx["value_expr"] = f"array_intersect_key({value_expr}, array_flip([{allowed_php}]))"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 # --- sinks ----------------------------------------------------------------
 #
 # Every sink branches on `bound` where a bound form exists at all, so one
@@ -502,6 +566,27 @@ class SqlStringLiteralLikeSink(TemplateModule):
 
     def __init__(self) -> None:
         super().__init__("sql_string_literal_like", "sink", _SINK_ENV, "sql_string_literal_like.php.j2")
+
+
+class OrmEntityBulkAssignSink(TemplateModule):
+    """The ``orm_entity_bulk_assign`` sink family (CC-LAB-0060,
+    mass-assignment). Unlike ``fuzzlab.labgen.modules``' php_current
+    analogue -- plain PDO, which needs a runtime ``foreach`` to build a SET
+    clause by hand -- Laravel's Query Builder ``update()`` accepts an
+    associative array directly (``DB::table(...)->update($fields)``), a
+    genuine, idiomatic one-line Laravel equivalent, not a manufactured
+    workaround for a Laravel limitation. Deliberately ``DB::table()``, not
+    an Eloquent model's own ``update()``: Eloquent's ``$fillable``/
+    ``$guarded`` is a model-class property with no existing module category
+    in either registry for emitting a separate model file (the reason an
+    earlier draft of CC-LAB-0060 was re-scoped away from Eloquent
+    entirely); the Query Builder bypasses Eloquent's mass-assignment guard
+    the same way raw PDO does, which is exactly the vulnerability class
+    this sink renders -- and it is real, commonly-used Laravel API, not a
+    contrivance to dodge the model-file problem."""
+
+    def __init__(self) -> None:
+        super().__init__("orm_entity_bulk_assign", "sink", _SINK_ENV, "orm_entity_bulk_assign.php.j2")
 
 
 # --- views (the `view` module category, L-P3.3c-G2) -----------------------
@@ -761,6 +846,7 @@ SOURCES: dict[str, Module] = {
     "get_param": GetParamSource(),
     "post_param": PostParamSource(),
     "read_stored_field": ReadStoredFieldSource(),
+    "all_post_params": AllPostParamsSource(),
 }
 #: Transform ops. Every name here must also have a row for every sink family
 #: it is authored against in ``lab/safety_matrix.yaml`` -- an op this emitter
@@ -776,6 +862,8 @@ TRANSFORMS: dict[str, Module] = {
     "identifier_allowlist": IdentifierAllowlistTransform(),
     "url_scheme_allowlist": UrlSchemeAllowlistTransform(),
     "attr_value_allowlist": AttrValueAllowlistTransform(),
+    "unfiltered_body_update": UnfilteredBodyUpdateTransform(),
+    "runtime_field_allowlist": RuntimeFieldAllowlistTransform(),
 }
 #: Sinks. The three HTML sinks render a **Blade view** body rather than a
 #: controller statement; :data:`VIEW_SINKS` names them so the emitter knows
@@ -793,6 +881,7 @@ SINKS: dict[str, Module] = {
     # rendering of the existing `sql_string_literal` family.
     "html_attribute_quoted_echo": HtmlAttributeQuotedEchoSink(),
     "sql_string_literal_like": SqlStringLiteralLikeSink(),
+    "orm_entity_bulk_assign": OrmEntityBulkAssignSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

@@ -1542,6 +1542,77 @@ lane) can submit a payload as
   sink_family)` key across the 102 entries; `tests/test_labgen_verdict.py`
   (15 tests, pre-existing entries only) stays green, unchanged.
 
+- **FR-LAB-57** *(implements code generation for `orm_entity_bulk_assign`
+  in `php_current`'s shared module registry, per `CC-LAB-0060`, drafted and
+  reviewed through this project's new pre-change review gate,
+  `docs/components/README.md`, before implementation.)* First scoped
+  increment of the module-template half `FR-LAB-56` left unstarted: 2 of
+  the family's 10 `lab/safety_matrix.yaml` ops (`unfiltered_body_update`
+  vulnerable, `runtime_field_allowlist` secure), in the shared
+  `fuzzlab.labgen.modules` registry (`fuzzlab/labgen/modules/__init__.py`,
+  `php_current`'s package) — not `php_laravel` directly, since
+  `php_laravel`'s own module names must already exist in this shared
+  registry for `fuzzlab.labgen.minimal_pair`'s composition-line classifier
+  to pass (its `_MODULE_CATEGORY` dict is built only from this package's
+  `SOURCES`/`TRANSFORMS`/`SINKS`/`COMPLEXITIES`, never from an individual
+  emitter's own dicts); an earlier draft of `CC-LAB-0060` targeted
+  `php_laravel`'s Eloquent `$fillable`/`$guarded` directly and was
+  re-scoped away from that in review for exactly this reason, plus a
+  second one — Eloquent's mass-assignment guard is a model-class property,
+  not a value-expression rewrite, and neither registry has an existing
+  module category for emitting a separate model file, while plain PDO has
+  no such mismatch (every module here composes into one inline PHP
+  fragment already). Four new modules: one source, `all_post_params`
+  (publishes `value_expr = "$_POST"`, the whole array — `GetParamSource`/
+  `PostParamSource` both extract exactly one named parameter, the wrong
+  shape here); two transforms, `unfiltered_body_update` (passes
+  `value_expr` through unchanged) and `runtime_field_allowlist` (rewrites
+  it to `array_intersect_key($_POST, array_flip($allowed_fields))`,
+  `allowed_fields` supplied by the emitter's own page profile — mirrors
+  `IdentifierAllowlistTransform`'s `allowed_identifiers` convention
+  exactly, including its "raise rather than invent a default allowlist"
+  design); one sink, `orm_entity_bulk_assign` (builds and executes a
+  parameterized `UPDATE ... SET ...` at runtime from whatever keys survive
+  in `value_expr` — column *names* come from the array's keys, bound
+  *values* are always parameters). Unlike every other sink here (each a
+  single-line `value_expr` interpolation, since each handles one tainted
+  scalar), this sink's template needs its own runtime PHP `foreach` to
+  build both the SET-clause text and a positionally-matching bound-values
+  array — real new implementation surface, not a reuse of
+  `sql_identifier_order_by.php.j2`'s single-value-substitution pattern.
+  `php_current`'s own `_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS` (a new
+  `/account_settings.php` profile: `table: users`, `id_column: id`,
+  `allowed_fields: (display_name, bio, avatar_url)`) and
+  `fuzzlab/labgen/conformance/static_precheck.py`'s
+  `STATIC_PRECHECK_BY_SHAPE[("mass_assignment", "orm_entity_bulk_assign")]
+  = UNINFORMATIVE` (needed for `tests/test_labgen_mass_assignment.py`'s
+  static-precheck test, which `static_precheck_status()` would otherwise
+  `KeyError` on for an unregistered shape) — both discovered as real gaps
+  during implementation, not anticipated by the reviewed change-control
+  draft, and reflected back into it per the draft's own "a real divergence
+  found during implementation gets reflected back into the entry" rule —
+  were also added. New manifest `lab/manifests/mass_assignment_sample.yaml`
+  (`class: mass_assignment`, a new `vuln_class` value; confirmed this is a
+  plain open string in both `lab/schemas/manifest.schema.json` and
+  `fuzzlab/labgen/schema.py`, not a closed enum) carries the vulnerable/
+  secure minimal pair, both cells sharing the identical
+  `sink_context.required_neutralizations: [mass_assignment]` (the static-
+  per-sink-family convention every existing pair already follows).
+  Explicit deferral, unchanged from the reviewed draft: the other 8
+  `orm_entity_bulk_assign` ops (JS/GraphQL/Sequelize-shaped op names from
+  the corpus's Node anchors that do not map naturally onto this registry's
+  plain-PDO idiom), `php_laravel`/`python_fastapi`/`node_express` reusing
+  these same registered names for their own native rendering, and the
+  other 19 new sink families `FR-LAB-56` left registry-only. Verified:
+  both cells render via `PhpCurrentEmitter`, `php -l` clean, `verdict()`
+  derives `VULNERABLE`/`trivial` and `SECURE` respectively, 20 new tests in
+  `tests/test_labgen_mass_assignment.py` pass; `lab-generate --check`
+  against the new manifest fails only on this sandbox's two pre-existing,
+  unrelated environment gaps (`gitleaks` not on `PATH`, `numpy` not
+  installed — confirmed identical against `lab/manifests/
+  phase1_harder_shapes_sample.yaml` run the same way), the same gates
+  every other manifest in this repository currently fails on here.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

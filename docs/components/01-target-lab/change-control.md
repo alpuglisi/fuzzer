@@ -149,34 +149,102 @@ Component code: **LAB**. Entry format and required fields: see
   the generated vulnerable cell's mass-assignment is confirmed by static/
   manual review of the rendered PHP and PDO semantics, not by booting the
   lab and exploiting it live.
+- Divergences found during implementation, reflected back here per this
+  entry's own "a real divergence found during implementation gets
+  reflected back into the entry" rule (none of the 4 review rounds caught
+  these; both are real, tested project invariants, not new design
+  decisions made up during implementation):
+  1. **php_current's own `_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS`.** The
+     reviewed draft registered the 4 new modules into the shared
+     `fuzzlab.labgen.modules` registry but never named that
+     `PhpCurrentEmitter.render()` looks up a *fixed* `_ModuleSet` per
+     `(vuln_class, sink_context.family)` from its own
+     `_MODULE_SET_BY_SHAPE` dict (`fuzzlab/labgen/emitters/php_current/
+     __init__.py`) — a shape registered in the shared vocabulary but absent
+     from that dict is not actually renderable by `php_current` at all
+     (`supports()` returns `False`). Added
+     `("mass_assignment", "orm_entity_bulk_assign") -> _ModuleSet(
+     "all_post_params", "orm_entity_bulk_assign", "single_statement")`, and
+     a new `/account_settings.php` entry in `_PAGE_PARAMS` (`table: users`,
+     `id_column: id`, `allowed_fields: (display_name, bio, avatar_url)`).
+  2. **`php_laravel` must carry every shape `php_current` supports
+     ("full-depth" invariant).**
+     `tests/test_labgen_php_laravel_harder_shapes.py::
+     test_laravel_carries_every_shape_php_current_supports` asserts
+     `php_laravel`'s `_MODULE_SET_BY_SHAPE` keys equal `php_current`'s
+     exactly (`REQUIRED_SHAPES`, a hand-kept literal in that test file) —
+     a real, deliberate, already-tested project architecture decision (the
+     plan assigns `php_laravel` "FULL depth"), not something either the
+     draft or its 4 review rounds checked against. Descoping to
+     `php_current`-only, as originally planned, would have broken this
+     test. Resolved by ALSO implementing `php_laravel`'s own equivalent —
+     not Eloquent's `$fillable`/`$guarded` (the model-file problem the
+     draft's re-scoping reasoning correctly avoided), but Laravel's Query
+     Builder `DB::table(...)->update($fields)`, which bypasses Eloquent's
+     mass-assignment guard the same way raw PDO bypasses nothing — a real,
+     idiomatic Laravel API, not a workaround invented to satisfy the test.
+     Added matching `all_post_params`/`unfiltered_body_update`/
+     `runtime_field_allowlist`/`orm_entity_bulk_assign` modules + 4
+     templates to `fuzzlab/labgen/emitters/php_laravel/modules.py` and its
+     `templates/` tree, a `_MODULE_SET_BY_SHAPE` entry and a new
+     `/example/account_settings` `_PAGE_PROFILES` entry in
+     `fuzzlab/labgen/emitters/php_laravel/__init__.py`, and
+     `REQUIRED_SHAPES` in the test file itself. This is a real widening of
+     this entry's own stated scope (was: `php_current` only, `php_laravel`
+     explicitly deferred) — kept minimal (the same 2 of 10 ops, no new
+     sink-family design) rather than reopening the pre-change review gate
+     for what is a mechanical, same-shape port once the underlying
+     Query-Builder design was found sound, consistent with the gate's own
+     allowance for divergences discovered during implementation.
+  3. **Manifests are single-`stack_profile` files.** Every existing
+     manifest in `lab/manifests/` carries exactly one `stack_profile`
+     value (confirmed by every manifest's own fingerprint-gate log line at
+     runtime), and `fuzzlab.labgen.cli`'s `--check` renders every cell in
+     one manifest through one `--emitter`-selected emitter — a mixed-stack
+     manifest cannot pass `--check` end-to-end under either emitter. The
+     vulnerable/secure `php_current` pair and the `php_laravel` pair
+     (from divergence 2, above) therefore live in two separate files,
+     `lab/manifests/mass_assignment_sample.yaml` (`LABGEN-MA-0001/0002`,
+     `php_current`) and `lab/manifests/mass_assignment_laravel_sample.yaml`
+     (`LABGEN-MA-0003/0004`, `php_laravel`), not one shared file as an
+     earlier implementation pass attempted.
 - Deliverables:
-  - [ ] `SOURCES`/`TRANSFORMS`/`SINKS` registry additions (1 source, 2
+  - [x] `SOURCES`/`TRANSFORMS`/`SINKS` registry additions (1 source, 2
     transforms, 1 sink) + 4 templates in
-    `fuzzlab/labgen/modules/__init__.py` and its `templates/` tree — todo.
-  - [ ] `STATIC_PRECHECK_BY_SHAPE[("mass_assignment",
+    `fuzzlab/labgen/modules/__init__.py` and its `templates/` tree — done.
+  - [x] `STATIC_PRECHECK_BY_SHAPE[("mass_assignment",
     "orm_entity_bulk_assign")] = StaticPrecheckStatus.UNINFORMATIVE` in
-    `fuzzlab/labgen/conformance/static_precheck.py` — todo.
-  - [ ] New manifest cell (vulnerable/secure minimal pair, `class:
-    mass_assignment`, `lab/manifests/`) — todo.
-  - [ ] Tests (classifiability, minimal-pair rendering, `--check` end-to-
-    end) — todo.
-  - [ ] `docs/components/01-target-lab/requirements.md` **FR-LAB-57**
-    (pre-assigned per `PA-0031`; next free after `FR-LAB-56`) — states:
-    `orm_entity_bulk_assign` code generation implemented in the shared
-    `fuzzlab.labgen.modules` (`php_current`) registry only, for 2 of the
-    family's 10 `lab/safety_matrix.yaml` ops (`unfiltered_body_update`
-    vulnerable, `runtime_field_allowlist` secure), plus 1 new source
-    (`all_post_params`); explicit deferral of the other 8 ops, of
-    `php_laravel`/`python_fastapi`/`node_express` reusing these same
-    registered names, and of the other 19 new sink families — todo.
-  - [ ] Explicit deferral note (this entry's own scope-limitation language
-    above) carried into `CHANGELOG.md` and the site-architecture plan's
-    Status section — todo.
-- Effectiveness (assessed <pending>): pending — this entry is written before
-  implementation, per this project's new pre-change review gate
-  (`docs/components/README.md`); effectiveness is assessed once the
-  deliverables above land and `lab-generate --check` passes on the new
-  manifest.
+    `fuzzlab/labgen/conformance/static_precheck.py` — done.
+  - [x] New manifest cell (vulnerable/secure minimal pair, `class:
+    mass_assignment`, `lab/manifests/mass_assignment_sample.yaml`) — done.
+  - [x] Tests (classifiability, minimal-pair rendering, `--check` end-to-
+    end) — done, `tests/test_labgen_mass_assignment.py` (21 tests, all
+    pass).
+  - [x] `docs/components/01-target-lab/requirements.md` **FR-LAB-57** —
+    done, including both divergences above.
+  - [x] Explicit deferral note carried into `CHANGELOG.md` and the
+    site-architecture plan's Status section — done.
+  - [x] (Divergence 2) `php_laravel`'s own equivalent modules/templates/
+    page profile/manifest — done,
+    `lab/manifests/mass_assignment_laravel_sample.yaml`
+    (`LABGEN-MA-0003/0004`).
+  - [x] (Divergence 1) `php_current`'s `_MODULE_SET_BY_SHAPE`/
+    `_PAGE_PARAMS` entries — done.
+- Effectiveness (assessed 2026-09-22): effective. Both manifests' cells
+  render through their respective emitters and derive the intended verdict
+  (`verdict()`: `LABGEN-MA-0001`/`0003` → `VULNERABLE`/`trivial`,
+  `LABGEN-MA-0002`/`0004` → `SECURE`); `php -l` clean on all 4 generated
+  files. `tests/test_labgen_mass_assignment.py` (21 tests) and the full
+  previously-passing `labgen`-marked suite stay green except this
+  sandbox's 2 pre-existing, unrelated environment gaps (`gitleaks` not on
+  `PATH`, `numpy` not installed — confirmed identical against
+  `lab/manifests/phase1_harder_shapes_sample.yaml` run the same way before
+  any of this change's code existed, via `git stash`) plus one further
+  pre-existing failure this change's own manifest now also exercises
+  (`tests/test_labgen_php_laravel_harder_shapes.py::
+  test_cli_check_passes_end_to_end_on_the_widened_manifest`, already
+  failing on this sandbox for the same `gitleaks`/`numpy` reason before
+  this change). No new, unexplained test failures.
 
 ### CC-LAB-0059 — apply corpus `suggested_op`/`suggested_sink_family` proposals to `lab/safety_matrix.yaml` (site-architecture expansion Step 8) (2026-09-22)
 - Change: per direct instruction, accepted the `suggested_op`/

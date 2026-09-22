@@ -1,0 +1,33 @@
+# Mass-assignment sample manifest (CC-LAB-0060/FR-LAB-57), php_laravel.
+#
+# php_laravel's own twin pair for the `orm_entity_bulk_assign` shape,
+# restoring the "Laravel carries every shape php_current supports"
+# full-depth invariant `tests/test_labgen_php_laravel_harder_shapes.py`
+# asserts, after `lab/manifests/mass_assignment_sample.yaml`'s php_current
+# pair added this shape first. Rendered via `DB::table()->update()`
+# (Laravel's Query Builder, which bypasses Eloquent's own
+# `$fillable`/`$guarded` mass-assignment guard the same way raw PDO
+# bypasses nothing) instead of php_current's hand-rolled PDO statement --
+# see `fuzzlab/labgen/emitters/php_laravel/modules.py`'s
+# `OrmEntityBulkAssignSink` docstring for why this is a genuine Laravel
+# idiom, not a manufactured workaround.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-MA-0003
+    class: mass_assignment
+    stack_profile: php_laravel
+    route: { method: POST, path: /example/account_settings }
+    sink_context:
+      family: orm_entity_bulk_assign
+      required_neutralizations: [mass_assignment]
+    transform: [unfiltered_body_update]
+
+  - cell_id: LABGEN-MA-0004
+    class: mass_assignment
+    stack_profile: php_laravel
+    route: { method: POST, path: /example/account_settings }
+    sink_context:
+      family: orm_entity_bulk_assign
+      required_neutralizations: [mass_assignment]
+    transform: [runtime_field_allowlist]

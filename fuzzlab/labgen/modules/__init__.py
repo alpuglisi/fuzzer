@@ -168,6 +168,24 @@ class ReadStoredFieldSource(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class AllPostParamsSource(TemplateModule):
+    """Extracts the WHOLE ``$_POST`` array (not one named parameter) into a
+    PHP variable and publishes it as ``value_expr`` -- the mass-assignment
+    family's source shape (``orm_entity_bulk_assign``, CC-LAB-0060).
+    ``GetParamSource``/``PostParamSource`` both extract exactly one named
+    parameter, the wrong shape for a bulk-assignment sink, which needs the
+    whole tainted key/value map to decide which fields get written."""
+
+    def __init__(self) -> None:
+        super().__init__("all_post_params", "source", _SOURCE_ENV, "all_post_params.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = f"${ctx['var_name']}"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 class IdentityTransform(TemplateModule):
     """The empty-pipeline transform: the tainted value is used as-is. Used
     whenever a cell's ``transform`` pipeline has no ops. Family-agnostic --
@@ -175,6 +193,51 @@ class IdentityTransform(TemplateModule):
 
     def __init__(self) -> None:
         super().__init__("identity", "transform", _TRANSFORM_ENV, "identity.php.j2")
+
+
+class UnfilteredBodyUpdateTransform(TemplateModule):
+    """The ``unfiltered_body_update`` op (CC-LAB-0060, `mass_assignment`
+    concern): ``value_expr`` passes through unchanged -- every key in the
+    whole tainted array reaches the sink, including any the endpoint never
+    intended to accept. Safety matrix: ``effect=no_effect`` (the vulnerable
+    twin)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unfiltered_body_update", "transform", _TRANSFORM_ENV, "unfiltered_body_update.php.j2"
+        )
+
+
+class RuntimeFieldAllowlistTransform(TemplateModule):
+    """The ``runtime_field_allowlist`` op (CC-LAB-0060, `mass_assignment`
+    concern): rewrites ``value_expr`` to only the keys also present in
+    ``allowed_fields`` (an ordered tuple the emitter's own page profile
+    supplies -- mirrors :class:`IdentifierAllowlistTransform`'s
+    ``allowed_identifiers`` context-key convention exactly, including its
+    "raise rather than invent a default allowlist" design). Safety matrix:
+    ``effect=neutralises``, ``neutralizes: [mass_assignment]``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "runtime_field_allowlist", "transform", _TRANSFORM_ENV, "runtime_field_allowlist.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        try:
+            allowed = tuple(ctx["allowed_fields"])
+        except KeyError as exc:
+            raise ValueError(
+                "runtime_field_allowlist transform needs an 'allowed_fields' context "
+                "value (an ordered tuple of the real fields this endpoint may update) "
+                "-- the emitter's page profile must supply it; there is no safe default"
+            ) from exc
+        allowed_php = _php_string_list(allowed)
+        value_expr = ctx["value_expr"]
+        new_ctx = dict(ctx)
+        new_ctx["allowed_fields_php"] = allowed_php
+        result = TemplateModule.render(self, new_ctx)
+        new_ctx["value_expr"] = f"array_intersect_key({value_expr}, array_flip([{allowed_php}]))"
+        return RenderResult(code=result.code, context=new_ctx)
 
 
 class ParamBindTransform(TemplateModule):
@@ -480,6 +543,26 @@ class SqlStringLiteralLikeSink(TemplateModule):
         super().__init__("sql_string_literal_like", "sink", _SINK_ENV, "sql_string_literal_like.php.j2")
 
 
+class OrmEntityBulkAssignSink(TemplateModule):
+    """The ``orm_entity_bulk_assign`` sink family (CC-LAB-0060,
+    mass-assignment): builds and executes a parameterized ``UPDATE ... SET
+    ...`` at runtime from whatever keys are present in ``value_expr``'s
+    array. Column *names* come from the array's own keys -- tainted when
+    unfiltered, allowlisted when the ``runtime_field_allowlist`` transform
+    has run first; bound *values* are always parameters, never
+    concatenated. Unlike every other sink here (each a single-line
+    ``{{ value_expr }}`` interpolation, since each handles exactly one
+    tainted scalar), this sink's template needs its own runtime PHP
+    ``foreach`` over the array to build both the SET-clause text and a
+    positionally-matching bound-values array -- real new surface, not a
+    reuse of :class:`SqlIdentifierOrderBySink`'s single-value-substitution
+    pattern. No Jinja-level loop is needed: the column set isn't known
+    until PHP runtime, since the keys are attacker-controlled."""
+
+    def __init__(self) -> None:
+        super().__init__("orm_entity_bulk_assign", "sink", _SINK_ENV, "orm_entity_bulk_assign.php.j2")
+
+
 class SingleStatementComplexity(TemplateModule):
     """The simplest complexity wrapper: the composed source/transform/sink
     body as the entire body of one function. Later complexity modules
@@ -555,6 +638,8 @@ SOURCES: dict[str, Module] = {
     "get_param": GetParamSource(),
     "post_param": PostParamSource(),
     "read_stored_field": ReadStoredFieldSource(),
+    # CC-LAB-0060: mass-assignment's whole-array source (vs. one named param).
+    "all_post_params": AllPostParamsSource(),
 }
 TRANSFORMS: dict[str, Module] = {
     "identity": IdentityTransform(),
@@ -569,6 +654,10 @@ TRANSFORMS: dict[str, Module] = {
     "identifier_allowlist": IdentifierAllowlistTransform(),
     "url_scheme_allowlist": UrlSchemeAllowlistTransform(),
     "attr_value_allowlist": AttrValueAllowlistTransform(),
+    # CC-LAB-0060: mass-assignment ops (lab/safety_matrix.yaml's
+    # orm_entity_bulk_assign rows).
+    "unfiltered_body_update": UnfilteredBodyUpdateTransform(),
+    "runtime_field_allowlist": RuntimeFieldAllowlistTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -587,6 +676,8 @@ SINKS: dict[str, Module] = {
     # deliberately not widened to either.
     "html_attribute_quoted_echo": HtmlAttributeQuotedEchoSink(),
     "sql_string_literal_like": SqlStringLiteralLikeSink(),
+    # CC-LAB-0060: mass-assignment's sink family.
+    "orm_entity_bulk_assign": OrmEntityBulkAssignSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

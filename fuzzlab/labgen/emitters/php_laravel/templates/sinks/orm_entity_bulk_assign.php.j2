@@ -1,0 +1,11 @@
+// A bulk-assignment write via the Query Builder: every key present in
+// {{ value_expr }} at this point (tainted when unfiltered, allowlisted when
+// the runtime_field_allowlist transform ran first) becomes a column this
+// statement writes. DB::table()->update() bypasses Eloquent's own
+// $fillable/$guarded mass-assignment guard entirely -- the same
+// vulnerability class raw PDO exhibits, reached through Laravel's real,
+// idiomatic Query Builder API rather than a manufactured workaround. The
+// sink never filters anything itself.
+$__massAssignFields = {{ value_expr }};
+DB::table('{{ table }}')->where('{{ id_column }}', $request->user()->id)->update($__massAssignFields);
+$rows = ['updated_fields' => array_keys($__massAssignFields)];

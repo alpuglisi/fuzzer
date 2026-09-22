@@ -14,6 +14,28 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- LAB: implemented code generation for `orm_entity_bulk_assign`
+  (mass-assignment, registry-only since `CC-LAB-0059`/`FR-LAB-56`) in
+  `php_current`'s shared `fuzzlab.labgen.modules` registry (1 new source,
+  2 new transforms, 1 new sink, 4 templates), drafted and reviewed through
+  the new pre-change gate before implementation. Mid-implementation, found
+  and closed two real gaps the reviewed draft missed: `php_current` needs
+  its own `_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS` entries to actually render
+  the shape, and `php_laravel` must carry every shape `php_current`
+  supports (a tested "full depth" invariant) — added the equivalent
+  `php_laravel` modules too, using Laravel's Query Builder
+  `DB::table()->update()` (which bypasses Eloquent's `$fillable`/
+  `$guarded` guard the same way raw PDO bypasses nothing) rather than the
+  Eloquent-model design an earlier draft had already ruled out. New
+  manifests `lab/manifests/mass_assignment_sample.yaml` (php_current) and
+  `lab/manifests/mass_assignment_laravel_sample.yaml` (php_laravel), 21
+  new tests (`tests/test_labgen_mass_assignment.py`), `CC-LAB-0060`/
+  `FR-LAB-57`. Verified: both stacks' cells render and derive the
+  intended verdict, `php -l` clean, full `labgen`-marked suite unchanged
+  at 29 pre-existing failures (this sandbox's missing `gitleaks`/`numpy`),
+  zero new regressions. Other 8 ops of this family, the other 19 new sink
+  families, and `python_fastapi`/`node_express` remain registry-only,
+  explicitly deferred.
 - Process: per direct instruction, added a pre-change review gate to
   `docs/components/README.md` — for a substantive component change, the
   change-control entry is now drafted first, reviewed by 2 independent

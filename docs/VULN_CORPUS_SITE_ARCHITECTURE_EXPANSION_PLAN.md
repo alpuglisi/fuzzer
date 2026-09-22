@@ -227,3 +227,12 @@ entry are the proposal a later change accepts, renames, or merges.
       `CC-LAB-0059`/`FR-LAB-56` (see Step 8 above). Registry-only: emitter/
       module code generation for the 20 new sink families remains a
       separate, unstarted follow-up.
+- [x] Emitter/module code generation, first increment — `orm_entity_bulk_
+      assign` (mass-assignment) implemented in `php_current` and
+      `php_laravel` (`CC-LAB-0060`/`FR-LAB-57`, drafted and reviewed
+      through this project's new pre-change review gate before
+      implementation, per direct instruction). 2 of the family's 10 ops;
+      the other 8 ops, the other 19 new sink families, and
+      `python_fastapi`/`node_express` remain registry-only, explicitly
+      deferred — not all 20 families x 4 emitters in one pass, matching
+      this plan's own "scope per wave" convention.
