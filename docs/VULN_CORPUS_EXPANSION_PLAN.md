@@ -234,6 +234,10 @@ from the directory listing alone, without opening the manifest. Each
   license: MIT
   pattern: "unchecked extension, moved into web-root"
   notes: "mirrors puppy-fort-factory's own unrestricted-upload shape"
+  validated: false   # every entry defaults to this the moment it's created,
+                      # Phase 2 or Phase 3 -- see Phase 3's "Validated data
+                      # only reaches lab-generation-facing files"
+  validated_by: []   # populated only once validated: true is set
 ```
 
 The full 40-character commit SHA (never a branch/tag — branches move and
@@ -332,6 +336,8 @@ fields to each existing entry rather than creating a second file:
   license: MIT
   pattern: "unchecked extension, moved into web-root"
   notes: "mirrors puppy-fort-factory's own unrestricted-upload shape"
+  validated: false   # already set by Phase 2 -- see Phase 2's
+  validated_by: []   # "Organization and metadata" for these two fields
   # --- appended during Phase 3 ---
   cwe: [CWE-434]
   suggested_op: extension_denylist_check   # Phase 3's best guess at a
@@ -383,13 +389,28 @@ rather than continuing to search for a naturally-occurring match:
    content-confinement fix from this session for the actual invariant being
    mirrored here, even though this corpus predates and feeds the generator
    rather than being generator output itself).
-2. **Generate more than one such pair per CWE.** A single pair proves the
-   alteration is *possible*, not that it's *representative* — produce at
-   least 2 distinct pairs per CWE (from different collected examples, or
-   different plausible injection points in the same example if only one
-   source example exists for that cell), so a later human/agent reviewing
-   the corpus can see the CWE's shape hold across more than one instance
-   before it's trusted enough to justify a new `safety_matrix.yaml` row.
+2. **Generate more than one such pair per CWE — floor scaled to available
+   source material, not a fixed count.** A single pair proves the
+   alteration is *possible*, not that it's *representative*. Research into
+   established benchmark/dataset conventions (Juliet, OWASP Benchmark,
+   CVEfixes/BigVul/D2A) found no universal fixed minimum — purpose-built
+   suites like Juliet go big (dozens of flow-pattern variants per CWE) for
+   a stated reason (stress-testing static analyzers across control/data-flow
+   shapes) that doesn't apply at this corpus's scale, while mined corpora
+   (CVEfixes/BigVul) are naturally imbalanced with no target at all.
+   Borrowing an arbitrary fixed number from neither precedent would be
+   unmoored, so instead scale the floor to what Phase 2 actually collected
+   for that CWE's feature+language cell: **generate pairs for at least half
+   of that cell's available source examples, minimum 2** (a cell with only
+   2 source examples uses both; a cell with 4-5 uses at least 2-3). This
+   keeps the proof-burden proportional to what's actually on hand rather
+   than either overclaiming variety from a thin cell or leaving usable
+   source material idle in a well-stocked one. A naturally-collected pair
+   that already satisfies the same CWE contrast (the wild genuinely offered
+   both a vulnerable and a fixed real-world example of it) **counts toward
+   this floor** — manufacturing is how gaps get closed, not a mandate to
+   re-derive evidence Phase 2 already collected for free. Only the shortfall
+   between what's naturally paired and the floor needs deliberate alteration.
 3. Store the altered pair alongside (never overwriting) the original
    collected file: add `vulnerable-<n>-altered.<ext>` /
    `idiomatic-<n>-altered.<ext>` naming for a manufactured pair, distinct
@@ -407,26 +428,108 @@ a real live-boot harness for the generator itself rather than trusting a
 rendered file's syntax validity alone (`fuzzlab/labgen/conformance/
 live_boot.py`). Before a pair counts as validated:
 
+**Validation execution sandbox (required before any DYNAMIC/execution
+check — not required for the static-analysis tools below, which only
+parse/scan source text and never run it).** Actually executing
+deliberately-vulnerabilized third-party code is a distinct, real risk
+surface, separate from and in addition to this project's existing lab
+safety doctrine (`CLAUDE.md`'s loopback-only/`--authorized`-gated posture
+governs the *generated lab*; this governs *running arbitrary altered
+source during corpus validation*, which the lab doctrine doesn't cover).
+Research into how established benchmarks handle this found a useful
+negative data point: CVEfixes/BigVul/D2A never execute their vulnerable
+examples at all (purely static mining), and OWASP Benchmark/Juliet/
+WebGoat/DVWA's own guidance is "never expose to a network, run in an
+isolated VM/container" without prescribing execution containment beyond
+that — so this goes further than established precedent and needs its own
+explicit rule, not an inherited one:
+
+- **Network: zero outbound by default, no exceptions via allow-listing.**
+  Command-injection and SSRF payloads are specifically designed to make
+  the target reach out; an egress filter or allow-list is not reliable
+  containment (DNS exfiltration and IP-literal SSRF both defeat naive
+  filtering). Run every dynamic check with no network namespace/bridge at
+  all. If a specific CWE's proof genuinely requires an external-looking
+  endpoint (confirming an SSRF fired), the target is a mock server inside
+  the *same* isolated network namespace — never the real internet, never a
+  route back to the host.
+- **Filesystem: ephemeral, scoped to the one fixture, destroyed per run.**
+  Mount only the specific pair under test, read-only where the runtime
+  allows it, a small tmpfs for scratch output. No reuse across runs and no
+  persistent volume, so a path-traversal payload that manages to write
+  somewhere can't contaminate the next validation.
+- **Resource/time limits per run:** a memory cap, a `pids-limit` (blocks
+  fork bombs), a wall-clock timeout (kill the run rather than let it hang),
+  non-root user, all capabilities dropped, `no-new-privileges`.
+- **Runtime: gVisor (`runsc`), not plain Docker/`runc`.** A dynamic check
+  deliberately triggers real command execution (command-injection payloads
+  are host-kernel-facing arbitrary code execution, not merely file/network
+  misuse) across three language runtimes — a bigger threat than typical
+  container isolation is built for. gVisor is a drop-in Docker runtime
+  swap (`--runtime=runsc`, no architecture change, no VM images) that
+  intercepts syscalls in userspace specifically for running third-party/
+  untrusted code, and is the proportionate choice for a small research
+  project (Firecracker/microVMs are the stronger option, worth it only at
+  a scale — large-volume or multi-tenant — this project isn't at).
+- **Explicit opt-in, audited per run** — mirroring the lab's own
+  `--authorized` flag pattern rather than inventing a separate convention:
+  a dynamic-check run requires an explicit flag, and every run is logged
+  (which payload, which CWE, which fixture, pass/fail), so running a
+  validation batch is always a visible, reviewable action, never an
+  implicit side effect of some other command.
+
+A concrete example invocation shape (illustrative, not a final CLI spec):
+`docker run --runtime=runsc --network none --read-only --tmpfs /tmp
+--cap-drop ALL --security-opt no-new-privileges --pids-limit 64
+--memory 256m --user nobody <validation-image> <fixture-path>`, with a
+wall-clock timeout wrapping the whole invocation and the container
+destroyed immediately after. The static-analysis tools in step 2 below
+(Semgrep, Bandit, Psalm, eslint-plugin-security) run directly, unsandboxed
+— they read and pattern-match source text, they never execute it, so none
+of the above applies to them.
+
 1. **Structural check:** confirm the vulnerable and safe sides of a pair
    differ only in the mechanism the CWE describes — the same confinement
-   check `minimal_pair.py` performs on generator output, applied here by a
-   human/agent diffing the pair directly (an automated equivalent isn't
-   assumed to exist for arbitrary collected languages/frameworks; do this
-   by inspection unless a suitable static tool is already in hand for that
-   language).
+   check `minimal_pair.py` performs on generator output, applied here to
+   arbitrary collected-language source. Use **difftastic**
+   (github.com/Wilfred/difftastic) as the one structural-diff CLI across
+   all three stacks this corpus targets (PHP, JS/TS, Python) — it's
+   tree-sitter-based, ignores whitespace/formatting-only differences, and
+   needs no per-language setup (`difft <vulnerable-file> <safe-file>`).
+   Fall back to a language-native AST dump only when a claim needs
+   programmatic (not just visual) confirmation that exactly one
+   node/call-expression differs: `nikic/PHP-Parser` or the `php-ast`
+   extension for PHP, `@babel/parser` for JS/TS, the stdlib `ast` module
+   (`ast.dump(node, indent=...)`) for Python.
 2. **Behavioral check, where the language/stack allows it:** actually
-   exercise the vulnerable side and confirm it's exploitable (a real
-   payload triggers the described effect) and the safe side isn't, the same
-   standard this session's live-boot work applied to the `php_laravel`
-   emitter's own output. Where standing the collected code up to actually
-   run it isn't practical (a fragment with no runnable harness around it,
-   a language/framework this project has no runtime for), fall back to a
-   static-analysis tool appropriate to that CWE/language (e.g. a linter or
-   SAST rule that specifically flags the CWE) as the next-best evidence,
-   and record in the `manifest.yaml` entry which validation method was
-   actually used (`validated_by: dynamic|static|manual-review`) — never
-   silently treat a weaker check as equivalent to a stronger one without
-   saying so.
+   exercise the vulnerable side, inside the sandbox above, and confirm
+   it's exploitable (a real payload triggers the described effect) and the
+   safe side isn't — the same standard this session's live-boot work
+   applied to the `php_laravel` emitter's own output. Where standing the
+   collected code up to actually run it isn't practical (a fragment with
+   no runnable harness around it, a language/framework this project has no
+   runtime for), fall back to a static-analysis tool as the next-best
+   evidence (no sandbox needed for this path). **Semgrep** (semgrep.dev)
+   is the primary cross-language tool for this — run `semgrep --config
+   p/cwe-top-25 --config p/security-audit` (plus a per-language pack:
+   `p/python`, `p/javascript`/`p/typescript`, `p/php`) across the pair,
+   since one tool covering all three stacks for these CWE classes (SQLi,
+   path traversal, command injection, SSRF, insecure deserialization, XSS)
+   beats needing a different tool per language for the common cases. Layer
+   a language-native tool only for classes Semgrep's generic rules tend to
+   miss: **Bandit** (Python — pickle/deserialization, `subprocess`
+   shell=True), **Psalm** with `--taint-analysis` (PHP — native
+   taint-flow tracking, stronger than a rule-based scanner for multi-step
+   SQLi/command-injection/XSS chains), **eslint-plugin-security** (Node —
+   `child_process`/`eval`/unsafe-regex patterns Semgrep's generic JS rules
+   don't always catch). Record in the `manifest.yaml` entry which
+   validation method(s) were actually used, as a **list** since a check
+   can legitimately layer more than one tool — `validated_by: [dynamic]`
+   or `validated_by: [semgrep, bandit]`, etc. (values drawn from
+   `dynamic|semgrep|bandit|psalm-taint|eslint-security|manual-review`) —
+   never silently treat a weaker check as equivalent to a stronger one
+   without saying so, and never collapse a layered check into a single
+   value that hides what was actually run.
 3. **No silent pass.** A pair that fails validation (the alteration didn't
    actually introduce/fix the described flaw, or the two sides differ in
    more than the declared mechanism) is not corrected quietly and re-marked
@@ -464,4 +567,12 @@ step 1 alone). Concretely:
 - [ ] Phase 1 complete, list documented above
 - [ ] Phase 2 dispatched
 - [ ] Phase 2 complete, corpus collected
-- [ ] Phase 3 (deferred)
+- [ ] Phase 3: CWEs assigned to collected examples
+- [ ] Phase 3: manufactured pairs generated (floor met per CWE — see
+      "Pair generation")
+- [ ] Phase 3: validation execution sandbox actually built/tested (not just
+      specified) — required before any dynamic check can run for real
+- [ ] Phase 3: all pairs validated (report as "N of M", per "Validated data
+      only reaches lab-generation-facing files" — never rounded up)
+- [ ] Phase 3: `suggested_op`/`suggested_sink_family` proposals acted on
+      (accepted/renamed/merged into `lab/safety_matrix.yaml`)

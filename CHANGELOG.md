@@ -14,6 +14,18 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Planning: hardened `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s Phase 3 via a
+  3-cycle review→research→revise pass (real research: pairs-per-CWE floor
+  scaled to available source material rather than a fixed number, grounded
+  in Juliet/OWASP Benchmark/CVEfixes conventions; `difftastic`/Semgrep/
+  Bandit/Psalm/eslint-plugin-security as concrete structural-diff and
+  static-analysis tools; a new "Validation execution sandbox" doctrine
+  covering zero-outbound-network, ephemeral filesystem, resource limits,
+  and gVisor over plain Docker for actually running deliberately-
+  vulnerabilized code — a real risk surface this project's existing
+  lab-only doctrine didn't cover) plus a 2-cycle whole-document pass that
+  found and fixed a cross-phase inconsistency (`validated`/`validated_by`
+  fields shown only in Phase 3's example despite being set by Phase 2).
 - Planning: extended `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s Phase 3 with a
   deliberate-vulnerability-injection requirement — after a CWE is matched to a
   collected feature/language example, alter that real code so it manufactures a
