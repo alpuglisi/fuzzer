@@ -3,6 +3,45 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0020 — Oracle-probes-per-finding metric_series (CC-FUZZ-0016 follow-up) (2026-09-22)
+- Change: `Oracle.confirm()` now counts every probe sent across the *whole* call —
+  every confirmation mechanism it tries, not only the one that ultimately confirms
+  — via a call-scoped `_CostCounter` (`total_probe`) that wraps `sender`; when a
+  scheduler is attached, each mechanism's existing per-arm cost counter (`probe`)
+  now wraps `total_probe` instead of `sender` directly, so both totals stay
+  accurate from the same `sender.send()` calls (no double-counting, no separate
+  instrumentation pass). On a confirmed finding, when both `store` and `run_id`
+  are attached, emits one `metric_series` point (source `oracle`, key
+  `probes_per_finding`, step = a per-oracle-instance running finding count,
+  value = `total_probe.count`) via `log_scalar` (CC-CORE-0018). Emitted **with or
+  without a scheduler** — deliberately, since the metric's purpose is a
+  before/after comparison ("the bandit's request savings" CC-FUZZ-0016 named as a
+  follow-up) that only exists as a delta between the two conditions, not a
+  standalone number from either one.
+- Impact (other components / project): read-only-shaped instrumentation — no
+  change to `confirm()`'s control flow, return value, or the bandit's existing
+  per-arm reward/cost update (`probe.count` is unchanged; only what it wraps
+  changed). No schema change (consumes `metric_series`/`log_scalar`, CC-CORE-0018).
+  A future diagnostics-tab or runbook script can now plot/compare
+  `probes_per_finding` across a bandit-off and bandit-on run of the same
+  workload — the concrete ask this follow-up closes.
+- Risk (level; mitigation): low — purely additive; the only behavior change
+  visible to existing callers is one more `metric_series` row per finding when a
+  store is attached (an existing test asserting the exact prior `source` set had
+  to be updated to include `oracle` — expected, not a regression). Mitigated by
+  4 new tests (`tests/test_oracle_scheduler.py`): the recorded value matches the
+  sender's own independent probe count with and without a scheduler, the step
+  counter increments across multiple findings in one `Oracle` instance, and a
+  store-less `Oracle` still confirms without error (nothing to record into).
+- Deliverables:
+  - [x] Call-scoped total probe counter across every tried mechanism — done.
+  - [x] `probes_per_finding` metric_series emission (with/without scheduler) —
+    done.
+  - [x] Tests + existing bandit-metric test updated for the new source — done.
+- Effectiveness (assessed 2026-09-22): effective — the recorded value equals the
+  sender's own ground-truth probe count in both the scheduler and no-scheduler
+  cases, and increments correctly across repeated findings.
+
 ### CC-FUZZ-0019 — Emit bandit posterior/regret + coverage-frontier metric_series (2026-09-22)
 - Change: `Oracle.confirm()` emits `posterior/<arm>/mean` and `regret/cumulative`
   metric_series points (source `bandit`) after each `scheduler.update()` call, only when

@@ -14,6 +14,11 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- FUZZ: `Oracle.confirm()` now records a `probes_per_finding` metric_series point
+  (total probes across every confirmation mechanism tried, not only the
+  confirming one) per finding, with or without a bandit scheduler attached, so a
+  run's request cost can be compared before/after the bandit — closes the
+  CC-FUZZ-0016 follow-up (`CC-FUZZ-0020`, `FR-FUZZ-9`).
 - UI: built out the ML tab (`/ml`) into a read-only, advisory dashboard over
   classifier/ranker/conformal/anomaly/active-learning/bandit/mutation state already in
   the store; every unavailable family says so rather than fabricating a value. Its

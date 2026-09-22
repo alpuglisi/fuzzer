@@ -54,6 +54,13 @@ class Oracle:
         # nothing — no run to attribute the points to).
         self._bandit_step = 0
         self._bandit_regret_cum = 0.0
+        # Oracle-probes-per-finding (CC-FUZZ-0017 follow-up): how many requests the
+        # oracle sent, across every mechanism it tried in a `confirm()` call, to
+        # reach a confirmed finding. Recorded with or without a scheduler attached,
+        # specifically so a run WITH the bandit ordering mechanisms can be compared
+        # against a run without it — "the bandit's request savings" is exactly this
+        # metric's delta between the two conditions, not visible from either alone.
+        self._oracle_step = 0
 
     def confirm(self, candidate: Candidate, sender: Sender) -> Verdict | None:
         applicable = [s for s in self.strategies if s.applies(candidate)]
@@ -65,12 +72,19 @@ class Oracle:
         else:
             ctx, ordered = None, applicable
 
+        # Counts every probe sent across the WHOLE call (every mechanism tried, not
+        # only the one that ultimately confirms) — the oracle-probes-per-finding
+        # metric below. When a scheduler is attached, each mechanism also gets its
+        # own nested counter (`probe`) for the bandit's per-arm cost, wrapping this
+        # one so both totals stay accurate from a single set of `sender.send()` calls.
+        total_probe = _CostCounter(sender)
+
         for strategy in ordered:
             if self.scheduler is not None:
-                probe = _CostCounter(sender)             # measure this mechanism's cost
+                probe = _CostCounter(total_probe)         # measure this mechanism's cost
                 verdict = strategy.confirm(candidate, probe)
             else:
-                verdict = strategy.confirm(candidate, sender)
+                verdict = strategy.confirm(candidate, total_probe)
             confirmed = verdict is not None and verdict.confirmed
             if self.scheduler is not None:               # reward+cost only the tried arms
                 reward = 1.0 if confirmed else 0.0
@@ -85,6 +99,10 @@ class Oracle:
                               self._bandit_step, self._bandit_regret_cum)
             if confirmed:
                 self._write_finding(candidate, verdict)
+                if self.store is not None and self.run_id is not None:
+                    self._oracle_step += 1
+                    log_scalar(self.store, self.run_id, "oracle", "probes_per_finding",
+                              self._oracle_step, float(total_probe.count))
                 if self.plugins is not None:             # on_finding: observe (never writes)
                     self.plugins.on_finding({
                         "vuln_class": verdict.vuln_class, "url": to_path(candidate.url),

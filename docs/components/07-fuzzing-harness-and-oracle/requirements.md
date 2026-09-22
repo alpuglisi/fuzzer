@@ -56,6 +56,14 @@ rewards) derives from it.
   `coverage/lines` metric_series points (source `coverage`, the running
   `CoverageFrontier` size) per probe — both via the buffered `core.store.MetricLogger`
   (CC-CORE-0018). Optional/advisory: absent a store or run id, behavior is unchanged.
+- **FR-FUZZ-9** When attached to a store and run, `Oracle.confirm()` emits a
+  `probes_per_finding` metric_series point (source `oracle`) on every confirmed
+  finding — the total probe count across every confirmation mechanism tried in
+  that call, not only the confirming one — via `log_scalar` (CC-CORE-0018).
+  Emitted whether or not a scheduler is attached, so the same metric can compare
+  a bandit-off run against a bandit-on run of the same workload. Optional/
+  advisory: absent a store or run id, behavior is unchanged. *(Realized:
+  CC-FUZZ-0020.)*
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
