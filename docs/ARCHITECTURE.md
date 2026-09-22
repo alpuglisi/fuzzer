@@ -551,18 +551,33 @@ tracked in the requirements files, not here.
   from R1. R1's deep-linkable per-section routes are now `[built]` (Wave-0 lane U0: the
   hash-tab shell is retired for five real MPA routes — `/`, `/proxy`, `/results`, `/ml`,
   `/diagnostics` — each with its own template/JS/CSS and server-rendered active-nav;
-  CC-UI-0025, FR-UI-9). **Pending:** the R1 Overview dashboard (U1), R2 Findings workbench
-  (U2), R3 Proxy rebuild (U3), the ML tab (U4), and the diagnostics tab (U5) — all now
-  unblocked and buildable independently on U0's per-section files.
+  CC-UI-0025, FR-UI-9). Wave 1 is now fully `[built]` on top of U0's per-section split:
+  the **Overview dashboard** (R1, U1 — landing route `GET /`, KPI row, recent-runs panel,
+  findings-by-severity bar, quick actions; the Launcher moved to `/launch`; CC-UI-0027,
+  FR-UI-11), the **Findings workbench** (R2, U2 — faceted sidebar, server-side saved views,
+  the shared `DataTable` module, a Post/Redirect/Get "send to Repeater" pivot; CC-UI-0028,
+  FR-UI-12/FR-UI-13), the **Proxy workbench rebuild** (R3, U3 — a shared `<message-editor>`
+  custom element + hand-rolled resizable splitter + in-page sub-nav over the unchanged
+  Phase 2 backend; CC-UI-0029, FR-UI-14), the **ML tab** (U4 — read-only/advisory over
+  classifier/ranker/conformal/anomaly/active-learning/bandit/mutation state; CC-UI-0030,
+  FR-UI-15), and the **Diagnostics tab + store explorer** (U5 — TensorBoard-like
+  `metric_series` charts with server-side LTTB/envelope downsampling, plus a read-only,
+  redacting Datasette-style store browser; CC-UI-0031, FR-UI-16/FR-UI-17). U4 and U5 each
+  built a near-identical uPlot chart wrapper independently and concurrently (neither could
+  see the other mid-build); reconciled onto one shared `static/js/charts.js` at
+  integration rather than keeping two implementations. Control-plane hardening (U6 —
+  global Host allow-list + Origin/Sec-Fetch-Site/Referer CSRF gate + security headers,
+  guarding every POST/PUT/DELETE route the above lanes added; Starlette bumped to
+  `>=1.0.1,<2` for CVE-2026-48710; CC-UI-0026, FR-UI-10) is also `[built]`. **Pending:** a
+  `--dry-run` mode and a plain CLI entry point per tool for headless use (`fuzzlab auto`
+  exists today).
   The backend `metric_series` per-step time-series table + `open_store()`/WAL +
-  `log_scalar`/`MetricLogger` emitter API is now `[built]` (Phase 4b lane B0; CC-CORE-0018,
+  `log_scalar`/`MetricLogger` emitter API is `[built]` (Phase 4b lane B0; CC-CORE-0018,
   FR-CORE-8), wired into the GBT/logistic training curve, bandit posterior/regret,
   coverage-frontier growth, and mutation reward/novelty emitters (CC-ML-0009, CC-FUZZ-0019,
-  CC-MUT-0008). Stage wall-clock/throughput emission is deferred (no single generic seam
-  across the harness/pipeline loops without restructuring them).
-  **Pending:** the ML tab (Phase 3), the TensorBoard-like diagnostics tab reading the now-
-  built `metric_series` table (Phase 4a), Datasette-style store exploration, a `--dry-run`
-  mode, and a plain CLI entry point per tool for headless use (`fuzzlab auto` exists today).
+  CC-MUT-0008), and now read by the Diagnostics tab's charts (U5) and the ML tab (U4).
+  Stage wall-clock/throughput emission is deferred (no single generic seam across the
+  harness/pipeline loops without restructuring them).
 - **Reproducible evaluation report** `[built]` (Phase 10 T10.4, `fuzzlab/report/`): a
   deterministic report over a stored run (run/config identity, target, counts, findings,
   metrics, deployed models, active plugins), canonical JSON for diffing; read-only
