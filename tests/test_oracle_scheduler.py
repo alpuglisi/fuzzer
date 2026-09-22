@@ -3,6 +3,7 @@
 import random
 import re
 
+from fuzzlab.core.store import Store
 from fuzzlab.oracle import Candidate, Oracle
 from fuzzlab.oracle.probe import Probe
 from fuzzlab.oracle.strategies import default_strategies
@@ -67,3 +68,30 @@ def test_no_scheduler_keeps_fixed_order(tmp_path):
     # Without a scheduler the oracle still confirms (cheapest-first, unchanged).
     v = Oracle().confirm(_cand(), TimingOnlySender())
     assert v is not None and v.mechanism == "differential-timing"
+
+
+# --- B0: bandit posterior/regret emitter ------------------------------------
+def test_oracle_emits_bandit_posterior_and_regret_when_store_attached(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("test", "h")
+        bandit = _trained_timing_bandit(2)
+        Oracle(store=store, run_id=run_id, scheduler=bandit).confirm(
+            _cand(), TimingOnlySender())
+        rows = store.conn.execute(
+            "SELECT source, key, step, value FROM metric_series WHERE run_id=? "
+            "ORDER BY step", (run_id,)).fetchall()
+        assert rows
+        assert {r["source"] for r in rows} == {"bandit"}
+        keys = {r["key"] for r in rows}
+        assert "regret/cumulative" in keys
+        assert any(k.startswith("posterior/") and k.endswith("/mean") for k in keys)
+        assert all(r["value"] == r["value"] for r in rows)  # no NaN
+
+
+def test_oracle_with_scheduler_but_no_store_emits_nothing(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        # scheduler attached, but no store/run_id on the Oracle itself
+        bandit = _trained_timing_bandit(3)
+        Oracle(scheduler=bandit).confirm(_cand(), TimingOnlySender())
+        assert store.conn.execute(
+            "SELECT COUNT(*) c FROM metric_series").fetchone()["c"] == 0

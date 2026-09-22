@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 
+from fuzzlab.core.store import log_scalar
 from fuzzlab.core.urls import to_path
 from fuzzlab.oracle.probe import Candidate, Sender, Verdict
 from fuzzlab.oracle.strategies import ConfirmationStrategy, default_strategies
@@ -48,6 +49,11 @@ class Oracle:
         # T4.3): the productive mechanism is tried first, so a confirmation short-
         # circuits the expensive ones (fewer probes). None -> fixed cheapest-first order.
         self.scheduler = scheduler
+        # B0: bandit posterior/regret time series, emitted only when both a store
+        # and a scheduler are attached (a scheduler-only Oracle, as in tests, emits
+        # nothing — no run to attribute the points to).
+        self._bandit_step = 0
+        self._bandit_regret_cum = 0.0
 
     def confirm(self, candidate: Candidate, sender: Sender) -> Verdict | None:
         applicable = [s for s in self.strategies if s.applies(candidate)]
@@ -67,8 +73,16 @@ class Oracle:
                 verdict = strategy.confirm(candidate, sender)
             confirmed = verdict is not None and verdict.confirmed
             if self.scheduler is not None:               # reward+cost only the tried arms
-                self.scheduler.update(ctx, strategy.arm, 1.0 if confirmed else 0.0,
-                                      cost=max(1, probe.count))
+                reward = 1.0 if confirmed else 0.0
+                self.scheduler.update(ctx, strategy.arm, reward, cost=max(1, probe.count))
+                if self.store is not None and self.run_id is not None:
+                    self._bandit_step += 1
+                    self._bandit_regret_cum += 1.0 - reward   # best possible reward is 1.0
+                    log_scalar(self.store, self.run_id, "bandit",
+                              f"posterior/{strategy.arm}/mean", self._bandit_step,
+                              self.scheduler.mean(ctx, strategy.arm))
+                    log_scalar(self.store, self.run_id, "bandit", "regret/cumulative",
+                              self._bandit_step, self._bandit_regret_cum)
             if confirmed:
                 self._write_finding(candidate, verdict)
                 if self.plugins is not None:             # on_finding: observe (never writes)
