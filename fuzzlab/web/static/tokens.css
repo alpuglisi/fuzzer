@@ -72,3 +72,7 @@
 }
 
 :root[data-density="compact"] { --row: 27px; }
+
+/* Chart height (R-12: U4/U5 shared createChart wrapper reads this per density). */
+:root { --chart-h: 220px; }
+:root[data-density="compact"] { --chart-h: 176px; }

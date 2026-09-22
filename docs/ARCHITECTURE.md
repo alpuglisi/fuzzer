@@ -688,10 +688,34 @@ tracked in the requirements files, not here.
   Wave 1 (U1–U5) builds each section's real content on top of this split: an Overview
   dashboard, a Findings workbench, a Proxy rebuild, the ML tab, and Diagnostics + store
   explorer.
-  **Pending:** U1–U5 themselves (ML tab / Phase 3; the TensorBoard-like diagnostics tab +
-  a `metric_series` time-series table / Phase 4; Datasette-style store exploration), U6
-  control-plane hardening (Host/Origin/CSP on the new POST surface), a `--dry-run` mode,
-  and a plain CLI entry point per tool for headless use (`fuzzlab auto` exists today).
+- **U4 — ML tab (`docs/UI_IMPLEMENTATION_PLAN.md` §3, CC-UI-0031/CC-ML-0010, 2026-09-22,
+  Phase 3, Wave 1, built on U0):** filled in `/ml` with read-only, advisory panels over
+  model internals already in the store — classifier PR curve + reliability/ECE, ranker
+  nDCG@k/precision@k + score/uncertainty distributions, the conformal flag/abstain/drop
+  split, the ECOD anomaly tripwire, active-learning committee disagreement, Thompson-
+  bandit Beta posteriors, and mutation killed/survived variants — behind a persistent
+  non-dismissible advisory banner, categorical bands, verb hygiene, and a neutral
+  blue/amber palette (never the oracle's red/green), per resolved R-06. New read-only
+  `fuzzlab/web/mlview.py` + `GET /api/ml/data`. Introduced this project's **charting
+  layer** (D2, resolved R-02/R-12), shared with U5: vendored **uPlot 1.6.32** verbatim
+  (`static/vendor/uplot/uPlot.esm.js` + `uPlot.min.css`, no bundler/CDN) behind
+  `static/js/chart.js::createChart()` — full destroy()+recreate on theme/density change
+  (canvas can't read CSS vars and uPlot bakes colors in at construction), a debounced
+  `ResizeObserver` on the chart's parent cell + `requestAnimationFrame` coalescing, a
+  `MutationObserver`/`matchMedia` retheme, `window.__charts` registry, and a
+  visually-hidden `<table>` a11y fallback per chart. **Known gap** (see
+  `docs/components/10-ml-components/requirements.md` FR-ML-8): the logistic
+  classifier's trained weights are never persisted to the store, so the "logistic
+  weights" panel R-06 calls for renders a documented not-available state rather than a
+  value — closing it is a future ML-component change, out of this lane's read-only
+  scope.
+  **Pending:** U1–U3, U5 (Overview / Findings / Proxy rebuild; the TensorBoard-like
+  diagnostics tab + a `metric_series` time-series table / Phase 4; Datasette-style store
+  exploration — U5 should reuse this lane's `static/vendor/uplot/` and
+  `static/js/chart.js` rather than re-vendoring), a `--dry-run` mode, and a plain CLI
+  entry point per tool for headless use (`fuzzlab auto` exists today). (U6's
+  control-plane hardening already landed — `SecurityGateMiddleware`, CC-UI-0026 — the
+  prior revision of this paragraph listed it as pending; corrected here.)
 - **Reproducible evaluation report** `[built]` (Phase 10 T10.4, `fuzzlab/report/`): a
   deterministic report over a stored run (run/config identity, target, counts, findings,
   metrics, deployed models, active plugins), canonical JSON for diffing; read-only

@@ -3,6 +3,45 @@
 Component code: **ML**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-ML-0010 — Lane U4: read-only ML-internals surfacing for the web panel's ML tab (2026-09-22)
+- Change: no change to any ML training/scoring/inference code in this component — this
+  entry records the **consumer-side** change: `fuzzlab/web/mlview.py` (component #12,
+  see `CC-UI-0031` for the full detail) reads this component's stored outputs
+  (`candidate.score`/`rank_score`/`rank_uncertainty`, `model.calibration`,
+  `bandit_posteriors`, `payload_variant`) and reuses its pure-Python helpers
+  (`fuzzlab.ml.metrics.pr_auc`, `fuzzlab.ml.ranking.mean_ndcg_at_k`/
+  `mean_precision_at_k`, `fuzzlab.ml.conformal.ConformalGate`, `fuzzlab.ml.anomaly.ECOD`/
+  `flag_top`, `fuzzlab.ml.active.Committee`/`disagreement`) to render the ML tab's
+  advisory panels. Recorded here (dual bookkeeping, per this lane's reserved numbers)
+  because it establishes a **new read-only consumer** of this component's contract and
+  surfaces a genuine gap against it.
+- Impact (other components / project): none on this component's own behavior — every
+  `fuzzlab.ml.*` function keeps its existing signature and contract (`NFR-ML-advisory`,
+  `NFR-ML-no-leak`, `NFR-ML-calibrated` all unaffected). The gap: `FR-ML-9` (new,
+  `requirements.md`) documents that the logistic classifier's trained coefficients
+  (`_w`/`_b`) are never written to the store — `fuzzlab.ml.train.train_and_score`
+  fits a fresh model in-memory per call and persists only the conformal calibration
+  thresholds to `model.calibration` — so the UI's "logistic weights diverging bar"
+  panel (R-06) cannot be populated from stored data and instead renders a documented
+  not-available state. Closing that gap for real is a future ML-component change
+  (persist `_w`/`_b`, e.g. as a JSON column or blob on `model`), not something this
+  read-only web lane does on its own initiative.
+- Risk (level; mitigation): none to this component — no code here changed. The
+  read-only consumer's own risk (a synchronous bootstrap-committee fit inside a web
+  `GET` handler, capped and exception-guarded) is assessed under `CC-UI-0031`.
+- Deliverables:
+  - [x] Confirmed every `mlview.py` panel function reads this component's existing
+    contract without needing a new column/table — done (one exception recorded as
+    the FR-ML-9 gap above, not a deliverable of this lane).
+  - [x] `requirements.md` FR-ML-9 added, documenting the read-only consumer and the
+    weights gap — done.
+  - [ ] Persist trained logistic-regression coefficients to the store, closing the
+    weights-panel gap — future ML-component work, not this lane's scope.
+- Effectiveness (assessed 2026-09-22): effective as a record — the gap is named with
+  its root cause and the exact code path, so a future change closing it knows what to
+  touch (`fuzzlab/ml/train.py::train_and_score`) and which UI panel starts working the
+  moment it does (no web-side change needed then, `mlview.py`'s panel just needs the
+  new field wired in).
 ### CC-ML-0009 — GBT/logistic per-step metric_series emitter (build lane B0, Wave 1b) (2026-09-22)
 - Change: wired the classifier training loops into B0-table's cross-run
   `metric_series` sink (`CC-CORE-0018`, `fuzzlab/core/store.py`'s

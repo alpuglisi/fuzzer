@@ -14,6 +14,19 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- UI/ML (`CC-UI-0031`, `CC-ML-0010`, `FR-UI-11`, `FR-UI-12`, `FR-ML-9`, build lane
+  U4): built the **ML tab** (`/ml`) as a read-only, advisory surface over model
+  internals already in the store — classifier PR curve/reliability/ECE, ranker
+  nDCG@k/precision@k + score distributions, the conformal flag/abstain/drop split,
+  the ECOD anomaly histogram, active-learning committee disagreement, bandit Beta
+  posteriors, and mutation killed/survived variants — behind a persistent
+  non-dismissible advisory banner, categorical bands, and a neutral blue/amber
+  palette (never the oracle's red/green), per R-06. Vendored **uPlot 1.6.32**
+  (`static/vendor/uplot/`) and built the shared `createChart()` wrapper
+  (`static/js/chart.js`, per R-02/R-12) for reuse by U5's Diagnostics tab. New
+  read-only module `fuzzlab/web/mlview.py` + `GET /api/ml/data`; nothing here writes
+  to the store. 17 new tests (`tests/test_web_ml.py`); full suite green — see this
+  lane's change-control entries for pass/skip counts.
 - UI (`CC-UI-0028`, `FR-UI-10`, build lane U1): added the **Overview dashboard**
   as the new landing route (`/`) — 5 KPI tiles (findings, runs, last run,
   detection quality, efficiency), a recent-runs table, a findings-by-severity
