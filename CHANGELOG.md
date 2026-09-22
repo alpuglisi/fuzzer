@@ -14,6 +14,12 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Planning: marked Phase 2 wave 1 (the six priority-9 feature rows) complete
+  in `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s Status checklist, after
+  independently re-verifying the full collected corpus (gitleaks re-scan
+  across all ~65 files: no leaks; YAML-validated every `manifest.yaml`; full
+  test suite green: 1530 passed/8 skipped). Wave 2 (rows 7-11, priority 6)
+  remains undispatched.
 - Research: Phase 2 corpus collection for the "file handling" feature row
   (priority 9, row 4) of `docs/VULN_CORPUS_EXPANSION_PLAN.md` — added
   `docs/research/corpus-examples/file-handling/{php,node,python}/` with

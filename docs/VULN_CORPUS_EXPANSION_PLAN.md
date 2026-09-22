@@ -619,8 +619,12 @@ sources (OWASP LLM Top 10) before Phase 2 either includes or skips it.
 - [x] Phase 1 complete, list documented above (19 features scored and
       ranked; row 19's score is flagged as evidence-scope-limited, not a
       risk judgment — see the list's own closing note)
-- [ ] Phase 2 dispatched
-- [ ] Phase 2 complete, corpus collected
+- [x] Phase 2 dispatched (wave 1: the six priority-9 rows)
+- [ ] Phase 2 complete, corpus collected — **wave 1 done** (rows 1-6:
+      access-control, auth-session, ugc-xss, file-handling, search-export,
+      ecommerce-logic; ~65 real, license-triaged, gitleaks-scanned,
+      commit-pinned files under `docs/research/corpus-examples/`, verified
+      independently). **Wave 2 (rows 7-11, priority 6) not yet dispatched.**
 - [ ] Phase 3: CWEs assigned to collected examples
 - [ ] Phase 3: manufactured pairs generated (floor met per CWE — see
       "Pair generation")
