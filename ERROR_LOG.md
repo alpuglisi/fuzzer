@@ -18,7 +18,7 @@ Format per entry:
 
 ---
 
-## 2026-09-22 — Session process: agent paused to ask for continuation after explicit "work until tasks run out" instruction (fixed)
+## 2026-09-22 — Session process: agent paused to ask for continuation after explicit "work until tasks run out" instruction (fixed, BUG-0029/PA-0032)
 
 - **Symptom:** the user instructed the session to keep executing the approved
   `docs/PARALLEL_LANE_BUILD_PLAN.md` build lanes "until you ran out of tasks." After
@@ -35,9 +35,11 @@ Format per entry:
   again, and will continue dispatching remaining waves/lanes from
   `docs/PARALLEL_LANE_BUILD_PLAN.md` without pausing for confirmation until the backlog
   is actually exhausted or a genuine blocker (not just "more work exists") comes up.
-- **Status:** Fixed (process correction, not a code defect — no `docs/bugs/BUG-NNNN`
-  entry or preventive-action rule is required per `CLAUDE.md`'s bug protocol, since
-  that protocol is scoped to defects in the fuzzlab codebase, not session behavior).
+- **Status:** Fixed. Not a fuzzlab code defect, so `CLAUDE.md`'s bug protocol does not
+  strictly require it — but per the user's explicit request, given the full treatment
+  anyway: `docs/bugs/BUG-0029-session-paused-for-confirmation-despite-explicit-continue-instruction.md`
+  (root-cause analysis, recurrence review against `BUG-0018`'s related-but-distinct
+  agent-conduct failure) and `docs/PREVENTIVE_ACTIONS.md`'s **PA-0032**.
 
 ## 2026-09-22 — LAB: `LiveBootHarness` silently followed real redirects and its seeded schema lacked Eloquent timestamp columns (fixed)
 

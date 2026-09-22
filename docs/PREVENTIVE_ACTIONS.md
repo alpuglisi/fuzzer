@@ -277,3 +277,15 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   `docs/MULTI_AGENT_ORCHESTRATION.md` for the full rationale and the rejected
   alternatives (fragment files, batched reconciliation, fewer/larger lanes, a merge-queue
   bot).
+- **PA-0032** — Before ending a turn with any next-step question, offer, or "say the
+  word" framing directed at the user, check that question against the standing
+  instructions already given for the current task. If the user already authorized the
+  action the question is about (a scope, a count, a condition like "until X" or "keep
+  going until done"), do not ask again — proceed. Reserve an end-of-turn check-in for a
+  genuine blocker: an actual decision only the user can make, a missing input, or an
+  ambiguity the standing instructions do not resolve — never for a natural-feeling
+  stopping point (a wave/phase/batch finishing) that the standing instructions already
+  cover. This is a session-conduct rule, not a fix for a fuzzlab code defect — a
+  different root cause from PA-0019's bookkeeping-recall gap (that one is about
+  recalling *what to record*; this one is about recalling *what was already
+  authorized*). (from BUG-0029)

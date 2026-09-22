@@ -14,6 +14,12 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Process: filed `docs/bugs/BUG-0029` (the session paused to ask for continuation
+  confirmation despite an explicit "work until you run out of tasks" instruction) and
+  added `PA-0032` — check a next-step question against the task's standing
+  instructions before asking it; reserve check-ins for genuine blockers, not
+  already-pre-authorized natural stopping points. Not a fuzzlab code defect; filed at
+  the user's explicit request.
 - LAB (`CC-LAB-0060`, `FR-LAB-57`, build lane T1): wired `fuzzlab.labgen
   .conformance.tier1`'s public API (`build_tier1_case`/`run_tier1_case`/
   `evaluate_tier1_response`) against a real in-process app+DB for the first
