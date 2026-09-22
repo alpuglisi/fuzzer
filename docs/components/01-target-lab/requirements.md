@@ -1903,6 +1903,76 @@ lane) can submit a payload as
     timing-differential oracle mechanism) -- out of this requirement's
     scope.
 
+- **FR-LAB-65** *(`ruby_rails` emitter Phase A: real skeleton + live-boot
+  harness; `CC-LAB-0071`, 2026-09-22).* This project's first Ruby-on-Rails
+  stack (category 1's Shopify pick,
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §2/§9.4a/§9.5), scoped to
+  Phase A only -- the real bootable skeleton and live-boot harness, proven
+  against one illustrative cell; the real Rails-idiom vulnerability modules
+  (webhook-signature, CWE-915 mass assignment, CWE-502 deserialization) are
+  a separate, later requirement/lane.
+  - New `fuzzlab.labgen.emitters.ruby_rails.RailsEmitter` (an
+    `Emitter` implementation): renders exactly one
+    `(vuln_class, sink_context.family)` shape, `("xss", "html_body")` --
+    a query-string parameter (`get_param`) reflected, unescaped
+    (`html_body_echo`), into a controller action's rendered view
+    (`render_only`) -- and one `Cell.context_depth`, `"direct"`. Reuses the
+    shared `get_param`/`identity`/`html_entity_escape`/`html_body_echo`/
+    `render_only` module-name vocabulary `php_current`/`php_laravel`
+    already use (not yet wired into `fuzzlab.labgen.minimal_pair`'s
+    category map, which is `php_current`-module-registry-sourced per the
+    open question this component's own requirements already record for
+    `php_laravel` -- widening it for a third stack is left to whichever
+    lane needs it, same as that existing note says).
+  - New `fuzzlab.labgen.emitters.ruby_rails.route_accumulator.
+    RouteAccumulator`: the Rails `config/routes.rb` analogue of
+    `php_laravel.route_accumulator`'s `CR-LAB-0001` Addendum D pattern
+    (`get '<path>', to: '<controller>#<action>' # cell: <id>` fragments,
+    always sorted by cell ID, duplicate-URL detection) -- adapted for
+    Rails' own `to: "controller#action"` string convention rather than
+    Laravel's `[Controller::class, 'action']` array form.
+  - New checked-in skeleton
+    `fuzzlab/labgen/emitters/ruby_rails/stack/skeleton/`: a real, trimmed
+    `rails new --minimal` output, Rails `8.1.3.1` (the verified-current
+    stable release on rubygems.org as of 2026-09-22, not a guessed `7.x`),
+    with one real migration (`db/migrate/..._create_users.rb` + a `User`
+    model) for the minimal per-run-database schema this requirement's own
+    dispatch instructions call for at minimum, though no Phase A cell reads
+    or writes it yet. Exact provenance/trim list in
+    `fuzzlab/labgen/emitters/ruby_rails/stack/README.md`.
+  - New `fuzzlab.labgen.conformance.rails_live_boot.RailsLiveBootHarness`
+    (`rails_boot_available()`): the Rails port of
+    `conformance.live_boot.LiveBootHarness`. Real `bundle install`, a real
+    `bin/rails db:prepare` against a real per-run SQLite database, a real
+    `bin/rails server` (Puma) boot, and real HTTP requests via the same
+    `urllib.request`-based client pattern (never a new HTTP client
+    abstraction). `rails_boot_available()`'s network probe
+    (`_bundle_network_probe`) runs a real, bounded `bundle lock` (the
+    actual dependency-resolution phase of `bundle install`, not a raw
+    socket/DNS check) against a throwaway `Gemfile`, per PA-0035 -- applied
+    correctly for this package manager from the start, not retrofitted
+    after a `BUG-0033`-shaped defect. Implements `Tier1Client`. Every real
+    subprocess step has its own bounded timeout, enforced at a shared
+    `_run()` helper.
+  - Proved for real, not simulated: `tests/test_labgen_ruby_rails_live_boot.py`
+    (1 test, `@pytest.mark.slow`, skip-guarded on `rails_boot_available()`)
+    assembles, real-`bundle install`s, real-migrates, real-boots, and sends
+    a real HTTP request to one illustrative cell, asserting the real
+    response body contains the unescaped payload it sent -- plus a real
+    `200` from Rails' own `/up` health endpoint. Passed for real: 1 passed
+    in ~4.9s.
+  - A real code defect was found and fixed during this same change (Rails'
+    `ActiveSupport::Inflector#underscore` does not round-trip a
+    cell-ID-derived class name whose digits abut a letter, so the
+    generated controller's bare `render :show` resolved the wrong view
+    directory) -- `docs/bugs/BUG-0034-*.md`/`PA-0036`; fixed by rendering
+    via an explicit `render template: "<path>"` literal instead.
+  - Explicitly out of this requirement's scope (a later, separate lane):
+    the Shopify-research-shortlisted vulnerability modules themselves,
+    widening `SUPPORTED_CONTEXT_DEPTHS`/`_MODULE_SET_BY_SHAPE` to full
+    depth, wiring this stack into `multitarget.py`/Tier 2, and touching
+    `lab/safety_matrix.yaml` for this stack.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

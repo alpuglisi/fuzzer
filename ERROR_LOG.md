@@ -18,6 +18,32 @@ Format per entry:
 
 ---
 
+## 2026-09-22 — `ruby_rails` emitter's generated controller 500'd: Rails' inflector does not round-trip a class name with digits abutting a letter (fixed, BUG-0034/PA-0036)
+
+- **Symptom:** the first real live-boot test of the new `ruby_rails` emitter
+  (`tests/test_labgen_ruby_rails_live_boot.py`) got a real HTTP `500`
+  (`ActionView::MissingTemplate` for `cell_labgen_rr0001/show`) even though
+  the emitter had written the view file to the correctly-underscored
+  `app/views/cell_labgen_rr_0001/show.html.erb`.
+- **Root cause:** the generated controller used Rails' bare `render :show`
+  symbol form, which resolves the view directory from
+  `self.class.controller_path` — derived from the *class name* via
+  `ActiveSupport::Inflector#underscore` at runtime, not from any path string
+  the emitter itself wrote. That inflector does not insert an underscore
+  before a digit run directly following a letter (`"Rr0001".underscore` =>
+  `"rr0001"`, not `"rr_0001"`), so the emitter's own camelized class name and
+  Rails' own runtime reconstruction of a view path from it silently
+  disagreed — for exactly the letter-then-digits shape this project's own
+  `LABGEN-...-NNNN` cell-ID convention always produces. See
+  `docs/bugs/BUG-0034-*.md` for the full Five Whys.
+- **Remediation:** the generated controller now renders via an explicit
+  `render template: "<controller_name>/<view_name>"` path literal computed
+  directly from the same string the emitter used to write the view file,
+  never through Rails' inflector-derived `controller_path`. Verified for
+  real: the live-boot test now returns a real `200` with the expected
+  unescaped payload. New preventive action: **PA-0036**.
+- **Status:** Fixed.
+
 ## 2026-09-22 — Mass-assignment codegen: smuggled SQLi, broken POST routing, and a nullable dereference, found by PR review (fixed, BUG-0031/PA-0034)
 
 - **Symptom:** PR #1's external review found the `orm_entity_bulk_assign`

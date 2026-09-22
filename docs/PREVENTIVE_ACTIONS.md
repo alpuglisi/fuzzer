@@ -369,3 +369,26 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   a proxy signal for it — only `live_boot_available()`'s network half
   (`_network_reachable`, now `_composer_network_probe`) had this defect. (from
   BUG-0033)
+- **PA-0036** — When code-generation names an entity by one convention (a file path, a
+  route string) and separately derives a *related* name for it via a target
+  framework's own naming/inflection convention (a class name, or a symbol the
+  framework expands into a path at runtime), never assume the two are inverses of
+  each other without checking. Prefer computing the framework-facing value from the
+  same single source of truth (an explicit path/string, never re-derived through the
+  framework's own inflector) over relying on the round trip generatively; where an
+  inflected form must be relied upon anyway, execute the target framework's real
+  name-conversion function once against representative "hard" inputs (e.g. a run of
+  digits directly abutting a letter) before trusting it. Concrete instance: the
+  `ruby_rails` emitter's generated controller called Rails' bare `render :show`,
+  which resolves the view directory via `self.class.controller_path` — derived from
+  the class name through `ActiveSupport::Inflector#underscore` at runtime, which does
+  not insert an underscore before a digit run following a letter — so a class name
+  like `CellLabgenRr0001Controller` (from a cell ID like `LABGEN-RR-0001`, this
+  project's own convention) resolved to the wrong view directory and 500'd on every
+  real request. Fixed by rendering via an explicit `render template: "<path>"`
+  literal computed from the same string used to write the view file, never through
+  the inflector. Distinct from PA-0034 (executed adversarial tests for sinks that
+  construct executable text) and PA-0035 (a capability probe's fidelity to a real
+  operation path) — this is about generated code's own naming consistency with a
+  target framework's implicit conventions, a failure mode neither prior rule covers.
+  (from BUG-0034)

@@ -13,6 +13,24 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- LAB (`CC-LAB-0071`, `FR-LAB-65`, `claude/second-target-cat1-ecommerce`):
+  built this project's first Ruby-on-Rails stack, `ruby_rails` (category 1's
+  Shopify pick), Phase A only — a real, trimmed, checked-in Rails 8.1.3.1
+  skeleton (`fuzzlab/labgen/emitters/ruby_rails/stack/skeleton/`, verified
+  against a real rubygems.org query rather than guessed), a `RailsEmitter`
+  rendering one illustrative reflected-XSS-shaped cell, and
+  `RailsLiveBootHarness` (`fuzzlab/labgen/conformance/rails_live_boot.py`,
+  the Rails port of `LiveBootHarness` — real `bundle install`, real SQLite
+  migration, real `bin/rails server` boot, real HTTP round trip; its
+  `rails_boot_available()` network probe runs a real, bounded `bundle
+  lock`, per PA-0035, not a raw socket check). New test
+  `tests/test_labgen_ruby_rails_live_boot.py` passed for real (1 passed,
+  ~4.9s). Found and fixed a real defect along the way (Rails' inflector
+  does not round-trip a cell-ID-derived class name with digits abutting a
+  letter) — `docs/bugs/BUG-0034-*.md`, `PA-0036`. The real vulnerability
+  modules (webhook-signature, CWE-915, CWE-502) are a separate, later lane;
+  `node_express`/`php_laravel`/`php_current`/`python_fastapi` and
+  `lab/safety_matrix.yaml` are untouched.
 - LAB (`CC-LAB-0070`, `FR-LAB-64`, `claude/second-target-cat1-ecommerce`):
   built a real CWE-1321 (prototype pollution) vulnerable/secure pair for
   the `node_express` emitter — a BFF-style `/api/preferences` endpoint

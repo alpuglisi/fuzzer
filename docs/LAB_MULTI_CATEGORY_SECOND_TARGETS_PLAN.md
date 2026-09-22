@@ -539,7 +539,7 @@ one's own pilot:
 
 | # | Category | Status | Sites picked (stack) | New stack(s) needed | Branch | Bookkeeping block reserved | Notes |
 |---|---|---|---|---|---|---|---|
-| 1 | E-commerce/marketplaces | **Piloting — CWE selection done (§9.4a); Walmart/Node cell 1 of 2 landed (CC-LAB-0070, CWE-1321 prototype pollution); next: CWE-1333 (ReDoS, separate lane) + Phase A (Rails skeleton)** | Shopify (Ruby on Rails); Walmart (Node/Express — reuses existing) | Ruby on Rails | `claude/second-target-cat1-ecommerce` | `CC-LAB-0070` used (prototype pollution); `CC-LAB-0071`-`0089` still reserved, not yet used | See §9.4a for full detail (site-pair rationale, functionality findings, CWE shortlists, breadth ranking). |
+| 1 | E-commerce/marketplaces | **Piloting — CWE selection done (§9.4a); Walmart/Node cell 1 of 2 landed (CC-LAB-0070, CWE-1321 prototype pollution); Rails Phase A (skeleton + live-boot harness) landed (CC-LAB-0071); next: CWE-1333 (ReDoS, separate lane) + Rails Phase B (the actual webhook-signature/CWE-915/CWE-502 modules)** | Shopify (Ruby on Rails); Walmart (Node/Express — reuses existing) | Ruby on Rails | `claude/second-target-cat1-ecommerce` | `CC-LAB-0070`-`0071` used; `CC-LAB-0072`-`0089` still reserved, not yet used | See §9.4a for full detail (site-pair rationale, functionality findings, CWE shortlists, breadth ranking). |
 | 2 | Social / UGC platforms | Not started | — | Likely Python/Django (Instagram) is the strongest new-stack candidate; Facebook (PHP/Hack+HHVM) may or may not warrant a *new* stack vs. reusing `php_laravel`/`php_current` as an approximation — this is exactly the kind of call §9.1 asks the picking session to make and record, not this table to pre-decide. Discord flagged in §9.1 step 1 as likely excluded (realtime/Elixir, not a request/response fit). YouTube likely excluded (Google-internal infra, no portable app-language claim). | — | — | Open for another session to pick up. |
 | 3 | SaaS / productivity / collaboration | Not started | — | Candidates per the survey: Slack (PHP/Hack web tier + Java realtime — itself two stacks), Notion (sharded Postgres + Kafka, but no named app-framework/language beyond "engineering blog doesn't name one" — check before committing), Atlassian (Java/Kotlin+Spring, Node+Express, or Python — Atlassian itself uses 3 stacks, pick the one most distinct from what's already built), Microsoft 365/Teams (Node.js backend + React/TS front end), Google Workspace (OT + Spanner/Bigtable — confirmed at the algorithm/storage level, not at a portable app-framework level; may not be a sensible single-stack pick without further research). | — | — | Open. Flag: Google Workspace's confirmed detail is algorithmic/storage, not framework-level — whoever picks this category should research further (per the standing instruction to do more research if needed) before treating it as buildable, or should pick two of the other four sites instead. |
 | 4 | Media / streaming / content platforms | Not started | — | Candidates: Netflix (Java/Spring Boot + a Federated GraphQL gateway), Spotify (Java/Spring + Kafka), Twitch (Go, post-monolith-migration — genuinely distinct paradigm from the others), Disney+ (excluded per §9.1 step 1 — infrastructure-only, unconfirmed at application-code level). | — | — | Open. Twitch/Go vs. Netflix-or-Spotify/Java+Spring reads as the most architecturally distinct pair from the current research, but the picking session should verify against §9.1's full procedure rather than take this as decided. |
@@ -688,15 +688,27 @@ next steps, in order, per §9.1-§9.3's discipline:
 4. ~~Finalize which CWEs become this app's actual manifest cells.~~ **Done
    — see §9.4a's "Decided" block: 3 Rails cells (webhook-signature idiom,
    CWE-915, CWE-502), 2 Node cells (CWE-1321, CWE-1333). CWE-943 declined.**
-5. **Next (in progress):** build the Rails skeleton/live-boot harness
-   (this category's version of §2's Phase A, for a stack that doesn't
-   exist in this project at all yet — the biggest single piece of new
-   work in this pilot) and, in parallel, deepen `node_express`'s module
-   inventory with the two new Node cells (§3's Phase B, extended with the
-   specific CWE-1321/1333 modules §9.4a names — these are additive to
-   what §3 originally scoped generically). Then: design and build the
-   pages (§4's Phase C, now corpus-grounded per the real Shopify/Walmart
-   research), prove conformance (§5), wire into `multitarget.py` (§6).
+5. ~~Build the Rails skeleton/live-boot harness (this category's version
+   of §2's Phase A, for a stack that didn't exist in this project at all
+   before).~~ **Phase A done (`CC-LAB-0071`/`FR-LAB-65`, 2026-09-22): a
+   real, trimmed, checked-in Rails 8.1.3.1 skeleton
+   (`fuzzlab/labgen/emitters/ruby_rails/stack/skeleton/`), a `RailsEmitter`
+   rendering one illustrative reflected-XSS-shaped cell, and
+   `RailsLiveBootHarness` (`fuzzlab/labgen/conformance/rails_live_boot.py`)
+   proven end to end by a real, executed, passing test
+   (`tests/test_labgen_ruby_rails_live_boot.py`, 1 passed, ~4.9s real
+   `bundle install` + migrate + boot + HTTP round trip). **Next (not yet
+   done):** Phase B — the actual Rails-idiom vulnerability modules this
+   section's own "Decided" block names (webhook-signature idiom, CWE-915,
+   CWE-502) against this harness, widening `RailsEmitter.
+   SUPPORTED_CONTEXT_DEPTHS`/`_MODULE_SET_BY_SHAPE` beyond the one Phase A
+   shape. In parallel: deepen `node_express`'s module inventory with the
+   two new Node cells (§3's Phase B, extended with the specific
+   CWE-1321/1333 modules §9.4a names — these are additive to what §3
+   originally scoped generically; CWE-1321 already done, see
+   `CC-LAB-0070`/`FR-LAB-64`). Then: design and build the pages (§4's
+   Phase C, now corpus-grounded per the real Shopify/Walmart research),
+   prove conformance (§5), wire into `multitarget.py` (§6).
 5. Update §9.4/§9.4a at every step above — do not wait until the category
    is fully done to report progress.
 
