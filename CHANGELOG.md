@@ -13,6 +13,15 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-22
+- Docs: `docs/components/01-target-lab/change-control.md` — drafted
+  `CC-LAB-0090` (TrackerNest's Java/Kotlin+Spring Boot emitter, Tier-A depth)
+  and passed it through this repo's mandatory 2-reviewer pre-change review
+  gate; the reviewed-and-revised entry narrows the first build increment to
+  skeleton+harness+probe+one cell (SSTI/OGNL), defers XXE/insecure-
+  deserialization to a follow-on entry, records a real environment check
+  (Maven Central reachable through the sandbox's proxy), and decides the
+  insecure-deserialization cell's concrete non-gadget-chain shape ahead of
+  building it.
 - Docs: added `docs/research/category3-saas-functionality-and-cwe-research.md`
   — closes the §0a items 2-3 functionality/CWE research gap for category 3's
   two picks (Slack, Atlassian) and records Phase C's page/vulnerability-class

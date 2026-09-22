@@ -3,6 +3,103 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0090 — TrackerNest: Java/Kotlin+Spring Boot emitter, Tier-A depth, one cell (FR-LAB-64) (2026-09-22)
+- Change: Add `fuzzlab/labgen/emitters/spring_boot/` — an `Emitter` subclass
+  implementing the `Cell -> EmittedFiles` contract (per `fuzzlab/labgen/emitter.py`'s
+  ABC: `supports(vuln_class, sink_context)`, `render(cell) -> EmittedFiles`,
+  byte-determinism) for a minimal Spring Boot REST-controller shape. Two
+  **distinct** checked-in artifacts, kept separate per `php_laravel`/`node_express`'s
+  own convention: (1) `stack/skeleton/` — a real, trimmed Spring Initializr/`mvn
+  archetype`-generated project (`pom.xml`, minimal `Application.java`, a base
+  Controller/Service/Repository layering), with a provenance README following
+  **`php_laravel`'s** convention specifically (verified: `node_express`'s own
+  `scaffold/` is a small hand-authored directory with no provenance README and no
+  "real generated output, trimmed" story — this entry does not claim to mirror
+  `node_express` here); (2) a `StackEnv`-equivalent Python module (code, not
+  checked-in scaffold). Scope for this entry, revised down from the original
+  draft after two-reviewer pre-change review (see below): Tier-A-only, **one**
+  cell only — the SSTI/OGNL-style template-injection twin at
+  `/wiki/pages/{id}/render` (`docs/research/category3-saas-functionality-and-cwe-research.md`
+  §6b), chosen as the cheapest of the three TrackerNest cells to prove with an
+  unambiguous HTTP-observable payload differential (expression evaluated vs.
+  treated as data) — the XXE and insecure-deserialization cells are deferred to
+  a follow-on entry (see "Out of scope" below), matching `node_express`'s own
+  precedent of separating a first skeleton+harness+one-proof slice from later
+  module-inventory deepening, rather than authoring all of Phase C's cells in
+  the stack's first entry. A real capability probe `spring_boot_boot_available()`
+  performing a bounded, real Maven Central dependency-resolution round trip
+  (never a raw socket/DNS check, per PA-0035/BUG-0033). **Environment check for
+  this entry (done, mirroring `node_express` plan §1's own logged check):** in
+  this build sandbox, `java` (OpenJDK 21.0.10) and `mvn` (Apache Maven 3.9.11)
+  are on `PATH`, and a real, bounded HTTPS GET to
+  `repo.maven.apache.org/maven2/org/springframework/boot/spring-boot/maven-metadata.xml`
+  through the sandbox's pre-configured proxy returns `200` — a real Maven build
+  is buildable and testable here today. If this ever regresses (proxy/registry
+  unreachable in a future environment), the fallback is the same one
+  `python_fastapi`/`node_express` Tier 1/2 already use: `spring_boot_boot_available()`
+  returns false, the live-boot test SKIPs (never silently passes), and this
+  stack's Tier 1/2 sits `[design]`-only until re-verified — stated explicitly
+  here rather than left implicit. A minimal `SpringBootLiveBootHarness`
+  (mirroring `LiveBootHarness` in `fuzzlab/labgen/conformance/live_boot.py`)
+  that assembles the skeleton + the SSTI cell's rendered output, runs a real
+  `mvn package`, boots the resulting executable jar for real (`java -jar`), and
+  makes a real HTTP request proving that one payload differential end to end —
+  the same bar `php_laravel`'s very first live-boot test set. Tier 0 (`mvn -q
+  compile`) and Tier 3 (whole-manifest regenerate-and-diff, byte-deterministic)
+  conformance for this one cell. **Tier 1/2 status after this entry: `[design]`-only**
+  (matching `python_fastapi`/`node_express`'s own stated status for a
+  newly-built stack; this entry's harness proves live-boot capability, not
+  oracle-grade Tier 2 parity).
+- Impact (other components / project): New subtree under component 1 (LAB)
+  only; no other numbered component touched. Establishes the project's fourth
+  emitter stack and its first JVM-based stack — per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.2's stack-reuse ledger,
+  any other category (5/6 are flagged Java/Kotlin candidates) reuses this
+  emitter rather than building a second one.
+- Risk (level; mitigation or accepted-risk justification): Medium. A new
+  package-manager integration (Maven) is exactly the class of code
+  `BUG-0033`/`PA-0035` flags as likely to hide a capability-probe defect (a bare
+  reachability check standing in for the real bounded operation). Mitigated by
+  building the probe to exercise a real, bounded Maven Central round trip from
+  day one (verified working in this sandbox, see the environment check above,
+  with a stated `[design]`-only fallback if that ever regresses), and by
+  narrowing this first entry to one cell with one live-boot proof rather than
+  all three TrackerNest cells at once.
+- Out of scope for this entry (tracked for follow-on `CC-LAB-009x` entries, not
+  silently absent): the XXE (`/issues/{id}/import`) and insecure-deserialization
+  (`/integrations/webhook-payload`) cells; ground truth
+  (`labels.json`/`injection-points.json`, plan §4 Phase C step 2); wiring into
+  `fuzzlab/harness/multitarget.py` (plan §6/Phase E). The insecure-deserialization
+  cell's concrete shape is decided here even though its build is deferred,
+  per the second reviewer's finding that the research doc left it ambiguous:
+  it will **not** use a real gadget chain (no vulnerable library such as
+  `commons-collections` is or will be added to this stack's `pom.xml` for that
+  purpose — a real-RCE gadget chain is a substantially larger, environment-fragile
+  undertaking out of proportion with this lab's other cells' bar). Instead the
+  vulnerable twin calls `ObjectInputStream.readObject()` (or a Jackson
+  `ObjectMapper` with polymorphic/default typing enabled) directly on the raw
+  request body and instantiates/reflects a field from whatever type the
+  attacker's serialized stream names, versus the secure twin's fixed, typed
+  Jackson DTO parse — an observable class-instantiation-of-attacker-chosen-type
+  differential (CWE-502), not full RCE.
+- Deliverables:
+  - [ ] `stack/skeleton/` with provenance README (php_laravel's convention) — todo
+  - [ ] `StackEnv`-equivalent Python module (separate from the skeleton) — todo
+  - [ ] `Emitter` subclass + 1 cell (SSTI/OGNL), vulnerable+secure twin — todo
+  - [ ] `spring_boot_boot_available()` capability probe — todo
+  - [ ] `SpringBootLiveBootHarness` + 1 executed live-boot test — todo
+  - [ ] Tier 0/Tier 3 conformance for the one cell — todo
+  - [ ] `requirements.md` FR-LAB-64 entry — todo
+  - [ ] `CHANGELOG.md` line — todo
+- Effectiveness (assessed <date> or pending): pending
+- Pre-change review gate: drafted, reviewed by 2 independent agents (accuracy:
+  1 finding, fixed — the node_express-provenance-README claim above; adequacy:
+  5 findings, all incorporated above — scope narrowed to 1 cell, environment
+  check added, deserialization shape decided, ground-truth/multitarget scope
+  exclusion stated, Tier 1/2 status stated). 3/3 agreement reached by
+  incorporating every concrete finding from both reviews without contesting
+  any of them; implementation proceeds on this revised entry.
+
 ### CC-LAB-0069 — real live-boot verification that `orm_entity_bulk_assign`'s php_laravel sink safely quotes an adversarial column-name key (FR-LAB-63) (2026-09-22)
 - Change: `CC-LAB-0064`'s php_current sink (`fuzzlab/labgen/modules/sinks/
   orm_entity_bulk_assign.php.j2`) got a real, executed adversarial test for its
