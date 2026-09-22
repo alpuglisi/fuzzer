@@ -42,6 +42,24 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   these cells through a route-rewrite adapter only — verified, not assumed: that module is
   stack-agnostic apart from assuming a cell is served at `cell.route.path`, which a
   router-dispatched stack is not.
+- Planning docs: fleshed out lane L-P3.3c (the `puppy-fort-factory/` → `php_laravel`
+  migration) in `docs/LAB_IMPLEMENTATION_PLAN.md` from a one-paragraph milestone into an
+  executable breakdown (new §4.3.6.1–4.3.6.7 plus per-sub-lane rows in the §7 lane map),
+  via three iterative review → research → revise passes — so the lane can be built without
+  further clarification. Substantive findings folded in, not just restructuring: the
+  fixture's scope is three layers (labeled cells, unlabeled crawler surface, and non-page
+  assets like `waf-rules.json`/`cov.php`/`schema.sql` that production code and compose
+  read), so "delete the directory" needed a concrete re-homing plan; `search.php`'s
+  LIKE-clause SQLi is an existing `sql_string_literal` shape rather than a new family, but
+  its quoted-attribute XSS needs the missing `raw_concat × html_attribute_quoted` matrix
+  row; DOM XSS (`PFF-0007/0008`) has no family, op, or emitter concept at all and is carved
+  out as a decision rather than assumed; `track.php` issues no query so it is exempted, not
+  modeled; `edit_profile`→`profile` is one `stored_second_order` cell; and, most sharply,
+  Laravel's idiomatic extension-less routes would *relocate* all 16 `PFF-` cases and trip
+  T-LAB0.9's additive-only regression gate, so migrated routes keep the `.php` suffix. Two
+  scope questions (whether the JS-rendered crawler surface must be reproduced, and whether
+  DOM XSS blocks the cutover) are left explicitly open for the user. Documentation only —
+  no code, tests, or manifests touched.
 
 ## 2026-09-21
 

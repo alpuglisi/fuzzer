@@ -830,6 +830,342 @@ groups once the base emitter exists.
    generator becomes the single source... not an additional target
    alongside a permanently-kept original").
 
+#### 4.3.6.1 What "every real page" actually covers (scope)
+
+The one-line framing above hides a three-layer scope, and only the first
+layer is about pages at all. Established by inventorying
+`puppy-fort-factory/` against `lab/ground-truth/labels.json`:
+
+- **Layer A — labeled injection cells (16 cases).** `PFF-0001…0008`
+  (vulnerable) and `PFF-1001…1008` (secure true negatives). Four pages
+  (`product.php`, `blog_post.php`, `login.php`, `profile.php`) are already
+  reproduced by `php_current` per `CC-LAB-0022`; those four are re-emitted
+  in Laravel idiom here, and the remainder are new.
+- **Layer B — unlabeled realism/crawler surface.** The 10 JS-rendered
+  pages, the static pages (`about`/`faq`/`careers`), the "Discover" nav
+  injected by `assets/js/site.js`, and the inline-JSON data islands. These
+  carry no cell, but they are the *reason* the fixture exercises the CRAWL
+  component (a static spider cannot see them).
+- **Layer C — non-page fixture assets.** `config/waf-rules.json` and
+  `includes/waf.php` (D16 lab WAF), `includes/cov.php` (grey-box coverage
+  side channel), `sql/schema.sql` (mounted by `lab/compose.yaml` as the DB
+  seed), and `VULNERABILITIES.md` itself (cited as ground truth by tests
+  and by this plan).
+
+Layer A is unambiguously in scope for L-P3.3c. Layers B and C are not
+"pages" and cannot be emitted as cells — they are what makes "delete the
+directory" a much larger step than it reads. See 4.3.6.5.
+
+#### 4.3.6.2 Shape-gap analysis (what blocks which page)
+
+Checked against `lab/safety_matrix.yaml`'s `(op, sink_family)` rows and
+`php_current`'s `_MODULE_SET_BY_SHAPE`. Three outcomes, and they drive
+the sequencing:
+
+- **Already-supported shapes (no new family, no new matrix row).**
+  `product.php`/`blog_post.php` (`sql_numeric_literal`),
+  `login.php` (`sql_string_literal`), `profile.php` (`html_body`, stored
+  source). `search.php`'s SQLi also lands here: `WHERE name LIKE '%$q%'`
+  is a **quoted string-literal position** — the `LIKE` wildcards are not
+  verdict-relevant to `sql_syntax_break`, so it is `sql_string_literal`
+  with a `get_param` source override, not a new `sql_like_pattern`
+  family. `search.php`'s body reflection is `html_body` with the same
+  override.
+- **One missing matrix row, no new concept.** `search.php` also echoes
+  `q` into `value="<?= $q ?>"` — a **quoted** attribute. The
+  `html_attribute_quoted` family exists, but only with an
+  `html_entity_escape` op; there is **no `raw_concat ×
+  html_attribute_quoted` row** and no module for it on any stack. This is
+  a small, well-understood addition of the same shape L-P1.2b already
+  made for `html_attribute_unquoted`.
+- **Genuine capability gap — DOM XSS.** `reviews.php` (`#author=` via
+  `innerHTML`) and `feedback.php` (`?ref=` via `innerHTML`) have **no
+  sink family, no op, no module, and no emitter concept of a client-side
+  sink** anywhere in `labgen`. The taint never reaches the server, so the
+  existing source vocabulary (`get_param`/`post_param`/
+  `read_stored_field`) cannot express it either, and `verdict()` has no
+  notion of a client-executed sink. This is not a porting task; it is a
+  new sink-class. It is therefore **carved out of L-P3.3c** — see
+  4.3.6.4's `L-P3.3c-DOM` and the open decision in 4.3.6.7.
+- **Not a cell at all.** `api/products.php` is a secure JSON endpoint with
+  no vulnerable twin; the static and fetch-based JS pages likewise. These
+  are Layer B, handled as realism surface, not emitted shapes.
+
+#### 4.3.6.3 Per-page task inventory
+
+Each row is a self-contained sub-lane deliverable: a manifest cell pair
+(vulnerable + secure twin), the `php_laravel` page profile entry it needs,
+and its Tier-3 coverage. "New modules" counts modules new to
+`php_laravel`; L-P3.3b is assumed to have landed the ported inventory.
+
+| Page | Labeled cases | Shape(s) | New modules? | Cells | Size | Group |
+| --- | --- | --- | --- | --- | --- | --- |
+| `product.php` | PFF-0001 | `sqli`/`sql_numeric_literal` | no | 2 | S | G1 |
+| `blog_post.php` | PFF-0006 | `sqli`/`sql_numeric_literal` | no | 2 | S | G1 |
+| `products.php` | PFF-1001 | secure `sql_string_literal` | no | 1 | S | G2 |
+| `api/products.php` | PFF-1003 | secure `sql_string_literal`, JSON view | `json_view` (view category) | 1 | M | G2 |
+| `login.php` | PFF-0004, PFF-1008 | `sqli`/`sql_string_literal` (POST) | no | 2 | S | G3 |
+| `register.php` | PFF-1004 | secure `sql_string_literal` (POST) | no | 1 | S | G3 |
+| `profile.php` + `edit_profile.php` | PFF-0005, PFF-1007 | `xss`/`html_body`, `stored_second_order` | stored-write sink | 2 | M | G4 |
+| `contact.php` | PFF-1005 | secure `html_body` (escaped echo) | no | 1 | S | G5 |
+| `newsletter.php` | PFF-1006 | secure `html_body` (escaped echo) | no | 1 | S | G5 |
+| `search.php` | PFF-0002, PFF-0003 | `sql_string_literal` (GET) + `html_body` + `html_attribute_quoted` | attr-quoted sink + matrix row | 6 | L | G6 |
+| `track.php` | PFF-1002 | **no sink** — exempt, see below | — | 0 | — | — |
+| `reviews.php` | PFF-0007 | DOM XSS — **no family exists** | blocked | — | L | DOM |
+| `feedback.php` | PFF-0008 | DOM XSS — **no family exists** | blocked | — | L | DOM |
+
+Grouping rationale: pages are grouped by **shared shape + shared page
+profile fields**, so one sub-lane authors one set of modules and reuses
+it, exactly as `product.php`/`blog_post.php` already share a module set
+in `php_current`. A group is never split across sub-lanes, and no two
+groups touch the same module files — that is what makes them parallel.
+Sizes are relative (S = reuses existing modules, page profile only;
+M = one new module; L = new module *and* a safety-matrix row or a new
+concept), matching this plan's convention of sizing by novelty rather
+than by hours.
+
+**Two findings that change the naive reading of this table:**
+
+- **`track.php` emits no cell.** Its `order_id` is int-cast and its status
+  is canned demo data — it performs **no database query at all**
+  (`puppy-fort-factory/track.php`). Its security comes from having no
+  sink, not from a modeled safe op, and the safety matrix has no
+  `intval_cast` op to express it with. Rather than inventing one to model
+  a page that injects nowhere, `PFF-1002` goes in the exemption register
+  (4.3.6.6) with that reason. The general rule this establishes: a
+  `PFF-10xx` true negative is emitted as a **secure-only cell** when its
+  safety comes from an op the matrix models (`param_bind`), and exempted
+  with a stated reason when it does not.
+- **Secure-only cells are legal.** `fuzzlab/labgen/minimal_pair.py` is a
+  standalone offline checker over two already-rendered results, not a
+  schema constraint — nothing requires every cell to have a twin. Twins
+  are authored where they add training value (as
+  `phase0_real_pages_sample.yaml` already does, noting its twins are "this
+  task's own addition, not in labels.json"), not as an obligation.
+- **`profile.php` + `edit_profile.php` are one cell, not two pages.**
+  This is exactly L-P2.3's `stored_second_order` flow variant: `route` is
+  the write endpoint (`edit_profile`), `sink_endpoint` is the read
+  endpoint (`profile`), and `fuzzlab/labgen/schema.py` already validates
+  that the two differ. G4 therefore models one second-order cell pair, not
+  a secure page plus a vulnerable page.
+
+#### 4.3.6.3a Laravel authoring hazard: the safe/raw default is inverted
+
+`php_current`'s modules assume plain PHP, where raw concatenation and
+unescaped `<?= ?>` are the *default* and safety is opt-in. Laravel inverts
+both: Blade's `{{ }}` escapes via `htmlspecialchars` automatically, and
+Eloquent/the query builder bind parameters by default. So in this emitter
+the **vulnerable** cell is the one that must deliberately opt out —
+`{!! !!}` for the XSS sinks, `whereRaw()`/`DB::select()` with
+concatenation for the SQLi sinks.
+
+This creates a minimal-pair hazard that L-P3.3b's module authoring must
+respect and each sub-lane must verify: the obvious secure twin
+(`->where('id', $id)`) differs from its vulnerable partner by the whole
+statement construction, not by a transform region, which
+`minimal_pair.py` will correctly reject. **The secure twin keeps the same
+raw-statement shape and differs only in the binding** — e.g.
+`whereRaw('id = ?', [$id])` against `whereRaw('id = '.$id)`, and
+`{{ $bio }}` against `{!! $bio !!}`. Any sub-lane that finds itself
+unable to express a pair this way should flag it rather than relaxing the
+invariant.
+
+#### 4.3.6.4 Sub-lane decomposition
+
+| Sub-lane | Scope | Depends on | Parallel with |
+| --- | --- | --- | --- |
+| `L-P3.3c-G1` | numeric-literal pages (`product`, `blog_post`) | L-P3.3b | G2–G6 |
+| `L-P3.3c-G2` | catalog/listing + JSON feed (`products`, `api/products`) | L-P3.3b | G1, G3–G6 |
+| `L-P3.3c-G3` | auth pages (`login`, `register`) | L-P3.3b, L-P2.2 | G1, G2, G4–G6 |
+| `L-P3.3c-G4` | stored second-order pair (`edit_profile` → `profile`) | L-P3.3b, L-P2.1, L-P2.3 | G1–G3, G5, G6 |
+| `L-P3.3c-G5` | escaped-echo forms (`contact`, `newsletter`) | L-P3.3b | G1–G4, G6 |
+| `L-P3.3c-G6` | `search.php` + the `raw_concat × html_attribute_quoted` matrix row | L-P3.3b, L-P1.2b | G1–G5 |
+| `L-P3.3c-DOM` | DOM-XSS sink class (`reviews`, `feedback`) | **new family work — not L-P3.3b** | — (see 4.3.6.7) |
+| `L-P3.3c-CUT` | the atomic cutover | **all** of the above | — (strictly last) |
+
+G3 and G4 name L-P2.2 (`identity_session.py`) and L-P2.1
+(`identity.py`/`lab/identities/identities.yaml`) as real dependencies,
+not conveniences: `login.php` needs a session to establish and
+`profile.php`/`edit_profile.php` need an owning identity for the stored
+`bio` to belong to. Both lanes are merged, so neither blocks — but a
+sub-lane that ignores them will re-invent a session helper, which
+`PA-0001` forbids.
+
+#### 4.3.6.5 The atomic cutover (`L-P3.3c-CUT`) — concrete change list
+
+"Delete it" is the smallest part. The full sweep of things that reference
+`puppy-fort-factory/` today, each of which the cutover must re-point or
+consciously exempt:
+
+- **Runtime wiring.** `lab/compose.yaml` mounts
+  `../puppy-fort-factory/sql/schema.sql` as the DB seed and
+  `../puppy-fort-factory` as the web root; `lab/web.Dockerfile` and
+  `deploy.sh` both assume that directory is the app.
+- **Production code.** `fuzzlab/mutation/filtermodel.py` reads
+  `puppy-fort-factory/config/waf-rules.json` as the shared WAF rule
+  source. This is shipped code, not a test — the rules file must move to a
+  generator-owned or `lab/`-owned location before the directory can go.
+- **Tests.** `tests/test_lab_waf.py` (points `APP` at the directory),
+  `tests/test_mutation_xss.py` (reads `waf-rules.json`),
+  `tests/test_labels_contract.py` (asserts
+  `labels.json.target == "puppy-fort-factory"`),
+  `tests/test_labgen_php_current_real_pages.py` (cites
+  `VULNERABILITIES.md` as its oracle).
+- **Ground truth.** `lab/ground-truth/labels.json` and
+  `injection-points.json` both carry `"target": "puppy-fort-factory"`.
+- **Grey-box.** `scripts/greybox_e2e.sh` references
+  `includes/cov.php`; the generator must emit an equivalent coverage shim
+  or the grey-box path loses its side channel.
+- **Docs.** `README.md`, `docs/ARCHITECTURE.md`, `lab/README.md`,
+  `docs/ON_HOST_RUNBOOK.md`, `docs/LAB_PHASE_0_PLAN.md`, and this file.
+  `VULNERABILITIES.md` is itself the human-readable vulnerability map and
+  needs a generated successor, not just deletion.
+
+**Where the Layer-C assets go.** Each has a destination implied by what
+already owns it; none of them is generator output:
+
+- `config/waf-rules.json` → **`lab/waf-rules.json`**, alongside
+  `lab/safety_matrix.yaml` and `lab/compose.yaml`. It is already described
+  in `fuzzlab/mutation/filtermodel.py` as the *shared* rule source between
+  the lab WAF and the offline `FilterModel`; moving it under `lab/` makes
+  that sharing explicit and survives the app's deletion. `filtermodel.py`,
+  `tests/test_mutation_xss.py` and `tests/test_lab_waf.py` re-point there.
+- `includes/waf.php` → a **`php_laravel` scaffold file** (Laravel
+  middleware), emitted once per build like `.env`, keeping the D16
+  default-off `PFF_WAF` toggle semantics.
+- `includes/cov.php` → likewise a scaffold shim, so
+  `scripts/greybox_e2e.sh` keeps its `X-Fzl-Cov` side channel.
+- `sql/schema.sql` → **`lab/sql/schema.sql`**, which is where
+  `lab/compose.yaml` already reaches for it; the mount path changes but
+  the seeding contract does not.
+- `VULNERABILITIES.md` → a **generated** vulnerability map emitted from
+  the manifests plus `labels.json`, so it cannot drift from the cells it
+  describes (its drifting from ground truth by hand is precisely the
+  failure mode the generator exists to remove).
+
+Ordering within `L-P3.3c-CUT` (one commit, but this internal order):
+re-home Layer-C assets first (WAF rules, coverage shim, schema seed), then
+re-point compose/deploy, then update ground-truth `target`, then the
+tests, then the docs, and only then delete the directory.
+
+#### 4.3.6.6 Verification: parity gate before deletion
+
+Per the prior art on fixture-to-generator cutovers (parity harness →
+shadow comparison → exclusive cutover → explicit rollback), the cutover is
+gated on a **parity artifact**, not on a reviewer's judgement:
+
+1. **Per-sub-lane (Tier-3, the `BUG-0022`/`PA-0024` pattern).** Each group
+   extends the whole-manifest regenerate-and-diff test — every cell of
+   every manifest renders, not only the group's new cells. Per `PA-0027`,
+   the set of cells asserted on is computed from the emitter's own
+   `supports()` predicate, never restated as a hand-maintained literal.
+   This is what makes a later group's widening fail loudly if it breaks an
+   earlier group's page.
+2. **Per-page acceptance criterion.** A page is "reproduced" when: its
+   manifest cells load and validate; `verdict()` returns the label
+   `labels.json` already carries for that `PFF-` case; the rendered
+   Laravel passes Tier-0 `php -l`; render is byte-deterministic across two
+   calls; and the minimal-pair invariant holds between the vulnerable cell
+   and its secure twin.
+3. **Cutover gate.** A single coverage assertion that every `PFF-` case in
+   `labels.json` maps to at least one emitted `php_laravel` cell — derived
+   from `labels.json` itself, so a case added later fails the gate rather
+   than being silently uncovered. Anything deliberately not reproduced
+   (`PFF-1002`, Layer B, and DOM XSS if 4.3.6.7 is decided that way) is
+   listed in an explicit **exemption register**: a machine-readable
+   `lab/ground-truth/migration-exemptions.yaml`, one entry per exempted
+   `PFF-` case with a `reason` string, **read by the gate itself** rather
+   than kept as prose. That is what makes an exemption a reviewed decision
+   rather than a silent omission — an uncovered case absent from the
+   register fails the build, and adding one is a diff a reviewer sees.
+4. **Rollback.** The deletion commit is kept separate and revertable;
+   until the parity gate is green the fixture stays, unmodified.
+
+#### 4.3.6.6a Route paths must keep the `.php` suffix (regression-gate constraint)
+
+**The single most likely way to get this lane wrong.** T-LAB0.9's
+additive-only regression gate (`fuzzlab/labgen/regression_gate.py`) holds
+that "once a case exists in the hand-authored ground truth, a later
+generator run must keep emitting that same case ID **at the same page**
+with the same verdict — removing, **relocating**, or re-verdicting an
+existing one is a build-breaking regression."
+
+Laravel's idiomatic route for `product.php` is `/product`, and
+`phase3_php_laravel_sample.yaml` already uses extension-less paths
+(`/example/product`). Applied naively to the real pages, **every one of
+the 16 `PFF-` cases would relocate**, and the gate would correctly fail
+the entire cutover.
+
+Resolution, adopted: **the migrated cells keep the real app's exact URLs,
+`.php` suffix included** — `Route::get('/product.php', …)`. Laravel routes
+are arbitrary strings, so this costs nothing technically. It keeps the
+label contract additive-only, keeps every `PFF-` URL in `labels.json`,
+`injection-points.json` and `expectedresults.csv` valid unchanged, and
+keeps every downstream FUZZ/AUD consumer pointed at URLs that still
+resolve. Idiomatic-looking routes are not worth silently invalidating the
+ground truth that is the whole point of the lab. (`labels.json`'s `target`
+string does change, but that is metadata the gate does not diff — a
+one-line update to `tests/test_labels_contract.py`.)
+
+#### 4.3.6.6b `php_current` is not retired by this lane
+
+Easy to misread D20's "single source" as retiring `php_current` too. It
+does not. What D20 retires is the **hand-built directory**, not a
+generator stack: `php_current` is one of the emitters whose *existence* as
+a second stack is what makes L-P3.4's fingerprint-independence gate
+meaningful (`min_stacks_per_class >= 2`). `phase0_real_pages_sample.yaml`
+and `php_current`'s `_PAGE_PARAMS` real-page entries therefore **stay**,
+and the same four pages existing as both `php_current` and `php_laravel`
+cells is the desired outcome — that pairing is exactly the cross-stack
+data the fingerprint gate consumes, not duplication to clean up.
+
+#### 4.3.6.6c Bookkeeping this lane owes (CLAUDE.md)
+
+Called out because the cutover is unusual — it deletes the subject matter
+of component 01-target-lab:
+
+- One `CC-LAB-NNNN` change-control entry per sub-lane (append-only), plus
+  one for `L-P3.3c-CUT`.
+- `docs/components/01-target-lab/requirements.md` edited **in place**:
+  §2 Scope names "the Puppy Fort Factory app" and must be re-stated as the
+  generated lab; **FR-LAB-8** (the migration requirement itself) is
+  satisfied by this lane and should be marked as such; FR-LAB-1's
+  "deliberately vulnerable web app" remains true but changes subject.
+- `docs/ARCHITECTURE.md` (#1 target lab) and `README.md`, per 4.3.6.5.
+- One `CHANGELOG.md` line for the cutover.
+
+#### 4.3.6.7 Open decisions for the user
+
+Two questions here are scope decisions, not evidence questions, and are
+left open deliberately:
+
+- **D-open-1: does retiring the fixture require reproducing Layer B?**
+  The 10 JS-rendered pages and the injected "Discover" nav exist to give
+  the CRAWL component something a static spider provably cannot see, and
+  no emitter models client-rendered pages. **Evidence narrowing the
+  question:** a sweep of the test suite found that every automated
+  consumer of the JS pages reads *ground-truth JSON*, not the PHP files —
+  `tests/test_labels_contract.py` asserts the client-only set from
+  `injection-points.json`, `tests/test_auto.py` asserts those points are
+  skipped by the non-browser path, and `tests/test_oracle_browser.py`
+  uses `/feedback.php` only as a synthetic URL string. All of these keep
+  passing after the directory is deleted, because `labels.json` and
+  `injection-points.json` survive it. What is genuinely lost is the
+  **live, on-host crawler exercise** — running the JS-executing spider
+  against a real app whose nav is JS-injected — which is manual/runbook
+  work, not pytest. So the decision is narrower than it first appears:
+  accept losing the live crawler-discoverability target, or keep a
+  minimal JS-rendered surface in the generator for it. Not a blocker for
+  Layer A either way.
+- **D-open-2: is DOM XSS (`L-P3.3c-DOM`) in or out of the cutover's
+  definition of "full coverage"?** `PFF-0007`/`PFF-0008` are labeled
+  vulnerable cases, so a literal reading of D20 §7.2 says the fixture
+  cannot retire without them — but building a client-side sink class is a
+  new capability, not a migration, and plausibly belongs in its own lane.
+  If it stays in, L-P3.3c is blocked on it; if it comes out, it goes in
+  the exemption register and D20 §7.2's "every real page" is formally
+  narrowed to server-side cells.
+
 ### 4.4 Cross-cutting: `stack` field + fingerprint-independence gate
 
 **Depends on:** at least one of 4.1/4.2/4.3 landing (needs a second stack
@@ -1055,7 +1391,15 @@ either condition changes.
 | L-P3.2 | Python/FastAPI emitter, Tier-A (§4.2) | — | 1 | Same as above |
 | L-P3.3a | PHP/Laravel `StackEnv` + accumulator + conformance harness (§4.3, steps 1/3/4/5) | — | 1 | |
 | L-P3.3b | PHP/Laravel full module inventory incl. hard shapes (§4.3, step 2) | L-P1.2b, L-P3.3a | 2 | This is *why* Laravel was assigned "full depth" — the hard-shape modules port directly from L-P1.2b's `php_current` work |
-| L-P3.3c | PHP/Laravel app migration, per-page sub-lanes (§4.3, step 6) | L-P3.3b | 3 | Decompose into one sub-lane per remaining real page (or small page group) once the base emitter is validated — an ideal candidate for the migrating agent to spawn its own sub-agents, per the standing policy |
+| L-P3.3c | PHP/Laravel app migration — umbrella for the sub-lanes below (§4.3.6) | L-P3.3b | 3 | Decomposed in §4.3.6.4. Dispatch G1–G6 in parallel to sub-agents; `-CUT` is strictly last |
+| L-P3.3c-G1 | numeric-literal pages: `product`, `blog_post` (§4.3.6.3) | L-P3.3b | 3 | S — page profiles only, no new modules |
+| L-P3.3c-G2 | listing + JSON feed: `products`, `api/products` | L-P3.3b | 3 | M — needs a `json_view` view-category module |
+| L-P3.3c-G3 | auth pages: `login`, `register` | L-P3.3b, L-P2.2 | 3 | S — L-P2.2's session helper is a real dependency, not a convenience |
+| L-P3.3c-G4 | stored second-order pair: `edit_profile` → `profile` | L-P3.3b, L-P2.1, L-P2.3 | 3 | M — one `stored_second_order` cell, not two pages |
+| L-P3.3c-G5 | escaped-echo forms: `contact`, `newsletter` | L-P3.3b | 3 | S |
+| L-P3.3c-G6 | `search.php` (3 sinks) + the missing `raw_concat × html_attribute_quoted` matrix row | L-P3.3b, L-P1.2b | 3 | L — the only sub-lane that edits `lab/safety_matrix.yaml`; serialize it against any other matrix-touching lane |
+| L-P3.3c-DOM | DOM-XSS sink class: `reviews`, `feedback` | **new capability, not L-P3.3b** | — | L — blocked on a decision, not on a lane; see §4.3.6.7 D-open-2 |
+| L-P3.3c-CUT | atomic cutover: re-home Layer-C assets, re-point consumers, delete the fixture | **all** G-sub-lanes + the parity gate green | 4 | Strictly last; separate revertable commit (§4.3.6.5/4.3.6.6) |
 | L-P3.4 | `stack` field + fingerprint-gate wiring (§4.4) | any 2 of {L-P3.1, L-P3.2, L-P3.3a} | 2 | Needs a second stack name to exist; the gate half needs exactly two stacks landed, not all three |
 
 **Wave 1 (12 lanes, zero dependencies — dispatch all of them now):** L-P0.9,
@@ -1070,8 +1414,9 @@ and needs no one waiting on it.
 L-P3.3b (needs L-P1.2b + L-P3.3a — so effectively wave 3 in practice, listed
 here for its nominal position), L-P3.4 (needs any two stack lanes).
 
-**Wave 3+:** L-P1.3 (needs L-P1.1 + L-P1.2b), L-P3.3c (needs L-P3.3b,
-itself sub-lane-able per-page once unlocked).
+**Wave 3+:** L-P1.3 (needs L-P1.1 + L-P1.2b), L-P3.3c's G-sub-lanes (need
+L-P3.3b; G1–G6 run in parallel with each other), then L-P3.3c-CUT alone in
+wave 4 once every G-sub-lane is merged and the parity gate is green.
 
 **Cross-lane coordination notes (the only real coupling in this table):**
 - `fuzzlab/labgen/schema.py`'s `Cell`/`SinkContext` dataclasses are touched
