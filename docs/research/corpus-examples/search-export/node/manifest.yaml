@@ -23,6 +23,19 @@
   validated: false
   validated_by: []
   redacted: false
+  # --- appended during Phase 3 ---
+  cwe: [CWE-89]
+  suggested_op: orm_order_by_unvalidated   # new op: genuinely distinct from
+                                            # raw_concat -- the surrounding
+                                            # query IS parameterized elsewhere
+                                            # in this same statement; the gap
+                                            # is specifically an unvalidated
+                                            # identifier reaching ORDER BY
+  suggested_sink_family: sql_order_by_clause   # new family: existing
+                                                # sql_identifier/sql_join_alias
+                                                # families don't cover an
+                                                # ORDER BY column/direction
+                                                # position specifically
 
 - file: vulnerable-2.js
   role: vulnerable
@@ -34,6 +47,24 @@
   validated: false
   validated_by: []
   redacted: false
+  # --- appended during Phase 3 ---
+  cwe: [CWE-1336]
+  suggested_op: template_compile_user_content   # new op: user-authored
+                                                 # content is compiled AS a
+                                                 # Handlebars template rather
+                                                 # than passed as template data
+  suggested_sink_family: template_render_pipeline   # new family: a
+                                                     # template-engine compile/
+                                                     # execute step in a
+                                                     # report/export pipeline
+  # No idiomatic/secure counterpart was collected for this shape (see this
+  # entry's own notes above) -- there is currently no safe-twin row to pair
+  # against template_compile_user_content at template_render_pipeline; a
+  # future secure counterpart would compile a FIXED, developer-authored
+  # template once and pass user content only as template *data* (e.g. an
+  # op like `template_precompiled_fixed` / `template_user_content_as_data`),
+  # but that shape was not found in this collection pass, so no
+  # suggested_op is proposed for it here -- noted as a gap, not invented.
 
 - file: idiomatic-1.js
   role: idiomatic
@@ -45,3 +76,18 @@
   validated: false
   validated_by: []
   redacted: false
+  # --- appended during Phase 3 ---
+  cwe: [CWE-89]
+  suggested_op: param_bind   # existing op; reused -- every dynamic WHERE/
+                              # LIMIT/OFFSET value is bound via knex.raw(sql,
+                              # params), same shape as the matrix's existing
+                              # (param_bind, sql_string_literal) neutralises
+                              # row, just in knex/JS
+  suggested_sink_family: sql_string_literal   # existing family; reused for
+                                               # the LIKE/`=` WHERE bindings
+                                               # (the LIMIT/OFFSET/`ano`
+                                               # bindings are the numeric
+                                               # counterpart -- would map to
+                                               # the existing sql_numeric_literal
+                                               # family, noted here rather than
+                                               # duplicating this entry)

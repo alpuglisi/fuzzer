@@ -19,6 +19,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-434]
+  suggested_op: no_extension_check
+  suggested_sink_family: fs_web_root_write
 
 - file: idiomatic-1.js
   role: idiomatic
@@ -31,6 +34,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-434]
+  suggested_op: mime_type_check
+  suggested_sink_family: fs_web_root_write
 
 - file: vulnerable-2.js
   role: vulnerable
@@ -43,6 +49,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-22]
+  suggested_op: unconfined_path
+  suggested_sink_family: fs_path_read
 
 - file: idiomatic-2.js
   role: idiomatic
@@ -55,3 +64,6 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-22]
+  suggested_op: realpath_confine
+  suggested_sink_family: fs_path_read

@@ -26,6 +26,13 @@
   validated: false
   validated_by: []
   redacted: false
+  # --- appended during Phase 3 ---
+  cwe: [CWE-89]
+  suggested_op: raw_concat   # same shape lab/safety_matrix.yaml already
+                              # covers -- a string-built WHERE clause with
+                              # no transform at all, just reused across 3
+                              # queries in one request; reuse, don't invent
+  suggested_sink_family: sql_string_literal   # existing family; reused
 
 - file: vulnerable-2.php
   role: vulnerable
@@ -37,6 +44,15 @@
   validated: false
   validated_by: []
   redacted: false
+  # --- appended during Phase 3 ---
+  cwe: [CWE-89]
+  suggested_op: raw_concat   # sanitize() is an XSS mitigation
+                              # (htmlspecialchars/strip_tags), not SQL
+                              # escaping -- for the SQL sink this is
+                              # indistinguishable from no transform at all,
+                              # same shape lab/safety_matrix.yaml already
+                              # has; reuse, don't invent
+  suggested_sink_family: sql_string_literal   # existing family; reused
 
 - file: vulnerable-3.php
   role: vulnerable
@@ -48,6 +64,16 @@
   validated: false
   validated_by: []
   redacted: false
+  # --- appended during Phase 3 ---
+  cwe: [CWE-611]
+  suggested_op: xml_external_entities_enabled   # new op: DOMDocument::loadXML()
+                                                  # called with LIBXML_NOENT,
+                                                  # no libxml_disable_entity_loader
+                                                  # / no LIBXML_NONET -- genuinely
+                                                  # new transform-absent shape,
+                                                  # not an SQL op
+  suggested_sink_family: xml_parse_input   # new family: an XML parser fed
+                                            # raw untrusted document text
 
 - file: idiomatic-1.php
   role: idiomatic
@@ -59,3 +85,16 @@
   validated: false
   validated_by: []
   redacted: true
+  # --- appended during Phase 3 ---
+  cwe: [CWE-89]
+  suggested_op: driver_escape_string   # new op (not a reuse): mysqli_real_
+                                        # escape_string() is a real driver-level
+                                        # escaping call -- stronger than the
+                                        # existing strip_quotes_naive (which only
+                                        # strips a literal quote char) but still
+                                        # not param_bind; distinct transform,
+                                        # not yet in the matrix's vocabulary
+  suggested_sink_family: sql_string_literal   # existing family; reused --
+                                               # same quoted-literal WHERE
+                                               # position as the vulnerable
+                                               # pair above

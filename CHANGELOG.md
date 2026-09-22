@@ -14,6 +14,30 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- Research: Phase 3 CWE mapping for the "search-export" corpus cell
+  (`docs/research/corpus-examples/search-export/{php,node,python}/manifest.yaml`,
+  10 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each
+  entry per `docs/VULN_CORPUS_EXPANSION_PLAN.md` Phase 3's handoff spec.
+  CWE-89 for every SQLi shape, CWE-1336 for the Node Handlebars-report SSTI
+  entry, CWE-611 for the PHP XXE tutorial entry. Reused
+  `lab/safety_matrix.yaml`'s existing vocabulary wherever the shape was
+  genuinely the same: `raw_concat`/`sql_string_literal` for the three plain
+  raw-concat-WHERE PHP entries, `param_bind`/`sql_string_literal` for the two
+  fully-parameterized idiomatic entries (Node's knex.raw() builder, Python's
+  Django `.filter(Q(...))`), and `identifier_allowlist` (reused, applied at a
+  new `sql_order_by_clause` sink family) for Python's `hasattr()`-gated
+  `sort_by` allowlist. New vocabulary proposed only for genuinely new shapes:
+  `orm_order_by_unvalidated`/`sql_order_by_clause` for Node's raw ORDER-BY
+  interpolation next to an otherwise-parameterized query,
+  `orm_raw_escape_hatch`/`sql_where_clause_fragment` for Python's Django
+  `.extra(where=...)` misuse, `driver_escape_string`/`sql_string_literal`
+  (reused family) for PHP's `mysqli_real_escape_string()` idiomatic entry,
+  `template_compile_user_content`/`template_render_pipeline` for the Node
+  Handlebars SSTI entry (no idiomatic counterpart collected — flagged as a
+  gap, not invented), and `xml_external_entities_enabled`/`xml_parse_input`
+  for the PHP XXE entry. Documentation/metadata-only: no source files
+  altered, no pairs built, no validation attempted; `validated: false`/
+  `validated_by: []` left unchanged on all 10 entries.
 - Research: Phase 3 CWE mapping for the "ecommerce-logic" corpus cell
   (`docs/research/corpus-examples/ecommerce-logic/{php,node,python}/manifest.yaml`,
   10 entries) — appended `cwe`/`suggested_op`/`suggested_sink_family` to each

@@ -33,6 +33,22 @@
   validated: false
   validated_by: []
   redacted: false
+  # --- appended during Phase 3 ---
+  cwe: [CWE-89]
+  suggested_op: orm_raw_escape_hatch   # new op: genuinely distinct from
+                                        # raw_concat -- the rest of this same
+                                        # app/class uses the ORM's own
+                                        # parameter binding (see idiomatic-1.py
+                                        # below, same file/commit); the flaw is
+                                        # specifically reaching for .extra()
+                                        # to build one raw fragment
+  suggested_sink_family: sql_where_clause_fragment   # new family: a whole
+                                                      # raw SQL fragment
+                                                      # substituted into a
+                                                      # WHERE clause via an
+                                                      # ORM escape hatch, not
+                                                      # a single literal/
+                                                      # identifier position
 
 - file: idiomatic-1.py
   role: idiomatic
@@ -44,6 +60,14 @@
   validated: false
   validated_by: []
   redacted: false
+  # --- appended during Phase 3 ---
+  cwe: [CWE-89]
+  suggested_op: param_bind   # existing op; reused -- .filter(Q(...)) binds
+                              # every value as a query parameter, same shape
+                              # as the matrix's existing (param_bind,
+                              # sql_string_literal) neutralises row, just via
+                              # the Django ORM
+  suggested_sink_family: sql_string_literal   # existing family; reused
 
 - file: idiomatic-2.py
   role: idiomatic
@@ -55,3 +79,22 @@
   validated: false
   validated_by: []
   redacted: false
+  # --- appended during Phase 3 ---
+  cwe: [CWE-89]
+  suggested_op: identifier_allowlist   # existing op; reused -- hasattr()
+                                        # membership-checks the sort column
+                                        # against the model's real attributes
+                                        # before use, the same "allowlist of
+                                        # known identifiers" shape the matrix
+                                        # already models for sql_identifier/
+                                        # sql_join_alias, applied here at the
+                                        # ORDER BY position; this is the
+                                        # direct neutralising counterpart to
+                                        # node/vulnerable-1.js's
+                                        # orm_order_by_unvalidated
+  suggested_sink_family: sql_order_by_clause   # reused from
+                                                # node/vulnerable-1.js's new
+                                                # family -- same ORDER BY
+                                                # column position, now
+                                                # allowlisted rather than
+                                                # unvalidated
