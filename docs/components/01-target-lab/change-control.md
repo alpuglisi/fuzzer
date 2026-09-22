@@ -3,6 +3,181 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0060 — orm_entity_bulk_assign (mass-assignment) module implementation, php_current emitter (2026-09-22)
+- Change: implements code generation for the `orm_entity_bulk_assign` sink
+  family (one of the 20 new sink families `CC-LAB-0059`/`FR-LAB-56` added as
+  registry-only entries) in the **shared `fuzzlab.labgen.modules` registry**
+  (`fuzzlab/labgen/modules/__init__.py`, `php_current`'s package), as the
+  first scoped increment of that follow-up work — not all 20 families x 4
+  emitters at once, matching this project's own "scope per wave, explicit
+  deferral" convention. Re-scoped from an earlier draft of this entry, which
+  targeted `php_laravel` (Eloquent's `$fillable`/`$guarded`) directly —
+  caught in review: `php_laravel`'s own module docstring (`modules.py`,
+  decision 1) states every module name a Laravel cell's `// Module
+  composition: ...` line uses must ALSO be registered in this shared
+  `fuzzlab.labgen.modules` registry, because `minimal_pair._MODULE_CATEGORY`
+  (confirmed by reading `fuzzlab/labgen/minimal_pair.py` directly) is built
+  **only** from `SOURCES`/`TRANSFORMS`/`SINKS`/`COMPLEXITIES` imported from
+  that one shared package — never from `php_laravel`'s own dicts. Every
+  existing shared-registry name (e.g. `sql_identifier_order_by`,
+  `identifier_allowlist`) already has a real `php_current` (plain-PDO)
+  renderer, so there is no existing precedent for a classification-only
+  stub never rendered by `php_current` itself; building the real thing
+  there first, then having `php_laravel` reuse the same names (a later,
+  separate increment), follows the established pattern instead of
+  inventing a new one. This also sidesteps a second problem the earlier
+  draft hand-waved: Eloquent's `$fillable`/`$guarded` is a *model-class*
+  property, not a value-expression rewrite, and there is no existing module
+  category in either registry for emitting a separate model file — plain
+  PDO has no such mismatch, since every module here already composes into
+  one inline PHP fragment (matching every existing sink's own pattern:
+  "a sink never escapes anything itself," `modules.py` decision 2).
+
+  Concrete design, grounded in the existing `RenderResult`/context-passing
+  contract (`fuzzlab/labgen/modules/__init__.py`: a source publishes
+  `value_expr`; a transform may rewrite `value_expr` and/or set a context
+  flag a sink branches on, per `IdentifierAllowlistTransform`'s real
+  `render()`, which wraps `value_expr` in an `in_array(...)` guard; a sink
+  template just embeds the final `value_expr` — never re-escapes it):
+  1. **One new source**, `all_post_params` (category `source`), publishing
+     `value_expr = "$_POST"` (the whole associative array, not one scalar
+     param) — the existing `GetParamSource`/`PostParamSource` both extract
+     exactly one named parameter, the wrong shape for this family, so a new
+     source is required (an earlier draft of this entry underestimated
+     scope by assuming an existing source could be reused for a whole-array
+     value — also caught in review).
+  2. **Two new transforms**, matching `lab/safety_matrix.yaml` lines
+     506-512 exactly:
+     - `unfiltered_body_update` (`effect: no_effect`, no `neutralizes:` tag
+       on its matrix row) — passes `value_expr` through unchanged (an
+       `identity`-shaped `render()`, mirroring `IdentityTransform`).
+     - `runtime_field_allowlist` (`effect: neutralises`, `neutralizes:
+       [mass_assignment]` — confirmed this tag is on only this op's row,
+       not `unfiltered_body_update`'s) — rewrites `value_expr` to
+       `array_intersect_key($_POST, array_flip([{{ allowed_fields_php }}]))`,
+       requiring an `allowed_fields` context value the emitter's page
+       profile supplies (mirroring `IdentifierAllowlistTransform`'s own
+       `allowed_identifiers` context-key convention exactly — same
+       "raises rather than inventing a default allowlist" design note).
+  3. **One new sink**, `orm_entity_bulk_assign` (category `sink`), that
+     builds and executes a parameterized `UPDATE {{ table }} SET ... WHERE
+     id = ?` at runtime from whatever keys are present in `value_expr`'s
+     array (column *names* come from the array's keys — tainted when
+     unfiltered, allowlisted when not; bound *values* are always
+     parameters). Unlike every existing sink template (each a single-line
+     `{{ value_expr }}` interpolation into an `echo`/`prepare` call — none
+     needs a runtime loop, since each handles exactly one tainted scalar),
+     this sink's PHP body needs its own runtime `foreach` over
+     `{{ value_expr }}`'s keys to build both the comma-joined `SET col1 =
+     ?, col2 = ? ...` text and a positionally-matching bound-values array —
+     real, new implementation surface this entry names explicitly rather
+     than glossing as a reuse of `sql_identifier_order_by.php.j2`'s
+     single-value-substitution pattern (an earlier draft of this entry
+     understated this; caught in review). No Jinja-level `{% for %}` is
+     needed in the template itself (the column set isn't known until PHP
+     runtime, since the keys are attacker-controlled) — the loop is plain
+     PHP inside the template's static body, not a templating construct.
+  4. **4 new `.php.j2` templates** total (1 source, 2 transforms, 1 sink)
+     under `fuzzlab/labgen/modules/{sources,transforms,sinks}/`.
+  5. **A new `STATIC_PRECHECK_BY_SHAPE` entry**,
+     `fuzzlab/labgen/conformance/static_precheck.py`: `(vuln_class="mass_
+     assignment", sink_family="orm_entity_bulk_assign") ->
+     StaticPrecheckStatus.UNINFORMATIVE` (grepped and confirmed this
+     dict's existing SQLi rows use the same status for the same underlying
+     reason — a dynamic query built from a runtime-computed field list
+     looks syntactically unremarkable to a static tool with no business-
+     logic awareness of which fields *should* be assignable, the same
+     "empirically confirmed" rationale already recorded for the SQLi
+     rows). Required, not optional: `run_static_precheck` (confirmed via
+     `grep`) is never called from `cli.py`'s `run_checks`/`lab-generate
+     --check` path itself, BUT
+     `tests/test_labgen_harder_shapes.py::test_every_new_shape_has_a_
+     static_precheck_flag` (lines 404-408) iterates every cell in its
+     manifest and calls `static_precheck_status(cell.vuln_class,
+     cell.sink_context.family)`, which raises `KeyError` for an
+     unregistered shape — since this entry's own Tests bullet (6, below)
+     explicitly mirrors that file's pattern, the new tests would fail
+     without this registry entry. An earlier draft of this entry omitted
+     this deliverable entirely; caught in review.
+  6. **A new illustrative manifest cell** (vulnerable + secure minimal
+     pair) in `lab/manifests/`, `class: mass_assignment` (a new `vuln_class`
+     value, matching the `STATIC_PRECHECK_BY_SHAPE` key above and the
+     concern-ID naming `lab/safety_matrix.yaml` already uses), composition
+     `all_post_params -> unfiltered_body_update -> orm_entity_bulk_assign
+     -> single_statement` (vulnerable) vs. `... -> runtime_field_allowlist
+     -> ...` (secure) — equal-length compositions, satisfying
+     `minimal_pair`'s documented "equal length" constraint. BOTH twins'
+     `sink_context.required_neutralizations` are set to the identical
+     `[mass_assignment]` (confirmed via `lab/manifests/
+     example_phase0_scaffold.yaml`: both twins of an existing pair already
+     carry the same `required_neutralizations` — it is not something that
+     differs between them; `verdict.py`'s derivation compares each cell's
+     own op's `neutralizes:` tag against this shared baseline).
+  7. Tests: registry-name classifiability (`minimal_pair`'s composition
+     vocabulary check), minimal-pair rendering, and `--check` passing
+     end-to-end for the new manifest — mirroring the existing
+     `tests/test_labgen_harder_shapes.py` pattern (the `php_current`-scoped
+     equivalent of `test_labgen_php_laravel_harder_shapes.py`).
+- Impact (other components / project): additive only to
+  `fuzzlab/labgen/modules/__init__.py` (php_current's shared registry), its
+  templates/tests, and one new entry added to (not modified within)
+  `fuzzlab/labgen/conformance/static_precheck.py`'s
+  `STATIC_PRECHECK_BY_SHAPE` dict. No change to `lab/safety_matrix.yaml`
+  (its 2 relevant rows already exist from `CC-LAB-0059`) or to
+  `verdict.py`'s derivation logic. No change to any existing module,
+  template, test, or `STATIC_PRECHECK_BY_SHAPE` row.
+  `sink_context.family` is already a plain open string field
+  (`fuzzlab/labgen/schema.py`), so no schema/type change is needed. Once
+  this lands, `php_laravel` (or any other emitter) can reuse these same 3
+  registered names for an Eloquent-native rendering in a later, separate
+  change-control entry — explicitly not implied done here. The other 3
+  emitters (`php_laravel`, `python_fastapi`, `node_express`) and the other
+  19 new sink families remain untouched and registry-only, exactly as
+  `CC-LAB-0059` left them.
+- Risk (level; mitigation): low — purely additive new modules/templates/
+  manifest/tests; nothing existing is edited, and `php_current` is the
+  lab-only, loopback-bound target this project's safety rules
+  (`CLAUDE.md`: "the target is loopback-only and must never be exposed")
+  already govern — this change adds no new route exposure surface beyond
+  what `php_current`'s existing filesystem-routed convention already
+  covers, since `Module.cardinality` here stays `"per_cell"` like every
+  other `php_current` module (`modules.py`'s own `Module` docstring: Phase
+  3's routed/accumulator cardinalities are explicitly out of scope for this
+  Phase-0 inventory). Residual risk: no dynamic-execution sandbox is
+  available in this environment (same constraint recorded in the
+  site-architecture plan's own "Tooling available" scoping decision), so
+  the generated vulnerable cell's mass-assignment is confirmed by static/
+  manual review of the rendered PHP and PDO semantics, not by booting the
+  lab and exploiting it live.
+- Deliverables:
+  - [ ] `SOURCES`/`TRANSFORMS`/`SINKS` registry additions (1 source, 2
+    transforms, 1 sink) + 4 templates in
+    `fuzzlab/labgen/modules/__init__.py` and its `templates/` tree — todo.
+  - [ ] `STATIC_PRECHECK_BY_SHAPE[("mass_assignment",
+    "orm_entity_bulk_assign")] = StaticPrecheckStatus.UNINFORMATIVE` in
+    `fuzzlab/labgen/conformance/static_precheck.py` — todo.
+  - [ ] New manifest cell (vulnerable/secure minimal pair, `class:
+    mass_assignment`, `lab/manifests/`) — todo.
+  - [ ] Tests (classifiability, minimal-pair rendering, `--check` end-to-
+    end) — todo.
+  - [ ] `docs/components/01-target-lab/requirements.md` **FR-LAB-57**
+    (pre-assigned per `PA-0031`; next free after `FR-LAB-56`) — states:
+    `orm_entity_bulk_assign` code generation implemented in the shared
+    `fuzzlab.labgen.modules` (`php_current`) registry only, for 2 of the
+    family's 10 `lab/safety_matrix.yaml` ops (`unfiltered_body_update`
+    vulnerable, `runtime_field_allowlist` secure), plus 1 new source
+    (`all_post_params`); explicit deferral of the other 8 ops, of
+    `php_laravel`/`python_fastapi`/`node_express` reusing these same
+    registered names, and of the other 19 new sink families — todo.
+  - [ ] Explicit deferral note (this entry's own scope-limitation language
+    above) carried into `CHANGELOG.md` and the site-architecture plan's
+    Status section — todo.
+- Effectiveness (assessed <pending>): pending — this entry is written before
+  implementation, per this project's new pre-change review gate
+  (`docs/components/README.md`); effectiveness is assessed once the
+  deliverables above land and `lab-generate --check` passes on the new
+  manifest.
+
 ### CC-LAB-0059 — apply corpus `suggested_op`/`suggested_sink_family` proposals to `lab/safety_matrix.yaml` (site-architecture expansion Step 8) (2026-09-22)
 - Change: per direct instruction, accepted the `suggested_op`/
   `suggested_sink_family` proposals recorded on every entry across all 12
