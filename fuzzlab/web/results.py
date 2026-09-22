@@ -8,12 +8,36 @@ separate from the web layer so it is testable without FastAPI and never sends tr
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fuzzlab.core.urls import to_path
 
 # Score keys the harness records (report.as_dict); surfaced as a group in the UI.
 _SCORE_KEYS = ("tp", "fp", "tn", "fn", "precision", "recall", "mcc")
+
+# Overview dashboard (U1/CC-UI-0028, R-10): a fixed vuln_class -> severity bucket
+# map. The store has no `finding.severity` column (only `confidence`, which the
+# oracle actually uses for the detection *mechanism*, e.g. "error-signature" --
+# see `fuzzlab/oracle/oracle.py`), so severity is derived read-only from the
+# known category set (`fuzzlab.audit.known_categories`) rather than requiring a
+# schema change out of this lane's scope. An unrecognized/legacy vuln_class (e.g.
+# a plugin's own category, or the short aliases some tests/fixtures use) falls
+# back to "info" so it is never silently dropped from the tile/bar totals.
+_SEVERITY_BY_VULN_CLASS = {
+    "sql-injection": "critical", "sqli": "critical",
+    "command-injection": "critical", "command_injection": "critical",
+    "server-side-template-injection": "critical", "ssti": "critical",
+    "file-inclusion": "high", "file_inclusion": "high", "lfi": "high", "rfi": "high",
+    "xss": "high",
+    "open-redirect": "medium", "open_redirect": "medium",
+}
+_SEVERITY_ORDER = ("critical", "high", "medium", "low", "info")
+
+
+def severity_of(vuln_class: str | None) -> str:
+    """The dashboard severity bucket for a finding's `vuln_class` (never raises)."""
+    return _SEVERITY_BY_VULN_CLASS.get((vuln_class or "").strip().lower(), "info")
 
 
 def _scored_candidates(store, run_id: int, limit: int = 10) -> tuple[dict | None, list[dict]]:
@@ -118,3 +142,103 @@ def run_detail(store, run_id: int) -> dict | None:
         "model": model,
         "scored": scored,
     }
+
+
+# --- overview dashboard aggregate (U1/CC-UI-0028) -----------------------------
+#
+# One read-only, single-pass aggregate for the landing route ("/"): counts +
+# pre-aggregated findings-by-severity + the latest ~10 runs, joined here rather
+# than per-row in the template (R-10: "no heavy per-run joins on load").
+
+def overview_summary(store, recent_limit: int = 10) -> dict:
+    """Everything the Overview dashboard needs, in a handful of queries.
+
+    Read-only: never creates the store, never writes a row. Safe to call on an
+    empty (freshly migrated, zero-run) store -- every field degrades to an
+    empty/None value rather than raising.
+    """
+    total_findings = store.conn.execute("SELECT COUNT(*) c FROM finding").fetchone()["c"]
+
+    severity = dict.fromkeys(_SEVERITY_ORDER, 0)
+    for row in store.conn.execute("SELECT vuln_class FROM finding").fetchall():
+        severity[severity_of(row["vuln_class"])] += 1
+
+    run_rows = store.conn.execute(
+        "SELECT id, tool, config_hash, started_at FROM run ORDER BY id DESC"
+    ).fetchall()
+    total_runs = len(run_rows)
+
+    now = datetime.now(timezone.utc)
+    runs_last_7d = 0
+    for r in run_rows:
+        started = _parse_started_at(r["started_at"])
+        if started is not None and now - started <= timedelta(days=7):
+            runs_last_7d += 1
+
+    recent_runs = []
+    for r in run_rows[:recent_limit]:
+        findings_n = store.conn.execute(
+            "SELECT COUNT(*) c FROM finding WHERE run_id=?", (r["id"],)).fetchone()["c"]
+        metrics_n = store.conn.execute(
+            "SELECT COUNT(*) c FROM run_metrics WHERE run_id=?", (r["id"],)).fetchone()["c"]
+        recent_runs.append({
+            "id": r["id"], "tool": r["tool"], "target": r["config_hash"],
+            "started_at": r["started_at"], "findings": findings_n,
+            "status": "completed" if metrics_n else "recorded",
+        })
+
+    last_run = recent_runs[0] if recent_runs else None
+
+    # Detection quality (tile 4): the newest run that was actually scored
+    # (carries an "f1" run_metrics row) -- not just the newest run, which may
+    # be an unscored tool like the crawler or proxy.
+    detection_quality = None
+    for r in run_rows:
+        m = {row["key"]: row["value"] for row in store.conn.execute(
+            "SELECT key, value FROM run_metrics WHERE run_id=?", (r["id"],)).fetchall()}
+        if "f1" in m:
+            detection_quality = {
+                "run_id": r["id"], "f1": m["f1"],
+                "mcc": m.get("mcc"), "precision": m.get("precision"),
+                "recall": m.get("recall"),
+            }
+            break
+
+    # Efficiency (tile 5): the newest run carrying pipeline request/finding metrics.
+    efficiency = None
+    for r in run_rows:
+        m = {row["key"]: row["value"] for row in store.conn.execute(
+            "SELECT key, value FROM run_metrics WHERE run_id=? "
+            "AND key IN ('pipeline_requests', 'pipeline_requests_per_finding')",
+            (r["id"],)).fetchall()}
+        if m:
+            efficiency = {
+                "run_id": r["id"],
+                "requests_per_finding": m.get("pipeline_requests_per_finding"),
+                "requests": m.get("pipeline_requests"),
+            }
+            break
+
+    return {
+        "total_findings": total_findings,
+        "severity": severity,
+        "total_runs": total_runs,
+        "runs_last_7d": runs_last_7d,
+        "recent_runs": recent_runs,
+        "last_run": last_run,
+        "detection_quality": detection_quality,
+        "efficiency": efficiency,
+    }
+
+
+def _parse_started_at(value: str | None):
+    """Best-effort parse of `run.started_at` (sqlite `datetime('now')`, UTC,
+    'YYYY-MM-DD HH:MM:SS'); returns None rather than raising on odd/legacy data."""
+    if not value:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None

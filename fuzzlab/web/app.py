@@ -215,7 +215,10 @@ class SecurityGateMiddleware:
 # server-side `aria-current="page"` (R-01/R-11); nothing here is JS-switched.
 NAV: list[dict[str, Any]] = [
     {"group": "Workbench", "links": [
-        {"id": "launcher", "label": "Launcher", "href": "/", "icon": "▸"},
+        # U1/CC-UI-0028: Overview is now the landing route ("/"); Launcher moved to
+        # its own route ("/launcher") so the dashboard doesn't overload it (R-10).
+        {"id": "overview", "label": "Overview", "href": "/", "icon": "◆"},
+        {"id": "launcher", "label": "Launcher", "href": "/launcher", "icon": "▸"},
         {"id": "proxy", "label": "Proxy", "href": "/proxy", "icon": "⇄"},
         {"id": "results", "label": "Results", "href": "/results", "icon": "▤"},
     ]},
@@ -290,6 +293,22 @@ def _read_flows(cfg: Config, query: str | None = None) -> list[dict]:
     from fuzzlab.web import proxyview
     with Store(path) as store:
         return proxyview.list_flows(store, query=query)
+
+
+def _read_overview(cfg: Config) -> dict:
+    """The Overview dashboard's aggregate (U1/CC-UI-0028); empty-store safe, never
+    creates the store file."""
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        return {
+            "total_findings": 0, "severity": dict.fromkeys(
+                ("critical", "high", "medium", "low", "info"), 0),
+            "total_runs": 0, "runs_last_7d": 0, "recent_runs": [], "last_run": None,
+            "detection_quality": None, "efficiency": None,
+        }
+    from fuzzlab.core.store import Store
+    with Store(path) as store:
+        return results.overview_summary(store)
 
 
 def _read_flow(cfg: Config, flow_id: int) -> dict | None:
@@ -394,6 +413,10 @@ def _results_context(cfg: Config, runs: list[dict]) -> dict[str, Any]:
     return {**_shell_context(cfg, active="results"), "runs": runs}
 
 
+def _overview_context(cfg: Config) -> dict[str, Any]:
+    return {**_shell_context(cfg, active="overview"), **_read_overview(cfg)}
+
+
 def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None,
                proxy: "ProxyController | None" = None):
     """Build the FastAPI app (loopback-only, read-only over the store).
@@ -440,6 +463,13 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
     # computed server-side per route via `_shell_context`/`_launcher_context`.
 
     @app.get("/", response_class=HTMLResponse)
+    def overview_page(request: Request):
+        # U1/CC-UI-0028: Overview is the landing route; read-only over the store
+        # (renders with an empty store and with seeded runs, R-10).
+        return templates.TemplateResponse(
+            request, "sections/overview.html", _overview_context(cfg))
+
+    @app.get("/launcher", response_class=HTMLResponse)
     def launcher(request: Request):
         return templates.TemplateResponse(
             request, "sections/launcher.html", _launcher_context(cfg, state))

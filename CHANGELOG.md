@@ -14,6 +14,19 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- UI (`CC-UI-0028`, `FR-UI-9`, build lane U1): added the **Overview dashboard**
+  as the new landing route (`/`) — 5 KPI tiles (findings, runs, last run,
+  detection quality, efficiency), a recent-runs table, a findings-by-severity
+  bar (severity derived read-only from `finding.vuln_class`, since the store has
+  no severity column), quick actions, and empty/partial-empty states, per
+  resolved marker R-10 in `docs/UI_IMPLEMENTATION_PLAN.md`. The **Launcher**
+  moved off `/` to its own route, `/launcher` (behavior unchanged), so Overview
+  doesn't overload it. Read-only over the store (never creates it, never writes
+  a result-table row); served from one aggregate read,
+  `fuzzlab/web/results.py::overview_summary`. `js/datatable.js` (the shared
+  read-only `DataTable` R-03 reserves for U2/U5) did not exist yet, so the
+  recent-runs table got its own small hand-rolled click-to-sort instead —
+  flagged for U2/U5 to reconcile when the shared component lands.
 - LAB (`CC-LAB-0060`, `FR-LAB-57`, build lane T1): wired `fuzzlab.labgen
   .conformance.tier1`'s public API (`build_tier1_case`/`run_tier1_case`/
   `evaluate_tier1_response`) against a real in-process app+DB for the first
