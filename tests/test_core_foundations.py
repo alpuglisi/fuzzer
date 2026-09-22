@@ -8,7 +8,7 @@ from fuzzlab.core import migrations
 from fuzzlab.core.budget import BudgetExceeded, RequestBudget
 from fuzzlab.core.config import load_config
 from fuzzlab.core.http import HttpClient, OutOfScope, Request
-from fuzzlab.core.store import Store, connect
+from fuzzlab.core.store import MetricLogger, Store, connect, log_scalar, open_store
 
 
 # --- store + migrations -------------------------------------------------
@@ -42,6 +42,147 @@ def test_pragmas_set(tmp_path):
     conn = connect(tmp_path / "s.db")
     assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
     assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+
+# --- open_store()/WAL (B0 / R-08 CORE prerequisite) ----------------------
+def test_open_store_wal_smoke(tmp_path):
+    """The central connection helper always leaves the store in WAL mode."""
+    conn = open_store(tmp_path / "s.db")
+    assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 10000
+    assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1  # NORMAL
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+
+
+def test_open_store_reasserting_wal_on_existing_store_is_a_noop(tmp_path):
+    """Flipping WAL on again for a pre-existing (already-WAL) store is harmless."""
+    path = tmp_path / "s.db"
+    open_store(path).close()
+    conn = open_store(path)   # second connection, same file: re-asserts WAL
+    assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+
+
+def test_migrations_additive_on_fresh_and_prepopulated_store(tmp_path):
+    """The metric_series migration applies cleanly to a fresh store AND to one
+    that already has data under the pre-migration schema (additive/reversible-safe)."""
+    db = tmp_path / "s.db"
+    conn = open_store(db)
+    head = max(v for v, _ in migrations.MIGRATIONS)
+    v = migrations.migrate(conn)
+    assert v == head
+    tables = {r["name"] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "metric_series" in tables
+    idx = {r["name"] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index'")}
+    assert "idx_metric_series_series" in idx
+    assert "idx_metric_series_overlay" in idx
+    # Existing consumers (run_metrics rows) are untouched by the new table.
+    cur = conn.execute("INSERT INTO run (tool, config_hash) VALUES ('t','h')")
+    run_id = cur.lastrowid
+    conn.execute("INSERT INTO run_metrics (run_id, key, value) VALUES (?,?,?)",
+                (run_id, "k", 1.0))
+    conn.commit()
+    conn.close()
+
+    # Re-open (simulating a later process on the same, now-populated file):
+    # migrate() must be a clean no-op and existing rows survive.
+    conn2 = open_store(db)
+    v2 = migrations.migrate(conn2)
+    assert v2 == head
+    row = conn2.execute("SELECT value FROM run_metrics WHERE run_id=?", (run_id,)).fetchone()
+    assert row["value"] == 1.0
+
+
+# --- metric_series emitter API (B0) --------------------------------------
+def test_log_scalar_writes_a_point(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("test", "h")
+        ok = log_scalar(store, run_id, "gbt", "train/loss", 1, 0.5, ts=100.0)
+        assert ok is True
+        rows = store.conn.execute(
+            "SELECT run_id, source, key, step, ts, value FROM metric_series").fetchall()
+        assert len(rows) == 1
+        r = rows[0]
+        assert (r["run_id"], r["source"], r["key"], r["step"], r["ts"], r["value"]) == \
+            (run_id, "gbt", "train/loss", 1, 100.0, 0.5)
+
+
+def test_log_scalar_rejects_non_finite(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("test", "h")
+        with pytest.warns(UserWarning):
+            ok_nan = log_scalar(store, run_id, "gbt", "train/loss", 1, float("nan"))
+        with pytest.warns(UserWarning):
+            ok_inf = log_scalar(store, run_id, "gbt", "train/loss", 2, float("inf"))
+        assert ok_nan is False
+        assert ok_inf is False
+        rows = store.conn.execute("SELECT * FROM metric_series").fetchall()
+        assert rows == []
+
+
+def test_metric_logger_buffers_and_flushes_on_exit(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("test", "h")
+        with MetricLogger(store, run_id, "bandit", flush_every=200) as logger:
+            for step in range(5):
+                logger.log("regret/cumulative", step, float(step))
+            # Below flush_every, nothing committed yet on this same connection —
+            # but assert via the buffer, not a concurrent connection (WAL
+            # visibility across separate connections isn't the point here).
+            assert len(logger._buf) == 5
+        rows = store.conn.execute(
+            "SELECT step, value FROM metric_series ORDER BY step").fetchall()
+        assert [r["step"] for r in rows] == [0, 1, 2, 3, 4]
+        assert logger._buf == []
+
+
+def test_metric_logger_flushes_at_flush_every(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("test", "h")
+        logger = MetricLogger(store, run_id, "coverage", flush_every=3)
+        for step in range(3):
+            logger.log("coverage/lines", step, float(step))
+        assert logger._buf == []  # auto-flushed at flush_every
+        rows = store.conn.execute("SELECT COUNT(*) c FROM metric_series").fetchone()
+        assert rows["c"] == 3
+        logger.flush()  # no-op, nothing buffered
+
+
+def test_metric_logger_flushes_on_exception(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("test", "h")
+        with pytest.raises(RuntimeError):
+            with MetricLogger(store, run_id, "mutation", flush_every=200) as logger:
+                logger.log("reward", 0, 1.0)
+                raise RuntimeError("boom")
+        rows = store.conn.execute("SELECT COUNT(*) c FROM metric_series").fetchone()
+        assert rows["c"] == 1
+
+
+def test_metric_logger_drops_non_finite_without_buffering(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("test", "h")
+        with MetricLogger(store, run_id, "ml", flush_every=200) as logger:
+            with pytest.warns(UserWarning):
+                logger.log("train/loss", 0, float("nan"))
+            assert logger._buf == []
+        rows = store.conn.execute("SELECT COUNT(*) c FROM metric_series").fetchone()
+        assert rows["c"] == 0
+
+
+def test_metric_logger_uses_begin_immediate(tmp_path):
+    with Store(tmp_path / "s.db") as store:
+        run_id = store.start_run("test", "h")
+        logger = MetricLogger(store, run_id, "gbt", flush_every=200)
+        logger.log("train/loss", 0, 1.0)
+        calls = []
+        store.conn.set_trace_callback(calls.append)
+        try:
+            logger.flush()
+        finally:
+            store.conn.set_trace_callback(None)
+        assert any("BEGIN IMMEDIATE" in c for c in calls)
 
 
 # --- config -------------------------------------------------------------

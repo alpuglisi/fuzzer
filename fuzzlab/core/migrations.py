@@ -321,6 +321,28 @@ CREATE TABLE run_plugin (
 CREATE INDEX idx_run_plugin_run ON run_plugin(run_id);
 """
 
+# --- migration 11: per-step metric time-series (Phase 4b / UI lane B0) -------
+# `run_metrics` (Phase 0) is one row per run: aggregate counters. This is the
+# per-STEP companion — training curves, bandit posterior/regret, coverage
+# growth, mutation reward/novelty — so a diagnostics UI can chart trends within
+# a run and overlay them across runs. Additive; existing `run_metrics` readers
+# are untouched. Written only through `core.store.log_scalar`/`MetricLogger`
+# (never directly), which reject non-finite values at emit time (drop + warn) —
+# so there is no `is_nan` column and no NaN branch to read back here.
+_M0011 = """
+CREATE TABLE metric_series (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id  INTEGER REFERENCES run(id),
+    source  TEXT NOT NULL,     -- subsystem bucket: gbt | logreg | bandit | coverage | rank | ml
+    key     TEXT NOT NULL,     -- bounded slash-delimited path, e.g. 'train/loss'
+    step    INTEGER NOT NULL,
+    ts      REAL NOT NULL,
+    value   REAL NOT NULL
+);
+CREATE INDEX idx_metric_series_series ON metric_series(run_id, source, key, step);
+CREATE INDEX idx_metric_series_overlay ON metric_series(source, key, run_id, step);
+"""
+
 # Ordered registry. Append new migrations; never edit an applied one.
 MIGRATIONS: list[tuple[int, str]] = [
     (1, _M0001),
@@ -333,6 +355,7 @@ MIGRATIONS: list[tuple[int, str]] = [
     (8, _M0008),
     (9, _M0009),
     (10, _M0010),
+    (11, _M0011),
 ]
 
 
