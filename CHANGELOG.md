@@ -4,6 +4,42 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-22 (category 4 pilot)
+- Docs: Category 4 (Media/streaming/content platforms) of
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s 12-app expansion moved
+  from "Not started" to **Piloting** on `claude/category-4-build-t9uz3y`.
+  Applied §9.1's site-pair/stack-selection methodology in full (recorded in
+  §9.4's tracker row): excluded Amazon Prime Video (no confirmed single
+  app-language, AWS-service-oriented) and Disney+ (per the survey's own
+  "partially unconfirmed at the application-code level" note); grouped the
+  remaining three sites by (language, paradigm) — {Netflix, Spotify} both
+  Java/Spring-Boot microservices vs. {Twitch} Go — and picked the two most
+  architecturally distinct groups, then Netflix over Spotify within the
+  Java group for its documented Federated-GraphQL-gateway/DGS pattern.
+  Added `docs/research/site-architecture-survey-functionality-netflix.md`
+  and `-twitch.md`: real, cited functionality research (closing the same
+  per-site feature-research gap §0a item 2 found for category 1) plus
+  stack-specific CWE shortlists cross-checked against the existing
+  ~140-CWE corpus footprint and CWE Top 25. Picks for this pilot's Phase A:
+  **CWE-502** (Jackson polymorphic/default-typing deserialization in a
+  Netflix-DGS-style GraphQL mutation resolver, Java/Spring Boot — a new
+  stack instance of the existing `insecure-deserialization` corpus class)
+  and **CWE-347** (naive/skipped HMAC comparison in a Twitch-EventSub-style
+  webhook receiver, Go — a new stack instance of the existing
+  `webhook-signature` corpus class, grounded in Twitch's own documented
+  HMAC-SHA256 header/body signature scheme). Both classes are ones
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4 already names as
+  project-preferred for expanding real coverage; CWE-862 (GraphQL
+  field-authorization) and CWE-918 (SSRF) are recorded as Phase B
+  follow-ups for the respective stacks, not declined. Reserved
+  `CC-LAB-0090`-`0129` for this category's build (two brand-new emitters —
+  Java/Spring Boot and Go — a larger block than a single-stack category,
+  sized comparably to category 1's Ruby-on-Rails-only reservation). Updated
+  §9.2's stack-reuse ledger with the Ruby-on-Rails row category 1 had left
+  unrecorded there, plus new Java/Spring-Boot and Go rows for this
+  category, so a later category cannot silently duplicate either build.
+  Next: Phase A (skeleton + live-boot harness) for each stack.
+
 Format per entry: `- <area>: <what changed> — <why>` (commit `<hash>`).
 
 **Every change updates both logs:** this high-level CHANGELOG *and* the
