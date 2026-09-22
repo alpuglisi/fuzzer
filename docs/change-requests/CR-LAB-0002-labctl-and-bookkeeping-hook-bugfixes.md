@@ -1,6 +1,8 @@
 # CR-LAB-0002 — `labctl.sh` teardown/prune bugfixes + bookkeeping-hook detection gaps
 
-**Status: PROPOSED — awaiting review (drafted 2026-09-22, nothing patched yet).**
+**Status: APPROVED (2026-09-22) — 3/3 (two independent reviewers + author),
+revised per both reviewers' required changes. Nothing patched yet; patching
+and the bug workflow follow this approval per "On approval" below.**
 
 **Date:** 2026-09-22 · **Primary component:** LAB (`01-target-lab/`, `lab/labctl.sh`)
 · **Secondary scope:** project tooling, not one of the 13 architecture components —
@@ -101,7 +103,7 @@ instead of a global prune:
 ```sh
 # Scope to this project's own pod(s) — a global `pod prune` would remove any
 # other podman-managed project's stopped/empty pods on the same host too.
-mapfile -t _pods < <(podman pod ps -q --filter "name=pff-lab" 2>/dev/null || true)
+mapfile -t _pods < <(podman pod ps -q --filter "name=pff-lab" 2>/dev/null) || true
 if [ "${#_pods[@]}" -gt 0 ]; then
   podman pod rm -f "${_pods[@]}" >/dev/null 2>&1 || true
 fi
@@ -113,10 +115,32 @@ container/network name in this file already keys off of — see the
 no-op (not an error) when no such pod exists, preserving today's "safe to call
 even when nothing needs cleaning" behavior.
 
-**Residual risk:** if a future podman-compose version names the pod without
-the `pff-lab` substring, this filter would (safely) no-op instead of cleaning
-up — a stricter but not a worse failure mode than today's unscoped prune. This
-is called out explicitly rather than silently accepted (§5).
+**Residual risk:** three distinct things, called out explicitly rather than
+silently accepted (see also §5):
+1. If a future podman-compose version names the pod without the `pff-lab`
+   substring, this filter would (safely) no-op instead of cleaning up — a
+   stricter but not a worse failure mode than today's unscoped prune.
+2. `--filter name=...` is a substring/regex match, not exact-name — a
+   hypothetical second checkout or project named e.g. `pff-lab-ci` on the same
+   host would also match and get its stopped/empty pods removed. Narrower than
+   today's fully host-wide prune (still an improvement), but not perfectly
+   scoped to *this* checkout specifically.
+3. **`podman pod rm -f` is more destructive than `podman pod prune -f` in one
+   case the original code's semantics relied on:** `prune` only ever removes
+   pods that are already empty/stopped (a safe no-op if anything inside is
+   still running), whereas `pod rm -f` force-kills and removes a *matched*
+   pod even if it still holds live containers. In the normal path this is
+   masked because the preceding per-container `podman rm -f` loop already
+   empties the pod before this line runs. But under the exact scenario this
+   whole self-heal function exists for (BUG-0013/BUG-0017: a podman-compose
+   version whose container naming doesn't match the `pff-lab_{frontend,web,db}_1`
+   literals the loop force-removes by name), the pod could still hold live
+   containers when this line runs. Today's code silently leaves such a pod
+   alone; the new code force-tears it down. This is judged an intentional,
+   desirable strengthening of the self-heal (leaving a live-container pod
+   behind on a wedged stack is the failure mode BUG-0013/0017 are about), not
+   an accident — but it is a real behavior change beyond pure scoping, and is
+   recorded here as such rather than folded silently into "scoping only."
 
 ### 3.3 `.claude/hooks/check-error-log-bookkeeping.sh:27` — unpushed-commit detection silently degrades to nothing when `origin/<branch>` doesn't exist
 
@@ -204,12 +228,25 @@ no existing match narrowed.)
   unaffected in behavior (3.2 only narrows what gets pruned, it doesn't change
   `up`/`reset`'s own exit-code handling), but do share the benefit of the
   fixed blast radius on every self-heal they trigger.
-- **Project tooling (the Stop hook):** purely a detection-recall improvement
-  for a mechanical bookkeeping check; it cannot make the hook block something
-  it doesn't already block today (§3.3/§3.4 only add cases the hook now
-  correctly flags, they never add a false positive on unrelated diffs — the
-  fallback `upstream` search checks `!=  "$current_branch"` and the regex
-  change strictly widens two existing branches).
+- **Project tooling (the Stop hook):** a detection-recall improvement for a
+  mechanical bookkeeping check, but not a pure no-side-effect widening — two
+  things worth stating plainly rather than glossing over:
+  - §3.4's regex change strictly widens two existing alternation branches
+    (`ures?`/`ions?`); it cannot turn a previously-non-matching diff into a
+    match on text the old regex wouldn't already partially recognize as
+    incident-shaped, so it does not introduce a new *false*-positive class.
+  - §3.3's fallback, however, changes more than which diffs match — it changes
+    the **range of history scanned**, from "nothing" (today's silent gap) to
+    "every commit since divergence from `main`/`master`." On a long-lived
+    unpushed branch, that range can include this repo's own bookkeeping files
+    (`docs/bugs/*`, `PREVENTIVE_ACTIONS.md`, `ERROR_LOG.md` itself), which are
+    inherently dense with incident language by their nature. The hook will
+    correctly fire far more often across such a branch's full unpushed
+    history, not just on the current turn's diff. This is a soft, non-blocking
+    Stop-hook nudge rather than a hard failure, and is the intended fix (the
+    whole point of §3.3 is to stop silently skipping that history) — but it is
+    a real behavioral widening, not merely "more cases correctly flagged with
+    no other effect."
 - No `requirements.md` changes: neither script exposes a stated `FR-LAB-*`
   requirement that these fixes alter (they correct implementation defects
   against the *existing* self-heal/detection intent, not a new capability).
@@ -261,8 +298,14 @@ no existing match narrowed.)
 - [ ] 3.2 — `lab/labctl.sh` `_force_clean` pod-prune scoping fix — todo
 - [ ] 3.3 — hook upstream-fallback fix — todo
 - [ ] 3.4 — hook keyword-regex plural fix — todo
-- [ ] Bug workflow for all four (`ERROR_LOG.md`, `docs/bugs/BUG-0029-*.md`,
-      `docs/PREVENTIVE_ACTIONS.md`) — todo, gated on this CR's approval
+- [ ] Bug workflow, **one `ERROR_LOG.md` line + one `docs/bugs/BUG-NNNN-*.md` +
+      one `PREVENTIVE_ACTIONS.md` entry per distinct root cause** (revised
+      per Reviewer 2, §10 — see rationale there), not bundled into a single
+      doc — todo, gated on this CR's approval:
+  - [ ] `BUG-0029` / `PA-0031` — 3.1, `down` exit-code swallow
+  - [ ] `BUG-0030` / `PA-0032` — 3.2, unscoped `podman pod prune -f`
+  - [ ] `BUG-0031` / `PA-0033` — 3.3, hook upstream-detection gap
+  - [ ] `BUG-0032` / `PA-0034` — 3.4, hook regex plural-form miss
 - [ ] `docs/components/01-target-lab/change-control.md` — `CC-LAB-0057` for
       3.1/3.2 — todo
 - [ ] `CHANGELOG.md` line covering all four — todo
@@ -308,20 +351,58 @@ against the actual logs). One required correction: §3.1/§4/§5 wrongly cited
 classes found elsewhere in the repo. All four fixes otherwise correct,
 complete, and safe to apply as written.
 
-### Reviewer 2
-*(pending)*
+### Reviewer 2 (independent agent, round B)
+
+Verdict: **APPROVE WITH CHANGES.** Independently confirmed the same
+greybox_e2e.sh/h2_desync_e2e.sh caller-chain error as Reviewer 1 (found
+independently, before seeing Reviewer 1's report). Confirmed CC-LAB-0057 and
+BUG-0029 as correctly the next free IDs, and additionally flagged that the CR
+never pinned a PA number (confirmed PA-0031 next free). Five further points:
+(a) bundling all four defects into a single BUG-0029 conflicts with
+`docs/bugs/README.md`'s one-root-cause-per-doc structure and BUG-0013/0017's
+own precedent — should be split into separate bug docs; (b) §3.2's residual
+risk didn't disclose that `podman pod rm -f` is more destructive than `podman
+pod prune -f` in the case where a matched pod still holds live containers;
+(c) the `--filter name=pff-lab` substring match isn't noted as also matching
+a hypothetical `pff-lab-ci`-style second project; (d) §4's "never add a false
+positive" claim for 3.3 overstates it — the fallback changes the *range* of
+history scanned, not just which diffs match, and will fire more often across
+a long-lived unpushed branch; (e) minor: the new `mapfile` line was
+inconsistent with the rest of `_force_clean`'s `|| true` style (not a real
+bug on modern bash, but worth fixing for uniformity). No objection to the
+mechanical correctness of any of the four diffs themselves — confirmed the
+retry-then-propagate shape for `down` is correct under `set -e`, and the
+regex widening is non-narrowing, both verified independently by
+construction.
 
 ### Author disposition
 
-**Reviewer 1's required correction: accepted and applied.** Verified
-directly (`scripts/greybox_e2e.sh:80-82`, `scripts/h2_desync_e2e.sh:94`) —
-both are string literals inside `die "..."`/`echo`, not executed. §3.1, §4,
-and §5 above have been rewritten to state accurately that no script
-currently invokes `./labctl.sh down` on an automated path, and that 3.1's
-real-world effect today is limited to a human running it interactively. This
-makes 3.1's risk *lower* than originally assessed, not higher — no change to
-the proposed fix itself, only to the impact/risk narrative. Remaining verdict
-pending Reviewer 2.
+**Reviewer 1's required correction: accepted and applied** (recorded above).
+**Reviewer 2's required changes: all accepted and applied:**
+- (a) split — §7's deliverables now list four separate `BUG-NNNN`/`PA-NNNN`
+  pairs (`BUG-0029`/`PA-0031` through `BUG-0032`/`PA-0034`), one per distinct
+  root cause, instead of one bundled `BUG-0029` doc.
+- (b) and (c) — §3.2's residual-risk note now documents the
+  `pod rm -f`-vs-`pod prune -f` destructiveness difference explicitly as an
+  accepted, intentional strengthening (not an oversight), and the
+  substring-match/`pff-lab-ci` case.
+- (d) — §4's Stop-hook impact paragraph now distinguishes 3.4 (strictly
+  non-widening) from 3.3 (a real widening of the history range scanned,
+  intended and accepted, but stated as such rather than "no false positive").
+- (e) — the `mapfile` line's error handling now matches the function's
+  existing `|| true` placement style.
+
+No reviewer raised a defect in the mechanical correctness of any of the four
+proposed diffs; both reviewers independently confirmed the retry/`set -e`
+behavior, the regex non-narrowing property, the pod-scoping logic, and the
+hook fallback logic by direct construction/testing, not just by reading the
+prose. All required changes from both rounds are now reflected above.
+
+**3/3 approval reached** (Reviewer 1: approve with changes, applied;
+Reviewer 2: approve with changes, applied; author: concurs with both and has
+verified every requested correction directly against the repo rather than
+taking either report's word for it). This CR is **APPROVED** as revised.
+Proceeding to the bug workflow and remediation per "On approval" below.
 
 ## On approval
 
