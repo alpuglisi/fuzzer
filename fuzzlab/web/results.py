@@ -13,7 +13,7 @@ from pathlib import Path
 from fuzzlab.core.urls import to_path
 
 # Score keys the harness records (report.as_dict); surfaced as a group in the UI.
-_SCORE_KEYS = ("tp", "fp", "tn", "fn", "precision", "recall", "mcc")
+_SCORE_KEYS = ("tp", "fp", "tn", "fn", "precision", "recall", "mcc", "f1")
 
 
 def _scored_candidates(store, run_id: int, limit: int = 10) -> tuple[dict | None, list[dict]]:
@@ -61,6 +61,60 @@ def list_runs(store) -> list[dict]:
         out.append({"id": r["id"], "tool": r["tool"], "target": r["config_hash"],
                     "started_at": r["started_at"], "findings": findings})
     return out
+
+
+def overview_summary(store, recent_limit: int = 10) -> dict:
+    """Read-only aggregate for the Overview dashboard (R1, FR-UI-9): counts, a
+    findings-by-category breakdown (the store has no severity taxonomy yet — see
+    FR-UI-9), the latest run, the latest scored run's detection quality, the latest
+    run with an efficiency metric, and a bounded recent-runs slice. One query pass;
+    no result-table writes (NFR-UI-read-only)."""
+    from datetime import datetime, timedelta, timezone
+
+    runs = list_runs(store)
+    total_findings = sum(r["findings"] for r in runs)
+
+    def _parse(ts):
+        if not ts:
+            return None
+        try:
+            return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            return None
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    runs_7d = sum(1 for r in runs if (dt := _parse(r["started_at"])) and dt >= cutoff)
+
+    cat_rows = store.conn.execute(
+        "SELECT COALESCE(vuln_class, 'unknown') AS vuln_class, COUNT(*) AS c "
+        "FROM finding GROUP BY vuln_class ORDER BY c DESC"
+    ).fetchall()
+    findings_by_category = [{"category": r["vuln_class"], "count": r["c"]} for r in cat_rows]
+
+    quality = None
+    efficiency = None
+    for r in runs:  # newest first
+        metrics = {row["key"]: row["value"] for row in store.conn.execute(
+            "SELECT key, value FROM run_metrics WHERE run_id=?", (r["id"],)).fetchall()}
+        if quality is None and "f1" in metrics:
+            quality = {"run_id": r["id"], "f1": metrics["f1"], "mcc": metrics.get("mcc")}
+        if efficiency is None and "requests_per_finding" in metrics:
+            efficiency = {"run_id": r["id"],
+                          "requests_per_finding": metrics["requests_per_finding"],
+                          "pipeline_requests": metrics.get("pipeline_requests")}
+        if quality is not None and efficiency is not None:
+            break
+
+    return {
+        "total_runs": len(runs),
+        "runs_7d": runs_7d,
+        "total_findings": total_findings,
+        "findings_by_category": findings_by_category,
+        "last_run": runs[0] if runs else None,
+        "quality": quality,
+        "efficiency": efficiency,
+        "recent_runs": runs[:recent_limit],
+    }
 
 
 def _count(store, table: str, run_id: int) -> int:

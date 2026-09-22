@@ -86,8 +86,24 @@ bugs — the research-platform diagnostics of decision D2.
   `app.css`, and `initShell()` for theme/density/collapse persistence + the proxy chip. The
   **Launch view** was then rebuilt as the approved **master-detail** (a grouped, gate-tagged
   activity picker → the selected activity's form; `initLaunchNav()`, CC-UI-0022) — brought
-  forward from R1. Deep-linkable per-section routes, the Overview dashboard, and the Findings /
-  Proxy rebuilds still follow in R1–R3, per `docs/UI_LAYOUT_REDESIGN.md`.)*
+  forward from R1. Deep-linkable per-section routes and the Overview dashboard landed in R1
+  (FR-UI-9, CC-UI-0025); the Findings / Proxy rebuilds still follow in R2–R3, per
+  `docs/UI_LAYOUT_REDESIGN.md`.)*
+- **FR-UI-9** The panel is a **multi-page app with real, deep-linkable routes**: one URL per
+  section (`/` Overview, `/launch`, `/proxy`, `/runs` + `/runs/{id}`, `/ml`, `/diagnostics`),
+  each rendered server-side by its own template extending the shared shell — not client-side
+  tab state that resets on reload. The sidebar links to these routes and marks the current
+  one server-side (no client router; the project stays dependency-light per its no-build
+  policy). `/` is an **Overview dashboard**: KPI tiles (findings + a by-category breakdown,
+  runs, last run, detection quality, efficiency), a recent-runs table, and quick actions
+  (Launch, Proxy) — all read-only over the store, rendering correctly with no store at all
+  and never writing a result table (NFR-UI-read-only). The store has no severity taxonomy for
+  findings yet, so the findings breakdown groups by `vuln_class` rather than a severity level
+  that does not exist as a field; a future severity model would extend this, not replace it.
+  *(Realized: R1 of the layout redesign — `templates/sections/*.html`, one route per section
+  in `app.py`, `results.overview_summary()`; CC-UI-0025. Retires the hash-tab single document
+  FR-UI-7/FR-UI-8 originally described. R2 adds the Findings workbench, R3 the Proxy rebuild,
+  both as further routes in this same shell.)*
 
 ## 4. Non-functional requirements
 - **NFR-UI-localhost** The web app binds to loopback only, is never exposed, and is

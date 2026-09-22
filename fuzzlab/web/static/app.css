@@ -1,13 +1,14 @@
 /* fuzzlab control panel — served locally on loopback only.
  *
- * R0 app shell: a left sidebar (nav.tabs) + a top context bar (.topbar) frame a
+ * App shell: a left sidebar (nav.tabs) + a top context bar (.topbar) frame a
  * scrolling content area (.content). Colors, elevation, and density come from
  * tokens.css (design tokens) — this file consumes those variables, never raw hex,
  * so light/dark/system + compact density all flow from one place.
  *
- * Behavior is unchanged from the previous top-tab layout: the sections still render
- * server-side as .panel elements and app.js toggles .hidden to show one at a time
- * (no-JS shows all).
+ * R1 (docs/UI_LAYOUT_REDESIGN.md): each section is its own real, deep-linkable route
+ * and its own small page — the hash-tab single document (one .panel per section, JS
+ * toggling .hidden) is retired. `.panel`/`.card` stay as the per-page content wrapper
+ * and card styling.
  */
 
 * { box-sizing: border-box; }
@@ -125,9 +126,6 @@ nav.tabs a .ic { width: 20px; text-align: center; flex: 0 0 auto; font-size: 1re
 
 /* --- content area ------------------------------------------------------- */
 .content { grid-area: main; overflow: auto; padding: 1rem 1.2rem; }
-
-/* Panels render server-side; JS hides the inactive ones (no-JS shows all). */
-.panel.hidden { display: none; }
 
 .card {
   background: var(--surface);
@@ -328,6 +326,28 @@ th {
   padding: .5rem; border: 1px solid var(--border); border-radius: 8px;
   background: var(--surface2); color: var(--text);
 }
+
+/* --- Overview dashboard (R1) --------------------------------------------- */
+.kpirow {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: .8rem; margin: 0 0 1rem;
+}
+.kpi { margin: 0; }
+.kpi-label {
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); font-weight: 700;
+}
+.kpi-value { font-size: 1.7rem; font-weight: 700; margin: .25rem 0; line-height: 1.1; }
+.kpi-sub { font-size: .78rem; display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; }
+.kpi-sub.muted { color: var(--muted); }
+.qactions { display: flex; gap: .6rem; flex-wrap: wrap; }
+.qbtn {
+  display: inline-flex; align-items: center; gap: .4rem;
+  padding: .45rem .9rem; border-radius: 8px; font-weight: 600; font-size: .88rem;
+  background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+}
+.qbtn:hover { border-color: var(--accent); text-decoration: none; }
+.qbtn-primary { background: var(--accent); color: #fff; border-color: transparent; }
 
 /* --- narrow viewports: shrink the sidebar to icons ---------------------- */
 @media (max-width: 680px) {

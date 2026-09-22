@@ -3,6 +3,85 @@
 Component code: **UI**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-UI-0025 — R1: deep-linkable per-section routes + Overview dashboard (2026-09-22)
+- Change: built R1 of the layout redesign (`docs/UI_LAYOUT_REDESIGN.md` §9), the enabling
+  routing refactor plus the Overview dashboard it was sequenced with.
+  - **Real routes, hash-tabs retired.** Split the single `templates/index.html` (five
+    `<section class="panel" id="tab-*">` blocks toggled by `app.js`'s `initTabs`/hash
+    listener) into `templates/sections/{overview,launch,proxy,runs,ml,diagnostics}.html`,
+    each its own small page extending `base.html`. `app.py` gained one route per section
+    (`GET /`, `/launch`, `/proxy`, `/runs`, `/ml`, `/diagnostics`; `/runs/{id}` unchanged)
+    instead of one `index()` handler assembling the whole document. `base.html`'s sidebar
+    now links to real `href`s (`/`, `/launch`, …) with the active item marked **server-side**
+    from a new `section` context field (`_shell_context(cfg, section)`) via `aria-current`
+    — no client router, per the project's no-build/no-SPA-framework policy. `app.js` lost
+    `PANELS`/`TABS`/`activate`/`currentTab`/`initTabs` (dead once every section is its own
+    document); `initShell`, `initLaunchNav`, `initLaunchForms`, and the proxy-workbench
+    initializers are unchanged and still self-guard on missing elements, so they no-op
+    correctly on pages that don't have their markup.
+  - **Overview dashboard** (`/`, FR-UI-9): a new `results.overview_summary(store)` (pure,
+    testable without FastAPI, one query pass, never creates a missing store) returns
+    total findings + a **by-category** breakdown (the store has no severity field yet —
+    `finding.confidence` is a free-text oracle-mechanism label, not a severity enum, so R1
+    groups by `vuln_class` instead of inventing a severity taxonomy the schema doesn't
+    have), total/last-7-days run counts, the latest run, the latest *scored* run's
+    detection quality (F1 + MCC from `run_metrics`; added `f1` to `results._SCORE_KEYS`),
+    the latest run with an efficiency metric (`requests_per_finding`), and a bounded
+    recent-runs slice. `sections/overview.html` renders it as five KPI tiles (an em-dash,
+    never a bare `0`, when a run is unscored or has no efficiency metric yet), a recent-runs
+    table linking to `/runs/{id}`, and quick actions to `/launch` and `/proxy`.
+  - `run.html`/`not_found.html`'s "back" link now points at `/runs` (the Runs list route)
+    instead of `/` (now Overview).
+- Impact (other components / project): UI only. No new store writes (`overview_summary` is
+  read-only; NFR-UI-read-only holds) and no schema change — `f1` was already written to
+  `run_metrics` by `harness/integration.py::record_metrics` (report.as_dict()), just not
+  previously surfaced through `results._SCORE_KEYS`. The command-spec/launcher contract
+  (FR-UI-6, X0's `group` field) is untouched: `/launch` renders the same activity-picker
+  markup `initLaunchNav()` expects, just under its own route. The Proxy workbench's DOM ids
+  (`#flow-table`, `#intercept-card`, `#repeater-card`, `#scope-card`, …) are unchanged, just
+  moved to `/proxy` — U3 (the Proxy rebuild) still has a stable base to build on. Deliberately
+  **not** in this pass (left for a follow-up under U0's own tracked scope in
+  `docs/UI_IMPLEMENTATION_PLAN.md`): splitting `app.js`/`app.css` into per-section modules —
+  R1's acceptance criteria in `docs/UI_LAYOUT_REDESIGN.md` §9 are routes + Overview, and the
+  single-file assets still work correctly per-page (each page's init functions self-guard on
+  missing elements).
+- Risk (level; mitigation): low-medium (a routing/template refactor touching every page, but
+  no new state, no new writes, and the API surface is untouched). Mitigation: every existing
+  web test that assumed launcher/proxy/results content lived at `/` was updated to its new
+  route (`tests/test_web_frontend.py`, `test_web_launcher.py`, `test_web_proxy_history.py`,
+  `test_web_results.py`) rather than left to silently pass against the wrong page; a new
+  `tests/test_web_overview.py` covers `overview_summary` on an empty store, a seeded store
+  (real findings/runs/metrics, not mocked), the recent-runs limit, and the `/` route's
+  rendering (empty-state copy, real KPI values, quick-action links); a new pair of frontend
+  tests assert every section route resolves inside the shell and marks itself active, and
+  that the sidebar's `href`s match the retired hash-tab names 1:1. The two Playwright browser
+  smokes (`test_web_launcher_browser.py`, `test_web_repeater_browser.py`) still pass: the
+  first now `goto`s `/launch` directly (it was exercising the Launcher, not Overview) and its
+  in-page `nav.tabs a[data-tab="proxy"]` click now does a real page navigation to `/proxy`
+  instead of a hash change — Playwright's `.click()` on an `<a>` handles that transparently,
+  no test logic changed; the second was already navigating to `/` then clicking through to
+  Proxy, unaffected.
+- Deliverables:
+  - [x] `templates/sections/{overview,launch,proxy,runs,ml,diagnostics}.html` + one route
+    each in `app.py` (`overview`, `launch_page`, `proxy_page`, `runs_page`, `ml_page`,
+    `diagnostics_page`) — done; `templates/index.html` removed.
+  - [x] `base.html` real `href`s + server-rendered active state (`section` context var) —
+    done.
+  - [x] `app.js`: hash-tab switching removed (`initTabs` and its helpers) — done.
+  - [x] `results.overview_summary()` + `f1` in `_SCORE_KEYS` — done.
+  - [x] `sections/overview.html` KPI tiles + recent runs + quick actions — done.
+  - [x] `run.html`/`not_found.html` back-links repointed at `/runs` — done.
+  - [x] Existing web tests repointed at their new routes; `tests/test_web_overview.py` added
+    (route resolution + Overview data-wiring); focused web suite green (91 passed) — done.
+  - [x] Full fast suite (`pytest -q -m "not slow"`): 1542 passed, 8 skipped, 11 deselected,
+    3 failed — the 3 failures are pre-existing, unrelated `test_labgen_*`
+    (`dom_innerhtml_echo` Laravel emitter) failures from concurrent uncommitted work already
+    in the shared tree before this lane started, not a regression from this change — done.
+- Effectiveness (assessed 2026-09-22): effective — the panel now has real, bookmarkable/
+  shareable URLs per section and a landing dashboard wired to live data, closing the R1 gap
+  UI_LAYOUT_REDESIGN.md flagged as blocker-free and first in sequence. Re-assess once R2
+  (Findings workbench) lands on top of these routes.
+
 ### CC-UI-0024 — Lane X0: register `lab-generate` in the launcher (own group) (2026-09-22)
 - Change: surfaced `fuzzlab lab-generate` as a launchable activity in the web launcher (Wave-0
   lane X0 of `docs/UI_IMPLEMENTATION_PLAN.md`). `fuzzlab/labgen/cli.py` already exposed

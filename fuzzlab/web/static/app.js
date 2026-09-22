@@ -1,38 +1,9 @@
 // fuzzlab control panel — client shell.
-// Progressive enhancement: with JS off, every panel renders (nothing is hidden);
-// with JS on, the tab nav shows one panel at a time.
-
-const PANELS = () => Array.from(document.querySelectorAll(".panel"));
-const TABS = () => Array.from(document.querySelectorAll("nav.tabs a"));
-
-function activate(name) {
-  let matched = false;
-  for (const panel of PANELS()) {
-    const on = panel.id === `tab-${name}`;
-    panel.classList.toggle("hidden", !on);
-    matched = matched || on;
-  }
-  for (const tab of TABS()) {
-    tab.classList.toggle("active", tab.dataset.tab === name);
-  }
-  return matched;
-}
-
-function currentTab() {
-  const hash = (location.hash || "").replace(/^#/, "");
-  return hash || "launcher";
-}
-
-function initTabs() {
-  const tabs = TABS();
-  // The sidebar nav is present on every page (base.html), but only the index has the
-  // .panel sections it switches. On a run/detail page there is nothing to activate.
-  if (tabs.length === 0 || PANELS().length === 0) return;
-  if (!activate(currentTab())) activate("launcher");
-  window.addEventListener("hashchange", () => {
-    if (!activate(currentTab())) activate("launcher");
-  });
-}
+// R1 (docs/UI_LAYOUT_REDESIGN.md): each section is its own real route/page (an MPA,
+// not a client router); the sidebar nav marks the active section server-side
+// (base.html, from the `section` context var). Progressive enhancement per page:
+// with JS off, a page's controls (forms, links) still work; JS adds live behavior
+// (dry-run/run/SSE output, the proxy workbench polling) on top.
 
 // --- app shell: theme / density / sidebar persistence + proxy status chip ---
 // All chrome; it touches no invariant. Preferences persist in localStorage (wrapped
@@ -501,6 +472,6 @@ function initScope() {
 
 document.addEventListener("DOMContentLoaded", () => {
   initShell();
-  initTabs(); initLaunchNav(); initLaunchForms();
+  initLaunchNav(); initLaunchForms();
   initProxy(); initIntercept(); initRepeater(); initScope();
 });

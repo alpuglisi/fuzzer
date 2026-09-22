@@ -180,28 +180,47 @@ def _active_plugins() -> list[dict]:
         return []
 
 
-def _shell_context(cfg: Config) -> dict[str, Any]:
-    """Chrome shared by every page (sidebar + top context bar): the target, scope, and
-    authorization state the topbar chips render. Merged into each TemplateResponse so the
-    shell is identical on the index, a run detail, and the not-found page."""
+def _shell_context(cfg: Config, section: str = "overview") -> dict[str, Any]:
+    """Chrome shared by every page (sidebar + top context bar): the target, scope,
+    authorization state the topbar chips render, and which sidebar item is the current
+    section (R1: real per-section routes, server-rendered active state — no client
+    router). Merged into each TemplateResponse so the shell is identical everywhere."""
     return {
         "target": cfg.get("target_base_url", ""),
         "scope": ", ".join(cfg.get("scope_hosts", [])),
         "authorized": bool(cfg.get("authorized", False)),
+        "section": section,
     }
 
 
-def _index_context(cfg: Config, state: LauncherState, runs: list[dict]) -> dict[str, Any]:
+def _overview_context(cfg: Config) -> dict[str, Any]:
+    """R1 Overview dashboard (FR-UI-9): KPI tiles + recent runs, read-only over the
+    store. Renders correctly with no store at all (a fresh checkout, never created by
+    this read-only reader)."""
+    path = cfg.get("store_path", "fuzzlab.db")
+    if not results.store_exists(path):
+        summary = {
+            "total_runs": 0, "runs_7d": 0, "total_findings": 0,
+            "findings_by_category": [], "last_run": None,
+            "quality": None, "efficiency": None, "recent_runs": [],
+        }
+    else:
+        from fuzzlab.core.store import Store
+        with Store(path) as store:
+            summary = results.overview_summary(store)
+    return {**_shell_context(cfg, "overview"), **summary}
+
+
+def _launch_context(cfg: Config, state: LauncherState) -> dict[str, Any]:
     activities = _activities()
     return {
-        **_shell_context(cfg),
+        **_shell_context(cfg, "launcher"),
         "mode": state.mode,
         "categories": _known_categories(),
         "commands": _tool_commands(cfg),
         "activities": activities,
         "activity_groups": _group_activities(activities),
         "plugins": _active_plugins(),
-        "runs": runs,
         "last_result": None if state.last_result is None else str(state.last_result),
     }
 
@@ -241,10 +260,41 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         except KeyError:
             return None
 
+    # --- R1: real, deep-linkable routes per section (retires the hash-tab shell;
+    # see docs/UI_LAYOUT_REDESIGN.md R1). Each section is its own small page extending
+    # the shared base.html shell; the sidebar nav links to these real URLs and the
+    # active item is marked server-side from `section` (no client router). ---
+
     @app.get("/", response_class=HTMLResponse)
-    def index(request: Request):
+    def overview(request: Request):
         return templates.TemplateResponse(
-            request, "index.html", _index_context(cfg, state, _read_runs(cfg)))
+            request, "sections/overview.html", _overview_context(cfg))
+
+    @app.get("/launch", response_class=HTMLResponse)
+    def launch_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/launch.html", _launch_context(cfg, state))
+
+    @app.get("/proxy", response_class=HTMLResponse)
+    def proxy_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/proxy.html", _shell_context(cfg, "proxy"))
+
+    @app.get("/runs", response_class=HTMLResponse)
+    def runs_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/runs.html",
+            {**_shell_context(cfg, "results"), "runs": _read_runs(cfg)})
+
+    @app.get("/ml", response_class=HTMLResponse)
+    def ml_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/ml.html", _shell_context(cfg, "ml"))
+
+    @app.get("/diagnostics", response_class=HTMLResponse)
+    def diagnostics_page(request: Request):
+        return templates.TemplateResponse(
+            request, "sections/diagnostics.html", _shell_context(cfg, "diagnostics"))
 
     @app.get("/api/status")
     def status() -> dict[str, Any]:
@@ -295,9 +345,9 @@ def create_app(cfg: Config | None = None, pipeline: PipelineRunner | None = None
         if detail is None:
             return templates.TemplateResponse(
                 request, "not_found.html",
-                {"run_id": run_id, **_shell_context(cfg)}, status_code=404)
+                {"run_id": run_id, **_shell_context(cfg, "results")}, status_code=404)
         return templates.TemplateResponse(
-            request, "run.html", {"detail": detail, **_shell_context(cfg)})
+            request, "run.html", {"detail": detail, **_shell_context(cfg, "results")})
 
     # --- launcher: dry-run preview, gated execution, live output (Phase 0.3) ---
 

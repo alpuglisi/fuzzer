@@ -647,7 +647,16 @@ tracked in the requirements files, not here.
   change, hash-based section switching preserved; CC-UI-0021, FR-UI-8). The **Launch view** was
   then rebuilt as the approved **master-detail** — a grouped, gate-tagged activity picker →
   the selected activity's command-spec form (`initLaunchNav()`; CC-UI-0022), brought forward
-  from R1. R1 still adds deep-linkable per-section routes + an Overview dashboard, R2 a Findings
+  from R1. **R1 built:** real, deep-linkable per-section routes (`/`, `/launch`, `/proxy`,
+  `/runs`, `/ml`, `/diagnostics`; `/runs/{id}` unchanged) replacing the hash-tab single
+  document — each section is its own small jinja template under `web/templates/sections/`
+  extending `base.html`, the sidebar now links to real `href`s with server-rendered active
+  state (`section` context var), and `app.js`'s hash-tab switching (`initTabs`) is retired.
+  R1 also added the **Overview dashboard** (`/`, `results.overview_summary()`): KPI tiles
+  (findings + a by-category breakdown — the store has no severity taxonomy yet, FR-UI-9),
+  runs, last run, detection quality (F1/MCC on the latest scored run), efficiency
+  (requests/finding), a recent-runs table, and quick actions to Launch/Proxy; read-only,
+  renders correctly with no store at all (CC-UI-0025, FR-UI-9). R2 still adds a Findings
   workbench, R3 a Proxy rebuild.
   **Pending:** the ML tab (Phase 3), the TensorBoard-like diagnostics tab + a
   `metric_series` time-series table (Phase 4), Datasette-style store exploration, a

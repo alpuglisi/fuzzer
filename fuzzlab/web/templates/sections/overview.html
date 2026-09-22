@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block crumb %}Overview{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="kpirow">
+    <div class="kpi card">
+      <div class="kpi-label">Findings</div>
+      <div class="kpi-value">{{ total_findings }}</div>
+      <div class="kpi-sub">
+        {% if findings_by_category %}
+        {% for c in findings_by_category[:4] %}<span class="chip">{{ c.category }} {{ c.count }}</span>{% endfor %}
+        {% else %}<span class="muted">none yet</span>{% endif %}
+      </div>
+    </div>
+
+    <div class="kpi card">
+      <div class="kpi-label">Runs</div>
+      <div class="kpi-value">{{ total_runs }}</div>
+      <div class="kpi-sub muted">{{ runs_7d }} in last 7d</div>
+    </div>
+
+    <div class="kpi card">
+      <div class="kpi-label">Last run</div>
+      {% if last_run %}
+      <div class="kpi-value"><a href="/runs/{{ last_run.id }}">#{{ last_run.id }}</a></div>
+      <div class="kpi-sub muted">{{ last_run.tool }} &rarr; <code>{{ last_run.target or '—' }}</code>
+        &middot; {{ last_run.started_at or '' }}</div>
+      {% else %}
+      <div class="kpi-value">&mdash;</div>
+      <div class="kpi-sub muted">no runs yet</div>
+      {% endif %}
+    </div>
+
+    <div class="kpi card">
+      <div class="kpi-label">Detection quality</div>
+      {% if quality %}
+      <div class="kpi-value">{{ "%.2f"|format(quality.f1) }}</div>
+      <div class="kpi-sub muted">F1 &middot; run #{{ quality.run_id }}{% if quality.mcc is not none %}
+        &middot; MCC {{ "%.2f"|format(quality.mcc) }}{% endif %}</div>
+      {% else %}
+      <div class="kpi-value">&mdash;</div>
+      <div class="kpi-sub muted">unscored</div>
+      {% endif %}
+    </div>
+
+    <div class="kpi card">
+      <div class="kpi-label">Efficiency</div>
+      {% if efficiency %}
+      <div class="kpi-value">{{ efficiency.requests_per_finding }}</div>
+      <div class="kpi-sub muted">requests / finding{% if efficiency.pipeline_requests is not none %}
+        &middot; {{ efficiency.pipeline_requests|int }} total{% endif %}</div>
+      {% else %}
+      <div class="kpi-value">&mdash;</div>
+      <div class="kpi-sub muted">no metrics yet</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Recent runs</h2>
+    {% if recent_runs %}
+    <table>
+      <thead><tr><th>run</th><th>tool</th><th>target</th><th>started</th><th>findings</th></tr></thead>
+      <tbody>
+        {% for r in recent_runs %}
+        <tr>
+          <td><a href="/runs/{{ r.id }}">#{{ r.id }}</a></td>
+          <td>{{ r.tool }}</td>
+          <td><code>{{ r.target or '' }}</code></td>
+          <td>{{ r.started_at or '' }}</td>
+          <td>{{ r.findings }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted"><a href="/runs">All runs &rarr;</a></p>
+    {% else %}
+    <p class="muted">No runs yet. <a href="/launch">Launch the automatic pipeline</a> to get
+      started &mdash; nothing runs until you act (no-auto-run).</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Quick actions</h2>
+    <div class="qactions">
+      <a class="qbtn qbtn-primary" href="/launch">&#9654; Launch</a>
+      <a class="qbtn" href="/proxy">Open proxy</a>
+    </div>
+  </div>
+</section>
+{% endblock %}

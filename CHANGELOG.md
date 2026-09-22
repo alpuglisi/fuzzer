@@ -14,6 +14,12 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-22
 
+- UI: built R1 of the layout redesign (`docs/UI_LAYOUT_REDESIGN.md`) — real,
+  deep-linkable per-section routes (`/`, `/launch`, `/proxy`, `/runs`, `/ml`,
+  `/diagnostics`) replacing the single hash-tab document, and a new Overview
+  dashboard (`/`) with KPI tiles, a recent-runs table, and quick actions wired to
+  real store data (`results.overview_summary()`), so the panel scales past one
+  ever-growing document and has a real landing page (CC-UI-0025, FR-UI-9).
 - FUZZ: built the previously-unbuilt M8 out-of-band (OOB) callback oracle mechanism —
   `fuzzlab/oracle/oob.py::OobListener` (a loopback-only, default-off local canary
   tracker) plus `CommandInjectionOobStrategy`, confirming blind command injection

@@ -1,6 +1,7 @@
 # Web UI Layout Redesign
 
-Component: **UI** (#12, `fuzzlab/web/`) · Status: `[proposed]` · Last updated: 2026-09-21
+Component: **UI** (#12, `fuzzlab/web/`) · Status: `[R0, R1 built; R2/R3 proposed]` ·
+Last updated: 2026-09-22
 
 Related: `docs/UI_REVAMP_PLAN.md` (the feature revamp, Phases 0–4), `ARCHITECTURE.md` #12,
 `DECISIONS_AND_ROADMAP.md` (D11 local web app). This doc redesigns the **layout / IA**;
@@ -185,9 +186,18 @@ in-page state persist in `localStorage`.
 
 - **R0 — shell + tokens (no behavior change).** Add `shell.html` (sidebar + top context bar),
   `tokens.css` (theme + density), and extract shared JS (DataTable, message editor, list→
-  detail, prefs). Render the *existing* sections inside the shell first.
+  detail, prefs). Render the *existing* sections inside the shell first. `[built; CC-UI-0021]`
 - **R1 — routes per section + Overview.** Split `index.html` into per-section templates behind
-  real routes; add the Overview dashboard. Retire the hash-tabs.
+  real routes; add the Overview dashboard. Retire the hash-tabs. `[built; CC-UI-0025, FR-UI-9]`
+  — real routes (`/`, `/launch`, `/proxy`, `/runs`, `/ml`, `/diagnostics`; `/runs/{id}`
+  unchanged), each its own template under `templates/sections/` extending `base.html`; the
+  sidebar's `href`s mark the active section server-side (`section` context var, no client
+  router); `app.js`'s hash-tab switching (`initTabs`) removed. The Overview dashboard
+  (`results.overview_summary()`) ships the fixed-layout KPI row + recent-runs table + quick
+  actions from §11's "lean to fixed first" call — composable widgets remain a later option.
+  Findings-by-category (not "by severity" — see FR-UI-9) is a horizontal chip row for now;
+  the segmented-bar/sparkline treatment described in §6 is left for a follow-up pass once a
+  charting story exists (R3+/Phase 4).
 - **R2 — Findings workbench.** Faceted filters + saved views over the existing `finding`/
   `attempt` data; wire "send to Repeater / open request".
 - **R3 — Proxy workbench rebuild.** Re-lay Proxy on the shared message editor + resizable

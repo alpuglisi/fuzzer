@@ -31,7 +31,7 @@ def test_static_css_is_served():
 def test_static_js_is_served():
     r = _client().get("/static/app.js")
     assert r.status_code == 200
-    assert "subscribe" in r.text and "initTabs" in r.text
+    assert "subscribe" in r.text and "initLaunchNav" in r.text
 
 
 def test_static_tokens_css_is_served():
@@ -68,21 +68,39 @@ def test_shell_context_on_run_and_not_found_pages():
     assert 'class="sidebar"' in nf.text and 'class="topbar"' in nf.text
 
 
-def test_index_renders_the_tab_shell():
+def test_nav_has_real_routes_and_marks_active_section():
+    # R1: the hash-tab shell is retired — the sidebar links to real, deep-linkable
+    # routes and the active item is marked server-side (no client router).
     body = _client().get("/").text
-    # R0: the tab nav moved into the app-shell sidebar (a labelled landmark), but it is
-    # still <nav class="tabs"> switching the same five sections by data-tab/id.
     assert '<nav class="tabs"' in body
-    for tab in ("launcher", "proxy", "results", "ml", "diagnostics"):
-        assert f'data-tab="{tab}"' in body
-        assert f'id="tab-{tab}"' in body
+    routes = {
+        "overview": "/", "launcher": "/launch", "proxy": "/proxy",
+        "results": "/runs", "ml": "/ml", "diagnostics": "/diagnostics",
+    }
+    for tab, href in routes.items():
+        assert f'data-tab="{tab}" href="{href}"' in body or f'href="{href}" data-tab="{tab}"' in body
+    # the current section (Overview, on "/") is marked active server-side
+    assert 'data-tab="overview" class="active" aria-current="page"' in body
+    assert 'data-tab="launcher" class="active"' not in body
     # the shared stylesheet + module script are linked
     assert '/static/app.css' in body
     assert '/static/app.js' in body
 
 
+def test_each_section_route_resolves_with_the_shell_and_marks_itself_active():
+    # Deep-linkable routes (R1): every section is reachable at its own URL and the
+    # shell frames it, with that section's nav item marked current.
+    client = _client()
+    for path, tab in (("/", "overview"), ("/launch", "launcher"), ("/proxy", "proxy"),
+                      ("/runs", "results"), ("/ml", "ml"), ("/diagnostics", "diagnostics")):
+        r = client.get(path)
+        assert r.status_code == 200, path
+        assert 'class="sidebar"' in r.text and 'class="topbar"' in r.text
+        assert f'data-tab="{tab}" class="active" aria-current="page"' in r.text
+
+
 def test_index_previews_activities_from_the_command_spec():
-    body = _client().get("/").text
+    body = _client().get("/launch").text
     # activities come from the command-spec registry (Phase 0.1)
     assert "greybox-run" in body and "mutate-run" in body
     # gate pills surface which activities send traffic / need authorization
@@ -92,7 +110,7 @@ def test_index_previews_activities_from_the_command_spec():
 # --- Phase 1: interactive launcher forms -----------------------------------
 
 def test_launcher_renders_a_form_per_activity():
-    body = _client().get("/").text
+    body = _client().get("/launch").text
     # one form per non-subcommand activity (session is subcommand-only → note, no form)
     assert body.count('class="launch-form"') >= 8
     assert 'data-command="auto"' in body
@@ -110,14 +128,14 @@ def test_run_buttons_gated_by_authorization():
     # unauthorized: traffic tools' Run is disabled; read-only tools stay enabled.
     # Matched on the (whitespace-independent) gate title so the layout can evolve.
     gate = 'title="set authorized:true to run traffic tools"'
-    unauth = _client(authorized=False).get("/").text
+    unauth = _client(authorized=False).get("/launch").text
     assert unauth.count(gate) == 7
-    auth = _client(authorized=True).get("/").text
+    auth = _client(authorized=True).get("/launch").text
     assert gate not in auth
 
 
 def test_category_picker_rendered_for_auto():
-    body = _client().get("/").text
+    body = _client().get("/launch").text
     assert 'data-catgroup="categories"' in body
     # populated from the known injection categories
     assert 'class="cat"' in body
@@ -125,13 +143,13 @@ def test_category_picker_rendered_for_auto():
 
 def test_plugins_panel_and_endpoint():
     client = _client()
-    assert "Plugins" in client.get("/").text
+    assert "Plugins" in client.get("/launch").text
     data = client.get("/api/plugins").json()
     assert "plugins" in data and isinstance(data["plugins"], list)
 
 
 def test_session_is_subcommand_note_not_a_form():
-    body = _client().get("/").text
+    body = _client().get("/launch").text
     # session has subparsers → rendered as a CLI note, not a launch form
     assert 'data-command="session"' not in body
     assert "fuzzlab session &lt;sub&gt;" in body

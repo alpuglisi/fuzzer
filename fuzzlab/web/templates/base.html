@@ -24,12 +24,13 @@
   <div class="brand"><span class="dot"></span><span>fuzzlab</span></div>
   <nav class="tabs" aria-label="Primary">
     <div class="side-sep"><span>Workbench</span></div>
-    <a href="/#launcher" data-tab="launcher"><span class="ic">▸</span><span>Launcher</span></a>
-    <a href="/#proxy" data-tab="proxy"><span class="ic">⇄</span><span>Proxy</span></a>
-    <a href="/#results" data-tab="results"><span class="ic">▤</span><span>Results</span></a>
+    <a href="/" data-tab="overview"{% if section == 'overview' %} class="active" aria-current="page"{% endif %}><span class="ic">◧</span><span>Overview</span></a>
+    <a href="/launch" data-tab="launcher"{% if section == 'launcher' %} class="active" aria-current="page"{% endif %}><span class="ic">▸</span><span>Launcher</span></a>
+    <a href="/proxy" data-tab="proxy"{% if section == 'proxy' %} class="active" aria-current="page"{% endif %}><span class="ic">⇄</span><span>Proxy</span></a>
+    <a href="/runs" data-tab="results"{% if section == 'results' %} class="active" aria-current="page"{% endif %}><span class="ic">▤</span><span>Results</span></a>
     <div class="side-sep"><span>Analysis</span></div>
-    <a href="/#ml" data-tab="ml"><span class="ic">◈</span><span>ML</span></a>
-    <a href="/#diagnostics" data-tab="diagnostics"><span class="ic">◍</span><span>Diagnostics</span></a>
+    <a href="/ml" data-tab="ml"{% if section == 'ml' %} class="active" aria-current="page"{% endif %}><span class="ic">◈</span><span>ML</span></a>
+    <a href="/diagnostics" data-tab="diagnostics"{% if section == 'diagnostics' %} class="active" aria-current="page"{% endif %}><span class="ic">◍</span><span>Diagnostics</span></a>
   </nav>
   <div class="side-foot"><span>lab-only · loopback</span></div>
 </aside>

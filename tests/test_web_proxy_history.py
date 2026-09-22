@@ -103,6 +103,6 @@ def test_api_flows_missing_store_is_empty_and_creates_nothing(tmp_path):
 def test_proxy_tab_renders_history_ui(tmp_path):
     path = tmp_path / "p.db"
     _seed(path)
-    body = _client(path).get("/").text
+    body = _client(path).get("/proxy").text
     assert 'id="flow-table"' in body and 'id="flow-search"' in body
-    assert 'id="tab-proxy"' in body
+    assert "Proxy workbench" in body
