@@ -4266,11 +4266,22 @@ lane) can submit a payload as
   no existing `sink_context` value describes a price/charge amount
   reflected in a JSON response rather than written to a database
   (Booking.com's own `BKNG-0003` used `"sql"` because its sink is a real
-  DB insert; this sink never touches a database at all); `param=
-  "monthly_charge"`/`location="body"`, the same per-named-field
-  convention `NFLX-0004`'s own `account_id` established, not the
-  whole-body convention `NFLX-0001`-`0003` use, since exactly one JSON
-  field carries the taint here).
+  DB insert; this sink never touches a database at all); `param="body"`/
+  `location="body"`, the same whole-body convention `NFLX-0001`-`0003`
+  use. **Corrected in place** (living-doc discipline; the original text
+  here read `param="monthly_charge"`, modeled on `NFLX-0004`'s own
+  per-named-query-param convention): found wrong during `CC-FUZZ-0037`'s
+  own real end-to-end pipeline verification --
+  `fuzzlab.harness.auto.points_from_ground_truth` only marks a body
+  point's Content-Type as `application/json` when `param == "body"`
+  exactly (the same gate `CC-LAB-0182`'s own `mass_assignment` ground
+  truth already had to satisfy), so a per-field `param` name silently
+  starves `PriceIntegrityBypassStrategy` of the JSON body point it needs
+  when driven through the real harness, not just its own dedicated unit/
+  live-boot tests (which construct a `Candidate` directly and never hit
+  this gate). The correction changes nothing about what either the
+  vulnerable/secure twins do or what the oracle strategy sends -- see
+  `CC-FUZZ-0037` for the full record.
   **Real live-boot proof** (`tests/test_labgen_spring_boot_subscription_
   price_integrity_live_boot.py`, real `mvn package`/boot/HTTP round
   trip, the exact differential this task asked for): a manipulated

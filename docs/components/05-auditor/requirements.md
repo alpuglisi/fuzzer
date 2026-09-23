@@ -104,6 +104,24 @@ budget where a vulnerability is plausible.
   own deliberately-deferred detection follow-on for Twitch's
   unrestricted-file-upload cell (`TWCH-0009`). Rule-generation only —
   confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-22`).
+- **FR-AUD-15** *(`CC-AUD-0025`, 2026-09-23).* A candidate is generated for
+  the `price-integrity-bypass` category: `R-PRICE-INTEGRITY`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a body point
+  whose `sink_context` is `"payment_charge"` — the same
+  `location_in`+`sink_context_in` shape as `R-MASS-ASSIGNMENT`/
+  `R-UNRESTRICTED-FILE-UPLOAD`. Deliberately scoped to `"payment_charge"`
+  only, not also `"sql"` (Booking.com's own `BKNG-0003` ground truth uses
+  `sink_context="sql"`, since its sink is a real DB insert): `"sql"` is
+  already used as the `sink_context` for a large number of unrelated
+  SQL-injection candidates project-wide, and widening this rule's own
+  `sink_context_in` to include it would have generated a
+  `price-integrity-bypass` candidate for essentially every SQL-sink point
+  in the project, a real false-candidate-explosion risk caught during
+  this rule's own pre-change review, not discovered after the fact. This
+  project's first-ever candidate-generation rule for this vuln class,
+  closing `CC-LAB-0188`'s own deliberately-deferred detection follow-on
+  for Netflix's price-integrity-bypass cell (`NFLX-0005`). Rule-generation
+  only — confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-23`).
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that

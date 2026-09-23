@@ -98,6 +98,13 @@
       "transaction_type": "Unrestricted File Upload",
       "when": { "location_in": ["body"], "sink_context_in": ["fs_web_root_write"] },
       "reference": "upload-insecure-files"
+    },
+    {
+      "id": "R-PRICE-INTEGRITY",
+      "category": "price-integrity-bypass",
+      "transaction_type": "Price/Amount Integrity Bypass",
+      "when": { "location_in": ["body"], "sink_context_in": ["payment_charge"] },
+      "reference": "business-logic-price-manipulation"
     }
   ]
 }

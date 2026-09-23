@@ -68,7 +68,7 @@ def test_netflix_ground_truth_loads_and_cross_checks():
     assert price_case.sink_context == "payment_charge"
     assert price_case.url == "/api/subscription/change-plan"
     assert price_case.method == "POST"
-    assert price_case.param == "monthly_charge"
+    assert price_case.param == "body"
     assert price_case.location == "body"
 
     # Opaque case IDs: no vuln class leaks into the identifier.

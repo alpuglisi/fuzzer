@@ -1284,6 +1284,120 @@ class StoredXssStrategy(_BrowserXssStrategy):
         return self._executor.run(ExecRequest(url=candidate.url, store=store), token)
 
 
+def _json_number_field(text: str | None, field: str) -> float | int | None:
+    """Like `_json_bool_field`, but for a numeric field -- used by
+    `PriceIntegrityBypassStrategy` to read back the reflected `monthly_charge`.
+    Returns `None` (never `0`/`False`-as-falsy) on anything unparseable, a
+    missing key, or a non-numeric value (a `bool` is explicitly excluded,
+    since Python's `bool` is a `int` subclass and would otherwise silently
+    pass this check)."""
+    import json
+    try:
+        val = json.loads(text or "")[field]
+    except (ValueError, TypeError, KeyError):
+        return None
+    if isinstance(val, bool) or not isinstance(val, (int, float)):
+        return None
+    return val
+
+
+class PriceIntegrityBypassStrategy(ConfirmationStrategy):
+    """Confirms `price_integrity_bypass` (CWE-807, this project's own
+    `CC-LAB-0188` cell -- Netflix's `/api/subscription/change-plan`) with a
+    two-probe differential over the JSON body's own `monthly_charge` field
+    (this project's own Go/Twitch-lab-style "hardcode the sink's own known
+    field name in the strategy" convention `MassAssignmentPrivilegedField
+    Strategy`'s `is_partner` and `JwtAlgNoneConfusionStrategy`'s
+    `channel_id`/`role` claims already use) -- this project's first-ever
+    rule/strategy pair for the `price_integrity_bypass` class at all (a
+    real implementation already exists on two stacks, `php_laravel`'s
+    Booking.com checkout charge, `CC-LAB-0212`, and `spring_boot`'s own
+    Netflix plan-change endpoint, `CC-LAB-0188`, but neither had any
+    detection capability before this entry).
+
+    Unlike a strategy that would need to know the target's own real price
+    in advance (which a genuine black-box fuzzer never does), this
+    strategy needs no such prior knowledge: it sends the *same* plan_tier
+    twice with two deliberately different, attacker-chosen amounts, and
+    checks whether the amount that comes back tracks whichever amount was
+    just sent (client-trusted, vulnerable) or stays identical across both
+    requests despite the different inputs (server-recomputed, secure) --
+    the same "does the sink's own output move with this specific input"
+    reasoning `MassAssignmentPrivilegedFieldStrategy`'s own two-probe
+    differential already uses for a boolean field, generalized here to a
+    numeric one.
+
+    Probe A sends `{"plan_tier": "standard", "monthly_charge": 0.01}` --
+    an implausibly low amount no real Standard-tier price would ever be.
+    Requires HTTP 200 and a numeric `monthly_charge` in the response;
+    establishes this run's own baseline reading, whatever it is (this
+    strategy never assumes it knows the real price).
+
+    Probe B (the differentiator) sends the same plan_tier with a
+    different, implausibly high amount
+    (`{"plan_tier": "standard", "monthly_charge": 999999.99}`). Confirms
+    only if this probe is also HTTP 200 with a numeric `monthly_charge`,
+    AND probe A's reading equals its own submitted `0.01` AND probe B's
+    reading equals its own submitted `999999.99` -- proof that the
+    server's own charge tracks whatever the client sends, not merely that
+    "some number came back" or "the two probes differ for any reason".
+    A target whose reading is identical across both probes (the secure,
+    server-recomputed shape -- the real charge for a fixed plan_tier
+    never changes) fails closed, correctly, rather than being treated as
+    weak/ambiguous evidence.
+
+    Known limitation, not silently swept under the rug: this assumes the
+    candidate is a JSON whole-body point (`content_type ==
+    "application/json"`) whose response echoes a flat, top-level numeric
+    `monthly_charge` key, and that `plan_tier="standard"` is an accepted
+    tier -- this project's own Netflix/`spring_boot` lab's exact shape
+    (and `php_laravel`'s Booking.com twin's own JSON response shape,
+    which also echoes a flat top-level charge, though under a different
+    field name this strategy does not attempt to also match, per this
+    project's existing per-target field-name-hardcoding convention). A
+    differently-shaped price-integrity endpoint (a different field name,
+    a non-JSON response, or a DB-row read-back instead of a JSON echo,
+    the way `CC-LAB-0212`'s own DB-insert live-boot proof reads the
+    charge back) has nothing for this strategy to parse or match, so it
+    fails closed (returns `None`) rather than misfiring -- it does not,
+    and cannot, positively confirm the *absence* of price-integrity
+    bypass for a differently-shaped target, only decline to guess.
+    """
+    vuln_class = "price_integrity_bypass"
+    mechanism = "client-price-trust-differential"
+    category = "price-integrity-bypass"
+
+    _FIELD = "monthly_charge"
+    _TIER = "standard"
+    _LOW_AMOUNT = 0.01
+    _HIGH_AMOUNT = 999999.99
+
+    def confirm(self, candidate, sender):
+        import json
+
+        if candidate.content_type != "application/json":
+            return None    # only a declared-JSON whole-body point can carry this format
+
+        body_a = json.dumps({"plan_tier": self._TIER, self._FIELD: self._LOW_AMOUNT})
+        probe_a = self._send(sender, candidate, body_a)
+        if probe_a.status != 200:
+            return None
+        reading_a = _json_number_field(probe_a.text, self._FIELD)
+        if reading_a is None or reading_a != self._LOW_AMOUNT:
+            return None    # unparseable, or already doesn't track the low probe
+
+        body_b = json.dumps({"plan_tier": self._TIER, self._FIELD: self._HIGH_AMOUNT})
+        probe_b = self._send(sender, candidate, body_b)
+        if probe_b.status != 200:
+            return None
+        reading_b = _json_number_field(probe_b.text, self._FIELD)
+        if reading_b is None or reading_b != self._HIGH_AMOUNT:
+            return None    # the charge never actually tracked the high probe either
+
+        return Verdict(True, self.vuln_class, self.mechanism,
+                       {"field": self._FIELD, "low": reading_a, "high": reading_b})
+
+
 def default_strategies(browser: BrowserExecutor | None = None,
                        oob: OobListener | None = None,
                        coverage: CoverageSource | None = None,
@@ -1312,6 +1426,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
             PredictableTokenSourceStrategy(),
             MassAssignmentPrivilegedFieldStrategy(),
             UnrestrictedFileUploadContentTypeTrustStrategy(),
+            PriceIntegrityBypassStrategy(),
             GreyboxConfirmationStrategy(coverage, dbfault)]
 
 
@@ -1336,6 +1451,7 @@ _CATEGORY_TO_CLASS = {
     "weak-token-entropy": "weak_token_entropy",
     "mass-assignment": "mass_assignment",
     "unrestricted-file-upload": "unrestricted_file_upload",
+    "price-integrity-bypass": "price_integrity_bypass",
 }
 
 

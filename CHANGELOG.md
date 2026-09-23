@@ -4,6 +4,35 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (FUZZ/AUD: real detection for price_integrity_bypass, CC-FUZZ-0037/CC-AUD-0025/FR-FUZZ-23/FR-AUD-15)
+- Fuzzing harness and oracle, auditor: builds the detection follow-on
+  `CC-LAB-0188` deliberately deferred — `PriceIntegrityBypassStrategy` +
+  `R-PRICE-INTEGRITY`, this project's first-ever rule/strategy pair for
+  `price_integrity_bypass` (CWE-807), closing Netflix's `NFLX-0005`
+  structural detection zero. A two-probe differential over the JSON
+  body's own `monthly_charge` field: sends the same `plan_tier` twice
+  with two deliberately different, implausible amounts and confirms only
+  if the server's own reported charge tracks both — no prior knowledge
+  of the target's real price needed, unlike a naive "does it equal the
+  known correct price" check a genuine black-box fuzzer could never run.
+  `R-PRICE-INTEGRITY` deliberately scoped to `sink_context="payment_charge"`
+  only, not also `"sql"` (Booking.com's own `CC-LAB-0212` cell uses
+  `"sql"`) — including `"sql"` would have generated a spurious candidate
+  for essentially every SQL-sink point project-wide, caught during this
+  rule's own pre-change review. Also fixes a real defect found while
+  verifying this end-to-end: `NFLX-0005`'s own ground truth used a
+  per-named-field `param` that silently failed to satisfy the harness's
+  whole-body-JSON gate (`param=="body"` exactly), plus two real
+  regressions this same gap had already introduced (not caught by the
+  prior commit's non-slow suite run): two of `test_multitarget_
+  category4.py`'s own `@pytest.mark.slow` tests, and `test_auto.py`'s
+  own hardcoded whole-body-JSON point count — all three corrected here.
+  Verified live: Netflix's real, scored recall in the multi-cell
+  live-boot test moves from 4/4 to 5/5. Full non-slow suite green before
+  this commit (see this entry's own change-control record for exact
+  counts); the two previously-broken slow tests re-run and pass too. See
+  `CC-FUZZ-0037`/`CC-AUD-0025`.
+
 ## 2026-09-23 (LAB: Netflix's 5th real page, first price_integrity_bypass instance, `/api/subscription/change-plan`, CC-LAB-0188/FR-LAB-128)
 - Target lab: genuinely new breadth for Netflix, not a depth increment —
   Netflix has never had a `price_integrity_bypass` page before, and this

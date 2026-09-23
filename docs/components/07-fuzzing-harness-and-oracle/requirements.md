@@ -327,6 +327,101 @@ rewards) derives from it.
     `webhook_signature`'s own permanently-infeasible timing side channel
     remains undetected).
 
+- **FR-FUZZ-23** *(`PriceIntegrityBypassStrategy`; `CC-FUZZ-0037`,
+  2026-09-23).* The oracle supports real **price/amount integrity
+  bypass (CWE-807) confirmation**, paired with `FR-AUD-15`'s candidate-
+  generation rule, closing `CC-LAB-0188`'s own deliberately-separated
+  follow-on for Netflix's `NFLX-0005` structural detection zero — this
+  project's first-ever detection capability for the
+  `price_integrity_bypass` class (a real implementation already exists
+  on two stacks, `php_laravel`'s Booking.com checkout, `CC-LAB-0212`, and
+  `spring_boot`'s Netflix plan-change endpoint, `CC-LAB-0188`, but
+  neither had any detection before this entry):
+  - `PriceIntegrityBypassStrategy` (`vuln_class=
+    "price_integrity_bypass"`, `mechanism=
+    "client-price-trust-differential"`): a two-probe differential over
+    the JSON body's own `monthly_charge` field, needing no prior
+    knowledge of the target's real price (which a genuine black-box
+    fuzzer never has) — it sends the same `plan_tier` twice with two
+    deliberately different, implausible amounts (`0.01`, then
+    `999999.99`) and confirms only if the server's own reported charge
+    tracks *both* submitted amounts exactly; a target whose reported
+    charge stays identical across both probes (the secure,
+    server-recomputed shape) fails closed, correctly, rather than being
+    treated as ambiguous evidence. The same "does the sink's own output
+    move with this specific input" reasoning `MassAssignmentPrivileged
+    FieldStrategy`'s own two-probe differential already uses for a
+    boolean field, generalized here to a numeric one.
+  - **Design checked against `MassAssignmentPrivilegedFieldStrategy`'s
+    own docstring/pattern before designing from scratch**, per this
+    task's own explicit instruction: both hardcode the sink's own known
+    field name(s) directly in the strategy (`is_partner` there,
+    `monthly_charge`/`plan_tier` here), both gate on
+    `content_type == "application/json"` and fail closed otherwise, and
+    both require a matching-but-distinct two-probe result rather than a
+    bare single-probe 200 as evidence.
+  - `R-PRICE-INTEGRITY`'s own `sink_context_in` is deliberately scoped
+    to `["payment_charge"]` only, not also `"sql"` — see `FR-AUD-15` for
+    the false-candidate-explosion risk this avoided.
+  - **A real, pre-existing ground-truth defect found and fixed during
+    this entry's own real end-to-end pipeline verification, not
+    silently left for a later discovery**: `NFLX-0005`'s ground truth
+    (`CC-LAB-0188`) originally used `param="monthly_charge"` (a
+    per-named-field convention modeled on `NFLX-0004`'s own query-param
+    case), but `fuzzlab.harness.auto.points_from_ground_truth` only
+    marks a `location="body"` point's Content-Type as
+    `application/json` when `param == "body"` exactly (the same gate
+    `CC-LAB-0182`'s own `mass_assignment` ground truth already had to
+    satisfy) — a per-field `param` name for a body point silently
+    starves this strategy of the JSON point it needs when driven through
+    the real harness, even though the strategy's own dedicated unit/
+    live-boot tests (which construct a `Candidate` directly) never hit
+    this gate and so never revealed it. Corrected in place in
+    `lab/ground-truth-netflix-clone/` (living-doc discipline) to
+    `param="body"`, the same whole-body convention `NFLX-0001`-`0003`
+    use — verified directly: `points_from_ground_truth` now reports
+    `body_content_type="application/json"` for this point. This same
+    correction also fixed a **real regression this task's own first
+    (lab) commit had silently introduced** into `tests/
+    test_multitarget_category4.py`'s `@pytest.mark.slow` tests (not
+    caught by the non-slow suite run before that commit, since both
+    affected tests are slow-marked): adding `NFLX-0005` to the ground
+    truth changed the Netflix app's own total positive count from 4 to
+    5, which on its own (before this entry's cell/strategy were added to
+    that test) dropped `test_both_apps_run_through_multitarget_for_real`'s
+    and `test_netflix_multi_cell_boot_confirms_all_positives`'s own
+    recall assertions from correct to failing (`1/4`/`4/4` no longer
+    matched reality) — found by actually re-running the slow suite
+    during this entry's own work, not assumed clean from the non-slow
+    run alone, and fixed here by updating both tests' own assertions and
+    extending the multi-cell boot to include `LABGEN-JV-0009`. A second,
+    structurally identical regression was then found the same way, by a
+    full non-slow-suite re-run after that fix (not assumed sufficient on
+    its own): `tests/test_auto.py::test_points_from_ground_truth_sets_
+    body_content_type_only_for_json_cases` hardcoded Netflix's own
+    whole-body-JSON point count at 3; updated to 4, with the new point's
+    own `body_content_type` asserted explicitly.
+  - Unit tests (`tests/test_oracle_strategies_price_integrity.py`, 10
+    tests, fake-sender based, mirroring `test_oracle_strategies_mass_
+    assignment.py`'s own vulnerable/secure-twin pattern): the vulnerable
+    `client_trusted_amount` twin confirms; the secure
+    `server_recomputed_amount` twin fails closed; a false-positive-
+    avoidance case (a target that always returns the same fixed low
+    amount) fails closed; a non-JSON candidate, a missing-field
+    response, and a rejected probe B each fail closed; the rule matches/
+    doesn't-match/doesn't-match-an-unrelated-sink-context cases; and the
+    registration check.
+  - Real, executed live-boot proof
+    (`tests/test_oracle_strategies_price_integrity_live_boot.py`, driven
+    through the real `RequestsProbeSender` against a real booted
+    `LABGEN-JV-0009`/`0010` cell pair, never a fake sender): the
+    strategy confirms the vulnerable twin and correctly fails closed on
+    the secure twin.
+  - Verified live through the real `fuzzlab.harness.multitarget` Phase E
+    wiring (`test_netflix_multi_cell_boot_confirms_all_positives`,
+    extended): Netflix's real, scored recall in that multi-cell boot
+    moves from 4/4 to 5/5.
+
 - **FR-FUZZ-19** *(`JwtAlgNoneConfusionStrategy`; `CC-FUZZ-0033`,
   2026-09-23).* The oracle supports real **JWT algorithm-confusion
   (CWE-347) confirmation**, paired with `FR-AUD-11`'s candidate-

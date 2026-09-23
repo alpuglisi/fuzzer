@@ -8,4 +8,4 @@ NFLX-0001,/api/playback/resume,POST,body,body,insecure_deserialization,true,/api
 NFLX-0002,/api/content/import,POST,body,body,xxe,true,/api/content/import,sink,,direct
 NFLX-0003,/api/profiles/switch,POST,body,body,insecure_deserialization,true,/api/profiles/switch,sink,,direct
 NFLX-0004,/api/account/billing,GET,account_id,query,access_control,true,/api/account/billing,sink,,direct
-NFLX-0005,/api/subscription/change-plan,POST,monthly_charge,body,price_integrity_bypass,true,/api/subscription/change-plan,sink,,direct
+NFLX-0005,/api/subscription/change-plan,POST,body,body,price_integrity_bypass,true,/api/subscription/change-plan,sink,,direct

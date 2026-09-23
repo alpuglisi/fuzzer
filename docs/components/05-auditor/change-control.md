@@ -3,6 +3,77 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0025 — `R-PRICE-INTEGRITY` audit rule (2026-09-23)
+
+- Change: adds `R-PRICE-INTEGRITY`, category `price-integrity-bypass`, to
+  `fuzzlab/audit/rules_data/default_rules.json` — `{"location_in":
+  ["body"], "sink_context_in": ["payment_charge"]}`, the same
+  `location_in`+`sink_context_in` shape as `R-MASS-ASSIGNMENT`/
+  `R-UNRESTRICTED-FILE-UPLOAD`. `reference` is
+  `"business-logic-price-manipulation"` (no existing `references/`
+  catalog directory names this concern -- the same kind of deliberate
+  departure from the "reference matches an existing catalog dir" default
+  `CC-AUD-0023` already recorded and explained for
+  `"upload-insecure-files"`, not silently assumed to exist). The
+  project's first-ever candidate-generation rule for
+  `price_integrity_bypass` (CWE-807) -- this vuln class now exists on two
+  lab pages (`php_laravel`'s Booking.com checkout, `CC-LAB-0212`, and
+  `spring_boot`'s Netflix plan-change endpoint, `CC-LAB-0188`), and had no
+  rule at all before this entry, closing Netflix's own deliberately-
+  deferred `NFLX-0005` structural detection zero. Paired with
+  `CC-FUZZ-0037`'s new `PriceIntegrityBypassStrategy` oracle confirmation.
+  **Deliberately scoped to `sink_context_in: ["payment_charge"]` only,
+  not also `"sql"`** (Booking.com's own `BKNG-0003` ground truth uses
+  `sink_context="sql"` there, since its own sink is a real DB insert) --
+  checked and rejected during this rule's own drafting, not discovered
+  after the fact: `"sql"` is already the `sink_context` for a large
+  number of unrelated SQL-injection ground-truth points project-wide
+  (confirmed by grep across every `lab/ground-truth-*/labels.json`), so
+  including it here would have generated a spurious
+  `price-integrity-bypass` candidate for essentially every SQL-sink point
+  in the project -- a real false-candidate-explosion risk this narrower
+  scoping avoids entirely. `R-SQLI-PARAM`'s own `when` clause has no
+  `sink_context_in` filter at all, so it is unaffected either way; this
+  rule simply does not attempt to also cover Booking.com's own
+  `php_laravel` cell, which remains a real, deliberately-scoped, one-page
+  detection gap tracked here rather than silently claimed as covered.
+  Reviewed via the mandatory pre-change review gate: the `Agent` tool for
+  a two-independent-reviewer pass was checked for and found unavailable
+  in this session's toolset (via `ToolSearch`) -- the same substitution
+  precedent `CC-LAB-0182`-`0188`/`CC-AUD-0023`/`CC-AUD-0024` already used,
+  documented here rather than silently skipped. **(1) Accuracy** --
+  checked by direct source inspection: confirmed `NFLX-0005`'s real
+  ground-truth `sink_context` value (`"payment_charge"`) directly from
+  `lab/ground-truth-netflix-clone/labels.json`, and confirmed
+  `fuzzlab.harness.auto.points_from_ground_truth` genuinely propagates it
+  onto the real audited `InjectionPoint` (verified by reading that
+  function's own code, not assumed, the same discipline `CC-AUD-0023`
+  used) -- and, in the course of that check, actually found the point
+  was NOT reaching the strategy as JSON at all (see `CC-FUZZ-0037`'s own
+  entry for the `param="body"` ground-truth correction this uncovered).
+  **(2) Adequacy** -- checked this rule does not collide with or
+  duplicate `R-MASS-ASSIGNMENT`/`R-UNRESTRICTED-FILE-UPLOAD`/any SQLi
+  rule (each keys on a disjoint `sink_context_in` value, or no
+  `sink_context_in` filter at all for `R-SQLI-PARAM`, so no two rules
+  with a `sink_context_in` filter can ever both fire for the same
+  `payment_charge` point); confirmed via a real, executed `run_targets`
+  pipeline run
+  (`tests/test_multitarget_category4.py::test_netflix_multi_cell_boot_confirms_all_positives`)
+  that this rule actually fires for the real ground-truth point and the
+  paired strategy actually confirms it, moving Netflix's own real, scored
+  recall from 4/4 to 5/5 -- not assumed correct from unit tests alone.
+  New/changed files:
+  - `fuzzlab/audit/rules_data/default_rules.json`
+  - `docs/components/05-auditor/requirements.md` (`FR-AUD-15`, new)
+- Impact (other components / project): `default_rules.json` is shared
+  across every category and every existing target's own run — purely
+  additive (a new rule appended after `R-UNRESTRICTED-FILE-UPLOAD`). Only
+  Netflix's own ground truth currently uses `sink_context="payment_charge"`
+  (Booking.com's own price-integrity cell uses `"sql"` instead, per this
+  entry's own explicit, recorded scoping decision), so no other target's
+  scoring changes. Paired with `CC-FUZZ-0037` (oracle) — see that entry
+  for the full strategy record and the ground-truth correction it made.
+
 ### CC-AUD-0024 — `R-ACCESS-CONTROL` widened to also match `account_id` (2026-09-23)
 
 - Change: widens `R-ACCESS-CONTROL`'s `name_regex` in `fuzzlab/audit/

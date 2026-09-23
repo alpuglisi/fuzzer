@@ -18,6 +18,39 @@ Format per entry:
 
 ---
 
+## 2026-09-23 — Adding a ground-truth case silently broke two already-pushed, slow-marked recall assertions (fixed, BUG-0040/PA-0042)
+
+- **Symptom:** `CC-LAB-0188` (Netflix's `price_integrity_bypass` lab page)
+  added `NFLX-0005` to `lab/ground-truth-netflix-clone/` and was committed
+  and pushed after a green `pytest -q -m "not slow"` run. Building that
+  page's detection follow-on (`CC-FUZZ-0037`) then found two pre-existing
+  tests in `tests/test_multitarget_category4.py` — both under a
+  module-level `pytestmark = [pytest.mark.slow, ...]`, so excluded from
+  every "not slow" run this whole session used as its own completion
+  bar — now failing: `test_both_apps_run_through_multitarget_for_real`'s
+  hardcoded `1/4` Netflix recall assertion and
+  `test_netflix_multi_cell_boot_confirms_all_positives`'s hardcoded `4/4`
+  assertion, both stale the moment Netflix's own total ground-truth case
+  count grew from 4 to 5.
+- **Root cause:** adding a ground-truth case changes the denominator/count
+  two pre-existing, unrelated-looking test files' hardcoded recall
+  assertions depend on, but those two tests live in a file marked
+  `pytest.mark.slow` at module level, so this session's routine
+  `pytest -q -m "not slow"` pre-push check — treated as sufficient
+  throughout this entire build — structurally cannot see them break.
+  `CC-LAB-0188`'s own commit touched only the lab page and ground truth,
+  never `test_multitarget_category4.py` itself, so nothing in that
+  commit's own diff would have prompted running it either.
+- **Remediation:** corrected `NFLX-0005`'s own ground-truth `param` to the
+  project's real whole-body-JSON convention (`"body"`, not the per-field
+  `"monthly_charge"` `CC-LAB-0188` originally shipped — itself found the
+  same way, via a real end-to-end `points_from_ground_truth` check) and
+  updated both stale assertions (`1/4`→`1/5`, `4/4`→`5/5` before the new
+  cell's own detection, then →`5/5` again including it) in the same
+  `CC-FUZZ-0037` commit that also closed the detection gap. See
+  `docs/bugs/BUG-0040-slow-marked-recall-assertions-silently-broken-by-a-ground-truth-only-change.md`.
+- **Status:** Fixed.
+
 ## 2026-09-23 — `points_from_ground_truth` never propagated `sink_context`, silently defeating the first rule ever keyed on it (fixed, BUG-0039/PA-0041)
 
 - **Symptom:** building real detection for `insecure_deserialization`

@@ -66,6 +66,7 @@ _VULN_TO_CATEGORY = {
     "weak_token_entropy": "weak-token-entropy",
     "mass_assignment": "mass-assignment",
     "unrestricted_file_upload": "unrestricted-file-upload",
+    "price_integrity_bypass": "price-integrity-bypass",
 }
 
 

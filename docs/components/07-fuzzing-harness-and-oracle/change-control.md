@@ -3,6 +3,166 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0037 — `PriceIntegrityBypassStrategy`: real detection for `price_integrity_bypass` (2026-09-23)
+
+- Change: builds the deliberately-deferred detection follow-on
+  `CC-LAB-0188` flagged: an oracle confirmation strategy for
+  `price_integrity_bypass` (CWE-807), closing Netflix's `NFLX-0005`
+  structural detection zero — this project's first-ever rule/strategy
+  pair for this vuln class (a real implementation already exists on two
+  stacks, `php_laravel`'s Booking.com checkout, `CC-LAB-0212`, and
+  `spring_boot`'s Netflix plan-change endpoint, `CC-LAB-0188`, but
+  neither had any detection capability before this entry).
+  1. **`fuzzlab/oracle/strategies.py`**: `PriceIntegrityBypassStrategy`
+     (`vuln_class="price_integrity_bypass"`, `mechanism=
+     "client-price-trust-differential"`). Checked
+     `MassAssignmentPrivilegedFieldStrategy`'s own docstring/pattern
+     before designing from scratch, per this task's own explicit
+     instruction: both hardcode the sink's own known field name(s)
+     directly in the strategy (this project's existing per-target
+     field-name-hardcoding convention), both gate on `content_type ==
+     "application/json"` and fail closed otherwise, and both require a
+     matching two-probe result rather than a bare single-probe 200 as
+     evidence. Unlike a strategy that would need to know the target's
+     own real price in advance (which a genuine black-box fuzzer never
+     does), this strategy needs no such prior knowledge: it sends the
+     same `plan_tier` twice with two deliberately different, implausible
+     amounts (`0.01`, then `999999.99`) and confirms only if the
+     server's own reported `monthly_charge` tracks *both* submitted
+     amounts exactly (proof the charge moves with whatever the client
+     sends); a target whose reported charge stays identical across both
+     probes (the secure, server-recomputed shape -- the real charge for
+     a fixed `plan_tier` never changes) fails closed, correctly, rather
+     than being treated as ambiguous evidence -- the same "does the
+     sink's own output move with this specific input" reasoning
+     `MassAssignmentPrivilegedFieldStrategy`'s own two-probe differential
+     already uses for a boolean field, generalized here to a numeric
+     one. Registered in `default_strategies()` and `_CATEGORY_TO_CLASS`.
+  2. **`fuzzlab/core/runmode.py`**: `_VULN_TO_CATEGORY` gained
+     `"price_integrity_bypass": "price-integrity-bypass"` — checked and
+     fixed proactively (`test_every_ruled_strategy_category_is_
+     reachable_from_its_vuln_class` re-run and stays green), the same
+     recurring underscore/hyphen gap `CC-FUZZ-0036` already documented
+     for its own seventh instance; this is at least an eighth.
+  3. **A real, pre-existing ground-truth defect found and fixed during
+     this entry's own real end-to-end pipeline verification** (not
+     silently left for a later discovery, and not routed around):
+     `NFLX-0005`'s ground truth (landed by `CC-LAB-0188`) originally used
+     `param="monthly_charge"` (a per-named-field convention modeled on
+     `NFLX-0004`'s own query-param case), but
+     `fuzzlab.harness.auto.points_from_ground_truth` only marks a
+     `location="body"` point's Content-Type as `application/json` when
+     `param == "body"` exactly (the same gate `CC-LAB-0182`'s own
+     `mass_assignment` ground truth already had to satisfy) — a
+     per-field `param` name for a body point silently starves this
+     strategy of the JSON point it needs when driven through the real
+     harness, even though the strategy's own dedicated unit/live-boot
+     tests (which construct a `Candidate` directly and never touch
+     `points_from_ground_truth`) never hit this gate and so never
+     revealed it. Found by running `points_from_ground_truth` directly
+     against the real ground truth and inspecting the resulting point's
+     own `body_content_type` (`None`, not `"application/json"`), not
+     assumed correct from the unit/live-boot tests' own green result
+     alone. **Corrected in place** in `lab/ground-truth-netflix-clone/`
+     (`labels.json`/`injection-points.json`/`expectedresults.csv`,
+     living-doc discipline) to `param="body"`, the same whole-body
+     convention `NFLX-0001`-`0003` use — re-verified directly afterward:
+     `points_from_ground_truth` now reports
+     `body_content_type="application/json"` for this point. The
+     correction changes nothing about what either twin does or what the
+     strategy sends; `docs/components/01-target-lab/requirements.md`'s
+     own `FR-LAB-128` was also corrected in place to match (living-doc
+     discipline), rather than left describing the wrong convention
+     `CC-LAB-0188` originally shipped. This same correction also fixed a
+     **real regression `CC-LAB-0188`'s own commit had silently
+     introduced** into `tests/test_multitarget_category4.py`'s two
+     `@pytest.mark.slow` tests (not caught by that commit's own
+     non-slow-suite run before pushing, since both affected tests are
+     slow-marked and therefore deselected by `-m "not slow"`): merely
+     adding `NFLX-0005` to the ground truth changed Netflix's own total
+     positive count from 4 to 5, which — independently of this entry's
+     own new cell/strategy — dropped `test_both_apps_run_through_
+     multitarget_for_real`'s `1/4` recall assertion and
+     `test_netflix_multi_cell_boot_confirms_all_positives`'s `4/4`
+     assertion to failing, since neither actually matched reality
+     anymore. Found by actually re-running the full slow suite during
+     this entry's own work (not assumed clean from the non-slow run
+     alone, `PA-0040`'s own discipline extended to the slow suite too,
+     not just the default one) and fixed here, in the same commit as the
+     new detection capability that also closes the gap those two tests'
+     own assertions needed updating for anyway.
+  4. **Real, executed live-boot proof**
+     (`tests/test_oracle_strategies_price_integrity_live_boot.py`, driven
+     through the real `RequestsProbeSender` against a real booted
+     `LABGEN-JV-0009`/`0010` cell pair, never a fake sender): the
+     strategy confirms the vulnerable twin (`low=0.01`, `high=999999.99`,
+     both tracked exactly) and correctly returns `None` (fails closed) on
+     the secure twin, whose reported charge stays fixed at the real
+     Standard price across both probes.
+  5. **Unit tests** (`tests/test_oracle_strategies_price_integrity.py`,
+     10 tests, fake-sender based, mirroring `test_oracle_strategies_mass_
+     assignment.py`'s own vulnerable/secure-twin pattern): the vulnerable
+     `client_trusted_amount` twin confirms; the secure `server_
+     recomputed_amount` twin fails closed; a dedicated false-positive-
+     avoidance case (a target that always returns the same fixed low
+     amount regardless of input) fails closed; a non-JSON candidate, a
+     missing-field response, and a rejected probe B each fail closed;
+     the rule matches/doesn't-match-a-query-point/doesn't-match-an-
+     unrelated-sink-context cases; and the registration check.
+  6. **`tests/test_multitarget_category4.py`**: updated for the new real
+     confirmation and the ground-truth correction above —
+     `test_both_apps_run_through_multitarget_for_real`'s Netflix recall
+     assertion moves from `1/4` to `1/5` (the single-cell-boot test still
+     only boots `LABGEN-JV-0001`, so its own `tp` is unchanged at 1; only
+     the denominator changed, correctly, now that Netflix has five real
+     positives); `test_netflix_multi_cell_boot_confirms_all_positives` is
+     extended to also assemble `LABGEN-JV-0009`
+     (`price_integrity_netflix_subscription_sample.yaml`) into the same
+     real multi-cell boot, and Netflix's own real, scored recall in that
+     boot moves from 4/4 to 5/5 (`tp=5, fp=0`) — re-verified against a
+     real booted app through the real `run_targets` pipeline, not
+     assumed from the unit/live-boot tests alone.
+  7. **A second, structurally identical regression found the same way**
+     (a full, non-slow-suite re-run after the correction above, not
+     assumed clean from the slow-test fix alone): `tests/test_auto.py::
+     test_points_from_ground_truth_sets_body_content_type_only_for_json_cases`
+     hardcoded Netflix's own whole-body-JSON point count at 3 (before
+     this entry's `NFLX-0005` correction added a fourth); found by
+     actually re-running the full non-slow suite after item 3's own fix
+     landed, not assumed sufficient from the slow-test fix alone —
+     updated to expect 4 and to assert the new `/api/subscription/
+     change-plan` point's own `body_content_type ==
+     "application/json"` explicitly, the same per-URL assertion style
+     the existing three points already use.
+  New/changed files:
+  - `fuzzlab/oracle/strategies.py` (new `PriceIntegrityBypassStrategy` +
+    `_json_number_field` helper; registered in `default_strategies()`
+    and `_CATEGORY_TO_CLASS`)
+  - `fuzzlab/core/runmode.py` (`_VULN_TO_CATEGORY` entry)
+  - `fuzzlab/audit/rules_data/default_rules.json` (see `CC-AUD-0025`)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (`NFLX-0005`'s `param` corrected from `"monthly_charge"` to `"body"`)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-128`
+    corrected in place to match)
+  - `tests/test_oracle_strategies_price_integrity.py` (new)
+  - `tests/test_oracle_strategies_price_integrity_live_boot.py` (new)
+  - `tests/test_auto.py` (whole-body-JSON point count updated, item 7)
+  - `tests/test_multitarget_category4.py` (recall assertions updated;
+    multi-cell boot extended)
+  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    (`FR-FUZZ-23`, new)
+- Impact (other components / project): `default_strategies()` is shared
+  across every target's own run — purely additive (a new strategy scoped
+  by `category`, never fired for a candidate of a different category).
+  The ground-truth `param` correction is scoped to `NFLX-0005` alone; no
+  other case in any ground-truth directory used that field or that
+  convention incorrectly (checked). No other target's ground truth
+  currently uses `sink_context="payment_charge"` (Booking.com's own cell
+  uses `"sql"` — see `CC-AUD-0025`'s own explicit, recorded scoping
+  decision for why this entry's rule does not also reach it), so no
+  other target's scoring changes. Paired with `CC-AUD-0025` (rule) — see
+  that entry for the full rule record and pre-change review.
+
 ### CC-FUZZ-0036 — `UnrestrictedFileUploadContentTypeTrustStrategy`: real detection for `unrestricted_file_upload` (2026-09-23)
 
 - Change: builds the deliberately-deferred detection follow-on

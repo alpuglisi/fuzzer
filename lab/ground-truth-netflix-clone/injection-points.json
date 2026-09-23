@@ -33,7 +33,7 @@
     {
       "url": "/api/subscription/change-plan",
       "method": "POST",
-      "param": "monthly_charge",
+      "param": "body",
       "location": "body",
       "rendering": "server-json"
     }

@@ -135,7 +135,26 @@ test (`tests/test_labgen_spring_boot_account_billing_live_boot.py`) and by
 own real, scored recall in that multi-cell boot moves from 3/3 to 4/4,
 the first proof this strategy generalizes across stacks
 (`go_net_http` -> `spring_boot`), not just across routes on the same
-stack. One gap remains open:
+stack.
+
+`NFLX-0005` (`CC-LAB-0188`, `/api/subscription/change-plan`) is Netflix's
+fifth real page, again genuinely new breadth: Netflix's first
+`price_integrity_bypass` page (CWE-807), and this concern's first
+instantiation on `spring_boot` at all (the only prior real implementation
+project-wide is `php_laravel`'s Booking.com checkout charge,
+`CC-LAB-0212`). Unlike `NFLX-0004`'s detection, this one needed genuinely
+new detection logic: `PriceIntegrityBypassStrategy`/`R-PRICE-INTEGRITY`
+(`CC-FUZZ-0037`/`CC-AUD-0025`) -- a two-probe differential over the JSON
+body's own `monthly_charge` field, confirming only when the server's own
+reported charge tracks two different, deliberately implausible
+client-submitted amounts rather than staying fixed regardless of input --
+confirmed the new vulnerable twin and correctly failed closed on its new
+secure twin, verified against a real booted app both by a dedicated
+live-boot strategy test
+(`tests/test_oracle_strategies_price_integrity_live_boot.py`) and by
+`test_netflix_multi_cell_boot_confirms_all_positives` below -- Netflix's
+own real, scored recall in that multi-cell boot moves from 4/4 to 5/5.
+One gap remains open:
 
 1. **No audit `Rule`/oracle strategy exists yet for `webhook_signature`**
    (`ssrf`/`access_control`/`insecure_deserialization`/`xxe` now all have
@@ -287,20 +306,21 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002, which does have a rule/strategy, R-XXE/
     # XxeInBandMarkerStrategy, CC-FUZZ-0031), the second
-    # insecure-deserialization instance (NFLX-0003, CC-LAB-0184), and the
-    # first access_control/IDOR instance (NFLX-0004, CC-LAB-0187) are simply
-    # not booted in this single-cell test -- one of its now-four
+    # insecure-deserialization instance (NFLX-0003, CC-LAB-0184), the
+    # first access_control/IDOR instance (NFLX-0004, CC-LAB-0187), and the
+    # first price_integrity_bypass instance (NFLX-0005, CC-LAB-0188) are
+    # simply not booted in this single-cell test -- one of its now-five
     # positives, not all (only NFLX-0001's own vulnerable twin,
     # LABGEN-JV-0001, is booted here) -- see
     # test_netflix_multi_cell_boot_confirms_all_positives below for the
-    # multi-cell boot that confirms all four together.
+    # multi-cell boot that confirms all five together.
     netflix_report = by_name["netflix-clone"].report
     assert netflix_report.tp == 1 and netflix_report.fp == 0
-    assert round(netflix_report.recall, 4) == round(1 / 4, 4)
+    assert round(netflix_report.recall, 4) == round(1 / 5, 4)
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
-    assert round(summary["macro_recall"], 4) == round(((8 / 9) + (1 / 4)) / 2, 4)
+    assert round(summary["macro_recall"], 4) == round(((8 / 9) + (1 / 5)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True
@@ -317,9 +337,14 @@ _NETFLIX_MULTI_MANIFESTS = (
     # CC-LAB-0187: fourth real page, first access_control/IDOR instance
     # (/api/account/billing) -- a fourth, distinct route, no collision.
     "lab/manifests/access_control_netflix_billing_sample.yaml",
+    # CC-LAB-0188/CC-FUZZ-0037: fifth real page, first price_integrity_bypass
+    # instance (/api/subscription/change-plan) -- a fifth, distinct route,
+    # no collision.
+    "lab/manifests/price_integrity_netflix_subscription_sample.yaml",
 )
 _NETFLIX_MULTI_CELL_IDS = {
     "LABGEN-JV-0001", "LABGEN-JV-0003", "LABGEN-JV-0005", "LABGEN-JV-0007",
+    "LABGEN-JV-0009",
 }
 _BUILD_TIMEOUT_S = 240.0
 _BOOT_TIMEOUT_S = 30.0
@@ -348,27 +373,31 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
     """Hand-rolled multi-cell boot (bypassing `SpringBootLiveBootHarness`'s
     single-cell restriction), mirroring `tests/test_labgen_spring_boot_
     trackernest_multitarget.py`'s own established pattern: assembles all
-    four of Netflix's own vulnerable twins -- `LABGEN-JV-0001`
+    five of Netflix's own vulnerable twins -- `LABGEN-JV-0001`
     (insecure-deserialization, `/api/playback/resume`), `LABGEN-JV-0003`
     (XXE, `/api/content/import`), `LABGEN-JV-0005`
-    (insecure-deserialization, `/api/profiles/switch`, `CC-LAB-0184`), and
+    (insecure-deserialization, `/api/profiles/switch`, `CC-LAB-0184`),
     `LABGEN-JV-0007` (access_control/IDOR, `/api/account/billing`,
-    `CC-LAB-0187`) -- into one real booted app (four distinct routes, no
-    collision), then runs the real generic `run_targets` pipeline against
-    it. Originally closed the follow-on `CC-FUZZ-0032` flagged (both of
-    Netflix's positives confirming together in one real boot); extended by
-    `CC-LAB-0184` to prove the third positive confirms alongside the other
-    two with zero new detection code -- the same generalization proof
-    `CC-LAB-0183` made for Twitch's `access_control` detection, moving
-    Netflix's own scored recall in this boot from 2/2 to 3/3. Extended
-    again by `CC-LAB-0187` to add the fourth positive, `NFLX-0004`: this
-    is Netflix's first `access_control`/IDOR page, and
+    `CC-LAB-0187`), and `LABGEN-JV-0009` (price_integrity_bypass,
+    `/api/subscription/change-plan`, `CC-LAB-0188`) -- into one real
+    booted app (five distinct routes, no collision), then runs the real
+    generic `run_targets` pipeline against it. Originally closed the
+    follow-on `CC-FUZZ-0032` flagged (both of Netflix's positives
+    confirming together in one real boot); extended by `CC-LAB-0184` to
+    prove the third positive confirms alongside the other two with zero
+    new detection code -- the same generalization proof `CC-LAB-0183`
+    made for Twitch's `access_control` detection, moving Netflix's own
+    scored recall in this boot from 2/2 to 3/3. Extended again by
+    `CC-LAB-0187` to add the fourth positive, `NFLX-0004`:
     `AccessControlIdorStrategy` (`CC-FUZZ-0029`, already built for
     Twitch's `go_net_http` cells) needed zero new detection code to
     confirm it too, moving Netflix's own scored recall in this boot from
-    3/3 to 4/4 -- the first proof this strategy generalizes across
-    stacks (go_net_http -> spring_boot), not just across routes on the
-    same stack.
+    3/3 to 4/4. Extended again by `CC-FUZZ-0037` to add the fifth
+    positive, `NFLX-0005`: this is `price_integrity_bypass`'s first-ever
+    rule/strategy pair in the project, `R-PRICE-INTEGRITY`/
+    `PriceIntegrityBypassStrategy`, genuinely new detection logic (not a
+    zero-new-code generalization like the two before it), moving
+    Netflix's own scored recall in this boot from 4/4 to 5/5.
     """
     root = tmp_path_factory.mktemp("netflix_multitarget")
     shutil.copytree(SKELETON_DIR, root, dirs_exist_ok=True)
@@ -411,11 +440,12 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
                                    oob=listener)
         outcome = outcomes[0]
         assert outcome.scored is True and outcome.report is not None
-        # All four of Netflix's own positives confirm in this one real boot
-        # (NFLX-0001, NFLX-0002, NFLX-0003, NFLX-0004) -- CC-LAB-0184 moved
-        # this from 2/2 to 3/3, CC-LAB-0187 moves it from 3/3 to 4/4, both
-        # with zero new detection code.
-        assert outcome.report.tp == 4 and outcome.report.fp == 0
+        # All five of Netflix's own positives confirm in this one real boot
+        # (NFLX-0001..NFLX-0005) -- CC-LAB-0184 moved this from 2/2 to 3/3,
+        # CC-LAB-0187 moved it from 3/3 to 4/4 (both with zero new detection
+        # code), and CC-FUZZ-0037 moves it from 4/4 to 5/5 with this entry's
+        # own genuinely new PriceIntegrityBypassStrategy.
+        assert outcome.report.tp == 5 and outcome.report.fp == 0
         assert outcome.report.recall == 1.0
     finally:
         listener.stop()

@@ -508,3 +508,32 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   bugs are siblings, not a recurrence of one another: `PA-0006` is about a
   value that doesn't exist yet at a pipeline stage; this is about a value
   that exists elsewhere but was never wired through). (from BUG-0039)
+- **PA-0042** — Before considering any change to a `lab/ground-truth-*/`
+  directory's case *or point* count (a `Case`/`InjectionPoint` added,
+  removed, or reshaped — e.g. a `param`/`location` correction that changes
+  which points a derived filter matches — not just an unrelated field
+  edited within an existing entry) complete, grep the **whole** test suite
+  (not only obviously-related files) for every hardcoded fraction/count
+  assertion that could depend on that directory's cardinality or shape
+  (target-app `recall`/`tp ==`/`N/M` assertions in `tests/*multitarget*.py`
+  and `tests/*labels_contract*.py`, but also point-count assertions
+  elsewhere, e.g. `tests/test_auto.py`'s own hardcoded whole-body-JSON
+  point count) and explicitly re-run every file such a grep surfaces —
+  **regardless of whether that file carries `pytest.mark.slow`** and is
+  therefore excluded from the routine `pytest -q -m "not slow"` pre-push
+  check. That check is the correct fast-iteration gate and stays
+  mandatory, but it is never sufficient on its own to certify a
+  ground-truth-cardinality-or-shape change complete: a hardcoded assertion
+  living in a `slow`-marked file is invisible to it by construction, and a
+  commit that only touches ground truth (not the test file whose assertion
+  depends on it) gets no other prompt to re-run that file either. A grep
+  finds all such files at once; a full, unfiltered suite re-run after the
+  fact (this bug's own third instance, `test_auto.py`, was found exactly
+  this way) is a valid but strictly weaker substitute — prefer the grep.
+  Sharpens `PA-0040`'s related but narrower "run the whole-repo suite, not
+  just relevant files" finding (scoped there to shared cross-stack module
+  registries) and `PA-0038`'s "run that shape's own test module" (scoped
+  there to the *new* ground truth's own dedicated tests) for the case
+  neither covers: a pre-existing, unrelated-looking, cross-cutting test
+  file whose hardcoded assertion merely happens to depend on a
+  ground-truth directory's total count or shape. (from BUG-0040)
