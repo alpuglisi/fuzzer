@@ -12,6 +12,24 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (cross-category doc sync, round 2)
+- Docs (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, all five second-target
+  category branches): re-synced §9.2 (stack-reuse ledger), §9.2a (Java/Spring
+  Boot consolidation), §9.3 (coordination contract), and §9.4 (category
+  tracker) to a single canonical, byte-identical block (SHA256-verified)
+  after reviewing and correcting category 4's Go/Twitch Phase B increment and
+  the completed Java/Spring Boot port, and category 5's CSV-formula-injection
+  shape (which had a fresh `FR-LAB-80`/`81` collision with category 3,
+  renumbered to `FR-LAB-90`/`91`). §9.2a's "Decided" text is updated from
+  pending/future tense to reflect the consolidation is now **done**:
+  category 4's `java_spring_boot` package is deleted, Netflix's cell is
+  ported into `spring_boot` as `CC-LAB-0173`, and category 5 does not build
+  a competing package. Documentation-only change; each branch's own full
+  test suite was re-run after the splice to confirm no regression (cat1:
+  1891 passed/8 skipped; cat2: 1783 passed/8 skipped; cat3: 1821 passed/8
+  skipped; cat4: 1843 passed/8 skipped; cat5: 1798 passed/8 skipped — all
+  identical to each branch's own pre-sync baseline).
+
 ## 2026-09-23
 - `fuzzlab/labgen/emitters/php_laravel/`: Huddle Hub's (category 3's Slack
   pick) first designed cell — webhook-signature-verification bypass at a
