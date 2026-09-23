@@ -3,6 +3,82 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0095a — Widen `labels.schema.json`'s `vuln_class`/`sink_context` enums again (adopts the now-unified cross-category branch's precedent verbatim) (2026-09-23)
+
+- **Change:** `fuzzlab/labels/schemas/labels.schema.json` — `vuln_class`
+  enum widened to add `webhook_signature`, `mass_assignment`,
+  `prototype_pollution`, `redos`, `open_redirect`,
+  `csv_formula_injection`, `price_integrity_bypass`, `spel_injection`;
+  `sink_context` enum widened to add `webhook_signature`,
+  `mass_assignment`, `object_property`, `regex`, `redirect`, `csv`,
+  `spel`. Purely additive.
+
+  **A real, load-bearing discovery made while starting this entry, not
+  assumed:** a fresh `git fetch` of all four other active category
+  branches (`claude/second-target-cat1-ecommerce`,
+  `claude/category-3-build-iuu5k9`, `claude/category-4-build-t9uz3y`,
+  `claude/category-5-build-6boejs`) found all four now point to the
+  **same** commit (`c2b8850`, "Merge category 5 ... into the unified
+  branch") — those four categories have been consolidated into one
+  unified branch by another session, outside this branch's own
+  knowledge until this check. That unified branch's own
+  `labels.schema.json` already carries this exact widening (confirmed
+  via `diff` after adoption: byte-identical). Rather than inventing a
+  third, possibly-divergent set of values for `mass_assignment` (needed
+  for `CC-LAB-0095`, below) on top of `CC-LAB-0094a`'s own already-landed
+  widening, this entry adopts the unified branch's **current full enum
+  list** verbatim — not just the one value this branch's own next page
+  needs — since a partial, independently-worded widening would only
+  create a second collision at the next merge, the exact failure mode
+  `CC-LAB-0094a` was landed to avoid recurring.
+
+  **This discovery also changes how the next `FR-LAB` number was picked
+  for `CC-LAB-0095`** (see that entry): the unified branch's own
+  `requirements.md` ceiling is `FR-LAB-116` — higher than this branch's
+  own prior ceiling (`FR-LAB-106`), because the other four categories'
+  own work has advanced further inside the now-consolidated branch. This
+  branch is not being merged into that unified branch as part of this
+  entry (out of scope, not requested) — but its own next `FR-LAB` number
+  is picked starting from the higher, real ceiling (`117`), not this
+  branch's own lower one, to avoid a real, predictable collision at
+  whatever future point this branch is itself merged in — the same
+  discipline this category's own numbering has required from the start,
+  applied to a newly-discovered, larger collision surface. `CC-LAB`
+  numbering is unaffected by this (this branch's own component log stays
+  append-only and self-consistent within its own reserved block,
+  `CC-LAB-0090`-`0119`; the unified branch's own renumbering of
+  `CC-LAB`/`BUG`/`PA` IDs at merge time, observed directly — e.g. this
+  category's own already-merged `BUG-0034`/`PA-0036` now read
+  `BUG-0037`/`PA-0039` in the unified branch — is a merge-time
+  reconciliation step for whoever next integrates the branches, not
+  something this entry attempts here).
+
+- **Impact (other components / project):** Shared schema, used by every
+  category branch's own ground truth. Verified via
+  `fuzzlab.labels.contract.load()` against both `lab/ground-truth`
+  (16 `PFF-*` cases) and `lab/ground-truth-picktrail-django` (3 cases at
+  the time of this change).
+
+- **Risk (level: low):** Purely additive JSON Schema enum widening,
+  copied from an already-real, already-merged cross-branch precedent
+  rather than invented. Mitigated by: (1) byte-identical `diff` against
+  the unified branch's own current schema; (2) a real
+  `fuzzlab.labels.contract.load()` round trip against every existing
+  ground-truth directory in this branch.
+
+- **Deliverables:**
+  - [x] `fuzzlab/labels/schemas/labels.schema.json` widened as above.
+  - [x] Verified via `fuzzlab.labels.contract.load()` against
+    `lab/ground-truth` and `lab/ground-truth-picktrail-django`.
+  - [x] `CHANGELOG.md` line.
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` — the
+    cross-branch-consolidation discovery recorded (§9.4 row).
+
+- **Effectiveness (assessed 2026-09-23): effective** — schema widened,
+  verified byte-identical to the unified branch's own current values,
+  and both existing ground-truth directories still load/validate
+  correctly.
+
 ### CC-LAB-0094 — PicTrail's third real page: link-preview SSRF via `requests`, no resolved-IP check (FR-LAB-105/FR-LAB-106) (2026-09-23)
 
 - **Change:** Lands PicTrail's third real, ground-truth-bearing page,

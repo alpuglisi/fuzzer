@@ -12,6 +12,24 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (labels schema: widen enums again + cross-branch consolidation discovery)
+
+- LAB: Widened `fuzzlab/labels/schemas/labels.schema.json`'s
+  `vuln_class`/`sink_context` enums again (adds `mass_assignment`,
+  `webhook_signature`, `prototype_pollution`, `redos`, `open_redirect`,
+  `csv_formula_injection`, `price_integrity_bypass`, `spel_injection`,
+  `object_property`, `regex`, `redirect`, `csv`, `spel`) — landed
+  standalone (`CC-LAB-0095a`), adopting byte-identical values from
+  categories 1/3/4/5's own now-**unified** branch (discovered via a fresh
+  cross-branch fetch: all four now point to the same merged commit).
+  Needed for `CC-LAB-0095`'s own `mass_assignment` ground truth.
+- Discovered, not assumed: categories 1/3/4/5 have been consolidated into
+  one unified branch by another session. This branch (category 2) is not
+  merged into it here (out of scope) but its own next `FR-LAB` numbers
+  are now picked against that branch's real, higher ceiling (116) rather
+  than this branch's own lower one, to avoid a predictable future
+  collision — recorded in `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`.
+
 ## 2026-09-23 (PicTrail link-preview SSRF page)
 - LAB: landed PicTrail's third real page — `CC-LAB-0094`/`FR-LAB-105`/
   `FR-LAB-106`, pre-change review gate cleared (2 independent reviewer
