@@ -65,6 +65,7 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("ssti", "template_render"): _ModuleSet("query_param", "single_handler"),
     ("xxe", "xml_parse_input"): _ModuleSet("raw_body", "single_handler"),
     ("insecure_deserialization", "object_deserialization"): _ModuleSet("request_stream", "single_handler"),
+    ("spel_injection", "spel_expression_evaluate"): _ModuleSet("query_param", "single_handler"),
 }
 
 #: Per-route static render context, the same "render-only information, not
@@ -74,6 +75,7 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
     "/issues/import": {"var_name": "xmlBody"},
     "/integrations/webhook-payload": {"var_name": "request"},
     "/api/playback/resume": {},
+    "/api/hotels/search-sort": {"var_name": "sortExpr", "param_name": "sortBy"},
 }
 
 #: Per-op source override (`CC-LAB-0173`) -- checked *after* the shape-level

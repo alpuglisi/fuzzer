@@ -136,6 +136,20 @@ STATIC_PRECHECK_BY_SHAPE: dict[tuple[str, str], StaticPrecheckStatus] = {
     # there is no missing-sanitizer-shaped tell to key on, unlike the
     # plain ("xss", "html_body") case.
     ("price_integrity_bypass", "payment_charge_amount"): StaticPrecheckStatus.UNINFORMATIVE,
+    # --- CC-LAB-0214: SpEL injection (spring_boot, Expedia) ----------------
+    # UNINFORMATIVE: both the vulnerable and secure twins call the
+    # *identical* `SpelExpressionParser().parseExpression(tainted).
+    # getValue(context)` sequence -- the only difference is which
+    # `EvaluationContext` object was constructed beforehand
+    # (`new StandardEvaluationContext()` vs.
+    # `SimpleEvaluationContext.forReadOnlyDataBinding().build()`). A
+    # generic taint/pattern checker has no differing call-shape or
+    # missing-sanitizer-call to key on -- it would flag (or not flag) both
+    # twins identically, the same reasoning already used for the
+    # escaping-context-mismatch XSS rows above, not the SSTI shape's
+    # differing-API case (`Ognl.getValue()` vs. a fixed `Map` lookup),
+    # which a checker genuinely could distinguish.
+    ("spel_injection", "spel_expression_evaluate"): StaticPrecheckStatus.UNINFORMATIVE,
 }
 
 

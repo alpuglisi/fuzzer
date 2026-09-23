@@ -350,16 +350,31 @@ out below.
   is a strong shortlist candidate specifically because it's a materially
   different exploitation mechanism from the corpus's existing PHP
   deserialization entries.
-- **CWE-89 — SQL/JPQL Injection via Spring Data JPA/MongoDB `@Query` +
-  SpEL parameter binding.** Grounded in: a Spring Boot service with a
+- **CWE-917 — Expression Language Injection, via Spring Data JPA/MongoDB
+  `@Query`'s SpEL parameter binding.** *(Corrected 2026-09-23, pre-
+  implementation, during this shape's own change-control drafting: an
+  earlier pass of this doc labeled this CWE-89. MITRE/NVD actually
+  classify this vulnerability family under CWE-917 ("Improper
+  Neutralization of Special Elements used in an Expression Language
+  Statement"), not CWE-89 — CWE-89 describes CVE-2016-6652's specific
+  JPQL/SQL *outcome*, but the general mechanism (and CVE-2022-22980's/
+  CVE-2018-1273's own classification) is expression-language injection,
+  not SQL injection. This project's own shape reuses the more general,
+  correctly-classified primitive: unsafe SpEL evaluation via Spring's
+  `StandardEvaluationContext` — the exact mechanism CVE-2018-1273 (Spring
+  Data Commons) patched by switching to a restricted
+  `SimpleEvaluationContext`.)* Grounded in: a Spring Boot service with a
   Spring Data repository whose `@Query`-annotated method interpolates a
   Spring Expression Language (SpEL) parameter reference unsafely — real
   precedent: CVE-2016-6652 (Spring Data JPA SQL injection via a `Sort`
-  instance with a function call) and CVE-2022-22980/CVE-2026-41717
-  (Spring Data MongoDB SpEL injection via `@Query`/`@Aggregation`
-  parameter binding) — see
-  [Spring's own CVE-2022-22980 advisory](https://spring.io/security/cve-2022-22980/)
-  and [the CVE-2026-41717 advisory](https://spring.io/security/cve-2026-41717/).
+  instance with a function call), CVE-2022-22980/CVE-2026-41717 (Spring
+  Data MongoDB SpEL injection via `@Query`/`@Aggregation` parameter
+  binding), and CVE-2018-1273 (Spring Data Commons, `MapDataBinder`'s
+  unrestricted `StandardEvaluationContext`, the CWE-917 mechanism this
+  project's shape models directly) — see
+  [Spring's own CVE-2022-22980 advisory](https://spring.io/security/cve-2022-22980/),
+  [the CVE-2026-41717 advisory](https://spring.io/security/cve-2026-41717/),
+  and [CVE-2018-1273's writeup](https://gosecure.ai/blog/2018/05/15/beware-of-the-magic-spell-part-1-cve-2018-1273/).
   Coverage check: raw SQLi (`sql_syntax_break`) is heavily covered
   already in `safety_matrix.yaml`'s SQL-sink entries and presumably the
   PHP/Node/Python corpus entries. The Spring-specific flavor here is
@@ -368,11 +383,12 @@ out below.
   convenience feature* (SpEL expression evaluation inside an ORM
   annotation) being reachable by attacker input — a mechanism unique to
   Spring Data's query-derivation machinery, with no PHP/Node/Python
-  equivalent in the corpus. Flagged as the same broad SQLi/JPQL-injection
-  *outcome* as existing coverage, but via a framework-specific trigger
-  path (`ORDER BY`/sort-parameter → SpEL evaluation) genuinely distinct
-  from `sql_identifier_substitution`/`sql_order_by_injection`'s existing
-  string-concatenation model.
+  equivalent in the corpus, and a genuinely new concern class for this
+  project (CWE-917 has no prior `safety_matrix.yaml` entry). Fits
+  Expedia's real, documented Kotlin+Spring Boot stack (see this doc's
+  own §1/§2) via a plausible hotel/flight search-and-sort feature — a
+  user-supplied `sortBy`/filter parameter reaching a Spring Data
+  repository, directly echoing CVE-2016-6652's real trigger shape.
 - **CWE-1321/CWE-915-adjacent — Mass assignment via unguarded
   `@RequestBody`-bound JPA entities.** Grounded in: any Spring MVC
   controller that binds a `@RequestBody` directly to a JPA `@Entity`

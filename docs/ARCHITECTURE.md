@@ -501,6 +501,27 @@ tracked in the requirements files, not here.
   own research shortlisted); Spring Data SpEL/`@Query` injection remains
   fully greenfield project-wide and is separate follow-on work.
 
+  **Expedia's first own shape: `spel_injection`** (`CC-LAB-0214`/
+  `FR-LAB-102`/`FR-LAB-103`, 2026-09-23) — CWE-917, a hotel-search
+  `sortBy` parameter evaluated as a Spring Expression Language (SpEL)
+  expression. Genuinely new concern class (`lab/safety_matrix.yaml` gains
+  `spel_injection`/`spel_expression_evaluate`), grounded in CVE-2018-1273
+  (Spring Data Commons) and CVE-2022-22980/CVE-2026-41717 (Spring Data
+  MongoDB). Models Spring's own documented fix directly: both twins parse
+  and evaluate the identical tainted SpEL string; only the
+  `EvaluationContext` differs (`StandardEvaluationContext`, unrestricted,
+  vs. `SimpleEvaluationContext`, which rejects type references/method
+  invocation/bean resolution). The pre-change review gate's adequacy pass
+  caught a real, blocking classification error before implementation —
+  the draft had reasoned by a false SSTI-shape analogy (no spring_boot
+  `static_precheck` precedent exists at all) to the wrong conclusion; the
+  correct, adequacy-review-corrected classification is UNINFORMATIVE,
+  since both twins share one identical call shape a generic taint
+  checker cannot distinguish. Establishes Expedia's own cell-ID prefix
+  (`LABGEN-EXP-`) and its own dedicated ground-truth directory
+  (`lab/ground-truth-expedia-clone/`, `EXPD-` case prefix) — the first
+  shape built specifically for Expedia rather than reused/ported.
+
   **The parity/cutover coverage gate** (`CC-LAB-0053`/`FR-LAB-51`,
   `fuzzlab/labgen/cutover_gate.py`, plan §4.3.6.6 point 3) is the precondition
   `L-P3.3c-CUT` needs before it can run, built ahead of and independent from

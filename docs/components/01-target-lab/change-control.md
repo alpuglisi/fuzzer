@@ -3,6 +3,170 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0214 — category 5 pilot, Expedia's first own shape: `spel_injection` (CWE-917) on `spring_boot`, hotel-search sort (FR-LAB-102, FR-LAB-103) (2026-09-23)
+- Change: the first vulnerability shape built specifically for Expedia
+  (Java/Spring Boot), on top of the freshly-ported `spring_boot` package
+  (`CC-LAB-0213`) — distinct from that entry's ported Netflix Jackson
+  cell, which is TrackerNest/category-4 code reused, not built for
+  Expedia. A hotel-search endpoint (`GET /api/hotels/search-sort`)
+  accepts a user-supplied `sortBy` query parameter, parsed and evaluated
+  as a Spring Expression Language (SpEL) expression — CWE-917
+  ("Expression Language Injection"), a genuinely new concern class for
+  this project (no prior `safety_matrix.yaml` entry). Grounded in real
+  Spring CVEs: CVE-2018-1273 (Spring Data Commons, `MapDataBinder`'s use
+  of an unrestricted `StandardEvaluationContext` — the exact mechanism
+  this shape models) and CVE-2022-22980/CVE-2026-41717 (Spring Data
+  MongoDB `@Query`/`@Aggregation` SpEL parameter-binding injection).
+  Spring's own documented fix (the literal CVE-2018-1273 patch) is to
+  evaluate with a restricted `SimpleEvaluationContext` instead of
+  `StandardEvaluationContext` — this shape models that exact
+  differential: both twins call the *identical*
+  `SpelExpressionParser().parseExpression(tainted).getValue(context)`
+  sequence; only the `EvaluationContext` object differs.
+
+  Went through this component's pre-change review gate before any code
+  was written (a drafted entry, reviewed independently by two agents).
+  The accuracy pass returned clean **ACCURATE** on all 10 checked claims
+  (including actually running `mvn dependency:tree` against the real
+  skeleton to confirm `spring-expression` is pulled in transitively via
+  `spring-boot-starter-web` with no new Maven dependency needed, and
+  independently verifying the CVE citations and the CWE-917-not-CWE-89
+  correction against cwe.mitre.org), with one minor wording nuance (the
+  exact dependency-tree hop sequence) noted but not blocking. The
+  adequacy pass returned **INADEQUATE**, catching one real, blocking gap
+  the draft had explicitly flagged as an open question rather than
+  guessed at: the draft's own SSTI-shape analogy for the
+  `static_precheck` classification was wrong (no spring_boot
+  `STATIC_PRECHECK_BY_SHAPE` precedent exists at all — confirmed by
+  `CC-LAB-0213` itself), and the correct classification is
+  **UNINFORMATIVE** (the opposite of the draft's SSTI comparison): unlike
+  SSTI's genuinely different vulnerable/secure API calls
+  (`Ognl.getValue()` vs. a fixed `Map` lookup), this shape's two twins
+  call the identical parse/evaluate sequence — a generic taint checker
+  has no differing call-shape or missing-sanitizer tell to key on, the
+  same reasoning already used for the escaping-context-mismatch XSS
+  rows. The adequacy review also caught a real omission (the draft
+  hadn't flagged that `labels.schema.json`'s `sink_context` enum needed
+  widening at all, only `vuln_class`) and confirmed two of the draft's
+  own open questions were correctly resolved as drafted (a new,
+  dedicated `lab/ground-truth-expedia-clone/` directory, matching
+  Booking/Netflix/Twitch's per-app-identity precedent rather than
+  TrackerNest's no-ground-truth-at-all state; and `sink_context: spel`,
+  a fresh, plain-word token matching Booking's own `redirect`/`csv`
+  minting convention, not an existing bucket). Both fixed before
+  implementation, per this component's now-standing practice.
+
+  `docs/research/category5-travel-functionality-and-cwe-research.md`'s
+  existing SpEL-injection shortlist entry was corrected in the same
+  change, pre-implementation: it had labeled this CWE-89 (CVE-2016-
+  6652's specific JPQL/SQL *outcome*), but MITRE/NVD classify the SpEL-
+  evaluation-context mechanism this shape actually models under CWE-917
+  — corrected in place with a dated note, not silently rewritten, per
+  this project's living-doc convention; verified accurate by the
+  accuracy reviewer independently against cwe.mitre.org.
+
+  1. **`lab/safety_matrix.yaml`**: new concern `spel_injection` (CWE-917,
+     documented in the header vocabulary), new sink family
+     `spel_expression_evaluate`. Vulnerable op
+     `standard_evaluation_context_unrestricted` (`no_effect`); secure op
+     `simple_evaluation_context_restricted` (`neutralises:
+     [spel_injection]`). Additive; no version bump.
+  2. **New `spring_boot` modules**: reuses the existing `QueryParamSource`
+     (no new source needed). New sinks:
+     `StandardEvaluationContextUnrestrictedSink` (parses the tainted
+     string with `SpelExpressionParser` and evaluates it against
+     `new StandardEvaluationContext()`) and
+     `SimpleEvaluationContextRestrictedSink` (identical parse, evaluated
+     against `SimpleEvaluationContext.forReadOnlyDataBinding().build()`).
+     No new Maven dependency (verified by the accuracy review, see
+     above). Reuses the existing `single_handler` complexity. New
+     `_MODULE_SET_BY_SHAPE` row
+     `("spel_injection", "spel_expression_evaluate")`, new `_PAGE_PARAMS`
+     route `/api/hotels/search-sort` (`var_name: sortExpr`,
+     `param_name: sortBy`).
+     `fuzzlab.labgen.conformance.static_precheck.STATIC_PRECHECK_BY_SHAPE`
+     gains `("spel_injection", "spel_expression_evaluate") ->
+     UNINFORMATIVE` (the adequacy-review-corrected classification, with
+     its reasoning recorded in the registry's own comment, not just this
+     entry).
+  3. **New manifest**: `lab/manifests/expedia_spel_injection_sample.yaml`
+     (new `LABGEN-EXP-` cell-ID prefix — Expedia's first cells, checked
+     against every other active branch's own cell-ID prefixes before use,
+     zero collisions per the adequacy review).
+  4. **New ground-truth directory**: `lab/ground-truth-expedia-clone/`
+     (Expedia's own, opaque `EXPD-` case-ID prefix — never `PFF-*`,
+     matching `lab/ground-truth-booking-clone/`'s established per-app-
+     identity precedent, per the adequacy review's resolution above). One
+     case, `EXPD-0001`, cross-checked by `fuzzlab.labels.contract` and by
+     this entry's own test suite (item 7). `fuzzlab/labels/schemas/
+     labels.schema.json`'s `vuln_class` enum widened additively
+     (`spel_injection`); `sink_context` enum widened additively (`spel`)
+     — the omission the adequacy review caught in the draft.
+  5. **Real live-boot proof**
+     (`tests/test_labgen_spel_injection_live_boot.py`): both twins
+     receive `sortBy=T(java.lang.Math).abs(-99)` — a safe, side-effect-
+     free type-reference/method-invocation SpEL canary (deliberately not
+     a `Runtime.exec`-shaped payload, even in this lab-only sandbox: it
+     proves the identical "can an attacker reach a type reference/method
+     invocation at all" differential without invoking a process).
+     Vulnerable twin: real HTTP 200 with `99` (the evaluated result) in
+     the body. Secure twin: real HTTP 400 (a rejected `T(...)` type
+     reference under `SimpleEvaluationContext`). A second, benign
+     property-path-shaped expression (`'price'`) proves the secure twin
+     still functions for legitimate input, not just that it rejects the
+     attack — both twins pass this case too.
+  6. `docs/components/01-target-lab/requirements.md`: `FR-LAB-102` (the
+     shape), `FR-LAB-103` (ground truth).
+  7. **Tests**: `tests/test_labgen_spel_injection.py` (9 tests — manifest/
+     verdict, static-precheck classification, `supports()`, determinism,
+     twin-composition assertions, ground-truth cross-check, ground-truth-
+     directory isolation, class-name-collision guard) +
+     `tests/test_labgen_spel_injection_live_boot.py` (2 real live-boot
+     tests, the proof above). Whole-repo `pytest tests/` run before
+     considering this increment complete (`PA-0036`) — see Effectiveness
+     for the pass/skip/fail counts.
+  8. `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated.
+- Impact (other components / project): additive-only across
+  `lab/safety_matrix.yaml`, the `spring_boot` package's local registries,
+  `fuzzlab/labgen/conformance/static_precheck.py`,
+  `fuzzlab/labels/schemas/labels.schema.json` (2 more enum values), and a
+  new ground-truth directory. No other of the 13 components touched.
+  Establishes Expedia's own cell-ID prefix (`LABGEN-EXP-`) and ground-
+  truth directory (`lab/ground-truth-expedia-clone/`) precedent for any
+  further Expedia-specific shapes.
+- Risk (level; mitigation or accepted-risk justification): low — the
+  shape reuses existing, already-verified infrastructure end to end
+  (the `spring_boot` package's own module-composition pattern, the
+  `QueryParamSource`/`single_handler` modules, `spring-expression`
+  already on the classpath) and introduces exactly one new concern/sink-
+  family pair, grounded in three independently-verified real CVEs. The
+  adequacy review's one genuinely open design question (the
+  `static_precheck` classification) was resolved by evidence (comparing
+  the actual vulnerable/secure sink code, not guessed) before
+  implementation rather than left to be discovered by a later failing
+  test.
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml`: 2 additive rows, new concern header entry — done
+  - [x] `fuzzlab/labgen/emitters/spring_boot/modules.py` + 2 new templates — done
+  - [x] `fuzzlab/labgen/emitters/spring_boot/__init__.py`: page profile + module-set row — done
+  - [x] `fuzzlab/labgen/conformance/static_precheck.py`: new entry — done
+  - [x] `lab/manifests/expedia_spel_injection_sample.yaml` (2 cells) — done
+  - [x] `fuzzlab/labels/schemas/labels.schema.json`: `vuln_class`/`sink_context` widening — done
+  - [x] `lab/ground-truth-expedia-clone/`: new directory, 3 files, `EXPD-0001` — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-102`/`103` — done
+  - [x] `docs/research/category5-travel-functionality-and-cwe-research.md`: CWE-89→917 correction — done
+  - [x] `tests/test_labgen_spel_injection.py` (9 tests) — done
+  - [x] `tests/test_labgen_spel_injection_live_boot.py` (2 real live-boot tests, all green) — done
+  - [x] `CHANGELOG.md` line — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done
+- Effectiveness (assessed 2026-09-23): achieved its intent, with evidence.
+  The adequacy review caught a real, blocking classification error in the
+  draft's own SSTI-shape reasoning (the opposite classification from what
+  the draft proposed) and a real schema-widening omission, both before
+  any code was written — exactly the review gate's purpose. Full
+  whole-repo `pytest tests/` run: see the commit message / `CHANGELOG.md`
+  line for the exact pass/skip/fail counts.
+
 ### CC-LAB-0213 — category 5 pilot, `spring_boot` package ported onto this branch for Expedia (FR-LAB-94) (2026-09-23)
 - Change: mechanical port (not a new build) of the `spring_boot` emitter
   package onto `claude/category-5-build-6boejs`, unblocking Expedia's

@@ -95,6 +95,13 @@
 #     an exported cell unneutralized), not a claim that any single
 #     client-side mitigation closes every consuming application's own
 #     import-time behavior.
+#   spel_injection — attacker-influenced data reaches a Spring Expression
+#     Language (SpEL) evaluation performed with an unrestricted evaluation
+#     context (`StandardEvaluationContext`), which permits arbitrary method
+#     invocation, type references (`T(...)`), and bean resolution -- the
+#     real mechanism behind CVE-2018-1273 (Spring Data Commons) and
+#     CVE-2022-22980/CVE-2026-41717 (Spring Data MongoDB `@Query`/
+#     `@Aggregation` SpEL parameter binding) (CWE-917) (added CC-LAB-0214)
 version: 1
 entries:
   # --- SQL sinks -----------------------------------------------------
@@ -806,3 +813,19 @@ entries:
     sink_family: csv_cell_value
     effect: neutralises
     neutralizes: [csv_formula_injection]
+
+  # --- CC-LAB-0214: SpEL injection (category 5 pilot, Expedia's Java/
+  # Spring Boot half -- a Spring Data hotel/flight search-and-sort feature
+  # whose repository evaluates a Spring Expression Language expression
+  # against attacker-influenced input using an unrestricted evaluation
+  # context. Grounded in CVE-2018-1273 (Spring Data Commons) and
+  # CVE-2022-22980/CVE-2026-41717 (Spring Data MongoDB); real fix per
+  # Spring's own advisories is a restricted evaluation context, not input
+  # sanitization -- see the concern-vocabulary header above. ------------
+  - op: standard_evaluation_context_unrestricted
+    sink_family: spel_expression_evaluate
+    effect: no_effect
+  - op: simple_evaluation_context_restricted
+    sink_family: spel_expression_evaluate
+    effect: neutralises
+    neutralizes: [spel_injection]

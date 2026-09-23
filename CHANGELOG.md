@@ -12,6 +12,29 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (category 5: Expedia's first own shape, spel_injection)
+- LAB: added Expedia's first own vulnerability shape (not reused/ported
+  code): `spel_injection` (CWE-917, Spring Expression Language injection)
+  on `spring_boot`, a hotel-search `sortBy` parameter evaluated as SpEL —
+  grounded in real Spring CVEs (CVE-2018-1273, CVE-2022-22980/
+  CVE-2026-41717) and modeling Spring's own documented fix
+  (`SimpleEvaluationContext` instead of `StandardEvaluationContext`).
+  Pre-change review gate: accuracy pass clean (10/10 claims verified,
+  including a real `mvn dependency:tree` run); adequacy pass caught a
+  real, blocking classification error (the draft's SSTI-shape analogy
+  for this shape's static-precheck flag was backwards — correct
+  classification is UNINFORMATIVE, not the draft's proposed
+  comparison) plus a schema-widening omission, both fixed before
+  implementation. Also corrected a pre-existing CWE-89→CWE-917
+  mislabeling in `docs/research/category5-travel-functionality-and-cwe-
+  research.md`'s own shortlist entry, caught during this shape's
+  drafting. New `lab/ground-truth-expedia-clone/` directory (Expedia's
+  first own ground truth, `EXPD-` prefix). Real live-boot proof: a safe
+  `T(java.lang.Math).abs(-99)` type-reference canary evaluates for real
+  on the vulnerable twin (HTTP 200, `99` in the body) and is rejected for
+  real on the secure twin (HTTP 400), with a benign expression proving
+  the fix doesn't break legitimate use. See `CC-LAB-0214`.
+
 ## 2026-09-23 (category 5: spring_boot package ported for Expedia)
 - LAB: ported the `spring_boot` emitter package (built by category 3 for
   TrackerNest, `CC-LAB-0130`-`0132`, and already the host of category 4's

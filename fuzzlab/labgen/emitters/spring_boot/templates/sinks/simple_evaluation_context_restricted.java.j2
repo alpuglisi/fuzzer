@@ -1,0 +1,13 @@
+        try {
+            org.springframework.expression.ExpressionParser parser =
+                new org.springframework.expression.spel.standard.SpelExpressionParser();
+            org.springframework.expression.Expression expr = parser.parseExpression({{ value_expr }});
+            org.springframework.expression.EvaluationContext context =
+                org.springframework.expression.spel.support.SimpleEvaluationContext
+                    .forReadOnlyDataBinding().build();
+            Object result = expr.getValue(context);
+            return org.springframework.http.ResponseEntity.ok("Sort result: " + String.valueOf(result));
+        } catch (Exception e) {
+            return org.springframework.http.ResponseEntity.status(400)
+                .body("Sort expression error: " + e.getMessage());
+        }

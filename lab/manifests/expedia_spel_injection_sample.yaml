@@ -1,0 +1,41 @@
+# SpEL-injection sample manifest (`CC-LAB-0214`/`FR-LAB-102`), `spring_boot`.
+#
+# Category 5 (Travel/booking/marketplaces) pilot's first Expedia-specific
+# cell -- see docs/research/category5-travel-functionality-and-cwe-research.md
+# for the CWE-917 research and its CVE-2018-1273/CVE-2022-22980/
+# CVE-2026-41717 grounding. Not a port from TrackerNest/Netflix like
+# CC-LAB-0213's cells: this is Expedia's own, first-built shape, on the
+# spring_boot package the earlier port made available.
+#
+# A hotel-search endpoint accepts a `sortBy` query parameter, evaluated as
+# a Spring Expression Language (SpEL) expression against a Spring Data-
+# style repository layer. Both twins call the *identical*
+# `SpelExpressionParser().parseExpression(sortExpr).getValue(context)`
+# sequence -- the only difference is which EvaluationContext was
+# constructed: the vulnerable twin's `new StandardEvaluationContext()`
+# permits arbitrary type references (`T(...)`), method invocation, and
+# bean resolution (the real mechanism behind CVE-2018-1273); the secure
+# twin's `SimpleEvaluationContext.forReadOnlyDataBinding().build()`
+# rejects all of that while still permitting ordinary property/index
+# access, Spring's own documented fix. Same route, never live-booted
+# together, per this project's established twin-pair precedent.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-EXP-0001
+    class: spel_injection
+    stack_profile: spring_boot
+    route: { method: GET, path: /api/hotels/search-sort }
+    sink_context:
+      family: spel_expression_evaluate
+      required_neutralizations: [spel_injection]
+    transform: [standard_evaluation_context_unrestricted]
+
+  - cell_id: LABGEN-EXP-0002
+    class: spel_injection
+    stack_profile: spring_boot
+    route: { method: GET, path: /api/hotels/search-sort }
+    sink_context:
+      family: spel_expression_evaluate
+      required_neutralizations: [spel_injection]
+    transform: [simple_evaluation_context_restricted]

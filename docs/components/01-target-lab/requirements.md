@@ -2181,6 +2181,81 @@ lane) can submit a payload as
   modules, or corpus precedent exist anywhere in this repository for it)
   are separate, later requirements.
 
+- **FR-LAB-102** *(`spel_injection` shape, CWE-917, `spring_boot`;
+  `CC-LAB-0214`, 2026-09-23).* Expedia's first own shape (distinct from
+  `FR-LAB-94`'s ported Netflix Jackson cell, which is TrackerNest/
+  category-4 code reused, not built for Expedia). A hotel-search endpoint
+  (`GET /api/hotels/search-sort`) accepts a `sortBy` query parameter,
+  parsed and evaluated as a Spring Expression Language (SpEL) expression.
+  - Grounded in real Spring CVEs: CVE-2018-1273 (Spring Data Commons,
+    `MapDataBinder`'s unrestricted `StandardEvaluationContext` — the
+    exact mechanism this shape models) and CVE-2022-22980/CVE-2026-41717
+    (Spring Data MongoDB `@Query`/`@Aggregation` SpEL parameter-binding
+    injection). New `lab/safety_matrix.yaml` concern `spel_injection`
+    (CWE-917) and sink family `spel_expression_evaluate`:
+    `standard_evaluation_context_unrestricted`/`no_effect` (vulnerable —
+    `new StandardEvaluationContext()`, permits type references/method
+    invocation/bean resolution) vs.
+    `simple_evaluation_context_restricted`/`neutralises` (secure —
+    `SimpleEvaluationContext.forReadOnlyDataBinding().build()`, Spring's
+    own documented CVE-2018-1273 fix). Both twins call the *identical*
+    `SpelExpressionParser().parseExpression(tainted).getValue(context)`
+    sequence; only the `EvaluationContext` object differs.
+  - Went through this component's pre-change review gate before
+    implementation. The accuracy pass returned clean ACCURATE on all 10
+    checked claims (including a real `mvn dependency:tree` run
+    confirming `spring-expression` ships transitively, no new Maven
+    dependency needed). The adequacy pass returned INADEQUATE, catching
+    a real, blocking classification error: the draft's own SSTI-shape
+    analogy for this shape's `static_precheck` flag was backwards — no
+    spring_boot `STATIC_PRECHECK_BY_SHAPE` precedent exists at all, and
+    the correct classification is UNINFORMATIVE (both twins share an
+    identical call shape, unlike SSTI's genuinely different vulnerable/
+    secure API calls) — plus a real omission (the draft hadn't flagged
+    that `labels.schema.json`'s `sink_context` enum needed widening).
+    Both fixed before implementation.
+  - `docs/research/category5-travel-functionality-and-cwe-research.md`'s
+    SpEL-injection shortlist entry corrected in the same change,
+    pre-implementation: MITRE/NVD classify this mechanism under CWE-917,
+    not the CWE-89 the doc had originally labeled it (CWE-89 describes
+    CVE-2016-6652's specific JPQL/SQL *outcome*, a different real CVE in
+    the same family) — corrected in place with a dated note.
+  - New `spring_boot` modules:
+    `StandardEvaluationContextUnrestrictedSink`/
+    `SimpleEvaluationContextRestrictedSink`, reusing the existing
+    `QueryParamSource`/`single_handler` modules — no new source or
+    complexity module needed. New `_MODULE_SET_BY_SHAPE` row, new
+    `_PAGE_PARAMS` route. `STATIC_PRECHECK_BY_SHAPE` gains
+    `("spel_injection", "spel_expression_evaluate") -> UNINFORMATIVE`.
+  - New manifest `lab/manifests/expedia_spel_injection_sample.yaml`
+    (`LABGEN-EXP-0001`/`LABGEN-EXP-0002`, Expedia's first cell-ID
+    prefix, checked for collision against every other active branch).
+  - Real live-boot proof
+    (`tests/test_labgen_spel_injection_live_boot.py`): both twins
+    receive `sortBy=T(java.lang.Math).abs(-99)` — a safe, side-effect-
+    free type-reference/method-invocation canary (not a
+    `Runtime.exec`-shaped payload, even in this lab-only sandbox).
+    Vulnerable twin: real HTTP 200 with `99` in the body. Secure twin:
+    real HTTP 400 (rejected `T(...)` reference). A second, benign
+    property-path expression (`'price'`) proves the secure twin still
+    functions for legitimate input.
+
+- **FR-LAB-103** *(Expedia's own ground-truth directory;
+  `CC-LAB-0214`, 2026-09-23).* New `lab/ground-truth-expedia-clone/`
+  directory (opaque `EXPD-` case-ID prefix, never `PFF-*`) — matches
+  `lab/ground-truth-booking-clone/`'s established per-app-identity
+  precedent (the adequacy review's resolution: TrackerNest's own
+  spring_boot cells have no ground-truth cross-check at all, so there
+  was no "reuse a shared dir" precedent to follow; Expedia is a new app
+  identity, like Booking/Netflix/Twitch, so it gets its own dedicated
+  directory). One case, `EXPD-0001`, cross-checked by
+  `fuzzlab.labels.contract` and by this shape's own test suite.
+  `fuzzlab/labels/schemas/labels.schema.json`'s `vuln_class` enum
+  widened additively (`spel_injection`); `sink_context` enum widened
+  additively (`spel` — a fresh, plain-word token matching Booking's own
+  `redirect`/`csv` minting convention, not forced into an existing
+  bucket, per the adequacy review).
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.
