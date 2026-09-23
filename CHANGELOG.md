@@ -4,6 +4,34 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Netflix's 3rd real page — insecure_deserialization generalizes for free, CC-LAB-0184/FR-LAB-124)
+- Target lab: a cheap depth increment for category 4's Netflix pick,
+  mirroring `CC-LAB-0183`'s own just-landed pattern — reuses
+  `LABGEN-JV-0001`/`0002`'s already-built Jackson-polymorphic-typing
+  module set verbatim at a second, distinct real route,
+  `POST /api/profiles/switch` (a multi-profile-switch payload, a real
+  Netflix account feature — up to 5 profiles/account, each with its own
+  preferences — genuinely distinct from `/api/playback/resume`'s own
+  resume-position mutation). Zero new generator code — one new manifest
+  (`lab/manifests/insecure_deserialization_netflix_profiles_sample.yaml`,
+  cells `LABGEN-JV-0005`/`0006`) and one new `_PAGE_PARAMS` route entry.
+  Ground truth `NFLX-0003` added; no schema widening needed. Real
+  live-boot proof (three assertions, mirroring `LABGEN-JV-0001`/`0002`'s
+  own test). **The point of this increment**: verified, not assumed,
+  that the already-built `InsecureDeserializationTypeConfusionStrategy`
+  (`CC-FUZZ-0030`) confirms the new vulnerable twin and fails closed on
+  the new secure twin with zero new detection code — proven live via a
+  dedicated live-boot strategy test and a hand-rolled 3-cell
+  `run_targets` boot, moving Netflix's own real, scored recall in that
+  boot from 2/2 to 3/3. Cross-branch collision check performed against
+  categories 3/5's branches on every shared `spring_boot`/oracle/runmode/
+  rules/schema file before touching them — both sibling branches found
+  strictly behind this branch's tip on those files, nothing to
+  reconcile. `Agent` tool absent from this session's toolset (checked via
+  `ToolSearch`); substituted a documented rigorous self-review, per
+  `CC-LAB-0182`/`CC-LAB-0183`'s own precedent for that substitution. Full
+  bookkeeping: `CC-LAB-0184`, `FR-LAB-124`.
+
 ## 2026-09-23 (LAB: Twitch's 7th real page — access-control/IDOR generalizes for free, CC-LAB-0183/FR-LAB-123)
 - Target lab: a cheap depth increment for category 4's Twitch pick —
   reuses `CC-LAB-0178`'s already-built `access_control`/

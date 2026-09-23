@@ -25,6 +25,18 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "notes": "Whole raw request body (an XML partner content-metadata feed) parsed with a default-configured DocumentBuilderFactory that resolves external entities/DOCTYPE declarations (CWE-611) -- modeled on Netflix's real B2B content-metadata ingestion surface (DDEX ERN messages are XSD-validated XML; Netflix is a confirmed EIDR participant alongside the major studios and MovieLabs -- see lab/manifests/xxe_netflix_sample.yaml's own sourcing note for the fact-vs-inference split). No single named field carries the taint, so `param` is the literal string \"body\", same whole-body convention as NFLX-0001 (CC-LAB-0174). `rendering` is \"server\" (plain text, not JSON) -- distinct from NFLX-0001's \"server-json\". `LABGEN-JV-0003` in lab/manifests/xxe_netflix_sample.yaml, CC-LAB-0179 (reuses TrackerNest's own already-built xml_external_entities_enabled/_disabled shape, CC-LAB-0131, at a new Netflix-specific route) -- never a PFF-* case."
+    },
+    {
+      "case_id": "NFLX-0003",
+      "url": "/api/profiles/switch",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "vuln_class": "insecure_deserialization",
+      "sink_context": "deserialization",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "Whole raw request body deserialized polymorphically by Jackson default-typing, with the concrete runtime type resolved from an attacker-controlled type hint embedded in the JSON itself (CWE-502) -- the identical mechanism NFLX-0001 already models (source jackson_body, sinks jackson_default_typing_deserialize/jackson_typed_allowlist_deserialize, both via _SOURCE_OVERRIDE_BY_OP, CC-LAB-0173), reused verbatim at a second, distinct real Netflix feature: switching the account's active profile (a real, core Netflix feature -- Netflix's own Help Center documents up to 5 profiles per account, each with its own maturity-rating/autoplay/subtitle preferences), not a cosmetic rename of NFLX-0001's own playback-resume mutation. No single named field carries the taint, so `param` is the literal string \"body\", same whole-body convention as NFLX-0001/NFLX-0002 (CC-LAB-0174). `LABGEN-JV-0005` in lab/manifests/insecure_deserialization_netflix_profiles_sample.yaml, CC-LAB-0184/FR-LAB-124 (Netflix's third real page, zero new generator code) -- never a PFF-* case."
     }
   ]
 }

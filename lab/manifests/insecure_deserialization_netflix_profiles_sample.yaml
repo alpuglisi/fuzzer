@@ -1,0 +1,72 @@
+# Multi-profile-switch, insecure-deserialization sample manifest
+# (`CC-LAB-0184`), `spring_boot` (Netflix, category 4 pilot).
+#
+# Netflix's third real page -- category 4's continued "coherent page/route
+# set" depth work (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4),
+# mirroring `CC-LAB-0179`'s own zero-new-generator-code "new manifest + new
+# route entry + ground truth" pattern. Reuses the *same* mechanism
+# `LABGEN-JV-0001`/`0002` (`/api/playback/resume`) already instantiate --
+# Jackson polymorphic-typing deserialization (CWE-502): source `jackson_body`
+# (via `_SOURCE_OVERRIDE_BY_OP`, unchanged), sinks
+# `jackson_default_typing_deserialize`/`jackson_typed_allowlist_deserialize`
+# -- verbatim, at a second, distinct real Netflix route. Not a cosmetic
+# rename of the first: profile-switching is a genuinely different real
+# Netflix feature (which profile is active, plus that profile's own
+# maturity-rating/autoplay/subtitle-language preferences) from resuming
+# in-progress playback.
+#
+# Real-world grounding (fact vs. inference labeled, per this project's own
+# sourcing discipline):
+#   FACT: Netflix accounts support multiple named profiles (Netflix's own
+#     Help Center documents up to 5 profiles per account, each with its own
+#     maturity-rating setting, autoplay preference, and viewing history/
+#     "My List"), and switching the active profile is a real, core account
+#     feature every Netflix user exercises.
+#   INFERENCE (this manifest's own illustrative choice, not a confirmed
+#     Netflix-internal implementation detail): a `POST /api/profiles/switch`
+#     mutation accepting a JSON body describing the target profile and its
+#     current preference state is a plausible illustrative surface for that
+#     real feature -- distinct from `/api/playback/resume`'s own
+#     resume-position mutation, and distinct from `/api/content/import`'s
+#     own B2B partner-ingestion surface (`CC-LAB-0179`).
+#
+# Accepted risk, stated explicitly (not left implicit): the
+# `jackson_body`/`jackson_default_typing_deserialize`/
+# `jackson_typed_allowlist_deserialize` modules are shared code with
+# `LABGEN-JV-0001`/`0002`, not forked -- a future change to those templates
+# (or to `PlaybackResumeRequest`, the fixed DTO class the secure twin's
+# template still hardcodes, the same accepted cosmetic gap `CC-LAB-0179`
+# recorded for its own shared XXE templates' TrackerNest-flavored response
+# text) could silently affect both routes at once. Mitigated by
+# `tests/test_labgen_spring_boot_deserialization.py`'s own joint regression
+# coverage (both manifests rendered together, asserted disjoint paths) and
+# by `tests/test_labgen_spring_boot_deserialization_netflix_profiles_live_
+# boot.py`'s own live-boot proof of this route specifically, not assumed
+# from the shared-module argument alone.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: deserializes the whole request body into a polymorphic
+  # Object via Jackson default typing -- the concrete runtime type is
+  # resolved from an attacker-controlled type hint embedded in the JSON
+  # body itself (CWE-502).
+  - cell_id: LABGEN-JV-0005
+    class: insecure_deserialization
+    stack_profile: spring_boot
+    route: { method: POST, path: /api/profiles/switch }
+    sink_context:
+      family: object_deserialization
+      required_neutralizations: [insecure_deserialization]
+    transform: [jackson_default_typing_deserialize]
+
+  # Secure twin: the only difference is the transform region -- deserializes
+  # into a single, fixed, concrete DTO class, no polymorphism, so no
+  # attacker-controlled type hint is ever honored.
+  - cell_id: LABGEN-JV-0006
+    class: insecure_deserialization
+    stack_profile: spring_boot
+    route: { method: POST, path: /api/profiles/switch }
+    sink_context:
+      family: object_deserialization
+      required_neutralizations: [insecure_deserialization]
+    transform: [jackson_typed_allowlist_deserialize]

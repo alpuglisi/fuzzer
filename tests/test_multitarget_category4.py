@@ -66,16 +66,33 @@ and `tests/test_labgen_spring_boot_trackernest_multitarget.py`).
 `test_both_apps_run_through_multitarget_for_real` below still boots only
 `LABGEN-JV-0001` (the insecure-deserialization vulnerable twin) via
 `SpringBootLiveBootHarness`'s one-cell-per-boot constraint, so `NFLX-0002`
-is a structural false negative *in that one test* -- not because
-detection is missing, but because that test's single-cell boot doesn't
-serve it. `test_netflix_multi_cell_boot_confirms_both_positives` below
-closes that gap the way `tests/test_labgen_spring_boot_trackernest_
+and `NFLX-0003` are structural false negatives *in that one test* -- not
+because detection is missing, but because that test's single-cell boot
+doesn't serve them. `test_netflix_multi_cell_boot_confirms_all_positives`
+below closes that gap the way `tests/test_labgen_spring_boot_trackernest_
 multitarget.py` already does for TrackerNest: a hand-rolled multi-cell
 boot (bypassing `SpringBootLiveBootHarness`'s single-cell restriction,
-assembling `LABGEN-JV-0001` and `LABGEN-JV-0003` together -- distinct
-routes, `/api/playback/resume` and `/api/content/import`, so no
-same-route collision), proving both of Netflix's own positives confirm
-together in one real boot. One gap remains open:
+assembling `LABGEN-JV-0001`, `LABGEN-JV-0003`, and `LABGEN-JV-0005`
+together -- three distinct routes, `/api/playback/resume`,
+`/api/content/import`, and `/api/profiles/switch`, so no same-route
+collision), proving all three of Netflix's own positives confirm together
+in one real boot.
+
+`NFLX-0003` (`CC-LAB-0184`, `/api/profiles/switch`) is Netflix's third
+real page: a second `insecure_deserialization` instance reusing
+`LABGEN-JV-0001`/`0002`'s own module set verbatim -- zero new generator
+code, mirroring `CC-LAB-0183`'s own reuse-at-a-new-route pattern.
+`InsecureDeserializationTypeConfusionStrategy` (`CC-FUZZ-0030`, already
+built for `NFLX-0001`) needed zero new detection code to confirm the new
+vulnerable twin and correctly fail closed on its new secure twin,
+verified against a real booted app both by a dedicated live-boot strategy
+test (`tests/test_labgen_spring_boot_deserialization_netflix_profiles_
+live_boot.py`) and by `test_netflix_multi_cell_boot_confirms_all_
+positives` below -- Netflix's own real, scored recall in that multi-cell
+boot moves from 2/2 to 3/3, proving the existing detection generalizes to
+a second instance of the same shape, the same generalization proof
+`CC-LAB-0183` made for Twitch's `access_control` detection. One gap
+remains open:
 
 1. **No audit `Rule`/oracle strategy exists yet for `webhook_signature`**
    (`ssrf`/`access_control`/`insecure_deserialization`/`xxe` now all have
@@ -194,28 +211,36 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     assert round(twitch_report.recall, 4) == round(6 / 7, 4)
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
-    # finding; XXE (NFLX-0002) still has no rule/strategy (see module
-    # docstring) -- one of its two positives, not both (only NFLX-0001's
-    # own vulnerable twin, LABGEN-JV-0001, is booted here).
+    # finding; XXE (NFLX-0002, which does have a rule/strategy, R-XXE/
+    # XxeInBandMarkerStrategy, CC-FUZZ-0031) and the second
+    # insecure-deserialization instance (NFLX-0003, CC-LAB-0184) are simply
+    # not booted in this single-cell test -- one of its now-three
+    # positives, not all (only NFLX-0001's own vulnerable twin,
+    # LABGEN-JV-0001, is booted here) -- see
+    # test_netflix_multi_cell_boot_confirms_all_positives below for the
+    # multi-cell boot that confirms all three together.
     netflix_report = by_name["netflix-clone"].report
     assert netflix_report.tp == 1 and netflix_report.fp == 0
-    assert round(netflix_report.recall, 4) == round(1 / 2, 4)
+    assert round(netflix_report.recall, 4) == round(1 / 3, 4)
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
-    assert round(summary["macro_recall"], 4) == round(((6 / 7) + (1 / 2)) / 2, 4)
+    assert round(summary["macro_recall"], 4) == round(((6 / 7) + (1 / 3)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True
 
 
-# --- Netflix multi-cell boot: both of its own positives, one app (CC-FUZZ-0032) ---
+# --- Netflix multi-cell boot: all of its own positives, one app (CC-FUZZ-0032,
+# extended by CC-LAB-0184 to include the second insecure_deserialization
+# instance at /api/profiles/switch) ---
 
 _NETFLIX_MULTI_MANIFESTS = (
     "lab/manifests/insecure_deserialization_spring_boot_sample.yaml",
     "lab/manifests/xxe_netflix_sample.yaml",
+    "lab/manifests/insecure_deserialization_netflix_profiles_sample.yaml",
 )
-_NETFLIX_MULTI_CELL_IDS = {"LABGEN-JV-0001", "LABGEN-JV-0003"}
+_NETFLIX_MULTI_CELL_IDS = {"LABGEN-JV-0001", "LABGEN-JV-0003", "LABGEN-JV-0005"}
 _BUILD_TIMEOUT_S = 240.0
 _BOOT_TIMEOUT_S = 30.0
 
@@ -239,17 +264,22 @@ def _wait_until_listening(port: int, timeout_s: float = _BOOT_TIMEOUT_S) -> None
     raise AssertionError(f"java -jar never started listening on 127.0.0.1:{port}: {last_exc}")
 
 
-def test_netflix_multi_cell_boot_confirms_both_positives(tmp_path_factory, tmp_path) -> None:
+def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_path) -> None:
     """Hand-rolled multi-cell boot (bypassing `SpringBootLiveBootHarness`'s
     single-cell restriction), mirroring `tests/test_labgen_spring_boot_
-    trackernest_multitarget.py`'s own established pattern: assembles both
-    of Netflix's own vulnerable twins -- `LABGEN-JV-0001`
-    (insecure-deserialization, `/api/playback/resume`) and `LABGEN-JV-0003`
-    (XXE, `/api/content/import`) -- into one real booted app (distinct
-    routes, no collision), then runs the real generic `run_targets`
-    pipeline against it. Closes the follow-on this module's own docstring
-    flags: both of Netflix's positives now confirm together in one real
-    boot, not just each proven individually elsewhere.
+    trackernest_multitarget.py`'s own established pattern: assembles all
+    three of Netflix's own vulnerable twins -- `LABGEN-JV-0001`
+    (insecure-deserialization, `/api/playback/resume`), `LABGEN-JV-0003`
+    (XXE, `/api/content/import`), and `LABGEN-JV-0005`
+    (insecure-deserialization, `/api/profiles/switch`, `CC-LAB-0184`) --
+    into one real booted app (three distinct routes, no collision), then
+    runs the real generic `run_targets` pipeline against it. Originally
+    closed the follow-on `CC-FUZZ-0032` flagged (both of Netflix's
+    positives confirming together in one real boot); extended by
+    `CC-LAB-0184` to prove the third positive confirms alongside the other
+    two with zero new detection code -- the same generalization proof
+    `CC-LAB-0183` made for Twitch's `access_control` detection, moving
+    Netflix's own scored recall in this boot from 2/2 to 3/3.
     """
     root = tmp_path_factory.mktemp("netflix_multitarget")
     shutil.copytree(SKELETON_DIR, root, dirs_exist_ok=True)
@@ -292,8 +322,10 @@ def test_netflix_multi_cell_boot_confirms_both_positives(tmp_path_factory, tmp_p
                                    oob=listener)
         outcome = outcomes[0]
         assert outcome.scored is True and outcome.report is not None
-        # Both of Netflix's own positives confirm in this one real boot.
-        assert outcome.report.tp == 2 and outcome.report.fp == 0
+        # All three of Netflix's own positives confirm in this one real boot
+        # (NFLX-0001, NFLX-0002, NFLX-0003) -- CC-LAB-0184 moves this from
+        # 2/2 to 3/3 with zero new detection code.
+        assert outcome.report.tp == 3 and outcome.report.fp == 0
         assert outcome.report.recall == 1.0
     finally:
         listener.stop()

@@ -126,13 +126,16 @@ def test_points_from_ground_truth_sets_body_content_type_only_for_json_cases():
     # CC-LAB-0179: Netflix now has two whole-body points -- NFLX-0001
     # (JSON, rendering="server-json") and NFLX-0002 (XML/XXE,
     # rendering="server") -- so this must distinguish them by URL, not just
-    # grab "the" body point.
+    # grab "the" body point. CC-LAB-0184 adds a third, NFLX-0003
+    # (JSON, rendering="server-json", /api/profiles/switch) -- the same
+    # whole-body-JSON shape as NFLX-0001, at a different URL.
     netflix_gt = contract.load("lab/ground-truth-netflix-clone")
     points, _ = points_from_ground_truth(netflix_gt, "http://127.0.0.1:8080")
     body_points = {p.url: p for p in points if p.param == "body"}
-    assert len(body_points) == 2
+    assert len(body_points) == 3
     assert body_points["http://127.0.0.1:8080/api/playback/resume"].body_content_type == "application/json"
     assert body_points["http://127.0.0.1:8080/api/content/import"].body_content_type is None
+    assert body_points["http://127.0.0.1:8080/api/profiles/switch"].body_content_type == "application/json"
 
     trackernest_gt = contract.load("lab/ground-truth-trackernest")
     points, _ = points_from_ground_truth(trackernest_gt, "http://127.0.0.1:8080")
@@ -157,6 +160,9 @@ def test_points_from_ground_truth_carries_sink_context_from_the_matching_case():
     by_url = {p.url: p for p in points}
     assert by_url["http://127.0.0.1:8080/api/playback/resume"].sink_context == "deserialization"
     assert by_url["http://127.0.0.1:8080/api/content/import"].sink_context == "xml"
+    # CC-LAB-0184: the new /api/profiles/switch point carries the same
+    # sink_context as NFLX-0001 (the identical shape, reused).
+    assert by_url["http://127.0.0.1:8080/api/profiles/switch"].sink_context == "deserialization"
 
 
 def test_run_auto_ground_truth_points_beats_crawl_coverage(tmp_path):

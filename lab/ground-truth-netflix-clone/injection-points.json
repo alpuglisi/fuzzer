@@ -15,6 +15,13 @@
       "param": "body",
       "location": "body",
       "rendering": "server"
+    },
+    {
+      "url": "/api/profiles/switch",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "rendering": "server-json"
     }
   ]
 }

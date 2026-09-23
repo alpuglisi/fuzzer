@@ -6,3 +6,4 @@
 case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
 NFLX-0001,/api/playback/resume,POST,body,body,insecure_deserialization,true,/api/playback/resume,sink,,direct
 NFLX-0002,/api/content/import,POST,body,body,xxe,true,/api/content/import,sink,,direct
+NFLX-0003,/api/profiles/switch,POST,body,body,insecure_deserialization,true,/api/profiles/switch,sink,,direct

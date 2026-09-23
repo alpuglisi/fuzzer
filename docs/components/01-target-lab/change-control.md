@@ -3,6 +3,200 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0184 — Netflix's third real page: second insecure_deserialization instance, `/api/profiles/switch` (FR-LAB-124) (2026-09-23)
+
+- Change: a cheap, low-risk depth increment for category 4's Netflix pick
+  (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§9.4), mirroring
+  `CC-LAB-0183`'s own just-landed pattern (a second instance of an
+  already-built, already-detected mechanism at a new route, zero new
+  generator code) -- this time on `spring_boot`/Netflix rather than
+  `go_net_http`/Twitch. Reuses `LABGEN-JV-0001`/`0002`'s already-built
+  Jackson-polymorphic-typing module set (`jackson_body` source via
+  `_SOURCE_OVERRIDE_BY_OP`, `jackson_default_typing_deserialize`/
+  `jackson_typed_allowlist_deserialize` sinks, `CC-LAB-0173`) verbatim at
+  a second, distinct real Netflix route: `POST /api/profiles/switch`, a
+  multi-profile-switch payload -- a real, plausible Netflix feature
+  (up to 5 profiles per account, each with its own maturity-rating/
+  autoplay/subtitle preferences, per Netflix's own Help Center) genuinely
+  distinct from `/api/playback/resume`'s own resume-position mutation and
+  from `/api/content/import`'s own B2B partner-ingestion surface
+  (`CC-LAB-0179`), not a cosmetic rename of either.
+  **Cross-branch collision check, performed and recorded**: `git fetch
+  origin claude/category-3-build-iuu5k9 claude/category-5-build-6boejs`
+  followed by `git diff --stat HEAD <branch> -- fuzzlab/labgen/emitters/
+  spring_boot/ fuzzlab/oracle/strategies.py fuzzlab/core/runmode.py
+  fuzzlab/audit/rules_data/default_rules.json fuzzlab/labels/schemas/
+  labels.schema.json` against both sibling branches, before touching any
+  shared file: both diffs showed only deletions relative to this branch
+  (i.e. both sibling branches are strictly behind this branch's own tip
+  on every one of those files, missing only this branch's prior
+  `/api/content/import` entry) -- no divergent work to reconcile, and no
+  file above needed changing at all for this increment except
+  `fuzzlab/labgen/emitters/spring_boot/__init__.py`'s own
+  `_PAGE_PARAMS` (additive, one new key).
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`/`CC-LAB-0183`'s own precedent wording):**
+  the `Agent` tool for a two-independent-reviewer accuracy/adequacy pass
+  was not present in this session's toolset (checked via `ToolSearch`
+  before concluding this, not assumed absent) -- substituted with a
+  documented, rigorous self-review performed and recorded here rather
+  than silently skipping the gate: (1) **accuracy** -- confirmed by
+  direct source inspection, not assumed: `_MODULE_SET_BY_SHAPE[
+  ("insecure_deserialization", "object_deserialization")]` and
+  `_SOURCE_OVERRIDE_BY_OP`'s two Jackson op entries exist verbatim and
+  unchanged in `fuzzlab/labgen/emitters/spring_boot/__init__.py`/
+  `modules.py`; cell IDs `LABGEN-JV-0005`/`0006` were confirmed free
+  (grepped `LABGEN-JV-` across every manifest, highest existing was
+  `LABGEN-JV-0004`); rendering both new cells was run directly before
+  writing any test and produced the identical module-composition line
+  (`jackson_body -> jackson_default_typing_deserialize/jackson_typed_
+  allowlist_deserialize -> single_handler`) and sink body content as
+  `LABGEN-JV-0001`/`0002`, differing only in served path/class/handler
+  name (asserted directly,
+  `test_profiles_cells_render_byte_identical_module_composition_to_
+  playback_resume`); `InsecureDeserializationTypeConfusionStrategy`'s own
+  confirmation contract was checked against the exact rendered templates
+  (unchanged) before assuming it would confirm, not assumed from the
+  shape match alone. (2) **adequacy** -- checked that this increment does
+  not silently duplicate an existing route (grepped `_PAGE_PARAMS` for
+  `/api/profiles/switch`: absent), does not need a second, redundant
+  strategy (no new `Rule`/`ConfirmationStrategy` code was written at
+  all), and that the "detection already works automatically" claim was
+  actually run against a real booted instance rather than asserted from
+  theory (see below) -- both the dedicated live-boot strategy test and
+  the full `fuzzlab.harness.multitarget.run_targets` pipeline (via a
+  hand-rolled 3-cell Netflix boot) were executed for real before this
+  entry claims the recall move.
+  - **Real Netflix functionality (grounded, not invented)**: profile
+    switching -- Netflix's own Help Center documents up to 5 profiles per
+    account, each with its own maturity-rating/autoplay/subtitle-language
+    preferences (fact); the specific `POST /api/profiles/switch` JSON
+    mutation shape is this manifest's own illustrative inference, not a
+    confirmed Netflix-internal implementation detail (labeled explicitly
+    in the manifest's own header, matching `CC-LAB-0179`'s own
+    fact-vs-inference discipline).
+  - **Vulnerable** (`LABGEN-JV-0005`, `jackson_default_typing_deserialize`):
+    deserializes the whole request body into a polymorphic `Object` via
+    Jackson default typing -- the concrete runtime type is resolved from
+    an attacker-controlled type hint embedded in the JSON body itself.
+    **Secure** (`LABGEN-JV-0006`, `jackson_typed_allowlist_deserialize`):
+    deserializes into the fixed `PlaybackResumeRequest` DTO class (the
+    same shared, cosmetically-TrackerNest/Netflix-agnostic DTO
+    `LABGEN-JV-0002` already uses -- an accepted, explicitly-recorded
+    cosmetic gap, same as `CC-LAB-0179`'s own shared-template wording
+    gap), no polymorphism, so no attacker-controlled type hint is ever
+    honored.
+  - **Zero new generator code, verified not just claimed**: the only
+    non-ground-truth code change is one new
+    `_PAGE_PARAMS["/api/profiles/switch"] = {}` entry in
+    `fuzzlab/labgen/emitters/spring_boot/__init__.py` (config, not a new
+    class/template); rendering both cells was run directly before
+    writing any test and produced byte-for-byte the same sink body as
+    `LABGEN-JV-0001`/`0002`.
+  - **Real, live-boot proof**
+    (`tests/test_labgen_spring_boot_deserialization_netflix_profiles_
+    live_boot.py`, same three-assertion shape as the
+    `LABGEN-JV-0001`/`0002` live-boot test): (a) the vulnerable twin
+    accepts an attacker-type-hinted body; (b) the secure twin accepts its
+    own well-formed plain body; (c) the secure twin rejects the same
+    type-hinted body the vulnerable twin accepted.
+  - **Detection generalization, verified for real against a real booted
+    app, not asserted from theory**: a new live-boot test drives the
+    real, already-built `InsecureDeserializationTypeConfusionStrategy`
+    (`CC-FUZZ-0030`) directly against this new cell pair -- confirms the
+    vulnerable twin, fails closed on the secure twin, with zero new
+    strategy/rule code. The real
+    `fuzzlab.harness.multitarget.run_targets` pipeline was then run end
+    to end against a real booted Netflix instance assembling all three
+    of Netflix's own vulnerable twins in one hand-rolled multi-cell boot
+    (`tests/test_multitarget_category4.py::
+    test_netflix_multi_cell_boot_confirms_all_positives`, extended from
+    `CC-FUZZ-0032`'s own two-cell precedent), and shows Netflix's own
+    real, scored recall in that boot moving from `2/2` to `3/3` (`tp=3,
+    fp=0`) with no audit-rule/strategy change -- the whole point of this
+    increment, proving the existing detection generalizes to a second
+    instance of the same shape rather than assuming it would. The
+    single-cell `test_both_apps_run_through_multitarget_for_real` test
+    (bootable of only one Netflix cell at a time, per
+    `SpringBootLiveBootHarness`'s own constraint) has its own recall
+    assertion updated only for the ground-truth count change (`1/2` ->
+    `1/3`) -- `NFLX-0003`'s own vulnerable twin is simply not booted in
+    that particular test, not a detection gap.
+  - Ground truth: `NFLX-0003` added to `lab/ground-truth-netflix-clone/`
+    (`vuln_class="insecure_deserialization"`,
+    `sink_context="deserialization"` -- both pre-existing enum values
+    from `NFLX-0001`, no schema widening needed).
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/__init__.py` (`_PAGE_PARAMS`,
+    one new route entry)
+  - `lab/manifests/insecure_deserialization_netflix_profiles_sample.yaml`
+    (new)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended)
+  - `tests/test_labgen_spring_boot_deserialization.py` (extended: new
+    manifest constant/expected-verdicts map, disjoint-paths list, 6 new
+    unit tests including the byte-identical-module-composition check)
+  - `tests/test_labgen_spring_boot_deserialization_netflix_profiles_live_boot.py`
+    (new, 3 tests)
+  - `tests/test_labels_contract_category4.py` (extended)
+  - `tests/test_auto.py` (extended: body-points/sink_context assertions
+    updated for the third Netflix whole-body point)
+  - `tests/test_multitarget_category4.py` (module docstring extended;
+    `_NETFLIX_MULTI_MANIFESTS`/`_NETFLIX_MULTI_CELL_IDS` extended;
+    single-cell recall assertion `1/2` -> `1/3`; multi-cell test/function
+    renamed `test_netflix_multi_cell_boot_confirms_all_positives`,
+    recall assertion `2/2` -> `3/3`; a pre-existing stale inline comment
+    claiming XXE "still has no rule/strategy" corrected in passing, found
+    while editing the adjacent block)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-124`, new)
+- Impact (other components / project): additive only -- one new
+  `_PAGE_PARAMS` key (cannot collide with any existing route since
+  `spring_boot` component-scans and each cell's class name derives from
+  its own `cell_id`, not the route path), one new manifest, ground truth
+  extension. No existing cell's rendered output changes (verified:
+  `spring_boot`'s full existing insecure-deserialization test suite
+  re-run unmodified-in-assertion alongside the new tests). No new
+  detection code in `fuzzlab.oracle`/`fuzzlab.core.runmode` at all --
+  this increment is purely a generalization proof of already-shipped
+  detection capability, the second one this session has made for this
+  vuln class shape (Twitch's `access_control`/`CC-LAB-0183` was the
+  first, on a different stack).
+- Risk (level; mitigation or accepted-risk justification): **low**.
+  Reuses fully-built, already-tested modules verbatim; the only
+  genuinely new artifacts are config (manifest + one `_PAGE_PARAMS`
+  entry) and ground truth. The one real shared-code risk (a future
+  change to the `jackson_default_typing_deserialize`/`jackson_typed_
+  allowlist_deserialize` templates or the shared `PlaybackResumeRequest`
+  DTO silently affecting both `/api/playback/resume` and
+  `/api/profiles/switch` at once) is named explicitly in the manifest's
+  own header and mitigated by this route's own dedicated live-boot test
+  plus the disjoint-class-names regression test rendering both manifests
+  together every run. Verified end to end with a real `mvn package`/
+  boot/HTTP round trip and a real `run_targets` pipeline run, not
+  assumed from the shared-module argument alone.
+- Deliverables:
+  - [x] New manifest + one `_PAGE_PARAMS` entry, zero new module/op code
+  - [x] Real live-boot proof (3 assertions, same shape as
+    `LABGEN-JV-0001`/`0002`'s own test)
+  - [x] Ground truth extended (`NFLX-0003`)
+  - [x] Cross-branch collision check performed and recorded (no
+    divergent work found)
+  - [x] Detection generalization verified live (dedicated strategy
+    live-boot test + real `run_targets` pipeline run via a hand-rolled
+    3-cell boot) -- recall `2/2` -> `3/3`
+  - [x] Full non-slow suite + the relevant category-4/`spring_boot` real
+    live-boot slow tests re-verified green
+  - [x] Pre-change review gate's `Agent`-tool absence flagged explicitly,
+    substituted with a documented self-review (accuracy + adequacy),
+    matching `CC-LAB-0182`/`CC-LAB-0183`'s own precedent wording
+- Effectiveness (assessed 2026-09-23): met -- Netflix now has three real,
+  live-boot-proven pages, and the project's existing
+  `insecure_deserialization` detection is now proven, not just assumed,
+  to generalize across distinct routes of the same shape with zero new
+  detection code -- the second such generalization proof this session
+  has made (after `CC-LAB-0183`'s `access_control` proof on a different
+  stack).
+
 ### CC-LAB-0183 — Twitch's 7th real page: second access-control/IDOR instance, `/channels/subscribers` (FR-LAB-123) (2026-09-23)
 
 - Change: a cheap, low-risk depth increment for category 4's Twitch pick

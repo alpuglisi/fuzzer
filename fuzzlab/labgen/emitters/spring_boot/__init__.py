@@ -77,6 +77,12 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
     "/api/playback/resume": {},
     "/api/hotels/search-sort": {"var_name": "sortExpr", "param_name": "sortBy"},
     "/api/content/import": {"var_name": "contentFeedXml"},
+    # CC-LAB-0184: Netflix's third real page, a second insecure_deserialization
+    # instance reusing LABGEN-JV-0001/0002's own jackson_body/jackson_default_
+    # typing_deserialize/jackson_typed_allowlist_deserialize modules verbatim
+    # (via `_SOURCE_OVERRIDE_BY_OP`, unchanged) -- no var_name/param_name
+    # needed, matching "/api/playback/resume"'s own whole-body-JSON `{}`.
+    "/api/profiles/switch": {},
 }
 
 #: Per-op source override (`CC-LAB-0173`) -- checked *after* the shape-level

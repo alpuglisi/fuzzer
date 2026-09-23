@@ -15,7 +15,7 @@ TWITCH_GT_DIR = "lab/ground-truth-twitch-clone"
 def test_netflix_ground_truth_loads_and_cross_checks():
     gt = contract.load(NETFLIX_GT_DIR)
     assert gt.target == "spring_boot"
-    assert len(gt.cases) == 2
+    assert len(gt.cases) == 3
     case = gt.case_by_id("NFLX-0001")
     assert case is not None
     assert case.expected_vulnerable
@@ -35,6 +35,17 @@ def test_netflix_ground_truth_loads_and_cross_checks():
     assert xxe_case.method == "POST"
     assert xxe_case.param == "body"
     assert xxe_case.location == "body"
+
+    # CC-LAB-0184: second insecure_deserialization instance, /api/profiles/switch.
+    profiles_case = gt.case_by_id("NFLX-0003")
+    assert profiles_case is not None
+    assert profiles_case.expected_vulnerable
+    assert profiles_case.vuln_class == "insecure_deserialization"
+    assert profiles_case.sink_context == "deserialization"
+    assert profiles_case.url == "/api/profiles/switch"
+    assert profiles_case.method == "POST"
+    assert profiles_case.param == "body"
+    assert profiles_case.location == "body"
 
     # Opaque case IDs: no vuln class leaks into the identifier.
     for case in gt.cases:

@@ -3986,6 +3986,62 @@ lane) can submit a payload as
   `fuzzlab.harness.multitarget.run_targets` pipeline end to end
   (`tests/test_multitarget_category4.py`), which shows Twitch's own real,
   scored recall moving from 5/6 to 6/7 with no strategy/rule change.
+- **FR-LAB-124** *(Netflix's third real page: second insecure_
+  deserialization instance, `/api/profiles/switch`; `CC-LAB-0184`,
+  2026-09-23).* Reuses `LABGEN-JV-0001`/`0002`'s already-built
+  Jackson-polymorphic-typing module set (`jackson_body` source via
+  `_SOURCE_OVERRIDE_BY_OP`, `jackson_default_typing_deserialize`/
+  `jackson_typed_allowlist_deserialize` sinks, `CC-LAB-0173`) verbatim at
+  a second, distinct real Netflix feature: `POST /api/profiles/switch`, a
+  multi-profile-switch payload (Netflix's own documented up-to-5-
+  profiles-per-account feature, each with its own maturity-rating/
+  autoplay/subtitle preferences -- distinct from `/api/playback/resume`'s
+  own resume-position mutation, not a cosmetic rename of it), mirroring
+  `CC-LAB-0179`'s and `CC-LAB-0183`'s own reuse-at-a-new-route precedent.
+  **Zero new generator code**: only a new manifest
+  (`lab/manifests/insecure_deserialization_netflix_profiles_sample.yaml`,
+  cells `LABGEN-JV-0005`/`0006`) and one new
+  `_PAGE_PARAMS["/api/profiles/switch"]` entry (`{}`, matching
+  `/api/playback/resume`'s own whole-body-JSON convention) in
+  `fuzzlab/labgen/emitters/spring_boot/__init__.py` -- no new module, op,
+  or safety-matrix entry. Ground truth `NFLX-0003`
+  (`vuln_class="insecure_deserialization"`, `sink_context="deserialization"`,
+  both pre-existing enum values from `NFLX-0001` -- no schema widening
+  needed; `param="body"`, the same whole-body-point convention
+  `NFLX-0001`/`NFLX-0002` already use). Real live-boot proof (same
+  three-assertion shape as the `LABGEN-JV-0001`/`0002` live-boot test):
+  the vulnerable twin accepts an attacker-type-hinted body; the secure
+  twin accepts its own well-formed plain body but rejects the same
+  type-hinted one.
+  **This is the detection-generalization proof itself, verified for
+  real, not assumed from theory**: `InsecureDeserializationType
+  ConfusionStrategy` (`CC-FUZZ-0030`, already built for `NFLX-0001`) is
+  keyed on `vuln_class` + sink shape, never per-route, so it needed zero
+  new audit-rule or oracle-strategy code to confirm `NFLX-0003`'s new
+  vulnerable twin and correctly fail closed on its new secure twin --
+  proven against a real `mvn package`/boot/HTTP round trip
+  (`tests/test_labgen_spring_boot_deserialization_netflix_profiles_live_
+  boot.py::test_real_boot_proves_the_insecure_deserialization_strategy_
+  generalizes_to_profiles_route`) and against the real
+  `fuzzlab.harness.multitarget.run_targets` pipeline end to end, via a
+  hand-rolled multi-cell boot assembling all three of Netflix's own
+  positives together (`tests/test_multitarget_category4.py::
+  test_netflix_multi_cell_boot_confirms_all_positives`), which shows
+  Netflix's own real, scored recall in that boot moving from 2/2 to 3/3
+  (`tp=3, fp=0`) with no strategy/rule change. The single-cell
+  `test_both_apps_run_through_multitarget_for_real` test (which boots
+  only `LABGEN-JV-0001`, per `SpringBootLiveBootHarness`'s
+  one-cell-per-boot constraint) has its own recall assertion updated for
+  the ground-truth count change alone (1/2 -> 1/3, unrelated to whether
+  detection generalizes -- `NFLX-0003`'s own vulnerable twin is simply
+  not booted in that particular test).
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`/`CC-LAB-0183`'s own precedent wording):**
+  the `Agent` tool for a two-independent-reviewer accuracy/adequacy pass
+  was not present in this session's toolset (checked via `ToolSearch`
+  before concluding this, not assumed absent) -- substituted with a
+  documented, rigorous self-review (accuracy + adequacy), recorded in
+  `CC-LAB-0184`.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
