@@ -3,6 +3,226 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0097 — PicTrail's sixth real page: inbox insecure deserialization via pickle (FR-LAB-121/FR-LAB-122) (2026-09-23)
+
+- **Change:** Lands PicTrail's sixth real, ground-truth-bearing page,
+  `POST /inbox` (grounded in §2 item 4's DM/inbox feature), the
+  researched insecure-deserialization shape (`docs/research/
+  category2-social-ugc-functionality-and-cwe-research.md` §4 row 5,
+  CWE-502): Django's own real, documented `django.contrib.sessions.
+  serializers.PickleSerializer` opt-in footgun. No new safety-matrix
+  design: `lab/safety_matrix.yaml`'s existing `object_deserialization`
+  sink family already has the exact Python pair this shape needs
+  (`unrestricted_pickle_loads`/`no_effect`, `json_loads_type_check`/
+  `neutralises`).
+
+  **Modeled as an inbox message payload, not a session cookie, stated
+  explicitly**: this emitter's per-cell views have no session-middleware
+  round trip to exercise a real Django session cookie, so `Pickle
+  Serializer`'s real mechanism is ported onto a base64-encoded POST body
+  field instead — the same deserialize call, the same real vulnerability,
+  a different (but still realistic, per §2 item 4) attacker-controlled
+  entry point.
+
+  **Architecturally new for this emitter, stated explicitly**: every
+  prior shape's sink has been byte-identical between twins, with the
+  security boundary living entirely in the transform. Here the
+  deserialize *mechanism itself* (`pickle.loads()` vs. `json.loads()`)
+  differs between twins — there is no shared operation to gate with a
+  pre-processing filter. Resolved by porting `ruby_rails`'s own
+  already-established "flag-only transform, sink branches on it via
+  Jinja2-time interpolation" convention (`YamlUnsafeLoadTransform`/
+  `YamlSafeLoadTransform` → `{{ deserialize_method }}`) directly:
+  `UnrestrictedPickleLoadsTransform`/`JsonLoadsTypeCheckTransform` each
+  set a `loader` context flag (`"pickle"`/`"json"`), and
+  `inbox_deserialize_sink.py.j2` renders one of two `{% if loader ==
+  "pickle" %}` branches at **generation time** — never a runtime branch
+  in the emitted code, so each generated view contains only the one
+  code path its own twin actually uses.
+
+  Concretely:
+  1. **New route**, `_ROUTE_PARAMS["/inbox"]` — `{"var_name": "payload",
+     "param_name": "payload"}`, `POST`, reusing the existing `post_param`
+     source unchanged.
+  2. **New transform, `unrestricted_pickle_loads`** (vulnerable):
+     flag-only, sets `loader="pickle"`.
+  3. **New transform, `json_loads_type_check`** (secure): flag-only, sets
+     `loader="json"`.
+  4. **New sink, `inbox_deserialize_sink`**: the pickle branch calls
+     `pickle.loads(base64.b64decode(payload))` inside a `try/except`,
+     reporting the parsed value's type name on success or the exception
+     class name (HTTP 400) on failure; the JSON branch calls
+     `json.loads(base64.b64decode(payload))` with an additional
+     `isinstance(..., dict)` check (matching `json_loads_type_check`'s
+     own name — not just "parses as JSON," but "parses as a JSON
+     *object*"), same success/failure reporting shape.
+  5. New ground truth: extends `lab/ground-truth-picktrail-django/` with
+     `PT-0006` — `vuln_class: "insecure_deserialization"`,
+     `sink_context: "deserialization"`, `method: "POST"`, `param:
+     "payload"`, `location: "body"`, `rendering: "server-json"`,
+     `url: "/inbox"`.
+  6. New manifest, `lab/manifests/phase_c_picktrail_inbox.yaml`.
+
+- **Impact (other components / project):** No shared schema, safety-
+  matrix *op*, or existing emitter/module changes. `fuzzlab/harness/
+  multitarget.py` unaffected.
+
+- **Risk (level: low-moderate):** The new "flag-only transform, sink
+  branches at generation time" architecture is a real precedent-follow,
+  not an invention — `ruby_rails`'s own `yaml_unsafe_load`/
+  `yaml_safe_load` pair already proved this exact pattern for the
+  structurally identical Psych-loader shape. The adversarial-execution
+  proof itself carries the real risk of any pickle-RCE test (a crafted
+  payload must actually execute inside the booted subprocess). Mitigated
+  by: a `__reduce__` target that reduces to `os.system` (stdlib,
+  resolvable by module+qualname inside the booted app's own separate
+  venv/subprocess, which has no access to this repo's test files at
+  all — a `__reduce__` target defined in the test module itself would
+  fail with `ModuleNotFoundError` inside that subprocess; caught before
+  landing by design, not discovered via a failing test), writing a real,
+  checkable marker file whose contents are verified directly, not
+  inferred from the response body's own claims. The secure twin's
+  positive path (a legitimate JSON payload still succeeds) is proven
+  separately, so the differential can't pass by the secure twin
+  trivially rejecting everything.
+
+- **Deliverables:**
+  - [x] `fuzzlab/labgen/emitters/django/templates/transforms/
+    unrestricted_pickle_loads.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/transforms/
+    json_loads_type_check.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/sinks/
+    inbox_deserialize_sink.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/modules.py` — new
+    `UnrestrictedPickleLoadsTransform`/`JsonLoadsTypeCheckTransform`/
+    `InboxDeserializeSink` classes + registry entries — done.
+  - [x] `fuzzlab/labgen/emitters/django/__init__.py` — new
+    `_MODULE_SET_BY_SHAPE`/`_ROUTE_PARAMS` entries; `import base64`/
+    `import json`/`import pickle` added to the fixed header imports;
+    `_REAL_PAGE_CELL_IDS` gains `LABGEN-DJ-0017` — done.
+  - [x] `lab/manifests/phase_c_picktrail_inbox.yaml` — done.
+  - [x] `lab/ground-truth-picktrail-django/labels.json`/
+    `injection-points.json`/`expectedresults.csv` — extended with
+    `PT-0006` — done.
+  - [x] `tests/test_labgen_django_conformance.py` — Tier 0/3 +
+    verdict-regression test for the new manifest, plus the URL-pinning
+    and `@csrf_exempt` collection regression tests extended — done,
+    25/25 passing.
+  - [x] `tests/test_labgen_django_live_boot_picktrail_inbox.py` — real
+    pickle-RCE proof (a marker file genuinely written by an unpickled
+    `__reduce__` hook) on the vulnerable twin; real non-execution proof
+    on the secure twin; the secure twin's own legitimate-JSON positive
+    path; the `PT-0006` ground-truth cross-check — done, 4/4 passing.
+  - [x] `docs/research/category2-social-ugc-functionality-and-cwe-
+    research.md` §6 — row 6 marked built — done.
+  - [x] `docs/components/01-target-lab/requirements.md` — new
+    `FR-LAB-121`/`FR-LAB-122` — done.
+  - [x] `docs/ARCHITECTURE.md` — sixth real page noted — done.
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 tracker row
+    — done.
+  - [x] `CHANGELOG.md` line — done.
+
+- **Effectiveness (assessed 2026-09-23): effective** — every deliverable
+  above is real, executed, and passing (25 Tier 0/3 tests, 4 real
+  live-boot tests including a genuine pickle-RCE marker-file proof).
+
+### CC-LAB-0096 — PicTrail's fifth real page: explore/search identifier-position SQLi (FR-LAB-119/FR-LAB-120) (2026-09-23)
+
+- **Change:** Lands PicTrail's fifth real, ground-truth-bearing page,
+  `GET /explore` (grounded in §2 item 6's explore/search feature), the
+  researched identifier/`ORDER BY`-position SQLi shape (`docs/research/
+  category2-social-ugc-functionality-and-cwe-research.md` §4 row 4,
+  CWE-89). This project's **first real implementation of
+  `lab/safety_matrix.yaml`'s own `sql_order_by_clause` sink family, on
+  any stack** — the family existed (`orm_order_by_unvalidated`/
+  `no_effect`, `identifier_allowlist`/`neutralises`, neutralizing both
+  `sql_order_by_injection` and `sql_identifier_substitution`) but had
+  never been built anywhere before this entry.
+
+  Concretely:
+  1. **New route**, `_ROUTE_PARAMS["/explore"]` — `{"var_name": "sort",
+     "param_name": "sort"}`, `GET`, reusing the existing `get_param`
+     source unchanged.
+  2. **New transform, `orm_order_by_unvalidated`** (vulnerable): an
+     explicit, self-documenting no-op (matches the matrix's own
+     `no_effect` row) — `value_expr` passes through unchanged.
+  3. **New transform, `identifier_allowlist`** (secure): maps
+     `value_expr` through a fixed, code-controlled dict
+     (`_ORDER_BY_ALLOWLIST = {"id": "id", "name": "name"}`), defaulting
+     to `"id"` for any unrecognized key — reassigns `value_expr` in
+     place (same convention as `CC-LAB-0095`'s own field-filtering
+     transforms).
+  4. **New sink, `explore_order_by_sink`** (shared, byte-identical
+     between twins, the "sink is neutral" shape every sink since
+     `CC-LAB-0093` has used): `SELECT id, name FROM posts ORDER BY " +
+     str(value_expr)` via a raw `connection.cursor()` — the
+     Django-idiomatic realistic trigger the research names (a dev
+     reaching for `.extra()`/`RawSQL()`-equivalent string concatenation
+     instead of the ORM's parameterized `.order_by()`), ported onto this
+     emitter's own established raw-cursor convention.
+  5. New ground truth: extends `lab/ground-truth-picktrail-django/` with
+     `PT-0005` — `vuln_class: "sqli"`, `subtypes: ["identifier"]`,
+     `sink_context: "sql"`, `method: "GET"`, `param: "sort"`, `location:
+     "query"`, `rendering: "server-json"`, `url: "/explore"`.
+  6. New manifest, `lab/manifests/phase_c_picktrail_explore.yaml`.
+
+- **Impact (other components / project):** No shared schema, safety-
+  matrix *op*, or existing emitter/module changes — this entry reuses
+  the matrix's existing `sql_order_by_clause` family exactly as
+  originally designed. `fuzzlab/harness/multitarget.py` unaffected.
+
+- **Risk (level: low):** A new shape for this emitter, but reusing an
+  already-real, already-researched safety-matrix sink family and this
+  emitter's own established raw-cursor sink convention. The one real
+  risk is proving a genuine *identifier-position* differential rather
+  than an ordinary string-literal syntax-break one (which this project
+  already proves elsewhere) — mitigated by choosing a payload
+  (`"id DESC"`) that is syntactically valid SQL with no quotes or
+  comment sequences, so only an identifier/clause-position injection (not
+  a syntax-break one) can exploit it, and by proving the secure twin's
+  own legitimate-`sort=id` request produces the identical row order the
+  payload-blocked request does (not merely "no error").
+
+- **Deliverables:**
+  - [x] `fuzzlab/labgen/emitters/django/templates/transforms/
+    orm_order_by_unvalidated.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/transforms/
+    identifier_allowlist.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/sinks/
+    explore_order_by_sink.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/modules.py` — new
+    `OrmOrderByUnvalidatedTransform`/`IdentifierAllowlistTransform`/
+    `ExploreOrderBySink` classes + registry entries — done.
+  - [x] `fuzzlab/labgen/emitters/django/__init__.py` — new
+    `_MODULE_SET_BY_SHAPE`/`_ROUTE_PARAMS` entries; `_ORDER_BY_ALLOWLIST`
+    fixed constant added to the unconditional header;
+    `_REAL_PAGE_CELL_IDS` gains `LABGEN-DJ-0015` — done.
+  - [x] `lab/manifests/phase_c_picktrail_explore.yaml` — done.
+  - [x] `lab/ground-truth-picktrail-django/labels.json`/
+    `injection-points.json`/`expectedresults.csv` — extended with
+    `PT-0005` — done.
+  - [x] `tests/test_labgen_django_conformance.py` — Tier 0/3 +
+    verdict-regression test for the new manifest, plus the URL-pinning
+    and `@csrf_exempt` collection regression tests extended — done,
+    22/22 passing.
+  - [x] `tests/test_labgen_django_live_boot_picktrail_explore.py` — real
+    row-order-reversal proof on the vulnerable twin (a real, legal,
+    non-syntax-breaking `ORDER BY` modifier); real ignored-payload proof
+    on the secure twin (matched against a legitimate `sort=id` request);
+    the `PT-0005` ground-truth cross-check — done, 3/3 passing.
+  - [x] `docs/research/category2-social-ugc-functionality-and-cwe-
+    research.md` §6 — row 5 marked built — done.
+  - [x] `docs/components/01-target-lab/requirements.md` — new
+    `FR-LAB-119`/`FR-LAB-120` — done.
+  - [x] `docs/ARCHITECTURE.md` — fifth real page noted — done.
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 tracker row
+    — done.
+  - [x] `CHANGELOG.md` line — done.
+
+- **Effectiveness (assessed 2026-09-23): effective** — every deliverable
+  above is real, executed, and passing (22 Tier 0/3 tests, 3 real
+  live-boot tests).
+
 ### CC-LAB-0095 — PicTrail's fourth real page: account-settings mass assignment (FR-LAB-117/FR-LAB-118) (2026-09-23)
 
 - **Change:** Lands PicTrail's fourth real, ground-truth-bearing page,

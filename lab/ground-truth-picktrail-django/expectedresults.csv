@@ -9,3 +9,5 @@ PT-0001,/post,GET,id,query,sqli,true,/post,sink,,direct
 PT-0002,/post/comments,GET,comment,body,xss-stored,true,/post/comments,sink,,direct
 PT-0003,/upload/link-preview,GET,url,query,ssrf,true,/upload/link-preview,sink,,direct
 PT-0004,/settings,POST,is_verified,body,mass_assignment,true,/settings,sink,,direct
+PT-0005,/explore,GET,sort,query,sqli,true,/explore,sink,,direct
+PT-0006,/inbox,POST,payload,body,insecure_deserialization,true,/inbox,sink,,direct

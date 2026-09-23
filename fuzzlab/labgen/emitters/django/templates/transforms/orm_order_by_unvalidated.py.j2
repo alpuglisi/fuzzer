@@ -1,0 +1,6 @@
+# orm_order_by_unvalidated transform (CC-LAB-0096): explicit no-op --
+# {{ value_expr }} (the raw sort key) is passed to the sink below exactly
+# as received, with no identifier allowlist, so the ORDER BY clause
+# concatenates attacker-controlled text directly. Self-documenting
+# (lab/safety_matrix.yaml's own `orm_order_by_unvalidated`/`no_effect`
+# row), not just an empty pipeline relying on identity.

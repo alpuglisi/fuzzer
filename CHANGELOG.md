@@ -282,6 +282,36 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (PicTrail explore/search + inbox pages — six-page design complete)
+- LAB: landed PicTrail's fifth real page — `CC-LAB-0096`/`FR-LAB-119`/
+  `FR-LAB-120`. `GET /explore`: identifier/`ORDER BY`-position SQLi
+  (CWE-89), this project's first real implementation of
+  `lab/safety_matrix.yaml`'s own `sql_order_by_clause` sink family, on
+  any stack (`orm_order_by_unvalidated` vs. `identifier_allowlist`, a
+  shared raw-`connection.cursor()` sink). Real live-boot proof uses a
+  real, legal, non-syntax-breaking payload (`"id DESC"`) to reverse real
+  row order on the vulnerable twin, matched against a legitimate
+  `sort=id` request on the secure twin.
+- LAB: landed PicTrail's sixth real page — `CC-LAB-0097`/`FR-LAB-121`/
+  `FR-LAB-122`. `POST /inbox`: insecure deserialization (CWE-502)
+  modeling Django's own real, documented `PickleSerializer` opt-in
+  footgun as an inbox message payload — this emitter's first sink whose
+  deserialize *mechanism itself* differs between twins (`pickle.loads()`
+  vs. `json.loads()`), resolved by porting `ruby_rails`'s own
+  already-established "flag-only transform, sink branches via
+  Jinja2-time interpolation" convention directly. Real live-boot proof is
+  a genuine pickle-RCE: a crafted `__reduce__` payload writes a real,
+  checkable marker file when unpickled on the vulnerable twin, never
+  created on the secure twin.
+- LAB: **PicTrail's own six-page design (per the category-2 research
+  doc's §6) is now fully built** — post detail (SQLi), comments
+  (stored XSS), link preview (SSRF), settings (mass assignment), explore
+  (identifier SQLi), inbox (insecure deserialization). Extends
+  `lab/ground-truth-picktrail-django/` with `PT-0005`/`PT-0006`. Full
+  bookkeeping in `docs/components/01-target-lab/{change-control,
+  requirements}.md`, `docs/ARCHITECTURE.md`, and the category-2 research
+  doc.
+
 ## 2026-09-23 (PicTrail account-settings mass-assignment page)
 - LAB: landed PicTrail's fourth real page — `CC-LAB-0095`/`FR-LAB-117`/
   `FR-LAB-118`. `POST /settings`: a real mass-assignment (CWE-915) via a

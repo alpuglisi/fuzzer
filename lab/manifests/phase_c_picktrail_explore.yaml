@@ -1,0 +1,33 @@
+# Phase C, PicTrail's fifth real page (category 2 pilot, `CC-LAB-0096`).
+#
+# The researched identifier/ORDER-BY-position SQLi shape (docs/research/
+# category2-social-ugc-functionality-and-cwe-research.md §4 row 4,
+# CWE-89): an explore/search "sort by" built by concatenating the raw
+# sort key into an ORDER BY clause instead of using an allowlist. This
+# project's first real implementation of lab/safety_matrix.yaml's own
+# `sql_order_by_clause` sink family, on any stack.
+#
+# Extends, not replaces, the other phase_c_picktrail_*.yaml manifests. The
+# canonical vulnerable cell (LABGEN-DJ-0015) owns PicTrail's real
+# `/explore` URL and is the one described by
+# lab/ground-truth-picktrail-django/'s own labels.json (case PT-0005).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-DJ-0015
+    class: sqli
+    stack_profile: django
+    route: { method: GET, path: /explore }
+    sink_context:
+      family: sql_order_by_clause
+      required_neutralizations: [sql_order_by_injection, sql_identifier_substitution]
+    transform: [orm_order_by_unvalidated]
+
+  - cell_id: LABGEN-DJ-0016
+    class: sqli
+    stack_profile: django
+    route: { method: GET, path: /explore }
+    sink_context:
+      family: sql_order_by_clause
+      required_neutralizations: [sql_order_by_injection, sql_identifier_substitution]
+    transform: [identifier_allowlist]

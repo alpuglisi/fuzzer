@@ -118,6 +118,14 @@ _COMMENT_TEMPLATE_HTML = '<div class="comment">{{ comment }}</div>\n'
 _KNOWN_PROFILE_COLUMNS = "_KNOWN_PROFILE_COLUMNS = {\"bio\", \"is_verified\"}\n"
 _PUBLIC_SETTINGS_FIELDS = "_PUBLIC_SETTINGS_FIELDS = {\"bio\"}\n"
 
+# CC-LAB-0096: fixed, unconditional constant backing the identifier-
+# allowlist transform for the explore/search page -- maps every
+# real, sortable sort key to its own (identical) real column name on
+# `posts`. Present identically in every generated file regardless of
+# whether that cell's own shape uses it, same convention as the other
+# fixed constants above.
+_ORDER_BY_ALLOWLIST = '_ORDER_BY_ALLOWLIST = {"id": "id", "name": "name"}\n'
+
 
 class _ModuleSet(NamedTuple):
     """Same shape as ``php_current``'s/``node_express``'s ``_ModuleSet``:
@@ -165,6 +173,25 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("mass_assignment", "orm_entity_bulk_assign"): _ModuleSet(
         "post_body_dict", "profile_bulk_update_sink", "render_only"
     ),
+    # CC-LAB-0096: identifier/ORDER-BY-position SQLi (CWE-89) -- reuses
+    # lab/safety_matrix.yaml's existing `sql_order_by_clause` sink family
+    # unchanged (this project's first real implementation of it, on any
+    # stack). Sink shared between twins; the vulnerable/secure
+    # distinction lives entirely in the transform
+    # (`orm_order_by_unvalidated` vs. `identifier_allowlist`).
+    ("sqli", "sql_order_by_clause"): _ModuleSet(
+        "get_param", "explore_order_by_sink", "render_only"
+    ),
+    # CC-LAB-0097: insecure deserialization (CWE-502), modeling Django's
+    # own real, documented PickleSerializer opt-in footgun as an inbox/DM
+    # payload. Unlike every other shape in this emitter, the sink is
+    # *not* shared byte-identical between twins -- the deserialize
+    # mechanism itself (pickle vs. JSON) differs, flagged by the
+    # transform via Jinja2-time interpolation (mirroring `ruby_rails`'s
+    # own `yaml_unsafe_load`/`yaml_safe_load` convention).
+    ("insecure_deserialization", "object_deserialization"): _ModuleSet(
+        "post_param", "inbox_deserialize_sink", "render_only"
+    ),
 }
 
 #: Per-route static context (table/column/param names, or the stored field
@@ -202,6 +229,13 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     # needs no `param_name` (the source reads the entire body, not one
     # named field).
     "/settings": {"var_name": "settings_fields"},
+    # PicTrail's real explore/search page (CC-LAB-0096, Phase C's fifth
+    # real page).
+    "/explore": {"var_name": "sort", "param_name": "sort"},
+    # PicTrail's real inbox/DM page (CC-LAB-0097, Phase C's sixth real
+    # page) -- the payload param models the inbox message's own
+    # serialized-cache-data field.
+    "/inbox": {"var_name": "payload", "param_name": "payload"},
 }
 
 #: Cell IDs that are **real, ground-truth-bearing pages** (`CC-LAB-0092`,
@@ -217,7 +251,14 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
 #: describe the one real, exploitable page, matching how a ``php_current``
 #: secure twin does not necessarily get its own ``PFF-`` case either.
 _REAL_PAGE_CELL_IDS: frozenset[str] = frozenset(
-    {"LABGEN-DJ-0007", "LABGEN-DJ-0009", "LABGEN-DJ-0011", "LABGEN-DJ-0013"}
+    {
+        "LABGEN-DJ-0007",
+        "LABGEN-DJ-0009",
+        "LABGEN-DJ-0011",
+        "LABGEN-DJ-0013",
+        "LABGEN-DJ-0015",
+        "LABGEN-DJ-0017",
+    }
 )
 
 
@@ -294,8 +335,11 @@ class DjangoEmitter(Emitter):
             f"# Route: {cell.route.method} {cell.route.path}\n"
             f"# Module composition: {composition}\n"
             "\n"
+            "import base64\n"
             "import hashlib\n"
             "import ipaddress\n"
+            "import json\n"
+            "import pickle\n"
             "import socket\n"
             "from urllib.parse import urlparse\n"
             "\n"
@@ -315,6 +359,7 @@ class DjangoEmitter(Emitter):
             "\n"
             f"{_KNOWN_PROFILE_COLUMNS}"
             f"{_PUBLIC_SETTINGS_FIELDS}"
+            f"{_ORDER_BY_ALLOWLIST}"
             "\n"
             f"{view_code}"
         )

@@ -1,0 +1,4 @@
+# unrestricted_pickle_loads: flags the sink to parse {{ var_name }} with
+# Python's full pickle deserializer (pickle.loads()) -- a __reduce__
+# hook in the pickled byte stream is honored, executing arbitrary code
+# during unpickling. Safety matrix: effect=no_effect.

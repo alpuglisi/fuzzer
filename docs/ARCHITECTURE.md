@@ -790,10 +790,34 @@ tracked in the requirements files, not here.
   one request (the legitimate `bio` field still applies; the privileged
   `is_verified` field is blocked on the secure twin), reading the DB row
   back directly rather than inferring it from the response.
-  PicTrail's remaining planned pages (identifier-SQLi search, session
-  deserialization, the full auto-linking-specific XSS shape) and
-  CircleFeed (the Facebook-style PHP app) stay planned, not built — each
-  its own future, separately-gated increment.
+  **PicTrail's fifth real page (`CC-LAB-0096`) landed the researched
+  identifier/`ORDER BY`-position SQLi shape**: `GET /explore`, this
+  project's first real implementation of `lab/safety_matrix.yaml`'s own
+  `sql_order_by_clause` sink family (`orm_order_by_unvalidated` vs.
+  `identifier_allowlist`) on any stack — a shared raw-`connection.
+  cursor()` sink, security boundary entirely in the transform. Real
+  live-boot proof uses a real, legal, non-syntax-breaking payload
+  (`"id DESC"`) to reverse real row order on the vulnerable twin, while
+  the secure twin's allowlist ignores it and matches a legitimate
+  `sort=id` request exactly.
+  **PicTrail's sixth real page (`CC-LAB-0097`) landed the researched
+  insecure-deserialization shape**: `POST /inbox`, Django's own real,
+  documented `PickleSerializer` opt-in footgun (CWE-502), ported onto a
+  base64-encoded inbox-message payload. This emitter's first sink whose
+  deserialize *mechanism itself* (`pickle.loads()` vs. `json.loads()`)
+  differs between twins, not just a transform gating a shared operation
+  — resolved by porting `ruby_rails`'s own already-established
+  "flag-only transform, sink branches via Jinja2-time interpolation"
+  convention directly. Real live-boot proof is a genuine pickle-RCE: a
+  crafted `__reduce__` payload writes a real, checkable marker file when
+  unpickled on the vulnerable twin, while the secure twin's `json.loads()`
+  never creates it, and still correctly accepts a legitimate JSON
+  payload.
+  **PicTrail's own six-page design (per the research doc's §6) is now
+  fully built.** The full auto-linking-specific XSS shape (§4 row 2's
+  own fuller `@mention`/`#hashtag` mechanism, deliberately simplified in
+  `CC-LAB-0093`) and CircleFeed (the Facebook-style PHP app) stay
+  planned, not built — each its own future, separately-gated increment.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

@@ -1,0 +1,35 @@
+# Phase C, PicTrail's sixth real page (category 2 pilot, `CC-LAB-0097`).
+#
+# The researched insecure-deserialization shape (docs/research/
+# category2-social-ugc-functionality-and-cwe-research.md §4 row 5,
+# CWE-502): Django's own real, documented
+# `django.contrib.sessions.serializers.PickleSerializer` opt-in footgun,
+# modeled here as an inbox/DM message payload (this emitter's per-cell
+# views have no session-middleware round trip to exercise a real cookie).
+# Reuses lab/safety_matrix.yaml's existing `object_deserialization` sink
+# family unchanged (`unrestricted_pickle_loads`/`json_loads_type_check`).
+#
+# Extends, not replaces, the other phase_c_picktrail_*.yaml manifests. The
+# canonical vulnerable cell (LABGEN-DJ-0017) owns PicTrail's real
+# `/inbox` URL and is the one described by
+# lab/ground-truth-picktrail-django/'s own labels.json (case PT-0006).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-DJ-0017
+    class: insecure_deserialization
+    stack_profile: django
+    route: { method: POST, path: /inbox }
+    sink_context:
+      family: object_deserialization
+      required_neutralizations: [insecure_deserialization]
+    transform: [unrestricted_pickle_loads]
+
+  - cell_id: LABGEN-DJ-0018
+    class: insecure_deserialization
+    stack_profile: django
+    route: { method: POST, path: /inbox }
+    sink_context:
+      family: object_deserialization
+      required_neutralizations: [insecure_deserialization]
+    transform: [json_loads_type_check]

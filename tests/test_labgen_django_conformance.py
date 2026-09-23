@@ -240,6 +240,86 @@ def test_picktrail_settings_verdicts_match_the_shared_safety_matrix() -> None:
     assert verdict(by_id["LABGEN-DJ-0014"].transform, by_id["LABGEN-DJ-0014"].sink_context, matrix).verdict == "SECURE"
 
 
+def test_regenerate_and_diff_emitter_passes_for_the_picktrail_explore_manifest() -> None:
+    manifest = load_manifest("lab/manifests/phase_c_picktrail_explore.yaml")
+    emitter = DjangoEmitter()
+    regenerate_and_diff_emitter(emitter, manifest.cells)
+
+
+def test_tier0_lint_passes_for_the_picktrail_explore_manifest() -> None:
+    if not python_available():
+        import pytest
+
+        pytest.skip("no python interpreter on PATH for py_compile (PA-0005)")
+
+    manifest = load_manifest("lab/manifests/phase_c_picktrail_explore.yaml")
+    emitter = DjangoEmitter()
+    for cell in manifest.cells:
+        results = lint_python_emitted_files(emitter.render(cell))
+        assert results, f"{cell.cell_id}: no .py files emitted to lint"
+        for result in results:
+            assert result.ok, f"{cell.cell_id} ({result.path}): {result.detail}"
+
+    accumulator = emitter.render_route_accumulator(manifest.cells)
+    result = lint_python(accumulator.path, accumulator.content)
+    assert result.ok, f"{accumulator.path}: {result.detail}"
+
+
+def test_picktrail_explore_verdicts_match_the_shared_safety_matrix() -> None:
+    """`CC-LAB-0096`'s own regression check: the vulnerable twin
+    (`orm_order_by_unvalidated`, no identifier allowlist) must derive
+    VULNERABLE and the secure twin (`identifier_allowlist`) must derive
+    SECURE, purely from `lab/safety_matrix.yaml`'s own
+    `sql_order_by_clause` sink family -- this project's first real
+    implementation of that family, on any stack."""
+    from fuzzlab.labgen.verdict import load_safety_matrix, verdict
+
+    manifest = load_manifest("lab/manifests/phase_c_picktrail_explore.yaml")
+    matrix = load_safety_matrix()
+    by_id = {cell.cell_id: cell for cell in manifest.cells}
+    assert verdict(by_id["LABGEN-DJ-0015"].transform, by_id["LABGEN-DJ-0015"].sink_context, matrix).verdict == "VULNERABLE"
+    assert verdict(by_id["LABGEN-DJ-0016"].transform, by_id["LABGEN-DJ-0016"].sink_context, matrix).verdict == "SECURE"
+
+
+def test_regenerate_and_diff_emitter_passes_for_the_picktrail_inbox_manifest() -> None:
+    manifest = load_manifest("lab/manifests/phase_c_picktrail_inbox.yaml")
+    emitter = DjangoEmitter()
+    regenerate_and_diff_emitter(emitter, manifest.cells)
+
+
+def test_tier0_lint_passes_for_the_picktrail_inbox_manifest() -> None:
+    if not python_available():
+        import pytest
+
+        pytest.skip("no python interpreter on PATH for py_compile (PA-0005)")
+
+    manifest = load_manifest("lab/manifests/phase_c_picktrail_inbox.yaml")
+    emitter = DjangoEmitter()
+    for cell in manifest.cells:
+        results = lint_python_emitted_files(emitter.render(cell))
+        assert results, f"{cell.cell_id}: no .py files emitted to lint"
+        for result in results:
+            assert result.ok, f"{cell.cell_id} ({result.path}): {result.detail}"
+
+    accumulator = emitter.render_route_accumulator(manifest.cells)
+    result = lint_python(accumulator.path, accumulator.content)
+    assert result.ok, f"{accumulator.path}: {result.detail}"
+
+
+def test_picktrail_inbox_verdicts_match_the_shared_safety_matrix() -> None:
+    """`CC-LAB-0097`'s own regression check: the vulnerable twin
+    (`unrestricted_pickle_loads`) must derive VULNERABLE and the secure
+    twin (`json_loads_type_check`) must derive SECURE, purely from
+    `lab/safety_matrix.yaml`'s own `object_deserialization` sink family."""
+    from fuzzlab.labgen.verdict import load_safety_matrix, verdict
+
+    manifest = load_manifest("lab/manifests/phase_c_picktrail_inbox.yaml")
+    matrix = load_safety_matrix()
+    by_id = {cell.cell_id: cell for cell in manifest.cells}
+    assert verdict(by_id["LABGEN-DJ-0017"].transform, by_id["LABGEN-DJ-0017"].sink_context, matrix).verdict == "VULNERABLE"
+    assert verdict(by_id["LABGEN-DJ-0018"].transform, by_id["LABGEN-DJ-0018"].sink_context, matrix).verdict == "SECURE"
+
+
 def test_comment_template_is_never_evaluated_by_this_projects_own_jinja2_pass() -> None:
     """`CC-LAB-0093`'s own pre-change review's most important finding: a
     `.html.j2` generation template containing literal Django syntax
@@ -307,6 +387,26 @@ def test_only_real_page_cell_ids_get_a_pinned_url() -> None:
         "the secure twin (not a real-page cell) must keep the generic pattern"
     )
 
+    explore_manifest = load_manifest("lab/manifests/phase_c_picktrail_explore.yaml")
+    explore_accumulator = emitter.render_route_accumulator(explore_manifest.cells)
+    explore_body = explore_accumulator.content.decode("utf-8")
+    assert 'path("explore", handle_labgen_dj_0015' in explore_body, (
+        "the real-page cell must be served at /explore"
+    )
+    assert 'path("generated/labgen_dj_0016/", handle_labgen_dj_0016' in explore_body, (
+        "the secure twin (not a real-page cell) must keep the generic pattern"
+    )
+
+    inbox_manifest = load_manifest("lab/manifests/phase_c_picktrail_inbox.yaml")
+    inbox_accumulator = emitter.render_route_accumulator(inbox_manifest.cells)
+    inbox_body = inbox_accumulator.content.decode("utf-8")
+    assert 'path("inbox", handle_labgen_dj_0017' in inbox_body, (
+        "the real-page cell must be served at /inbox"
+    )
+    assert 'path("generated/labgen_dj_0018/", handle_labgen_dj_0018' in inbox_body, (
+        "the secure twin (not a real-page cell) must keep the generic pattern"
+    )
+
 
 def test_every_non_get_cell_is_decorated_with_csrf_exempt() -> None:
     """`CC-LAB-0091`'s own regression check (`PA-0024`-style, a
@@ -324,6 +424,8 @@ def test_every_non_get_cell_is_decorated_with_csrf_exempt() -> None:
         load_manifest("lab/manifests/phase_c_picktrail_comments.yaml"),
         load_manifest("lab/manifests/phase_c_picktrail_link_preview.yaml"),
         load_manifest("lab/manifests/phase_c_picktrail_settings.yaml"),
+        load_manifest("lab/manifests/phase_c_picktrail_explore.yaml"),
+        load_manifest("lab/manifests/phase_c_picktrail_inbox.yaml"),
     )
     checked_a_non_get_cell = False
     for manifest in manifests:

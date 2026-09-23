@@ -2233,6 +2233,70 @@ lane) can submit a payload as
   loaded for real and cross-checked, independently of the emitter's own
   internals, against a real booted request at the exact URL/method/param
   it names.
+- **FR-LAB-119** *(PicTrail's fifth real page, `/explore`, and this
+  project's first real implementation of `lab/safety_matrix.yaml`'s own
+  `sql_order_by_clause` sink family, on any stack; `CC-LAB-0096`,
+  2026-09-23).* Identifier/`ORDER BY`-position SQLi (CWE-89). New
+  transform, `orm_order_by_unvalidated` (vulnerable, explicit no-op) and
+  `identifier_allowlist` (secure, maps the sort key through a fixed
+  `_ORDER_BY_ALLOWLIST` dict, defaulting to `"id"`). New shared sink,
+  `explore_order_by_sink` (`SELECT id, name FROM posts ORDER BY " +
+  str(value_expr)`, raw `connection.cursor()`, matching this emitter's
+  own established convention). Passes Tier 0/Tier 3 for the new manifest
+  (`lab/manifests/phase_c_picktrail_explore.yaml`).
+- **FR-LAB-120** *(real live-boot proof of the identifier-position SQLi
+  differential, both directions, plus ground-truth extension;
+  `CC-LAB-0096`, 2026-09-23).* Real, executed, skip-guarded (PA-0005)
+  proof in `tests/test_labgen_django_live_boot_picktrail_explore.py`: a
+  real, legal, non-syntax-breaking payload (`"id DESC"`) genuinely
+  reverses the real row order a real SQLite query returns on the
+  vulnerable twin; **and, proven separately, matched against a
+  legitimate `sort=id` request, not merely "no error"** — the secure
+  twin's `identifier_allowlist` ignores the same payload (not a
+  recognized key) and falls back to the identical ascending-by-`id`
+  order. Ground truth extended (not a new directory) with `PT-0005` in
+  `lab/ground-truth-picktrail-django/` (`vuln_class: "sqli"`, `subtypes:
+  ["identifier"]`), loaded for real and cross-checked, independently of
+  the emitter's own internals, against a real booted request at the
+  exact URL/method/param it names.
+- **FR-LAB-121** *(PicTrail's sixth real page, `/inbox`, and this
+  emitter's first sink whose deserialize *mechanism* differs between
+  twins rather than a shared sink gated by a transform; `CC-LAB-0097`,
+  2026-09-23).* Insecure deserialization (CWE-502) modeling Django's own
+  real, documented `PickleSerializer` opt-in footgun as an inbox message
+  payload. Reuses `lab/safety_matrix.yaml`'s existing
+  `object_deserialization` sink family unchanged
+  (`unrestricted_pickle_loads`/`json_loads_type_check`). Two new
+  flag-only transforms (porting `ruby_rails`'s own
+  `yaml_unsafe_load`/`yaml_safe_load` "flag-only transform, sink branches
+  on it via Jinja2-time interpolation" convention directly) set a
+  `loader` context flag; the new `inbox_deserialize_sink` renders one of
+  two `{% if loader == "pickle" %}` branches at **generation time** --
+  each generated view contains only the one code path its own twin
+  actually uses. Passes Tier 0/Tier 3 for the new manifest (`lab/
+  manifests/phase_c_picktrail_inbox.yaml`).
+- **FR-LAB-122** *(real live-boot proof of a genuine pickle-RCE
+  differential, plus the secure twin's own positive path and
+  ground-truth extension; `CC-LAB-0097`, 2026-09-23).* Real, executed,
+  skip-guarded (PA-0005) proof in `tests/
+  test_labgen_django_live_boot_picktrail_inbox.py`: a crafted pickle
+  payload's `__reduce__` hook (reducing to `os.system`, stdlib, resolvable
+  inside the booted app's own separate venv/subprocess -- a target
+  defined in the test module itself would fail with
+  `ModuleNotFoundError` in that subprocess, caught before landing, not
+  discovered via a failing test) genuinely writes a real, checkable
+  marker file when unpickled on the vulnerable twin; **and, proven
+  separately** -- the identical bytes against the secure twin's
+  `json.loads()` never create that marker file at all (a real parse
+  failure, HTTP 400), while a legitimate JSON-object payload still
+  succeeds on the same secure twin (proving `json_loads_type_check` is a
+  genuine working deserializer, not a blanket rejection). Ground truth
+  extended (not a new directory) with `PT-0006` in
+  `lab/ground-truth-picktrail-django/` (`vuln_class:
+  "insecure_deserialization"`, `sink_context: "deserialization"`),
+  loaded for real and cross-checked, independently of the emitter's own
+  internals, against a real booted request at the exact URL/method/param
+  it names.
 
 - **FR-LAB-64** *(prototype pollution, CWE-1321, `node_express`; `CC-LAB-0070`,
   2026-09-22).* Per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a's
