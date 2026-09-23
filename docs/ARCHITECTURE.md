@@ -159,7 +159,7 @@ tracked in the requirements files, not here.
   `generalizes` verdict — the generalization evidence. The live run against an external
   validation lab is on-host; the manifest-generated second target plugs in as a
   `TargetSpec`.
-- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- seven emitters (php_current, python_fastapi, php_laravel, node_express, django, go_net_http, spring_boot) built to varying depth: node_express at Tier-A depth, django at Phase-A/foundation depth (category 2's PicTrail pick), go_net_http now at 11 real pages, 9/11 with live-boot-proven detection (category 4's Twitch pick, CC-LAB-0170-0190, 2026-09-23 status -- webhook-signature's CWE-347 timing side channel and path_traversal both remain undetected, for different reasons), spring_boot at TrackerNest's full three-cell depth (category 3's Atlassian pick) now also hosting category 4's Netflix cell, grown to 10 real pages, 10/10 detected (CC-LAB-0173/0179/0187/0188/0191/0192/0193/0194/0195) per the §9.2a consolidation (java_spring_boot itself retired) -- see the go_net_http/spring_boot narrative below for the full per-increment record; ruby_rails (category 1's Shopify pick, docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md) now has its full Phase A-E built and proven for real: Phase A skeleton + live-boot harness (CC-LAB-0071/FR-LAB-65), Phase B's three vulnerability modules -- webhook-signature verification, CWE-915 mass assignment, CWE-502 insecure deserialization (CC-LAB-0072..0075/FR-LAB-66..68) -- Phase C's coherent "ForgeCart" app identity (5 real pages + 5 inert surrounding pages, its own lab/ground-truth-forgecart/ contract, CC-LAB-0080/FR-LAB-84), Phase D's whole-app (all 12 cells, one boot) live-boot conformance plus a real dependency-pinning defect found and fixed along the way (CC-LAB-0081/FR-LAB-85, BUG-0035/PA-0037), and Phase E's real fuzzlab.harness.multitarget.TargetSpec wiring with a real, scored ScoreReport genuinely confirming the app's real XSS page (CC-LAB-0082/FR-LAB-86); Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself done]` (D8, target shape pinned by **D20**/
+- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- seven emitters (php_current, python_fastapi, php_laravel, node_express, django, go_net_http, spring_boot) built to varying depth: node_express at Tier-A depth, django at Phase-A/foundation depth (category 2's PicTrail pick), go_net_http now at 12 real pages, 9/12 with live-boot-proven detection (category 4's Twitch pick, CC-LAB-0170-0196, 2026-09-23 status -- webhook-signature's CWE-347 timing side channel, path_traversal (no detection built yet), and ssti/template_render (a real, verified generic-strategy-syntax mismatch with Go's text/template) all remain undetected, for three different, honestly distinct reasons), spring_boot at TrackerNest's full three-cell depth (category 3's Atlassian pick) now also hosting category 4's Netflix cell, grown to 10 real pages, 10/10 detected (CC-LAB-0173/0179/0187/0188/0191/0192/0193/0194/0195) per the §9.2a consolidation (java_spring_boot itself retired) -- see the go_net_http/spring_boot narrative below for the full per-increment record; ruby_rails (category 1's Shopify pick, docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md) now has its full Phase A-E built and proven for real: Phase A skeleton + live-boot harness (CC-LAB-0071/FR-LAB-65), Phase B's three vulnerability modules -- webhook-signature verification, CWE-915 mass assignment, CWE-502 insecure deserialization (CC-LAB-0072..0075/FR-LAB-66..68) -- Phase C's coherent "ForgeCart" app identity (5 real pages + 5 inert surrounding pages, its own lab/ground-truth-forgecart/ contract, CC-LAB-0080/FR-LAB-84), Phase D's whole-app (all 12 cells, one boot) live-boot conformance plus a real dependency-pinning defect found and fixed along the way (CC-LAB-0081/FR-LAB-85, BUG-0035/PA-0037), and Phase E's real fuzzlab.harness.multitarget.TargetSpec wiring with a real, scored ScoreReport genuinely confirming the app's real XSS page (CC-LAB-0082/FR-LAB-86); Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself done]` (D8, target shape pinned by **D20**/
   `CR-LAB-0001`): the "lab as a compiler" — one manifest plus a safety matrix,
   seed, and env-profile generate the app, labels, docs, and oracle tests, with a
   **binary** verdict derived from `(transform, sink context)` (a partially
@@ -395,19 +395,26 @@ tracked in the requirements files, not here.
   now well past Phase B depth — see `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
   §4 for the full per-increment record; only the current shape/build status
   is restated here, not the history above):** `go_net_http`/Twitch has grown
-  to **11 real pages** (`CC-LAB-0170`-`0190`) spanning webhook-signature
+  to **12 real pages** (`CC-LAB-0170`-`0196`) spanning webhook-signature
   (CWE-347, undetectable by design — a real, measured timing-oracle
   infeasibility finding, not an oversight), SSRF (2 instances),
   access-control/IDOR (2 instances), JWT `alg:none` confusion, predictable
   session tokens, channel-profile mass assignment, unrestricted file upload
   (CWE-434, this stack's first multipart-form source),
-  price-integrity-bypass (CWE-807), and path_traversal (CWE-22/23,
-  `CC-LAB-0190`) — **9 of 11 real, live-boot-proven
+  price-integrity-bypass (CWE-807), path_traversal (CWE-22/23,
+  `CC-LAB-0190`), and SSTI (CWE-1336, `CC-LAB-0196` — this stack's first
+  instantiation of an already-multi-stack `template_render` mechanism,
+  genuine breadth not depth) — **9 of 12 real, live-boot-proven
   detections** (`R-SSRF`/`R-ACCESS-CONTROL`/`R-JWT-ALG-NONE`/
   `R-WEAK-TOKEN-ENTROPY`/`R-MASS-ASSIGNMENT`/`R-UNRESTRICTED-FILE-UPLOAD`/
   `R-PRICE-INTEGRITY` audit rules, `fuzzlab.oracle.strategies`' matching
   `ConfirmationStrategy` classes) — `webhook_signature` (structurally
-  undetectable) and `path_traversal` (not yet built) remain the two gaps.
+  undetectable), `path_traversal` (no detection built yet), and `ssti`
+  (a real, verified syntax-level mismatch: the existing generic
+  `SstiStrategy`'s arithmetic-marker payloads do not parse or evaluate
+  under Go's `text/template` action grammar, confirmed by a real `go run`
+  check and a real live-boot run, not a missing-wiring gap) remain the
+  three gaps.
   `spring_boot`'s hosted Netflix cell has similarly grown to
   **10 real pages** (`CC-LAB-0173`, `0179`, `0187`/`0188`/`0191`/`0192`/
   `0193`/`0194`/`0195`) — insecure deserialization (2 instances), XXE,
@@ -435,7 +442,18 @@ tracked in the requirements files, not here.
   mechanisms — Netflix-only `insecure_deserialization`/`xxe`, which have
   no genuine Go-stdlib equivalent, and Twitch-only `webhook_signature`
   (structurally undetectable) and `path_traversal` (detection judged
-  unsafe/contrived to attempt) — are not further candidates). Both apps
+  unsafe/contrived to attempt) — are not further candidates). A
+  DIFFERENT kind of increment landed after that completion point
+  (`ssti`/`template_render`, `CC-LAB-0196`): not cross-stack
+  generalization (bringing a Go mechanism to Java or vice versa) but
+  cross-stack BREADTH within Twitch itself — reusing an existing,
+  already-multi-stack `lab/safety_matrix.yaml` mechanism
+  (`spring_boot`'s own TrackerNest `template_render` shape) on Go for the
+  first time. Its own detection generalization was checked empirically
+  and found NOT to hold (a genuine Go-`text/template`-syntax mismatch
+  with the generic `SstiStrategy`'s arithmetic-marker technique, not a
+  contrived design or an unbuilt-wiring gap) — documented as an honest
+  open question rather than forced or silently skipped. Both apps
   are wired into `fuzzlab.harness.multitarget` for
   real; a real bug/preventive-action pair (`BUG-0040`/`PA-0042`) was found
   and fixed along the way: a ground-truth-only change can silently break a

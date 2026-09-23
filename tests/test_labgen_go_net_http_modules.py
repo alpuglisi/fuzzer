@@ -344,3 +344,38 @@ def test_path_traversal_shape_reuses_the_url_query_param_source() -> None:
         {"var_name": "requestedFilename", "param_name": "filename"}
     )
     assert 'requestedFilename := r.URL.Query().Get("filename")' in result.code
+
+
+# -- Phase B twelfth increment: SSTI (template_render, CC-LAB-0196) --
+
+
+def test_read_channel_command_request_source_publishes_default_body_var() -> None:
+    result = SOURCES["read_channel_command_request"].render({})
+    assert "reqBody, _ := io.ReadAll(r.Body)" in result.code
+    assert result.context["body_var"] == "reqBody"
+
+
+def test_user_supplied_template_compile_sink_compiles_and_executes_caller_template() -> None:
+    result = SINKS["user_supplied_template_compile"].render({"body_var": "reqBody"})
+    # Vulnerable: the caller-supplied template STRING is compiled via
+    # text/template.New(...).Parse(...) and then executed -- never treated
+    # as inert text.
+    assert "template.New(" in result.code
+    assert "tmpl, err := template.New(\"chatCommand\").Parse(req.Template)" in result.code
+    assert "tmpl.Execute(&buf, data)" in result.code
+    # The data passed to Execute exposes real exported fields the template
+    # language can access/branch on -- not just a single substituted value.
+    assert "Uptime" in result.code and "Viewers" in result.code and "Game" in result.code
+    # A parse/exec error is surfaced (HTTP 400), never silently swallowed.
+    assert "http.StatusBadRequest" in result.code
+
+
+def test_file_loaded_template_name_sink_never_compiles_the_tainted_value() -> None:
+    result = SINKS["file_loaded_template_name"].render({"body_var": "reqBody"})
+    # Secure: the caller-supplied string only ever selects a KEY in a
+    # fixed, developer-defined map -- never compiled/executed as a
+    # template.
+    assert "template.New(" not in result.code
+    assert "knownVars[req.Template]" in result.code
+    assert 'knownVars := map[string]string{' in result.code
+    assert '"uptime":  "3h27m"' in result.code

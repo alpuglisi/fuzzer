@@ -688,6 +688,79 @@ class RealpathConfineSink(TemplateModule):
         super().__init__("realpath_confine", "sink", _SINK_ENV, "realpath_confine.go.j2")
 
 
+class ReadChannelCommandRequestSource(TemplateModule):
+    """Reads the whole raw request body -- the SSTI shape's source
+    (``CC-LAB-0196``, this stack's first ``ssti``/``template_render``
+    instance, reusing ``lab/safety_matrix.yaml``'s existing
+    ``server_template_injection`` concern and mirroring ``spring_boot``'s
+    own TrackerNest ``ssti``/``template_render`` shape, ``CC-LAB-0130``).
+    Publishes ``body_var`` (a Go ``[]byte`` identifier), the same
+    "publish the raw body, let the sink do its own JSON parsing"
+    convention ``ReadChannelProfileBodySource``/
+    ``ReadSubscriptionPurchaseRequestSource`` already established for this
+    stack's other whole-body-JSON shapes -- reused here as its own
+    distinct source class since a custom-chat-command definition
+    (``POST /channels/commands``) is conceptually unrelated to either."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "read_channel_command_request", "source", _SOURCE_ENV,
+            "read_channel_command_request.go.j2",
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        render_ctx = dict(ctx)
+        render_ctx.setdefault("body_var", "reqBody")
+        return super().render(render_ctx)
+
+
+class UserSuppliedTemplateCompileSink(TemplateModule):
+    """The ``user_supplied_template_compile`` op (``lab/safety_matrix.yaml``,
+    ``template_render`` family, ``no_effect`` -- this stack's first
+    instantiation, mirroring ``spring_boot``'s own
+    ``UserSuppliedTemplateCompileSink``, ``CC-LAB-0130``): the caller-
+    supplied ``template`` field of a custom chat-command definition (a
+    real, well-documented streaming-bot feature -- Nightbot/StreamElements-
+    style custom commands with template variables, e.g. ``!uptime`` showing
+    ``{{.Uptime}} since going live``) is compiled and executed directly via
+    Go's ``text/template`` package (CWE-1336). Unlike ``html/template``,
+    ``text/template`` performs no output escaping, and -- the real,
+    observable differential this sink deliberately exposes -- its template
+    *language* can invoke exported fields/methods and its own conditional/
+    range constructs on the data passed to ``Execute``, not just substitute
+    inert placeholders: a caller-supplied template string can branch on
+    ``{{if eq .Uptime "..."}}...{{end}}`` or call a builtin like
+    ``{{len .Uptime}}``, proving real server-side evaluation rather than
+    dumb string interpolation. A parse or execution error is surfaced to
+    the caller (HTTP 400), never silently swallowed, so a malformed probe
+    is distinguishable from a successful evaluation."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "user_supplied_template_compile", "sink", _SINK_ENV,
+            "user_supplied_template_compile.go.j2",
+        )
+
+
+class FileLoadedTemplateNameSink(TemplateModule):
+    """The ``file_loaded_template_name`` op (``lab/safety_matrix.yaml``,
+    ``template_render`` family, ``neutralises`` -- the secure twin,
+    mirroring ``spring_boot``'s own ``FileLoadedTemplateNameSink``): the
+    caller-supplied ``template`` field only ever selects a KEY into a
+    small, fixed, developer-defined ``map[string]string`` of pre-approved
+    variable names (``uptime``/``viewers``/``game``) -- it is never
+    compiled or executed as template source at all, so no template
+    language construct the caller sends (arithmetic, conditionals,
+    field/method access) can ever be evaluated, regardless of its
+    syntax."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "file_loaded_template_name", "sink", _SINK_ENV,
+            "file_loaded_template_name.go.j2",
+        )
+
+
 class RenderOnlyComplexity(TemplateModule):
     """Wraps the composed source/transform/sink body as the entire body of
     one ``net/http.HandlerFunc`` -- the Go analogue of every other stack's
@@ -712,6 +785,7 @@ SOURCES: dict[str, Module] = {
     "read_channel_profile_body": ReadChannelProfileBodySource(),
     "read_uploaded_file": ReadUploadedFileSource(),
     "read_subscription_purchase_request": ReadSubscriptionPurchaseRequestSource(),
+    "read_channel_command_request": ReadChannelCommandRequestSource(),
 }
 TRANSFORMS: dict[str, Module] = {
     "naive_string_compare": NaiveStringCompareTransform(),
@@ -737,6 +811,8 @@ SINKS: dict[str, Module] = {
     "server_recomputed_amount": ServerRecomputedAmountSink(),
     "unconfined_path": UnconfinedPathSink(),
     "realpath_confine": RealpathConfineSink(),
+    "user_supplied_template_compile": UserSuppliedTemplateCompileSink(),
+    "file_loaded_template_name": FileLoadedTemplateNameSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "render_only": RenderOnlyComplexity(),

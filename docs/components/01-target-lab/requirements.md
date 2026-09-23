@@ -4809,6 +4809,93 @@ lane) can submit a payload as
   concluding this, not assumed absent) -- substituted with a documented,
   rigorous self-review performed and recorded in `CC-LAB-0194`.
 
+- **FR-LAB-136** *(Twitch's twelfth real page: first `ssti`/
+  `template_render` instance on `go_net_http`, `POST /channels/commands`;
+  `CC-LAB-0196`, 2026-09-23).* Instantiates `lab/safety_matrix.yaml`'s
+  existing `template_render` sink family and its `user_supplied_template_
+  compile`/`file_loaded_template_name` ops (`CC-LAB-0063`, already on
+  `spring_boot`'s TrackerNest wiki-macro shape, `CC-LAB-0130`) on
+  `go_net_http` for the FIRST time -- genuinely new breadth, not a depth
+  reuse, and this session's own cross-stack-generalization campaign
+  bringing an already-multi-stack mechanism to Go for the first time
+  (distinct from the prior several entries, each of which brought an
+  already-Go mechanism to Java). A custom chat-command definition
+  endpoint (a real, well-documented streaming-bot feature -- Nightbot/
+  StreamElements-style custom commands with template variables, e.g. an
+  `!uptime` command whose response is `{{.Uptime}} since going live`).
+  Convention 2 (like SSRF/mass-assignment/file-upload/price-integrity/
+  path-traversal): the manifest's one op names a sink module directly.
+  The vulnerable twin (`user_supplied_template_compile`) compiles and
+  executes the caller-supplied `template` field directly via Go's
+  `text/template` package (`template.New(...).Parse(...)` then
+  `.Execute(...)`, CWE-1336) -- unlike `html/template`, no output
+  escaping, and the template language itself can invoke exported fields/
+  methods and its own conditional/range constructs on the data passed to
+  `Execute`, not just substitute inert placeholders. The secure twin
+  (`file_loaded_template_name`) only ever looks the same caller-supplied
+  string up as a KEY in a small, fixed map of pre-approved variable names
+  (`uptime`/`viewers`/`game`) -- never compiled as template source at
+  all. Real, live-boot-proven differential (`tests/test_labgen_go_live_
+  boot.py::test_real_boot_proves_the_ssti_differential_for_both_twins`):
+  a `{{.Uptime}}` field-access payload evaluates to the real substituted
+  value on the vulnerable twin (never the literal placeholder); a
+  `{{if eq .Uptime "3h27m"}}MATCHED{{else}}NO{{end}}` conditional payload
+  evaluates real control flow (`MATCHED`), proving more than dumb
+  substitution; a malformed template produces a real HTTP 400 parse
+  error rather than being silently echoed; the secure twin treats every
+  one of those same payloads as an opaque, unrecognized variable name
+  (`"unknown variable"`), while a real, fixed, pre-approved name
+  (`uptime`) still resolves through its lookup path.
+  **Detection generalization, checked empirically and found NOT to hold
+  -- an honest, documented open question, not routed around or forced.**
+  The existing generic `SstiStrategy` (`fuzzlab/oracle/strategies.py`,
+  arm `ssti:evaluation-marker`) sends an arithmetic-expression payload in
+  one of five template-engine syntaxes and checks whether the numeric
+  product appears while the literal expression does not. A direct `go
+  run` check against Go's REAL `text/template` package (`tests/
+  test_labgen_go_live_boot.py::test_ssti_go_text_template_syntax_
+  mismatch`, always run on the non-slow suite, not gated behind
+  `go_boot_available()`'s network requirement) shows two of the five
+  payloads (`{{a*b}}`/`${{a*b}}`) fail to PARSE outright --
+  `text/template`'s action grammar has no infix arithmetic operators at
+  all, unlike Jinja2/FreeMarker/OGNL/EL, a hard syntax-level restriction
+  independent of anything the vulnerable sink's own `FuncMap` could
+  define -- and the other three (`${a*b}`/`<%= a*b %>`/`#{a*b}`) contain
+  no `{{`/`}}` at all, so `text/template` treats them as inert literal
+  text and echoes them back completely unevaluated. This is verified
+  against a real booted vulnerable twin too (`tests/test_labgen_go_live_
+  boot.py::test_ssti_strategy_does_not_generalize_to_go_text_template`):
+  `SstiStrategy.confirm()` correctly returns `None`, a real, tracked
+  false negative -- not a bug in the strategy (it does exactly what it is
+  designed to do) and not a fixable reachability-wiring gap the way
+  `path_traversal`'s own unbuilt-detection gap is (`CC-LAB-0190`), but a
+  genuine, verified syntax-level mismatch between the marker technique
+  and Go's own template action grammar. `R-SSTI`'s own audit-rule
+  reachability gate (`location_in: ["query", "body"]`, no name-specific
+  gate) needed zero change -- this case's `location="body"` point is
+  already reachable through it; the gap is entirely in the confirmation
+  strategy's payload syntax, not in reachability wiring (unlike
+  `CC-FUZZ-0028`'s header-point fix). Twitch's own real, scored
+  `multitarget` recall moves from `9/11` to `9/12` (`tp` stays `9`).
+  PA-0042 compliance: `tests/test_multitarget_category4.py`'s recall/
+  macro-recall assertions and `tests/test_labels_contract_category4.py`'s
+  case count/cross-check were re-derived, not left stale; `tests/
+  test_auto.py` was checked by direct inspection (not assumed clean by
+  analogy) and found genuinely unaffected -- it has no Twitch-cardinality-
+  dependent hardcoded count the way its Netflix whole-body-point count
+  assertion does.
+  Ground truth: `TWCH-0012` added to `lab/ground-truth-twitch-clone/`
+  (`vuln_class="ssti"`, `sink_context="template"` -- both pre-existing
+  enum values already used by `spring_boot`'s TrackerNest ground truth;
+  `param="body"`/`location="body"`, the whole-body-point convention
+  `TWCH-0005`/`TWCH-0006`/`TWCH-0010` already establish).
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0195`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded in `CC-LAB-0196`.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

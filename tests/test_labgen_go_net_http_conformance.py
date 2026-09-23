@@ -49,6 +49,10 @@ _MANIFESTS = (
     # CC-LAB-0190: this project's first path_traversal/fs_path_read
     # instance on any stack (a genuinely new mechanism, not a reuse).
     "lab/manifests/path_traversal_go_sample.yaml",
+    # CC-LAB-0196: this stack's first ssti/template_render instance
+    # (reuses an existing, multi-stack concern -- genuinely new breadth,
+    # not a genuinely new mechanism).
+    "lab/manifests/ssti_channel_commands_go_sample.yaml",
 )
 
 

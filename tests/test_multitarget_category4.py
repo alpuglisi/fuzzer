@@ -256,6 +256,27 @@ One gap remains open:
    one) -- `fuzzlab.core.runmode._VULN_TO_CATEGORY` doesn't map it, and it
    needs a genuinely new timing-statistics oracle (a single-request model
    cannot observe a comparison-timing side channel), not just a rule.
+
+**Twitch's 12th real page (`CC-LAB-0196`/`FR-LAB-136`): this stack's first
+`ssti`/`template_render` instance** (`TWCH-0012`, `/channels/commands`,
+reusing `lab/safety_matrix.yaml`'s existing `template_render` sink family
+verbatim, already instantiated on `spring_boot`'s TrackerNest shape --
+genuinely new BREADTH, not a new mechanism). Unlike every other genuinely-
+new instance in this file, this one does NOT confirm through the existing
+generic `SstiStrategy`: a real, executed check (`go run` against Go's
+actual `text/template` package, both directly and against a real booted
+app -- see `tests/test_labgen_go_live_boot.py::
+test_ssti_go_text_template_syntax_mismatch`/
+`test_ssti_strategy_does_not_generalize_to_go_text_template`) shows the
+strategy's arithmetic-product-marker payloads either fail to parse under
+`text/template`'s action grammar (no infix arithmetic operators, unlike
+Jinja2/FreeMarker/OGNL/EL) or are echoed back completely unevaluated as
+inert literal text. This is a genuine, verified syntax-level mismatch
+between the marker technique and Go's own template syntax -- not a
+missing-rule/missing-wiring gap the way `path_traversal` is -- so
+`TWCH-0012`'s own positive stays an honest, explicitly-documented false
+negative, and Twitch's own scored recall in this multi-cell boot moves
+from `9/11` to `9/12`.
 """
 
 from __future__ import annotations
@@ -332,10 +353,18 @@ def _twitch_cells():
     # until that follow-on lands, per this dispatch's own lab-then-
     # detection split.
     path_traversal = load_manifest("lab/manifests/path_traversal_go_sample.yaml").cells
+    # CC-LAB-0196: this stack's first ssti/template_render instance
+    # (/channels/commands). Included so the pipeline sees the new
+    # vulnerable/secure twins for real, but this cell's own positive stays
+    # an (expected, tracked) false negative -- the existing generic
+    # SstiStrategy's arithmetic-marker payloads do not generalize to Go's
+    # text/template action grammar (verified empirically, see
+    # tests/test_labgen_go_live_boot.py::test_ssti_strategy_does_not_generalize_to_go_text_template).
+    ssti = load_manifest("lab/manifests/ssti_channel_commands_go_sample.yaml").cells
     return (
         webhook + ssrf + access_control + jwt + weak_token + mass_assignment
         + access_control_subscribers + ssrf_clips_download + unrestricted_file_upload
-        + price_integrity + path_traversal
+        + price_integrity + path_traversal + ssti
     )
 
 
@@ -424,16 +453,28 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # CC-LAB-0190) does NOT confirm here -- no audit rule/oracle strategy
     # exists yet for `path_traversal`/`fs_path_read` (a deliberately
     # deferred follow-on, this dispatch's own lab-then-detection split),
-    # so it is a real, expected, tracked false negative. Ground-truth
-    # cardinality moves from 10 to 11 positives (PA-0042: this hardcoded
-    # fraction was re-derived, not left stale, when TWCH-0011 was added);
-    # tp stays 9 (webhook-signature and path-traversal both remain
-    # undetected, for different reasons -- one an empirically-infeasible
-    # timing side channel, the other a genuinely unbuilt detection
-    # mechanism), so recall moves from 9/10 to 9/11.
+    # so it is a real, expected, tracked false negative. The 12th page's
+    # SSTI cell (TWCH-0012, CC-LAB-0196, `/channels/commands`) also does
+    # NOT confirm here -- the existing generic `SstiStrategy` DOES exist
+    # and does apply (category="server-side-template-injection" matches),
+    # but its arithmetic-product-marker payloads do not generalize to Go's
+    # `text/template` action grammar (verified empirically: two of five
+    # payloads fail to PARSE at all -- no infix arithmetic operators --
+    # and the other three contain no `{{`/`}}` and are echoed back
+    # unevaluated, regardless of the vulnerable sink's own content; see
+    # `tests/test_labgen_go_live_boot.py::
+    # test_ssti_strategy_does_not_generalize_to_go_text_template` and
+    # `CC-LAB-0196`'s own change-control entry for the full analysis) --
+    # a genuine, verified false negative from a real syntax mismatch, not
+    # an unbuilt-detection gap like path-traversal's. Ground-truth
+    # cardinality moves from 11 to 12 positives (PA-0042: this hardcoded
+    # fraction was re-derived, not left stale, when TWCH-0012 was added);
+    # tp stays 9 (webhook-signature, path-traversal, and SSTI all remain
+    # undetected, each for a different, honestly distinct reason), so
+    # recall moves from 9/11 to 9/12.
     twitch_report = by_name["twitch-clone"].report
     assert twitch_report.tp == 9 and twitch_report.fp == 0
-    assert round(twitch_report.recall, 4) == round(9 / 11, 4)
+    assert round(twitch_report.recall, 4) == round(9 / 12, 4)
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002, which does have a rule/strategy, R-XXE/
@@ -464,10 +505,10 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     assert summary["targets"] == 2
     # PA-0042: re-derived, not left stale, from the ground-truth-cardinality
     # changes TWCH-0011/CC-LAB-0190 (Twitch's own recall moved from 9/10 to
-    # 9/11) and NFLX-0009/CC-LAB-0194 + NFLX-0010/CC-LAB-0195 (Netflix's own
-    # recall in THIS single-cell test moved from 1/8 to 1/9 to 1/10) all
-    # made.
-    assert round(summary["macro_recall"], 4) == round(((9 / 11) + (1 / 10)) / 2, 4)
+    # 9/11 to 9/12) and NFLX-0009/CC-LAB-0194 + NFLX-0010/CC-LAB-0195
+    # (Netflix's own recall in THIS single-cell test moved from 1/8 to
+    # 1/9 to 1/10) all made.
+    assert round(summary["macro_recall"], 4) == round(((9 / 12) + (1 / 10)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True

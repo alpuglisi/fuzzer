@@ -1103,3 +1103,234 @@ def test_real_boot_proves_the_path_traversal_differential_for_both_twins() -> No
             "GET", "/generated/labgen-go-0022?filename=does-not-exist.mp4"
         )
         assert secure_missing.status == 404
+
+
+# -- Phase B twelfth increment: SSTI (template_render, CC-LAB-0196) --
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_ssti_differential_for_both_twins() -> None:
+    """Real assertions, isolating exactly what compiling-vs-looking-up the
+    caller-supplied `template` field controls (CC-LAB-0196):
+
+    (a) the vulnerable twin actually EVALUATES a real-field-access payload
+        (`{{.Uptime}}`), not just echoes it -- the literal `{{.Uptime}}`
+        never appears in the response, the real substituted value does.
+    (b) the vulnerable twin also evaluates a conditional (`{{if}}...{{end}}`)
+        construct, proving real template-language control flow runs, not
+        dumb single-value substitution.
+    (c) a malformed/unparseable template produces a real HTTP 400 parse
+        error on the vulnerable twin, distinguishing "evaluated and
+        failed" from "not evaluated at all".
+    (d) the secure twin treats the exact same field-access/conditional
+        payloads as opaque, unrecognized variable NAMES -- never
+        evaluated -- while a real, fixed, pre-approved variable name
+        (`uptime`) still resolves through its lookup path.
+
+    **What this does NOT prove (an open question, stated plainly, not
+    routed around).** The existing generic `SstiStrategy`
+    (`fuzzlab.oracle.strategies`) does NOT confirm this vulnerable twin --
+    see `test_ssti_strategy_does_not_generalize_to_go_text_template`
+    below for the real, executed proof of that gap.
+    """
+    manifest = load_manifest("lab/manifests/ssti_channel_commands_go_sample.yaml")
+    emitter = GoEmitter()
+    cells = {c.cell_id: c for c in manifest.cells}
+
+    with GoLiveBootHarness(emitter, [cells["LABGEN-GO-0023"]]) as harness:
+        # (a) real field-access evaluation.
+        resp = harness.post(
+            "/generated/labgen-go-0023",
+            body=b'{"trigger":"!uptime","template":"{{.Uptime}} since going live"}',
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status == 200, resp.body
+        assert resp.body == "3h27m since going live"
+        assert "{{.Uptime}}" not in resp.body
+
+        # (b) real conditional/control-flow evaluation -- beyond simple
+        # substitution.
+        cond_resp = harness.post(
+            "/generated/labgen-go-0023",
+            body=(
+                b'{"trigger":"!check","template":'
+                b'"{{if eq .Uptime \\"3h27m\\"}}MATCHED{{else}}NO{{end}}"}'
+            ),
+            headers={"Content-Type": "application/json"},
+        )
+        assert cond_resp.status == 200, cond_resp.body
+        assert cond_resp.body == "MATCHED"
+
+        # (c) a malformed template is a real parse error, not silently
+        # echoed back or ignored.
+        bad_resp = harness.post(
+            "/generated/labgen-go-0023",
+            body=b'{"trigger":"!broken","template":"{{.Uptime"}',
+            headers={"Content-Type": "application/json"},
+        )
+        assert bad_resp.status == 400
+        assert "template error" in bad_resp.body
+
+    with GoLiveBootHarness(emitter, [cells["LABGEN-GO-0024"]]) as harness:
+        # (d) the secure twin never evaluates the same payloads -- they
+        # are simply unrecognized variable names.
+        secure_field_resp = harness.post(
+            "/generated/labgen-go-0024",
+            body=b'{"trigger":"!uptime","template":"{{.Uptime}} since going live"}',
+            headers={"Content-Type": "application/json"},
+        )
+        assert secure_field_resp.status == 200, secure_field_resp.body
+        assert secure_field_resp.body == "!uptime: unknown variable"
+
+        secure_cond_resp = harness.post(
+            "/generated/labgen-go-0024",
+            body=(
+                b'{"trigger":"!check","template":'
+                b'"{{if eq .Uptime \\"3h27m\\"}}MATCHED{{else}}NO{{end}}"}'
+            ),
+            headers={"Content-Type": "application/json"},
+        )
+        assert secure_cond_resp.status == 200, secure_cond_resp.body
+        assert "MATCHED" not in secure_cond_resp.body
+        assert secure_cond_resp.body == "!check: unknown variable"
+
+        # A real, pre-approved variable name still resolves correctly --
+        # proving the lookup path itself genuinely runs.
+        legit_resp = harness.post(
+            "/generated/labgen-go-0024",
+            body=b'{"trigger":"!uptime","template":"uptime"}',
+            headers={"Content-Type": "application/json"},
+        )
+        assert legit_resp.status == 200, legit_resp.body
+        assert legit_resp.body == "!uptime: 3h27m"
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_ssti_strategy_does_not_generalize_to_go_text_template() -> None:
+    """Honest, executed documentation of an open detection question
+    (CC-LAB-0196's own change-control entry): the existing generic
+    `SstiStrategy` (`fuzzlab.oracle.strategies`, arm `ssti:evaluation-
+    marker`) sends an arithmetic-expression payload wrapped in one of five
+    template-engine syntaxes (`${a*b}`, `{{a*b}}`, `<%= a*b %>`, `#{a*b}`,
+    `${{a*b}}`) and checks whether the numeric PRODUCT appears while the
+    literal expression does not. Against a REAL booted `go_net_http`
+    vulnerable twin (never asserted from a `go run` unit check alone,
+    though that check is what first found this and is reproduced in
+    `test_ssti_go_text_template_syntax_mismatch` below), none of the five
+    payloads is evaluated: `{{a*b}}`/`${{a*b}}` are rejected by the
+    handler as unparseable templates (Go's `text/template` action grammar
+    has no infix arithmetic operators at all -- a hard syntax
+    restriction, not a missing `FuncMap` entry), and
+    `${a*b}`/`<%= a*b %>`/`#{a*b}` contain no `{{`/`}}` at all, so
+    `text/template` treats them as inert literal text and echoes them back
+    completely unevaluated. `SstiStrategy.confirm()` therefore correctly
+    returns `None` here -- a real, verified false negative, not a bug in
+    the strategy itself (it does exactly what it is designed to do; Go's
+    template syntax is simply incompatible with an arithmetic-infix-
+    operator marker)."""
+    manifest = load_manifest("lab/manifests/ssti_channel_commands_go_sample.yaml")
+    emitter = GoEmitter()
+    cells = {c.cell_id: c for c in manifest.cells}
+
+    from fuzzlab.oracle.probe import Candidate, Probe
+    from fuzzlab.oracle.strategies import SstiStrategy
+
+    def _cand():
+        return Candidate(url="http://h/generated/labgen-go-0023", param="body",
+                         method="POST", location="body",
+                         vuln_class="ssti", category="server-side-template-injection")
+
+    strategy = SstiStrategy()
+
+    with GoLiveBootHarness(emitter, [cells["LABGEN-GO-0023"]]) as harness:
+        class _HarnessSender:
+            def send(self, url, param, value, timing=False, method="POST",
+                      location="body", content_type=None):
+                # The strategy sends a raw arithmetic-expression payload
+                # string; this app's own handler expects a JSON body with
+                # a `template` field, so wrap it exactly the way a real
+                # custom-command-creation client would.
+                import json as _json
+                body = _json.dumps({"trigger": "!probe", "template": value}).encode("utf-8")
+                resp = harness.request("POST", "/generated/labgen-go-0023", body=body,
+                                       headers={"Content-Type": "application/json"})
+                return Probe(resp.status, resp.body)
+
+        verdict = strategy.confirm(_cand(), _HarnessSender())
+        assert verdict is None, (
+            "SstiStrategy unexpectedly confirmed the real go_net_http vulnerable twin -- "
+            "this test's own docstring (and CC-LAB-0196's own change-control entry) claim "
+            "this generalization does NOT happen; if this now fails, the analysis needs "
+            "updating, not this assertion silently loosened."
+        )
+
+
+def test_ssti_go_text_template_syntax_mismatch() -> None:
+    """Non-boot, fast, always-run reproduction of the syntax-level
+    incompatibility above: `fuzzlab.oracle.strategies._ssti_payloads`'s
+    exact five candidate payload strings run through Go's REAL
+    `text/template` package (a subprocess `go run`, skip-guarded on `go`
+    being on PATH -- distinct from `go_boot_available()`'s network-
+    reachability requirement, since this needs no module fetch at all).
+    Kept as its own fast, non-slow test (unlike the two live-boot tests
+    above) precisely because it needs no full app boot -- just the Go
+    toolchain compiling and running one trivial program -- so this
+    specific empirical claim stays checked on every non-slow run, not
+    only when `-m slow` is explicitly requested."""
+    import shutil
+    import subprocess
+    import tempfile
+    from pathlib import Path as _Path
+
+    if shutil.which("go") is None:
+        pytest.skip("go CLI not available on this build host (PA-0005 pattern)")
+
+    from fuzzlab.oracle.strategies import _ssti_payloads
+
+    payloads = _ssti_payloads("413*271")
+    assert payloads == ["${413*271}", "{{413*271}}", "<%= 413*271 %>", "#{413*271}", "${{413*271}}"]
+
+    go_src = '''package main
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"text/template"
+)
+
+func main() {
+	payload := os.Args[1]
+	t, err := template.New("x").Parse(payload)
+	if err != nil {
+		fmt.Println("PARSE_ERROR")
+		return
+	}
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, nil); err != nil {
+		fmt.Println("EXEC_ERROR")
+		return
+	}
+	fmt.Println("OUTPUT:" + buf.String())
+}
+'''
+    with tempfile.TemporaryDirectory(prefix="fuzzlab-ssti-syntax-check-") as tmp:
+        main_go = _Path(tmp) / "main.go"
+        main_go.write_text(go_src)
+        for payload in payloads:
+            result = subprocess.run(
+                ["go", "run", str(main_go), payload],
+                capture_output=True, text=True, timeout=30.0,
+            )
+            output = result.stdout.strip()
+            if "{{" in payload:
+                # text/template's action grammar has no infix arithmetic
+                # operators -- these two payloads fail to parse outright.
+                assert output == "PARSE_ERROR", f"{payload!r} -> {output!r} (expected a parse error)"
+            else:
+                # No `{{`/`}}` at all -- treated as inert literal text and
+                # echoed back completely unevaluated (the product never
+                # appears, the literal expression always does).
+                assert output == f"OUTPUT:{payload}", f"{payload!r} -> {output!r} (expected verbatim echo)"

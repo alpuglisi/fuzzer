@@ -4,6 +4,44 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Twitch's 12th real page, first ssti/template_render instance on go_net_http, CC-LAB-0196/FR-LAB-136)
+- Target lab: `POST /channels/commands` (a custom chat-command definition
+  endpoint — a real, well-documented streaming-bot feature, Nightbot/
+  StreamElements-style custom commands with template variables, e.g. an
+  `!uptime` command whose response is `{{.Uptime}} since going live`).
+  `go_net_http`'s **first** instantiation of `lab/safety_matrix.yaml`'s
+  existing `template_render` sink family / `server_template_injection`
+  concern (`CC-LAB-0063`, already instantiated on `spring_boot`'s
+  TrackerNest wiki-macro shape, `CC-LAB-0130`) — genuinely new breadth
+  (bringing an already-multi-stack mechanism to Go for the first time),
+  not a genuinely new mechanism. The vulnerable twin
+  (`user_supplied_template_compile`) compiles and executes the caller-
+  supplied `template` field directly via Go's `text/template` package
+  (CWE-1336); the secure twin (`file_loaded_template_name`) only ever
+  looks the same string up as a key in a small, fixed map of pre-approved
+  variable names, never compiling it. Verified live: field-access
+  (`{{.Uptime}}`), conditional (`{{if}}...{{end}}`), and parse-error
+  differentials all confirmed against a real booted `go_net_http` app.
+  **Detection generalization, checked empirically and found NOT to hold
+  (an honest, documented open question, not routed around):** the
+  existing generic `SstiStrategy` does not confirm this instance — a real
+  `go run` check against Go's actual `text/template` package (both
+  standalone and against the real booted vulnerable twin) shows its
+  arithmetic-product-marker payloads either fail to parse under
+  `text/template`'s action grammar (no infix arithmetic operators at all,
+  unlike Jinja2/FreeMarker/OGNL/EL) or contain no `{{`/`}}` and are
+  echoed back completely unevaluated — a genuine, verified syntax-level
+  mismatch, not a fixable reachability-wiring gap. This case's own recall
+  contribution stays a real, tracked false negative; Twitch's own real,
+  scored `multitarget` recall moves from `9/11` to `9/12`. PA-0042
+  compliance: re-derived (not left stale) `tests/test_multitarget_
+  category4.py`'s recall/macro-recall assertions and `tests/
+  test_labels_contract_category4.py`'s case count/cross-check; `tests/
+  test_auto.py` checked directly and found unaffected (no hardcoded
+  Twitch-cardinality-dependent count exists there). Ground truth extended
+  (`TWCH-0012`). Full bookkeeping in `docs/components/01-target-lab/
+  change-control.md`'s `CC-LAB-0196` entry.
+
 ## 2026-09-23 (LAB: Netflix's 10th real page, first weak_token_entropy instance on spring_boot, CC-LAB-0195/FR-LAB-135)
 - Target lab: `POST /api/session/refresh` (a session/token-refresh
   endpoint, refreshing an authenticated session token — a realistic

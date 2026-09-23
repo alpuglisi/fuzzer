@@ -3,6 +3,303 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0196 — Twitch's 12th real page: first ssti/template_render instance on `go_net_http`, `/channels/commands` (FR-LAB-136) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing `template_render`
+  sink family / `server_template_injection` concern (`user_supplied_
+  template_compile`/`file_loaded_template_name` ops, `CC-LAB-0063`,
+  already built on `spring_boot` -- `CC-LAB-0130`'s TrackerNest wiki-macro
+  shape, `SstiStrategy`) on `go_net_http`, this stack's first instance:
+  `POST /channels/commands`, a custom chat-command definition endpoint --
+  a real, well-documented streaming-bot feature (Nightbot/StreamElements-
+  style custom commands with template variables, e.g. an `!uptime` command
+  whose response is `{{.Uptime}} since going live`). This is a DIFFERENT
+  kind of increment from most of this session's prior work: not a "second
+  instance, zero new code" depth increment, and not this session's earlier
+  cross-stack-generalization direction (bringing an already-Go mechanism
+  to Java) either -- this brings an already-multi-stack mechanism
+  (already on `spring_boot`) to Go for the FIRST time, real breadth on the
+  stack this session's dispatch is scoped to.
+  **Design decision, checked directly against `spring_boot`'s own
+  `UserSuppliedTemplateCompileSink`/`FileLoadedTemplateNameSink` (`CC-LAB-
+  0130`) before building, not assumed to port identically:** Java's twin
+  evaluates the tainted value as an OGNL expression via `Ognl.getValue()`
+  -- OGNL syntax naturally evaluates arithmetic infix expressions
+  (`7*7` -> `49`) without any wrapping. Go has no equivalent expression
+  evaluator in its standard library; the closest genuine, well-documented
+  analog is compiling and executing the tainted value as a `text/
+  template` TEMPLATE (not a bare expression evaluator) via
+  `template.New(...).Parse(...)`/`.Execute(...)` -- a real, CWE-1336
+  server-side template injection (unlike `html/template`, no output
+  escaping, and the template language itself can invoke exported fields/
+  methods and its own conditional/range constructs on the data passed to
+  `Execute`, not just substitute inert placeholders). This needed no new
+  module-composition convention: `go_net_http` already has "Convention 2"
+  (the manifest's one op names a sink module directly, no separate
+  transform stage) from SSRF/mass-assignment/file-upload/price-integrity/
+  path-traversal, and this shape's vulnerable/secure difference is the
+  same kind of one-inseparable-operation split those shapes already use.
+  Reused the exact op names `spring_boot` already uses
+  (`user_supplied_template_compile`/`file_loaded_template_name`) rather
+  than inventing new ones, since both are pre-existing
+  `lab/safety_matrix.yaml` op rows already scoped to this exact
+  `template_render` family -- no safety-matrix change needed.
+  **Detection generalization, verified empirically BEFORE building the
+  final design, not assumed to work because the task dispatch suggested
+  it would:** the task's own suggested design assumed the existing
+  generic `SstiStrategy`'s arithmetic-product-marker payloads (`${a*b}`,
+  `{{a*b}}`, `<%= a*b %>`, `#{a*b}`, `${{a*b}}`) would work "given this
+  project's own multi-template-engine precedent" and that `_ssti_
+  payloads()` "very likely already includes Go-style `{{ }}` syntax." A
+  direct `go run` check against Go's REAL `text/template` package (run
+  BEFORE writing any module/template code, per this project's own "check
+  before assuming" discipline) falsified that assumption: `{{a*b}}` and
+  `${{a*b}}` both fail to PARSE outright (`text/template`'s action
+  grammar supports only pipelines/function calls/field-and-method access,
+  with NO infix arithmetic operators at all -- a hard syntax-level
+  restriction of the parser itself, confirmed by the exact error text
+  `unexpected "*" in operand`, not a missing `FuncMap` entry a vulnerable
+  sink's own design could work around), while `${a*b}`/`<%= a*b %>`/
+  `#{a*b}` contain no `{{`/`}}` at all, so `text/template` treats them as
+  inert literal text and `Execute` echoes them back completely
+  unevaluated regardless of what data or functions the vulnerable sink
+  passes in. This is a genuine, verified architecture mismatch between
+  the generic strategy's arithmetic-marker technique and Go's own
+  template-action syntax -- NOT a fixable reachability-wiring gap
+  analogous to `CC-FUZZ-0028`'s header-point fix (that fix closed a gap
+  in point/sender plumbing; this gap is in the confirmation payload
+  syntax itself, upstream of any wiring). Per the task's own explicit
+  fallback for exactly this outcome ("do NOT force a contrived/unsafe
+  design ... land the lab page alone with detection as an open
+  question"), this instance lands with a genuine, real, live-boot-proven
+  SSTI differential (field-access/conditional/parse-error evaluation) as
+  its proof, but automatic confirmation via the existing generic
+  `SstiStrategy` is an explicitly open question, not silently claimed
+  working, and NO new, untested detection strategy code was written to
+  paper over the gap (writing one now, under this dispatch's time
+  budget, without the same rigor `CC-FUZZ-0028`/`CC-FUZZ-0033`/etc.
+  applied to their own new strategies, would itself be the kind of
+  contrivance the task warned against). `R-SSTI`'s own audit-rule
+  reachability gate (`when: {location_in: ["query","body"]}`, no name-
+  specific gate) needed zero change -- checked directly, not assumed:
+  this case's `location="body"` point is already reachable through it,
+  confirmed with a direct `points_from_ground_truth` call showing the
+  point carries `sink_context="template"` and `body_content_type=
+  "application/json"` correctly. The gap is entirely in `SstiStrategy`'s
+  own payload syntax matching Go's template grammar, not in reachability
+  wiring.
+  **Cross-branch collision check, performed and recorded**: `git fetch
+  origin claude/category-3-build-iuu5k9 claude/category-5-build-6boejs`
+  followed by a diff of every shared file this task touched (`fuzzlab/
+  labgen/emitters/go_net_http/`, `fuzzlab/oracle/strategies.py`) against
+  both sibling branches: both diffs show only deletions relative to this
+  branch (strictly behind on every one of those files, no conflicting
+  edit to the same lines/keys), and this entry does not modify `fuzzlab/
+  oracle/strategies.py` at all (`SstiStrategy`/`_ssti_payloads` are read,
+  never changed -- the whole point of this entry's own detection-
+  generalization analysis is that they need no change), so no collision
+  risk from either sibling branch's own new strategy classes. This is a
+  pure, non-colliding addition.
+  **Bookkeeping-ID discipline, checked directly, not assumed:** confirmed
+  `CC-LAB-0196` against this branch's own reserved block (`CC-LAB-0170`-
+  `0209`) and the highest number actually USED in this log (`CC-LAB-0195`),
+  not merely mentioned anywhere in this branch's merged docs (category 5's
+  own `CC-LAB-0210`-`0249` block is also present in this branch's history
+  and must not be mistaken for "next free"). `LABGEN-GO-0023`/`0024` cell
+  IDs confirmed free (grepped `LABGEN-GO-` across every manifest, highest
+  existing was `LABGEN-GO-0022`, from `CC-LAB-0190`). Per `BUG-0040`/
+  `PA-0042`, grepped `tests/test_multitarget_category4.py`/`tests/
+  test_auto.py`/`tests/test_labels_contract_category4.py` for hardcoded
+  fraction/count assertions depending on Twitch's ground-truth
+  cardinality and re-ran all three directly (not just the non-slow
+  suite) after updating them: `test_multitarget_category4.py`'s Twitch
+  recall assertion moved from `9/11` to `9/12` (`tp` stays `9`) and the
+  macro-recall average was re-derived; `test_labels_contract_category4.py`'s
+  case count moved from 11 to 12 with a new `TWCH-0012` cross-check;
+  `test_auto.py` was checked by DIRECT inspection (not assumed clean by
+  analogy to `CC-LAB-0195`'s own affected Netflix case): it has NO
+  Twitch-cardinality-dependent hardcoded count at all (its one Twitch-
+  ground-truth test, `test_points_from_ground_truth_now_includes_header_
+  points`, asserts only two specific `(url, param, method, location)`
+  tuples are present/absent, neither of which is the new case) -- a real,
+  checked-and-confirmed-clean finding, not a restated assumption.
+  - **Real Twitch functionality (grounded, not invented)**: a custom
+    chat-command definition endpoint (a real, well-documented streaming-
+    bot feature every major platform's bot ecosystem has -- Nightbot,
+    StreamElements, and similar tools all let broadcasters define custom
+    commands with template variables; the specific `POST /channels/
+    commands` path is this manifest's own illustrative inference, not a
+    confirmed Twitch-internal implementation detail, labeled explicitly
+    in the manifest's own header, matching `CC-LAB-0179`'s/`CC-LAB-0195`'s
+    own fact-vs-inference discipline).
+  - **Vulnerable** (`LABGEN-GO-0023`, `user_supplied_template_compile`):
+    the caller-supplied `template` field is compiled and executed via
+    `text/template.New(...).Parse(...)`/`.Execute(...)`.
+    **Secure** (`LABGEN-GO-0024`, `file_loaded_template_name`): the same
+    field only ever selects a key into a fixed `map[string]string`.
+  - **Zero new generator infrastructure, only new modules/templates**: one
+    new source class (`ReadChannelCommandRequestSource`, reusing the
+    established "publish `body_var`, let the sink parse its own JSON"
+    convention) and two new sink classes -- `_MODULE_SET_BY_SHAPE`/
+    `_MODULE_IMPORTS`/`_ROUTE_PARAMS` dict-registration pattern and
+    Convention 2's `render()` branch are all pre-existing, unchanged
+    infrastructure. Rendering both cells was run directly (and passed
+    `go vet`/`gofmt -l` for real) before writing any test.
+  - **Real, live-boot proof** (`tests/test_labgen_go_live_boot.py::
+    test_real_boot_proves_the_ssti_differential_for_both_twins`): 3
+    assertions covering (a) real field-access evaluation
+    (`{{.Uptime}}` -> `3h27m`), (b) real conditional/control-flow
+    evaluation (`{{if eq .Uptime "3h27m"}}MATCHED{{else}}NO{{end}}` ->
+    `MATCHED`, proving more than dumb substitution), (c) a real HTTP 400
+    parse error on a malformed template, and (d) the secure twin treating
+    all of the above as opaque unrecognized variable names while a real
+    pre-approved name (`uptime`) still resolves -- passed against a real
+    `go build`/boot/HTTP round trip.
+  - **Detection generalization, verified empirically and found NOT to
+    hold -- documented honestly, not silently skipped or forced**:
+    `test_ssti_go_text_template_syntax_mismatch` (fast, non-slow, always
+    run -- no boot needed) reproduces the exact `_ssti_payloads()` syntax
+    mismatch via a real `go run` subprocess; `test_ssti_strategy_does_
+    not_generalize_to_go_text_template` (slow, live-boot) confirms
+    `SstiStrategy.confirm()` returns `None` against the real booted
+    vulnerable twin. The real `fuzzlab.harness.multitarget.run_targets`
+    pipeline was then re-run end to end
+    (`test_both_apps_run_through_multitarget_for_real`) with the new
+    cells included, confirming Twitch's own real, scored recall moves
+    from `9/11` to `9/12` (a real, expected false negative, `tp` stays
+    `9`) -- not merely asserted, but actually observed via a real run.
+  - Ground truth: `TWCH-0012` added to `lab/ground-truth-twitch-clone/`
+    (`vuln_class="ssti"`, `sink_context="template"` -- both pre-existing
+    enum values already used by `spring_boot`'s TrackerNest ground truth
+    (`lab/ground-truth-trackernest/labels.json`); `param="body"`/
+    `location="body"`, the whole-body-point convention `TWCH-0005`/
+    `TWCH-0006`/`TWCH-0010` already establish). **A schema-validation
+    catch during authoring, not silently worked around:** the initial
+    draft used `sink_context="template_render"` (the safety-matrix
+    family name) and `jsonschema.validate` correctly rejected it -- the
+    labels schema's own enum value for this vuln_class is `"template"`,
+    not the sink-family name, matching `spring_boot`'s TrackerNest ground
+    truth exactly. Corrected before landing, recorded here as a real
+    caught-before-landing mistake rather than omitted.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0195`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded here rather than silently
+  skipping the gate: (1) **accuracy** -- confirmed by direct source
+  inspection, not assumed: `spring_boot`'s own `UserSuppliedTemplateCompile
+  Sink`/`FileLoadedTemplateNameSink` templates and `lab/safety_matrix.
+  yaml`'s `template_render` op rows were read before designing the Go
+  port; `_ssti_payloads()`'s exact five payload strings were read from
+  `fuzzlab/oracle/strategies.py` and independently reproduced via a real
+  `go run` check BEFORE writing any lab code, not after a failed test run
+  -- this caught the task dispatch's own mistaken assumption ("very
+  likely already includes Go-style syntax") early, and is documented
+  above as its own design-decision narrative rather than silently
+  reusing the wrong precedent framing; cell IDs `LABGEN-GO-0023`/`0024`
+  were confirmed free; both cells' rendered Go source was run through a
+  real `go vet`/`gofmt -l` pass and passed cleanly before any test was
+  written; the labels-schema `sink_context` mismatch (`template_render`
+  vs `template`) was caught by a real `contract.load()` validation
+  failure during authoring, not assumed correct by analogy. (2)
+  **adequacy** -- checked that this increment does not silently duplicate
+  an existing route (grepped `_ROUTE_PARAMS`/manifests for `/channels/
+  commands`: absent) or an existing `go_net_http` SSTI instance (grepped
+  `user_supplied_template_compile|file_loaded_template_name|template_
+  render` under `fuzzlab/labgen/emitters/go_net_http/` and `lab/
+  manifests/*go*.yaml`: absent before this change); does not need a
+  second, redundant strategy (no new `Rule`/`ConfirmationStrategy` code
+  was written at all, a deliberate choice per the task's own "do not
+  force a contrived design" instruction); and that the "detection does
+  NOT generalize" claim was actually run against both a standalone `go
+  run` check and a real booted instance rather than asserted from theory
+  -- both are real, executed tests in this commit, one of them (the
+  syntax-mismatch check) deliberately kept fast/non-slow so this specific
+  empirical claim stays checked on every ordinary run, not only under
+  `-m slow`. The adequacy pass also checked `tests/test_auto.py` for a
+  PA-0042 impact and found it genuinely unaffected by direct inspection
+  (not assumed clean by analogy to `CC-LAB-0194`'s or `CC-LAB-0195`'s own,
+  differently-shaped cases) -- documented above, not silently skipped.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py`
+    (`ReadChannelCommandRequestSource`, `UserSuppliedTemplateCompileSink`,
+    `FileLoadedTemplateNameSink`)
+  - `fuzzlab/labgen/emitters/go_net_http/__init__.py` (new
+    `_MODULE_SET_BY_SHAPE`/`_MODULE_IMPORTS`/`_ROUTE_PARAMS` entries,
+    module docstring)
+  - `fuzzlab/labgen/emitters/go_net_http/templates/sources/
+    read_channel_command_request.go.j2`, `templates/sinks/
+    user_supplied_template_compile.go.j2`, `templates/sinks/
+    file_loaded_template_name.go.j2` (new)
+  - `lab/manifests/ssti_channel_commands_go_sample.yaml` (new)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,
+    expectedresults.csv}`
+  - `tests/test_labgen_go_net_http_modules.py` (3 new module tests)
+  - `tests/test_labgen_go_net_http_conformance.py` (new manifest added to
+    the Tier-3 whole-lab regeneration sweep)
+  - `tests/test_labgen_go_live_boot.py` (3 new tests: the live-boot
+    differential, the live-boot strategy-does-not-generalize proof, and
+    the fast standalone syntax-mismatch reproduction)
+  - `tests/test_labels_contract_category4.py` (TWCH-0012 cross-check,
+    count 11 -> 12)
+  - `tests/test_multitarget_category4.py` (Twitch recall re-derived,
+    `9/11` -> `9/12`; `_twitch_cells()` extended; macro-recall re-derived)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-136`, new)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category-4 tracker
+    row)
+  - `docs/ARCHITECTURE.md` (Twitch page/detection counts)
+  - `CHANGELOG.md`
+- Impact (other components / project): purely additive to `go_net_http`
+  and `lab/ground-truth-twitch-clone`; no other stack/app touched. No
+  audit-rule/oracle-strategy code changed at all (`R-SSTI`/`SstiStrategy`
+  already exist and needed zero code change to APPLY, even though they do
+  not CONFIRM this instance) -- this entry's real contribution to that
+  component is the documented, empirically-verified negative result, not
+  a positive generalization proof. **Project-level note, stated plainly:**
+  this is the first genuinely-new-mechanism-to-a-stack increment in this
+  session's own category-4 work where the "detection already works
+  automatically" pattern every prior such increment established (`CC-LAB-
+  0188` onward) does NOT hold -- an honest data point for anyone deciding
+  whether to invest in a Go-syntax-aware SSTI confirmation strategy as a
+  follow-on, not a claim that this session's own generalization track
+  record has changed direction.
+- Risk (level; mitigation or accepted-risk justification): **low**. Purely
+  additive lab-only code (a new Go handler, generated and rendered, never
+  hand-written app logic reachable from anywhere else); no outbound-
+  network/fetch capability introduced (unlike SSRF cells); no destructive
+  filesystem operation (unlike path-traversal/file-upload cells); the
+  vulnerable sink's own blast radius is confined to whatever fields the
+  fixed `commandData` struct exposes (`Uptime`/`Viewers`/`Game`, three
+  fixed demo strings) -- genuinely limited compared to a real production
+  SSTI sink that might expose request/response objects or filesystem
+  access to the template. Verified end to end with a real `go build`/
+  boot/HTTP round trip and a real `run_targets` pipeline run, not assumed
+  from the shared-mechanism argument alone. The only real process risk
+  this entry accepts and states explicitly is the same self-review
+  substitution (in place of two independent reviewer agents) every entry
+  in this session has accepted, mitigated by the real `go vet`/`gofmt`/
+  live-boot verification actually performed before landing (both the
+  differential and the strategy non-generalization proof).
+- Deliverables:
+  - [x] New source + two sink modules/templates, zero new generator
+        infrastructure code -- done
+  - [x] Real live-boot proof (3 assertions: field access, conditional
+        control flow, parse-error handling, plus the secure twin's own
+        non-evaluation) -- done
+  - [x] Ground truth extended (`TWCH-0012`) -- done
+  - [x] Detection generalization checked empirically and found NOT to
+        hold -- documented honestly (fast standalone syntax check +
+        live-boot strategy check), not silently skipped or forced --
+        Twitch's own recall moves `9/11` -> `9/12` (an honest, tracked
+        false negative) -- done
+  - [x] `tests/test_labels_contract_category4.py`/`tests/test_auto.py`
+        re-run and confirmed per `PA-0042` -- `tests/test_auto.py` found
+        genuinely UNAFFECTED by direct inspection (no Twitch-cardinality-
+        dependent hardcoded count exists there), not assumed clean -- done
+  - [x] Full non-slow suite + every directly-affected slow test re-run
+        green -- done
+
 ### CC-LAB-0195 — Netflix's 10th real page: first weak_token_entropy instance on `spring_boot`, `/api/session/refresh` (FR-LAB-135) (2026-09-23)
 
 - Change: instantiates `lab/safety_matrix.yaml`'s existing

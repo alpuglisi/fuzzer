@@ -67,6 +67,44 @@ directory's own real form (secure, ``realpath_confine``). Reuses
 no new source module needed. Convention 2 again: the manifest's one op
 names a sink module directly.
 
+**Phase B, twelfth increment (``CC-LAB-0196``/``FR-LAB-136``): this stack's
+first `ssti`/`template_render` instance**, ``("ssti", "template_render")``
+-- a custom chat-command handler (``POST /channels/commands``, a real,
+well-documented streaming-bot feature: Nightbot/StreamElements-style custom
+commands with template variables, e.g. an ``!uptime`` command whose response
+is ``{{.Uptime}} since going live``) that either compiles and executes the
+caller-supplied ``template`` field directly via Go's ``text/template``
+package (vulnerable, CWE-1336, ``user_supplied_template_compile`` -- the
+same op `spring_boot`'s own TrackerNest wiki-macro shape already uses,
+``CC-LAB-0130``) or only ever looks the caller-supplied string up as a KEY
+in a small, fixed map of pre-approved variable names, never compiling it as
+template source at all (secure, ``file_loaded_template_name``). Reuses
+`lab/safety_matrix.yaml`'s existing `server_template_injection` concern and
+`template_render` sink family verbatim -- no safety-matrix change needed.
+Convention 2 again: the manifest's one op names a sink module directly.
+**Detection generalization, checked empirically, not assumed:** the
+existing generic `SstiStrategy` (`fuzzlab/oracle/strategies.py`) confirms
+SSTI by sending an arithmetic-expression payload (`${a*b}`, `{{a*b}}`,
+`<%= a*b %>`, `#{a*b}`, `${{a*b}}`) and checking that the numeric PRODUCT
+appears while the literal expression does not. A direct `go run` check
+against Go's real `text/template` package (not assumed from the payload
+list's syntax alone) shows this does **not** generalize to this stack:
+`{{a*b}}`/`${{a*b}}` fail to PARSE at all (`text/template`'s action
+grammar has no infix arithmetic operators, unlike Jinja2/FreeMarker/OGNL/
+EL -- a hard syntax-level restriction, not a missing wiring gap analogous
+to `CC-FUZZ-0028`'s header-point fix), and `${a*b}`/`<%= a*b %>`/`#{a*b}`
+contain no `{{`/`}}` at all, so `text/template` treats them as plain
+literal text and echoes them back completely unevaluated regardless of
+what the vulnerable sink's own `FuncMap` might define. This is a genuine,
+verified architecture mismatch between the generic strategy's arithmetic-
+marker technique and Go's template-action syntax, not a fixable gap in
+this shape's own reachability wiring -- so this instance lands with real,
+live-boot-proven field-access/conditional/builtin-call evaluation as its
+differential (a genuine SSTI, per the task's own honest-judgment standard),
+but automatic confirmation via `SstiStrategy` is an explicitly open
+question, not silently claimed working. See `CC-LAB-0196`'s own
+change-control entry for the full analysis.
+
 **Multi-file output, like every other routed emitter.** Per this project's
 routed-emitter convention (``node_express``, ``ruby_rails``), a ``route``-
 category *accumulator* module (``net/http.ServeMux`` registration lines)
@@ -159,6 +197,16 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     # (`CC-LAB-0190`). Reuses `read_url_query_param` verbatim as its
     # source, exactly like the SSRF shape.
     ("path_traversal", "fs_path_read"): _ModuleSet("read_url_query_param", None, "render_only"),
+    # Convention 2 again (like SSRF/mass-assignment/price-integrity/path-
+    # traversal): the manifest's one op names a sink module directly --
+    # the vulnerable/secure difference here is one inseparable compile-
+    # and-execute-caller-template-vs-lookup-fixed-variable-name operation,
+    # not a value rewrite feeding a shared sink. This stack's first
+    # `ssti`/`template_render` instance (`CC-LAB-0196`), reusing
+    # `lab/safety_matrix.yaml`'s existing `server_template_injection`
+    # concern and mirroring `spring_boot`'s own TrackerNest
+    # `ssti`/`template_render` shape (`CC-LAB-0130`).
+    ("ssti", "template_render"): _ModuleSet("read_channel_command_request", None, "render_only"),
 }
 
 #: Per-module (source/transform-op/sink name) -> the extra Go standard-
@@ -202,6 +250,9 @@ _MODULE_IMPORTS: dict[str, tuple[str, ...]] = {
     "server_recomputed_amount": ("encoding/json",),
     "unconfined_path": ("os", "path/filepath"),
     "realpath_confine": ("os", "path/filepath", "strings"),
+    "read_channel_command_request": ("io",),
+    "user_supplied_template_compile": ("bytes", "encoding/json", "text/template"),
+    "file_loaded_template_name": ("encoding/json",),
 }
 
 #: Per-route static context this Phase A emitter needs beyond the
@@ -238,6 +289,12 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     # var_name/param_name convention (like /api/clips/thumbnail's own
     # entry above) -- filename is read from the `filename` query param.
     "/clips/export": {"var_name": "requestedFilename", "param_name": "filename"},
+    # CC-LAB-0196: this stack's first ssti/template_render instance -- no
+    # per-route var_name/param_name needed (ReadChannelCommandRequestSource
+    # publishes its own default identifier), matching
+    # `/channels/emotes/upload`'s/`/subscriptions/purchase`'s own empty
+    # entries.
+    "/channels/commands": {},
 }
 
 

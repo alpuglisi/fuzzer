@@ -1,0 +1,74 @@
+# SSTI (server-side template injection) sample manifest (CC-LAB-0196),
+# go_net_http.
+#
+# Twelfth real page for this stack's Twitch pick (category 4, Media/
+# streaming -- docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §9.4/§9.5).
+# NOT a genuinely new-to-the-project mechanism -- reuses
+# `lab/safety_matrix.yaml`'s existing `template_render` sink family /
+# `server_template_injection` concern verbatim (added by CC-LAB-0063,
+# already instantiated on `spring_boot`'s own TrackerNest wiki-macro shape,
+# CC-LAB-0130) -- but genuinely new BREADTH: this stack's first instance of
+# this vuln_class, bringing an already-multi-stack mechanism to Go for the
+# first time. Confirmed absent before building: `grep -rln
+# "user_supplied_template_compile|file_loaded_template_name|template_render"
+# fuzzlab/labgen/emitters/go_net_http/*.py lab/manifests/*go*.yaml` returned
+# nothing under go_net_http before this change.
+#
+# A custom chat-command definition endpoint (a real, well-documented
+# streaming-bot feature -- Nightbot/StreamElements-style custom commands
+# with template variables, e.g. an `!uptime` command whose response is
+# `{{.Uptime}} since going live`), CWE-1336 (server-side template
+# injection). The vulnerable twin compiles and executes the caller-
+# supplied `template` field directly via Go's `text/template` package
+# (`template.New(...).Parse(...)` then `.Execute(...)`) -- unlike
+# `html/template`, no output escaping, and the template language itself
+# can invoke exported fields/methods and its own conditional/range
+# constructs on the data passed to `Execute`, not just substitute inert
+# placeholders. The secure twin only ever looks the caller-supplied string
+# up as a KEY in a small, fixed map of pre-approved variable names
+# (`uptime`/`viewers`/`game`) -- it is never compiled as template source at
+# all.
+#
+# Module composition is this stack's Convention 2 (like SSRF/mass-
+# assignment/file-upload/price-integrity/path-traversal): the manifest's
+# one op names a SINK module directly -- the vulnerable/secure difference
+# is one inseparable compile-and-execute-caller-template-vs-lookup-fixed-
+# variable-name operation, not a value rewrite feeding a shared sink.
+#
+# **Detection generalization, an open question stated plainly (see
+# `CC-LAB-0196`'s own change-control entry for the full empirical
+# analysis):** the existing generic `SstiStrategy`
+# (`fuzzlab/oracle/strategies.py`) does NOT confirm this instance -- its
+# arithmetic-product-marker payloads either fail to parse under Go's
+# `text/template` action grammar (no infix operators) or contain no
+# `{{`/`}}` at all and are echoed back completely unevaluated. This is a
+# genuine, verified syntax-level mismatch, not a fixable reachability-
+# wiring gap. The vulnerability itself is real and live-boot-proven via a
+# different, honest differential (field-access/conditional/builtin-call
+# evaluation), just not through this generic strategy's own marker
+# technique.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: the caller-supplied template string is compiled and
+  # executed via text/template.
+  - cell_id: LABGEN-GO-0023
+    class: ssti
+    stack_profile: go_net_http
+    route: { method: POST, path: /channels/commands }
+    sink_context:
+      family: template_render
+      required_neutralizations: [server_template_injection]
+    transform: [user_supplied_template_compile]
+
+  # Secure twin: the only difference is which sink module renders (the
+  # minimal-pair invariant) -- the caller-supplied string only ever
+  # selects a key into a fixed, developer-defined map.
+  - cell_id: LABGEN-GO-0024
+    class: ssti
+    stack_profile: go_net_http
+    route: { method: POST, path: /channels/commands }
+    sink_context:
+      family: template_render
+      required_neutralizations: [server_template_injection]
+    transform: [file_loaded_template_name]

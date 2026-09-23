@@ -1,0 +1,22 @@
+var req struct {
+	Trigger  string `json:"trigger"`
+	Template string `json:"template"`
+}
+_ = json.Unmarshal({{ body_var }}, &req)
+// Secure: `Template` only ever selects a KEY into a small, fixed,
+// developer-defined map of pre-approved variable names -- it is never
+// compiled or executed as template source at all, so no template-language
+// construct the caller sends can ever be evaluated, regardless of syntax.
+knownVars := map[string]string{
+	"uptime":  "3h27m",
+	"viewers": "1,204",
+	"game":    "Just Chatting",
+}
+value, ok := knownVars[req.Template]
+if !ok {
+	value = "unknown variable"
+}
+resp := req.Trigger + ": " + value
+w.Header().Set("Content-Type", "text/plain")
+w.WriteHeader(http.StatusOK)
+w.Write([]byte(resp))
