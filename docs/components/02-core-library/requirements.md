@@ -83,6 +83,20 @@ plugin registry. It is the layer that makes the store the integration bus.
   real, locally-booted deployment. Scoped to `open_redirect` only — category
   5's other three built classes have no verified confirmer yet.
 
+- **FR-CORE-12** *(`price_integrity_bypass`→`price-integrity-bypass`
+  mapping; `CC-CORE-0022`, 2026-09-23).* Extends `FR-CORE-10`'s map with
+  `price_integrity_bypass`→`price-integrity-bypass` (category 5,
+  Booking.com's real vulnerable cell `LABGEN-BC-0005`, `CC-LAB-0212`),
+  paired with a genuinely new rule+strategy (`R-PRICE-INTEGRITY`/
+  `PriceIntegrityBypassStrategy`, `CC-FUZZ-0029`, this component's own
+  FUZZ counterpart — see `FR-FUZZ-16`). Verified live end to end through
+  `fuzzlab.harness.multitarget.run_targets`'s own real scoring (`PA-0042`),
+  not just `ConfirmationStrategy.confirm()` in isolation. Real, verified
+  result: `tp=2, fn=1, fp=0` against Booking.com's real, locally-booted
+  deployment (recall `1/3 -> 2/3`). Scoped to `price_integrity_bypass`
+  only — `csv_formula_injection` (Booking.com) and
+  `insecure_deserialization` (Expedia) still have no verified confirmer.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

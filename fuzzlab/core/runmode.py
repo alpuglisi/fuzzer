@@ -66,6 +66,17 @@ _VULN_TO_CATEGORY = {
     # differential this project already proved live. Verified live against
     # both of Expedia's real twins before landing.
     "spel_injection": "spel-injection",
+    # `price_integrity_bypass` (category 5, Booking.com, `CC-LAB-0212`): a
+    # new rule (`R-PRICE-INTEGRITY`) and confirmation strategy
+    # (`PriceIntegrityBypassStrategy` in fuzzlab/oracle/strategies.py) built
+    # specifically for this class -- the vulnerable twin (`LABGEN-BC-0005`)
+    # has an empty transform pipeline (no named op to detect); the real
+    # differential is the secure twin's own server-side rate-table
+    # recomputation, which the vulnerable twin never performs, proven live
+    # in `tests/test_labgen_price_integrity.py`'s own live-boot test before
+    # this mapping landed. Verified live against both of Booking.com's real
+    # twins before landing.
+    "price_integrity_bypass": "price-integrity-bypass",
 }
 
 

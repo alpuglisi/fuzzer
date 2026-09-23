@@ -3,6 +3,24 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0022 — Map `price_integrity_bypass` to the new `price-integrity-bypass` category in `_VULN_TO_CATEGORY` (FR-CORE-12) (2026-09-23)
+- Change: Adds one entry to `fuzzlab/core/runmode.py`'s `_VULN_TO_CATEGORY` dict: `"price_integrity_bypass": "price-integrity-bypass"`. Unlike `CC-CORE-0021`'s own `open_redirect` mapping (which reused a pre-existing rule+strategy pair), this class needed a genuinely new one — `R-PRICE-INTEGRITY`/`PriceIntegrityBypassStrategy`, built in `CC-FUZZ-0029` (this component's own FUZZ counterpart entry has the full record: pre-change review findings, canary design, live verification). This entry is the CORE-owned half: the one dict-entry mapping that lets `fuzzlab.harness.pipeline`'s own `evaluate()`/`category_to_oracle_class()` dispatch reach the new strategy at all for ground-truth-sourced runs.
+
+  Live-verified end to end, mirroring `CC-CORE-0021`'s own discipline: `fuzzlab.harness.multitarget.run_targets` against a real, locally-booted Booking.com deployment scores `tp=2, fn=1, fp=0` for the real vulnerable twin (`LABGEN-BC-0005`) — a real, correctly-attributed true positive alongside `open_redirect`'s own (`CC-CORE-0021`), not a coincidence.
+
+  Scoped to `price_integrity_bypass` only, not category 5's remaining unmapped class (`csv_formula_injection`): it has no verified confirmer yet (no `ConfirmationStrategy`/`Rule` pair exists for CSV-formula-injection detection) — mapping it now would only relabel an honest false negative as a mis-wired one, not a real improvement, matching `CC-CORE-0020`/`CC-CORE-0021`'s own established scoping discipline.
+
+  Updates category 5's own Phase E tests (`CC-LAB-0217`/`0219`) to the new, real scored numbers (Booking.com recall `1/3 -> 2/3`; the combined test's per-target assertions, not a shared loop, per `CC-CORE-0020`'s own adequacy-review-caught precedent for that exact pitfall).
+- Impact (other components / project): `fuzzlab/oracle/strategies.py`/`fuzzlab/audit/rules_data/default_rules.json` (FUZZ component owns the new strategy/rule — see `CC-FUZZ-0029` for that component's own entry), `tests/test_labgen_php_laravel_booking_multitarget.py`/`test_multitarget_category5_combined.py` (LAB component, updated scored-number assertions).
+- Risk (level; mitigation or accepted-risk justification): low. One dict entry, scoped and precedented by `CC-CORE-0020`/`CC-CORE-0021`. The real risk (a wrong or over-broad confirmer) was retired by `CC-FUZZ-0029`'s own pre-change review gate before this mapping was added; live end-to-end verification and the full whole-repo suite (see Effectiveness) confirm zero regressions.
+- Deliverables:
+  - [x] `fuzzlab/core/runmode.py`: `_VULN_TO_CATEGORY["price_integrity_bypass"]` — done
+  - [x] `tests/test_labgen_php_laravel_booking_multitarget.py`/`test_multitarget_category5_combined.py`: real scored-number updates — done
+  - [x] `docs/components/02-core-library/requirements.md`: `FR-CORE-12` — done
+  - [x] `CHANGELOG.md` line — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done
+- Effectiveness (assessed 2026-09-23): Met. Real, verified result: `tp=2, fn=1, fp=0` against Booking.com's real, locally-booted deployment, recall `1/3 -> 2/3`. Full whole-repo `pytest tests/` run: see the commit message / `CHANGELOG.md` line for the exact pass/skip/fail counts.
+
 ### CC-CORE-0021 — Map `open_redirect` to the existing `open-redirect` category in `_VULN_TO_CATEGORY` (FR-CORE-11) (2026-09-23)
 - Change: Adds one entry to `fuzzlab/core/runmode.py`'s `_VULN_TO_CATEGORY` dict: `"open_redirect": "open-redirect"`. Mirrors `CC-CORE-0020`'s own `ssti` precedent exactly: a real rule (`R-OPEN-REDIRECT`, `fuzzlab/audit/rules_data/default_rules.json`, `name_regex: "url|next|redirect|return|dest|goto|continue|target"` — matches Booking.com's real `return_to` param via its `return` alternative) and a real confirmation strategy (`OpenRedirectStrategy`, `fuzzlab/oracle/strategies.py`) already existed and were already correctly scoped for category 5's real cell (`LABGEN-BC-0001`, `CC-LAB-0210`) — purely a missing mapping, not a missing detector.
 

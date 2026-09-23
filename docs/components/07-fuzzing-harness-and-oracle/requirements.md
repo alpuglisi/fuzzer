@@ -249,6 +249,37 @@ rewards) derives from it.
   the Phase E combined test now scores `generalizes=True` for real (two
   independently-mapped classes, two different stacks).
 
+- **FR-FUZZ-16** *(`CC-FUZZ-0029`, 2026-09-23).* `PriceIntegrityBypassStrategy`
+  (`fuzzlab/oracle/strategies.py`) confirms `price_integrity_bypass` (no
+  CWE — a business-logic/trust-boundary defect, grounded in the real
+  QloApps `Cart::getOrderTotal()` trust pattern this shape was modeled
+  on) by sending an attacker-chosen amount canary and checking whether the
+  response echoes it back verbatim (`"charged_amount":"<canary>"`,
+  matched after stripping whitespace, not a bare substring search — an
+  unanchored match was rejected pre-implementation by the adequacy
+  review). The canary always has three decimal places, structurally
+  incompatible with the real rate table's own two-decimal-place values
+  (`89.00`/`149.00`/`249.00`, also excluded explicitly as defense in
+  depth) — a random two-decimal canary was rejected pre-implementation by
+  the same review as a real, non-negligible collision risk, not just an
+  improbable one. The vulnerable twin (`LABGEN-BC-0005`) has an empty
+  transform pipeline (no named "trusted amount" op to detect); the real
+  differential is the secure twin's own server-side rate-table
+  recomputation, which the vulnerable twin never performs — the accuracy
+  review caught and corrected an earlier draft's fictitious
+  `ClientTrustedAmountTransform` framing pre-implementation. New `Rule`
+  `R-PRICE-INTEGRITY` (`name_regex: "amount|price|total|cost|charge"`,
+  `method_in: ["POST"]`, grounded in Booking.com's real `amount`
+  parameter), new `_VULN_TO_CATEGORY["price_integrity_bypass"]`/
+  `_CATEGORY_TO_CLASS["price-integrity-bypass"]` entries (both required —
+  the same completeness gap `FR-FUZZ-15` already documents). Live-verified
+  end to end: `fuzzlab.harness.multitarget.run_targets` against
+  Booking.com's real deployment now scores `tp=2, fn=1, fp=0` (recall
+  `1/3 -> 2/3`), the real inserted `bookings` row's own `total_amount`
+  independently proven by `tests/test_labgen_price_integrity.py`'s
+  live-boot test before this mapping landed. Category 5's third real
+  detection.
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

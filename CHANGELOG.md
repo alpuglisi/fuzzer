@@ -4,6 +4,22 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (category 5: PriceIntegrityBypassStrategy, third real detection)
+- CORE/FUZZ: builds `PriceIntegrityBypassStrategy` + `R-PRICE-INTEGRITY`
+  (`CC-FUZZ-0029`/`FR-FUZZ-16`) and maps `price_integrity_bypass` into
+  `_VULN_TO_CATEGORY` (`CC-CORE-0022`/`FR-CORE-12`) — category 5's third
+  real detection, Booking.com's `LABGEN-BC-0005` (empty-transform
+  vulnerable twin, no named "trusted amount" op). Pre-change review caught
+  two blocking design flaws before any code was written: a random
+  two-decimal canary could collide with the real rate table
+  (`89.00`/`149.00`/`249.00`) — fixed with a structurally distinct
+  three-decimal canary; and an unanchored substring match — fixed by
+  anchoring to `"charged_amount":"<canary>"` after whitespace-stripping.
+  Live-verified end to end against Booking.com's real deployment:
+  `tp=2, fn=1, fp=0`, recall `1/3 -> 2/3`. Updates
+  `tests/test_labgen_php_laravel_booking_multitarget.py`/
+  `test_multitarget_category5_combined.py` to the new real scored numbers.
+
 ## 2026-09-23 (category 5: Expedia's second own page, trip-restore)
 - LAB: adds `/api/trips/restore` (`LABGEN-EXP-0003`/`0004`), Expedia's
   second own designed page, reusing `CC-LAB-0213`'s existing Jackson

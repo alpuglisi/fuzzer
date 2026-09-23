@@ -44,6 +44,17 @@ def test_categories_from_vuln_classes_maps_spel_injection():
     assert cats == ["spel-injection"]
 
 
+def test_categories_from_vuln_classes_maps_price_integrity_bypass():
+    # CC-FUZZ-0029: price_integrity_bypass needed a genuinely NEW rule+
+    # strategy pair (R-PRICE-INTEGRITY/PriceIntegrityBypassStrategy) -- the
+    # vulnerable twin (LABGEN-BC-0005) has an empty transform pipeline, so
+    # the real differential is the secure twin's own server-side rate-table
+    # recomputation, which the vulnerable twin never performs. Live-verified
+    # against both of Booking.com's real twins.
+    cats = categories_from_vuln_classes(["price_integrity_bypass"])
+    assert cats == ["price-integrity-bypass"]
+
+
 def test_categories_from_vuln_classes_leaves_unmapped_classes_unchanged():
     # xxe/insecure_deserialization/etc. have no confirmer yet -- to_category()
     # falls through to the raw class name (no audit rule matches it, so it

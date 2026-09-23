@@ -333,6 +333,53 @@ class SpelInjectionStrategy(ConfirmationStrategy):
         return None
 
 
+class PriceIntegrityBypassStrategy(ConfirmationStrategy):
+    """A client-submitted amount is trusted and echoed back verbatim instead
+    of being recomputed server-side from a rate table (category 5's
+    `price_integrity_bypass`, Booking.com pilot). No CWE is cited for this
+    class -- it is a business-logic/trust-boundary defect, not a parser or
+    injection flaw; grounded in the real QloApps `Cart::getOrderTotal()`
+    trust pattern this shape was modeled on.
+
+    **The vulnerable twin (`LABGEN-BC-0005`) has an empty transform pipeline**
+    (`transform: []`) -- there is no named "trusted amount" class to detect;
+    the differential is the *absence* of the secure twin's own server-side
+    recomputation op, proven live in
+    `tests/test_labgen_price_integrity.py::test_live_boot_price_integrity_manifest_ignores_the_client_amount_on_the_secure_twin`.
+
+    **Canary has three decimal places**, structurally distinct from the real
+    rate table's own two-decimal-place values (`89.00`/`149.00`/`249.00` --
+    also excluded explicitly, defense in depth) -- a random two-decimal
+    canary could otherwise coincidentally collide with a real rate, caught
+    by this component's own pre-change adequacy review before implementation.
+
+    **Match is anchored**: `"charged_amount":"<canary>"` (after stripping
+    whitespace from the response body, mirroring the live-boot test's own
+    normalization) -- not a bare substring search, which could false-match
+    an unrelated field that happens to contain the same digits."""
+    vuln_class = "price_integrity_bypass"
+    mechanism = "trusted-client-amount-echo"
+    category = "price-integrity-bypass"
+
+    #: The real rate-table literals this shape's secure twin can return --
+    #: excluded explicitly even though the canary's own decimal-place shape
+    #: already makes a collision structurally impossible (defense in depth).
+    _RATE_TABLE_AMOUNTS = frozenset({"89.00", "149.00", "249.00"})
+
+    def confirm(self, candidate, sender):
+        while True:
+            whole = secrets.randbelow(9000) + 100
+            frac = secrets.randbelow(900) + 100
+            canary = f"{whole}.{frac}"
+            if canary not in self._RATE_TABLE_AMOUNTS:
+                break
+        text = (self._send(sender, candidate, canary).text or "").replace(" ", "")
+        if f'"charged_amount":"{canary}"' in text:
+            return Verdict(True, self.vuln_class, self.mechanism,
+                           {"payload": canary, "echoed": canary})
+        return None
+
+
 class PathTraversalStrategy(ConfirmationStrategy):
     """M7: a file-content marker (/etc/passwd) appears in the response."""
     vuln_class = "file-inclusion"
@@ -636,6 +683,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
     return [SqliErrorStrategy(), SqliBooleanStrategy(), SqliTimingStrategy(),
             ReflectedXssStrategy(), DomXssStrategy(browser), StoredXssStrategy(browser),
             OpenRedirectStrategy(), SstiStrategy(), SpelInjectionStrategy(),
+            PriceIntegrityBypassStrategy(),
             PathTraversalStrategy(), CommandInjectionStrategy(),
             CommandInjectionOobStrategy(oob), RegexDosStrategy(),
             GreyboxConfirmationStrategy(coverage, dbfault)]
@@ -652,6 +700,7 @@ _CATEGORY_TO_CLASS = {
     "open-redirect": "open-redirect",
     "server-side-template-injection": "ssti",
     "spel-injection": "spel_injection",
+    "price-integrity-bypass": "price_integrity_bypass",
     "file-inclusion": "file-inclusion",
     "command-injection": "command-injection",
     "regular-expression": "redos",
