@@ -33,9 +33,16 @@ class SeamProbeSender:
             # A whole-body point (`param="body"`, no single named field): send
             # `value` as the raw body at the ground truth's own declared
             # content type -- never assume JSON for every body point (some
-            # are XML/binary-serialized; CC-FUZZ-0028/FR-FUZZ-15).
+            # are XML/binary-serialized; CC-FUZZ-0028/FR-FUZZ-15). A
+            # multipart body (`UnrestrictedFileUploadContentTypeTrustStrategy`,
+            # CC-FUZZ-0036) may carry genuinely binary content (real image
+            # magic bytes) round-tripped through this `str`-only parameter as
+            # latin-1 (lossless 1:1 byte<->codepoint) -- re-encoded the same
+            # way here, never utf-8, which would corrupt any byte >= 0x80.
+            body_bytes = (value.encode("latin-1") if content_type.startswith("multipart/")
+                         else value.encode("utf-8"))
             req = Request(method.upper(), url, headers={"Content-Type": content_type},
-                          body=value.encode("utf-8"),
+                          body=body_bytes,
                           identity=self._identity, timing=timing, component="oracle")
         elif location == "body":
             req = Request(method.upper(), url,
@@ -67,8 +74,12 @@ class RequestsProbeSender:
             kwargs["headers"] = {param: value}
         elif location == "body" and content_type:
             # Whole-body point at its own declared content type -- never
-            # assume JSON for every body point (CC-FUZZ-0028/FR-FUZZ-15).
-            kwargs["data"] = value.encode("utf-8")
+            # assume JSON for every body point (CC-FUZZ-0028/FR-FUZZ-15). A
+            # multipart body may carry genuinely binary content (real image
+            # magic bytes) round-tripped as latin-1 -- see the matching
+            # comment in `SeamProbeSender.send` above (CC-FUZZ-0036).
+            kwargs["data"] = (value.encode("latin-1") if content_type.startswith("multipart/")
+                              else value.encode("utf-8"))
             kwargs["headers"] = {"Content-Type": content_type}
         elif location == "body":
             kwargs["data"] = {param: value}          # form-encoded body

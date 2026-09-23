@@ -4,6 +4,37 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (AUDITOR + FUZZ: real detection for `unrestricted_file_upload`, CC-AUD-0023/FR-AUD-14/CC-FUZZ-0036/FR-FUZZ-22)
+- Auditor + oracle: builds `CC-LAB-0186`'s own deliberately-deferred
+  detection follow-on — closes Twitch's `TWCH-0009` structural detection
+  zero (`unrestricted_file_upload`/CWE-434, `POST /channels/emotes/
+  upload`), this project's first-ever rule/strategy pair for this vuln
+  class and its first real `multipart/form-data` probe of any kind.
+  New `R-UNRESTRICTED-FILE-UPLOAD` audit rule (`location_in=["body"]` +
+  `sink_context_in=["fs_web_root_write"]`) plus a new
+  `UnrestrictedFileUploadContentTypeTrustStrategy` oracle strategy: a
+  real two-probe `multipart/form-data` differential — an inert-marker
+  `probe.svg` upload (a plausible extension, but bytes that are NOT a
+  real image) must be accepted and served back with a script-executable
+  `Content-Type` derived from the extension; a real-PNG `control.png`
+  upload must independently be accepted and correctly served as
+  `image/png` — the false-positive defense that rules out both a
+  legitimate SVG-accepting endpoint and a generically-permissive/broken
+  target. Verified live against Twitch's real booted
+  `LABGEN-GO-0017`/`0018` twins (a dedicated live-boot strategy test) and
+  through the real `fuzzlab.harness.multitarget` pipeline: Twitch's own
+  real, scored recall moves from 7/9 to 8/9. Along the way, made a real,
+  narrowly-scoped `Sender` extension (`fuzzlab/tools/probesender.py`):
+  a whole-body value is now encoded latin-1 instead of utf-8 specifically
+  when `content_type` starts with `"multipart/"`, so genuinely binary
+  probe content (real PNG magic bytes) round-trips losslessly through the
+  `Sender` interface's own `str`-only `value` parameter — scoped to that
+  one branch, every existing JSON/XML whole-body sender path is
+  unaffected. Also fixed the seventh instance of this session's own
+  recurring `_VULN_TO_CATEGORY`/`_CATEGORY_TO_CLASS` underscore/hyphen
+  naming gap, this time caught proactively before landing rather than by
+  the structural guard test after the fact.
+
 ## 2026-09-23 (LAB: Twitch's 9th real page — first unrestricted-file-upload instance, CC-LAB-0186/FR-LAB-126)
 - Target lab: genuinely new breadth for category 4's Twitch pick, not a
   cheap depth reuse like `CC-LAB-0180`-`0185` — the project's **first**

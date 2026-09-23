@@ -91,6 +91,16 @@ budget where a vulnerability is plausible.
   vuln class (already built on three other stacks' lab pages, but with
   no rule anywhere before this entry). Rule-generation only —
   confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-21`).
+- **FR-AUD-14** *(`CC-AUD-0023`, 2026-09-23).* A candidate is generated for
+  the `unrestricted-file-upload` category: `R-UNRESTRICTED-FILE-UPLOAD`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a body point
+  whose `sink_context` is `"fs_web_root_write"` — the same
+  `location_in`+`sink_context_in` shape as `R-MASS-ASSIGNMENT`/
+  `R-INSECURE-DESERIALIZATION`/`R-XXE`. This project's first-ever
+  candidate-generation rule for this vuln class, closing `CC-LAB-0186`'s
+  own deliberately-deferred detection follow-on for Twitch's
+  unrestricted-file-upload cell (`TWCH-0009`). Rule-generation only —
+  confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-22`).
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that

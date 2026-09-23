@@ -7,6 +7,7 @@ classes are added as new strategies (and, later, plugin `register_oracle` hooks)
 
 from __future__ import annotations
 
+import base64
 import re
 import secrets
 
@@ -974,6 +975,174 @@ class MassAssignmentPrivilegedFieldStrategy(ConfirmationStrategy):
                        {"field": self._PRIVILEGED_FIELD, "marker": marker})
 
 
+# --- unrestricted file upload (CWE-434, this project's `CC-LAB-0186` cell) --
+# A real, minimal, valid 1x1 transparent PNG (67 bytes) -- decoded once at
+# import time, never constructed as a Python `str` with raw high bytes in it
+# (that would round-trip incorrectly through utf-8 encoding). Used as the
+# control probe's genuinely-real image content, so `UnrestrictedFileUpload
+# ContentTypeTrustStrategy`'s differential has a real "this IS a real image"
+# leg to compare its malicious, NOT-a-real-image leg against.
+_MINIMAL_PNG_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY"
+    "42YAAAAASUVORK5CYII="
+)
+
+# Raster image types a *sniffing* (real-bytes) implementation can honestly
+# report for a real image upload -- this strategy's secure/control leg.
+_SAFE_RASTER_CONTENT_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+
+# Content types that let an uploaded file's bytes execute as active content
+# when served back same-origin -- the real CWE-434-to-XSS chain
+# `NoExtensionCheckSink`'s own docstring documents (`.html`/`.svg` -> `text/
+# html`/`image/svg+xml`). Deliberately a named, bounded set (not "anything
+# that isn't a safe raster type") -- an unusual-but-harmless type like
+# `application/octet-stream` (forces a download, never executes) must not
+# count as evidence, or this strategy would over-claim on a merely odd
+# response rather than a genuinely dangerous one.
+_SCRIPT_EXECUTABLE_CONTENT_TYPES = {
+    "text/html", "application/xhtml+xml", "image/svg+xml",
+    "text/xml", "application/xml",
+}
+
+
+def _multipart_body(field_name: str, filename: str, content: bytes,
+                    declared_content_type: str) -> tuple[str, str]:
+    """Build a real `multipart/form-data` body (one file part) as a `str`.
+
+    Encoded via latin-1 (a lossless 1:1 byte<->codepoint mapping, the same
+    convention `fuzzlab.proxy`/`fuzzlab.web` already use for raw bytes) so it
+    survives `Sender`'s own `str`-only ``value`` parameter round trip intact
+    even when ``content`` is genuinely binary (e.g. a real PNG's magic
+    bytes, all >= 0x80) -- `RequestsProbeSender`/`SeamProbeSender` re-encode
+    a multipart body via latin-1 too (see their own `content_type.startswith
+    ("multipart/")` branch), never utf-8, which would corrupt any byte
+    >= 0x80 into a multi-byte sequence.
+    """
+    boundary = "----FuzzLabUploadBoundary" + secrets.token_hex(8)
+    header = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="{field_name}"; filename="{filename}"\r\n'
+        f"Content-Type: {declared_content_type}\r\n\r\n"
+    ).encode("ascii")
+    footer = f"\r\n--{boundary}--\r\n".encode("ascii")
+    return (header + content + footer).decode("latin-1"), boundary
+
+
+def _response_content_type(probe: Probe) -> str:
+    """Case-insensitive `Content-Type` lookup, header params stripped/lowered."""
+    for k, v in (probe.headers or {}).items():
+        if k.lower() == "content-type":
+            return (v or "").split(";", 1)[0].strip().lower()
+    return ""
+
+
+class UnrestrictedFileUploadContentTypeTrustStrategy(ConfirmationStrategy):
+    """Confirms unrestricted file upload / extension-trusted `Content-Type`
+    (CWE-434, `CC-LAB-0186`'s deliberately-deferred detection follow-on) by a
+    real `multipart/form-data` two-probe differential over Twitch's own
+    emote-upload shape (`TWCH-0009`, `sink_context="fs_web_root_write"`):
+    does the endpoint decide the response `Content-Type` it serves an
+    uploaded file back with from the caller-supplied filename's *extension*,
+    rather than the file's real bytes?
+
+    Verified directly against the real templates before designing this
+    (`fuzzlab/labgen/emitters/go_net_http/templates/sinks/
+    no_extension_check.go.j2` / `extension_allowlist_mime_check.go.j2`):
+    both twins write-and-serve in the *same* POST response -- there is no
+    separate GET-the-served-file round trip to make, so this strategy reads
+    the upload response's own `Content-Type` header directly.
+
+    **Probe A (malicious)**: uploads a file named ``probe.svg`` (a
+    plausible, image-*looking* extension -- svg is a real, commonly
+    accepted upload extension) whose actual bytes are an inert, non-
+    executing marker (``<!DOCTYPE html><p>FUZZLAB-MARKER-...</p>``, per
+    `NFR-AUD-safe` -- never a real `<script>` tag, the same probe-safety
+    convention `CC-LAB-0186`'s own live-boot test already uses) -- bytes
+    that are NOT valid image content of any format. Confirms only a first
+    condition from this leg: HTTP 2xx (the upload was accepted, not
+    rejected for its bad content) with the marker echoed back in the body
+    (proof the response is genuinely serving *this* upload, not an
+    unrelated cached/canned page) and a response `Content-Type` in the
+    named, bounded `_SCRIPT_EXECUTABLE_CONTENT_TYPES` set (not a bare
+    "isn't a safe raster type" heuristic, which would over-claim on a
+    harmless-but-unusual type like `application/octet-stream`).
+
+    **Probe B (control, the false-positive defense)**: uploads a file named
+    ``control.png`` whose bytes are a real, minimal, valid PNG
+    (`_MINIMAL_PNG_BYTES`). Requires HTTP 2xx with a response `Content-Type`
+    in `_SAFE_RASTER_CONTENT_TYPES`. This is the differential's real
+    purpose, the same "two-probe, not a bare single-probe heuristic"
+    reasoning `InsecureDeserializationTypeConfusionStrategy`'s own docstring
+    argues for: it rules out a legitimate SVG/image-accepting endpoint that
+    would *also* serve `image/svg+xml` for a genuine SVG upload (that alone
+    is correct, unremarkable behavior, not a vulnerability) -- probe A only
+    counts as evidence once probe B has independently shown this same
+    endpoint DOES correctly report a real image's type when given real
+    image bytes, proving the dangerous type on probe A came specifically
+    from trusting the filename over content that was never actually image
+    data, not from some generic "always echoes text/html" bug or a
+    coincidentally-permissive but harmless SVG feature.
+
+    Confirms only when both legs hold. A target that rejects probe A
+    outright (a real allowlist/content-sniff, `ExtensionAllowlistMimeCheck
+    Sink`'s own secure behavior) or that fails to correctly serve probe B's
+    real image fails closed, never a guess.
+
+    Known limitation, not silently swept under the rug: this assumes the
+    vulnerable/secure difference is observable directly in the upload
+    response itself (true for this project's own Go/Twitch lab shape,
+    verified against the real templates above) -- a target that instead
+    redirects to, or requires a separate GET of, the served file's own URL
+    would have nothing for this strategy to read from a single POST
+    response, so it fails closed rather than following a redirect this
+    strategy was never designed to chase.
+    """
+    vuln_class = "unrestricted_file_upload"
+    mechanism = "extension-content-type-trust-differential"
+    category = "unrestricted-file-upload"
+
+    def confirm(self, candidate, sender):
+        marker = _token()
+        malicious_field = candidate.param or "file"
+
+        malicious_content = f"<!DOCTYPE html><p>FUZZLAB-MARKER-{marker}</p>".encode("utf-8")
+        malicious_body, malicious_boundary = _multipart_body(
+            malicious_field, "probe.svg", malicious_content,
+            declared_content_type="application/octet-stream",
+        )
+        probe_a = sender.send(
+            candidate.url, candidate.param, malicious_body,
+            method=candidate.method, location=candidate.location,
+            content_type=f"multipart/form-data; boundary={malicious_boundary}",
+        )
+        if probe_a.status < 200 or probe_a.status >= 300:
+            return None    # rejected outright -- not trusting the extension over the bytes
+        if marker not in (probe_a.text or ""):
+            return None    # not served back verbatim -- can't attribute the type to this upload
+        served_type = _response_content_type(probe_a)
+        if served_type not in _SCRIPT_EXECUTABLE_CONTENT_TYPES:
+            return None    # the extension-derived type isn't one that would execute in-browser
+
+        control_body, control_boundary = _multipart_body(
+            malicious_field, "control.png", _MINIMAL_PNG_BYTES,
+            declared_content_type="image/png",
+        )
+        probe_b = sender.send(
+            candidate.url, candidate.param, control_body,
+            method=candidate.method, location=candidate.location,
+            content_type=f"multipart/form-data; boundary={control_boundary}",
+        )
+        if probe_b.status < 200 or probe_b.status >= 300:
+            return None    # can't even accept a genuine image -- no clean differential
+        control_type = _response_content_type(probe_b)
+        if control_type not in _SAFE_RASTER_CONTENT_TYPES:
+            return None    # doesn't correctly report a real image's type either
+
+        return Verdict(True, self.vuln_class, self.mechanism,
+                       {"marker": marker, "served_content_type": served_type,
+                        "control_content_type": control_type})
+
+
 # Grey-box (M10) default confirmation-side probes: something that would reach the
 # vulnerable sink (a SQLi syntax-breaker; an XSS canary) so the coverage/DB-fault
 # side channel has something to observe. Distinct from the black-box strategies'
@@ -1142,6 +1311,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
             JwtAlgNoneConfusionStrategy(),
             PredictableTokenSourceStrategy(),
             MassAssignmentPrivilegedFieldStrategy(),
+            UnrestrictedFileUploadContentTypeTrustStrategy(),
             GreyboxConfirmationStrategy(coverage, dbfault)]
 
 
@@ -1165,6 +1335,7 @@ _CATEGORY_TO_CLASS = {
     "jwt-algorithm-confusion": "jwt_algorithm_confusion",
     "weak-token-entropy": "weak_token_entropy",
     "mass-assignment": "mass_assignment",
+    "unrestricted-file-upload": "unrestricted_file_upload",
 }
 
 

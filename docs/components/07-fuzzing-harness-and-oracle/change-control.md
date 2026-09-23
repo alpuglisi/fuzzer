@@ -3,6 +3,130 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0036 — `UnrestrictedFileUploadContentTypeTrustStrategy`: real detection for `unrestricted_file_upload` (2026-09-23)
+
+- Change: builds the deliberately-deferred detection follow-on
+  `CC-LAB-0186` flagged: an oracle confirmation strategy for
+  `unrestricted_file_upload` (CWE-434), closing Twitch's `TWCH-0009`
+  structural detection zero — this project's first-ever rule/strategy
+  pair for this vuln class, and its first-ever real `multipart/form-data`
+  probe of any kind.
+  1. **`fuzzlab/oracle/strategies.py`**: `UnrestrictedFileUploadContent
+     TypeTrustStrategy` (`vuln_class="unrestricted_file_upload"`,
+     `mechanism="extension-content-type-trust-differential"`). Read both
+     real Go sink templates (`no_extension_check.go.j2`/
+     `extension_allowlist_mime_check.go.j2`) before designing: both
+     twins write-and-serve in the *same* POST response, so this strategy
+     reads the upload response's own `Content-Type` header directly —
+     no separate GET-the-served-file round trip exists on this stack.
+     Two real, hand-encoded `multipart/form-data` probes (`_multipart_
+     body`): probe A uploads `probe.svg` (a plausible image extension)
+     whose bytes are an inert marker
+     (`<!DOCTYPE html><p>FUZZLAB-MARKER-...</p>`, per `NFR-AUD-safe` —
+     never an executing `<script>` tag, the same convention
+     `CC-LAB-0186`'s own live-boot test already uses) that is NOT valid
+     image content of any kind; confirms only a first condition from
+     this leg — HTTP 2xx, the marker echoed back verbatim, and a
+     response `Content-Type` in a named, bounded
+     `_SCRIPT_EXECUTABLE_CONTENT_TYPES` set (`text/html`/`image/svg+xml`/
+     etc. — deliberately never a bare "isn't a safe raster type"
+     heuristic, which would over-claim on a harmless-but-unusual type
+     like `application/octet-stream`). Probe B (the differentiator and
+     the strategy's own false-positive defense, the same "two-probe, not
+     a bare single-probe heuristic" reasoning
+     `InsecureDeserializationTypeConfusionStrategy`'s own docstring
+     argues for) uploads `control.png`, a real, minimal, valid 67-byte
+     PNG (`_MINIMAL_PNG_BYTES`); confirms only if that upload is *also*
+     accepted and its own response `Content-Type` is a genuine safe
+     raster type (`_SAFE_RASTER_CONTENT_TYPES`). Requiring both legs
+     rules out a legitimate SVG-accepting endpoint (which would also,
+     correctly, serve `image/svg+xml` for a genuinely real SVG upload —
+     not a vulnerability on its own) and a generically-permissive/broken
+     target that serves every upload with the same dangerous type
+     regardless of content — probe A alone is not sufficient evidence.
+     Registered in `default_strategies()`.
+  2. **`fuzzlab/core/runmode.py`**: `_VULN_TO_CATEGORY` gained
+     `"unrestricted_file_upload": "unrestricted-file-upload"` — the
+     seventh instance of this session's own recurring underscore/hyphen
+     naming gap, checked and fixed proactively this time rather than
+     found after the fact by the structural guard test (re-run and still
+     green: `test_every_ruled_strategy_category_is_reachable_from_its_
+     vuln_class`).
+  3. **`fuzzlab/tools/probesender.py`**: a real, narrowly-scoped `Sender`
+     extension, found necessary while implementing probe B. This
+     project's `Sender` interface carries a whole-body value as a plain
+     `str`, and both real senders (`RequestsProbeSender`/
+     `SeamProbeSender`) previously always re-encoded it via `.encode
+     ("utf-8")` — correct for the JSON/XML bodies every prior whole-body
+     strategy sends, but probe B's own real PNG magic bytes (all
+     `>= 0x80`) would be corrupted by a utf-8 re-encoding (each such byte
+     turning into a multi-byte utf-8 sequence instead of round-tripping
+     1:1). Fixed by encoding the multipart body into `value` as latin-1
+     (a lossless 1:1 byte<->codepoint mapping, the same convention
+     `fuzzlab.proxy`/`fuzzlab.web` already use for raw bytes) and, in
+     both senders, re-encoding via latin-1 instead of utf-8 specifically
+     when `content_type.startswith("multipart/")` — every other
+     whole-body content type (`application/json`, XML) is untouched, so
+     no existing sender behavior changed; re-ran `tests/
+     test_probesender.py` and the mass-assignment/insecure-
+     deserialization/XXE strategy suites unmodified-in-assertion to
+     confirm.
+  4. **Real, live-boot proof**
+     (`tests/test_oracle_strategies_unrestricted_file_upload_live_boot.py::
+     test_real_boot_confirms_the_vulnerable_twin_and_fails_closed_on_the_
+     secure_twin`, driven through the real `RequestsProbeSender` against
+     a real booted `LABGEN-GO-0017`/`0018` cell pair, never a fake
+     sender): the strategy confirms the vulnerable twin (`served_content_
+     type == "image/svg+xml"`, `control_content_type == "image/png"`)
+     and correctly returns `None` (fails closed) on the secure twin,
+     which rejects `probe.svg` outright (its extension is not
+     allowlisted). Every write this test causes lands under
+     `GoLiveBootHarness`'s own throwaway `tempfile.TemporaryDirectory`-
+     backed process `cwd`, never a real/permanent/shared path.
+  5. **Unit tests**
+     (`tests/test_oracle_strategies_unrestricted_file_upload.py`, 10
+     tests, fake-sender based, mirroring `test_oracle_strategies_mass_
+     assignment.py`'s own vulnerable/secure-twin pattern): the vulnerable
+     `no_extension_check` twin confirms; the secure `extension_allowlist_
+     mime_check` twin fails closed; two dedicated false-positive-
+     avoidance cases fail closed (a target that serves every upload as
+     `text/html` regardless of content, and one that serves everything
+     as the harmless `application/octet-stream`); a target that rejects
+     both probes fails closed; the rule matches/doesn't-match cases; and
+     the registration/`_VULN_TO_CATEGORY` reachability checks.
+  6. **`tests/test_multitarget_category4.py`**: updated for the new real
+     confirmation — Twitch's own real, scored recall moves from 7/9 to
+     8/9 (`tp=8, fp=0`) in `test_both_apps_run_through_multitarget_for_
+     real`, and the combined `macro_recall` assertion updated to match;
+     re-verified against a real booted app through the real `run_targets`
+     pipeline, not assumed from the unit/live-boot tests alone.
+  New/changed files:
+  - `fuzzlab/oracle/strategies.py` (new
+    `UnrestrictedFileUploadContentTypeTrustStrategy` +
+    `_multipart_body`/`_response_content_type` helpers +
+    `_MINIMAL_PNG_BYTES`/`_SAFE_RASTER_CONTENT_TYPES`/
+    `_SCRIPT_EXECUTABLE_CONTENT_TYPES` constants; registered in
+    `default_strategies()` and `_CATEGORY_TO_CLASS`)
+  - `fuzzlab/core/runmode.py` (`_VULN_TO_CATEGORY` entry)
+  - `fuzzlab/tools/probesender.py` (latin-1 multipart-body encoding in
+    both `RequestsProbeSender`/`SeamProbeSender`)
+  - `fuzzlab/audit/rules_data/default_rules.json` (see `CC-AUD-0023`)
+  - `tests/test_oracle_strategies_unrestricted_file_upload.py` (new)
+  - `tests/test_oracle_strategies_unrestricted_file_upload_live_boot.py`
+    (new)
+  - `tests/test_multitarget_category4.py` (recall assertions updated)
+  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    (`FR-FUZZ-22`, new)
+- Impact (other components / project): `default_strategies()` is shared
+  across every target's own run — purely additive (a new strategy scoped
+  by `category`, never fired for a candidate of a different category).
+  The `probesender.py` change is scoped to the `content_type.startswith
+  ("multipart/")` branch only; no other whole-body sender path (JSON/XML)
+  is affected. No other ground truth in the project currently uses
+  `fs_web_root_write`/`unrestricted_file_upload`, so no other target's
+  scoring changes. Paired with `CC-AUD-0023` (rule) — see that entry for
+  the full rule record and pre-change review.
+
 ### CC-FUZZ-0035 — `MassAssignmentPrivilegedFieldStrategy`: real detection for `mass_assignment` (2026-09-23)
 
 - Change: adds the deliberately-separated detection follow-on `CC-LAB-0182`

@@ -91,6 +91,13 @@
       "transaction_type": "Mass Assignment",
       "when": { "location_in": ["body"], "sink_context_in": ["mass_assignment"] },
       "reference": "mass-assignment"
+    },
+    {
+      "id": "R-UNRESTRICTED-FILE-UPLOAD",
+      "category": "unrestricted-file-upload",
+      "transaction_type": "Unrestricted File Upload",
+      "when": { "location_in": ["body"], "sink_context_in": ["fs_web_root_write"] },
+      "reference": "upload-insecure-files"
     }
   ]
 }

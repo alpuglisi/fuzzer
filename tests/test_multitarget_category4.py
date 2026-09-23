@@ -10,13 +10,30 @@ the `run_targets()` passthrough gap and added the project's first `ssrf`
 audit rule + oracle strategies).
 
 **What this now proves, and what remains honestly open (recorded here, not
-routed around).** Twitch now has eight real cells (webhook-signature,
+routed around).** Twitch now has nine real cells (webhook-signature,
 SSRF, access-control/IDOR, JWT `alg:none` confusion, predictable session
 tokens, channel-profile mass assignment, a second access-control/IDOR
-instance at `/channels/subscribers`, and a second SSRF instance at
-`/clips/download` -- `CC-LAB-0178`/`CC-LAB-0180`/`CC-LAB-0181`/
-`CC-LAB-0182`/`CC-LAB-0183`/`CC-LAB-0185`, the "coherent page/route set"
-depth work), and seven of the eight now confirm for real. The second
+instance at `/channels/subscribers`, a second SSRF instance at
+`/clips/download`, and an unrestricted-file-upload cell at `/channels/
+emotes/upload` -- `CC-LAB-0178`/`CC-LAB-0180`/`CC-LAB-0181`/`CC-LAB-0182`/
+`CC-LAB-0183`/`CC-LAB-0185`/`CC-LAB-0186`, the "coherent page/route set"
+depth work), and eight of the nine now confirm for real (only
+webhook-signature does not -- its CWE-347 timing side channel is
+empirically infeasible for this project's wall-clock HTTP measurement
+model). The unrestricted-file-upload cell's own detection follow-on
+(`TWCH-0009`, `CC-AUD-0023`/`CC-FUZZ-0036`) is new, genuinely new
+detection logic (not a zero-new-code generalization like the two below):
+`UnrestrictedFileUploadContentTypeTrustStrategy` sends a real
+`multipart/form-data` two-probe differential -- an inert-marker `probe.svg`
+upload (extension-plausible, bytes NOT a real image) must be accepted and
+served back with a script-executable `Content-Type` derived from the
+extension; a real-PNG `control.png` upload must independently be accepted
+and correctly served as `image/png`, the false-positive defense that rules
+out a legitimate SVG-accepting endpoint or a generically-permissive/broken
+target -- and sees the vulnerable `no_extension_check` twin
+(`LABGEN-GO-0017`) do exactly that, while correctly failing closed on the
+secure `extension_allowlist_mime_check` twin (`LABGEN-GO-0018`, which
+rejects the non-allowlisted upload outright). The second
 access-control/IDOR instance (`TWCH-0007`, `CC-LAB-0183`) needed zero new
 detection code: `AccessControlIdorStrategy` (already built for `TWCH-0003`,
 `CC-FUZZ-0029`) is keyed on `vuln_class` + sink shape, not per-route, and
@@ -159,10 +176,10 @@ def _twitch_cells():
         "lab/manifests/ssrf_clips_download_go_sample.yaml"
     ).cells
     # CC-LAB-0186: this stack's first unrestricted_file_upload/
-    # fs_web_root_write instance (/channels/emotes/upload) -- lab page
-    # only, no rule/strategy yet, so TWCH-0009 scores as a real missed
-    # positive (fn) until its own separately-scoped detection follow-on
-    # lands, same as every other page's own lab-then-detection landing gap.
+    # fs_web_root_write instance (/channels/emotes/upload). Its own
+    # deliberately-deferred detection follow-on (CC-AUD-0023/CC-FUZZ-0036,
+    # `R-UNRESTRICTED-FILE-UPLOAD`/`UnrestrictedFileUploadContentTypeTrust
+    # Strategy`) has since landed, so TWCH-0009 now confirms for real too.
     unrestricted_file_upload = load_manifest(
         "lab/manifests/unrestricted_file_upload_go_sample.yaml"
     ).cells
@@ -228,12 +245,24 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # no rule/strategy (a CWE-347 timing side channel, empirically
     # infeasible for this project's wall-clock HTTP measurement model).
     # The 9th page's unrestricted-file-upload cell (TWCH-0009, CC-LAB-0186)
-    # is a lab page ONLY, deliberately not bundled with detection (same
-    # split as every prior page) -- it is now the 2nd missed positive.
-    # Seven of nine positives confirm here.
+    # now ALSO confirms for real: its own deliberately-deferred detection
+    # follow-on landed (`R-UNRESTRICTED-FILE-UPLOAD`/`UnrestrictedFileUpload
+    # ContentTypeTrustStrategy`, CC-AUD-0023/CC-FUZZ-0036) -- a real
+    # multipart/form-data two-probe differential (an inert-marker `probe.svg`
+    # upload must be accepted and served back with a script-executable
+    # Content-Type derived from the extension; a real-PNG `control.png`
+    # upload must independently be accepted and correctly served as
+    # `image/png`, ruling out a generically-permissive/broken endpoint or a
+    # merely-harmless-but-unusual response type) that sees the vulnerable
+    # `no_extension_check` twin (`LABGEN-GO-0017`) serve an uploaded
+    # `probe.svg` back as `image/svg+xml` regardless of its real, non-image
+    # bytes, and correctly fails closed on the secure
+    # `extension_allowlist_mime_check` twin (`LABGEN-GO-0018`, which rejects
+    # the non-allowlisted upload outright). Eight of nine positives confirm
+    # here now (only webhook-signature remains permanently undetected).
     twitch_report = by_name["twitch-clone"].report
-    assert twitch_report.tp == 7 and twitch_report.fp == 0
-    assert round(twitch_report.recall, 4) == round(7 / 9, 4)
+    assert twitch_report.tp == 8 and twitch_report.fp == 0
+    assert round(twitch_report.recall, 4) == round(8 / 9, 4)
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002, which does have a rule/strategy, R-XXE/
@@ -250,7 +279,7 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
-    assert round(summary["macro_recall"], 4) == round(((7 / 9) + (1 / 3)) / 2, 4)
+    assert round(summary["macro_recall"], 4) == round(((8 / 9) + (1 / 3)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True

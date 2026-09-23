@@ -266,6 +266,67 @@ rewards) derives from it.
     `fuzzlab.harness.multitarget` Phase E wiring, Twitch's real, scored
     recall moves from 4/6 to 5/6.
 
+- **FR-FUZZ-22** *(`UnrestrictedFileUploadContentTypeTrustStrategy`;
+  `CC-FUZZ-0036`, 2026-09-23).* The oracle supports real **unrestricted
+  file upload (CWE-434) confirmation**, paired with `FR-AUD-14`'s
+  candidate-generation rule, closing `CC-LAB-0186`'s own deliberately-
+  separated follow-on for Twitch's `TWCH-0009` structural detection zero
+  — this project's first-ever detection capability for the
+  `unrestricted_file_upload` class, and its first real
+  `multipart/form-data` probe of any kind:
+  - `UnrestrictedFileUploadContentTypeTrustStrategy` (`vuln_class=
+    "unrestricted_file_upload"`, `mechanism=
+    "extension-content-type-trust-differential"`): a real, hand-encoded
+    `multipart/form-data` two-probe differential. Probe A uploads a file
+    named `probe.svg` (a plausible image extension) whose actual bytes
+    are an inert marker (`<!DOCTYPE html><p>FUZZLAB-MARKER-...</p>`, per
+    `NFR-AUD-safe` — never an executing `<script>` tag) that is NOT valid
+    image content of any kind; confirms only if the upload is accepted
+    (2xx), the marker is echoed back verbatim, and the response's own
+    `Content-Type` header is in a named, bounded script-executable set
+    (`text/html`/`image/svg+xml`/etc — never a bare "isn't a safe raster
+    type" heuristic, which would over-claim on a harmless-but-unusual
+    type like `application/octet-stream`). Probe B (the false-positive
+    defense) independently uploads a file named `control.png` whose
+    bytes are a real, minimal, valid PNG; confirms only if that upload is
+    *also* accepted and its own `Content-Type` is a genuine safe raster
+    type — ruling out both a legitimate SVG-accepting endpoint (which
+    would also serve `image/svg+xml` for a *real* SVG, correctly) and a
+    generically-permissive/broken target that serves every upload with
+    the same dangerous type regardless of content.
+  - Both twins' real response shape was verified directly against the
+    real Go templates before designing this (`fuzzlab/labgen/emitters/
+    go_net_http/templates/sinks/no_extension_check.go.j2`/
+    `extension_allowlist_mime_check.go.j2`): the vulnerable/secure
+    difference is observable directly in the upload's own POST response
+    (no separate GET-the-served-file round trip is needed), so this
+    strategy never chases a redirect or a second request.
+  - `fuzzlab.core.runmode._VULN_TO_CATEGORY` gained
+    `"unrestricted_file_upload": "unrestricted-file-upload"` — the
+    seventh instance of the recurring underscore/hyphen gap, checked and
+    fixed proactively this time (the structural guard test,
+    `test_every_ruled_strategy_category_is_reachable_from_its_vuln_class`,
+    was also re-run and stays green).
+  - A real, additive `Sender` extension was needed and made narrowly:
+    `RequestsProbeSender`/`SeamProbeSender` (`fuzzlab/tools/
+    probesender.py`) now encode a `location="body"` value as latin-1
+    (a lossless 1:1 byte<->codepoint mapping, the same convention
+    `fuzzlab.proxy`/`fuzzlab.web` already use for raw bytes) instead of
+    utf-8 whenever `content_type` starts with `"multipart/"` — the
+    project's existing whole-body sender path only ever carried text
+    (JSON/XML), and utf-8 would corrupt any byte >= 0x80 in this
+    strategy's own real binary PNG control probe. Scoped to the
+    multipart branch only; every existing JSON/XML whole-body sender
+    path is unaffected (re-verified: `test_probesender.py` and the
+    mass-assignment/insecure-deserialization/XXE strategy suites all
+    still pass unmodified).
+  - Verified live against Twitch's real booted twins
+    (`LABGEN-GO-0017`/`0018`) via a dedicated live-boot strategy test;
+    through the real `fuzzlab.harness.multitarget` Phase E wiring,
+    Twitch's real, scored recall moves from 7/9 to 8/9 (only
+    `webhook_signature`'s own permanently-infeasible timing side channel
+    remains undetected).
+
 - **FR-FUZZ-19** *(`JwtAlgNoneConfusionStrategy`; `CC-FUZZ-0033`,
   2026-09-23).* The oracle supports real **JWT algorithm-confusion
   (CWE-347) confirmation**, paired with `FR-AUD-11`'s candidate-

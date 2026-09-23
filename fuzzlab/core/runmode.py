@@ -47,7 +47,13 @@ MANUAL = "manual"
 # every *ruled* category) so a missed entry fails loudly at test time
 # instead of silently shipping an unreachable strategy.
 # `webhook_signature` (and `outbound_header_injection`) still have no
-# confirmer built -- stay unmapped until each does.
+# confirmer built -- stay unmapped until each does. `unrestricted_file_
+# upload` (CC-LAB-0186's deferred follow-on) is the seventh instance of this
+# same underscore/hyphen mismatch found in this session -- checked
+# proactively before landing, not found by the guard test after the fact
+# this time: `R-UNRESTRICTED-FILE-UPLOAD`/`UnrestrictedFileUploadContent
+# TypeTrustStrategy`, verified live against Twitch's real
+# LABGEN-GO-0017/0018 twins.
 _VULN_TO_CATEGORY = {
     "sqli": "sql-injection",
     "xss-reflected": "xss",
@@ -59,6 +65,7 @@ _VULN_TO_CATEGORY = {
     "jwt_algorithm_confusion": "jwt-algorithm-confusion",
     "weak_token_entropy": "weak-token-entropy",
     "mass_assignment": "mass-assignment",
+    "unrestricted_file_upload": "unrestricted-file-upload",
 }
 
 

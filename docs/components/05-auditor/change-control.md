@@ -3,6 +3,63 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0023 — `R-UNRESTRICTED-FILE-UPLOAD` audit rule (2026-09-23)
+
+- Change: adds `R-UNRESTRICTED-FILE-UPLOAD`, category
+  `unrestricted-file-upload`, to `fuzzlab/audit/rules_data/
+  default_rules.json` — `{"location_in": ["body"], "sink_context_in":
+  ["fs_web_root_write"]}`, the same `location_in`+`sink_context_in` shape
+  as `R-MASS-ASSIGNMENT`/`R-INSECURE-DESERIALIZATION`/`R-XXE`. `reference`
+  is `"upload-insecure-files"` (the matching `references/` catalog
+  directory name — `unrestricted-file-upload` itself has no catalog dir,
+  so this is a genuine, deliberate departure from the "reference matches
+  the category slug" convention every prior rule in this file happened to
+  follow, recorded here rather than left implicit). The project's
+  first-ever candidate-generation rule for `unrestricted_file_upload`
+  (CWE-434) — this vuln class exists on only one lab page so far
+  (Twitch's `/channels/emotes/upload`, `CC-LAB-0186`), and had no rule at
+  all before this entry, closing that page's own deliberately-deferred
+  `TWCH-0009` structural detection zero. Paired with `CC-FUZZ-0036`'s new
+  `UnrestrictedFileUploadContentTypeTrustStrategy` oracle confirmation.
+  Reviewed via the mandatory pre-change review gate: the `Agent` tool for
+  a two-independent-reviewer pass was checked for and found unavailable
+  in this session's toolset (via `ToolSearch`, several queries) — the
+  same substitution precedent `CC-LAB-0182`-`0186` already used,
+  documented here rather than silently skipped. **(1) Accuracy** —
+  checked by direct source inspection of both real Go sink templates
+  (`no_extension_check.go.j2`/`extension_allowlist_mime_check.go.j2`)
+  before designing the rule/strategy pair, not assumed from the
+  `CC-LAB-0186` change-control entry's own prose alone: confirmed both
+  twins write-and-serve in the same POST response (no separate GET
+  round trip exists to key detection off), confirmed `TWCH-0009`'s real
+  ground-truth `param`/`location`/`sink_context` values
+  (`file`/`body`/`fs_web_root_write`) directly from `lab/
+  ground-truth-twitch-clone/labels.json` and confirmed
+  `fuzzlab.harness.auto.points_from_ground_truth` genuinely propagates
+  `sink_context` onto the real audited `InjectionPoint` (verified by
+  reading that function's own code, not assumed). **(2) Adequacy** —
+  checked this rule does not collide with or duplicate `R-MASS-
+  ASSIGNMENT`/`R-INSECURE-DESERIALIZATION`/`R-XXE` (each keys on a
+  disjoint `sink_context_in` value: `mass_assignment`/`deserialization`/
+  `xml` vs. this rule's own `fs_web_root_write`, so no two rules can ever
+  both fire for the same point); confirmed via a real, executed
+  `run_targets` pipeline run (`tests/test_multitarget_category4.py::
+  test_both_apps_run_through_multitarget_for_real`) that this rule
+  actually fires for the real ground-truth point and the paired strategy
+  actually confirms it, moving Twitch's own real, scored recall from 7/9
+  to 8/9 — not assumed correct from unit tests alone, the same discipline
+  `CC-AUD-0018`'s own `sink_context` propagation defect was originally
+  caught by.
+  New/changed files:
+  - `fuzzlab/audit/rules_data/default_rules.json`
+  - `docs/components/05-auditor/requirements.md` (`FR-AUD-14`, new)
+- Impact (other components / project): `default_rules.json` is shared
+  across every category and every existing target's own run — purely
+  additive (a new rule appended after `R-MASS-ASSIGNMENT`). No other
+  ground truth in the project currently uses `fs_web_root_write`, so no
+  other target's scoring changes. Paired with `CC-FUZZ-0036` (oracle) —
+  see that entry for the full strategy record.
+
 ### CC-AUD-0022 — `R-MASS-ASSIGNMENT` audit rule (2026-09-23)
 
 - Change: adds `R-MASS-ASSIGNMENT`, category `mass-assignment`, to
