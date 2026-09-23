@@ -15,7 +15,25 @@ changed, and the reason. Reference the commit hash where useful.
   comparison timing), so Tier 1/2's marker-differential model cannot confirm
   it — recorded as an open question, not silently skipped. A real control-value
   design mistake (a control that could itself produce the evidence marker) was
-  found and fixed before landing. `CC-LAB-0175`/`FR-LAB-81`.
+  found and fixed before landing. `CC-LAB-0175`/`FR-LAB-98` (renumbered from
+  the dispatch's own `FR-LAB-81` after merging the cross-branch collision fix
+  below, which had already claimed up through `FR-LAB-97`).
+
+## 2026-09-23 (cross-branch bookkeeping fix, by the category 1 pilot session)
+- Docs/LAB: fixed two real cross-branch `FR-LAB` ID collisions found during
+  a cross-branch review — this branch's `FR-LAB-78`/`FR-LAB-79`
+  (`go_net_http` Phase B SSRF; §9.2a Java/Spring Boot consolidation) had
+  been independently claimed by category 5 for its own, unrelated
+  `open_redirect`/ground-truth entries; this branch's `FR-LAB-80` (Phase C
+  ground truth for Netflix/Twitch) had been independently claimed by
+  category 3 for its `spring_boot` insecure-deserialization cell. Since
+  this branch's usages had fewer cross-file references to update,
+  renumbered them: `FR-LAB-78`→`FR-LAB-92`, `FR-LAB-79`→`FR-LAB-93`,
+  `FR-LAB-80`→`FR-LAB-97`, via exact-token replacement across
+  `requirements.md`/`change-control.md`/`CHANGELOG.md`/
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`/`docs/ARCHITECTURE.md`.
+  Full non-slow test suite re-run confirms no regression (1846 passed / 8
+  skipped, identical to this branch's own pre-fix baseline).
 
 ## 2026-09-23 (category 4, Phase C ground truth)
 - Lab: added real, out-of-band ground truth for category 4's Netflix and
@@ -29,7 +47,7 @@ changed, and the reason. Reference the commit hash where useful.
   whole-body-JSON `param` convention; a header-carried-value `param`
   convention). Explicitly flags that Phase C's "coherent page/route set"
   design step remains separate, larger, not-yet-started work for both apps.
-  `CC-LAB-0174`/`FR-LAB-80`. See `docs/components/01-target-lab/change-control.md`.
+  `CC-LAB-0174`/`FR-LAB-97`. See `docs/components/01-target-lab/change-control.md`.
 
 ## 2026-09-23 (cross-category doc sync, round 2)
 - Docs (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, all five second-target
@@ -38,7 +56,7 @@ changed, and the reason. Reference the commit hash where useful.
   tracker) to a single canonical, byte-identical block (SHA256-verified)
   after reviewing and correcting category 4's Go/Twitch Phase B increment and
   the completed Java/Spring Boot port, and category 5's CSV-formula-injection
-  shape (which had a fresh `FR-LAB-80`/`81` collision with category 3,
+  shape (which had a fresh `FR-LAB-97`/`81` collision with category 3,
   renumbered to `FR-LAB-90`/`91`). §9.2a's "Decided" text is updated from
   pending/future tense to reflect the consolidation is now **done**:
   category 4's `java_spring_boot` package is deleted, Netflix's cell is
@@ -50,7 +68,7 @@ changed, and the reason. Reference the commit hash where useful.
   identical to each branch's own pre-sync baseline).
 
 ## 2026-09-23 (category 4 pilot, Phase B first increment — Go/SSRF)
-- LAB: `go_net_http` Phase B, first increment (`CC-LAB-0172`/`FR-LAB-78` —
+- LAB: `go_net_http` Phase B, first increment (`CC-LAB-0172`/`FR-LAB-92` —
   numbered against this category's `0170`-`0209` block per the
   cross-branch collision fix recorded immediately below; this increment
   was built before that fix landed on this branch, so it originally used

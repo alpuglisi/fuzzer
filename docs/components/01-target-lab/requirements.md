@@ -1890,7 +1890,7 @@ lane) can submit a payload as
   for context, not deleted).** The `java_spring_boot` package this
   requirement described is retired; its one capability (a JVM/Java target
   stack supporting the Netflix CWE-502 Jackson-deserialization cell) is
-  now met by `spring_boot` — see `FR-LAB-79`. *(`java_spring_boot` Phase A:
+  now met by `spring_boot` — see `FR-LAB-93`. *(`java_spring_boot` Phase A:
   this project's first JVM/Java
   target-lab stack; `CC-LAB-0171`, 2026-09-22, category 4 pilot — Media/
   streaming, Netflix pick, `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
@@ -1966,7 +1966,7 @@ lane) can submit a payload as
     `docs/research/site-architecture-survey-functionality-netflix.md` §2's
     own Phase B note.
 
-- **FR-LAB-78** *(`go_net_http` Phase B, first increment: a second
+- **FR-LAB-92** *(`go_net_http` Phase B, first increment: a second
   illustrative shape, CWE-918/SSRF; `CC-LAB-0172`, 2026-09-23, category 4
   pilot's Twitch pick).* Given its own new FR number rather than widening
   `FR-LAB-76` in place — a distinct vuln class with a genuinely different
@@ -2031,7 +2031,7 @@ lane) can submit a payload as
     rather than adding vuln-class breadth, which this project ranks
     lower) — deferred to a later increment, not dropped.
 
-- **FR-LAB-79** *(§9.2a Java/Spring Boot consolidation: Netflix's cell now
+- **FR-LAB-93** *(§9.2a Java/Spring Boot consolidation: Netflix's cell now
   lives in `spring_boot`; `CC-LAB-0173`, 2026-09-23).* Supersedes
   `FR-LAB-77`'s capability without restating it: the CWE-502 Jackson
   polymorphic-deserialization cell (playback-resume shape) is ported out
@@ -2114,7 +2114,7 @@ lane) can submit a payload as
     suite was re-run after the deletion to confirm (no regression, same
     pre-existing `gitleaks`-related failures as before).
 
-- **FR-LAB-80** *(Phase C ground truth for category 4's Netflix and Twitch
+- **FR-LAB-97** *(Phase C ground truth for category 4's Netflix and Twitch
   apps, plus additive `labels.schema.json` widening; `CC-LAB-0174`,
   2026-09-23).* Adds real, out-of-band ground truth (D9's contract) for
   every vulnerable cell category 4 has built so far, each app in its own
@@ -2124,7 +2124,7 @@ lane) can submit a payload as
   - `lab/ground-truth-netflix-clone/` (`target: "spring_boot"`, prefix
     `NFLX-`): one case, `NFLX-0001`, for `LABGEN-JV-0001`
     (`POST /api/playback/resume`, CWE-502 Jackson polymorphic
-    deserialization, `FR-LAB-79`). The tainted value is the entire raw
+    deserialization, `FR-LAB-93`). The tainted value is the entire raw
     request body (Jackson deserializes it polymorphically), not one named
     field, so `param` is the literal string `"body"` with
     `location: "body"` — recorded explicitly as a judgment call, since the
@@ -2138,7 +2138,7 @@ lane) can submit a payload as
     same convention a query-param case uses the literal query-string key
     — this project's first header-carried ground-truth case, recorded as
     a judgment call. `TWCH-0002` for `LABGEN-GO-0003`
-    (`GET /generated/labgen-go-0003`, CWE-918 SSRF, `FR-LAB-78`), an
+    (`GET /generated/labgen-go-0003`, CWE-918 SSRF, `FR-LAB-92`), an
     ordinary query-param case (`param: "url"`, `location: "query"`).
   - **Additive widening of `fuzzlab/labels/schemas/labels.schema.json`**:
     append three `vuln_class` enum values (`webhook_signature`, `ssrf`,
@@ -2169,7 +2169,7 @@ lane) can submit a payload as
     C's 'coherent page/route set' bar... not yet begun"). Recorded here
     rather than left to imply Phase C is now fully done for category 4.
 
-- **FR-LAB-81** *(Phase D: real Tier 1/2 conformance for two of category
+- **FR-LAB-98** *(Phase D: real Tier 1/2 conformance for two of category
   4's three cells; `CC-LAB-0175`, 2026-09-23).* Real, executed Tier 1
   (`fuzzlab.labgen.conformance.tier1.run_tier1_case`) and Tier 2
   (`tier2.LiveBootTier2Oracle`/`run_tier2_case`) proof for the SSRF cell
@@ -2328,7 +2328,7 @@ None (it is the system under test).
   `tests/test_labgen_harder_shapes.py` and `tests/test_labgen_identifier_sqli_assertion.py`.
 
 ## 8. Open questions
-- (`CC-LAB-0175`/`FR-LAB-81`, category 4) **The webhook-signature cell
+- (`CC-LAB-0175`/`FR-LAB-98`, category 4) **The webhook-signature cell
   (`LABGEN-GO-0001`/`0002`, CWE-347) has no Tier 1/2 conformance path.**
   `naive_string_compare` vs `hmac.Equal` are functionally identical for any
   single request (both accept a correct signature, reject an incorrect
