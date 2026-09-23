@@ -1,4 +1,4 @@
-"""The `price_integrity_bypass` shape (`CC-LAB-0212`/`FR-LAB-92`/`FR-LAB-93`)
+"""The `price_integrity_bypass` shape (`CC-LAB-0212`/`FR-LAB-100`/`FR-LAB-101`)
 -- category 5's (Travel/booking/marketplaces) Booking.com pilot, third
 increment (first: `open_redirect`, `CC-LAB-0210`; second:
 `csv_formula_injection`, `CC-LAB-0211`).

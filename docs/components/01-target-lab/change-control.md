@@ -123,7 +123,7 @@ Component code: **LAB**. Entry format and required fields: see
   see the commit message / `CHANGELOG.md` line for the exact pass/skip/
   fail counts.
 
-### CC-LAB-0212 — category 5 pilot, third increment: `price_integrity_bypass` (client-trusted payment amount) shape on `php_laravel`, Booking.com's checkout (FR-LAB-92, FR-LAB-93) (2026-09-23)
+### CC-LAB-0212 — category 5 pilot, third increment: `price_integrity_bypass` (client-trusted payment amount) shape on `php_laravel`, Booking.com's checkout (FR-LAB-100, FR-LAB-101) (2026-09-23)
 - Change: the third increment of category 5's Booking.com app (first two:
   `CC-LAB-0210` open_redirect, `CC-LAB-0211` csv_formula_injection).
   Reuses the **already-existing** `price_integrity_bypass` concern and
@@ -218,8 +218,8 @@ Component code: **LAB**. Entry format and required fields: see
      genuinely is a SQL `INSERT`) rather than minting an under-specified
      new token, per the adequacy review's explicit preference for reuse
      over vagueness.
-  8. `docs/components/01-target-lab/requirements.md`: `FR-LAB-92`
-     (the shape), `FR-LAB-93` (ground truth's third case), written at the
+  8. `docs/components/01-target-lab/requirements.md`: `FR-LAB-100`
+     (the shape), `FR-LAB-101` (ground truth's third case), written at the
      same file-by-file granularity as `FR-LAB-78`-`81` from the first
      draft (no placeholder-then-fix round needed this time).
   9. **Tests**: `tests/test_labgen_price_integrity.py` (9 tests) —
@@ -264,7 +264,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] `lab/ground-truth-booking-clone/`: `BKNG-0003` in all 3 files — done
   - [x] `fuzzlab/labgen/conformance/static_precheck.py`: new entry — done
   - [x] `tests/test_labgen_modules.py`: 2 new fixture entries (done *before* the whole-repo run) — done
-  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-92`/`83` — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-100`/`83` — done
   - [x] `tests/test_labgen_price_integrity.py` (9 tests, all green including the real live-boot test) — done
   - [x] `CHANGELOG.md` line — done
   - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done

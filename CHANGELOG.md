@@ -32,6 +32,18 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   (the ported cell already models the exact idiom); Spring Data SpEL
   injection remains genuinely greenfield project-wide. See `CC-LAB-0213`.
 
+## 2026-09-23 (cross-branch bookkeeping fix, by the category 1 pilot session)
+- Docs/LAB: fixed a real cross-branch `FR-LAB` ID collision found during a
+  cross-branch review — this branch's freshly-pushed `FR-LAB-92`/
+  `FR-LAB-93` (third increment, `price_integrity_bypass` shape,
+  `CC-LAB-0212`, and its own ground-truth case) had been independently
+  claimed moments earlier by category 4 for its own, unrelated
+  `go_net_http`/Java-Spring-Boot-consolidation entries. Renumbered this
+  branch's usages to `FR-LAB-100`/`FR-LAB-101` via exact-token replacement
+  across `requirements.md`/`change-control.md`/
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`/`docs/ARCHITECTURE.md`.
+  Full non-slow test suite re-run confirms no regression.
+
 ## 2026-09-23 (cross-category doc sync, round 2)
 - Docs (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, all five second-target
   category branches): re-synced §9.2 (stack-reuse ledger), §9.2a (Java/Spring
