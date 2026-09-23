@@ -1,0 +1,4 @@
+_response_{{ var_name }} = requests.get({{ value_expr }}, timeout=5, allow_redirects=False)
+_response_{{ var_name }}.raise_for_status()
+_preview_{{ var_name }} = _response_{{ var_name }}.json()
+return JsonResponse({"preview_title": _preview_{{ var_name }}.get("title", "")})

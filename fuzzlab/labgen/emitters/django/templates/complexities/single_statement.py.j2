@@ -1,0 +1,5 @@
+def {{ handler_name }}(request):
+{{ body }}
+    if row is None:
+        return HttpResponse(status=404)
+    return JsonResponse({"id": row[0], "name": row[1]})

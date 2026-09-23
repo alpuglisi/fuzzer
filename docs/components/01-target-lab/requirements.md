@@ -1838,6 +1838,343 @@ lane) can submit a payload as
     `puppy-fort-factory/` still present and every test green, a second doing
     only the `git rm -r puppy-fort-factory/` once the first commit's own
     full test run (fast suite + the live-boot slow suite) was green.
+> **✅ Cross-branch bookkeeping-ID collision, resolved (originally flagged
+> 2026-09-22 by the Category 1 (E-commerce) pilot session; correction note
+> added 2026-09-23 by this branch's own session).** This branch's `django`
+> emitter Phase A originally landed as `FR-LAB-64`/`FR-LAB-65`, which
+> collided with `FR-LAB-64`/`FR-LAB-65` independently claimed on
+> `claude/second-target-cat1-ecommerce` (its own `node_express` CWE-1321
+> module / `ruby_rails` Phase A harness) — neither branch merged into
+> `main` yet, so each session picked "next free" off its own stale copy of
+> this file. A fix commit on this branch (`a04127f`) renumbered this
+> branch's entries to `FR-LAB-72`/`FR-LAB-73`. **That fix commit's own
+> warning text (the paragraph this note replaces) had a real, self-
+> introduced bug**, found on a later re-read of this file: its find/replace
+> renumbered every `64`/`65` it found, including inside the warning
+> message's own prose — so the warning ended up asserting "`FR-LAB-72`/
+> `FR-LAB-73` collide with cat1's own `FR-LAB-72`/`FR-LAB-73`," a
+> self-contradictory claim (72/73 was the *target* of the renumbering, not
+> a second collision). **Verified directly against a real fetch of
+> `origin/claude/second-target-cat1-ecommerce`'s current
+> `requirements.md`, 2026-09-23: its highest `FR-LAB-` number is
+> `FR-LAB-69`** — `FR-LAB-72`/`FR-LAB-73` do not exist there and do not
+> collide with anything on that branch's actual pushed state (the prior
+> note's "cat1 is through `FR-LAB-71`" claim was also not quite matched by
+> that branch's real file content at fetch time, though close). This
+> branch's `FR-LAB-72`/`FR-LAB-73` are confirmed clear as of this check;
+> a session merging either branch into `main` later should still re-verify
+> at merge time, since both branches keep advancing independently.
+- **FR-LAB-72** *(the `django` emitter exists, Phase A scope; `CC-LAB-0090`,
+  2026-09-22).* A new `Emitter` implementation
+  (`fuzzlab.labgen.emitters.django.DjangoEmitter`) for category 2's
+  (Social/UGC platforms) new-stack pick — Instagram/Python-Django, per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9 and
+  `docs/research/category2-social-ugc-functionality-and-cwe-research.md`.
+  **Phase A scope only**: exactly one shape, `(sqli,
+  sql_numeric_literal)` — the same first shape `php_laravel`'s own L-P3.3a
+  foundation lane and `node_express`'s own Phase A plan both picked — with
+  a real vulnerable twin (unparameterized string-concatenated
+  `connection.cursor()` query) and a real secure twin (a parameterized
+  `%s` placeholder on the same raw cursor, never the ORM on either twin —
+  deliberately isolating the vulnerable/secure axis to string-concat-vs.
+  -parameterized-placeholder, the same axis every other stack's first
+  shape proves, rather than confounding it with "ORM vs. raw SQL").
+  Module composition (`fuzzlab.labgen.emitters.django.modules`) follows
+  `node_express.modules`' own Tier-A/Phase-A port of the shared
+  source/transform/sink/complexity category shape (`CR-LAB-0001` Addendum
+  C) — its own registries, no import from or registration into
+  `fuzzlab.labgen.modules` or any sibling emitter's registry. A
+  `route`-category accumulator (`fuzlab_django_lab/urls.py`, Addendum D)
+  is fed one fragment per supported cell via
+  `DjangoEmitter.render_route_accumulator()`, sorted by cell ID at render
+  time (verified deterministic across two calls with reversed cell order —
+  `tests/test_labgen_django_conformance.py`). Passes Tier 0 (`python -m
+  py_compile` on every generated view + the accumulator) and Tier 3
+  (whole-manifest regenerate-and-diff, byte-deterministic) —
+  `lab/manifests/phase_a_django_sample.yaml`,
+  `tests/test_labgen_django_conformance.py`. The full module-inventory
+  depth (mirroring `node_express`'s own three Tier-A shapes, let alone
+  `php_laravel`'s full nine) is explicitly out of scope — a separate,
+  later Phase B.
+- **FR-LAB-73** *(`DjangoLiveBootHarness` proves a real boot + real HTTP
+  payload differential; `CC-LAB-0090`, 2026-09-22).*
+  `fuzzlab.labgen.conformance.django_live_boot.DjangoLiveBootHarness`
+  structurally mirrors `php_laravel`'s own `LiveBootHarness`
+  (`build()`/`_assemble()`/`request()`/`get()`/`post()`/`query_db()`/
+  `close()`/context-manager protocol, the same bounded-timeout-at-every-
+  subprocess-step discipline via its own `_run()`, and reuses
+  `live_boot.py`'s existing `_NoRedirectHttpErrorProcessor`/
+  `_NO_REDIRECT_OPENER` directly rather than reimplementing it — `BUG-0028`'s
+  fix, generic `urllib` plumbing with no Laravel-specific behavior). The
+  actual boot mechanism is new and venv-based, never Docker/`composer`: a
+  real `python -m venv` + `pip install django==5.2.17` + `manage.py
+  migrate --no-input` + `manage.py runserver` boot, **forced to
+  `127.0.0.1`** regardless of `DJANGO_STACK_ENV.entrypoint_cmd`'s nominal
+  `0.0.0.0` string (`CLAUDE.md`'s non-negotiable Safety section — loopback-
+  only, never exposed; the same real-vs-nominal-field distinction
+  `LiveBootHarness.build()` already has for `php_laravel`, now stated
+  explicitly here rather than left to silent analogy). A real capability
+  probe, `django_boot_available()`, exercises the actual operation path
+  (a real, bounded `pip download django==5.2.17 --no-deps` round trip
+  through whatever proxy is configured — `PA-0035`, generalizing
+  `BUG-0033`'s `composer` fix to `pip`), never a bare socket/DNS check.
+  **`DEBUG = False`/`ALLOWED_HOSTS` are forced** in the generated
+  `settings.py` (`fuzzlab.labgen.emitters.django.stack_env.
+  settings_py_content()`) — a correctness requirement, not a follow-up
+  (mirrors `php_laravel`'s own `APP_DEBUG=false`, D20): left on, Django's
+  own debug page would leak a full traceback + `SECRET_KEY`-adjacent
+  settings on exactly the unhandled-exception path the vulnerable twin's
+  SQLi payload triggers, contaminating this cell's single labeled
+  vulnerability class with an unlabeled full-disclosure secondary one —
+  **verified against the real served HTTP response body, not merely
+  `settings.py`'s source text**
+  (`tests/test_labgen_django_live_boot_single_shape.py::
+  test_django_live_boot_debug_false_no_traceback_leak`). Real, executed,
+  skip-guarded (PA-0005) proof, observed directly this session: a real
+  `GET` with a syntax-breaking payload (`1' OR '1'='1`) against the
+  vulnerable twin returns a real `500` with **no** stack trace (Django's
+  plain error page, confirming `DEBUG = False` is enforced in practice,
+  not just asserted); the identical payload against the secure twin's
+  parameterized query returns a real `404` (safely treated as a
+  non-matching literal string, never executed as SQL) — the same
+  syntax-break-vs.-safely-bound differential every other stack's first
+  live-boot test proves.
+- **FR-LAB-88** *(the `django` emitter widened to Tier-A depth; `CC-LAB-0091`,
+  2026-09-23).* `fuzzlab.labgen.emitters.django.DjangoEmitter` widened from
+  Phase A's one shape to the same three-shape Tier-A bar `node_express`
+  already proves: `sqli`/`sql_string_literal` (a login-style lookup, POST
+  body source, an MD5'd-password-boilerplate sink, parameterized `%s`
+  placeholders vs. quoted-string concatenation) and `xss`/`html_body` (a
+  stored value — a real, seeded `profiles` row, read via a small fixed
+  `_read_stored_bio()` helper every generated view carries unconditionally
+  — echoed raw into an `HttpResponse` body vs. escaped with
+  `django.utils.html.escape()`). Any cell whose `route.method` is not
+  `GET` renders with `@csrf_exempt` (gated on the cell's own route method,
+  never on which complexity template renders it, so a future POST-shaped
+  cell on a different complexity cannot silently ship undecorated —
+  verified by a whole-collection regression check,
+  `tests/test_labgen_django_conformance.py::
+  test_every_non_get_cell_is_decorated_with_csrf_exempt`). Passes Tier 0/
+  Tier 3 for the widened manifest
+  (`lab/manifests/phase_b_django_widen_sample.yaml`). The full
+  `php_laravel`-depth nine-shape inventory, and the researched,
+  corpus-grounded Django-specific XSS footgun (`mark_safe()`/`|safe`/
+  `{% autoescape off %}`, `docs/research/category2-social-ugc-
+  functionality-and-cwe-research.md` §4) stay out of scope — the latter
+  deliberately deferred to Phase C's own corpus-grounded page design.
+- **FR-LAB-89** *(real live-boot proof for both widened shapes, including
+  a `PA-0034` adversarial test; `CC-LAB-0091`, 2026-09-23).* Real, executed,
+  skip-guarded (PA-0005) proof in `tests/test_labgen_django_live_boot_
+  phase_b.py`: a real `POST /api/login` request with a classic SQLi
+  login-bypass payload (`' OR 1=1 -- `) against the vulnerable twin's
+  unparameterized query returns a real `200` (a genuine, observable
+  authentication bypass — no correct password required), while the secure
+  twin's parameterized query returns a real `404` (no bypass); a real
+  `GET /api/profile` request against a `profiles` row seeded with a real
+  `<script>` payload returns the vulnerable twin's raw, unescaped payload
+  in the response body, and the secure twin's real `&lt;script&gt;`-escaped
+  form. **A real `PA-0034` adversarial test** (an input orthogonal to the
+  feature's own SQLi demonstration — a mismatched HTTP method, `GET`
+  instead of `POST`, against the newly `@csrf_exempt`-decorated `/api/login`
+  view) confirmed the CSRF exemption does not silently widen the attack
+  surface — this test **found a real code defect** (`BUG-0037`/`PA-0039`:
+  the vulnerable sink concatenated a possibly-`None` value without a
+  `str()` cast, crashing with a real `500` instead of the expected `404`
+  on a `GET` request), fixed before this entry landed, and now passing.
+- **FR-LAB-95** *(PicTrail app identity + `/post` real page; `CC-LAB-0092`,
+  2026-09-23).* Establishes **PicTrail** — the Instagram-style app
+  identity for the `django` stack's Phase C content (category 2 pilot;
+  page-set design in `docs/research/category2-social-ugc-functionality-
+  and-cwe-research.md` §6) — and lands its first real,
+  ground-truth-bearing page: `GET /post?id=` (a post-detail lookup,
+  grounded in the real Instagram post-detail feature researched there).
+  Reuses Phase A's proven `sqli`/`sql_numeric_literal` module verbatim —
+  zero new sink/source/transform/complexity code; the value of this
+  increment is the **app-identity/ground-truth pattern** standing up end
+  to end for the first time on this stack, not a new vulnerability shape.
+  A new `_REAL_PAGE_CELL_IDS`-based URL-pinning mechanism in
+  `render_route_accumulator` serves a real-page cell at its own declared
+  route path instead of the generic `generated/{slug}/` pattern every
+  illustrative cell uses (`php_laravel`'s own "a real page keeps its own
+  exact URL" convention, ported at a much smaller scale — one real-URL-
+  owning cell, no twin/canonical-cell machinery). Passes Tier 0/Tier 3
+  for the new manifest
+  (`lab/manifests/phase_c_picktrail_post_detail.yaml`).
+- **FR-LAB-96** *(real, independent ground truth authored and cross-
+  checked against a real live-booted request, including a `PA-0034`
+  adversarial test; `CC-LAB-0092`, 2026-09-23).* A brand-new, independent
+  ground-truth directory, `lab/ground-truth-picktrail-django/` (D9's
+  three-file contract: `labels.json`/`injection-points.json`/
+  `expectedresults.csv`), never touching or merging into `php_laravel`'s
+  own `lab/ground-truth/` — this project's first-ever second, independent
+  ground-truth set. One case, `PT-0001` (a fresh, opaque case-ID prefix,
+  never `PFF-`/`LABGEN-*`), loaded for real via
+  `fuzzlab.labels.contract.load()` and cross-checked, independently of
+  the emitter's own `_ROUTE_PARAMS`/`_REAL_PAGE_CELL_IDS` internals,
+  against a real booted request at the exact URL/param/method the ground
+  truth names (`tests/test_labgen_django_live_boot_picktrail.py::
+  test_ground_truth_case_matches_the_real_served_page`) — a real 200 on a
+  legitimate lookup, a real 500 on the ground truth's own claimed SQLi
+  payload. **A real `PA-0034` adversarial test** (citing `BUG-0031` as
+  the directly analogous precedent — `php_laravel`'s own first
+  real-URL-serving mechanism silently hardcoded the wrong HTTP method,
+  producing false ground truth): a mismatched-method `POST` against the
+  pinned, `GET`-declared `/post` URL. The real, observed result (found by
+  the test, not predicted in advance) is a clean `403` (Django's own
+  `CsrfViewMiddleware`, since a `GET`-method cell is never decorated with
+  `@csrf_exempt`) — safe, no crash, no widened attack surface. **Named,
+  accepted limitations of this first slice** (not oversights): the
+  `{"id", "name"}` JSON response shape (shared with every other cell using
+  the `single_statement` complexity) is not a fully realistic post-detail
+  response shape; `lab/ground-truth-picktrail-django/` is not wired into
+  `fuzzlab.core.config`'s global `ground_truth_dir`-driven consumers (the
+  web dashboard, `cutover_gate.py`, `regression_gate.py`) — reachable,
+  this entry, only through its own bespoke test; the right home for a
+  second, per-target ground-truth set is
+  `fuzzlab.harness.multitarget.TargetSpec.ground_truth` (Phase E, not
+  attempted here).
+- **FR-LAB-102** *(PicTrail's second real page, `/post/comments`, and this
+  emitter's first real Django template-engine round trip; `CC-LAB-0093`,
+  2026-09-23).* Django's real `mark_safe()`/template-autoescaping-bypass
+  footgun, deliberately deferred from Phase B (`CC-LAB-0091`) — a
+  **deliberate narrowing** of the fuller researched shape (`docs/research/
+  category2-social-ugc-functionality-and-cwe-research.md` §4 row 2's
+  `@mention`/`#hashtag` auto-linking-specific footgun): this entry builds
+  the simpler, generic `mark_safe()`-on-the-entire-raw-comment version,
+  stated explicitly, not implied as full grounding — the auto-linking
+  shape stays a real, later increment. New `_ROUTE_PARAMS["/post/
+  comments"]`; a new `(xss, html_body_template)` shape in
+  `_MODULE_SET_BY_SHAPE`, backed by a new `lab/safety_matrix.yaml` sink
+  family, `html_body_template` — genuinely new, not a rendering of
+  `html_body`, because this sink is **safe by default** (Django's own
+  template auto-escaping) rather than dangerous by default: the
+  vulnerable twin's `mark_safe_wrap` transform uses the matrix's
+  `introduces` mechanic to add the `html_tag_break` concern only when
+  applied, mirroring `verbose_error_leak`'s own use of that mechanic at a
+  different family. `DjangoEmitter.render()` returns a **second
+  `EmittedFile`** for this shape (this emitter's first two-file-per-cell
+  render) — a companion `.html` template, emitted as a **fixed Python
+  string constant, never a `.j2` file rendered through this emitter's own
+  Jinja2 module-composition system**: that system's Jinja2 environments
+  use the same `{{ }}` delimiter Django's own template engine does, so a
+  `.j2` generation template containing literal Django syntax
+  (`{{ comment }}`) would collide with generation-time rendering — the
+  exact collision `php_laravel`'s own Blade views avoid via raw-echo
+  `{!! $value !!}` syntax for the identical reason (this project's
+  pre-change review caught this before it was built, not after). Since
+  the template content is identical between twins, it needs no per-cell
+  interpolation at generation time at all — a real generation-time test
+  (`tests/test_labgen_django_conformance.py::
+  test_comment_template_is_never_evaluated_by_this_projects_own_jinja2_
+  pass`) confirms the emitted bytes are exactly `{{ comment }}`,
+  untouched, and byte-identical between twins. Real `TEMPLATES[0]["DIRS"]`
+  settings change (`fuzzlab.labgen.emitters.django.stack_env.
+  settings_py_content()`). Passes Tier 0/Tier 3 for the new manifest
+  (`lab/manifests/phase_c_picktrail_comments.yaml`).
+- **FR-LAB-103** *(real live-boot proof through the real Django template
+  engine, both directions of the differential, plus ground-truth
+  extension; `CC-LAB-0093`, 2026-09-23).* Real, executed, skip-guarded
+  (PA-0005) proof in `tests/test_labgen_django_live_boot_picktrail_
+  comments.py`: a real seeded `comments` row carrying a
+  `<script>alert(1)</script>` payload (`DjangoLiveBootHarness`'s
+  `seed_comment` constructor parameter, mirroring `seed_bio`'s
+  convention); the vulnerable twin's real response body contains the raw,
+  unescaped payload (`mark_safe()` genuinely defeats Django's
+  auto-escaping through the real engine); **and, proven separately, not
+  merely inferred** — the secure twin's real response body contains the
+  real HTML-entity-escaped form (`&lt;script&gt;`), confirming Django's
+  own default template auto-escaping is genuinely still in effect when
+  the transform does not opt out of it. Ground truth extended (not a new
+  directory) with `PT-0002` in `lab/ground-truth-picktrail-django/`
+  (`vuln_class: "xss-stored"`, `sink_context: "html"` — required, not
+  cosmetic, since `fuzzlab.mutation.xss`/`fuzzlab.audit.rules` both key
+  XSS payload/audit selection off this field — mirroring `lab/ground-
+  truth/labels.json`'s own `PFF-0005` shape on both counts), loaded for
+  real and cross-checked, independently of the emitter's own internals,
+  against a real booted request at the exact URL/method it names, seeded
+  with the same adversarial payload.
+- **FR-LAB-105** *(PicTrail's third real page, `/upload/link-preview`,
+  and this emitter's first server-side-HTTP-fetch (SSRF, CWE-918) sink
+  category; `CC-LAB-0094`, 2026-09-23).* Ports the already-reviewed,
+  corpus-grounded shape (`docs/research/corpus-examples/ssrf/python/
+  {vulnerable,idiomatic}-oembed-unfurl-4.py`) almost verbatim, reusing
+  `lab/safety_matrix.yaml`'s existing `server_side_http_fetch` sink
+  family unchanged — no new safety-matrix design needed. New
+  `_ROUTE_PARAMS["/upload/link-preview"]`; a new `(ssrf,
+  server_side_http_fetch)` shape in `_MODULE_SET_BY_SHAPE`, rendered with
+  `render_only` complexity (not `single_statement`, whose fixed
+  `if row is None: ...` epilogue assumes a DB-row sink shape this one
+  does not have — a real defect caught by compiling the generated view
+  before this entry landed, not shipped). Two new transform modules:
+  `unchecked_url_fetch` (the vulnerable twin, an explicit self-documenting
+  no-op matching the matrix's own `no_effect` row, not an empty pipeline
+  relying on `identity`) and `scheme_and_resolved_ip_allowlist` (the
+  secure twin: scheme check, then the URL's *resolved* IP via
+  `socket.gethostbyname()` + `ipaddress.ip_address(...).is_private/
+  .is_loopback/.is_link_local`, closing the DNS-rebinding gap a
+  hostname-only allowlist leaves open — `lab/safety_matrix.yaml`'s own
+  `hostname_allowlist`/`partial` vs. `scheme_and_resolved_ip_allowlist`/
+  `neutralises` distinction). One deliberate adaptation from the corpus
+  example, stated explicitly: `ALLOWED_SCHEMES = {"http", "https"}` here
+  (the corpus example is `https`-only), so the live-boot adversarial
+  payload is blocked specifically by the resolved-IP check, not
+  incidentally by the scheme check. One shared sink module,
+  `http_fetch_json_sink` (`requests.get(url, timeout=5,
+  allow_redirects=False)` — `allow_redirects=False` closes a
+  redirect-based allowlist bypass; the sink module itself never differs
+  between twins, mirroring `CC-LAB-0093`'s own "sink is neutral, the
+  transform is what secures/breaks it" shape). Fail-closed on validation
+  failure: the secure twin's transform raises `ValueError`, propagated as
+  Django's own real exception-handling path (`DEBUG=False`-safe, no
+  stack-trace leak, the same mechanism `CC-LAB-0090`'s own test already
+  proved) rather than a hand-rolled `try/except` wrapper. Passes Tier
+  0/Tier 3 for the new manifest (`lab/manifests/
+  phase_c_picktrail_link_preview.yaml`).
+
+  **Shared-schema dependency, landed as its own standalone, pre-requisite
+  entry** (`CC-LAB-0094a`, same date): `fuzzlab/labels/schemas/
+  labels.schema.json`'s `vuln_class`/`sink_context` enums widened to add
+  `ssrf`/`network` (plus five other values from the same widening) —
+  needed for this entry's own ground truth (below) but landed separately
+  since the schema is shared across every active category branch;
+  adopts category 3's own already-reviewed widening (`fa8207d` on
+  `claude/category-3-build-iuu5k9`) byte-identically rather than
+  inventing different values, verified via `diff` and via
+  `fuzzlab.labels.contract.load()` against every existing ground-truth
+  directory.
+- **FR-LAB-106** *(real live-boot proof of the SSRF differential, both
+  directions, plus the `PA-0034` adversarial-direction test and
+  ground-truth extension; `CC-LAB-0094`, 2026-09-23).* Real, executed,
+  skip-guarded (PA-0005) proof in `tests/
+  test_labgen_django_live_boot_picktrail_link_preview.py`, against a new,
+  real, stdlib-only "internal service" HTTP-server fixture
+  (`fuzzlab.labgen.conformance.django_live_boot.InternalServiceFixture`,
+  bound via `("127.0.0.1", 0)` so port allocation and bind are one atomic
+  call — no separate find-free-port race to mitigate; torn down via
+  `server.shutdown()` + `server.server_close()` + a bounded
+  `thread.join(timeout=5)` on its `daemon=True` serving thread, a
+  concrete mechanism, not a `PA-0012` citation — `PA-0012` is
+  asyncio-specific and does not apply to this stdlib-threaded fixture):
+  the vulnerable twin's real response genuinely relays the fixture's own
+  secret marker back to the caller (a real SSRF, not just "no validation
+  code is present" at a source-level glance); **and, proven separately**
+  — the secure twin genuinely rejects the identical payload with a real
+  Django 500, specifically via the resolved-IP check (both schemes are
+  allowed, so only that check can be blocking it). Per `PA-0034`, a third
+  test proves the allowlist doesn't fail closed on everything: a
+  well-formed, real, public, JSON-returning URL must still succeed on
+  the secure twin — skip-guarded by a new, dedicated capability probe,
+  `django_live_boot.external_http_probe(url)`, pointed at that exact URL
+  (per `PA-0035`: reusing `django_boot_available()`'s own PyPI-
+  reachability probe here would only prove pip-install-time reachability,
+  a different operation from an app-level `requests.get()` at test-run
+  time — the same class of mistake `BUG-0033` was for `composer`, not
+  repeated here). Ground truth extended (not a new directory) with
+  `PT-0003` in `lab/ground-truth-picktrail-django/` (`vuln_class:
+  "ssrf"`, `sink_context: "network"`), loaded for real and cross-checked,
+  independently of the emitter's own internals, against a real booted
+  request at the exact URL/method/param it names, pointed at the
+  internal-service fixture.
 
 - **FR-LAB-64** *(prototype pollution, CWE-1321, `node_express`; `CC-LAB-0070`,
   2026-09-22).* Per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a's

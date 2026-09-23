@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "target": "picktrail_django",
+  "points": [
+    {
+      "url": "/post",
+      "method": "GET",
+      "param": "id",
+      "location": "query",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/post/comments",
+      "method": "GET",
+      "param": "comment",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/upload/link-preview",
+      "method": "GET",
+      "param": "url",
+      "location": "query",
+      "rendering": "server-json"
+    }
+  ]
+}

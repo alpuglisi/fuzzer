@@ -89,6 +89,137 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   involving `ecommerce-logic/php` (a manifest not touched by this pass)
   were found during the corpus-wide check but are pre-existing and out of
   this change's scope.
+## 2026-09-23 (PicTrail link-preview SSRF page)
+- LAB: landed PicTrail's third real page — `CC-LAB-0094`/`FR-LAB-105`/
+  `FR-LAB-106`, pre-change review gate cleared (2 independent reviewer
+  subagents; findings incorporated: `allow_redirects=False` on the sink,
+  a dedicated `external_http_probe()` replacing a PyPI-reachability
+  stand-in for the network-dependent test, a concrete thread-join
+  teardown for the new internal-service fixture instead of a `PA-0012`
+  citation, port-`0` binding avoiding the find-free-port race entirely,
+  a reconciled sink timeout, and the full `PT-0003` ground-truth field
+  set). `GET /upload/link-preview` — `requests.get()` fetching an
+  attacker-influenced URL server-side with no scheme/resolved-IP check
+  (CWE-918/SSRF), this emitter's first outbound-HTTP-fetch sink category.
+  Reuses `lab/safety_matrix.yaml`'s existing `server_side_http_fetch`
+  sink family unchanged; ports the already-reviewed Python corpus example
+  (`docs/research/corpus-examples/ssrf/python/{vulnerable,idiomatic}-
+  oembed-unfurl-4.py`) almost verbatim. New `InternalServiceFixture`
+  (stdlib `http.server`, port-`0`-bound) proves the differential live,
+  both directions; a `PA-0034`/`PA-0035`-disciplined adversarial test
+  proves the allowlist still admits a legitimate public URL, correctly
+  skip-guarding on this build environment's own restricted network
+  egress. Two real defects caught and corrected during implementation,
+  before landing: the sink's own name (the reviewed draft conflated a
+  transform op's name with a sink name) and its complexity module
+  (`single_statement`'s DB-row epilogue would have appended real,
+  unreachable dead code after this shape's own `return` — caught by
+  `py_compile`, fixed by using `render_only` instead). Extends
+  `lab/ground-truth-picktrail-django/` with `PT-0003`. Full bookkeeping:
+  `docs/components/01-target-lab/{change-control,requirements}.md`,
+  `docs/ARCHITECTURE.md`, `docs/research/category2-social-ugc-
+  functionality-and-cwe-research.md` §6.
+
+## 2026-09-23 (labels schema: widen vuln_class/sink_context enums)
+
+- LAB: Widened `fuzzlab/labels/schemas/labels.schema.json`'s `vuln_class`
+  and `sink_context` enums (adds `ssti`/`xxe`/`insecure_deserialization`/
+  `webhook_signature_bypass`/`ssrf`/`outbound_header_injection` and
+  `template`/`xml`/`deserialization`/`webhook`/`network`/`header`
+  respectively) — needed for PicTrail's upcoming SSRF page's ground truth
+  (`CC-LAB-0094`), landed as its own standalone entry (`CC-LAB-0094a`)
+  since the schema is shared across every category branch. Adopts
+  category 3's own already-reviewed widening (`fa8207d` on
+  `claude/category-3-build-iuu5k9`) byte-identically rather than
+  inventing different values, to avoid cross-branch schema drift.
+
+## 2026-09-23 (PicTrail comments page)
+- LAB: landed PicTrail's second real page — `CC-LAB-0093`/`FR-LAB-102`/
+  `FR-LAB-103`, pre-change review gate cleared (2 independent reviewer
+  agents; reviewer #1 approved as-is; reviewer #2's 4 findings
+  incorporated). `/post/comments`: Django's real `mark_safe()`-defeats-
+  template-autoescaping footgun, deliberately deferred from Phase B
+  (`CC-LAB-0091`) — a stated, deliberate simplification of the fuller
+  researched `@mention`/`#hashtag` auto-linking shape, not silently
+  narrowed. This emitter's first two-file-per-cell render (a view + a
+  real `.html` template) and first real Django template-engine round
+  trip (`django.shortcuts.render()`, a new `TEMPLATES["DIRS"]` setting).
+  **The pre-change review caught a real Jinja2/Django `{{ }}` delimiter
+  collision before any code was written**: this project's own Jinja2
+  generation pass shares Django's own template-variable syntax, so a
+  `.j2` generation template containing literal `{{ comment }}` would
+  collide with generation-time rendering — exactly the collision
+  `php_laravel`'s own Blade views avoid via raw-echo syntax for the
+  identical reason. Resolved by redesign: the template (byte-identical
+  between twins) is emitted as a fixed Python string constant, never
+  routed through Jinja2 at all, verified by a real generation-time test.
+  A new `lab/safety_matrix.yaml` sink family, `html_body_template`,
+  models Django's inverted "safe by default" semantics via the matrix's
+  existing `introduces` mechanic — a real divergence from the original
+  draft's plan, found during implementation and reflected back into the
+  change-control entry, not silently absorbed. Real live-boot proof
+  covers **both directions** of the differential through the real
+  template engine (the vulnerable twin's raw payload; the secure twin's
+  real HTML-entity-escaped form, proven separately, not inferred), plus
+  a `PT-0002` ground-truth extension (`lab/ground-truth-picktrail-
+  django/`, sink_context: "html" included, matching `PFF-0005`'s own
+  shape). A fresh bookkeeping check against all four other active
+  category branches (not just cat1) caught a real would-be `FR-LAB-93`
+  collision with category 4 before it happened. No regression in the
+  broader suite (1539 non-slow passed; 13 slow Django tests passed; same
+  30 pre-existing environment-only failures). Full record:
+  `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0093`
+  entry.
+
+## 2026-09-23 (cross-branch bookkeeping fix, by the category 1 pilot session)
+- Docs/LAB: fixed a real cross-branch `FR-LAB` ID collision found during a
+  cross-branch review — this branch's freshly-pushed `FR-LAB-90`/
+  `FR-LAB-91` (PicTrail Phase C app identity + first real page,
+  `CC-LAB-0092`) had been independently claimed by category 5 for its
+  already-established, more heavily cross-referenced `CC-LAB-0211`
+  CSV-formula-injection shape (already baked into the shared
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` tracker synced across
+  all five branches). Renumbered this branch's usages to `FR-LAB-95`/
+  `FR-LAB-96` via exact-token replacement across
+  `requirements.md`/`change-control.md`/`CHANGELOG.md`/
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`. Full non-slow test
+  suite re-run confirms no regression (1789 passed / 8 skipped, identical
+  to this branch's own pre-fix baseline).
+
+## 2026-09-23 (Phase C)
+- LAB: started Phase C for category 2's Django pick — `CC-LAB-0092`/
+  `FR-LAB-95`/`FR-LAB-96`, pre-change review gate cleared (2 independent
+  reviewer agents, 7 findings incorporated: a route-notation fix — `Route
+  .path`'s plain-string IR can't express `/post/<id>`, corrected to
+  `/post?id=` in the research doc first, matching `CC-LAB-0131`'s own
+  precedent; `PA-0034`/`BUG-0031` cited explicitly with an adversarial
+  mismatched-method test added; the `{"id","name"}` JSON-shape realism
+  gap named and justified; the new ground-truth directory's non-wiring
+  into the global config's consumers stated as an accepted, Phase-E-
+  deferred limitation; a next-free bookkeeping check). Established
+  **PicTrail** — the Instagram-style app identity for `django`'s
+  corpus-grounded content (page-set design for both PicTrail and
+  **CircleFeed**, the Facebook-style PHP app, added to the category 2
+  research doc's new §6) — and landed its first real, ground-truth-
+  bearing page: `GET /post?id=`, reusing Phase A's proven SQLi module
+  verbatim (the value of this increment is the app-identity/ground-truth
+  pattern, not a new shape). A new `_REAL_PAGE_CELL_IDS`-based URL-
+  pinning mechanism serves a real-page cell at its own declared route
+  (`php_laravel`'s "a real page keeps its own URL" convention, at a much
+  smaller scale). This project's **first-ever second, independent
+  ground-truth directory** (`lab/ground-truth-picktrail-django/`, D9's
+  three-file contract, never merged into `php_laravel`'s own
+  `lab/ground-truth/`) is loaded for real and cross-checked against a
+  real live-booted request. **The required `PA-0034` adversarial test
+  (a mismatched HTTP method against the newly-pinned real page) ran for
+  real and its result differed from what the draft had predicted**
+  (a clean `403`, Django's own CSRF protection — not the guessed
+  "identical to GET") — the real behavior is safe, and the record now
+  reflects what was actually observed, not an assumption. No regression
+  in the broader suite (1533 passed, same 30 pre-existing environment
+  failures). Full record:
+  `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0092`
+  entry.
 
 ## 2026-09-23 (cross-category doc sync, round 2)
 - Docs (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, all five second-target
@@ -277,6 +408,129 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   Updated `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4/§9.4a with
   the findings and next steps. Research only — no manifests, modules, or
   `lab/safety_matrix.yaml` changes yet.
+## 2026-09-23 (cross-branch review, by the category 1 pilot session, round 2)
+- Docs/LAB: reviewed this branch's Django Phase B widening (sqli/
+  sql_string_literal at `/api/login`, xss/html_body at `/api/profile`,
+  the route-method-gated `@csrf_exempt` fix) — no code defects found; all
+  4 real live-boot tests pass genuinely (real `manage.py runserver` boot,
+  real HTTP, ~45s). Found and fixed a fresh cross-branch bookkeeping-ID
+  collision: this branch's new `FR-LAB-74`/`75` (Django Phase B) collided
+  with `FR-LAB-74`/`75` already used on `claude/category-3-build-iuu5k9`
+  (its own `spring_boot` SSTI/XXE cells) — both branches picked "next
+  free" independently since a prior fix to this exact class of collision
+  doesn't prevent a *new* one once either branch keeps building past the
+  point it was fixed at. Renumbered to `FR-LAB-88`/`89` (beyond the
+  current global ceiling, `FR-LAB-87`, per `claude/second-target-cat1-
+  ecommerce`'s own latest work). `CC-LAB-0091` itself never collided, so
+  it is unchanged. Full suite reverified green after the rename (1783
+  passed, 8 skipped, matching the pre-fix count exactly).
+
+## 2026-09-23
+- LAB: fixed a self-contradictory cross-branch bookkeeping warning left by
+  an earlier fix commit (a blind find/replace had rewritten its own
+  warning message's prose to assert "FR-LAB-72/73 collide with cat1's own
+  FR-LAB-72/73" — a self-contradiction, since 72/73 was the *target* of
+  the renumbering). Verified directly against a real fetch of
+  `origin/claude/second-target-cat1-ecommerce` (its highest FR-LAB number
+  is 69) that no actual collision exists; replaced the stale warning with
+  a corrected note. See `docs/components/01-target-lab/requirements.md`.
+- LAB: widened `django` (category 2 pilot's Instagram/Python-Django pick)
+  to Phase B — `CC-LAB-0091`/`FR-LAB-88`/`FR-LAB-89`, pre-change review
+  gate cleared (2 independent reviewer agents, 5 findings incorporated: a
+  wrong plan-doc citation fixed, the deferral of a researched Django-
+  specific XSS footgun to Phase C stated explicitly, a wrong `CR-LAB-0001`
+  citation corrected to `BUG-0027`, `@csrf_exempt` gating moved from
+  complexity-template membership to the cell's own HTTP method plus a
+  whole-collection regression check, a `PA-0034` adversarial test added,
+  risk raised from low to moderate). Widens `DjangoEmitter` to the same
+  three-shape Tier-A bar `node_express` already proves: `sqli`/
+  `sql_string_literal` (a login-style lookup, MD5'd-password-boilerplate
+  sink) and `xss`/`html_body` (a stored value — a real, seeded `profiles`
+  row read via a fixed `_read_stored_bio()` helper — echoed raw vs.
+  escaped with `django.utils.html.escape()`). Any non-`GET` cell renders
+  with `@csrf_exempt`. **The required `PA-0034` adversarial test (a
+  mismatched HTTP method against the newly CSRF-exempt view) found a real
+  code defect** (`BUG-0037`/`PA-0039`: the vulnerable sink concatenated a
+  possibly-`None` value without a `str()` cast — Python's `+` raises where
+  JS/PHP's equivalent operators coerce, missed when porting `node_express`'s
+  sink shape across the language boundary), fixed before landing. Real,
+  executed proof: Tier 0/Tier 3 for the widened manifest (7 passed) and a
+  real live-boot payload differential — a genuine SQLi login bypass (200,
+  not 404) on the vulnerable twin vs. a real 404 on the secure twin; a
+  real raw-vs-escaped stored-XSS differential (4 passed, after the
+  `BUG-0037` fix). No regression in the broader suite (1527 passed, same
+  30 pre-existing environment failures as before). Full record:
+  `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0091` entry;
+  full bug record: `ERROR_LOG.md`, `docs/bugs/BUG-0037-*.md`,
+  `docs/PREVENTIVE_ACTIONS.md`'s `PA-0039`.
+
+## 2026-09-23 (cross-branch review, by the category 1 pilot session)
+- Docs/LAB: reviewed this branch's Django SQLi code and tests — no code
+  defects found (parameterized `%s` cursor placeholder vs. string
+  concatenation, matching the project's established `bound` convention).
+  Finished fixing the cross-branch bookkeeping-ID collision flagged
+  2026-09-22: this branch's `FR-LAB-64`/`65` collided with the same IDs
+  independently claimed by categories 1, 3, 4, and 5's own Phase A work.
+  Renumbered to `FR-LAB-72`/`73` (this category's assigned block;
+  `CC-LAB-0090` itself never collided, so it is unchanged). Full suite
+  reverified green after the rename (1777 passed, 8 skipped, matching
+  the pre-fix count exactly). Also added the missing Ruby-on-Rails/Java-
+  Spring-Boot/Go rows this branch's copy of the §9.2 stack-reuse ledger
+  never had, including the same Java/Spring-Boot-built-twice flag
+  recorded on categories 3, 4, and 5's branches.
+
+## 2026-09-22
+- LAB: built `django` (category 2 pilot's new-stack pick, Instagram/Python-
+  Django) Phase A — `CC-LAB-0090`/`FR-LAB-72`/`FR-LAB-73`, pre-change review
+  gate cleared (2 independent reviewer agents, 8 findings incorporated: a
+  scoped `StackEnv`-reuse correction, forced `DEBUG=False`/`ALLOWED_HOSTS`,
+  a real digest-pinned `base_image`, explicit loopback-only binding, reuse
+  of the existing `_NoRedirectHttpErrorProcessor` + up-front Django/ORM
+  default enumeration per `PA-0030`/`BUG-0028`, an `ARCHITECTURE.md`
+  deliverable, and a dependency-provenance record). A new
+  `fuzzlab.labgen.emitters.django.DjangoEmitter` (one shape, `sqli`/
+  `sql_numeric_literal`, both twins via a raw `connection.cursor()` sink
+  to isolate the string-concat-vs-parameterized axis, never the ORM), its
+  own module-composition registry mirroring `node_express`'s Phase-A port
+  shape, a real trimmed `django-admin startproject` skeleton (real Django
+  5.2.17, resolved live against PyPI; base image digest resolved via AWS's
+  public ECR mirror after Docker Hub's own rate limit was hit), and a
+  `DjangoLiveBootHarness` (real `venv` + `pip install` + `manage.py
+  migrate`/`runserver`, forced to `127.0.0.1` independent of the nominal
+  `entrypoint_cmd` string, reusing `live_boot.py`'s existing no-redirect
+  opener). Passes Tier 0/Tier 3 for real (`tests/test_labgen_django_
+  conformance.py`, 4 passed) and a real live-boot payload differential
+  (`tests/test_labgen_django_live_boot_single_shape.py`, 3 passed): the
+  vulnerable twin's adversarial payload returns a real 500 with **no**
+  stack-trace/`SECRET_KEY` leak (confirming `DEBUG=False` is enforced in
+  the actual served response, not just asserted), the secure twin returns
+  a real 404. No regression in the broader suite (`pytest tests/ -q -m
+  "not slow"`, 1521 passed; 30 pre-existing failures are this sandbox's
+  own missing `gitleaks`/`numpy`, unrelated to this change). Full record:
+  `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0090` entry.
+- LAB: started category 2 (Social/UGC platforms) of the 12-app multi-category
+  second-targets plan, on branch `claude/category-2-build-bomomg`, per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9's coordination
+  contract. Applied §9.1's site-pair methodology to category 2's 5
+  researched sites: excluded YouTube (infra-only, no portable
+  application-language claim) and Discord (realtime/Elixir, not a
+  request/response fit); picked Instagram (Python/Django — a new stack,
+  distinct from the existing `python_fastapi` async-API paradigm) and
+  Facebook (PHP/Hack — approximated via the existing `php_current`/
+  `php_laravel` stack rather than a new HHVM/Hack runtime emitter) as the
+  most architecturally distinct pair, dropping Reddit as redundant with
+  Instagram's (Python, synchronous monolith) group. Produced the
+  functionality research (real Instagram/Facebook feature sets, cited) and
+  stack-specific CWE research (Django- and PHP/Hack-idiomatic footguns tied
+  to those real features, cross-checked against `lab/safety_matrix.yaml`
+  for breadth) that §0a items 2-3 identified as missing —
+  `docs/research/category2-social-ugc-functionality-and-cwe-research.md`.
+  Registered the pick in the plan's §9.2 stack-reuse ledger (new Python/
+  Django row) and §9.4 tracker (category 2 -> Piloting, bookkeeping block
+  `CC-LAB-0090`-`0119` reserved). No component code changed yet — the
+  Django emitter build (Phase A) is next, gated on `CLAUDE.md`'s pre-change
+  review gate (change-control entry + 2 reviewer agents + 3/3 agreement),
+  not yet run.
 - Docs: renamed `docs/LAB_SECOND_TARGET_NODE_EXPRESS_PLAN.md` ->
   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` and added its §9,
   recording the project owner's answers to §0b's open questions: stack

@@ -1,0 +1,14 @@
+# scheme_and_resolved_ip_allowlist transform (CC-LAB-0094): ports
+# docs/research/corpus-examples/ssrf/python/idiomatic-oembed-unfurl-4.py's
+# own defense almost line-for-line -- checks the URL's scheme, then the
+# *resolved* IP of its hostname (not just the hostname string), closing
+# the DNS-rebinding gap a hostname-only allowlist leaves open
+# (lab/safety_matrix.yaml's own `hostname_allowlist`/`partial` vs.
+# `scheme_and_resolved_ip_allowlist`/`neutralises` distinction).
+_parsed_{{ var_name }} = urlparse({{ value_expr }})
+if _parsed_{{ var_name }}.scheme not in {"http", "https"}:
+    raise ValueError("blocked scheme")
+_resolved_ip_{{ var_name }} = socket.gethostbyname(_parsed_{{ var_name }}.hostname)
+_ip_obj_{{ var_name }} = ipaddress.ip_address(_resolved_ip_{{ var_name }})
+if _ip_obj_{{ var_name }}.is_private or _ip_obj_{{ var_name }}.is_loopback or _ip_obj_{{ var_name }}.is_link_local:
+    raise ValueError("blocked resolved IP")

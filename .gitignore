@@ -7,6 +7,7 @@ venv/
 # ...but the ground-truth contract CSV is tracked, not a generated dataset
 !lab/ground-truth/*.csv
 !lab/ground-truth-meadowmart/*.csv
+!lab/ground-truth-picktrail-django/*.csv
 # python build / test artifacts
 *.egg-info/
 build/

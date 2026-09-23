@@ -159,7 +159,7 @@ tracked in the requirements files, not here.
   `generalizes` verdict — the generalization evidence. The live run against an external
   validation lab is on-host; the manifest-generated second target plugs in as a
   `TargetSpec`.
-- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- four emitters (php_current, python_fastapi, php_laravel, node_express) built to varying depth; a fifth (ruby_rails, category 1's Shopify pick, docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md) now has its full Phase A-E built and proven for real: Phase A skeleton + live-boot harness (CC-LAB-0071/FR-LAB-65), Phase B's three vulnerability modules -- webhook-signature verification, CWE-915 mass assignment, CWE-502 insecure deserialization (CC-LAB-0072..0075/FR-LAB-66..68) -- Phase C's coherent "ForgeCart" app identity (5 real pages + 5 inert surrounding pages, its own lab/ground-truth-forgecart/ contract, CC-LAB-0080/FR-LAB-84), Phase D's whole-app (all 12 cells, one boot) live-boot conformance plus a real dependency-pinning defect found and fixed along the way (CC-LAB-0081/FR-LAB-85, BUG-0035/PA-0037), and Phase E's real fuzzlab.harness.multitarget.TargetSpec wiring with a real, scored ScoreReport genuinely confirming the app's real XSS page (CC-LAB-0082/FR-LAB-86); Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself pending human sign-off]` (D8, target shape pinned by **D20**/
+- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- five emitters (php_current, python_fastapi, php_laravel, node_express, django) built to varying depth: node_express at Tier-A depth, django at Phase-A/foundation depth (category 2's PicTrail pick); ruby_rails (category 1's Shopify pick, docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md) now has its full Phase A-E built and proven for real: Phase A skeleton + live-boot harness (CC-LAB-0071/FR-LAB-65), Phase B's three vulnerability modules -- webhook-signature verification, CWE-915 mass assignment, CWE-502 insecure deserialization (CC-LAB-0072..0075/FR-LAB-66..68) -- Phase C's coherent "ForgeCart" app identity (5 real pages + 5 inert surrounding pages, its own lab/ground-truth-forgecart/ contract, CC-LAB-0080/FR-LAB-84), Phase D's whole-app (all 12 cells, one boot) live-boot conformance plus a real dependency-pinning defect found and fixed along the way (CC-LAB-0081/FR-LAB-85, BUG-0035/PA-0037), and Phase E's real fuzzlab.harness.multitarget.TargetSpec wiring with a real, scored ScoreReport genuinely confirming the app's real XSS page (CC-LAB-0082/FR-LAB-86); Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself done]` (D8, target shape pinned by **D20**/
   `CR-LAB-0001`): the "lab as a compiler" — one manifest plus a safety matrix,
   seed, and env-profile generate the app, labels, docs, and oracle tests, with a
   **binary** verdict derived from `(transform, sink context)` (a partially
@@ -486,6 +486,148 @@ tracked in the requirements files, not here.
   documented in `docs/ON_HOST_RUNBOOK.md`; `php_current` is **not**
   retired (it stays as the second stack `L-P3.4`'s fingerprint-independence
   gate needs).
+  **A fourth stack emitter, `django` (`fuzzlab/labgen/emitters/django/`,
+  `CC-LAB-0090`, Phase A), is now built** — category 2's (Social/UGC
+  platforms) new-stack pick (Instagram/Python-Django,
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9), a genuinely new
+  paradigm distinct from `python_fastapi`'s async-API shape (Django's
+  synchronous, template-rendering MVC monolith paradigm). Phase-A/
+  foundation depth only, mirroring `php_laravel`'s own L-P3.3a and
+  `node_express`'s own Phase A scope: one shape, `(sqli,
+  sql_numeric_literal)`, both twins via a raw `connection.cursor()` sink
+  (string-concat vs. parameterized `%s`, never the ORM on either twin, to
+  isolate exactly the axis every other stack's first shape proves); its own
+  fully independent module-composition registry
+  (`emitters/django/modules.py`), no cross-import with any sibling
+  emitter's registry; a `route`-category accumulator
+  (`fuzlab_django_lab/urls.py`) fed one fragment per cell, sorted by cell
+  ID; passes Tier 0 (`python -m py_compile`)/Tier 3 (regenerate-and-diff)
+  against `lab/manifests/phase_a_django_sample.yaml`. A real, venv-based
+  (never Docker/`composer`) live-boot harness,
+  `fuzzlab/labgen/conformance/django_live_boot.py`'s
+  `DjangoLiveBootHarness`, structurally mirrors `LiveBootHarness`
+  (reusing its existing `_NoRedirectHttpErrorProcessor` directly rather
+  than reimplementing it) but boots via a real `python -m venv` + `pip
+  install django==5.2.17` + `manage.py migrate` + `manage.py runserver`,
+  forced to `127.0.0.1` independent of `entrypoint_cmd`'s nominal
+  `0.0.0.0` string; a real capability probe (`django_boot_available()`)
+  exercises a real, bounded `pip download` round trip, never a bare
+  socket check (`PA-0035`, generalizing `BUG-0033`'s `composer` fix to
+  `pip`). The generated `settings.py` forces `DEBUG = False`/a real
+  `ALLOWED_HOSTS` — a correctness requirement, not a follow-up, mirroring
+  `php_laravel`'s own `APP_DEBUG=false` (D20) — **verified against the
+  real served HTTP response body**, not merely settings source text: a
+  real adversarial `GET` against the vulnerable twin returns a real `500`
+  with no stack-trace leak, while the secure twin's parameterized query
+  returns a real `404` (safely treated as a non-matching literal), proven
+  end to end in `tests/test_labgen_django_live_boot_single_shape.py`. The
+  full module-inventory depth (mirroring `node_express`'s own three
+  Tier-A shapes) and corpus-grounded page design (Phase C) are separate,
+  later work — not attempted here.
+  **Phase B (`CC-LAB-0091`) widened `django` to that same three-shape
+  Tier-A bar**: `sqli`/`sql_string_literal` (a login-style lookup, POST
+  body source, an MD5'd-password-boilerplate sink) and `xss`/`html_body`
+  (a stored value — a real, seeded `profiles` row, read via a small fixed
+  `_read_stored_bio()` helper every generated view carries unconditionally,
+  since unlike `node_express` this harness genuinely boots and executes
+  the code — echoed raw vs. escaped with `django.utils.html.escape()`).
+  Any cell whose route method is not `GET` renders with `@csrf_exempt`,
+  gated on the cell's own route method (not on which complexity template
+  renders it, verified by a whole-collection regression check) — the same
+  real-CSRF-framework-absence reasoning `php_laravel`'s own skeleton
+  documents for disabling Laravel's default CSRF middleware. Real,
+  executed live-boot proof (`tests/test_labgen_django_live_boot_phase_b.py`)
+  includes a `PA-0034` adversarial test (a mismatched HTTP method against
+  the newly CSRF-exempt view) that **found and fixed a real code defect**
+  (`BUG-0037`/`PA-0039`: the vulnerable sink concatenated a possibly-`None`
+  value without a `str()` cast, a language-specific behavior — Python's
+  `+` raises on `str`+`None` where JS/PHP's equivalent operators coerce —
+  missed when porting `node_express`'s own sink shape across the language
+  boundary). The full `php_laravel`-depth nine-shape inventory, and the
+  researched, corpus-grounded Django-specific XSS footgun (Django template
+  autoescaping disabled via `mark_safe()`/`|safe`/`{% autoescape off %}`)
+  stay out of scope — the latter deliberately deferred to Phase C's own
+  corpus-grounded page design.
+  **Phase C (`CC-LAB-0092`) landed its first real page**: **PicTrail**,
+  the Instagram-style app identity for `django`'s corpus-grounded content
+  (page-set design in `docs/research/category2-social-ugc-functionality-
+  and-cwe-research.md` §6), with a real `GET /post?id=` post-detail page
+  reusing Phase A's proven SQLi module verbatim — the value of this
+  increment is the app-identity/ground-truth pattern, not a new shape. A
+  new `_REAL_PAGE_CELL_IDS`-based URL-pinning mechanism serves a real-page
+  cell at its own declared route instead of the generic illustrative
+  pattern (`php_laravel`'s own "a real page keeps its own URL" convention,
+  at a much smaller scale). A brand-new, independent ground-truth
+  directory, `lab/ground-truth-picktrail-django/` (this project's
+  first-ever second one, D9's three-file contract, never merged into
+  `php_laravel`'s own `lab/ground-truth/`) is loaded and cross-checked for
+  real against a live-booted request — a `PA-0034` adversarial test
+  (citing `BUG-0031`, the directly analogous `php_laravel` precedent) found
+  that a mismatched-method request against the pinned page gets a real,
+  clean `403` (Django's own CSRF protection), not a crash or a bypass.
+  Named, accepted limitations of this first slice: the JSON response shape
+  isn't fully response-realistic, and this ground truth isn't yet wired
+  into the global `ground_truth_dir` config's consumers (the right home is
+  `multitarget.TargetSpec.ground_truth`, Phase E, not attempted here).
+  **PicTrail's second real page (`CC-LAB-0093`) landed the deferred
+  Django-specific XSS footgun**: `/post/comments`, `mark_safe()` defeating
+  Django's own template auto-escaping — a deliberately simplified,
+  generic version of the fuller researched `@mention`/`#hashtag`
+  auto-linking shape, stated explicitly, not silently narrowed. This
+  emitter's first two-file-per-cell render (a view + a real `.html`
+  template) and first real Django template-engine round trip
+  (`django.shortcuts.render()`, a new `TEMPLATES["DIRS"]` setting). A new
+  `lab/safety_matrix.yaml` sink family, `html_body_template`, models the
+  inverted "safe by default" semantics (Django auto-escapes unless
+  `mark_safe()` opts out) via the matrix's existing `introduces` mechanic.
+  The template is emitted as a **fixed Python string constant, never a
+  `.j2` file** — this project's own Jinja2 generation pass shares Django's
+  `{{ }}` delimiter, a real collision `php_laravel`'s own Blade views
+  avoid via raw-echo syntax for the identical reason, caught by this
+  entry's own pre-change review before it was built. Real live-boot proof
+  covers **both directions** of the differential through the real
+  template engine (`mark_safe()` genuinely bypasses auto-escaping; a
+  plain string is genuinely still protected by it), plus a real
+  generation-time test confirming the template's own bytes are never
+  touched by this project's Jinja2 pass.
+  **PicTrail's third real page (`CC-LAB-0094`) landed the researched SSRF
+  shape**: `/upload/link-preview`, `requests.get()` fetching an
+  attacker-influenced URL server-side (CWE-918) — this emitter's first
+  genuinely new sink *category* (outbound HTTP fetch, not DB/template/
+  string-response). No new safety-matrix design: `lab/safety_matrix.yaml`'s
+  existing `server_side_http_fetch` sink family (from the already-
+  researched `docs/research/corpus-examples/ssrf/{node,php,python}/`
+  corpus) is reused unchanged. Ports the Python corpus example
+  (`vulnerable-oembed-unfurl-4.py`/`idiomatic-oembed-unfurl-4.py`) almost
+  verbatim: the secure twin's transform checks the URL's scheme, then its
+  *resolved* IP (`socket.gethostbyname()` + `ipaddress.ip_address(...).
+  is_private/.is_loopback/.is_link_local`), closing the DNS-rebinding gap
+  a hostname-only allowlist leaves open — one deliberate, stated
+  adaptation from the corpus example (`ALLOWED_SCHEMES` widened to both
+  `http`/`https`, so the live-boot test's payload is blocked specifically
+  by the resolved-IP check, not incidentally by the scheme check). The
+  sink itself is shared, byte-identical between twins (mirroring
+  `CC-LAB-0093`'s own "sink is neutral, the transform secures/breaks it"
+  shape), with `allow_redirects=False` closing a redirect-based allowlist
+  bypass. A new, real, stdlib-only "internal service" HTTP-server fixture
+  (`InternalServiceFixture`, port-`0`-bound to avoid a find-free-port
+  race entirely, torn down via a bounded thread-join, not an asyncio-style
+  `PA-0012` citation) proves the differential both directions live; a
+  `PA-0034`/`PA-0035`-disciplined adversarial test (a dedicated
+  `external_http_probe()` capability probe, not a PyPI-reachability
+  stand-in) proves the allowlist doesn't fail closed on a legitimate
+  public URL, correctly skip-guarding in this build environment's own
+  restricted network egress. This project's shared `labels.schema.json`
+  needed widening (`vuln_class`/`sink_context` gaining `ssrf`/`network`
+  among other values) for this page's own ground truth — landed as its
+  own standalone, pre-requisite entry (`CC-LAB-0094a`), adopting category
+  3's own already-reviewed widening byte-identically rather than
+  inventing different values, to avoid future cross-branch schema drift.
+  PicTrail's remaining planned pages (mass-assignment settings,
+  identifier-SQLi search, session deserialization, the full
+  auto-linking-specific XSS shape) and CircleFeed (the Facebook-style PHP
+  app) stay planned, not built — each its own future, separately-gated
+  increment.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

@@ -1,0 +1,9 @@
+{% if bound %}
+with connection.cursor() as cursor:
+    cursor.execute("SELECT id, name FROM {{ table }} WHERE {{ column }} = %s", [{{ value_expr }}])
+    row = cursor.fetchone()
+{% else %}
+with connection.cursor() as cursor:
+    cursor.execute("SELECT id, name FROM {{ table }} WHERE {{ column }} = " + str({{ value_expr }}))
+    row = cursor.fetchone()
+{% endif %}

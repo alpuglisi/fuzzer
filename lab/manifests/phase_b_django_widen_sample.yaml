@@ -1,0 +1,53 @@
+# Phase B django widen sample manifest (category 2 pilot, `CC-LAB-0091`).
+#
+# Widens fuzzlab.labgen.emitters.django to the same three-shape Tier-A bar
+# node_express already proves. Extends, not replaces,
+# lab/manifests/phase_a_django_sample.yaml (Phase A's own sql_numeric_literal
+# pair stays there as its own fixed regression fixture) -- this manifest
+# carries the two shapes Phase B adds: sql_string_literal (a login-style
+# lookup) and xss/html_body (a stored-value echo). Cell IDs continue the
+# LABGEN-DJ- namespace Phase A started.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # --- /api/login: raw concat into a quoted string-literal SQL position -
+  # --- (POST username) -- a distinct sink-context family and a distinct-
+  # --- source (POST body, not GET query) from Phase A's numeric shape.  -
+  - cell_id: LABGEN-DJ-0003
+    class: sqli
+    stack_profile: django
+    route: { method: POST, path: /api/login }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  - cell_id: LABGEN-DJ-0004
+    class: sqli
+    stack_profile: django
+    route: { method: POST, path: /api/login }
+    sink_context:
+      family: sql_string_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]
+
+  # --- /api/profile: stored XSS -- a distinct vulnerability class, a  ---
+  # --- distinct source (a stored field, not a request parameter), and ---
+  # --- a distinct sink (HTML body echo).                              ---
+  - cell_id: LABGEN-DJ-0005
+    class: xss
+    stack_profile: django
+    route: { method: GET, path: /api/profile }
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: []
+
+  - cell_id: LABGEN-DJ-0006
+    class: xss
+    stack_profile: django
+    route: { method: GET, path: /api/profile }
+    sink_context:
+      family: html_body
+      required_neutralizations: [html_tag_break]
+    transform: [html_entity_escape]
