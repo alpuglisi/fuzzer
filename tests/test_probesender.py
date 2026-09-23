@@ -12,8 +12,11 @@ class _FakeSession:
     def __init__(self):
         self.calls = []
 
-    def request(self, method, url, params=None, data=None, timeout=None):
-        self.calls.append({"method": method, "url": url, "params": params, "data": data})
+    def request(self, method, url, params=None, data=None, timeout=None, allow_redirects=None):
+        self.calls.append({
+            "method": method, "url": url, "params": params, "data": data,
+            "allow_redirects": allow_redirects,
+        })
 
         class R:
             status_code = 200
@@ -28,6 +31,10 @@ def test_requests_probe_sender_get_query():
     assert isinstance(p, Probe) and p.status == 200 and "ok" in p.text and p.elapsed >= 0
     assert session.calls[0]["method"] == "GET"
     assert session.calls[0]["params"] == {"id": "1'"} and session.calls[0]["data"] is None
+    # BUG-0039: must never follow redirects -- a strategy that reads the raw
+    # `Location` header (e.g. OpenRedirectStrategy) needs the redirect response
+    # itself, and a redirect target can be attacker-controlled/unreachable.
+    assert session.calls[0]["allow_redirects"] is False
 
 
 def test_requests_probe_sender_post_body():

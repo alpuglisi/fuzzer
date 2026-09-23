@@ -42,6 +42,17 @@ _VULN_TO_CATEGORY = {
     "xss-stored": "xss",
     "xss-dom": "xss",
     "ssti": "server-side-template-injection",
+    # `open_redirect` (category 5, Booking.com, `CC-LAB-0210`): a real rule
+    # (`R-OPEN-REDIRECT`, `name_regex` matching "return_to" via its "return"
+    # alternative) and confirmation strategy (`OpenRedirectStrategy` in
+    # fuzzlab/oracle/strategies.py) already existed and were already
+    # correctly scoped for this cell -- purely a missing mapping, not a
+    # missing detector. Verified live against both of Booking.com's real
+    # twins before landing (see this change's own change-control entry);
+    # doing so surfaced and fixed a real, separate defect in
+    # `RequestsProbeSender` (`BUG-0039`) that would otherwise have made this
+    # mapping look wired but silently fail (or crash) against a real target.
+    "open_redirect": "open-redirect",
 }
 
 

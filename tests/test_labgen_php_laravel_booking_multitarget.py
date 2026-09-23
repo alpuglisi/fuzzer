@@ -17,13 +17,15 @@ which explicitly cites this app's own established convention): this
 harness already accepts a **list** of cells with no single-cell
 restriction, so no extension was needed here.
 
-**Recall is honestly 0 here, and that is expected, not a bug** -- same
-documented gap as every other category's own Phase E test: none of
-`open_redirect`/`csv_formula_injection`/`price_integrity_bypass` are
-mapped by `fuzzlab.core.runmode._VULN_TO_CATEGORY`. Wiring that mapping is
-real, sized follow-on work this test does not attempt -- its job is to
-prove the `TargetSpec` wiring (a real target, a real ground truth, a real
-run, a real scored report).
+**Recall is 1/3, and the other 2/3 are honestly false negatives, not a
+bug** -- `open_redirect` genuinely detects (`CC-CORE-0021`/`FR-CORE-11`,
+mapped into `fuzzlab.core.runmode._VULN_TO_CATEGORY` and verified live
+before this test was updated to expect it); `csv_formula_injection`/
+`price_integrity_bypass` have no verified confirmer yet (no
+`ConfirmationStrategy`/`Rule` pair exists for either), same documented gap
+as every other category's own Phase E test for its own unmapped classes.
+Wiring those two is real, sized follow-on work this test does not
+attempt.
 
 Skip-guarded on `live_boot_available()` (PA-0005). Marked
 `@pytest.mark.slow`.
@@ -88,11 +90,17 @@ def test_booking_target_spec_runs_for_real_and_scores(tmp_path) -> None:
             outcome = outcomes[0]
             # Real target, real ground truth -> a real, scored report (D14: automatic
             # mode + ground truth is always scored, regardless of tp count).
+            # `open_redirect` genuinely detects now (`CC-CORE-0021`/`FR-CORE-11`,
+            # verified live before this test was written this way -- BKNG-0001's
+            # real vulnerable twin, tp=1); `csv_formula_injection`/
+            # `price_integrity_bypass` have no verified confirmer yet, so they
+            # stay honest false negatives (fn=2), same documented gap as every
+            # other category's own Phase E test.
             assert outcome.scored is True
             assert outcome.report is not None
-            assert outcome.report.tp == 0 and outcome.report.fn == len(gt.positives())
-            assert outcome.report.precision == 0.0
-            assert outcome.report.recall == 0.0
+            assert outcome.report.tp == 1 and outcome.report.fn == 2
+            assert outcome.report.fp == 0
+            assert outcome.report.recall == 1 / 3
 
             summary = transfer_summary(outcomes)
             assert summary["targets"] == 1

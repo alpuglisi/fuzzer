@@ -217,6 +217,18 @@ rewards) derives from it.
   alongside `RequestsProbeSender`/`SeamProbeSender`) is real, sized
   follow-on work this requirement does not cover.
 
+- **FR-FUZZ-14** *(`CC-FUZZ-0027`, 2026-09-23).* `RequestsProbeSender.send()`
+  disables redirect-following (`allow_redirects=False`), matching
+  `fuzzlab.core.http`'s own authenticated client — a confirmation strategy
+  reading a raw `Location` header (`OpenRedirectStrategy`) needs the
+  redirect response itself, and a redirect target can be attacker-
+  controlled/unreachable (`BUG-0039`). `OpenRedirectStrategy.vuln_class` is
+  `"open_redirect"` (underscored), matching this project's established
+  ground-truth `vuln_class` convention every sibling strategy already
+  follows — `category` (`"open-redirect"`, hyphenated) is unchanged, a
+  separate namespace (`BUG-0040`). Both verified live end to end against a
+  real target; see `CC-CORE-0021`/`FR-CORE-11` for the real scored proof.
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

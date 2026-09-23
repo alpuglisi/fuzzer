@@ -252,8 +252,16 @@ class ReflectedXssStrategy(ConfirmationStrategy):
 
 
 class OpenRedirectStrategy(ConfirmationStrategy):
-    """M9: the parameter controls the redirect target (Location or meta refresh)."""
-    vuln_class = "open-redirect"
+    """M9: the parameter controls the redirect target (Location or meta refresh).
+
+    ``vuln_class`` is underscored (``open_redirect``), not hyphenated, to match
+    this project's own established ground-truth/manifest convention for this
+    class (``lab/safety_matrix.yaml``'s `open_redirect` concern, `labels.
+    schema.json`'s `vuln_class` enum, and every `open_redirect` manifest's own
+    `class:` field) -- ``category`` stays hyphenated (`open-redirect`), the
+    separate, deliberately-hyphenated category namespace every other strategy
+    also uses (`sql-injection`, `server-side-template-injection`, ...)."""
+    vuln_class = "open_redirect"
     mechanism = "redirect-target-control"
     category = "open-redirect"
 

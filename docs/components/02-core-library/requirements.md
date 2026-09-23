@@ -67,6 +67,22 @@ plugin registry. It is the layer that makes the store the integration bus.
   (`xxe`/`insecure_deserialization`/`webhook_signature_bypass`/`ssrf`/
   `outbound_header_injection`) stay unmapped until each has one.
 
+- **FR-CORE-11** *(`open_redirect`→`open-redirect` mapping; `CC-CORE-0021`,
+  2026-09-23).* Extends `FR-CORE-10`'s map with `open_redirect`→
+  `open-redirect` (category 5, Booking.com's real vulnerable cell,
+  `CC-LAB-0210`), verified live end to end through
+  `fuzzlab.harness.multitarget.run_targets`'s own real scoring (`PA-0042`),
+  not just `ConfirmationStrategy.confirm()` in isolation — that stricter
+  verification bar caught two real, distinct pre-existing defects
+  (`BUG-0039`: `RequestsProbeSender` followed redirects into an attacker-
+  controlled canary host; `BUG-0040`: `OpenRedirectStrategy.vuln_class`'s
+  spelling didn't match ground truth's own convention), both fixed before
+  this mapping was considered complete — see `CC-CORE-0021`'s own entry for
+  the full record and `CC-FUZZ-0027` for the fixes' own component-owner
+  entry. Real, verified result: `tp=1, fn=2, fp=0` against Booking.com's
+  real, locally-booted deployment. Scoped to `open_redirect` only — category
+  5's other three built classes have no verified confirmer yet.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

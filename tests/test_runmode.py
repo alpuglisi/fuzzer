@@ -23,6 +23,16 @@ def test_categories_from_vuln_classes_maps_ssti():
     assert cats == ["server-side-template-injection"]
 
 
+def test_categories_from_vuln_classes_maps_open_redirect():
+    # CC-CORE-0021: open_redirect has a real, verified working rule+strategy
+    # pairing (R-OPEN-REDIRECT/OpenRedirectStrategy) -- unlike category 5's
+    # other 3 built classes, which stay unmapped (see _VULN_TO_CATEGORY's
+    # own comment). Live-verifying this mapping found and fixed two real,
+    # distinct defects (BUG-0039/BUG-0040) before it was considered done.
+    cats = categories_from_vuln_classes(["open_redirect"])
+    assert cats == ["open-redirect"]
+
+
 def test_categories_from_vuln_classes_leaves_unmapped_classes_unchanged():
     # xxe/insecure_deserialization/etc. have no confirmer yet -- to_category()
     # falls through to the raw class name (no audit rule matches it, so it

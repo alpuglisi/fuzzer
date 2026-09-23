@@ -4,6 +4,24 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (category 5: first real detection, open_redirect mapped)
+- CORE/FUZZ: maps `open_redirect` into `fuzzlab.core.runmode.
+  _VULN_TO_CATEGORY` — a real rule (`R-OPEN-REDIRECT`) and confirmation
+  strategy (`OpenRedirectStrategy`) already existed and were already
+  correctly scoped for Booking.com's real cell, purely a missing mapping.
+  Live-verifying this end to end (not just `confirm()` in isolation, per
+  a new preventive action this same change adds) found and fixed two
+  real, distinct defects: `RequestsProbeSender` never disabled redirect-
+  following, so a real confirmation crashed instead of confirming
+  (`BUG-0039`); and `OpenRedirectStrategy.vuln_class` was spelled with a
+  hyphen where every ground-truth case (and every sibling strategy) uses
+  an underscore, so a correctly-confirmed finding could never match and
+  scored as a false positive instead of a hit (`BUG-0040`). Real,
+  verified result: `tp=1, fn=2, fp=0` against Booking.com's real,
+  locally-booted deployment — category 5's first real detection, and the
+  second vuln class in this project (after `ssti`) to move past an
+  honest zero. See `CC-CORE-0021`/`CC-FUZZ-0027`.
+
 ## 2026-09-23 (category 5: Phase E, wire both apps into multitarget.py)
 - LAB: constructs a real `TargetSpec` for Booking.com (`php_laravel`,
   reusing `LiveBootHarness` directly for all 3 vulnerable cells) and for

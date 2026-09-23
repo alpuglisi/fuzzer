@@ -19,12 +19,13 @@ This closes the toolkit-side half of category 5's own Phase 10 `T10.6`-
 style proof: `fuzzlab/harness/multitarget.py` actually accepting two real,
 distinct, locally-booted second targets in one call and producing a real
 combined `transfer_summary`. It does **not** claim `generalizes=True` --
-every one of this category's four currently-built vuln classes
-(`open_redirect`/`csv_formula_injection`/`price_integrity_bypass`/
-`spel_injection`) is honestly unmapped in
-`fuzzlab.core.runmode._VULN_TO_CATEGORY`, the same documented gap both
-apps' own individual Phase E tests already recorded, so `generalizes` is
-correctly `False`.
+`open_redirect` genuinely detects on Booking.com now (`CC-CORE-0021`/
+`FR-CORE-11`), but `csv_formula_injection`/`price_integrity_bypass`
+(Booking.com) and `spel_injection` (Expedia) all remain honestly unmapped
+in `fuzzlab.core.runmode._VULN_TO_CATEGORY` (no verified confirmer exists
+for any of the three yet), so `generalizes` is correctly `False` -- a
+single target detecting one of its own classes is not cross-target
+transfer.
 
 Skip-guarded on both `spring_boot_boot_available()` and
 `live_boot_available()` (PA-0005/PA-0035). Marked `@pytest.mark.slow`.
@@ -106,11 +107,19 @@ def test_booking_and_expedia_run_together_in_one_call(tmp_path) -> None:
         with Store(tmp_path / "u.db") as store:
             outcomes = run_targets(specs, store, sender_for=lambda s: RequestsProbeSender(timeout=10.0))
             assert [o.name for o in outcomes] == ["php_laravel_booking", "spring_boot_expedia"]
+            booking_outcome, expedia_outcome = outcomes
             for outcome in outcomes:
                 assert outcome.scored is True
                 assert outcome.report is not None
-                assert outcome.report.tp == 0
-                assert outcome.report.recall == 0.0
+            # Per-target assertions, not a shared loop -- CC-CORE-0020's own
+            # adequacy review caught exactly this pitfall (a shared loop would
+            # silently apply one target's own numbers to the other). Booking.com
+            # genuinely detects open_redirect now (CC-CORE-0021/FR-CORE-11);
+            # Expedia's spel_injection has no verified confirmer yet.
+            assert booking_outcome.report.tp == 1 and booking_outcome.report.fn == 2
+            assert booking_outcome.report.recall == 1 / 3
+            assert expedia_outcome.report.tp == 0
+            assert expedia_outcome.report.recall == 0.0
             # Two independent real run_ids, one per target, in the same call.
             assert outcomes[0].run_id != outcomes[1].run_id
 

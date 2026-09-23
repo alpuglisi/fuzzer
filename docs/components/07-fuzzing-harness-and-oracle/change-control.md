@@ -3,6 +3,23 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0027 — Fix two real defects found live-verifying `open_redirect`'s `_VULN_TO_CATEGORY` mapping (`BUG-0039`/`BUG-0040`) (FR-FUZZ-14) (2026-09-23)
+- Change: Companion fix to `CC-CORE-0021` (category 5's `open_redirect` → `_VULN_TO_CATEGORY` mapping), owned here since both defects live in this component's own files:
+  1. **`BUG-0039`** (`fuzzlab/tools/probesender.py`): `RequestsProbeSender.send()` never set `allow_redirects=False`, so any confirmation strategy reading a raw `Location` header (only `OpenRedirectStrategy` today) would crash or silently mis-follow a redirect against a real target — `fuzzlab.core.http`'s own authenticated client already set this; `RequestsProbeSender` alone did not. Fixed additively; `tests/test_probesender.py`'s fake session updated to accept and assert the new kwarg.
+  2. **`BUG-0040`** (`fuzzlab/oracle/strategies.py`): `OpenRedirectStrategy.vuln_class` was `"open-redirect"` (hyphenated, matching this strategy's own `category` attribute) instead of `"open_redirect"` (underscored, this project's established ground-truth `vuln_class` convention every sibling strategy already follows) — a real confirmation would never score as a true positive no matter how correct the underlying detection was. Fixed; `category` left unchanged (a separate, correctly-hyphenated namespace).
+
+  Both were caught by actually running `fuzzlab.harness.multitarget.run_targets` end to end against a real, locally-booted target and real ground truth (`PA-0042`, added by this same entry) — neither would have been caught by unit-testing `OpenRedirectStrategy.confirm()` alone against a hand-written fake, which is exactly what this component's own `tests/test_oracle_vectors.py` does and continues to pass unchanged throughout both fixes.
+- Impact (other components / project): `RequestsProbeSender`'s fix affects every existing caller across every category's own Phase E `multitarget.py` tests (LAB component) — all re-verified green by the full whole-repo suite, see `CC-CORE-0021`. No other FUZZ-component file touched.
+- Risk (level; mitigation or accepted-risk justification): low. Both fixes are strictly corrective (the prior behavior was either a crash or a silent scoring miss, never a working case these fixes could regress) and verified against this component's own full existing test suite (`test_oracle_vectors.py`, `test_probesender.py`, `test_ml_ranker.py`, `test_ml_ranking.py`, `test_web_findings.py`, `test_web_overview.py` — all still pass; the last four confirm `"open-redirect"`'s *category*-namespace spelling is genuinely untouched by the `vuln_class` fix).
+- Deliverables:
+  - [x] `fuzzlab/tools/probesender.py`: `allow_redirects=False` — done
+  - [x] `fuzzlab/oracle/strategies.py`: `OpenRedirectStrategy.vuln_class` corrected — done
+  - [x] `tests/test_probesender.py`: fake session + new assertion — done
+  - [x] `docs/bugs/BUG-0039-*.md`/`BUG-0040-*.md`, `ERROR_LOG.md`, `docs/PREVENTIVE_ACTIONS.md` (`PA-0041`/`PA-0042`) — done
+  - [x] `docs/components/07-fuzzing-harness-and-oracle/requirements.md`: `FR-FUZZ-14` — done
+  - [x] `CHANGELOG.md` line (shared with `CC-CORE-0021`) — done
+- Effectiveness (assessed 2026-09-23): Met. Both fixes verified live against a real, locally-booted target (see `CC-CORE-0021`'s own Effectiveness section for the exact `tp`/`fp` numbers) and this component's full existing test suite re-run with no regressions.
+
 ### CC-FUZZ-0025 — Build the M1 timing-differential ReDoS oracle mechanism (`RegexDosStrategy`) (2026-09-22)
 - Change: built `RegexDosStrategy` (`fuzzlab/oracle/strategies.py`), the
   `("regular-expression", "redos")` confirmation strategy

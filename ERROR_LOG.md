@@ -18,6 +18,44 @@ Format per entry:
 
 ---
 
+## 2026-09-23 — `RequestsProbeSender` followed redirects into an attacker-controlled canary host (fixed, BUG-0039/PA-0041)
+
+- **Symptom:** live-verifying category 5's `open_redirect` → `_VULN_TO_CATEGORY`
+  mapping before landing it, a real `OpenRedirectStrategy.confirm()` call
+  against Booking.com's real vulnerable twin raised an uncaught
+  `requests.exceptions.ProxyError` instead of returning a confirmed `Verdict`.
+- **Root cause:** `RequestsProbeSender.send()` never set `allow_redirects=False`
+  (unlike `fuzzlab.core.http`'s own authenticated client, which already does),
+  so `requests` tried to follow the strategy's own canary redirect target —
+  an attacker-controlled host this sandbox's egress proxy correctly refuses.
+  No prior category's ground truth included a redirect-based sink, so no
+  real confirmation run had ever exercised this path before.
+- **Remediation:** added `allow_redirects=False` to `RequestsProbeSender.send()`,
+  matching `fuzzlab.core.http`'s own client. `tests/test_probesender.py`
+  updated to assert it.
+- **Status:** Fixed. See `docs/bugs/BUG-0039-*.md`.
+
+## 2026-09-23 — `OpenRedirectStrategy.vuln_class` was hyphenated, mismatching ground truth's underscored spelling (fixed, BUG-0040/PA-0042)
+
+- **Symptom:** after fixing `BUG-0039`, the same real confirmation now
+  returned a correct `Verdict`, but `fuzzlab.harness.multitarget.run_targets`'s
+  own scoring against real `lab/ground-truth-booking-clone/` ground truth
+  recorded the confirmed finding as a false positive (`tp=0, fp=1`), not a hit.
+- **Root cause:** `OpenRedirectStrategy.vuln_class = "open-redirect"`
+  (hyphenated, matching this strategy's own `category` attribute) never
+  matched ground truth's `"open_redirect"` (underscored, this project's
+  established `vuln_class` convention for this class, which every sibling
+  strategy already follows correctly) — `fuzzlab.harness.scoring.score()`'s
+  exact-key match therefore never linked the two. Latent since this
+  strategy was first authored; no `open_redirect` ground truth existed
+  anywhere in this project to catch the mismatch until now.
+- **Remediation:** `OpenRedirectStrategy.vuln_class` corrected to
+  `"open_redirect"` (`category` left unchanged, a separate, correctly-
+  hyphenated namespace). Re-verified live: `tp=1, fn=2, fp=0`.
+- **Status:** Fixed. See `docs/bugs/BUG-0040-*.md`.
+
+---
+
 ## 2026-09-23 — `ruby_rails` skeleton's unpinned `json` gem 500'd every second request in a session (fixed, BUG-0035/PA-0037)
 
 - **Symptom:** building the Phase D whole-app conformance test and the Phase
