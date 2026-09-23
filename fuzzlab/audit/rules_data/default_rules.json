@@ -42,6 +42,27 @@
       "transaction_type": "Template Injection",
       "when": { "location_in": ["query", "body"] },
       "reference": "server-side-template-injection"
+    },
+    {
+      "id": "R-SPEL-INJECTION",
+      "category": "spel-injection",
+      "transaction_type": "Expression Language Injection",
+      "when": { "name_regex": "sort|sortby|filter|order|expr|expression" },
+      "reference": "spel-injection"
+    },
+    {
+      "id": "R-PRICE-INTEGRITY",
+      "category": "price-integrity-bypass",
+      "transaction_type": "Price Integrity Bypass",
+      "when": { "name_regex": "amount|price|total|cost|charge", "method_in": ["POST"] },
+      "reference": "price-integrity-bypass"
+    },
+    {
+      "id": "R-CSV-FORMULA-INJECTION",
+      "category": "csv-formula-injection",
+      "transaction_type": "CSV Formula Injection",
+      "when": { "name_regex": "label|name|comment|note|description|title", "method_in": ["GET"] },
+      "reference": "csv-formula-injection"
     }
   ]
 }

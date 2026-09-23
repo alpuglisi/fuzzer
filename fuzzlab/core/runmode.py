@@ -42,6 +42,50 @@ _VULN_TO_CATEGORY = {
     "xss-stored": "xss",
     "xss-dom": "xss",
     "ssti": "server-side-template-injection",
+    # `open_redirect` (category 5, Booking.com, `CC-LAB-0210`): a real rule
+    # (`R-OPEN-REDIRECT`, `name_regex` matching "return_to" via its "return"
+    # alternative) and confirmation strategy (`OpenRedirectStrategy` in
+    # fuzzlab/oracle/strategies.py) already existed and were already
+    # correctly scoped for this cell -- purely a missing mapping, not a
+    # missing detector. Verified live against both of Booking.com's real
+    # twins before landing (see this change's own change-control entry);
+    # doing so surfaced and fixed a real, separate defect in
+    # `RequestsProbeSender` (`BUG-0039`) that would otherwise have made this
+    # mapping look wired but silently fail (or crash) against a real target.
+    "open_redirect": "open-redirect",
+    # `spel_injection` (category 5, Expedia, `CC-LAB-0214`): a new rule
+    # (`R-SPEL-INJECTION`) and confirmation strategy (`SpelInjectionStrategy`
+    # in fuzzlab/oracle/strategies.py) built specifically for this class --
+    # unlike `ssti`/`open_redirect` above, no existing rule+strategy pair
+    # applied here (SstiStrategy's own bare-arithmetic-product canary would
+    # be a guaranteed false positive against this shape's real secure twin,
+    # a `SimpleEvaluationContext` that restricts type/method access but not
+    # literal arithmetic -- caught by this component's own pre-change review
+    # gate before implementation). `SpelInjectionStrategy` uses a
+    # `T(java.lang.Math).abs(-n)` type-reference canary instead, the exact
+    # differential this project already proved live. Verified live against
+    # both of Expedia's real twins before landing.
+    "spel_injection": "spel-injection",
+    # `price_integrity_bypass` (category 5, Booking.com, `CC-LAB-0212`): a
+    # new rule (`R-PRICE-INTEGRITY`) and confirmation strategy
+    # (`PriceIntegrityBypassStrategy` in fuzzlab/oracle/strategies.py) built
+    # specifically for this class -- the vulnerable twin (`LABGEN-BC-0005`)
+    # has an empty transform pipeline (no named op to detect); the real
+    # differential is the secure twin's own server-side rate-table
+    # recomputation, which the vulnerable twin never performs, proven live
+    # in `tests/test_labgen_price_integrity.py`'s own live-boot test before
+    # this mapping landed. Verified live against both of Booking.com's real
+    # twins before landing.
+    "price_integrity_bypass": "price-integrity-bypass",
+    # `csv_formula_injection` (category 5, Booking.com, `CC-LAB-0211`): a new
+    # rule (`R-CSV-FORMULA-INJECTION`) and confirmation strategy
+    # (`CsvFormulaInjectionStrategy` in fuzzlab/oracle/strategies.py) built
+    # specifically for this class -- tries all four OWASP trigger characters
+    # (=, +, -, @), not just one, per this component's own pre-change
+    # adequacy review (a single-character canary risked a false negative
+    # against a neutralizer that only escapes a subset). Verified live
+    # against both of Booking.com's real twins before landing.
+    "csv_formula_injection": "csv-formula-injection",
 }
 
 

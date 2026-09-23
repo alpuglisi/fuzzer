@@ -13,6 +13,18 @@
             "expected_vulnerable": true,
             "rendering": "server",
             "notes": "sortBy parsed and evaluated as a Spring Expression Language (SpEL) expression against an unrestricted StandardEvaluationContext -- CWE-917, the real mechanism behind CVE-2018-1273 (Spring Data Commons) and CVE-2022-22980/CVE-2026-41717 (Spring Data MongoDB @Query/@Aggregation SpEL parameter binding) (docs/research/category5-travel-functionality-and-cwe-research.md). LABGEN-EXP-0001 in lab/manifests/expedia_spel_injection_sample.yaml, CC-LAB-0214/FR-LAB-113, category 5 pilot's first Expedia-specific cell (distinct from the ported Netflix cell, which is TrackerNest/category-4 code reused, not built for Expedia) -- never a PFF-* case."
+        },
+        {
+            "case_id": "EXPD-0002",
+            "url": "/api/trips/restore",
+            "method": "POST",
+            "param": "body",
+            "location": "body",
+            "vuln_class": "insecure_deserialization",
+            "sink_context": "deserialization",
+            "expected_vulnerable": true,
+            "rendering": "server-json",
+            "notes": "Whole raw request body deserialized polymorphically by Jackson default-typing, with the concrete runtime type resolved from an attacker-controlled type hint embedded in the JSON itself (CWE-502) -- modeled on Expedia's real booking-history/manage-your-trip resume-a-saved-booking feature (docs/research/category5-travel-functionality-and-cwe-research.md sec 1.2). No single named field carries the taint (the entire body is the sink input), so param is the literal string \"body\", matching CC-LAB-0174's own established convention for this exact shape. LABGEN-EXP-0003 in lab/manifests/expedia_trip_restore_sample.yaml, CC-LAB-0220/FR-LAB-121, category 5 pilot's second Expedia-specific cell (reuses CC-LAB-0213's ported jackson_default_typing_deserialize/jackson_typed_allowlist_deserialize ops -- no new safety-matrix rows or emitter code -- but this is Expedia's own designed page, closing the route-borrowing gap that entry's port left open) -- never a PFF-* case."
         }
     ]
 }

@@ -1,6 +1,8 @@
 # fuzzlab expected results (Benchmark-style) for category 5's Expedia
 # pilot app. Derived from labels.json; the loader cross-checks the two so
 # they cannot drift. category is the vuln class; expected_vulnerable is the
-# ground-truth verdict for that (url, param) case. CC-LAB-0214/FR-LAB-113.
+# ground-truth verdict for that (url, param) case. CC-LAB-0214/FR-LAB-113,
+# CC-LAB-0220/FR-LAB-121.
 case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
 EXPD-0001,/api/hotels/search-sort,GET,sortBy,query,spel_injection,true,/api/hotels/search-sort,sink,,direct
+EXPD-0002,/api/trips/restore,POST,body,body,insecure_deserialization,true,/api/trips/restore,sink,,direct

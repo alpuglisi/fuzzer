@@ -67,6 +67,51 @@ plugin registry. It is the layer that makes the store the integration bus.
   (`xxe`/`insecure_deserialization`/`webhook_signature_bypass`/`ssrf`/
   `outbound_header_injection`) stay unmapped until each has one.
 
+- **FR-CORE-11** *(`open_redirect`→`open-redirect` mapping; `CC-CORE-0021`,
+  2026-09-23).* Extends `FR-CORE-10`'s map with `open_redirect`→
+  `open-redirect` (category 5, Booking.com's real vulnerable cell,
+  `CC-LAB-0210`), verified live end to end through
+  `fuzzlab.harness.multitarget.run_targets`'s own real scoring (`PA-0042`),
+  not just `ConfirmationStrategy.confirm()` in isolation — that stricter
+  verification bar caught two real, distinct pre-existing defects
+  (`BUG-0039`: `RequestsProbeSender` followed redirects into an attacker-
+  controlled canary host; `BUG-0040`: `OpenRedirectStrategy.vuln_class`'s
+  spelling didn't match ground truth's own convention), both fixed before
+  this mapping was considered complete — see `CC-CORE-0021`'s own entry for
+  the full record and `CC-FUZZ-0027` for the fixes' own component-owner
+  entry. Real, verified result: `tp=1, fn=2, fp=0` against Booking.com's
+  real, locally-booted deployment. Scoped to `open_redirect` only — category
+  5's other three built classes have no verified confirmer yet.
+
+- **FR-CORE-12** *(`price_integrity_bypass`→`price-integrity-bypass`
+  mapping; `CC-CORE-0022`, 2026-09-23).* Extends `FR-CORE-10`'s map with
+  `price_integrity_bypass`→`price-integrity-bypass` (category 5,
+  Booking.com's real vulnerable cell `LABGEN-BC-0005`, `CC-LAB-0212`),
+  paired with a genuinely new rule+strategy (`R-PRICE-INTEGRITY`/
+  `PriceIntegrityBypassStrategy`, `CC-FUZZ-0029`, this component's own
+  FUZZ counterpart — see `FR-FUZZ-16`). Verified live end to end through
+  `fuzzlab.harness.multitarget.run_targets`'s own real scoring (`PA-0042`),
+  not just `ConfirmationStrategy.confirm()` in isolation. Real, verified
+  result: `tp=2, fn=1, fp=0` against Booking.com's real, locally-booted
+  deployment (recall `1/3 -> 2/3`). Scoped to `price_integrity_bypass`
+  only — `csv_formula_injection` (Booking.com) and
+  `insecure_deserialization` (Expedia) still have no verified confirmer.
+
+- **FR-CORE-13** *(`csv_formula_injection`→`csv-formula-injection`
+  mapping; `CC-CORE-0023`, 2026-09-23).* Extends `FR-CORE-10`'s map with
+  `csv_formula_injection`→`csv-formula-injection` (category 5,
+  Booking.com's real vulnerable cell `LABGEN-BC-0003`, `CC-LAB-0211`),
+  paired with a genuinely new rule+strategy (`R-CSV-FORMULA-INJECTION`/
+  `CsvFormulaInjectionStrategy`, `CC-FUZZ-0030`, this component's own FUZZ
+  counterpart — see `FR-FUZZ-17`). Verified live end to end through
+  `fuzzlab.harness.multitarget.run_targets`'s own real scoring (`PA-0042`).
+  Real, verified result: `tp=3, fn=0, fp=0` against Booking.com's real,
+  locally-booted deployment (recall `2/3 -> 1.0`) — this app's own full
+  ground truth, zero false negatives, closing Booking.com's toolkit-side
+  detection coverage entirely. This is category 5's fourth real detection
+  and the last of Booking.com's own classes; only Expedia's own
+  `insecure_deserialization` remains unmapped in this category.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

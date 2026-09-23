@@ -23,6 +23,49 @@ def test_categories_from_vuln_classes_maps_ssti():
     assert cats == ["server-side-template-injection"]
 
 
+def test_categories_from_vuln_classes_maps_open_redirect():
+    # CC-CORE-0021: open_redirect has a real, verified working rule+strategy
+    # pairing (R-OPEN-REDIRECT/OpenRedirectStrategy) -- unlike category 5's
+    # other 3 built classes, which stay unmapped (see _VULN_TO_CATEGORY's
+    # own comment). Live-verifying this mapping found and fixed two real,
+    # distinct defects (BUG-0039/BUG-0040) before it was considered done.
+    cats = categories_from_vuln_classes(["open_redirect"])
+    assert cats == ["open-redirect"]
+
+
+def test_categories_from_vuln_classes_maps_spel_injection():
+    # CC-FUZZ-0028: spel_injection needed a genuinely NEW rule+strategy pair
+    # (R-SPEL-INJECTION/SpelInjectionStrategy) -- unlike ssti/open_redirect,
+    # no existing confirmer applied (a bare-arithmetic canary would have
+    # been a guaranteed false positive against this shape's real secure
+    # twin, caught by the pre-change review gate). Live-verified against
+    # both of Expedia's real twins: tp=1, fn=0, fp=0.
+    cats = categories_from_vuln_classes(["spel_injection"])
+    assert cats == ["spel-injection"]
+
+
+def test_categories_from_vuln_classes_maps_price_integrity_bypass():
+    # CC-FUZZ-0029: price_integrity_bypass needed a genuinely NEW rule+
+    # strategy pair (R-PRICE-INTEGRITY/PriceIntegrityBypassStrategy) -- the
+    # vulnerable twin (LABGEN-BC-0005) has an empty transform pipeline, so
+    # the real differential is the secure twin's own server-side rate-table
+    # recomputation, which the vulnerable twin never performs. Live-verified
+    # against both of Booking.com's real twins.
+    cats = categories_from_vuln_classes(["price_integrity_bypass"])
+    assert cats == ["price-integrity-bypass"]
+
+
+def test_categories_from_vuln_classes_maps_csv_formula_injection():
+    # CC-FUZZ-0030: csv_formula_injection needed a genuinely NEW rule+
+    # strategy pair (R-CSV-FORMULA-INJECTION/CsvFormulaInjectionStrategy) --
+    # tries all four OWASP trigger characters (=, +, -, @), not just one,
+    # per the pre-change adequacy review's own false-negative concern.
+    # Live-verified against both of Booking.com's real twins -- this is
+    # category 5's fourth and final real detection for this app.
+    cats = categories_from_vuln_classes(["csv_formula_injection"])
+    assert cats == ["csv-formula-injection"]
+
+
 def test_categories_from_vuln_classes_leaves_unmapped_classes_unchanged():
     # xxe/insecure_deserialization/etc. have no confirmer yet -- to_category()
     # falls through to the raw class name (no audit rule matches it, so it

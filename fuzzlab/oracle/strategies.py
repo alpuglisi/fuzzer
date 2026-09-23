@@ -252,8 +252,16 @@ class ReflectedXssStrategy(ConfirmationStrategy):
 
 
 class OpenRedirectStrategy(ConfirmationStrategy):
-    """M9: the parameter controls the redirect target (Location or meta refresh)."""
-    vuln_class = "open-redirect"
+    """M9: the parameter controls the redirect target (Location or meta refresh).
+
+    ``vuln_class`` is underscored (``open_redirect``), not hyphenated, to match
+    this project's own established ground-truth/manifest convention for this
+    class (``lab/safety_matrix.yaml``'s `open_redirect` concern, `labels.
+    schema.json`'s `vuln_class` enum, and every `open_redirect` manifest's own
+    `class:` field) -- ``category`` stays hyphenated (`open-redirect`), the
+    separate, deliberately-hyphenated category namespace every other strategy
+    also uses (`sql-injection`, `server-side-template-injection`, ...)."""
+    vuln_class = "open_redirect"
     mechanism = "redirect-target-control"
     category = "open-redirect"
 
@@ -289,6 +297,129 @@ class SstiStrategy(ConfirmationStrategy):
             if product in text and expr not in text:      # evaluated, not just reflected
                 return Verdict(True, self.vuln_class, self.mechanism,
                                {"payload": payload, "product": product})
+        return None
+
+
+class SpelInjectionStrategy(ConfirmationStrategy):
+    """A Spring Expression Language (SpEL) expression is evaluated with an
+    unrestricted evaluation context (CWE-917, category 5's `spel_injection`).
+
+    **Deliberately not `SstiStrategy`'s own bare-arithmetic-product canary.**
+    A real vulnerable sink of this shape parses the *entire* raw parameter
+    as a bare SpEL expression with no delimiter -- but a restricted
+    `SimpleEvaluationContext` (the real, documented fix for this class, per
+    `CC-LAB-0214`) still permits ordinary literal arithmetic; it only
+    restricts type references (`T(...)`), bean references, constructors,
+    and arbitrary method/property access. A bare-arithmetic canary
+    (`<a>*<b>`) would therefore evaluate identically under BOTH twins --
+    a guaranteed false positive on the secure twin, not a rare one, caught
+    by this component's own pre-change review gate before implementation.
+    Uses a `T(java.lang.Math).abs(-<n>)` type-reference canary instead --
+    the exact differential this project already proved live
+    (`tests/test_labgen_spel_injection_live_boot.py`): evaluates for real
+    under an unrestricted context, rejected outright under a restricted
+    one."""
+    vuln_class = "spel_injection"
+    mechanism = "type-reference-evaluation"
+    category = "spel-injection"
+
+    def confirm(self, candidate, sender):
+        n = secrets.randbelow(900) + 100
+        payload = f"T(java.lang.Math).abs(-{n})"
+        text = self._send(sender, candidate, payload).text or ""
+        if str(n) in text and payload not in text:         # evaluated, not just reflected
+            return Verdict(True, self.vuln_class, self.mechanism,
+                           {"payload": payload, "result": str(n)})
+        return None
+
+
+class PriceIntegrityBypassStrategy(ConfirmationStrategy):
+    """A client-submitted amount is trusted and echoed back verbatim instead
+    of being recomputed server-side from a rate table (category 5's
+    `price_integrity_bypass`, Booking.com pilot). No CWE is cited for this
+    class -- it is a business-logic/trust-boundary defect, not a parser or
+    injection flaw; grounded in the real QloApps `Cart::getOrderTotal()`
+    trust pattern this shape was modeled on.
+
+    **The vulnerable twin (`LABGEN-BC-0005`) has an empty transform pipeline**
+    (`transform: []`) -- there is no named "trusted amount" class to detect;
+    the differential is the *absence* of the secure twin's own server-side
+    recomputation op, proven live in
+    `tests/test_labgen_price_integrity.py::test_live_boot_price_integrity_manifest_ignores_the_client_amount_on_the_secure_twin`.
+
+    **Canary has three decimal places**, structurally distinct from the real
+    rate table's own two-decimal-place values (`89.00`/`149.00`/`249.00` --
+    also excluded explicitly, defense in depth) -- a random two-decimal
+    canary could otherwise coincidentally collide with a real rate, caught
+    by this component's own pre-change adequacy review before implementation.
+
+    **Match is anchored**: `"charged_amount":"<canary>"` (after stripping
+    whitespace from the response body, mirroring the live-boot test's own
+    normalization) -- not a bare substring search, which could false-match
+    an unrelated field that happens to contain the same digits."""
+    vuln_class = "price_integrity_bypass"
+    mechanism = "trusted-client-amount-echo"
+    category = "price-integrity-bypass"
+
+    #: The real rate-table literals this shape's secure twin can return --
+    #: excluded explicitly even though the canary's own decimal-place shape
+    #: already makes a collision structurally impossible (defense in depth).
+    _RATE_TABLE_AMOUNTS = frozenset({"89.00", "149.00", "249.00"})
+
+    def confirm(self, candidate, sender):
+        while True:
+            whole = secrets.randbelow(9000) + 100
+            frac = secrets.randbelow(900) + 100
+            canary = f"{whole}.{frac}"
+            if canary not in self._RATE_TABLE_AMOUNTS:
+                break
+        text = (self._send(sender, candidate, canary).text or "").replace(" ", "")
+        if f'"charged_amount":"{canary}"' in text:
+            return Verdict(True, self.vuln_class, self.mechanism,
+                           {"payload": canary, "echoed": canary})
+        return None
+
+
+class CsvFormulaInjectionStrategy(ConfirmationStrategy):
+    """A value containing an OWASP CSV-formula trigger character is embedded
+    unescaped into an exported CSV cell (CWE-1236, category 5's
+    `csv_formula_injection`, Booking.com pilot).
+
+    **Tries all four OWASP trigger characters** (`=`, `+`, `-`, `@`), not
+    just `=` -- a real neutralizer could plausibly escape only a subset,
+    which a single-character canary would silently miss (a false negative
+    on a genuinely vulnerable target), caught by this component's own
+    pre-change adequacy review before implementation. (The real secure
+    twin this shape was modeled on, `CsvFormulaNeutralizeTransform`, also
+    neutralizes leading tab/CR, per that same review -- not exercised here,
+    matching the four-character scope this project's own OWASP-grounded
+    test payload set already established, not a new gap this strategy
+    introduces.)
+
+    **Match is anchored to the CSV cell boundary**, not merely "right after
+    a newline": both the unmodified-echo check and the not-secure check
+    require the payload to be immediately followed by the field separator
+    (`,`) -- `f"\\n{payload},"` / a leading `{payload},`. A bare
+    `f"\\n{payload}"` check (an earlier draft) would false-positive-confirm
+    on any response that merely echoes the raw payload right after a
+    newline for an unrelated reason (a debug/error page, a differently-
+    shaped reflection) -- rejected pre-implementation by the same review."""
+    vuln_class = "csv_formula_injection"
+    mechanism = "unescaped-formula-trigger-echo"
+    category = "csv-formula-injection"
+
+    #: OWASP's four named CSV-formula trigger characters.
+    _TRIGGER_CHARS = ("=", "+", "-", "@")
+
+    def confirm(self, candidate, sender):
+        for trigger in self._TRIGGER_CHARS:
+            n = secrets.randbelow(900) + 100
+            payload = f"{trigger}{n}+{n}"
+            text = self._send(sender, candidate, payload).text or ""
+            anchored = f"{payload},"
+            if text.startswith(anchored) or f"\n{anchored}" in text:
+                return Verdict(True, self.vuln_class, self.mechanism,
+                               {"payload": payload, "trigger": trigger})
         return None
 
 
@@ -594,7 +725,8 @@ def default_strategies(browser: BrowserExecutor | None = None,
     """
     return [SqliErrorStrategy(), SqliBooleanStrategy(), SqliTimingStrategy(),
             ReflectedXssStrategy(), DomXssStrategy(browser), StoredXssStrategy(browser),
-            OpenRedirectStrategy(), SstiStrategy(),
+            OpenRedirectStrategy(), SstiStrategy(), SpelInjectionStrategy(),
+            PriceIntegrityBypassStrategy(), CsvFormulaInjectionStrategy(),
             PathTraversalStrategy(), CommandInjectionStrategy(),
             CommandInjectionOobStrategy(oob), RegexDosStrategy(),
             GreyboxConfirmationStrategy(coverage, dbfault)]
@@ -610,6 +742,9 @@ _CATEGORY_TO_CLASS = {
     "xss": "xss-reflected",
     "open-redirect": "open-redirect",
     "server-side-template-injection": "ssti",
+    "spel-injection": "spel_injection",
+    "price-integrity-bypass": "price_integrity_bypass",
+    "csv-formula-injection": "csv_formula_injection",
     "file-inclusion": "file-inclusion",
     "command-injection": "command-injection",
     "regular-expression": "redos",

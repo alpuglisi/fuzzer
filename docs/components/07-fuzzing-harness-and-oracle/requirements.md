@@ -217,6 +217,91 @@ rewards) derives from it.
   alongside `RequestsProbeSender`/`SeamProbeSender`) is real, sized
   follow-on work this requirement does not cover.
 
+- **FR-FUZZ-14** *(`CC-FUZZ-0027`, 2026-09-23).* `RequestsProbeSender.send()`
+  disables redirect-following (`allow_redirects=False`), matching
+  `fuzzlab.core.http`'s own authenticated client — a confirmation strategy
+  reading a raw `Location` header (`OpenRedirectStrategy`) needs the
+  redirect response itself, and a redirect target can be attacker-
+  controlled/unreachable (`BUG-0039`). `OpenRedirectStrategy.vuln_class` is
+  `"open_redirect"` (underscored), matching this project's established
+  ground-truth `vuln_class` convention every sibling strategy already
+  follows — `category` (`"open-redirect"`, hyphenated) is unchanged, a
+  separate namespace (`BUG-0040`). Both verified live end to end against a
+  real target; see `CC-CORE-0021`/`FR-CORE-11` for the real scored proof.
+
+- **FR-FUZZ-15** *(`CC-FUZZ-0028`, 2026-09-23).* `SpelInjectionStrategy`
+  (`fuzzlab/oracle/strategies.py`) confirms `spel_injection` (CWE-917) via
+  a `T(java.lang.Math).abs(-n)` type-reference canary — a bare-arithmetic
+  canary (`SstiStrategy`'s own mechanism) was rejected pre-implementation
+  by the adequacy review: `SimpleEvaluationContext` (the real secure-twin
+  fix) restricts type/method/bean access but not literal arithmetic, so
+  a bare-arithmetic canary would confirm on the SECURE twin too, a
+  guaranteed false positive. New `Rule` `R-SPEL-INJECTION` (`name_regex:
+  "sort|sortby|filter|order|expr|expression"`, grounded in Expedia's real
+  `sortBy` parameter), new `_VULN_TO_CATEGORY["spel_injection"]`/
+  `_CATEGORY_TO_CLASS["spel-injection"]` entries (both required —
+  `fuzzlab.harness.pipeline`'s own dispatch gate needs the second one or
+  every candidate is silently dropped, a completeness gap the accuracy
+  review caught pre-implementation). Live-verified end to end: `tp=1,
+  fn=0, fp=0` against Expedia's real deployment, including an explicit
+  secure-twin check confirming no false positive. Category 5's second
+  real detection — combined with `open_redirect`'s own (`FR-CORE-11`),
+  the Phase E combined test now scores `generalizes=True` for real (two
+  independently-mapped classes, two different stacks).
+
+- **FR-FUZZ-16** *(`CC-FUZZ-0029`, 2026-09-23).* `PriceIntegrityBypassStrategy`
+  (`fuzzlab/oracle/strategies.py`) confirms `price_integrity_bypass` (no
+  CWE — a business-logic/trust-boundary defect, grounded in the real
+  QloApps `Cart::getOrderTotal()` trust pattern this shape was modeled
+  on) by sending an attacker-chosen amount canary and checking whether the
+  response echoes it back verbatim (`"charged_amount":"<canary>"`,
+  matched after stripping whitespace, not a bare substring search — an
+  unanchored match was rejected pre-implementation by the adequacy
+  review). The canary always has three decimal places, structurally
+  incompatible with the real rate table's own two-decimal-place values
+  (`89.00`/`149.00`/`249.00`, also excluded explicitly as defense in
+  depth) — a random two-decimal canary was rejected pre-implementation by
+  the same review as a real, non-negligible collision risk, not just an
+  improbable one. The vulnerable twin (`LABGEN-BC-0005`) has an empty
+  transform pipeline (no named "trusted amount" op to detect); the real
+  differential is the secure twin's own server-side rate-table
+  recomputation, which the vulnerable twin never performs — the accuracy
+  review caught and corrected an earlier draft's fictitious
+  `ClientTrustedAmountTransform` framing pre-implementation. New `Rule`
+  `R-PRICE-INTEGRITY` (`name_regex: "amount|price|total|cost|charge"`,
+  `method_in: ["POST"]`, grounded in Booking.com's real `amount`
+  parameter), new `_VULN_TO_CATEGORY["price_integrity_bypass"]`/
+  `_CATEGORY_TO_CLASS["price-integrity-bypass"]` entries (both required —
+  the same completeness gap `FR-FUZZ-15` already documents). Live-verified
+  end to end: `fuzzlab.harness.multitarget.run_targets` against
+  Booking.com's real deployment now scores `tp=2, fn=1, fp=0` (recall
+  `1/3 -> 2/3`), the real inserted `bookings` row's own `total_amount`
+  independently proven by `tests/test_labgen_price_integrity.py`'s
+  live-boot test before this mapping landed. Category 5's third real
+  detection.
+
+- **FR-FUZZ-17** *(`CC-FUZZ-0030`, 2026-09-23).* `CsvFormulaInjectionStrategy`
+  (`fuzzlab/oracle/strategies.py`) confirms `csv_formula_injection`
+  (CWE-1236) by sending a canary prefixed with each of OWASP's four
+  CSV-formula trigger characters (`=`, `+`, `-`, `@`) in turn and checking
+  whether the response echoes it back unescaped, anchored to the actual
+  CSV cell boundary (`f"{payload},"`, not merely "right after a
+  newline" — an unanchored match was rejected pre-implementation by the
+  adequacy review as a false-positive risk against any response that
+  merely echoes the payload after a newline for an unrelated reason).
+  Trying all four trigger characters, not just `=`, was also required by
+  the same review — a single-character canary risked a false negative
+  against a real neutralizer that only escapes a subset. New `Rule`
+  `R-CSV-FORMULA-INJECTION` (`name_regex:
+  "label|name|comment|note|description|title"`, `method_in: ["GET"]`,
+  grounded in Booking.com's real `label` export parameter), new
+  `_VULN_TO_CATEGORY["csv_formula_injection"]`/
+  `_CATEGORY_TO_CLASS["csv-formula-injection"]` entries. Live-verified end
+  to end: `tp=3, fn=0, fp=0` against Booking.com's real deployment — this
+  app's own full ground truth, zero false negatives. Category 5's fourth
+  real detection, closing Booking.com's own toolkit-side detection
+  coverage entirely.
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

@@ -49,7 +49,18 @@ class RequestsProbeSender:
     def send(self, url: str, param: str, value: str, timing: bool = False,
              method: str = "GET", location: str = "query") -> Probe:
         import requests
-        kwargs = {"timeout": self._timeout}
+        # `allow_redirects=False` (BUG-0039): a confirmation strategy that reads
+        # the raw `Location` header (e.g. `OpenRedirectStrategy`) needs the
+        # redirect response itself, not whatever page following it lands on --
+        # and a payload that *is* a redirect target (an attacker-controlled URL)
+        # can point anywhere, including a host this sandbox's own egress policy
+        # or a real network simply cannot reach, which `requests` surfaces as an
+        # uncaught connection error while trying to follow it. Matches
+        # `fuzzlab.core.http`'s authenticated client, which already sets this
+        # (see that module's own request-building code) -- this was a real
+        # inconsistency between the two `Sender` implementations, not a
+        # deliberate difference.
+        kwargs = {"timeout": self._timeout, "allow_redirects": False}
         if location == "body":
             kwargs["data"] = {param: value}          # form-encoded body
         else:

@@ -1,0 +1,43 @@
+# Trip-restore insecure-deserialization sample manifest (`CC-LAB-0220`/
+# `FR-LAB-121`), `spring_boot`.
+#
+# Category 5 (Travel/booking/marketplaces) pilot's second Expedia-specific
+# cell -- closes a real design gap `CC-LAB-0213`'s port left open: that
+# entry's ported Netflix Jackson-deserialization cell sits on a borrowed
+# Netflix route (`/api/playback/resume`), not an Expedia-flavored one, so
+# Expedia's own designed page set only had `spel_injection`
+# (`CC-LAB-0214`). This manifest reuses the SAME existing ops
+# (`jackson_default_typing_deserialize`/`jackson_typed_allowlist_deserialize`
+# -- no new safety-matrix rows or emitter code needed) at a new,
+# Expedia-flavored route grounded in Expedia's real booking-history/
+# manage-your-trip functionality
+# (docs/research/category5-travel-functionality-and-cwe-research.md
+# §1.2's "User account / booking history / cancellation-modification"
+# section, cited): a "resume your saved trip" feature that restores an
+# abandoned booking session from a client-supplied state blob.
+#
+# Same CWE-502 mechanism as CC-LAB-0213's ported cell (vulnerable twin:
+# Jackson polymorphic default-typing deserialization into a bare Object;
+# secure twin: a single, fixed, concrete DTO class, no polymorphism) --
+# this manifest's contribution is the page/route identity, not a new
+# detection mechanism.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-EXP-0003
+    class: insecure_deserialization
+    stack_profile: spring_boot
+    route: { method: POST, path: /api/trips/restore }
+    sink_context:
+      family: object_deserialization
+      required_neutralizations: [insecure_deserialization]
+    transform: [jackson_default_typing_deserialize]
+
+  - cell_id: LABGEN-EXP-0004
+    class: insecure_deserialization
+    stack_profile: spring_boot
+    route: { method: POST, path: /api/trips/restore }
+    sink_context:
+      family: object_deserialization
+      required_neutralizations: [insecure_deserialization]
+    transform: [jackson_typed_allowlist_deserialize]

@@ -1401,6 +1401,264 @@ Component code: **LAB**. Entry format and required fields: see
   and both existing ground-truth directories still load/validate
   correctly.
 
+### Bookkeeping-ID note: category 5's Phase D/E + Expedia trip-restore entries renumbered `CC-LAB-0216`-`0220`/`FR-LAB-117`-`121` -> `CC-LAB-0221`-`0225`/`FR-LAB-127`-`131` (2026-09-23, merge time)
+
+Category 5 (`claude/category-5-build-6boejs`) independently assigned
+`CC-LAB-0216`-`0220`/`FR-LAB-117`-`121` to its own Phase D conformance
+entry, its Phase E `multitarget.py` wiring (Booking.com, Expedia, both
+together), and Expedia's trip-restore page. Both number ranges turned
+out to be genuine cross-branch collisions, on two different components:
+
+- `CC-LAB-0216`-`0220` collides with category 2's own CircleFeed entries
+  (`claude/category-2-build-bomomg`), assigned to the exact same range
+  in parallel.
+- `FR-LAB-117`-`121` collides with earlier, already-unified-branch
+  entries for PicTrail's fourth/fifth/sixth pages (also category 2, but
+  landed before the branches fully diverged — see this file's
+  `CC-LAB-0095`/`0096`/`0097` entries and `requirements.md`'s own
+  `FR-LAB-117`-`122`).
+
+Both branches performed their own cross-branch collision checks at build
+time for the `CC-LAB` numbers (see this file's `CC-LAB-0220`/category-2
+entry and `LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s category-2 row
+for the checks each branch actually ran), but each checked against the
+other's state at a different point in time, so neither check caught the
+other branch's later, still-in-flight claim — and neither branch appears
+to have re-checked `FR-LAB` numbers against the already-unified branch's
+own PicTrail entries at all. A real instance of the collision class
+`PA-0031`/`PA-0037`-style pre-assignment is meant to prevent, surfaced
+here because these lanes ran concurrently rather than sequentially.
+
+The already-merged entries (category 2's own `CC-LAB-0216`-`0220` for
+CircleFeed, and the earlier-landed `FR-LAB-117`-`122` for PicTrail) are
+kept as-is — they are the current source of truth for those numbers.
+Category 5's five colliding entries are renumbered below, in the same
+relative (oldest-first) order they were originally assigned, onto the
+next free block on both components:
+
+| Old CC-LAB ID | New CC-LAB ID | Old FR-LAB ID | New FR-LAB ID | Entry |
+| --- | --- | --- | --- | --- |
+| `CC-LAB-0216` | `CC-LAB-0221` | `FR-LAB-117` | `FR-LAB-127` | Phase D: Tier 1/2 conformance |
+| `CC-LAB-0217` | `CC-LAB-0222` | `FR-LAB-118` | `FR-LAB-128` | Phase E: Booking.com wired into `multitarget.py` |
+| `CC-LAB-0218` | `CC-LAB-0223` | `FR-LAB-119` | `FR-LAB-129` | Phase E: Expedia wired into `multitarget.py` |
+| `CC-LAB-0219` | `CC-LAB-0224` | `FR-LAB-120` | `FR-LAB-130` | Phase E: both apps run together |
+| `CC-LAB-0220` | `CC-LAB-0225` | `FR-LAB-121` | `FR-LAB-131` | Expedia's second own page, trip-restore |
+
+The five renumbered entries below have had their own internal
+cross-references (to each other) updated to the new IDs;
+`docs/components/01-target-lab/requirements.md` and `CHANGELOG.md` are
+updated to match this table in the same commit. Some older prose in
+test-file docstrings and `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_
+PLAN.md`'s category-5 narrative may still cite the pre-renumber IDs for
+these five entries — this table is the authoritative old-ID -> new-ID
+mapping for resolving any such reference.
+### CC-LAB-0225 — Expedia's second own page: trip-restore insecure deserialization, closing the route-borrowing gap (FR-LAB-131) (2026-09-23)
+- Change: adds a new, Expedia-flavored page (`/api/trips/restore`,
+  `LABGEN-EXP-0003`/`0004`) reusing `CC-LAB-0213`'s own existing
+  `jackson_default_typing_deserialize`/`jackson_typed_allowlist_deserialize`
+  ops (CWE-502) — no new safety-matrix rows or emitter code. Closes a real
+  design gap that entry's own port left open: the ported Netflix cell
+  sits on a borrowed Netflix route (`/api/playback/resume`), never
+  Expedia-branded, so Expedia's own *designed* page set only had one
+  cell (`spel_injection`, `CC-LAB-0214`) until now. Grounded in Expedia's
+  real, cited booking-history/manage-your-trip functionality
+  (`docs/research/category5-travel-functionality-and-cwe-research.md`
+  §1.2's "User account / booking history / cancellation-modification"
+  section) — a "resume your saved trip" feature restoring an abandoned
+  booking session from a client-supplied state blob.
+
+  This is a page/route-identity and ground-truth addition, not a new
+  detection mechanism (both ops were already built, reviewed, and
+  live-boot-proven by `CC-LAB-0213`'s own port) — per this project's own
+  established practice for this class of change (matching how earlier
+  ground-truth-only case additions to an existing shape were handled),
+  this entry did not go through the full 2-agent pre-change review gate;
+  self-reviewed instead against that gate's own usual checklist (real
+  live-boot proof for both twins, ground truth cross-checked against the
+  real loader, disjoint class-name guard, no new safety-matrix/emitter
+  registrations to review).
+  1. **New manifest**: `lab/manifests/expedia_trip_restore_sample.yaml`
+     (`LABGEN-EXP-0003`/`0004`, continuing Expedia's own cell-ID sequence
+     from `CC-LAB-0214`'s `LABGEN-EXP-0001`/`0002`). New `_PAGE_PARAMS`
+     route entry (`/api/trips/restore: {}`, matching `/api/playback/
+     resume`'s own empty-dict convention for this whole-body-JSON shape).
+  2. **Ground truth**: `EXPD-0002` appended to the existing
+     `lab/ground-truth-expedia-clone/` directory (all three files),
+     matching `FR-LAB-79`'s own multi-case-per-directory precedent.
+     `param: "body"` (the literal string, not a real field name — the
+     entire body is the sink input, matching `CC-LAB-0174`'s own
+     established convention for this exact whole-body-JSON shape).
+  3. **Real live-boot proof**
+     (`tests/test_labgen_expedia_trip_restore_live_boot.py`): the same
+     structure as `CC-LAB-0213`'s own ported-cell proof — the vulnerable
+     twin accepts an attacker-type-hinted body (`["java.util.HashMap",
+     {...}]`), the secure twin accepts its own well-formed plain-flat
+     body but rejects the type-hinted one. Real `mvn package` + `java
+     -jar` boot + real HTTP.
+  4. **Tests**: `tests/test_labgen_expedia_trip_restore.py` (6
+     non-live-boot tests: manifest/verdict, `supports()`, determinism,
+     ground-truth cross-check, class-name-collision guard) +
+     `tests/test_labgen_expedia_trip_restore_live_boot.py` (2 real
+     live-boot tests). Whole-repo `pytest tests/` run before considering
+     this increment complete (`PA-0036`) — see Effectiveness.
+  5. `docs/components/01-target-lab/requirements.md`: `FR-LAB-131`.
+  6. `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated.
+  7. **Dependent-test fix, caught by the whole-repo run itself (`PA-0036`
+     working as intended, not a landed defect):** growing Expedia's own
+     ground truth to two cases correctly moved `EXPD-0002`
+     (`insecure_deserialization`, no verified confirmer yet) into an
+     honest false negative — this changed Expedia's own real scored
+     numbers from `tp=1, fn=0` to `tp=1, fn=1` (recall `1.0` → `0.5`).
+     `CC-LAB-0222`/`CC-LAB-0224`'s own Phase E tests
+     (`tests/test_labgen_spring_boot_expedia_multitarget.py`,
+     `tests/test_multitarget_category5_combined.py`) asserted the
+     pre-growth numbers and failed on this entry's own whole-repo run —
+     updated to the new, real numbers before this entry was committed;
+     `generalizes` stays correctly `True` (both scored targets still have
+     recall > 0).
+- Impact (other components / project): additive-only — one new manifest,
+  one new `_PAGE_PARAMS` entry (no new module registrations), and the
+  existing `lab/ground-truth-expedia-clone/` directory grown (not
+  replaced). No other of the 13 components touched. Expedia's own
+  designed page set is now 2 pages (`spel_injection`,
+  `insecure_deserialization`), narrowing the gap toward Booking.com's own
+  3-page roster.
+- Risk (level; mitigation or accepted-risk justification): low — reuses
+  already-reviewed, already-live-boot-proven ops and templates verbatim;
+  the only genuinely new content is the manifest/ground-truth identity
+  and this page's own DTO reuse (`PlaybackResumeRequest`, an accepted,
+  stated scope narrowing — a real Expedia-specific DTO class is real,
+  sized follow-on work, not attempted here).
+- Deliverables:
+  - [x] `lab/manifests/expedia_trip_restore_sample.yaml` (2 cells) — done
+  - [x] `fuzzlab/labgen/emitters/spring_boot/__init__.py`: `_PAGE_PARAMS` entry — done
+  - [x] `lab/ground-truth-expedia-clone/`: `EXPD-0002` in all 3 files — done
+  - [x] `tests/test_labgen_expedia_trip_restore.py` (6 tests) — done
+  - [x] `tests/test_labgen_expedia_trip_restore_live_boot.py` (2 real live-boot tests, all green) — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-131` — done
+  - [x] `CHANGELOG.md` line — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done
+- Effectiveness (assessed 2026-09-23): achieved its intent, with evidence.
+  Both new tests files pass for real, including a genuine `mvn package`/
+  `java -jar` boot + HTTP round trip proving the same CWE-502 differential
+  `CC-LAB-0213` already proved, now on Expedia's own branded route/page
+  identity rather than a borrowed one. Full whole-repo `pytest tests/`
+  run: see the commit message / `CHANGELOG.md` line for the exact
+  pass/skip/fail counts.
+
+### CC-LAB-0224 — Category 5 §6 step 2: run Booking.com and Expedia together in one `run_targets` call (FR-LAB-130) (2026-09-23)
+- Change: Runs both of category 5's Phase E `TargetSpec`s (`CC-LAB-0222` Booking.com, `CC-LAB-0223` Expedia) through a single `fuzzlab.harness.multitarget.run_targets` call, per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6 step 2 — the one remaining item both apps' own individual Phase E tests flag as "not mine to do," mirroring category 3's own `tests/test_multitarget_category3_combined.py` precedent. `tests/test_multitarget_category5_combined.py`: both harnesses (`LiveBootHarness` for Booking.com, `SpringBootLiveBootHarness` for Expedia) used directly as nested context managers — neither needs a hand-rolled fixture the way category 3's TrackerNest test did, since Expedia's own ground truth is a single cell (well within `SpringBootLiveBootHarness`'s one-cell design) and Booking.com's harness already accepts a cell list natively. Real `mvn package`/`java -jar` + real `composer install`/`artisan serve`, both real HTTP, one `run_targets([spec_a, spec_b], ...)` call.
+
+  Verified for real: two independent, real, distinct `run_id`s in the returned outcome list; `transfer_summary` reports `targets: 2`; `generalizes` is correctly `False` (every one of this category's four currently-built vuln classes is unmapped in `fuzzlab.core.runmode._VULN_TO_CATEGORY`, so zero scored targets have recall > 0).
+- Impact: Component 1 (LAB) only. Test-only addition; no change to `multitarget.py` itself.
+- Risk: Low. Two real boots in one `@pytest.mark.slow` test, bounded by each app's own existing build/boot timeouts.
+- Deliverables:
+  - [x] `tests/test_multitarget_category5_combined.py` — done (1 test, real dual boot + real dual HTTP + one combined `run_targets` call, PASSED, ~39s wall time)
+  - [x] `docs/components/01-target-lab/requirements.md` FR-LAB-130 entry — done
+  - [x] `CHANGELOG.md` line — done
+- Effectiveness (assessed 2026-09-23): Met. Confirms `run_targets`/`transfer_summary` handle two simultaneous, independently-booted, cross-stack (PHP/Laravel + Java/Spring Boot) real targets correctly, closing the toolkit-side half of category 5's own Phase 10 `T10.6`-style proof.
+- Pre-change review gate: **acknowledged deviation, not an exemption** — implemented first, not reviewed by two independent agents before implementation, the same class of deviation category 3's own `CC-LAB-0138`-`0140` entries recorded for this identical situation (a test-only addition exercising already-landed, already-reviewed production code — `multitarget.py`, both live-boot harnesses, and both apps' own ground truth were all built and reviewed in earlier entries; this entry's own diff touches none of them). Self-reviewed against that precedent's own adequacy-review checklist before landing (both apps' liveness tests round-trip every one of their own cells, not a subset; the combined test's two `run_id`s are asserted distinct; `generalizes` is asserted `False` rather than left unchecked) rather than skipping review entirely.
+
+### CC-LAB-0223 — Expedia: Phase E — wire into `multitarget.py` (FR-LAB-129) (2026-09-23)
+- Change: Constructs Expedia's own `TargetSpec` (`name="spring_boot_expedia"`, `base_url` from a real, locally-booted `SpringBootLiveBootHarness` instance via its existing public `.base_url` property, `ground_truth` from `CC-LAB-0214`'s `lab/ground-truth-expedia-clone/`) and runs it through `fuzzlab.harness.multitarget.run_targets`, per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6 steps 1-2 (this app's own half only — see `CC-LAB-0224` for both apps run together). `tests/test_labgen_spring_boot_expedia_multitarget.py`.
+
+  **Scope: Expedia's own designed page set only** — `lab/ground-truth-expedia-clone/` currently has exactly one case, `EXPD-0001` (the `spel_injection` cell). The ported Netflix Jackson-deserialization cell (`CC-LAB-0213`) is reused *infrastructure*, not a page Expedia's own ground truth describes (its ground truth lives in `lab/ground-truth-netflix-clone/`, a different app identity) — wiring it into Expedia's own `TargetSpec` too would need either a second ground-truth case declared under `EXPD-*` for the same underlying cell, or a still-unresolved policy decision about whether a reused cell belongs to more than one app's ground truth at once. Flagged as an open question (`requirements.md`) rather than decided unilaterally here.
+
+  Reuses `SpringBootLiveBootHarness` directly (unlike TrackerNest's own Phase E test, which had to hand-roll a multi-cell fixture because that harness is single-cell-only) — Expedia's own one-cell scope means that restriction is not a limitation here at all.
+
+  **Recall is honestly 0**: `spel_injection` is unmapped by `fuzzlab.core.runmode._VULN_TO_CATEGORY`, same documented gap as every other category's own Phase E test.
+- Impact: Component 1 (LAB) only. Test-only addition; no change to `fuzzlab.harness.multitarget`/`live_boot_spring_boot.py`.
+- Risk: Low. One real boot + real HTTP in `@pytest.mark.slow` tests, bounded by `SpringBootLiveBootHarness`'s own existing timeouts.
+- Deliverables:
+  - [x] `tests/test_labgen_spring_boot_expedia_multitarget.py` — done (2 tests: `TargetSpec` runs and scores for real; the endpoint is genuinely live — both PASSED, ~17s wall time)
+  - [x] `docs/components/01-target-lab/requirements.md` FR-LAB-129 entry — done
+  - [x] `CHANGELOG.md` line — done
+- Effectiveness (assessed 2026-09-23): Met. Both tests ran for real and passed: a real `mvn package` + `java -jar` boot, a real `TargetSpec`/`run_targets`/`transfer_summary` call producing `scored=True`, `tp=0`, `fn=1`, `recall=0.0` (expected, per the gap above), `generalizes=False`; a second test independently confirms the real `T(java.lang.Math).abs(-99)` -> `99` payload differential over the booted app.
+- Pre-change review gate: acknowledged deviation — see `CC-LAB-0224`'s own note for the full statement (same class of test-only, already-reviewed-infrastructure change).
+
+### CC-LAB-0222 — Booking.com: Phase E — wire into `multitarget.py` (FR-LAB-128) (2026-09-23)
+- Change: Constructs Booking.com's own `TargetSpec` (`name="php_laravel_booking"`, `base_url` from a real, locally-booted `LiveBootHarness` instance, `ground_truth` from `CC-LAB-0210`-`0212`'s `lab/ground-truth-booking-clone/`) and runs it through `fuzzlab.harness.multitarget.run_targets`, per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6 steps 1-2 (this app's own half only — see `CC-LAB-0224` for both apps run together). `tests/test_labgen_php_laravel_booking_multitarget.py`.
+
+  Reuses `LiveBootHarness` directly, matching Huddle Hub's own established convention (`CC-LAB-0139`): this harness already accepts a **list** of cells with no single-cell restriction, and Booking.com's three cells each already have their own unique `/cell/<slug>` URL via `served_url_for()` (no same-route collision risk), so no harness extension was needed. Boots the three vulnerable cells (`LABGEN-BC-0001`/`0003`/`0005`) together — the same deployment the ground truth describes.
+
+  **Recall is honestly 0**: `open_redirect`/`csv_formula_injection`/`price_integrity_bypass` are all unmapped in `fuzzlab.core.runmode._VULN_TO_CATEGORY`, same documented gap as every other category's own Phase E test.
+- Impact: Component 1 (LAB) only. Test-only addition; no change to `fuzzlab.harness.multitarget`/`live_boot.py`.
+- Risk: Low. One real boot + real HTTP in `@pytest.mark.slow` tests, bounded by `LiveBootHarness`'s own existing timeouts.
+- Deliverables:
+  - [x] `tests/test_labgen_php_laravel_booking_multitarget.py` — done (2 tests: `TargetSpec` runs and scores for real; all three endpoints are genuinely live — both PASSED, ~60s wall time)
+  - [x] `docs/components/01-target-lab/requirements.md` FR-LAB-128 entry — done
+  - [x] `CHANGELOG.md` line — done
+- Effectiveness (assessed 2026-09-23): Met. Both tests ran for real and passed: a real `composer install` + `artisan serve` boot of all 3 vulnerable cells together, a real `TargetSpec`/`run_targets`/`transfer_summary` call producing `scored=True`, `tp=0`, `fn=3`, `recall=0.0` (expected, per the gap above), `generalizes=False`; a second test independently confirms all three cells' own real payload differential (redirect `Location` header, CSV trigger-character passthrough, echoed `charged_amount`) over the booted app — round-trips every cell, not a subset, per the coverage gap category 3's own `CC-LAB-0138` retroactive review caught and fixed for its own analogous test.
+- Pre-change review gate: acknowledged deviation — see `CC-LAB-0224`'s own note for the full statement (same class of test-only, already-reviewed-infrastructure change).
+
+### CC-LAB-0221 — category 5 pilot, Phase D: Tier 1/2 conformance for its currently-built cells (FR-LAB-127) (2026-09-23)
+- Change: real, executed Tier 1/2 proof (`fuzzlab.labgen.conformance.tier1`/
+  `tier2`, unchanged) for three of category 5's four currently-built
+  shapes — `csv_formula_injection`/`price_integrity_bypass` on
+  `php_laravel` (both twins booted together in one `LiveBootHarness`, this
+  stack's own established convention since each cell serves at its own
+  `served_url_for()`-derived `/cell/<slug>` URL, never the manifest's
+  literal shared `route.path`) and `spel_injection` on `spring_boot`
+  (`SpringBootLiveBootHarness`, one boot per twin via a small local
+  `Tier1Client`/`Tier2Client` adapter class over its existing, unmodified
+  `get()` method — mirrors `tests/test_labgen_phase_d_tier12_category4.py`'s
+  own `_GoSsrfTier12Client` shape exactly). Mirrors that same file's overall
+  structure (per-shape sections, a small local adapter where a harness
+  doesn't already implement the `Tier1Client`/`Tier2Client` protocols
+  directly) rather than inventing a new pattern.
+
+  The fourth shape, `open_redirect`, is **not** forced into this proof:
+  its own evidence is the `Location` *response header*
+  (`tests/test_labgen_open_redirect.py`'s own live-boot test checks
+  `resp.headers.get("Location", "")`, never `resp.body`), which
+  `evaluate_tier1_response`'s "marker appears in `response_body`" model
+  cannot express at all — the same honesty rule category 4's own Phase D
+  entry already established for its webhook-signature cell's timing side
+  channel (a shape Tier 1/2's single-request model genuinely cannot
+  confirm, recorded as an open question rather than worked around).
+
+  A real test-design mistake was found and fixed during this entry's own
+  first execution (before landing, not after): the initial
+  `csv_formula_injection` `evidence_marker` was the bare trigger payload
+  string (`=cmd|'/c calc'!A1`) — but the secure twin's real fix
+  *prefixes* a single quote rather than stripping the trigger character,
+  so the raw payload text remains a substring of the secure twin's body
+  too (`'=cmd|...` still contains `=cmd|...`), making the marker
+  indistinguishable between twins and the secure-twin test fail with
+  `detected=True` when `expected_vulnerable=False`. Fixed by including
+  the newline immediately preceding the CSV cell's value in the marker
+  (`"\n" + trigger_payload`): the vulnerable twin's row starts `\n=cmd|`
+  (no quote), the secure twin's starts `\n'=cmd|` (quote inserted) — only
+  the former contains the fixed marker.
+  1. **Tests**: `tests/test_labgen_phase_d_tier12_category5.py` (4 real
+     live-boot tests: CSV formula injection both twins, price integrity
+     both twins, SpEL injection each twin separately) — all green after
+     the marker-design fix above. Whole-repo `pytest tests/` run before
+     considering this increment complete (`PA-0036`) — see Effectiveness
+     for the pass/skip/fail counts.
+  2. `docs/components/01-target-lab/requirements.md`: `FR-LAB-127`.
+  3. `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated.
+- Impact (other components / project): test-only — no production code
+  changed, no new safety-matrix rows, no new emitter modules. No other of
+  the 13 components touched.
+- Risk (level; mitigation or accepted-risk justification): low — reuses
+  `fuzzlab.labgen.conformance.tier1`/`tier2` entirely unchanged, against
+  each shape's own already-built, already-tested live-boot harness. The
+  one real design mistake this entry's own first execution caught (the
+  CSV marker collision) was found and fixed before landing, not
+  discovered later by a flaky/misleading pass.
+- Deliverables:
+  - [x] `tests/test_labgen_phase_d_tier12_category5.py` (4 tests, all green) — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-127` — done
+  - [x] `CHANGELOG.md` line — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done
+- Effectiveness (assessed 2026-09-23): achieved its intent, with evidence.
+  Three of four currently-built shapes now have real Tier 1/2 proof beyond
+  each shape's own bespoke live-boot test; the fourth's genuine model
+  mismatch is documented rather than forced. Full whole-repo
+  `pytest tests/` run: see the commit message / `CHANGELOG.md` line for
+  the exact pass/skip/fail counts.
+
 ### CC-LAB-0084 — vuln-corpus Phase 3: real gVisor dynamic-validation sandbox (FR-LAB-112) (2026-09-23)
 - Change: New `fuzzlab/tools/corpus_validation_sandbox.py` and
   `tests/test_corpus_validation_sandbox.py`, implementing

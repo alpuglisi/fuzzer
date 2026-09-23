@@ -485,3 +485,21 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   e.g. `expectedresults.csv`, that `fuzzlab.labels.contract.load()` requires
   unconditionally, compounded here by that file also being unreachable via
   `git add` for lack of a `.gitignore` negation). (from BUG-0036)
+- **PA-0041** — When a project maintains more than one implementation of the
+  same seam/protocol (e.g. `fuzzlab.oracle.probe.Sender`: `SeamProbeSender`
+  and `RequestsProbeSender`), a security-relevant transport setting adopted
+  in one implementation (redirect-following, TLS verification, timeout
+  behavior, etc.) must be applied to every other implementation of that same
+  seam in the same change, not left to be discovered independently
+  per-implementation the first time a vuln class that happens to exercise it
+  is built. (from BUG-0039)
+- **PA-0042** — Before mapping a new vuln class into
+  `fuzzlab.core.runmode._VULN_TO_CATEGORY` (wiring a real confirmation path
+  for it), verify live, end to end, through `fuzzlab.harness.multitarget.
+  run_targets`'s own real scoring — not just `ConfirmationStrategy.confirm()`
+  in isolation — against real ground truth for that class, checking the
+  resulting `ScoreReport.tp`/`fp` values, not only that a `Verdict` object
+  was returned. A strategy can confirm correctly and still score as a false
+  positive if its `vuln_class` attribute's spelling doesn't match the
+  ground-truth convention — a gap `confirm()`'s own return value alone can
+  never surface. (from BUG-0040)

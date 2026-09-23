@@ -19,6 +19,123 @@ changed, and the reason. Reference the commit hash where useful.
   safety-net Routine, flagging the decision back to the user rather than
   deciding it autonomously.
 
+## 2026-09-23 (category 5: CsvFormulaInjectionStrategy, fourth real detection -- Booking.com's ground truth now fully closed)
+- CORE/FUZZ: builds `CsvFormulaInjectionStrategy` + `R-CSV-FORMULA-INJECTION`
+  (`CC-FUZZ-0030`/`FR-FUZZ-17`) and maps `csv_formula_injection` into
+  `_VULN_TO_CATEGORY` (`CC-CORE-0023`/`FR-CORE-13`) — category 5's fourth
+  real detection, closing Booking.com's own toolkit-side detection
+  coverage entirely (all three of its ground-truth cases now match).
+  Pre-change review caught three blocking design flaws before any code
+  was written: an unanchored newline-only match (fixed by requiring an
+  immediate trailing `,` after the payload, anchoring to the real CSV cell
+  boundary); a single `=`-only trigger-character canary (fixed by trying
+  all four OWASP trigger characters — `=`, `+`, `-`, `@`); and a missing
+  `method_in` constraint (fixed with `method_in: ["GET"]`, mirroring
+  `R-PRICE-INTEGRITY`'s own precedent). Live-verified end to end against
+  Booking.com's real deployment: `tp=3, fn=0, fp=0`, recall `2/3 -> 1.0`.
+  Updates `tests/test_labgen_php_laravel_booking_multitarget.py`/
+  `test_multitarget_category5_combined.py` to the new real scored numbers.
+
+## 2026-09-23 (category 5: PriceIntegrityBypassStrategy, third real detection)
+- CORE/FUZZ: builds `PriceIntegrityBypassStrategy` + `R-PRICE-INTEGRITY`
+  (`CC-FUZZ-0029`/`FR-FUZZ-16`) and maps `price_integrity_bypass` into
+  `_VULN_TO_CATEGORY` (`CC-CORE-0022`/`FR-CORE-12`) — category 5's third
+  real detection, Booking.com's `LABGEN-BC-0005` (empty-transform
+  vulnerable twin, no named "trusted amount" op). Pre-change review caught
+  two blocking design flaws before any code was written: a random
+  two-decimal canary could collide with the real rate table
+  (`89.00`/`149.00`/`249.00`) — fixed with a structurally distinct
+  three-decimal canary; and an unanchored substring match — fixed by
+  anchoring to `"charged_amount":"<canary>"` after whitespace-stripping.
+  Live-verified end to end against Booking.com's real deployment:
+  `tp=2, fn=1, fp=0`, recall `1/3 -> 2/3`. Updates
+  `tests/test_labgen_php_laravel_booking_multitarget.py`/
+  `test_multitarget_category5_combined.py` to the new real scored numbers.
+
+## 2026-09-23 (category 5: Expedia's second own page, trip-restore)
+- LAB: adds `/api/trips/restore` (`LABGEN-EXP-0003`/`0004`), Expedia's
+  second own designed page, reusing `CC-LAB-0213`'s existing Jackson
+  deserialization ops (CWE-502) — no new safety-matrix rows or emitter
+  code. Closes a real design gap: that entry's own ported Netflix cell
+  sits on a borrowed Netflix route (`/api/playback/resume`), never
+  Expedia-branded. Grounded in Expedia's real, cited booking-history/
+  manage-your-trip functionality — a "resume your saved trip" feature.
+  `EXPD-0002` appended to the existing ground-truth directory. Real
+  live-boot proof for both twins. See `CC-LAB-0225` (renumbered from
+  `CC-LAB-0220` at merge time — cross-branch collision with category 2's
+  own CircleFeed entry of the same number).
+
+## 2026-09-23 (category 5: second real detection, generalizes=True for real)
+- FUZZ: builds `SpelInjectionStrategy` + a new `R-SPEL-INJECTION` rule for
+  `spel_injection` (CWE-917) — unlike `ssti`/`open_redirect`, no existing
+  confirmer applied here, so this is genuinely new detection capability.
+  The pre-change review gate caught a blocking, 100%-reproducible design
+  flaw before any code was written: the obvious mirror of `SstiStrategy`'s
+  own bare-arithmetic-product canary would confirm on the SECURE twin too
+  (`SimpleEvaluationContext` restricts type/method/bean access, not
+  literal arithmetic) — fixed with a `T(java.lang.Math).abs(-n)` type-
+  reference canary instead, the exact differential already proven live in
+  this category's own live-boot test. Live-verified end to end: `tp=1,
+  fn=0, fp=0` against Expedia's real deployment, zero false positives on
+  the real secure twin. Combined with `open_redirect`'s own real
+  detection, category 5's Phase E combined test now scores
+  `generalizes=True` for real — two independently-mapped classes, two
+  different stacks, genuine cross-target transfer, not one class counted
+  twice. See `CC-FUZZ-0028`.
+
+## 2026-09-23 (category 5: first real detection, open_redirect mapped)
+- CORE/FUZZ: maps `open_redirect` into `fuzzlab.core.runmode.
+  _VULN_TO_CATEGORY` — a real rule (`R-OPEN-REDIRECT`) and confirmation
+  strategy (`OpenRedirectStrategy`) already existed and were already
+  correctly scoped for Booking.com's real cell, purely a missing mapping.
+  Live-verifying this end to end (not just `confirm()` in isolation, per
+  a new preventive action this same change adds) found and fixed two
+  real, distinct defects: `RequestsProbeSender` never disabled redirect-
+  following, so a real confirmation crashed instead of confirming
+  (`BUG-0039`); and `OpenRedirectStrategy.vuln_class` was spelled with a
+  hyphen where every ground-truth case (and every sibling strategy) uses
+  an underscore, so a correctly-confirmed finding could never match and
+  scored as a false positive instead of a hit (`BUG-0040`). Real,
+  verified result: `tp=1, fn=2, fp=0` against Booking.com's real,
+  locally-booted deployment — category 5's first real detection, and the
+  second vuln class in this project (after `ssti`) to move past an
+  honest zero. See `CC-CORE-0021`/`CC-FUZZ-0027`.
+
+## 2026-09-23 (category 5: Phase E, wire both apps into multitarget.py)
+- LAB: constructs a real `TargetSpec` for Booking.com (`php_laravel`,
+  reusing `LiveBootHarness` directly for all 3 vulnerable cells) and for
+  Expedia (`spring_boot`, `SpringBootLiveBootHarness`, its own one-cell
+  ground truth), and runs both through `fuzzlab.harness.multitarget.
+  run_targets` — individually and together in one call (mirroring
+  category 3's own combined-run precedent). Real `composer install`/
+  `artisan serve` and `mvn package`/`java -jar` boots, real HTTP,
+  `generalizes` correctly `False` (this category's four vuln classes are
+  all unmapped in `fuzzlab.core.runmode._VULN_TO_CATEGORY`, flagged
+  plainly rather than glossed over). Also flags an open policy question:
+  whether the ported Netflix Jackson-deserialization cell Expedia reuses
+  should be double-counted under Expedia's own ground truth too, or stay
+  scoped to Netflix's — left undecided, not guessed at. This closes
+  category 5's toolkit-side Phase 10 `T10.6`-style proof. See
+  `CC-LAB-0222`/`0223`/`0224` (renumbered from `CC-LAB-0217`/`0218`/
+  `0219` at merge time — cross-branch collision with category 2's own
+  CircleFeed entries of the same numbers).
+
+## 2026-09-23 (category 5: Phase D Tier 1/2 conformance)
+- LAB: real, executed Tier 1/2 proof for three of category 5's four
+  currently-built shapes (`csv_formula_injection`/`price_integrity_
+  bypass` on `php_laravel`, `spel_injection` on `spring_boot`), reusing
+  `fuzzlab.labgen.conformance.tier1`/`tier2` unchanged against each
+  shape's own live-boot harness. `open_redirect` is deliberately
+  excluded: its evidence lives in the `Location` response header, which
+  Tier 1/2's marker-in-body model cannot express — a genuine model
+  mismatch, not a gap worked around. A real test-design mistake (the CSV
+  evidence marker remaining a substring of the secure twin's quote-
+  prefixed output too) was caught and fixed by this entry's own first
+  execution before landing. Renumbered `CC-LAB-0216` -> `CC-LAB-0221` at
+  merge time (cross-branch collision with category 2's own CircleFeed
+  entries; see `docs/components/01-target-lab/change-control.md`'s
+  renumbering note). See `CC-LAB-0221`.
+
 ## 2026-09-23 (overnight autonomous build plan)
 - Docs: saved `docs/OVERNIGHT_AUTONOMOUS_BUILD_PLAN.md` at the user's
   request before they logged off for the night — the orchestration
