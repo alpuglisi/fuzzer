@@ -169,3 +169,25 @@ def test_jwt_claims_response_sink_branches_on_value_expr() -> None:
     assert "channel_id" in result.code
     # both identifiers guarded, even though only one is referenced by value_expr
     assert "_, _ = algIsNone, algIsHS256" in result.code
+
+
+# -- Phase B increment 4: predictable session token (session_token_generation) --
+
+
+def test_no_op_token_request_source_publishes_nothing() -> None:
+    result = SOURCES["no_op_token_request"].render({})
+    assert "tainted request input at all" in result.code
+    assert result.context == {}
+
+
+def test_predictable_token_source_sink_uses_unix_nano_timestamp() -> None:
+    result = SINKS["predictable_token_source"].render({})
+    assert "time.Now().UnixNano()" in result.code
+    assert "session_token" in result.code
+
+
+def test_csprng_token_sink_uses_crypto_rand() -> None:
+    result = SINKS["csprng_token"].render({})
+    assert "rand.Read(buf)" in result.code
+    assert "hex.EncodeToString(buf)" in result.code
+    assert "session_token" in result.code

@@ -49,6 +49,18 @@
       "expected_vulnerable": true,
       "rendering": "server-json",
       "notes": "A Bearer JWT's own alg:none header is honored, skipping signature verification entirely and trusting the token's own forged claims (CWE-347, the real auth0/node-jsonwebtoken GHSA-8cf7-32gw-wr33 bug -- docs/research/corpus-examples/auth-session/node/vulnerable-1.js) -- modeled on a channel-owner-only settings endpoint, a realistic Bearer-JWT-protected API-edge shape for this app identity. Reuses lab/safety_matrix.yaml's existing jwt_signature_verification sink family and jwt_alg_none_default/jwt_none_alg_opt_in ops (added by CC-LAB-0063 for the corpus-examples/auth-session research) -- the first lab-generator instance of this mechanism on any stack. The tainted value is carried in the Authorization header, not a query/body field, so `param` is set to the literal header name `Authorization` (the same header-carried-value convention TWCH-0001 established, CC-LAB-0174). `LABGEN-GO-0007` in lab/manifests/jwt_alg_confusion_go_sample.yaml, served at `/generated/labgen-go-0007` (same cell_id-derived-route convention as TWCH-0001/0002/0003) -- never a PFF-* case."
+    },
+    {
+      "case_id": "TWCH-0005",
+      "url": "/generated/labgen-go-0009",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "vuln_class": "weak_token_entropy",
+      "sink_context": "session_token",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "A session-refresh token is generated as the current nanosecond timestamp (CWE-330), trivially predictable -- an attacker who observes or roughly times one token knows every other token issued in a narrow, guessable window. Modeled on a session-token-refresh endpoint, a realistic API-edge auth shape for this app identity. Reuses lab/safety_matrix.yaml's existing session_token_generation sink family and predictable_token_source/csprng_token ops (added by CC-LAB-0063 for the corpus-examples/auth-session research) -- the first lab-generator instance of this mechanism on any stack. Genuinely no tainted request input at all (unlike every other case here) -- `param`/`location` are set to the whole-body-point convention (`body`/`body`) this project already uses for other no-per-field-param whole-body cases (e.g. NFLX-0001/insecure_deserialization), even though the request body itself is unused by this mechanism; the vulnerability is entirely in the response the sink generates, not in anything the caller sends. `LABGEN-GO-0009` in lab/manifests/weak_token_entropy_go_sample.yaml, served at `/generated/labgen-go-0009` (same cell_id-derived-route convention as TWCH-0001/0002/0003/0004) -- never a PFF-* case."
     }
   ]
 }

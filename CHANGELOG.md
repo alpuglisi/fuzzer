@@ -4,6 +4,33 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Twitch's 5th real page, predictable session token)
+- Lab: a new mechanism from `lab/safety_matrix.yaml`
+  (`predictable_token_source`/`csprng_token`, added by `CC-LAB-0063`,
+  never before instantiated on any stack) built for real on
+  `go_net_http`: a session-token-refresh endpoint (`POST
+  /sessions/refresh`, served route `/generated/labgen-go-0009`/`-0010`).
+  Genuinely no tainted request input at all — unlike every other page
+  this stack has built, the vulnerability is entirely in how the sink
+  *generates* its own output value. A real, third module-composition
+  convention, documented explicitly as new (not conflated with the SSRF
+  shape's own Convention 2, which still has a real source — a framing
+  correction the adequacy-review pass required). Vulnerable twin:
+  `token := fmt.Sprintf("%d", time.Now().UnixNano())` (CWE-330,
+  trivially predictable); secure twin: 32 bytes from `crypto/rand`,
+  hex-encoded. Real live-boot proof: two consecutive vulnerable-twin
+  tokens both parse as decimal integers whose difference tracks real
+  measured elapsed wall-clock time; two consecutive secure-twin tokens
+  never parse as decimal integers at all (empirically verified: real
+  tokens observed were `1790167989807636886`/`1790167989808637091`,
+  delta ≈1.0ms matching ≈2.3ms measured elapsed time, vs. 64-character
+  hex strings for the secure twin). Ground truth extended (`TWCH-0005`),
+  `labels.schema.json` additively widened (`weak_token_entropy`
+  vuln_class, `session_token` sink_context). Detection deliberately not
+  bundled into this commit — landed as its own separately-scoped
+  follow-on, same split this session already established for
+  `CC-LAB-0180`/`CC-FUZZ-0033`. `CC-LAB-0181`/`FR-LAB-121`.
+
 ## 2026-09-23 (FUZZ/AUD: real detection for `jwt_algorithm_confusion`)
 - Fuzzing harness/oracle: the deliberately-separated detection follow-on
   to `CC-LAB-0180` (Twitch's JWT `alg:none` page) — a new audit rule

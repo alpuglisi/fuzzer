@@ -394,6 +394,51 @@ class JwtClaimsResponseSink(TemplateModule):
         )
 
 
+class NoOpTokenRequestSource(TemplateModule):
+    """A genuinely new module-composition shape for this stack (neither
+    Convention 1 -- a transform modifies a value a shared sink renders --
+    nor Convention 2 -- the manifest's op names a sink directly, but with
+    a *real* source still reading real request input, `CC-LAB-0172`'s own
+    SSRF shape): ``session_token_generation``'s vulnerability is entirely
+    in how the sink *generates* its own output, not in any attacker-
+    controlled value reaching it, so there is no tainted input to read at
+    all. Renders a comment-only file stating that explicitly (never a
+    silently-omitted source stage) and publishes nothing."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "no_op_token_request", "source", _SOURCE_ENV, "no_op_token_request.go.j2"
+        )
+
+
+class PredictableTokenSourceSink(TemplateModule):
+    """The ``predictable_token_source`` op (``lab/safety_matrix.yaml``,
+    ``session_token_generation`` family, ``no_effect`` -- added by
+    ``CC-LAB-0063``, never before instantiated by any stack's generator):
+    the session token *is* the current nanosecond timestamp as a decimal
+    string (CWE-330) -- trivially predictable, since an attacker who
+    observes or roughly times one token knows every other token issued in
+    a narrow, guessable window."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "predictable_token_source", "sink", _SINK_ENV, "predictable_token_source.go.j2"
+        )
+
+
+class CsprngTokenSink(TemplateModule):
+    """The ``csprng_token`` op (``lab/safety_matrix.yaml``,
+    ``session_token_generation`` family, ``neutralises`` -- the secure
+    twin): 32 bytes from ``crypto/rand``, hex-encoded -- genuinely
+    unpredictable, matching this stack's own error-handling convention
+    (never silently ignore a `crypto/rand.Read` error)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "csprng_token", "sink", _SINK_ENV, "csprng_token.go.j2"
+        )
+
+
 class RenderOnlyComplexity(TemplateModule):
     """Wraps the composed source/transform/sink body as the entire body of
     one ``net/http.HandlerFunc`` -- the Go analogue of every other stack's
@@ -414,6 +459,7 @@ SOURCES: dict[str, Module] = {
     "read_url_query_param": ReadUrlQueryParamSource(),
     "read_channel_id_and_broadcaster_header": ReadChannelIdAndBroadcasterHeaderSource(),
     "read_authorization_bearer_token": ReadAuthorizationBearerTokenSource(),
+    "no_op_token_request": NoOpTokenRequestSource(),
 }
 TRANSFORMS: dict[str, Module] = {
     "naive_string_compare": NaiveStringCompareTransform(),
@@ -429,6 +475,8 @@ SINKS: dict[str, Module] = {
     "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistSink(),
     "object_lookup_authorization_check": ObjectLookupAuthorizationCheckSink(),
     "jwt_claims_response": JwtClaimsResponseSink(),
+    "predictable_token_source": PredictableTokenSourceSink(),
+    "csprng_token": CsprngTokenSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "render_only": RenderOnlyComplexity(),

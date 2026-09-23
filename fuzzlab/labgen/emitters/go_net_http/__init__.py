@@ -86,6 +86,14 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("jwt_algorithm_confusion", "jwt_signature_verification"): _ModuleSet(
         "read_authorization_bearer_token", "jwt_claims_response", "render_only"
     ),
+    # A third convention (neither 1 nor 2 above): the manifest's one op
+    # names a sink directly (like convention 2), but the source itself has
+    # no tainted input to read at all -- see `NoOpTokenRequestSource`'s own
+    # docstring in modules.py for why this genuinely differs from the SSRF
+    # shape's own convention 2 (which still has a real source).
+    ("weak_token_entropy", "session_token_generation"): _ModuleSet(
+        "no_op_token_request", None, "render_only"
+    ),
 }
 
 #: Per-module (source/transform-op/sink name) -> the extra Go standard-
@@ -115,6 +123,9 @@ _MODULE_IMPORTS: dict[str, tuple[str, ...]] = {
     "jwt_alg_none_default": (),
     "jwt_none_alg_opt_in": (),
     "jwt_claims_response": ("encoding/json", "io"),
+    "no_op_token_request": (),
+    "predictable_token_source": ("fmt", "io", "time"),
+    "csprng_token": ("crypto/rand", "encoding/hex", "io"),
 }
 
 #: Per-route static context this Phase A emitter needs beyond the
@@ -125,6 +136,7 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     "/api/clips/thumbnail": {"var_name": "targetUrl", "param_name": "url"},
     "/channels/analytics": {"param_name": "channel_id"},
     "/channels/settings": {},
+    "/sessions/refresh": {},
 }
 
 

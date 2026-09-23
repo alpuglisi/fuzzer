@@ -3892,6 +3892,32 @@ lane) can submit a payload as
   the pre-change review's adequacy pass, landed as its own separately-
   scoped follow-on (a real, buildable single-request differential is
   recorded, not attempted in this entry).
+- **FR-LAB-121** *(Twitch's fifth real page: predictable session token;
+  `CC-LAB-0181`, 2026-09-23).* Instantiates `lab/safety_matrix.yaml`'s
+  existing `predictable_token_source`/`csprng_token` mechanism
+  (`session_token_generation` family, `CC-LAB-0063`, never before built
+  on any stack) on `go_net_http`: `POST /sessions/refresh` (served
+  `/generated/labgen-go-0009`/`-0010`), a session-token-refresh endpoint.
+  **Genuinely no tainted request input at all** — a real, third module-
+  composition convention (`NoOpTokenRequestSource`, documented explicitly
+  as new, not conflated with the SSRF shape's own Convention 2, which
+  still has a real source): the manifest's one op names a sink module
+  directly, the same mechanic Convention 2 uses, just without a real
+  source alongside it. Vulnerable twin: `token := fmt.Sprintf("%d",
+  time.Now().UnixNano())` (CWE-330); secure twin: 32 bytes from
+  `crypto/rand`, hex-encoded. Cells `LABGEN-GO-0009`/`0010`; ground truth
+  `TWCH-0005` (`vuln_class="weak_token_entropy"`,
+  `sink_context="session_token"`, both new enum values, additively
+  widened; `param="body"`/`location="body"`, the whole-body-point
+  convention for no-per-field-param cases, even though the body is
+  unused). Real live-boot proof (two consecutive vulnerable-twin tokens
+  parse as decimal integers whose difference tracks real measured
+  elapsed time; two consecutive secure-twin tokens never parse as
+  decimal integers). **Not itself detection capability**: no new audit
+  rule or oracle strategy is added here — deliberately split from this
+  page per the pre-change review's adequacy pass (the same split
+  `FR-LAB-120` established), landed as its own separately-scoped
+  follow-on.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

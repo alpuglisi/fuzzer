@@ -29,6 +29,13 @@
       "param": "Authorization",
       "location": "header",
       "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0009",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "rendering": "server-json"
     }
   ]
 }

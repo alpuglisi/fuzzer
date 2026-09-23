@@ -45,9 +45,9 @@ def test_netflix_ground_truth_loads_and_cross_checks():
 def test_twitch_ground_truth_loads_and_cross_checks():
     gt = contract.load(TWITCH_GT_DIR)
     assert gt.target == "go_net_http"
-    assert len(gt.cases) == 4
+    assert len(gt.cases) == 5
     ids = {c.case_id for c in gt.cases}
-    assert ids == {"TWCH-0001", "TWCH-0002", "TWCH-0003", "TWCH-0004"}
+    assert ids == {"TWCH-0001", "TWCH-0002", "TWCH-0003", "TWCH-0004", "TWCH-0005"}
 
     webhook = gt.case_by_id("TWCH-0001")
     assert webhook.expected_vulnerable
@@ -85,8 +85,17 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert jwt.param == "Authorization"
     assert jwt.location == "header"
 
+    weak_token = gt.case_by_id("TWCH-0005")
+    assert weak_token.expected_vulnerable
+    assert weak_token.vuln_class == "weak_token_entropy"
+    assert weak_token.sink_context == "session_token"
+    assert weak_token.url == "/generated/labgen-go-0009"
+    assert weak_token.method == "POST"
+    assert weak_token.param == "body"
+    assert weak_token.location == "body"
+
     for case in gt.cases:
-        for token in ("webhook", "ssrf", "vuln", "idor", "access", "jwt"):
+        for token in ("webhook", "ssrf", "vuln", "idor", "access", "jwt", "entropy"):
             assert token not in case.case_id.lower()
 
 

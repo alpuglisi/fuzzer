@@ -400,3 +400,50 @@ def test_real_boot_proves_the_jwt_alg_none_strategy_end_to_end() -> None:
         assert strategy.confirm(_cand(), _HarnessSender()) is None, (
             "strategy incorrectly confirmed the real secure twin"
         )
+
+
+# -- Phase B increment 4: predictable session token (session_token_generation) --
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_weak_token_entropy_differential_for_both_twins() -> None:
+    """Two cases, isolating exactly what token generation controls:
+
+    (a) the vulnerable twin's two consecutive tokens both parse as
+        decimal integers whose difference tracks real elapsed wall-clock
+        time (nanosecond-timestamp-derived, CWE-330).
+    (b) the secure twin's tokens are 64-character hex strings that never
+        parse as base-10 integers at all (crypto/rand-sourced).
+    """
+    import json
+    import time
+
+    manifest = load_manifest("lab/manifests/weak_token_entropy_go_sample.yaml")
+    emitter = GoEmitter()
+
+    with GoLiveBootHarness(emitter, manifest.cells) as harness:
+        # (a) vulnerable twin: timestamp-derived, tracks real elapsed time.
+        t0 = time.time()
+        vuln_r1 = harness.request("POST", "/generated/labgen-go-0009", body=b"")
+        vuln_r2 = harness.request("POST", "/generated/labgen-go-0009", body=b"")
+        elapsed_ns = (time.time() - t0) * 1e9
+        assert vuln_r1.status == 200 and vuln_r2.status == 200
+        token1 = json.loads(vuln_r1.body)["session_token"]
+        token2 = json.loads(vuln_r2.body)["session_token"]
+        delta = int(token2) - int(token1)   # raises if either isn't a real integer
+        assert 0 <= delta <= max(elapsed_ns * 50, 1e8), (
+            f"vulnerable twin's token delta ({delta}ns) is not consistent with "
+            f"real elapsed time (~{elapsed_ns:.0f}ns) -- not actually timestamp-derived"
+        )
+
+        # (b) secure twin: neither token parses as a decimal integer at all.
+        secure_r1 = harness.request("POST", "/generated/labgen-go-0010", body=b"")
+        secure_r2 = harness.request("POST", "/generated/labgen-go-0010", body=b"")
+        assert secure_r1.status == 200 and secure_r2.status == 200
+        secure_token1 = json.loads(secure_r1.body)["session_token"]
+        secure_token2 = json.loads(secure_r2.body)["session_token"]
+        for tok in (secure_token1, secure_token2):
+            with pytest.raises(ValueError):
+                int(tok)
+        assert secure_token1 != secure_token2

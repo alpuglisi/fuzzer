@@ -32,6 +32,7 @@ _MANIFESTS = (
     "lab/manifests/ssrf_go_sample.yaml",
     "lab/manifests/access_control_go_sample.yaml",
     "lab/manifests/jwt_alg_confusion_go_sample.yaml",
+    "lab/manifests/weak_token_entropy_go_sample.yaml",
 )
 
 

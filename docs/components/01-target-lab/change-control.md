@@ -3,6 +3,91 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0181 — Twitch's 5th real page, predictable session token (FR-LAB-121) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing
+  `predictable_token_source`/`csprng_token` mechanism (`session_token_
+  generation` sink family, added by `CC-LAB-0063`, never before built on
+  any stack) on `go_net_http` — Twitch's 5th real page, continuing this
+  category's own "coherent page/route set" depth work.
+  1. **New route** `POST /sessions/refresh` (served at
+     `/generated/labgen-go-0009`/`-0010`) — a session-token-refresh
+     endpoint. **Genuinely no tainted request input at all**, unlike
+     every other page this stack has built: the vulnerability is
+     entirely in how the sink *generates* its own output value.
+  2. **A genuinely new, third module-composition convention**, documented
+     explicitly as such (a framing correction the adequacy-review pass
+     required — an earlier draft mis-cited the SSRF shape's own
+     "Convention 2" as precedent, but that convention still has a real
+     source reading real request input; this shape has none at all):
+     `NoOpTokenRequestSource` renders a comment-only file stating plainly
+     why there is no tainted read, and the manifest's one op names a
+     **sink** module directly (`predictable_token_source` vulnerable /
+     `csprng_token` secure), the same "op selects a sink" mechanic
+     Convention 2 uses, just without a real source alongside it.
+  3. **Vulnerable twin**: `token := fmt.Sprintf("%d",
+     time.Now().UnixNano())` (CWE-330) — the session token literally is
+     the current nanosecond timestamp. **Secure twin**: 32 bytes from
+     `crypto/rand`, hex-encoded, with an explicit `err != nil` guard
+     (never silently ignoring a `crypto/rand.Read` failure).
+  4. **Ground truth extended**: `TWCH-0005`
+     (`vuln_class="weak_token_entropy"`, `sink_context="session_token"`,
+     `param="body"`, `location="body"` — the whole-body-point convention
+     this project already uses for other no-per-field-param cases, even
+     though the request body itself is unused by this mechanism).
+     `fuzzlab/labels/schemas/labels.schema.json` additively widened.
+  - Dispatched through this component's mandatory pre-change review gate
+    (accuracy + adequacy passes, the adequacy pass including a false-
+    positive-math soundness trace for the paired detection strategy's
+    own design, even though detection itself is deliberately not landed
+    in this commit). Accuracy pass: no factual errors found (one
+    clarification: `sink_context_in` alone, with no `location_in`, would
+    be a genuinely new, less-constrained rule shape — noted for the
+    detection follow-on, not this entry). Adequacy pass required: (a)
+    the module-composition framing correction (item 2 above — this is
+    NOT a reuse of Convention 2, it is a new, third convention); (b)
+    **detection deliberately NOT bundled into this commit** — same split
+    this session already established for `CC-LAB-0180`/`CC-FUZZ-0033`.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py`, `__init__.py`
+  - New templates: `templates/sources/no_op_token_request.go.j2`,
+    `templates/sinks/predictable_token_source.go.j2`,
+    `templates/sinks/csprng_token.go.j2`
+  - `lab/manifests/weak_token_entropy_go_sample.yaml` (new)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}`
+  - `fuzzlab/labels/schemas/labels.schema.json`
+  - `tests/test_labgen_go_net_http_modules.py`,
+    `tests/test_labgen_go_net_http_conformance.py`,
+    `tests/test_labgen_go_live_boot.py` (new
+    `test_real_boot_proves_the_weak_token_entropy_differential_for_both_twins`),
+    `tests/test_labels_contract_category4.py`,
+    `tests/test_multitarget_category4.py` (docstring/assertions updated
+    — Twitch's own ground truth now has 5 positives, real recall 3/5)
+- Impact (other components / project): `fuzzlab/labgen/emitters/go_net_http/`
+  and `fuzzlab/labels/schemas/labels.schema.json` are shared across every
+  category/target touching this stack or its ground-truth schema (fresh
+  `git show` collision check against category-2/3/5 and
+  second-target-cat1-ecommerce before landing — no collisions found).
+  `fuzzlab.harness.multitarget`'s real, scored Twitch report now shows 5
+  positives instead of 4 (`recall=3/5` instead of `3/4`).
+- Risk (level; mitigation or accepted-risk justification): Low. No
+  hand-rolled crypto/parsing logic like `CC-LAB-0180`'s JWT verifier —
+  just `time.Now().UnixNano()`/`crypto/rand.Read`, both stdlib, used
+  exactly as their own documentation prescribes.
+- Deliverables:
+  - [x] Predictable-token mechanism implemented, registered, unit-tested
+        — done
+  - [x] Real live-boot proof (real observed tokens confirming both the
+        timestamp-derived and the hex-random shapes) — done
+  - [x] Ground truth extended, schema additively widened — done
+  - [x] Full non-slow suite + every directly-affected slow test re-run
+        green at the stable baseline — done
+- Effectiveness (assessed 2026-09-23): achieved. The real booted
+  vulnerable twin's two consecutive tokens both parse as decimal
+  integers whose difference matches real measured elapsed time; the real
+  booted secure twin's tokens never parse as decimal integers at all —
+  proven by a real, executed live-boot test, not simulated.
+
 ### CC-LAB-0180 — Twitch's 4th real page, JWT `alg:none` signature confusion (FR-LAB-120) (2026-09-23)
 
 - Change: instantiates `lab/safety_matrix.yaml`'s existing
