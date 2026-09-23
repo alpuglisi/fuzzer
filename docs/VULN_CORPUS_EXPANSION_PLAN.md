@@ -625,7 +625,13 @@ sources (OWASP LLM Top 10) before Phase 2 either includes or skips it.
       ecommerce-logic; ~65 real, license-triaged, gitleaks-scanned,
       commit-pinned files under `docs/research/corpus-examples/`, verified
       independently). **Wave 2 (rows 7-11, priority 6) not yet dispatched.**
-- [ ] Phase 3: CWEs assigned to collected examples
+- [x] Phase 3: CWEs assigned to collected examples (all 12 wave-1 feature
+      cells now carry a flat `cwe: [...]` field per entry, plus
+      `suggested_op`/`suggested_sink_family`; a real cross-cell CWE-
+      uniqueness defect found during this pass — several entries in
+      unrelated cells had independently claimed the same "unique" CWE ID —
+      was fixed by re-researching each duplicate against its actual source
+      and assigning a genuinely specific, non-colliding MITRE ID)
 - [ ] Phase 3: manufactured pairs generated (floor met per CWE — see
       "Pair generation")
 - [ ] Phase 3: validation execution sandbox actually built/tested (not just
