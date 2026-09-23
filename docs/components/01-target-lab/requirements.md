@@ -1838,13 +1838,13 @@ lane) can submit a payload as
     `puppy-fort-factory/` still present and every test green, a second doing
     only the `git rm -r puppy-fort-factory/` once the first commit's own
     full test run (fast suite + the live-boot slow suite) was green.
-- **FR-LAB-64** *(open-redirect shape, `php_laravel`; `CC-LAB-0090`,
+- **FR-LAB-78** *(open-redirect shape, `php_laravel`; `CC-LAB-0210`,
   2026-09-22).* Category 5's (Travel/booking/marketplaces,
   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5) Booking.com
   pilot's first increment. Note on numbering: `FR-LAB-63` is already spoken
   for (`CC-LAB-0069`'s title cites it, although no `requirements.md` heading
   for it exists — a pre-existing bookkeeping gap in that earlier entry, not
-  this one's to fix); this entry is `FR-LAB-64` to avoid a real collision.
+  this one's to fix); this entry is `FR-LAB-78` to avoid a real collision.
   - A genuinely new `(vuln_class, sink_context.family)` shape,
     `("open_redirect", "http_redirect_location")`: a server-issued HTTP
     redirect (Laravel's `redirect()` helper) whose target is a tainted
@@ -1869,10 +1869,10 @@ lane) can submit a payload as
     module set has needed, since neither `single_statement` nor
     `render_only` fits a sink that is itself the terminal `return`;
     originally named `redirect_response`, **renamed to `terminal_response`
-    by `FR-LAB-66`/`CC-LAB-0091`** once a second, unrelated sink family
+    by `FR-LAB-80`/`CC-LAB-0211`** once a second, unrelated sink family
     needed the identical, already sink-agnostic wrapper — this entry
     updated in place to the current name, per this file's own living-doc
-    convention; `CC-LAB-0090`'s append-only change-control record keeps the
+    convention; `CC-LAB-0210`'s append-only change-control record keeps the
     original name, as the historical record of what that change actually
     shipped) — registered in **both** `fuzzlab.labgen.modules` (`php_current`,
     unrendered — for the shared minimal-pair vocabulary only, the same
@@ -1892,7 +1892,7 @@ lane) can submit a payload as
     Extranet) or the research doc's other shortlisted candidates
     (price-integrity duplicate, CWE-1236 CSV-export) — those are later,
     separate increments inside this category's reserved
-    `CC-LAB-0090`-`0119` block, tracked in
+    `CC-LAB-0210`-`0119` block, tracked in
     `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4.
   - Real live-boot proof
     (`tests/test_labgen_open_redirect.py::test_live_boot_redirect_manifest_blocks_the_bypass_shapes_the_allowlist_is_meant_to_catch`),
@@ -1909,7 +1909,7 @@ lane) can submit a payload as
     `HttpResponse` gained an additive `headers: dict[str, str]` field
     (default `{}`, every pre-existing construction unchanged) and
     `LiveBootHarness.request()` now populates it from the real response.
-- **FR-LAB-65** *(second, independent ground-truth directory; `CC-LAB-0090`,
+- **FR-LAB-79** *(second, independent ground-truth directory; `CC-LAB-0210`,
   2026-09-22).* The ground-truth label contract (`fuzzlab.labels.contract`)
   now has a real, tested precedent for more than one `ground_truth_dir`
   serving more than one distinct lab app sharing an emitter/stack:
@@ -1930,9 +1930,9 @@ lane) can submit a payload as
   is the first test in this repository to load two ground-truth
   directories in the same process and confirm neither's `contract.load()`
   call is affected by the other's existence.
-- **FR-LAB-66** *(CSV/report export formula-injection shape, `php_laravel`;
-  `CC-LAB-0091`, 2026-09-22).* Category 5's Booking.com app, second
-  increment (first: `FR-LAB-64`'s `open_redirect` shape).
+- **FR-LAB-80** *(CSV/report export formula-injection shape, `php_laravel`;
+  `CC-LAB-0211`, 2026-09-22).* Category 5's Booking.com app, second
+  increment (first: `FR-LAB-78`'s `open_redirect` shape).
   - A genuinely new `(vuln_class, sink_context.family)` shape,
     `("csv_formula_injection", "csv_cell_value")`: a CSV/report export
     response whose cell content is a tainted query parameter, grounded in
@@ -1962,7 +1962,7 @@ lane) can submit a payload as
     `fuzzlab.labgen.emitters.php_laravel.modules`/`__init__.py` (rendered,
     via a new `_MODULE_SET_BY_SHAPE` entry and page profile,
     `/extranet/export`, `label`). This second terminal-statement sink is
-    what surfaced that `FR-LAB-64`'s `redirect_response` complexity module
+    what surfaced that `FR-LAB-78`'s `redirect_response` complexity module
     was already fully sink-agnostic in implementation (a bare
     method-signature wrapper, no redirect-specific code at all) — **renamed
     to `terminal_response`** and reused for both shapes, rather than
@@ -1970,8 +1970,8 @@ lane) can submit a payload as
     project's own `single_statement`/`render_only` convention of naming
     shared modules by structural shape and reusing them across unrelated
     vuln classes/sink families (caught during this entry's own accuracy
-    review; `FR-LAB-64`'s text above is updated in place to the current
-    name, per this file's own living-doc convention, while `CC-LAB-0090`'s
+    review; `FR-LAB-78`'s text above is updated in place to the current
+    name, per this file's own living-doc convention, while `CC-LAB-0210`'s
     append-only change-control entry keeps the original name as the
     historical record of what that change actually shipped). The rename
     touches
@@ -1990,11 +1990,11 @@ lane) can submit a payload as
     a real sanitizer against this specific downstream-interpretation risk.
   - New manifest `lab/manifests/booking_csv_export_sample.yaml`
     (`LABGEN-BC-0003`/`LABGEN-BC-0004`, the vulnerable/secure twin pair,
-    continuing this app's own cell-ID sequence from `FR-LAB-64`'s
+    continuing this app's own cell-ID sequence from `FR-LAB-78`'s
     `LABGEN-BC-0001`/`0002`).
   - Real live-boot proof
     (`tests/test_labgen_csv_export_injection.py::test_live_boot_csv_manifest_neutralizes_every_formula_trigger_shape`),
-    matching this component's `CC-LAB-0069`/`FR-LAB-64` evidentiary bar: a
+    matching this component's `CC-LAB-0069`/`FR-LAB-78` evidentiary bar: a
     real HTTP `GET` against both live-booted twins with real
     trigger-character payloads (`=cmd|'/c calc'!A1`, `+1+1`, `-2+3`,
     `@SUM(1,1)`) plus the leading-whitespace-bypass shape
@@ -2015,21 +2015,21 @@ lane) can submit a payload as
     `php -r` against a raw, untrimmed string, proving the neutralizer's own
     check is correct on its own terms, not merely coincidentally covered by
     Laravel's default middleware.
-  - Deliberately narrow, matching `FR-LAB-64`'s own scoping: does not yet
+  - Deliberately narrow, matching `FR-LAB-78`'s own scoping: does not yet
     cover the rest of Booking.com's researched functionality or the
     research doc's remaining shortlisted candidate (the price-integrity
     duplicate) — a later increment inside this category's reserved
-    `CC-LAB-0090`-`0119` block. After this increment: 2 of 5 originally
+    `CC-LAB-0210`-`0119` block. After this increment: 2 of 5 originally
     shortlisted shapes landed, 2 pages, still short of Phase C's "coherent
     page/route set" bar.
-- **FR-LAB-67** *(ground truth's second case in the existing directory;
-  `CC-LAB-0091`, 2026-09-22).* `BKNG-0002` appended to the *same*
-  `lab/ground-truth-booking-clone/` directory `FR-LAB-65` created (not a
+- **FR-LAB-81** *(ground truth's second case in the existing directory;
+  `CC-LAB-0211`, 2026-09-22).* `BKNG-0002` appended to the *same*
+  `lab/ground-truth-booking-clone/` directory `FR-LAB-79` created (not a
   third directory) — verified against the real loader
   (`fuzzlab.labels.contract.load_labels()` parses `labels.json`'s `cases`
   array with no one-case-per-file restriction, and explicitly guards
   against a duplicate `case_id`) that this is fully supported, not an
-  extrapolation from `FR-LAB-65`'s own single-case precedent. Every one of
+  extrapolation from `FR-LAB-79`'s own single-case precedent. Every one of
   the shared ground-truth contract's three files updated together, per the
   adequacy review's explicit demand (a `labels.json`-only change would have
   broken `load()`'s `expectedresults.csv` cross-check for the *whole*

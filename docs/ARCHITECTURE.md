@@ -425,7 +425,7 @@ tracked in the requirements files, not here.
 
   **Multi-category, multi-app expansion begun (`docs/LAB_MULTI_CATEGORY_
   SECOND_TARGETS_PLAN.md` §9, category 5 pilot's first increment,
-  `CC-LAB-0090`/`FR-LAB-64`/`FR-LAB-65`, 2026-09-22).** The `php_laravel`
+  `CC-LAB-0210`/`FR-LAB-78`/`FR-LAB-79`, 2026-09-22).** The `php_laravel`
   emitter now renders more than one lab-app *identity*, not just one
   (`puppy-fort-factory`'s migrated pages plus illustrative pages): a new,
   standalone Booking.com-themed app (`lab/manifests/
@@ -448,7 +448,7 @@ tracked in the requirements files, not here.
   categories 2-6 are open. See the plan doc's own §9.4 tracker for live,
   per-category status rather than restating it here.
 
-  **Second increment (`CC-LAB-0091`/`FR-LAB-66`/`FR-LAB-67`, 2026-09-23):**
+  **Second increment (`CC-LAB-0211`/`FR-LAB-80`/`FR-LAB-81`, 2026-09-23):**
   `("csv_formula_injection", "csv_cell_value")` (CWE-1236, a CSV/report
   export response whose own code is likewise the method's terminal
   statement) landed on the same Booking.com app, with `BKNG-0002` appended

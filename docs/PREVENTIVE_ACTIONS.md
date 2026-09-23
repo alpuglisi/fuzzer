@@ -381,4 +381,4 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   completeness table/guard test (`tests/test_labgen_modules.py`'s
   `_DETERMINISM_CTX_BY_MODULE`) from any single stack's own module-set tests, and a
   change that adds a shared-vocabulary-only registration (the `L-P3.3c-DOM`/
-  `CC-LAB-0090` pattern) must satisfy both. (from BUG-0034)
+  `CC-LAB-0210` pattern) must satisfy both. (from BUG-0035)

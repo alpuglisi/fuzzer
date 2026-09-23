@@ -4,7 +4,7 @@ Status: supports `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4's catego
 row. Site pair already decided there (do not re-derive): **Booking.com**
 (PHP, microservices behind an API gateway — reuses `php_laravel`/
 `php_current`) and **Expedia** (Java/Spring Boot microservices — new
-stack, `CC-LAB-0090`-`0119` reserved). This document closes the
+stack, `CC-LAB-0210`-`0119` reserved). This document closes the
 functionality-research and stack-specific-CWE-research gap identified in
 §0a items 2-3 for this category, before any page/manifest design starts.
 

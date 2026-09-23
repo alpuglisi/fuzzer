@@ -24,9 +24,9 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   (`BKNG-0002`) appended to this app's existing ground truth
   (`lab/ground-truth-booking-clone/`). Went through this repo's pre-change
   review gate a second time; the adequacy pass again returned INADEQUATE
-  on the first draft (the same class of gap as `CC-LAB-0090`'s own first
+  on the first draft (the same class of gap as `CC-LAB-0210`'s own first
   draft — an under-specified neutralization check), and the accuracy pass
-  drove a real design improvement: `CC-LAB-0090`'s `redirect_response`
+  drove a real design improvement: `CC-LAB-0210`'s `redirect_response`
   complexity module was already fully sink-agnostic in implementation, so
   it was renamed `terminal_response` and reused for both shapes rather
   than minting a near-duplicate module, matching this project's own
@@ -38,7 +38,39 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   test, caught only because a second, framework-independent proof of the
   transform's own check was added. `PA-0036` (whole-repo `pytest` before
   considering a shared-registry change complete) applied proactively this
-  time, not found missing after the fact. See `CC-LAB-0091`.
+  time, not found missing after the fact. See `CC-LAB-0211`. Bookkeeping
+  IDs assigned within this category's own reserved `CC-LAB-0210`-`0249`
+  block (per the cross-branch review below, which renumbered this app's
+  first increment out of the previously-contested `0090`-`0119` range).
+
+## 2026-09-22 (cross-branch review, by the category 1 pilot session)
+- Docs/LAB: reviewed this branch's `open_redirect` (CWE-601) code and
+  tests — no code defects found; the `redirect_target_allowlist` regex
+  correctly rejects every open-redirect bypass shape its own docstring
+  claims (protocol-relative, backslash-prefixed, scheme-carrying), and
+  `BUG-0035`'s own RCA (a real gap this branch caught and fixed itself)
+  checks out. Found and fixed two real cross-branch bookkeeping-ID
+  collisions: (1) this branch's `CC-LAB-0090`/`FR-LAB-64`/`FR-LAB-65`
+  collided with the same IDs independently claimed by categories 2, 3,
+  and 4's own Phase A work — all four branches picked "next free after
+  category 1's 0070-0089 block" without seeing each other; renumbered to
+  `CC-LAB-0210`/`FR-LAB-78`/`FR-LAB-79` (this category's assigned
+  `0210`-`0249` block). (2) this branch's `BUG-0034` (open_redirect's
+  missing determinism-fixture entries) collided with category 1's own,
+  unrelated `BUG-0034` (a Rails inflector defect) — renamed to `BUG-0035`
+  (file and all cross-references). Full suite reverified green after both
+  fixes (1784 passed, 8 skipped, matching the pre-fix count exactly). Also
+  flagged a bigger, non-mechanical finding in the `docs/LAB_MULTI_
+  CATEGORY_SECOND_TARGETS_PLAN.md` §9.2 ledger: categories 3 and 4 each
+  independently built a full, separate Java/Spring Boot emitter
+  (`spring_boot` and `java_spring_boot`) without knowing about this
+  branch's own prior reservation of that stack for Expedia — recommend
+  this branch reuse one of the two existing packages once Maven access is
+  confirmed, rather than building a third (and re-check that access: a
+  real Maven build succeeded in this same sandbox on category 4's branch
+  today, after this branch's own blocker was recorded).
+
+## 2026-09-22
 - LAB: category 5 (Travel/booking/marketplaces) pilot, first increment —
   a new `open_redirect` (CWE-601) vulnerability shape on `php_laravel`
   (`lab/safety_matrix.yaml`'s new `http_redirect_location` sink family, a
@@ -53,14 +85,14 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   Went through this repo's pre-change review gate (two independent agent
   reviews; the adequacy pass returned INADEQUATE on the first draft and
   drove a real, verified allowlist check plus a real live-boot proof
-  instead of prose/structural-only checks — see `CC-LAB-0090`), which
+  instead of prose/structural-only checks — see `CC-LAB-0210`), which
   surfaced two genuine, non-obvious findings about Laravel's own
   `redirect()` helper before landing rather than after. Category 5's
   other pick, Expedia's Java/Spring Boot half, stays paused: Maven
   Central/Spring Initializr are unreachable through this sandbox's egress
   proxy (recorded 2026-09-22, `ERROR_LOG.md`).
-- LAB: fixed `BUG-0034` (a same-session, self-caught defect, full bug
-  protocol applied) — `CC-LAB-0090`'s three new shared-vocabulary modules
+- LAB: fixed `BUG-0035` (a same-session, self-caught defect, full bug
+  protocol applied) — `CC-LAB-0210`'s three new shared-vocabulary modules
   (`redirect_target_allowlist`/`http_redirect_return`/`redirect_response`)
   shipped without their `_DETERMINISM_CTX_BY_MODULE` fixture entries in
   `tests/test_labgen_modules.py`, caught by that file's own completeness

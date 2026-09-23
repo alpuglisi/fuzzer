@@ -18,9 +18,9 @@ Format per entry:
 
 ---
 
-## 2026-09-22 — Category 5 pilot (open_redirect shape): shared-vocabulary modules added without their determinism-fixture entries (Fixed, BUG-0034/PA-0036)
+## 2026-09-22 — Category 5 pilot (open_redirect shape): shared-vocabulary modules added without their determinism-fixture entries (Fixed, BUG-0035/PA-0036)
 
-- **Symptom:** `CC-LAB-0090`'s three new shared-vocabulary-only module
+- **Symptom:** `CC-LAB-0210`'s three new shared-vocabulary-only module
   registrations (`redirect_target_allowlist`/`http_redirect_return`/
   `redirect_response` in `fuzzlab/labgen/modules/__init__.py`) were pushed
   in a commit that had only been verified with `tests/
@@ -42,7 +42,7 @@ Format per entry:
   entries (matching the file's own `L-P3.3c-DOM` precedent's comment
   convention), verified with a second whole-repo `pytest tests/` run:
   1618 passed, 30 skipped, 0 failed.
-- **Status:** Fixed. See `docs/bugs/BUG-0034-*.md` for the full RCA and
+- **Status:** Fixed. See `docs/bugs/BUG-0035-*.md` for the full RCA and
   recurrence review: `PA-0001`/`PA-0027` already cover the registry/
   guard-test discipline itself (and their guard test worked correctly here
   — it failed loud on the very first run against the new code), so this is

@@ -392,7 +392,7 @@ class UrlSchemeAllowlistTransform(TemplateModule):
 
 
 class RedirectTargetAllowlistTransform(TemplateModule):
-    """The ``redirect_target_allowlist`` op (CC-LAB-0090, `open_redirect`
+    """The ``redirect_target_allowlist`` op (CC-LAB-0210, `open_redirect`
     concern): rewrites ``value_expr`` so only a same-origin relative path
     survives -- otherwise the inert default ``'/'``.
 
@@ -431,7 +431,7 @@ class RedirectTargetAllowlistTransform(TemplateModule):
 
 
 class CsvFormulaNeutralizeTransform(TemplateModule):
-    """The ``csv_formula_neutralize`` op (CC-LAB-0091, `csv_formula_injection`
+    """The ``csv_formula_neutralize`` op (CC-LAB-0211, `csv_formula_injection`
     concern, CWE-1236): rewrites ``value_expr`` so a value whose first
     *non-whitespace* character is a CSV-formula trigger character (``=``,
     ``+``, ``-``, ``@``, a tab, or a carriage return -- the five characters
@@ -736,7 +736,7 @@ class DomInnerhtmlEchoSink(TemplateModule):
 
 
 class HttpRedirectReturnSink(TemplateModule):
-    """The ``http_redirect_return`` sink family (CC-LAB-0090, `open_redirect`
+    """The ``http_redirect_return`` sink family (CC-LAB-0210, `open_redirect`
     concern): a server-issued HTTP redirect (Laravel's ``redirect()``
     helper, an HTTP 3xx ``Location:`` header) whose target is
     ``value_expr``.
@@ -755,7 +755,7 @@ class HttpRedirectReturnSink(TemplateModule):
 
 
 class CsvExportRowSink(TemplateModule):
-    """The ``csv_export_row`` sink family (CC-LAB-0091, `csv_formula_injection`
+    """The ``csv_export_row`` sink family (CC-LAB-0211, `csv_formula_injection`
     concern): a small CSV report/export response -- Booking.com's real
     Extranet/partner-admin booking-list export view idiom -- embedding
     ``value_expr`` as a cell in the exported row.
@@ -1037,10 +1037,10 @@ class TerminalResponseComplexity(TemplateModule):
     an already-terminal body) and shared across unrelated sink families,
     exactly like :class:`SingleStatementComplexity`/:class:`RenderOnlyComplexity`
     are each shared across unrelated vuln classes -- **renamed from
-    `RedirectResponseComplexity`/`redirect_response`** (`CC-LAB-0090`) once
-    a second, unrelated sink family (`csv_cell_value`, `CC-LAB-0091`)
+    `RedirectResponseComplexity`/`redirect_response`** (`CC-LAB-0210`) once
+    a second, unrelated sink family (`csv_cell_value`, `CC-LAB-0211`)
     needed the identical, already sink-agnostic wrapper. See
-    `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0091` entry
+    `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0211` entry
     for the rename's own record."""
 
     def __init__(self) -> None:
@@ -1080,9 +1080,9 @@ TRANSFORMS: dict[str, Module] = {
     "runtime_field_allowlist": RuntimeFieldAllowlistTransform(),
     # L-P3.3c-DOM (reviews.php/feedback.php): the client-side write mechanism.
     "dom_text_content": DomTextContentTransform(),
-    # CC-LAB-0090 (open_redirect, category 5's Booking.com pilot app).
+    # CC-LAB-0210 (open_redirect, category 5's Booking.com pilot app).
     "redirect_target_allowlist": RedirectTargetAllowlistTransform(),
-    # CC-LAB-0091 (csv_formula_injection, category 5's Booking.com pilot app).
+    # CC-LAB-0211 (csv_formula_injection, category 5's Booking.com pilot app).
     "csv_formula_neutralize": CsvFormulaNeutralizeTransform(),
 }
 #: Sinks. The three HTML sinks render a **Blade view** body rather than a
@@ -1104,15 +1104,18 @@ SINKS: dict[str, Module] = {
     "orm_entity_bulk_assign": OrmEntityBulkAssignSink(),
     # L-P3.3c-DOM: reviews.php/feedback.php's client-only DOM-XSS sink.
     "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
-    # CC-LAB-0090 (open_redirect, category 5's Booking.com pilot app).
+    # CC-LAB-0210 (open_redirect, category 5's Booking.com pilot app).
     "http_redirect_return": HttpRedirectReturnSink(),
-    # CC-LAB-0091 (csv_formula_injection, category 5's Booking.com pilot app).
+    # CC-LAB-0211 (csv_formula_injection, category 5's Booking.com pilot app).
     "csv_export_row": CsvExportRowSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),
     "render_only": RenderOnlyComplexity(),
-    # CC-LAB-0090 (open_redirect, category 5's Booking.com pilot app).
+    # CC-LAB-0210/CC-LAB-0211 (open_redirect + csv_formula_injection, both on
+    # category 5's Booking.com pilot app): originally `redirect_response`
+    # (CC-LAB-0210), renamed `terminal_response` and shared with the second
+    # shape once CC-LAB-0211 found it was already fully sink-agnostic.
     "terminal_response": TerminalResponseComplexity(),
 }
 #: ``view``-category modules (L-P3.3c-G2). Selected per page by the emitter's

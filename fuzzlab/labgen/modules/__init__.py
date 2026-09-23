@@ -715,7 +715,7 @@ class DomInnerhtmlEchoSink(TemplateModule):
         super().__init__("dom_innerhtml_echo", "sink", _SINK_ENV, "dom_innerhtml_echo.php.j2")
 
 
-# --- CC-LAB-0090: open redirect (category 5, Booking.com pilot) -----------
+# --- CC-LAB-0210: open redirect (category 5, Booking.com pilot) -----------
 #
 # Registered here (unrendered by `php_current`'s own `_MODULE_SET_BY_SHAPE`,
 # exactly like L-P3.3c-DOM's `dom_url_source`/`dom_text_content`/
@@ -785,12 +785,12 @@ class TerminalResponseComplexity(TemplateModule):
     no row/value to hand back. Named for its structural shape and shared
     across unrelated sink families, exactly like ``single_statement``/
     ``render_only`` are -- **renamed from `redirect_response`** (its
-    original, `open_redirect`-specific name, `CC-LAB-0090`) once a second,
-    unrelated sink family (`csv_cell_value`, `CC-LAB-0091`) needed the
+    original, `open_redirect`-specific name, `CC-LAB-0210`) once a second,
+    unrelated sink family (`csv_cell_value`, `CC-LAB-0211`) needed the
     identical, already sink-agnostic wrapper; the earlier name would have
     been misleading for a non-redirect consumer. The template itself never
     changed -- see `docs/components/01-target-lab/change-control.md`'s
-    `CC-LAB-0091` entry for the rename's own record (`CC-LAB-0090`'s own
+    `CC-LAB-0211` entry for the rename's own record (`CC-LAB-0210`'s own
     entry is left as the historical record and not rewritten)."""
 
     def __init__(self) -> None:
@@ -827,11 +827,11 @@ TRANSFORMS: dict[str, Module] = {
     # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
     "dom_text_content": DomTextContentTransform(),
-    # CC-LAB-0090: registered for the shared minimal-pair vocabulary only --
+    # CC-LAB-0210: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
     # php_laravel is what actually renders it.
     "redirect_target_allowlist": RedirectTargetAllowlistTransform(),
-    # CC-LAB-0091: registered for the shared minimal-pair vocabulary only --
+    # CC-LAB-0211: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
     # php_laravel is what actually renders it.
     "csv_formula_neutralize": CsvFormulaNeutralizeTransform(),
@@ -858,11 +858,11 @@ SINKS: dict[str, Module] = {
     # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
     "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
-    # CC-LAB-0090: registered for the shared minimal-pair vocabulary only --
+    # CC-LAB-0210: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
     # php_laravel is what actually renders it.
     "http_redirect_return": HttpRedirectReturnSink(),
-    # CC-LAB-0091: registered for the shared minimal-pair vocabulary only --
+    # CC-LAB-0211: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
     # php_laravel is what actually renders it.
     "csv_export_row": CsvExportRowSink(),
@@ -870,7 +870,7 @@ SINKS: dict[str, Module] = {
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),
     "render_only": RenderOnlyComplexity(),
-    # CC-LAB-0090: registered for the shared minimal-pair vocabulary only --
+    # CC-LAB-0210: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
     # php_laravel is what actually renders it.
     "terminal_response": TerminalResponseComplexity(),

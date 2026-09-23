@@ -1,6 +1,6 @@
-"""The `csv_formula_injection` shape (CWE-1236, `CC-LAB-0091`/`FR-LAB-66`/
-`FR-LAB-67`) -- category 5's (Travel/booking/marketplaces) Booking.com
-pilot, second increment (first: `open_redirect`, `CC-LAB-0090`).
+"""The `csv_formula_injection` shape (CWE-1236, `CC-LAB-0211`/`FR-LAB-80`/
+`FR-LAB-81`) -- category 5's (Travel/booking/marketplaces) Booking.com
+pilot, second increment (first: `open_redirect`, `CC-LAB-0210`).
 `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5.
 
 Mirrors `tests/test_labgen_open_redirect.py`'s structure exactly (itself
@@ -10,7 +10,7 @@ Tier 0 lint + minimal-pair, Tier 3 regen-diff, CLI `--check`, a ground-truth
 cross-check against this app's existing directory (`lab/ground-truth-
 booking-clone/`, this shape's case appended to the same directory
 `open_redirect` already established), and a real live-boot proof of the
-actual adversarial bypass shape (`CC-LAB-0090`'s own evidentiary bar) --
+actual adversarial bypass shape (`CC-LAB-0210`'s own evidentiary bar) --
 including the leading-whitespace-then-trigger-character payload the
 adequacy review for this increment specifically demanded (a naive
 "starts with a trigger character?" check would miss it)."""
@@ -111,7 +111,7 @@ def test_the_verdict_agrees_with_this_apps_own_ground_truth(manifest) -> None:
     assert case.expected_vulnerable is True
     assert case.url == served_url_for(vulnerable)
     assert case.param == "label"
-    # This app's first case (open_redirect, CC-LAB-0090) is unaffected by
+    # This app's first case (open_redirect, CC-LAB-0210) is unaffected by
     # this increment's addition.
     assert gt.case_by_id("BKNG-0001") is not None
 

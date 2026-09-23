@@ -78,13 +78,13 @@
 #   open_redirect — a server-issued redirect's target is built from tainted
 #     input with no check that it stays on this site, letting an attacker
 #     send a user through a trusted domain to an arbitrary external
-#     destination (CWE-601) (added CC-LAB-0090)
+#     destination (CWE-601) (added CC-LAB-0210)
 #   csv_formula_injection — a value written into an exported CSV cell is not
 #     checked for a leading spreadsheet-formula trigger character (after
 #     optional leading whitespace), letting an attacker's row be evaluated
 #     as a formula (including a code-execution-capable one, e.g. a DDE
 #     command) by whichever spreadsheet application later opens the export
-#     (CWE-1236) (added CC-LAB-0091). Defense-in-depth, not a universal fix:
+#     (CWE-1236) (added CC-LAB-0211). Defense-in-depth, not a universal fix:
 #     the standard mitigation (prefixing the value with a single quote) is
 #     the industry-standard, most-widely-effective control (reliable in
 #     Excel and LibreOffice Calc's normal CSV import path) but is not
@@ -728,7 +728,7 @@ entries:
     effect: neutralises
     neutralizes: [html_tag_break]
 
-  # --- CC-LAB-0090: open redirect (category 5 pilot, Booking.com's real
+  # --- CC-LAB-0210: open redirect (category 5 pilot, Booking.com's real
   # affiliate/partner-redirect and post-checkout-continuation behavior --
   # docs/research/category5-travel-functionality-and-cwe-research.md
   # §1.1/§2.1, CWE-601) ------------------------------------------------
@@ -758,7 +758,7 @@ entries:
     effect: neutralises
     neutralizes: [open_redirect]
 
-  # --- CC-LAB-0091: CSV/report export formula injection (category 5 pilot,
+  # --- CC-LAB-0211: CSV/report export formula injection (category 5 pilot,
   # Booking.com's real Extranet/partner-admin booking-list export view --
   # docs/research/category5-travel-functionality-and-cwe-research.md
   # §1.1/§2.1, CWE-1236) --------------------------------------------------

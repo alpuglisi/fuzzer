@@ -100,7 +100,7 @@ STATIC_PRECHECK_BY_SHAPE: dict[tuple[str, str], StaticPrecheckStatus] = {
     # step further: those shapes at least have a PHP-observable call for the
     # checker to mis-trust as a sanitizer).
     ("xss-dom", "dom_html_sink"): StaticPrecheckStatus.UNINFORMATIVE,
-    # --- CC-LAB-0090: open redirect (category 5, Booking.com pilot) --------
+    # --- CC-LAB-0210: open redirect (category 5, Booking.com pilot) --------
     # INFORMATIVE: a vulnerable cell's `redirect($value)` sink is fed a
     # request-parameter value with no check applied at all -- the same
     # textbook "value reaches a sensitive sink with nothing between source
@@ -113,7 +113,7 @@ STATIC_PRECHECK_BY_SHAPE: dict[tuple[str, str], StaticPrecheckStatus] = {
     # context -- so a clean scan of the secure twin is not evidence of
     # nothing the way it is for those shapes.
     ("open_redirect", "http_redirect_location"): StaticPrecheckStatus.INFORMATIVE,
-    # --- CC-LAB-0091: CSV/report export formula injection (category 5) ----
+    # --- CC-LAB-0211: CSV/report export formula injection (category 5) ----
     # UNINFORMATIVE: a PHP taint checker analyzes PHP data flow and string
     # sinks (echo/file writes/HTTP responses), not spreadsheet-application
     # semantics -- it has no notion that a value's *first character* being

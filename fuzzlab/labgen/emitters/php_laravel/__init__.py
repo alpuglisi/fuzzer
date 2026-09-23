@@ -230,7 +230,7 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     # through a request parameter -- it is worth keeping the two classes
     # visibly distinct rather than conflating them under "xss".
     ("xss-dom", "dom_html_sink"): _ModuleSet("dom_url_source", "dom_innerhtml_echo", "render_only"),
-    # CC-LAB-0090 (category 5, Booking.com pilot): a server-issued HTTP
+    # CC-LAB-0210 (category 5, Booking.com pilot): a server-issued HTTP
     # redirect whose target is a tainted query parameter -- the affiliate/
     # partner-continuation link Booking.com's real checkout flow uses
     # (docs/research/category5-travel-functionality-and-cwe-research.md
@@ -238,12 +238,12 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     # sink (see `HttpRedirectReturnSink`/`TerminalResponseComplexity`'s own
     # docstrings), which is why this was the first shape to name a third
     # complexity module (`redirect_response`, renamed `terminal_response`
-    # by `CC-LAB-0091` once a second, unrelated sink family needed the
+    # by `CC-LAB-0211` once a second, unrelated sink family needed the
     # identical wrapper).
     ("open_redirect", "http_redirect_location"): _ModuleSet(
         "get_param", "http_redirect_return", "terminal_response"
     ),
-    # CC-LAB-0091 (category 5, Booking.com pilot): a CSV/report export row
+    # CC-LAB-0211 (category 5, Booking.com pilot): a CSV/report export row
     # whose own code is likewise the method's terminal statement -- the
     # Extranet/partner-admin booking-list export view Booking.com's real
     # property-owner surface has (docs/research/category5-travel-
@@ -463,13 +463,13 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # unfiltered write can still reach, since they are simply absent from the
     # allowlist, not from the table itself. Mirrors
     # `fuzzlab.labgen.emitters.php_current`'s `/account_settings.php` profile.
-    # CC-LAB-0090 (category 5, Booking.com pilot app): the "continue to
+    # CC-LAB-0210 (category 5, Booking.com pilot app): the "continue to
     # partner/payment provider" redirect a real Booking.com-style checkout
     # flow issues (docs/research/category5-travel-functionality-and-cwe-
     # research.md §1.1). No `table`/`column`: the source is an ordinary GET
     # query parameter, not a database lookup.
     "/booking/continue": {"var_name": "return_to", "param_name": "return_to"},
-    # CC-LAB-0091 (category 5, Booking.com pilot app): the Extranet/
+    # CC-LAB-0211 (category 5, Booking.com pilot app): the Extranet/
     # partner-admin booking-list export view (docs/research/category5-
     # travel-functionality-and-cwe-research.md §1.1/§2.1). No `table`/
     # `column`: the source is an ordinary GET query parameter, not a

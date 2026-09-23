@@ -1,11 +1,11 @@
-"""The `open_redirect` shape (CWE-601, `CC-LAB-0090`/`FR-LAB-64`/`FR-LAB-65`)
+"""The `open_redirect` shape (CWE-601, `CC-LAB-0210`/`FR-LAB-78`/`FR-LAB-79`)
 -- category 5's (Travel/booking/marketplaces) Booking.com pilot, first
 increment. `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5.
 
 Mirrors `tests/test_labgen_php_laravel_harder_shapes.py`'s Tier 0/Tier 3/
 CLI-check structure (the dedicated `php_laravel` test file -- *not*
 `tests/test_labgen_mass_assignment.py`, whose Laravel-relevant section is
-verdict-only; see this component's own `CC-LAB-0090` change-control entry
+verdict-only; see this component's own `CC-LAB-0210` change-control entry
 for why that citation was corrected during review) over the new, standalone
 manifest, plus a real live-boot proof of the actual adversarial bypass
 shapes the new `redirect_target_allowlist` transform is meant to close
@@ -163,7 +163,7 @@ def test_cli_check_passes_end_to_end_on_the_new_manifest(tmp_path) -> None:
 
 # ---------------------------------------------------------------------------
 # Ground truth: this app's own directory loads independently of the default
-# one (FR-LAB-65 -- the first test in this repo to exercise two
+# one (FR-LAB-79 -- the first test in this repo to exercise two
 # `ground_truth_dir`s side by side).
 # ---------------------------------------------------------------------------
 
@@ -174,7 +174,7 @@ def test_the_new_ground_truth_directory_loads_independently_of_the_default_one()
 
     assert booking_gt.target == "php_laravel"
     # This app's own directory grows across increments (BKNG-0002 was added
-    # by CC-LAB-0091) -- assert this case is present, not that it is the
+    # by CC-LAB-0211) -- assert this case is present, not that it is the
     # directory's only case (PA-0027: a test's expectations must be a
     # function of the specific record under test, never of the
     # collection's cardinality).
