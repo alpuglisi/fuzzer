@@ -3,6 +3,112 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0035 — `MassAssignmentPrivilegedFieldStrategy`: real detection for `mass_assignment` (2026-09-23)
+
+- Change: adds the deliberately-separated detection follow-on `CC-LAB-0182`
+  flagged: an oracle confirmation strategy for `mass_assignment`
+  (CWE-915), closing Twitch's `TWCH-0006` structural detection zero —
+  this project's first-ever rule/strategy pair for this vuln class at
+  all (`mass_assignment` lab pages already exist on three other stacks,
+  `php_current`/`ruby_rails`/`php_laravel`, but none had any detection
+  capability before this entry).
+  1. **`fuzzlab/oracle/strategies.py`**: `MassAssignmentPrivilegedFieldStrategy`
+     (`vuln_class="mass_assignment"`, `mechanism=
+     "privileged-field-injection"`). Two probes over a hardcoded, known
+     JSON body field (`is_partner`, this stack's own privileged field —
+     the same "hardcode the sink's own known field name" convention
+     `PredictableTokenSourceStrategy`'s `session_token`/
+     `JwtAlgNoneConfusionStrategy`'s `channel_id`/`role` claims already
+     use): probe A sends only the intended fields (`display_name`/`bio`)
+     plus a per-run marker, and requires the privileged field to read
+     back `false`; probe B additionally sets the privileged field to
+     `true` in the same JSON body, and requires it to read back `true`.
+     Confirms only on that specific `false`-to-`true` transition — never
+     a bare "does the endpoint ever return `true`" check, which would
+     false-positive against a generically-permissive/broken target (the
+     same reasoning `JwtAlgNoneConfusionStrategy`'s own two-probe
+     differential already documents). Registered in `default_strategies()`
+     and `_CATEGORY_TO_CLASS`.
+  2. **A real ground-truth defect found and fixed before landing, not
+     assumed correct from unit tests alone**: the lab-page commit's own
+     first-draft ground truth (`CC-LAB-0182`) used `param="is_partner"`
+     (the privileged field name, matching `ruby_rails`'s own
+     `FCART-0004` convention), but `fuzzlab.harness.auto.
+     points_from_ground_truth` only marks a body point's content type as
+     `application/json` when `param == "body"` exactly — a real,
+     deliberately narrow gate this strategy's own `content_type` check
+     depends on. Running the real `run_targets()` pipeline end to end
+     (not just this strategy's own fake-sender unit tests, which used a
+     hand-built `Candidate` and so never exercised that gate) showed
+     `tp=4` instead of the expected `5`; traced to the missing
+     content-type detection and fixed by changing the ground truth to
+     the `param="body"`/`location="body"` whole-body-point convention
+     `weak_token_entropy`'s own `TWCH-0005` already uses, before either
+     commit landed (`CC-LAB-0182`'s own change-control entry records the
+     same correction on the lab-page side).
+  3. **`fuzzlab/core/runmode.py`**: `_VULN_TO_CATEGORY` gained
+     `"mass_assignment": "mass-assignment"` — the sixth instance of the
+     recurring underscore/hyphen gap, caught automatically by the
+     structural guard test (`tests/test_oracle.py`) before it could ever
+     manifest as a silent non-firing rule.
+  4. **`fuzzlab/audit/rules_data/default_rules.json`**: `R-MASS-
+     ASSIGNMENT` (see the paired `CC-AUD-0022` entry for the rule
+     itself).
+  - Dispatched through this component's mandatory pre-change review
+    gate. No `Agent`/`Task` tool was available in this session's toolset
+    to run the gate's own two-independent-parallel-reviewer-session
+    mechanism; per this project's multi-agent-orchestration fidelity
+    rule, that substitution is flagged here rather than silently made:
+    the design was instead verified by a rigorous self-review pass
+    (accuracy: every claim checked against a real, executed
+    `run_targets()` run against a real booted app — which is exactly
+    what caught defect item 2 above before it could land; adequacy: the
+    two-probe transition-based confirm logic, the field-name-hardcoding
+    convention choice, and the content_type fail-closed gate were each
+    explicitly re-derived from existing precedent). A real, documented
+    gap in review independence versus every prior entry in this log, not
+    claimed as equivalent to it.
+  New/changed files:
+  - `fuzzlab/oracle/strategies.py`
+  - `fuzzlab/core/runmode.py`
+  - `fuzzlab/audit/rules_data/default_rules.json` (shared with `CC-AUD-0022`)
+  - `tests/test_oracle_strategies_mass_assignment.py` (new)
+  - `tests/test_labgen_go_live_boot.py` (new
+    `test_real_boot_proves_the_mass_assignment_strategy_end_to_end`)
+  - `tests/test_multitarget_category4.py` (Twitch's real, scored recall
+    moves from 4/6 to 5/6)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,
+    expectedresults.csv}` (the `param="body"` correction, item 2 above)
+  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    (`FR-FUZZ-21`, new)
+- Impact (other components / project): `fuzzlab/oracle/strategies.py`,
+  `fuzzlab/core/runmode.py`, and `fuzzlab/audit/rules_data/
+  default_rules.json` are shared across every category/target.
+  `fuzzlab.harness.multitarget`'s real, scored Twitch report for
+  category 4's own Phase E test now shows `tp=5` instead of `tp=4`.
+- Risk (level; mitigation or accepted-risk justification): Low. The
+  transition-based confirm logic (both a `false` baseline and a
+  `true` after-state required, not a bare truthy check) directly closes
+  the "generically permissive target" false-positive class; the
+  documented known limitation (fails closed, never misfires, against a
+  differently-shaped mass-assignment endpoint such as `FCART-0004`) is
+  an accepted, explicit scope boundary, not a silent gap.
+- Deliverables:
+  - [x] `MassAssignmentPrivilegedFieldStrategy` implemented, registered,
+        unit-tested (vulnerable/secure/always-true-permissive/
+        non-JSON/missing-field cases) — done
+  - [x] The ground-truth `param` convention defect found and fixed
+        before landing — done
+  - [x] Real live-boot proof against Twitch's real booted twins — done
+  - [x] `test_multitarget_category4.py` updated to the new real recall
+        and re-run against a real double live boot — done
+  - [x] Full non-slow suite re-run green at the stable baseline — done
+- Effectiveness (assessed 2026-09-23): achieved. Twitch's real, scored
+  `multitarget` recall moved from 4/6 to 5/6 (`tp=5, fp=0`), proven by a
+  real, executed `run_targets()` call against a real booted app, and the
+  strategy independently confirms/fails-closed correctly against real
+  live-booted vulnerable/secure twins (`tests/test_labgen_go_live_boot.py`).
+
 ### CC-FUZZ-0034 — `PredictableTokenSourceStrategy`: real detection for `weak_token_entropy` (2026-09-23)
 
 - Change: adds the deliberately-separated detection follow-on `CC-LAB-0181`

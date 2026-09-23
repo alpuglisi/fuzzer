@@ -82,6 +82,15 @@ budget where a vulnerability is plausible.
   real tainted location to key off at all; `method_in` substitutes as
   the available constraint). Rule-generation only — confirmation is
   `fuzzlab.oracle`'s job (`FR-FUZZ-20`).
+- **FR-AUD-13** *(`CC-AUD-0022`, 2026-09-23).* A candidate is generated for
+  the `mass-assignment` category: `R-MASS-ASSIGNMENT`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a body point
+  whose `sink_context` is `"mass_assignment"` — the same
+  `location_in`+`sink_context_in` shape as `R-INSECURE-DESERIALIZATION`/
+  `R-XXE`. The project's first-ever candidate-generation rule for this
+  vuln class (already built on three other stacks' lab pages, but with
+  no rule anywhere before this entry). Rule-generation only —
+  confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-21`).
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that

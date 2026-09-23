@@ -4,6 +4,33 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (FUZZ/AUD: real detection for `mass_assignment`)
+- Fuzzing harness/oracle: the deliberately-separated detection follow-on
+  to `CC-LAB-0182` (Twitch's channel-profile mass-assignment page) — a
+  new audit rule (`R-MASS-ASSIGNMENT`, `location_in=["body"]` +
+  `sink_context_in=["mass_assignment"]`) and oracle strategy
+  (`MassAssignmentPrivilegedFieldStrategy`). This project's first-ever
+  rule/strategy pair for the `mass_assignment` class (already built on
+  three other stacks' lab pages, `php_current`/`ruby_rails`/
+  `php_laravel`, but with no detection anywhere in the project before
+  this). Sends two probes over the hardcoded, known privileged field
+  (`is_partner`): probe A sets only the intended fields and requires it
+  to read back `false`; probe B additionally sets it and requires it to
+  read back `true` — confirms only on that specific transition, never a
+  bare truthy check. `fuzzlab.core.runmode._VULN_TO_CATEGORY` gained
+  `"mass_assignment": "mass-assignment"` (the sixth instance of this
+  project's recurring underscore/hyphen naming gap). A real defect was
+  found and fixed before landing: the lab-page commit's own first-draft
+  ground truth used `param="is_partner"` directly, but
+  `fuzzlab.harness.auto.points_from_ground_truth` only marks a body
+  point's content type as JSON when `param=="body"` exactly — caught by
+  actually running the real `run_targets()` pipeline, not assumed
+  correct from unit tests alone. Verified live against Twitch's real
+  booted twins; Twitch's own real, scored `multitarget` recall moves
+  from 4/6 to 5/6. Full non-slow suite: stable baseline (18 pre-existing
+  failures, unrelated). Bookkeeping: `CC-AUD-0022`/`FR-AUD-13`,
+  `CC-FUZZ-0035`/`FR-FUZZ-21`, category-4 plan tracker row updated.
+
 ## 2026-09-23 (LAB: Twitch's 6th real page, channel-profile mass assignment)
 - Target lab (`go_net_http`): instantiates `lab/safety_matrix.yaml`'s
   existing `unfiltered_object_assign`/`typed_schema_allowlist` mechanism

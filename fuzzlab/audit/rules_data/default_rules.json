@@ -84,6 +84,13 @@
       "transaction_type": "Predictable Session Token",
       "when": { "method_in": ["POST"], "sink_context_in": ["session_token"] },
       "reference": "weak-token-entropy"
+    },
+    {
+      "id": "R-MASS-ASSIGNMENT",
+      "category": "mass-assignment",
+      "transaction_type": "Mass Assignment",
+      "when": { "location_in": ["body"], "sink_context_in": ["mass_assignment"] },
+      "reference": "mass-assignment"
     }
   ]
 }

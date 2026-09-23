@@ -15,8 +15,8 @@ access-control/IDOR, JWT `alg:none` confusion, predictable session
 tokens, and channel-profile mass assignment -- `CC-LAB-0178`/
 `CC-LAB-0180`/`CC-LAB-0181`/`CC-LAB-0182`, the "coherent page/route set"
 depth work), and four of the six now confirm for real (mass-assignment's
-own detection follow-on is a separately-scoped commit, landing right
-after this one -- see this module's own body below for the split).
+own detection follow-on is a separately-scoped commit -- see this
+module's own body below for the split).
 The predictable-session-token case (`TWCH-0005`, `CC-FUZZ-0034`):
 `PredictableTokenSourceStrategy` sees the vulnerable twin
 (`LABGEN-GO-0009`) issue two consecutive tokens that both parse as
@@ -162,18 +162,16 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     assert by_name["twitch-clone"].run_id != by_name["netflix-clone"].run_id
 
     # Twitch: SSRF (TWCH-0002), access-control/IDOR (TWCH-0003), JWT
-    # alg:none confusion (TWCH-0004), and predictable session tokens
-    # (TWCH-0005) are all real, confirmed findings. webhook-signature
-    # (TWCH-0001) still has no rule/strategy (a CWE-347 timing side
-    # channel, empirically infeasible for this project's wall-clock HTTP
-    # measurement model), and mass-assignment (TWCH-0006, CC-LAB-0182) is
-    # a real lab page with no rule/strategy YET -- its own detection
-    # follow-on (CC-FUZZ-0035/CC-AUD-0022) lands as a separately-scoped
-    # commit, the same split this session has used for every prior Twitch
-    # page. Four of six positives confirm here.
+    # alg:none confusion (TWCH-0004), predictable session tokens
+    # (TWCH-0005), and mass assignment (TWCH-0006, CC-LAB-0182 +
+    # CC-AUD-0022/CC-FUZZ-0035) are all now real, confirmed findings.
+    # webhook-signature (TWCH-0001) still has no rule/strategy (a CWE-347
+    # timing side channel, empirically infeasible for this project's
+    # wall-clock HTTP measurement model). Five of six positives confirm
+    # here.
     twitch_report = by_name["twitch-clone"].report
-    assert twitch_report.tp == 4 and twitch_report.fp == 0
-    assert round(twitch_report.recall, 4) == round(4 / 6, 4)
+    assert twitch_report.tp == 5 and twitch_report.fp == 0
+    assert round(twitch_report.recall, 4) == round(5 / 6, 4)
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002) still has no rule/strategy (see module
@@ -185,7 +183,7 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
-    assert round(summary["macro_recall"], 4) == round(((4 / 6) + (1 / 2)) / 2, 4)
+    assert round(summary["macro_recall"], 4) == round(((5 / 6) + (1 / 2)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True

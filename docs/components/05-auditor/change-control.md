@@ -3,6 +3,54 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0022 — `R-MASS-ASSIGNMENT` audit rule (2026-09-23)
+
+- Change: adds `R-MASS-ASSIGNMENT`, category `mass-assignment`, to
+  `fuzzlab/audit/rules_data/default_rules.json` — `{"location_in":
+  ["body"], "sink_context_in": ["mass_assignment"]}`, the same rule
+  shape as `R-INSECURE-DESERIALIZATION`/`R-XXE`. The project's first-ever
+  candidate-generation rule for the `mass-assignment` category —
+  `mass_assignment` lab pages already exist on three other stacks
+  (`php_current`/`ruby_rails`/`php_laravel`), but none had ever had a
+  rule or strategy at all before this entry, and this Twitch page
+  (`CC-LAB-0182`) closes its own `TWCH-0006` structural detection zero.
+  Paired with `CC-FUZZ-0035`'s new `MassAssignmentPrivilegedFieldStrategy`
+  oracle confirmation. Reviewed pre-implementation per the component's
+  pre-change review gate (accuracy + adequacy passes — see `CC-FUZZ-0035`
+  for the full review record and the real ground-truth `param`
+  convention defect the accuracy pass's real `run_targets` re-run
+  caught before landing).
+  New/changed files:
+  - `fuzzlab/audit/rules_data/default_rules.json`
+  - `docs/components/05-auditor/requirements.md` (`FR-AUD-13`, new)
+- Impact (other components / project): `default_rules.json` is shared
+  across every category and every existing target's own run — purely
+  additive (a new rule appended after `R-WEAK-TOKEN-ENTROPY`). Also the
+  first rule to ever fire for the pre-existing `php_current`/
+  `ruby_rails`/`php_laravel` mass-assignment ground-truth cases
+  (`FCART-0004` et al.) if/when their own targets are next run through
+  the generic pipeline — those cases use a differently-shaped
+  form-encoded/nested-param convention this rule still nominates
+  (`location_in`/`sink_context_in` alone, no `param`-shape assumption),
+  but `MassAssignmentPrivilegedFieldStrategy` itself fails closed on them
+  (see that strategy's own docstring) — a candidate nominated but not yet
+  confirmable elsewhere, the same honest state every other rule's
+  cross-target reach already carries.
+- Risk (level; mitigation or accepted-risk justification): Low. A rule
+  only nominates a candidate; it cannot itself produce a false
+  "confirmed" finding (that risk lives in the paired strategy, assessed
+  in `CC-FUZZ-0035`).
+- Deliverables:
+  - [x] `R-MASS-ASSIGNMENT` added to `default_rules.json` — done
+  - [x] Unit tests confirming the rule's `when` predicate matches/excludes
+        as scoped (`test_r_mass_assignment_rule_matches_a_body_mass_
+        assignment_point`, `test_r_mass_assignment_rule_does_not_match_a_
+        query_point`) — done
+- Effectiveness (assessed 2026-09-23): achieved. Paired with
+  `MassAssignmentPrivilegedFieldStrategy`, the rule correctly nominates
+  Twitch's real `TWCH-0006` point and is proven end-to-end against a
+  real booted app — see `CC-FUZZ-0035`'s Effectiveness note.
+
 ### CC-AUD-0021 — `R-WEAK-TOKEN-ENTROPY` audit rule (2026-09-23)
 
 - Change: adds `R-WEAK-TOKEN-ENTROPY`, category `weak-token-entropy`, to

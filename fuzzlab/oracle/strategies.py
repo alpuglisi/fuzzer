@@ -873,6 +873,107 @@ class PredictableTokenSourceStrategy(ConfirmationStrategy):
                         "delta_ns": delta})
 
 
+def _json_bool_field(text: str | None, field: str) -> bool | None:
+    import json
+    try:
+        val = json.loads(text or "")[field]
+    except (ValueError, TypeError, KeyError):
+        return None
+    return val if isinstance(val, bool) else None
+
+
+class MassAssignmentPrivilegedFieldStrategy(ConfirmationStrategy):
+    """Confirms unrestricted mass assignment (CWE-915, this project's own
+    `CC-LAB-0182` cell) with a two-probe differential over a privileged,
+    never-user-facing JSON body field (`is_partner`, this project's own
+    Go/Twitch lab's fixed shape -- the same "hardcode the sink's own
+    known field name in the strategy" convention
+    `PredictableTokenSourceStrategy`'s `session_token` and
+    `JwtAlgNoneConfusionStrategy`'s `channel_id`/`role` claims already
+    use), mirroring those two strategies' own "a bare single-probe 200
+    is not enough evidence" reasoning -- this project's first-ever
+    rule/strategy pair for the `mass_assignment` class (already built on
+    three other stacks' lab pages, `php_current`/`ruby_rails`/
+    `php_laravel`, but with no detection anywhere in the project until
+    this strategy).
+
+    Ground truth uses the whole-body-point convention
+    (`param="body"`/`location="body"`) this project already uses for
+    other no-single-named-field whole-body cases (`weak_token_entropy`'s
+    own `TWCH-0005`) rather than naming the privileged field in `param`
+    directly (the way `ruby_rails`'s own `FCART-0004` does with
+    `user[role]`): `fuzzlab.harness.auto.points_from_ground_truth` only
+    marks a point's body as JSON (`content_type="application/json"`)
+    when `param == "body"` exactly -- a real, deliberately narrow gate
+    that a first draft of this strategy's own ground truth got wrong
+    (`param="is_partner"`), caught by actually running the point through
+    the real `run_targets` pipeline rather than trusting the unit tests'
+    own fake-sender candidates alone.
+
+    Probe A sends only the fields this endpoint's own intended form
+    exposes (`display_name`/`bio`) plus a freshly-minted per-run marker
+    in `display_name`. Requires HTTP 200 with the marker echoed back and
+    the privileged field reading back `false` -- establishes the
+    baseline the endpoint starts from, so a target that always reports
+    the privileged field as `true` regardless of input can never
+    false-positive here.
+
+    Probe B (the differentiator) sends the *same* marker and intended
+    fields, plus `is_partner: true` in the same JSON body. Confirms only
+    if this probe is also HTTP 200, still echoes the marker, and the
+    privileged field now reads back `true` -- proof that this specific,
+    never-exposed field is what changed, not merely "some field changed"
+    or "the endpoint always reports true".
+
+    Known limitation, not silently swept under the rug: this assumes the
+    candidate is a JSON whole-body point (`content_type ==
+    "application/json"`) whose response echoes the updated record as a
+    flat JSON object with a literal `is_partner` top-level boolean key --
+    this project's own Go/Twitch lab's exact response shape. A
+    differently-shaped mass-assignment endpoint (e.g. `ruby_rails`'s own
+    `FCART-0004`, a form-encoded nested `user[role]` param with no JSON
+    response echo and a different privileged field name entirely) has
+    nothing for this strategy to parse or match, so it fails closed
+    (returns `None`) rather than misfiring -- it does not, and cannot,
+    positively confirm the *absence* of mass assignment for a
+    differently-shaped target, only decline to guess.
+    """
+    vuln_class = "mass_assignment"
+    mechanism = "privileged-field-injection"
+    category = "mass-assignment"
+
+    _PRIVILEGED_FIELD = "is_partner"
+    _INTENDED_FIELDS = {"bio": "lab-probe"}
+
+    def confirm(self, candidate, sender):
+        import json
+
+        if candidate.content_type != "application/json":
+            return None    # only a declared-JSON whole-body point can carry this format
+        marker = _token()
+
+        baseline_body = json.dumps({"display_name": marker, **self._INTENDED_FIELDS})
+        probe_a = self._send(sender, candidate, baseline_body)
+        if probe_a.status != 200 or marker not in (probe_a.text or ""):
+            return None
+        before = _json_bool_field(probe_a.text, self._PRIVILEGED_FIELD)
+        if before is not False:
+            return None    # either unparseable or already true -- no clean baseline
+
+        probe_body = json.dumps(
+            {"display_name": marker, self._PRIVILEGED_FIELD: True, **self._INTENDED_FIELDS}
+        )
+        probe_b = self._send(sender, candidate, probe_body)
+        if probe_b.status != 200 or marker not in (probe_b.text or ""):
+            return None
+        after = _json_bool_field(probe_b.text, self._PRIVILEGED_FIELD)
+        if after is not True:
+            return None    # the privileged field never actually changed
+
+        return Verdict(True, self.vuln_class, self.mechanism,
+                       {"field": self._PRIVILEGED_FIELD, "marker": marker})
+
+
 # Grey-box (M10) default confirmation-side probes: something that would reach the
 # vulnerable sink (a SQLi syntax-breaker; an XSS canary) so the coverage/DB-fault
 # side channel has something to observe. Distinct from the black-box strategies'
@@ -1040,6 +1141,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
             XxeInBandMarkerStrategy(oob), XxeOobStrategy(oob),
             JwtAlgNoneConfusionStrategy(),
             PredictableTokenSourceStrategy(),
+            MassAssignmentPrivilegedFieldStrategy(),
             GreyboxConfirmationStrategy(coverage, dbfault)]
 
 
@@ -1062,6 +1164,7 @@ _CATEGORY_TO_CLASS = {
     "xxe": "xxe",
     "jwt-algorithm-confusion": "jwt_algorithm_confusion",
     "weak-token-entropy": "weak_token_entropy",
+    "mass-assignment": "mass_assignment",
 }
 
 

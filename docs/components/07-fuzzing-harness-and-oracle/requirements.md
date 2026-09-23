@@ -239,6 +239,33 @@ rewards) derives from it.
     `fuzzlab.harness.multitarget` Phase E wiring, Twitch's real, scored
     recall moves from 3/5 to 4/5.
 
+- **FR-FUZZ-21** *(`MassAssignmentPrivilegedFieldStrategy`; `CC-FUZZ-0035`,
+  2026-09-23).* The oracle supports real **mass-assignment (CWE-915)
+  confirmation**, paired with `FR-AUD-13`'s candidate-generation rule,
+  closing Twitch's `TWCH-0006` structural detection zero (`CC-LAB-0182`'s
+  own deliberately-separated follow-on) — this project's first-ever
+  detection capability for the `mass_assignment` class at all:
+  - `MassAssignmentPrivilegedFieldStrategy` (`vuln_class=
+    "mass_assignment"`, `mechanism="privileged-field-injection"`): two
+    probes over a hardcoded, known JSON body field (`is_partner`);
+    confirms only on a `false`-to-`true` transition of that field
+    between probe A (intended fields only) and probe B (intended fields
+    plus the privileged field) — never a bare "does it ever read true"
+    check.
+  - `fuzzlab.core.runmode._VULN_TO_CATEGORY` gained
+    `"mass_assignment": "mass-assignment"` — the sixth instance of the
+    recurring underscore/hyphen gap, caught automatically by the
+    structural guard test.
+  - A real ground-truth defect (`param="is_partner"` instead of the
+    whole-body-point `param="body"` convention, which starved the
+    strategy of the `content_type="application/json"` it needs) was
+    found and fixed before landing, by actually running the real
+    `run_targets()` pipeline rather than trusting fake-sender unit tests
+    alone.
+  - Verified live against Twitch's real booted twins; through the real
+    `fuzzlab.harness.multitarget` Phase E wiring, Twitch's real, scored
+    recall moves from 4/6 to 5/6.
+
 - **FR-FUZZ-19** *(`JwtAlgNoneConfusionStrategy`; `CC-FUZZ-0033`,
   2026-09-23).* The oracle supports real **JWT algorithm-confusion
   (CWE-347) confirmation**, paired with `FR-AUD-11`'s candidate-
