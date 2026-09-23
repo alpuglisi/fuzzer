@@ -159,7 +159,7 @@ tracked in the requirements files, not here.
   `generalizes` verdict — the generalization evidence. The live run against an external
   validation lab is on-host; the manifest-generated second target plugs in as a
   `TargetSpec`.
-- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- four emitters (php_current, python_fastapi, php_laravel, node_express) built to varying depth, plus two more (go_net_http, java_spring_boot -- both Phase A only) added by the category-4 second-target pilot; Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself pending human sign-off]` (D8, target shape pinned by **D20**/
+- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- four emitters (php_current, python_fastapi, php_laravel, node_express) built to varying depth, plus go_net_http (category-4 pilot, Phase A + one Phase B increment) and spring_boot (category-3 pilot, now also hosting category 4's one ported Netflix cell per the §9.2a consolidation -- java_spring_boot itself retired); Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself pending human sign-off]` (D8, target shape pinned by **D20**/
   `CR-LAB-0001`): the "lab as a compiler" — one manifest plus a safety matrix,
   seed, and env-profile generate the app, labels, docs, and oracle tests, with a
   **binary** verdict derived from `(transform, sink context)` (a partially
@@ -365,24 +365,27 @@ tracked in the requirements files, not here.
   difference is one inseparable validate-then-fetch operation, not a
   value transform); both sinks use a bounded `http.Client` so neither
   twin's generated code can hang. Still deferred: the per-run database
-  and the richer EventSub header checks. A **sixth stack emitter**
-  (`fuzzlab/labgen/emitters/java_spring_boot/`, category 4 second-target
-  pilot's `CC-LAB-0171`/`FR-LAB-77`, 2026-09-22) is this project's first
-  JVM/Java stack — Spring Boot 3.4.1/Spring MVC, Phase A depth (one
-  illustrative shape: a Jackson-polymorphic-deserialization endpoint,
-  CWE-502, reusing `lab/safety_matrix.yaml`'s existing
-  `object_deserialization` family with two new Java-specific ops) with a
-  real checked-in Maven skeleton, a real `JavaLiveBootHarness`
-  (`fuzzlab/labgen/conformance/java_live_boot.py`), and Tier 0
-  (`mvn -q compile`)/Tier 3 conformance passing. Architecturally distinct
-  from every other routed emitter: Spring Boot's component scanning
-  auto-discovers each generated `@RestController` class on the classpath
-  at boot, so this stack needs **no route accumulator at all** (every
-  generated cell controller is hardcoded to a fixed subpackage,
-  `com.fuzzlab.lab.cells`, under the scanned root). Deferred to Phase B:
-  a per-run database (this shape is stateless too), the GraphQL/DGS
-  federation layer Netflix's real architecture uses, and its CWE-862
-  field-authorization pick. **Superseded for the
+  and the richer EventSub header checks. **The originally-planned sixth
+  stack emitter, `java_spring_boot` (category 4 second-target pilot's
+  `CC-LAB-0171`/`FR-LAB-77`, 2026-09-22), was retired 2026-09-23** per the
+  project owner's §9.2a Java/Spring Boot consolidation decision: rather
+  than maintaining a second, shallower Java/Spring Boot emitter alongside
+  category 3's more mature `spring_boot` package (TrackerNest — SSTI, XXE,
+  and its own insecure-deserialization cell, `CC-LAB-0130`-`0132`), the one
+  Netflix cell (`CC-LAB-0171`'s Jackson-polymorphic-deserialization
+  endpoint, CWE-502) was ported into `spring_boot` and `java_spring_boot`
+  was deleted entirely (`CC-LAB-0173`/`FR-LAB-79`). The port surfaced a
+  real Jackson major-version API break (Spring Boot 4.1.1, `spring_boot`'s
+  pin, resolves Jackson 3's `tools.jackson.databind.*`, not the Jackson 2
+  `com.fasterxml.jackson.databind.*` `java_spring_boot`'s code used) and
+  required extending `SpringBootEmitter`'s dispatch (a new
+  `_SOURCE_OVERRIDE_BY_OP` map, since the ported ops need a different
+  source module than TrackerNest's own ops for the same shape tuple) —
+  see `CC-LAB-0173`'s own change-control entry for the full technical
+  record. Category 3's `spring_boot` package remains this project's one
+  canonical Java/Spring Boot stack going forward; a future category
+  researching a Java/Spring Boot pick reuses it rather than building a
+  third. **Superseded for the
   Layer-A/cutover purpose by D-open-1** (`docs/LAB_IMPLEMENTATION_PLAN.md`
   §4.3.6.7, decided 2026-09-22): the operative exit bar for closing Phase 0 on
   the 16 `PFF-` real-page cases is functional **parity/coverage**, not a

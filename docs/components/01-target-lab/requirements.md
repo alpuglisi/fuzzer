@@ -1885,7 +1885,13 @@ lane) can submit a payload as
     stack (which would be the first shape needing the per-run database
     above).
 
-- **FR-LAB-77** *(`java_spring_boot` Phase A: this project's first JVM/Java
+- **FR-LAB-77** — **SUPERSEDED (2026-09-23, `CC-LAB-0173`, marked in
+  place per this project's living-doc convention — history stays below
+  for context, not deleted).** The `java_spring_boot` package this
+  requirement described is retired; its one capability (a JVM/Java target
+  stack supporting the Netflix CWE-502 Jackson-deserialization cell) is
+  now met by `spring_boot` — see `FR-LAB-79`. *(`java_spring_boot` Phase A:
+  this project's first JVM/Java
   target-lab stack; `CC-LAB-0171`, 2026-09-22, category 4 pilot — Media/
   streaming, Netflix pick, `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
   §9.4/§9.5).* The toolkit supports a Spring Boot 3.4.1/Spring MVC target
@@ -2024,6 +2030,89 @@ lane) can submit a payload as
     existing webhook-signature cell (refines an already-proven shape
     rather than adding vuln-class breadth, which this project ranks
     lower) — deferred to a later increment, not dropped.
+
+- **FR-LAB-79** *(§9.2a Java/Spring Boot consolidation: Netflix's cell now
+  lives in `spring_boot`; `CC-LAB-0173`, 2026-09-23).* Supersedes
+  `FR-LAB-77`'s capability without restating it: the CWE-502 Jackson
+  polymorphic-deserialization cell (playback-resume shape) is ported out
+  of the now-retired `java_spring_boot` package into category 3's
+  `spring_boot` package (TrackerNest), as `(vuln_class=
+  "insecure_deserialization", sink_context.family="object_deserialization")`
+  with a new op pair (`jackson_default_typing_deserialize`/
+  `jackson_typed_allowlist_deserialize`) that already existed in
+  `lab/safety_matrix.yaml` from the original entry — no new safety-matrix
+  work needed.
+  - **Real Jackson major-version API break found and resolved.**
+    `spring_boot`'s skeleton pins `spring-boot-starter-parent` 4.1.1,
+    which resolves Jackson 3.1.5 (`tools.jackson.databind.*`), not the
+    Jackson 2 (`com.fasterxml.jackson.databind.*`) the original cell used
+    against Spring Boot 3.4.1. Verified directly via `javap` against the
+    real resolved jar before writing any port code: Jackson 3's
+    `ObjectMapper` has no instance `activateDefaultTyping` method (moved
+    to `JsonMapper.builder()...build()`), and `LaissezFaireSubTypeValidator`
+    is package-private in Jackson 3 (cannot be referenced from generated
+    code) — the ported vulnerable sink instead defines a small local
+    `PolymorphicTypeValidator.Base` subclass with the same "allow any
+    subtype" semantics. Confirmed working end to end in a real, isolated
+    Maven probe before any template code was written.
+  - **A real minimal-pair-vocabulary dispatch refactor.**
+    `SpringBootEmitter._MODULE_SET_BY_SHAPE` keys `(vuln_class,
+    sink_context.family) -> (source, complexity)`, with the sink selected
+    separately by `cell.transform.ops`. The pre-existing
+    `(insecure_deserialization, object_deserialization)` entry's default
+    source (`request_stream`, publishing the raw `HttpServletRequest`
+    itself) doesn't fit the ported Jackson ops, which need to read the
+    body into a `byte[]` instead. A new `_SOURCE_OVERRIDE_BY_OP` map lets
+    an op override the shape-level default source; only the two Jackson
+    ops are in it, every other op/shape keeps its existing dispatch
+    unchanged (re-verified: the pre-existing 32-test suite stays green
+    byte-for-byte). **Known, stated narrowing:** this overrides only the
+    source, not `_ModuleSet.complexity` — sufficient today (every op for
+    every shape uses `single_handler`) but would need widening for a
+    future op needing a different complexity module on an already-
+    supported shape.
+  - **Cell/page identity, addressed explicitly (not left as a bare
+    "cosmetic" note).** The ported class renders under
+    `com.fuzzlab.trackernest.generated` (the same package every other
+    `spring_boot` cell/DTO already lives in) — a **build/skeleton-level**
+    sharing decision only, the same shape `node_express` already has
+    precedent for (hosting Walmart's cells without merging app identity).
+    This does not make Netflix's cell "a TrackerNest page": no
+    TrackerNest ground truth or page/route design is touched, and the
+    ported cell keeps its own `LABGEN-JV-` cell-ID prefix (distinct from
+    TrackerNest's own `LABGEN-DESER-`/`LABGEN-SSTI-` prefixes) so
+    provenance stays distinguishable at the manifest/ground-truth level.
+    Category 4's own Phase C page design (not yet started for either
+    Netflix or Twitch) is unaffected.
+  - **Both twins share one literal route
+    (`POST /api/playback/resume`) safely**, matching TrackerNest's own
+    `LABGEN-DESER-0001`/`0002` twin-pair precedent: `spring_boot`'s own
+    live-boot harness (`SpringBootLiveBootHarness`) boots exactly one cell
+    per real Spring Boot instance, never both twins in one running app,
+    so an identical route across twins is not the ambiguous-mapping
+    hazard it would be under a multi-cell-per-boot harness (the shape
+    `go_net_http`/`java_spring_boot` both needed cell-ID-derived paths to
+    avoid) — confirmed by reading the harness's own constructor signature
+    and by a real boot hitting exactly this "Ambiguous mapping" Spring
+    Boot startup failure during this port's own initial manual
+    verification, before the correct single-cell convention was applied.
+  - Proven end to end by two real live-boot tests
+    (`tests/test_labgen_spring_boot_deserialization_jackson_live_boot.py`),
+    each its own separate `SpringBootLiveBootHarness` instance:
+    (a) the vulnerable twin accepts a type-hint-wrapped body naming an
+    arbitrary class; (b) the secure twin accepts its own well-formed
+    plain-JSON body and rejects the same type-hint-wrapped body — the
+    same three assertions the original, now-deleted
+    `tests/test_labgen_java_live_boot.py` made (a coverage-diff check
+    confirmed this before that file was deleted), adapted to
+    `spring_boot`'s real HTTP contract.
+  - **`java_spring_boot` retired in the same dispatch**: the package,
+    its conformance harness (`fuzzlab.labgen.conformance.java_live_boot`),
+    its manifest, and its 4 test files are deleted. `grep`-confirmed no
+    other file (including `fuzzlab/harness/multitarget.py`) referenced it
+    by name, so nothing else on this branch broke — the full non-slow
+    suite was re-run after the deletion to confirm (no regression, same
+    pre-existing `gitleaks`-related failures as before).
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

@@ -1,5 +1,7 @@
 """Unit coverage for the `spring_boot` emitter's insecure-deserialization
-cell (`CC-LAB-0132`, TrackerNest's third and final designed cell).
+cell (`CC-LAB-0132`, TrackerNest's third and final designed cell), plus
+the Netflix cell ported in from `java_spring_boot` by `CC-LAB-0173` (the
+§9.2a Java/Spring Boot consolidation).
 
 No network/java/mvn required -- pure Python emitter-output checks, mirroring
 `tests/test_labgen_spring_boot.py`/`tests/test_labgen_spring_boot_xxe.py`'s
@@ -17,6 +19,8 @@ _MANIFEST_PATH = "lab/manifests/insecure_deserialization_spring_boot_sample.yaml
 _EXPECTED_VERDICTS = {
     "LABGEN-DESER-0001": "VULNERABLE",  # function_executing_deserialize: unrestricted ObjectInputStream
     "LABGEN-DESER-0002": "SECURE",  # handler_registry_lookup: resolveClass() allowlist
+    "LABGEN-JV-0001": "VULNERABLE",  # jackson_default_typing_deserialize: polymorphic Object (ported, CC-LAB-0173)
+    "LABGEN-JV-0002": "SECURE",  # jackson_typed_allowlist_deserialize: fixed DTO class (ported, CC-LAB-0173)
 }
 
 
@@ -61,11 +65,11 @@ def test_vulnerable_twin_has_no_allowlist_secure_twin_does() -> None:
     assert "PostMapping" in vulnerable_src and "PostMapping" in secure_src
 
 
-def test_all_three_trackernest_controllers_have_disjoint_class_names() -> None:
-    """TrackerNest's three cells (SSTI `CC-LAB-0130`, XXE `CC-LAB-0131`,
-    insecure deserialization here) must never collide on a generated file
-    path/class name -- guaranteed by `_class_name_for()` deriving from each
-    cell's own id."""
+def test_all_controllers_have_disjoint_class_names() -> None:
+    """TrackerNest's three own cells (SSTI `CC-LAB-0130`, XXE `CC-LAB-0131`,
+    insecure deserialization) plus the two ported Netflix cells (`CC-LAB-0173`)
+    must never collide on a generated file path/class name -- guaranteed by
+    `_class_name_for()` deriving from each cell's own id."""
     emitter = SpringBootEmitter()
     all_paths = set()
     for manifest_path in (
@@ -77,4 +81,22 @@ def test_all_three_trackernest_controllers_have_disjoint_class_names() -> None:
             path = emitter.render(cell)[0].path
             assert path not in all_paths, path
             all_paths.add(path)
-    assert len(all_paths) == 6
+    assert len(all_paths) == 8
+
+
+def test_ported_jackson_vulnerable_twin_uses_default_typing_secure_uses_fixed_dto() -> None:
+    """The ported Netflix cell's twins (`CC-LAB-0173`): vulnerable
+    deserializes into a polymorphic `Object` via
+    `JsonMapper.builder().activateDefaultTyping(...)`; secure deserializes
+    into the fixed `PlaybackResumeRequest` DTO, no polymorphism."""
+    emitter = SpringBootEmitter()
+    cells = _cells()
+    vulnerable_src = emitter.render(cells["LABGEN-JV-0001"])[0].content.decode("utf-8")
+    secure_src = emitter.render(cells["LABGEN-JV-0002"])[0].content.decode("utf-8")
+    assert "activateDefaultTyping" in vulnerable_src
+    assert "Object event = mapper.readValue" in vulnerable_src
+    assert "activateDefaultTyping" not in secure_src
+    assert "PlaybackResumeRequest event = mapper.readValue" in secure_src
+    assert "tools.jackson.databind" in vulnerable_src and "tools.jackson.databind" in secure_src
+    assert "com.fasterxml.jackson.databind" not in vulnerable_src
+    assert "com.fasterxml.jackson.databind" not in secure_src

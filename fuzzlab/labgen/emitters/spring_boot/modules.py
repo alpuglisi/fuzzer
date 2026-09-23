@@ -183,6 +183,58 @@ class RequestStreamSource(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class JacksonBodySource(TemplateModule):
+    """Reads the raw request body into a byte array (`CC-LAB-0173`, the
+    §9.2a Java/Spring Boot consolidation port) -- the Jackson-based
+    deserialization cells construct their own `JsonMapper` in the sink
+    (with or without polymorphic default typing), so unlike
+    `RequestStreamSource` this source does need to render real code, but
+    still publishes only raw material for the sink to interpret, matching
+    every other stack's "source publishes raw material, sink/transform
+    decides the safe/unsafe shape" convention. Ported from
+    `java_spring_boot`'s original `ReadPlaybackEventBodySource`, re-targeted
+    at Jackson 3's real API (`tools.jackson.databind.*`, not the Jackson-2
+    `com.fasterxml.jackson.databind.*` the original used against Spring
+    Boot 3.4.1 -- see this entry's own change-control record for the real
+    API-migration finding)."""
+
+    def __init__(self) -> None:
+        super().__init__("jackson_body", "source", SOURCE_ENV, "jackson_body.java.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = "requestBody"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class JacksonDefaultTypingDeserializeSink(TemplateModule):
+    """The vulnerable op (`CC-LAB-0173`, ported from `java_spring_boot`):
+    deserializes into a polymorphic `Object` via Jackson 3's
+    `JsonMapper.builder().activateDefaultTyping(...)` -- CWE-502, the
+    concrete runtime type is resolved from an attacker-controlled type
+    hint embedded in the JSON body itself. Matches
+    `lab/safety_matrix.yaml`'s `jackson_default_typing_deserialize` op."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "jackson_default_typing_deserialize", "sink", SINK_ENV, "jackson_default_typing_deserialize.java.j2"
+        )
+
+
+class JacksonTypedAllowlistDeserializeSink(TemplateModule):
+    """The secure twin (`CC-LAB-0173`, ported from `java_spring_boot`):
+    deserializes into a single, fixed, concrete DTO class
+    (`PlaybackResumeRequest`) -- no polymorphism, so the attacker cannot
+    redirect the runtime type. Matches `lab/safety_matrix.yaml`'s
+    `jackson_typed_allowlist_deserialize` neutralizing op."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "jackson_typed_allowlist_deserialize", "sink", SINK_ENV, "jackson_typed_allowlist_deserialize.java.j2"
+        )
+
+
 class FunctionExecutingDeserializeSink(TemplateModule):
     """The vulnerable op (`CC-LAB-0132`): an unrestricted
     `ObjectInputStream.readObject()` -- will construct any `Serializable`
@@ -225,6 +277,7 @@ SOURCES: dict[str, Module] = {
     "query_param": QueryParamSource(),
     "raw_body": RawBodySource(),
     "request_stream": RequestStreamSource(),
+    "jackson_body": JacksonBodySource(),
 }
 #: Keyed by the op name that selects this sink (see this module's own
 #: docstring for why the op selects the sink here, not a pre-sink
@@ -236,6 +289,8 @@ SINKS: dict[str, Module] = {
     "xml_external_entities_disabled": XmlExternalEntitiesDisabledSink(),
     "function_executing_deserialize": FunctionExecutingDeserializeSink(),
     "handler_registry_lookup": HandlerRegistryLookupSink(),
+    "jackson_default_typing_deserialize": JacksonDefaultTypingDeserializeSink(),
+    "jackson_typed_allowlist_deserialize": JacksonTypedAllowlistDeserializeSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_handler": SingleHandlerComplexity(),

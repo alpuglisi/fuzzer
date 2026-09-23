@@ -1,4 +1,0 @@
-// jackson_typed_allowlist_deserialize transform: {{ result_var }} is deserialized
-// into a single, fixed, concrete DTO class -- no polymorphism, so the
-// attacker cannot redirect the runtime type
-PlaybackResumeRequest {{ result_var }} = mapper.readValue({{ body_var }}, PlaybackResumeRequest.class);
