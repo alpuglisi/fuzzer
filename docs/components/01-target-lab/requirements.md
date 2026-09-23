@@ -4495,6 +4495,70 @@ lane) can submit a payload as
   concluding this, not assumed absent) -- substituted with a documented,
   rigorous self-review performed and recorded in `CC-LAB-0190`.
 
+- **FR-LAB-131** *(Netflix's sixth real page: first `unrestricted_file_
+  upload` instance on `spring_boot`, `/api/profiles/avatar`;
+  `CC-LAB-0191`, 2026-09-23).* Instantiates `lab/safety_matrix.yaml`'s
+  existing `fs_web_root_write` sink family and its `no_extension_check`/
+  `extension_allowlist_mime_check` ops (`CC-LAB-0063`, already on
+  `go_net_http` per `CC-LAB-0186`/`FR-LAB-126`) on `spring_boot` for the
+  FIRST time -- genuinely new breadth, not a depth reuse. A per-profile
+  avatar-image upload endpoint (a real, plausible Netflix feature -- up
+  to five profiles per account, each with its own avatar). A new source,
+  `ReadUploadedAvatarFileSource` (this stack's first real `multipart/
+  form-data` parser, reading the upload off the raw Servlet 3.1+ `Part`
+  API since every complexity template's handler signature takes only
+  `HttpServletRequest`), publishes the caller-supplied filename/content/
+  multipart-`Content-Type` a sink reads directly -- Convention 2 (the
+  manifest's one op names a sink directly, like SSRF/mass-assignment/
+  access-control/price). Java, like Go, has no PHP-style "the web server
+  executes an uploaded script" footgun, so the vulnerable twin
+  (`no_extension_check`) models the same real, well-documented
+  CWE-434-to-XSS chain `FR-LAB-126` already documents: it writes the
+  upload to `static/avatars/<caller's own filename>` verbatim and serves
+  it back with a `Content-Type` from Spring's own
+  `MediaTypeFactory.getMediaType()` on that same filename (falling back
+  to the caller's own multipart `Content-Type` header) -- an uploaded
+  `.html` file is served back same-origin as `text/html`. The secure
+  twin (`extension_allowlist_mime_check`) allowlists exactly `.png`/
+  `.jpg`/`.jpeg` -- narrower than `go_net_http`'s own allowlist (which
+  also accepts `.gif`/`.webp`), a deliberate, stated scoping to the two
+  formats this stack's own minimal magic-byte check can actually
+  recognize -- AND sniffs the real bytes via an explicit PNG/JPEG
+  magic-byte check (PNG's fixed 8-byte signature, JPEG's 3-byte
+  `0xFFD8FF` prefix), a documented choice over `Files.probeContentType`
+  (platform/OS-dependent, not a deterministic real-bytes sniff -- Java's
+  stdlib has no `http.DetectContentType` equivalent); writes under a
+  fully server-chosen filename (`"avatar"+ext`) and always serves the
+  sniffed content type. A new, additive complexity module,
+  `single_handler_binary` (`ResponseEntity<byte[]>` instead of
+  `<String>`, needed so the served bytes round-trip byte-for-byte) --
+  `single_handler.java.j2` and every existing cell using it are
+  untouched. Cells `LABGEN-JV-0011`/`0012`; ground truth `NFLX-0006`
+  (`vuln_class="unrestricted_file_upload"`, `sink_context=
+  "fs_web_root_write"`, both existing enum values, no schema change;
+  `param="file"`/`location="body"`, the same deliberate convention
+  `TWCH-0009`/`FR-LAB-126` established; `rendering="server"`).
+  **Detection generalizes with zero new code, verified live**:
+  `UnrestrictedFileUploadContentTypeTrustStrategy` (`CC-FUZZ-0036`/
+  `CC-AUD-0023`, built for `TWCH-0009`) reads the served `Content-Type`
+  off the same POST response both twins already return -- this shape's
+  own design satisfies that contract unchanged, so no strategy
+  adaptation or widening was needed; confirmed against a real booted
+  `spring_boot` app (`tests/test_labgen_spring_boot_netflix_avatar_
+  upload_live_boot.py`), the second stack this strategy generalizes to
+  (after `go_net_http` itself). Netflix's own real, scored recall moves
+  from `5/5` to `6/6` in the multi-cell boot and from `1/5` to `1/6` in
+  the single-cell wiring test (`tests/test_multitarget_category4.py`,
+  both re-derived per `PA-0042`). `SpringBootLiveBootHarness.
+  HttpResponse` gained an additive `headers` field (no prior
+  `spring_boot` cell needed to read a response header back).
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0190`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded in `CC-LAB-0191`.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

@@ -51,7 +51,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from fuzzlab.labgen.emitter import Emitter
@@ -180,6 +180,16 @@ def _run(cmd: list[str], *, cwd: Path, timeout: float) -> subprocess.CompletedPr
 class HttpResponse:
     status: int
     body: str
+    #: Response headers, case-insensitive-original-cased, first value wins
+    #: on a repeat (`CC-LAB-0191`, additive -- every pre-existing caller
+    #: keeps working unchanged, since this is a new field with a default).
+    #: Needed by this stack's first `unrestricted_file_upload` cell's own
+    #: differential test, which must read the served `Content-Type` back
+    #: (whether the vulnerable twin derived it from the caller's filename
+    #: extension, or the secure twin derived it from the real sniffed
+    #: bytes) -- something no pre-existing `spring_boot` cell's own
+    #: live-boot test needed to check.
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 class SpringBootLiveBootHarness:
@@ -328,7 +338,12 @@ class SpringBootLiveBootHarness:
             req_headers.update(headers)
         req = urllib.request.Request(url, data=data, method=method.upper(), headers=req_headers)
         with _NO_REDIRECT_OPENER.open(req, timeout=REQUEST_TIMEOUT_S) as resp:
-            return HttpResponse(status=resp.status, body=resp.read().decode("utf-8", errors="replace"))
+            resp_headers = dict(resp.headers.items())
+            return HttpResponse(
+                status=resp.status,
+                body=resp.read().decode("utf-8", errors="replace"),
+                headers=resp_headers,
+            )
 
     def get(
         self,

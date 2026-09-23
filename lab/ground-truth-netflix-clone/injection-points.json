@@ -36,6 +36,13 @@
       "param": "body",
       "location": "body",
       "rendering": "server-json"
+    },
+    {
+      "url": "/api/profiles/avatar",
+      "method": "POST",
+      "param": "file",
+      "location": "body",
+      "rendering": "server"
     }
   ]
 }

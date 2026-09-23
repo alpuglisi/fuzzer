@@ -82,6 +82,17 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("price_integrity_bypass", "payment_charge_amount"): _ModuleSet(
         "read_plan_change_request", "single_handler"
     ),
+    # CC-LAB-0191: Netflix's sixth real page, this stack's first
+    # unrestricted_file_upload instance -- reuses lab/safety_matrix.yaml's
+    # existing fs_web_root_write sink family and no_extension_check/
+    # extension_allowlist_mime_check ops (CC-LAB-0063), already
+    # instantiated on go_net_http (CC-LAB-0186). No new safety-matrix
+    # entry needed. Uses "single_handler_binary", not "single_handler" --
+    # this shape's own sink must serve the uploaded file's real bytes back
+    # byte-for-byte (see SingleHandlerBinaryComplexity's own docstring).
+    ("unrestricted_file_upload", "fs_web_root_write"): _ModuleSet(
+        "read_uploaded_avatar_file", "single_handler_binary"
+    ),
 }
 
 #: Per-route static render context, the same "render-only information, not
@@ -114,6 +125,12 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
             ("premium", "22.99"),
         ),
     },
+    # CC-LAB-0191: Netflix's sixth real page, a per-profile avatar-image
+    # upload endpoint -- this stack's first unrestricted_file_upload page.
+    # No var_name/param_name needed: the tainted material is the multipart
+    # "file" part itself, read directly off the raw request by
+    # ReadUploadedAvatarFileSource, not a query param/header/JSON field.
+    "/api/profiles/avatar": {},
 }
 
 #: Per-op source override (`CC-LAB-0173`) -- checked *after* the shape-level

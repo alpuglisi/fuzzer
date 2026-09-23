@@ -1,0 +1,22 @@
+        // no_extension_check: the served Content-Type is derived from the
+        // caller-supplied filename's extension via Spring's own
+        // MediaTypeFactory (the idiomatic Java/Spring analog of Go's
+        // mime.TypeByExtension -- a static, bundled extension-to-MediaType
+        // lookup table, never the file's real bytes), falling back to the
+        // caller-supplied multipart Content-Type header when the extension
+        // is unrecognized. The uploaded bytes are written verbatim under
+        // the caller's own filename into a web-served directory (CWE-434):
+        // an uploaded .html/.svg file is served back same-origin with a
+        // Content-Type that lets an embedded <script> execute (stored XSS
+        // via unrestricted file upload).
+        java.nio.file.Path avatarUploadDir = java.nio.file.Paths.get("static", "avatars");
+        java.nio.file.Files.createDirectories(avatarUploadDir);
+        java.nio.file.Path destPath = avatarUploadDir.resolve({{ filename_var }});
+        java.nio.file.Files.write(destPath, {{ content_var }});
+        String servedContentType = org.springframework.http.MediaTypeFactory
+            .getMediaType({{ filename_var }})
+            .map(org.springframework.http.MediaType::toString)
+            .orElse({{ client_content_type_var }});
+        return org.springframework.http.ResponseEntity.ok()
+            .header("Content-Type", servedContentType)
+            .body({{ content_var }});

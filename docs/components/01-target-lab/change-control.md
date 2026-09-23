@@ -3,6 +3,246 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0191 — Netflix's 6th real page: first unrestricted_file_upload instance on `spring_boot`, `/api/profiles/avatar` (FR-LAB-131) (2026-09-23)
+
+- **Numbering correction, caught and fixed before this entry was ever
+  pushed**: this entry was originally drafted and implemented under
+  `CC-LAB-0216`, which falls inside category 5's own reserved block
+  (`CC-LAB-0210`-`0249`), not this branch's own `CC-LAB-0170`-`0209` block
+  — an incorrect "next free number" lookup during drafting. Caught during
+  this same commit's own pre-push review (checking this branch's own
+  reserved block before pushing, per this project's own multi-agent
+  numbering-collision discipline), and corrected here to `CC-LAB-0191`
+  (the true next-free number in this branch's block, after `CC-LAB-0190`'s
+  own path-traversal entry) across every file that referenced the wrong
+  number — never shipped under the wrong ID.
+- Change: genuinely new breadth for category 4's Netflix pick, not a depth
+  reuse: this is `lab/safety_matrix.yaml`'s existing `fs_web_root_write`
+  sink family / `unrestricted_file_upload` concern's **first**
+  instantiation for the `spring_boot` stack (the only prior real
+  implementation project-wide is `go_net_http`'s Twitch emote-upload page,
+  `CC-LAB-0186`). Confirmed absent before building: `grep -rln
+  "no_extension_check\|extension_allowlist_mime_check"
+  fuzzlab/labgen/emitters/spring_boot/modules.py` returned nothing.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0190`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` with a
+  direct query before concluding this, not assumed absent) — substituted
+  with a documented, rigorous self-review performed and recorded here.
+  **(1) Accuracy** — checked by direct source inspection: the safety-
+  matrix ops this shape reuses (`no_extension_check`/
+  `extension_allowlist_mime_check`, both keyed to `fs_web_root_write`)
+  exist verbatim in `lab/safety_matrix.yaml` with the documented
+  `no_effect`/`neutralises` ladder; `LABGEN-JV-0011`/`0012` were
+  confirmed free (highest existing `LABGEN-JV-` id across every manifest
+  was `LABGEN-JV-0010`); Spring's own `MediaTypeFactory.getMediaType()`
+  extension-lookup behavior and the minimal PNG/JPEG magic-byte checks
+  this entry writes from scratch (Java's stdlib has no
+  `http.DetectContentType` equivalent — `Files.probeContentType` was
+  deliberately rejected as platform/OS-dependent, not a deterministic
+  real-bytes sniff; see `ExtensionAllowlistMagicByteCheckSink`'s own
+  docstring) were verified against a real `mvn package`/boot/HTTP round
+  trip, not assumed from documentation alone — all 6 live-boot
+  assertions (4 differential + 2 oracle-generalization) passed on the
+  first real run. **(2) Adequacy** — checked that this increment does not
+  silently duplicate an existing route (grepped `_PAGE_PARAMS` for
+  `/api/profiles/avatar`: absent) and does not need a second, redundant
+  sink pair (the manifest's minimal-pair invariant: one vulnerable, one
+  secure op, both new for this stack). Confirmed the mandatory
+  filesystem-safety constraint is met structurally: `SpringBootLiveBoot
+  Harness` already runs the built jar with `cwd` set to its own
+  `tempfile.TemporaryDirectory`-backed `app_dir`, and the generated
+  handler writes to a **relative** path (`static/avatars`, resolved
+  against that `cwd`) using only test-supplied filenames with no `../`
+  segments — verified by reading `live_boot_spring_boot.py`'s own
+  `build()`/`_wait_for_boot()` before relying on it, not assumed;
+  confirmed the live-boot probe payload is inert (a marker string in a
+  `<!DOCTYPE html><p>...</p>` snippet, never an actual `<script>` tag).
+  **Detection design decision, checked before building (task's own
+  explicit ask):** verified directly against `UnrestrictedFileUpload
+  ContentTypeTrustStrategy`'s own source (`fuzzlab/oracle/strategies.py`)
+  that its `confirm()` reads the served `Content-Type` off the SAME POST
+  response both twins already return — this shape's own design (both
+  twins write-and-serve within one handler, matching `no_extension_
+  check.go.j2`/`extension_allowlist_mime_check.go.j2`'s own shape, per
+  the strategy's own documented assumption) satisfies that contract with
+  **zero code changes**, so this landed as one commit (the `CC-LAB-0183`/
+  `0184`/`0185`/`0187`/`0189` zero-new-generator-code generalization
+  pattern, here applied to a detection strategy rather than a lab
+  generator module) rather than adapting the response shape or widening
+  the strategy.
+  - **Real Netflix functionality (grounded, not invented)**: a per-
+    profile avatar-image upload endpoint — Netflix's own Help Center
+    documents up to 5 profiles per account, each with its own avatar.
+  - **A genuinely new mechanism for this stack, not a template port.**
+    `ReadUploadedAvatarFileSource` (`read_uploaded_avatar_file`, this
+    stack's first real `multipart/form-data` parser) reads the uploaded
+    part off the raw Servlet 3.1+ `Part` API (`request.getPart("file")`)
+    — necessary because every complexity template's handler signature
+    takes only `HttpServletRequest`, so there is no Spring-bound
+    `MultipartFile` parameter to read instead. Publishes `filename_var`/
+    `content_var`/`client_content_type_var`, the same three-identifier
+    contract `go_net_http`'s own `ReadUploadedFileSource` established.
+    Convention 2 (op names a sink directly, like SSRF/mass-assignment/
+    access-control/price).
+  - **Vulnerable** (`LABGEN-JV-0011`, `no_extension_check`): writes the
+    upload to `static/avatars/<caller's own filename>` verbatim, then
+    serves it back with a `Content-Type` from Spring's own
+    `MediaTypeFactory.getMediaType()` on that same filename (falling back
+    to the caller's own multipart `Content-Type` header when the
+    extension is unrecognized) — never from the file's real bytes
+    (CWE-434). Java, like Go, has no PHP-style "the web server executes
+    an uploaded script" footgun, so this models the same well-documented
+    CWE-434-to-XSS chain `CC-LAB-0186` modeled: an uploaded `.html`/
+    `.svg` file is served back same-origin as `text/html`/
+    `image/svg+xml`, letting an embedded `<script>` execute.
+  - **Secure** (`LABGEN-JV-0012`, `extension_allowlist_mime_check`):
+    rejects any extension outside `.png`/`.jpg`/`.jpeg` — narrower than
+    `go_net_http`'s own allowlist (which also accepts `.gif`/`.webp`), a
+    deliberate, stated scoping to the two formats this stack's own
+    minimal magic-byte check can actually recognize (a real gap that
+    would exist if the allowlist were wider than the sniff, so it is
+    kept exactly as wide as the sniff instead) — then sniffs the REAL
+    bytes via an explicit magic-byte check (PNG's fixed 8-byte signature,
+    JPEG's 3-byte `0xFFD8FF` prefix) and rejects anything that does not
+    match. Writes under a fully server-chosen filename (`"avatar"+ext`)
+    and always serves the SNIFFED content type.
+  - **A new, additive complexity module** (`single_handler_binary`,
+    `SingleHandlerBinaryComplexity`): the handler returns
+    `ResponseEntity<byte[]>` instead of `ResponseEntity<String>` (needed
+    because this shape's sink must serve the uploaded file's real bytes
+    back byte-for-byte — a `String`-typed body would corrupt any byte
+    ≥ 0x80 when Spring's `StringHttpMessageConverter` re-encodes it for
+    the wire) and additionally declares `throws jakarta.servlet.
+    ServletException`. `single_handler.java.j2` and every existing cell
+    using it (`ssti`/`xxe`/`insecure_deserialization`/`access_control`/
+    `price_integrity_bypass`/`spel_injection`) are completely untouched.
+  - **A real, additive harness gap found and fixed along the way**
+    (the same class `CC-LAB-0186`'s own `GoLiveBootHarness.HttpResponse`
+    gap was): `SpringBootLiveBootHarness.HttpResponse` had no `headers`
+    field at all — every prior `spring_boot` cell's vulnerable/secure
+    difference is observable in the response body/status alone, never
+    only in a response header, so this was never needed before. Added
+    `headers: dict[str, str] = field(default_factory=dict)`, populated
+    from the real `http.client.HTTPMessage` the `urllib` response
+    carries — additive only, confirmed by re-running this stack's full
+    pre-existing live-boot suite unmodified-in-assertion.
+  - **Real, live-boot proof**
+    (`tests/test_labgen_spring_boot_netflix_avatar_upload_live_boot.py`,
+    6 assertions across 2 test classes): (a) the vulnerable twin serves
+    an uploaded `evil.html` back with `Content-Type: text/html`, marker
+    intact; (b) the secure twin rejects the identical `evil.html` upload
+    outright (HTTP 415); (c) the secure twin ALSO rejects a spoofed
+    upload (real HTML bytes, named `fake.png`) with HTTP 415 — proving
+    the magic-byte sniff, not just the extension check, closes the gap;
+    (d) the secure twin accepts a real PNG-signature upload and serves
+    it back with the sniffed `image/png` Content-Type; (e)/(f)
+    `UnrestrictedFileUploadContentTypeTrustStrategy` confirms the
+    vulnerable twin (`served_content_type=image/svg+xml`,
+    `control_content_type=image/png`) and correctly fails closed on the
+    secure twin, both against a real booted `spring_boot` app, zero new
+    detection code. All 6 assertions passed on the first real run
+    (41.85s). Filesystem safety: every write lands under
+    `SpringBootLiveBootHarness`'s own `tempfile.TemporaryDirectory`-
+    backed `app_dir`; every probe filename is fixed and traversal-free.
+  - Ground truth: `NFLX-0006` added to `lab/ground-truth-netflix-clone/`
+    (`vuln_class="unrestricted_file_upload"`, `sink_context=
+    "fs_web_root_write"` — both existing enum values, no schema change
+    needed since `CC-LAB-0186` already widened
+    `fuzzlab/labels/schemas/labels.schema.json` for this concern).
+    `param`/`location` are `file`/`body` (the real multipart field name),
+    the same deliberate convention `TWCH-0009`'s own ground truth
+    established, not the `body`/`body` whole-body-point convention this
+    directory's other, whole-JSON-body cases use. `rendering="server"`,
+    matching `TWCH-0009`'s own departure from this directory's usual
+    `server-json`/`server` split.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/modules.py` (5 new classes:
+    `SingleHandlerBinaryComplexity`/`ReadUploadedAvatarFileSource`/
+    `NoExtensionCheckContentTypeTrustSink`/
+    `ExtensionAllowlistMagicByteCheckSink`, registered in `SOURCES`/
+    `SINKS`/`COMPLEXITIES`), `__init__.py` (`_MODULE_SET_BY_SHAPE`,
+    `_PAGE_PARAMS`)
+  - New templates: `templates/sources/read_uploaded_avatar_file.java.j2`,
+    `templates/sinks/no_extension_check.java.j2`,
+    `templates/sinks/extension_allowlist_mime_check.java.j2`,
+    `templates/complexities/single_handler_binary.java.j2`
+  - `fuzzlab/labgen/emitters/spring_boot/stack/skeleton/src/main/
+    resources/application.properties` (explicit 5 MB multipart cap,
+    parity with `go_net_http`'s own 5 MiB `io.LimitReader` bound)
+  - `lab/manifests/unrestricted_file_upload_netflix_avatar_sample.yaml`
+    (new)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,
+    expectedresults.csv}` (extended, `NFLX-0006`)
+  - `fuzzlab/labgen/conformance/live_boot_spring_boot.py`
+    (`HttpResponse.headers`, additive)
+  - `tests/test_labgen_spring_boot_netflix_avatar_upload.py` (7 new unit
+    tests)
+  - `tests/test_labgen_spring_boot_netflix_avatar_upload_live_boot.py` (6
+    new live-boot tests, incl. oracle-strategy generalization)
+  - `tests/test_labels_contract_category4.py` (extended, 6 Netflix cases)
+  - `tests/test_multitarget_category4.py` (`_NETFLIX_MULTI_MANIFESTS`/
+    `_NETFLIX_MULTI_CELL_IDS` extended; recall assertions moved
+    1/5 -> 1/6 (single-cell test) and 5/5 -> 6/6 (multi-cell boot),
+    `macro_recall` re-derived per PA-0042)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-131`, new)
+- Impact (other components / project): `fuzzlab/labgen/emitters/
+  spring_boot/` is shared across category 3 (TrackerNest) and category 5
+  (Expedia) per this dispatch's own collision-discipline instruction —
+  checked both sibling branches' diffs against every file this entry
+  touches before starting: both are strictly BEHIND this branch on every
+  one of those files (their diffs show only removals of content this
+  branch already has, never a conflicting edit to the same lines/keys),
+  so this is a pure, non-colliding addition. `fuzzlab/oracle/
+  strategies.py` was read, not written — `Unrestricted
+  FileUploadContentTypeTrustStrategy` needed zero changes, confirmed by
+  a real live-boot generalization test rather than by code inspection
+  alone. Netflix's own real, scored `multitarget` recall moves from 1/5
+  to 1/6 in the single-cell wiring test, and from 5/5 to 6/6 in the
+  multi-cell boot test (both re-derived per PA-0042, not left stale).
+- Risk (level; mitigation or accepted-risk justification): **low-medium**.
+  Genuinely new module/template code for this stack (not a verbatim
+  port), so it carries more real-defect risk than a same-stack depth
+  increment — mitigated by verifying every claim (MediaTypeFactory's
+  extension mapping, the magic-byte checks, the byte-correct
+  `ResponseEntity<byte[]>` response, the oracle-strategy generalization)
+  against a real `mvn package`/boot/HTTP round trip before landing, not
+  assumed from template/strategy-source inspection alone. Upload size is
+  bounded (5 MB) on both twins; every live-boot write lands under a
+  throwaway temp directory and every probe payload is inert, per the
+  task's explicit filesystem-safety constraint.
+- Deliverables:
+  - [x] New source + new binary-response complexity + two new sink
+    modules/templates implemented, rendered, and verified byte-
+    deterministic — done.
+  - [x] Sample manifest (`LABGEN-JV-0011`/`0012`) added and verdict-
+    checked against `lab/safety_matrix.yaml` — done.
+  - [x] Ground truth: `NFLX-0006` in all 3 files, cross-checked by the
+    contract loader — done.
+  - [x] Unit tests (manifest/module rendering, disjoint class names) —
+    done, 7 passed.
+  - [x] Real live-boot differential test (4 assertions) — done, passed
+    against a real `mvn package`/boot/HTTP round trip.
+  - [x] Oracle-strategy generalization proof (2 assertions, zero new
+    detection code) — done, passed live.
+  - [x] `tests/test_multitarget_category4.py` recall assertions
+    re-derived per PA-0042 and re-run against a real pipeline run — done
+    (both the single-cell wiring test and the multi-cell boot test pass).
+  - [x] `tests/test_auto.py`/`tests/test_labels_contract_category4.py`
+    re-run explicitly per PA-0042 — done, all green.
+  - [x] CHANGELOG.md, this change-control entry, `requirements.md`
+    (`FR-LAB-131`), `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s
+    category-4 tracker — done.
+- Effectiveness (assessed 2026-09-23): met its intent. All 6 live-boot
+  assertions pass on the first real run; the oracle strategy generalized
+  to a second stack with zero new detection code, moving Netflix's own
+  real, scored recall from 5/5 to 6/6 in the multi-cell boot and from
+  1/5 to 1/6 in the single-cell wiring test (the correct, re-derived
+  fraction, not a stale one). Full non-slow suite green plus the two
+  PA-0042-mandated explicit slow re-runs (`test_multitarget_category4.py`,
+  `test_auto.py`) green.
+
 ### CC-LAB-0190 — Twitch's 11th real page: first path_traversal instance on any stack, `/clips/export` (FR-LAB-130) (2026-09-23)
 
 - Change: genuinely new breadth for category 4's Twitch pick, explicitly

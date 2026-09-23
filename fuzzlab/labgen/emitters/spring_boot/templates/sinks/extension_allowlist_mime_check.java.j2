@@ -1,0 +1,45 @@
+        // extension_allowlist_mime_check: real image extensions only
+        // (.png/.jpg/.jpeg) AND the uploaded bytes' own magic-byte
+        // signature must match a real PNG or JPEG -- Java's standard
+        // library has no ready-made http.DetectContentType equivalent;
+        // Files.probeContentType is platform/OS-dependent (many JDKs fall
+        // back to extension-based or `file`-command-backed detection,
+        // neither of which is a deterministic, environment-independent
+        // "sniff the real bytes" check this lab's live-boot proof can rely
+        // on), so this implements a minimal, explicit magic-byte check
+        // instead. Anything else -- wrong magic bytes, or an unrecognized
+        // extension -- is rejected before anything is written; the served
+        // Content-Type is always the SNIFFED type, never the extension or
+        // the caller's own header.
+        String lowerName = {{ filename_var }}.toLowerCase(java.util.Locale.ROOT);
+        boolean allowedExtension = lowerName.endsWith(".png") || lowerName.endsWith(".jpg")
+            || lowerName.endsWith(".jpeg");
+        if (!allowedExtension) {
+            return org.springframework.http.ResponseEntity.status(415)
+                .body("unsupported file extension".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        String sniffedContentType = null;
+        if ({{ content_var }}.length >= 8
+                && ({{ content_var }}[0] & 0xFF) == 0x89 && {{ content_var }}[1] == 0x50
+                && {{ content_var }}[2] == 0x4E && {{ content_var }}[3] == 0x47
+                && {{ content_var }}[4] == 0x0D && {{ content_var }}[5] == 0x0A
+                && {{ content_var }}[6] == 0x1A && {{ content_var }}[7] == 0x0A) {
+            sniffedContentType = "image/png";
+        } else if ({{ content_var }}.length >= 3
+                && ({{ content_var }}[0] & 0xFF) == 0xFF
+                && ({{ content_var }}[1] & 0xFF) == 0xD8
+                && ({{ content_var }}[2] & 0xFF) == 0xFF) {
+            sniffedContentType = "image/jpeg";
+        }
+        if (sniffedContentType == null) {
+            return org.springframework.http.ResponseEntity.status(415)
+                .body("uploaded content is not a real image".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        java.nio.file.Path avatarUploadDir = java.nio.file.Paths.get("static", "avatars");
+        java.nio.file.Files.createDirectories(avatarUploadDir);
+        String serverChosenExt = sniffedContentType.equals("image/png") ? ".png" : ".jpg";
+        java.nio.file.Path destPath = avatarUploadDir.resolve("avatar" + serverChosenExt);
+        java.nio.file.Files.write(destPath, {{ content_var }});
+        return org.springframework.http.ResponseEntity.ok()
+            .header("Content-Type", sniffedContentType)
+            .body({{ content_var }});

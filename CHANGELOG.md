@@ -4,6 +4,43 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Netflix's 6th real page, first unrestricted_file_upload instance on spring_boot, CC-LAB-0191/FR-LAB-131)
+- Target lab: `POST /api/profiles/avatar` (a per-profile avatar-image
+  upload endpoint — a real, plausible Netflix feature, each of a
+  Netflix account's up-to-five profiles has its own avatar image).
+  `spring_boot`'s **first** instantiation of `lab/safety_matrix.yaml`'s
+  existing `fs_web_root_write` sink family / `unrestricted_file_upload`
+  concern (the only prior real implementation project-wide is
+  `go_net_http`'s Twitch emote-upload page, `CC-LAB-0186`). The
+  vulnerable twin (`no_extension_check`) writes the uploaded bytes
+  under the caller's own filename into a web-served directory and
+  serves them back with a Content-Type derived from that same
+  filename's extension via Spring's own `MediaTypeFactory` (the
+  idiomatic Java/Spring analog of Go's `mime.TypeByExtension`), falling
+  back to the caller's own multipart Content-Type header (CWE-434, the
+  same CWE-434-to-XSS chain `CC-LAB-0186` modeled). The secure twin
+  (`extension_allowlist_mime_check`) allowlists exactly `.png`/`.jpg`/
+  `.jpeg` AND requires the uploaded bytes' own magic-byte signature to
+  match a real PNG or JPEG (a deliberate, documented choice over
+  `Files.probeContentType`, which is platform/OS-dependent), writes
+  under a fully server-chosen filename, and always serves the sniffed
+  content type. A new source (`ReadUploadedAvatarFileSource`, reading
+  the upload off the raw Servlet 3.1+ `Part` API) and a new
+  `single_handler_binary` complexity (serving `ResponseEntity<byte[]>`
+  instead of `<String>`, needed so the served bytes round-trip exactly)
+  — the existing `single_handler.java.j2` template and every cell using
+  it are untouched. Ground truth: `NFLX-0006` added to
+  `lab/ground-truth-netflix-clone/` (`vuln_class`/`sink_context` both
+  reused existing enum values, no schema change). Detection:
+  `UnrestrictedFileUploadContentTypeTrustStrategy` (already built for
+  Twitch's `TWCH-0009`/`CC-FUZZ-0036`/`CC-AUD-0023`) confirmed this new
+  vulnerable twin and correctly failed closed on its secure twin with
+  **zero new detection code**, verified against a real booted
+  `spring_boot` app — the second stack this strategy generalizes to.
+  `SpringBootLiveBootHarness.request()`'s `HttpResponse` gained a
+  `headers` field (additive) so a live-boot test can read the served
+  `Content-Type` back.
+
 ## 2026-09-23 (LAB: Twitch's 11th real page, first path_traversal instance on any stack, CC-LAB-0190/FR-LAB-130)
 - Target lab: `/clips/export?filename=` (a previously-exported-clip
   download endpoint — a real, plausible Twitch feature). This project's

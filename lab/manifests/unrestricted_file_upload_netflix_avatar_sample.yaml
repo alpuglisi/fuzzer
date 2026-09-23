@@ -1,0 +1,83 @@
+# Profile-avatar-upload sample manifest (`CC-LAB-0191`), `spring_boot`
+# (Netflix, category 4).
+#
+# Netflix's sixth real page -- category 4's continued "coherent page/route
+# set" depth work (docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §9.4),
+# and genuinely new breadth for Netflix, not a depth increment: this is
+# `lab/safety_matrix.yaml`'s existing `fs_web_root_write` sink family /
+# `unrestricted_file_upload` concern's FIRST instantiation for the
+# `spring_boot` stack (the only prior real implementation project-wide is
+# `go_net_http`'s Twitch emote-upload page, `CC-LAB-0186`) -- confirmed
+# absent before building: `grep -rln "no_extension_check\|
+# extension_allowlist_mime_check" fuzzlab/labgen/emitters/spring_boot/
+# modules.py` returned nothing.
+#
+# Real-world grounding: a `POST /api/profiles/avatar` endpoint uploading a
+# profile-picture image (a real, plausible Netflix feature -- each of a
+# Netflix account's up-to-five profiles has its own avatar image).
+#
+# The vulnerable twin trusts the caller-supplied filename and multipart
+# Content-Type; Java has no PHP-style "the web server executes an
+# uploaded script" footgun either, so this models the same well-
+# documented CWE-434-to-XSS chain `CC-LAB-0186` modeled for Go, but
+# idiomatically for Java/Spring: the uploaded bytes are written under the
+# caller's own filename into a web-served directory and served back with
+# a Content-Type derived from that same filename's extension via Spring's
+# own `MediaTypeFactory` (falling back to the caller's own multipart
+# Content-Type header), so an uploaded `.html`/`.svg` file is served back
+# same-origin as `text/html`/`image/svg+xml`, letting an embedded
+# <script> execute. The secure twin allowlists real image extensions
+# (`.png`/`.jpg`/`.jpeg` -- narrower than Go's own allowlist, a
+# deliberate, stated scoping to the two formats this sink's own minimal
+# magic-byte check can actually sniff) AND sniffs the actual bytes via an
+# explicit PNG/JPEG magic-byte check (Java's stdlib has no
+# `http.DetectContentType` equivalent; `Files.probeContentType` is
+# platform/OS-dependent, so this deliberately avoids it -- see
+# `ExtensionAllowlistMagicByteCheckSink`'s own docstring for the full
+# reasoning), rejecting anything not really one of those two formats,
+# writes under a fully server-chosen filename, and always serves the
+# SNIFFED content type -- never one derived from the extension or the
+# caller's own header.
+#
+# Module composition is this stack's Convention 2 (like SSRF/mass-
+# assignment/access-control/price): the manifest's one op names a SINK
+# module directly -- the vulnerable/secure difference is one inseparable
+# write-and-serve operation, not a value rewrite feeding a shared sink.
+# Uses the "single_handler_binary" complexity (not "single_handler"):
+# this shape's own sink must serve the uploaded file's real bytes back
+# byte-for-byte, which a String-typed ResponseEntity body cannot do
+# without corrupting any byte >= 0x80 (see SingleHandlerBinaryComplexity's
+# own docstring).
+#
+# `param`/`location` in this manifest's paired ground truth are `file`/
+# `body` (the real multipart field name) -- the same deliberate choice
+# `CC-LAB-0186`'s own ground truth already documents, not the `body`/
+# `body` whole-body-point convention `weak_token_entropy`/
+# `mass_assignment`/the other Netflix whole-JSON-body cells use.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: writes the upload under the caller's own filename and
+  # serves it back with a Content-Type derived from that same filename's
+  # extension (CWE-434 -> stored XSS).
+  - cell_id: LABGEN-JV-0011
+    class: unrestricted_file_upload
+    stack_profile: spring_boot
+    route: { method: POST, path: /api/profiles/avatar }
+    sink_context:
+      family: fs_web_root_write
+      required_neutralizations: [unrestricted_file_upload]
+    transform: [no_extension_check]
+
+  # Secure twin: the only difference is which sink module renders (the
+  # minimal-pair invariant) -- allowlisted extension AND sniffed real
+  # PNG/JPEG bytes required before writing; the served Content-Type is
+  # always the sniffed type.
+  - cell_id: LABGEN-JV-0012
+    class: unrestricted_file_upload
+    stack_profile: spring_boot
+    route: { method: POST, path: /api/profiles/avatar }
+    sink_context:
+      family: fs_web_root_write
+      required_neutralizations: [unrestricted_file_upload]
+    transform: [extension_allowlist_mime_check]

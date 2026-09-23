@@ -426,6 +426,120 @@ class SingleHandlerComplexity(TemplateModule):
         return RenderResult(code=code, context=dict(ctx))
 
 
+class SingleHandlerBinaryComplexity(TemplateModule):
+    """A binary-body variant of `SingleHandlerComplexity` (`CC-LAB-0191`,
+    Netflix's sixth real page, this stack's first `unrestricted_file_upload`
+    instance): the generated handler returns `ResponseEntity<byte[]>`
+    instead of `ResponseEntity<String>`, and additionally declares `throws
+    jakarta.servlet.ServletException` alongside the existing `throws
+    java.io.IOException` (Servlet `Part` API access can throw it). Needed
+    because this shape's own sink must serve the uploaded file's real bytes
+    back byte-for-byte -- a `String`-typed body would silently corrupt any
+    byte >= 0x80 when Spring's `StringHttpMessageConverter` re-encodes it
+    for the wire (UTF-8 is not a 1:1 byte<->char mapping the way latin-1
+    is), which would make a real image control probe's own response bytes
+    wrong even though this strategy's `confirm()` doesn't happen to check
+    them. A new, additive complexity module registered under its own
+    `"single_handler_binary"` key -- `single_handler.java.j2` and every
+    existing cell that uses it are untouched."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "single_handler_binary", "complexity", COMPLEXITY_ENV, "single_handler_binary.java.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        template = self._env.get_template(self._template_name)
+        code = template.render(
+            class_name=ctx["class_name"],
+            route_path=ctx["route_path"],
+            handler_name=ctx["handler_name"],
+            mapping_annotation=ctx["mapping_annotation"],
+            body=ctx["body"],
+        )
+        return RenderResult(code=code, context=dict(ctx))
+
+
+class ReadUploadedAvatarFileSource(TemplateModule):
+    """Reads a real `multipart/form-data` profile-avatar upload
+    (`CC-LAB-0191`) -- this stack's first, the `unrestricted_file_upload`
+    shape's source. Reaches the uploaded part off the raw Servlet 3.1+
+    `Part` API (`request.getPart("file")`), matching this package's
+    existing raw-Servlet-API convention (`QueryParamSource`'s own
+    `request.getParameter`, not a typed `@RequestParam`/`MultipartFile`
+    argument) -- necessary here specifically because every complexity
+    template's handler signature takes only `HttpServletRequest`, so
+    there is no Spring-bound `MultipartFile` parameter to read instead.
+    Publishes three Java identifiers a sink reads directly:
+    `filename_var` (the caller-supplied filename, entirely
+    attacker-controlled), `content_var` (the raw `byte[]` payload), and
+    `client_content_type_var` (the caller-supplied multipart part
+    `Content-Type`, also attacker-controlled) -- the same three-identifier
+    contract `go_net_http`'s own `ReadUploadedFileSource` (`CC-LAB-0186`)
+    established for this exact shape, ported to Java's own `Part` API
+    rather than Go's `r.FormFile`. Convention 2 (like SSRF/mass-
+    assignment/access-control/price): no `value_expr` is published, since
+    the manifest's one op names a sink module directly."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "read_uploaded_avatar_file", "source", SOURCE_ENV, "read_uploaded_avatar_file.java.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        render_ctx = dict(ctx)
+        render_ctx.setdefault("part_var", "filePart")
+        render_ctx.setdefault("filename_var", "uploadFilename")
+        render_ctx.setdefault("content_var", "uploadContent")
+        render_ctx.setdefault("client_content_type_var", "clientContentType")
+        result = super().render(render_ctx)
+        return RenderResult(code=result.code, context=render_ctx)
+
+
+class NoExtensionCheckContentTypeTrustSink(TemplateModule):
+    """The vulnerable op (`lab/safety_matrix.yaml`'s existing
+    `no_extension_check`, `fs_web_root_write` family, `no_effect` -- added
+    by `CC-LAB-0063`, already instantiated on `go_net_http` by
+    `CC-LAB-0186`; `CC-LAB-0191` is its first instantiation for
+    `spring_boot`): writes the uploaded bytes under the caller's own
+    filename verbatim into a web-served directory, and derives the served
+    Content-Type from that same filename's extension via Spring's own
+    `MediaTypeFactory` (the idiomatic Java/Spring analog of Go's
+    `mime.TypeByExtension` -- a static, bundled extension-to-MediaType
+    lookup table, never the file's real bytes), falling back to the
+    caller-supplied multipart Content-Type header when the extension is
+    unrecognized -- CWE-434, the same CWE-434-to-XSS chain
+    `NoExtensionCheckSink`'s own (`go_net_http`) docstring documents."""
+
+    def __init__(self) -> None:
+        super().__init__("no_extension_check", "sink", SINK_ENV, "no_extension_check.java.j2")
+
+
+class ExtensionAllowlistMagicByteCheckSink(TemplateModule):
+    """The secure twin (`extension_allowlist_mime_check`, `neutralises` --
+    `CC-LAB-0191`): allowlists exactly `.png`/`.jpg`/`.jpeg` (narrower than
+    `go_net_http`'s own allowlist, which also accepts `.gif`/`.webp` -- a
+    deliberate, stated scoping to the two formats this sink can actually
+    sniff, not silently smaller) AND requires the uploaded bytes' own
+    magic-byte signature to match a real PNG or JPEG. **Design choice,
+    documented (task's own explicit ask):** Java's standard library has no
+    ready-made `http.DetectContentType` equivalent; `Files.probeContentType`
+    is platform/OS-dependent (many JDKs fall back to extension-based or a
+    `file`-command-backed detector, neither of which is a deterministic,
+    environment-independent "sniff the real bytes" check this lab's
+    live-boot proof can rely on), so this implements a minimal, explicit
+    magic-byte check instead (PNG's fixed 8-byte signature, JPEG's 3-byte
+    `0xFFD8FF` prefix) -- chosen over `Files.probeContentType` specifically
+    for that determinism. Writes under a fully server-chosen filename
+    (`"avatar"+ext`) and always serves the SNIFFED content type, never one
+    derived from the extension or the caller's own header."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "extension_allowlist_mime_check", "sink", SINK_ENV, "extension_allowlist_mime_check.java.j2"
+        )
+
+
 SOURCES: dict[str, Module] = {
     "query_param": QueryParamSource(),
     "raw_body": RawBodySource(),
@@ -433,6 +547,7 @@ SOURCES: dict[str, Module] = {
     "jackson_body": JacksonBodySource(),
     "read_account_id_and_caller_header": ReadAccountIdAndCallerHeaderSource(),
     "read_plan_change_request": ReadPlanChangeRequestSource(),
+    "read_uploaded_avatar_file": ReadUploadedAvatarFileSource(),
 }
 #: Keyed by the op name that selects this sink (see this module's own
 #: docstring for why the op selects the sink here, not a pre-sink
@@ -452,7 +567,10 @@ SINKS: dict[str, Module] = {
     "identity_match_before_fetch": IdentityMatchBeforeFetchObjectLookupSink(),
     "client_trusted_amount": ClientTrustedAmountSink(),
     "server_recomputed_amount": ServerRecomputedAmountSink(),
+    "no_extension_check": NoExtensionCheckContentTypeTrustSink(),
+    "extension_allowlist_mime_check": ExtensionAllowlistMagicByteCheckSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_handler": SingleHandlerComplexity(),
+    "single_handler_binary": SingleHandlerBinaryComplexity(),
 }
