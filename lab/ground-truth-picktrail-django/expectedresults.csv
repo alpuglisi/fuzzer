@@ -1,0 +1,8 @@
+# fuzzlab expected results (Benchmark-style), PicTrail (django) target.
+# Derived from labels.json; the loader cross-checks the two so they cannot
+# drift. category is the vuln class; expected_vulnerable is the
+# ground-truth verdict for that (url, param) case. This is a single-location
+# case, so primary_endpoint mirrors url, primary_role is sink, and
+# flow_variant is direct.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+PT-0001,/post,GET,id,query,sqli,true,/post,sink,,direct

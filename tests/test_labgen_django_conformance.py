@@ -102,6 +102,48 @@ def test_tier0_lint_passes_for_the_phase_b_widen_manifest() -> None:
     assert result.ok, f"{accumulator.path}: {result.detail}"
 
 
+def test_regenerate_and_diff_emitter_passes_for_the_picktrail_post_detail_manifest() -> None:
+    manifest = load_manifest("lab/manifests/phase_c_picktrail_post_detail.yaml")
+    emitter = DjangoEmitter()
+    regenerate_and_diff_emitter(emitter, manifest.cells)
+
+
+def test_tier0_lint_passes_for_the_picktrail_post_detail_manifest() -> None:
+    if not python_available():
+        import pytest
+
+        pytest.skip("no python interpreter on PATH for py_compile (PA-0005)")
+
+    manifest = load_manifest("lab/manifests/phase_c_picktrail_post_detail.yaml")
+    emitter = DjangoEmitter()
+    for cell in manifest.cells:
+        results = lint_python_emitted_files(emitter.render(cell))
+        assert results, f"{cell.cell_id}: no .py files emitted to lint"
+        for result in results:
+            assert result.ok, f"{cell.cell_id} ({result.path}): {result.detail}"
+
+    accumulator = emitter.render_route_accumulator(manifest.cells)
+    result = lint_python(accumulator.path, accumulator.content)
+    assert result.ok, f"{accumulator.path}: {result.detail}"
+
+
+def test_only_real_page_cell_ids_get_a_pinned_url() -> None:
+    """`CC-LAB-0092`'s own regression check for the new
+    `_REAL_PAGE_CELL_IDS`-based URL-pinning mechanism: a cell in that set
+    is served at its own declared route path; every other cell (including
+    its own secure twin) keeps the existing generic `generated/{slug}/`
+    pattern -- so adding a real page can never silently change an
+    unrelated cell's served URL."""
+    manifest = load_manifest("lab/manifests/phase_c_picktrail_post_detail.yaml")
+    emitter = DjangoEmitter()
+    accumulator = emitter.render_route_accumulator(manifest.cells)
+    body = accumulator.content.decode("utf-8")
+    assert 'path("post", handle_labgen_dj_0007' in body, "the real-page cell must be served at /post"
+    assert 'path("generated/labgen_dj_0008/", handle_labgen_dj_0008' in body, (
+        "the secure twin (not a real-page cell) must keep the generic pattern"
+    )
+
+
 def test_every_non_get_cell_is_decorated_with_csrf_exempt() -> None:
     """`CC-LAB-0091`'s own regression check (`PA-0024`-style, a
     whole-collection check rather than reliance on today's one-POST-cell
@@ -114,6 +156,7 @@ def test_every_non_get_cell_is_decorated_with_csrf_exempt() -> None:
     manifests = (
         load_manifest("lab/manifests/phase_a_django_sample.yaml"),
         load_manifest("lab/manifests/phase_b_django_widen_sample.yaml"),
+        load_manifest("lab/manifests/phase_c_picktrail_post_detail.yaml"),
     )
     checked_a_non_get_cell = False
     for manifest in manifests:

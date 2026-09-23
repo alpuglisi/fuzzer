@@ -12,6 +12,41 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (Phase C)
+- LAB: started Phase C for category 2's Django pick — `CC-LAB-0092`/
+  `FR-LAB-90`/`FR-LAB-91`, pre-change review gate cleared (2 independent
+  reviewer agents, 7 findings incorporated: a route-notation fix — `Route
+  .path`'s plain-string IR can't express `/post/<id>`, corrected to
+  `/post?id=` in the research doc first, matching `CC-LAB-0131`'s own
+  precedent; `PA-0034`/`BUG-0031` cited explicitly with an adversarial
+  mismatched-method test added; the `{"id","name"}` JSON-shape realism
+  gap named and justified; the new ground-truth directory's non-wiring
+  into the global config's consumers stated as an accepted, Phase-E-
+  deferred limitation; a next-free bookkeeping check). Established
+  **PicTrail** — the Instagram-style app identity for `django`'s
+  corpus-grounded content (page-set design for both PicTrail and
+  **CircleFeed**, the Facebook-style PHP app, added to the category 2
+  research doc's new §6) — and landed its first real, ground-truth-
+  bearing page: `GET /post?id=`, reusing Phase A's proven SQLi module
+  verbatim (the value of this increment is the app-identity/ground-truth
+  pattern, not a new shape). A new `_REAL_PAGE_CELL_IDS`-based URL-
+  pinning mechanism serves a real-page cell at its own declared route
+  (`php_laravel`'s "a real page keeps its own URL" convention, at a much
+  smaller scale). This project's **first-ever second, independent
+  ground-truth directory** (`lab/ground-truth-picktrail-django/`, D9's
+  three-file contract, never merged into `php_laravel`'s own
+  `lab/ground-truth/`) is loaded for real and cross-checked against a
+  real live-booted request. **The required `PA-0034` adversarial test
+  (a mismatched HTTP method against the newly-pinned real page) ran for
+  real and its result differed from what the draft had predicted**
+  (a clean `403`, Django's own CSRF protection — not the guessed
+  "identical to GET") — the real behavior is safe, and the record now
+  reflects what was actually observed, not an assumption. No regression
+  in the broader suite (1533 passed, same 30 pre-existing environment
+  failures). Full record:
+  `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0092`
+  entry.
+
 ## 2026-09-23 (cross-category doc sync, round 2)
 - Docs (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, all five second-target
   category branches): re-synced §9.2 (stack-reuse ledger), §9.2a (Java/Spring

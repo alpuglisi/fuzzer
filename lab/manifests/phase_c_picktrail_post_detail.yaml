@@ -1,0 +1,33 @@
+# Phase C, PicTrail's first real page (category 2 pilot, `CC-LAB-0092`).
+#
+# PicTrail (Instagram-style, django) -- the app identity for category 2's
+# Phase C content, per docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §4/§9
+# and docs/research/category2-social-ugc-functionality-and-cwe-research.md
+# §6's page-set design. This manifest's canonical vulnerable cell
+# (LABGEN-DJ-0007) owns PicTrail's real `/post` URL and is the one described
+# by lab/ground-truth-picktrail-django/'s own labels.json (case PT-0001) --
+# never merged into or reusing php_laravel's own lab/ground-truth/ (D9,
+# per §4's "never reuse puppy-fort-factory's... case IDs or identity" rule).
+# The secure twin (LABGEN-DJ-0008) is illustrative-only, served at the
+# generic generated/ URL -- ground truth only needs to describe the one
+# real, exploitable page.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-DJ-0007
+    class: sqli
+    stack_profile: django
+    route: { method: GET, path: /post }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: []
+
+  - cell_id: LABGEN-DJ-0008
+    class: sqli
+    stack_profile: django
+    route: { method: GET, path: /post }
+    sink_context:
+      family: sql_numeric_literal
+      required_neutralizations: [sql_syntax_break]
+    transform: [param_bind]

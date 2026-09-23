@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "target": "picktrail_django",
+  "cases": [
+    {
+      "case_id": "PT-0001",
+      "url": "/post",
+      "method": "GET",
+      "param": "id",
+      "location": "query",
+      "vuln_class": "sqli",
+      "subtypes": ["error", "boolean", "union"],
+      "sink_context": "sql",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "stack": "django",
+      "notes": "PicTrail (Instagram-style) post-detail lookup: id concatenated raw into a WHERE clause via a raw connection.cursor() query (never the ORM); real, seeded SQLite backend. CC-LAB-0092, category 2 (Social/UGC platforms) pilot's first real, ground-truth-bearing page."
+    }
+  ]
+}

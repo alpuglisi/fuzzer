@@ -1981,6 +1981,58 @@ lane) can submit a payload as
   the vulnerable sink concatenated a possibly-`None` value without a
   `str()` cast, crashing with a real `500` instead of the expected `404`
   on a `GET` request), fixed before this entry landed, and now passing.
+- **FR-LAB-90** *(PicTrail app identity + `/post` real page; `CC-LAB-0092`,
+  2026-09-23).* Establishes **PicTrail** — the Instagram-style app
+  identity for the `django` stack's Phase C content (category 2 pilot;
+  page-set design in `docs/research/category2-social-ugc-functionality-
+  and-cwe-research.md` §6) — and lands its first real,
+  ground-truth-bearing page: `GET /post?id=` (a post-detail lookup,
+  grounded in the real Instagram post-detail feature researched there).
+  Reuses Phase A's proven `sqli`/`sql_numeric_literal` module verbatim —
+  zero new sink/source/transform/complexity code; the value of this
+  increment is the **app-identity/ground-truth pattern** standing up end
+  to end for the first time on this stack, not a new vulnerability shape.
+  A new `_REAL_PAGE_CELL_IDS`-based URL-pinning mechanism in
+  `render_route_accumulator` serves a real-page cell at its own declared
+  route path instead of the generic `generated/{slug}/` pattern every
+  illustrative cell uses (`php_laravel`'s own "a real page keeps its own
+  exact URL" convention, ported at a much smaller scale — one real-URL-
+  owning cell, no twin/canonical-cell machinery). Passes Tier 0/Tier 3
+  for the new manifest
+  (`lab/manifests/phase_c_picktrail_post_detail.yaml`).
+- **FR-LAB-91** *(real, independent ground truth authored and cross-
+  checked against a real live-booted request, including a `PA-0034`
+  adversarial test; `CC-LAB-0092`, 2026-09-23).* A brand-new, independent
+  ground-truth directory, `lab/ground-truth-picktrail-django/` (D9's
+  three-file contract: `labels.json`/`injection-points.json`/
+  `expectedresults.csv`), never touching or merging into `php_laravel`'s
+  own `lab/ground-truth/` — this project's first-ever second, independent
+  ground-truth set. One case, `PT-0001` (a fresh, opaque case-ID prefix,
+  never `PFF-`/`LABGEN-*`), loaded for real via
+  `fuzzlab.labels.contract.load()` and cross-checked, independently of
+  the emitter's own `_ROUTE_PARAMS`/`_REAL_PAGE_CELL_IDS` internals,
+  against a real booted request at the exact URL/param/method the ground
+  truth names (`tests/test_labgen_django_live_boot_picktrail.py::
+  test_ground_truth_case_matches_the_real_served_page`) — a real 200 on a
+  legitimate lookup, a real 500 on the ground truth's own claimed SQLi
+  payload. **A real `PA-0034` adversarial test** (citing `BUG-0031` as
+  the directly analogous precedent — `php_laravel`'s own first
+  real-URL-serving mechanism silently hardcoded the wrong HTTP method,
+  producing false ground truth): a mismatched-method `POST` against the
+  pinned, `GET`-declared `/post` URL. The real, observed result (found by
+  the test, not predicted in advance) is a clean `403` (Django's own
+  `CsrfViewMiddleware`, since a `GET`-method cell is never decorated with
+  `@csrf_exempt`) — safe, no crash, no widened attack surface. **Named,
+  accepted limitations of this first slice** (not oversights): the
+  `{"id", "name"}` JSON response shape (shared with every other cell using
+  the `single_statement` complexity) is not a fully realistic post-detail
+  response shape; `lab/ground-truth-picktrail-django/` is not wired into
+  `fuzzlab.core.config`'s global `ground_truth_dir`-driven consumers (the
+  web dashboard, `cutover_gate.py`, `regression_gate.py`) — reachable,
+  this entry, only through its own bespoke test; the right home for a
+  second, per-target ground-truth set is
+  `fuzzlab.harness.multitarget.TargetSpec.ground_truth` (Phase E, not
+  attempted here).
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

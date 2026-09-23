@@ -548,6 +548,31 @@ tracked in the requirements files, not here.
   autoescaping disabled via `mark_safe()`/`|safe`/`{% autoescape off %}`)
   stay out of scope — the latter deliberately deferred to Phase C's own
   corpus-grounded page design.
+  **Phase C (`CC-LAB-0092`) landed its first real page**: **PicTrail**,
+  the Instagram-style app identity for `django`'s corpus-grounded content
+  (page-set design in `docs/research/category2-social-ugc-functionality-
+  and-cwe-research.md` §6), with a real `GET /post?id=` post-detail page
+  reusing Phase A's proven SQLi module verbatim — the value of this
+  increment is the app-identity/ground-truth pattern, not a new shape. A
+  new `_REAL_PAGE_CELL_IDS`-based URL-pinning mechanism serves a real-page
+  cell at its own declared route instead of the generic illustrative
+  pattern (`php_laravel`'s own "a real page keeps its own URL" convention,
+  at a much smaller scale). A brand-new, independent ground-truth
+  directory, `lab/ground-truth-picktrail-django/` (this project's
+  first-ever second one, D9's three-file contract, never merged into
+  `php_laravel`'s own `lab/ground-truth/`) is loaded and cross-checked for
+  real against a live-booted request — a `PA-0034` adversarial test
+  (citing `BUG-0031`, the directly analogous `php_laravel` precedent) found
+  that a mismatched-method request against the pinned page gets a real,
+  clean `403` (Django's own CSRF protection), not a crash or a bypass.
+  Named, accepted limitations of this first slice: the JSON response shape
+  isn't fully response-realistic, and this ground truth isn't yet wired
+  into the global `ground_truth_dir` config's consumers (the right home is
+  `multitarget.TargetSpec.ground_truth`, Phase E, not attempted here).
+  PicTrail's remaining planned pages (comments/mention-XSS, SSRF link
+  preview, mass-assignment settings, identifier-SQLi search, session
+  deserialization) and CircleFeed (the Facebook-style PHP app) stay
+  planned, not built — each its own future, separately-gated increment.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

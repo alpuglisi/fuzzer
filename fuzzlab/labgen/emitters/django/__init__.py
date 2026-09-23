@@ -105,6 +105,11 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
 #: since a vulnerable cell and its secure twin share one route profile.
 _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     "/api/products": {"var_name": "id", "param_name": "id", "table": "products", "column": "id"},
+    # PicTrail's real post-detail lookup (CC-LAB-0092, Phase C's first
+    # real page) -- a distinct `posts` table, not a reuse of the
+    # illustrative `/api/products` table above, per that entry's own
+    # "thematically-accurate table" note.
+    "/post": {"var_name": "id", "param_name": "id", "table": "posts", "column": "id"},
     "/api/login": {
         "var_name": "username",
         "param_name": "username",
@@ -115,6 +120,20 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     },
     "/api/profile": {"var_name": "bio", "stored_expr": "_read_stored_bio()", "css_class": "bio"},
 }
+
+#: Cell IDs that are **real, ground-truth-bearing pages** (`CC-LAB-0092`,
+#: Phase C) rather than illustrative cells: served at their own
+#: ``cell.route.path`` (stripped of the leading slash) instead of the
+#: generic ``generated/{cell_slug}/`` pattern every illustrative cell
+#: uses -- mirroring, at a much smaller scale, ``php_laravel``'s own "a
+#: real page keeps its own exact URL" convention (``_served_route_for``),
+#: without porting that mechanism's full generality (no
+#: ``_CANONICAL_CELL_KEY``/twin-URL machinery -- this project's `django`
+#: stack has exactly one real-URL-owning cell so far). A cell's *secure*
+#: twin is deliberately not added here: ground truth only ever needs to
+#: describe the one real, exploitable page, matching how a ``php_current``
+#: secure twin does not necessarily get its own ``PFF-`` case either.
+_REAL_PAGE_CELL_IDS: frozenset[str] = frozenset({"LABGEN-DJ-0007"})
 
 
 class DjangoEmitter(Emitter):
@@ -230,7 +249,15 @@ class DjangoEmitter(Emitter):
             import_lines.append(
                 render_route_import_line(handler_module=cell_slug, handler_name=handler_name).rstrip("\n")
             )
-            url_path = f"generated/{cell_slug}/"
+            # CC-LAB-0092: a real, ground-truth-bearing cell is served at
+            # its own declared route path, never the generic
+            # `generated/{cell_slug}/` pattern -- so the URL a real page's
+            # ground truth names is the URL that is actually served, not
+            # a derived/guessed one.
+            if c.cell_id in _REAL_PAGE_CELL_IDS:
+                url_path = c.route.path.lstrip("/")
+            else:
+                url_path = f"generated/{cell_slug}/"
             urlpattern_lines.append(
                 f'    path("{url_path}", {handler_name}, name="{cell_slug}"),  # cell: {c.cell_id}\n'
             )

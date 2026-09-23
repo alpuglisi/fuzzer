@@ -202,6 +202,19 @@ SEED_PASSWORD = "correct-horse-battery-staple"
 #: `seed_bio` to the constructor instead (see `DjangoLiveBootHarness.__init__`).
 DEFAULT_SEED_BIO = "Hi, I'm a happy customer!"
 
+#: PicTrail's real `/post` detail page (`CC-LAB-0092`, Phase C) -- a
+#: distinct `posts` table, not a reuse of `products` above, per that
+#: entry's own "thematically-accurate table" note.
+_SEED_POSTS_SQL = """
+CREATE TABLE IF NOT EXISTS posts (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL
+);
+INSERT INTO posts (id, name) VALUES
+    (1, 'A walk in the park'),
+    (2, 'Sunset over the lake');
+"""
+
 
 class DjangoLiveBootHarness:
     """Assembles, installs, migrates, and boots one manifest's ``django``
@@ -284,6 +297,7 @@ class DjangoLiveBootHarness:
                 "CREATE TABLE IF NOT EXISTS profiles (id INTEGER PRIMARY KEY, bio TEXT NOT NULL)"
             )
             conn.execute("INSERT INTO profiles (id, bio) VALUES (1, ?)", (self._seed_bio,))
+            conn.executescript(_SEED_POSTS_SQL)
             conn.commit()
         finally:
             conn.close()

@@ -142,25 +142,37 @@ Component code: **LAB**. Entry format and required fields: see
   not left for a reader to discover by checking `config.py` themselves.
 
 - **Deliverables:**
-  - [ ] `fuzzlab/labgen/emitters/django/__init__.py` — `_ROUTE_PARAMS["/post"]`,
+  - [x] `fuzzlab/labgen/emitters/django/__init__.py` — `_ROUTE_PARAMS["/post"]`,
     `_REAL_PAGE_CELL_IDS`, `render_route_accumulator` URL-pinning logic —
-    todo.
-  - [ ] `fuzzlab/labgen/conformance/django_live_boot.py` — seed a real
-    `posts` table — todo.
-  - [ ] `lab/manifests/phase_c_picktrail_post_detail.yaml` — todo.
-  - [ ] `lab/ground-truth-picktrail-django/{labels,injection-points}.json`
-    + `expectedresults.csv` — todo.
-  - [ ] `tests/test_labgen_django_conformance.py` — extend Tier 0/3 to the
-    new manifest; a regression test that only `_REAL_PAGE_CELL_IDS`
-    members get a pinned URL — todo.
-  - [ ] A new live-boot test module (or extend an existing one) — real
-    `fuzzlab.labels.contract.load()` of the new ground-truth directory,
-    cross-checked against a real booted request at the exact URL/param the
-    ground truth names, with the real payload differential; **plus the
-    `PA-0034` adversarial test** (reviewer #2's finding, citing `BUG-0031`
-    as the directly analogous precedent): a real request against the
-    pinned `/post` URL with a mismatched HTTP method (`POST` instead of
-    `GET`), confirming no crash/mis-route — todo.
+    done.
+  - [x] `fuzzlab/labgen/conformance/django_live_boot.py` — seeded a real
+    `posts` table (`id`, `name` — a post's caption content) — done.
+  - [x] `lab/manifests/phase_c_picktrail_post_detail.yaml` — done.
+  - [x] `lab/ground-truth-picktrail-django/{labels,injection-points}.json`
+    + `expectedresults.csv` — done, validated against
+    `fuzzlab.labels.schemas` (`case_id` pattern `^[A-Z]+-[0-9]{4}$` —
+    `PT-0001` matches; `rendering: "server-json"`, the same value
+    `PFF-1003`'s own JSON-feed case uses, matching Django's real
+    `JsonResponse`).
+  - [x] `tests/test_labgen_django_conformance.py` — extended: Tier 0/3 for
+    the new manifest, plus `test_only_real_page_cell_ids_get_a_pinned_url`
+    (the real-page cell serves at `/post`; its secure twin, not in
+    `_REAL_PAGE_CELL_IDS`, keeps the generic pattern) — done, **observed
+    passing for real** (9 passed, up from Phase B's 7).
+  - [x] `tests/test_labgen_django_live_boot_picktrail.py` (new module) —
+    done, **observed passing for real this session** (3 passed in ~24s):
+    a real `fuzzlab.labels.contract.load()` of the new ground-truth
+    directory cross-checked against a real booted request at the exact
+    URL/param/method (`test_ground_truth_case_matches_the_real_served_
+    page`); a real secure-twin-reachable-at-a-separate-URL check
+    (`test_secure_twin_is_not_reachable_at_the_real_page_url`); **and the
+    `PA-0034` adversarial test** (`test_mismatched_http_method_against_
+    the_pinned_real_page`) — its real, observed result (found by the test,
+    not predicted in the draft, which had guessed "identical to GET") is
+    a clean `403` (Django's own `CsrfViewMiddleware`, since this `GET`-
+    method cell was never decorated with `@csrf_exempt`) — safe, no
+    crash, no widened attack surface, but a genuinely different behavior
+    than assumed, worth having actually run rather than asserted.
   - [x] `docs/research/category2-social-ugc-functionality-and-cwe-
     research.md` §6 — **correction, reviewer #1's finding:** row 1/2's
     route notation was originally written `/post/<id>`
@@ -181,19 +193,44 @@ Component code: **LAB**. Entry format and required fields: see
     cross-branch fix) and `claude/second-target-cat1-ecommerce`'s own
     highest (re-fetched) is `FR-LAB-87` — `90`/`91` confirmed clear of
     both immediately before drafting this entry.
-  - [ ] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-90`
-    (PicTrail app identity + `/post` real page exists, Tier 0/3
-    conformant) and `FR-LAB-91` (real ground truth authored, cross-checked
-    against a real live-booted request) — todo.
-  - [ ] `docs/ARCHITECTURE.md` — note PicTrail's first real page — todo.
-  - [ ] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 tracker row
-    — update Phase C status — todo.
-  - [ ] `CHANGELOG.md` line — todo.
-  - [ ] Full bug protocol for any genuine defect surfaced — todo (only if
-    one occurs).
+  - [x] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-90`/
+    `FR-LAB-91` — done.
+  - [x] `docs/ARCHITECTURE.md` — PicTrail's first real page noted, plus the
+    remaining planned pages named as still-planned — done.
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 tracker row
+    — updated with Phase C status — done.
+  - [x] `CHANGELOG.md` line — done.
+  - [x] Full bug protocol for any genuine defect surfaced — n/a, no
+    genuine code defect found while building this (the adversarial test's
+    real result differed from what the draft predicted, but that is a
+    documentation/prediction gap, not a code defect — the real behavior
+    observed, a clean 403, is correct and safe).
 
-- **Effectiveness (assessed 2026-09-23): pending** — left pending until the
-  deliverables above land and the new tests are observed to pass for real.
+- **Effectiveness (assessed 2026-09-23): effective.** Every deliverable
+  landed and was independently, really exercised this session: Tier 0/3
+  pass for real for the new manifest (`tests/test_labgen_django_
+  conformance.py`, 9 passed); the full live-boot proof passes for real
+  (`tests/test_labgen_django_live_boot_picktrail.py`, 3 passed) — a real
+  ground-truth case cross-checked against a real booted request (not a
+  re-derivation from the emitter's own internals), a real secure-twin-
+  separate-URL check, and the `PA-0034` adversarial test, which **did its
+  job again** (as it did for `BUG-0034` in `CC-LAB-0091`): it ran the
+  actual mismatched-method request rather than relying on this entry's
+  own draft prediction, and the real result (a clean `403`, not the
+  draft's guessed "identical to `GET`") was different from what was
+  predicted — caught and corrected here, in the record, rather than left
+  as an untested assumption. The broader suite shows no regression
+  (`pytest tests/ -q -m "not slow"`, 1533 passed, up from Phase B's 1527
+  by exactly the 6 new non-slow tests added; the same 30 pre-existing
+  `gitleaks`/`numpy`-environment failures, confirmed unrelated). All 7
+  pre-change-review corrections/additions (1 from reviewer #1, 6 from
+  reviewer #2) were incorporated as designed: the route-notation fix
+  landed in the research doc before this entry's code did; the
+  `{"id","name"}` realism gap and the ground-truth-directory non-wiring
+  are both named explicitly in this entry's own Risk section, not
+  silently absent; `FR-LAB-90`/`91`'s next-free check was verified against
+  both this branch and a real fetch of `claude/second-target-cat1-
+  ecommerce` before landing.
 
 ---
 **Pre-change review gate record:** reviewer #1 (accuracy) — APPROVE WITH
