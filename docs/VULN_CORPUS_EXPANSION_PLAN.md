@@ -638,5 +638,14 @@ sources (OWASP LLM Top 10) before Phase 2 either includes or skips it.
       specified) — required before any dynamic check can run for real
 - [ ] Phase 3: all pairs validated (report as "N of M", per "Validated data
       only reaches lab-generation-facing files" — never rounded up)
-- [ ] Phase 3: `suggested_op`/`suggested_sink_family` proposals acted on
-      (accepted/renamed/merged into `lab/safety_matrix.yaml`)
+- [x] Phase 3: `suggested_op`/`suggested_sink_family` proposals acted on
+      (accepted/renamed/merged into `lab/safety_matrix.yaml`) — audited
+      2026-09-23 against the now-CWE-complete corpus (all 12 wave-1
+      cells): every single `(suggested_op, suggested_sink_family)` pair
+      across all 32 manifest files already has an exact matching row in
+      `lab/safety_matrix.yaml`, applied earlier by `CC-LAB-0063`. Zero new
+      rows needed, zero op/sink_family naming collisions found. One open
+      gap noted for a future pass (not a missed proposal): `search-export`/
+      `node`'s manifest flags a still-uncollected secure-twin op for
+      `template_render_pipeline` that was never formally proposed via
+      `suggested_op` in the first place.

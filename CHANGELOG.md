@@ -12,6 +12,21 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (vuln corpus Phase 3: safety_matrix.yaml handoff audit)
+- Docs: audited the vuln-corpus expansion plan's remaining Phase 3 status
+  item — "`suggested_op`/`suggested_sink_family` proposals acted on
+  (accepted/renamed/merged into `lab/safety_matrix.yaml`)" — against the
+  now-CWE-complete wave-1 corpus (12 feature cells, 32 manifest files).
+  Finding: every proposed `(op, sink_family)` pair already has an exact
+  matching row in `lab/safety_matrix.yaml`, applied earlier by
+  `CC-LAB-0063`'s Step-8 handoff — no new matrix rows or renames were
+  needed, and no op/sink_family naming collisions were found. This ticks
+  the plan's checklist item with no code change (see
+  `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s own Status section for the full
+  finding, including one open gap flagged for a future pass:
+  `search-export`/`node`'s manifest names a still-uncollected secure-twin
+  op for `template_render_pipeline` that was never formally proposed).
+
 ## 2026-09-23 (vuln corpus Phase 3: CWE mapping)
 - Docs (`docs/research/corpus-examples/*/manifest.yaml`, all wave-1 feature
   cells): completed Phase 3 of `docs/VULN_CORPUS_EXPANSION_PLAN.md` —
