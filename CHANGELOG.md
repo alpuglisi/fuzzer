@@ -12,9 +12,24 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (cross-branch review, by the category 1 pilot session)
+- Docs/LAB: reviewed this branch's Django SQLi code and tests — no code
+  defects found (parameterized `%s` cursor placeholder vs. string
+  concatenation, matching the project's established `bound` convention).
+  Finished fixing the cross-branch bookkeeping-ID collision flagged
+  2026-09-22: this branch's `FR-LAB-64`/`65` collided with the same IDs
+  independently claimed by categories 1, 3, 4, and 5's own Phase A work.
+  Renumbered to `FR-LAB-72`/`73` (this category's assigned block;
+  `CC-LAB-0090` itself never collided, so it is unchanged). Full suite
+  reverified green after the rename (1777 passed, 8 skipped, matching
+  the pre-fix count exactly). Also added the missing Ruby-on-Rails/Java-
+  Spring-Boot/Go rows this branch's copy of the §9.2 stack-reuse ledger
+  never had, including the same Java/Spring-Boot-built-twice flag
+  recorded on categories 3, 4, and 5's branches.
+
 ## 2026-09-22
 - LAB: built `django` (category 2 pilot's new-stack pick, Instagram/Python-
-  Django) Phase A — `CC-LAB-0090`/`FR-LAB-64`/`FR-LAB-65`, pre-change review
+  Django) Phase A — `CC-LAB-0090`/`FR-LAB-72`/`FR-LAB-73`, pre-change review
   gate cleared (2 independent reviewer agents, 8 findings incorporated: a
   scoped `StackEnv`-reuse correction, forced `DEBUG=False`/`ALLOWED_HOSTS`,
   a real digest-pinned `base_image`, explicit loopback-only binding, reuse

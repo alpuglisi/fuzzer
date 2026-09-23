@@ -3,7 +3,7 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0090 — `django` emitter Phase A: real bootable skeleton + `DjangoLiveBootHarness` (FR-LAB-64/FR-LAB-65) (2026-09-22)
+### CC-LAB-0090 — `django` emitter Phase A: real bootable skeleton + `DjangoLiveBootHarness` (FR-LAB-72/FR-LAB-73) (2026-09-22)
 
 - **Change:** Adds the `django` stack as category 2's new-stack pick
   (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9, category 2 —
@@ -295,9 +295,9 @@ Component code: **LAB**. Entry format and required fields: see
     implementation since Tier 0/3 conformance is the standing bar this
     entry's own "Change" section commits to ("passes Tier 0 + Tier 3");
     reflected back here per the same divergence-disclosure rule.
-  - [x] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-64`
+  - [x] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-72`
     (django emitter exists, renders the one shape, Tier 0/3 conformant,
-    `DEBUG=False` enforced) and `FR-LAB-65` (`DjangoLiveBootHarness` proves
+    `DEBUG=False` enforced) and `FR-LAB-73` (`DjangoLiveBootHarness` proves
     a real boot + real HTTP payload differential, loopback-only) — done.
   - [x] `docs/ARCHITECTURE.md` — dedicated `django` emitter paragraph in
     the manifest-driven-generator section (and its summary bracket tag

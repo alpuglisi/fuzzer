@@ -1840,15 +1840,15 @@ lane) can submit a payload as
     full test run (fast suite + the live-boot slow suite) was green.
 > **⚠ Cross-branch bookkeeping-ID collision flagged 2026-09-22, by the
 > Category 1 (E-commerce) pilot session working `claude/second-target-cat1-ecommerce`.**
-> The two `FR-LAB-64`/`FR-LAB-65` entries immediately below (this branch's
-> django emitter Phase A) collide with `FR-LAB-64`/`FR-LAB-65` already used
-> and pushed on `claude/second-target-cat1-ecommerce` (FR-LAB-64 = the
-> `node_express` CWE-1321 prototype-pollution module, FR-LAB-65 = the
+> The two `FR-LAB-72`/`FR-LAB-73` entries immediately below (this branch's
+> django emitter Phase A) collide with `FR-LAB-72`/`FR-LAB-73` already used
+> and pushed on `claude/second-target-cat1-ecommerce` (FR-LAB-72 = the
+> `node_express` CWE-1321 prototype-pollution module, FR-LAB-73 = the
 > `ruby_rails` Phase A skeleton/live-boot harness). Neither branch is merged
 > into `main` yet, so each session independently picked "next free" off its
 > own stale copy of this file and collided. `CC-LAB-0090` itself is fine —
 > outside cat1's reserved `CC-LAB-0070`-`0089` block, no collision there.
-> **Recommend renumbering this branch's `FR-LAB-64`/`FR-LAB-65` to the next
+> **Recommend renumbering this branch's `FR-LAB-72`/`FR-LAB-73` to the next
 > free numbers above cat1's current ceiling (cat1 is through `FR-LAB-71` as
 > of its last landed lane, per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
 > §9.4's category-1 tracker row) before building further on this branch** —
@@ -1859,7 +1859,7 @@ lane) can submit a payload as
 > session messaging path was available to deliver this any other way — it's
 > being left here per §9.3's "check shared state before assuming staleness"
 > rule, for whoever resumes this branch to see on next read.)
-- **FR-LAB-64** *(the `django` emitter exists, Phase A scope; `CC-LAB-0090`,
+- **FR-LAB-72** *(the `django` emitter exists, Phase A scope; `CC-LAB-0090`,
   2026-09-22).* A new `Emitter` implementation
   (`fuzzlab.labgen.emitters.django.DjangoEmitter`) for category 2's
   (Social/UGC platforms) new-stack pick — Instagram/Python-Django, per
@@ -1891,7 +1891,7 @@ lane) can submit a payload as
   depth (mirroring `node_express`'s own three Tier-A shapes, let alone
   `php_laravel`'s full nine) is explicitly out of scope — a separate,
   later Phase B.
-- **FR-LAB-65** *(`DjangoLiveBootHarness` proves a real boot + real HTTP
+- **FR-LAB-73** *(`DjangoLiveBootHarness` proves a real boot + real HTTP
   payload differential; `CC-LAB-0090`, 2026-09-22).*
   `fuzzlab.labgen.conformance.django_live_boot.DjangoLiveBootHarness`
   structurally mirrors `php_laravel`'s own `LiveBootHarness`
