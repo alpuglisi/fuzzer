@@ -25,13 +25,16 @@ ground truth (`lab/ground-truth-trackernest/`, `CC-LAB-0136`) describes as
 assembly/boot fixture for the identical reason rather than fighting a
 conformance harness's own single-purpose restriction.
 
-**Recall is honestly 0 here, and that is expected, not a bug** -- same
-documented gap as category 1's own Phase E tests: none of `ssti`/`xxe`/
-`insecure_deserialization` are mapped by
-`fuzzlab.core.runmode._VULN_TO_CATEGORY`, so no audit rule ever gets a
-candidate to confirm. Wiring that mapping is real, sized follow-on work
-this test does not attempt -- its job is to prove the wiring (a real
-target, a real ground truth, a real run, a real scored report).
+**Recall is 1/3 here, not 0 -- `CC-CORE-0020` wired `ssti` into
+`fuzzlab.core.runmode._VULN_TO_CATEGORY`** (mapped to the pre-existing,
+independently-verified `server-side-template-injection` category, whose
+own rule (`R-SSTI`) and confirmation strategy (`SstiStrategy`) were
+already built and already correctly scoped for this exact point shape --
+verified live against both of TrackerNest's own twins before that change
+landed). `xxe`/`insecure_deserialization` remain unmapped (no confirmer
+built yet for either), so this app's own recall is exactly 1 confirmed
+case out of 3 positives -- the documented gap now covers 2 of 3 cases,
+not all 3.
 
 Skip-guarded on `spring_boot_boot_available()` (PA-0005/PA-0035, the same
 real, bounded Maven-network capability probe every other `spring_boot`
@@ -151,13 +154,21 @@ def test_trackernest_target_spec_runs_for_real_and_scores(live_base_url, tmp_pat
         # mode + ground truth is always scored, regardless of tp count).
         assert outcome.scored is True
         assert outcome.report is not None
-        assert outcome.report.tp == 0 and outcome.report.fn == len(gt.positives())
-        assert outcome.report.precision == 0.0
-        assert outcome.report.recall == 0.0
+        # ssti (macroExpr, TNEST-0001) is confirmed for real (CC-CORE-0020's
+        # R-SSTI rule + SstiStrategy, already verified live against this
+        # exact cell); xxe/insecure_deserialization remain unmapped, so 2 of
+        # 3 positives are still an honest false negative each.
+        assert outcome.report.tp == 1
+        assert outcome.report.fp == 0
+        assert outcome.report.fn == len(gt.positives()) - 1
+        assert outcome.report.precision == 1.0
+        assert outcome.report.recall == pytest.approx(1 / 3)
 
         summary = transfer_summary(outcomes)
         assert summary["targets"] == 1
         assert "macro_precision" in summary and "macro_recall" in summary
+        # A single target's recall > 0 is still not >= 2 scored targets
+        # (transfer_summary's own rule), so generalizes is still False here.
         assert summary["generalizes"] is False
 
 

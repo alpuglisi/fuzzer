@@ -12,21 +12,26 @@ own combined test (`tests/test_multitarget_category1_combined.py` on
 This closes the toolkit-side half of category 3's own Phase 10 `T10.6`-
 style proof: `fuzzlab/harness/multitarget.py` actually accepting two real,
 distinct, locally-booted second targets in one call and producing a real
-combined `transfer_summary`. It does **not** claim `generalizes=True` --
-every one of this category's 6 vuln classes (`ssti`/`xxe`/
-`insecure_deserialization`/`webhook_signature_bypass`/`ssrf`/
-`outbound_header_injection`) is honestly unmapped in
-`fuzzlab.core.runmode._VULN_TO_CATEGORY`, the same documented gap both
-apps' own individual Phase E tests already recorded, so `generalizes` is
-correctly `False` with zero scored targets above zero recall -- this is a
-weaker transfer result than category 1's own combined test (which had one
-real recall>0 case from ForgeCart), stated plainly rather than glossed
-over. Proving the harness can run and combine two independent real
-targets from two entirely different stacks (Java/Spring Boot and PHP/
-Laravel) in one pass is the actual T10.6 toolkit-side deliverable here; a
-true `generalizes=True` demonstration needs the same follow-on audit-rule
-wiring both apps' own tests already flagged, not a new gap introduced by
-this one.
+combined `transfer_summary`. It does **not** claim `generalizes=True`:
+`CC-CORE-0020` wired `ssti` into `fuzzlab.core.runmode._VULN_TO_CATEGORY`
+(a pre-existing, independently-verified working rule+strategy pairing),
+so TrackerNest's own recall is now 1/3 (its one `ssti` case, `TNEST-0001`,
+confirms for real) -- but Huddle Hub's own three classes
+(`webhook_signature_bypass`/`ssrf`/`outbound_header_injection`) and
+TrackerNest's other two (`xxe`/`insecure_deserialization`) all remain
+honestly unmapped (no verified confirmer built for any of them yet), so
+Huddle Hub's own recall is still 0 and `generalizes` is correctly `False`
+(`transfer_summary`'s own rule needs recall > 0 on **both** scored
+targets to report `True`; one of two is not enough) -- this is a weaker
+transfer result than category 1's own combined test (which had one real
+recall>0 case from ForgeCart, also on only one of its two targets), stated
+plainly rather than glossed over. Proving the harness can run and combine
+two independent real targets from two entirely different stacks (Java/
+Spring Boot and PHP/Laravel) in one pass, and correctly score each target
+independently (one now genuinely detecting something, one not), is the
+actual T10.6 toolkit-side deliverable here; a true `generalizes=True`
+demonstration needs the same follow-on audit-rule wiring for the
+remaining 5 classes, not a new gap introduced by this one.
 
 Skip-guarded on both `spring_boot_boot_available()` and
 `live_boot_available()` (PA-0005/PA-0035), matching each app's own
@@ -162,20 +167,26 @@ def test_trackernest_and_huddlehub_run_together_in_one_call(trackernest_base_url
         with Store(tmp_path / "u.db") as store:
             outcomes = run_targets(specs, store, sender_for=lambda s: RequestsProbeSender(timeout=10.0))
             assert [o.name for o in outcomes] == ["spring_boot_trackernest", "php_laravel_huddlehub"]
+            trackernest_outcome, huddlehub_outcome = outcomes
             for outcome in outcomes:
                 assert outcome.scored is True
                 assert outcome.report is not None
-                assert outcome.report.tp == 0
-                assert outcome.report.recall == 0.0
+            # TrackerNest: ssti (TNEST-0001) confirms for real (CC-CORE-0020),
+            # xxe/insecure_deserialization stay unmapped -- 1 of 3 positives.
+            assert trackernest_outcome.report.tp == 1
+            assert trackernest_outcome.report.recall == pytest.approx(1 / 3)
+            # Huddle Hub: all 3 of its own classes remain unmapped -- 0 of 3.
+            assert huddlehub_outcome.report.tp == 0
+            assert huddlehub_outcome.report.recall == 0.0
             # Two independent real run_ids, one per target, in the same call.
             assert outcomes[0].run_id != outcomes[1].run_id
 
             summary = transfer_summary(outcomes)
             assert summary["targets"] == 2
             assert "macro_precision" in summary and "macro_recall" in summary
-            # Neither target has recall > 0 (both categories' vuln classes are
-            # unmapped in _VULN_TO_CATEGORY, per this module's own docstring) --
-            # generalizes is correctly False, not glossed over.
+            # Only one of the two scored targets has recall > 0 --
+            # transfer_summary's own rule needs both, so generalizes is
+            # still correctly False, not glossed over.
             assert summary["generalizes"] is False
             # format_transfer must not raise on a real two-target summary.
             rendered = format_transfer(summary)

@@ -36,6 +36,20 @@ changed, and the reason. Reference the commit hash where useful.
   spanning all 12 wave-1 feature areas. No pairs manufactured yet — this
   is the plan only, saved so the work can be picked up without
   re-deriving the analysis.
+## 2026-09-23 (first real detection wiring for a category 3 vuln class)
+- `fuzzlab/core/runmode.py`: maps `ssti` to the existing
+  `server-side-template-injection` category in `_VULN_TO_CATEGORY`,
+  closing (for this one class only) the "recall is honestly 0" gap
+  category 3's own Phase E entries flagged. A real rule (`R-SSTI`) and
+  confirmation strategy (`SstiStrategy`) already existed and were already
+  correctly scoped — verified live against TrackerNest's real vulnerable
+  and secure `ssti` twins before landing (two of the strategy's five
+  existing payloads genuinely evaluate under OGNL with zero code changes
+  needed). TrackerNest's own recall goes from 0 to 1/3; the other 5 of
+  this category's 6 new classes stay unmapped (no verified confirmer
+  built for any of them yet) — scoped deliberately, not an oversight.
+  Updated `CC-LAB-0138`'s/`CC-LAB-0140`'s own Phase E tests to match the
+  new, real scored numbers. See `CC-CORE-0020`/`FR-CORE-10`.
 
 ## 2026-09-23 (cross-branch bookkeeping fix, by the category 1 pilot session)
 - Docs/FUZZ: fixed a real cross-branch ID collision found during a

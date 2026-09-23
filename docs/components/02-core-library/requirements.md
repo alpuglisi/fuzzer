@@ -52,6 +52,21 @@ plugin registry. It is the layer that makes the store the integration bus.
   caller (`fuzzlab.web.savedviews`); CORE only provides the table and index.
   (Added by CC-CORE-0019, for the Findings workbench, `CC-UI-0029`.)
 
+- **FR-CORE-10** `_VULN_TO_CATEGORY` (in `fuzzlab.core.runmode`) maps a ground-truth
+  `vuln_class` to the audit-rule/oracle category it corresponds to, when one with a
+  real, working confirmer exists — an unmapped class falls through
+  `to_category()`'s own fallback unchanged and is never nominated by
+  `evaluate()`, so it always scores as an honest false negative rather than a
+  mis-wired one. Currently maps `sqli`→`sql-injection`, `xss-reflected`/
+  `xss-stored`/`xss-dom`→`xss`, and `ssti`→`server-side-template-injection`
+  (added by `CC-CORE-0020`, verified live against TrackerNest's real vulnerable
+  and secure `ssti` twins before landing). A class is added here only once it has
+  a real, independently-verified rule+confirmation-strategy pairing — adding an
+  entry for a class with no confirmer would only relabel a false negative as a
+  mis-wired candidate, not improve detection, so category 3's other 5 new classes
+  (`xxe`/`insecure_deserialization`/`webhook_signature_bypass`/`ssrf`/
+  `outbound_header_injection`) stay unmapped until each has one.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).
