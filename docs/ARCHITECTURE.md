@@ -589,11 +589,45 @@ tracked in the requirements files, not here.
   template engine (`mark_safe()` genuinely bypasses auto-escaping; a
   plain string is genuinely still protected by it), plus a real
   generation-time test confirming the template's own bytes are never
-  touched by this project's Jinja2 pass. PicTrail's remaining planned
-  pages (SSRF link preview, mass-assignment settings, identifier-SQLi
-  search, session deserialization, the full auto-linking-specific XSS
-  shape) and CircleFeed (the Facebook-style PHP app) stay planned, not
-  built — each its own future, separately-gated increment.
+  touched by this project's Jinja2 pass.
+  **PicTrail's third real page (`CC-LAB-0094`) landed the researched SSRF
+  shape**: `/upload/link-preview`, `requests.get()` fetching an
+  attacker-influenced URL server-side (CWE-918) — this emitter's first
+  genuinely new sink *category* (outbound HTTP fetch, not DB/template/
+  string-response). No new safety-matrix design: `lab/safety_matrix.yaml`'s
+  existing `server_side_http_fetch` sink family (from the already-
+  researched `docs/research/corpus-examples/ssrf/{node,php,python}/`
+  corpus) is reused unchanged. Ports the Python corpus example
+  (`vulnerable-oembed-unfurl-4.py`/`idiomatic-oembed-unfurl-4.py`) almost
+  verbatim: the secure twin's transform checks the URL's scheme, then its
+  *resolved* IP (`socket.gethostbyname()` + `ipaddress.ip_address(...).
+  is_private/.is_loopback/.is_link_local`), closing the DNS-rebinding gap
+  a hostname-only allowlist leaves open — one deliberate, stated
+  adaptation from the corpus example (`ALLOWED_SCHEMES` widened to both
+  `http`/`https`, so the live-boot test's payload is blocked specifically
+  by the resolved-IP check, not incidentally by the scheme check). The
+  sink itself is shared, byte-identical between twins (mirroring
+  `CC-LAB-0093`'s own "sink is neutral, the transform secures/breaks it"
+  shape), with `allow_redirects=False` closing a redirect-based allowlist
+  bypass. A new, real, stdlib-only "internal service" HTTP-server fixture
+  (`InternalServiceFixture`, port-`0`-bound to avoid a find-free-port
+  race entirely, torn down via a bounded thread-join, not an asyncio-style
+  `PA-0012` citation) proves the differential both directions live; a
+  `PA-0034`/`PA-0035`-disciplined adversarial test (a dedicated
+  `external_http_probe()` capability probe, not a PyPI-reachability
+  stand-in) proves the allowlist doesn't fail closed on a legitimate
+  public URL, correctly skip-guarding in this build environment's own
+  restricted network egress. This project's shared `labels.schema.json`
+  needed widening (`vuln_class`/`sink_context` gaining `ssrf`/`network`
+  among other values) for this page's own ground truth — landed as its
+  own standalone, pre-requisite entry (`CC-LAB-0094a`), adopting category
+  3's own already-reviewed widening byte-identically rather than
+  inventing different values, to avoid future cross-branch schema drift.
+  PicTrail's remaining planned pages (mass-assignment settings,
+  identifier-SQLi search, session deserialization, the full
+  auto-linking-specific XSS shape) and CircleFeed (the Facebook-style PHP
+  app) stay planned, not built — each its own future, separately-gated
+  increment.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

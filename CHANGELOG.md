@@ -12,6 +12,37 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (PicTrail link-preview SSRF page)
+- LAB: landed PicTrail's third real page — `CC-LAB-0094`/`FR-LAB-105`/
+  `FR-LAB-106`, pre-change review gate cleared (2 independent reviewer
+  subagents; findings incorporated: `allow_redirects=False` on the sink,
+  a dedicated `external_http_probe()` replacing a PyPI-reachability
+  stand-in for the network-dependent test, a concrete thread-join
+  teardown for the new internal-service fixture instead of a `PA-0012`
+  citation, port-`0` binding avoiding the find-free-port race entirely,
+  a reconciled sink timeout, and the full `PT-0003` ground-truth field
+  set). `GET /upload/link-preview` — `requests.get()` fetching an
+  attacker-influenced URL server-side with no scheme/resolved-IP check
+  (CWE-918/SSRF), this emitter's first outbound-HTTP-fetch sink category.
+  Reuses `lab/safety_matrix.yaml`'s existing `server_side_http_fetch`
+  sink family unchanged; ports the already-reviewed Python corpus example
+  (`docs/research/corpus-examples/ssrf/python/{vulnerable,idiomatic}-
+  oembed-unfurl-4.py`) almost verbatim. New `InternalServiceFixture`
+  (stdlib `http.server`, port-`0`-bound) proves the differential live,
+  both directions; a `PA-0034`/`PA-0035`-disciplined adversarial test
+  proves the allowlist still admits a legitimate public URL, correctly
+  skip-guarding on this build environment's own restricted network
+  egress. Two real defects caught and corrected during implementation,
+  before landing: the sink's own name (the reviewed draft conflated a
+  transform op's name with a sink name) and its complexity module
+  (`single_statement`'s DB-row epilogue would have appended real,
+  unreachable dead code after this shape's own `return` — caught by
+  `py_compile`, fixed by using `render_only` instead). Extends
+  `lab/ground-truth-picktrail-django/` with `PT-0003`. Full bookkeeping:
+  `docs/components/01-target-lab/{change-control,requirements}.md`,
+  `docs/ARCHITECTURE.md`, `docs/research/category2-social-ugc-
+  functionality-and-cwe-research.md` §6.
+
 ## 2026-09-23 (labels schema: widen vuln_class/sink_context enums)
 
 - LAB: Widened `fuzzlab/labels/schemas/labels.schema.json`'s `vuln_class`

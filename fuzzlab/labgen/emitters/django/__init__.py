@@ -132,6 +132,16 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("xss", "html_body_template"): _ModuleSet(
         "read_stored_field", "django_template_render", "render_only"
     ),
+    # CC-LAB-0094: a genuinely new sink *category* for this emitter --
+    # outbound server-side HTTP fetch, not DB/template/string-response.
+    # No new safety-matrix design needed: `lab/safety_matrix.yaml`
+    # already has a real, corpus-grounded `server_side_http_fetch` sink
+    # family. The sink is shared, byte-identical between twins; the
+    # vulnerable/secure distinction lives entirely in the transform
+    # (`unchecked_url_fetch` vs. `scheme_and_resolved_ip_allowlist`).
+    ("ssrf", "server_side_http_fetch"): _ModuleSet(
+        "get_param", "http_fetch_json_sink", "render_only"
+    ),
 }
 
 #: Per-route static context (table/column/param names, or the stored field
@@ -160,6 +170,10 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     # PicTrail's real comments page (CC-LAB-0093, Phase C's second real
     # page) -- a distinct `comments` table.
     "/post/comments": {"var_name": "comment", "stored_expr": "_read_stored_comment()"},
+    # PicTrail's real link-preview upload flow (CC-LAB-0094, Phase C's
+    # third real page) -- ports docs/research/corpus-examples/ssrf/
+    # python/{vulnerable,idiomatic}-oembed-unfurl-4.py almost verbatim.
+    "/upload/link-preview": {"var_name": "url", "param_name": "url"},
 }
 
 #: Cell IDs that are **real, ground-truth-bearing pages** (`CC-LAB-0092`,
@@ -174,7 +188,9 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
 #: twin is deliberately not added here: ground truth only ever needs to
 #: describe the one real, exploitable page, matching how a ``php_current``
 #: secure twin does not necessarily get its own ``PFF-`` case either.
-_REAL_PAGE_CELL_IDS: frozenset[str] = frozenset({"LABGEN-DJ-0007", "LABGEN-DJ-0009"})
+_REAL_PAGE_CELL_IDS: frozenset[str] = frozenset(
+    {"LABGEN-DJ-0007", "LABGEN-DJ-0009", "LABGEN-DJ-0011"}
+)
 
 
 class DjangoEmitter(Emitter):
@@ -251,6 +267,11 @@ class DjangoEmitter(Emitter):
             f"# Module composition: {composition}\n"
             "\n"
             "import hashlib\n"
+            "import ipaddress\n"
+            "import socket\n"
+            "from urllib.parse import urlparse\n"
+            "\n"
+            "import requests\n"
             "\n"
             "from django.db import connection\n"
             "from django.http import HttpResponse, JsonResponse\n"

@@ -45,16 +45,19 @@ not restated here.
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import socket
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from fuzzlab.labgen.conformance.live_boot import (
@@ -83,6 +86,13 @@ SKELETON_DIR = Path(__file__).resolve().parent.parent / "emitters" / "django" / 
 #: -- they should not, and a mismatch here is a real authoring bug, not a
 #: supported configuration.
 DJANGO_PIN = "django==5.2.17"
+
+#: `CC-LAB-0094`: the link-preview SSRF shape's generated view imports
+#: ``requests`` -- already a declared project dependency (``pyproject.toml``),
+#: so this harness's own scratch ``venv`` installs the identical constraint,
+#: not a separately-invented pin, the first time this harness needs a second
+#: package installed alongside ``DJANGO_PIN``.
+REQUESTS_PIN = "requests>=2.31,<3"
 
 #: How long to wait for ``manage.py runserver`` to accept connections before
 #: giving up and reporting a boot failure, rather than hanging indefinitely.
@@ -133,6 +143,119 @@ def _pip_network_probe(timeout: float = NETWORK_PROBE_TIMEOUT_S) -> bool:
         except (subprocess.TimeoutExpired, OSError):
             return False
     return result.returncode == 0
+
+
+#: `CC-LAB-0094`'s own dedicated network-capability probe for the
+#: "well-formed, allowlisted URL still works" adversarial test on the SSRF
+#: shape's secure twin -- a real, stable, already-project-trusted external
+#: host (the same interpreter distribution this harness already requires),
+#: independent of :func:`_pip_network_probe`/PyPI. Reusing the PyPI probe
+#: here would only prove pip-install-time reachability is predicted
+#: correctly, a different operation from an app-level ``requests.get()``
+#: at test-run time -- exactly the ``PA-0035``/``BUG-0033`` mistake this
+#: probe avoids repeating.
+EXTERNAL_HTTP_PROBE_URL = "https://www.python.org/"
+
+
+def external_http_probe(url: str = EXTERNAL_HTTP_PROBE_URL, timeout: float = NETWORK_PROBE_TIMEOUT_S) -> bool:
+    """Actually attempt a real ``GET`` against ``url`` -- the exact
+    operation a "well-formed URL still works" test depends on being
+    possible, not a correlated stand-in for it (`PA-0035`). Defaults to
+    :data:`EXTERNAL_HTTP_PROBE_URL`; a caller with a specific target URL
+    (e.g. the exact allowlisted URL its own test will fetch) passes it
+    explicitly, so the probe and the operation it predicts are the same
+    URL, not merely the same class of operation. Bounded by ``timeout``;
+    any failure reports unavailable, never propagates (PA-0025's
+    fail-closed doctrine, same as :func:`_pip_network_probe`)."""
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            return 200 <= resp.status < 400
+    except Exception:
+        return False
+
+
+#: `CC-LAB-0094`: the fixed JSON body the internal-service fixture serves,
+#: containing a real, checkable secret marker -- what the SSRF payload's
+#: response is checked against, standing in for a real internal-only
+#: service an attacker should not be able to reach from a public-facing
+#: link-preview feature.
+INTERNAL_SERVICE_SECRET = "fuzzlab-internal-service-marker-CC-LAB-0094"
+
+
+class _InternalServiceHandler(BaseHTTPRequestHandler):
+    """Serves one fixed JSON body containing :data:`INTERNAL_SERVICE_SECRET`
+    on any path/method. Silences ``BaseHTTPRequestHandler``'s default
+    per-request stderr logging -- this fixture's own request log is not
+    useful test output."""
+
+    def _respond(self) -> None:
+        body = json.dumps({"title": INTERNAL_SERVICE_SECRET}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's own naming
+        self._respond()
+
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+        pass
+
+
+class InternalServiceFixture:
+    """A tiny, real, local "internal service" HTTP server (`CC-LAB-0094`),
+    stdlib-only (``http.server``), standing in for a real internal-only
+    service an SSRF payload should not be able to reach from a public-
+    facing link-preview feature.
+
+    **Port allocation**: constructed as ``HTTPServer(("127.0.0.1", 0),
+    ...)`` -- port ``0`` asks the OS to bind an ephemeral port inside the
+    same call that opens the socket, so there is no separate "find a free
+    port, then bind" step to race against (unlike :func:`_find_free_port`,
+    deliberately not reused here for that reason). The actual bound port
+    is read back from ``server.server_address[1]``.
+
+    **Teardown**: a ``daemon=True`` thread runs ``server.serve_forever()``;
+    :meth:`stop` calls ``server.shutdown()`` (stops the serve loop) then
+    ``server.server_close()`` (releases the socket) then
+    ``thread.join(timeout=5)`` -- a concrete, bounded, synchronous
+    mechanism, not a ``PA-0012`` citation (``PA-0012`` is asyncio-specific
+    and does not apply to this stdlib-threaded fixture)."""
+
+    def __init__(self) -> None:
+        self._server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._server = HTTPServer(("127.0.0.1", 0), _InternalServiceHandler)
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    @property
+    def port(self) -> int:
+        assert self._server is not None
+        return self._server.server_address[1]
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.port}/"
+
+    def stop(self) -> None:
+        if self._server is not None:
+            self._server.shutdown()
+            self._server.server_close()
+        if self._thread is not None:
+            self._thread.join(timeout=5.0)
+        self._server = None
+        self._thread = None
+
+    def __enter__(self) -> "InternalServiceFixture":
+        self.start()
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.stop()
 
 
 def django_boot_available() -> bool:
@@ -358,13 +481,13 @@ class DjangoLiveBootHarness:
             )
 
         pip_result = _run(
-            [str(self._venv_dir / "bin" / "pip"), "install", "-q", DJANGO_PIN],
+            [str(self._venv_dir / "bin" / "pip"), "install", "-q", DJANGO_PIN, REQUESTS_PIN],
             cwd=self._app_dir,
             timeout=self._install_timeout,
         )
         if pip_result.returncode != 0:
             raise LiveBootError(
-                f"pip install {DJANGO_PIN} failed (exit {pip_result.returncode}):\n"
+                f"pip install {DJANGO_PIN} {REQUESTS_PIN} failed (exit {pip_result.returncode}):\n"
                 f"{pip_result.stdout[-4000:]}\n{pip_result.stderr[-4000:]}"
             )
 

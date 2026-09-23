@@ -234,6 +234,41 @@ class MarkSafeWrapTransform(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class UncheckedUrlFetchTransform(TemplateModule):
+    """The ``unchecked_url_fetch`` op (`CC-LAB-0094`): an explicit no-op,
+    self-documenting rather than an empty pipeline relying on
+    ``identity`` -- matches ``lab/safety_matrix.yaml``'s own
+    ``unchecked_url_fetch``/``no_effect`` row for the
+    ``server_side_http_fetch`` sink family. Publishes no new context;
+    ``value_expr`` passes through unchanged."""
+
+    def __init__(self) -> None:
+        super().__init__("unchecked_url_fetch", "transform", _TRANSFORM_ENV, "unchecked_url_fetch.py.j2")
+
+
+class SchemeAndResolvedIpAllowlistTransform(TemplateModule):
+    """The ``scheme_and_resolved_ip_allowlist`` op (`CC-LAB-0094`): ports
+    ``docs/research/corpus-examples/ssrf/python/idiomatic-oembed-
+    unfurl-4.py``'s own defense almost line-for-line -- scheme check, then
+    the *resolved* IP of the URL's hostname (``socket.gethostbyname()`` +
+    ``ipaddress.ip_address(...).is_private/.is_loopback/.is_link_local``),
+    raising ``ValueError`` on a disallowed scheme or resolved IP (fail-
+    closed, propagated as Django's own real exception-handling path, same
+    as the corpus example). Unlike every other transform in this
+    inventory, this one emits real validation *statements*, not a
+    ``value_expr``-wrapping expression -- ``value_expr`` itself passes
+    through unchanged; the security effect is the ``raise`` happening
+    before the sink ever runs, not a rewritten value."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "scheme_and_resolved_ip_allowlist",
+            "transform",
+            _TRANSFORM_ENV,
+            "scheme_and_resolved_ip_allowlist.py.j2",
+        )
+
+
 class SqlStringLiteralLookupSink(TemplateModule):
     """A single-row lookup by a quoted-string-literal-position column, with
     a second, non-tainted, already-hashed condition (a login-style password
@@ -282,6 +317,25 @@ class DjangoTemplateRenderSink(TemplateModule):
         super().__init__("django_template_render", "sink", _SINK_ENV, "django_template_render.py.j2")
 
 
+class HttpFetchJsonSink(TemplateModule):
+    """Fetches an attacker-influenced URL server-side via ``requests.get()``
+    and returns a JSON preview (`CC-LAB-0094`) -- the Django analogue of
+    the researched corpus example's own vulnerable oEmbed/link-unfurl
+    shape (``docs/research/corpus-examples/ssrf/python/vulnerable-oembed-
+    unfurl-4.py``). Shared, byte-identical between the vulnerable and
+    secure twin: the security boundary lives entirely in the
+    **transform** (``scheme_and_resolved_ip_allowlist`` raises before this
+    sink ever runs on the secure twin), never in the sink itself -- the
+    same "sink is neutral" shape ``CC-LAB-0093``'s ``mark_safe_wrap``
+    already established for this emitter. ``allow_redirects=False``
+    closes the redirect-based bypass a pre-fetch-only allowlist would
+    otherwise leave open (an allowlisted URL that 302s to a blocked
+    target would reach ``requests.get()`` unresolved without it)."""
+
+    def __init__(self) -> None:
+        super().__init__("http_fetch_json_sink", "sink", _SINK_ENV, "http_fetch_json_sink.py.j2")
+
+
 class SingleStatementComplexity(TemplateModule):
     """Wraps the composed source/transform/sink body as the entire body of
     one Django function-based view that responds with the looked-up row --
@@ -324,12 +378,15 @@ TRANSFORMS: dict[str, Module] = {
     "param_bind": ParamBindTransform(),
     "html_entity_escape": HtmlEntityEscapeTransform(),
     "mark_safe_wrap": MarkSafeWrapTransform(),
+    "unchecked_url_fetch": UncheckedUrlFetchTransform(),
+    "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
     "sql_string_literal_lookup": SqlStringLiteralLookupSink(),
     "html_body_echo": HtmlBodyEchoSink(),
     "django_template_render": DjangoTemplateRenderSink(),
+    "http_fetch_json_sink": HttpFetchJsonSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

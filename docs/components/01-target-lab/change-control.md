@@ -3,6 +3,255 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0094 — PicTrail's third real page: link-preview SSRF via `requests`, no resolved-IP check (FR-LAB-105/FR-LAB-106) (2026-09-23)
+
+- **Change:** Lands PicTrail's third real, ground-truth-bearing page,
+  `/upload/link-preview` (grounded in §2 item 7's upload-flow link-
+  preview feature), the researched SSRF shape (`docs/research/
+  category2-social-ugc-functionality-and-cwe-research.md` §4 row 1,
+  CWE-918). No new safety-matrix design: `lab/safety_matrix.yaml`
+  already has a real, already-researched `server_side_http_fetch` sink
+  family with three ops (`unchecked_url_fetch`/`no_effect`,
+  `hostname_allowlist`/`partial`, `scheme_and_resolved_ip_allowlist`/
+  `neutralises`), added from `docs/research/corpus-examples/ssrf/
+  {node,php,python}/` — and that Python corpus example (`vulnerable-
+  oembed-unfurl-4.py`/`idiomatic-oembed-unfurl-4.py`, already using
+  `requests`, already a declared project dependency, `pyproject.toml`)
+  is what this entry ports to Django almost verbatim.
+
+  Reviewed by two independent subagents before implementation (pre-change
+  review gate); their findings and this entry's corrections:
+  1. **`allow_redirects=False`** added to the shared sink's `requests.get()`
+     call (reviewer #1): the idiomatic corpus example's secure fetch uses
+     it as part of its SSRF defense — without it, an allowlisted-looking
+     URL that 302s to a blocked internal target would reach the sink
+     unresolved, silently defeating the transform's own allowlist.
+  2. **Network-dependent test redesigned** (reviewer #2, `PA-0035`/
+     `BUG-0033`-class finding): the "well-formed URL still works" adversarial
+     test does **not** reuse `django_boot_available()`'s PyPI-reachability
+     probe as a stand-in (that only proves pip-install-time reachability, a
+     different operation from an app-level `requests.get()` at test-run
+     time). A new, dedicated probe, `django_live_boot.external_http_probe(url)`,
+     is pointed at the exact URL the test itself fetches.
+  3. **Concrete fixture teardown, not a `PA-0012` citation** (reviewer #2):
+     `PA-0012` is asyncio-specific and does not apply to the new,
+     stdlib-only, synchronous `http.server.HTTPServer`-based internal-
+     service fixture. The real mechanism: a `daemon=True` thread running
+     `serve_forever()`, torn down via `server.shutdown()` +
+     `server.server_close()` + a bounded `thread.join(timeout=5)`.
+  4. **Port-allocation TOCTOU avoided, not just named** (reviewer #2): the
+     fixture is constructed as `HTTPServer(("127.0.0.1", 0), ...)` — port
+     `0` makes the OS bind an ephemeral port in the same call that opens
+     the socket, so there is no separate find-free-port step to race
+     against; `_find_free_port()` is deliberately not reused for this
+     fixture.
+  5. **Sink timeout raised from an initially-drafted `3` to `5`** (reviewer
+     #2), and the two timeout axes named explicitly: the sink's own
+     `timeout` is the *application's* outbound-fetch timeout (a different
+     concern from the harness's own `REQUEST_TIMEOUT_S`/
+     `NETWORK_PROBE_TIMEOUT_S`, which time the *test's* requests to Django/
+     external hosts) — not reconciled to those constants, since they
+     measure different things.
+  6. **`PT-0003`'s full ground-truth field set** stated explicitly (below).
+  7. **The schema widening this entry's ground truth needs is landed as
+     its own standalone, pre-requisite entry**, `CC-LAB-0094a` (below),
+     rather than folded into this one — the schema is shared across every
+     active category branch, this entry's own scope is not.
+
+  Concretely (as actually implemented — two details corrected from this
+  entry's own initial draft during implementation, both caught by real,
+  executed checks before landing, not shipped and fixed later):
+  1. **New route**, `_ROUTE_PARAMS["/upload/link-preview"]` —
+     `{"var_name": "url", "param_name": "url"}`, `GET`, reusing the
+     existing `get_param` source unchanged.
+  2. **New transform, `unchecked_url_fetch`** (vulnerable twin): an
+     explicit, self-documenting no-op module (matches the matrix's own
+     `no_effect` row) rather than an empty pipeline relying on
+     `identity` — `value_expr` passes through unchanged.
+  3. **New transform, `scheme_and_resolved_ip_allowlist`** (secure twin):
+     ports the idiomatic corpus example's own logic almost line-for-line
+     — `urlparse`, scheme check, `socket.gethostbyname()` +
+     `ipaddress.ip_address(...).is_private/.is_loopback/.is_link_local`
+     — **one deliberate, stated adaptation from the corpus example**:
+     `ALLOWED_SCHEMES = {"http", "https"}` here (the corpus example is
+     `https`-only), so the live-boot test's adversarial payload
+     (`http://127.0.0.1:<port>/...`, targeting the new internal-service
+     fixture) is blocked specifically by the **resolved-IP check**, not
+     incidentally by the scheme check — proving the actually-interesting
+     defense. Unlike every other transform in this emitter's inventory,
+     this one emits real validation *statements* (not a `value_expr`-
+     wrapping expression) — the security effect is the `raise` happening
+     before the sink ever runs, not a rewritten value.
+  4. **New sink, `http_fetch_json_sink`** (shared, byte-identical between
+     twins — **named for what it does, not reusing an op's own name**,
+     correcting this entry's own initial draft, which conflated the
+     `unchecked_url_fetch` *transform op name* with a sink name before
+     implementation clarified the two are separate registries) —
+     `requests.get({{ value_expr }}, timeout=5, allow_redirects=False)`,
+     then `response.json()`, returning `JsonResponse({"preview_title": ...})`.
+     The **transform** carries the fix (mirroring `CC-LAB-0093`'s own
+     "sink is neutral, the transform is what secures/breaks it" shape) —
+     the sink module itself never differs between twins.
+  5. **Complexity: `render_only`, not `single_statement`** — a real defect
+     caught before landing: `single_statement`'s complexity template has a
+     fixed `if row is None: return HttpResponse(404) ...` epilogue that
+     assumes a DB-row-lookup sink shape (the shape every existing
+     `single_statement` user has); this sink already `return`s inside its
+     own body, so `single_statement` would have appended real, unreachable
+     dead code after that `return` (syntactically valid Python, but wrong
+     — caught by actually compiling the generated view with `py_compile`
+     before this entry landed, not shipped and found later). `render_only`
+     (already used by the `html_body`/`html_body_template` shapes, which
+     also `return` directly within `body`) is correct.
+  6. **Fail-closed on validation failure**: the secure twin's transform
+     raises `ValueError` on a disallowed scheme/IP (matching the idiomatic
+     corpus example's own `raise ValueError(...)` exactly) — propagated as
+     Django's own real exception-handling path (`DEBUG=False`-safe, no
+     stack-trace leak, already proven by `CC-LAB-0090`'s own test for this
+     exact mechanism) rather than a hand-rolled `try/except` wrapper.
+  7. **New live-boot fixture**, `InternalServiceFixture`
+     (`fuzzlab.labgen.conformance.django_live_boot`): a tiny, real, local
+     "internal service" HTTP server (stdlib `http.server.HTTPServer`/
+     `BaseHTTPRequestHandler`, no new dependency), bound via
+     `("127.0.0.1", 0)`, serving one fixed JSON body containing a real,
+     checkable secret marker (`INTERNAL_SERVICE_SECRET`) — the target the
+     SSRF payload points at, standing in for a real internal-only service.
+     A standalone context-manager class, deliberately **not** folded into
+     `DjangoLiveBootHarness` itself (a design choice, not left implicit):
+     a test ties both lifetimes together with one `with
+     InternalServiceFixture() as internal, DjangoLiveBootHarness(...) as
+     harness:` block, avoiding unconditional per-test overhead for every
+     *other* shape's live-boot test that has no use for this fixture.
+  8. **`DjangoLiveBootHarness.build()`'s `pip install` step** installs
+     `requests` alongside `django==<pinned>` in the same scratch `venv`
+     (`REQUESTS_PIN = "requests>=2.31,<3"`, the identical constraint
+     `pyproject.toml` already declares, not a separately-invented pin) —
+     the first time this harness's own scratch venv needs a second
+     package installed into it.
+  9. **New capability probe**, `django_live_boot.external_http_probe(url,
+     timeout)`: a real, bounded `urllib.request.urlopen(url)` round trip,
+     defaulting to `EXTERNAL_HTTP_PROBE_URL` (`https://www.python.org/`)
+     but overridable per call site — used by the new live-boot test module
+     to skip-guard the `PA-0034` "well-formed URL still works" test
+     against the *exact* URL it fetches (`https://httpbin.org/json`, a
+     real, public, JSON-returning endpoint — needed because the sink calls
+     `response.json()` unconditionally, so the probed URL must both
+     resolve publicly and actually serve valid JSON).
+  10. New ground truth: extends `lab/ground-truth-picktrail-django/` with
+     `PT-0003` — `vuln_class: "ssrf"`, `sink_context: "network"`,
+     `method: "GET"`, `param: "url"`, `location: "query"`,
+     `rendering: "server-json"`, `expected_vulnerable: true`,
+     `url: "/upload/link-preview"`. Depends on `CC-LAB-0094a`'s schema
+     widening (below), landed first.
+  11. New manifest, `lab/manifests/phase_c_picktrail_link_preview.yaml`.
+
+- **Impact (other components / project):** No shared schema, safety-matrix
+  *op*, or existing emitter/module changes beyond this entry's own scope
+  (the schema dependency is `CC-LAB-0094a`, its own separate entry).
+  `fuzzlab/harness/multitarget.py` unaffected.
+
+- **Risk (level: moderate):** A genuinely new sink *category* for this
+  project overall (outbound server-side HTTP fetch, not DB/template/
+  string-response), though the underlying safety-matrix/corpus research
+  is already real and reviewed — the risk here is in the **live-boot
+  proof mechanism** (a second real server process per test run, not just
+  the Django process), not in inventing a new vulnerability shape from
+  scratch. Mitigated by:
+  1. The internal-service fixture is `stdlib`-only, no new dependency;
+     port `0` binding removes the find-free-port race rather than
+     mitigating it; a bounded, synchronous, thread-join teardown.
+  2. A real generation-time/Tier-0 check (`py_compile`) that
+     `requests`/`socket`/`ipaddress`/`urlparse` imports compile — this is
+     what caught the `render_only`-vs-`single_statement` defect above
+     before it shipped.
+  3. `allow_redirects=False` closes the redirect-based bypass reviewer #1
+     identified.
+  4. Per `PA-0034`/`PA-0035`, real, executed proof of both directions of
+     the differential (`tests/
+     test_labgen_django_live_boot_picktrail_link_preview.py`) plus the
+     adversarial "well-formed URL still works" direction, skip-guarded by
+     a dedicated capability probe against the exact URL it fetches (not a
+     PyPI-reachability stand-in). **Network-dependent risk, observed
+     directly, not merely anticipated**: in this build environment, both
+     `EXTERNAL_HTTP_PROBE_URL` and `https://httpbin.org/json` are
+     unreachable (the sandboxed proxy does not allowlist them), so that
+     one test skips — correctly, not a false pass or a false failure — while
+     the other three tests in the module (which depend only on
+     `django_boot_available()`'s own already-required PyPI reachability
+     and the local-only internal-service fixture) run and pass for real.
+
+- **Deliverables:**
+  - [x] `fuzzlab/labgen/emitters/django/templates/transforms/
+    unchecked_url_fetch.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/transforms/
+    scheme_and_resolved_ip_allowlist.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/sinks/
+    http_fetch_json_sink.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/modules.py` — new
+    `UncheckedUrlFetchTransform`/`SchemeAndResolvedIpAllowlistTransform`/
+    `HttpFetchJsonSink` classes + registry entries — done.
+  - [x] `fuzzlab/labgen/emitters/django/__init__.py` — new
+    `_MODULE_SET_BY_SHAPE`/`_ROUTE_PARAMS` entries; `import requests`/
+    `import socket`/`import ipaddress`/`from urllib.parse import
+    urlparse` added to the fixed header imports; `_REAL_PAGE_CELL_IDS`
+    gains `LABGEN-DJ-0011` — done.
+  - [x] `fuzzlab/labgen/conformance/django_live_boot.py` — `pip install`
+    step installs `requests` too; new `InternalServiceFixture`
+    (start/stop, port-0 bind, thread-join teardown); new
+    `external_http_probe()` capability probe — done.
+  - [x] `lab/manifests/phase_c_picktrail_link_preview.yaml` — done.
+  - [x] `lab/ground-truth-picktrail-django/labels.json`/
+    `injection-points.json`/`expectedresults.csv` — extended with
+    `PT-0003` — done.
+  - [x] `tests/test_labgen_django_conformance.py` — Tier 0/3 +
+    verdict-regression test for the new manifest — done, 16/16 passing.
+  - [x] `tests/test_labgen_django_live_boot_picktrail_link_preview.py` —
+    real internal-service-reachable proof on the vulnerable twin; real
+    blocked-by-resolved-IP proof on the secure twin; the `PA-0034`
+    "well-formed URL still works" adversarial-direction test (correctly
+    skip-guarded in this environment); the `PT-0003` ground-truth
+    cross-check — done, 3 passed + 1 correctly skipped.
+  - [x] `docs/research/category2-social-ugc-functionality-and-cwe-
+    research.md` §6 — row 3 (and row 2, found stale) marked built — done.
+  - [x] `docs/components/01-target-lab/requirements.md` — new
+    `FR-LAB-105`/`FR-LAB-106` — done (checked against a fresh fetch of
+    all four other active category branches: cat1=87, cat3=104, cat4=99,
+    cat5=101; this branch's own prior ceiling was 103).
+  - [x] `docs/ARCHITECTURE.md` — third real page noted — done.
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 tracker row
+    — done.
+  - [x] `CHANGELOG.md` line — done.
+  - Full bug protocol for a genuine code defect: **not triggered** — the
+    `single_statement`-vs-`render_only` complexity mistake was caught and
+    corrected during this entry's own initial implementation, before any
+    test observed a wrong result and before landing, which is this
+    project's own bug-vs-authoring-gap distinction (a caught defect in
+    unlanded, in-progress work is not a shipped regression).
+
+- **Effectiveness (assessed 2026-09-23): effective** — every deliverable
+  above that depends only on this environment's own local capabilities
+  (Tier 0/3, both live-boot differential directions, the ground-truth
+  cross-check) is real, executed, and passing; the one test with a
+  genuine external-network dependency correctly skip-guards rather than
+  false-passing or false-failing in this sandboxed environment.
+
+- **Pre-change review gate record:** reviewed by two independent
+  subagents (accuracy-only, adequacy-only) prior to any implementation.
+  Reviewer #1: stale `FR-LAB-104/105` (renumbered to `FR-LAB-105/106`
+  after a fresh fetch of all active category branches) and missing
+  `allow_redirects=False` on the sink. Reviewer #2: `PA-0035`/`BUG-0033`-
+  class conflation in the network-dependent test, a wrong `PA-0012`
+  citation for a synchronous fixture, an unnamed port-allocation TOCTOU,
+  an unreconciled sink timeout, an unspecified `PT-0003` field set, and
+  the schema widening folded into this entry rather than split out — all
+  corrected in the draft before implementation began. During
+  implementation itself, two further corrections were made from the
+  reviewed draft (both caught by real, executed checks, not shipped): the
+  sink module's own name (the draft conflated a transform op's name with
+  a sink name) and the complexity module (`single_statement`'s DB-row
+  epilogue vs. `render_only`, caught by `py_compile`). Gate cleared;
+  entry finalized to match what was actually built and verified.
+
 ### CC-LAB-0094a — Widen `labels.schema.json`'s `vuln_class`/`sink_context` enums (adopts category 3's precedent verbatim) (2026-09-23)
 
 - **Change:** `fuzzlab/labels/schemas/labels.schema.json` — `vuln_class`

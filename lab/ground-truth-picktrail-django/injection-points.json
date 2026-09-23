@@ -15,6 +15,13 @@
       "param": "comment",
       "location": "body",
       "rendering": "server"
+    },
+    {
+      "url": "/upload/link-preview",
+      "method": "GET",
+      "param": "url",
+      "location": "query",
+      "rendering": "server-json"
     }
   ]
 }

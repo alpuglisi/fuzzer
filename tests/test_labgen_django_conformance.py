@@ -156,6 +156,49 @@ def test_tier0_lint_passes_for_the_picktrail_comments_manifest() -> None:
     assert result.ok, f"{accumulator.path}: {result.detail}"
 
 
+def test_regenerate_and_diff_emitter_passes_for_the_picktrail_link_preview_manifest() -> None:
+    manifest = load_manifest("lab/manifests/phase_c_picktrail_link_preview.yaml")
+    emitter = DjangoEmitter()
+    regenerate_and_diff_emitter(emitter, manifest.cells)
+
+
+def test_tier0_lint_passes_for_the_picktrail_link_preview_manifest() -> None:
+    if not python_available():
+        import pytest
+
+        pytest.skip("no python interpreter on PATH for py_compile (PA-0005)")
+
+    manifest = load_manifest("lab/manifests/phase_c_picktrail_link_preview.yaml")
+    emitter = DjangoEmitter()
+    for cell in manifest.cells:
+        results = lint_python_emitted_files(emitter.render(cell))
+        assert results, f"{cell.cell_id}: no .py files emitted to lint"
+        for result in results:
+            assert result.ok, f"{cell.cell_id} ({result.path}): {result.detail}"
+
+    accumulator = emitter.render_route_accumulator(manifest.cells)
+    result = lint_python(accumulator.path, accumulator.content)
+    assert result.ok, f"{accumulator.path}: {result.detail}"
+
+
+def test_picktrail_link_preview_verdicts_match_the_shared_safety_matrix() -> None:
+    """`CC-LAB-0094`'s own regression check: the vulnerable twin
+    (`unchecked_url_fetch`, no scheme/resolved-IP check) must derive
+    VULNERABLE and the secure twin (`scheme_and_resolved_ip_allowlist`)
+    must derive SECURE, purely from `lab/safety_matrix.yaml`'s own
+    `server_side_http_fetch` sink family -- no new safety-matrix design
+    was needed for this shape, so this proves the existing, already-
+    reviewed matrix entries do the right thing for this emitter's own
+    pipeline encoding."""
+    from fuzzlab.labgen.verdict import load_safety_matrix, verdict
+
+    manifest = load_manifest("lab/manifests/phase_c_picktrail_link_preview.yaml")
+    matrix = load_safety_matrix()
+    by_id = {cell.cell_id: cell for cell in manifest.cells}
+    assert verdict(by_id["LABGEN-DJ-0011"].transform, by_id["LABGEN-DJ-0011"].sink_context, matrix).verdict == "VULNERABLE"
+    assert verdict(by_id["LABGEN-DJ-0012"].transform, by_id["LABGEN-DJ-0012"].sink_context, matrix).verdict == "SECURE"
+
+
 def test_comment_template_is_never_evaluated_by_this_projects_own_jinja2_pass() -> None:
     """`CC-LAB-0093`'s own pre-change review's most important finding: a
     `.html.j2` generation template containing literal Django syntax
@@ -203,6 +246,16 @@ def test_only_real_page_cell_ids_get_a_pinned_url() -> None:
         "the secure twin (not a real-page cell) must keep the generic pattern"
     )
 
+    link_preview_manifest = load_manifest("lab/manifests/phase_c_picktrail_link_preview.yaml")
+    link_preview_accumulator = emitter.render_route_accumulator(link_preview_manifest.cells)
+    link_preview_body = link_preview_accumulator.content.decode("utf-8")
+    assert 'path("upload/link-preview", handle_labgen_dj_0011' in link_preview_body, (
+        "the real-page cell must be served at /upload/link-preview"
+    )
+    assert 'path("generated/labgen_dj_0012/", handle_labgen_dj_0012' in link_preview_body, (
+        "the secure twin (not a real-page cell) must keep the generic pattern"
+    )
+
 
 def test_every_non_get_cell_is_decorated_with_csrf_exempt() -> None:
     """`CC-LAB-0091`'s own regression check (`PA-0024`-style, a
@@ -218,6 +271,7 @@ def test_every_non_get_cell_is_decorated_with_csrf_exempt() -> None:
         load_manifest("lab/manifests/phase_b_django_widen_sample.yaml"),
         load_manifest("lab/manifests/phase_c_picktrail_post_detail.yaml"),
         load_manifest("lab/manifests/phase_c_picktrail_comments.yaml"),
+        load_manifest("lab/manifests/phase_c_picktrail_link_preview.yaml"),
     )
     checked_a_non_get_cell = False
     for manifest in manifests:

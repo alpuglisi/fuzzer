@@ -1,0 +1,34 @@
+# Phase C, PicTrail's third real page (category 2 pilot, `CC-LAB-0094`).
+#
+# The researched SSRF shape (docs/research/category2-social-ugc-
+# functionality-and-cwe-research.md §4 row 1, CWE-918), porting the
+# already-reviewed corpus example (docs/research/corpus-examples/ssrf/
+# python/{vulnerable,idiomatic}-oembed-unfurl-4.py) almost verbatim. No new
+# safety-matrix design: lab/safety_matrix.yaml's own `server_side_http_fetch`
+# sink family already has all three ops this shape needs.
+#
+# Extends, not replaces, lab/manifests/phase_c_picktrail_post_detail.yaml and
+# lab/manifests/phase_c_picktrail_comments.yaml. The canonical vulnerable
+# cell (LABGEN-DJ-0011) owns PicTrail's real `/upload/link-preview` URL and
+# is the one described by lab/ground-truth-picktrail-django/'s own
+# labels.json (case PT-0003).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-DJ-0011
+    class: ssrf
+    stack_profile: django
+    route: { method: GET, path: /upload/link-preview }
+    sink_context:
+      family: server_side_http_fetch
+      required_neutralizations: [ssrf_request_forgery]
+    transform: [unchecked_url_fetch]
+
+  - cell_id: LABGEN-DJ-0012
+    class: ssrf
+    stack_profile: django
+    route: { method: GET, path: /upload/link-preview }
+    sink_context:
+      family: server_side_http_fetch
+      required_neutralizations: [ssrf_request_forgery]
+    transform: [scheme_and_resolved_ip_allowlist]

@@ -1,0 +1,5 @@
+# unchecked_url_fetch transform (CC-LAB-0094): explicit no-op -- {{ value_expr }}
+# is passed to the sink below exactly as received, with no scheme or
+# resolved-IP check, so the sink fetches whatever URL the caller supplies.
+# Self-documenting (lab/safety_matrix.yaml's own `unchecked_url_fetch`/
+# `no_effect` row), not just an empty pipeline relying on identity.

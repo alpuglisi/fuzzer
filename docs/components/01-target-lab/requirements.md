@@ -2093,6 +2093,88 @@ lane) can submit a payload as
   real and cross-checked, independently of the emitter's own internals,
   against a real booted request at the exact URL/method it names, seeded
   with the same adversarial payload.
+- **FR-LAB-105** *(PicTrail's third real page, `/upload/link-preview`,
+  and this emitter's first server-side-HTTP-fetch (SSRF, CWE-918) sink
+  category; `CC-LAB-0094`, 2026-09-23).* Ports the already-reviewed,
+  corpus-grounded shape (`docs/research/corpus-examples/ssrf/python/
+  {vulnerable,idiomatic}-oembed-unfurl-4.py`) almost verbatim, reusing
+  `lab/safety_matrix.yaml`'s existing `server_side_http_fetch` sink
+  family unchanged — no new safety-matrix design needed. New
+  `_ROUTE_PARAMS["/upload/link-preview"]`; a new `(ssrf,
+  server_side_http_fetch)` shape in `_MODULE_SET_BY_SHAPE`, rendered with
+  `render_only` complexity (not `single_statement`, whose fixed
+  `if row is None: ...` epilogue assumes a DB-row sink shape this one
+  does not have — a real defect caught by compiling the generated view
+  before this entry landed, not shipped). Two new transform modules:
+  `unchecked_url_fetch` (the vulnerable twin, an explicit self-documenting
+  no-op matching the matrix's own `no_effect` row, not an empty pipeline
+  relying on `identity`) and `scheme_and_resolved_ip_allowlist` (the
+  secure twin: scheme check, then the URL's *resolved* IP via
+  `socket.gethostbyname()` + `ipaddress.ip_address(...).is_private/
+  .is_loopback/.is_link_local`, closing the DNS-rebinding gap a
+  hostname-only allowlist leaves open — `lab/safety_matrix.yaml`'s own
+  `hostname_allowlist`/`partial` vs. `scheme_and_resolved_ip_allowlist`/
+  `neutralises` distinction). One deliberate adaptation from the corpus
+  example, stated explicitly: `ALLOWED_SCHEMES = {"http", "https"}` here
+  (the corpus example is `https`-only), so the live-boot adversarial
+  payload is blocked specifically by the resolved-IP check, not
+  incidentally by the scheme check. One shared sink module,
+  `http_fetch_json_sink` (`requests.get(url, timeout=5,
+  allow_redirects=False)` — `allow_redirects=False` closes a
+  redirect-based allowlist bypass; the sink module itself never differs
+  between twins, mirroring `CC-LAB-0093`'s own "sink is neutral, the
+  transform is what secures/breaks it" shape). Fail-closed on validation
+  failure: the secure twin's transform raises `ValueError`, propagated as
+  Django's own real exception-handling path (`DEBUG=False`-safe, no
+  stack-trace leak, the same mechanism `CC-LAB-0090`'s own test already
+  proved) rather than a hand-rolled `try/except` wrapper. Passes Tier
+  0/Tier 3 for the new manifest (`lab/manifests/
+  phase_c_picktrail_link_preview.yaml`).
+
+  **Shared-schema dependency, landed as its own standalone, pre-requisite
+  entry** (`CC-LAB-0094a`, same date): `fuzzlab/labels/schemas/
+  labels.schema.json`'s `vuln_class`/`sink_context` enums widened to add
+  `ssrf`/`network` (plus five other values from the same widening) —
+  needed for this entry's own ground truth (below) but landed separately
+  since the schema is shared across every active category branch;
+  adopts category 3's own already-reviewed widening (`fa8207d` on
+  `claude/category-3-build-iuu5k9`) byte-identically rather than
+  inventing different values, verified via `diff` and via
+  `fuzzlab.labels.contract.load()` against every existing ground-truth
+  directory.
+- **FR-LAB-106** *(real live-boot proof of the SSRF differential, both
+  directions, plus the `PA-0034` adversarial-direction test and
+  ground-truth extension; `CC-LAB-0094`, 2026-09-23).* Real, executed,
+  skip-guarded (PA-0005) proof in `tests/
+  test_labgen_django_live_boot_picktrail_link_preview.py`, against a new,
+  real, stdlib-only "internal service" HTTP-server fixture
+  (`fuzzlab.labgen.conformance.django_live_boot.InternalServiceFixture`,
+  bound via `("127.0.0.1", 0)` so port allocation and bind are one atomic
+  call — no separate find-free-port race to mitigate; torn down via
+  `server.shutdown()` + `server.server_close()` + a bounded
+  `thread.join(timeout=5)` on its `daemon=True` serving thread, a
+  concrete mechanism, not a `PA-0012` citation — `PA-0012` is
+  asyncio-specific and does not apply to this stdlib-threaded fixture):
+  the vulnerable twin's real response genuinely relays the fixture's own
+  secret marker back to the caller (a real SSRF, not just "no validation
+  code is present" at a source-level glance); **and, proven separately**
+  — the secure twin genuinely rejects the identical payload with a real
+  Django 500, specifically via the resolved-IP check (both schemes are
+  allowed, so only that check can be blocking it). Per `PA-0034`, a third
+  test proves the allowlist doesn't fail closed on everything: a
+  well-formed, real, public, JSON-returning URL must still succeed on
+  the secure twin — skip-guarded by a new, dedicated capability probe,
+  `django_live_boot.external_http_probe(url)`, pointed at that exact URL
+  (per `PA-0035`: reusing `django_boot_available()`'s own PyPI-
+  reachability probe here would only prove pip-install-time reachability,
+  a different operation from an app-level `requests.get()` at test-run
+  time — the same class of mistake `BUG-0033` was for `composer`, not
+  repeated here). Ground truth extended (not a new directory) with
+  `PT-0003` in `lab/ground-truth-picktrail-django/` (`vuln_class:
+  "ssrf"`, `sink_context: "network"`), loaded for real and cross-checked,
+  independently of the emitter's own internals, against a real booted
+  request at the exact URL/method/param it names, pointed at the
+  internal-service fixture.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

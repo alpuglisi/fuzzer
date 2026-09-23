@@ -28,6 +28,19 @@
       "rendering": "server",
       "stack": "django",
       "notes": "PicTrail comment body rendered through Django's real template engine after being wrapped in django.utils.safestring.mark_safe(), which marks it 'already safe' and defeats Django's own default template auto-escaping (CWE-79). A deliberately simplified, generic mark_safe()-on-raw-value shape -- not the full @mention/#hashtag auto-linking footgun researched in docs/research/category2-social-ugc-functionality-and-cwe-research.md §4 row 2, which stays a later, separately-scoped increment. This generator's read_stored_field source models the sink side only (no write endpoint is generated) -- source_url deliberately omitted, not silently implied. CC-LAB-0093."
+    },
+    {
+      "case_id": "PT-0003",
+      "url": "/upload/link-preview",
+      "method": "GET",
+      "param": "url",
+      "location": "query",
+      "vuln_class": "ssrf",
+      "sink_context": "network",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "stack": "django",
+      "notes": "PicTrail's link-preview upload flow fetches an attacker-supplied url server-side via requests.get() with no scheme or resolved-IP check (CWE-918), returning a JSON preview. Ports docs/research/corpus-examples/ssrf/python/vulnerable-oembed-unfurl-4.py almost verbatim. lab/safety_matrix.yaml's own server_side_http_fetch sink family: unchecked_url_fetch/no_effect (this case) vs. scheme_and_resolved_ip_allowlist/neutralises (the secure twin, LABGEN-DJ-0012, not separately ground-truthed here -- same convention as PT-0001/PT-0002's own secure twins). CC-LAB-0094."
     }
   ]
 }
