@@ -3,6 +3,177 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0038 — `GoTemplateSstiStrategy`: closes `go_net_http`'s SSTI detection gap (2026-09-23)
+
+- Change: builds a genuinely new, Go-`text/template`-syntax-aware
+  confirmation strategy closing the real, honestly-documented detection
+  gap `CC-LAB-0196` recorded: the existing generic `SstiStrategy`
+  (`fuzzlab/oracle/strategies.py`, `mechanism="evaluation-marker"`) does
+  NOT confirm Twitch's `TWCH-0012` SSTI cell (`/channels/commands`,
+  `go_net_http`'s first `ssti`/`template_render` instance) because its
+  arithmetic-product-marker payloads (`_ssti_payloads()`, wrapping
+  `a*b` in five template-delimiter styles) are structurally incompatible
+  with Go's `text/template`: its action grammar has NO infix arithmetic
+  operators at all, so two of the five payloads fail to parse outright
+  and the other three are echoed back as inert literal text (real,
+  verified via `go run` and a real booted target).
+  1. **`fuzzlab/oracle/strategies.py`**: `GoTemplateSstiStrategy`
+     (`vuln_class="ssti"`, `mechanism="go-template-len-marker"`). Uses
+     `text/template`'s own builtin functions (`len`, `index`, `printf`/
+     `print`, the comparison functions), none of which need an infix
+     arithmetic operator: `{{ len "AAA...A" }}` (a literal string of `N`
+     `A` characters, `N` freshly randomized per probe — a 3-digit range,
+     `secrets.randbelow(900) + 100`, matching `SstiStrategy`'s own `a`/
+     `b` range) evaluates to the decimal integer `N` only if the engine
+     genuinely parses the action and invokes the builtin.
+     **False-positive defense, a differential over a single-probe
+     heuristic** (this project's own established preference, per
+     `InsecureDeserializationTypeConfusionStrategy`'s own docstring): a
+     single probe's random `N` coincidentally already appearing
+     somewhere in an unrelated normal response is a real, if small,
+     risk. Sends TWO independent probes with two distinct random
+     lengths `N1 != N2` and confirms only when: neither probe's own
+     literal payload is echoed back verbatim (rules out reflection);
+     probe 1's response contains `N1` as a whole decimal token
+     (word-boundary matched, so `142` doesn't false-match inside
+     `31420`); probe 2's response contains `N2` likewise; and NEITHER
+     response also contains the OTHER probe's length as a whole token (a
+     cross-contamination guard against a cached/stale/echo-everything
+     response). For a JSON whole-body point (`content_type ==
+     "application/json"`), the marker expression is wrapped as
+     `{"template": "<expr>"}` — this lab's own `user_supplied_template_
+     compile` sink shape, the same per-target field-name-hardcoding
+     convention `PriceIntegrityBypassStrategy`'s/`MassAssignmentPrivileged
+     FieldStrategy`'s own docstrings already use; a plain named param
+     candidate sends the expression unwrapped.
+     **Design decision, checked against this project's own established
+     architecture before deciding, not assumed**: a NEW strategy under
+     the same `server-side-template-injection` category, not a widened
+     `SstiStrategy`. `default_strategies()`'s own registration pattern
+     and `Oracle.confirm()`'s multi-strategy-per-category dispatch
+     (tries every strategy whose `category` matches in order, stopping
+     at the first confirming verdict, no code change needed to add a
+     second strategy under one category) already establish exactly this
+     "cheaper/broader mechanism first, specialized fallback for a syntax
+     family the first one structurally cannot reach next" layering
+     (`SsrfInBandMarkerStrategy`/`SsrfOobStrategy`, M1 timing/
+     `CommandInjectionOobStrategy`). Folding this into `SstiStrategy.
+     confirm()` would make every non-Go target pay for two wasted
+     requests on top of its own five, and would conflate two
+     structurally different marker techniques in one method, against
+     this project's one-mechanism-per-strategy convention. Registered
+     directly after `SstiStrategy` in `default_strategies()`.
+  2. **No `fuzzlab/audit/` rule change** — verified, not assumed:
+     `R-SSTI` already nominates on `sink_context`/location
+     (`CC-AUD-0011`), not per-mechanism, so it already covers this
+     candidate; grepped to confirm.
+- Impact (other components / project): `fuzzlab/oracle/strategies.py`
+  (new class + one line in `default_strategies()`); test-only changes to
+  `tests/test_oracle_vectors.py` (5 new fake-sender unit tests),
+  `tests/test_labgen_go_live_boot.py` (1 new live-boot test), and
+  `tests/test_multitarget_category4.py` (Twitch's own scored-recall
+  assertions re-derived from `9/12` to `10/12`, `tp` 9 -> 10,
+  macro-recall re-derived, per `PA-0042`). No schema, rule, or
+  cross-component interface change. `spring_boot`'s existing `SstiStrategy`
+  coverage (TrackerNest's `TNEST-0001`) is additive-only and unaffected —
+  re-verified live, not assumed (see Deliverables).
+- Risk (level; mitigation or accepted-risk justification): low. The new
+  strategy is purely additive (a new class + one registration-list
+  entry); it does not modify `SstiStrategy` or any shared helper. Its own
+  false-positive risk (a coincidental digit match) is mitigated by the
+  two-probe, no-cross-contamination differential described above, the
+  same evidentiary bar this project's other differential strategies
+  (`InsecureDeserializationTypeConfusionStrategy`, `PriceIntegrityBypass
+  Strategy`) already use. Its own known limitation (the JSON-field-name
+  hardcode `"template"`) is stated explicitly in both the class docstring
+  and this entry, matching the project's existing convention for
+  per-target field-name-hardcoded strategies — a differently-shaped JSON
+  whole-body SSTI sink fails closed rather than misfiring.
+- Deliverables:
+  - [x] `GoTemplateSstiStrategy` implemented and registered in
+    `default_strategies()` — done.
+  - [x] Unit tests (`tests/test_oracle_vectors.py`, fake-sender based):
+    vulnerable-evaluation case confirms; reflection-only, static/fixed-
+    response (including one with unrelated decimal digits — the named
+    false-positive class), and stale/cross-contaminated-response cases
+    each fail closed — done, 5/5 pass.
+  - [x] Real live-boot proof against the real booted `LABGEN-GO-0023`/
+    `0024` Twitch cell pair (`tests/test_labgen_go_live_boot.py::
+    test_go_template_ssti_strategy_closes_the_generalization_gap`):
+    confirms the vulnerable twin, correctly fails closed on the secure
+    twin (fixed-map lookup, never evaluates `len` on caller input) —
+    done, verified against a real `go build`/boot/HTTP round trip.
+  - [x] Re-verified `spring_boot`'s existing TrackerNest SSTI coverage
+    stays intact, unmodified: `tests/test_labgen_spring_boot_live_boot.py`'s
+    two SSTI live-boot tests and `tests/test_labgen_spring_boot_
+    trackernest_multitarget.py` (which drives `TNEST-0001` through
+    `SstiStrategy` via the real `run_targets` pipeline) re-run directly
+    against a real `mvn package`/boot — done, both green, no regression.
+  - [x] Real `fuzzlab.harness.multitarget` pipeline re-run
+    (`tests/test_multitarget_category4.py::
+    test_both_apps_run_through_multitarget_for_real`): Twitch's own
+    real, scored recall moves from `9/12` to `10/12` (`tp` 9 -> 10) —
+    done, verified against a real pipeline run, not assumed.
+  - [x] Per `PA-0042`/`BUG-0040`: grepped and re-ran `tests/
+    test_multitarget_category4.py`, `tests/test_auto.py`, `tests/
+    test_labels_contract_category4.py` regardless of `slow` marker —
+    done. `test_labels_contract_category4.py`/`test_auto.py` have no
+    Twitch-cardinality-dependent hardcoded count affected by this
+    change (ground-truth cardinality is unchanged — a pure detection
+    increment, not a lab-side change); both re-run and pass unmodified.
+  - [x] Full non-slow suite re-run before commit — done (2082 passed, 18
+    pre-existing unrelated failures — `gitleaks`/`scikit-learn` missing
+    from this sandbox, matching the stable pre-existing baseline; count
+    only grew, no new failures).
+  - [x] `CHANGELOG.md`, `docs/components/07-fuzzing-harness-and-oracle/
+    requirements.md` (`FR-FUZZ-24`), `docs/LAB_MULTI_CATEGORY_SECOND_
+    TARGETS_PLAN.md`'s category-4 tracker row, `docs/ARCHITECTURE.md`'s
+    current-status paragraph — done.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0196`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) — substituted with a documented,
+  rigorous self-review performed and recorded here rather than silently
+  skipping the gate: (1) **accuracy** — confirmed by direct source
+  inspection, not assumed: `SstiStrategy`'s own `_ssti_payloads()`,
+  `default_strategies()`'s own registration order, `Oracle.confirm()`'s
+  dispatch logic, `R-SSTI`'s own `when` clause, the real vulnerable/
+  secure Go sink templates (`user_supplied_template_compile.go.j2`/
+  `file_loaded_template_name.go.j2`), and `PriceIntegrityBypassStrategy`'s/
+  `InsecureDeserializationTypeConfusionStrategy`'s own docstrings were
+  all read directly before designing; the highest-used `CC-FUZZ`/
+  `FR-FUZZ`/`CC-AUD` numbers were confirmed by grep (not merely
+  mentioned-anywhere) before assigning `CC-FUZZ-0038`/`FR-FUZZ-24`; a
+  first draft mistakenly sent the raw marker expression as the entire
+  JSON whole-body candidate's value (not wrapped in the sink's own
+  `{"template": ...}` field shape) — caught by actually running the real
+  `test_multitarget_category4.py` pipeline test (which failed, `tp=9`
+  not `10`) rather than assumed correct from the fake-sender unit tests
+  alone, and fixed before landing; this correction is recorded here as a
+  real caught-before-landing mistake, not silently omitted. (2)
+  **adequacy** — checked that no rule/schema change was needed (grepped
+  `R-SSTI`'s own `when` clause; confirmed it nominates on
+  `sink_context`/location already); checked this does not silently
+  duplicate existing detection (grepped for any prior `ssti`-category
+  strategy besides `SstiStrategy`: absent); verified live against BOTH
+  the real booted vulnerable AND secure Go twins (not just the
+  vulnerable one) to rule out a false positive on the secure twin
+  specifically; verified TrackerNest's own existing `SstiStrategy`
+  coverage is genuinely unaffected by re-running its own live-boot AND
+  real-pipeline tests directly, not assumed unaffected by code
+  inspection alone; re-ran `tests/test_auto.py`/`tests/
+  test_labels_contract_category4.py` directly per `PA-0042`/`BUG-0040`
+  rather than assuming they were unaffected by analogy to prior entries;
+  and ran the full non-slow suite before committing, confirming the
+  pass count only grew against the stable 18-failure baseline.
+- Effectiveness (assessed 2026-09-23): met its intent. `TWCH-0012` moved
+  from a documented false negative to a real, confirmed finding through
+  the actual `fuzzlab.harness.multitarget` pipeline (`tp` 9 -> 10,
+  recall `9/12` -> `10/12`), verified against a real booted Go app, with
+  zero regression to `spring_boot`'s existing SSTI coverage (re-verified
+  live) and zero rule/schema change needed.
+
 ### CC-FUZZ-0037 — `PriceIntegrityBypassStrategy`: real detection for `price_integrity_bypass` (2026-09-23)
 
 - Change: builds the deliberately-deferred detection follow-on

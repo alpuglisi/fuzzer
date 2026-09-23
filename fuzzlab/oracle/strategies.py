@@ -297,6 +297,154 @@ class SstiStrategy(ConfirmationStrategy):
         return None
 
 
+class GoTemplateSstiStrategy(ConfirmationStrategy):
+    """M4b: confirms SSTI on Go's `text/template` syntax, which `SstiStrategy`'s
+    own arithmetic-marker payloads cannot reach (CC-LAB-0196/CC-FUZZ-0038).
+
+    `SstiStrategy`'s `_ssti_payloads()` wraps an infix arithmetic expression
+    (`a*b`) in five template-engine delimiter styles (Jinja2/FreeMarker/OGNL/
+    EL/ERB-ish). That marker technique is structurally incompatible with
+    Go's `text/template`: its action grammar has NO infix arithmetic
+    operators at all (a hard syntax restriction, empirically verified via a
+    real `go run` check and a real booted target -- see
+    `tests/test_labgen_go_live_boot.py::test_ssti_go_text_template_syntax_
+    mismatch`/`test_ssti_strategy_does_not_generalize_to_go_text_template`),
+    so `{{a*b}}`/`${{a*b}}` fail to parse and the other three delimiter
+    styles contain no `{{`/`}}` at all and are echoed back as inert literal
+    text. This is a genuine syntax-family gap, not a tunable threshold, so
+    it needs a different marker technique entirely rather than a wider
+    `_ssti_payloads()` list.
+
+    **The marker.** `text/template`'s own built-in functions
+    (https://pkg.go.dev/text/template#hdr-Functions) include `len`, `index`,
+    `printf`/`print`, and the comparison functions (`eq`/`ne`/`lt`/`le`/
+    `gt`/`ge`) -- none need an infix arithmetic operator. `len` is the
+    simplest: `{{ len "AAAA...A" }}` (a literal string of `N` `A`
+    characters) evaluates to the decimal integer `N` if, and only if, the
+    template engine actually parses the `{{ }}` action and invokes the
+    built-in -- a target that merely echoes the payload as literal text (or
+    HTML-escapes/reflects it, or rejects it) never produces the decimal
+    string `N` in its response body. `N` is randomized fresh per probe (this
+    project's own randomized-marker convention -- `SstiStrategy`'s own
+    `a`/`b` are `secrets.randbelow(900) + 100`; this strategy mirrors that
+    same 3-digit range so the produced value is short enough to embed
+    cheaply but long enough that its exact decimal value coincidentally
+    appearing in an unrelated part of a normal response is very unlikely
+    for any *one* probe).
+
+    **Why one probe alone is not enough (false-positive risk, thought
+    through the same way `PriceIntegrityBypassStrategy`'s/
+    `UnrestrictedFileUploadContentTypeTrustStrategy`'s own docstrings do).**
+    A single `{{ len "..." }}` probe whose expected 3-digit `N` happens to
+    already appear somewhere in a normal, unrelated response (a timestamp,
+    a byte count, a session field, an unrelated numeric ID) would
+    false-positive on a target that isn't evaluating anything at all. This
+    project's own established defense against exactly that shape of risk
+    is a differential, not a tighter single-probe heuristic (the same
+    "differential over single-probe heuristic" preference
+    `InsecureDeserializationTypeConfusionStrategy`'s own docstring states
+    explicitly). So this strategy sends TWO independent probes with two
+    distinct, freshly randomized lengths `N1 != N2`, and confirms only when
+    ALL of: (a) neither probe's own literal template-source payload is
+    echoed back verbatim (rules out dumb reflection); (b) probe 1's
+    response contains `N1` as a whole decimal token (word-boundary
+    matched, so `N1=142` doesn't false-match inside `31420`); (c) probe 2's
+    response contains `N2` likewise; (d) NEITHER response also contains the
+    OTHER probe's length as a whole token (`N2` must not leak into probe
+    1's response, and `N1` must not leak into probe 2's) -- a
+    cross-contamination guard against a cached/stale/echo-everything
+    response that would otherwise pass (a) and (b)/(c) independently but
+    isn't actually computing a fresh, request-specific `len()` each time.
+    Requiring two independent random values to each land correctly, with no
+    cross-bleed, before confirming is astronomically less likely to
+    coincidence-match than a single probe (each length is a fresh 3-digit
+    draw out of 900 possibilities; both matching by pure coincidence AND
+    landing on the correct probe's own value is the product of two already
+    small per-probe odds).
+
+    **Design decision: a new strategy, not a widened `SstiStrategy`
+    (checked against this project's own established architecture before
+    deciding).** `default_strategies()`'s own registration order already
+    establishes a "cheaper/broader mechanism first, specialized fallback
+    for a syntax family the first one structurally cannot reach next"
+    layering for exactly this shape of gap -- `SsrfInBandMarkerStrategy`
+    before `SsrfOobStrategy`, M1 timing before `CommandInjectionOobStrategy`
+    -- and `Oracle.confirm()` already tries every strategy whose `category`
+    matches a candidate in order, stopping at the first confirming verdict,
+    with NO code change needed to add a second strategy under the same
+    `category`. Folding this into `SstiStrategy.confirm()` itself would mean
+    every non-Go target pays for two additional wasted requests (the `len`
+    marker) on top of its own five, and would conflate two structurally
+    different marker techniques (arithmetic-infix vs. builtin-function-call)
+    in one method -- against this project's own one-mechanism-per-strategy
+    convention every other multi-mechanism-per-category case (SSRF, command
+    injection) already follows. Registered directly after `SstiStrategy` in
+    `default_strategies()`: `SstiStrategy` is tried first (it is already the
+    established, broader-coverage mechanism across the arithmetic-evaluating
+    engines this lab already has -- Jinja2/OGNL/FreeMarker/EL), and this
+    strategy runs as the fallback specifically for the syntax family
+    `SstiStrategy` cannot parse into evaluation at all, exactly the
+    "cheaper/broader first, specialized fallback next" shape.
+    """
+    vuln_class = "ssti"
+    mechanism = "go-template-len-marker"
+    category = "server-side-template-injection"
+
+    _LEN_RANGE = 900   # 3-digit lengths (100-999), matching SstiStrategy's own range
+
+    # Known limitation, not silently swept under the rug (the same per-target
+    # field-name-hardcoding convention `PriceIntegrityBypassStrategy`'s/
+    # `MassAssignmentPrivilegedFieldStrategy`'s own docstrings already use):
+    # for a JSON whole-body point (`content_type == "application/json"`), the
+    # template expression must be sent under this exact field name -- this
+    # project's own `go_net_http` `user_supplied_template_compile` sink shape
+    # (`{"template": "..."}"`, CC-LAB-0196). A differently-shaped JSON
+    # whole-body SSTI sink (a different field name) has nothing for this
+    # strategy to build, so it would send an unrecognized field and correctly
+    # fail closed rather than misfire -- it does not, and cannot, positively
+    # confirm the *absence* of this vulnerability class for a differently-
+    # shaped target, only decline to guess. A non-whole-body candidate (a
+    # plain named query/form param) needs no wrapping at all: the payload is
+    # sent as that param's raw value directly.
+    _JSON_FIELD = "template"
+
+    def _random_length(self) -> int:
+        return secrets.randbelow(self._LEN_RANGE) + 100
+
+    @staticmethod
+    def _expr(n: int) -> str:
+        return '{{ len "%s" }}' % ("A" * n)
+
+    def _payload(self, candidate: Candidate, n: int) -> str:
+        expr = self._expr(n)
+        if candidate.content_type == "application/json":
+            import json
+            return json.dumps({self._JSON_FIELD: expr})
+        return expr
+
+    @staticmethod
+    def _contains_token(text: str, n: int) -> bool:
+        return re.search(rf"(?<!\d){n}(?!\d)", text) is not None
+
+    def confirm(self, candidate, sender):
+        n1 = self._random_length()
+        n2 = self._random_length()
+        while n2 == n1:                            # degenerate collision; redraw rather than reuse
+            n2 = self._random_length()
+        expr1, expr2 = self._expr(n1), self._expr(n2)
+        payload1, payload2 = self._payload(candidate, n1), self._payload(candidate, n2)
+        text1 = self._send(sender, candidate, payload1).text or ""
+        text2 = self._send(sender, candidate, payload2).text or ""
+        if expr1 in text1 or expr2 in text2:
+            return None                            # literal reflection, not evaluation
+        own1, own2 = self._contains_token(text1, n1), self._contains_token(text2, n2)
+        cross1, cross2 = self._contains_token(text1, n2), self._contains_token(text2, n1)
+        if own1 and own2 and not cross1 and not cross2:
+            return Verdict(True, self.vuln_class, self.mechanism,
+                           {"lengths": [n1, n2], "payloads": [payload1, payload2]})
+        return None
+
+
 class PathTraversalStrategy(ConfirmationStrategy):
     """M7: a file-content marker (/etc/passwd) appears in the response."""
     vuln_class = "file-inclusion"
@@ -1415,7 +1563,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
     """
     return [SqliErrorStrategy(), SqliBooleanStrategy(), SqliTimingStrategy(),
             ReflectedXssStrategy(), DomXssStrategy(browser), StoredXssStrategy(browser),
-            OpenRedirectStrategy(), SstiStrategy(),
+            OpenRedirectStrategy(), SstiStrategy(), GoTemplateSstiStrategy(),
             PathTraversalStrategy(), CommandInjectionStrategy(),
             CommandInjectionOobStrategy(oob), RegexDosStrategy(),
             SsrfInBandMarkerStrategy(oob), SsrfOobStrategy(oob),

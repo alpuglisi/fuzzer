@@ -438,6 +438,119 @@ rewards) derives from it.
     test_both_apps_run_through_multitarget_for_real`, extended): Twitch's
     real, scored recall in that boot moves from 8/9 to 9/10.
 
+- **FR-FUZZ-24** *(`GoTemplateSstiStrategy`; `CC-FUZZ-0038`,
+  2026-09-23).* The oracle supports real **SSTI confirmation on Go's
+  `text/template` syntax** — closing `CC-LAB-0196`'s own honestly-
+  documented detection gap for Twitch's `TWCH-0012` (`/channels/
+  commands`, `go_net_http`'s first `ssti`/`template_render` instance),
+  reusing `R-SSTI`'s existing candidate-generation rule as-is (it
+  already nominates on `sink_context`/location, not per-mechanism, so no
+  audit-side change was needed):
+  - **The gap this closes.** The existing `SstiStrategy`'s
+    `_ssti_payloads()` wraps an infix arithmetic expression (`a*b`) in
+    five template-engine delimiter styles. That marker technique is
+    structurally incompatible with Go's `text/template`: its action
+    grammar has NO infix arithmetic operators at all (verified via a
+    real `go run` check and a real booted target,
+    `tests/test_labgen_go_live_boot.py::test_ssti_go_text_template_
+    syntax_mismatch`/`test_ssti_strategy_does_not_generalize_to_go_
+    text_template`), so two of the five payloads fail to parse outright
+    and the other three are echoed back as inert literal text.
+  - `GoTemplateSstiStrategy` (`vuln_class="ssti"`, `mechanism=
+    "go-template-len-marker"`) uses a different marker technique
+    entirely, built on `text/template`'s own builtin functions (`len`,
+    `index`, `printf`/`print`, the comparison functions), none of which
+    need an infix arithmetic operator: `{{ len "AAA...A" }}` (a literal
+    string of `N` `A` characters) evaluates to the decimal integer `N`
+    only if the engine genuinely parses the action and invokes the
+    builtin. `N` is randomized fresh per probe (3-digit range,
+    `secrets.randbelow(900) + 100`, matching `SstiStrategy`'s own `a`/
+    `b` range).
+  - **False-positive defense, a differential over a single-probe
+    heuristic** (this project's own established preference, per
+    `InsecureDeserializationTypeConfusionStrategy`'s own docstring): a
+    single probe's random 3-digit `N` coincidentally already appearing
+    somewhere in an unrelated normal response is a real, if small, risk.
+    So this strategy sends TWO independent probes with two distinct
+    random lengths `N1 != N2` and confirms only when ALL hold: neither
+    probe's own literal payload is echoed back verbatim (rules out dumb
+    reflection); probe 1's response contains `N1` as a whole decimal
+    token (word-boundary matched); probe 2's response contains `N2`
+    likewise; and NEITHER response also contains the OTHER probe's
+    length as a whole token (a cross-contamination guard against a
+    cached/stale/echo-everything response that would otherwise pass the
+    first three checks without actually computing a fresh,
+    request-specific `len()` each time).
+  - **Design decision: a new strategy under the same category, not a
+    widened `SstiStrategy`** — checked against this project's own
+    established architecture (`default_strategies()`'s own registration
+    order, `Oracle.confirm()`'s multi-strategy-per-category dispatch)
+    before deciding, not assumed. `Oracle.confirm()` already tries every
+    strategy whose `category` matches a candidate in order, stopping at
+    the first confirming verdict, with no code change needed to add a
+    second strategy under the same `category` — the same
+    "cheaper/broader mechanism first, specialized fallback for a syntax
+    family the first one structurally cannot reach next" layering
+    `SsrfInBandMarkerStrategy`/`SsrfOobStrategy` and M1 timing/
+    `CommandInjectionOobStrategy` already establish. Folding this into
+    `SstiStrategy.confirm()` itself would make every non-Go target pay
+    for two additional wasted requests on top of its own five, and would
+    conflate two structurally different marker techniques in one method,
+    against this project's one-mechanism-per-strategy convention.
+    Registered directly after `SstiStrategy` in `default_strategies()`
+    (category `server-side-template-injection`): `SstiStrategy` is tried
+    first (broader existing coverage across the arithmetic-evaluating
+    engines this lab already has), and this strategy is the fallback
+    specifically for the syntax family `SstiStrategy` cannot parse into
+    evaluation at all.
+  - **JSON whole-body-point support, gated and hardcoded like this
+    project's own established convention** (`PriceIntegrityBypass
+    Strategy`'s `monthly_charge`/`plan_tier`, `MassAssignmentPrivileged
+    FieldStrategy`'s `is_partner`): for a `content_type ==
+    "application/json"` candidate, the marker expression is wrapped as
+    `{"template": "<expr>"}` — this lab's own `user_supplied_template_
+    compile` sink shape. A non-whole-body candidate (a plain named
+    query/form param) sends the marker expression directly, unwrapped.
+    A differently-shaped JSON whole-body SSTI sink (a different field
+    name) has nothing for this strategy to build and correctly fails
+    closed rather than misfiring.
+  - Unit tests (`tests/test_oracle_vectors.py`, fake-sender based,
+    mirroring `SstiStrategy`'s own test structure in the same file): the
+    vulnerable case (a fake sender that genuinely evaluates `len`)
+    confirms; a mere-reflection sender, a static/fixed-response sender
+    (including one containing unrelated decimal digits, the false-
+    positive class this strategy's own docstring names explicitly), and
+    a stale/cross-contaminated sender (one that always echoes back the
+    first probe's own result) each fail closed.
+  - Real, executed live-boot proof
+    (`tests/test_labgen_go_live_boot.py::test_go_template_ssti_
+    strategy_closes_the_generalization_gap`, driven through a real
+    `GoLiveBootHarness` boot of `LABGEN-GO-0023`/`0024`, never a fake
+    sender): the strategy confirms the real vulnerable twin and
+    correctly fails closed on the real secure twin (which only ever
+    does a fixed-map lookup and never evaluates `len` on caller input).
+  - **Existing coverage re-verified unmodified, not assumed unaffected**:
+    `spring_boot`'s TrackerNest SSTI live-boot tests
+    (`tests/test_labgen_spring_boot_live_boot.py::
+    test_ssti_vulnerable_twin_evaluates_ognl_expression_for_real`/
+    `test_ssti_secure_twin_never_evaluates_the_tainted_value`) and its
+    real-pipeline SSTI coverage
+    (`tests/test_labgen_spring_boot_trackernest_multitarget.py`, which
+    drives `TNEST-0001` through `SstiStrategy` via the real
+    `fuzzlab.harness.multitarget` pipeline) were re-run directly against
+    a real boot and stay green — `GoTemplateSstiStrategy` is additive
+    only (a new, separately-scoped strategy tried after `SstiStrategy`
+    in the same category), never touching `SstiStrategy`'s own code.
+  - Verified through the real `fuzzlab.harness.multitarget` pipeline
+    (`tests/test_multitarget_category4.py::
+    test_both_apps_run_through_multitarget_for_real`, extended): Twitch's
+    `TWCH-0012` is now a real, confirmed finding; ground-truth
+    cardinality stays 12 positives (a pure detection increment, not a
+    lab-side change), `tp` moves from 9 to 10, and Twitch's own real,
+    scored recall moves from `9/12` to `10/12` (only `webhook_signature`
+    and `path_traversal` remain undetected, each for its own distinct,
+    tracked reason).
+
 - **FR-FUZZ-19** *(`JwtAlgNoneConfusionStrategy`; `CC-FUZZ-0033`,
   2026-09-23).* The oracle supports real **JWT algorithm-confusion
   (CWE-347) confirmation**, paired with `FR-AUD-11`'s candidate-

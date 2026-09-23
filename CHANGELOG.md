@@ -4,6 +4,35 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (FUZZ: `GoTemplateSstiStrategy` closes `go_net_http`'s SSTI detection gap, CC-FUZZ-0038/FR-FUZZ-24)
+- New oracle confirmation strategy for SSTI on Go's `text/template`
+  syntax, closing the real, honestly-documented detection gap
+  `CC-LAB-0196` recorded: the existing generic `SstiStrategy`'s
+  arithmetic-product-marker payloads (`a*b`) do not generalize to
+  `text/template`'s action grammar (no infix arithmetic operators at
+  all). `GoTemplateSstiStrategy` instead uses `text/template`'s own
+  builtin `len` function: `{{ len "AAA...A" }}` evaluates to the literal
+  decimal length only if the engine genuinely parses and executes it.
+  False-positive risk (a single probe's random length coincidentally
+  matching unrelated response content) is closed with a two-probe
+  differential — two independent random lengths must each appear
+  correctly with no cross-contamination — the same "differential over
+  single-probe heuristic" preference `InsecureDeserializationType
+  ConfusionStrategy` already established. Registered directly after
+  `SstiStrategy` under the same `server-side-template-injection`
+  category (a new strategy, not a widened `SstiStrategy` — matches
+  `Oracle.confirm()`'s existing multi-strategy-per-category dispatch and
+  the cheaper/broader-first, specialized-fallback-next layering
+  `SsrfInBandMarkerStrategy`/`SsrfOobStrategy` already use); no `R-SSTI`
+  rule change needed (it already nominates on `sink_context`/location).
+  Verified live against the real booted `LABGEN-GO-0023`/`0024` Twitch
+  cell pair (confirms vulnerable, fails closed on secure), and
+  `spring_boot`'s existing TrackerNest SSTI coverage was re-verified
+  live and stays green, unmodified. Twitch's own real, scored recall
+  through the real `fuzzlab.harness.multitarget` pipeline moves from
+  `9/12` to `10/12` (`tp` 9 -> 10), re-derived per `PA-0042` and
+  re-verified against a real pipeline run.
+
 ## 2026-09-23 (LAB: Twitch's 12th real page, first ssti/template_render instance on go_net_http, CC-LAB-0196/FR-LAB-136)
 - Target lab: `POST /channels/commands` (a custom chat-command definition
   endpoint — a real, well-documented streaming-bot feature, Nightbot/

@@ -8,6 +8,7 @@ from fuzzlab.oracle import Candidate, category_to_oracle_class
 from fuzzlab.oracle.probe import Probe
 from fuzzlab.oracle.strategies import (
     CommandInjectionStrategy,
+    GoTemplateSstiStrategy,
     OpenRedirectStrategy,
     PathTraversalStrategy,
     SstiStrategy,
@@ -61,6 +62,76 @@ def test_ssti_not_confirmed_on_reflection_without_eval():
         def send(self, url, param, value, timing=False, method="GET", location="query"):
             return Probe(200, f"<p>{value}</p>", headers={})
     assert SstiStrategy().confirm(_cand("ssti"), ReflectSender()) is None
+
+
+# --- Go text/template SSTI (M4b, CC-FUZZ-0038) --------------------------------
+
+def test_go_template_ssti_confirmed_when_len_evaluated():
+    """A fake sender that genuinely evaluates `{{ len "..." }}` (mirroring
+    real Go `text/template` behavior) is confirmed."""
+    class GoTemplateSender:
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            m = re.search(r'\{\{\s*len\s+"(A*)"\s*\}\}', value)
+            if m:
+                return Probe(200, str(len(m.group(1))), headers={})
+            return Probe(200, value, headers={})
+    v = GoTemplateSstiStrategy().confirm(_cand("ssti"), GoTemplateSender())
+    assert v is not None and v.confirmed and v.mechanism == "go-template-len-marker"
+    n1, n2 = v.evidence["lengths"]
+    assert n1 != n2 and 100 <= n1 <= 999 and 100 <= n2 <= 999
+
+
+def test_go_template_ssti_not_confirmed_on_reflection_without_eval():
+    """Mirrors the real go_net_http vulnerable twin's own SstiStrategy false
+    negative in reverse: a target that just echoes the literal payload back
+    (never evaluates it) must not confirm."""
+    class ReflectSender:
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            return Probe(200, f"<p>{value}</p>", headers={})
+    assert GoTemplateSstiStrategy().confirm(_cand("ssti"), ReflectSender()) is None
+
+
+def test_go_template_ssti_not_confirmed_when_response_is_static():
+    """A target that always returns the same fixed page regardless of input
+    (e.g. Go's secure `file_loaded_template_name` twin, which only ever does
+    a fixed-map lookup) must not confirm even if that static page happens to
+    contain some unrelated decimal digits."""
+    class StaticSender:
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            return Probe(200, "unknown variable (build 500, uptime 342h)", headers={})
+    assert GoTemplateSstiStrategy().confirm(_cand("ssti"), StaticSender()) is None
+
+
+def test_go_template_ssti_not_confirmed_on_stale_cross_contaminated_response():
+    """A target that always echoes back the FIRST probe's own result (a
+    cached/stale-response bug, or one that doesn't actually vary per
+    request) must not confirm: probe 2's response would contain N1 (a
+    cross-contamination leak) instead of, or in addition to, its own N2."""
+    calls = []
+
+    class StaleSender:
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            m = re.search(r'\{\{\s*len\s+"(A*)"\s*\}\}', value)
+            n = len(m.group(1)) if m else 0
+            calls.append(n)
+            # Always answers with the FIRST call's own length, regardless of
+            # what was actually sent this time -- a stale/cached response.
+            return Probe(200, str(calls[0]), headers={})
+
+    assert GoTemplateSstiStrategy().confirm(_cand("ssti"), StaleSender()) is None
+
+
+def test_go_template_ssti_not_confirmed_on_single_probe_coincidental_digit_match():
+    """The false-positive class this strategy's own docstring names
+    explicitly: a normal, non-evaluating response that happens to already
+    contain SOME decimal digits (an unrelated build/status number) must not
+    confirm just because one of the two probes' random lengths happens not
+    to appear -- both must independently match, and this response never
+    contains either fresh random length at all."""
+    class BoilerplateSender:
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            return Probe(200, "status 200, build 42", headers={})
+    assert GoTemplateSstiStrategy().confirm(_cand("ssti"), BoilerplateSender()) is None
 
 
 # --- path traversal / LFI (M7) ----------------------------------------------

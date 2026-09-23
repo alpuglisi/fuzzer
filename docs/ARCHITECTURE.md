@@ -159,7 +159,7 @@ tracked in the requirements files, not here.
   `generalizes` verdict — the generalization evidence. The live run against an external
   validation lab is on-host; the manifest-generated second target plugs in as a
   `TargetSpec`.
-- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- seven emitters (php_current, python_fastapi, php_laravel, node_express, django, go_net_http, spring_boot) built to varying depth: node_express at Tier-A depth, django at Phase-A/foundation depth (category 2's PicTrail pick), go_net_http now at 12 real pages, 9/12 with live-boot-proven detection (category 4's Twitch pick, CC-LAB-0170-0196, 2026-09-23 status -- webhook-signature's CWE-347 timing side channel, path_traversal (no detection built yet), and ssti/template_render (a real, verified generic-strategy-syntax mismatch with Go's text/template) all remain undetected, for three different, honestly distinct reasons), spring_boot at TrackerNest's full three-cell depth (category 3's Atlassian pick) now also hosting category 4's Netflix cell, grown to 10 real pages, 10/10 detected (CC-LAB-0173/0179/0187/0188/0191/0192/0193/0194/0195) per the §9.2a consolidation (java_spring_boot itself retired) -- see the go_net_http/spring_boot narrative below for the full per-increment record; ruby_rails (category 1's Shopify pick, docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md) now has its full Phase A-E built and proven for real: Phase A skeleton + live-boot harness (CC-LAB-0071/FR-LAB-65), Phase B's three vulnerability modules -- webhook-signature verification, CWE-915 mass assignment, CWE-502 insecure deserialization (CC-LAB-0072..0075/FR-LAB-66..68) -- Phase C's coherent "ForgeCart" app identity (5 real pages + 5 inert surrounding pages, its own lab/ground-truth-forgecart/ contract, CC-LAB-0080/FR-LAB-84), Phase D's whole-app (all 12 cells, one boot) live-boot conformance plus a real dependency-pinning defect found and fixed along the way (CC-LAB-0081/FR-LAB-85, BUG-0035/PA-0037), and Phase E's real fuzzlab.harness.multitarget.TargetSpec wiring with a real, scored ScoreReport genuinely confirming the app's real XSS page (CC-LAB-0082/FR-LAB-86); Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself done]` (D8, target shape pinned by **D20**/
+- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- seven emitters (php_current, python_fastapi, php_laravel, node_express, django, go_net_http, spring_boot) built to varying depth: node_express at Tier-A depth, django at Phase-A/foundation depth (category 2's PicTrail pick), go_net_http now at 12 real pages, 10/12 with live-boot-proven detection (category 4's Twitch pick, CC-LAB-0170-0196 + CC-FUZZ-0038, 2026-09-23 status -- webhook-signature's CWE-347 timing side channel and path_traversal (no detection built yet) remain undetected; ssti/template_render's own real, verified generic-strategy-syntax mismatch with Go's text/template was closed by CC-FUZZ-0038's new GoTemplateSstiStrategy, a text/template-builtin-function marker), spring_boot at TrackerNest's full three-cell depth (category 3's Atlassian pick) now also hosting category 4's Netflix cell, grown to 10 real pages, 10/10 detected (CC-LAB-0173/0179/0187/0188/0191/0192/0193/0194/0195) per the §9.2a consolidation (java_spring_boot itself retired) -- see the go_net_http/spring_boot narrative below for the full per-increment record; ruby_rails (category 1's Shopify pick, docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md) now has its full Phase A-E built and proven for real: Phase A skeleton + live-boot harness (CC-LAB-0071/FR-LAB-65), Phase B's three vulnerability modules -- webhook-signature verification, CWE-915 mass assignment, CWE-502 insecure deserialization (CC-LAB-0072..0075/FR-LAB-66..68) -- Phase C's coherent "ForgeCart" app identity (5 real pages + 5 inert surrounding pages, its own lab/ground-truth-forgecart/ contract, CC-LAB-0080/FR-LAB-84), Phase D's whole-app (all 12 cells, one boot) live-boot conformance plus a real dependency-pinning defect found and fixed along the way (CC-LAB-0081/FR-LAB-85, BUG-0035/PA-0037), and Phase E's real fuzzlab.harness.multitarget.TargetSpec wiring with a real, scored ScoreReport genuinely confirming the app's real XSS page (CC-LAB-0082/FR-LAB-86); Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself done]` (D8, target shape pinned by **D20**/
   `CR-LAB-0001`): the "lab as a compiler" — one manifest plus a safety matrix,
   seed, and env-profile generate the app, labels, docs, and oracle tests, with a
   **binary** verdict derived from `(transform, sink context)` (a partially
@@ -404,17 +404,24 @@ tracked in the requirements files, not here.
   price-integrity-bypass (CWE-807), path_traversal (CWE-22/23,
   `CC-LAB-0190`), and SSTI (CWE-1336, `CC-LAB-0196` — this stack's first
   instantiation of an already-multi-stack `template_render` mechanism,
-  genuine breadth not depth) — **9 of 12 real, live-boot-proven
+  genuine breadth not depth) — **10 of 12 real, live-boot-proven
   detections** (`R-SSRF`/`R-ACCESS-CONTROL`/`R-JWT-ALG-NONE`/
   `R-WEAK-TOKEN-ENTROPY`/`R-MASS-ASSIGNMENT`/`R-UNRESTRICTED-FILE-UPLOAD`/
-  `R-PRICE-INTEGRITY` audit rules, `fuzzlab.oracle.strategies`' matching
-  `ConfirmationStrategy` classes) — `webhook_signature` (structurally
-  undetectable), `path_traversal` (no detection built yet), and `ssti`
-  (a real, verified syntax-level mismatch: the existing generic
-  `SstiStrategy`'s arithmetic-marker payloads do not parse or evaluate
-  under Go's `text/template` action grammar, confirmed by a real `go run`
-  check and a real live-boot run, not a missing-wiring gap) remain the
-  three gaps.
+  `R-PRICE-INTEGRITY`/`R-SSTI` audit rules, `fuzzlab.oracle.strategies`'
+  matching `ConfirmationStrategy` classes) — `webhook_signature`
+  (structurally undetectable) and `path_traversal` (no detection built
+  yet) remain the two gaps. `ssti` was itself a real, verified
+  syntax-level mismatch (the existing generic `SstiStrategy`'s
+  arithmetic-marker payloads do not parse or evaluate under Go's
+  `text/template` action grammar, confirmed by a real `go run` check and
+  a real live-boot run, not a missing-wiring gap) until `CC-FUZZ-0038`
+  closed it: a new `GoTemplateSstiStrategy`, registered alongside
+  `SstiStrategy` under the same category, uses `text/template`'s own
+  builtin `len` function (`{{ len "AAA...A" }}`) as its marker instead of
+  an arithmetic expression, confirmed via a two-probe differential
+  (independent random marker lengths, cross-contamination-checked) —
+  needing no `R-SSTI` rule change, since that rule already nominates on
+  `sink_context`/location, not per-mechanism.
   `spring_boot`'s hosted Netflix cell has similarly grown to
   **10 real pages** (`CC-LAB-0173`, `0179`, `0187`/`0188`/`0191`/`0192`/
   `0193`/`0194`/`0195`) — insecure deserialization (2 instances), XXE,

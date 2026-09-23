@@ -273,10 +273,31 @@ strategy's arithmetic-product-marker payloads either fail to parse under
 Jinja2/FreeMarker/OGNL/EL) or are echoed back completely unevaluated as
 inert literal text. This is a genuine, verified syntax-level mismatch
 between the marker technique and Go's own template syntax -- not a
-missing-rule/missing-wiring gap the way `path_traversal` is -- so
-`TWCH-0012`'s own positive stays an honest, explicitly-documented false
-negative, and Twitch's own scored recall in this multi-cell boot moves
-from `9/11` to `9/12`.
+missing-rule/missing-wiring gap the way `path_traversal` is -- so, at that
+point, `TWCH-0012`'s own positive stayed an honest, explicitly-documented
+false negative, and Twitch's own scored recall in this multi-cell boot
+moved from `9/11` to `9/12`.
+
+**That gap has since been closed (`CC-FUZZ-0038`/`FR-FUZZ-24`):**
+`GoTemplateSstiStrategy` (`fuzzlab.oracle.strategies`, arm `ssti:go-
+template-len-marker`) confirms SSTI via Go's own `text/template` builtin
+functions (`len`, which needs no infix arithmetic operator at all) instead
+of an arithmetic-product marker -- `{{ len "AAA...A" }}` evaluates to the
+literal decimal length only if the template engine genuinely parses and
+executes the action. Registered in `default_strategies()` directly after
+`SstiStrategy` under the same `server-side-template-injection` category
+(the same cheaper/broader-first, specialized-fallback-next layering
+`SsrfInBandMarkerStrategy`/`SsrfOobStrategy` already established), it
+needs no rule change (`R-SSTI` already nominates on
+`sink_context`/location, not per-mechanism). Verified against a real
+booted `go_net_http` app
+(`tests/test_labgen_go_live_boot.py::
+test_go_template_ssti_strategy_closes_the_generalization_gap`): confirms
+the real vulnerable twin (`LABGEN-GO-0023`) and correctly fails closed on
+the real secure twin (`LABGEN-GO-0024`, a fixed-map lookup that never
+evaluates `len` on caller input). `TWCH-0012` is now a real, confirmed
+finding, and Twitch's own scored recall in this multi-cell boot moves from
+`9/12` to `10/12`.
 """
 
 from __future__ import annotations
@@ -454,27 +475,31 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # exists yet for `path_traversal`/`fs_path_read` (a deliberately
     # deferred follow-on, this dispatch's own lab-then-detection split),
     # so it is a real, expected, tracked false negative. The 12th page's
-    # SSTI cell (TWCH-0012, CC-LAB-0196, `/channels/commands`) also does
-    # NOT confirm here -- the existing generic `SstiStrategy` DOES exist
-    # and does apply (category="server-side-template-injection" matches),
-    # but its arithmetic-product-marker payloads do not generalize to Go's
-    # `text/template` action grammar (verified empirically: two of five
-    # payloads fail to PARSE at all -- no infix arithmetic operators --
-    # and the other three contain no `{{`/`}}` and are echoed back
-    # unevaluated, regardless of the vulnerable sink's own content; see
+    # SSTI cell (TWCH-0012, CC-LAB-0196, `/channels/commands`) now ALSO
+    # confirms for real (CC-FUZZ-0038): the existing generic `SstiStrategy`
+    # still does NOT generalize to Go's `text/template` action grammar
+    # (verified empirically: two of five payloads fail to PARSE at all --
+    # no infix arithmetic operators -- and the other three contain no
+    # `{{`/`}}` and are echoed back unevaluated; see
     # `tests/test_labgen_go_live_boot.py::
-    # test_ssti_strategy_does_not_generalize_to_go_text_template` and
-    # `CC-LAB-0196`'s own change-control entry for the full analysis) --
-    # a genuine, verified false negative from a real syntax mismatch, not
-    # an unbuilt-detection gap like path-traversal's. Ground-truth
-    # cardinality moves from 11 to 12 positives (PA-0042: this hardcoded
-    # fraction was re-derived, not left stale, when TWCH-0012 was added);
-    # tp stays 9 (webhook-signature, path-traversal, and SSTI all remain
-    # undetected, each for a different, honestly distinct reason), so
-    # recall moves from 9/11 to 9/12.
+    # test_ssti_strategy_does_not_generalize_to_go_text_template`), but the
+    # new `GoTemplateSstiStrategy` (registered right after `SstiStrategy`
+    # under the same category, as a specialized fallback) sends a
+    # `{{ len "AAA...A" }}` builtin-function marker instead of an
+    # arithmetic-infix one, and sees the vulnerable twin
+    # (`LABGEN-GO-0023`) genuinely evaluate it while correctly failing
+    # closed on the secure twin (`LABGEN-GO-0024`, a fixed-map lookup that
+    # never evaluates `len` on caller input) -- see
+    # `tests/test_labgen_go_live_boot.py::
+    # test_go_template_ssti_strategy_closes_the_generalization_gap`.
+    # Ground-truth cardinality stays 12 positives; tp moves from 9 to 10
+    # (only webhook-signature and path-traversal remain undetected, each
+    # for its own distinct, tracked reason), so recall moves from 9/12 to
+    # 10/12 (PA-0042: this hardcoded fraction was re-derived, not left
+    # stale, for this change).
     twitch_report = by_name["twitch-clone"].report
-    assert twitch_report.tp == 9 and twitch_report.fp == 0
-    assert round(twitch_report.recall, 4) == round(9 / 12, 4)
+    assert twitch_report.tp == 10 and twitch_report.fp == 0
+    assert round(twitch_report.recall, 4) == round(10 / 12, 4)
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002, which does have a rule/strategy, R-XXE/
@@ -507,8 +532,11 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # changes TWCH-0011/CC-LAB-0190 (Twitch's own recall moved from 9/10 to
     # 9/11 to 9/12) and NFLX-0009/CC-LAB-0194 + NFLX-0010/CC-LAB-0195
     # (Netflix's own recall in THIS single-cell test moved from 1/8 to
-    # 1/9 to 1/10) all made.
-    assert round(summary["macro_recall"], 4) == round(((9 / 12) + (1 / 10)) / 2, 4)
+    # 1/9 to 1/10) all made, and again from CC-FUZZ-0038's new
+    # `GoTemplateSstiStrategy` closing TWCH-0012's own detection gap
+    # (Twitch's own tp moved from 9 to 10, recall from 9/12 to 10/12; no
+    # ground-truth-cardinality change this time, a pure detection increment).
+    assert round(summary["macro_recall"], 4) == round(((10 / 12) + (1 / 10)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True

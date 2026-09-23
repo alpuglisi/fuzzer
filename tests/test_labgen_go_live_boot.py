@@ -1267,6 +1267,68 @@ def test_ssti_strategy_does_not_generalize_to_go_text_template() -> None:
         )
 
 
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_go_template_ssti_strategy_closes_the_generalization_gap() -> None:
+    """CC-LAB-0196 documented that `SstiStrategy` does not generalize to Go's
+    `text/template` (`test_ssti_strategy_does_not_generalize_to_go_text_
+    template` above). `GoTemplateSstiStrategy` (`fuzzlab.oracle.strategies`,
+    arm `ssti:go-template-len-marker`, CC-FUZZ-0038) closes that gap: run
+    against a REAL booted vulnerable twin, it must confirm; run against the
+    REAL booted secure twin (which only ever does a fixed-map lookup and
+    never evaluates `len` on caller input), it must correctly fail closed.
+    """
+    manifest = load_manifest("lab/manifests/ssti_channel_commands_go_sample.yaml")
+    emitter = GoEmitter()
+    cells = {c.cell_id: c for c in manifest.cells}
+
+    from fuzzlab.oracle.probe import Candidate, Probe
+    from fuzzlab.oracle.strategies import GoTemplateSstiStrategy
+
+    def _cand(cell_path):
+        return Candidate(url=f"http://h{cell_path}", param="body",
+                         method="POST", location="body",
+                         vuln_class="ssti", category="server-side-template-injection")
+
+    class _HarnessSender:
+        def __init__(self, harness, path):
+            self._harness = harness
+            self._path = path
+
+        def send(self, url, param, value, timing=False, method="POST",
+                 location="body", content_type=None):
+            import json as _json
+            body = _json.dumps({"trigger": "!probe", "template": value}).encode("utf-8")
+            resp = self._harness.request("POST", self._path, body=body,
+                                         headers={"Content-Type": "application/json"})
+            return Probe(resp.status, resp.body)
+
+    strategy = GoTemplateSstiStrategy()
+
+    with GoLiveBootHarness(emitter, [cells["LABGEN-GO-0023"]]) as harness:
+        verdict = strategy.confirm(
+            _cand("/generated/labgen-go-0023"),
+            _HarnessSender(harness, "/generated/labgen-go-0023"),
+        )
+        assert verdict is not None and verdict.confirmed, (
+            "GoTemplateSstiStrategy failed to confirm the real go_net_http vulnerable "
+            "SSTI twin (LABGEN-GO-0023) -- the whole point of this strategy is closing "
+            "this exact detection gap"
+        )
+        assert verdict.mechanism == "go-template-len-marker"
+
+    with GoLiveBootHarness(emitter, [cells["LABGEN-GO-0024"]]) as harness:
+        verdict = strategy.confirm(
+            _cand("/generated/labgen-go-0024"),
+            _HarnessSender(harness, "/generated/labgen-go-0024"),
+        )
+        assert verdict is None, (
+            "GoTemplateSstiStrategy incorrectly confirmed the real go_net_http secure "
+            "SSTI twin (LABGEN-GO-0024), which only ever does a fixed-map lookup and "
+            "never evaluates `len` on caller input -- a false positive"
+        )
+
+
 def test_ssti_go_text_template_syntax_mismatch() -> None:
     """Non-boot, fast, always-run reproduction of the syntax-level
     incompatibility above: `fuzzlab.oracle.strategies._ssti_payloads`'s
