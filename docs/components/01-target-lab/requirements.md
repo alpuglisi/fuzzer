@@ -2365,6 +2365,76 @@ lane) can submit a payload as
   mapping in `fuzzlab.core.runmode._VULN_TO_CATEGORY` are out of scope
   and named as open follow-on work, not built.
 
+- **FR-LAB-125** *(CircleFeed's third real page, comment "share" redirect,
+  header injection; `CC-LAB-0218`, 2026-09-23).* Lands CircleFeed's third
+  designed cell (`docs/research/category2-social-ugc-functionality-and-
+  cwe-research.md` §3 item 1/2, §5 row 3, §6 row 3): a comment "share"
+  redirect built directly from an unvalidated `next` query parameter --
+  the classic `header("Location: " . $_GET['next'])` footgun (CWE-113,
+  HTTP response splitting/header injection). This project's first real
+  implementation of `lab/safety_matrix.yaml`'s `http_response_header_
+  value` sink family (`raw_socket_response_write`/`allowlist_and_
+  runtime_crlf_rejection`, both existed unimplemented since the family
+  was added). Vulnerable twin (`raw_socket_response_write`) reaches a
+  literal `header("Location: " . $value); exit;` call with no CR/LF
+  stripping and no allowlist; secure twin (`allowlist_and_runtime_crlf_
+  rejection`) rejects (HTTP 400) any control character or non-same-
+  origin-relative target at runtime before Laravel's structured
+  `redirect()->away($value)` helper ever runs -- the twins' code
+  genuinely differs at the sink line (branched at generation time on the
+  transform's own `header_delivery_mode` flag, porting `CC-LAB-0097`'s
+  "transform sets a flag, sink branches via Jinja2-time interpolation"
+  convention), reusing the existing, sink-agnostic `terminal_response`
+  complexity (both twins' own code is their method's terminal
+  statement). New page profile `/comments/share`, new manifest
+  `lab/manifests/header_injection_circlefeed_sample.yaml`
+  (`LABGEN-CF-0005`/`LABGEN-CF-0006`). Ground truth extended (not a new
+  directory) with `CF-0003` in `lab/ground-truth-circlefeed/`
+  (`vuln_class: "http_header_injection"`, a new schema enum value;
+  `sink_context: "header"`, already legal).
+
+  **A material, empirically-verified finding from this entry's own
+  pre-change review:** PHP's `header()` function has unconditionally
+  rejected any header string containing an embedded `\r`/`\n` since PHP
+  5.1.2 (re-verified directly, both bare `php -r` and a real `php -S`
+  built-in server, before writing any module code) -- so the literal
+  `header("Location: " . $_GET['next'])` shape this row is grounded in
+  cannot be exploited for genuine response splitting through any
+  currently-supported PHP SAPI. This is the same residual case this
+  project's own `docs/research/corpus-examples/header-injection/php/
+  vulnerable-raw-socket-response-4.php` already documents (a hand-rolled
+  raw-socket response writer that bypasses `header()` entirely), which is
+  why the safety matrix's vulnerable op for this family is named
+  `raw_socket_response_write` rather than (say) `raw_header_concat`. The
+  generated Laravel controller therefore renders genuine, real, `php -l`
+  -clean, minimal-pair-conformant, matrix-scorable code for both twins,
+  but a live HTTP request to that route through `LiveBootHarness`/`php
+  artisan serve` cannot itself demonstrate a spliced header (PHP's own
+  SAPI-level protection applies regardless of which twin's code path
+  runs). Real, executed proof of the genuine response-splitting
+  differential is instead given, real bytes read off a real raw socket
+  both directions, in `tests/
+  test_labgen_header_injection_circlefeed_live_boot.py`: a standalone,
+  single-shot raw-socket PHP responder (ported near-verbatim from the
+  corpus pair above, never part of the generated app itself) whose
+  vulnerable mode's crafted `next` value (a real `%0D%0A`-encoded CRLF
+  introducing a second, attacker-chosen `Set-Cookie` header) genuinely
+  splices that header into the raw response bytes; the secure mode
+  rejects the identical value with a real HTTP 400 and never splices
+  anything, while still accepting an ordinary relative redirect. A
+  fourth test independently confirms, against a real `php -S` process
+  running the exact vulnerable sink shape, that PHP's own SAPI-mediated
+  `header()` call never produces a spliced header at all -- direct
+  evidence for why this test file cannot use `LiveBootHarness`, not only
+  an assertion in prose. Tier 0 (`php -l`)/Tier 3
+  (`regenerate_and_diff_emitter`)/minimal-pair pass for the new manifest
+  in `tests/test_labgen_header_injection_circlefeed.py`. Scope
+  deliberately limited to this one page -- CircleFeed's remaining
+  page-set row (session/preference-cookie insecure deserialization),
+  `TargetSpec`/`run_targets` wiring, and `http_header_injection`'s
+  mapping in `fuzzlab.core.runmode._VULN_TO_CATEGORY` are out of scope
+  and named as open follow-on work, not built.
+
 - **FR-LAB-64** *(prototype pollution, CWE-1321, `node_express`; `CC-LAB-0070`,
   2026-09-22).* Per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a's
   decided Category-1 (e-commerce) Walmart/Node cell list, the `node_express`

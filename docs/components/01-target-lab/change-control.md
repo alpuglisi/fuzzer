@@ -3,6 +3,248 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0218 — CircleFeed (category 2, Facebook pick): third real cell, comment "share" redirect / response-header injection (FR-LAB-125) (2026-09-23)
+
+- **Change:** Lands CircleFeed's third designed cell — a comment "share"
+  redirect built directly from an unvalidated `next` query parameter
+  (`docs/research/category2-social-ugc-functionality-and-cwe-research.md`
+  §3 item 1/2, §5 row 3, §6 row 3), the classic
+  `header("Location: " . $_GET['next'])` footgun (CWE-113, HTTP response
+  splitting/header injection). New shape:
+  `(vuln_class="http_header_injection",
+  sink_context.family="http_response_header_value")`,
+  `required_neutralizations: [http_header_injection]` — this project's
+  **first real implementation of `lab/safety_matrix.yaml`'s
+  `http_response_header_value` sink family**, whose two ops
+  (`raw_socket_response_write`/`allowlist_and_runtime_crlf_rejection`)
+  existed unimplemented since the family was added — verified directly
+  before writing any code: `grep -rl "raw_socket_response_write\|
+  allowlist_and_runtime_crlf_rejection" fuzzlab/` returned nothing.
+
+  **A material, empirically-verified pre-change-review finding, load-
+  bearing for everything below.** PHP's own `header()` function has
+  unconditionally rejected any header string containing an embedded
+  `\r`/`\n` since PHP 5.1.2 — re-verified directly against a real PHP
+  8.4.19 interpreter before writing any module code (bare `php -r` with
+  `\r\n`, bare `\r`, bare `\n`, and already-`$_GET`-decoded variants, all
+  rejected with a real `E_WARNING` and the header genuinely not sent;
+  separately re-verified against a real `php -S` built-in server: a
+  crafted request produces no `Location` header at all, and certainly no
+  spliced second header). This means the literal
+  `header("Location: " . $_GET['next'])` shape this row is grounded in
+  **cannot be exploited for genuine response splitting through any
+  currently-supported PHP SAPI**. This is not a surprise this project
+  discovered from scratch: `docs/research/corpus-examples/
+  header-injection/php/vulnerable-raw-socket-response-4.php`'s own
+  comment already documents exactly this residual case — "a hand-rolled
+  response writer ... that bypasses `header()` entirely and writes the
+  response line-by-line itself" — which is why the safety matrix's own
+  vulnerable op for this family is named `raw_socket_response_write`
+  rather than (say) `raw_header_concat` (the sibling
+  `outbound_http_request_header_value` family's op name, `CC-LAB-0135` —
+  an *outbound* request the app builds as a *client*, where PHP's raw
+  stream-context/socket APIs genuinely have no CRLF protection at all,
+  `CC-LAB-0135`'s own real working proof).
+
+  Two new **transform** ops, registered in both `php_laravel`'s own
+  registries and the shared `fuzzlab.labgen.modules` vocabulary (per
+  `CC-LAB-0135`'s precedent, for the shared minimal-pair classifier):
+  `raw_socket_response_write` (vulnerable, `effect: no_effect`) — no
+  CR/LF stripping, no allowlist, the value reaches the sink exactly as
+  supplied; `allowlist_and_runtime_crlf_rejection` (secure, `effect:
+  neutralises`, `neutralizes: [http_header_injection]`) — a real runtime
+  `abort(400)` on any control character (`\x00`-`\x1F`/`\x7F`, which
+  covers CR/LF) or any target that is not itself a same-origin relative
+  path (`^/[A-Za-z0-9/_\-\.]*$`), combining PHP's own historical runtime
+  protection with an explicit application-level allowlist, per the
+  task's own grounding. Both gate one new, shared **sink** module,
+  `raw_redirect_dispatch` — this is the one place the two twins' own
+  rendered PHP genuinely differs at the sink line (not merely in
+  `value_expr`), branched at **generation time** on a
+  `header_delivery_mode` flag either transform publishes, porting
+  `CC-LAB-0097`'s (PicTrail inbox) "transform sets a flag, sink branches
+  via Jinja2-time interpolation" convention directly: vulnerable ⇒ a
+  literal `header("Location: " . $value); exit;` call (the task's own
+  literal grounding shape); secure ⇒ Laravel's structured
+  `redirect()->away($value)` helper (the idiomatic-Laravel secure
+  pattern the task names — safe here because the value was already
+  validated by the transform above it). No new complexity module: both
+  branches are their own method's terminal statement, so this reuses the
+  existing, already sink-agnostic `terminal_response` complexity
+  (`HttpRedirectReturnSink`/`CsvExportRowSink`'s own precedent) rather
+  than `single_statement` (which would append unreachable dead code after
+  `exit`/an earlier `return`). New page profile `/comments/share`
+  (`var_name`/`param_name` `next`), illustrative served URL
+  (`_served_route_for`'s no-`real_page` branch, same reasoning as every
+  other CircleFeed/Huddle Hub page).
+
+  **Consequence for what "a real implementation" honestly means here,**
+  stated explicitly rather than glossed over: the generated Laravel
+  controller is genuine, real PHP code — `php -l`-clean, minimal-pair-
+  conformant (identity-emptied twin renders and classifies correctly;
+  `header_delivery_mode` guarded with `is defined` so the emptied-
+  pipeline twin doesn't hit an undefined-Jinja2-variable error under
+  `StrictUndefined`), and a real safety-matrix `verdict()` of
+  VULNERABLE/SECURE — but, per the finding above, a live HTTP request to
+  *that* route through `LiveBootHarness`/`php artisan serve` cannot
+  itself demonstrate a spliced header, because PHP's SAPI-level
+  protection applies regardless of which twin's own code path runs. The
+  genuine, real-executed response-splitting proof is therefore given
+  separately, at the one layer where the underlying mechanism is
+  genuinely observable on the wire: a small, standalone, single-shot
+  raw-socket PHP responder (`_RAW_SOCKET_RESPONDER_PHP`, inline in the
+  new live-boot test file — a real `.php` file the test writes to
+  `tmp_path` and runs as a real `php` subprocess, never part of the
+  generated CircleFeed app itself), ported near-verbatim from this
+  project's own `vulnerable-raw-socket-response-4.php` corpus example
+  (matching the SSRF row's own "ports ... almost verbatim" precedent),
+  with the secure mode's runtime check copied verbatim from
+  `allowlist_and_runtime_crlf_rejection.php.j2` so it is provably the
+  *same* check, not a re-invented one. Exercised over a real raw Python
+  `socket` (never `http.client`/`requests`, which normalize/merge
+  headers and reject malformed status lines — exactly the failure mode
+  that would mask a genuine split), reading the literal bytes the
+  responder put on the wire.
+
+  New manifest `lab/manifests/header_injection_circlefeed_sample.yaml`,
+  two cells: `LABGEN-CF-0005` (vulnerable), `LABGEN-CF-0006` (secure) —
+  continuing the established sequential `LABGEN-CF-000N` numbering
+  (`access_control`'s `0001`/`0002`, `webhook_signature_bypass`'s
+  `0003`/`0004`, checked directly; not a new prefix). Ground truth
+  extended (not a new directory) with `CF-0003` in
+  `lab/ground-truth-circlefeed/` — required adding `http_header_injection`
+  to `fuzzlab/labels/schemas/labels.schema.json`'s closed `vuln_class`
+  enum (found and fixed during implementation: the schema validator
+  rejects an unlisted value outright, `sink_context: "header"` was
+  already legal from `CC-LAB-0135`'s own widening). Vulnerable-cell-only
+  convention, matching `CF-0001`/`CF-0002`'s own precedent (the secure
+  twin is proven directly by the live-boot test instead).
+
+- **Impact (other components / project):** Component 1 (LAB) only.
+  Additive safety-matrix *implementation* (no matrix row's own
+  `effect`/`neutralizes` changes — both ops already existed,
+  unimplemented; this entry implements them, it adds no new matrix
+  entries). Additive to `php_laravel`'s and the shared registry's dicts
+  only, plus one additive JSON-schema enum entry.
+- **Risk (level; mitigation or accepted-risk justification):**
+  Low-medium. The standalone raw-socket responder used only by the
+  live-boot test is a real listening socket on an ephemeral loopback
+  port, bound and torn down within the test (same lifecycle discipline
+  as `CC-LAB-0135`'s marker server — a `finally` block, a bounded
+  `subprocess.Popen`/`socket` timeout on every blocking call), never
+  reachable off-loopback, and never part of the generated app itself (it
+  exists in the test file only, never written into `stack/`/shipped
+  anywhere). No new outbound network call is introduced.
+- **Deliverables:**
+  - [x] `raw_socket_response_write`/`allowlist_and_runtime_crlf_rejection`
+    transform modules + templates (both registries) — done
+  - [x] `raw_redirect_dispatch` sink module + template (both registries) — done
+  - [x] `_MODULE_SET_BY_SHAPE`/`_PAGE_PROFILES` entries — done
+  - [x] `lab/manifests/header_injection_circlefeed_sample.yaml` — done
+  - [x] Ground truth `CF-0003` + `labels.schema.json` enum widening — done
+  - [x] Tier 0/Tier 3/minimal-pair test
+    (`tests/test_labgen_header_injection_circlefeed.py`) — done
+  - [x] Live-boot test, real raw-socket proof both directions plus an
+    independent SAPI-level confirmation
+    (`tests/test_labgen_header_injection_circlefeed_live_boot.py`) — done
+  - [x] `test_labgen_modules.py`'s determinism-fixture map extended for the
+    three new module names — done
+  - [x] `requirements.md` FR-LAB-125, `ARCHITECTURE.md`, research doc §6
+    row 3 + §5 row 3 + plan doc §9.4 tracker, `CHANGELOG.md` — done
+- **Effectiveness (assessed 2026-09-23):** Met. Both cells render (`php
+  -l` clean via Tier 0) and pass Tier 3
+  (`regenerate_and_diff_emitter`/`render_whole_sample`, byte-identical on
+  a second render) and the minimal-pair check against each cell's own
+  identity-emptied twin. `verdict()` against the real safety matrix
+  returns VULNERABLE for `LABGEN-CF-0005` and SECURE for
+  `LABGEN-CF-0006`, matching the designed shape. New unit suite
+  `tests/test_labgen_header_injection_circlefeed.py` (9 tests) passes:
+  manifest load, verdict match, `supports()`, determinism, vulnerable-
+  vs-secure code-shape assertions (`header(...)`/no `preg_match` vs.
+  `preg_match`+`abort(400)`+`redirect()->away()`), disjoint generated
+  paths against every other CircleFeed/Huddle-Hub header-injection
+  manifest, `php -l` (skip-guarded), and the minimal-pair check. New
+  live-boot suite `tests/test_labgen_header_injection_circlefeed_live_boot.py`
+  (4 `@pytest.mark.slow` tests, all run and passing on this host, well
+  under a second total — no `composer install`/network round trip
+  needed, only a real `php` CLI): the vulnerable raw-socket responder's
+  crafted `next` value (a real `%0D%0A`-encoded CRLF) genuinely splices a
+  real, separate `Set-Cookie: injected=1` header into the raw response
+  bytes read directly off the socket, alongside the original `Location`
+  header; the secure responder rejects the identical value with a real
+  HTTP 400 and produces no `Location`/`Set-Cookie` line at all, while
+  still correctly accepting an ordinary relative redirect; and a fourth,
+  independent test confirms directly (a real `php -S` process running
+  the exact vulnerable sink shape) that PHP's own SAPI never produces a
+  spliced header for this shape at all — the direct evidence for why
+  this file cannot use `LiveBootHarness`. `tests/test_labgen_modules.py`'s
+  determinism-fixture map was extended for the three new module names
+  and the whole file passes (17/17,
+  `test_every_registered_module_has_a_determinism_ctx_fixture` included). `tests/test_labels_contract.py`/
+  `test_labels_contract_category4.py` pass unchanged (13/13) after the
+  schema widening; `lab/ground-truth-circlefeed/` loads and
+  cross-validates for real (`fuzzlab.labels.contract.load`, 3 cases, 3
+  points). `tests/test_labgen_php_laravel_harder_shapes.py` (69 tests,
+  68 passed, the one pre-existing `test_cli_check_passes_end_to_end_on_
+  the_widened_manifest` failure is the same unrelated gitleaks/
+  scikit-learn environment gap named below, confirmed unaffected by this
+  change). Full non-slow suite: 1903 passed, 52 skipped, 18 failed — all
+  18 the same pre-existing, unrelated `gitleaks`-binary/`scikit-learn`-
+  dependency environment gaps present before this change (every failing
+  test name matches the `test_cli_check_passes_end_to_end*`/
+  `test_run_checks_*leakage*` pattern this project's other entries
+  already document; none touch this entry's own new files), zero
+  regressions attributable to this entry.
+- **Pre-change review gate:** the Agent tool was checked via `ToolSearch`
+  (`query: "Agent Task subagent spawn"`, then `query:
+  "select:Agent,Task,TaskCreate,SpawnAgent"`) and is genuinely not
+  available to this session as a subagent-spawning tool (only
+  `mcp__Claude_Code_Remote__create_session`, a full remote session, and
+  `SendMessage`, for messaging an already-listed peer, are available —
+  neither is "spawn an independent reviewer subagent"). Per CLAUDE.md's
+  own fallback instruction, two separate, explicit self-review passes
+  were done instead of the two-subagent gate, honestly recorded rather
+  than silently skipped:
+  - *Factual-accuracy-only pass* (before writing any module code):
+    independently re-verified, against a real PHP 8.4.19 interpreter,
+    that `header()` rejects an embedded CR/LF in every variant tested
+    (bare CLI and a real `php -S` server; `\r\n`, bare `\r`, bare `\n`);
+    confirmed `docs/research/corpus-examples/header-injection/php/
+    vulnerable-raw-socket-response-4.php`'s own text by reading it
+    directly; confirmed the zero-prior-implementation claim via `grep
+    -rl`; confirmed `LABGEN-CF-0001`-`0004` already existed (so `0005`/
+    `0006` are the correct next numbers, not a new prefix) by reading
+    both existing CircleFeed manifests directly; confirmed this
+    branch's own `CC-LAB-0217`/`FR-LAB-124` ceiling and all four sibling
+    category branches' ceilings (`git fetch`, then compared) were all
+    `<=` this branch's own — no accuracy issues found.
+  - *Adequacy/completeness-only pass* (after the first design draft,
+    before implementation): found and closed five gaps — (1) the shared
+    `fuzzlab.labgen.modules` vocabulary registration was initially
+    missing (found by reading `CC-LAB-0135`'s own module docstring,
+    which states the shared minimal-pair classifier reads that
+    registry, not each emitter's own); (2) the sink template's
+    `header_delivery_mode` Jinja2 lookup would raise under
+    `StrictUndefined` for the identity-emptied minimal-pair twin (no
+    transform runs, so the flag is never set) — fixed with an `is
+    defined` guard, caught only once the minimal-pair test was actually
+    run, not by inspection alone; (3) `labels.schema.json`'s closed
+    `vuln_class` enum would reject the new ground-truth case outright —
+    found by actually loading the ground truth via
+    `fuzzlab.labels.contract.load`, not merely writing the JSON; (4) the
+    live-boot proof's own honesty gap — an early draft would have
+    quietly asserted the differential through `LiveBootHarness` without
+    first checking whether that was even possible, which the empirical
+    `header()` finding above shows it is not; this is now stated
+    explicitly, with its own independent SAPI-level confirmation test,
+    rather than glossed over; (5) `test_labgen_modules.py`'s
+    determinism-fixture completeness assertion
+    (`test_every_registered_module_has_a_determinism_ctx_fixture`) was
+    initially missed and would have failed loudly on the next full-suite
+    run — added before this entry was considered done. All five
+    incorporated above before implementation proceeded on this revised
+    design.
+
 ### CC-LAB-0217 — CircleFeed (category 2, Facebook pick): second real cell, Groups webhook receiver / webhook-signature bypass (FR-LAB-124) (2026-09-23)
 
 - **Change:** Lands CircleFeed's second designed cell — a Groups webhook

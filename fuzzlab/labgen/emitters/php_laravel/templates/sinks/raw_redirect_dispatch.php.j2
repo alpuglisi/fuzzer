@@ -1,0 +1,26 @@
+{% if header_delivery_mode is defined and header_delivery_mode == "structured_redirect" %}
+// Laravel's redirect()->away() helper: a structured, framework-owned
+// redirect response, never a raw string-concatenated header line. The
+// value was already validated above (no control characters, a
+// same-origin relative path only), so away() -- which normally accepts
+// any absolute URL -- is safe to use here.
+return redirect()->away({{ value_expr }});
+{% else %}
+// Raw, unstructured header construction -- the classic response-
+// splitting footgun this family models (CWE-113). PHP's own header()
+// function has unconditionally rejected an embedded CR/LF in a single
+// call since PHP 5.1.2 (re-verified directly against a real PHP
+// interpreter, both bare CLI and a real `php -S` built-in server, during
+// CC-LAB-0218's pre-change review) -- so this literal call is not
+// independently exploitable through this framework's own SAPI. The
+// safety matrix's own no_effect verdict on this op still holds: it
+// records that the application applies no defense of its own, not a
+// claim that every possible delivery path for this exact code is
+// exploitable end to end. See CC-LAB-0218's change-control entry and
+// tests/test_labgen_header_injection_circlefeed_live_boot.py for the
+// raw-socket-level proof of this same raw-concatenation construction's
+// real behavior, at the one layer (a hand-rolled response writer, not a
+// PHP SAPI) where PHP genuinely applies no such protection.
+header("Location: " . {{ value_expr }});
+exit;
+{% endif %}

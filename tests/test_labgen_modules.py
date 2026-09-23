@@ -281,6 +281,12 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
     "no_ownership_check": {"value_expr": "$id"},
     "identity_match_before_fetch": {"value_expr": "$id"},
     "db_row_by_id_lookup": {"value_expr": "$id"},
+    # CC-LAB-0218: registered in the shared vocabulary so minimal_pair can
+    # classify them (php_current's shape map does not use any of them --
+    # php_laravel is what actually renders this shape, for CircleFeed).
+    "raw_socket_response_write": {"value_expr": "$next"},
+    "allowlist_and_runtime_crlf_rejection": {"value_expr": "$next"},
+    "raw_redirect_dispatch": {"value_expr": "$next"},
 }
 
 

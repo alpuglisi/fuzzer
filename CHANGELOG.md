@@ -4,6 +4,27 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (CircleFeed's third real page: comment "share" redirect, header injection)
+- `php_laravel`: lands CircleFeed's third designed cell (§3 item 1/2,
+  §5 row 3, §6 row 3 of `docs/research/category2-social-ugc-
+  functionality-and-cwe-research.md`) -- a comment "share" redirect built
+  directly from an unvalidated `next` query parameter, the classic
+  `header("Location: " . $_GET['next'])` footgun (CWE-113). This
+  project's first real implementation of `lab/safety_matrix.yaml`'s
+  `http_response_header_value` sink family (`raw_socket_response_write`/
+  `allowlist_and_runtime_crlf_rejection`, both existed unimplemented
+  since the family was added). New page profile `/comments/share`, new
+  manifest (`LABGEN-CF-0005`/`LABGEN-CF-0006`), ground truth extended
+  with `CF-0003` (new `vuln_class` enum value, `http_header_injection`).
+  Pre-change-review finding, empirically verified: PHP's own `header()`
+  function has unconditionally rejected an embedded CR/LF since PHP
+  5.1.2, so a real HTTP request to the generated Laravel route cannot
+  itself demonstrate a spliced header -- the genuine, real-executed
+  response-splitting differential is instead proven at the raw-socket
+  layer (a hand-rolled responder ported near-verbatim from this
+  project's own header-injection corpus), both directions, real raw
+  header bytes inspected directly. `CC-LAB-0218`/`FR-LAB-125`.
+
 ## 2026-09-23 (CircleFeed's second real page: Groups webhook receiver, webhook-signature bypass)
 - `php_laravel`: lands CircleFeed's second designed cell (§3 item 5,
   §5 row 2, §6 row 2 of `docs/research/category2-social-ugc-

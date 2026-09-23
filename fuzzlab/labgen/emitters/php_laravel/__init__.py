@@ -296,6 +296,20 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("access_control", "db_row_by_id_lookup"): _ModuleSet(
         "get_param", "db_row_by_id_lookup", "single_statement"
     ),
+    # CC-LAB-0218 (category 2, CircleFeed): a comment "share" redirect built
+    # directly from an unvalidated `next` query parameter (docs/research/
+    # category2-social-ugc-functionality-and-cwe-research.md sec 5 row 3,
+    # sec 6 row 3). This project's first real implementation of
+    # `lab/safety_matrix.yaml`'s `http_response_header_value` sink family
+    # (both ops existed unimplemented since the family was added). Sink
+    # differs by twin (branched at generation time on the transform's own
+    # `header_delivery_mode` flag, see `RawRedirectDispatchSink`), not just
+    # `value_expr` -- and both twins' own rendered code is a terminal
+    # statement (`header()`+`exit` / `return redirect()->away(...)`), which
+    # is why this reuses `terminal_response` rather than `single_statement`.
+    ("http_header_injection", "http_response_header_value"): _ModuleSet(
+        "get_param", "raw_redirect_dispatch", "terminal_response"
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -583,6 +597,13 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # never a real credential, and deliberately distinct from Huddle Hub's
     # own so the two apps' cells can never be confused by a shared value.
     "/groups/webhook": {"var_name": "webhookRawBody", "secret": "lab-only-circlefeed-webhook-secret"},
+    # CC-LAB-0218: CircleFeed's (category 2's Facebook pick) third designed
+    # cell -- a comment "share" redirect, `get_param` reads the redirect
+    # target as `?next=`. Illustrative served URL (`_served_route_for`'s
+    # no-`real_page` branch), same reasoning as every other CircleFeed/
+    # Huddle Hub page: CircleFeed has no migrated real puppy-fort-factory
+    # page to anchor a pinned URL to.
+    "/comments/share": {"var_name": "next", "param_name": "next"},
     # POST string-literal lookup. `password_var`/`password_param` are sink
     # boilerplate (an already-hashed secret), not a second injection point.
     "/login": {

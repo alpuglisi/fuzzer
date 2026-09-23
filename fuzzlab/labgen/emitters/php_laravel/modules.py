@@ -1021,6 +1021,70 @@ class HttpRedirectReturnSink(TemplateModule):
         super().__init__("http_redirect_return", "sink", _SINK_ENV, "http_redirect_return.php.j2")
 
 
+class RawSocketResponseWriteTransform(TemplateModule):
+    """The ``raw_socket_response_write`` op (`CC-LAB-0218`, CircleFeed's
+    comment "share" redirect) under the ``http_response_header_value``
+    sink_family: this project's first real implementation of that family
+    (added `CC-LAB-0063`-era, never rendered by any emitter until this
+    entry -- verified directly, ``grep -rl`` for both this family's op
+    names across ``fuzzlab/`` returned nothing before this change). No
+    CR/LF stripping, no allowlist -- the redirect target reaches the sink
+    exactly as supplied, modeling the classic
+    ``header("Location: " . $_GET['next'])`` footgun (CWE-113). Safety
+    matrix: ``effect=no_effect``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "raw_socket_response_write", "transform", _TRANSFORM_ENV, "raw_socket_response_write.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["header_delivery_mode"] = "raw_concat"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class AllowlistAndRuntimeCrlfRejectionTransform(TemplateModule):
+    """The ``allowlist_and_runtime_crlf_rejection`` op (`CC-LAB-0218`,
+    secure twin): rejects any redirect target containing a raw control
+    character (CR/LF included) or that is not itself a same-origin
+    relative path, with a real runtime ``abort(400)``. Safety matrix:
+    ``effect=neutralises``, ``neutralizes: [http_header_injection]``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "allowlist_and_runtime_crlf_rejection",
+            "transform",
+            _TRANSFORM_ENV,
+            "allowlist_and_runtime_crlf_rejection.php.j2",
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["header_delivery_mode"] = "structured_redirect"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class RawRedirectDispatchSink(TemplateModule):
+    """The ``raw_redirect_dispatch`` sink (`CC-LAB-0218`): the one place
+    both `http_response_header_value` twins' code genuinely differs at the
+    sink line (not merely in ``value_expr``), branched at **generation
+    time** on the ``header_delivery_mode`` flag either transform op above
+    publishes -- porting `CC-LAB-0097`'s (PicTrail inbox)
+    "transform sets a flag, sink branches via Jinja2-time interpolation"
+    convention. Vulnerable (``raw_concat``): a literal
+    ``header("Location: " . $value); exit;`` call. Secure
+    (``structured_redirect``): Laravel's ``redirect()->away()`` helper,
+    the idiomatic-Laravel secure pattern. Both are their own method's
+    terminal statement (see :class:`TerminalResponseComplexity`, which
+    this shape reuses rather than ``single_statement``)."""
+
+    def __init__(self) -> None:
+        super().__init__("raw_redirect_dispatch", "sink", _SINK_ENV, "raw_redirect_dispatch.php.j2")
+
+
 class CsvExportRowSink(TemplateModule):
     """The ``csv_export_row`` sink family (CC-LAB-0211, `csv_formula_injection`
     concern): a small CSV report/export response -- Booking.com's real
@@ -1379,6 +1443,11 @@ TRANSFORMS: dict[str, Module] = {
     # stack's first ownership_check_bypass/access_control shape).
     "no_ownership_check": NoOwnershipCheckTransform(),
     "identity_match_before_fetch": IdentityMatchBeforeFetchTransform(),
+    # CC-LAB-0218 (http_header_injection, category 2's CircleFeed app --
+    # this project's first real implementation of the
+    # `http_response_header_value` sink family, on any stack).
+    "raw_socket_response_write": RawSocketResponseWriteTransform(),
+    "allowlist_and_runtime_crlf_rejection": AllowlistAndRuntimeCrlfRejectionTransform(),
 }
 #: Sinks. The three HTML sinks render a **Blade view** body rather than a
 #: controller statement; :data:`VIEW_SINKS` names them so the emitter knows
@@ -1410,6 +1479,10 @@ SINKS: dict[str, Module] = {
     "payment_charge_insert": PaymentChargeInsertSink(),
     # CC-LAB-0216 (access_control, category 2's CircleFeed app).
     "db_row_by_id_lookup": DbRowByIdLookupSink(),
+    # CC-LAB-0218 (http_header_injection, category 2's CircleFeed app --
+    # this project's first real implementation of the
+    # `http_response_header_value` sink family, on any stack).
+    "raw_redirect_dispatch": RawRedirectDispatchSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

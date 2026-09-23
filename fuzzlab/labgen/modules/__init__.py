@@ -1043,6 +1043,61 @@ class DbRowByIdLookupSink(TemplateModule):
         super().__init__("db_row_by_id_lookup", "sink", _SINK_ENV, "db_row_by_id_lookup.php.j2")
 
 
+# --- CC-LAB-0218: header injection via a response redirect (category 2,
+# CircleFeed) --------------------------------------------------------------
+#
+# Registered here (unrendered by `php_current`'s own `_MODULE_SET_BY_SHAPE`,
+# same reasoning as the two blocks above) purely for the shared minimal-pair
+# vocabulary -- `php_laravel` is the emitter that actually renders this
+# shape. This project's first real implementation of `lab/safety_matrix.
+# yaml`'s `http_response_header_value` sink family (both ops existed,
+# unimplemented, since the family was added).
+
+
+class RawSocketResponseWriteTransform(TemplateModule):
+    """The ``raw_socket_response_write`` op (`http_response_header_value`
+    concern): no CR/LF stripping, no allowlist -- the redirect target
+    reaches the sink exactly as supplied. Safety matrix:
+    ``effect=no_effect``. See ``fuzzlab.labgen.emitters.php_laravel.
+    modules.RawSocketResponseWriteTransform`` (the emitter that actually
+    renders this op) for the real check."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "raw_socket_response_write", "transform", _TRANSFORM_ENV, "raw_socket_response_write.php.j2"
+        )
+
+
+class AllowlistAndRuntimeCrlfRejectionTransform(TemplateModule):
+    """The ``allowlist_and_runtime_crlf_rejection`` op (secure twin):
+    rejects any redirect target containing a raw control character or
+    that is not itself a same-origin relative path. Safety matrix:
+    ``effect=neutralises``, ``neutralizes: [http_header_injection]``. See
+    ``fuzzlab.labgen.emitters.php_laravel.modules.
+    AllowlistAndRuntimeCrlfRejectionTransform`` (the emitter that actually
+    renders this op) for the real check."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "allowlist_and_runtime_crlf_rejection",
+            "transform",
+            _TRANSFORM_ENV,
+            "allowlist_and_runtime_crlf_rejection.php.j2",
+        )
+
+
+class RawRedirectDispatchSink(TemplateModule):
+    """The ``raw_redirect_dispatch`` sink: the twins' code genuinely
+    differs here (a raw ``header()``+``exit`` call vs. Laravel's
+    ``redirect()->away()``), branched at generation time on the
+    transform's own ``header_delivery_mode`` flag. Registered for the
+    shared minimal-pair vocabulary only, same reasoning as
+    :class:`DbRowByIdLookupSink`."""
+
+    def __init__(self) -> None:
+        super().__init__("raw_redirect_dispatch", "sink", _SINK_ENV, "raw_redirect_dispatch.php.j2")
+
+
 class TerminalResponseComplexity(TemplateModule):
     """The ``terminal_response`` complexity: the controller method for a
     cell whose sink's own code already is the terminal statement (e.g. the
@@ -1165,6 +1220,11 @@ TRANSFORMS: dict[str, Module] = {
     # php_laravel is what actually renders it (CircleFeed).
     "no_ownership_check": NoOwnershipCheckTransform(),
     "identity_match_before_fetch": IdentityMatchBeforeFetchTransform(),
+    # CC-LAB-0218: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it (CircleFeed).
+    "raw_socket_response_write": RawSocketResponseWriteTransform(),
+    "allowlist_and_runtime_crlf_rejection": AllowlistAndRuntimeCrlfRejectionTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -1217,6 +1277,10 @@ SINKS: dict[str, Module] = {
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
     # php_laravel is what actually renders it (CircleFeed).
     "db_row_by_id_lookup": DbRowByIdLookupSink(),
+    # CC-LAB-0218: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it (CircleFeed).
+    "raw_redirect_dispatch": RawRedirectDispatchSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

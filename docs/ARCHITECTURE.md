@@ -841,10 +841,30 @@ tracked in the requirements files, not here.
   executed proof split the same way Huddle Hub's own webhook cell split
   it (a live-boot HTTP-correctness test plus a separate real-`php`-
   executed comparison-operator differential test for the "magic hash"
-  bug). CircleFeed's remaining two page-set rows (per the research doc's
-  §6) stay planned, not built — each its own future, separately-gated
-  increment, the same discipline PicTrail's own page-by-page landings
-  above followed.
+  bug). **CircleFeed's third real page (`CC-LAB-0218`) landed a comment
+  "share" redirect** — a `header("Location: " . $_GET['next'])`-shaped
+  redirect built directly from an unvalidated `next` query parameter
+  (CWE-113), this project's first real implementation of `lab/
+  safety_matrix.yaml`'s `http_response_header_value` sink family
+  (`raw_socket_response_write`/`allowlist_and_runtime_crlf_rejection`).
+  The vulnerable twin's own code is a literal, real `header(...); exit;`
+  call; the secure twin runtime-rejects (HTTP 400) any control character
+  or non-same-origin-relative target before Laravel's `redirect()->
+  away()` helper runs — the twins' code differs at the sink line itself,
+  branched at generation time on the transform's own flag (porting
+  `CC-LAB-0097`'s convention). Empirically verified during this entry's
+  pre-change review: PHP's own `header()` function has unconditionally
+  rejected an embedded CR/LF since PHP 5.1.2, so a live HTTP request to
+  the generated Laravel route cannot itself demonstrate a spliced
+  header — the genuine, real-executed differential is instead proven at
+  the raw-socket layer (a hand-rolled responder ported near-verbatim
+  from this project's own header-injection corpus), both directions,
+  real raw header bytes read directly off the wire. Ground truth
+  extended (`CF-0003`). CircleFeed's remaining page-set row (per the
+  research doc's §6, session/preference-cookie insecure deserialization)
+  stays planned, not built — its own future, separately-gated increment,
+  the same discipline PicTrail's own page-by-page landings above
+  followed.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

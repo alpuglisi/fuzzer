@@ -3,6 +3,7 @@
   "target": "php_laravel",
   "points": [
     { "url": "/cell/labgen-cf-0001", "method": "GET", "param": "id", "location": "query", "rendering": "server-json" },
-    { "url": "/cell/labgen-cf-0003", "method": "POST", "param": "X-Signature", "location": "header", "rendering": "server-json" }
+    { "url": "/cell/labgen-cf-0003", "method": "POST", "param": "X-Signature", "location": "header", "rendering": "server-json" },
+    { "url": "/cell/labgen-cf-0005", "method": "GET", "param": "next", "location": "query", "rendering": "server-json" }
   ]
 }
