@@ -158,9 +158,17 @@ def _twitch_cells():
     ssrf_clips_download = load_manifest(
         "lab/manifests/ssrf_clips_download_go_sample.yaml"
     ).cells
+    # CC-LAB-0186: this stack's first unrestricted_file_upload/
+    # fs_web_root_write instance (/channels/emotes/upload) -- lab page
+    # only, no rule/strategy yet, so TWCH-0009 scores as a real missed
+    # positive (fn) until its own separately-scoped detection follow-on
+    # lands, same as every other page's own lab-then-detection landing gap.
+    unrestricted_file_upload = load_manifest(
+        "lab/manifests/unrestricted_file_upload_go_sample.yaml"
+    ).cells
     return (
         webhook + ssrf + access_control + jwt + weak_token + mass_assignment
-        + access_control_subscribers + ssrf_clips_download
+        + access_control_subscribers + ssrf_clips_download + unrestricted_file_upload
     )
 
 
@@ -219,10 +227,13 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # `OobListener` passed above. webhook-signature (TWCH-0001) still has
     # no rule/strategy (a CWE-347 timing side channel, empirically
     # infeasible for this project's wall-clock HTTP measurement model).
-    # Seven of eight positives confirm here.
+    # The 9th page's unrestricted-file-upload cell (TWCH-0009, CC-LAB-0186)
+    # is a lab page ONLY, deliberately not bundled with detection (same
+    # split as every prior page) -- it is now the 2nd missed positive.
+    # Seven of nine positives confirm here.
     twitch_report = by_name["twitch-clone"].report
     assert twitch_report.tp == 7 and twitch_report.fp == 0
-    assert round(twitch_report.recall, 4) == round(7 / 8, 4)
+    assert round(twitch_report.recall, 4) == round(7 / 9, 4)
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002, which does have a rule/strategy, R-XXE/
@@ -239,7 +250,7 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
-    assert round(summary["macro_recall"], 4) == round(((7 / 8) + (1 / 3)) / 2, 4)
+    assert round(summary["macro_recall"], 4) == round(((7 / 9) + (1 / 3)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True

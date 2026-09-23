@@ -1,0 +1,22 @@
+const maxUploadBytes int64 = 5 << 20 // 5 MiB upload cap -- bounds how much of the request this handler ever reads
+if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+	http.Error(w, "bad multipart upload", http.StatusBadRequest)
+	return
+}
+file, header, err := r.FormFile("file")
+if err != nil {
+	http.Error(w, "missing file field", http.StatusBadRequest)
+	return
+}
+defer file.Close()
+{{ filename_var }} := header.Filename
+{{ client_content_type_var }} := header.Header.Get("Content-Type")
+{{ content_var }}, err := io.ReadAll(io.LimitReader(file, maxUploadBytes+1))
+if err != nil {
+	http.Error(w, "read failed", http.StatusInternalServerError)
+	return
+}
+if int64(len({{ content_var }})) > maxUploadBytes {
+	http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+	return
+}

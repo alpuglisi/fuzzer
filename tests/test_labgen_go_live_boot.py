@@ -769,3 +769,122 @@ def test_real_boot_proves_the_mass_assignment_strategy_end_to_end() -> None:
         assert strategy.confirm(_cand(), _HarnessSender()) is None, (
             "strategy incorrectly confirmed the real secure twin"
         )
+
+
+# -- Phase B increment 6: channel-emote unrestricted file upload (fs_web_root_write) --
+
+#: An inert HTML snippet carrying a distinctive marker -- proves the
+#: CWE-434-to-XSS content-type-chaining point (a same-origin response
+#: served as `text/html` with attacker-controlled markup) without the
+#: probe payload itself being anything that could plausibly execute if
+#: mishandled (per this dispatch's own filesystem-safety instruction: no
+#: real `<script>`-executing payload is needed to prove the Content-Type
+#: divergence, just a marker a test can grep for).
+_UPLOAD_MARKER = "FUZZLAB-UPLOAD-MARKER-3f9c2a"
+_INERT_HTML_PAYLOAD = f"<!DOCTYPE html><p>{_UPLOAD_MARKER}</p>".encode()
+
+#: The real PNG magic-number signature (the first 8 bytes `http.
+#: DetectContentType` keys its `image/png` sniff on) -- enough for Go's
+#: real sniffer to classify this as a real image without needing a fully
+#: valid PNG chunk stream, matching this differential's own narrow claim
+#: (content-type sniffing, not full image-format validation).
+_PNG_SIGNATURE_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+
+
+def _multipart_upload(filename: str, content: bytes, content_type: str) -> tuple[bytes, str]:
+    """Hand-encodes a real ``multipart/form-data`` body with one file part
+    named ``file`` -- the exact field name ``ReadUploadedFileSource``'s
+    generated code reads via ``r.FormFile("file")``. No dependency beyond
+    the stdlib; mirrors this test file's own preference for small,
+    dependency-free real-protocol encoding (e.g. the HMAC digests
+    elsewhere in this file) over pulling in `requests`."""
+    boundary = "fuzzlabuploadboundary7f3a"
+    body = (
+        f'--{boundary}\r\n'
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+        f'Content-Type: {content_type}\r\n\r\n'
+    ).encode() + content + f"\r\n--{boundary}--\r\n".encode()
+    return body, f"multipart/form-data; boundary={boundary}"
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_unrestricted_file_upload_differential_for_both_twins() -> None:
+    """Four real assertions, isolating exactly what allowlisting +
+    content sniffing controls (CC-LAB-0186):
+
+    (a) the vulnerable twin writes an uploaded ``evil.html`` and serves it
+        back as ``text/html``, with the marker intact in the body --
+        stored XSS via unrestricted file upload (CWE-434), the CWE-434-
+        to-XSS chain a Go-idiomatic vulnerable twin models since Go has
+        no PHP-style server-side-script-execution footgun.
+    (b) the secure twin rejects the identical ``evil.html`` upload
+        outright (extension not on the image allowlist).
+    (c) the secure twin ALSO rejects a spoofed upload (real HTML bytes,
+        but named ``fake.png``, an allowlisted extension) -- proving the
+        secure twin's content-sniffing half, not just its extension
+        check, is what actually closes the gap.
+    (d) the secure twin accepts a real PNG-signature upload and serves it
+        back with a sniffed ``image/png`` content type, proving the
+        secure path is not simply "reject everything".
+
+    Every write in this test lands under the booted app's own process
+    ``cwd`` -- a throwaway `tempfile.TemporaryDirectory` `GoLiveBootHarness`
+    itself creates and tears down (never a real, permanent, or shared
+    path), per this dispatch's own filesystem-safety instruction.
+    """
+    manifest = load_manifest("lab/manifests/unrestricted_file_upload_go_sample.yaml")
+    emitter = GoEmitter()
+
+    with GoLiveBootHarness(emitter, manifest.cells) as harness:
+        # (a) vulnerable twin: evil.html served back as text/html.
+        html_body, html_ctype = _multipart_upload("evil.html", _INERT_HTML_PAYLOAD, "text/html")
+        vuln_resp = harness.request(
+            "POST", "/generated/labgen-go-0017", body=html_body,
+            headers={"Content-Type": html_ctype},
+        )
+        assert vuln_resp.status == 200
+        assert "text/html" in vuln_resp.headers.get("Content-Type", ""), (
+            f"vulnerable twin did not serve the upload as text/html -- got "
+            f"{vuln_resp.headers.get('Content-Type')!r}"
+        )
+        assert _UPLOAD_MARKER in vuln_resp.body
+
+        # (b) secure twin: the same evil.html upload is rejected outright.
+        html_body2, html_ctype2 = _multipart_upload("evil.html", _INERT_HTML_PAYLOAD, "text/html")
+        secure_reject_resp = harness.request(
+            "POST", "/generated/labgen-go-0018", body=html_body2,
+            headers={"Content-Type": html_ctype2},
+        )
+        assert secure_reject_resp.status == 415, (
+            "secure twin did not reject a non-allowlisted extension "
+            f"(status={secure_reject_resp.status})"
+        )
+
+        # (c) secure twin: a spoofed upload (real HTML bytes, allowlisted
+        # .png extension) is still rejected -- the content-sniffing half.
+        spoof_body, spoof_ctype = _multipart_upload("fake.png", _INERT_HTML_PAYLOAD, "image/png")
+        secure_spoof_resp = harness.request(
+            "POST", "/generated/labgen-go-0018", body=spoof_body,
+            headers={"Content-Type": spoof_ctype},
+        )
+        assert secure_spoof_resp.status == 415, (
+            "secure twin let a spoofed (extension-only) upload through -- "
+            "content sniffing did not actually run"
+        )
+
+        # (d) secure twin: a real PNG-signature upload is accepted and
+        # served back with the sniffed image/png content type.
+        png_body, png_ctype = _multipart_upload("real.png", _PNG_SIGNATURE_BYTES, "image/png")
+        secure_ok_resp = harness.request(
+            "POST", "/generated/labgen-go-0018", body=png_body,
+            headers={"Content-Type": png_ctype},
+        )
+        assert secure_ok_resp.status == 200, (
+            f"secure twin incorrectly rejected a real PNG upload (status="
+            f"{secure_ok_resp.status})"
+        )
+        assert "image/png" in secure_ok_resp.headers.get("Content-Type", ""), (
+            f"secure twin did not serve a real PNG back as image/png -- got "
+            f"{secure_ok_resp.headers.get('Content-Type')!r}"
+        )

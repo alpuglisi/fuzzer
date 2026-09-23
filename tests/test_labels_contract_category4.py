@@ -56,11 +56,11 @@ def test_netflix_ground_truth_loads_and_cross_checks():
 def test_twitch_ground_truth_loads_and_cross_checks():
     gt = contract.load(TWITCH_GT_DIR)
     assert gt.target == "go_net_http"
-    assert len(gt.cases) == 8
+    assert len(gt.cases) == 9
     ids = {c.case_id for c in gt.cases}
     assert ids == {
         "TWCH-0001", "TWCH-0002", "TWCH-0003", "TWCH-0004", "TWCH-0005", "TWCH-0006",
-        "TWCH-0007", "TWCH-0008",
+        "TWCH-0007", "TWCH-0008", "TWCH-0009",
     }
 
     webhook = gt.case_by_id("TWCH-0001")
@@ -135,8 +135,17 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert clips_download_ssrf.param == "source_url"
     assert clips_download_ssrf.location == "query"
 
+    emote_upload = gt.case_by_id("TWCH-0009")
+    assert emote_upload.expected_vulnerable
+    assert emote_upload.vuln_class == "unrestricted_file_upload"
+    assert emote_upload.sink_context == "fs_web_root_write"
+    assert emote_upload.url == "/generated/labgen-go-0017"
+    assert emote_upload.method == "POST"
+    assert emote_upload.param == "file"
+    assert emote_upload.location == "body"
+
     for case in gt.cases:
-        for token in ("webhook", "ssrf", "vuln", "idor", "access", "jwt", "entropy", "mass"):
+        for token in ("webhook", "ssrf", "vuln", "idor", "access", "jwt", "entropy", "mass", "upload"):
             assert token not in case.case_id.lower()
 
 

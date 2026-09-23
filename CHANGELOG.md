@@ -4,6 +4,48 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Twitch's 9th real page — first unrestricted-file-upload instance, CC-LAB-0186/FR-LAB-126)
+- Target lab: genuinely new breadth for category 4's Twitch pick, not a
+  cheap depth reuse like `CC-LAB-0180`-`0185` — the project's **first**
+  instance of `lab/safety_matrix.yaml`'s existing `fs_web_root_write`
+  sink family / `unrestricted_file_upload` concern (added `CC-LAB-0063`)
+  on any stack (confirmed absent by grep before starting). `POST
+  /channels/emotes/upload` — a channel-emote upload endpoint. Go has no
+  PHP-style "server executes an uploaded script" footgun, so the
+  vulnerable twin (`no_extension_check`) models the real, well-documented
+  CWE-434-to-XSS chain instead: it writes the upload under the caller's
+  own filename into a web-served directory and serves it back with a
+  `Content-Type` derived from that same filename's extension (falling
+  back to the caller's own multipart `Content-Type` header) — an uploaded
+  `.html` file is served back same-origin as `text/html`. The secure twin
+  (`extension_allowlist_mime_check`) allowlists real image extensions AND
+  sniffs the real bytes via `http.DetectContentType`, rejecting anything
+  not really an image; it writes under a fully server-chosen filename and
+  always serves the sniffed content type. New source/sink modules
+  (`ReadUploadedFileSource`/`NoExtensionCheckSink`/
+  `ExtensionAllowlistMimeCheckSink`), new manifest (cells
+  `LABGEN-GO-0017`/`0018`), ground truth `TWCH-0009`, `labels.schema.json`
+  additively widened (`unrestricted_file_upload`/`fs_web_root_write`). A
+  real Go "declared and not used" compile bug (`clientContentType` in the
+  secure sink) was found and fixed before landing. Real, executed
+  live-boot proof (4 assertions: vulnerable twin serves an uploaded
+  `.html` back as `text/html` with a marker intact; secure twin rejects
+  the same `.html` outright; secure twin also rejects a spoofed upload
+  with a real-HTML body under an allowlisted `.png` extension, proving
+  content sniffing actually runs; secure twin accepts and correctly
+  serves a real PNG-signature upload). `GoLiveBootHarness.HttpResponse`
+  additively gained a `headers` field (this stack's first shape whose
+  vulnerable/secure difference is only observable in a response header).
+  Twitch's own real, scored recall is now 7/9 (was 7/8) — this page adds
+  a real missed positive, not a false one, since no audit rule/oracle
+  strategy exists for this class yet. Dispatched through the mandatory
+  pre-change review gate (the `Agent` tool absent from this session's
+  toolset, checked via `ToolSearch`; substituted with a documented,
+  rigorous self-review, per `CC-LAB-0182`-`0185`'s own precedent
+  wording). **Detection deliberately not bundled into this commit** —
+  tracked as its own separately-scoped follow-on, same lab-then-detection
+  split as `CC-LAB-0180`/`0181`.
+
 ## 2026-09-23 (LAB: Twitch's 8th real page — SSRF generalizes for free, CC-LAB-0185/FR-LAB-125)
 - Target lab: a cheap, low-risk depth increment for category 4's Twitch
   pick, the same pattern as `CC-LAB-0183` (access-control second instance)

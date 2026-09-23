@@ -216,3 +216,54 @@ def test_typed_schema_allowlist_sink_only_copies_the_dto_fields() -> None:
     # The DTO struct itself never declares `is_partner` -- no field to
     # unmarshal into even if the client sends the key.
     assert "IsPartner" not in result.code.split("var update struct", 1)[1].split("}", 1)[0]
+
+
+def test_read_uploaded_file_source_publishes_default_identifiers() -> None:
+    result = SOURCES["read_uploaded_file"].render({})
+    assert "r.ParseMultipartForm(maxUploadBytes)" in result.code
+    assert 'r.FormFile("file")' in result.code
+    assert result.context["filename_var"] == "uploadFilename"
+    assert result.context["content_var"] == "uploadContent"
+    assert result.context["client_content_type_var"] == "clientContentType"
+    # A real size bound, not left unbounded.
+    assert "maxUploadBytes" in result.code
+    assert "io.LimitReader" in result.code
+
+
+def test_no_extension_check_sink_derives_content_type_from_the_filename() -> None:
+    result = SINKS["no_extension_check"].render(
+        {
+            "filename_var": "uploadFilename",
+            "content_var": "uploadContent",
+            "client_content_type_var": "clientContentType",
+        }
+    )
+    # Vulnerable: written under the caller's own filename, verbatim.
+    assert "filepath.Join(emoteUploadDir, uploadFilename)" in result.code
+    # Vulnerable: Content-Type comes from that same filename's extension,
+    # falling back to the caller-supplied header -- never sniffed bytes.
+    assert "mime.TypeByExtension(filepath.Ext(uploadFilename))" in result.code
+    assert "servedContentType = clientContentType" in result.code
+    assert "http.DetectContentType" not in result.code
+
+
+def test_extension_allowlist_mime_check_sink_sniffs_real_bytes() -> None:
+    result = SINKS["extension_allowlist_mime_check"].render(
+        {
+            "filename_var": "uploadFilename",
+            "content_var": "uploadContent",
+            "client_content_type_var": "clientContentType",
+        }
+    )
+    # Secure: a real allowlist of image extensions.
+    assert '".svg"' not in result.code  # SVG is XML-renderable -- not an allowlisted image ext
+    assert '".png"' in result.code and '".webp"' in result.code
+    # Secure: the real bytes are sniffed, and the response is served with
+    # the sniffed type, never a filename-/header-derived one.
+    assert "http.DetectContentType(uploadContent)" in result.code
+    assert 'w.Header().Set("Content-Type", sniffedContentType)' in result.code
+    # Secure: the on-disk filename is fully server-chosen -- the caller's
+    # own filename is read only for its extension, never used as the
+    # destination path itself.
+    assert 'filepath.Join(emoteUploadDir, "emote"+ext)' in result.code
+    assert "filepath.Join(emoteUploadDir, uploadFilename)" not in result.code

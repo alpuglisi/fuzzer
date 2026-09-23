@@ -3,6 +3,228 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0186 — Twitch's 9th real page: first unrestricted-file-upload instance, `/channels/emotes/upload` (FR-LAB-126) (2026-09-23)
+
+- Change: genuinely new breadth for category 4's Twitch pick, explicitly
+  **not** a cheap "second instance" depth increment like `CC-LAB-0180`-
+  `0185` — this is the project's **first** instantiation, on any stack,
+  of `lab/safety_matrix.yaml`'s existing `fs_web_root_write` sink family
+  and `unrestricted_file_upload` concern (added by `CC-LAB-0063` for the
+  corpus-examples/file-handling research; its comment block near line 47
+  and its op rows near line 460-470 were read before starting, per the
+  task's own instruction). Confirmed absent before building: `grep -rln
+  "extension_allowlist_mime_check|fs_web_root_write"
+  fuzzlab/labgen/emitters/*/modules.py lab/manifests/*.yaml` returned
+  nothing.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0185`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` with
+  several queries before concluding this, not assumed absent) —
+  substituted with a documented, rigorous self-review performed and
+  recorded here rather than silently skipping the gate. **(1) Accuracy**
+  — checked by direct source inspection, not assumed: the safety-matrix
+  ops this shape reuses (`no_extension_check`/`mime_type_check`/
+  `filename_charset_sanitize`/`extension_allowlist_mime_check`, all
+  keyed to `fs_web_root_write`) exist verbatim in `lab/safety_matrix.yaml`
+  with the documented `no_effect`/`partial`/`partial`/`neutralises`
+  ladder; `LABGEN-GO-0017`/`0018` were confirmed free (highest existing
+  Go cell ID across every manifest in `lab/manifests/*.yaml` was
+  `LABGEN-GO-0016`); Go's own `http.DetectContentType` and `mime.
+  TypeByExtension` builtin behavior (including the ".html"/".svg" builtin
+  MIME mappings the vulnerable twin's spoofing relies on, and the PNG
+  magic-number sniff the secure twin's real-image acceptance relies on)
+  were verified against a real `go build`/boot/HTTP round trip, not
+  assumed from documentation alone — this real verification run also
+  caught and fixed one real defect the initial draft had (see below).
+  **(2) Adequacy** — checked that this increment does not silently
+  duplicate an existing route (grepped `_ROUTE_PARAMS` for
+  `/channels/emotes/upload`: absent) and does not need a second,
+  redundant sink pair (the manifest's minimal-pair invariant: one
+  vulnerable, one secure op, both already fully specified by the
+  existing safety-matrix rows); confirmed the mandatory filesystem-safety
+  constraint (any live-boot test writes only under a throwaway
+  `tempfile.TemporaryDirectory`, never a real/permanent/shared path) is
+  met structurally, not just by test-author intent — `GoLiveBootHarness`
+  already runs the compiled binary with `cwd` set to its own
+  `TemporaryDirectory`-backed app dir, and the generated handler writes
+  to a **relative** path (`static/emotes`, resolved against that `cwd`),
+  so the default behavior already lands in a throwaway directory with no
+  extra plumbing needed — verified by inspecting `go_live_boot.py`'s own
+  `build()` before relying on it, not assumed; confirmed the live-boot
+  probe payload is inert (a marker string in a `<!DOCTYPE html><p>...`
+  snippet, never an actual `<script>` tag or anything that could execute
+  if mishandled, per the task's own explicit constraint). Confirmed
+  detection is genuinely out of scope for this commit, as instructed —
+  no audit rule or oracle strategy exists yet for `unrestricted_file_
+  upload`/`fs_web_root_write`, and none was added here.
+  - **Real Twitch functionality (grounded, not invented)**: a channel-
+    emote/profile-image upload endpoint — Twitch streamers upload custom
+    subscriber emotes as image files, a real, documented feature of this
+    app identity.
+  - **A genuinely new mechanism, designed from scratch, not a template
+    port.** `ReadUploadedFileSource` (`read_uploaded_file`, this stack's
+    first real `multipart/form-data` parser — `r.ParseMultipartForm`/
+    `r.FormFile("file")`, bounded at a fixed 5 MiB via `io.LimitReader`
+    so an oversized upload fails closed rather than exhausting memory)
+    publishes three Go identifiers (`filename_var`/`content_var`/
+    `client_content_type_var`) a sink reads directly — Convention 2 (the
+    manifest's one op names a sink directly, like SSRF/mass-assignment),
+    since the vulnerable/secure difference here is one inseparable
+    write-and-serve operation, not a value rewrite feeding a shared sink.
+  - **Vulnerable** (`LABGEN-GO-0017`, `no_extension_check`): writes the
+    upload to `static/emotes/<caller's own filename>` verbatim, then
+    serves it back with a `Content-Type` from `mime.TypeByExtension` on
+    that same filename (falling back to the caller's own multipart
+    `Content-Type` header when the extension is unrecognized) — never
+    from the file's real bytes. Go has no PHP-style "the web server
+    executes an uploaded script" footgun (the task's own note), so this
+    models the real, well-documented CWE-434-to-XSS chain instead: an
+    uploaded `.html`/`.svg` file is served back same-origin as
+    `text/html`/`image/svg+xml`, letting an embedded `<script>` execute
+    (stored XSS via unrestricted file upload).
+  - **Secure** (`LABGEN-GO-0018`, `extension_allowlist_mime_check`):
+    rejects any extension outside a fixed image allowlist (`.png`/
+    `.jpg`/`.jpeg`/`.gif`/`.webp`), then sniffs the REAL bytes via
+    `http.DetectContentType` and rejects anything whose sniffed type is
+    not `image/*` — closing exactly the gap `lab/safety_matrix.yaml`'s
+    own comment documents for this family's `partial`-effect ops.
+    Writes under a fully server-chosen filename (`"emote"+ext`, never
+    the caller's own filename) and always serves the response with the
+    SNIFFED content type, never one derived from the extension or the
+    caller's `Content-Type` header.
+  - **A real Go compile defect found and fixed before landing** (the
+    same "declared and not used" class `CC-LAB-0178`'s `broadcasterID`
+    bug and `CC-LAB-0180`'s JWT bug were): the secure sink's first draft
+    never referenced `client_content_type_var` at all, which `go build`
+    correctly rejected as declared-and-not-used — fixed with an explicit
+    `_ = {{ client_content_type_var }}` plus a comment stating plainly
+    that the secure twin deliberately never trusts that header, found by
+    actually running `go build` during this dispatch, not assumed to
+    compile from template inspection alone.
+  - **Real, live-boot proof** (`tests/test_labgen_go_live_boot.py::
+    test_real_boot_proves_the_unrestricted_file_upload_differential_for_both_twins`,
+    4 assertions, isolating exactly what allowlisting + content sniffing
+    controls): (a) the vulnerable twin serves an uploaded `evil.html`
+    back with `Content-Type: text/html`, marker intact in the body; (b)
+    the secure twin rejects the identical `evil.html` upload outright
+    (HTTP 415, extension not allowlisted); (c) the secure twin ALSO
+    rejects a spoofed upload (real HTML bytes, named `fake.png`, an
+    allowlisted extension) with HTTP 415 — proving the content-sniffing
+    half is what actually closes the gap, not just the extension check;
+    (d) the secure twin accepts a real PNG-signature upload and serves it
+    back with a sniffed `image/png` Content-Type, proving the secure path
+    is not simply "reject everything". Filesystem safety: every write in
+    this test lands under `GoLiveBootHarness`'s own
+    `tempfile.TemporaryDirectory`-backed process `cwd` (the generated
+    handler's `static/emotes` path is relative, resolved against that
+    `cwd`) — never a real, permanent, or shared path; the probe payload
+    is an inert `<!DOCTYPE html><p>FUZZLAB-UPLOAD-MARKER-...</p>` snippet,
+    never an executing `<script>` tag.
+  - **A real, additive harness gap found and fixed along the way**:
+    `GoLiveBootHarness.HttpResponse` (`fuzzlab/labgen/conformance/
+    go_live_boot.py`) had no `headers` field at all — every prior shape
+    on this stack has its vulnerable/secure difference observable in the
+    response *body* or *status*, never only in a response *header*, so
+    this was never needed before. Added `headers: dict[str, str] =
+    field(default_factory=dict)`, populated from the real
+    `http.client.HTTPMessage` the `urllib` response carries — additive
+    only (every existing caller constructing `HttpResponse(status=...,
+    body=...)` positionally/by-keyword is unaffected; re-ran this
+    stack's full pre-existing live-boot suite unmodified-in-assertion
+    to confirm).
+  - Ground truth: `TWCH-0009` added to `lab/ground-truth-twitch-clone/`
+    (`vuln_class="unrestricted_file_upload"`, `sink_context=
+    "fs_web_root_write"`, both new enum values — `fuzzlab/labels/schemas/
+    labels.schema.json` additively widened). `param`/`location` are
+    `file`/`body` (the real multipart field name — genuinely the one
+    tainted field here), deliberately NOT the `body`/`body` whole-body-
+    point convention `weak_token_entropy`/`mass_assignment` use for a
+    true whole-JSON-body taint, so `fuzzlab.harness.auto.
+    points_from_ground_truth`'s `param=="body"` JSON-content-type
+    auto-detection (wrong for a multipart upload) never fires for this
+    point. `rendering="server"` (not `"server-json"`, this ground-truth
+    directory's usual value) since the success response is raw bytes
+    with a dynamic Content-Type, never JSON — a genuine, recorded
+    departure, not a copy-paste of the surrounding convention.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py` (3 new classes:
+    `ReadUploadedFileSource`/`NoExtensionCheckSink`/
+    `ExtensionAllowlistMimeCheckSink`), `__init__.py` (`_MODULE_SET_BY_
+    SHAPE`, `_MODULE_IMPORTS`, `_ROUTE_PARAMS`)
+  - New templates: `templates/sources/read_uploaded_file.go.j2`,
+    `templates/sinks/no_extension_check.go.j2`,
+    `templates/sinks/extension_allowlist_mime_check.go.j2`
+  - `lab/manifests/unrestricted_file_upload_go_sample.yaml` (new)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended)
+  - `fuzzlab/labels/schemas/labels.schema.json` (additively widened)
+  - `fuzzlab/labgen/conformance/go_live_boot.py` (`HttpResponse.headers`,
+    additive)
+  - `tests/test_labgen_go_net_http_modules.py` (4 new unit tests)
+  - `tests/test_labgen_go_net_http_conformance.py` (manifest list
+    extended)
+  - `tests/test_labels_contract_category4.py` (extended, 9 cases)
+  - `tests/test_labgen_go_live_boot.py` (1 new, 4-assertion live-boot
+    test)
+  - `tests/test_multitarget_category4.py` (`_twitch_cells()` extended;
+    recall assertions moved 7/8 -> 7/9, `macro_recall` updated)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-126`, new)
+- Impact (other components / project): `fuzzlab/labgen/emitters/
+  go_net_http/` and `fuzzlab/labels/schemas/labels.schema.json` are
+  shared across every category/target touching this stack or its
+  ground-truth schema — the widening is additive only (two new enum
+  values), and a fresh check found no other active branch already using
+  those two exact names for something else. `GoLiveBootHarness.
+  HttpResponse`'s new `headers` field is additive (default empty dict);
+  every existing construction site (`django_live_boot.py`,
+  `rails_live_boot.py`, `live_boot_spring_boot.py`, `live_boot.py` each
+  define their OWN `HttpResponse`, not this one) is unaffected, and this
+  stack's own full pre-existing live-boot suite was re-run unmodified-
+  in-assertion to confirm. Twitch's own real, scored `multitarget` recall
+  moves from 7/8 to 7/9 (a real missed positive, since no rule/strategy
+  exists yet for this class — not a false one).
+- Risk (level; mitigation or accepted-risk justification): **low-medium**.
+  Genuinely new template/module code (not a verbatim reuse), so it
+  carries more real-defect risk than `CC-LAB-0180`-`0185`'s own reuse
+  increments — realized once (the `clientContentType` unused-variable
+  compile failure), caught by actually running `go build`/the real
+  live-boot test before landing, not assumed correct from template
+  inspection. Upload size is bounded (5 MiB) on both twins; the live-boot
+  test's own probe payload is inert and every write lands under a
+  throwaway temp directory, per the task's explicit filesystem-safety
+  constraint.
+- Deliverables:
+  - [x] New source + two new sink modules/templates implemented,
+    registered, unit-tested (4 tests) — done
+  - [x] Real live-boot proof (4 assertions: vulnerable-twin XSS-chaining
+    Content-Type, secure-twin extension rejection, secure-twin
+    content-sniffing rejection of a spoofed upload, secure-twin
+    legitimate-image acceptance) — done, real defect found and fixed
+    along the way
+  - [x] Ground truth extended (`TWCH-0009`), schema additively widened
+    — done
+  - [x] Filesystem safety verified structurally (throwaway temp dir,
+    bounded upload size, inert probe payload) — done
+  - [x] Full non-slow suite + every directly-affected slow test (this
+    stack's whole live-boot/modules/conformance suite,
+    `test_labels_contract_category4.py`, `test_multitarget_category4.py`)
+    re-run green at the stable baseline — done
+  - [x] Pre-change review gate's `Agent`-tool absence flagged explicitly,
+    substituted with a documented self-review (accuracy + adequacy),
+    matching `CC-LAB-0182`-`0185`'s own precedent wording — done
+  - [x] Detection deliberately NOT bundled into this commit — tracked as
+    its own separately-scoped follow-on (same split as `CC-LAB-0180`/
+    `CC-LAB-0181`)
+- Effectiveness (assessed 2026-09-23): met as a lab page — Twitch now has
+  nine real, live-boot-proven pages, this project's first genuinely new
+  mechanism built in this category's depth-increment run rather than a
+  cheap reuse, with the vulnerable/secure Content-Type-chaining
+  differential proven live in both directions plus a real content-
+  sniffing bypass-resistance check. Detection effectiveness is deferred
+  to its own future `CC-AUD`/`CC-FUZZ` follow-on, tracked here rather
+  than silently left implicit.
+
 ### CC-LAB-0185 — Twitch's 8th real page: second ssrf/server_side_http_fetch instance, `/clips/download` (FR-LAB-125) (2026-09-23)
 
 - Change: a cheap, low-risk depth increment for category 4's Twitch pick

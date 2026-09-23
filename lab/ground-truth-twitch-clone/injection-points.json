@@ -57,6 +57,13 @@
       "param": "source_url",
       "location": "query",
       "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0017",
+      "method": "POST",
+      "param": "file",
+      "location": "body",
+      "rendering": "server"
     }
   ]
 }

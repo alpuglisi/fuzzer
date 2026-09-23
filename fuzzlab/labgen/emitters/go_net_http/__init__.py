@@ -104,6 +104,16 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("mass_assignment", "orm_entity_bulk_assign"): _ModuleSet(
         "read_channel_profile_body", None, "render_only"
     ),
+    # Convention 2 again (like SSRF/mass-assignment): the manifest's one op
+    # names a sink directly -- the vulnerable/secure difference is one
+    # inseparable write-and-serve operation (which filename/content-type to
+    # trust when writing to and serving from a web-served directory), not a
+    # value rewrite feeding a shared sink. This stack's first
+    # `unrestricted_file_upload`/`fs_web_root_write` instance on any stack
+    # in this project (`CC-LAB-0186`).
+    ("unrestricted_file_upload", "fs_web_root_write"): _ModuleSet(
+        "read_uploaded_file", None, "render_only"
+    ),
 }
 
 #: Per-module (source/transform-op/sink name) -> the extra Go standard-
@@ -139,6 +149,9 @@ _MODULE_IMPORTS: dict[str, tuple[str, ...]] = {
     "read_channel_profile_body": ("io",),
     "unfiltered_object_assign": ("encoding/json",),
     "typed_schema_allowlist": ("encoding/json",),
+    "read_uploaded_file": ("io",),
+    "no_extension_check": ("mime", "os", "path/filepath"),
+    "extension_allowlist_mime_check": ("os", "path/filepath", "strings"),
 }
 
 #: Per-route static context this Phase A emitter needs beyond the
@@ -159,6 +172,11 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     # (CC-LAB-0172's own /api/clips/thumbnail), zero new generator code --
     # just this route-profile entry.
     "/clips/download": {"var_name": "sourceUrl", "param_name": "source_url"},
+    # CC-LAB-0186: this stack's first unrestricted_file_upload/
+    # fs_web_root_write instance -- no per-route var_name/param_name needed
+    # (ReadUploadedFileSource publishes its own default identifiers),
+    # matching /webhooks/eventsub's/`/channels/settings`'s own empty entries.
+    "/channels/emotes/upload": {},
 }
 
 

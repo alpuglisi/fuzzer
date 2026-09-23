@@ -40,6 +40,9 @@ _MANIFESTS = (
     # CC-LAB-0185: second ssrf/server_side_http_fetch instance, reusing
     # CC-LAB-0172's modules verbatim at a new route.
     "lab/manifests/ssrf_clips_download_go_sample.yaml",
+    # CC-LAB-0186: this stack's first unrestricted_file_upload/
+    # fs_web_root_write instance (a genuinely new mechanism, not a reuse).
+    "lab/manifests/unrestricted_file_upload_go_sample.yaml",
 )
 
 

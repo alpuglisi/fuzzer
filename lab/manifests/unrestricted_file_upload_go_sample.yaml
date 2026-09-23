@@ -1,0 +1,70 @@
+# Unrestricted-file-upload sample manifest (CC-LAB-0186), go_net_http.
+#
+# Ninth real page for this stack's Twitch pick (category 4, Media/
+# streaming -- docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §9.4/§9.5).
+# Genuinely new breadth, not a cheap "second instance" depth increment
+# like CC-LAB-0180..0185 -- this is the project's FIRST instance of
+# `lab/safety_matrix.yaml`'s `fs_web_root_write` sink family /
+# `unrestricted_file_upload` concern on ANY stack (checked directly:
+# `grep -rln "extension_allowlist_mime_check|fs_web_root_write"
+# fuzzlab/labgen/emitters/*/modules.py lab/manifests/*.yaml` found nothing
+# before this manifest landed).
+#
+# A channel-emote upload endpoint (a real, documented Twitch feature --
+# streamers upload custom subscriber emotes as image files), CWE-434
+# (unrestricted file upload). The vulnerable twin trusts the caller-
+# supplied filename and multipart Content-Type; since Go has no PHP-style
+# "web server executes an uploaded script" footgun, the real, idiomatic
+# consequence modeled here is the well-documented CWE-434-to-XSS chain:
+# the uploaded bytes are written under the caller's own filename into a
+# web-served directory and served back with a Content-Type derived from
+# that same filename's extension (falling back to the caller's own
+# Content-Type header), so an uploaded `.html`/`.svg` file is served back
+# same-origin as `text/html`/`image/svg+xml`, letting an embedded
+# <script> execute (stored XSS via unrestricted upload). The secure twin
+# allowlists real image extensions AND sniffs the actual bytes via
+# `http.DetectContentType`, rejecting anything not really an image,
+# writes under a fully server-chosen filename, and always serves the
+# SNIFFED content type -- never one derived from the extension or the
+# caller's own header.
+#
+# Module composition is this stack's Convention 2 (like SSRF/mass-
+# assignment): the manifest's one op names a SINK module directly -- the
+# vulnerable/secure difference is one inseparable write-and-serve
+# operation, not a value rewrite feeding a shared sink.
+#
+# `param`/`location` in this manifest's paired ground truth are `file`/
+# `body` (the real multipart field name), not the `body`/`body` whole-
+# body-point convention `weak_token_entropy`/`mass_assignment` use --
+# deliberately, since `file` genuinely IS the one tainted field here
+# (unlike those two shapes' true whole-JSON-body taint), and using it
+# avoids `fuzzlab.harness.auto.points_from_ground_truth`'s
+# `param=="body"` JSON-content-type auto-detection, which would be wrong
+# for a multipart upload.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: writes the upload under the caller's own filename and
+  # serves it back with a Content-Type derived from that same filename's
+  # extension (CWE-434 -> stored XSS).
+  - cell_id: LABGEN-GO-0017
+    class: unrestricted_file_upload
+    stack_profile: go_net_http
+    route: { method: POST, path: /channels/emotes/upload }
+    sink_context:
+      family: fs_web_root_write
+      required_neutralizations: [unrestricted_file_upload]
+    transform: [no_extension_check]
+
+  # Secure twin: the only difference is which sink module renders (the
+  # minimal-pair invariant) -- allowlisted extension AND sniffed real
+  # image content required before writing; the served Content-Type is
+  # always the sniffed type.
+  - cell_id: LABGEN-GO-0018
+    class: unrestricted_file_upload
+    stack_profile: go_net_http
+    route: { method: POST, path: /channels/emotes/upload }
+    sink_context:
+      family: fs_web_root_write
+      required_neutralizations: [unrestricted_file_upload]
+    transform: [extension_allowlist_mime_check]

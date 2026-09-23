@@ -501,6 +501,80 @@ class TypedSchemaAllowlistSink(TemplateModule):
         )
 
 
+class ReadUploadedFileSource(TemplateModule):
+    """Reads a real ``multipart/form-data`` upload -- this stack's first
+    (``CC-LAB-0186``), the ``unrestricted_file_upload`` shape's source.
+    Bounds the read at ``maxUploadBytes`` (5 MiB, a fixed lab-only cap --
+    same "fixed demo value" convention as ``webhookSecret``/
+    ``jwtSecret``) via ``io.LimitReader`` so an oversized upload fails
+    closed rather than exhausting memory. Publishes three Go identifiers
+    a sink reads directly: ``filename_var`` (the caller-supplied
+    filename, entirely attacker-controlled), ``content_var`` (the raw
+    ``[]byte`` payload), and ``client_content_type_var`` (the caller-
+    supplied multipart part ``Content-Type``, also attacker-controlled --
+    the second half of what this shape's vulnerable sink wrongly
+    trusts). Convention 2 (like SSRF/mass-assignment): no ``value_expr``
+    is published, since the manifest's one op names a **sink** directly
+    (see this package's own ``__init__.py`` module docstring)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "read_uploaded_file", "source", _SOURCE_ENV, "read_uploaded_file.go.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        render_ctx = dict(ctx)
+        render_ctx.setdefault("filename_var", "uploadFilename")
+        render_ctx.setdefault("content_var", "uploadContent")
+        render_ctx.setdefault("client_content_type_var", "clientContentType")
+        return super().render(render_ctx)
+
+
+class NoExtensionCheckSink(TemplateModule):
+    """The ``no_extension_check`` op (``lab/safety_matrix.yaml``,
+    ``fs_web_root_write`` family, ``no_effect`` -- added by
+    ``CC-LAB-0063``, never before instantiated by any stack's generator):
+    writes the uploaded bytes to a web-served directory under the
+    caller-supplied filename **verbatim**, then serves them back with a
+    ``Content-Type`` derived from that same caller-supplied filename's
+    extension (``mime.TypeByExtension``), falling back to the caller-
+    supplied multipart ``Content-Type`` header when the extension is
+    unrecognized -- never from the file's real bytes (CWE-434). Go has
+    no PHP-style "the web server executes an uploaded script" footgun
+    (the task's own note), so this models the real, well-documented
+    CWE-434-to-XSS chain instead: an uploaded ``.html``/``.svg`` file is
+    served back same-origin with a ``Content-Type`` that lets an embedded
+    ``<script>`` execute (stored XSS via unrestricted file upload)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "no_extension_check", "sink", _SINK_ENV, "no_extension_check.go.j2"
+        )
+
+
+class ExtensionAllowlistMimeCheckSink(TemplateModule):
+    """The ``extension_allowlist_mime_check`` op (``lab/safety_matrix.yaml``,
+    ``fs_web_root_write`` family, ``neutralises`` -- the secure twin):
+    rejects any extension outside a fixed image allowlist (``.png``/
+    ``.jpg``/``.jpeg``/``.gif``/``.webp``), then sniffs the REAL bytes
+    with ``http.DetectContentType`` and rejects anything whose sniffed
+    type is not ``image/*`` -- closing the gap `lab/safety_matrix.yaml`'s
+    own comment block documents for the `partial`-effect ops in this
+    family (``mime_type_check``/``filename_charset_sanitize``: narrowing
+    without inspecting real content leaves a spoofable gap). Writes under
+    a fully server-chosen filename (``"emote"+ext``, never the caller's
+    own filename) and always serves the response with the SNIFFED
+    content type, never one derived from the extension or the caller's
+    ``Content-Type`` header -- so neither a spoofed extension nor a
+    spoofed header can change what the response is served as."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "extension_allowlist_mime_check", "sink", _SINK_ENV,
+            "extension_allowlist_mime_check.go.j2",
+        )
+
+
 class RenderOnlyComplexity(TemplateModule):
     """Wraps the composed source/transform/sink body as the entire body of
     one ``net/http.HandlerFunc`` -- the Go analogue of every other stack's
@@ -523,6 +597,7 @@ SOURCES: dict[str, Module] = {
     "read_authorization_bearer_token": ReadAuthorizationBearerTokenSource(),
     "no_op_token_request": NoOpTokenRequestSource(),
     "read_channel_profile_body": ReadChannelProfileBodySource(),
+    "read_uploaded_file": ReadUploadedFileSource(),
 }
 TRANSFORMS: dict[str, Module] = {
     "naive_string_compare": NaiveStringCompareTransform(),
@@ -542,6 +617,8 @@ SINKS: dict[str, Module] = {
     "csprng_token": CsprngTokenSink(),
     "unfiltered_object_assign": UnfilteredObjectAssignSink(),
     "typed_schema_allowlist": TypedSchemaAllowlistSink(),
+    "no_extension_check": NoExtensionCheckSink(),
+    "extension_allowlist_mime_check": ExtensionAllowlistMimeCheckSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "render_only": RenderOnlyComplexity(),
