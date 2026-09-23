@@ -1931,7 +1931,7 @@ lane) can submit a payload as
   (`labels.json`/`injection-points.json`); `multitarget.py` wiring; "Huddle
   Hub" (the Slack pick, reusing `php_laravel`, not yet started).
 
-- **FR-LAB-81** *(Huddle Hub: webhook-signature-verification cell on
+- **FR-LAB-94** *(Huddle Hub: webhook-signature-verification cell on
   `php_laravel`; `CC-LAB-0133`, 2026-09-23).* Category 3's Slack pick,
   "Huddle Hub," gets its first designed cell — built on the existing,
   shared `php_laravel` emitter, not a new one, per §9.2's ledger note.
@@ -1964,8 +1964,8 @@ lane) can submit a payload as
   Hub's other two designed cells (SSRF via link unfurling, header injection
   in outgoing-webhook delivery); ground truth; `multitarget.py` wiring.
 
-- **FR-LAB-82** *(Huddle Hub: SSRF-via-link-unfurling cell on `php_laravel`;
-  `CC-LAB-0134`, 2026-09-23).* Extends `FR-LAB-81`'s Huddle Hub app with a
+- **FR-LAB-98** *(Huddle Hub: SSRF-via-link-unfurling cell on `php_laravel`;
+  `CC-LAB-0134`, 2026-09-23).* Extends `FR-LAB-94`'s Huddle Hub app with a
   second designed cell, `(vuln_class="ssrf",
   sink_context.family="server_side_http_fetch")` — a Slack-style "link
   unfurling" feature (server fetches a user-pasted URL to generate a
@@ -1980,7 +1980,7 @@ lane) can submit a payload as
   spirit: a generated cell's own server-side fetch must never hang
   indefinitely, independent of which op is vulnerable). New module names
   registered in both `php_laravel`'s own registries and the shared
-  `fuzzlab.labgen.modules` registry, per `FR-LAB-81`'s own established
+  `fuzzlab.labgen.modules` registry, per `FR-LAB-94`'s own established
   precedent. Live-boot-proven against a real local marker HTTP server this
   test owns: the vulnerable twin reaches it via both an IP literal and a
   resolved hostname; the secure twin rejects both forms with a real HTTP

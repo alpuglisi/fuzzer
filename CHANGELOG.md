@@ -12,6 +12,22 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (cross-branch bookkeeping fix, by the category 1 pilot session)
+- Docs/LAB: fixed two real cross-branch `FR-LAB` ID collisions found during
+  a cross-branch review — this branch's `FR-LAB-81` (Huddle Hub
+  webhook-signature-verification cell) had been independently claimed by
+  category 1 for its own, unrelated MeadowMart Phase C entry; this
+  branch's freshly-pushed `FR-LAB-82` (Huddle Hub SSRF-via-link-unfurling
+  cell) had been independently claimed by category 1 for its Phase D
+  whole-app conformance entry. Since this branch's usages had fewer
+  cross-file references to update than category 1's (the authoritative,
+  earlier claim on both), renumbered them: `FR-LAB-81`→`FR-LAB-94`,
+  `FR-LAB-82`→`FR-LAB-98`, via exact-token replacement across
+  `requirements.md`/`change-control.md`/`CHANGELOG.md`/
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`. Full non-slow test
+  suite re-run confirms no regression (1831 passed / 8 skipped, identical
+  to this branch's own pre-fix baseline).
+
 ## 2026-09-23
 - `fuzzlab/labgen/emitters/php_laravel/`: Huddle Hub's (category 3's Slack
   pick) second designed cell — SSRF via link unfurling (a Slack-style
@@ -30,7 +46,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   rejects both forms with a real HTTP 400 (confirmed via the marker
   server's own hit counter staying at zero) while still accepting a real
   public URL. 9 new tests, all passing; full non-slow suite re-run shows
-  no regression. `CC-LAB-0134`/`FR-LAB-82`.
+  no regression. `CC-LAB-0134`/`FR-LAB-98`.
 
 ## 2026-09-23 (cross-category doc sync, round 2)
 - Docs (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, all five second-target
@@ -70,7 +86,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   proving the actual "magic hash" comparison-operator differential — a
   live HTTP test cannot force a real SHA-256 HMAC output to itself be
   magic-hash-shaped. 9 new tests, all passing; full non-slow suite re-run
-  shows no regression. `CC-LAB-0133`/`FR-LAB-81`.
+  shows no regression. `CC-LAB-0133`/`FR-LAB-94`.
 
 ## 2026-09-23 (cross-branch review, by the category 1 pilot session)
 - Docs/LAB: reviewed this branch's code and tests — no code defects
