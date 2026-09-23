@@ -53,6 +53,20 @@ first instantiation of this concern (``CC-LAB-0188``). Convention 2, like
 SSRF/mass-assignment/file-upload: the manifest's one op names a sink
 module directly.
 
+**Phase B, eleventh increment (``CC-LAB-0190``/``FR-LAB-130``): this
+project's first `path_traversal`/`fs_path_read` instance on any stack**,
+``("path_traversal", "fs_path_read")`` -- a previously-exported-clip
+download handler (``GET /clips/export?filename=`` -- a real, plausible
+Twitch feature: downloading a clip export a broadcaster previously
+requested) that either joins the caller-supplied ``filename`` onto a fixed
+export directory with no confinement check at all (vulnerable, CWE-22,
+``unconfined_path``) or resolves the joined path to its real, symlink-
+resolved absolute form and rejects (403) anything that escapes the export
+directory's own real form (secure, ``realpath_confine``). Reuses
+``read_url_query_param`` verbatim as its source (like the SSRF shape) --
+no new source module needed. Convention 2 again: the manifest's one op
+names a sink module directly.
+
 **Multi-file output, like every other routed emitter.** Per this project's
 routed-emitter convention (``node_express``, ``ruby_rails``), a ``route``-
 category *accumulator* module (``net/http.ServeMux`` registration lines)
@@ -137,6 +151,14 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("price_integrity_bypass", "payment_charge_amount"): _ModuleSet(
         "read_subscription_purchase_request", None, "render_only"
     ),
+    # Convention 2 again (like SSRF): the manifest's one op names a sink
+    # module directly -- the vulnerable/secure difference is one
+    # inseparable join-and-read-unconfined-vs-resolve-and-confine
+    # operation, not a value rewrite feeding a shared sink. This project's
+    # first `path_traversal`/`fs_path_read` instance on any stack
+    # (`CC-LAB-0190`). Reuses `read_url_query_param` verbatim as its
+    # source, exactly like the SSRF shape.
+    ("path_traversal", "fs_path_read"): _ModuleSet("read_url_query_param", None, "render_only"),
 }
 
 #: Per-module (source/transform-op/sink name) -> the extra Go standard-
@@ -178,6 +200,8 @@ _MODULE_IMPORTS: dict[str, tuple[str, ...]] = {
     "read_subscription_purchase_request": ("io",),
     "client_trusted_amount": ("encoding/json",),
     "server_recomputed_amount": ("encoding/json",),
+    "unconfined_path": ("os", "path/filepath"),
+    "realpath_confine": ("os", "path/filepath", "strings"),
 }
 
 #: Per-route static context this Phase A emitter needs beyond the
@@ -209,6 +233,11 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     # default identifiers), matching /webhooks/eventsub's/
     # /channels/settings's/`/channels/emotes/upload`'s own empty entries.
     "/subscriptions/purchase": {},
+    # CC-LAB-0190: this project's first path_traversal/fs_path_read
+    # instance on any stack. Reuses ReadUrlQueryParamSource's own
+    # var_name/param_name convention (like /api/clips/thumbnail's own
+    # entry above) -- filename is read from the `filename` query param.
+    "/clips/export": {"var_name": "requestedFilename", "param_name": "filename"},
 }
 
 

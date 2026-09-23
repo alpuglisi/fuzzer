@@ -1,0 +1,27 @@
+const clipExportDir = "static/clips_exports"
+const maxExportBytes int64 = 5 << 20 // 5 MiB cap -- bounds how much of any resolved file this handler ever reads
+// Vulnerable (CWE-22): the caller-supplied filename is joined onto the
+// export directory with filepath.Join, which only lexically CLEANS the
+// resulting string ("." and ".." segments collapsed) -- it never confines
+// the result to clipExportDir. A caller-supplied "../../whatever" value
+// walks straight back out of the intended directory once enough ".."
+// segments are supplied; nothing here checks the resolved path's real
+// location before reading it.
+requestedPath := filepath.Join(clipExportDir, {{ var_name }})
+info, err := os.Stat(requestedPath)
+if err != nil || info.IsDir() {
+	http.Error(w, "not found", http.StatusNotFound)
+	return
+}
+if info.Size() > maxExportBytes {
+	http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+	return
+}
+data, err := os.ReadFile(requestedPath)
+if err != nil {
+	http.Error(w, "read failed", http.StatusInternalServerError)
+	return
+}
+w.Header().Set("Content-Type", "application/octet-stream")
+w.WriteHeader(http.StatusOK)
+w.Write(data)

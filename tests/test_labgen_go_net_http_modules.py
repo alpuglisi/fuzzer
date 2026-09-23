@@ -300,3 +300,47 @@ def test_extension_allowlist_mime_check_sink_sniffs_real_bytes() -> None:
     # destination path itself.
     assert 'filepath.Join(emoteUploadDir, "emote"+ext)' in result.code
     assert "filepath.Join(emoteUploadDir, uploadFilename)" not in result.code
+
+
+# -- Phase B eleventh increment: path traversal (fs_path_read, CC-LAB-0190) --
+
+
+def test_unconfined_path_sink_joins_and_reads_with_no_confinement_check() -> None:
+    result = SINKS["unconfined_path"].render({"var_name": "requestedFilename"})
+    # Vulnerable: the joined path is read with no check that it stays
+    # inside the export directory at all.
+    assert "filepath.Join(clipExportDir, requestedFilename)" in result.code
+    assert "os.ReadFile(requestedPath)" in result.code
+    # Never resolves symlinks or checks a real/absolute prefix -- that is
+    # exactly what the secure twin adds.
+    assert "EvalSymlinks" not in result.code
+    assert "filepath.Abs" not in result.code
+    # A real size bound, not left unbounded.
+    assert "maxExportBytes" in result.code
+
+
+def test_realpath_confine_sink_resolves_and_rejects_escapes() -> None:
+    result = SINKS["realpath_confine"].render({"var_name": "requestedFilename"})
+    # Secure: resolves both the base directory and the requested path to
+    # their real, symlink-resolved, absolute forms before comparing.
+    assert "filepath.Abs(clipExportDir)" in result.code
+    assert "filepath.EvalSymlinks(absBase)" in result.code
+    assert "filepath.EvalSymlinks(absRequested)" in result.code
+    # Rejects (403) anything that does not stay inside the real base dir.
+    assert "http.StatusForbidden" in result.code
+    assert "strings.HasPrefix(realRequested, realBase" in result.code
+    # Reads the RESOLVED path, never the unresolved caller-influenced one.
+    assert "os.ReadFile(realRequested)" in result.code
+    assert "os.ReadFile(requestedPath)" not in result.code
+    # A real size bound, not left unbounded.
+    assert "maxExportBytes" in result.code
+
+
+def test_path_traversal_shape_reuses_the_url_query_param_source() -> None:
+    # Convention 2 (like SSRF): no new source module needed -- the
+    # existing read_url_query_param source publishes whatever var_name the
+    # route profile names.
+    result = SOURCES["read_url_query_param"].render(
+        {"var_name": "requestedFilename", "param_name": "filename"}
+    )
+    assert 'requestedFilename := r.URL.Query().Get("filename")' in result.code

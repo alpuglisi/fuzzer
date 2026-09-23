@@ -3,6 +3,279 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0190 — Twitch's 11th real page: first path_traversal instance on any stack, `/clips/export` (FR-LAB-130) (2026-09-23)
+
+- Change: genuinely new breadth for category 4's Twitch pick, explicitly
+  **not** a cheap "second instance" depth increment like `CC-LAB-0180`-
+  `0189` -- this is this project's **first** instantiation, on **any**
+  stack, of `lab/safety_matrix.yaml`'s existing `fs_path_read` sink
+  family and `path_traversal` concern (added by `CC-LAB-0063` for the
+  corpus-examples/file-handling research, its comment block near line 50
+  and its op rows near line 471-481). Confirmed absent before building:
+  `grep -rln "unconfined_path\|realpath_confine\|fs_path_read"
+  fuzzlab/labgen/emitters/*/modules.py lab/manifests/*.yaml` returned
+  nothing.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0189`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` with
+  a direct query before concluding this, not assumed absent) --
+  substituted with a documented, rigorous self-review performed and
+  recorded here rather than silently skipping the gate. **(1) Accuracy**
+  -- checked by direct source inspection, not assumed: `go_net_http`'s
+  existing Convention-2 shapes (SSRF, mass-assignment, file-upload,
+  price-integrity -- `modules.py`'s own docstring, read before designing
+  anything) already establish "the manifest's one op names a sink module
+  directly, no separate transform stage" for a shape whose vulnerable/
+  secure difference is one inseparable operation -- this concern fits
+  that convention exactly (join-and-read-unconfined vs. resolve-and-
+  confine is inseparable from which sink renders). Reused
+  `ReadUrlQueryParamSource` verbatim rather than writing a new source
+  (read directly: it already publishes whatever `var_name`/`param_name`
+  the route profile names, exactly what this shape needs, the same
+  reuse `UncheckedUrlFetchSink`'s own shape made for SSRF). Cell IDs
+  `LABGEN-GO-0021`/`0022` were confirmed free (grepped `LABGEN-GO-`
+  across every manifest, highest existing was `LABGEN-GO-0020`). Go's
+  own `filepath.Join`/`filepath.Abs`/`filepath.EvalSymlinks` semantics
+  (including that `filepath.Join` only lexically *cleans* a path -- it
+  never *confines* it, so enough `..` segments still walk back out; and
+  that `EvalSymlinks` fails closed when its target does not exist) were
+  verified against a real `go build`/boot/HTTP round trip, not assumed
+  from documentation alone -- the real boot is what actually proves the
+  vulnerable twin's escape and the secure twin's confinement, not a
+  unit-test-only claim. **(2) Adequacy** -- checked that this increment
+  does not silently duplicate an existing route (grepped `_ROUTE_PARAMS`
+  for `/clips/export`: absent) and does not need a second, redundant
+  sink pair (the manifest's minimal-pair invariant: one vulnerable, one
+  secure op, both newly built here since no prior instance existed to
+  reuse). Confirmed the mandatory filesystem-safety constraint (any
+  live-boot test operates entirely under a throwaway
+  `tempfile.TemporaryDirectory`-backed process `cwd`, and its traversal
+  probe targets an INERT canary the test creates itself inside that same
+  disposable tree, never a real system file) is met structurally, not
+  just by test-author intent: `GoLiveBootHarness` already runs the
+  compiled binary with `cwd` set to its own `TemporaryDirectory`-backed
+  `app_dir` (verified by reading `go_live_boot.py`'s own `build()` before
+  relying on it, not assumed) -- but that harness had no *public* way for
+  a test to plant a file on disk before issuing a request (every prior
+  shape only ever sent bytes over HTTP), so a minimal `app_dir` property
+  was added to it (additive, every existing caller unaffected -- checked
+  by re-running the whole existing `test_labgen_go_live_boot.py` suite
+  after adding it). The live-boot test then creates a legitimate export
+  file and a canary file (a sibling two directories above the export
+  directory, e.g. `filename=../../secret_canary.txt`) both directly
+  under that same `app_dir`, and never touches anything outside it or
+  any real system path. Confirmed detection is genuinely out of scope
+  for this commit, as instructed -- no audit rule or oracle strategy
+  exists yet for `path_traversal`/`fs_path_read`, and none was added
+  here; a genuine black-box confirmation strategy for this concern was
+  considered (see the follow-on note below) and deliberately not built.
+  - **Real Twitch functionality (grounded, not invented)**: a
+    previously-exported-clip download endpoint -- Twitch lets
+    broadcasters request an export of a clip/VOD and download it later,
+    a real, plausible feature of this app identity.
+  - **A genuinely new mechanism for this stack, but a minimal one**:
+    `UnconfinedPathSink`/`RealpathConfineSink`, this stack's first
+    `fs_path_read` sinks. No new source module: `read_url_query_param`
+    (already used by the SSRF shape) is reused verbatim, since this
+    shape's tainted input is a single query-string parameter (`filename`)
+    -- exactly what that source already publishes.
+  - **Vulnerable** (`LABGEN-GO-0021`, `unconfined_path`): joins the
+    caller-supplied `filename` onto a fixed export directory
+    (`static/clips_exports`) with `filepath.Join` and reads/serves
+    whatever file results, with no check at all that the resolved path
+    stays inside that directory (CWE-22). Bounds the read at a fixed 5
+    MiB (`maxExportBytes`, the same fixed lab-only cap convention as
+    `maxUploadBytes`, `CC-LAB-0186`) so a maliciously large target file
+    fails closed rather than exhausting memory.
+  - **Secure** (`LABGEN-GO-0022`, `realpath_confine`): resolves the
+    joined path to its real, canonical, **symlink-resolved** absolute
+    form (`filepath.Abs` + `filepath.EvalSymlinks` -- not just
+    `filepath.Clean`/a string-prefix check on the *unresolved* path,
+    which `lab/safety_matrix.yaml`'s own comment block documents as a
+    well-known partial-defense gap for exactly this reason, and which a
+    planted symlink inside the export directory could still defeat) and
+    rejects (HTTP 403) anything whose resolved form does not stay inside
+    the export directory's own real, resolved absolute form. Any
+    resolution failure (the base directory or the requested path cannot
+    be resolved, e.g. it does not exist) fails closed (404/500) rather
+    than falling through to a check on an unresolved path. Same 5 MiB
+    read bound as the vulnerable twin.
+  - **Real, live-boot proof**
+    (`tests/test_labgen_go_live_boot.py::
+    test_real_boot_proves_the_path_traversal_differential_for_both_twins`):
+    both twins serve a legitimate, in-directory filename identically; the
+    vulnerable twin serves a `filename=../../secret_canary.txt` payload
+    straight through, and the canary's own distinctive marker string
+    appears in the response body; the secure twin rejects the identical
+    payload outright (HTTP 403), the marker never appears in its
+    response, and a missing-but-in-bounds filename on the secure twin
+    fails closed as 404 (not 403) -- proving its confinement check and
+    its existence check are two genuinely distinct code paths, not one
+    check doing double duty. Every file this test reads or writes lives
+    under `harness.app_dir`, itself always inside `GoLiveBootHarness`'s
+    own throwaway `tempfile.TemporaryDirectory` -- never a real,
+    permanent, or shared path, and never a real system file like
+    `/etc/passwd`.
+  - **Detection: considered and deliberately deferred, not silently
+    skipped.** A canary-marker-in-band-response differential (the
+    project's established pattern, `SsrfInBandMarkerStrategy`/
+    `XxeInBandMarkerStrategy`) needs the oracle to plant its own canary
+    the confirmation probe can then look for. `SsrfInBandMarkerStrategy`
+    can do this because it controls an `OobListener` the target itself
+    calls back into; a path-traversal strategy has no equivalent --  it
+    cannot write a file onto the target's own filesystem from outside,
+    so it cannot plant a canary a traversal payload could then read back.
+    Probing for a small set of well-known, host-OS-agnostic paths (e.g.
+    `/etc/passwd`, `C:\Windows\win.ini`) is not a safe, realistic
+    black-box confirmation signal for this project's own lab-only,
+    authorized-only scope (`README.md`'s own safety rule) and would also
+    be a poor discriminator in general (many targets simply do not
+    expose such a path at all, producing false negatives, without ruling
+    out a genuine but differently-shaped escape). No safe, low-false-
+    positive, genuinely black-box-realistic confirmation design was
+    found this dispatch -- matching this project's own documented
+    precedent for `webhook_signature`'s own infeasible-detection call
+    (a CWE-347 timing side channel, empirically infeasible for this
+    project's wall-clock HTTP measurement model) rather than building
+    something contrived or unsafe. Left as this entry's own explicit
+    open question / follow-on, tracked here rather than silently
+    implicit -- a future design could constrain itself to a
+    differential purely on HTTP status/timing/error-message shape
+    (never file content) if a low-false-positive signal along those
+    lines is found later.
+  Ground truth: `TWCH-0011` added to `lab/ground-truth-twitch-clone/`
+  (`vuln_class="path_traversal"`, `sink_context="fs_path_read"` -- both
+  new enum values, `fuzzlab/labels/schemas/labels.schema.json` widened
+  additively; `param="filename"`/`location="query"`, matching the real
+  tainted input's actual shape (a single query-string parameter), unlike
+  the whole-body-JSON convention the price-integrity/mass-assignment
+  cases use).
+  **PA-0042 compliance (`BUG-0040`'s own recurrence-prevention rule)**:
+  grepped the whole test suite for hardcoded fraction/count assertions
+  that could depend on Twitch's ground-truth cardinality
+  (`tests/test_multitarget_category4.py`, `tests/test_auto.py`,
+  `tests/test_labels_contract_category4.py`) before considering this
+  entry done. Found and fixed **two** stale assertions in
+  `tests/test_multitarget_category4.py` this dispatch's own change made
+  stale: the Twitch-only `recall == 9/10` assertion (re-derived to
+  `9/11`, `tp` unchanged at 9 -- `TWCH-0011` is a real, tracked false
+  negative, not silently dropped from the boot) and a second,
+  easy-to-miss `macro_recall` assertion further down the same test
+  (`((9/10) + (1/5)) / 2`, re-derived to `((9/11) + (1/5)) / 2`) --
+  `tests/test_auto.py` and `tests/test_labels_contract_category4.py`
+  needed no such fix (the former asserts membership, not counts/
+  fractions; the latter's own `len(gt.cases) == 10`/case-ID-set
+  assertions were updated to 11/`TWCH-0011` directly as part of this
+  entry's own ground-truth extension, not left stale). All three files
+  were then explicitly re-run directly (not only as part of the whole-
+  repo run), regardless of `slow` marker, and confirmed green.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py` (new
+    `UnconfinedPathSink`/`RealpathConfineSink` classes + registrations,
+    module docstring extended)
+  - `fuzzlab/labgen/emitters/go_net_http/__init__.py`
+    (`_MODULE_SET_BY_SHAPE`/`_MODULE_IMPORTS`/`_ROUTE_PARAMS`, one new
+    shape + one new route entry; module docstring extended)
+  - `fuzzlab/labgen/emitters/go_net_http/templates/sinks/
+    {unconfined_path,realpath_confine}.go.j2` (new)
+  - `fuzzlab/labgen/conformance/go_live_boot.py` (new `app_dir` public
+    property on `GoLiveBootHarness`, additive)
+  - `lab/manifests/path_traversal_go_sample.yaml` (new,
+    `LABGEN-GO-0021`/`0022`)
+  - `fuzzlab/labels/schemas/labels.schema.json` (two new enum values:
+    `path_traversal`, `fs_path_read`)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (`TWCH-0011`)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-130`)
+  - `tests/test_labgen_go_net_http_modules.py` extended (3 tests)
+  - `tests/test_labgen_go_net_http_conformance.py` extended (manifest
+    added to the regenerate-and-diff/whole-sample sweep)
+  - `tests/test_labgen_go_live_boot.py` extended (1 test, real live boot,
+    green)
+  - `tests/test_labels_contract_category4.py` extended
+  - `tests/test_multitarget_category4.py` extended and re-verified
+    against a real pipeline run (Twitch recall `9/10` -> `9/11`, `tp`
+    unchanged at 9; `macro_recall` re-derived to match)
+  - `CHANGELOG.md` line
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` category 4 tracker
+    row updated
+- Impact (other components / project): additive-only across `lab/
+  safety_matrix.yaml` (no change, only reuse -- the `path_traversal`
+  concern and `fs_path_read` family were already documented there by
+  `CC-LAB-0063`, just never instantiated), `fuzzlab/labgen/emitters/
+  go_net_http/` (two new sink modules + templates, existing ones
+  untouched), `fuzzlab/labgen/conformance/go_live_boot.py` (one new,
+  additive public property), `fuzzlab/labels/schemas/labels.schema.json`
+  (two new enum values), and the existing `lab/ground-truth-twitch-
+  clone/` directory (grown again, not replaced). No change to
+  `fuzzlab/oracle/strategies.py` or `fuzzlab/audit/rules_data/
+  default_rules.json` at all -- detection for this concern remains
+  genuinely unbuilt project-wide, tracked as this entry's own explicit,
+  considered-and-deferred open question (see above), not silently left
+  implicit. No DB write or outbound network call at all -- the only
+  filesystem writes involved are the lab app's own (bounded, throwaway-
+  temp-directory-confined) reads and the live-boot test's own throwaway
+  fixture writes.
+- Risk (level; mitigation or accepted-risk justification): low -- this
+  is a lab-only, self-contained filesystem-read shape with no DB write,
+  no outbound network call, and every live-boot read/write confined to a
+  throwaway `tempfile.TemporaryDirectory` the harness itself owns and
+  tears down; both the vulnerable and secure twins bound the file size
+  they read, so neither can be driven to exhaust memory. The one
+  genuinely new risk this entry's own review gate flagged pre-
+  implementation (a live-boot traversal test that actually reads a real
+  system file, e.g. `/etc/passwd`, to "prove the point" more
+  dramatically) was designed around from the start per this dispatch's
+  own explicit instruction -- the probe targets only an inert canary
+  this test creates itself, inside its own disposable temp tree, never
+  a real system path.
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml`: no change (reuse confirmed) -- done
+  - [x] `fuzzlab/labgen/emitters/go_net_http/modules.py` + `__init__.py`
+    + 2 new templates -- done
+  - [x] `fuzzlab/labgen/conformance/go_live_boot.py`: `app_dir` property
+    -- done
+  - [x] `lab/manifests/path_traversal_go_sample.yaml` (2 cells) -- done
+  - [x] `fuzzlab/labels/schemas/labels.schema.json`: `path_traversal`/
+    `fs_path_read` widening -- done
+  - [x] `lab/ground-truth-twitch-clone/`: `TWCH-0011` in all 3 files --
+    done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-130` --
+    done
+  - [x] `tests/test_labgen_go_net_http_modules.py` extended (3 tests) --
+    done
+  - [x] `tests/test_labgen_go_net_http_conformance.py` extended -- done
+  - [x] `tests/test_labgen_go_live_boot.py` extended (1 test, real live
+    boot, green) -- done
+  - [x] `tests/test_labels_contract_category4.py` extended -- done
+  - [x] `tests/test_multitarget_category4.py` extended and re-verified
+    against a real pipeline run (recall `9/10` -> `9/11`) -- done
+  - [x] Whole-repo `pytest -m "not slow"` run before considering this
+    increment complete (`PA-0040`) -- see Effectiveness
+  - [x] PA-0042's own hardcoded-recall-assertion grep + explicit re-run
+    of `tests/test_multitarget_category4.py`/`tests/test_auto.py`/
+    `tests/test_labels_contract_category4.py` -- two stale assertions
+    found and fixed in `tests/test_multitarget_category4.py`, all three
+    re-run directly and green -- see Effectiveness
+  - [x] `CHANGELOG.md` line -- done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` category 4
+    tracker row updated -- done
+  - [x] Pre-change review gate, `Agent`-tool-absence substitution noted
+    explicitly, matching `CC-LAB-0182`-`0189`'s own precedent wording --
+    done
+- Effectiveness (assessed 2026-09-23): met as a lab page -- Twitch now
+  has eleven real, live-boot-proven pages, and this project now has its
+  first `path_traversal`/`fs_path_read` implementation on any stack,
+  proven live (a real escape via `filepath.Join`'s lexical-only cleaning,
+  and a real, symlink-aware confinement fix), not merely rendered.
+  Detection effectiveness is deliberately deferred, with the specific
+  reason a naive in-band-marker strategy does not transfer to this
+  concern recorded above rather than left implicit -- the same split
+  `CC-LAB-0180`/`CC-LAB-0181`/`CC-LAB-0186` already established for this
+  category, extended here with an explicit "considered and rejected"
+  record for why no follow-on detection commit accompanies this one.
+
 ### CC-LAB-0189 — Twitch's 10th real page: first price_integrity_bypass instance, `/subscriptions/purchase` (FR-LAB-129) (2026-09-23)
 
 - Change: genuinely new breadth for category 4's Twitch pick, explicitly

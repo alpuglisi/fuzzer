@@ -4417,6 +4417,84 @@ lane) can submit a payload as
   concluding this, not assumed absent) -- substituted with a documented,
   rigorous self-review performed and recorded in `CC-LAB-0189`.
 
+- **FR-LAB-130** *(Twitch's eleventh real page: first `path_traversal`
+  instance on any stack, `/clips/export`; `CC-LAB-0190`, 2026-09-23).*
+  Genuinely new breadth for `go_net_http`, not a depth reuse: this is
+  this project's **first** instantiation, on any stack, of `lab/
+  safety_matrix.yaml`'s existing `fs_path_read` sink family and
+  `path_traversal` concern (added by `CC-LAB-0063` for the corpus-
+  examples/file-handling research, alongside `fs_web_root_write`/
+  `unrestricted_file_upload`; confirmed absent from every emitter and
+  manifest before starting: `grep -rln
+  "unconfined_path\|realpath_confine\|fs_path_read"
+  fuzzlab/labgen/emitters/*/modules.py lab/manifests/*.yaml` returned
+  nothing). A previously-exported-clip download endpoint (`GET
+  /clips/export?filename=` -- a real, plausible Twitch feature:
+  downloading a clip export a broadcaster previously requested),
+  genuinely distinct from every other route this stack already has.
+  **Design**: follows this stack's existing Convention 2 (SSRF/mass-
+  assignment/file-upload/price-integrity) -- the manifest's one op names
+  a sink module directly, since the vulnerable/secure difference is one
+  inseparable join-and-read-unconfined-vs-resolve-and-confine operation,
+  not a value rewrite feeding a shared sink. Reuses
+  `ReadUrlQueryParamSource` verbatim as its source (like the SSRF shape)
+  -- no new source module needed; only two new sink modules.
+  The vulnerable twin (`UnconfinedPathSink`, op `unconfined_path`) joins
+  the caller-supplied `filename` onto a fixed export directory
+  (`static/clips_exports`) with Go's `filepath.Join` -- which only
+  lexically *cleans* the resulting string, it never *confines* it -- and
+  reads/serves whatever file results with no check at all that the
+  resolved path stays inside that directory (CWE-22). The secure twin
+  (`RealpathConfineSink`, op `realpath_confine`) resolves the joined path
+  to its real, canonical, **symlink-resolved** absolute form
+  (`filepath.Abs` + `filepath.EvalSymlinks` -- not just
+  `filepath.Clean`/a string-prefix check on the unresolved path, which a
+  planted symlink could still defeat) and rejects (HTTP 403) anything
+  whose resolved form does not stay inside the export directory's own
+  real, resolved absolute form; any resolution failure fails closed
+  (404/500). Both twins bound the file size they read (`maxExportBytes`,
+  5 MiB, the same fixed lab-only cap convention as `maxUploadBytes`).
+  Cells `LABGEN-GO-0021`/`0022`
+  (`lab/manifests/path_traversal_go_sample.yaml`); ground truth
+  `TWCH-0011` (`vuln_class="path_traversal"`, `sink_context=
+  "fs_path_read"` -- both new enum values, `fuzzlab/labels/schemas/
+  labels.schema.json` widened additively; `param="filename"`/
+  `location="query"`).
+  **Real live-boot proof, filesystem-safety discipline followed
+  throughout** (`tests/test_labgen_go_live_boot.py::
+  test_real_boot_proves_the_path_traversal_differential_for_both_twins`,
+  real assemble/build/boot/HTTP round trip): every file this test reads
+  or writes lives under `GoLiveBootHarness`'s own throwaway
+  `tempfile.TemporaryDirectory`-backed `app_dir` (a new, minimal public
+  accessor added to the harness for this proof -- no prior shape needed
+  to plant a file on disk before issuing a request), never a real,
+  permanent, or shared path, and never a real system file such as
+  `/etc/passwd` -- the traversal probe targets an inert canary file the
+  test itself creates as a sibling two directories above the export
+  directory, still entirely inside that same disposable temp tree. A
+  legitimate in-directory filename is served identically by both twins;
+  a `filename=../../<canary>` payload is served straight through by the
+  vulnerable twin (the canary's own marker appears in the response) and
+  rejected outright (HTTP 403, marker absent) by the secure twin; a
+  missing-but-in-bounds filename fails closed as 404 on the secure twin,
+  proving its confinement check and its existence check are two
+  genuinely distinct code paths.
+  **Detection deliberately out of scope for this entry, per this
+  dispatch's own lab-then-detection split** (matching `CC-LAB-0180`/
+  `CC-LAB-0181`/`CC-LAB-0186`'s own precedent): no audit rule or oracle
+  strategy exists yet for `path_traversal`/`fs_path_read` on any stack.
+  `tests/test_multitarget_category4.py` was extended to boot this
+  shape's cells alongside every other Twitch cell; `TWCH-0011` is a real,
+  expected, tracked false negative there (Twitch's own scored recall in
+  that pipeline moves from `9/10` to `9/11`, `tp` unchanged at 9) rather
+  than silently omitted from the boot.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0189`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded in `CC-LAB-0190`.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

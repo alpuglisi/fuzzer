@@ -4,6 +4,44 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Twitch's 11th real page, first path_traversal instance on any stack, CC-LAB-0190/FR-LAB-130)
+- Target lab: `/clips/export?filename=` (a previously-exported-clip
+  download endpoint — a real, plausible Twitch feature). This project's
+  **first** instantiation, on any stack, of `lab/safety_matrix.yaml`'s
+  existing `fs_path_read` sink family / `path_traversal` concern (added
+  by `CC-LAB-0063`, never before built). The vulnerable twin
+  (`unconfined_path`) joins the caller-supplied `filename` onto a fixed
+  export directory with Go's `filepath.Join` — which only lexically
+  cleans the result, it never confines it — and reads/serves whatever
+  file results with no confinement check at all (CWE-22). The secure
+  twin (`realpath_confine`) resolves the joined path to its real,
+  symlink-resolved absolute form (`filepath.Abs` + `filepath.
+  EvalSymlinks`) and rejects (HTTP 403) anything outside the export
+  directory's own real, resolved form; both twins bound the file size
+  they read. Reuses the existing `read_url_query_param` source verbatim
+  (like the SSRF shape) — only two new sink modules needed. Real
+  live-boot proof added a public `app_dir` accessor to
+  `GoLiveBootHarness` (additive) so the test could plant a legitimate
+  export file and an inert canary directly on disk, entirely inside the
+  harness's own throwaway temp directory — never a real system file
+  like `/etc/passwd`: a `filename=../../<canary>` payload escapes on the
+  vulnerable twin and is rejected on the secure twin, verified against a
+  real boot. Ground truth: `TWCH-0011`
+  (`lab/ground-truth-twitch-clone/`), two new `labels.schema.json` enum
+  values (`path_traversal`, `fs_path_read`). Detection (audit rule +
+  oracle strategy) is deliberately deferred — a naive in-band-marker
+  differential (this project's usual pattern) does not transfer here
+  since a path-traversal strategy cannot plant its own canary on the
+  target's filesystem the way an SSRF/XXE strategy can via an
+  `OobListener`; no safe, low-false-positive, black-box-realistic
+  confirmation design was found, so it is left an explicit open
+  question (matching `webhook_signature`'s own precedent) rather than
+  built contrived or unsafe. PA-0042: re-derived two stale hardcoded
+  recall assertions in `tests/test_multitarget_category4.py` that this
+  ground-truth-cardinality change made stale (Twitch `9/10` → `9/11`,
+  `tp` unchanged at 9; `macro_recall` re-derived to match). See
+  `CC-LAB-0190`/`FR-LAB-130` for the full record.
+
 ## 2026-09-23 (LAB: Twitch's 10th real page, first price_integrity_bypass instance on go_net_http, CC-LAB-0189/FR-LAB-129)
 - Target lab: `/subscriptions/purchase` (a channel-subscription purchase
   endpoint — Twitch's own signature monetization feature). Genuinely new

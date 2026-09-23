@@ -1016,3 +1016,90 @@ def test_real_boot_proves_the_price_integrity_strategy_generalizes_from_spring_b
         assert strategy.confirm(_cand(), _HarnessSender()) is None, (
             "strategy incorrectly confirmed the real secure twin"
         )
+
+
+# -- Phase B eleventh increment: path traversal (fs_path_read, CC-LAB-0190) --
+
+_PATH_TRAVERSAL_CANARY_MARKER = "FUZZLAB-PATH-TRAVERSAL-CANARY-9d71ab"
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_path_traversal_differential_for_both_twins() -> None:
+    """Real assertions, isolating exactly what real-path confinement
+    controls (CC-LAB-0190):
+
+    (a) both twins serve a legitimate, in-directory filename identically --
+        this shape's functional contract (serve a previously-exported
+        clip) is unaffected by the fix.
+    (b) the vulnerable twin serves a `../../<canary>`-style traversal
+        payload straight through, reaching a file two directories above
+        the intended export directory (CWE-22).
+    (c) the secure twin rejects the identical traversal payload outright
+        (HTTP 403), and the canary's own marker never appears in its
+        response body.
+    (d) the secure twin's confinement check and its existence check are
+        two genuinely distinct code paths -- a missing-but-in-bounds
+        filename fails closed as "not found", not as a confinement error.
+
+    **Filesystem safety.** Every file this test creates or reads lives
+    under `harness.app_dir` -- always a path inside `GoLiveBootHarness`'s
+    own throwaway `tempfile.TemporaryDirectory` (never a real, permanent,
+    or shared path, and never a real system file like `/etc/passwd`), per
+    this dispatch's own filesystem-safety instruction. The canary file is a
+    sibling of the export directory two levels up, entirely inside that
+    same disposable temp tree -- proving the escape without ever touching
+    anything outside it.
+    """
+    manifest = load_manifest("lab/manifests/path_traversal_go_sample.yaml")
+    emitter = GoEmitter()
+
+    with GoLiveBootHarness(emitter, manifest.cells) as harness:
+        export_dir = harness.app_dir / "static" / "clips_exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        legit_content = b"a legitimate previously-exported clip file"
+        (export_dir / "clip123.mp4").write_bytes(legit_content)
+
+        # The canary: a sibling file two levels above clipExportDir, still
+        # entirely inside this harness's own disposable temp root.
+        canary_path = harness.app_dir / "secret_canary.txt"
+        canary_path.write_text(_PATH_TRAVERSAL_CANARY_MARKER)
+
+        # (a) legitimate filename: both twins serve the real file back
+        # identically -- the fix does not break the intended functionality.
+        vuln_ok = harness.request("GET", "/generated/labgen-go-0021?filename=clip123.mp4")
+        assert vuln_ok.status == 200
+        assert vuln_ok.body == legit_content.decode()
+
+        secure_ok = harness.request("GET", "/generated/labgen-go-0022?filename=clip123.mp4")
+        assert secure_ok.status == 200
+        assert secure_ok.body == legit_content.decode()
+
+        # (b) vulnerable twin: the traversal payload escapes clipExportDir
+        # and reaches the canary two directories up (CWE-22).
+        vuln_escape = harness.request(
+            "GET", "/generated/labgen-go-0021?filename=../../secret_canary.txt"
+        )
+        assert vuln_escape.status == 200, (
+            f"vulnerable twin did not serve the escaped canary (status={vuln_escape.status})"
+        )
+        assert _PATH_TRAVERSAL_CANARY_MARKER in vuln_escape.body
+
+        # (c) secure twin: the identical traversal payload is rejected
+        # outright, and the canary's marker never leaks into the response.
+        secure_escape = harness.request(
+            "GET", "/generated/labgen-go-0022?filename=../../secret_canary.txt"
+        )
+        assert secure_escape.status == 403, (
+            f"secure twin did not reject the traversal payload (status={secure_escape.status})"
+        )
+        assert _PATH_TRAVERSAL_CANARY_MARKER not in secure_escape.body
+
+        # (d) secure twin: an unknown/missing filename inside the export
+        # directory fails closed as "not found", not as a confinement
+        # error -- proving the confinement check and the existence check
+        # are two genuinely distinct code paths.
+        secure_missing = harness.request(
+            "GET", "/generated/labgen-go-0022?filename=does-not-exist.mp4"
+        )
+        assert secure_missing.status == 404

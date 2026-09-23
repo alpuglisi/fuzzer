@@ -46,6 +46,9 @@ _MANIFESTS = (
     # CC-LAB-0189: this stack's first price_integrity_bypass/
     # payment_charge_amount instance (a genuinely new mechanism, not a reuse).
     "lab/manifests/price_integrity_twitch_subscription_sample.yaml",
+    # CC-LAB-0190: this project's first path_traversal/fs_path_read
+    # instance on any stack (a genuinely new mechanism, not a reuse).
+    "lab/manifests/path_traversal_go_sample.yaml",
 )
 
 

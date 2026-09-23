@@ -1,0 +1,60 @@
+# Path-traversal sample manifest (CC-LAB-0190), go_net_http.
+#
+# Eleventh real page for this stack's Twitch pick (category 4, Media/
+# streaming -- docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §9.4/§9.5).
+# Genuinely new breadth, not a cheap "second instance" depth increment --
+# this is this project's FIRST instance, on ANY stack, of
+# `lab/safety_matrix.yaml`'s existing `fs_path_read` sink family /
+# `path_traversal` concern (added by CC-LAB-0063 for the corpus-examples/
+# file-handling research; its comment block near line 50 and its op rows
+# near line 471-481 were read before starting). Confirmed absent before
+# building: `grep -rln "unconfined_path|realpath_confine|fs_path_read"
+# fuzzlab/labgen/emitters/*/modules.py lab/manifests/*.yaml` returned
+# nothing.
+#
+# A previously-exported-clip download endpoint (a real, plausible Twitch
+# feature: downloading a clip export a broadcaster previously requested),
+# CWE-22 (path traversal). The vulnerable twin joins the caller-supplied
+# `filename` query param directly onto a fixed export directory
+# (`static/clips_exports`) with `filepath.Join` -- which only lexically
+# cleans the resulting string, it never confines it -- and reads/serves
+# whatever file results, with no check at all that the resolved path
+# stays inside that directory. A `filename=../../whatever`-style value
+# walks straight back out. The secure twin resolves the joined path to
+# its real, canonical, symlink-resolved absolute form (`filepath.Abs` +
+# `filepath.EvalSymlinks`) and rejects (HTTP 403) anything whose resolved
+# form does not stay inside the export directory's own real, resolved
+# absolute form; any resolution failure fails closed (404/500).
+#
+# Module composition is this stack's Convention 2 (like SSRF/mass-
+# assignment/file-upload/price-integrity): the manifest's one op names a
+# SINK module directly -- the vulnerable/secure difference is one
+# inseparable join-and-read-unconfined-vs-resolve-and-confine operation,
+# not a value rewrite feeding a shared sink. Reuses
+# `read_url_query_param` verbatim as its source (like the SSRF shape) --
+# no new source module needed.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: joins the caller-supplied filename onto the export
+  # directory with no confinement check at all.
+  - cell_id: LABGEN-GO-0021
+    class: path_traversal
+    stack_profile: go_net_http
+    route: { method: GET, path: /clips/export }
+    sink_context:
+      family: fs_path_read
+      required_neutralizations: [path_traversal]
+    transform: [unconfined_path]
+
+  # Secure twin: the only difference is which sink module renders (the
+  # minimal-pair invariant) -- the resolved path is confined to the real,
+  # symlink-resolved export directory.
+  - cell_id: LABGEN-GO-0022
+    class: path_traversal
+    stack_profile: go_net_http
+    route: { method: GET, path: /clips/export }
+    sink_context:
+      family: fs_path_read
+      required_neutralizations: [path_traversal]
+    transform: [realpath_confine]

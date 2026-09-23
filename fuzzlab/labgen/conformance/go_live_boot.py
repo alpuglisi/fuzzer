@@ -301,6 +301,20 @@ class GoLiveBootHarness:
         without going through this harness's own request methods."""
         return self._base_url()
 
+    @property
+    def app_dir(self) -> Path:
+        """The booted app's own process ``cwd`` -- always a path inside this
+        harness's own throwaway `tempfile.TemporaryDirectory`, never a real,
+        permanent, or shared path. Added for ``CC-LAB-0190``'s path-
+        traversal differential, the first shape on this stack whose secure-
+        twin proof needs a caller to plant a file (a canary, and a
+        legitimately-served file) directly on disk *before* issuing a
+        request, rather than only ever sending bytes over HTTP -- every
+        other caller of this harness is unaffected."""
+        if self._app_dir is None:
+            raise GoLiveBootError("app_dir is only available after build() -- use the harness as a context manager")
+        return self._app_dir
+
     def request(
         self,
         method: str,

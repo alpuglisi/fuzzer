@@ -15,3 +15,4 @@ TWCH-0007,/generated/labgen-go-0013,GET,channel_id,query,access_control,true,/ge
 TWCH-0008,/generated/labgen-go-0015,GET,source_url,query,ssrf,true,/generated/labgen-go-0015,sink,,direct
 TWCH-0009,/generated/labgen-go-0017,POST,file,body,unrestricted_file_upload,true,/generated/labgen-go-0017,sink,,direct
 TWCH-0010,/generated/labgen-go-0019,POST,body,body,price_integrity_bypass,true,/generated/labgen-go-0019,sink,,direct
+TWCH-0011,/generated/labgen-go-0021,GET,filename,query,path_traversal,true,/generated/labgen-go-0021,sink,,direct

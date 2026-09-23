@@ -236,10 +236,18 @@ def _twitch_cells():
     price_integrity = load_manifest(
         "lab/manifests/price_integrity_twitch_subscription_sample.yaml"
     ).cells
+    # CC-LAB-0190: this project's first path_traversal/fs_path_read
+    # instance on any stack (/clips/export). No detection (audit rule/
+    # oracle strategy) exists yet for this concern -- included here so the
+    # pipeline sees the new vulnerable/secure twins for real, but this
+    # cell's own positive stays an (expected, tracked) false negative
+    # until that follow-on lands, per this dispatch's own lab-then-
+    # detection split.
+    path_traversal = load_manifest("lab/manifests/path_traversal_go_sample.yaml").cells
     return (
         webhook + ssrf + access_control + jwt + weak_token + mass_assignment
         + access_control_subscribers + ssrf_clips_download + unrestricted_file_upload
-        + price_integrity
+        + price_integrity + path_traversal
     )
 
 
@@ -324,11 +332,20 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # the first proof this strategy generalizes across stacks in the
     # direction `spring_boot` -> `go_net_http` (complementing
     # `CC-LAB-0187`'s own proof of `AccessControlIdorStrategy` generalizing
-    # the other way). Nine of ten positives confirm here now (only
-    # webhook-signature remains permanently undetected).
+    # the other way). The 11th page's path-traversal cell (TWCH-0011,
+    # CC-LAB-0190) does NOT confirm here -- no audit rule/oracle strategy
+    # exists yet for `path_traversal`/`fs_path_read` (a deliberately
+    # deferred follow-on, this dispatch's own lab-then-detection split),
+    # so it is a real, expected, tracked false negative. Ground-truth
+    # cardinality moves from 10 to 11 positives (PA-0042: this hardcoded
+    # fraction was re-derived, not left stale, when TWCH-0011 was added);
+    # tp stays 9 (webhook-signature and path-traversal both remain
+    # undetected, for different reasons -- one an empirically-infeasible
+    # timing side channel, the other a genuinely unbuilt detection
+    # mechanism), so recall moves from 9/10 to 9/11.
     twitch_report = by_name["twitch-clone"].report
     assert twitch_report.tp == 9 and twitch_report.fp == 0
-    assert round(twitch_report.recall, 4) == round(9 / 10, 4)
+    assert round(twitch_report.recall, 4) == round(9 / 11, 4)
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002, which does have a rule/strategy, R-XXE/
@@ -347,7 +364,10 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
-    assert round(summary["macro_recall"], 4) == round(((9 / 10) + (1 / 5)) / 2, 4)
+    # PA-0042: re-derived, not left stale, from the ground-truth-cardinality
+    # change TWCH-0011/CC-LAB-0190 made (Twitch's own recall moved from
+    # 9/10 to 9/11 above).
+    assert round(summary["macro_recall"], 4) == round(((9 / 11) + (1 / 5)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True

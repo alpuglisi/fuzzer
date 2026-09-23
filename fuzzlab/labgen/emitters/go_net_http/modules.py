@@ -21,6 +21,16 @@ ops verbatim — no new safety-matrix entry was needed (a scope reduction
 found during implementation of ``CC-LAB-0170``, which had drafted a new
 ``hmac_signature_check`` family before this family's prior existence, added
 by ``CC-LAB-0063``, was found).
+
+Phase B, eleventh increment (``CC-LAB-0190``/``FR-LAB-130``): this project's
+first ``path_traversal``/``fs_path_read`` instance on any stack -- a
+previously-exported-clip download endpoint (``GET /clips/export?filename=``)
+that either joins the caller-supplied filename onto a fixed export
+directory with no confinement check at all (vulnerable, CWE-22,
+``unconfined_path``) or resolves the joined path to its real, symlink-
+resolved absolute form and rejects anything that escapes the export
+directory's own real form (secure, ``realpath_confine``). Convention 2
+again: the manifest's one op names a sink module directly.
 """
 
 from __future__ import annotations
@@ -640,6 +650,44 @@ class ServerRecomputedAmountSink(TemplateModule):
         )
 
 
+class UnconfinedPathSink(TemplateModule):
+    """The ``unconfined_path`` op (``lab/safety_matrix.yaml``,
+    ``fs_path_read`` family, ``no_effect`` -- added by ``CC-LAB-0063``;
+    this project's first instantiation of this family/concern on any
+    stack, ``CC-LAB-0190``): joins the caller-supplied filename onto the
+    fixed export directory with ``filepath.Join`` -- which only lexically
+    *cleans* the resulting string, it never *confines* it -- then reads
+    and serves whatever file results, with no check at all that the
+    resolved path stays inside that directory (CWE-22). A
+    ``filename=../../whatever``-style value walks straight back out.
+    Convention 2 (like SSRF/mass-assignment/file-upload/price-integrity):
+    the manifest's one op names a **sink** module directly -- the
+    vulnerable/secure difference here is one inseparable
+    join-and-read-unconfined-vs-resolve-and-confine operation, not a value
+    rewrite feeding a shared sink."""
+
+    def __init__(self) -> None:
+        super().__init__("unconfined_path", "sink", _SINK_ENV, "unconfined_path.go.j2")
+
+
+class RealpathConfineSink(TemplateModule):
+    """The ``realpath_confine`` op (``lab/safety_matrix.yaml``,
+    ``fs_path_read`` family, ``neutralises`` -- the secure twin): resolves
+    the joined path to its real, canonical, symlink-resolved absolute form
+    (``filepath.Abs`` + ``filepath.EvalSymlinks``, not just
+    ``filepath.Clean``/a string-prefix check on the *unresolved* path,
+    which a planted symlink could still defeat -- the same lexical-vs-real
+    distinction ``lab/safety_matrix.yaml``'s own comment block documents
+    for this family's ``path_prefix_check`` `partial`-effect op) and
+    rejects (HTTP 403) anything whose resolved form does not stay inside
+    the export directory's own real, resolved absolute form. Any
+    resolution failure fails closed (404/500), never falls through to a
+    confinement check on an unresolved path."""
+
+    def __init__(self) -> None:
+        super().__init__("realpath_confine", "sink", _SINK_ENV, "realpath_confine.go.j2")
+
+
 class RenderOnlyComplexity(TemplateModule):
     """Wraps the composed source/transform/sink body as the entire body of
     one ``net/http.HandlerFunc`` -- the Go analogue of every other stack's
@@ -687,6 +735,8 @@ SINKS: dict[str, Module] = {
     "extension_allowlist_mime_check": ExtensionAllowlistMimeCheckSink(),
     "client_trusted_amount": ClientTrustedAmountSink(),
     "server_recomputed_amount": ServerRecomputedAmountSink(),
+    "unconfined_path": UnconfinedPathSink(),
+    "realpath_confine": RealpathConfineSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "render_only": RenderOnlyComplexity(),

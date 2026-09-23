@@ -80,11 +80,11 @@ def test_netflix_ground_truth_loads_and_cross_checks():
 def test_twitch_ground_truth_loads_and_cross_checks():
     gt = contract.load(TWITCH_GT_DIR)
     assert gt.target == "go_net_http"
-    assert len(gt.cases) == 10
+    assert len(gt.cases) == 11
     ids = {c.case_id for c in gt.cases}
     assert ids == {
         "TWCH-0001", "TWCH-0002", "TWCH-0003", "TWCH-0004", "TWCH-0005", "TWCH-0006",
-        "TWCH-0007", "TWCH-0008", "TWCH-0009", "TWCH-0010",
+        "TWCH-0007", "TWCH-0008", "TWCH-0009", "TWCH-0010", "TWCH-0011",
     }
 
     webhook = gt.case_by_id("TWCH-0001")
@@ -177,9 +177,20 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert price_integrity.param == "body"
     assert price_integrity.location == "body"
 
+    # CC-LAB-0190: Twitch's 11th real page, first path_traversal/
+    # fs_path_read instance on any stack.
+    path_traversal = gt.case_by_id("TWCH-0011")
+    assert path_traversal.expected_vulnerable
+    assert path_traversal.vuln_class == "path_traversal"
+    assert path_traversal.sink_context == "fs_path_read"
+    assert path_traversal.url == "/generated/labgen-go-0021"
+    assert path_traversal.method == "GET"
+    assert path_traversal.param == "filename"
+    assert path_traversal.location == "query"
+
     for case in gt.cases:
         for token in ("webhook", "ssrf", "vuln", "idor", "access", "jwt", "entropy", "mass", "upload",
-                      "price", "charge"):
+                      "price", "charge", "traversal", "path"):
             assert token not in case.case_id.lower()
 
 
