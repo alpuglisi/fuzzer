@@ -2040,7 +2040,7 @@ lane) can submit a payload as
   enums widened again, additively, with `"csv_formula_injection"`/`"csv"`
   (existing values, and every existing case across both ground-truth
   directories, unchanged and re-validated by this change's own test run).
-- **FR-LAB-92** *(price-integrity/business-logic amount-trust shape,
+- **FR-LAB-100** *(price-integrity/business-logic amount-trust shape,
   `php_laravel`; `CC-LAB-0212`, 2026-09-23).* Category 5's Booking.com app,
   third increment (first: `FR-LAB-78`'s `open_redirect`; second: `FR-LAB-90`'s
   `csv_formula_injection`).
@@ -2122,7 +2122,7 @@ lane) can submit a payload as
     Phase C's "coherent page/route set" bar (search, listing, checkout-flow
     completion, Extranet browsing — not yet begun as real page/route
     coverage, only as illustrative injection-shape cells).
-- **FR-LAB-93** *(ground truth's third case in the existing directory;
+- **FR-LAB-101** *(ground truth's third case in the existing directory;
   `CC-LAB-0212`, 2026-09-23).* `BKNG-0003` appended to the same
   `lab/ground-truth-booking-clone/` directory `FR-LAB-79`/`FR-LAB-91`
   already grew — consistent with `fuzzlab.labels.contract`'s real,

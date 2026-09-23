@@ -462,7 +462,7 @@ tracked in the requirements files, not here.
   own established convention of a structurally-named, shared complexity
   module rather than one minted per sink type.
 
-  **Third increment (`CC-LAB-0212`/`FR-LAB-92`/`FR-LAB-93`, 2026-09-23):**
+  **Third increment (`CC-LAB-0212`/`FR-LAB-100`/`FR-LAB-101`, 2026-09-23):**
   `("price_integrity_bypass", "payment_charge_amount")` reuses an
   already-existing `lab/safety_matrix.yaml` concern/sink family
   (`CC-LAB-0063`, previously rendered by no emitter on any stack) — a
