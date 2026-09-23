@@ -6,6 +6,11 @@ venv/
 *.csv
 # ...but the ground-truth contract CSV is tracked, not a generated dataset
 !lab/ground-truth/*.csv
+# CC-LAB-0174: category 4's Netflix and Twitch apps each have their own
+# ground-truth directory (D9's out-of-band contract), same "tracked, not
+# generated" rule
+!lab/ground-truth-netflix-clone/*.csv
+!lab/ground-truth-twitch-clone/*.csv
 # python build / test artifacts
 *.egg-info/
 build/

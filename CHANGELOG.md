@@ -4,6 +4,20 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (category 4, Phase C ground truth)
+- Lab: added real, out-of-band ground truth for category 4's Netflix and
+  Twitch apps (`lab/ground-truth-netflix-clone/`, `lab/ground-truth-twitch-clone/`,
+  3 cases total) and additively widened `fuzzlab/labels/schemas/labels.schema.json`
+  (`webhook_signature`/`ssrf`/`insecure_deserialization` vuln classes,
+  `webhook`/`network`/`deserialization` sink contexts) so those classes can be
+  recorded — mirroring category 5's own already-reviewed widening precedent.
+  Dispatched through the pre-change review gate (accuracy + adequacy passes)
+  before implementation. Two judgment calls recorded explicitly (a
+  whole-body-JSON `param` convention; a header-carried-value `param`
+  convention). Explicitly flags that Phase C's "coherent page/route set"
+  design step remains separate, larger, not-yet-started work for both apps.
+  `CC-LAB-0174`/`FR-LAB-80`. See `docs/components/01-target-lab/change-control.md`.
+
 ## 2026-09-23 (cross-category doc sync, round 2)
 - Docs (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, all five second-target
   category branches): re-synced §9.2 (stack-reuse ledger), §9.2a (Java/Spring

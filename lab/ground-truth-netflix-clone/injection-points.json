@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "target": "spring_boot",
+  "points": [
+    {
+      "url": "/api/playback/resume",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "rendering": "server-json"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 # Target Lab and Ground Truth — Requirement Specification
 
 Component code: **LAB** · Status: `[built; generator is the single source of the PHP lab since L-P3.3c-CUT (2026-09-22) -- the hand-built app is retired]`
-· Last updated: 2026-09-22
+· Last updated: 2026-09-23
 
 Related: `ARCHITECTURE.md` #1; `DECISIONS_AND_ROADMAP.md` (D7, D8, D9, D10);
 `./change-control.md`.
@@ -2113,6 +2113,61 @@ lane) can submit a payload as
     by name, so nothing else on this branch broke — the full non-slow
     suite was re-run after the deletion to confirm (no regression, same
     pre-existing `gitleaks`-related failures as before).
+
+- **FR-LAB-80** *(Phase C ground truth for category 4's Netflix and Twitch
+  apps, plus additive `labels.schema.json` widening; `CC-LAB-0174`,
+  2026-09-23).* Adds real, out-of-band ground truth (D9's contract) for
+  every vulnerable cell category 4 has built so far, each app in its own
+  directory with its own opaque case-ID prefix, mirroring category 5's own
+  already-reviewed precedent (`lab/ground-truth-booking-clone/`) for both
+  the per-app-directory layout and the schema-widening mechanism.
+  - `lab/ground-truth-netflix-clone/` (`target: "spring_boot"`, prefix
+    `NFLX-`): one case, `NFLX-0001`, for `LABGEN-JV-0001`
+    (`POST /api/playback/resume`, CWE-502 Jackson polymorphic
+    deserialization, `FR-LAB-79`). The tainted value is the entire raw
+    request body (Jackson deserializes it polymorphically), not one named
+    field, so `param` is the literal string `"body"` with
+    `location: "body"` — recorded explicitly as a judgment call, since the
+    schema has no "whole body, no field name" concept and no existing case
+    in this project's ground truth had this shape before.
+  - `lab/ground-truth-twitch-clone/` (`target: "go_net_http"`, prefix
+    `TWCH-`): two cases — `TWCH-0001` for `LABGEN-GO-0001`
+    (`POST /generated/labgen-go-0001`, CWE-347 webhook-signature,
+    `FR-LAB-76`), whose tainted value is a request **header**
+    (`X-Signature-256`); `param` is set to the literal header name, the
+    same convention a query-param case uses the literal query-string key
+    — this project's first header-carried ground-truth case, recorded as
+    a judgment call. `TWCH-0002` for `LABGEN-GO-0003`
+    (`GET /generated/labgen-go-0003`, CWE-918 SSRF, `FR-LAB-78`), an
+    ordinary query-param case (`param: "url"`, `location: "query"`).
+  - **Additive widening of `fuzzlab/labels/schemas/labels.schema.json`**:
+    append three `vuln_class` enum values (`webhook_signature`, `ssrf`,
+    `insecure_deserialization`, matching `Cell.vuln_class`'s real string
+    values verbatim) and three `sink_context` enum values (`webhook`,
+    `network`, `deserialization`, deliberately coarser than the internal
+    `SinkContext.family` strings, e.g.
+    `webhook_signature_verification`/`server_side_http_fetch`/
+    `object_deserialization`, matching this schema's own existing
+    convention of a coarser sink-context vocabulary). Purely additive: no
+    existing enum value changed or removed, so every already-valid
+    ground-truth directory (including the default `lab/ground-truth/`)
+    stays valid unchanged — re-verified directly
+    (`tests/test_labels_contract.py` stays green).
+  - New offline tests, `tests/test_labels_contract_category4.py`: asserts
+    concrete content (case counts, IDs, `vuln_class`/`sink_context`/
+    `url`/`method`/`param`/`location` per case, opaque-ID checks) for both
+    new directories, not just that `contract.load()` doesn't raise, plus
+    one test re-confirming the default `lab/ground-truth/`'s own contract
+    still loads/validates after the schema widening.
+  - **Deferred scope, explicitly**: this only completes §4 Phase C step 2
+    (author ground truth for cells as-built). Step 1 — designing a
+    coherent page/route set spanning each app's chosen vulnerability
+    classes, rather than ground truth over the single illustrative
+    route(s) Phase A/B happened to build — remains open, larger,
+    not-yet-started work for both apps, exactly as category 5's own
+    tracker entry records the same gap for Booking.com/Expedia ("Phase
+    C's 'coherent page/route set' bar... not yet begun"). Recorded here
+    rather than left to imply Phase C is now fully done for category 4.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

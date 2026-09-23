@@ -3,6 +3,83 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0174 — Phase C ground truth for the Netflix and Twitch apps; additive `labels.schema.json` widening (2026-09-23)
+
+- Change: The first real deliverable of Phase C
+  (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4 step 2) for both of
+  this category's apps: real, out-of-band ground truth
+  (`labels.json`/`injection-points.json`/`expectedresults.csv`, per D9's
+  contract) for every vulnerable cell currently built, each app in its own
+  directory with its own opaque case-ID prefix — following category 5's own
+  already-reviewed precedent (`lab/ground-truth-booking-clone/`) for both
+  the per-app-directory layout and the schema-widening mechanism.
+  Dispatched through this component's pre-change review gate: an accuracy
+  pass confirmed every cited cell ID, route, manifest field, current schema
+  enum content, and the category 5 precedent's real content; an adequacy
+  pass approved with additions (the deferred-scope note below, concrete
+  test assertions instead of a bare load-succeeds check, and this entry
+  itself) — both incorporated before implementation.
+  - `lab/ground-truth-netflix-clone/` (`target: "spring_boot"`, prefix
+    `NFLX-`): one case, `NFLX-0001`, for `LABGEN-JV-0001`
+    (`POST /api/playback/resume`, CWE-502 Jackson polymorphic
+    deserialization). `param` is the literal string `"body"` (whole raw
+    request body, no single named field) — a recorded judgment call, this
+    project's first whole-body-JSON ground-truth case.
+  - `lab/ground-truth-twitch-clone/` (`target: "go_net_http"`, prefix
+    `TWCH-`): two cases — `TWCH-0001` (`LABGEN-GO-0001`,
+    `POST /generated/labgen-go-0001`, CWE-347 webhook-signature, `param`
+    set to the literal header name `X-Signature-256` — this project's
+    first header-carried case, another recorded judgment call) and
+    `TWCH-0002` (`LABGEN-GO-0003`, `GET /generated/labgen-go-0003`,
+    CWE-918 SSRF, an ordinary `param: "url"`/`location: "query"` case).
+  - `fuzzlab/labels/schemas/labels.schema.json`: additive widening only —
+    appended `webhook_signature`/`ssrf`/`insecure_deserialization` to the
+    `vuln_class` enum (matching `Cell.vuln_class`'s real string values
+    verbatim) and `webhook`/`network`/`deserialization` to the
+    `sink_context` enum (deliberately coarser than the internal
+    `SinkContext.family` strings, matching this schema's existing
+    convention). No existing enum value changed or removed.
+  - New file `tests/test_labels_contract_category4.py`: asserts concrete
+    content (case counts, case IDs, every field, opaque-ID checks) for
+    both new directories, plus re-confirms the default `lab/ground-truth/`
+    still loads/validates unchanged after the widening.
+  - **Deferred scope, stated explicitly**: this lands Phase C step 2 only.
+    Step 1 (designing a coherent page/route set per app, spanning each
+    app's chosen vulnerability classes, rather than ground truth over the
+    single illustrative route(s) already built) remains open, larger,
+    not-yet-started work for both Netflix and Twitch — mirroring category
+    5's own tracker language for the same still-open gap on its apps.
+  New/changed files:
+  - `fuzzlab/labels/schemas/labels.schema.json`
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,expectedresults.csv}` (new)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}` (new)
+  - `tests/test_labels_contract_category4.py` (new)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-80`, new)
+- Impact (other components / project): touches the shared `fuzzlab.labels`
+  schema used by every ground-truth directory in the project. Purely
+  additive — verified by re-running the default `lab/ground-truth/`'s own
+  existing contract tests (still green) and the full non-slow suite (1605
+  passed, 52 skipped, 27 deselected; the same 15 pre-existing
+  `gitleaks`/`scikit-learn`-dependency failures as before this change, no
+  new failures).
+- Risk (level; mitigation or accepted-risk justification): **low**. An
+  append-only enum widening with a directly comparable, already-tested
+  precedent (category 5's own). The two judgment calls (whole-body `param`
+  convention; header-name-as-`param` convention) are recorded above rather
+  than silently decided.
+- Deliverables:
+  - [x] `labels.schema.json` widened (6 new enum values total)
+  - [x] `lab/ground-truth-netflix-clone/` (3 files, 1 case)
+  - [x] `lab/ground-truth-twitch-clone/` (3 files, 2 cases)
+  - [x] New offline tests proving `fuzzlab.labels.contract.load()` succeeds,
+    with concrete content assertions, for both new directories
+  - [x] Default `lab/ground-truth/`'s own existing contract tests
+    re-verified green after the schema widening
+  - [x] Full non-slow suite re-verified green (no new failures)
+- Effectiveness (assessed 2026-09-23): met — both ground-truth directories
+  load and validate for real, cross-checked against their `expectedresults.csv`
+  mirrors, and the default lab's own ground truth is unaffected.
+
 ### CC-LAB-0173 — §9.2a Java/Spring Boot consolidation: port Netflix's insecure-deserialization cell into `spring_boot`, retire `java_spring_boot` (2026-09-23)
 
 - Change: Executes the assigned §9.2a consolidation task recorded on this
