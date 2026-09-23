@@ -37,6 +37,18 @@
       "expected_vulnerable": true,
       "rendering": "server-json",
       "notes": "channel_id query param used to look up per-channel analytics with no check that it matches the caller's own X-Broadcaster-Id (CWE-639/862, broken object-level authorization / IDOR) -- modeled on Twitch's real per-channel analytics API, a textbook OWASP API1:2023 BOLA surface for a public API-edge service. Reuses lab/safety_matrix.yaml's existing db_row_by_id_lookup sink family and no_ownership_check/identity_match_before_fetch ops (added by CC-LAB-0063 for the corpus-examples/access-control research) -- the first lab-generator instance of this mechanism on any stack. `X-Broadcaster-Id` is a fixed demo header standing in for the caller's own identity (this stack has no session/auth system yet; the header models only the ownership-check-bypass mechanism in isolation, never a real session/auth system). `LABGEN-GO-0005` in lab/manifests/access_control_go_sample.yaml, served at `/generated/labgen-go-0005` (same cell_id-derived-route convention as TWCH-0001/0002) -- never a PFF-* case."
+    },
+    {
+      "case_id": "TWCH-0004",
+      "url": "/generated/labgen-go-0007",
+      "method": "GET",
+      "param": "Authorization",
+      "location": "header",
+      "vuln_class": "jwt_algorithm_confusion",
+      "sink_context": "jwt",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "A Bearer JWT's own alg:none header is honored, skipping signature verification entirely and trusting the token's own forged claims (CWE-347, the real auth0/node-jsonwebtoken GHSA-8cf7-32gw-wr33 bug -- docs/research/corpus-examples/auth-session/node/vulnerable-1.js) -- modeled on a channel-owner-only settings endpoint, a realistic Bearer-JWT-protected API-edge shape for this app identity. Reuses lab/safety_matrix.yaml's existing jwt_signature_verification sink family and jwt_alg_none_default/jwt_none_alg_opt_in ops (added by CC-LAB-0063 for the corpus-examples/auth-session research) -- the first lab-generator instance of this mechanism on any stack. The tainted value is carried in the Authorization header, not a query/body field, so `param` is set to the literal header name `Authorization` (the same header-carried-value convention TWCH-0001 established, CC-LAB-0174). `LABGEN-GO-0007` in lab/manifests/jwt_alg_confusion_go_sample.yaml, served at `/generated/labgen-go-0007` (same cell_id-derived-route convention as TWCH-0001/0002/0003) -- never a PFF-* case."
     }
   ]
 }

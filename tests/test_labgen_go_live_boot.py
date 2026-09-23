@@ -284,3 +284,72 @@ def test_real_boot_proves_the_access_control_idor_strategy_end_to_end() -> None:
         assert strategy.confirm(secure_cand, _HarnessSender("/generated/labgen-go-0006")) is None, (
             "strategy incorrectly confirmed the real secure twin"
         )
+
+
+# -- Phase B increment 3: JWT alg:none confusion (jwt_signature_verification) --
+
+
+def _b64url(obj: dict) -> str:
+    import base64
+    import json
+    return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_jwt_alg_none_differential_for_both_twins() -> None:
+    """Three cases, isolating exactly what algorithm-pinning controls:
+
+    (a) the vulnerable twin honors an attacker-chosen `alg: none` header
+        and returns the token's own forged, unsigned claims.
+    (b) the vulnerable twin still correctly rejects a garbage/invalid
+        HS256-claimed signature -- proving it isn't simply "always 200",
+        only specifically bypassable via `alg: none`.
+    (c) the secure twin rejects the exact same `alg: none` token outright,
+        with a real HTTP 401 and no data.
+    """
+    manifest = load_manifest("lab/manifests/jwt_alg_confusion_go_sample.yaml")
+    emitter = GoEmitter()
+
+    alg_none_token = (
+        _b64url({"alg": "none", "typ": "JWT"}) + "."
+        + _b64url({"channel_id": "attacker-channel", "role": "owner"}) + "."
+    )
+    garbage_hs256_token = (
+        _b64url({"alg": "HS256", "typ": "JWT"}) + "."
+        + _b64url({"channel_id": "attacker-channel", "role": "owner"}) + "."
+        + "not-a-real-signature"
+    )
+
+    with GoLiveBootHarness(emitter, manifest.cells) as harness:
+        # (a) vulnerable twin: alg:none is honored, forged claims returned.
+        vuln_resp = harness.request(
+            "GET", "/generated/labgen-go-0007",
+            headers={"Authorization": f"Bearer {alg_none_token}"},
+        )
+        assert vuln_resp.status == 200, (
+            f"vulnerable twin rejected an alg:none token (status {vuln_resp.status}): {vuln_resp.body!r}"
+        )
+        assert "attacker-channel" in vuln_resp.body and "owner" in vuln_resp.body, (
+            f"vulnerable twin did not honor the forged claims: {vuln_resp.body!r}"
+        )
+
+        # (b) vulnerable twin: a garbage HS256 signature is still rejected.
+        vuln_garbage_resp = harness.request(
+            "GET", "/generated/labgen-go-0007",
+            headers={"Authorization": f"Bearer {garbage_hs256_token}"},
+        )
+        assert vuln_garbage_resp.status == 401, (
+            f"vulnerable twin accepted a garbage HS256 signature (status {vuln_garbage_resp.status}): "
+            f"{vuln_garbage_resp.body!r}"
+        )
+
+        # (c) secure twin: the same alg:none token is rejected outright.
+        secure_resp = harness.request(
+            "GET", "/generated/labgen-go-0008",
+            headers={"Authorization": f"Bearer {alg_none_token}"},
+        )
+        assert secure_resp.status == 401, (
+            f"secure twin accepted an alg:none token (status {secure_resp.status}): {secure_resp.body!r}"
+        )
+        assert "attacker-channel" not in secure_resp.body

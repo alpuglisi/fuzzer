@@ -3,6 +3,125 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0180 — Twitch's 4th real page, JWT `alg:none` signature confusion (FR-LAB-120) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing
+  `jwt_alg_none_default`/`jwt_none_alg_opt_in` mechanism (`jwt_signature_
+  verification` sink family, added by `CC-LAB-0063` for the
+  `corpus-examples/auth-session` research, never before built on any
+  stack) on `go_net_http` — Twitch's 4th real page, continuing this
+  category's own "coherent page/route set" depth work (`CC-LAB-0178`/
+  `CC-LAB-0179`'s own precedent).
+  1. **New route** `GET /channels/settings` (served at
+     `/generated/labgen-go-0007`/`-0008`, this stack's own cell-ID-
+     derived-route convention): a channel-owner-only settings endpoint,
+     Bearer-JWT-protected — a realistic API-edge auth shape distinct
+     from the 3 existing routes.
+  2. **A hand-rolled JWT parser/verifier, Go stdlib only** (`encoding/
+     base64`, `encoding/json`, `crypto/hmac`, `crypto/sha256` — no
+     third-party dependency; `go.mod` stays at zero `require` entries),
+     modeling the real `auth0/node-jsonwebtoken` vulnerability
+     (GHSA-8cf7-32gw-wr33, already cited in this project's own
+     `docs/research/corpus-examples/auth-session/node/vulnerable-1.js`):
+     the vulnerable twin (`jwt_alg_none_default`) honors an
+     attacker-chosen `alg: none` header, skipping signature verification
+     entirely (`value_expr = algIsNone || hmacValid`); the secure twin
+     (`jwt_none_alg_opt_in`) requires the token's own header to
+     explicitly claim the one pinned algorithm (`HS256`) *and* a valid
+     HMAC before any claims are trusted (`value_expr = algIsHS256 &&
+     hmacValid`) — an `alg:none` token never reaches the HMAC check at
+     all. `hmac.Equal` (constant-time) is used explicitly for the HMAC
+     comparison, and a malformed/empty signature segment fails closed by
+     construction (a decode failure yields a short/nil byte slice,
+     `hmac.Equal` safely reports "not equal" on any length mismatch,
+     never panics) — named explicitly in the source template's own
+     comment, per the pre-change review's adequacy-pass requirement (an
+     earlier draft left this implicit).
+  3. **A real Go "declared and not used" compile bug found and fixed
+     before landing**: each twin's transform only references one of the
+     two boolean identifiers the source publishes (`algIsNone`/
+     `algIsHS256`) — the same defect class `CC-LAB-0178`'s own
+     `broadcasterID` bug was, found this time by a real `go build`
+     during implementation rather than by chance. Fixed with a
+     `_, _ = algIsNone, algIsHS256` guard in the shared sink template
+     (mirroring `object_lookup_authorization_check.go.j2`'s own
+     `_ = broadcaster_var` precedent).
+  4. **Ground truth extended**: `TWCH-0004`
+     (`vuln_class="jwt_algorithm_confusion"`, `sink_context="jwt"`,
+     `param="Authorization"`, `location="header"`,
+     `rendering="server-json"` — the same header-carried-value
+     convention `TWCH-0001` established, `CC-LAB-0174`).
+     `fuzzlab/labels/schemas/labels.schema.json` additively widened
+     (`jwt_algorithm_confusion` vuln_class, `jwt` sink_context).
+  - Dispatched through this component's mandatory pre-change review gate
+    (accuracy + adequacy passes, the adequacy pass including an explicit
+    security-logic soundness trace of the attacker payload against both
+    twins before any code was written). Accuracy pass: no factual errors
+    found. Adequacy pass required, and this entry incorporates: (a) the
+    explicit fail-closed HMAC-verify behavior (item 2 above — the
+    original draft left "verifies HMAC-SHA256 the same way" implicit,
+    which could have hidden a second, undocumented bug); (b) **detection
+    deliberately NOT bundled into this commit** — the adequacy pass
+    recommended splitting the lab page from its detection rule/strategy
+    into two separately reviewable increments (this project's own
+    established `access_control`/`xxe` precedent), landed here as the
+    lab-page-only increment; detection is a real, buildable follow-on
+    (a single-request differential: send an `alg:none` token, check
+    whether the response echoes an injected marker claim, plus a control
+    request with a garbage-but-`HS256`-claimed signature that must still
+    be rejected — the same false-positive-avoidance shape
+    `AccessControlIdorStrategy` already established), not attempted in
+    this entry.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py`, `__init__.py`
+  - `fuzzlab/labgen/emitters/go_net_http/stack/skeleton/main.go`
+    (`jwtSecret`)
+  - New templates: `templates/sources/read_authorization_bearer_token.go.j2`,
+    `templates/transforms/jwt_alg_none_default.go.j2`,
+    `templates/transforms/jwt_none_alg_opt_in.go.j2`,
+    `templates/sinks/jwt_claims_response.go.j2`
+  - `lab/manifests/jwt_alg_confusion_go_sample.yaml` (new)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}`
+  - `fuzzlab/labels/schemas/labels.schema.json`
+  - `tests/test_labgen_go_net_http_modules.py`,
+    `tests/test_labgen_go_net_http_conformance.py`,
+    `tests/test_labgen_go_live_boot.py` (new
+    `test_real_boot_proves_the_jwt_alg_none_differential_for_both_twins`),
+    `tests/test_labels_contract_category4.py`,
+    `tests/test_multitarget_category4.py` (docstring/assertions updated
+    — Twitch's own ground truth now has 4 positives, real recall 2/4)
+- Impact (other components / project): `fuzzlab/labgen/emitters/go_net_http/`
+  and `fuzzlab/labels/schemas/labels.schema.json` are shared across every
+  category/target touching this stack or its ground-truth schema (fresh
+  `git show` collision check against category-2/3/5 and
+  second-target-cat1-ecommerce before landing — no collisions found, all
+  behind this branch's own prior commits). `fuzzlab.harness.multitarget`'s
+  real, scored Twitch report now shows 4 positives instead of 3
+  (`recall=2/4` instead of `2/3`) — any consumer asserting the old figure
+  needs the same update this entry makes to `test_multitarget_category4.py`.
+- Risk (level; mitigation or accepted-risk justification): Low-medium.
+  A hand-rolled JWT parser is inherently more security-sensitive than
+  reusing an established library — mitigated by keeping the parsing
+  logic minimal and entirely inside this lab-generator's own controlled
+  fixture code (never a real target), the explicit fail-closed HMAC
+  behavior named in code comments (item 2), and a real, executed
+  live-boot proof (not just unit tests) covering both the intended
+  bypass and a plausible secondary bypass attempt (a garbage-but-claimed-
+  HS256 signature, which the vulnerable twin still correctly rejects).
+- Deliverables:
+  - [x] JWT alg:none mechanism implemented, registered, unit-tested — done
+  - [x] Real Go compile bug found and fixed before landing — done
+  - [x] Real live-boot proof (3 assertions) against both real twins — done
+  - [x] Ground truth extended, schema additively widened — done
+  - [x] Full non-slow suite + every directly-affected slow test re-run
+        green at the stable baseline — done
+- Effectiveness (assessed 2026-09-23): achieved. The real booted
+  vulnerable twin accepts an `alg:none` token and returns its forged
+  claims (HTTP 200), while still correctly rejecting a garbage `HS256`
+  signature (HTTP 401); the real booted secure twin rejects the same
+  `alg:none` token outright (HTTP 401, no data) — proven by a real,
+  executed live-boot test, not simulated timing or a mock.
+
 ### CC-LAB-0084 — vuln-corpus Phase 3: real gVisor dynamic-validation sandbox (FR-LAB-112) (2026-09-23)
 - Change: New `fuzzlab/tools/corpus_validation_sandbox.py` and
   `tests/test_corpus_validation_sandbox.py`, implementing

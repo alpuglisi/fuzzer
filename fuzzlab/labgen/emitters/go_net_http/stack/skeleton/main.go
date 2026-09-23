@@ -12,6 +12,13 @@ import (
 // values (e.g. a fixed DB path) rather than modeling real secret rotation.
 var webhookSecret = []byte("fuzzlab-go-net-http-lab-fixed-demo-secret")
 
+// jwtSecret is this stack's own fixed, per-run shared HMAC key for its
+// JWT-protected illustrative cell -- the same "lab-only, no real secret
+// rotation" simplification webhookSecret above already is, kept as its
+// own variable (not reused from webhookSecret) since they model two
+// conceptually distinct secrets a real deployment would never share.
+var jwtSecret = []byte("fuzzlab-go-net-http-lab-fixed-demo-jwt-secret")
+
 func main() {
 	mux := http.NewServeMux()
 	registerRoutes(mux)

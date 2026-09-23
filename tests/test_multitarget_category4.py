@@ -10,17 +10,24 @@ the `run_targets()` passthrough gap and added the project's first `ssrf`
 audit rule + oracle strategies).
 
 **What this now proves, and what remains honestly open (recorded here, not
-routed around).** Twitch now has three real cells (webhook-signature, SSRF,
-and access-control/IDOR -- `CC-LAB-0178`, the "coherent page/route set"
-depth work), and two of the three now confirm for real. The SSRF case
-(`TWCH-0002`): `SsrfInBandMarkerStrategy` sees the vulnerable twin
-(`LABGEN-GO-0003`) echo the OOB marker back in its own response body
-(`io.Copy(w, resp.Body)`), and correctly does not confirm the secure twin
+routed around).** Twitch now has four real cells (webhook-signature, SSRF,
+access-control/IDOR, and JWT `alg:none` confusion -- `CC-LAB-0178`/
+`CC-LAB-0180`, the "coherent page/route set" depth work), and two of the
+four now confirm for real. The SSRF case (`TWCH-0002`):
+`SsrfInBandMarkerStrategy` sees the vulnerable twin (`LABGEN-GO-0003`)
+echo the OOB marker back in its own response body (`io.Copy(w,
+resp.Body)`), and correctly does not confirm the secure twin
 (`LABGEN-GO-0004`, blocked by its scheme/IP allowlist before any fetch). The
 access-control/IDOR case (`TWCH-0003`, `CC-FUZZ-0029`):
 `AccessControlIdorStrategy` sees the vulnerable twin (`LABGEN-GO-0005`)
 accept and echo back any `channel_id`, and correctly does not confirm the
 secure twin (`LABGEN-GO-0006`, blocked by its identity-match check).
+`TWCH-0004` (JWT `alg:none` confusion, `LABGEN-GO-0007`/`0008`) has no
+rule/strategy yet -- a real, buildable single-request differential (send
+an `alg:none` token, check whether the response echoes an injected
+marker claim), deliberately landed as its own separately-scoped follow-on
+after this page itself (per this increment's own pre-change review gate),
+not bundled into the same commit as the page.
 
 Netflix's `NFLX-0001` (insecure-deserialization) is now also a real,
 confirmed finding (`CC-FUZZ-0030`): the whole-body-JSON case
@@ -95,7 +102,8 @@ def _twitch_cells():
     webhook = load_manifest("lab/manifests/webhook_signature_go_sample.yaml").cells
     ssrf = load_manifest("lab/manifests/ssrf_go_sample.yaml").cells
     access_control = load_manifest("lab/manifests/access_control_go_sample.yaml").cells
-    return webhook + ssrf + access_control
+    jwt = load_manifest("lab/manifests/jwt_alg_confusion_go_sample.yaml").cells
+    return webhook + ssrf + access_control + jwt
 
 
 def _netflix_cell():
@@ -143,7 +151,7 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # positives, not all three.
     twitch_report = by_name["twitch-clone"].report
     assert twitch_report.tp == 2 and twitch_report.fp == 0
-    assert round(twitch_report.recall, 4) == round(2 / 3, 4)
+    assert round(twitch_report.recall, 4) == round(2 / 4, 4)
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002) still has no rule/strategy (see module
@@ -155,7 +163,7 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
-    assert round(summary["macro_recall"], 4) == round(((2 / 3) + (1 / 2)) / 2, 4)
+    assert round(summary["macro_recall"], 4) == round(((2 / 4) + (1 / 2)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True

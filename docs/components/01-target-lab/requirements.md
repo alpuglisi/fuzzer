@@ -3863,6 +3863,35 @@ lane) can submit a payload as
   own separate `TargetSpec`/hand-rolled multi-cell fixture (the same
   real, sized follow-on category 3's own `CC-LAB-0138` needed for
   TrackerNest) — not built here.
+- **FR-LAB-120** *(Twitch's fourth real page: JWT `alg:none` signature
+  confusion; `CC-LAB-0180`, 2026-09-23).* Instantiates `lab/safety_
+  matrix.yaml`'s existing `jwt_alg_none_default`/`jwt_none_alg_opt_in`
+  mechanism (`jwt_signature_verification` family, `CC-LAB-0063`, never
+  before built on any stack) on `go_net_http`: `GET /channels/settings`
+  (served `/generated/labgen-go-0007`/`-0008`), a channel-owner-only
+  settings endpoint, Bearer-JWT-protected. A hand-rolled JWT parser/
+  verifier, Go stdlib only (no third-party library, matching this
+  stack's zero-dependency `go.mod`), modeling the real `auth0/
+  node-jsonwebtoken` vulnerability (GHSA-8cf7-32gw-wr33, cited in
+  `docs/research/corpus-examples/auth-session/node/vulnerable-1.js`):
+  the vulnerable twin honors an attacker-chosen `alg:none` header,
+  skipping signature verification entirely; the secure twin requires the
+  token's own header to explicitly claim the one pinned algorithm
+  (`HS256`) before any further processing. `hmac.Equal` (constant-time)
+  used explicitly; a malformed/empty signature fails closed by
+  construction (length-mismatch-safe). Cells `LABGEN-GO-0007`/`0008`;
+  ground truth `TWCH-0004` (`vuln_class="jwt_algorithm_confusion"`,
+  `sink_context="jwt"`, both new enum values, additively widened). Real
+  live-boot proof (3 assertions: `alg:none` honored on the vulnerable
+  twin; a garbage `HS256` signature still correctly rejected on the same
+  vulnerable twin; `alg:none` correctly rejected outright on the secure
+  twin). A real Go "declared and not used" compile bug (the same class
+  `CC-LAB-0178`'s `broadcasterID` bug was) found and fixed before
+  landing. **Not itself detection capability**: no new audit rule or
+  oracle strategy is added here — deliberately split from this page per
+  the pre-change review's adequacy pass, landed as its own separately-
+  scoped follow-on (a real, buildable single-request differential is
+  recorded, not attempted in this entry).
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

@@ -83,6 +83,9 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("access_control", "db_row_by_id_lookup"): _ModuleSet(
         "read_channel_id_and_broadcaster_header", "object_lookup_authorization_check", "render_only"
     ),
+    ("jwt_algorithm_confusion", "jwt_signature_verification"): _ModuleSet(
+        "read_authorization_bearer_token", "jwt_claims_response", "render_only"
+    ),
 }
 
 #: Per-module (source/transform-op/sink name) -> the extra Go standard-
@@ -106,6 +109,12 @@ _MODULE_IMPORTS: dict[str, tuple[str, ...]] = {
     "no_ownership_check": (),
     "identity_match_before_fetch": (),
     "object_lookup_authorization_check": ("io",),
+    "read_authorization_bearer_token": (
+        "crypto/hmac", "crypto/sha256", "encoding/base64", "encoding/json", "strings",
+    ),
+    "jwt_alg_none_default": (),
+    "jwt_none_alg_opt_in": (),
+    "jwt_claims_response": ("encoding/json", "io"),
 }
 
 #: Per-route static context this Phase A emitter needs beyond the
@@ -115,6 +124,7 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     "/webhooks/eventsub": {},
     "/api/clips/thumbnail": {"var_name": "targetUrl", "param_name": "url"},
     "/channels/analytics": {"param_name": "channel_id"},
+    "/channels/settings": {},
 }
 
 

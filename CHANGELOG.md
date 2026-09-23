@@ -4,6 +4,40 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Twitch's 4th real page, JWT `alg:none` signature confusion)
+- Lab: a new mechanism from `lab/safety_matrix.yaml` (`jwt_alg_none_default`/
+  `jwt_none_alg_opt_in`, added by `CC-LAB-0063`, never before instantiated
+  on any stack) built for real on `go_net_http`: a channel-owner-only
+  settings endpoint (`GET /channels/settings`, served route
+  `/generated/labgen-go-0007`/`-0008`), Bearer-JWT-protected. Hand-rolls a
+  minimal JWT parser/verifier from Go stdlib only (`encoding/base64`,
+  `encoding/json`, `crypto/hmac`, `crypto/sha256` — zero third-party
+  dependency, matching this stack's own zero-dep `go.mod`) rather than
+  reusing a library, modeling the real `auth0/node-jsonwebtoken`
+  vulnerability (GHSA-8cf7-32gw-wr33, already cited in this project's own
+  `docs/research/corpus-examples/auth-session/node/vulnerable-1.js`): the
+  vulnerable twin honors an attacker-chosen `alg: none` header and skips
+  signature verification entirely; the secure twin requires the token's
+  own header to explicitly claim the one pinned algorithm (`HS256`)
+  before any further processing. `hmac.Equal` (constant-time) is used
+  explicitly, and a malformed/empty signature segment fails closed by
+  construction (length-mismatch-safe), per the pre-change review's
+  adequacy pass. Found and fixed the same "declared and not used" Go
+  compile-bug class this session's own `CC-LAB-0178` found before it —
+  each twin's transform only references one of two published boolean
+  identifiers; guarded in the shared sink template. Real live-boot proof
+  (3 assertions: alg:none honored on the vulnerable twin, a garbage
+  HS256 signature still correctly rejected on the same vulnerable twin,
+  alg:none correctly rejected outright on the secure twin). Ground truth
+  extended (`TWCH-0004`), `labels.schema.json` additively widened
+  (`jwt_algorithm_confusion` vuln_class, `jwt` sink_context). Detection
+  (audit rule + oracle strategy) deliberately not bundled into this
+  commit — landed as its own separately-scoped follow-on, per the
+  pre-change review's adequacy pass (a real, buildable single-request
+  differential, but kept as a distinct, independently reviewable
+  increment matching this session's own established lab-then-detection
+  pattern for `access_control`/`xxe`). `CC-LAB-0180`/`FR-LAB-120`.
+
 ## 2026-09-23 (FUZZ: empirically confirmed the webhook-signature timing oracle is genuinely infeasible at this layer)
 - Fuzzing harness: turned the standing `webhook_signature` open question
   from a theoretical "hasn't been attempted" into an empirically measured

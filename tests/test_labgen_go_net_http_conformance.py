@@ -31,6 +31,7 @@ _MANIFESTS = (
     "lab/manifests/webhook_signature_go_sample.yaml",
     "lab/manifests/ssrf_go_sample.yaml",
     "lab/manifests/access_control_go_sample.yaml",
+    "lab/manifests/jwt_alg_confusion_go_sample.yaml",
 )
 
 

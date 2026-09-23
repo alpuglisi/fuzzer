@@ -130,3 +130,42 @@ def test_object_lookup_authorization_check_sink_branches_on_value_expr() -> None
     assert "http.StatusForbidden" in result.code
     assert "subscriber_count" in result.code
     assert "_ = broadcasterID" in result.code   # always used, even on the vulnerable path
+
+
+# -- Phase B increment 3: JWT alg:none confusion (jwt_signature_verification) --
+
+
+def test_read_authorization_bearer_token_source_publishes_vulnerable_default() -> None:
+    result = SOURCES["read_authorization_bearer_token"].render({})
+    assert 'authHeader := r.Header.Get("Authorization")' in result.code
+    assert "hmac.Equal(expectedSig, sigBytes)" in result.code
+    assert result.context["alg_none_var"] == "algIsNone"
+    assert result.context["alg_hs256_var"] == "algIsHS256"
+    assert result.context["hmac_valid_var"] == "hmacValid"
+    assert result.context["claims_var"] == "claimsJSON"
+    # vulnerable by default: an alg:none token bypasses the HMAC check entirely
+    assert result.context["value_expr"] == "algIsNone || hmacValid"
+
+
+def test_jwt_alg_none_default_transform_leaves_the_bypass_default() -> None:
+    ctx = {"alg_none_var": "algIsNone", "alg_hs256_var": "algIsHS256", "hmac_valid_var": "hmacValid"}
+    result = TRANSFORMS["jwt_alg_none_default"].render(ctx)
+    assert result.context["value_expr"] == "algIsNone || hmacValid"
+
+
+def test_jwt_none_alg_opt_in_transform_requires_pinned_algorithm_and_valid_hmac() -> None:
+    ctx = {"alg_none_var": "algIsNone", "alg_hs256_var": "algIsHS256", "hmac_valid_var": "hmacValid"}
+    result = TRANSFORMS["jwt_none_alg_opt_in"].render(ctx)
+    assert result.context["value_expr"] == "algIsHS256 && hmacValid"
+
+
+def test_jwt_claims_response_sink_branches_on_value_expr() -> None:
+    ctx = {"value_expr": "algIsHS256 && hmacValid", "alg_none_var": "algIsNone",
+           "alg_hs256_var": "algIsHS256", "claims_var": "claimsJSON"}
+    result = SINKS["jwt_claims_response"].render(ctx)
+    assert "if algIsHS256 && hmacValid {" in result.code
+    assert "http.StatusOK" in result.code
+    assert "http.StatusUnauthorized" in result.code
+    assert "channel_id" in result.code
+    # both identifiers guarded, even though only one is referenced by value_expr
+    assert "_, _ = algIsNone, algIsHS256" in result.code

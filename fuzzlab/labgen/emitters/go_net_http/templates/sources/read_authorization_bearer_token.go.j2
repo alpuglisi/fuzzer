@@ -1,0 +1,26 @@
+authHeader := r.Header.Get("Authorization")
+{{ token_var }} := strings.TrimPrefix(authHeader, "Bearer ")
+tokenParts := strings.Split({{ token_var }}, ".")
+var headerB64, payloadB64, sigB64 string
+if len(tokenParts) == 3 {
+	headerB64, payloadB64, sigB64 = tokenParts[0], tokenParts[1], tokenParts[2]
+}
+headerBytes, _ := base64.RawURLEncoding.DecodeString(headerB64)
+var jwtHeader struct {
+	Alg string `json:"alg"`
+}
+_ = json.Unmarshal(headerBytes, &jwtHeader)
+{{ alg_none_var }} := strings.EqualFold(jwtHeader.Alg, "none")
+{{ alg_hs256_var }} := jwtHeader.Alg == "HS256"
+mac := hmac.New(sha256.New, jwtSecret)
+mac.Write([]byte(headerB64 + "." + payloadB64))
+expectedSig := mac.Sum(nil)
+// A malformed/empty sigB64 decodes to a nil or short byte slice; hmac.Equal
+// is constant-time and safely reports "not equal" on any length mismatch
+// (it never panics) -- so a missing or garbage signature segment (the
+// alg:none convention's own empty third segment included) always fails
+// this check closed, regardless of which transform op composes it below.
+sigBytes, _ := base64.RawURLEncoding.DecodeString(sigB64)
+{{ hmac_valid_var }} := hmac.Equal(expectedSig, sigBytes)
+payloadBytes, _ := base64.RawURLEncoding.DecodeString(payloadB64)
+{{ claims_var }} := string(payloadBytes)

@@ -306,6 +306,94 @@ class ObjectLookupAuthorizationCheckSink(TemplateModule):
         )
 
 
+class ReadAuthorizationBearerTokenSource(TemplateModule):
+    """Reads the ``Authorization: Bearer <jwt>`` header and hand-parses the
+    three-segment JWT (base64url header/payload/signature -- Go stdlib
+    only, no third-party JWT library, matching this stack's own
+    zero-dependency ``go.mod``), publishing four Go identifiers a
+    transform composes into ``value_expr``: ``alg_none_var``/
+    ``alg_hs256_var`` (what the token's own header claims) and
+    ``hmac_valid_var`` (a real, constant-time HMAC-SHA256 check via
+    ``crypto/hmac.Equal`` -- computed unconditionally, fails closed on any
+    decode failure or length mismatch, per this template's own inline
+    comment). ``claims_var`` carries the decoded payload JSON string for
+    the sink to read. Publishes a vulnerable-by-default ``value_expr``
+    (``alg_none_var || hmac_valid_var``, honoring an unsigned ``alg:none``
+    token), matching every other source in this stack's own convention."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "read_authorization_bearer_token", "source", _SOURCE_ENV,
+            "read_authorization_bearer_token.go.j2",
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        render_ctx = dict(ctx)
+        render_ctx.setdefault("token_var", "bearerToken")
+        render_ctx.setdefault("alg_none_var", "algIsNone")
+        render_ctx.setdefault("alg_hs256_var", "algIsHS256")
+        render_ctx.setdefault("hmac_valid_var", "hmacValid")
+        render_ctx.setdefault("claims_var", "claimsJSON")
+        result = super().render(render_ctx)
+        new_ctx = dict(render_ctx)
+        new_ctx["value_expr"] = f"{new_ctx['alg_none_var']} || {new_ctx['hmac_valid_var']}"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class JwtAlgNoneDefaultTransform(TemplateModule):
+    """The ``jwt_alg_none_default`` op (``lab/safety_matrix.yaml``,
+    ``jwt_signature_verification`` family, ``no_effect`` -- added by
+    ``CC-LAB-0063``, never before instantiated by any stack's generator):
+    renders a comment only, since the source already publishes this
+    vulnerable ``value_expr`` by default -- names the vulnerable path
+    explicitly, matching ``NoOwnershipCheckTransform``'s own convention."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "jwt_alg_none_default", "transform", _TRANSFORM_ENV, "jwt_alg_none_default.go.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        render_ctx = dict(ctx)
+        render_ctx["value_expr"] = f"{ctx['alg_none_var']} || {ctx['hmac_valid_var']}"
+        result = super().render(render_ctx)
+        return RenderResult(code=result.code, context=render_ctx)
+
+
+class JwtNoneAlgOptInTransform(TemplateModule):
+    """The ``jwt_none_alg_opt_in`` op (``lab/safety_matrix.yaml``,
+    ``jwt_signature_verification`` family, ``neutralises`` -- the secure
+    twin): rewrites ``value_expr`` to require the token's own header to
+    explicitly claim the one pinned, allowed algorithm (``HS256``) *and*
+    a valid HMAC -- an ``alg:none`` token is rejected before
+    ``hmac_valid_var`` even matters."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "jwt_none_alg_opt_in", "transform", _TRANSFORM_ENV, "jwt_none_alg_opt_in.go.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        render_ctx = dict(ctx)
+        render_ctx["value_expr"] = f"{ctx['alg_hs256_var']} && {ctx['hmac_valid_var']}"
+        result = super().render(render_ctx)
+        return RenderResult(code=result.code, context=render_ctx)
+
+
+class JwtClaimsResponseSink(TemplateModule):
+    """Branches on ``value_expr`` (the algorithm/signature decision a
+    transform above published) and either returns the decoded claims as
+    channel settings or a real HTTP 401 with no data -- does not itself
+    know or care which algorithm policy produced that decision, matching
+    ``WebhookSignatureVerificationSink``'s own sink-is-transform-agnostic
+    convention."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "jwt_claims_response", "sink", _SINK_ENV, "jwt_claims_response.go.j2"
+        )
+
+
 class RenderOnlyComplexity(TemplateModule):
     """Wraps the composed source/transform/sink body as the entire body of
     one ``net/http.HandlerFunc`` -- the Go analogue of every other stack's
@@ -325,18 +413,22 @@ SOURCES: dict[str, Module] = {
     "read_webhook_signature": ReadWebhookSignatureSource(),
     "read_url_query_param": ReadUrlQueryParamSource(),
     "read_channel_id_and_broadcaster_header": ReadChannelIdAndBroadcasterHeaderSource(),
+    "read_authorization_bearer_token": ReadAuthorizationBearerTokenSource(),
 }
 TRANSFORMS: dict[str, Module] = {
     "naive_string_compare": NaiveStringCompareTransform(),
     "constant_time_compare": ConstantTimeCompareTransform(),
     "no_ownership_check": NoOwnershipCheckTransform(),
     "identity_match_before_fetch": IdentityMatchBeforeFetchTransform(),
+    "jwt_alg_none_default": JwtAlgNoneDefaultTransform(),
+    "jwt_none_alg_opt_in": JwtNoneAlgOptInTransform(),
 }
 SINKS: dict[str, Module] = {
     "webhook_signature_verification": WebhookSignatureVerificationSink(),
     "unchecked_url_fetch": UncheckedUrlFetchSink(),
     "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistSink(),
     "object_lookup_authorization_check": ObjectLookupAuthorizationCheckSink(),
+    "jwt_claims_response": JwtClaimsResponseSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "render_only": RenderOnlyComplexity(),

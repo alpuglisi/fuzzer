@@ -1,0 +1,4 @@
+// jwt_none_alg_opt_in transform: {{ value_expr }} -- requires the token's
+// own header to explicitly claim the one pinned, allowed algorithm
+// (HS256) before any signature check matters; an `alg: none` (or any
+// other) token is rejected outright here, never reaching hmacValid at all.
