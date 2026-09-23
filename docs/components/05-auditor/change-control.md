@@ -3,6 +3,43 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0019 — `R-XXE` audit rule (2026-09-23)
+
+- Change: adds `R-XXE`, category `xxe`, to `fuzzlab/audit/rules_data/
+  default_rules.json` — `{"location_in": ["body"], "sink_context_in":
+  ["xml"]}`. The project's first candidate-generation rule for the `xxe`
+  category, closing TrackerNest's and Netflix's shared structural
+  detection zero. Second use of `sink_context_in` (after
+  `R-INSECURE-DESERIALIZATION`) — same necessary shape: this class has no
+  informative parameter name to key off, every whole-body point sharing
+  the literal `param="body"`. Paired with `CC-FUZZ-0031`'s new
+  `XxeInBandMarkerStrategy`/`XxeOobStrategy` oracle confirmation. Reviewed
+  pre-implementation per the component's pre-change review gate (accuracy
+  + adequacy passes — see `CC-FUZZ-0031` for the full review record).
+  New/changed files:
+  - `fuzzlab/audit/rules_data/default_rules.json`
+  - `docs/components/05-auditor/requirements.md` (`FR-AUD-10`, new)
+- Impact (other components / project): `default_rules.json` is shared
+  across every category and every existing target's own run — purely
+  additive (a new rule appended after `R-INSECURE-DESERIALIZATION`).
+- Risk (level; mitigation or accepted-risk justification): Low-medium.
+  Same explicit scope limit as `R-INSECURE-DESERIALIZATION`
+  (`FR-AUD-9`): `sink_context` is currently populated only from ground
+  truth (`BUG-0039`'s fix), not inferred generically by the auditor for
+  an arbitrary crawled target — reachable only in the project's own
+  ground-truth-scored detection-benchmark mode today.
+- Deliverables:
+  - [x] `R-XXE` added to `default_rules.json` — done
+  - [x] Unit tests confirming the rule's `when` predicate matches/excludes
+        as scoped (`test_r_xxe_rule_matches_a_body_xml_point`,
+        `test_r_xxe_rule_does_not_match_an_unrelated_sink_context`) — done
+- Effectiveness (assessed 2026-09-23): achieved. Paired with
+  `XxeInBandMarkerStrategy`, the rule correctly nominates TrackerNest's
+  real `TNEST-0002` point and is proven end-to-end against a real booted
+  app, through both a dedicated live-boot test and the real generic
+  ground-truth-driven multitarget pipeline — see `CC-FUZZ-0031`'s
+  Effectiveness note.
+
 ### CC-AUD-0018 — `R-INSECURE-DESERIALIZATION` audit rule (2026-09-23)
 
 - Change: adds `R-INSECURE-DESERIALIZATION`, category

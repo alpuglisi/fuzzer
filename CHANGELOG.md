@@ -4,6 +4,41 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (FUZZ/AUD: real detection for `xxe`; several stale multitarget tests fixed)
+- Fuzzing harness/oracle: the project's first real audit rule
+  (`R-XXE`, `sink_context_in=["xml"]`) and two oracle strategies
+  (`XxeInBandMarkerStrategy`/`XxeOobStrategy`, mirroring the SSRF pair) for
+  `xxe` (CWE-611). Sends a `SYSTEM` external entity pointed at the
+  injected `OobListener`'s own loopback callback URL — real, empirically
+  verified behavior (both twins booted for real first): the vulnerable
+  twin's parser genuinely fetches the URL and inlines its content, echoed
+  back in-band; the secure twin (`disallow-doctype-decl`) rejects the
+  whole DOCTYPE outright. Never sends anything but the listener's own
+  minted canary URL — an explicit, docstring-stated safety scope (XXE's
+  `SYSTEM` mechanism is trivially adaptable to a real local-file-read
+  primitive, unlike SSRF's URL-only shape).
+- While wiring this, found and fixed that **two pre-existing multitarget
+  tests never actually exercised SSRF detection** despite `R-SSRF`/
+  `SsrfInBandMarkerStrategy` already being built (`CC-AUD-0016`/
+  `CC-FUZZ-0027`): `test_labgen_php_laravel_huddlehub_multitarget.py` and
+  `test_multitarget_category3_combined.py` never passed a real
+  `OobListener` to `run_targets`, so every OOB-dependent strategy failed
+  closed there. Not a production defect — `run_targets`'s own `oob`
+  passthrough and the strategies both already worked correctly; the tests
+  simply predated the capability and were never revisited. Fixed by
+  passing a real, started listener and updating each test's own
+  assertions to its now-real recall (Huddle Hub 0→1/3; the category-3
+  combined test's TrackerNest 1/3→2/3 and Huddle Hub 0→1/3,
+  `generalizes` False→True).
+- TrackerNest's own solo Phase E test (`test_labgen_spring_boot_
+  trackernest_multitarget.py`) also updated the same way: recall
+  1/3→2/3 (adds `xxe`/`TNEST-0002`); `insecure_deserialization`
+  (`TNEST-0003`) stays an honest false negative — a real, different
+  mechanism (Java `ObjectInputStream`/ysoserial-shaped binary
+  deserialization) from Netflix's own Jackson-JSON case, no confirmer
+  built for that mechanism yet.
+  `CC-FUZZ-0031`/`FR-FUZZ-18`, `CC-AUD-0019`/`FR-AUD-10`.
+
 ## 2026-09-23 (FUZZ/AUD: real detection for `insecure_deserialization`)
 - Fuzzing harness/oracle: a new audit rule (`R-INSECURE-DESERIALIZATION`,
   keyed on `sink_context_in=["deserialization"]`, the project's first use

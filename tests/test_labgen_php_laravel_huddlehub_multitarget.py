@@ -18,30 +18,23 @@ with no single-cell restriction (its own `__init__` filters to
 `emitter.supports(...)` cells and assembles all of them), so no extension
 was needed here.
 
-**Recall is honestly 0 here, and that is expected, not a bug** -- same
-documented gap as TrackerNest's own Phase E test and category 1's
-precedent: none of `webhook_signature_bypass`/`ssrf`/
-`outbound_header_injection` are mapped by
-`fuzzlab.core.runmode._VULN_TO_CATEGORY`. A second, narrower gap this
-target's own ground truth is the first in this project to exercise:
-`HHUB-0001`'s injection point is `location="header"` (the X-Signature
-header, not a query/body param) -- `fuzzlab.harness.auto.
-points_from_ground_truth` has no header-location branch, so it falls into
-that function's generic client-only/DOM `else` branch and is recorded as
-`skipped` with a technically-inaccurate reason string ("client-only/DOM
-(needs browser execution, M6)" -- this point needs a header-capable
-prober, not a browser). This is a real, pre-existing latent gap in that
-function's own location handling, first actually exercised by this
-target's ground truth (no `injection-points.json` in this project
-declared a `location="header"` point before `CC-LAB-0137`) -- flagged
-here, not fixed: fixing `points_from_ground_truth`'s header-location
-handling (and building a header-capable prober to actually drive it) is
-real, sized follow-on work distinct from this test's own job of proving
-the `TargetSpec` wiring, matching this project's own "flag a gap rather
-than silently route around it" discipline. It has no effect on this
-test's own assertions either way: `webhook_signature_bypass` is unmapped
-in `_VULN_TO_CATEGORY` regardless of whether its point is skipped or
-driven, so recall for that case is 0 either way.
+**Recall is 1/3 here, not 0.** `ssrf` (`HHUB-0002`) is now confirmed for
+real: `R-SSRF`/`SsrfInBandMarkerStrategy` (`CC-AUD-0016`/`CC-FUZZ-0027`)
+were built after this test was first written -- this test now starts and
+passes a real `OobListener` to `run_targets` (`oob=listener`), without
+which `SsrfInBandMarkerStrategy` fails closed and never confirms (it uses
+the listener as its own marker responder, not only for an OOB wait).
+`webhook_signature_bypass`/`outbound_header_injection` remain unmapped in
+`fuzzlab.core.runmode._VULN_TO_CATEGORY` -- no confirmer built for either
+yet. Separately: `HHUB-0001`'s injection point is `location="header"`
+(the X-Signature header, not a query/body param) -- this was once a real,
+latent gap in `fuzzlab.harness.auto.points_from_ground_truth` (no
+header-location branch at all, silently skipped with a misleading reason
+string), closed generically by `CC-FUZZ-0028`/`FR-FUZZ-15` (header points
+are now real, audited points project-wide). It has no effect on this
+test's own assertions either way: `webhook_signature_bypass` is still
+unmapped in `_VULN_TO_CATEGORY` regardless of whether its point is driven,
+so recall for that specific case stays 0.
 
 Skip-guarded on `live_boot_available()` (PA-0005), matching every other
 `php_laravel` live-boot test in this project. Marked `@pytest.mark.slow`.
@@ -57,6 +50,7 @@ from fuzzlab.labels import contract
 from fuzzlab.labgen.conformance.live_boot import LiveBootHarness, live_boot_available
 from fuzzlab.labgen.emitters.php_laravel import LaravelEmitter
 from fuzzlab.labgen.schema import load_manifest
+from fuzzlab.oracle.oob import OobListener
 
 pytestmark = pytest.mark.skipif(
     not live_boot_available(),
@@ -102,20 +96,30 @@ def test_huddlehub_target_spec_runs_for_real_and_scores(tmp_path) -> None:
         )
         from fuzzlab.tools.probesender import RequestsProbeSender
 
-        with Store(tmp_path / "u.db") as store:
-            outcomes = run_targets([spec], store, sender_for=lambda s: RequestsProbeSender(timeout=10.0))
-            assert [o.name for o in outcomes] == ["php_laravel_huddlehub"]
-            outcome = outcomes[0]
-            assert outcome.scored is True
-            assert outcome.report is not None
-            assert outcome.report.tp == 0 and outcome.report.fn == len(gt.positives())
-            assert outcome.report.precision == 0.0
-            assert outcome.report.recall == 0.0
+        listener = OobListener()
+        listener.start()
+        try:
+            with Store(tmp_path / "u.db") as store:
+                outcomes = run_targets([spec], store, sender_for=lambda s: RequestsProbeSender(timeout=10.0),
+                                       oob=listener)
+                assert [o.name for o in outcomes] == ["php_laravel_huddlehub"]
+                outcome = outcomes[0]
+                assert outcome.scored is True
+                assert outcome.report is not None
+                # ssrf (HHUB-0002) confirms for real (CC-AUD-0016/CC-FUZZ-0027,
+                # via the real OobListener passed above); the other two
+                # classes remain unmapped -- 1 of 3 positives, not 0.
+                assert outcome.report.tp == 1 and outcome.report.fp == 0
+                assert outcome.report.fn == len(gt.positives()) - 1
+                assert outcome.report.precision == 1.0
+                assert outcome.report.recall == pytest.approx(1 / 3)
 
-            summary = transfer_summary(outcomes)
-            assert summary["targets"] == 1
-            assert "macro_precision" in summary and "macro_recall" in summary
-            assert summary["generalizes"] is False
+                summary = transfer_summary(outcomes)
+                assert summary["targets"] == 1
+                assert "macro_precision" in summary and "macro_recall" in summary
+                assert summary["generalizes"] is False
+        finally:
+            listener.stop()
 
 
 @pytest.mark.slow

@@ -213,6 +213,39 @@ rewards) derives from it.
   header point is a real, audited point today, not a skip reason. This
   entry is kept for history — it correctly named the gap at the time.
 
+- **FR-FUZZ-18** *(`XxeInBandMarkerStrategy`/`XxeOobStrategy`;
+  `CC-FUZZ-0031`, 2026-09-23).* The oracle supports real **XXE (CWE-611)
+  confirmation**, paired with `FR-AUD-10`'s candidate-generation rule,
+  closing TrackerNest's and Netflix's shared structural detection zero:
+  - `XxeInBandMarkerStrategy` (`mechanism="in-band-external-entity-
+    marker"`) and `XxeOobStrategy` (`mechanism="oob-external-entity-
+    fetch"`), directly modeled on the SSRF pair. A `SYSTEM` external
+    entity is pointed at the injected `OobListener`'s own loopback
+    callback URL; the in-band layer confirms when the immediate response
+    echoes the minted token, the OOB layer falls back to a real callback
+    hit for blind XXE (entity resolved but not reflected). Two documented
+    wrapper XML shapes tried in-band before the OOB fallback.
+  - **Explicit, docstring-stated safety scope**: the entity value is
+    always `OobListener`'s own minted callback URL, never a real
+    filesystem URI or other host — required because XXE's `SYSTEM`
+    mechanism is trivially adaptable to a genuine local-file-read
+    primitive, unlike SSRF's URL-only shape this pattern is otherwise
+    modeled on.
+  - Calls `sender.send()` directly rather than extending the shared
+    `_send()` helper with an unexercised override parameter (an adequacy-
+    pass correction, YAGNI) — XXE's own ground truth is `rendering=
+    "server"` (not `server-json`), so each strategy declares its own
+    fixed `content_type="application/xml"` at the call site.
+  - **Surfaced two pre-existing multitarget tests that never actually
+    exercised SSRF detection** (`tests/test_labgen_php_laravel_huddlehub_
+    multitarget.py`, `tests/test_multitarget_category3_combined.py`
+    both never passed `oob=` to `run_targets`, so every OOB-dependent
+    strategy had been failing closed there since `FR-FUZZ-14` landed) —
+    fixed and re-verified against real boots, not a production defect.
+  - Verified live against TrackerNest's real booted twins, both directly
+    and through the real `fuzzlab.harness.multitarget` pipeline:
+    TrackerNest's real, scored recall moves from 1/3 to 2/3.
+
 - **FR-FUZZ-17** *(`InsecureDeserializationTypeConfusionStrategy`;
   `CC-FUZZ-0030`, 2026-09-23).* The oracle supports real
   **insecure-deserialization (CWE-502) confirmation**, paired with

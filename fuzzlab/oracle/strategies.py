@@ -635,6 +635,113 @@ class InsecureDeserializationTypeConfusionStrategy(ConfirmationStrategy):
                        {"benign_class": self._BENIGN_CLASS, "bogus_class": bogus_class})
 
 
+# XXE (M-XXE): entity-wrapped XML around a `SYSTEM` reference. Two shapes tried
+# in-band before falling back to OOB -- a `<title>` child (this lab's own apps'
+# real extracted field, `xml_external_entities_enabled.java.j2`'s
+# `getElementsByTagName("title")`) and a root-element-direct-text form (a
+# plausible different real-world target shape that doesn't happen to read a
+# `<title>` tag specifically). Not an attempt to cover every possible XML
+# shape a target might expect (`XxeOobStrategy`'s fetch-only proof is the
+# fallback for any shape neither wrapper happens to satisfy), the same
+# "two independent, documented variants, then a fallback" shape
+# `RegexDosStrategy`'s own `_REDOS_TEMPLATES` and `SsrfInBandMarkerStrategy`/
+# `SsrfOobStrategy`'s own pairing both already use.
+#
+# **Safety scope, stated explicitly (never silently widen this):** the entity
+# value sent here is *always* `OobListener`'s own loopback callback URL --
+# never a real filesystem URI (`file:///etc/passwd`) or any other host. XXE's
+# `SYSTEM` mechanism is trivially adaptable to a genuine local-file-read
+# primitive, unlike SSRF's URL-only shape (which this pattern is otherwise
+# modeled on) -- this strategy must never be extended to send anything other
+# than the injected `OobListener`'s own minted canary URL without a fresh,
+# dedicated safety review (`CLAUDE.md`'s lab-only/loopback-only posture).
+_XXE_ENTITY_WRAPPERS = [
+    "<r><title>&xxe;</title></r>",
+    "<r>&xxe;</r>",
+]
+
+
+def _xxe_payload(entity_url: str, wrapper: str) -> str:
+    return ('<?xml version="1.0"?><!DOCTYPE r [<!ENTITY xxe SYSTEM "%s">]>%s'
+            % (entity_url, wrapper))
+
+
+class XxeInBandMarkerStrategy(ConfirmationStrategy):
+    """The cheap first layer for XXE: a single request per wrapper shape, no
+    OOB wait needed. Mirrors `SsrfInBandMarkerStrategy` exactly, for XML
+    instead of a raw URL param: points a `SYSTEM` external entity at the
+    injected `OobListener`'s own callback URL (reused as a marker responder,
+    same as the SSRF use) and checks whether the *immediate* response echoes
+    the minted token back -- proven for real against this project's own XXE
+    lab cells (`xml_external_entities_enabled.java.j2`'s
+    `getElementsByTagName("title")` echo). Needs the same injected,
+    already-started `OobListener` `SsrfInBandMarkerStrategy` does; without
+    one, no-ops (fail-closed).
+
+    Calls `sender.send()` directly rather than the shared `_send()` helper:
+    this strategy's payload is always raw XML at its own fixed content type
+    (`application/xml`), independent of whatever `candidate.content_type`
+    the ground truth declared for the point's own ordinary traffic shape
+    (XXE's own ground truth is `rendering="server"`, not `server-json`, so
+    `candidate.content_type` is `None` -- `_send()` would form-encode the
+    whole XML payload as one field value instead of sending it as a raw
+    body, defeating the entity-parsing proof entirely).
+    """
+    vuln_class = "xxe"
+    mechanism = "in-band-external-entity-marker"
+    category = "xxe"
+
+    def __init__(self, listener: OobListener | None = None):
+        self._listener = listener
+
+    def confirm(self, candidate, sender):
+        if self._listener is None:
+            return None
+        token = self._listener.register()
+        canary = self._listener.callback_url(token)
+        for wrapper in _XXE_ENTITY_WRAPPERS:
+            probe = sender.send(candidate.url, candidate.param,
+                                _xxe_payload(canary, wrapper),
+                                method=candidate.method, location=candidate.location,
+                                content_type="application/xml")
+            if token in (probe.text or ""):
+                return Verdict(True, self.vuln_class, self.mechanism,
+                               {"canary": canary, "marker": token, "wrapper": wrapper})
+        return None
+
+
+class XxeOobStrategy(ConfirmationStrategy):
+    """The fallback layer for XXE, when the target does not echo the
+    resolved entity's content back into a visible response (blind XXE) --
+    the fetch itself, observed via the same out-of-band callback the
+    target's own parser leaves in the loopback listener, mirrors
+    `SsrfOobStrategy`'s established pattern exactly. Needs an injected,
+    already-started `OobListener`; without one, no-ops (fail-closed).
+    """
+    vuln_class = "xxe"
+    mechanism = "oob-external-entity-fetch"
+    category = "xxe"
+
+    def __init__(self, listener: OobListener | None = None, timeout: float = 3.0):
+        self._listener = listener
+        self._timeout = timeout
+
+    def confirm(self, candidate, sender):
+        if self._listener is None:
+            return None
+        token = self._listener.register()
+        canary = self._listener.callback_url(token)
+        sender.send(candidate.url, candidate.param,
+                    _xxe_payload(canary, _XXE_ENTITY_WRAPPERS[0]),
+                    method=candidate.method, location=candidate.location,
+                    content_type="application/xml")
+        hit = self._listener.wait_for(token, timeout=self._timeout)
+        if hit is not None:
+            return Verdict(True, self.vuln_class, self.mechanism,
+                           {"canary": canary, "hit_path": hit.path})
+        return None
+
+
 # Grey-box (M10) default confirmation-side probes: something that would reach the
 # vulnerable sink (a SQLi syntax-breaker; an XSS canary) so the coverage/DB-fault
 # side channel has something to observe. Distinct from the black-box strategies'
@@ -799,6 +906,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
             SsrfInBandMarkerStrategy(oob), SsrfOobStrategy(oob),
             AccessControlIdorStrategy(),
             InsecureDeserializationTypeConfusionStrategy(),
+            XxeInBandMarkerStrategy(oob), XxeOobStrategy(oob),
             GreyboxConfirmationStrategy(coverage, dbfault)]
 
 
@@ -818,6 +926,7 @@ _CATEGORY_TO_CLASS = {
     "ssrf": "ssrf",
     "access-control": "access_control",
     "insecure-deserialization": "insecure_deserialization",
+    "xxe": "xxe",
 }
 
 

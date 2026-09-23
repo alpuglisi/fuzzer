@@ -3,6 +3,119 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0031 — `XxeInBandMarkerStrategy`/`XxeOobStrategy`: real detection for `xxe`; two stale multitarget tests fixed (2026-09-23)
+
+- Change: adds the project's first oracle confirmation strategies for
+  `xxe` (CWE-611), closing TrackerNest's and Netflix's shared structural
+  detection zero (`TNEST-0002`/`NFLX-0002`).
+  1. **`fuzzlab/oracle/strategies.py`**: `XxeInBandMarkerStrategy`
+     (`vuln_class="xxe"`, `mechanism="in-band-external-entity-marker"`)
+     and `XxeOobStrategy` (`mechanism="oob-external-entity-fetch"`),
+     directly modeled on `SsrfInBandMarkerStrategy`/`SsrfOobStrategy`. A
+     `SYSTEM` external entity is pointed at the injected `OobListener`'s
+     own loopback callback URL; the in-band layer checks whether the
+     immediate response echoes the minted token (real, empirically
+     verified: `xml_external_entities_enabled.java.j2`'s parser genuinely
+     fetches the URL and inlines its content into the extracted `<title>`
+     field), the OOB layer falls back to `wait_for()` for a target that
+     resolves the entity but never reflects its content (blind XXE). Two
+     wrapper XML shapes tried in-band (`<title>`-child, matching this
+     lab's own apps; root-element-direct-text, a plausible different
+     real-world shape) before the OOB fallback, the same "≥2 documented
+     variants, then fallback" pattern `RegexDosStrategy`/the SSRF pair
+     already use.
+  2. **Calls `sender.send()` directly, not the shared `_send()` helper**
+     (a deliberate adequacy-pass correction from an earlier draft that
+     would have added an unexercised `content_type` override parameter to
+     `_send()` — YAGNI, reconsidered before implementation): XXE's own
+     ground truth is `rendering="server"` (XML, not JSON), so
+     `candidate.content_type` is `None` and `_send()` would form-encode
+     the whole XML payload as one field value, defeating the entity-
+     parsing proof; each strategy declares its own fixed
+     `content_type="application/xml"` directly at the call site instead.
+  3. **Explicit, docstring-stated safety scope**: the entity value sent is
+     *always* `OobListener`'s own minted loopback callback URL — never a
+     real filesystem URI or any other host. Required because XXE's
+     `SYSTEM` mechanism is trivially adaptable to a genuine local-file-
+     read primitive, unlike SSRF's URL-only shape this pattern is
+     otherwise modeled on (the adequacy pass's top-ranked required
+     addition) — pinned by
+     `test_entity_value_is_always_the_injected_listeners_own_callback_url`.
+  4. **`fuzzlab/audit/rules_data/default_rules.json`**: `R-XXE` (see the
+     paired `CC-AUD-0019` entry).
+  5. **Two pre-existing multitarget tests found never actually exercising
+     SSRF detection**, discovered while wiring this (proving XXE detection
+     meant starting a real `OobListener` and passing it through, which
+     surfaced that two *other* tests never did, despite `R-SSRF`/
+     `SsrfInBandMarkerStrategy` already existing): `tests/
+     test_labgen_php_laravel_huddlehub_multitarget.py` and `tests/
+     test_multitarget_category3_combined.py` both called `run_targets`
+     without `oob=`, so every OOB-dependent strategy (SSRF included) had
+     been failing closed there since `CC-AUD-0016`/`CC-FUZZ-0027` landed —
+     not a production defect (`run_targets`'s own `oob` passthrough and
+     the strategy both work correctly; the tests simply predated the
+     capability and nobody revisited them), so no `docs/bugs/` entry, same
+     reasoning as every other stale-test-assertion fix this session.
+     Fixed by passing a real, started listener and updating each test's
+     own assertions and docstrings to the now-real recall. `tests/
+     test_labgen_spring_boot_trackernest_multitarget.py` (TrackerNest's
+     own solo test) updated the same way for its new `xxe` confirmation.
+  - Dispatched through this component's mandatory pre-change review gate
+    (accuracy + adequacy passes). Accuracy pass independently re-ran the
+    real live-boot probes (external-entity fetch, in-band echo, OOB hit,
+    secure-twin rejection) and confirmed byte for byte. Adequacy pass
+    required, and this entry incorporates: (a) the explicit safety-scope
+    docstring (item 3 above); (b) bypassing `_send()` rather than
+    generalizing it on spec (item 2 above); (c) scoping this increment to
+    TrackerNest's own real multitarget test rather than also attempting
+    Netflix's `SpringBootLiveBootHarness` one-cell-per-boot integration
+    (left as its own explicitly-noted, separately-scoped follow-on in
+    `tests/test_multitarget_category4.py`'s own docstring); (d) a
+    documented rationale for the two wrapper shapes, matching
+    `RegexDosStrategy`'s own docstring rigor.
+  New/changed files:
+  - `fuzzlab/oracle/strategies.py`
+  - `fuzzlab/audit/rules_data/default_rules.json` (shared with `CC-AUD-0019`)
+  - `tests/test_oracle_strategies_xxe.py` (new)
+  - `tests/test_labgen_spring_boot_xxe_live_boot.py` (new
+    `test_real_boot_proves_the_xxe_strategy_end_to_end`)
+  - `tests/test_labgen_spring_boot_trackernest_multitarget.py`,
+    `tests/test_labgen_php_laravel_huddlehub_multitarget.py`,
+    `tests/test_multitarget_category3_combined.py`,
+    `tests/test_multitarget_category4.py` (docstring/assertion updates)
+  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    (`FR-FUZZ-18`, new)
+- Impact (other components / project): `fuzzlab/oracle/strategies.py` and
+  `fuzzlab/audit/rules_data/default_rules.json` are shared across every
+  category/target (fresh `git show` collision check against category-2/3/5
+  and second-target-cat1-ecommerce before landing — all behind this
+  branch's own prior commits, no independent edits). Real behavior change
+  for four existing test files' own scored reports: TrackerNest's real
+  recall 1/3→2/3 (both its solo test and the category-3 combined test),
+  Huddle Hub's real recall 0→1/3 (both its solo test and the combined
+  test), and the category-3 combined test's `generalizes` False→True.
+- Risk (level; mitigation or accepted-risk justification): Low. The
+  mechanism is identical in shape and risk to the already-approved SSRF
+  strategies (a loopback-only fetch to the project's own `OobListener`);
+  the one XXE-specific risk (adaptability to a real file-read payload) is
+  explicitly scoped out and pinned by a dedicated test, not just stated in
+  prose.
+- Deliverables:
+  - [x] `XxeInBandMarkerStrategy`/`XxeOobStrategy` implemented, registered,
+        unit-tested (vulnerable/blind/secure/no-listener/safety-scope
+        cases) — done
+  - [x] Real live-boot proof against TrackerNest's real booted twins — done
+  - [x] Two stale multitarget tests found, fixed, re-verified against real
+        boots — done
+  - [x] Full non-slow suite + every directly-affected slow test re-run
+        green at the stable baseline — done
+- Effectiveness (assessed 2026-09-23): achieved. TrackerNest's real,
+  scored `multitarget` recall (both its own solo test and the category-3
+  combined test) moved from 1/3 to 2/3; Huddle Hub's moved from 0 to 1/3
+  in both tests it appears in; the category-3 combined test's
+  `generalizes` moved from `False` to `True` — all proven by real,
+  executed `run_targets()` calls against real booted apps, not mocks.
+
 ### CC-FUZZ-0030 — `InsecureDeserializationTypeConfusionStrategy`: real detection for `insecure_deserialization`; a `sink_context` propagation defect found and fixed (2026-09-23)
 
 - Change: adds the project's first oracle confirmation strategy for

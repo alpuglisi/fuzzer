@@ -25,16 +25,22 @@ ground truth (`lab/ground-truth-trackernest/`, `CC-LAB-0136`) describes as
 assembly/boot fixture for the identical reason rather than fighting a
 conformance harness's own single-purpose restriction.
 
-**Recall is 1/3 here, not 0 -- `CC-CORE-0020` wired `ssti` into
-`fuzzlab.core.runmode._VULN_TO_CATEGORY`** (mapped to the pre-existing,
-independently-verified `server-side-template-injection` category, whose
-own rule (`R-SSTI`) and confirmation strategy (`SstiStrategy`) were
-already built and already correctly scoped for this exact point shape --
-verified live against both of TrackerNest's own twins before that change
-landed). `xxe`/`insecure_deserialization` remain unmapped (no confirmer
-built yet for either), so this app's own recall is exactly 1 confirmed
-case out of 3 positives -- the documented gap now covers 2 of 3 cases,
-not all 3.
+**Recall is 2/3 here, not 1/3.** `ssti` (`TNEST-0001`) has been confirmed
+since `CC-CORE-0020` wired it into `fuzzlab.core.runmode._VULN_TO_CATEGORY`
+(mapped to the pre-existing, independently-verified
+`server-side-template-injection` category's `R-SSTI`/`SstiStrategy`).
+`xxe` (`TNEST-0002`) is now also confirmed (`CC-FUZZ-0031`/`FR-FUZZ-18`'s
+`R-XXE`/`XxeInBandMarkerStrategy`) -- this test now starts and passes a
+real `OobListener` to `run_targets` (`oob=listener`), without which the
+XXE strategies fail closed and never confirm (same seam the SSRF/
+access-control/insecure-deserialization strategies already use).
+`insecure_deserialization` (`TNEST-0003`) remains an honest false
+negative: it is a genuinely different mechanism from Netflix's own
+confirmed insecure-deserialization case (real Java `ObjectInputStream`/
+ysoserial-shaped binary deserialization via `function_executing_
+deserialize`, vs. Netflix's Jackson-JSON polymorphic typing
+`InsecureDeserializationTypeConfusionStrategy` actually confirms) -- no
+confirmer built for *that* mechanism yet, not a gap in wiring.
 
 Skip-guarded on `spring_boot_boot_available()` (PA-0005/PA-0035, the same
 real, bounded Maven-network capability probe every other `spring_boot`
@@ -57,6 +63,7 @@ from fuzzlab.labels import contract
 from fuzzlab.labgen.conformance.live_boot_spring_boot import SKELETON_DIR, spring_boot_boot_available
 from fuzzlab.labgen.emitters.spring_boot import SpringBootEmitter
 from fuzzlab.labgen.schema import load_manifest
+from fuzzlab.oracle.oob import OobListener
 from fuzzlab.tools.probesender import RequestsProbeSender
 
 GT_DIR = "lab/ground-truth-trackernest"
@@ -146,27 +153,42 @@ def test_trackernest_target_spec_runs_for_real_and_scores(live_base_url, tmp_pat
         name="spring_boot_trackernest", base_url=live_base_url,
         ground_truth=gt, points_source="ground-truth",
     )
-    with Store(tmp_path / "u.db") as store:
-        outcomes = run_targets([spec], store, sender_for=lambda s: RequestsProbeSender(timeout=10.0))
-        assert [o.name for o in outcomes] == ["spring_boot_trackernest"]
-        outcome = outcomes[0]
-        # Real target, real ground truth -> a real, scored report (D14: automatic
-        # mode + ground truth is always scored, regardless of tp count).
-        assert outcome.scored is True
-        assert outcome.report is not None
-        # ssti (macroExpr, TNEST-0001) is confirmed for real (CC-CORE-0020's
-        # R-SSTI rule + SstiStrategy, already verified live against this
-        # exact cell); xxe/insecure_deserialization remain unmapped, so 2 of
-        # 3 positives are still an honest false negative each.
-        assert outcome.report.tp == 1
-        assert outcome.report.fp == 0
-        assert outcome.report.fn == len(gt.positives()) - 1
-        assert outcome.report.precision == 1.0
-        assert outcome.report.recall == pytest.approx(1 / 3)
+    listener = OobListener()
+    listener.start()
+    try:
+        with Store(tmp_path / "u.db") as store:
+            outcomes = run_targets(
+                [spec], store, sender_for=lambda s: RequestsProbeSender(timeout=10.0),
+                oob=listener,
+            )
+            assert [o.name for o in outcomes] == ["spring_boot_trackernest"]
+            outcome = outcomes[0]
+            # Real target, real ground truth -> a real, scored report (D14: automatic
+            # mode + ground truth is always scored, regardless of tp count).
+            assert outcome.scored is True
+            assert outcome.report is not None
+            # ssti (macroExpr, TNEST-0001, CC-CORE-0020's R-SSTI/SstiStrategy) and
+            # xxe (macroExpr's sibling cell, TNEST-0002, CC-FUZZ-0031's
+            # R-XXE/XxeInBandMarkerStrategy -- needs the real, started OobListener
+            # above, unlike ssti) are both now confirmed for real.
+            # insecure_deserialization (TNEST-0003) is a genuinely different
+            # mechanism from Netflix's own confirmed case (real Java
+            # ObjectInputStream/ysoserial-shaped binary deserialization,
+            # `function_executing_deserialize`, vs. Netflix's Jackson-JSON
+            # polymorphic typing `InsecureDeserializationTypeConfusionStrategy`
+            # confirms) -- still an honest false negative, no confirmer built
+            # for that mechanism yet.
+            assert outcome.report.tp == 2
+            assert outcome.report.fp == 0
+            assert outcome.report.fn == len(gt.positives()) - 2
+            assert outcome.report.precision == 1.0
+            assert outcome.report.recall == pytest.approx(2 / 3)
 
-        summary = transfer_summary(outcomes)
-        assert summary["targets"] == 1
-        assert "macro_precision" in summary and "macro_recall" in summary
+            summary = transfer_summary(outcomes)
+            assert summary["targets"] == 1
+            assert "macro_precision" in summary and "macro_recall" in summary
+    finally:
+        listener.stop()
         # A single target's recall > 0 is still not >= 2 scored targets
         # (transfer_summary's own rule), so generalizes is still False here.
         assert summary["generalizes"] is False

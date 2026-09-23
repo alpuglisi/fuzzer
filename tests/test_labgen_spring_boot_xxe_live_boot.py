@@ -112,3 +112,54 @@ def test_xxe_secure_twin_rejects_the_doctype_but_still_parses_legitimate_documen
             assert "Normal title" in benign_resp.body, benign_resp.body
     finally:
         os.unlink(fixture.name)
+
+
+def test_real_boot_proves_the_xxe_strategy_end_to_end() -> None:
+    """The real `XxeInBandMarkerStrategy`/`XxeOobStrategy`
+    (CC-FUZZ-0031/FR-FUZZ-18), driven against a real booted app rather than
+    a fake sender: confirms the vulnerable twin and fails closed on the
+    secure twin, using the exact `OobListener`-only payload the strategies
+    themselves send (never `file://`, per this file's own safety
+    discipline above)."""
+    from fuzzlab.oracle.oob import OobListener
+    from fuzzlab.oracle.probe import Candidate, Probe
+    from fuzzlab.oracle.strategies import XxeInBandMarkerStrategy
+
+    manifest = load_manifest("lab/manifests/xxe_spring_boot_sample.yaml")
+    emitter = SpringBootEmitter()
+    cells = {c.cell_id: c for c in manifest.cells}
+
+    def _cand():
+        return Candidate(url="http://h/issues/import", param="body", method="POST",
+                         location="body", vuln_class="xxe", category="xxe")
+
+    listener = OobListener()
+    listener.start()
+    try:
+        strategy = XxeInBandMarkerStrategy(listener)
+
+        with SpringBootLiveBootHarness(emitter, cells["LABGEN-XXE-0001"]) as harness:
+            class _HarnessSender:
+                def send(self, url, param, value, timing=False, method="POST",
+                          location="body", content_type=None):
+                    resp = harness.post("/issues/import", data=value.encode("utf-8"))
+                    return Probe(resp.status, resp.body)
+
+            verdict = strategy.confirm(_cand(), _HarnessSender())
+            assert verdict is not None and verdict.confirmed, (
+                "strategy failed to confirm the real vulnerable twin"
+            )
+            assert verdict.vuln_class == "xxe"
+
+        with SpringBootLiveBootHarness(emitter, cells["LABGEN-XXE-0002"]) as harness:
+            class _HarnessSender:
+                def send(self, url, param, value, timing=False, method="POST",
+                          location="body", content_type=None):
+                    resp = harness.post("/issues/import", data=value.encode("utf-8"))
+                    return Probe(resp.status, resp.body)
+
+            assert strategy.confirm(_cand(), _HarnessSender()) is None, (
+                "strategy incorrectly confirmed the real secure twin"
+            )
+    finally:
+        listener.stop()

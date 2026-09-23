@@ -63,6 +63,13 @@
       "transaction_type": "Insecure Deserialization",
       "when": { "location_in": ["body"], "sink_context_in": ["deserialization"] },
       "reference": "insecure-deserialization"
+    },
+    {
+      "id": "R-XXE",
+      "category": "xxe",
+      "transaction_type": "XML External Entity Injection",
+      "when": { "location_in": ["body"], "sink_context_in": ["xml"] },
+      "reference": "xxe"
     }
   ]
 }

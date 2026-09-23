@@ -60,6 +60,13 @@ budget where a vulnerability is plausible.
   only in the project's own ground-truth-scored detection-benchmark mode
   today, not yet a general crawl-driven capability. Rule-generation only —
   confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-17`).
+- **FR-AUD-10** *(`CC-AUD-0019`, 2026-09-23).* A candidate is generated for
+  the `xxe` category: `R-XXE` (`fuzzlab/audit/rules_data/
+  default_rules.json`) matches a `body`-location point whose `sink_context`
+  is `"xml"` — the second use of `sink_context_in` (after `R-INSECURE-
+  DESERIALIZATION`), same necessary shape and same scope limit (reachable
+  only from ground-truth-sourced points today). Rule-generation only —
+  confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-18`).
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that

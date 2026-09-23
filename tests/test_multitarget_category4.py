@@ -30,15 +30,27 @@ this exact generic pipeline (not just the dedicated Phase D Tier1/2 test) --
 (`LABGEN-JV-0001`) accept and successfully deserialize an attacker-named
 JDK class via Jackson's `WRAPPER_ARRAY` polymorphic-type format, and
 correctly does not confirm the secure twin (`LABGEN-JV-0002`, no
-polymorphic typing configured at all). `NFLX-0002` (XXE) still has no
-rule/strategy. One gap remains open, already flagged and not fixed here:
+polymorphic typing configured at all).
 
-1. **No audit `Rule`/oracle strategy exists yet for `webhook_signature`/
-   `xxe`** (`ssrf`/`access_control`/`insecure_deserialization` now all have
-   one, `CC-FUZZ-0027`/`CC-FUZZ-0029`/`CC-FUZZ-0030`) --
-   `fuzzlab.core.runmode._VULN_TO_CATEGORY` still doesn't map these two, so
-   they fall through to their own name as the category and find no
-   matching rule.
+`NFLX-0002` (XXE) now also has a real rule/strategy pair
+(`R-XXE`/`XxeInBandMarkerStrategy`, `CC-FUZZ-0031`, verified live against
+TrackerNest's own XXE twins -- `tests/test_labgen_spring_boot_xxe_live_boot.py`
+and `tests/test_labgen_spring_boot_trackernest_multitarget.py`), but it is
+**not yet exercised in this specific test**: `_netflix_cell()` below boots
+only `LABGEN-JV-0001` (the insecure-deserialization vulnerable twin) via
+`SpringBootLiveBootHarness`'s one-cell-per-boot constraint, so `NFLX-0002`'s
+own point (a different route the booted app doesn't serve) is still a
+structural false negative *here* -- not because detection is missing, but
+because this test's own single-cell boot doesn't include it. Closing that
+is its own separately-scoped follow-on (a hand-rolled multi-cell fixture
+like TrackerNest's or category 3's `CC-LAB-0138`, or a second `TargetSpec`
+booting `NFLX-0002` on its own), not attempted here. One gap remains open:
+
+1. **No audit `Rule`/oracle strategy exists yet for `webhook_signature`**
+   (`ssrf`/`access_control`/`insecure_deserialization`/`xxe` now all have
+   one) -- `fuzzlab.core.runmode._VULN_TO_CATEGORY` doesn't map it, and it
+   needs a genuinely new timing-statistics oracle (a single-request model
+   cannot observe a comparison-timing side channel), not just a rule.
 """
 
 from __future__ import annotations
