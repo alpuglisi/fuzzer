@@ -102,7 +102,7 @@ import sys
 import tempfile
 import time
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from fuzzlab.labgen.conformance.tier1 import Tier1Case
@@ -548,7 +548,16 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TEXT,
     updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS bookings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_type TEXT NOT NULL,
+    total_amount REAL NOT NULL
+);
 """
+#: `bookings` (CC-LAB-0212, category 5's `price_integrity_bypass` shape):
+#: no seed rows -- each test inserts its own row via a real HTTP request and
+#: reads it back with :meth:`LiveBootHarness.query_db`, the same pattern
+#: `CC-LAB-0056`'s real `register.php` `INSERT` proof already established.
 #: ``created_at``/``updated_at`` above are for :class:`\\App\\Models\\User`
 #: alone (``login.php``/``register.php`` go through ``DB::table('users')``,
 #: which never touches them): Eloquent's default ``$timestamps = true``
@@ -622,6 +631,12 @@ def _run(cmd: list[str], *, cwd: Path, timeout: float, env: dict[str, str] | Non
 class HttpResponse:
     status: int
     body: str
+    #: Response headers (CC-LAB-0210: the first caller of this harness that
+    #: needs to observe a header rather than only status/body -- a real
+    #: `Location:` header proof for the open-redirect shape). Additive: a
+    #: default of `{}` keeps every pre-existing construction of this
+    #: dataclass unchanged.
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 class LiveBootHarness:
@@ -880,7 +895,11 @@ class LiveBootHarness:
             req_headers.update(headers)
         req = urllib.request.Request(url, data=body, method=method.upper(), headers=req_headers)
         with _NO_REDIRECT_OPENER.open(req, timeout=REQUEST_TIMEOUT_S) as resp:
-            return HttpResponse(status=resp.status, body=resp.read().decode("utf-8", errors="replace"))
+            return HttpResponse(
+                status=resp.status,
+                body=resp.read().decode("utf-8", errors="replace"),
+                headers=dict(resp.headers.items()),
+            )
 
     def get(self, path: str, *, params: dict[str, str] | None = None) -> HttpResponse:
         return self.request("GET", path, params=params)

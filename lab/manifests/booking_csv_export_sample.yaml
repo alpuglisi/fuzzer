@@ -1,0 +1,32 @@
+# Booking.com-themed CSV/report export formula-injection sample manifest
+# (CC-LAB-0211/FR-LAB-90), php_laravel -- category 5 (Travel/booking/
+# marketplaces) pilot, docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §9.4
+# row 5, second increment (first: booking_open_redirect_sample.yaml).
+#
+# The vulnerable/secure twin pair for the new `csv_formula_injection` shape
+# (CWE-1236), grounded in Booking.com's real Extranet/partner-admin
+# booking-list/revenue export view -- see
+# docs/research/category5-travel-functionality-and-cwe-research.md
+# §1.1/§2.1 for the citations. Continues this app's own cell-ID sequence
+# and out-of-band ground truth (lab/ground-truth-booking-clone/, BKNG-0002)
+# -- never puppy-fort-factory's `PFF-*` identity.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-BC-0003
+    class: csv_formula_injection
+    stack_profile: php_laravel
+    route: { method: GET, path: /extranet/export }
+    sink_context:
+      family: csv_cell_value
+      required_neutralizations: [csv_formula_injection]
+    transform: []
+
+  - cell_id: LABGEN-BC-0004
+    class: csv_formula_injection
+    stack_profile: php_laravel
+    route: { method: GET, path: /extranet/export }
+    sink_context:
+      family: csv_cell_value
+      required_neutralizations: [csv_formula_injection]
+    transform: [csv_formula_neutralize]

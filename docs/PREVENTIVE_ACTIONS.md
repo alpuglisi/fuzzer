@@ -451,3 +451,37 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   already had it. A future cross-language module port should run the same sweep before
   considering that class of module "ported," not just "renders the same shape." (from
   BUG-0037)
+- **PA-0040** — When a change registers a module (or any entry) in a **shared,
+  cross-stack** registry consumed by more than one stack-specific module set or more
+  than one test file's own completeness table (as opposed to a change confined to one
+  stack's own emitter-local registry), run the whole-repo `pytest tests/` suite and
+  confirm it is green **before** the change is pushed/considered complete — not only
+  the test file(s) judged directly relevant to the change. Sharpens `CLAUDE.md`'s own
+  Definition-of-Done step 2 ("run the suite; keep it green") for the specific case
+  where "the suite" that matters is not obviously implied by which production file was
+  edited: `fuzzlab.labgen.modules`' shared registries have their own, separate
+  completeness table/guard test (`tests/test_labgen_modules.py`'s
+  `_DETERMINISM_CTX_BY_MODULE`) from any single stack's own module-set tests, and a
+  change that adds a shared-vocabulary-only registration (the `L-P3.3c-DOM`/
+  `CC-LAB-0210` pattern) must satisfy both. (from BUG-0038; this ID was originally
+  assigned `PA-0036` on `claude/category-5-build-6boejs`, which collided with this
+  branch's own, unrelated `PA-0036` — renumbered on merge, not restated.)
+- **PA-0038** — Before considering any new `lab/ground-truth-*/` directory
+  complete: (a) confirm all three required files (`labels.json`,
+  `injection-points.json`, `expectedresults.csv`) show as tracked/addable via
+  `git status`/`git add -n` — `.gitignore`'s blanket `*.csv` rule requires its
+  own `!lab/ground-truth-<app>/*.csv` negation per directory, so a file
+  present on disk can still be silently ignored and never reach the commit;
+  and (b) run that shape's own test module as its own explicit, separate
+  `pytest` invocation (not just as part of a claimed whole-repo run) and quote
+  its literal pass count in the change-control entry's Effectiveness section.
+  An aggregate whole-repo pass count does not, on its own, prove any specific
+  new test file was actually collected and exercised against the final
+  committed tree — sharpens PA-0040's related but narrower finding (that a
+  cross-cutting change needs the whole suite run, not just the files judged
+  directly relevant) for the case where even a claimed whole-repo pass turns
+  out inconsistent with the new file's own directory-completeness contract
+  (a new `lab/ground-truth-*/` directory missing a required sibling file,
+  e.g. `expectedresults.csv`, that `fuzzlab.labels.contract.load()` requires
+  unconditionally, compounded here by that file also being unreachable via
+  `git add` for lack of a `.gitignore` negation). (from BUG-0036)

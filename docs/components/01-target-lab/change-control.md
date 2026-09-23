@@ -4699,6 +4699,861 @@ implementation may begin.
 
 
 ### CC-LAB-0069 — real live-boot verification that `orm_entity_bulk_assign`'s php_laravel sink safely quotes an adversarial column-name key (FR-LAB-63) (2026-09-22)
+### CC-LAB-0215 — fix BUG-0036: `lab/ground-truth-expedia-clone/` shipped without `expectedresults.csv` (and without the `.gitignore` exception needed to track it) (2026-09-23)
+- Change: `CC-LAB-0214`'s new `lab/ground-truth-expedia-clone/` directory
+  was missing the third file `fuzzlab.labels.contract.load()`
+  unconditionally requires, `expectedresults.csv` — every sibling
+  second-target ground-truth directory ships all three files
+  (`labels.json`, `injection-points.json`, `expectedresults.csv`) as one
+  atomic unit, and this one didn't. Compounding this, `.gitignore`'s
+  blanket `*.csv` rule had no `!lab/ground-truth-expedia-clone/*.csv`
+  negation (the pattern established for `lab/ground-truth/` and
+  `lab/ground-truth-booking-clone/` in `CC-LAB-0090`), so the file would
+  have remained untracked even once authored. Fixed both: authored
+  `expectedresults.csv` (one row, `EXPD-0001`, matching `labels.json`'s
+  existing case exactly, in the established column convention from
+  `lab/ground-truth-booking-clone/expectedresults.csv`) and added the
+  missing `.gitignore` negation. Full RCA in `docs/bugs/BUG-0036-expedia-
+  ground-truth-shipped-without-expectedresults-csv.md`; new preventive
+  action `PA-0038` in `docs/PREVENTIVE_ACTIONS.md`.
+- Impact (other components / project): none beyond this component — no
+  interface or contract change, `fuzzlab.labels.contract`'s loader
+  behavior is unchanged, only the previously-incomplete ground-truth
+  directory's own data is completed. `FR-LAB-113`/`FR-LAB-114` (this
+  shape's requirements, renumbered from `FR-LAB-102`/`103` in a separate,
+  unrelated cross-branch bookkeeping-ID collision fix earlier in this same
+  push) are unaffected by this entry.
+- Risk (level; mitigation or accepted-risk justification): low — additive
+  data-file fix plus a `.gitignore` exception; no code path changed. The
+  targeted test file and the whole-repo suite were both re-run clean (see
+  Effectiveness) before this entry was closed out, per the very `PA-0038`
+  rule this fix produced.
+- Deliverables:
+  - [x] `lab/ground-truth-expedia-clone/expectedresults.csv` authored — done
+  - [x] `.gitignore` `!lab/ground-truth-expedia-clone/*.csv` negation added — done
+  - [x] `docs/bugs/BUG-0036-*.md` full RCA — done
+  - [x] `ERROR_LOG.md` entry — done
+  - [x] `docs/PREVENTIVE_ACTIONS.md` `PA-0038` — done
+- Effectiveness (assessed 2026-09-23): `pytest
+  tests/test_labgen_spel_injection.py -v` — 9 passed (up from 7 passed, 2
+  failed with `FileNotFoundError`). Whole-repo `pytest -m "not slow"`
+  re-run: 1865 passed, 8 skipped — no regression elsewhere. `git status`
+  confirms `expectedresults.csv` now shows as addable rather than
+  gitignore-suppressed.
+
+### CC-LAB-0214 — category 5 pilot, Expedia's first own shape: `spel_injection` (CWE-917) on `spring_boot`, hotel-search sort (FR-LAB-113, FR-LAB-114) (2026-09-23)
+- Change: the first vulnerability shape built specifically for Expedia
+  (Java/Spring Boot), on top of the freshly-ported `spring_boot` package
+  (`CC-LAB-0213`) — distinct from that entry's ported Netflix Jackson
+  cell, which is TrackerNest/category-4 code reused, not built for
+  Expedia. A hotel-search endpoint (`GET /api/hotels/search-sort`)
+  accepts a user-supplied `sortBy` query parameter, parsed and evaluated
+  as a Spring Expression Language (SpEL) expression — CWE-917
+  ("Expression Language Injection"), a genuinely new concern class for
+  this project (no prior `safety_matrix.yaml` entry). Grounded in real
+  Spring CVEs: CVE-2018-1273 (Spring Data Commons, `MapDataBinder`'s use
+  of an unrestricted `StandardEvaluationContext` — the exact mechanism
+  this shape models) and CVE-2022-22980/CVE-2026-41717 (Spring Data
+  MongoDB `@Query`/`@Aggregation` SpEL parameter-binding injection).
+  Spring's own documented fix (the literal CVE-2018-1273 patch) is to
+  evaluate with a restricted `SimpleEvaluationContext` instead of
+  `StandardEvaluationContext` — this shape models that exact
+  differential: both twins call the *identical*
+  `SpelExpressionParser().parseExpression(tainted).getValue(context)`
+  sequence; only the `EvaluationContext` object differs.
+
+  Went through this component's pre-change review gate before any code
+  was written (a drafted entry, reviewed independently by two agents).
+  The accuracy pass returned clean **ACCURATE** on all 10 checked claims
+  (including actually running `mvn dependency:tree` against the real
+  skeleton to confirm `spring-expression` is pulled in transitively via
+  `spring-boot-starter-web` with no new Maven dependency needed, and
+  independently verifying the CVE citations and the CWE-917-not-CWE-89
+  correction against cwe.mitre.org), with one minor wording nuance (the
+  exact dependency-tree hop sequence) noted but not blocking. The
+  adequacy pass returned **INADEQUATE**, catching one real, blocking gap
+  the draft had explicitly flagged as an open question rather than
+  guessed at: the draft's own SSTI-shape analogy for the
+  `static_precheck` classification was wrong (no spring_boot
+  `STATIC_PRECHECK_BY_SHAPE` precedent exists at all — confirmed by
+  `CC-LAB-0213` itself), and the correct classification is
+  **UNINFORMATIVE** (the opposite of the draft's SSTI comparison): unlike
+  SSTI's genuinely different vulnerable/secure API calls
+  (`Ognl.getValue()` vs. a fixed `Map` lookup), this shape's two twins
+  call the identical parse/evaluate sequence — a generic taint checker
+  has no differing call-shape or missing-sanitizer tell to key on, the
+  same reasoning already used for the escaping-context-mismatch XSS
+  rows. The adequacy review also caught a real omission (the draft
+  hadn't flagged that `labels.schema.json`'s `sink_context` enum needed
+  widening at all, only `vuln_class`) and confirmed two of the draft's
+  own open questions were correctly resolved as drafted (a new,
+  dedicated `lab/ground-truth-expedia-clone/` directory, matching
+  Booking/Netflix/Twitch's per-app-identity precedent rather than
+  TrackerNest's no-ground-truth-at-all state; and `sink_context: spel`,
+  a fresh, plain-word token matching Booking's own `redirect`/`csv`
+  minting convention, not an existing bucket). Both fixed before
+  implementation, per this component's now-standing practice.
+
+  `docs/research/category5-travel-functionality-and-cwe-research.md`'s
+  existing SpEL-injection shortlist entry was corrected in the same
+  change, pre-implementation: it had labeled this CWE-89 (CVE-2016-
+  6652's specific JPQL/SQL *outcome*), but MITRE/NVD classify the SpEL-
+  evaluation-context mechanism this shape actually models under CWE-917
+  — corrected in place with a dated note, not silently rewritten, per
+  this project's living-doc convention; verified accurate by the
+  accuracy reviewer independently against cwe.mitre.org.
+
+  1. **`lab/safety_matrix.yaml`**: new concern `spel_injection` (CWE-917,
+     documented in the header vocabulary), new sink family
+     `spel_expression_evaluate`. Vulnerable op
+     `standard_evaluation_context_unrestricted` (`no_effect`); secure op
+     `simple_evaluation_context_restricted` (`neutralises:
+     [spel_injection]`). Additive; no version bump.
+  2. **New `spring_boot` modules**: reuses the existing `QueryParamSource`
+     (no new source needed). New sinks:
+     `StandardEvaluationContextUnrestrictedSink` (parses the tainted
+     string with `SpelExpressionParser` and evaluates it against
+     `new StandardEvaluationContext()`) and
+     `SimpleEvaluationContextRestrictedSink` (identical parse, evaluated
+     against `SimpleEvaluationContext.forReadOnlyDataBinding().build()`).
+     No new Maven dependency (verified by the accuracy review, see
+     above). Reuses the existing `single_handler` complexity. New
+     `_MODULE_SET_BY_SHAPE` row
+     `("spel_injection", "spel_expression_evaluate")`, new `_PAGE_PARAMS`
+     route `/api/hotels/search-sort` (`var_name: sortExpr`,
+     `param_name: sortBy`).
+     `fuzzlab.labgen.conformance.static_precheck.STATIC_PRECHECK_BY_SHAPE`
+     gains `("spel_injection", "spel_expression_evaluate") ->
+     UNINFORMATIVE` (the adequacy-review-corrected classification, with
+     its reasoning recorded in the registry's own comment, not just this
+     entry).
+  3. **New manifest**: `lab/manifests/expedia_spel_injection_sample.yaml`
+     (new `LABGEN-EXP-` cell-ID prefix — Expedia's first cells, checked
+     against every other active branch's own cell-ID prefixes before use,
+     zero collisions per the adequacy review).
+  4. **New ground-truth directory**: `lab/ground-truth-expedia-clone/`
+     (Expedia's own, opaque `EXPD-` case-ID prefix — never `PFF-*`,
+     matching `lab/ground-truth-booking-clone/`'s established per-app-
+     identity precedent, per the adequacy review's resolution above). One
+     case, `EXPD-0001`, cross-checked by `fuzzlab.labels.contract` and by
+     this entry's own test suite (item 7). `fuzzlab/labels/schemas/
+     labels.schema.json`'s `vuln_class` enum widened additively
+     (`spel_injection`); `sink_context` enum widened additively (`spel`)
+     — the omission the adequacy review caught in the draft.
+  5. **Real live-boot proof**
+     (`tests/test_labgen_spel_injection_live_boot.py`): both twins
+     receive `sortBy=T(java.lang.Math).abs(-99)` — a safe, side-effect-
+     free type-reference/method-invocation SpEL canary (deliberately not
+     a `Runtime.exec`-shaped payload, even in this lab-only sandbox: it
+     proves the identical "can an attacker reach a type reference/method
+     invocation at all" differential without invoking a process).
+     Vulnerable twin: real HTTP 200 with `99` (the evaluated result) in
+     the body. Secure twin: real HTTP 400 (a rejected `T(...)` type
+     reference under `SimpleEvaluationContext`). A second, benign
+     property-path-shaped expression (`'price'`) proves the secure twin
+     still functions for legitimate input, not just that it rejects the
+     attack — both twins pass this case too.
+  6. `docs/components/01-target-lab/requirements.md`: `FR-LAB-113` (the
+     shape), `FR-LAB-114` (ground truth).
+  7. **Tests**: `tests/test_labgen_spel_injection.py` (9 tests — manifest/
+     verdict, static-precheck classification, `supports()`, determinism,
+     twin-composition assertions, ground-truth cross-check, ground-truth-
+     directory isolation, class-name-collision guard) +
+     `tests/test_labgen_spel_injection_live_boot.py` (2 real live-boot
+     tests, the proof above). Whole-repo `pytest tests/` run before
+     considering this increment complete (`PA-0040`) — see Effectiveness
+     for the pass/skip/fail counts.
+  8. `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated.
+- Impact (other components / project): additive-only across
+  `lab/safety_matrix.yaml`, the `spring_boot` package's local registries,
+  `fuzzlab/labgen/conformance/static_precheck.py`,
+  `fuzzlab/labels/schemas/labels.schema.json` (2 more enum values), and a
+  new ground-truth directory. No other of the 13 components touched.
+  Establishes Expedia's own cell-ID prefix (`LABGEN-EXP-`) and ground-
+  truth directory (`lab/ground-truth-expedia-clone/`) precedent for any
+  further Expedia-specific shapes.
+- Risk (level; mitigation or accepted-risk justification): low — the
+  shape reuses existing, already-verified infrastructure end to end
+  (the `spring_boot` package's own module-composition pattern, the
+  `QueryParamSource`/`single_handler` modules, `spring-expression`
+  already on the classpath) and introduces exactly one new concern/sink-
+  family pair, grounded in three independently-verified real CVEs. The
+  adequacy review's one genuinely open design question (the
+  `static_precheck` classification) was resolved by evidence (comparing
+  the actual vulnerable/secure sink code, not guessed) before
+  implementation rather than left to be discovered by a later failing
+  test.
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml`: 2 additive rows, new concern header entry — done
+  - [x] `fuzzlab/labgen/emitters/spring_boot/modules.py` + 2 new templates — done
+  - [x] `fuzzlab/labgen/emitters/spring_boot/__init__.py`: page profile + module-set row — done
+  - [x] `fuzzlab/labgen/conformance/static_precheck.py`: new entry — done
+  - [x] `lab/manifests/expedia_spel_injection_sample.yaml` (2 cells) — done
+  - [x] `fuzzlab/labels/schemas/labels.schema.json`: `vuln_class`/`sink_context` widening — done
+  - [x] `lab/ground-truth-expedia-clone/`: new directory, 3 files, `EXPD-0001` — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-113`/`103` — done
+  - [x] `docs/research/category5-travel-functionality-and-cwe-research.md`: CWE-89→917 correction — done
+  - [x] `tests/test_labgen_spel_injection.py` (9 tests) — done
+  - [x] `tests/test_labgen_spel_injection_live_boot.py` (2 real live-boot tests, all green) — done
+  - [x] `CHANGELOG.md` line — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done
+- Effectiveness (assessed 2026-09-23): achieved its intent, with evidence.
+  The adequacy review caught a real, blocking classification error in the
+  draft's own SSTI-shape reasoning (the opposite classification from what
+  the draft proposed) and a real schema-widening omission, both before
+  any code was written — exactly the review gate's purpose. Full
+  whole-repo `pytest tests/` run: see the commit message / `CHANGELOG.md`
+  line for the exact pass/skip/fail counts.
+
+### CC-LAB-0213 — category 5 pilot, `spring_boot` package ported onto this branch for Expedia (FR-LAB-94) (2026-09-23)
+- Change: mechanical port (not a new build) of the `spring_boot` emitter
+  package onto `claude/category-5-build-6boejs`, unblocking Expedia's
+  Java/Spring Boot half per §9.2a's cross-category consolidation decision
+  (reuse category 3's `spring_boot`/TrackerNest package rather than build a
+  from-scratch emitter — Maven Central was reconfirmed reachable
+  2026-09-23, removing the earlier environment blocker for a *from-scratch*
+  build, but the consolidation decision means that build is no longer
+  needed at all). This repository's multi-branch model keeps each
+  category's own new package private to its branch until a PR merge, so
+  the package did not exist on this branch or on `main` before this entry
+  — confirmed by `git ls-tree` on both.
+  1. **Source and pick**: fetched both `origin/claude/category-3-build-
+     iuu5k9` (the package's original build: `CC-LAB-0130` emitter+SSTI,
+     `CC-LAB-0131` XXE, `CC-LAB-0132` insecure deserialization) and
+     `origin/claude/category-4-build-t9uz3y` (the more current state,
+     since it already carries category 3's full package plus category 4's
+     own `CC-LAB-0173` Netflix-cell Jackson-deserialization port and the
+     retirement of the now-superseded standalone `java_spring_boot`
+     package). Ported from the category-4 branch as the more complete,
+     more current source.
+  2. **Wiring verified before porting, not assumed**: dispatched research
+     confirming (a) the package is genuinely self-contained — zero
+     references to `spring_boot` in any central file (`cli.py`'s
+     `EMITTER_REGISTRY`, `fuzzlab/labgen/conformance/static_precheck.py`,
+     `fuzzlab/labgen/emitters/__init__.py`, `fuzzlab/labgen/minimal_pair.py`
+     all have zero matches — confirmed by `git diff main FETCH_HEAD` on
+     each), matching the package's own docstring claim that Spring's
+     classpath component-scan replaces any accumulator/registry hookup,
+     the same shape `python_fastapi` already established; (b) every
+     non-package file that mentions `spring_boot` is a test file (9 total,
+     `git grep -l` on the source branch).
+  3. **Files ported** (`git checkout FETCH_HEAD --`, unmodified):
+     `fuzzlab/labgen/emitters/spring_boot/` (emitter `__init__.py`,
+     `modules.py`, `stack_env.py`, the checked-in Maven skeleton under
+     `stack/skeleton/`, Jinja templates under `templates/`),
+     `fuzzlab/labgen/conformance/live_boot_spring_boot.py`, three sample
+     manifests (`lab/manifests/{ssti,xxe,insecure_deserialization}_
+     spring_boot_sample.yaml`), and 8 of the 9 test files found in step 2b.
+     The 9th, `tests/test_labels_contract_category4.py`, was deliberately
+     excluded and not ported: it asserts against `lab/ground-truth-
+     netflix-clone/`/`-twitch-clone/`, category 4's own dedicated
+     ground-truth directories, which don't exist on this branch and are
+     not this category's own ground truth to carry — porting it would have
+     produced a permanently-failing test (missing directory) rather than
+     real coverage.
+  4. **Real gaps found by running the ported tests, not assumed clean**:
+     running the 4 non-live-boot ported test files immediately surfaced 2
+     `SafetyMatrixError`s (`fuzzlab.labgen.verdict.verdict()` raising on an
+     unregistered `(op, sink_family)` pair) — `lab/safety_matrix.yaml` is a
+     shared file each category branch has edited independently since the
+     last cross-branch sync, so two small, real rows present on the source
+     branches were missing here: (a) `xml_external_entities_disabled`/
+     `xml_parse_input` (`neutralises: [xxe_entity_resolution]`) —
+     originally category 3's `CC-LAB-0131`/`FR-LAB-75`, the secure
+     counterpart to a vulnerable-only row this file already had from
+     `CC-LAB-0063`; (b) `jackson_default_typing_deserialize`/
+     `jackson_typed_allowlist_deserialize` for `object_deserialization`
+     (`no_effect`/`neutralises: [insecure_deserialization]` respectively)
+     — originally category 4's `CC-LAB-0171`, carried through the
+     `CC-LAB-0173` Netflix-cell port. Both rows copied verbatim from the
+     source branches' diffs (`git diff HEAD FETCH_HEAD -- lab/
+     safety_matrix.yaml`) and added additively at the correct existing
+     section (no version bump — no existing pair's meaning changed).
+  5. **Verification**: all 33 non-live-boot ported tests pass after the
+     safety-matrix additions. All 8 live-boot tests
+     (`tests/test_labgen_spring_boot{,_deserialization,_xxe}_live_boot.py`,
+     `tests/test_labgen_spring_boot_deserialization_jackson_live_boot.py`)
+     pass — a real `mvn -q -B package -DskipTests` + `java -jar` boot +
+     real HTTP round trip for TrackerNest's SSTI/XXE/deserialization cells
+     and the ported Netflix Jackson-deserialization cell, all executed on
+     this sandbox (Maven Central reachable, per the session's earlier
+     reconfirmation). Whole-repo `pytest tests/` run after the port and
+     the two safety-matrix additions, per `PA-0040` — see Effectiveness
+     for the pass/skip/fail counts.
+  6. `docs/components/01-target-lab/requirements.md`: `FR-LAB-94`.
+- Impact (other components / project): additive-only to
+  `lab/safety_matrix.yaml` (2 new rows, no existing row changed). No other
+  of the 13 components touched. Unblocks Expedia's own shape work: CWE-502
+  Jackson polymorphic deserialization is now directly available (the
+  ported Netflix cell already models the exact real-world idiom Expedia's
+  own research doc shortlisted, `activateDefaultTyping()`) and needs only
+  a new page profile/manifest, not new safety-matrix rows or emitter code;
+  Spring Data SpEL/`@Query` injection remains fully greenfield (confirmed
+  by grep on this branch and all three source category branches: no
+  safety-matrix rows, emitter modules, or corpus precedent exist anywhere
+  in this repository for it) and is separate follow-on work.
+- Risk (level; mitigation or accepted-risk justification): low — every
+  file ported is either unmodified, already-reviewed code from another
+  category's own change-control-gated build (`CC-LAB-0130`-`0132`/`0171`/
+  `0173`, each independently reviewed and tested when first landed on its
+  own branch), or a small, verbatim-copied additive safety-matrix row from
+  the same source. The one genuinely new judgment call this entry made —
+  which of the two source branches to port from — was resolved by
+  evidence (category 4's branch strictly contains category 3's own work
+  plus more, confirmed by both branches' own file listings) rather than
+  guessed. Mitigated further by actually running the full ported test
+  suite (including real live-boot) rather than trusting the source
+  branches' own historical passing state, which is exactly what surfaced
+  the two missing safety-matrix rows before they could reach a later,
+  harder-to-diagnose failure in Expedia's own shape work.
+- Deliverables:
+  - [x] `fuzzlab/labgen/emitters/spring_boot/` (full package) — ported
+  - [x] `fuzzlab/labgen/conformance/live_boot_spring_boot.py` — ported
+  - [x] 3 sample manifests — ported
+  - [x] 8 test files (33 non-live-boot + 8 live-boot) — ported, all green
+  - [x] `lab/safety_matrix.yaml`: 2 additive rows (XXE secure counterpart,
+        Jackson deserialization pair) — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-94` — done
+  - [x] `CHANGELOG.md` line — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done
+- Effectiveness (assessed 2026-09-23): achieved its intent, with evidence.
+  A port that could easily have silently carried an incomplete or stale
+  package instead surfaced two real, concrete gaps (the missing
+  safety-matrix rows) by actually executing the ported tests rather than
+  trusting the source branches' own passing history — both fixed before
+  this entry was considered complete. Full whole-repo `pytest tests/` run:
+  see the commit message / `CHANGELOG.md` line for the exact pass/skip/
+  fail counts.
+
+### CC-LAB-0212 — category 5 pilot, third increment: `price_integrity_bypass` (client-trusted payment amount) shape on `php_laravel`, Booking.com's checkout (FR-LAB-100, FR-LAB-101) (2026-09-23)
+- Change: the third increment of category 5's Booking.com app (first two:
+  `CC-LAB-0210` open_redirect, `CC-LAB-0211` csv_formula_injection).
+  Reuses the **already-existing** `price_integrity_bypass` concern and
+  `payment_charge_amount` sink family in `lab/safety_matrix.yaml` (added
+  by `CC-LAB-0063`, verified by grep to be rendered by no emitter on any
+  stack before this entry) rather than adding new safety-matrix rows.
+  Grounded in Booking.com's real checkout total computation
+  (`docs/research/category5-travel-functionality-and-cwe-research.md`
+  §1.1/§2.1) and the real QloApps (OSL-3.0, a real open-source
+  hotel-booking engine directly analogous to Booking.com)
+  `Cart::getOrderTotal()` pattern
+  (`docs/research/corpus-examples/ecommerce-logic/php/manifest.yaml`) —
+  explicitly the lowest-novelty pick of the research doc's shortlist (a
+  duplicate concern flavor, not a new CWE class), kept for its strong
+  real-site grounding rather than for breadth.
+
+  Went through this component's pre-change review gate a third time (a
+  drafted entry, reviewed independently by two agents). The accuracy pass
+  returned clean ACCURATE (every factual claim checked out — the first of
+  this category's three increments to clear accuracy review without a
+  correction). The adequacy pass returned **INADEQUATE**, catching two
+  real, blocking gaps neither the draft's author nor the accuracy reviewer
+  had: (1) the draft's secure-twin design (a bare hardcoded constant)
+  contradicted the `server_recomputed_amount` op's own name and the cited
+  QloApps grounding, which both describe genuine recomputation, not
+  "ignore the client and return a constant"; (2) the draft's live-boot
+  proof assumed a `bookings` database table that did not exist anywhere in
+  `LiveBootHarness`'s schema — the proof would have failed to boot at all.
+  Both were fixed before implementation, per this component's now-standing
+  practice of not proceeding past an INADEQUATE verdict without resolving
+  every blocking finding.
+
+  1. **`lab/safety_matrix.yaml`**: no changes (reuses `CC-LAB-0063`'s
+     existing four rows for `payment_charge_amount`/`price_integrity_bypass`
+     unchanged).
+  2. **The secure twin's real recompute** (the adequacy-review-demanded
+     fix): `ServerRecomputedAmountTransform` discards the tainted
+     `amount` entirely and looks the charge up in a page-profile-supplied
+     `room_type_rates` table (an ordered tuple of `(room_type, rate)`
+     pairs, each validated as a bare lowercase identifier /
+     `\d+\.\d{2}` decimal literal — PA-0026-style, no default, fails
+     loud) keyed by a *non-tainted* `room_type` request parameter, falling
+     back to `default_room_type`'s own rate for any unrecognized
+     selection — genuinely data-driven, not a disguised constant (proven
+     by the live-boot test's own `room_type=deluxe` case, item 6).
+  3. **New modules**, registered in **both** `fuzzlab.labgen.modules`
+     (`php_current`, unrendered — shared vocabulary only, the
+     `CC-LAB-0210`/`CC-LAB-0211` discipline) and
+     `fuzzlab.labgen.emitters.php_laravel.modules`/`__init__.py` (rendered):
+     `server_recomputed_amount` (transform, above) and
+     `payment_charge_insert` (sink — `DB::table('bookings')->insert(...)`,
+     the first sink in this app's own module set to *not* need
+     `terminal_response`: like `OrmEntityBulkAssignSink`, it sets `$rows`
+     rather than returning directly, so the pre-existing `single_statement`
+     complexity's own tail closes the method). New page profile
+     `/booking/checkout` (`amount`), new `_MODULE_SET_BY_SHAPE` row.
+     `fuzzlab.labgen.conformance.static_precheck.STATIC_PRECHECK_BY_SHAPE`
+     gained `("price_integrity_bypass", "payment_charge_amount") ->
+     UNINFORMATIVE`. `tests/test_labgen_modules.py`'s
+     `_DETERMINISM_CTX_BY_MODULE` entries for both new names added in the
+     *same* change, before the whole-repo run (item 9), not found missing
+     by it (`PA-0040`, `BUG-0038`'s own lesson applied proactively for the
+     second increment running).
+  4. **The missing `bookings` table** (the adequacy-review-caught blocking
+     gap): `fuzzlab.labgen.conformance.live_boot._SCHEMA_SQL` gained
+     `bookings(id, room_type, total_amount)`, additive alongside the
+     existing `products`/`posts`/`users` tables, no seed rows (each test
+     inserts its own row via a real HTTP request).
+  5. **New manifest** `lab/manifests/booking_price_integrity_sample.yaml`
+     (`LABGEN-BC-0005`/`LABGEN-BC-0006`, continuing this app's own cell-ID
+     sequence).
+  6. **Real live-boot proof**
+     (`tests/test_labgen_price_integrity.py::test_live_boot_price_integrity_manifest_ignores_the_client_amount_on_the_secure_twin`):
+     real HTTP `POST`s against both twins with an attacker-controlled
+     `amount` (`0.01`), reading the real inserted `bookings.total_amount`
+     row back via `LiveBootHarness.query_db` (the same DB-introspection
+     mechanism `CC-LAB-0056`'s real `register.php` `INSERT` proof already
+     established), each twin's row read immediately after its own request
+     (a real test-sequencing bug — querying only after both requests read
+     the same latest row twice — was caught and fixed by this test's own
+     first execution, before landing, exactly the kind of gap actually
+     running the proof catches that a purely structural check would not).
+     Also proves the lookup is genuinely data-driven: a real
+     `room_type=deluxe` request stores `149.00`, not the default `89.00`.
+  7. **Ground truth: `BKNG-0003` appended to the existing directory**
+     (`lab/ground-truth-booking-clone/`, not a new one — `FR-LAB-79`/
+     `FR-LAB-91`'s own precedent, verified again against the real loader).
+     All three files updated together: `labels.json`, `expectedresults.csv`,
+     `injection-points.json`. `fuzzlab/labels/schemas/labels.schema.json`'s
+     `vuln_class` enum widened additively (`price_integrity_bypass`);
+     `sink_context` reuses the existing `"sql"` value (the sink mechanism
+     genuinely is a SQL `INSERT`) rather than minting an under-specified
+     new token, per the adequacy review's explicit preference for reuse
+     over vagueness.
+  8. `docs/components/01-target-lab/requirements.md`: `FR-LAB-100`
+     (the shape), `FR-LAB-101` (ground truth's third case), written at the
+     same file-by-file granularity as `FR-LAB-78`-`81` from the first
+     draft (no placeholder-then-fix round needed this time).
+  9. **Tests**: `tests/test_labgen_price_integrity.py` (9 tests) —
+     verdict-derivation, static-precheck registration, Tier 0 (lint +
+     minimal-pair), Tier 3 (regen-diff, unique-path), CLI `--check`,
+     ground-truth cross-check, and the live-boot proof above. Whole-repo
+     `pytest tests/` run before considering this increment complete
+     (`PA-0040`) — see Effectiveness for the pass/skip/fail counts.
+  10. `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated
+      (closes this app's shortlisted PHP-shape roster: 3 of 3 unblocked
+      shapes landed).
+- Impact (other components / project): additive-only across
+  `lab/safety_matrix.yaml` (no change, only reuse), both `modules.py`
+  registries, `php_laravel/__init__.py`,
+  `fuzzlab/labels/schemas/labels.schema.json` (1 more enum value),
+  `fuzzlab.labgen.conformance.live_boot`'s `_SCHEMA_SQL` (new table, existing
+  tables unchanged), and the existing `lab/ground-truth-booking-clone/`
+  directory (grown again, not replaced). No other of the 13 components
+  touched. Category 5's remaining scope after this increment is entirely
+  Expedia/Java-Spring-Boot (CWE-502 Jackson deserialization, Spring Data
+  SpEL injection) plus Phase C's coherent-page-set bar for both apps.
+- Risk (level; mitigation or accepted-risk justification): low —
+  this shape reuses an already-reviewed, already-accepted safety-matrix
+  concern (`CC-LAB-0063`) rather than introducing a new one, and the
+  adequacy review's two blocking findings (recompute-vs-constant,
+  missing table) were both resolved before implementation rather than
+  discovered by execution after landing, unlike the previous two
+  increments' own post-implementation findings (`BUG-0038`'s
+  determinism-fixture gap, the `TrimStrings` live-boot surprise). The one
+  new genuinely untested-until-now mechanism is a DB-write live-boot proof
+  reading real inserted rows across two sequential requests to the same
+  table — mitigated by the real test-sequencing bug this entry's own
+  first execution caught and fixed (item 6) before landing.
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml`: no change (reuse confirmed) — done
+  - [x] `fuzzlab/labgen/modules/__init__.py`: shared-vocabulary registrations — done
+  - [x] `fuzzlab/labgen/emitters/php_laravel/modules.py` + 2 new templates — done
+  - [x] `fuzzlab/labgen/emitters/php_laravel/__init__.py`: page profile + module-set row — done
+  - [x] `fuzzlab/labgen/conformance/live_boot.py`: `bookings` table in `_SCHEMA_SQL` — done
+  - [x] `lab/manifests/booking_price_integrity_sample.yaml` (2 cells) — done
+  - [x] `fuzzlab/labels/schemas/labels.schema.json`: `vuln_class` widening — done
+  - [x] `lab/ground-truth-booking-clone/`: `BKNG-0003` in all 3 files — done
+  - [x] `fuzzlab/labgen/conformance/static_precheck.py`: new entry — done
+  - [x] `tests/test_labgen_modules.py`: 2 new fixture entries (done *before* the whole-repo run) — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-100`/`83` — done
+  - [x] `tests/test_labgen_price_integrity.py` (9 tests, all green including the real live-boot test) — done
+  - [x] `CHANGELOG.md` line — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done
+- Effectiveness (assessed 2026-09-23): achieved its intent, with evidence.
+  This increment's review gate caught two genuine, blocking design/
+  infrastructure gaps *before* any code was written (the recompute-vs-
+  constant design flaw and the missing `bookings` table), which the
+  previous two increments' own gates did not fully anticipate for their
+  own shapes (both needed a post-implementation fix instead: `BUG-0038`'s
+  determinism-fixture gap, the live-boot-surfaced `TrimStrings` finding).
+  This is read as the review-gate process maturing across repeated use
+  within the same category, not as this increment being inherently
+  simpler — the live-boot test's own first real execution still caught a
+  genuine sequencing bug (querying the DB after both requests instead of
+  after each) before landing, confirming that real execution remains
+  necessary even when the design review is clean. Full whole-repo
+  `pytest tests/` run: see the commit message / `CHANGELOG.md` line for
+  the exact pass/skip/fail counts.
+
+### CC-LAB-0211 — category 5 pilot, second increment: `csv_formula_injection` (CWE-1236) shape on `php_laravel`, Booking.com's Extranet export (FR-LAB-90, FR-LAB-91) (2026-09-23)
+- Change: the second buildable increment of category 5's Booking.com app
+  (first: `CC-LAB-0210`'s `open_redirect` shape) — CSV/report export
+  formula injection (CWE-1236), grounded in Booking.com's real Extranet/
+  partner-admin booking-list export view
+  (`docs/research/category5-travel-functionality-and-cwe-research.md`
+  §1.1/§2.1). Confirmed genuinely new before drafting: the existing
+  `search-export` corpus category covers search-to-SQL injection in an
+  export's underlying query (and one XXE example), never the exported
+  *output*'s own formula-injection risk — re-verified by re-reading
+  `docs/research/corpus-examples/search-export/php/manifest.yaml` directly,
+  not taken on the research doc's word alone.
+
+  Went through this component's pre-change review gate a second time (a
+  drafted entry, reviewed independently by two agents for accuracy and
+  adequacy). The accuracy pass found a real design improvement the draft
+  had asserted rather than justified (see item 3 below); the adequacy pass
+  returned **INADEQUATE** on the first draft, with the load-bearing finding
+  being the *exact same class of gap* `CC-LAB-0210`'s own first draft was
+  rejected for — a neutralization check described only against the
+  textbook trigger-character list, missing a real bypass shape (leading
+  whitespace before the trigger character). Every finding was fixed before
+  implementation, and — following `CC-LAB-0210`'s own precedent of
+  verifying by real execution rather than trusting the fix on paper — the
+  fixed design was verified end to end via a real live boot, which
+  surfaced a further genuine, non-obvious finding neither draft nor
+  reviewer predicted (see Effectiveness).
+
+  1. **`lab/safety_matrix.yaml`** (additive, `version` stays 1): new sink
+     family `csv_cell_value`, new concern `csv_formula_injection`.
+     Baseline: `op: raw_concat, sink_family: csv_cell_value, effect:
+     no_effect`. Secure twin: `op: csv_formula_neutralize, sink_family:
+     csv_cell_value, effect: neutralises, neutralizes:
+     [csv_formula_injection]`. The concern-vocabulary header documents this
+     mitigation's real, bounded scope explicitly (defense-in-depth against
+     the modeled threat model, not a universal fix across every consuming
+     spreadsheet application) — added per the adequacy review's demand that
+     the risk section not claim more than the mitigation actually closes.
+  2. **The neutralizer's real check** (the reviewer-demanded, most
+     load-bearing deliverable, PA-0026): `preg_match('/^\s*[=+\-@\t\r]/',
+     (string) $value)`, prepending a single quote **at the true start of
+     the value** (before any leading whitespace) on match
+     (`fuzzlab.labgen.emitters.php_laravel.modules.
+     CsvFormulaNeutralizeTransform.render`). The first draft's proposed
+     check anchored directly on the trigger character (`^[=+\-@\t\r]`,
+     no `\s*`), which the adequacy review demonstrated misses a
+     leading-whitespace-then-trigger payload (`" =cmd|..."`) — several
+     spreadsheet applications still evaluate this as a formula after
+     trimming leading whitespace on cell entry. Verified twice, not once:
+     (a) a direct, framework-independent `php -r` evaluation of the exact
+     rendered expression against a raw, untrimmed string
+     (`tests/test_labgen_csv_export_injection.py::test_the_neutralize_expression_itself_closes_the_leading_whitespace_bypass`),
+     and (b) the real live-boot proof (item 6).
+  3. **Module reuse over duplication — a design correction the accuracy
+     review drove, not merely accepted from the draft.** The draft
+     proposed a new, third complexity module (`csv_response`) alongside
+     `CC-LAB-0210`'s `redirect_response`, on the reasoning that reusing a
+     redirect-named module for a CSV sink would be misleading. The
+     accuracy reviewer read `redirect_response`'s actual rendered template
+     and found it already fully sink-agnostic (a bare method-signature
+     wrapper around `body`, no redirect-specific code at all), and pointed
+     out this project's own established convention — `single_statement`/
+     `render_only` are named for their structural shape and *shared*
+     across unrelated vuln classes, never re-minted per sink type. Adopted
+     that reasoning instead of the draft's: **`redirect_response` renamed
+     to `terminal_response`** and reused for both `http_redirect_return`
+     and the new `csv_export_row` sink, rather than minting a second,
+     near-duplicate module. The rename touches
+     `fuzzlab/labgen/modules/__init__.py`,
+     `fuzzlab/labgen/emitters/php_laravel/modules.py`, both stacks' own
+     `templates/complexities/{redirect_response.php.j2 ->
+     terminal_response.php.j2}` (`git mv`, content byte-identical),
+     `fuzzlab/labgen/emitters/php_laravel/__init__.py`'s `open_redirect`
+     `_ModuleSet` row, and `tests/test_labgen_modules.py`'s
+     `_DETERMINISM_CTX_BY_MODULE` key. `docs/components/01-target-lab/
+     requirements.md`'s `FR-LAB-78` entry is updated in place to the
+     current name (this file's own living-doc convention); this entry and
+     `CC-LAB-0210`'s append-only entry both keep their own historical text
+     unrewritten.
+  4. **New sink**, `csv_export_row` — like `http_redirect_return`, its own
+     rendered code (`return response($csv, 200, ['Content-Type' =>
+     'text/csv']);`) is the method's terminal statement, so it shares
+     `terminal_response` rather than `single_statement`/`render_only`. New
+     page profile `/extranet/export` (`label`), new `_MODULE_SET_BY_SHAPE`
+     row. `fuzzlab.labgen.conformance.static_precheck.
+     STATIC_PRECHECK_BY_SHAPE` gained `("csv_formula_injection",
+     "csv_cell_value") -> UNINFORMATIVE`. All three new module names
+     (`csv_formula_neutralize`, `csv_export_row`, and `terminal_response`
+     via its rename) registered in **both** `fuzzlab.labgen.modules`
+     (`php_current`, unrendered — shared vocabulary only) and
+     `fuzzlab.labgen.emitters.php_laravel.modules`/`__init__.py`
+     (rendered) — including `tests/test_labgen_modules.py`'s
+     `_DETERMINISM_CTX_BY_MODULE` entries for all three, done *before* the
+     whole-repo `pytest` run rather than found by it this time (`PA-0040`,
+     learned from `BUG-0038` on the previous increment).
+  5. **New manifest** `lab/manifests/booking_csv_export_sample.yaml`
+     (`LABGEN-BC-0003`/`LABGEN-BC-0004`, continuing this app's own cell-ID
+     sequence).
+  6. **Real live-boot proof**
+     (`tests/test_labgen_csv_export_injection.py::test_live_boot_csv_manifest_neutralizes_every_formula_trigger_shape`):
+     real HTTP `GET`s against both live-booted twins with real
+     trigger-character payloads plus the leading-whitespace-bypass shape,
+     reading the real CSV response body, asserting the whole differential
+     (header row, trailing cell, and the leading quote on the tainted
+     cell) — not only its first byte, per the adequacy review's explicit
+     demand. **Real finding this proof surfaced, not assumed:** the
+     `php_laravel` skeleton's default Laravel middleware (`TrimStrings`,
+     never disabled by `bootstrap/app.php`) already strips leading/
+     trailing whitespace from every request input before either twin's own
+     code runs — confirmed because even the *vulnerable* twin (no
+     transform at all) never observed the bypass payload's leading space.
+     This does not make the neutralizer's own whitespace handling dead
+     code (a non-web ingestion path would not get this framework-level
+     assist), which is exactly why item 2's second, framework-independent
+     `php -r` proof exists — the live-boot test alone would have silently
+     passed even with a broken neutralizer regex, masked by the
+     framework's own unrelated trimming.
+  7. **Ground truth: `BKNG-0002` appended to the existing directory**
+     (`lab/ground-truth-booking-clone/`, not a third one) — verified
+     against the real loader (`fuzzlab.labels.contract.load_labels()`
+     parses a `cases` array with no one-case-per-directory restriction)
+     that this is supported, not extrapolated from `CC-LAB-0210`'s
+     single-case precedent. All three of the shared ground-truth
+     directory's files updated together per the adequacy review's explicit
+     demand (a `labels.json`-only change would have broken `load()`'s
+     `expectedresults.csv` cross-check for the *whole* directory,
+     `BKNG-0001` included): `labels.json`, `expectedresults.csv`,
+     `injection-points.json`. `fuzzlab/labels/schemas/labels.schema.json`'s
+     `vuln_class`/`sink_context` enums widened again, additively
+     (`csv_formula_injection`/`csv`).
+  8. `docs/components/01-target-lab/requirements.md`: `FR-LAB-90`
+     (the shape), `FR-LAB-91` (ground truth's second case), written at the
+     same file-by-file granularity as `FR-LAB-78`/`65`, per the adequacy
+     review's explicit demand that the draft's placeholder-level text not
+     ship as the final spec.
+  9. **Tests**: `tests/test_labgen_csv_export_injection.py` (10 tests) —
+     verdict-derivation, static-precheck registration, Tier 0 (lint +
+     minimal-pair), Tier 3 (regen-diff, unique-path), CLI `--check`,
+     ground-truth cross-check, the framework-independent neutralizer
+     proof (item 2), and the live-boot proof (item 6). One pre-existing
+     test fixed as part of this rename/addition:
+     `tests/test_labgen_open_redirect.py::test_the_new_ground_truth_directory_loads_independently_of_the_default_one`
+     asserted this app's ground-truth directory held exactly one case —
+     now asserts `BKNG-0001` is present without asserting cardinality
+     (PA-0027: a test's expectations must be a function of the specific
+     record under test, never of the collection's size).
+- Impact (other components / project): additive-only across
+  `lab/safety_matrix.yaml`, both `modules.py` registries, `php_laravel/
+  __init__.py`, `fuzzlab/labels/schemas/labels.schema.json` (2 more enum
+  values), and the existing `lab/ground-truth-booking-clone/` directory
+  (grown, not replaced) — plus the `redirect_response` -> `terminal_response`
+  rename, which touches `CC-LAB-0210`'s own delivered files but changes no
+  template content or rendered behavior (confirmed: the whole-repo `pytest`
+  run this entry's own Effectiveness records is green, including every
+  `open_redirect` test unchanged in behavior). `fuzzlab.labgen.cutover_gate`
+  (`PFF-` coverage gate) unaffected by construction. No other of the 13
+  components touched. Explicitly out of scope, deferred to a later
+  increment in the same reserved `CC-LAB-0210`-`0249` block: the
+  price-integrity duplicate candidate; the rest of Booking.com's researched
+  functionality (search, listing, checkout).
+- Risk (level; mitigation or accepted-risk justification): moderate, named
+  explicitly per the adequacy review rather than copied uncritically from
+  `CC-LAB-0210`'s "low" rating — CSV/formula injection's real-world impact
+  is qualitatively higher-stakes than open redirect (successful
+  exploitation can reach local code execution on the victim's machine via
+  DDE/command-style formula payloads, not merely a phishing-redirect
+  outcome), and the standard client-side mitigation this concern models is
+  a known-bounded one (Google Sheets' import-path behavior is not
+  uniformly covered by any single-quote-prefix convention). Mitigated by:
+  (a) the neutralizer's own scope being documented honestly rather than
+  oversold (`lab/safety_matrix.yaml`'s header, item 1), (b) the two-layer
+  verification in item 2 (a framework-independent proof of the check
+  itself, not only an HTTP round trip that a coincidental framework
+  behavior could mask), and (c) the same shared-schema-widening vector
+  `CC-LAB-0210` already named, mitigated the same way (additive-only,
+  full-suite re-run).
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml`: `csv_cell_value`/`csv_formula_injection` — done
+  - [x] `fuzzlab/labgen/modules/__init__.py`: shared-vocabulary registrations + `terminal_response` rename — done
+  - [x] `fuzzlab/labgen/emitters/php_laravel/modules.py` + 2 new templates + `terminal_response` rename — done
+  - [x] `fuzzlab/labgen/emitters/php_laravel/__init__.py`: page profile + module-set row (+ open_redirect row updated for the rename) — done
+  - [x] `lab/manifests/booking_csv_export_sample.yaml` (2 cells) — done
+  - [x] `fuzzlab/labels/schemas/labels.schema.json`: enum widening — done
+  - [x] `lab/ground-truth-booking-clone/`: `BKNG-0002` in all 3 files — done
+  - [x] `fuzzlab/labgen/conformance/static_precheck.py`: new entry — done
+  - [x] `tests/test_labgen_modules.py`: 2 new fixture entries + rename (done *before* the whole-repo run, `PA-0040`) — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-90`/`67`, and `FR-LAB-78` updated in place for the rename — done
+  - [x] `tests/test_labgen_csv_export_injection.py` (10 tests, all green including the real live-boot test and the framework-independent neutralizer proof) — done
+  - [x] `tests/test_labgen_open_redirect.py`: cardinality-assumption fix (item 9) — done
+  - [x] `CHANGELOG.md` line — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done
+- Effectiveness (assessed 2026-09-23): achieved its intent, with evidence.
+  This increment's own review gate caught the same *class* of gap
+  `CC-LAB-0210`'s did (an under-specified neutralization check) before any
+  code was written, which is the review gate working as intended across
+  two increments, not a one-off. The real live-boot proof then found a
+  genuine, non-obvious fact neither draft nor reviewer predicted: this
+  skeleton's default Laravel `TrimStrings` middleware already neutralizes
+  the leading-whitespace bypass shape at the framework layer, which could
+  have silently masked a broken neutralizer regex behind a passing HTTP-level
+  test — caught only because this entry also added a framework-independent
+  `php -r` proof of the transform's own logic (item 2), which is now the
+  concrete precedent for testing an adapter's own check in isolation from
+  any caller-side mitigation that might coincidentally cover the same
+  bypass shape. A first whole-repo `pytest tests/` run (`PA-0040`, applied
+  proactively rather than found missing this time) is recorded in this
+  same closing verification; see the run's own pass/skip/fail counts in
+  this entry's own commit message and `CHANGELOG.md` line.
+
+### CC-LAB-0210 — category 5 (Travel/booking) pilot, first increment: `open_redirect` (CWE-601) shape on `php_laravel`, Booking.com's own app (FR-LAB-78, FR-LAB-79) (2026-09-22)
+- Change: the first buildable increment of category 5's Booking.com half
+  (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5;
+  `docs/research/category5-travel-functionality-and-cwe-research.md`'s
+  CWE-601 shortlist item, §2.1) — a genuinely new vulnerability shape, a new
+  standalone illustrative page, and this app's own out-of-band ground truth,
+  never `puppy-fort-factory`'s `PFF-*` identity. Went through this
+  component's pre-change review gate (a draft reviewed independently for
+  accuracy and adequacy by two agents; the adequacy pass returned
+  INADEQUATE on the first draft with six concrete, prioritized fixes,
+  including an FR-numbering collision against `CC-LAB-0069` and — most
+  load-bearing — a demand that the allowlist transform's actual bypass
+  resistance be spelled out and proven, not just named). Every fix was
+  applied before implementation, and the transform's real behavior (see
+  below) was additionally verified end-to-end via a real live boot before
+  this entry was closed out, which caught two real gaps neither reviewer
+  nor the original draft anticipated (see Effectiveness).
+
+  1. **`lab/safety_matrix.yaml`** (additive, `version` stays 1): new sink
+     family `http_redirect_location`, new concern `open_redirect`. Baseline:
+     `op: raw_concat, sink_family: http_redirect_location, effect:
+     no_effect`. Secure twin: `op: redirect_target_allowlist, sink_family:
+     http_redirect_location, effect: neutralises, neutralizes:
+     [open_redirect]`.
+  2. **The allowlist's real check** (the reviewer-demanded, most
+     load-bearing deliverable):
+     `preg_match('/^\/[A-Za-z0-9][A-Za-z0-9\-_.\/?=&%]*$/', (string)
+     $value)`, collapsing to `'/'` on no match
+     (`fuzzlab.labgen.emitters.php_laravel.modules.
+     RedirectTargetAllowlistTransform.render`). Verified by construction
+     against every bypass shape named in review (protocol-relative
+     `//evil.com`, backslash-prefixed `/\evil.com`, triple-slash, absolute
+     URL, `javascript:`), and then verified for real (see item 6) against
+     Booking.com's own live-booted app.
+  3. **New modules**, registered in **both** `fuzzlab.labgen.modules`
+     (`php_current`, unrendered — shared minimal-pair vocabulary only, the
+     `L-P3.3c-DOM`/`FR-LAB-61` discipline) and
+     `fuzzlab.labgen.emitters.php_laravel.modules`/`__init__.py` (rendered):
+     `redirect_target_allowlist` (transform), `http_redirect_return` (sink
+     — the first sink in this project whose own code is a method's terminal
+     statement), `redirect_response` (complexity — the first shape needing
+     a *third* complexity module, since neither `single_statement` nor
+     `render_only` fits a sink with no row/value to hand back). New page
+     profile `/booking/continue` (`return_to`), new `_MODULE_SET_BY_SHAPE`
+     row. `fuzzlab.labgen.conformance.static_precheck.
+     STATIC_PRECHECK_BY_SHAPE` gained `("open_redirect",
+     "http_redirect_location") -> INFORMATIVE`.
+  4. **New manifest** `lab/manifests/booking_open_redirect_sample.yaml`
+     (`LABGEN-BC-0001`/`LABGEN-BC-0002`). Deliberately narrow: does not yet
+     cover the rest of Booking.com's researched functionality or the
+     research doc's other shortlisted candidates (price-integrity
+     duplicate, CWE-1236 CSV-export) — later increments in the same
+     reserved `CC-LAB-0210`-`0249` block.
+  5. **New, separate ground-truth directory**
+     `lab/ground-truth-booking-clone/` (`labels.json`,
+     `injection-points.json`, `expectedresults.csv`; one case, `BKNG-0001`)
+     — verified (not assumed) that appending to `lab/ground-truth/` would
+     break `fuzzlab.labgen.cutover_gate`'s unconditional `PFF-` coverage
+     walk, since this page is illustrative (no `ground_truth_cases_for()`
+     coverage). `fuzzlab/labels/schemas/labels.schema.json`'s `vuln_class`/
+     `sink_context` enums widened additively (`"open_redirect"`/
+     `"redirect"`); every existing `PFF-` case re-validated unchanged.
+  6. **Real live-boot proof**
+     (`tests/test_labgen_open_redirect.py::test_live_boot_redirect_manifest_blocks_the_bypass_shapes_the_allowlist_is_meant_to_catch`),
+     matching this component's own `CC-LAB-0069` evidentiary bar: real HTTP
+     `GET`s against both live-booted twins with real adversarial `return_to`
+     payloads, reading the real (unfollowed — `BUG-0028`'s existing
+     `_NoRedirectHttpErrorProcessor`) `Location:` header back. This is what
+     surfaced two real, non-obvious findings neither the draft nor either
+     reviewer predicted (see Effectiveness) and drove `LiveBootHarness`
+     gaining an additive `headers: dict[str, str]` field on `HttpResponse`
+     (default `{}`; every pre-existing construction unchanged) — the first
+     caller of this harness that needed a response header, not only
+     status/body.
+  7. `docs/components/01-target-lab/requirements.md`: `FR-LAB-78`/
+     `FR-LAB-79` (not `FR-LAB-63`/`64` as first drafted — `CC-LAB-0069`
+     already cites `FR-LAB-63`, a real collision the adequacy reviewer
+     caught before implementation).
+  8. `tests/test_labgen_open_redirect.py`: verdict-derivation, Tier 0
+     (lint + minimal-pair), Tier 3 (regen-diff, unique-path), CLI `--check`,
+     a two-ground-truth-directories-load-independently smoke test (the
+     first test in this repo to do so — `FR-LAB-79`), and the live-boot
+     test above.
+- Impact (other components / project): additive-only across
+  `lab/safety_matrix.yaml`, both `modules.py` registries (php_current
+  unrendered, php_laravel rendered), `php_laravel/__init__.py`,
+  `fuzzlab/labels/schemas/labels.schema.json` (2 enum widenings), a new
+  ground-truth directory, and `fuzzlab.labgen.conformance.live_boot`'s
+  `HttpResponse`/`LiveBootHarness.request()` (new field/populated value,
+  no signature change). `fuzzlab.labgen.cutover_gate` (`PFF-` coverage
+  gate) unaffected by construction (new directory, never
+  `lab/ground-truth/labels.json`). No other of the 13 components touched.
+  Explicitly out of scope: the price-integrity duplicate and CWE-1236
+  CSV-export candidates (later increments, same reserved block).
+- Risk (level; mitigation or accepted-risk justification): low-to-moderate,
+  two vectors named explicitly per adequacy review: (1) the shared
+  `labels.schema.json` enum widening touches every ground-truth directory's
+  validation — mitigated by keeping it strictly additive and re-running the
+  full existing test suite (`lab/ground-truth/`-backed tests included) to
+  confirm no regression; (2) this is the first fully-new-CWE-class-plus-
+  first-non-`PFF-`-app-with-its-own-ground-truth pattern this project has
+  built, with no exact precedent to copy end-to-end (`FR-LAB-61`'s DOM-XSS
+  shape is the closest, but it reused `lab/ground-truth/` rather than a new
+  directory) — mitigated by the real live-boot proof (item 6) rather than
+  resting on Tier 0/3 structural checks alone, which is what surfaced this
+  entry's own real gaps before landing (see Effectiveness) instead of after.
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml`: `http_redirect_location`/`open_redirect` — done
+  - [x] `fuzzlab/labgen/modules/__init__.py`: shared-vocabulary-only registration — done
+  - [x] `fuzzlab/labgen/emitters/php_laravel/modules.py` + 3 templates — done
+  - [x] `fuzzlab/labgen/emitters/php_laravel/__init__.py`: page profile + module-set row — done
+  - [x] `lab/manifests/booking_open_redirect_sample.yaml` (2 cells) — done
+  - [x] `fuzzlab/labels/schemas/labels.schema.json`: enum widening — done
+  - [x] `lab/ground-truth-booking-clone/` (3 files, `BKNG-0001`) — done
+  - [x] `fuzzlab/labgen/conformance/static_precheck.py`: new entry — done
+  - [x] `fuzzlab/labgen/conformance/live_boot.py`: `HttpResponse.headers` — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-78`/`65` — done
+  - [x] `tests/test_labgen_open_redirect.py` (10 tests, all green including
+        the real live-boot test) — done
+  - [x] `CHANGELOG.md` line — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done
+- Effectiveness (assessed 2026-09-22): achieved its intent, with evidence,
+  and the review gate's own value is part of that evidence. The adequacy
+  review's demand for a real, spelled-out allowlist check (rather than a
+  prose description) and a real payload-differential proof (rather than
+  Tier 0/3 alone) is what caught two genuine, non-obvious facts before this
+  entry closed, neither of which the draft or either reviewer predicted:
+  (a) Laravel's own `redirect()`/`UrlGenerator::isValidUrl()` helper treats
+  a protocol-relative or scheme-qualified value as "already a URL" and
+  passes it through verbatim — confirming those two shapes are the real
+  exploitable differential — but treats a bare backslash-prefixed value or
+  a `javascript:`-scheme value as an ordinary relative *path* and rewrites
+  it onto this app's own host regardless of any allowlist, so those two
+  adversarial-looking payloads are not exploitable through this specific
+  sink at all (kept in the test as a verified negative control, not
+  asserted as a second attack proof); (b) the secure twin's safe fallback
+  is not literally re-served as the string `'/'` in the `Location` header —
+  Laravel's `redirect('/')` resolves it to a fully-qualified same-origin
+  URL — so the real proof asserts same-origin (`netloc`) and root path
+  structurally, not exact-string equality. Both were found by actually
+  booting the app and reading real HTTP responses, not by static reasoning
+  about Laravel's internals, which is exactly the class of gap Tier 0/3-only
+  coverage would have missed and the review gate's adequacy pass predicted
+  in the abstract. A first whole-repo `pytest tests/` run (1616 passed, 30
+  skipped, 2 real failures) additionally caught a third gap the review gate
+  and this entry's own drafting missed: `tests/test_labgen_modules.py`'s
+  `_DETERMINISM_CTX_BY_MODULE` table (a hand-kept, test-enforced completeness
+  map over every module the shared `fuzzlab.labgen.modules` registries hold)
+  had no entries for the three new shared-vocabulary-only registrations
+  (`redirect_target_allowlist`/`http_redirect_return`/`redirect_response`),
+  failing loud exactly as `PA-0001`/`PA-0027` intend a completeness check to
+  — fixed by adding the three entries, matching the existing `L-P3.3c-DOM`
+  row's own comment convention. A second whole-repo run after that fix: 1618
+  passed, 30 skipped, 0 failed — this component's ground-truth/cutover-gate
+  suite, the new `tests/test_labgen_open_redirect.py` module, and every
+  pre-existing test all green together, not just this shape's own tests in
+  isolation.
+
+
 - Change: `CC-LAB-0064`'s php_current sink (`fuzzlab/labgen/modules/sinks/
   orm_entity_bulk_assign.php.j2`) got a real, executed adversarial test for its
   identifier-charset guard after `BUG-0031` found the guard's absence let a

@@ -475,6 +475,105 @@ tracked in the requirements files, not here.
   `innerHTML`/`textContent` shape. `PFF-0007`/`PFF-0008` are **no longer**
   in `lab/ground-truth/migration-exemptions.yaml` (covered, not exempt).
 
+  **Multi-category, multi-app expansion begun (`docs/LAB_MULTI_CATEGORY_
+  SECOND_TARGETS_PLAN.md` §9, category 5 pilot's first increment,
+  `CC-LAB-0210`/`FR-LAB-78`/`FR-LAB-79`, 2026-09-22).** The `php_laravel`
+  emitter now renders more than one lab-app *identity*, not just one
+  (`puppy-fort-factory`'s migrated pages plus illustrative pages): a new,
+  standalone Booking.com-themed app (`lab/manifests/
+  booking_open_redirect_sample.yaml`) with its own out-of-band ground truth
+  in its own directory (`lab/ground-truth-booking-clone/`, opaque `BKNG-`
+  case-ID prefix — never `PFF-*`), the first real precedent for
+  `fuzzlab.labels.contract.load()` serving more than one `ground_truth_dir`
+  and for `fuzzlab.labgen.cutover_gate`'s `PFF-`-scoped coverage gate
+  correctly ignoring a second app's cases by construction. Also the shape
+  inventory's first genuinely new vulnerability class since DOM-XSS above:
+  `("open_redirect", "http_redirect_location")` (CWE-601) — a server-issued
+  HTTP redirect (`redirect()`) whose real-code sink is the method's own
+  terminal statement, the first shape needing a third `complexity` module
+  (`redirect_response`) because neither `single_statement` nor `render_only`
+  fits it. `fuzzlab/labels/schemas/labels.schema.json`'s `vuln_class`/
+  `sink_context` enums widened additively (`open_redirect`/`redirect`) to
+  carry it. This is the pilot category of a planned 12-app expansion (2 apps
+  per researched site-category, 6 categories); category 1 (E-commerce,
+  Shopify/Rails + Walmart/Node) is piloting concurrently on its own branch,
+  categories 2-6 are open. See the plan doc's own §9.4 tracker for live,
+  per-category status rather than restating it here.
+
+  **Second increment (`CC-LAB-0211`/`FR-LAB-90`/`FR-LAB-91`, 2026-09-23):**
+  `("csv_formula_injection", "csv_cell_value")` (CWE-1236, a CSV/report
+  export response whose own code is likewise the method's terminal
+  statement) landed on the same Booking.com app, with `BKNG-0002` appended
+  to the existing ground-truth directory rather than a new one (the
+  directory/schema supports more than one case natively). This increment's
+  own review gate drove a naming correction to the first one's design: the
+  third complexity module (`redirect_response`) turned out to already be
+  fully sink-agnostic in implementation, so it was renamed
+  `terminal_response` and is now shared by both `http_redirect_return` and
+  the new `csv_export_row` sink, matching `single_statement`/`render_only`'s
+  own established convention of a structurally-named, shared complexity
+  module rather than one minted per sink type.
+
+  **Third increment (`CC-LAB-0212`/`FR-LAB-100`/`FR-LAB-101`, 2026-09-23):**
+  `("price_integrity_bypass", "payment_charge_amount")` reuses an
+  already-existing `lab/safety_matrix.yaml` concern/sink family
+  (`CC-LAB-0063`, previously rendered by no emitter on any stack) — a
+  checkout charge whose secure twin recomputes the total server-side from
+  a fixed rate table keyed by a non-tainted `room_type` parameter, never
+  from the client-submitted amount, closing Booking.com's shortlisted
+  PHP-shape roster at 3 of 3 unblocked shapes. This increment's own
+  `bookings` table (id, room_type, total_amount) was added to
+  `fuzzlab.labgen.conformance.live_boot._SCHEMA_SQL`, additive alongside
+  the existing `products`/`posts`/`users` tables — the first schema
+  addition any category-5 increment has needed.
+
+  **`spring_boot` package ported for Expedia's Java half** (`CC-LAB-0213`/
+  `FR-LAB-94`, 2026-09-23): per the plan doc's §9.2a cross-category
+  consolidation decision, category 5's Expedia app (Java/Spring Boot)
+  reuses category 3's `spring_boot` emitter package (built for TrackerNest;
+  already also the host of category 4's ported Netflix Jackson-
+  deserialization cell) rather than a from-scratch build. Since this
+  project's multi-branch model keeps each category's own new package
+  private to its branch until a PR merge, the package did not exist on
+  this branch before this entry — it was mechanically ported (`git
+  checkout <source-branch> --`, unmodified) from
+  `origin/claude/category-4-build-t9uz3y`, the more current of the two
+  possible sources. Running the ported test suite (rather than trusting
+  it clean) surfaced two small, real gaps: `lab/safety_matrix.yaml` was
+  missing two rows present on the source branches (the
+  `xml_external_entities_disabled`/`xml_parse_input` secure counterpart,
+  and the `jackson_default_typing_deserialize`/
+  `jackson_typed_allowlist_deserialize` pair for `object_deserialization`)
+  — `safety_matrix.yaml` being a shared file each category branch edits
+  independently between cross-branch syncs. Both added additively; all 41
+  ported tests (33 non-live-boot + 8 real live-boot, a genuine `mvn
+  package` + `java -jar` boot + HTTP round trip) then pass. This closes
+  the CWE-502 Jackson-deserialization half of Expedia's shortlist for
+  free (the ported Netflix cell already models the exact idiom Expedia's
+  own research shortlisted); Spring Data SpEL/`@Query` injection remains
+  fully greenfield project-wide and is separate follow-on work.
+
+  **Expedia's first own shape: `spel_injection`** (`CC-LAB-0214`/
+  `FR-LAB-113`/`FR-LAB-114`, 2026-09-23) — CWE-917, a hotel-search
+  `sortBy` parameter evaluated as a Spring Expression Language (SpEL)
+  expression. Genuinely new concern class (`lab/safety_matrix.yaml` gains
+  `spel_injection`/`spel_expression_evaluate`), grounded in CVE-2018-1273
+  (Spring Data Commons) and CVE-2022-22980/CVE-2026-41717 (Spring Data
+  MongoDB). Models Spring's own documented fix directly: both twins parse
+  and evaluate the identical tainted SpEL string; only the
+  `EvaluationContext` differs (`StandardEvaluationContext`, unrestricted,
+  vs. `SimpleEvaluationContext`, which rejects type references/method
+  invocation/bean resolution). The pre-change review gate's adequacy pass
+  caught a real, blocking classification error before implementation —
+  the draft had reasoned by a false SSTI-shape analogy (no spring_boot
+  `static_precheck` precedent exists at all) to the wrong conclusion; the
+  correct, adequacy-review-corrected classification is UNINFORMATIVE,
+  since both twins share one identical call shape a generic taint
+  checker cannot distinguish. Establishes Expedia's own cell-ID prefix
+  (`LABGEN-EXP-`) and its own dedicated ground-truth directory
+  (`lab/ground-truth-expedia-clone/`, `EXPD-` case prefix) — the first
+  shape built specifically for Expedia rather than reused/ported.
+
   **The parity/cutover coverage gate** (`CC-LAB-0053`/`FR-LAB-51`,
   `fuzzlab/labgen/cutover_gate.py`, plan §4.3.6.6 point 3) is the precondition
   `L-P3.3c-CUT` needs before it can run, built ahead of and independent from

@@ -617,6 +617,81 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   server's own hit counter staying at zero) while still accepting a real
   public URL. 9 new tests, all passing; full non-slow suite re-run shows
   no regression. `CC-LAB-0134`/`FR-LAB-116`.
+## 2026-09-23 (cross-branch sync: bookkeeping-ID collision fix + BUG-0036)
+- LAB: renumbered this branch's `FR-LAB-102`→`FR-LAB-113` and
+  `FR-LAB-103`→`FR-LAB-114` after a fresh cross-branch collision was found
+  against categories 1/2/3 (concurrent build lanes independently claimed
+  the same "next free" numbers off their own stale local copy of the
+  shared bookkeeping files) — no behavior change, pure renumbering across
+  `lab/ground-truth-expedia-clone/labels.json`,
+  `lab/manifests/expedia_spel_injection_sample.yaml`,
+  `docs/components/01-target-lab/requirements.md`,
+  `docs/components/01-target-lab/change-control.md`,
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, `docs/ARCHITECTURE.md`.
+- LAB: fixed BUG-0036 — `lab/ground-truth-expedia-clone/` was missing its
+  required `expectedresults.csv` and the `.gitignore` exception needed to
+  track it (`fuzzlab.labels.contract.load()` requires all three
+  ground-truth files unconditionally). Authored the missing CSV and
+  `.gitignore` negation; added preventive action `PA-0038` (see
+  `CC-LAB-0215`, `docs/bugs/BUG-0036-*.md`, `ERROR_LOG.md`).
+  `pytest tests/test_labgen_spel_injection.py`: 9 passed (was 7
+  passed/2 failed). Whole-repo `pytest -m "not slow"`: 1865 passed, 8
+  skipped.
+
+## 2026-09-23 (category 5: Expedia's first own shape, spel_injection)
+- LAB: added Expedia's first own vulnerability shape (not reused/ported
+  code): `spel_injection` (CWE-917, Spring Expression Language injection)
+  on `spring_boot`, a hotel-search `sortBy` parameter evaluated as SpEL —
+  grounded in real Spring CVEs (CVE-2018-1273, CVE-2022-22980/
+  CVE-2026-41717) and modeling Spring's own documented fix
+  (`SimpleEvaluationContext` instead of `StandardEvaluationContext`).
+  Pre-change review gate: accuracy pass clean (10/10 claims verified,
+  including a real `mvn dependency:tree` run); adequacy pass caught a
+  real, blocking classification error (the draft's SSTI-shape analogy
+  for this shape's static-precheck flag was backwards — correct
+  classification is UNINFORMATIVE, not the draft's proposed
+  comparison) plus a schema-widening omission, both fixed before
+  implementation. Also corrected a pre-existing CWE-89→CWE-917
+  mislabeling in `docs/research/category5-travel-functionality-and-cwe-
+  research.md`'s own shortlist entry, caught during this shape's
+  drafting. New `lab/ground-truth-expedia-clone/` directory (Expedia's
+  first own ground truth, `EXPD-` prefix). Real live-boot proof: a safe
+  `T(java.lang.Math).abs(-99)` type-reference canary evaluates for real
+  on the vulnerable twin (HTTP 200, `99` in the body) and is rejected for
+  real on the secure twin (HTTP 400), with a benign expression proving
+  the fix doesn't break legitimate use. See `CC-LAB-0214`.
+
+## 2026-09-23 (category 5: spring_boot package ported for Expedia)
+- LAB: ported the `spring_boot` emitter package (built by category 3 for
+  TrackerNest, `CC-LAB-0130`-`0132`, and already the host of category 4's
+  ported Netflix Jackson-deserialization cell, `CC-LAB-0173`) onto this
+  branch, per §9.2a's cross-category consolidation decision — Expedia
+  (Java/Spring Boot) reuses this package rather than a from-scratch build,
+  now unblocked since Maven Central was reconfirmed reachable this
+  session. Mechanical, unmodified port from `origin/claude/category-4-
+  build-t9uz3y` (package + harness + 3 sample manifests + 8 test files,
+  deliberately excluding a 9th, category-4-specific ground-truth test).
+  Running the ported tests (not just trusting them) surfaced two real,
+  small gaps in this branch's own `lab/safety_matrix.yaml` — an XXE
+  secure-counterpart row and the Jackson-deserialization op pair, both
+  present on the source branches but not yet synced here — fixed
+  additively. All 41 ported tests (33 non-live-boot + 8 real live-boot,
+  including a genuine `mvn package`/`java -jar` boot + HTTP round trip)
+  pass. Closes Expedia's CWE-502 Jackson-deserialization shape for free
+  (the ported cell already models the exact idiom); Spring Data SpEL
+  injection remains genuinely greenfield project-wide. See `CC-LAB-0213`.
+
+## 2026-09-23 (cross-branch bookkeeping fix, by the category 1 pilot session)
+- Docs/LAB: fixed a real cross-branch `FR-LAB` ID collision found during a
+  cross-branch review — this branch's freshly-pushed `FR-LAB-92`/
+  `FR-LAB-93` (third increment, `price_integrity_bypass` shape,
+  `CC-LAB-0212`, and its own ground-truth case) had been independently
+  claimed moments earlier by category 4 for its own, unrelated
+  `go_net_http`/Java-Spring-Boot-consolidation entries. Renumbered this
+  branch's usages to `FR-LAB-100`/`FR-LAB-101` via exact-token replacement
+  across `requirements.md`/`change-control.md`/
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`/`docs/ARCHITECTURE.md`.
+  Full non-slow test suite re-run confirms no regression.
 
 ## 2026-09-23 (cross-category doc sync, round 2)
 - Docs (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, all five second-target
@@ -1041,6 +1116,135 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   recorded its §9.1 site-pair pick (Slack, reusing `php_laravel`; Atlassian,
   a new Java/Kotlin+Spring Boot emitter) — done first, per §9.3's
   coordination contract, before any category-3 build work.
+## 2026-09-23 (cross-branch review, by the category 1 pilot session, round 2)
+- Docs/LAB: reviewed this branch's `csv_formula_injection` (CWE-1236)
+  shape — no code defects found; the `csv_formula_neutralize` regex
+  (`^\s*[=+\-@\t\r]`) correctly matches leading-whitespace-then-trigger
+  values and prepends the quote before the whitespace as documented, and
+  all 10 real tests pass genuinely (including a real live-boot HTTP round
+  trip and a separate, framework-independent proof that the neutralizer's
+  own logic — not just Laravel's `TrimStrings` middleware, a real,
+  honestly-disclosed confound this branch's own commit already caught —
+  closes the leading-whitespace bypass). Found and fixed a fresh
+  cross-branch bookkeeping collision: this branch's new `FR-LAB-80`/`81`
+  collided with `FR-LAB-80`/`81` already used on `claude/category-3-
+  build-iuu5k9` (TrackerNest's third cell, Huddle Hub's webhook-signature
+  cell) — both branches picked "next free" independently past the point
+  of the last cross-branch sync. Renumbered to `FR-LAB-90`/`91` (beyond
+  the current global ceiling). `CC-LAB-0211` itself never collided
+  (within this category's own reserved `0210`-`0249` block), so it is
+  unchanged. Full suite reverified green after the rename (1798 passed,
+  8 skipped, matching the pre-fix count exactly).
+
+## 2026-09-23
+- LAB: category 5 (Travel/booking) pilot, third increment — reuses the
+  already-existing `price_integrity_bypass` concern/`payment_charge_amount`
+  sink family (`CC-LAB-0063`, previously rendered by no emitter) to add
+  a client-trusted-payment-amount shape on `php_laravel`'s Booking.com
+  checkout, grounded in the real QloApps (open-source hotel-booking
+  engine) `Cart::getOrderTotal()` pattern. Went through this repo's
+  pre-change review gate a third time; the accuracy pass returned clean
+  ACCURATE for the first time in this category, but the adequacy pass
+  again returned INADEQUATE, catching two real, blocking gaps before any
+  code was written: the secure twin's first design (a bare hardcoded
+  constant) contradicted the `server_recomputed_amount` op's own name and
+  the cited real-world grounding, which both describe genuine
+  recomputation — fixed by deriving the charge from a page-profile rate
+  table keyed by a non-tainted `room_type` parameter; and the live-boot
+  proof's planned `bookings` table didn't exist anywhere in
+  `LiveBootHarness`'s schema — fixed by adding it additively. This
+  closes Booking.com's shortlisted PHP-shape roster (3 of 3 unblocked
+  shapes now landed; the remaining two need Expedia's Java/Spring Boot
+  half). See `CC-LAB-0212`.
+- LAB: category 5 (Travel/booking) pilot, second increment — a new
+  `csv_formula_injection` (CWE-1236) vulnerability shape on `php_laravel`
+  (`lab/safety_matrix.yaml`'s new `csv_cell_value` sink family, a
+  `csv_formula_neutralize` transform whose leading-whitespace-bypass
+  handling is verified twice — once via a real live boot, once via a
+  direct, framework-independent `php -r` evaluation of the exact rendered
+  check), rendered as a second standalone Booking.com-style page
+  (`lab/manifests/booking_csv_export_sample.yaml`) with a second case
+  (`BKNG-0002`) appended to this app's existing ground truth
+  (`lab/ground-truth-booking-clone/`). Went through this repo's pre-change
+  review gate a second time; the adequacy pass again returned INADEQUATE
+  on the first draft (the same class of gap as `CC-LAB-0210`'s own first
+  draft — an under-specified neutralization check), and the accuracy pass
+  drove a real design improvement: `CC-LAB-0210`'s `redirect_response`
+  complexity module was already fully sink-agnostic in implementation, so
+  it was renamed `terminal_response` and reused for both shapes rather
+  than minting a near-duplicate module, matching this project's own
+  `single_statement`/`render_only` convention. The real live-boot proof
+  then surfaced a genuine, non-obvious finding: this skeleton's default
+  Laravel `TrimStrings` middleware already neutralizes the
+  leading-whitespace bypass shape at the framework layer — which could
+  have silently masked a broken neutralizer behind a passing HTTP-level
+  test, caught only because a second, framework-independent proof of the
+  transform's own check was added. `PA-0040` (whole-repo `pytest` before
+  considering a shared-registry change complete) applied proactively this
+  time, not found missing after the fact. See `CC-LAB-0211`. Bookkeeping
+  IDs assigned within this category's own reserved `CC-LAB-0210`-`0249`
+  block (per the cross-branch review below, which renumbered this app's
+  first increment out of the previously-contested `0090`-`0119` range).
+
+## 2026-09-22 (cross-branch review, by the category 1 pilot session)
+- Docs/LAB: reviewed this branch's `open_redirect` (CWE-601) code and
+  tests — no code defects found; the `redirect_target_allowlist` regex
+  correctly rejects every open-redirect bypass shape its own docstring
+  claims (protocol-relative, backslash-prefixed, scheme-carrying), and
+  `BUG-0038`'s own RCA (a real gap this branch caught and fixed itself)
+  checks out. Found and fixed two real cross-branch bookkeeping-ID
+  collisions: (1) this branch's `CC-LAB-0090`/`FR-LAB-64`/`FR-LAB-65`
+  collided with the same IDs independently claimed by categories 2, 3,
+  and 4's own Phase A work — all four branches picked "next free after
+  category 1's 0070-0089 block" without seeing each other; renumbered to
+  `CC-LAB-0210`/`FR-LAB-78`/`FR-LAB-79` (this category's assigned
+  `0210`-`0249` block). (2) this branch's `BUG-0034` (open_redirect's
+  missing determinism-fixture entries) collided with category 1's own,
+  unrelated `BUG-0034` (a Rails inflector defect) — renamed to `BUG-0038`
+  (file and all cross-references). Full suite reverified green after both
+  fixes (1784 passed, 8 skipped, matching the pre-fix count exactly). Also
+  flagged a bigger, non-mechanical finding in the `docs/LAB_MULTI_
+  CATEGORY_SECOND_TARGETS_PLAN.md` §9.2 ledger: categories 3 and 4 each
+  independently built a full, separate Java/Spring Boot emitter
+  (`spring_boot` and `java_spring_boot`) without knowing about this
+  branch's own prior reservation of that stack for Expedia — recommend
+  this branch reuse one of the two existing packages once Maven access is
+  confirmed, rather than building a third (and re-check that access: a
+  real Maven build succeeded in this same sandbox on category 4's branch
+  today, after this branch's own blocker was recorded).
+
+## 2026-09-22
+- LAB: category 5 (Travel/booking/marketplaces) pilot, first increment —
+  a new `open_redirect` (CWE-601) vulnerability shape on `php_laravel`
+  (`lab/safety_matrix.yaml`'s new `http_redirect_location` sink family, a
+  spelled-out-and-verified `redirect_target_allowlist` transform, and the
+  first sink/complexity pair whose own code is a method's terminal
+  statement), rendered as a new, standalone Booking.com-style illustrative
+  page (`lab/manifests/booking_open_redirect_sample.yaml`) with its own
+  out-of-band ground truth (`lab/ground-truth-booking-clone/`, case
+  `BKNG-0001` — never `puppy-fort-factory`'s `PFF-*` identity), grounded in
+  cited Booking.com/Expedia functionality and stack-specific CWE research
+  (`docs/research/category5-travel-functionality-and-cwe-research.md`).
+  Went through this repo's pre-change review gate (two independent agent
+  reviews; the adequacy pass returned INADEQUATE on the first draft and
+  drove a real, verified allowlist check plus a real live-boot proof
+  instead of prose/structural-only checks — see `CC-LAB-0210`), which
+  surfaced two genuine, non-obvious findings about Laravel's own
+  `redirect()` helper before landing rather than after. Category 5's
+  other pick, Expedia's Java/Spring Boot half, stays paused: Maven
+  Central/Spring Initializr are unreachable through this sandbox's egress
+  proxy (recorded 2026-09-22, `ERROR_LOG.md`).
+- LAB: fixed `BUG-0038` (a same-session, self-caught defect, full bug
+  protocol applied) — `CC-LAB-0210`'s three new shared-vocabulary modules
+  (`redirect_target_allowlist`/`http_redirect_return`/`redirect_response`)
+  shipped without their `_DETERMINISM_CTX_BY_MODULE` fixture entries in
+  `tests/test_labgen_modules.py`, caught by that file's own completeness
+  guard test on a whole-repo `pytest` run done as this change's own closing
+  verification. Fixed by adding the three entries; new `PA-0040` closes the
+  verification-sequencing gap (a change touching a shared, cross-stack
+  registry needs the whole-repo suite, not only the directly-relevant test
+  files) rather than restating `PA-0001`/`PA-0027`, whose own guard test
+  worked correctly here.
 - Docs: renamed `docs/LAB_SECOND_TARGET_NODE_EXPRESS_PLAN.md` ->
   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` and added its §9,
   recording the project owner's answers to §0b's open questions: stack

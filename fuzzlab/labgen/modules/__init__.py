@@ -915,6 +915,112 @@ class OutboundWebhookDeliverySink(TemplateModule):
 
     def __init__(self) -> None:
         super().__init__("outbound_webhook_delivery", "sink", _SINK_ENV, "outbound_webhook_delivery.php.j2")
+# --- CC-LAB-0210: open redirect (category 5, Booking.com pilot) -----------
+#
+# Registered here (unrendered by `php_current`'s own `_MODULE_SET_BY_SHAPE`,
+# exactly like L-P3.3c-DOM's `dom_url_source`/`dom_text_content`/
+# `dom_innerhtml_echo` above) purely for the shared minimal-pair vocabulary
+# (:mod:`fuzzlab.labgen.minimal_pair` classifies every emitter's composition
+# positions against this package's registries and raises for a name it
+# cannot find) -- `php_laravel` is the emitter that actually renders this
+# shape, for the new Booking.com-themed illustrative app
+# (`lab/manifests/booking_open_redirect_sample.yaml`).
+
+
+class RedirectTargetAllowlistTransform(TemplateModule):
+    """The ``redirect_target_allowlist`` op: rewrites ``value_expr`` so only
+    a same-origin relative path survives -- see
+    ``fuzzlab.labgen.emitters.php_laravel.modules.RedirectTargetAllowlistTransform``
+    (the emitter that actually renders this op) for the real check."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "redirect_target_allowlist", "transform", _TRANSFORM_ENV, "redirect_target_allowlist.php.j2"
+        )
+
+
+class HttpRedirectReturnSink(TemplateModule):
+    """The ``http_redirect_return`` sink: a server-issued HTTP redirect whose
+    target is ``value_expr``. Unlike every other sink in this package, its
+    own rendered code is the terminal statement of the method it is
+    composed into (there is no row/value to return), which is why this
+    shape also needs its own ``complexity`` module rather than
+    ``single_statement``/``render_only``."""
+
+    def __init__(self) -> None:
+        super().__init__("http_redirect_return", "sink", _SINK_ENV, "http_redirect_return.php.j2")
+
+
+class CsvFormulaNeutralizeTransform(TemplateModule):
+    """The ``csv_formula_neutralize`` op: rewrites ``value_expr`` so a value
+    whose first non-whitespace character is a CSV-formula trigger character
+    gets a leading single quote -- see
+    ``fuzzlab.labgen.emitters.php_laravel.modules.CsvFormulaNeutralizeTransform``
+    (the emitter that actually renders this op) for the real check."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "csv_formula_neutralize", "transform", _TRANSFORM_ENV, "csv_formula_neutralize.php.j2"
+        )
+
+
+class CsvExportRowSink(TemplateModule):
+    """The ``csv_export_row`` sink: a small CSV report/export response body
+    embedding ``value_expr`` as a cell. Like :class:`HttpRedirectReturnSink`,
+    its own rendered code is the terminal statement of the method it is
+    composed into."""
+
+    def __init__(self) -> None:
+        super().__init__("csv_export_row", "sink", _SINK_ENV, "csv_export_row.php.j2")
+
+
+class ServerRecomputedAmountTransform(TemplateModule):
+    """The ``server_recomputed_amount`` op (`price_integrity_bypass`
+    concern, `CC-LAB-0212`): discards the tainted client-submitted amount
+    entirely and substitutes a value derived server-side from a
+    non-price, allowlist-shaped input -- see
+    ``fuzzlab.labgen.emitters.php_laravel.modules.ServerRecomputedAmountTransform``
+    (the emitter that actually renders this op) for the real check."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "server_recomputed_amount", "transform", _TRANSFORM_ENV, "server_recomputed_amount.php.j2"
+        )
+
+
+class PaymentChargeInsertSink(TemplateModule):
+    """The ``payment_charge_insert`` sink: a booking-charge write
+    (``DB::table('bookings')->insert(...)``) whose ``total_amount`` column
+    is ``value_expr``. Like :class:`~fuzzlab.labgen.modules.
+    OrmEntityBulkAssignSink`, it sets ``$rows`` rather than returning
+    directly, so the existing ``single_statement`` complexity's own tail
+    closes the method -- no new complexity needed for this sink."""
+
+    def __init__(self) -> None:
+        super().__init__("payment_charge_insert", "sink", _SINK_ENV, "payment_charge_insert.php.j2")
+
+
+class TerminalResponseComplexity(TemplateModule):
+    """The ``terminal_response`` complexity: the controller method for a
+    cell whose sink's own code already is the terminal statement (e.g. the
+    ``http_redirect_return`` sink's ``return redirect(...)``, or
+    ``csv_export_row``'s ``return response($csv, ...)``), so this wrapper
+    adds only the method signature, no additional tail -- unlike
+    ``single_statement`` (closes with a JSON response) or ``render_only``
+    (closes with ``return view(...)``), neither of which fits a sink with
+    no row/value to hand back. Named for its structural shape and shared
+    across unrelated sink families, exactly like ``single_statement``/
+    ``render_only`` are -- **renamed from `redirect_response`** (its
+    original, `open_redirect`-specific name, `CC-LAB-0210`) once a second,
+    unrelated sink family (`csv_cell_value`, `CC-LAB-0211`) needed the
+    identical, already sink-agnostic wrapper; the earlier name would have
+    been misleading for a non-redirect consumer. The template itself never
+    changed -- see `docs/components/01-target-lab/change-control.md`'s
+    `CC-LAB-0211` entry for the rename's own record (`CC-LAB-0210`'s own
+    entry is left as the historical record and not rewritten)."""
+
+    def __init__(self) -> None:
+        super().__init__("terminal_response", "complexity", _COMPLEXITY_ENV, "terminal_response.php.j2")
 
 
 SOURCES: dict[str, Module] = {
@@ -999,6 +1105,18 @@ TRANSFORMS: dict[str, Module] = {
     # this cell is built on php_laravel only (category 3's Huddle Hub).
     "raw_header_concat": RawHeaderConcatTransform(),
     "structured_http_client_headers": StructuredHttpClientHeadersTransform(),
+    # CC-LAB-0210: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "redirect_target_allowlist": RedirectTargetAllowlistTransform(),
+    # CC-LAB-0211: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "csv_formula_neutralize": CsvFormulaNeutralizeTransform(),
+    # CC-LAB-0212: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "server_recomputed_amount": ServerRecomputedAmountTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -1035,10 +1153,26 @@ SINKS: dict[str, Module] = {
     "webhook_signature_verification": WebhookSignatureVerificationSink(),
     "server_side_http_fetch": ServerSideHttpFetchSink(),
     "outbound_webhook_delivery": OutboundWebhookDeliverySink(),
+    # CC-LAB-0210: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "http_redirect_return": HttpRedirectReturnSink(),
+    # CC-LAB-0211: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "csv_export_row": CsvExportRowSink(),
+    # CC-LAB-0212: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "payment_charge_insert": PaymentChargeInsertSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),
     "render_only": RenderOnlyComplexity(),
+    # CC-LAB-0210: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "terminal_response": TerminalResponseComplexity(),
 }
 #: Depth-hop fragments (§3.5, L-P2.5). Keyed by fragment, not by depth level:
 #: `same_file_helper` and `cross_file` share the same helper definition and

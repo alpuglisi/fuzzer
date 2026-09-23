@@ -258,6 +258,23 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
     "raw_header_concat": {"value_expr": "$triggerWord"},
     "structured_http_client_headers": {"value_expr": "$triggerWord"},
     "outbound_webhook_delivery": {"value_expr": "$triggerWord"},
+    # CC-LAB-0210: registered in the shared vocabulary so minimal_pair can
+    # classify them (php_current's shape map does not use any of them).
+    # None of the three real templates reference a Jinja variable (see
+    # fuzzlab.labgen.modules' own docstring for these classes), so any
+    # non-empty ctx satisfies them -- value_expr is supplied anyway to match
+    # this table's own convention of a realistic-looking fixture per module.
+    "redirect_target_allowlist": {"value_expr": "$return_to"},
+    "http_redirect_return": {"value_expr": "$return_to"},
+    "terminal_response": {"body": "    // x\n", "method_name": "handle_x"},
+    # CC-LAB-0211: registered in the shared vocabulary so minimal_pair can
+    # classify them (php_current's shape map does not use any of them).
+    "csv_formula_neutralize": {"value_expr": "$label"},
+    "csv_export_row": {"value_expr": "$label"},
+    # CC-LAB-0212: registered in the shared vocabulary so minimal_pair can
+    # classify them (php_current's shape map does not use any of them).
+    "server_recomputed_amount": {"value_expr": "$amount"},
+    "payment_charge_insert": {"value_expr": "$amount"},
 }
 
 

@@ -252,6 +252,39 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("outbound_header_injection", "outbound_http_request_header_value"): _ModuleSet(
         "get_param", "outbound_webhook_delivery", "single_statement"
     ),
+    # CC-LAB-0210 (category 5, Booking.com pilot): a server-issued HTTP
+    # redirect whose target is a tainted query parameter -- the affiliate/
+    # partner-continuation link Booking.com's real checkout flow uses
+    # (docs/research/category5-travel-functionality-and-cwe-research.md
+    # §1.1/§2.1). Neither `single_statement` nor `render_only` fits this
+    # sink (see `HttpRedirectReturnSink`/`TerminalResponseComplexity`'s own
+    # docstrings), which is why this was the first shape to name a third
+    # complexity module (`redirect_response`, renamed `terminal_response`
+    # by `CC-LAB-0211` once a second, unrelated sink family needed the
+    # identical wrapper).
+    ("open_redirect", "http_redirect_location"): _ModuleSet(
+        "get_param", "http_redirect_return", "terminal_response"
+    ),
+    # CC-LAB-0211 (category 5, Booking.com pilot): a CSV/report export row
+    # whose own code is likewise the method's terminal statement -- the
+    # Extranet/partner-admin booking-list export view Booking.com's real
+    # property-owner surface has (docs/research/category5-travel-
+    # functionality-and-cwe-research.md §1.1/§2.1, CWE-1236).
+    ("csv_formula_injection", "csv_cell_value"): _ModuleSet(
+        "get_param", "csv_export_row", "terminal_response"
+    ),
+    # CC-LAB-0212 (category 5, Booking.com pilot): a checkout charge whose
+    # amount must never be trusted from the client -- Booking.com's real
+    # booking-total computation (docs/research/category5-travel-
+    # functionality-and-cwe-research.md §1.1/§2.1; grounded in QloApps'
+    # real Cart::getOrderTotal() pattern, docs/research/corpus-examples/
+    # ecommerce-logic/php/manifest.yaml). Reuses the existing
+    # `single_statement` complexity (PaymentChargeInsertSink sets `$rows`
+    # rather than returning directly) -- the first of this category's three
+    # shapes with no row/value-return complication.
+    ("price_integrity_bypass", "payment_charge_amount"): _ModuleSet(
+        "post_param", "payment_charge_insert", "single_statement"
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -464,6 +497,33 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # unfiltered write can still reach, since they are simply absent from the
     # allowlist, not from the table itself. Mirrors
     # `fuzzlab.labgen.emitters.php_current`'s `/account_settings.php` profile.
+    # CC-LAB-0210 (category 5, Booking.com pilot app): the "continue to
+    # partner/payment provider" redirect a real Booking.com-style checkout
+    # flow issues (docs/research/category5-travel-functionality-and-cwe-
+    # research.md §1.1). No `table`/`column`: the source is an ordinary GET
+    # query parameter, not a database lookup.
+    "/booking/continue": {"var_name": "return_to", "param_name": "return_to"},
+    # CC-LAB-0211 (category 5, Booking.com pilot app): the Extranet/
+    # partner-admin booking-list export view (docs/research/category5-
+    # travel-functionality-and-cwe-research.md §1.1/§2.1). No `table`/
+    # `column`: the source is an ordinary GET query parameter, not a
+    # database lookup.
+    "/extranet/export": {"var_name": "label", "param_name": "label"},
+    # CC-LAB-0212 (category 5, Booking.com pilot app): the checkout charge
+    # endpoint (docs/research/category5-travel-functionality-and-cwe-
+    # research.md §1.1/§2.1). `room_type_rates`/`default_room_type` are the
+    # secure twin's own fixed, server-owned rate table -- the vulnerable
+    # twin never reads them (its transform is empty).
+    "/booking/checkout": {
+        "var_name": "amount",
+        "param_name": "amount",
+        "room_type_rates": (
+            ("standard", "89.00"),
+            ("deluxe", "149.00"),
+            ("suite", "249.00"),
+        ),
+        "default_room_type": "standard",
+    },
     "/example/account_settings": {
         "var_name": "postFields",
         "table": "users",

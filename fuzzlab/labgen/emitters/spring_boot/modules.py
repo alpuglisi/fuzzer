@@ -257,6 +257,41 @@ class HandlerRegistryLookupSink(TemplateModule):
         super().__init__("handler_registry_lookup", "sink", SINK_ENV, "handler_registry_lookup.java.j2")
 
 
+class StandardEvaluationContextUnrestrictedSink(TemplateModule):
+    """The vulnerable op (`CC-LAB-0214`): parses the tainted value as a
+    Spring Expression Language (SpEL) expression and evaluates it against
+    an unrestricted `StandardEvaluationContext` -- CWE-917, the real
+    mechanism behind CVE-2018-1273 (Spring Data Commons). Permits
+    arbitrary type references (`T(...)`), method invocation, and bean
+    resolution. Matches `lab/safety_matrix.yaml`'s
+    `standard_evaluation_context_unrestricted` op."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "standard_evaluation_context_unrestricted",
+            "sink",
+            SINK_ENV,
+            "standard_evaluation_context_unrestricted.java.j2",
+        )
+
+
+class SimpleEvaluationContextRestrictedSink(TemplateModule):
+    """The secure twin (`CC-LAB-0214`): the identical parse/evaluate call,
+    but against a restricted `SimpleEvaluationContext` -- Spring's own
+    documented fix for CVE-2018-1273. Rejects type references, method
+    invocation, and bean resolution while still permitting ordinary
+    property/index access. Matches `lab/safety_matrix.yaml`'s
+    `simple_evaluation_context_restricted` neutralizing op."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "simple_evaluation_context_restricted",
+            "sink",
+            SINK_ENV,
+            "simple_evaluation_context_restricted.java.j2",
+        )
+
+
 class SingleHandlerComplexity(TemplateModule):
     def __init__(self) -> None:
         super().__init__("single_handler", "complexity", COMPLEXITY_ENV, "single_handler.java.j2")
@@ -291,6 +326,8 @@ SINKS: dict[str, Module] = {
     "handler_registry_lookup": HandlerRegistryLookupSink(),
     "jackson_default_typing_deserialize": JacksonDefaultTypingDeserializeSink(),
     "jackson_typed_allowlist_deserialize": JacksonTypedAllowlistDeserializeSink(),
+    "standard_evaluation_context_unrestricted": StandardEvaluationContextUnrestrictedSink(),
+    "simple_evaluation_context_restricted": SimpleEvaluationContextRestrictedSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_handler": SingleHandlerComplexity(),

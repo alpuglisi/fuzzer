@@ -412,6 +412,172 @@ class UrlSchemeAllowlistTransform(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class RedirectTargetAllowlistTransform(TemplateModule):
+    """The ``redirect_target_allowlist`` op (CC-LAB-0210, `open_redirect`
+    concern): rewrites ``value_expr`` so only a same-origin relative path
+    survives -- otherwise the inert default ``'/'``.
+
+    The allowlist is deliberately an explicit character-class match on the
+    *whole* value, not a "does it start with a slash?" prefix check (PA-0026:
+    an allowlist adapter must enumerate its value-shape preconditions for
+    real, not describe them in prose). The first character after the leading
+    ``/`` must itself be alphanumeric, which is what rejects every open-
+    redirect bypass shape this op is meant to close in one check: a
+    protocol-relative target (``//evil.com`` -- second character is ``/``),
+    a backslash-prefixed target (``/\\evil.com`` -- second character is
+    ``\\``; some browsers normalize a leading backslash to a slash), a
+    triple-slash target (``///evil.com``), and any value that does not begin
+    with exactly one ``/`` at all (``evil.com``, ``\\evil.com``,
+    ``https://evil.com``, ``javascript:alert(1)`` -- none of these start
+    with ``/`` immediately followed by an alphanumeric character, so none of
+    them can match). Everything after that second character is limited to
+    an explicit safe-path/query character class (no colon, no backslash, no
+    whitespace/control characters), so a scheme or a host cannot be smuggled
+    in later in the string either."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "redirect_target_allowlist", "transform", _TRANSFORM_ENV, "redirect_target_allowlist.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        value_expr = ctx["value_expr"]
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = (
+            "(preg_match('/^\\/[A-Za-z0-9][A-Za-z0-9\\-_.\\/?=&%]*$/', (string) "
+            f"{value_expr}) ? {value_expr} : '/')"
+        )
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class CsvFormulaNeutralizeTransform(TemplateModule):
+    """The ``csv_formula_neutralize`` op (CC-LAB-0211, `csv_formula_injection`
+    concern, CWE-1236): rewrites ``value_expr`` so a value whose first
+    *non-whitespace* character is a CSV-formula trigger character (``=``,
+    ``+``, ``-``, ``@``, a tab, or a carriage return -- the five characters
+    OWASP's CSV Injection guidance names) gets a leading single quote
+    prepended at the true start of the value, forcing most spreadsheet
+    applications to display the whole cell as literal text rather than
+    evaluate it as a formula.
+
+    Checks the first *non-whitespace* character, not just the literal first
+    character (PA-0026: enumerate every value-shape precondition, not only
+    the one that motivated the change) -- a naive ``^[=+\\-@]`` anchor would
+    miss a leading-whitespace-then-trigger value (e.g. ``" =cmd|..."``),
+    which several spreadsheet applications still evaluate as a formula after
+    trimming the leading whitespace on cell entry. The single quote is
+    prepended at position 0 (before any leading whitespace), not after it,
+    so the *whole* value -- whitespace included -- is forced to text.
+
+    Documented, bounded scope (`lab/safety_matrix.yaml`'s concern-vocabulary
+    header): this is the standard, most broadly effective client-side
+    mitigation (reliable in Excel and LibreOffice Calc's normal CSV import
+    path) but is not a claim that every spreadsheet application's every
+    import path treats a leading apostrophe identically (Google Sheets'
+    behavior has varied across versions/import methods) -- it neutralizes
+    the CWE-1236 threat model this project's generator models, not every
+    downstream consumer's own parsing quirks."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "csv_formula_neutralize", "transform", _TRANSFORM_ENV, "csv_formula_neutralize.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        value_expr = ctx["value_expr"]
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = (
+            "(preg_match('/^\\s*[=+\\-@\\t\\r]/', (string) "
+            f"{value_expr}) ? \"'\" . {value_expr} : {value_expr})"
+        )
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class ServerRecomputedAmountTransform(TemplateModule):
+    """The ``server_recomputed_amount`` op (CC-LAB-0212, `price_integrity_bypass`
+    concern): discards the tainted client-submitted amount entirely and
+    substitutes a value looked up server-side from a fixed rate table,
+    keyed by a *non-price* request parameter (``room_type``) rather than
+    the tainted amount itself -- the real-world shape
+    `docs/research/corpus-examples/ecommerce-logic/php/manifest.yaml`'s
+    QloApps `Cart::getOrderTotal()` entry documents (a server that derives
+    the charge from cart/selection state, never from a client-supplied
+    total field), not merely "return a hardcoded constant" -- a bare
+    literal would model "ignore the client" without modeling "recompute,"
+    which is what this op's own name and the cited grounding both promise.
+
+    Unrecognized/missing selections fall back to ``default_room_type``'s
+    own rate (never to the tainted amount) -- ``room_type`` is itself
+    request-controlled but only ever used as an array key against a fixed,
+    server-owned table, the same allowlist-lookup shape
+    :class:`IdentifierAllowlistTransform` already establishes elsewhere in
+    this module; it is not the axis this concern's verdict is about.
+
+    Requires ``room_type_rates`` (an ordered tuple of ``(room_type, rate)``
+    pairs; each ``room_type`` a bare lowercase identifier, each ``rate`` a
+    ``\\d+\\.\\d{2}`` decimal string) and ``default_room_type`` (one of
+    those room types) in the assembly context -- render-only metadata a
+    page profile supplies; there is no safe default rate table to invent."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "server_recomputed_amount", "transform", _TRANSFORM_ENV, "server_recomputed_amount.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        try:
+            rates = tuple(ctx["room_type_rates"])
+        except KeyError as exc:
+            raise ValueError(
+                "server_recomputed_amount transform needs a 'room_type_rates' context value "
+                "(an ordered tuple of (room_type, rate) pairs the server actually charges) -- "
+                "the emitter's page profile must supply it; there is no safe default"
+            ) from exc
+        if not rates:
+            raise ValueError(
+                "server_recomputed_amount 'room_type_rates' is empty -- a rate table with "
+                "nothing in it has no safe fallback to fall back to"
+            )
+        try:
+            default_room_type = ctx["default_room_type"]
+        except KeyError as exc:
+            raise ValueError(
+                "server_recomputed_amount transform needs a 'default_room_type' context value "
+                "(the room type its own fallback rate applies to) -- there is no safe default"
+            ) from exc
+        rates_by_type = {}
+        for room_type, rate in rates:
+            if not re.fullmatch(r"[a-z][a-z0-9_]*", str(room_type)):
+                raise ValueError(
+                    f"server_recomputed_amount room_type {room_type!r} is not a bare lowercase "
+                    "identifier ([a-z][a-z0-9_]*) -- room types are emitted into PHP source "
+                    "verbatim and are never escaped or quoted for you"
+                )
+            if not re.fullmatch(r"\d+\.\d{2}", str(rate)):
+                raise ValueError(
+                    f"server_recomputed_amount rate {rate!r} (room type {room_type!r}) is not a "
+                    "bare \\d+\\.\\d{2} decimal literal -- rates are emitted into PHP source "
+                    "verbatim and are never validated or cast for you"
+                )
+            rates_by_type[room_type] = rate
+        if default_room_type not in rates_by_type:
+            raise ValueError(
+                f"server_recomputed_amount default_room_type {default_room_type!r} names a room "
+                f"type not present in room_type_rates ({sorted(rates_by_type)}) -- the fallback "
+                "must itself be a real, priced room type"
+            )
+        rates_php = ", ".join(f"'{room_type}' => {rate}" for room_type, rate in rates)
+        default_rate = rates_by_type[default_room_type]
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = (
+            f"([{rates_php}][$request->input('room_type', '{default_room_type}')] ?? {default_rate})"
+        )
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 class AttrValueAllowlistTransform(TemplateModule):
     """The ``attr_value_allowlist`` op: rewrites ``value_expr`` so only a
     strict ``^[A-Za-z0-9_-]+$`` value survives (otherwise the page profile's
@@ -786,6 +952,58 @@ class DomInnerhtmlEchoSink(TemplateModule):
         super().__init__("dom_innerhtml_echo", "sink", _SINK_ENV, "dom_innerhtml_echo.blade.php.j2")
 
 
+class HttpRedirectReturnSink(TemplateModule):
+    """The ``http_redirect_return`` sink family (CC-LAB-0210, `open_redirect`
+    concern): a server-issued HTTP redirect (Laravel's ``redirect()``
+    helper, an HTTP 3xx ``Location:`` header) whose target is
+    ``value_expr``.
+
+    Unlike every other sink in this module, its own rendered code is the
+    **terminal statement** of the method it is composed into -- there is no
+    row/value for a complexity wrapper to hand back afterward, which is why
+    this shape also needs the ``terminal_response`` complexity module
+    (:class:`TerminalResponseComplexity`) rather than
+    ``single_statement``/``render_only``. Not a Blade view either (no
+    ``.blade.php.j2`` suffix, so it stays out of :data:`VIEW_SINKS`): a
+    redirect response has no presentation layer to render."""
+
+    def __init__(self) -> None:
+        super().__init__("http_redirect_return", "sink", _SINK_ENV, "http_redirect_return.php.j2")
+
+
+class CsvExportRowSink(TemplateModule):
+    """The ``csv_export_row`` sink family (CC-LAB-0211, `csv_formula_injection`
+    concern): a small CSV report/export response -- Booking.com's real
+    Extranet/partner-admin booking-list export view idiom -- embedding
+    ``value_expr`` as a cell in the exported row.
+
+    Like :class:`HttpRedirectReturnSink`, its own rendered code is the
+    **terminal statement** of the method it is composed into (a bare
+    ``response($csv, ...)`` call, nothing for a complexity wrapper to add
+    after it), so it shares :class:`TerminalResponseComplexity` rather than
+    ``single_statement``/``render_only``. Not a Blade view either (no
+    ``.blade.php.j2`` suffix): a CSV download has no presentation layer to
+    render."""
+
+    def __init__(self) -> None:
+        super().__init__("csv_export_row", "sink", _SINK_ENV, "csv_export_row.php.j2")
+
+
+class PaymentChargeInsertSink(TemplateModule):
+    """The ``payment_charge_insert`` sink family (CC-LAB-0212,
+    `price_integrity_bypass` concern): a real Query Builder write
+    (``DB::table('bookings')->insert(...)``) whose ``total_amount`` column
+    is ``value_expr``.
+
+    Like :class:`OrmEntityBulkAssignSink`, it never ``return``s directly --
+    it sets ``$rows``, so the existing ``single_statement`` complexity's own
+    tail (``return response()->json($rows);``) closes the method; no new
+    complexity module is needed for this shape."""
+
+    def __init__(self) -> None:
+        super().__init__("payment_charge_insert", "sink", _SINK_ENV, "payment_charge_insert.php.j2")
+
+
 # --- views (the `view` module category, L-P3.3c-G2) -----------------------
 #
 # CR-LAB-0001 Addendum D names `"view"` as a module *category* alongside
@@ -1037,6 +1255,35 @@ class RenderOnlyComplexity(TemplateModule):
         return RenderResult(code=code, context=dict(ctx))
 
 
+class TerminalResponseComplexity(TemplateModule):
+    """The controller method for a cell whose sink's own code *is* the
+    whole method's terminal statement (:class:`HttpRedirectReturnSink`'s
+    ``return redirect(...)``; :class:`CsvExportRowSink`'s ``return
+    response($csv, ...)``) -- the composed source/transform/sink body needs
+    no added tail. Neither :class:`SingleStatementComplexity` (always adds
+    its own ``return response()->json($rows)``/tail) nor
+    :class:`RenderOnlyComplexity` (always adds its own ``return
+    view(...)``) fits such a sink -- both would emit unreachable code after
+    a real ``return``, which is why this shape needs a third complexity.
+    Named for its structural shape (a bare method-signature wrapper around
+    an already-terminal body) and shared across unrelated sink families,
+    exactly like :class:`SingleStatementComplexity`/:class:`RenderOnlyComplexity`
+    are each shared across unrelated vuln classes -- **renamed from
+    `RedirectResponseComplexity`/`redirect_response`** (`CC-LAB-0210`) once
+    a second, unrelated sink family (`csv_cell_value`, `CC-LAB-0211`)
+    needed the identical, already sink-agnostic wrapper. See
+    `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0211` entry
+    for the rename's own record."""
+
+    def __init__(self) -> None:
+        super().__init__("terminal_response", "complexity", _COMPLEXITY_ENV, "terminal_response.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        template = self._env.get_template(self._template_name)
+        code = template.render(body=ctx["body"], method_name=ctx["method_name"])
+        return RenderResult(code=code, context=dict(ctx))
+
+
 #: Source modules. Keys are :mod:`fuzzlab.labgen.modules`' shared names on
 #: purpose -- see this module's docstring, decision 1.
 SOURCES: dict[str, Module] = {
@@ -1072,6 +1319,12 @@ TRANSFORMS: dict[str, Module] = {
     "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistTransform(),
     "raw_header_concat": RawHeaderConcatTransform(),
     "structured_http_client_headers": StructuredHttpClientHeadersTransform(),
+    # CC-LAB-0210 (open_redirect, category 5's Booking.com pilot app).
+    "redirect_target_allowlist": RedirectTargetAllowlistTransform(),
+    # CC-LAB-0211 (csv_formula_injection, category 5's Booking.com pilot app).
+    "csv_formula_neutralize": CsvFormulaNeutralizeTransform(),
+    # CC-LAB-0212 (price_integrity_bypass, category 5's Booking.com pilot app).
+    "server_recomputed_amount": ServerRecomputedAmountTransform(),
 }
 #: Sinks. The three HTML sinks render a **Blade view** body rather than a
 #: controller statement; :data:`VIEW_SINKS` names them so the emitter knows
@@ -1095,10 +1348,21 @@ SINKS: dict[str, Module] = {
     "webhook_signature_verification": WebhookSignatureVerificationSink(),
     "server_side_http_fetch": ServerSideHttpFetchSink(),
     "outbound_webhook_delivery": OutboundWebhookDeliverySink(),
+    # CC-LAB-0210 (open_redirect, category 5's Booking.com pilot app).
+    "http_redirect_return": HttpRedirectReturnSink(),
+    # CC-LAB-0211 (csv_formula_injection, category 5's Booking.com pilot app).
+    "csv_export_row": CsvExportRowSink(),
+    # CC-LAB-0212 (price_integrity_bypass, category 5's Booking.com pilot app).
+    "payment_charge_insert": PaymentChargeInsertSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),
     "render_only": RenderOnlyComplexity(),
+    # CC-LAB-0210/CC-LAB-0211 (open_redirect + csv_formula_injection, both on
+    # category 5's Booking.com pilot app): originally `redirect_response`
+    # (CC-LAB-0210), renamed `terminal_response` and shared with the second
+    # shape once CC-LAB-0211 found it was already fully sink-agnostic.
+    "terminal_response": TerminalResponseComplexity(),
 }
 #: ``view``-category modules (L-P3.3c-G2). Selected per page by the emitter's
 #: own page profile (``view_category``), never by the verdict-relevant shape

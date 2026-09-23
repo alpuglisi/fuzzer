@@ -136,6 +136,56 @@ STATIC_PRECHECK_BY_SHAPE: dict[tuple[str, str], StaticPrecheckStatus] = {
     # timing-differential (M1) oracle strategy, not a static checker at all
     # (see docs/architecture/oracle-confirmation.md).
     ("redos", "regex_highlight_match"): StaticPrecheckStatus.UNINFORMATIVE,
+    # --- CC-LAB-0210: open redirect (category 5, Booking.com pilot) --------
+    # INFORMATIVE: a vulnerable cell's `redirect($value)` sink is fed a
+    # request-parameter value with no check applied at all -- the same
+    # textbook "value reaches a sensitive sink with nothing between source
+    # and sink" shape as ("xss", "html_body") above, which a taint-style
+    # static checker (most of which model `header()`/redirect-style sinks
+    # explicitly) is reasonably expected to flag. Unlike the escaping-
+    # context-mismatch XSS shapes, the secure twin's `redirect_target_
+    # allowlist` transform is a real, present validation call immediately
+    # before the sink, not an escaping function misapplied to the wrong
+    # context -- so a clean scan of the secure twin is not evidence of
+    # nothing the way it is for those shapes.
+    ("open_redirect", "http_redirect_location"): StaticPrecheckStatus.INFORMATIVE,
+    # --- CC-LAB-0211: CSV/report export formula injection (category 5) ----
+    # UNINFORMATIVE: a PHP taint checker analyzes PHP data flow and string
+    # sinks (echo/file writes/HTTP responses), not spreadsheet-application
+    # semantics -- it has no notion that a value's *first character* being
+    # `=`/`+`/`-`/`@`/tab/CR makes a downstream Excel/Sheets import execute
+    # it as a formula. Even a checker that flags "unescaped value reaches an
+    # HTTP response body" would flag this identically whether or not
+    # `csv_formula_neutralize` ran, since a single-quote prefix looks like
+    # ordinary string concatenation to a taint engine, not a recognized
+    # sanitizer -- the same reasoning as the escaping-context-mismatch XSS
+    # shapes above, one step further removed (there is no PHP-level function
+    # call this shape's fix hangs off of at all, just a `preg_match`-guarded
+    # string prefix a generic checker has no CSV-specific model for).
+    ("csv_formula_injection", "csv_cell_value"): StaticPrecheckStatus.UNINFORMATIVE,
+    # --- CC-LAB-0212: price integrity / business-logic amount trust -------
+    # UNINFORMATIVE, same underlying reason as ("mass_assignment",
+    # "orm_entity_bulk_assign") above: a numeric business-value field
+    # (a payment amount) reaching a DB write looks syntactically
+    # unremarkable to a static tool with no business-logic awareness that
+    # *this specific* numeric value should never come from client input --
+    # there is no missing-sanitizer-shaped tell to key on, unlike the
+    # plain ("xss", "html_body") case.
+    ("price_integrity_bypass", "payment_charge_amount"): StaticPrecheckStatus.UNINFORMATIVE,
+    # --- CC-LAB-0214: SpEL injection (spring_boot, Expedia) ----------------
+    # UNINFORMATIVE: both the vulnerable and secure twins call the
+    # *identical* `SpelExpressionParser().parseExpression(tainted).
+    # getValue(context)` sequence -- the only difference is which
+    # `EvaluationContext` object was constructed beforehand
+    # (`new StandardEvaluationContext()` vs.
+    # `SimpleEvaluationContext.forReadOnlyDataBinding().build()`). A
+    # generic taint/pattern checker has no differing call-shape or
+    # missing-sanitizer-call to key on -- it would flag (or not flag) both
+    # twins identically, the same reasoning already used for the
+    # escaping-context-mismatch XSS rows above, not the SSTI shape's
+    # differing-API case (`Ognl.getValue()` vs. a fixed `Map` lookup),
+    # which a checker genuinely could distinguish.
+    ("spel_injection", "spel_expression_evaluate"): StaticPrecheckStatus.UNINFORMATIVE,
 }
 
 
