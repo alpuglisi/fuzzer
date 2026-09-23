@@ -4,6 +4,28 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (FUZZ/AUD: real detection for `jwt_algorithm_confusion`)
+- Fuzzing harness/oracle: the deliberately-separated detection follow-on
+  to `CC-LAB-0180` (Twitch's JWT `alg:none` page) — a new audit rule
+  (`R-JWT-ALG-NONE`, `location_in=["header"]` + `name_regex=
+  "authorization|jwt"`) and oracle strategy
+  (`JwtAlgNoneConfusionStrategy`). A two-probe differential: probe A (an
+  unsigned `alg:none` token with a freshly-minted marker in its
+  `channel_id` claim — the literal field this project's own sink
+  actually echoes, not an arbitrary field, a real correction the
+  accuracy-review pass caught before implementation) must return 200
+  with the marker echoed back; probe B (the same marker, claiming
+  `HS256` with a garbage signature) must return a real auth-rejection
+  status (401/403 specifically, not merely "not 200" — tightened from an
+  earlier draft by the adequacy pass, since a parsing crash on malformed
+  input would otherwise falsely look like a rejection and defeat the
+  whole differential). Explicit "known limitation" docstring section
+  (against a non-JWT `Authorization` scheme, the strategy fails closed
+  rather than misfiring). Verified live against Twitch's real booted
+  twins and through the real `multitarget` Phase E wiring: Twitch's real,
+  scored recall moves from 2/4 to 3/4. `CC-FUZZ-0033`/`FR-FUZZ-19`,
+  `CC-AUD-0020`/`FR-AUD-11`.
+
 ## 2026-09-23 (LAB: Twitch's 4th real page, JWT `alg:none` signature confusion)
 - Lab: a new mechanism from `lab/safety_matrix.yaml` (`jwt_alg_none_default`/
   `jwt_none_alg_opt_in`, added by `CC-LAB-0063`, never before instantiated

@@ -40,13 +40,13 @@ MANUAL = "manual"
 # strategy_end_to_end`). `insecure_deserialization` (CC-FUZZ-0030): same
 # underscore/hyphen mismatch, `R-INSECURE-DESERIALIZATION`/
 # `InsecureDeserializationTypeConfusionStrategy`, verified live against
-# Netflix's real Jackson-deserialization twins. This is the *second* time a
-# new category forgot this entry until a real-run trace caught it (the first
-# was `access_control` itself, `CC-FUZZ-0029`) -- `tests/test_oracle.py::
-# test_every_strategy_category_is_reachable_from_its_vuln_class` now guards
-# the whole dict pairing generically so a third instance fails loudly at
-# test time instead of silently shipping an unreachable strategy.
-# `webhook_signature` (and `xxe`/`outbound_header_injection`) still have no
+# Netflix's real Jackson-deserialization twins. `xxe` (CC-FUZZ-0031) and
+# `jwt_algorithm_confusion` (CC-FUZZ-0033) followed the same pattern.
+# `tests/test_oracle.py::test_every_ruled_strategy_category_is_reachable_
+# from_its_vuln_class` now guards the whole dict pairing generically (for
+# every *ruled* category) so a missed entry fails loudly at test time
+# instead of silently shipping an unreachable strategy.
+# `webhook_signature` (and `outbound_header_injection`) still have no
 # confirmer built -- stay unmapped until each does.
 _VULN_TO_CATEGORY = {
     "sqli": "sql-injection",
@@ -56,6 +56,7 @@ _VULN_TO_CATEGORY = {
     "ssti": "server-side-template-injection",
     "access_control": "access-control",
     "insecure_deserialization": "insecure-deserialization",
+    "jwt_algorithm_confusion": "jwt-algorithm-confusion",
 }
 
 

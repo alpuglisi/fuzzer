@@ -213,6 +213,36 @@ rewards) derives from it.
   header point is a real, audited point today, not a skip reason. This
   entry is kept for history — it correctly named the gap at the time.
 
+- **FR-FUZZ-19** *(`JwtAlgNoneConfusionStrategy`; `CC-FUZZ-0033`,
+  2026-09-23).* The oracle supports real **JWT algorithm-confusion
+  (CWE-347) confirmation**, paired with `FR-AUD-11`'s candidate-
+  generation rule, closing Twitch's `TWCH-0004` structural detection
+  zero (`CC-LAB-0180`'s own deliberately-separated follow-on):
+  - `JwtAlgNoneConfusionStrategy` (`vuln_class=
+    "jwt_algorithm_confusion"`, `mechanism="alg-none-bypass"`): a
+    two-probe differential over a header-carried Bearer token. Probe A
+    (an unsigned `alg:none` token, a freshly-minted marker carried in
+    its `channel_id` claim — the literal field the real sink echoes)
+    must return 200 with the marker echoed back; probe B (the same
+    marker, claiming `HS256` with a garbage signature) must return a
+    real auth-rejection status (401/403 specifically, not merely
+    "not 200") — ruling out both a generically-permissive endpoint and
+    an unrelated parsing-crash false positive.
+  - **A real defect found by the accuracy-review pass before
+    implementation**: an earlier draft carried the marker in an
+    arbitrary `{"marker": ...}` JSON field, which the real sink
+    template silently drops (only `channel_id`/`role` are unmarshaled)
+    — would have made the strategy permanently return `None` against a
+    real boot despite passing every unit test with a hand-built fake
+    sender. Corrected before any code was written.
+  - `fuzzlab.core.runmode._VULN_TO_CATEGORY` gained
+    `"jwt_algorithm_confusion": "jwt-algorithm-confusion"` — the fourth
+    instance of the recurring underscore/hyphen gap, caught automatically
+    this time by the structural guard test added for the second instance.
+  - Verified live against Twitch's real booted twins; through the real
+    `fuzzlab.harness.multitarget` Phase E wiring, Twitch's real, scored
+    recall moves from 2/4 to 3/4.
+
 - **FR-FUZZ-18** *(`XxeInBandMarkerStrategy`/`XxeOobStrategy`;
   `CC-FUZZ-0031`, 2026-09-23).* The oracle supports real **XXE (CWE-611)
   confirmation**, paired with `FR-AUD-10`'s candidate-generation rule,

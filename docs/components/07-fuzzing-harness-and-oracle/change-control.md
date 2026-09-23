@@ -3,6 +3,89 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0033 — `JwtAlgNoneConfusionStrategy`: real detection for `jwt_algorithm_confusion` (2026-09-23)
+
+- Change: adds the deliberately-separated detection follow-on `CC-LAB-0180`
+  flagged: an oracle confirmation strategy for `jwt_algorithm_confusion`
+  (CWE-347), closing Twitch's `TWCH-0004` structural detection zero.
+  1. **`fuzzlab/oracle/strategies.py`**: `JwtAlgNoneConfusionStrategy`
+     (`vuln_class="jwt_algorithm_confusion"`, `mechanism=
+     "alg-none-bypass"`). A two-probe differential over a header-carried
+     Bearer token, mirroring `InsecureDeserializationTypeConfusionStrategy`'s
+     own two-probe shape: probe A (an unsigned `alg:none` token, a
+     freshly-minted marker carried in its `channel_id` claim — the
+     literal field `CC-LAB-0180`'s own sink echoes, not an arbitrary
+     field) must return HTTP 200 with the marker echoed back; probe B
+     (the same marker, claiming `HS256` with a garbage signature) must
+     return a real auth-rejection status (401/403 specifically) — ruling
+     out both a generically-permissive endpoint and an unrelated
+     parsing-crash false positive. Registered in `default_strategies()`
+     and `_CATEGORY_TO_CLASS`.
+  2. **`fuzzlab/core/runmode.py`**: `_VULN_TO_CATEGORY` gained
+     `"jwt_algorithm_confusion": "jwt-algorithm-confusion"` — the fourth
+     instance of the recurring underscore/hyphen gap this session's own
+     structural guard test now catches automatically (no manual trace
+     needed this time). Stale comment referencing the guard test's old
+     pre-rename name also corrected.
+  3. **`fuzzlab/audit/rules_data/default_rules.json`**: `R-JWT-ALG-NONE`
+     (see the paired `CC-AUD-0020` entry for the rule itself).
+  - Dispatched through this component's mandatory pre-change review gate
+    (accuracy + adequacy passes). Accuracy pass found a real, blocking
+    defect in the first draft before implementation: the marker was
+    planned to travel in an arbitrary `{"marker": ...}` JSON field, which
+    the real sink template (`jwt_claims_response.go.j2`) silently drops
+    (it only unmarshals `channel_id`/`role`) — the strategy would have
+    permanently returned `None` against a real boot despite passing
+    every unit test with a hand-built fake sender. Corrected to carry
+    the marker in `channel_id` before implementation, not discovered
+    after. Adequacy pass required: (a) tightening probe B's pass
+    condition from "any non-200" to specifically 401/403 (item in
+    mechanism above); (b) an explicit docstring "known limitation"
+    section (non-JWT `Authorization` schemes fail closed, don't
+    misfire); (c) dropping "bearer" from the rule's `name_regex`
+    (a header *value* prefix, not a header name — dead/misleading
+    weight in a name-matching regex).
+  New/changed files:
+  - `fuzzlab/oracle/strategies.py`
+  - `fuzzlab/core/runmode.py`
+  - `fuzzlab/audit/rules_data/default_rules.json` (shared with `CC-AUD-0020`)
+  - `tests/test_oracle_strategies_jwt_alg_none.py` (new)
+  - `tests/test_labgen_go_live_boot.py` (new
+    `test_real_boot_proves_the_jwt_alg_none_strategy_end_to_end`)
+  - `tests/test_multitarget_category4.py` (Twitch's real, scored recall
+    moves from 2/4 to 3/4)
+  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    (`FR-FUZZ-19`, new)
+- Impact (other components / project): `fuzzlab/oracle/strategies.py`,
+  `fuzzlab/core/runmode.py`, and `fuzzlab/audit/rules_data/
+  default_rules.json` are shared across every category/target (fresh
+  `git show` collision check against category-2/3/5 and
+  second-target-cat1-ecommerce before landing — all behind this branch's
+  own prior commits, no independent edits). `fuzzlab.harness.multitarget`'s
+  real, scored Twitch report for category 4's own Phase E test now shows
+  `tp=3` instead of `tp=2`.
+- Risk (level; mitigation or accepted-risk justification): Low. The
+  two-probe differential and its 401/403-specific control-probe check
+  directly close the false-positive classes the review passes named;
+  the strategy's own docstring states its one residual limitation
+  (non-JWT `Authorization` header targets) explicitly rather than
+  leaving it implicit.
+- Deliverables:
+  - [x] `JwtAlgNoneConfusionStrategy` implemented, registered,
+        unit-tested (vulnerable/secure/false-positive/crash cases) — done
+  - [x] The marker-field defect found by the accuracy pass fixed before
+        implementation — done
+  - [x] Real live-boot proof against Twitch's real booted twins — done
+  - [x] `test_multitarget_category4.py` updated to the new real recall
+        — done
+  - [x] Full non-slow suite re-run green at the stable baseline — done
+- Effectiveness (assessed 2026-09-23): achieved. Twitch's real, scored
+  `multitarget` recall moved from 2/4 to 3/4 (`tp=3, fp=0`), proven by a
+  real, executed `run_targets()` call against a real booted app, and the
+  strategy independently confirms/fails-closed correctly against real
+  vulnerable/secure twins via a dedicated live-boot test, not only
+  mocked senders.
+
 ### CC-FUZZ-0032 — Netflix's own multi-cell boot confirms both real positives together (2026-09-23)
 
 - Change: `tests/test_multitarget_category4.py` gained

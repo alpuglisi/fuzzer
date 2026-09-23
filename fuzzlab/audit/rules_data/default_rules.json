@@ -70,6 +70,13 @@
       "transaction_type": "XML External Entity Injection",
       "when": { "location_in": ["body"], "sink_context_in": ["xml"] },
       "reference": "xxe"
+    },
+    {
+      "id": "R-JWT-ALG-NONE",
+      "category": "jwt-algorithm-confusion",
+      "transaction_type": "JWT Algorithm Confusion",
+      "when": { "location_in": ["header"], "name_regex": "authorization|jwt" },
+      "reference": "jwt-algorithm-confusion"
     }
   ]
 }

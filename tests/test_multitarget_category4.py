@@ -12,7 +12,7 @@ audit rule + oracle strategies).
 **What this now proves, and what remains honestly open (recorded here, not
 routed around).** Twitch now has four real cells (webhook-signature, SSRF,
 access-control/IDOR, and JWT `alg:none` confusion -- `CC-LAB-0178`/
-`CC-LAB-0180`, the "coherent page/route set" depth work), and two of the
+`CC-LAB-0180`, the "coherent page/route set" depth work), and three of the
 four now confirm for real. The SSRF case (`TWCH-0002`):
 `SsrfInBandMarkerStrategy` sees the vulnerable twin (`LABGEN-GO-0003`)
 echo the OOB marker back in its own response body (`io.Copy(w,
@@ -21,13 +21,15 @@ resp.Body)`), and correctly does not confirm the secure twin
 access-control/IDOR case (`TWCH-0003`, `CC-FUZZ-0029`):
 `AccessControlIdorStrategy` sees the vulnerable twin (`LABGEN-GO-0005`)
 accept and echo back any `channel_id`, and correctly does not confirm the
-secure twin (`LABGEN-GO-0006`, blocked by its identity-match check).
-`TWCH-0004` (JWT `alg:none` confusion, `LABGEN-GO-0007`/`0008`) has no
-rule/strategy yet -- a real, buildable single-request differential (send
-an `alg:none` token, check whether the response echoes an injected
-marker claim), deliberately landed as its own separately-scoped follow-on
-after this page itself (per this increment's own pre-change review gate),
-not bundled into the same commit as the page.
+secure twin (`LABGEN-GO-0006`, blocked by its identity-match check). The
+JWT `alg:none` confusion case (`TWCH-0004`, `CC-FUZZ-0033`):
+`JwtAlgNoneConfusionStrategy` sees the vulnerable twin (`LABGEN-GO-0007`)
+accept an unsigned `alg:none` token and echo its forged claims back (while
+still correctly rejecting a garbage-signature `HS256`-claimed control
+probe -- the two-probe differential this strategy needs to rule out a
+generically-permissive endpoint), and correctly does not confirm the
+secure twin (`LABGEN-GO-0008`, which rejects the same `alg:none` token
+outright).
 
 Netflix's `NFLX-0001` (insecure-deserialization) is now also a real,
 confirmed finding (`CC-FUZZ-0030`): the whole-body-JSON case
@@ -150,8 +152,8 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # has no rule/point support (see module docstring) -- two of its three
     # positives, not all three.
     twitch_report = by_name["twitch-clone"].report
-    assert twitch_report.tp == 2 and twitch_report.fp == 0
-    assert round(twitch_report.recall, 4) == round(2 / 4, 4)
+    assert twitch_report.tp == 3 and twitch_report.fp == 0
+    assert round(twitch_report.recall, 4) == round(3 / 4, 4)
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002) still has no rule/strategy (see module
@@ -163,7 +165,7 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
-    assert round(summary["macro_recall"], 4) == round(((2 / 4) + (1 / 2)) / 2, 4)
+    assert round(summary["macro_recall"], 4) == round(((3 / 4) + (1 / 2)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True

@@ -3,6 +3,44 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0020 — `R-JWT-ALG-NONE` audit rule (2026-09-23)
+
+- Change: adds `R-JWT-ALG-NONE`, category `jwt-algorithm-confusion`, to
+  `fuzzlab/audit/rules_data/default_rules.json` — `{"location_in":
+  ["header"], "name_regex": "authorization|jwt"}`. The project's first
+  candidate-generation rule for the `jwt-algorithm-confusion` category,
+  closing Twitch's `TWCH-0004` structural detection zero. Scoped to
+  header-location points only, mirroring `R-ACCESS-CONTROL`'s own
+  location-narrowed shape — this class's own attack surface is
+  inherently header-carried. `"bearer"` deliberately dropped from the
+  `name_regex` during review (a header *value* prefix, not a header
+  name — would have added dead/misleading weight). Paired with
+  `CC-FUZZ-0033`'s new `JwtAlgNoneConfusionStrategy` oracle
+  confirmation. Reviewed pre-implementation per the component's
+  pre-change review gate (accuracy + adequacy passes — see `CC-FUZZ-0033`
+  for the full review record, since both passes covered the rule and the
+  strategy together).
+  New/changed files:
+  - `fuzzlab/audit/rules_data/default_rules.json`
+  - `docs/components/05-auditor/requirements.md` (`FR-AUD-11`, new)
+- Impact (other components / project): `default_rules.json` is shared
+  across every category and every existing target's own run — purely
+  additive (a new rule appended after `R-XXE`).
+- Risk (level; mitigation or accepted-risk justification): Low. A rule
+  only nominates a candidate; it cannot itself produce a false
+  "confirmed" finding (that risk lives in the paired strategy, assessed
+  in `CC-FUZZ-0033`).
+- Deliverables:
+  - [x] `R-JWT-ALG-NONE` added to `default_rules.json` — done
+  - [x] Unit tests confirming the rule's `when` predicate matches/excludes
+        as scoped (`test_r_jwt_alg_none_rule_matches_an_authorization_
+        header_point`, `test_r_jwt_alg_none_rule_does_not_match_an_
+        unrelated_header`) — done
+- Effectiveness (assessed 2026-09-23): achieved. Paired with
+  `JwtAlgNoneConfusionStrategy`, the rule correctly nominates Twitch's
+  real `TWCH-0004` point and is proven end-to-end against a real booted
+  app — see `CC-FUZZ-0033`'s Effectiveness note.
+
 ### CC-AUD-0019 — `R-XXE` audit rule (2026-09-23)
 
 - Change: adds `R-XXE`, category `xxe`, to `fuzzlab/audit/rules_data/

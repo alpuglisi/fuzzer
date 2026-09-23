@@ -353,3 +353,50 @@ def test_real_boot_proves_the_jwt_alg_none_differential_for_both_twins() -> None
             f"secure twin accepted an alg:none token (status {secure_resp.status}): {secure_resp.body!r}"
         )
         assert "attacker-channel" not in secure_resp.body
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_jwt_alg_none_strategy_end_to_end() -> None:
+    """The real `JwtAlgNoneConfusionStrategy` (CC-FUZZ-0033/FR-FUZZ-19),
+    driven against a real booted app rather than a fake sender: confirms
+    the vulnerable twin and fails closed on the secure twin, using the
+    exact two-probe differential the strategy itself sends."""
+    from fuzzlab.oracle.probe import Candidate, Probe
+    from fuzzlab.oracle.strategies import JwtAlgNoneConfusionStrategy
+
+    manifest = load_manifest("lab/manifests/jwt_alg_confusion_go_sample.yaml")
+    emitter = GoEmitter()
+    cells = {c.cell_id: c for c in manifest.cells}
+
+    def _cand():
+        return Candidate(url="http://h/generated/labgen-go-0007", param="Authorization",
+                         method="GET", location="header",
+                         vuln_class="jwt_algorithm_confusion",
+                         category="jwt-algorithm-confusion")
+
+    strategy = JwtAlgNoneConfusionStrategy()
+
+    with GoLiveBootHarness(emitter, [cells["LABGEN-GO-0007"]]) as harness:
+        class _HarnessSender:
+            def send(self, url, param, value, timing=False, method="GET",
+                      location="header", content_type=None):
+                resp = harness.request("GET", "/generated/labgen-go-0007",
+                                       headers={param: value})
+                return Probe(resp.status, resp.body)
+
+        verdict = strategy.confirm(_cand(), _HarnessSender())
+        assert verdict is not None and verdict.confirmed, "strategy failed to confirm the real vulnerable twin"
+        assert verdict.vuln_class == "jwt_algorithm_confusion"
+
+    with GoLiveBootHarness(emitter, [cells["LABGEN-GO-0008"]]) as harness:
+        class _HarnessSender:
+            def send(self, url, param, value, timing=False, method="GET",
+                      location="header", content_type=None):
+                resp = harness.request("GET", "/generated/labgen-go-0008",
+                                       headers={param: value})
+                return Probe(resp.status, resp.body)
+
+        assert strategy.confirm(_cand(), _HarnessSender()) is None, (
+            "strategy incorrectly confirmed the real secure twin"
+        )

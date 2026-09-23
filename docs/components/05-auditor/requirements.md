@@ -67,6 +67,13 @@ budget where a vulnerability is plausible.
   DESERIALIZATION`), same necessary shape and same scope limit (reachable
   only from ground-truth-sourced points today). Rule-generation only —
   confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-18`).
+- **FR-AUD-11** *(`CC-AUD-0020`, 2026-09-23).* A candidate is generated for
+  the `jwt-algorithm-confusion` category: `R-JWT-ALG-NONE`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a `header`-
+  location point whose name looks like a JWT-carrying header
+  (`authorization|jwt`) — scoped to header points only, mirroring
+  `R-ACCESS-CONTROL`'s own location-narrowed shape. Rule-generation only
+  — confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-19`).
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that
