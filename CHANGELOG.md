@@ -4,6 +4,55 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (FUZZ/AUD: `path_traversal`/`fs_path_read` detection closes category 4's last known real, tracked detection gap, CC-FUZZ-0042/CC-AUD-0027)
+- New oracle strategy `fuzzlab/oracle/strategies.py::
+  PathTraversalFsPathReadStrategy` (`CC-FUZZ-0042`) confirms `CC-LAB-0190`'s
+  own `path_traversal`/`fs_path_read` cell (Twitch's `TWCH-0011`,
+  `GET /clips/export?filename=`, CWE-22) with a real, live-verified
+  `/etc/passwd`-content differential: a `../`-traversal payload must make
+  the response body contain the target's real, PRE-EXISTING
+  `/etc/passwd` content (`root:.*:0:0:`); a non-traversal control value
+  (`"passwd"`, no `../`) must not — ruling out a target that always
+  echoes such content regardless of input. This reads a file that
+  already exists on the target; it plants nothing, exactly the standard
+  black-box path-traversal-confirmation technique this project's own
+  `fuzzlab/labgen/nuclei_oracle.py` already bundles for a different
+  sub-purpose (`lab/nuclei-templates/path-traversal-etc-passwd.yaml`,
+  the same match pattern). **Corrects a mischaracterization made
+  earlier in this project's own history** (recorded in `FR-LAB-130` and
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s category-4 row when
+  `CC-LAB-0190` deliberately deferred detection): the deferral reasoned
+  that "a path-traversal strategy cannot plant its own canary on the
+  target's filesystem... probing well-known OS paths is not a safe/
+  realistic black-box signal," conflating this concern with a
+  canary-planting design. That reasoning never applied to the
+  read-a-pre-existing-file technique actually used here — this was a
+  genuinely open, unbuilt follow-on (unlike `webhook_signature`, which
+  IS confirmed infeasible for its own distinct CWE-347 timing-side-
+  channel reason), and it is now closed. New audit rule
+  `R-PATH-TRAVERSAL` (`fuzzlab/audit/rules_data/default_rules.json`,
+  `CC-AUD-0027`, `sink_context_in: ["fs_path_read"]`, category
+  `path-traversal`). `fuzzlab/core/runmode.py::_VULN_TO_CATEGORY` and
+  `fuzzlab/oracle/strategies.py::_CATEGORY_TO_CLASS` both gain the
+  matching `path_traversal`/`path-traversal` entries (checked both
+  directly rather than assuming either already existed, per BUG-0043's
+  own lesson). Verified empirically against the real, live-booted
+  vulnerable/secure twins before writing the strategy (per this
+  change's own task instructions): the vulnerable twin
+  (`LABGEN-GO-0021`) returns real `/etc/passwd` content (HTTP 200) for
+  `filename=../../../../../../../../etc/passwd`; the secure twin
+  (`LABGEN-GO-0022`, `realpath_confine`) rejects the identical payload
+  outright (HTTP 403), confirming the existing `_TRAVERSAL_PAYLOADS`
+  list already reaches real OS-file content at this lab's confinement
+  depth with no new tuning needed. New live-boot test
+  (`tests/test_labgen_go_live_boot.py::
+  test_path_traversal_strategy_closes_the_fs_path_read_detection_gap`)
+  and through the real, scored multitarget pipeline
+  (`tests/test_multitarget_category4.py`): Twitch's own recall moves
+  from `13/15` to `14/15` (`tp` 13 -> 14, `fp` stays 0) — this project's
+  own last known real, tracked category-4 detection gap (only
+  `webhook_signature` remains, confirmed infeasible).
+
 ## 2026-09-23 (FUZZ/AUD: `http_header_injection` detection closes category 4's last known real gap; fix: a second, independent point-building bug found wiring it in, BUG-0044/PA-0046)
 - New oracle strategy `fuzzlab/oracle/strategies.py::
   HttpHeaderInjectionCrlfStrategy` (`CC-FUZZ-0041`) confirms `CC-LAB-0198`'s

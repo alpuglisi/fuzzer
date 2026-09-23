@@ -1105,6 +1105,60 @@ def test_real_boot_proves_the_path_traversal_differential_for_both_twins() -> No
         assert secure_missing.status == 404
 
 
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_path_traversal_strategy_closes_the_fs_path_read_detection_gap() -> None:
+    """`CC-FUZZ-0042`: `PathTraversalFsPathReadStrategy` (`fuzzlab/oracle/
+    strategies.py`) confirms `CC-LAB-0190`'s own vulnerable twin for real,
+    over the network via `RequestsProbeSender` (not a stub), and correctly
+    declines the secure twin -- closing `TWCH-0011`'s own deliberately-
+    deferred detection follow-on (its own `labels.json` `notes` field
+    explicitly tracked this as "genuinely unbuilt ... a false negative
+    until that follow-on lands").
+
+    This is the ORACLE-side proof, distinct from `tests/
+    test_labgen_go_live_boot.py::
+    test_real_boot_proves_the_path_traversal_differential_for_both_twins`
+    above, which only proves the LAB shape's own vulnerable/secure
+    differential exists (via an inert, harness-planted canary file) and
+    explicitly defers detection. This test proves the real oracle
+    strategy actually confirms it, reading the target's real, pre-existing
+    `/etc/passwd` (present in the harness's own build/boot container) --
+    never a canary planted on the target's filesystem, and never any file
+    this test itself writes: the strategy's own payload traverses to a
+    file that already exists there, exactly the safe, standard black-box
+    technique this project's own `fuzzlab/labgen/nuclei_oracle.py` already
+    bundles for a different sub-purpose (`lab/nuclei-templates/
+    path-traversal-etc-passwd.yaml`).
+    """
+    from fuzzlab.oracle.probe import Candidate
+    from fuzzlab.oracle.strategies import PathTraversalFsPathReadStrategy
+    from fuzzlab.tools.probesender import RequestsProbeSender
+
+    manifest = load_manifest("lab/manifests/path_traversal_go_sample.yaml")
+    emitter = GoEmitter()
+    cells = {c.cell_id: c for c in manifest.cells}
+
+    with GoLiveBootHarness(emitter, list(cells.values())) as harness:
+        sender = RequestsProbeSender(timeout=10.0)
+        strategy = PathTraversalFsPathReadStrategy()
+
+        vuln_candidate = Candidate(
+            url=f"{harness.base_url}/generated/labgen-go-0021", param="filename",
+            method="GET", location="query",
+        )
+        verdict = strategy.confirm(vuln_candidate, sender)
+        assert verdict is not None and verdict.confirmed, verdict
+        assert verdict.vuln_class == "path_traversal"
+        assert "etc/passwd" in verdict.evidence["payload"]
+
+        secure_candidate = Candidate(
+            url=f"{harness.base_url}/generated/labgen-go-0022", param="filename",
+            method="GET", location="query",
+        )
+        assert strategy.confirm(secure_candidate, sender) is None
+
+
 # -- Phase B twelfth increment: SSTI (template_render, CC-LAB-0196) --
 
 

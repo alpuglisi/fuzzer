@@ -3,6 +3,67 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0027 — `R-PATH-TRAVERSAL` audit rule closes category 4's last known real, tracked detection gap (2026-09-23)
+
+- Change: adds `R-PATH-TRAVERSAL`, category `path-traversal`, to
+  `fuzzlab/audit/rules_data/default_rules.json` — `{"location_in":
+  ["query", "body"], "sink_context_in": ["fs_path_read"]}`, the same
+  `location_in`+`sink_context_in` shape as `R-HEADER-INJECTION`/
+  `R-INSECURE-DESERIALIZATION`/`R-UNRESTRICTED-FILE-UPLOAD`/
+  `R-PRICE-INTEGRITY`. `reference` is `"directory-traversal"` — an
+  existing `references/directory-traversal` catalog directory names this
+  exact concern, unlike `R-HEADER-INJECTION`'s own deliberate departure
+  (checked before choosing this reference, not assumed). Gated on
+  `sink_context_in: ["fs_path_read"]` rather than the pre-existing
+  `R-FILE-INCLUSION` rule's `name_regex` (`file|path|page|include|
+  template|doc|folder|dir|load`) deliberately: `sink_context=
+  "fs_path_read"` is this project's own ground-truth-schema label for
+  exactly this concern (`TWCH-0011`'s own `labels.json` entry), and this
+  rule's own category (`path-traversal`) and `vuln_class`
+  (`path_traversal`, underscored) are both genuinely distinct from
+  `R-FILE-INCLUSION`'s own category/vuln_class (`file-inclusion`, which
+  matches no current ground truth and is left untouched) — the two rules
+  legitimately both fire on `filename` (the `name_regex` matches
+  "file" too), generating two independent candidates under two
+  independent categories for the same point; this is by design, not a
+  duplicate, since `PathTraversalStrategy`'s own `"file-inclusion"`
+  strategy fails closed on this page (no candidate reaches it, since
+  `file-inclusion` has no `_VULN_TO_CATEGORY`/ground-truth path into a
+  scored automatic run today), while the new `R-PATH-TRAVERSAL`/
+  `PathTraversalFsPathReadStrategy` pair is the one that actually scores.
+  Checked before landing: `sink_context="fs_path_read"` is used nowhere
+  else in the project (`grep -rl '"sink_context": "fs_path_read"'
+  lab/ground-truth-*/labels.json` returns only Twitch's own file), so
+  there is no cross-target overlap to reason about, unlike
+  `R-HEADER-INJECTION`'s own `outbound_header_injection` case.
+- Impact (other components / project): `AUD` primarily
+  (`default_rules.json`). `FUZZ`'s `CC-FUZZ-0042` (this rule's own
+  companion oracle strategy, `PathTraversalFsPathReadStrategy`) depends
+  on this rule to ever receive a candidate to confirm. Closes
+  `CC-LAB-0190`'s own deliberately-deferred detection follow-on for
+  Twitch's `TWCH-0011` — this project's own last known real, TRACKED
+  category-4 detection gap.
+- Risk (level; mitigation or accepted-risk justification): Low.
+  Additive-only (one new rule entry, no existing rule changed). The
+  `sink_context_in` gate means this rule only ever fires for a point
+  whose `sink_context` was positively typed as `"fs_path_read"` — never
+  for a crawled/untyped real point with no `sink_context` at all — so it
+  cannot spuriously widen candidate generation on an untyped black-box
+  target. No cross-target `sink_context` overlap exists today (checked
+  directly).
+- Deliverables:
+  - [x] `R-PATH-TRAVERSAL` rule added — done
+  - [x] Cross-checked `sink_context="fs_path_read"` against every other
+        `labels.json` file for an unintended overlap — none found — done
+  - [x] Verified live via the real, scored multitarget pipeline
+        (`tests/test_multitarget_category4.py`) — done
+- Effectiveness (assessed 2026-09-23): achieved. `evaluate()` now
+  nominates a real candidate for `TWCH-0011`'s `filename` param under
+  category `path-traversal`, which `PathTraversalFsPathReadStrategy`
+  confirms — verified against a live-booted app through the real
+  `run_targets` pipeline (Twitch's own `tp` moves from 13 to 14, `fp`
+  stays 0).
+
 ### CC-AUD-0026 — `R-HEADER-INJECTION` audit rule (2026-09-23)
 
 - Change: adds `R-HEADER-INJECTION`, category `http-header-injection`, to

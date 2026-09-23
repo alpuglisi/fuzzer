@@ -473,6 +473,79 @@ class PathTraversalStrategy(ConfirmationStrategy):
         return None
 
 
+class PathTraversalFsPathReadStrategy(ConfirmationStrategy):
+    """Confirms `path_traversal` (CWE-22, `fs_path_read` sink context --
+    `CC-LAB-0190`'s own deliberately-deferred detection follow-on, Twitch's
+    `TWCH-0011`, `GET /clips/export?filename=`) with a real, live-verified
+    `/etc/passwd`-content differential.
+
+    **This is NOT the "plant a canary on the target's filesystem" design a
+    prior verbal note in this project's own history dismissed as unsafe/
+    unrealistic (the same mischaracterization `docs/
+    LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s §9.4/§9.5 row for category
+    4 originally recorded, corrected by this same change).** That reasoning
+    applies only to a design that needs to *write* a marker file into the
+    target's filesystem first, the way an SSRF/XXE strategy plants a
+    canary via an `OobListener`. This strategy plants nothing: it sends a
+    `../`-traversal payload as the `filename` value and checks whether the
+    response body contains content that could only appear if the target
+    actually resolved and read a real, PRE-EXISTING OS file
+    (`/etc/passwd`, present on essentially every Linux/Unix target this
+    project's labs run on) -- the same standard, safe, purely-READ,
+    black-box technique this project's own `fuzzlab/labgen/nuclei_oracle.py`
+    already bundles for a different sub-purpose (`lab/nuclei-templates/
+    path-traversal-etc-passwd.yaml`, same `root:.*:0:0:`-shaped match), just
+    reimplemented here as a real, pure-Python `ConfirmationStrategy` for the
+    runtime oracle rather than invoked via Nuclei.
+
+    **Verified empirically against the real, live-booted vulnerable/secure
+    twins before writing this class** (`GoLiveBootHarness`, per this
+    change's own task instructions -- not guessed): the confinement depth
+    this lab's `UnconfinedPathSink` needs to escape is shallow enough that
+    the existing, already-escalating `_TRAVERSAL_PAYLOADS` list (reused
+    verbatim from `PathTraversalStrategy` above, whose own similarly-shaped
+    but differently-`vuln_class`/uncontrolled `file-inclusion` strategy
+    predates this one and is left untouched, matching no current ground
+    truth) already reaches real `/etc/passwd` content: the vulnerable twin
+    (`LABGEN-GO-0021`) returned the requested OS file's own real
+    `root:x:0:0:...` line verbatim for `filename=../../../../../../../../
+    etc/passwd` (HTTP 200), while the secure twin (`LABGEN-GO-0022`,
+    `realpath_confine`) rejected the identical payload outright (HTTP 403,
+    no such content anywhere in the body) -- confirming the plain
+    `/etc/passwd`-content differential transfers to this lab's real
+    confinement-bypass shape with no new traversal-depth tuning needed.
+
+    **Differential design (a control probe defends against a false
+    positive)**: a target that always echoes `root:...:0:0:`-shaped text
+    back regardless of input (a pathological or coincidental case, not
+    this bug) must not be confirmed. The control probe sends a filename
+    with no traversal separators at all (`"passwd"`, no `../`) -- a
+    legitimate-shaped but non-existent/out-of-directory-escaping filename
+    value that carries no traversal semantics whatsoever. Confirmation
+    requires the marker to be PRESENT for a genuine traversal payload AND
+    ABSENT for that control -- if the control also shows the marker, this
+    payload is skipped (not attributable to path traversal specifically)
+    and the next escalating payload in `_TRAVERSAL_PAYLOADS` is tried.
+    """
+    vuln_class = "path_traversal"
+    mechanism = "passwd-file-content-marker-differential"
+    category = "path-traversal"
+
+    _CONTROL_VALUE = "passwd"    # no traversal separators -- rules out an
+                                  # always-echoes-marker-content target
+
+    def confirm(self, candidate, sender):
+        for payload in _TRAVERSAL_PAYLOADS:
+            probe = self._send(sender, candidate, payload)
+            if not _PASSWD_MARKER.search(probe.text or ""):
+                continue
+            control = self._send(sender, candidate, self._CONTROL_VALUE)
+            if _PASSWD_MARKER.search(control.text or ""):
+                continue    # marker present even without traversal -- not attributable, try next payload
+            return Verdict(True, self.vuln_class, self.mechanism, {"payload": payload})
+        return None
+
+
 class CommandInjectionStrategy(ConfirmationStrategy):
     """M1 (timing): a shell `sleep` executes, latency rising with the requested delay."""
     vuln_class = "command-injection"
@@ -1697,6 +1770,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
             UnrestrictedFileUploadContentTypeTrustStrategy(),
             PriceIntegrityBypassStrategy(),
             HttpHeaderInjectionCrlfStrategy(),
+            PathTraversalFsPathReadStrategy(),
             GreyboxConfirmationStrategy(coverage, dbfault)]
 
 
@@ -1723,6 +1797,7 @@ _CATEGORY_TO_CLASS = {
     "unrestricted-file-upload": "unrestricted_file_upload",
     "price-integrity-bypass": "price_integrity_bypass",
     "http-header-injection": "http_header_injection",
+    "path-traversal": "path_traversal",
 }
 
 

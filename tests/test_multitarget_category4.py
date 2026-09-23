@@ -647,15 +647,29 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # both of CC-LAB-0198's own twins before this change was written, see
     # `tests/test_labgen_go_live_boot.py::
     # test_http_header_injection_strategy_closes_the_crlf_detection_gap`)
-    # closes this project's own last known real category-4 detection gap.
-    # No ground-truth-cardinality change this time (a pure detection
-    # increment, the same shape CC-FUZZ-0038's `GoTemplateSstiStrategy`
-    # landing was) -- tp moves from 12 to 13, recall from `12/15` to
-    # `13/15` (PA-0042/PA-0043: re-derived, grep-counted, and both
-    # occurrences in this file updated together).
+    # closed the category-4 gap known at that time. No ground-truth-
+    # cardinality change (a pure detection increment, the same shape
+    # CC-FUZZ-0038's `GoTemplateSstiStrategy` landing was) -- tp moved from
+    # 12 to 13, recall from `12/15` to `13/15`.
+    #
+    # `CC-FUZZ-0042`: TWCH-0011's own `path_traversal` case now ALSO
+    # confirms for real -- the new `R-PATH-TRAVERSAL`/
+    # `PathTraversalFsPathReadStrategy` pair (a real `/etc/passwd`-content
+    # differential: a traversal payload reads the target's real,
+    # pre-existing OS file, no canary planted; a non-traversal control
+    # value rules out an always-echoes-marker-content target; verified
+    # live against both of CC-LAB-0190's own twins, see `tests/
+    # test_labgen_go_live_boot.py::
+    # test_path_traversal_strategy_closes_the_fs_path_read_detection_gap`)
+    # closes this project's own last known real category-4 detection gap
+    # (only `webhook_signature` remains, confirmed infeasible for its own
+    # distinct, unrelated CWE-347 timing-side-channel reason). Another
+    # pure detection increment, no cardinality change -- tp moves from 13
+    # to 14, recall from `13/15` to `14/15` (PA-0042/PA-0043: re-derived,
+    # grep-counted, and both occurrences in this file updated together).
     twitch_report = by_name["twitch-clone"].report
-    assert twitch_report.tp == 13 and twitch_report.fp == 0
-    assert round(twitch_report.recall, 4) == round(13 / 15, 4)
+    assert twitch_report.tp == 14 and twitch_report.fp == 0
+    assert round(twitch_report.recall, 4) == round(14 / 15, 4)
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002, which does have a rule/strategy, R-XXE/
@@ -709,8 +723,12 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # `HttpHeaderInjectionCrlfStrategy` closes TWCH-0013's own remaining
     # `http_header_injection` gap (a pure detection increment, no
     # cardinality change): Twitch's own tp moves from 12 to 13, recall
-    # from 12/15 to 13/15.
-    assert round(summary["macro_recall"], 4) == round(((13 / 15) + (1 / 11)) / 2, 4)
+    # from 12/15 to 13/15. Then `CC-FUZZ-0042`'s new
+    # `PathTraversalFsPathReadStrategy` closes TWCH-0011's own remaining
+    # `path_traversal` gap (again a pure detection increment, no
+    # cardinality change): Twitch's own tp moves from 13 to 14, recall
+    # from 13/15 to 14/15.
+    assert round(summary["macro_recall"], 4) == round(((14 / 15) + (1 / 11)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True

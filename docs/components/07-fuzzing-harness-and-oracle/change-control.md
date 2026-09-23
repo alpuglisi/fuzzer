@@ -3,6 +3,114 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0042 — `PathTraversalFsPathReadStrategy` closes category 4's last known real, TRACKED detection gap (`path_traversal`/`fs_path_read`) (2026-09-23)
+
+- Change: new `fuzzlab/oracle/strategies.py::PathTraversalFsPathReadStrategy`
+  (`vuln_class="path_traversal"`, `category="path-traversal"`) confirms
+  `CC-LAB-0190`'s own deliberately-deferred `TWCH-0011` cell
+  (`GET /clips/export?filename=`, CWE-22) with a real, standard, purely-
+  READ black-box `/etc/passwd`-content differential: a `../`-traversal
+  payload (reused from the existing `_TRAVERSAL_PAYLOADS` list) must make
+  the response body contain the target's own real, PRE-EXISTING
+  `/etc/passwd` content (`_PASSWD_MARKER`, `root:.*:0:0:`); a control
+  probe with no traversal separators at all (`"passwd"`) must NOT show
+  that marker — ruling out a target that always echoes such content
+  regardless of input. Nothing is planted on the target's filesystem;
+  this only reads a file that already exists there — the same technique
+  this project's own `fuzzlab/labgen/nuclei_oracle.py` already bundles
+  for a different sub-purpose (`lab/nuclei-templates/
+  path-traversal-etc-passwd.yaml`, same match pattern), reimplemented
+  here as a pure-Python `ConfirmationStrategy` for the runtime oracle
+  rather than invoked via Nuclei. Registered in `default_strategies()`.
+  `fuzzlab/core/runmode.py::_VULN_TO_CATEGORY` gains `"path_traversal":
+  "path-traversal"`; `fuzzlab/oracle/strategies.py::_CATEGORY_TO_CLASS`
+  gains `"path-traversal": "path_traversal"` — both checked directly
+  before assuming either already existed (per `BUG-0043`'s own lesson).
+  **Corrects a mischaracterization made when `CC-LAB-0190` deliberately
+  deferred this concern's detection**: that entry (and `docs/
+  LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s category-4 row) reasoned
+  detection was deferred because "a path-traversal strategy cannot plant
+  its own canary on the target's filesystem... probing well-known OS
+  paths is not a safe/realistic black-box signal," which conflated this
+  concern with a canary-PLANTING design (the SSRF/XXE-style pattern via
+  an `OobListener`). That reasoning never applied to the read-a-pre-
+  existing-file technique this strategy actually uses — nothing is
+  planted, only a real, pre-existing OS file already on the target is
+  read. This was tracked as "genuinely unbuilt, an open follow-on" (per
+  `TWCH-0011`'s own `labels.json` `notes` field) — NOT confirmed
+  infeasible the way `webhook_signature`'s own CWE-347 timing side
+  channel is, for an unrelated reason (this project's single-request
+  oracle model cannot observe a timing side channel at all; that
+  limitation is real and distinct, and is NOT being revisited here).
+  Empirically verified against the real, live-booted vulnerable/secure
+  twins before writing this class (per this change's own task
+  instructions, not guessed): booted `GoLiveBootHarness` against
+  `lab/manifests/path_traversal_go_sample.yaml` and sent
+  `filename=../../../../../../../../etc/passwd` directly — the
+  vulnerable twin (`LABGEN-GO-0021`) returned real `/etc/passwd` content
+  (HTTP 200, `root:x:0:0:root:/root:/bin/bash...`); the secure twin
+  (`LABGEN-GO-0022`, `realpath_confine`) rejected the identical payload
+  outright (HTTP 403, no such content anywhere in the body); a legitimate
+  in-directory filename and a nonexistent filename behaved identically on
+  both twins. This confirms the existing, already-escalating
+  `_TRAVERSAL_PAYLOADS` list (shared with the pre-existing, differently-
+  named `PathTraversalStrategy`/`"file-inclusion"` class, left untouched
+  — it matches no current ground truth and was not the class this task
+  targeted) already reaches real OS-file content at this lab's
+  confinement depth, with no new traversal-depth tuning needed. New
+  live-boot test: `tests/test_labgen_go_live_boot.py::
+  test_path_traversal_strategy_closes_the_fs_path_read_detection_gap`
+  (driven through a real `GoLiveBootHarness` boot and a real
+  `RequestsProbeSender`, never a fake sender — confirms the real
+  vulnerable twin and correctly fails closed on the real secure twin).
+  `tests/test_multitarget_category4.py`'s two independent hardcoded
+  recall assertions (grep-counted per PA-0043: exactly 2 occurrences of
+  the stale fraction, both updated) move from `13/15` to `14/15`
+  (`tp` 13 -> 14, `fp` stays 0).
+- Impact (other components / project): `FUZZ` (`strategies.py`,
+  `runmode.py`) and `AUD` (`CC-AUD-0027`'s own `R-PATH-TRAVERSAL` rule,
+  this entry's companion). `LAB`'s `CC-LAB-0190`/`FR-LAB-130` entry's own
+  detection follow-on is now closed (no `LAB` change needed — the lab
+  page and its ground-truth label already existed; `FR-LAB-130` and
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s category-4 row are
+  updated in place to record the closure and correct the earlier
+  mischaracterization).
+- Risk (level; mitigation or accepted-risk justification): Low. The new
+  strategy/rule are purely additive (new class registered, new dict
+  entries added, no existing entry changed) and fail closed by
+  construction (a target that rejects the traversal probe, or whose
+  control probe also shows the marker, never confirms). The technique
+  only ever reads a pre-existing file on the target over an ordinary
+  HTTP request already being sent for this candidate — no write, no
+  filesystem access outside the HTTP protocol, no new capability granted
+  to the fuzzer. Full non-slow suite plus the category-4 multitarget
+  slow test file re-run, no new failures beyond the pre-existing,
+  unrelated PHP Laravel/labgen-CLI ones.
+- Deliverables:
+  - [x] `PathTraversalFsPathReadStrategy` added and registered — done
+  - [x] `_VULN_TO_CATEGORY`/`_CATEGORY_TO_CLASS` entries added, verified
+        neither already existed — done
+  - [x] Empirically verified (before design) against a real live boot
+        that the vulnerable twin returns real `/etc/passwd` content and
+        the secure twin rejects the identical payload — done
+  - [x] Live-boot test added and passing against a real booted app — done
+  - [x] `tests/test_multitarget_category4.py`'s both independent
+        hardcoded recall assertions grep-counted and updated (PA-0043) —
+        done
+  - [x] `FR-LAB-130` and the category-4 plan-doc row updated in place to
+        record the closure and correct the earlier "no way to plant a
+        canary" mischaracterization — done
+  - [x] Full non-slow suite + the category-4 multitarget slow test file
+        re-run, no new failures — done
+- Effectiveness (assessed 2026-09-23): achieved. Twitch's own real, scored
+  recall in `test_both_apps_run_through_multitarget_for_real` moves from
+  `13/15` to `14/15` (`tp` 13 -> 14, `fp` 0), verified against a real
+  booted app over the real `run_targets`/`RequestsProbeSender` pipeline,
+  not merely a hand-built `Candidate` call. This closes this project's
+  own last known real, TRACKED category-4 detection gap (only
+  `webhook_signature`'s own confirmed-infeasible CWE-347 timing side
+  channel remains undetected, for its own distinct, unrelated reason).
+
 ### CC-FUZZ-0041 — `HttpHeaderInjectionCrlfStrategy` closes category 4's last known real detection gap (`http_header_injection`); fix: a second, independent `points_from_ground_truth` bug found wiring it in (BUG-0044/PA-0046) (2026-09-23)
 
 - Change: new `fuzzlab/oracle/strategies.py::HttpHeaderInjectionCrlfStrategy`

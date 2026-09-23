@@ -4488,6 +4488,29 @@ lane) can submit a payload as
   expected, tracked false negative there (Twitch's own scored recall in
   that pipeline moves from `9/10` to `9/11`, `tp` unchanged at 9) rather
   than silently omitted from the boot.
+
+  **Detection gap CLOSED (`CC-FUZZ-0042`/`CC-AUD-0027`/`FR-FUZZ-26`/
+  `FR-AUD-17`, 2026-09-23, this note updated in place)**: `R-PATH-
+  TRAVERSAL` + `PathTraversalFsPathReadStrategy` now confirm `TWCH-0011`
+  for real (Twitch's own scored recall moves from `13/15` to `14/15`).
+  This was tracked immediately above as "genuinely unbuilt, an open
+  follow-on" — it was NOT confirmed infeasible, unlike `webhook_
+  signature`'s own distinct CWE-347 timing-side-channel limitation.
+  A separate mischaracterization, made when this entry and `docs/
+  LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s category-4 row first
+  recorded this deferral, is also corrected here: the deferral reasoned
+  detection was infeasible because "a path-traversal strategy cannot
+  plant its own canary on the target's filesystem... probing well-known
+  OS paths is not a safe/realistic black-box signal," conflating this
+  concern with a canary-PLANTING design (the SSRF/XXE pattern via an
+  `OobListener`). That reasoning never applied to the actual technique
+  used: sending a `../`-traversal payload and checking whether the
+  response contains the target's own real, PRE-EXISTING `/etc/passwd`
+  content — nothing is planted, only a file already on the target is
+  read, the same standard black-box technique this project's own
+  `fuzzlab/labgen/nuclei_oracle.py` already bundles for a different
+  sub-purpose. See `CC-FUZZ-0042` for the full change and the live
+  verification against this entry's own real vulnerable/secure twins.
   **Pre-change review gate, mechanism fidelity noted explicitly (same
   substitution as `CC-LAB-0182`-`0189`'s own precedent wording):** the
   `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was

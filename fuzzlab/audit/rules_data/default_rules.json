@@ -112,6 +112,13 @@
       "transaction_type": "HTTP Response Header Injection",
       "when": { "location_in": ["query", "body"], "sink_context_in": ["header"] },
       "reference": "http-response-splitting"
+    },
+    {
+      "id": "R-PATH-TRAVERSAL",
+      "category": "path-traversal",
+      "transaction_type": "Path Traversal / Unconfined File Read",
+      "when": { "location_in": ["query", "body"], "sink_context_in": ["fs_path_read"] },
+      "reference": "directory-traversal"
     }
   ]
 }

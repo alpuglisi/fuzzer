@@ -92,6 +92,14 @@ _VULN_TO_CATEGORY = {
     # (`fuzzlab/oracle/strategies.py`) before assuming either already had
     # an entry, per this change's own task instructions.
     "http_header_injection": "http-header-injection",
+    # `path_traversal` (CC-FUZZ-0042): the same underscore/hyphen mismatch
+    # class again (`PathTraversalFsPathReadStrategy.vuln_class ==
+    # "path_traversal"`, category `"path-traversal"`), added proactively
+    # alongside `R-PATH-TRAVERSAL` rather than found empirically after the
+    # fact -- checked both this dict and `_CATEGORY_TO_CLASS`
+    # (`fuzzlab/oracle/strategies.py`) before assuming either already had
+    # an entry, per `BUG-0043`'s own lesson.
+    "path_traversal": "path-traversal",
 }
 
 

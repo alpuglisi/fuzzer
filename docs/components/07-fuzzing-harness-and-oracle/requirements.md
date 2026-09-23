@@ -616,6 +616,59 @@ rewards) derives from it.
     full non-slow-suite + multitarget/live-boot re-run (no new
     regressions).
 
+- **FR-FUZZ-26** *(`PathTraversalFsPathReadStrategy`; `CC-FUZZ-0042`,
+  2026-09-23).* The oracle supports real **path-traversal (CWE-22,
+  `fs_path_read` sink context) confirmation** for `path_traversal`,
+  paired with `FR-AUD-17`'s candidate-generation rule, closing
+  `CC-LAB-0190`'s own deliberately-deferred detection follow-on for
+  Twitch's `TWCH-0011` (`GET /clips/export?filename=`) — this project's
+  own last known real, TRACKED category-4 detection gap (only
+  `webhook_signature`'s own confirmed-infeasible CWE-347 timing side
+  channel remains):
+  - `PathTraversalFsPathReadStrategy` (`vuln_class="path_traversal"`,
+    `mechanism="passwd-file-content-marker-differential"`): a `../`-
+    traversal payload must make the response body contain the target's
+    own real, PRE-EXISTING `/etc/passwd` content (`root:.*:0:0:`); a
+    control probe with no traversal separators at all (`"passwd"`) must
+    NOT show that marker. Nothing is planted on the target's filesystem
+    — this only reads a file that already exists there, the same
+    standard, safe, purely-read black-box technique this project's own
+    `fuzzlab/labgen/nuclei_oracle.py` already bundles for a different
+    sub-purpose (`lab/nuclei-templates/path-traversal-etc-passwd.yaml`).
+  - **Corrects a mischaracterization made when detection was originally
+    deferred** (`FR-LAB-130`, `CC-LAB-0190`): that deferral reasoned "a
+    path-traversal strategy cannot plant its own canary on the target's
+    filesystem... probing well-known OS paths is not a safe/realistic
+    black-box signal," conflating this concern with a canary-PLANTING
+    design (the SSRF/XXE pattern via an `OobListener`). That reasoning
+    never applied to the read-a-pre-existing-file technique actually
+    used — `path_traversal` was tracked as "genuinely unbuilt, an open
+    follow-on," not confirmed infeasible the way `webhook_signature` is
+    for its own distinct, unrelated reason.
+  - **Verified empirically against the real, live-booted vulnerable/
+    secure twins before design, not assumed**: the vulnerable twin
+    (`LABGEN-GO-0021`) returns real `/etc/passwd` content (HTTP 200) for
+    `filename=../../../../../../../../etc/passwd`; the secure twin
+    (`LABGEN-GO-0022`, `realpath_confine`) rejects the identical payload
+    outright (HTTP 403) — the existing, already-escalating
+    `_TRAVERSAL_PAYLOADS` list (shared with the pre-existing,
+    differently-named `PathTraversalStrategy`/`"file-inclusion"` class,
+    which matches no current ground truth and is left untouched) already
+    reaches real OS-file content at this lab's confinement depth, with
+    no new traversal-depth tuning needed.
+  - Real, executed live-boot proof (`tests/test_labgen_go_live_boot.py::
+    test_path_traversal_strategy_closes_the_fs_path_read_detection_gap`,
+    driven through a real `GoLiveBootHarness` boot and a real
+    `RequestsProbeSender`, never a fake sender): confirms the real
+    vulnerable twin and correctly fails closed on the real secure twin.
+  - Verified through the real `fuzzlab.harness.multitarget` pipeline
+    (`tests/test_multitarget_category4.py::
+    test_both_apps_run_through_multitarget_for_real`, extended): Twitch's
+    `TWCH-0011` is now a real, confirmed finding; ground-truth
+    cardinality stays 15 (a pure detection increment), `tp` moves from
+    13 to 14, and Twitch's own real, scored recall moves from `13/15` to
+    `14/15`.
+
 - **FR-FUZZ-19** *(`JwtAlgNoneConfusionStrategy`; `CC-FUZZ-0033`,
   2026-09-23).* The oracle supports real **JWT algorithm-confusion
   (CWE-347) confirmation**, paired with `FR-AUD-11`'s candidate-

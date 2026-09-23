@@ -144,6 +144,24 @@ budget where a vulnerability is plausible.
   `vuln_class` has no category mapping that would ever include this
   category in a real automatic run's `plan.categories`. Rule-generation
   only — confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-25`).
+- **FR-AUD-17** *(`CC-AUD-0027`, 2026-09-23).* A candidate is generated
+  for the `path-traversal` category: `R-PATH-TRAVERSAL`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a `query`/`body`
+  point whose `sink_context` is `"fs_path_read"` — the same
+  `location_in`+`sink_context_in` shape as `R-HEADER-INJECTION`/
+  `R-INSECURE-DESERIALIZATION`/`R-UNRESTRICTED-FILE-UPLOAD`/
+  `R-PRICE-INTEGRITY`. Closes `CC-LAB-0190`'s own deliberately-deferred
+  detection follow-on for Twitch's `path_traversal` cell (`TWCH-0011`) —
+  this project's own last known real, TRACKED category-4 detection gap.
+  Checked directly (not assumed) that `sink_context="fs_path_read"` has
+  no other current user in any ground truth, so there is no cross-target
+  overlap to reason about. The pre-existing `R-FILE-INCLUSION` rule's
+  broader `name_regex` also matches `filename`, generating a second,
+  independent candidate under a genuinely distinct category
+  (`file-inclusion`, matching no current ground truth) — by design, not
+  a duplicate: that category has no confirming path in a scored
+  automatic run today. Rule-generation only — confirmation is
+  `fuzzlab.oracle`'s job (`FR-FUZZ-26`).
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that
