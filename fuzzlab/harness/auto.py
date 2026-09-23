@@ -30,7 +30,7 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
     against a header value -- `CC-LAB-0174`'s `TWCH-0001`) are always ``skipped``
     with their own reason: neither this function's point model nor
     ``fuzzlab.tools.probesender``'s senders carry a header-injection convention yet
-    (`FR-FUZZ-12`), a real, distinct gap from the DOM/browser one -- never folded
+    (`FR-FUZZ-13`), a real, distinct gap from the DOM/browser one -- never folded
     into that reason string, which would misreport *why* the point can't be audited.
     """
     base = base_url.rstrip("/")
@@ -52,7 +52,7 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
         elif is_header:
             skipped.append((path, gp.method, gp.param,
                             "header-carried injection point (no header-capable "
-                            "point/sender wiring yet, FR-FUZZ-12)"))
+                            "point/sender wiring yet, FR-FUZZ-13)"))
         else:
             skipped.append((path, gp.method, gp.param,
                             "client-only/DOM (needs browser execution, M6)"))

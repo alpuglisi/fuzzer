@@ -99,7 +99,7 @@ def test_points_from_ground_truth_filters_to_testable():
 
 
 def test_points_from_ground_truth_gives_header_points_their_own_skip_reason():
-    # CC-LAB-0176/FR-FUZZ-12: a header-carried point (Twitch's webhook-signature
+    # CC-LAB-0176/FR-FUZZ-13: a header-carried point (Twitch's webhook-signature
     # case, location="header") must be skipped with an honest, distinct reason --
     # never folded into the DOM/browser one, which would misreport why it can't
     # be audited (no header-injection point/sender convention exists yet, not
@@ -113,7 +113,7 @@ def test_points_from_ground_truth_gives_header_points_their_own_skip_reason():
     skipped_by_param = {param: reason for _p, _m, param, reason in skipped}
     assert "X-Signature-256" in skipped_by_param
     reason = skipped_by_param["X-Signature-256"]
-    assert "header" in reason and "FR-FUZZ-12" in reason
+    assert "header" in reason and "FR-FUZZ-13" in reason
     assert "M6" not in reason and "browser" not in reason   # not the DOM reason
 
 

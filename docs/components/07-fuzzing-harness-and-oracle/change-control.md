@@ -3,7 +3,7 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
-### CC-FUZZ-0025 — Give header-carried ground-truth points their own honest skip reason (2026-09-23)
+### CC-FUZZ-0026 — Give header-carried ground-truth points their own honest skip reason (2026-09-23)
 
 - Change: `fuzzlab.harness.auto.points_from_ground_truth` treated a
   header-located ground-truth point (``location="header"``) as a
@@ -18,7 +18,7 @@ Newest first.
   surfaced immediately on inspection. Fixed with a distinct `is_header`
   branch and its own reason
   (``"header-carried injection point (no header-capable point/sender
-  wiring yet, FR-FUZZ-12)"``), never folded into the DOM reason. Building
+  wiring yet, FR-FUZZ-13)"``), never folded into the DOM reason. Building
   actual header-injection support (a point type + a header-capable sender)
   is real, sized follow-on work, not attempted here — this change only
   makes the current, correct "cannot be audited yet" outcome honestly
@@ -33,7 +33,7 @@ Newest first.
   New/changed files:
   - `fuzzlab/harness/auto.py` (`points_from_ground_truth`)
   - `tests/test_auto.py` (`test_points_from_ground_truth_gives_header_points_their_own_skip_reason`)
-  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md` (`FR-FUZZ-12`, new)
+  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md` (`FR-FUZZ-13`, new)
 - Impact (other components / project): none outside this function's own
   return value (`skipped`'s reason strings) — the set of points actually
   audited is unchanged (header points were already excluded before this

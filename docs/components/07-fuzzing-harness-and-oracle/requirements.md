@@ -1,7 +1,7 @@
 # Fuzzing Harness and Oracle — Requirement Specification
 
 Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5/M8; M10 grey-box wiring layer built, live sources on-host); harness generalization ongoing; greybox-run consumes mutation-engine variants (opt-in); coverage-frontier growth emitted to metric_series]`
-· Last updated: 2026-09-23 · see CC-FUZZ-0025
+· Last updated: 2026-09-23 · see CC-FUZZ-0026
 
 Related: `ARCHITECTURE.md` #7; `DECISIONS_AND_ROADMAP.md` (D1, D5, D7, Phase 2/3,
 Phase 8); `./change-control.md`.
@@ -155,7 +155,7 @@ rewards) derives from it.
     (renumbered from that branch's own `FR-FUZZ-9` — see the change-control
     entry's provenance note for why).
 
-- **FR-FUZZ-12** *(`CC-FUZZ-0025`, 2026-09-23).* A ground-truth point whose
+- **FR-FUZZ-13** *(`CC-FUZZ-0026`, 2026-09-23).* A ground-truth point whose
   tainted value is carried in a request **header**
   (`Case.location`/`InjectionPoint`'s `location="header"`) is honestly,
   distinctly reported as not-yet-auditable — never conflated with the

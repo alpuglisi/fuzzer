@@ -4,6 +4,22 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (cross-branch bookkeeping fix, by the category 1 pilot session)
+- Docs/FUZZ: fixed a real cross-branch ID collision found during a
+  cross-branch review — this branch's freshly-pushed `CC-FUZZ-0025`/
+  `FR-FUZZ-12` (the honest header-point skip-reason fix below) had been
+  independently claimed months earlier by category 1 for its own,
+  unrelated `RegexDosStrategy` M1 timing-differential ReDoS oracle work
+  — already baked into the shared cross-category tracker doc synced
+  across all five branches, making category 1's claim materially more
+  expensive to renumber. Renumbered this branch's usages to
+  `CC-FUZZ-0026`/`FR-FUZZ-13` via exact-token replacement across
+  `requirements.md`/`change-control.md`/`CHANGELOG.md`/
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`/
+  `fuzzlab/harness/auto.py`/`tests/test_auto.py`. Full non-slow test
+  suite re-run confirms no regression (1847 passed / 8 skipped, identical
+  to this branch's own pre-fix baseline).
+
 ## 2026-09-23 (FUZZ: honest header-point skip reason, found via category 4)
 - Fuzzing harness: `fuzzlab.harness.auto.points_from_ground_truth` was
   mislabeling a header-carried ground-truth point (`location="header"`) as
@@ -12,7 +28,7 @@ changed, and the reason. Reference the commit hash where useful.
   wiring category 4's Twitch app (its webhook-signature case is the
   project's first header-located ground-truth point) into Phase E. Fixed
   with its own accurate skip reason; no audited-point behavior changed.
-  `CC-FUZZ-0025`/`FR-FUZZ-12`.
+  `CC-FUZZ-0026`/`FR-FUZZ-13`.
 
 ## 2026-09-23 (category 4, Phase E multitarget wiring)
 - Lab: wired both of category 4's apps into `fuzzlab.harness.multitarget` for
