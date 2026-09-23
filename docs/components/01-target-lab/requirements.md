@@ -2196,6 +2196,36 @@ lane) can submit a payload as
     difference (the `identifier_charset_filter` open question above: an
     *identifier-swap* differential mode, not yet built either).
 
+- **FR-LAB-99** *(Phase E: both apps wired into
+  `fuzzlab.harness.multitarget` for real; `CC-LAB-0176`, 2026-09-23).*
+  `TargetSpec`s for both apps, booted for real (`GoLiveBootHarness`,
+  `SpringBootLiveBootHarness` — each gained an additive `base_url`
+  property), run through `run_targets`/`transfer_summary` in one call with
+  the project's existing `RequestsProbeSender` (real HTTP, never a fake
+  sender) — satisfies §6's actual ask (construct the spec, run it, confirm
+  it produces metrics and a `generalizes` verdict).
+  - **Open, explicitly recorded (not a defect in this wiring): real
+    detection on these three vuln classes is a structural zero today, for
+    two independent reasons.** No audit `Rule` exists for
+    `webhook_signature`/`ssrf`/`insecure_deserialization`
+    (`fuzzlab.core.runmode._VULN_TO_CATEGORY` only maps `sqli`/`xss-*`) —
+    the same class of gap category 1's own Phase E entry flagged for its
+    own new vuln classes and left unattempted. And two of the three
+    ground-truth points don't fit the generic pipeline's point model: the
+    header-located webhook case is skipped by
+    `fuzzlab.harness.auto.points_from_ground_truth` (which has no
+    header-location case at all, not just no vulnerability-class rule —
+    it falls into the DOM/browser skip path, a small additional
+    mislabeling worth a future fix even though the point is correctly
+    excluded either way); the whole-body-JSON deserialization case is
+    included as a point, but `RequestsProbeSender`'s body-location
+    convention (`data={param: value}`, form-urlencoded) cannot send valid
+    JSON, so no payload could ever succeed through it. Only the SSRF
+    query-param case is genuinely probed as designed. Building a new
+    audit-rule category, a header-location point type, or a
+    whole-body-JSON sender convention are each real, sized follow-on work
+    — not attempted in this increment.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.
@@ -2328,6 +2358,22 @@ None (it is the system under test).
   `tests/test_labgen_harder_shapes.py` and `tests/test_labgen_identifier_sqli_assertion.py`.
 
 ## 8. Open questions
+- (`CC-LAB-0176`/`FR-LAB-99`, category 4) **Three real gaps between
+  category 4's cells and the generic detection pipeline, found while
+  wiring Phase E.** (1) No audit `Rule` category exists for
+  `webhook_signature`/`ssrf`/`insecure_deserialization` — same class of
+  gap category 1's own Phase E flagged for its own new vuln classes. (2)
+  `fuzzlab.harness.auto.points_from_ground_truth` has no header-location
+  case at all (only `query`/`body`/DOM); a header-carried ground-truth
+  point (e.g. `TWCH-0001`) is silently absorbed into the DOM/browser skip
+  path with a misleading reason string, rather than its own, honestly
+  labeled "header injection points aren't audited yet" skip reason. (3)
+  `fuzzlab.tools.probesender.RequestsProbeSender`'s `location="body"`
+  convention is single-form-field (`data={param: value}`); it has no way
+  to express "substitute the payload into a whole raw JSON body," so a
+  whole-body-JSON ground-truth point (e.g. `NFLX-0001`) can never be
+  meaningfully probed through it. None of the three are attempted here —
+  each is real, sized follow-on work.
 - (`CC-LAB-0175`/`FR-LAB-98`, category 4) **The webhook-signature cell
   (`LABGEN-GO-0001`/`0002`, CWE-347) has no Tier 1/2 conformance path.**
   `naive_string_compare` vs `hmac.Equal` are functionally identical for any

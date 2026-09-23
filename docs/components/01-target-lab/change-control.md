@@ -3,6 +3,73 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0176 — Phase E: wire both apps into `fuzzlab.harness.multitarget` for real (2026-09-23)
+
+- Change: Constructs real `TargetSpec`s for both of this category's apps
+  and runs `fuzzlab.harness.multitarget.run_targets`/`transfer_summary`
+  against both, booted for real in one call — per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6, using the project's
+  existing real HTTP sender (`fuzzlab.tools.probesender.RequestsProbeSender`),
+  never a fake one. Two small, additive public accessors were needed and
+  added: `GoLiveBootHarness.base_url` / `SpringBootLiveBootHarness.base_url`
+  (thin wrappers over each harness's existing, unmodified private
+  `_base_url()`) — a `TargetSpec` needs a real URL string, and neither
+  harness exposed one publicly before this.
+  - `tests/test_multitarget_category4.py`: boots the Twitch app
+    (`GoLiveBootHarness`, both manifests' cells combined — webhook-signature
+    + SSRF) and the Netflix app (`SpringBootLiveBootHarness`, its one cell)
+    in the same test, wires `lab/ground-truth-twitch-clone`/
+    `lab/ground-truth-netflix-clone` (`CC-LAB-0174`) into two `TargetSpec`s,
+    and runs both through `run_targets` in one call — matching category 1's
+    own §6-step-2 precedent ("both real targets boot and score together in
+    one call").
+  - **Honestly recorded, not routed around: detections are a real,
+    structural zero for two independent, already-precedented reasons.**
+    (1) No audit `Rule` exists yet for `webhook_signature`/`ssrf`/
+    `insecure_deserialization` — `fuzzlab.core.runmode._VULN_TO_CATEGORY`
+    only maps `sqli`/`xss-*`, so these three fall through to their own name
+    as the category and `fuzzlab.audit.engine.evaluate` matches no rule,
+    same class of gap category 1's own Phase E entry already flagged and
+    left "not attempted" for its own new vuln classes. (2) Two of the three
+    ground-truth points can't be meaningfully expressed by the generic
+    pipeline's point model: the header-located webhook-signature case is
+    skipped by `points_from_auto.points_from_ground_truth` (mislabeled
+    under its DOM/browser skip reason — a small, separately-noted open
+    question, harmless since the point is skipped either way); the
+    whole-body-JSON deserialization case is included as a point but
+    `RequestsProbeSender`'s body-location convention (`data={param: value}`,
+    form-urlencoded) can never send valid JSON, so no injection could
+    succeed through it regardless of payload. Only the SSRF query-param
+    case is genuinely, meaningfully probed as designed. Building a new
+    audit rule category, a header-location point type, or a whole-body-JSON
+    sender convention are each real, sized follow-on items, not attempted
+    here — this increment's job (§6) was "construct the TargetSpec, run
+    `run_targets`, confirm it produces metrics and a `generalizes`
+    verdict," which it does, honestly.
+  New/changed files:
+  - `fuzzlab/labgen/conformance/go_live_boot.py` (`base_url` property, additive)
+  - `fuzzlab/labgen/conformance/live_boot_spring_boot.py` (`base_url` property, additive)
+  - `tests/test_multitarget_category4.py` (new)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-99`, new)
+- Impact (other components / project): none outside this component's own
+  harnesses (two additive public accessors, no existing caller's signature
+  changed) and a new test exercising `fuzzlab.harness.multitarget`/
+  `fuzzlab.tools.probesender` unchanged.
+- Risk (level; mitigation or accepted-risk justification): **low**. Additive
+  accessors only; the zero-detection outcome is an accepted, explicitly
+  documented scope boundary (matching category 1's own precedent), not a
+  silently-swallowed failure — the test asserts that exact zero rather than
+  hiding it.
+- Deliverables:
+  - [x] Real `TargetSpec`s for both apps, booted for real
+  - [x] `run_targets`/`transfer_summary` run against both in one call, no crash
+  - [x] Zero-detection outcome documented with its two real causes, not
+    silently accepted
+  - [x] Full non-slow suite re-verified green (no new failures)
+- Effectiveness (assessed 2026-09-23): met for the toolkit-wiring claim
+  (§6's actual ask); real detection on these three vuln classes remains
+  explicitly open, tracked in `FR-LAB-99`'s own note.
+
 ### CC-LAB-0175 — Phase D: real Tier 1/2 conformance for the SSRF and Jackson-deserialization cells (2026-09-23)
 
 - Change: Real, executed Tier 1 (in-process functional differential) and

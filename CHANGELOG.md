@@ -4,6 +4,19 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (category 4, Phase E multitarget wiring)
+- Lab: wired both of category 4's apps into `fuzzlab.harness.multitarget` for
+  real — `TargetSpec`s pointing at real live-booted instances (Go/Twitch,
+  Spring Boot/Netflix), run through `run_targets`/`transfer_summary` in one
+  call with the project's existing real HTTP `RequestsProbeSender`. Detection
+  is a documented, structural zero (no audit rule yet for
+  webhook_signature/ssrf/insecure_deserialization; the header-located and
+  whole-body-JSON ground-truth points don't fit the generic point/sender
+  model) — recorded as open follow-on work, not silently accepted, matching
+  category 1's own precedent for its own new vuln classes. Two additive
+  `base_url` accessors added to the Go/Spring Boot live-boot harnesses.
+  `CC-LAB-0176`/`FR-LAB-99`.
+
 ## 2026-09-23 (category 4, Phase D Tier 1/2 conformance)
 - Lab: real, executed Tier 1/2 conformance proof (`fuzzlab.labgen.conformance.tier1`/
   `tier2`, reused unchanged) for two of category 4's three cells — SSRF

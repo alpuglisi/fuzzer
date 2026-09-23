@@ -285,6 +285,13 @@ class GoLiveBootHarness:
         assert self._port is not None
         return f"http://127.0.0.1:{self._port}"
 
+    @property
+    def base_url(self) -> str:
+        """The real, booted app's base URL -- for a caller (e.g. a
+        `fuzzlab.harness.multitarget.TargetSpec`) that needs to point at it
+        without going through this harness's own request methods."""
+        return self._base_url()
+
     def request(
         self,
         method: str,
