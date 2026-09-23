@@ -4,6 +4,24 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (category 5: second real detection, generalizes=True for real)
+- FUZZ: builds `SpelInjectionStrategy` + a new `R-SPEL-INJECTION` rule for
+  `spel_injection` (CWE-917) — unlike `ssti`/`open_redirect`, no existing
+  confirmer applied here, so this is genuinely new detection capability.
+  The pre-change review gate caught a blocking, 100%-reproducible design
+  flaw before any code was written: the obvious mirror of `SstiStrategy`'s
+  own bare-arithmetic-product canary would confirm on the SECURE twin too
+  (`SimpleEvaluationContext` restricts type/method/bean access, not
+  literal arithmetic) — fixed with a `T(java.lang.Math).abs(-n)` type-
+  reference canary instead, the exact differential already proven live in
+  this category's own live-boot test. Live-verified end to end: `tp=1,
+  fn=0, fp=0` against Expedia's real deployment, zero false positives on
+  the real secure twin. Combined with `open_redirect`'s own real
+  detection, category 5's Phase E combined test now scores
+  `generalizes=True` for real — two independently-mapped classes, two
+  different stacks, genuine cross-target transfer, not one class counted
+  twice. See `CC-FUZZ-0028`.
+
 ## 2026-09-23 (category 5: first real detection, open_redirect mapped)
 - CORE/FUZZ: maps `open_redirect` into `fuzzlab.core.runmode.
   _VULN_TO_CATEGORY` — a real rule (`R-OPEN-REDIRECT`) and confirmation

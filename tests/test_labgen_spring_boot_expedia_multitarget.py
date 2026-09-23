@@ -31,9 +31,10 @@ means the existing harness's restriction is not a limitation here at all,
 and its public `.base_url` property (`CC-LAB-0132`'s own `app_dir`
 precedent, extended) is exactly what a `TargetSpec` needs.
 
-**Recall is honestly 0 here, and that is expected, not a bug** -- same
-documented gap as every other category's own Phase E test:
-`spel_injection` is unmapped by `fuzzlab.core.runmode._VULN_TO_CATEGORY`.
+**Recall is 1/1**: `spel_injection` now genuinely detects
+(`CC-FUZZ-0028`/`CC-CORE-0021`-adjacent mapping, a new rule+strategy pair
+built specifically for this shape, live-verified before this test was
+updated to expect it).
 
 Skip-guarded on `spring_boot_boot_available()` (PA-0005/PA-0035). Marked
 `@pytest.mark.slow`.
@@ -89,9 +90,11 @@ def test_expedia_target_spec_runs_for_real_and_scores(tmp_path) -> None:
             outcome = outcomes[0]
             assert outcome.scored is True
             assert outcome.report is not None
-            assert outcome.report.tp == 0 and outcome.report.fn == len(gt.positives())
-            assert outcome.report.precision == 0.0
-            assert outcome.report.recall == 0.0
+            # spel_injection genuinely detects now (CC-FUZZ-0028): tp=1, fn=0.
+            assert outcome.report.tp == 1 and outcome.report.fn == 0
+            assert outcome.report.fp == 0
+            assert outcome.report.precision == 1.0
+            assert outcome.report.recall == 1.0
 
             summary = transfer_summary(outcomes)
             assert summary["targets"] == 1

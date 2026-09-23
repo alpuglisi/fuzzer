@@ -10,6 +10,7 @@ from fuzzlab.oracle.strategies import (
     CommandInjectionStrategy,
     OpenRedirectStrategy,
     PathTraversalStrategy,
+    SpelInjectionStrategy,
     SstiStrategy,
 )
 
@@ -61,6 +62,48 @@ def test_ssti_not_confirmed_on_reflection_without_eval():
         def send(self, url, param, value, timing=False, method="GET", location="query"):
             return Probe(200, f"<p>{value}</p>", headers={})
     assert SstiStrategy().confirm(_cand("ssti"), ReflectSender()) is None
+
+
+# --- SpEL injection (CWE-917) -------------------------------------------------
+
+def test_spel_injection_confirmed_when_type_reference_evaluated():
+    class UnrestrictedContextSender:
+        """Models a real `StandardEvaluationContext` sink: a `T(...)` type
+        reference genuinely evaluates -- `T(java.lang.Math).abs(-N)` -> `N`."""
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            m = re.search(r"T\(java\.lang\.Math\)\.abs\(-(\d+)\)", value)
+            if m:
+                return Probe(200, f"Sort result: {m.group(1)}", headers={})
+            return Probe(400, "Sort expression error", headers={})
+    v = SpelInjectionStrategy().confirm(_cand("spel-injection"), UnrestrictedContextSender())
+    assert v is not None and v.confirmed and v.mechanism == "type-reference-evaluation"
+
+
+def test_spel_injection_not_confirmed_when_type_reference_rejected():
+    class RestrictedContextSender:
+        """Models a real `SimpleEvaluationContext` sink: a `T(...)` type
+        reference is rejected outright, the real documented fix."""
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            return Probe(400, "Sort expression error: EL1053E", headers={})
+    assert SpelInjectionStrategy().confirm(_cand("spel-injection"), RestrictedContextSender()) is None
+
+
+def test_spel_injection_arithmetic_alone_would_have_been_a_false_positive():
+    """Documents the exact pitfall this component's own pre-change review
+    gate caught before implementation: a restricted `SimpleEvaluationContext`
+    still evaluates bare literal arithmetic (only type/method/bean access is
+    restricted) -- so a bare-arithmetic canary like `SstiStrategy`'s own
+    would confirm on a SECURE twin too. This test proves the real strategy's
+    own `T(...)`-based canary does NOT fall into that trap: a sender that
+    evaluates bare arithmetic but rejects type references (the real
+    SimpleEvaluationContext differential) must not be confirmed."""
+    class ArithmeticOnlyRestrictedSender:
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            m = re.fullmatch(r"(\d+)\*(\d+)", value)
+            if m:
+                return Probe(200, f"Sort result: {int(m.group(1)) * int(m.group(2))}", headers={})
+            return Probe(400, "Sort expression error", headers={})   # T(...) rejected
+    assert SpelInjectionStrategy().confirm(_cand("spel-injection"), ArithmeticOnlyRestrictedSender()) is None
 
 
 # --- path traversal / LFI (M7) ----------------------------------------------

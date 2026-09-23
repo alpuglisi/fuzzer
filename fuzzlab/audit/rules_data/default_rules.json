@@ -42,6 +42,13 @@
       "transaction_type": "Template Injection",
       "when": { "location_in": ["query", "body"] },
       "reference": "server-side-template-injection"
+    },
+    {
+      "id": "R-SPEL-INJECTION",
+      "category": "spel-injection",
+      "transaction_type": "Expression Language Injection",
+      "when": { "name_regex": "sort|sortby|filter|order|expr|expression" },
+      "reference": "spel-injection"
     }
   ]
 }

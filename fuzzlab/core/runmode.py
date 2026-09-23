@@ -53,6 +53,19 @@ _VULN_TO_CATEGORY = {
     # `RequestsProbeSender` (`BUG-0039`) that would otherwise have made this
     # mapping look wired but silently fail (or crash) against a real target.
     "open_redirect": "open-redirect",
+    # `spel_injection` (category 5, Expedia, `CC-LAB-0214`): a new rule
+    # (`R-SPEL-INJECTION`) and confirmation strategy (`SpelInjectionStrategy`
+    # in fuzzlab/oracle/strategies.py) built specifically for this class --
+    # unlike `ssti`/`open_redirect` above, no existing rule+strategy pair
+    # applied here (SstiStrategy's own bare-arithmetic-product canary would
+    # be a guaranteed false positive against this shape's real secure twin,
+    # a `SimpleEvaluationContext` that restricts type/method access but not
+    # literal arithmetic -- caught by this component's own pre-change review
+    # gate before implementation). `SpelInjectionStrategy` uses a
+    # `T(java.lang.Math).abs(-n)` type-reference canary instead, the exact
+    # differential this project already proved live. Verified live against
+    # both of Expedia's real twins before landing.
+    "spel_injection": "spel-injection",
 }
 
 

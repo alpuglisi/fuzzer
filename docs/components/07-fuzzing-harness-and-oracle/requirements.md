@@ -229,6 +229,26 @@ rewards) derives from it.
   separate namespace (`BUG-0040`). Both verified live end to end against a
   real target; see `CC-CORE-0021`/`FR-CORE-11` for the real scored proof.
 
+- **FR-FUZZ-15** *(`CC-FUZZ-0028`, 2026-09-23).* `SpelInjectionStrategy`
+  (`fuzzlab/oracle/strategies.py`) confirms `spel_injection` (CWE-917) via
+  a `T(java.lang.Math).abs(-n)` type-reference canary — a bare-arithmetic
+  canary (`SstiStrategy`'s own mechanism) was rejected pre-implementation
+  by the adequacy review: `SimpleEvaluationContext` (the real secure-twin
+  fix) restricts type/method/bean access but not literal arithmetic, so
+  a bare-arithmetic canary would confirm on the SECURE twin too, a
+  guaranteed false positive. New `Rule` `R-SPEL-INJECTION` (`name_regex:
+  "sort|sortby|filter|order|expr|expression"`, grounded in Expedia's real
+  `sortBy` parameter), new `_VULN_TO_CATEGORY["spel_injection"]`/
+  `_CATEGORY_TO_CLASS["spel-injection"]` entries (both required —
+  `fuzzlab.harness.pipeline`'s own dispatch gate needs the second one or
+  every candidate is silently dropped, a completeness gap the accuracy
+  review caught pre-implementation). Live-verified end to end: `tp=1,
+  fn=0, fp=0` against Expedia's real deployment, including an explicit
+  secure-twin check confirming no false positive. Category 5's second
+  real detection — combined with `open_redirect`'s own (`FR-CORE-11`),
+  the Phase E combined test now scores `generalizes=True` for real (two
+  independently-mapped classes, two different stacks).
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

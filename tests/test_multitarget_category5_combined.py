@@ -18,14 +18,15 @@ managers.
 This closes the toolkit-side half of category 5's own Phase 10 `T10.6`-
 style proof: `fuzzlab/harness/multitarget.py` actually accepting two real,
 distinct, locally-booted second targets in one call and producing a real
-combined `transfer_summary`. It does **not** claim `generalizes=True` --
-`open_redirect` genuinely detects on Booking.com now (`CC-CORE-0021`/
-`FR-CORE-11`), but `csv_formula_injection`/`price_integrity_bypass`
-(Booking.com) and `spel_injection` (Expedia) all remain honestly unmapped
-in `fuzzlab.core.runmode._VULN_TO_CATEGORY` (no verified confirmer exists
-for any of the three yet), so `generalizes` is correctly `False` -- a
-single target detecting one of its own classes is not cross-target
-transfer.
+combined `transfer_summary`. **`generalizes` is `True`** -- `open_redirect`
+genuinely detects on Booking.com (`CC-CORE-0021`/`FR-CORE-11`, recall
+1/3) and `spel_injection` genuinely detects on Expedia (`CC-FUZZ-0028`,
+recall 1/1); `transfer_summary`'s own `generalizes` rule (`>= 2` scored
+targets with `recall > 0`) is satisfied by two *independently* mapped
+classes on two different stacks (PHP/Laravel and Java/Spring Boot), a
+real cross-target result, not a coincidence of one class counted twice.
+`csv_formula_injection`/`price_integrity_bypass` (Booking.com) remain
+honestly unmapped -- no verified confirmer exists for either yet.
 
 Skip-guarded on both `spring_boot_boot_available()` and
 `live_boot_available()` (PA-0005/PA-0035). Marked `@pytest.mark.slow`.
@@ -114,15 +115,17 @@ def test_booking_and_expedia_run_together_in_one_call(tmp_path) -> None:
             # Per-target assertions, not a shared loop -- CC-CORE-0020's own
             # adequacy review caught exactly this pitfall (a shared loop would
             # silently apply one target's own numbers to the other). Booking.com
-            # genuinely detects open_redirect now (CC-CORE-0021/FR-CORE-11);
-            # Expedia's spel_injection has no verified confirmer yet.
+            # genuinely detects open_redirect (CC-CORE-0021/FR-CORE-11);
+            # Expedia genuinely detects spel_injection (CC-FUZZ-0028).
             assert booking_outcome.report.tp == 1 and booking_outcome.report.fn == 2
             assert booking_outcome.report.recall == 1 / 3
-            assert expedia_outcome.report.tp == 0
-            assert expedia_outcome.report.recall == 0.0
+            assert expedia_outcome.report.tp == 1 and expedia_outcome.report.fn == 0
+            assert expedia_outcome.report.recall == 1.0
             # Two independent real run_ids, one per target, in the same call.
             assert outcomes[0].run_id != outcomes[1].run_id
 
             summary = transfer_summary(outcomes)
             assert summary["targets"] == 2
-            assert summary["generalizes"] is False
+            # Real cross-target transfer: two independently mapped classes,
+            # two different stacks, each with recall > 0.
+            assert summary["generalizes"] is True

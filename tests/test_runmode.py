@@ -33,6 +33,17 @@ def test_categories_from_vuln_classes_maps_open_redirect():
     assert cats == ["open-redirect"]
 
 
+def test_categories_from_vuln_classes_maps_spel_injection():
+    # CC-FUZZ-0028: spel_injection needed a genuinely NEW rule+strategy pair
+    # (R-SPEL-INJECTION/SpelInjectionStrategy) -- unlike ssti/open_redirect,
+    # no existing confirmer applied (a bare-arithmetic canary would have
+    # been a guaranteed false positive against this shape's real secure
+    # twin, caught by the pre-change review gate). Live-verified against
+    # both of Expedia's real twins: tp=1, fn=0, fp=0.
+    cats = categories_from_vuln_classes(["spel_injection"])
+    assert cats == ["spel-injection"]
+
+
 def test_categories_from_vuln_classes_leaves_unmapped_classes_unchanged():
     # xxe/insecure_deserialization/etc. have no confirmer yet -- to_category()
     # falls through to the raw class name (no audit rule matches it, so it

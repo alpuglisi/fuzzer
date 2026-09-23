@@ -300,6 +300,39 @@ class SstiStrategy(ConfirmationStrategy):
         return None
 
 
+class SpelInjectionStrategy(ConfirmationStrategy):
+    """A Spring Expression Language (SpEL) expression is evaluated with an
+    unrestricted evaluation context (CWE-917, category 5's `spel_injection`).
+
+    **Deliberately not `SstiStrategy`'s own bare-arithmetic-product canary.**
+    A real vulnerable sink of this shape parses the *entire* raw parameter
+    as a bare SpEL expression with no delimiter -- but a restricted
+    `SimpleEvaluationContext` (the real, documented fix for this class, per
+    `CC-LAB-0214`) still permits ordinary literal arithmetic; it only
+    restricts type references (`T(...)`), bean references, constructors,
+    and arbitrary method/property access. A bare-arithmetic canary
+    (`<a>*<b>`) would therefore evaluate identically under BOTH twins --
+    a guaranteed false positive on the secure twin, not a rare one, caught
+    by this component's own pre-change review gate before implementation.
+    Uses a `T(java.lang.Math).abs(-<n>)` type-reference canary instead --
+    the exact differential this project already proved live
+    (`tests/test_labgen_spel_injection_live_boot.py`): evaluates for real
+    under an unrestricted context, rejected outright under a restricted
+    one."""
+    vuln_class = "spel_injection"
+    mechanism = "type-reference-evaluation"
+    category = "spel-injection"
+
+    def confirm(self, candidate, sender):
+        n = secrets.randbelow(900) + 100
+        payload = f"T(java.lang.Math).abs(-{n})"
+        text = self._send(sender, candidate, payload).text or ""
+        if str(n) in text and payload not in text:         # evaluated, not just reflected
+            return Verdict(True, self.vuln_class, self.mechanism,
+                           {"payload": payload, "result": str(n)})
+        return None
+
+
 class PathTraversalStrategy(ConfirmationStrategy):
     """M7: a file-content marker (/etc/passwd) appears in the response."""
     vuln_class = "file-inclusion"
@@ -602,7 +635,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
     """
     return [SqliErrorStrategy(), SqliBooleanStrategy(), SqliTimingStrategy(),
             ReflectedXssStrategy(), DomXssStrategy(browser), StoredXssStrategy(browser),
-            OpenRedirectStrategy(), SstiStrategy(),
+            OpenRedirectStrategy(), SstiStrategy(), SpelInjectionStrategy(),
             PathTraversalStrategy(), CommandInjectionStrategy(),
             CommandInjectionOobStrategy(oob), RegexDosStrategy(),
             GreyboxConfirmationStrategy(coverage, dbfault)]
@@ -618,6 +651,7 @@ _CATEGORY_TO_CLASS = {
     "xss": "xss-reflected",
     "open-redirect": "open-redirect",
     "server-side-template-injection": "ssti",
+    "spel-injection": "spel_injection",
     "file-inclusion": "file-inclusion",
     "command-injection": "command-injection",
     "regular-expression": "redos",
