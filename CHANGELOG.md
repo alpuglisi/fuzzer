@@ -12,6 +12,28 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (Phase E — multitarget wiring)
+- `tests/test_labgen_spring_boot_trackernest_multitarget.py`,
+  `tests/test_labgen_php_laravel_huddlehub_multitarget.py`,
+  `tests/test_multitarget_category3_combined.py`: wires both of category
+  3's apps into `fuzzlab.harness.multitarget` as real `TargetSpec`s, per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6 — a real boot of
+  each app (TrackerNest via a hand-rolled multi-cell Spring Boot
+  fixture, since its own conformance harness is deliberately single-
+  cell-only; Huddle Hub via the existing multi-cell-capable
+  `LiveBootHarness`), a real `RequestsProbeSender`, and a real
+  `run_targets`/`transfer_summary` call for each, then both together in
+  one call (mirroring category 1's own combined-run precedent). Recall
+  is honestly 0 for every case (this category's 6 vuln classes are all
+  unmapped in `fuzzlab.core.runmode._VULN_TO_CATEGORY`, real follow-on
+  work not attempted here) and `generalizes` is correctly `False` — both
+  stated plainly, not glossed over. A second, narrower gap flagged (not
+  fixed): `fuzzlab.harness.auto.points_from_ground_truth` mislabels a
+  `location="header"` point's skip reason as "needs a browser," first
+  exercised by this project's own Huddle Hub ground truth. All 5 new
+  tests run for real and pass. See `CC-LAB-0138`/`FR-LAB-102`,
+  `CC-LAB-0139`/`FR-LAB-103`, `CC-LAB-0140`/`FR-LAB-104`.
+
 ## 2026-09-23 (Phase C ground truth)
 - `lab/ground-truth-trackernest/`, `lab/ground-truth-huddlehub/`: authors
   Phase C ground truth (`labels.json`/`injection-points.json`/

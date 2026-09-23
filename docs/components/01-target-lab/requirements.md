@@ -2076,6 +2076,36 @@ lane) can submit a payload as
   project's `webhook_signature_bypass` is a distinct string, no actual
   collision) — a merge-time reconciliation note, not a blocker.
 
+- **FR-LAB-102** *(TrackerNest: Phase E — wire into `multitarget.py`;
+  `CC-LAB-0138`, 2026-09-23).* TrackerNest's own `TargetSpec`
+  (`spring_boot_trackernest`), a real boot of all 3 vulnerable cells
+  together, run through `fuzzlab.harness.multitarget.run_targets` for
+  real, per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6 steps
+  1-2. `tests/test_labgen_spring_boot_trackernest_multitarget.py`.
+  Recall is honestly 0 (`ssti`/`xxe`/`insecure_deserialization` unmapped
+  in `_VULN_TO_CATEGORY`, real follow-on work, not attempted here).
+
+- **FR-LAB-103** *(Huddle Hub: Phase E — wire into `multitarget.py`;
+  `CC-LAB-0139`, 2026-09-23).* Huddle Hub's own `TargetSpec`
+  (`php_laravel_huddlehub`), a real boot of all 3 vulnerable cells
+  together via the existing multi-cell-capable `LiveBootHarness`, run
+  through `run_targets` for real.
+  `tests/test_labgen_php_laravel_huddlehub_multitarget.py`. Two flagged,
+  unfixed gaps: recall 0 (same unmapped-vuln-class reason as
+  `FR-LAB-102`), and `fuzzlab.harness.auto.points_from_ground_truth`
+  having no `location="header"` branch (a real, pre-existing latent gap
+  first exercised by this project's own ground truth, flagged not fixed).
+
+- **FR-LAB-104** *(Category 3 §6 step 2: both apps run together;
+  `CC-LAB-0140`, 2026-09-23).* `tests/test_multitarget_category3_combined.py`
+  runs both `TargetSpec`s from `FR-LAB-102`/`FR-LAB-103` through one
+  `run_targets` call for real — two independent real boots (Java/Spring
+  Boot + PHP/Laravel), two distinct real `run_id`s, a real combined
+  `transfer_summary` (`targets: 2`, `generalizes: False` — correctly, no
+  scored target has recall > 0 yet). Closes the toolkit-side half of
+  category 3's own Phase 10 `T10.6`-style proof, matching category 1's
+  own established combined-run precedent.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.
@@ -2208,6 +2238,21 @@ None (it is the system under test).
   `tests/test_labgen_harder_shapes.py` and `tests/test_labgen_identifier_sqli_assertion.py`.
 
 ## 8. Open questions
+- (`CC-LAB-0139`, 2026-09-23) **`fuzzlab.harness.auto.points_from_ground_truth` has no
+  `location="header"` branch.** A ground-truth point with `location="header"` (Huddle
+  Hub's `HHUB-0001`, the first such point in this project — see
+  `lab/ground-truth-huddlehub/labels.json`) falls into that function's generic
+  client-only/DOM `else` branch and is recorded `skipped` with the reason string
+  `"client-only/DOM (needs browser execution, M6)"` — technically inaccurate for a
+  header-location point, which needs a header-capable prober, not a browser. Two
+  pieces of real, sized follow-on work, neither attempted here: (1) give
+  `points_from_ground_truth` a real `location == "header"` branch with an accurate
+  skip reason (or a way to actually drive it); (2) build a header-capable prober
+  (`RequestsProbeSender.send()`'s own signature has no way to set an arbitrary
+  request header for an injection point either — see `fuzzlab/tools/probesender.py`).
+  Tracked here so this flagged gap is not lost; revisit when a header-location vuln
+  class (webhook-signature-bypass or any future one) needs real automated detection
+  coverage, not just wiring proof.
 - (L-P3.3b) **`fuzzlab.labgen.minimal_pair`'s module-category map is sourced from one
   emitter's registry.** It builds `_MODULE_CATEGORY` from `fuzzlab.labgen.modules`
   (`php_current`'s) alone, so *every* stack that wants the real (rather than the naive)
