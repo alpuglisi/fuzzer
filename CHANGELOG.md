@@ -4,6 +4,40 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Netflix's 5th real page, first price_integrity_bypass instance, `/api/subscription/change-plan`, CC-LAB-0188/FR-LAB-128)
+- Target lab: genuinely new breadth for Netflix, not a depth increment —
+  Netflix has never had a `price_integrity_bypass` page before, and this
+  is this concern's first instantiation on `spring_boot` at all (the
+  only prior real implementation project-wide is `php_laravel`'s
+  Booking.com checkout charge, `CC-LAB-0212`). New `POST /api/
+  subscription/change-plan` endpoint, switching a Netflix account
+  between Basic/Standard/Premium tiers. Reuses `lab/safety_matrix.yaml`'s
+  existing `payment_charge_amount` sink family and `client_trusted_
+  amount`/`server_recomputed_amount` ops (`CC-LAB-0063`) verbatim — no
+  new safety-matrix entry. The vulnerable twin reflects a client-supplied
+  `monthly_charge` field verbatim (CWE-807); the secure twin discards it
+  entirely and looks the real price up server-side from a fixed
+  plan-tier-to-price map keyed only by `plan_tier`, failing closed on an
+  unrecognized tier. Cells `LABGEN-JV-0009`/`0010`; ground truth
+  `NFLX-0005` (`sink_context` widened additively to `"payment_charge"`,
+  no existing value fit a price reflected in a JSON response rather than
+  written to a DB). Real live-boot proof: a manipulated
+  `{"plan_tier":"standard","monthly_charge":0.01}` request is trusted and
+  reflected by the vulnerable twin, while the secure twin ignores it and
+  returns the real $15.49 Standard price regardless; a second/third
+  plan_tier proves the lookup is genuinely data-driven. No detection
+  built here, by design (this concern has no audit-rule/oracle-strategy
+  anywhere in the project yet) — tracked as a separate follow-on, the
+  same lab-then-detection split `CC-LAB-0180`/`CC-LAB-0181`/`CC-LAB-0186`
+  already established. Cross-branch collision check performed against
+  `claude/category-3-build-iuu5k9`/`claude/category-5-build-6boejs`: the
+  files this entry touches are clean (both siblings strictly behind); the
+  wider named shared-file set this entry does *not* touch does have real
+  unmerged divergence on both siblings, disclosed for whoever reconciles
+  branches rather than left for them to discover. Full non-slow test
+  suite green before commit (see this entry's own change-control record
+  for exact counts). See `CC-LAB-0188`/`FR-LAB-128`.
+
 ## 2026-09-23 (LAB: Netflix's 4th real page, first access_control/IDOR instance, `/api/account/billing`, CC-LAB-0187/FR-LAB-127)
 - Target lab: category 4's continued "coherent page/route set" depth work,
   but genuinely new breadth for Netflix, not another depth increment —

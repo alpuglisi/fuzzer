@@ -4219,6 +4219,100 @@ lane) can submit a payload as
   6boejs`) before any was touched -- both strictly behind this branch's
   own tip on all of them, no divergent work found.
 
+- **FR-LAB-128** *(Netflix's fifth real page: first `price_integrity_
+  bypass` instance, `/api/subscription/change-plan`; `CC-LAB-0188`,
+  2026-09-23).* Genuinely new breadth for Netflix, not a depth reuse:
+  Netflix never had a `price_integrity_bypass` page before, and this is
+  this concern's **first** instantiation on `spring_boot` at all -- the
+  only prior real implementation project-wide is `php_laravel`'s
+  Booking.com checkout charge (`CC-LAB-0212`, category 5's branch). A
+  subscription plan-upgrade/downgrade endpoint (`POST /api/subscription/
+  change-plan`, switching an account between Basic/Standard/Premium
+  tiers -- a real, plausible, core streaming-subscription feature).
+  Reuses `lab/safety_matrix.yaml`'s existing `payment_charge_amount`
+  sink family and its `client_trusted_amount`/`server_recomputed_amount`
+  ops (`CC-LAB-0063`) verbatim -- no new safety-matrix entry.
+  **Design, read directly from `CC-LAB-0212`'s own change-control entry
+  before building, not ported PHP code**: `php_laravel`'s twin is a
+  source+transform+sink triad (a separate `ServerRecomputedAmountTransform`
+  stage); `spring_boot`'s shape has no separate transform stage (see
+  `fuzzlab/labgen/emitters/spring_boot/modules.py`'s own docstring), so
+  the op selects the sink directly, this stack's existing `ssti`/`xxe`/
+  `access_control` convention -- a new source,
+  `ReadPlanChangeRequestSource`, parses `plan_tier`/`monthly_charge` out
+  of the JSON body via Jackson 3's `JsonMapper.readTree()` (this stack's
+  existing Jackson-3 convention, `CC-LAB-0173`) and publishes both as
+  Java `String` locals for whichever sink module the op selects to use
+  or ignore. The vulnerable twin (`ClientTrustedAmountSink`) reflects the
+  client-supplied `monthly_charge` verbatim as the new plan's charge
+  (CWE-807). The secure twin (`ServerRecomputedAmountSink`) discards it
+  entirely and looks the real charge up in a fixed, page-profile-supplied
+  `plan_prices` map (`(tier, price)` pairs, `BigDecimal`-typed) keyed only
+  by the non-numeric `plan_tier` field -- genuinely data-driven, not a
+  disguised constant (`CC-LAB-0212`'s own adequacy-review lesson applied
+  proactively here, before any implementation, not found missing by a
+  later review): proven by the live-boot test's own `plan_tier=basic`/
+  `premium` cases returning distinct real prices. Unlike `php_laravel`'s
+  own `default_room_type` fallback, this design fails closed (HTTP 400)
+  on an unrecognized `plan_tier` rather than silently defaulting -- this
+  entry's own explicit design call, since Netflix's tier set is a small,
+  closed enumeration with no legitimate "unknown tier" case the way
+  Booking's room inventory might have one.
+  Cells `LABGEN-JV-0009`/`0010`
+  (`lab/manifests/price_integrity_netflix_subscription_sample.yaml`);
+  ground truth `NFLX-0005` (`vuln_class="price_integrity_bypass"`,
+  `sink_context="payment_charge"` -- a **new** enum value, additively
+  widened in `fuzzlab/labels/schemas/labels.schema.json`: checked first,
+  no existing `sink_context` value describes a price/charge amount
+  reflected in a JSON response rather than written to a database
+  (Booking.com's own `BKNG-0003` used `"sql"` because its sink is a real
+  DB insert; this sink never touches a database at all); `param=
+  "monthly_charge"`/`location="body"`, the same per-named-field
+  convention `NFLX-0004`'s own `account_id` established, not the
+  whole-body convention `NFLX-0001`-`0003` use, since exactly one JSON
+  field carries the taint here).
+  **Real live-boot proof** (`tests/test_labgen_spring_boot_subscription_
+  price_integrity_live_boot.py`, real `mvn package`/boot/HTTP round
+  trip, the exact differential this task asked for): a manipulated
+  `{"plan_tier":"standard","monthly_charge":0.01}` request is trusted and
+  reflected verbatim (`0.01`) by the vulnerable twin, while the secure
+  twin ignores it and returns the real Standard price (`15.49`)
+  regardless; a second/third `plan_tier` (`basic`/`premium`) proves the
+  secure twin's lookup is genuinely data-driven; an unrecognized
+  `plan_tier` gets a real HTTP 400 from the secure twin.
+  **No detection built here, by this task's own explicit lab-then-
+  detection split**: `price_integrity_bypass` has no audit-rule/oracle-
+  strategy anywhere in the project yet (checked -- genuinely new
+  detection logic, not a generalization-for-free case like `FR-LAB-127`'s
+  own `AccessControlIdorStrategy` reuse), tracked as a separate,
+  explicitly scoped follow-on in `CC-LAB-0188`, the same split
+  `CC-LAB-0180`/`CC-LAB-0181`/`CC-LAB-0186` already established for this
+  category.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0187`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch`, not
+  assumed absent) -- substituted with a documented, rigorous self-review
+  (accuracy + adequacy), recorded in `CC-LAB-0188`.
+  **Cross-branch collision check, performed and recorded**: `git fetch
+  origin claude/category-3-build-iuu5k9 claude/category-5-build-6boejs`
+  followed by `git diff --numstat` of every shared file this task named
+  against both sibling branches before any was touched. The exact files
+  this entry actually edits (`fuzzlab/labgen/emitters/spring_boot/`,
+  `fuzzlab/labels/schemas/labels.schema.json`) showed **zero** lines
+  unique to either sibling branch -- both strictly behind this branch's
+  own tip on those files, no divergent work to reconcile. **Recorded
+  honestly, not glossed over**: the wider shared-file set this task named
+  but this entry does **not** touch (`fuzzlab/core/runmode.py`,
+  `fuzzlab/tools/probesender.py`, `fuzzlab/audit/rules_data/
+  default_rules.json`, `fuzzlab/oracle/strategies.py`) does have real,
+  divergent, unmerged content on both sibling branches (their own new
+  rules/strategies not yet on this branch) -- irrelevant to this
+  lab-only entry (it edits none of them), but flagged here for whoever
+  reconciles branches at merge time rather than silently discovered
+  later, unlike the clean "no divergent work found" result `CC-LAB-0184`/
+  `CC-LAB-0187` were able to report for their own, narrower touch sets.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

@@ -1,0 +1,59 @@
+# Subscription plan-upgrade/downgrade sample manifest (`CC-LAB-0188`),
+# `spring_boot` (Netflix, category 4).
+#
+# Netflix's fifth real page -- category 4's continued "coherent page/route
+# set" depth work (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4),
+# and genuinely new breadth for Netflix, not another depth increment:
+# Netflix has never had a `price_integrity_bypass` page before, and this is
+# this concern's **first** instantiation on `spring_boot` at all (the only
+# prior real implementation project-wide is `php_laravel`'s Booking.com
+# checkout charge, `CC-LAB-0212`). Reuses `lab/safety_matrix.yaml`'s
+# existing `payment_charge_amount` sink family and `client_trusted_amount`/
+# `server_recomputed_amount` ops (added by `CC-LAB-0063` for the
+# corpus-examples/ecommerce-logic research) -- no new safety-matrix entry
+# needed.
+#
+# Real-world grounding: a `POST /api/subscription/change-plan` endpoint
+# switching a Netflix account between Basic/Standard/Premium tiers -- a
+# real, plausible, core streaming-subscription feature, genuinely distinct
+# from `/api/playback/resume` (playback-position mutation),
+# `/api/content/import` (B2B partner content ingestion),
+# `/api/profiles/switch` (profile-switching mutation), and
+# `/api/account/billing` (a GET billing-details lookup, not a mutation).
+#
+# Unlike `php_laravel`'s own Booking.com twin pair (a source+transform+sink
+# triad, since that stack's shape has a separate transform stage), this
+# stack's shapes have no separate transform stage (see
+# `fuzzlab/labgen/emitters/spring_boot/modules.py`'s own docstring) -- the
+# op selects the sink directly, this stack's existing `ssti`/`xxe`/
+# `access_control` convention. Both twins share one source
+# (`read_plan_change_request`, parses `plan_tier`/`monthly_charge` out of
+# the JSON body); only the op that selects the sink differs.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: reflects the client-supplied monthly_charge verbatim as the
+  # new plan's charge, ignoring plan_tier's real price entirely (CWE-807,
+  # price_integrity_bypass).
+  - cell_id: LABGEN-JV-0009
+    class: price_integrity_bypass
+    stack_profile: spring_boot
+    route: { method: POST, path: /api/subscription/change-plan }
+    sink_context:
+      family: payment_charge_amount
+      required_neutralizations: [price_integrity_bypass]
+    transform: [client_trusted_amount]
+
+  # Secure twin: the only difference is the transform region
+  # (server_recomputed_amount instead of client_trusted_amount) -- the
+  # minimal-pair invariant. Discards the client-supplied monthly_charge
+  # entirely and looks the real charge up server-side, keyed only by the
+  # requested plan_tier.
+  - cell_id: LABGEN-JV-0010
+    class: price_integrity_bypass
+    stack_profile: spring_boot
+    route: { method: POST, path: /api/subscription/change-plan }
+    sink_context:
+      family: payment_charge_amount
+      required_neutralizations: [price_integrity_bypass]
+    transform: [server_recomputed_amount]

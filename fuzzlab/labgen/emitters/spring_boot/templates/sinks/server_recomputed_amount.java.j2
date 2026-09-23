@@ -1,0 +1,18 @@
+        // server_recomputed_amount: the client-supplied {{ client_price_field }}
+        // is discarded entirely and never read here at all (it is parsed by
+        // the source only so both twins share one minimal-pair source). The
+        // real monthly charge is looked up server-side from a fixed
+        // plan-tier-to-price map keyed only by the requested plan_tier --
+        // never anything numeric from the client. An unrecognized plan_tier
+        // fails closed (HTTP 400) rather than silently defaulting.
+        java.util.Map<String, java.math.BigDecimal> planPrices = new java.util.LinkedHashMap<>();
+{% for tier, price in plan_prices %}
+        planPrices.put("{{ tier }}", new java.math.BigDecimal("{{ price }}"));
+{% endfor %}
+        java.math.BigDecimal serverPrice = planPrices.get({{ plan_tier_var }});
+        if (serverPrice == null) {
+            return org.springframework.http.ResponseEntity.status(400).body("Unknown plan_tier");
+        }
+        return org.springframework.http.ResponseEntity.ok()
+            .header("Content-Type", "application/json")
+            .body("{\"plan_tier\":\"" + {{ plan_tier_var }} + "\",\"monthly_charge\":" + serverPrice.toPlainString() + "}");

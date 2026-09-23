@@ -74,6 +74,14 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("access_control", "db_row_by_id_lookup"): _ModuleSet(
         "read_account_id_and_caller_header", "single_handler"
     ),
+    # CC-LAB-0188: Netflix's fifth real page, this stack's first
+    # price_integrity_bypass instance -- reuses lab/safety_matrix.yaml's
+    # existing payment_charge_amount sink family and client_trusted_amount/
+    # server_recomputed_amount ops (CC-LAB-0063), already instantiated on
+    # php_laravel (CC-LAB-0212). No new safety-matrix entry needed.
+    ("price_integrity_bypass", "payment_charge_amount"): _ModuleSet(
+        "read_plan_change_request", "single_handler"
+    ),
 }
 
 #: Per-route static render context, the same "render-only information, not
@@ -95,6 +103,17 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
     # lookup keyed by an attacker-visible account_id query param -- this
     # stack's first access_control/IDOR page.
     "/api/account/billing": {"param_name": "account_id"},
+    # CC-LAB-0188: Netflix's fifth real page, a subscription plan-upgrade/
+    # downgrade endpoint -- this stack's first price_integrity_bypass page.
+    # `plan_prices` is the secure twin's own fixed, server-owned rate table
+    # (the vulnerable twin never reads it, its op is client_trusted_amount).
+    "/api/subscription/change-plan": {
+        "plan_prices": (
+            ("basic", "6.99"),
+            ("standard", "15.49"),
+            ("premium", "22.99"),
+        ),
+    },
 }
 
 #: Per-op source override (`CC-LAB-0173`) -- checked *after* the shape-level

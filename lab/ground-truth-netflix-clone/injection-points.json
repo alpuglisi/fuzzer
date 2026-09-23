@@ -29,6 +29,13 @@
       "param": "account_id",
       "location": "query",
       "rendering": "server-json"
+    },
+    {
+      "url": "/api/subscription/change-plan",
+      "method": "POST",
+      "param": "monthly_charge",
+      "location": "body",
+      "rendering": "server-json"
     }
   ]
 }

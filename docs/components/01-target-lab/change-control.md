@@ -3,6 +3,213 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0188 — Netflix's 5th real page: first price_integrity_bypass instance, `/api/subscription/change-plan` (FR-LAB-128) (2026-09-23)
+
+- Change: genuinely new breadth for category 4's Netflix pick, explicitly
+  **not** a cheap "second instance" depth increment -- Netflix has never
+  had a `price_integrity_bypass` page before, and this is this concern's
+  **first** instantiation on `spring_boot` at all: the only prior real
+  implementation project-wide is `php_laravel`'s Booking.com checkout
+  charge (`CC-LAB-0212`, category 5's branch). Reuses `lab/safety_matrix.
+  yaml`'s existing `payment_charge_amount` sink family and its
+  `client_trusted_amount`/`server_recomputed_amount` ops (`CC-LAB-0063`)
+  verbatim -- no new safety-matrix entry needed (confirmed absent from
+  every emitter on this stack before starting: `grep -rln
+  "client_trusted_amount\|payment_charge_amount"
+  fuzzlab/labgen/emitters/spring_boot/` returned nothing).
+  A subscription plan-upgrade/downgrade endpoint (`POST /api/subscription/
+  change-plan`, switching an account between Basic/Standard/Premium tiers
+  -- a real, plausible, core streaming-subscription feature), genuinely
+  distinct from `/api/playback/resume` (playback-position mutation),
+  `/api/content/import` (B2B partner content ingestion),
+  `/api/profiles/switch` (profile-switching mutation), and
+  `/api/account/billing` (a GET billing-details lookup, not a mutation).
+
+  **Cross-branch collision check, performed and recorded**: `git fetch
+  origin claude/category-3-build-iuu5k9 claude/category-5-build-6boejs`
+  followed by `git diff --numstat HEAD <branch> -- <every shared file the
+  dispatch task named>` against both sibling branches, before touching
+  any of them. The files this entry actually edits
+  (`fuzzlab/labgen/emitters/spring_boot/__init__.py`,
+  `fuzzlab/labgen/emitters/spring_boot/modules.py`, its new templates,
+  `fuzzlab/labels/schemas/labels.schema.json`) showed **zero** lines
+  unique to either sibling branch -- both strictly behind this branch's
+  own tip on those exact files, no divergent work to reconcile.
+  **Recorded honestly, not glossed over**: the wider shared-file set the
+  dispatch task named but this entry does **not** touch
+  (`fuzzlab/core/runmode.py`, `fuzzlab/tools/probesender.py`,
+  `fuzzlab/audit/rules_data/default_rules.json`,
+  `fuzzlab/oracle/strategies.py`) does have real, divergent, unmerged
+  content on both sibling branches (their own new rules/strategies, not
+  yet on this branch: `git diff --numstat` showed 12-45 lines unique to
+  each sibling on `runmode.py`/`strategies.py`/`probesender.py`/
+  `default_rules.json`) -- irrelevant to this lab-only entry, which edits
+  none of them, but flagged here for whoever reconciles branches at merge
+  time rather than silently left for them to discover, unlike the clean
+  "no divergent work found" result `CC-LAB-0184`/`CC-LAB-0187` were able
+  to report for their own, narrower touch sets on this same shared-file
+  list.
+
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0187`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded here rather than silently
+  skipping the gate. **(1) Accuracy** -- checked by direct source
+  inspection, not assumed: `spring_boot`'s module system has no separate
+  transform stage (confirmed by reading `modules.py`'s own docstring
+  before designing anything, not assumed from `CC-LAB-0187`'s precedent
+  alone), so this shape's vulnerable/secure ops had to become two sink
+  modules (op-selects-sink, this stack's existing `ssti`/`xxe`/
+  `access_control` convention), not a source+transform+sink triad like
+  `php_laravel`'s own Booking.com twin (`CC-LAB-0212`) -- `CC-LAB-0212`'s
+  own change-control entry was read in full before designing anything,
+  for exactly what "recompute server-side" vs. "trust client input"
+  looked like there, then a genuinely independent Java implementation was
+  written (no PHP code ported); cell IDs `LABGEN-JV-0009`/`0010` were
+  confirmed free (grepped `LABGEN-JV-` across every manifest, highest
+  existing was `LABGEN-JV-0008`); Jackson 3's real `JsonMapper.
+  readTree()`/`JsonNode.path(...).asText()` API (not Jackson 2's
+  `com.fasterxml.jackson.databind.*`, the same API-migration finding
+  `CC-LAB-0173` already recorded for this stack) was verified against a
+  real `mvn package`/boot/HTTP round trip, not assumed from documentation
+  alone -- both twins render, compile, and boot correctly, and the
+  differential (client price trusted vs. discarded) was proven live, not
+  asserted from the template source alone. **(2) Adequacy** -- checked
+  that this increment does not silently duplicate an existing route
+  (grepped `_PAGE_PARAMS` for `/api/subscription/change-plan`: absent);
+  applied `CC-LAB-0212`'s own adequacy-review lesson *proactively*, before
+  any implementation, rather than needing a second review pass to catch
+  it after the fact: the secure twin's price map had to be a genuine,
+  data-driven, multi-entry lookup (`basic`/`standard`/`premium`, three
+  distinct real `BigDecimal` prices), never a disguised single constant,
+  and this was proven live (the `plan_tier=basic`/`premium` live-boot
+  cases return distinct real prices, not the same value regardless of
+  tier) rather than assumed from the template's own shape; also checked
+  whether an unrecognized `plan_tier` needed a fallback default
+  (`php_laravel`'s own `default_room_type` convention) or should fail
+  closed -- chose fail-closed (`HTTP 400`) as this entry's own explicit
+  design call, since Netflix's tier set is a small, closed enumeration
+  with no legitimate "unknown tier" case the way Booking's room inventory
+  might plausibly have one, and proved the 400 live rather than merely
+  asserting the `if (serverPrice == null)` branch exists.
+  Ground truth: `NFLX-0005` added to `lab/ground-truth-netflix-clone/`
+  (`vuln_class="price_integrity_bypass"`, a pre-existing enum value from
+  Booking.com's own `BKNG-0003`; `sink_context="payment_charge"` -- a
+  **new** enum value, additively widened in `fuzzlab/labels/schemas/
+  labels.schema.json` after confirming no existing value fit: Booking's
+  own `BKNG-0003` used `"sql"` because its sink is a real DB insert, and
+  this sink never touches a database at all, it only reflects/computes a
+  value into a JSON response).
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/modules.py` (new
+    `ReadPlanChangeRequestSource`/`ClientTrustedAmountSink`/
+    `ServerRecomputedAmountSink` classes + registrations)
+  - `fuzzlab/labgen/emitters/spring_boot/__init__.py`
+    (`_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS`, one new shape + one new route
+    entry, the latter carrying the secure twin's own fixed `plan_prices`
+    rate table)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sources/
+    read_plan_change_request.java.j2` (new)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sinks/
+    {client_trusted_amount,server_recomputed_amount}.java.j2` (new)
+  - `lab/manifests/price_integrity_netflix_subscription_sample.yaml` (new,
+    `LABGEN-JV-0009`/`0010`)
+  - `fuzzlab/labels/schemas/labels.schema.json` (`sink_context` widened
+    additively: `"payment_charge"`)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended, `NFLX-0005`)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-128`)
+  - `tests/test_labgen_spring_boot_subscription_price_integrity.py` (new,
+    7 unit tests, no network required)
+  - `tests/test_labgen_spring_boot_subscription_price_integrity_live_boot.py`
+    (new, 4 live-boot tests, real `mvn package`/boot/HTTP round trip --
+    ran for real in this session, all green, not skipped)
+  - `tests/test_labels_contract_category4.py` (extended)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category 4 tracker
+    row updated)
+  **Deliberately NOT touched, and why**:
+  `tests/test_multitarget_category4.py`'s own hand-rolled multi-cell
+  live-boot test (`test_netflix_multi_cell_boot_confirms_all_positives`,
+  currently scoring Netflix's real recall at 4/4) was **not** extended to
+  include this entry's new vulnerable twin (`LABGEN-JV-0009`), unlike
+  `CC-LAB-0187`'s own extension of that same test from 3/3 to 4/4 --
+  `CC-LAB-0187`'s addition worked because `AccessControlIdorStrategy`
+  already existed and confirmed it for free; `price_integrity_bypass` has
+  **no** audit-rule/oracle-strategy anywhere in the project yet (checked:
+  `grep -rn "price_integrity\|payment_charge_amount"
+  fuzzlab/oracle/strategies.py fuzzlab/audit/rules_data/default_rules.json`
+  returned nothing), so adding the new cell there today would silently
+  drop that test's own scored recall from 4/4 to 4/5 rather than
+  demonstrate anything -- deferred to this task's own explicitly-scoped
+  detection follow-on instead, per this task's own lab-then-detection
+  split (matching `CC-LAB-0180`/`CC-LAB-0181`/`CC-LAB-0186`'s own
+  precedent of not bundling unbuilt detection into the lab-page commit).
+- Impact (other components / project): additive-only across `lab/
+  safety_matrix.yaml` (no change, only reuse), `fuzzlab/labgen/emitters/
+  spring_boot/` (two new source/sink module pairs + templates, existing
+  ones untouched), `fuzzlab/labels/schemas/labels.schema.json` (one new
+  `sink_context` enum value), and the existing `lab/ground-truth-netflix-
+  clone/` directory (grown again, not replaced). No other of the 13
+  architecture components touched. `price_integrity_bypass` detection
+  (audit rule + oracle strategy) remains genuinely unbuilt project-wide
+  for any stack's real `client_trusted_amount` twin -- tracked as this
+  entry's own explicit follow-on, not silently left implicit.
+- Risk (level; mitigation or accepted-risk justification): low -- this
+  shape reuses an already-reviewed, already-accepted safety-matrix
+  concern (`CC-LAB-0063`) and an already-proven-real design pattern
+  (`CC-LAB-0212`'s own recompute-vs-trust twin), rather than introducing
+  either from scratch; the one genuinely new risk this entry's own review
+  gate flagged pre-implementation (disguised-constant secure twin,
+  `CC-LAB-0212`'s own past mistake) was designed around from the start,
+  not discovered after the fact. No DB write, filesystem write, or
+  outbound network call is involved at all (unlike `CC-LAB-0212`'s own
+  DB-insert live-boot proof) -- the entire mechanism is JSON-in/JSON-out,
+  the lowest-risk sink shape this stack has built yet.
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml`: no change (reuse confirmed) -- done
+  - [x] `fuzzlab/labgen/emitters/spring_boot/modules.py` + `__init__.py` +
+    3 new templates -- done
+  - [x] `lab/manifests/price_integrity_netflix_subscription_sample.yaml`
+    (2 cells) -- done
+  - [x] `fuzzlab/labels/schemas/labels.schema.json`: `sink_context`
+    widening -- done
+  - [x] `lab/ground-truth-netflix-clone/`: `NFLX-0005` in all 3 files --
+    done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-128` --
+    done
+  - [x] `tests/test_labgen_spring_boot_subscription_price_integrity.py`
+    (7 tests) -- done
+  - [x] `tests/test_labgen_spring_boot_subscription_price_integrity_live_boot.py`
+    (4 tests, real live boot, all green) -- done
+  - [x] `tests/test_labels_contract_category4.py` extended -- done
+  - [x] Whole-repo `pytest -m "not slow"` run before considering this
+    increment complete (`PA-0040`) -- see Effectiveness
+  - [x] `CHANGELOG.md` line -- done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` category 4
+    tracker row updated -- done
+  - [x] Cross-branch collision check performed and recorded, including
+    the honest disclosure of divergence in files this entry does not
+    touch -- done
+  - [x] Pre-change review gate, `Agent`-tool-absence substitution noted
+    explicitly, matching `CC-LAB-0182`-`0187`'s own precedent wording --
+    done
+  - [x] Detection deliberately NOT bundled into this commit -- tracked as
+    its own separately-scoped follow-on (same split as `CC-LAB-0180`/
+    `CC-LAB-0181`/`CC-LAB-0186`)
+- Effectiveness (assessed 2026-09-23): met as a lab page -- Netflix now
+  has five real, live-boot-proven pages, and this project now has its
+  second real `price_integrity_bypass` implementation and its first on
+  `spring_boot`, proving `CC-LAB-0212`'s own recompute-vs-trust design
+  pattern generalizes to a stack with a genuinely different module
+  architecture (op-selects-sink, not source+transform+sink) with no
+  fidelity loss -- both twins were proven live, not merely rendered.
+  Detection effectiveness is deferred to its own future `CC-AUD`/
+  `CC-FUZZ` follow-on, tracked here rather than silently left implicit,
+  the same split `CC-LAB-0180`/`CC-LAB-0181`/`CC-LAB-0186` already
+  established for this category.
+
 ### CC-LAB-0187 — Netflix's 4th real page: first access_control/IDOR instance, `/api/account/billing` (FR-LAB-127) (2026-09-23)
 
 - Change: genuinely new breadth for category 4's Netflix pick, explicitly

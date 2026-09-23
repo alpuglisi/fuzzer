@@ -15,7 +15,7 @@ TWITCH_GT_DIR = "lab/ground-truth-twitch-clone"
 def test_netflix_ground_truth_loads_and_cross_checks():
     gt = contract.load(NETFLIX_GT_DIR)
     assert gt.target == "spring_boot"
-    assert len(gt.cases) == 4
+    assert len(gt.cases) == 5
     case = gt.case_by_id("NFLX-0001")
     assert case is not None
     assert case.expected_vulnerable
@@ -59,9 +59,21 @@ def test_netflix_ground_truth_loads_and_cross_checks():
     assert billing_case.param == "account_id"
     assert billing_case.location == "query"
 
+    # CC-LAB-0188: Netflix's fifth real page, first price_integrity_bypass
+    # instance, /api/subscription/change-plan.
+    price_case = gt.case_by_id("NFLX-0005")
+    assert price_case is not None
+    assert price_case.expected_vulnerable
+    assert price_case.vuln_class == "price_integrity_bypass"
+    assert price_case.sink_context == "payment_charge"
+    assert price_case.url == "/api/subscription/change-plan"
+    assert price_case.method == "POST"
+    assert price_case.param == "monthly_charge"
+    assert price_case.location == "body"
+
     # Opaque case IDs: no vuln class leaks into the identifier.
     for case in gt.cases:
-        for token in ("jackson", "deser", "vuln", "xxe", "idor", "access"):
+        for token in ("jackson", "deser", "vuln", "xxe", "idor", "access", "price", "charge"):
             assert token not in case.case_id.lower()
 
 

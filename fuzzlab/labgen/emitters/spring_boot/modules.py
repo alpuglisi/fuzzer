@@ -349,6 +349,67 @@ class IdentityMatchBeforeFetchObjectLookupSink(TemplateModule):
         )
 
 
+class ReadPlanChangeRequestSource(TemplateModule):
+    """Reads a subscription plan-change request body (`CC-LAB-0188`,
+    `price_integrity_bypass` concern) -- parses the JSON body with a plain
+    Jackson 3 `JsonMapper.readTree()` (this stack's existing Jackson-3
+    convention, `CC-LAB-0173`) and publishes two Java `String` locals:
+    ``plan_tier_var`` (the requested tier, e.g. ``"standard"``) and
+    ``client_price_var`` (whatever price/monthly-charge value the client
+    submitted -- untrusted, and read by both twins' sinks only so they
+    share one minimal-pair source; only the vulnerable twin actually uses
+    it). Unlike `ReadAccountIdAndCallerHeaderSource`, this source's tainted
+    material lives in the JSON body, not a query param/header -- the same
+    real-world shape `JacksonBodySource` already established for this
+    stack's whole-body-JSON cells, but this shape needs two named fields
+    parsed out, not the whole body handed to a sink-owned deserializer."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "read_plan_change_request", "source", SOURCE_ENV, "read_plan_change_request.java.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        render_ctx = dict(ctx)
+        render_ctx.setdefault("plan_tier_var", "planTier")
+        render_ctx.setdefault("client_price_var", "clientMonthlyCharge")
+        render_ctx.setdefault("plan_tier_field", "plan_tier")
+        render_ctx.setdefault("client_price_field", "monthly_charge")
+        result = super().render(render_ctx)
+        return RenderResult(code=result.code, context=render_ctx)
+
+
+class ClientTrustedAmountSink(TemplateModule):
+    """The vulnerable op (`lab/safety_matrix.yaml`'s existing
+    ``client_trusted_amount`` op, ``payment_charge_amount`` sink family,
+    ``no_effect`` -- added by `CC-LAB-0063`, already instantiated on
+    ``php_laravel`` by `CC-LAB-0212`; `CC-LAB-0188` is its first
+    instantiation for ``spring_boot``): reflects the client-supplied
+    monthly-charge value verbatim as the new plan's charge -- CWE-807,
+    price_integrity_bypass -- never recomputed server-side."""
+
+    def __init__(self) -> None:
+        super().__init__("client_trusted_amount", "sink", SINK_ENV, "client_trusted_amount.java.j2")
+
+
+class ServerRecomputedAmountSink(TemplateModule):
+    """The secure twin (``server_recomputed_amount``, ``neutralises`` --
+    already instantiated on ``php_laravel`` by `CC-LAB-0212` as a
+    *transform*; `CC-LAB-0188` reuses the identical op name for this
+    stack's own op-selects-sink convention, since this stack's shapes have
+    no separate transform stage): discards the client-supplied price
+    entirely and looks the real charge up in a fixed, page-profile-supplied
+    plan-tier-to-price map keyed only by the requested (non-numeric)
+    plan_tier, matching ``ServerRecomputedAmountTransform``'s own real
+    look-up shape (`fuzzlab.labgen.modules`, php_current's shared
+    vocabulary) rather than a disguised constant."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "server_recomputed_amount", "sink", SINK_ENV, "server_recomputed_amount.java.j2"
+        )
+
+
 class SingleHandlerComplexity(TemplateModule):
     def __init__(self) -> None:
         super().__init__("single_handler", "complexity", COMPLEXITY_ENV, "single_handler.java.j2")
@@ -371,6 +432,7 @@ SOURCES: dict[str, Module] = {
     "request_stream": RequestStreamSource(),
     "jackson_body": JacksonBodySource(),
     "read_account_id_and_caller_header": ReadAccountIdAndCallerHeaderSource(),
+    "read_plan_change_request": ReadPlanChangeRequestSource(),
 }
 #: Keyed by the op name that selects this sink (see this module's own
 #: docstring for why the op selects the sink here, not a pre-sink
@@ -388,6 +450,8 @@ SINKS: dict[str, Module] = {
     "simple_evaluation_context_restricted": SimpleEvaluationContextRestrictedSink(),
     "no_ownership_check": NoOwnershipCheckObjectLookupSink(),
     "identity_match_before_fetch": IdentityMatchBeforeFetchObjectLookupSink(),
+    "client_trusted_amount": ClientTrustedAmountSink(),
+    "server_recomputed_amount": ServerRecomputedAmountSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_handler": SingleHandlerComplexity(),
