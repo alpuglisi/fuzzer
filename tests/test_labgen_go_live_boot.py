@@ -25,6 +25,13 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import http.server
+import socket
+import ssl
+import subprocess
+import tempfile
+import threading
+from pathlib import Path
 
 import pytest
 
@@ -56,3 +63,127 @@ def test_real_boot_proves_correct_and_incorrect_signature_for_both_twins() -> No
 
             missing = harness.post(path, body=body, headers={})
             assert missing.status == 401, f"{cell_id}: missing signature header was accepted"
+
+
+# -- CC-LAB-0092 Phase B: SSRF (server_side_http_fetch) -----------------------
+
+
+class _ThumbHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self) -> None:  # noqa: N802 - stdlib override
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"thumb-bytes")
+
+    def log_message(self, *args: object) -> None:  # silence per-request stderr noise
+        pass
+
+
+def _free_loopback_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _start_plain_http_listener() -> http.server.HTTPServer:
+    """A throwaway plain-HTTP loopback listener this test process itself
+    starts and owns -- never a real external host, per `CC-LAB-0092`'s own
+    lab-only/authorized-only safety scoping (`CLAUDE.md`)."""
+    server = http.server.HTTPServer(("127.0.0.1", _free_loopback_port()), _ThumbHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def _start_https_loopback_listener(cert_dir: Path) -> http.server.HTTPServer:
+    """Same as :func:`_start_plain_http_listener`, but TLS-wrapped with a
+    throwaway self-signed cert generated for this test run only -- needed
+    to isolate the secure twin's *resolved-IP* rejection from its *scheme*
+    rejection (a plain-HTTP loopback target would be rejected on the
+    scheme check alone, proving nothing about the IP-allowlist logic
+    specifically; see `CC-LAB-0092`'s change-control entry for why the
+    first draft of this test was wrong)."""
+    cert_path = cert_dir / "cert.pem"
+    key_path = cert_dir / "key.pem"
+    subprocess.run(
+        [
+            "openssl", "req", "-x509", "-newkey", "rsa:2048",
+            "-keyout", str(key_path), "-out", str(cert_path),
+            "-days", "1", "-nodes", "-subj", "/CN=localhost",
+        ],
+        capture_output=True,
+        timeout=30.0,
+        check=True,
+    )
+    server = http.server.HTTPServer(("127.0.0.1", _free_loopback_port()), _ThumbHandler)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(str(cert_path), str(key_path))
+    server.socket = ctx.wrap_socket(server.socket, server_side=True)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_ssrf_ip_allowlist_specifically_not_just_the_scheme_check() -> None:
+    """Three cases, each isolating one specific piece of logic (per
+    `CC-LAB-0092`'s adequacy-review correction):
+
+    (a) the vulnerable twin fetches a plain-HTTP loopback target
+        successfully -- no validation at all (CWE-918).
+    (b) the secure twin rejects that same plain-HTTP loopback target --
+        the scheme check (reject non-``https``) alone is enough here.
+    (c) the secure twin **also** rejects an HTTPS loopback target --
+        isolating the resolved-IP-allowlist check specifically, since the
+        scheme check alone would have let this one through.
+
+    A "secure twin successfully fetches some real allowed external
+    target" positive case is explicitly out of scope for this increment
+    (no real target allowlist exists yet for this stack) -- deferred, not
+    silently omitted; see `CC-LAB-0092`'s own change-control entry.
+    """
+    manifest = load_manifest("lab/manifests/ssrf_go_sample.yaml")
+    emitter = GoEmitter()
+
+    plain_server = _start_plain_http_listener()
+    try:
+        plain_port = plain_server.server_address[1]
+        plain_url = f"http://127.0.0.1:{plain_port}/thumb.jpg"
+
+        with GoLiveBootHarness(emitter, manifest.cells) as harness:
+            # (a) vulnerable twin: plain-HTTP loopback target accepted.
+            vuln_resp = harness.request(
+                "GET", f"/generated/labgen-go-0003?url={plain_url}"
+            )
+            assert vuln_resp.status == 200, (
+                f"vulnerable twin rejected an unvalidated loopback target (status {vuln_resp.status})"
+            )
+            assert vuln_resp.body == "thumb-bytes"
+
+            # (b) secure twin: same plain-HTTP target rejected (scheme check).
+            secure_http_resp = harness.request(
+                "GET", f"/generated/labgen-go-0004?url={plain_url}"
+            )
+            assert secure_http_resp.status == 403, (
+                f"secure twin accepted a plain-HTTP loopback target (status {secure_http_resp.status}) "
+                "-- the scheme check should have rejected it"
+            )
+
+            # (c) secure twin: an HTTPS loopback target is ALSO rejected --
+            # this isolates the resolved-IP-allowlist check specifically,
+            # since the scheme check alone would not catch this one.
+            with tempfile.TemporaryDirectory(prefix="fuzzlab-go-net-http-ssrf-tls-") as cert_dir:
+                https_server = _start_https_loopback_listener(Path(cert_dir))
+                try:
+                    https_port = https_server.server_address[1]
+                    https_url = f"https://127.0.0.1:{https_port}/thumb.jpg"
+                    secure_https_resp = harness.request(
+                        "GET", f"/generated/labgen-go-0004?url={https_url}"
+                    )
+                    assert secure_https_resp.status == 403, (
+                        f"secure twin accepted an HTTPS loopback target (status {secure_https_resp.status}) "
+                        "-- the resolved-IP-allowlist check should have rejected it even though the "
+                        "scheme check alone would have let it through"
+                    )
+                finally:
+                    https_server.shutdown()
+    finally:
+        plain_server.shutdown()

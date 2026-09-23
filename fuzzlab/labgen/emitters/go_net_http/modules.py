@@ -181,6 +181,47 @@ class WebhookSignatureVerificationSink(TemplateModule):
         )
 
 
+class ReadUrlQueryParamSource(TemplateModule):
+    """Reads one query-string parameter carrying the caller-supplied fetch
+    target -- the SSRF shape's source (``CC-LAB-0092``). Publishes
+    ``var_name`` unchanged from ``ctx`` (the route-profile table already
+    names it), matching every other source's "publish the Go identifier
+    the sink reads" convention."""
+
+    def __init__(self) -> None:
+        super().__init__("read_url_query_param", "source", _SOURCE_ENV, "read_url_query_param.go.j2")
+
+
+class UncheckedUrlFetchSink(TemplateModule):
+    """The ``unchecked_url_fetch`` op (``lab/safety_matrix.yaml``,
+    ``server_side_http_fetch`` family, ``no_effect``): fetches the
+    caller-supplied URL with a bounded-timeout ``http.Client`` and no
+    other validation at all -- CWE-918, the vulnerable twin. A **sink**
+    module, not a transform: see this package's own ``__init__.py``
+    module docstring for why this shape's manifest op names a sink
+    directly."""
+
+    def __init__(self) -> None:
+        super().__init__("unchecked_url_fetch", "sink", _SINK_ENV, "unchecked_url_fetch.go.j2")
+
+
+class SchemeAndResolvedIpAllowlistSink(TemplateModule):
+    """The ``scheme_and_resolved_ip_allowlist`` op (``lab/safety_matrix.yaml``,
+    ``server_side_http_fetch`` family, ``neutralises`` -- the secure twin):
+    rejects any scheme but ``https`` and rejects a resolved IP that is
+    loopback/private/link-local/unspecified, checked against the
+    *resolved* address (not just the hostname string), before fetching
+    with the same bounded-timeout ``http.Client``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "scheme_and_resolved_ip_allowlist",
+            "sink",
+            _SINK_ENV,
+            "scheme_and_resolved_ip_allowlist.go.j2",
+        )
+
+
 class RenderOnlyComplexity(TemplateModule):
     """Wraps the composed source/transform/sink body as the entire body of
     one ``net/http.HandlerFunc`` -- the Go analogue of every other stack's
@@ -198,6 +239,7 @@ class RenderOnlyComplexity(TemplateModule):
 
 SOURCES: dict[str, Module] = {
     "read_webhook_signature": ReadWebhookSignatureSource(),
+    "read_url_query_param": ReadUrlQueryParamSource(),
 }
 TRANSFORMS: dict[str, Module] = {
     "naive_string_compare": NaiveStringCompareTransform(),
@@ -205,6 +247,8 @@ TRANSFORMS: dict[str, Module] = {
 }
 SINKS: dict[str, Module] = {
     "webhook_signature_verification": WebhookSignatureVerificationSink(),
+    "unchecked_url_fetch": UncheckedUrlFetchSink(),
+    "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "render_only": RenderOnlyComplexity(),

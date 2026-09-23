@@ -353,7 +353,19 @@ tracked in the requirements files, not here.
   analogue of `ruby_rails`'s own Phase-A dispatch for category 1. Deferred
   to Phase B for this stack: a per-run database (this Phase A's one shape
   is stateless), CWE-918 (SSRF), and the richer Twitch EventSub message-ID/
-  timestamp/replay-window checks. A **sixth stack emitter**
+  timestamp/replay-window checks. **Phase B's first increment landed**
+  (`CC-LAB-0092`/`FR-LAB-66`): a second shape, `("ssrf",
+  "server_side_http_fetch")` — a clip-thumbnail-fetch proxy, vulnerable
+  (`unchecked_url_fetch`, no validation) vs. secure
+  (`scheme_and_resolved_ip_allowlist`, rejects non-`https` schemes and
+  loopback/private/link-local *resolved* IPs) — reusing the safety
+  matrix's existing family/ops, with a genuinely different module-
+  composition shape from the webhook-signature cell (the manifest op
+  selects a **sink** module directly, since the vulnerable/secure
+  difference is one inseparable validate-then-fetch operation, not a
+  value transform); both sinks use a bounded `http.Client` so neither
+  twin's generated code can hang. Still deferred: the per-run database
+  and the richer EventSub header checks. A **sixth stack emitter**
   (`fuzzlab/labgen/emitters/java_spring_boot/`, category 4 second-target
   pilot's `CC-LAB-0091`/`FR-LAB-65`, 2026-09-22) is this project's first
   JVM/Java stack — Spring Boot 3.4.1/Spring MVC, Phase A depth (one

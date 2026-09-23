@@ -1,7 +1,8 @@
 """Emitter-level tests for `go_net_http` (category 4 pilot,
-`CC-LAB-0090`/`FR-LAB-64`): `GoEmitter.render`/`render_route_accumulator`,
-plus a real, executed `go vet`/`gofmt -l`-equivalent Tier 0 lint pass over
-the rendered output -- this project's Go analogue of `node --check`
+`CC-LAB-0090`/`FR-LAB-64` Phase A, `CC-LAB-0092`/`FR-LAB-66` Phase B):
+`GoEmitter.render`/`render_route_accumulator`, plus a real, executed
+`go vet`/`gofmt -l`-equivalent Tier 0 lint pass over the rendered output
+-- this project's Go analogue of `node --check`
 (`tests/test_labgen_node_express.py`'s own convention), skip-guarded when
 `go` isn't on the build host (PA-0005).
 """
@@ -18,27 +19,46 @@ import pytest
 from fuzzlab.labgen.emitters.go_net_http import GoEmitter
 from fuzzlab.labgen.schema import Cell, Pipeline, Route, SinkContext
 
-_FAMILY = "webhook_signature_verification"
+_WEBHOOK_FAMILY = "webhook_signature_verification"
+_SSRF_FAMILY = "server_side_http_fetch"
 
 
-def _cell(cell_id: str, ops: list[str]) -> Cell:
+def _webhook_cell(cell_id: str, ops: list[str]) -> Cell:
     return Cell(
         cell_id=cell_id,
         vuln_class="webhook_signature",
         stack_profile="go_net_http",
         route=Route(method="POST", path="/webhooks/eventsub"),
-        sink_context=SinkContext(family=_FAMILY, required_neutralizations=["weak_signature_comparison"]),
+        sink_context=SinkContext(family=_WEBHOOK_FAMILY, required_neutralizations=["weak_signature_comparison"]),
         transform=Pipeline(ops=ops),
     )
 
 
-VULN_CELL = _cell("LABGEN-GO-0001", ["naive_string_compare"])
-SECURE_CELL = _cell("LABGEN-GO-0002", ["constant_time_compare"])
+def _ssrf_cell(cell_id: str, ops: list[str]) -> Cell:
+    return Cell(
+        cell_id=cell_id,
+        vuln_class="ssrf",
+        stack_profile="go_net_http",
+        route=Route(method="GET", path="/api/clips/thumbnail"),
+        sink_context=SinkContext(family=_SSRF_FAMILY, required_neutralizations=["ssrf_request_forgery"]),
+        transform=Pipeline(ops=ops),
+    )
 
 
-def test_supports_only_the_one_phase_a_shape() -> None:
+# Backwards-compatible alias for the rest of this module's existing tests.
+_cell = _webhook_cell
+
+VULN_CELL = _webhook_cell("LABGEN-GO-0001", ["naive_string_compare"])
+SECURE_CELL = _webhook_cell("LABGEN-GO-0002", ["constant_time_compare"])
+SSRF_VULN_CELL = _ssrf_cell("LABGEN-GO-0003", ["unchecked_url_fetch"])
+SSRF_SECURE_CELL = _ssrf_cell("LABGEN-GO-0004", ["scheme_and_resolved_ip_allowlist"])
+ALL_CELLS = (VULN_CELL, SECURE_CELL, SSRF_VULN_CELL, SSRF_SECURE_CELL)
+
+
+def test_supports_both_shapes() -> None:
     em = GoEmitter()
-    assert em.supports("webhook_signature", SinkContext(family=_FAMILY, required_neutralizations=[]))
+    assert em.supports("webhook_signature", SinkContext(family=_WEBHOOK_FAMILY, required_neutralizations=[]))
+    assert em.supports("ssrf", SinkContext(family=_SSRF_FAMILY, required_neutralizations=[]))
     assert not em.supports("sqli", SinkContext(family="sql_numeric_literal", required_neutralizations=[]))
 
 
@@ -85,6 +105,51 @@ def test_two_renders_of_the_same_cell_are_byte_identical() -> None:
     assert first.content == second.content
 
 
+# -- CC-LAB-0092 Phase B: SSRF (server_side_http_fetch) -----------------------
+
+
+def test_ssrf_vulnerable_twin_has_no_validation_and_only_needed_imports() -> None:
+    em = GoEmitter()
+    (emitted,) = em.render(SSRF_VULN_CELL)
+    code = emitted.content.decode()
+    assert "client.Get(targetUrl)" in code
+    assert '"net/url"' not in code
+    assert '"net"\n' not in code
+    assert "url.Parse" not in code
+
+
+def test_ssrf_secure_twin_checks_scheme_and_resolved_ip() -> None:
+    em = GoEmitter()
+    (emitted,) = em.render(SSRF_SECURE_CELL)
+    code = emitted.content.decode()
+    assert '"net/url"' in code
+    assert '"net"' in code
+    assert "url.Parse(targetUrl)" in code
+    assert "net.LookupIP(parsed.Hostname())" in code
+
+
+def test_ssrf_cell_with_more_than_one_op_raises() -> None:
+    em = GoEmitter()
+    bad = _ssrf_cell("LABGEN-GO-9998", ["unchecked_url_fetch", "scheme_and_resolved_ip_allowlist"])
+    with pytest.raises(ValueError):
+        em.render(bad)
+
+
+def test_ssrf_cell_with_unknown_op_raises() -> None:
+    em = GoEmitter()
+    bad = _ssrf_cell("LABGEN-GO-9997", ["not_a_real_sink"])
+    with pytest.raises(ValueError):
+        em.render(bad)
+
+
+def test_accumulator_covers_both_shapes_with_distinct_paths() -> None:
+    em = GoEmitter()
+    accumulator = em.render_route_accumulator(list(ALL_CELLS))
+    code = accumulator.content.decode()
+    for cell in ALL_CELLS:
+        assert f"/generated/{cell.cell_id.lower()}" in code
+
+
 def go_available() -> bool:
     return shutil.which("go") is not None
 
@@ -101,10 +166,10 @@ def test_rendered_handler_passes_go_vet() -> None:
     with tempfile.TemporaryDirectory(prefix="fuzzlab-go-net-http-tier0-") as tmp:
         app_dir = Path(tmp) / "app"
         shutil.copytree(skeleton, app_dir)
-        for cell in (VULN_CELL, SECURE_CELL):
+        for cell in ALL_CELLS:
             (emitted,) = em.render(cell)
             (app_dir / emitted.path).write_bytes(emitted.content)
-        accumulator = em.render_route_accumulator([VULN_CELL, SECURE_CELL])
+        accumulator = em.render_route_accumulator(list(ALL_CELLS))
         (app_dir / accumulator.path).write_bytes(accumulator.content)
 
         result = subprocess.run(
@@ -118,15 +183,16 @@ def test_rendered_handler_passes_go_vet() -> None:
 
 
 @pytest.mark.skipif(not go_available(), reason="go CLI not available on this build host (PA-0005 pattern)")
-def test_rendered_handler_is_gofmt_clean() -> None:
-    """`gofmt -l` on the one illustrative cell's rendered output -- flags
-    any file `gofmt` would reformat (empty output means clean), the closest
-    Go analogue of a bare syntax check for a single file in isolation."""
+def test_rendered_handlers_are_gofmt_clean() -> None:
+    """`gofmt -l` on every illustrative cell's rendered output (both
+    shapes) -- flags any file `gofmt` would reformat (empty output means
+    clean), the closest Go analogue of a bare syntax check per file."""
     em = GoEmitter()
-    (emitted,) = em.render(VULN_CELL)
     with tempfile.TemporaryDirectory(prefix="fuzzlab-go-net-http-gofmt-") as tmp:
-        cell_path = Path(tmp) / "cell.go"
-        cell_path.write_bytes(emitted.content)
-        result = subprocess.run(["gofmt", "-l", str(cell_path)], capture_output=True, text=True, timeout=20.0)
+        tmp_path = Path(tmp)
+        for cell in ALL_CELLS:
+            (emitted,) = em.render(cell)
+            (tmp_path / f"{cell.cell_id.lower()}.go").write_bytes(emitted.content)
+        result = subprocess.run(["gofmt", "-l", str(tmp_path)], capture_output=True, text=True, timeout=20.0)
         assert result.returncode == 0, f"gofmt failed to run:\n{result.stderr}"
         assert result.stdout.strip() == "", f"gofmt would reformat:\n{result.stdout}"

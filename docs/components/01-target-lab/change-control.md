@@ -3,6 +3,191 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0092 — `go_net_http` Phase B, first increment: one illustrative CWE-918 SSRF cell (clip-thumbnail fetch) (2026-09-23)
+
+- Change: The first Phase B increment for `go_net_http` (category 4 pilot,
+  Twitch pick; Phase A landed as `CC-LAB-0090`/`FR-LAB-64`). Adds a second
+  illustrative shape to this stack's module inventory:
+  `vuln_class="ssrf"`, `sink_context.family="server_side_http_fetch"` —
+  reusing `lab/safety_matrix.yaml`'s existing family and both its ops
+  (`unchecked_url_fetch`, vulnerable; `scheme_and_resolved_ip_allowlist`,
+  secure — added by `CC-LAB-0063`) verbatim, the same family-reuse
+  `CC-LAB-0090` did for `webhook_signature_verification` — **no new
+  safety-matrix entry needed** for this increment.
+
+  **The shape, grounded in the research pick's own §2 Phase B note**
+  (`docs/research/site-architecture-survey-functionality-twitch.md` §2):
+  a `/api/clips/thumbnail`-shaped GET handler that server-side-fetches a
+  caller-supplied `url` query parameter (a "render this clip's thumbnail"
+  proxy endpoint — a realistic Go-net/http BFF/media-proxy shape, per that
+  research note's own framing). Vulnerable twin (`unchecked_url_fetch`)
+  calls `http.Get(url)` on the raw, attacker-controlled URL with no
+  validation at all — a real SSRF primitive (internal/loopback targets,
+  cloud-metadata endpoints, etc. all reachable). Secure twin
+  (`scheme_and_resolved_ip_allowlist`) parses the URL, rejects any scheme
+  but `https`, resolves the hostname, and rejects the fetch if the
+  resolved IP is loopback/private/link-local (Go's own
+  `net.IP.IsLoopback()`/`IsPrivate()`/`IsLinkLocalUnicast()`, checked
+  against the *resolved* address actually dialed, not just the hostname
+  string — closing the DNS-rebinding gap the safety matrix's own comment
+  on this family names).
+
+  **Per-run database: still deferred, not added in this increment.**
+  `CC-LAB-0090`'s own scope call said a per-run database would land "when
+  Phase B adds a shape that actually reads or writes data." This SSRF
+  shape doesn't read/write persisted data either (it fetches an external
+  URL and relays/inspects the response) — so this increment does not add
+  one. Verified viable for whenever it *is* needed: `modernc.org/sqlite`
+  (a pure-Go, cgo-free SQLite driver) resolves and downloads cleanly
+  through this sandbox's proxy (`go get modernc.org/sqlite@latest`,
+  confirmed this session), matching every other stack's own
+  SQLite-for-dev/test convention — recorded here so the next Phase B
+  increment that *does* need one doesn't have to re-verify this from
+  scratch.
+
+  **What this increment does NOT do** (explicitly, not by omission): the
+  richer real Twitch EventSub message-ID/timestamp-concatenation/
+  10-minute-replay-window check for the *existing* CWE-347 webhook-
+  signature cell. That refines an already-proven shape rather than adding
+  vulnerability-class breadth, which this project's own stated preference
+  (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§0a item 4) ranks
+  below adding a new class — deferred to a later increment, not dropped.
+
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py` — add
+    `read_url_query_param` source, `unchecked_url_fetch`/
+    `scheme_and_resolved_ip_allowlist` sink pair (the sink, not a
+    transform, differs here — the validation-then-fetch logic is
+    inherently one fetch operation, not a value transform composed before
+    a separate sink call; a deliberate, documented divergence from the
+    webhook-signature cell's source/transform/sink split, decided during
+    implementation once the shape's real code was written, not
+    pre-committed here), `render_only` complexity reuse.
+  - `fuzzlab/labgen/emitters/go_net_http/templates/sources/read_url_query_param.go.j2`,
+    `templates/sinks/{unchecked_url_fetch,scheme_and_resolved_ip_allowlist}.go.j2` (new).
+  - `fuzzlab/labgen/emitters/go_net_http/__init__.py` — extend
+    `_MODULE_SET_BY_SHAPE`/`_ROUTE_PARAMS` with the new shape; no ABC/
+    accumulator-mechanism change.
+  - `tests/test_labgen_go_net_http_modules.py`/`test_labgen_go_net_http.py`/
+    `test_labgen_go_net_http_conformance.py` — extend with the new shape's
+    unit/Tier-0/Tier-3 coverage.
+  - `tests/test_labgen_go_live_boot.py` — extend with a real live-boot
+    proof, **corrected by adequacy review to actually isolate the IP-
+    allowlist logic rather than the scheme check**: a plain HTTP loopback
+    listener alone does not test this shape meaningfully, since the
+    secure twin's scheme check (reject non-`https`) would reject it for a
+    reason unrelated to SSRF/IP protection, making the test pass for the
+    wrong reason. This increment therefore stands up **two** throwaway
+    local listeners — a plain-HTTP one and a self-signed-TLS HTTPS one
+    (the test's own HTTP client configured to skip certificate
+    verification for that listener only, never for any other request this
+    harness makes) — and asserts three cases: (a) the vulnerable twin
+    fetches the plain-HTTP loopback listener successfully (no validation
+    at all); (b) the secure twin rejects the plain-HTTP listener (scheme
+    check); (c) the secure twin **also** rejects the HTTPS loopback
+    listener specifically because its resolved IP is loopback (isolating
+    the IP-allowlist logic from the scheme check). **Explicitly out of
+    scope for this increment, not silently omitted:** a "secure twin
+    successfully fetches some real allowed external target" positive
+    case — there is no real target allowlist for this stack yet (no
+    checked-in `puppy-fort-factory`-equivalent CDN host to name), so that
+    case is deferred to whichever later increment defines one.
+  - `lab/manifests/webhook_signature_go_sample.yaml` gets a sibling
+    manifest, `lab/manifests/ssrf_go_sample.yaml` (new) — the one
+    illustrative vulnerable/secure cell pair for this shape (kept
+    separate from the webhook-signature manifest, matching this project's
+    one-manifest-per-illustrative-shape-group convention elsewhere, e.g.
+    `mass_assignment_sample.yaml` vs. `prototype_pollution_node_sample.yaml`).
+  - `docs/components/01-target-lab/requirements.md` — add a **new**
+    `FR-LAB-66` (next-free after `FR-LAB-65`, `java_spring_boot` Phase A;
+    re-verify against this branch's actual state at implementation time,
+    per `CC-LAB-0090`'s own numbering lesson). **Corrected by both
+    reviews:** the original draft proposed widening `FR-LAB-64` in place
+    rather than minting a new ID, citing `php_laravel`'s `FR-LAB-61` as
+    precedent for "widen, don't renumber." Accuracy review checked that
+    citation directly and found it backwards: `FR-LAB-61` is itself a
+    brand-new FR number for a new capability (the DOM-XSS shape), not an
+    in-place widening of an earlier entry — so the cited precedent
+    actually supports minting a new ID, the opposite of what the draft
+    concluded from it. Adequacy review independently reached the same
+    conclusion on policy grounds: this is a second vuln class (SSRF, not
+    signature verification) with a genuinely different module-composition
+    shape (validation logic lives in the sink, not a transform stage) —
+    a distinct, discoverable capability that a buried widening of
+    `FR-LAB-64` would obscure, not a refinement of that entry's existing
+    scope.
+  - `docs/ARCHITECTURE.md` — update the `go_net_http` paragraph's "Phase A
+    only" framing to note this Phase B increment.
+  - **Made explicit by adequacy review (omitted in the first draft): both
+    the vulnerable and secure sink templates must use a bounded
+    `http.Client{Timeout: ...}`, never a bare `http.Get`.** A real
+    `http.Get` has no default timeout and can hang indefinitely against a
+    slow/unresponsive target — more load-bearing here than for the
+    webhook-signature cell, since this shape's entire point is a real
+    outbound call. Both templates get an explicit, fixed client timeout
+    (matching this project's own "bounded timeout on every real operation"
+    convention already applied to every harness-level subprocess call) so
+    neither twin's *generated code* — not just this dispatch's own test
+    harness — can hang a real deployment.
+
+- Impact (other components / project): none outside `LAB`. No ABC/schema
+  change; no existing cell's rendered output changes (Tier 3 re-run to
+  confirm).
+- Risk (level; mitigation or accepted-risk justification): **low**. New,
+  additive shape. The one real risk: the live-boot test's SSRF proof must
+  fetch a genuinely internal/loopback target to demonstrate the class
+  meaningfully (fetching a public URL wouldn't distinguish "vulnerable"
+  from "secure" in an offline test environment) — mitigated by using a
+  throwaway *local* HTTP listener this test process itself starts (never a
+  real external or production host), matching this project's own
+  lab-only/authorized-only safety discipline (`CLAUDE.md`) and avoiding
+  any actual outbound network side effect from the vulnerable twin's own
+  demonstrated behavior. **Added by adequacy review (a `CLAUDE.md`
+  safety-discipline point the first draft's risk section omitted): this
+  dispatch ships a real, live, outbound-fetch-capable code cell inside the
+  target lab.** Per `CLAUDE.md`'s "dual-use tooling (proxy, desync/
+  smuggling, WAF) stays default-off and lab-only" discipline (this cell is
+  a target-side artifact, not a testing tool, but the same containment
+  principle applies): this cell's fetch capability is never wired to any
+  real external-target list, credential, or production host anywhere in
+  this dispatch — every fetch target in every test this dispatch adds is a
+  throwaway listener the test process itself starts on loopback. Bounded
+  timeouts (below) additionally ensure the generated code itself cannot be
+  used to hang or amplify traffic against whatever it does eventually
+  fetch, in the lab or otherwise.
+- Deliverables:
+  - [x] `fuzzlab/labgen/emitters/go_net_http/modules.py` + `__init__.py` (new shape) — done. **Refined during implementation:** imports moved from a per-shape fixed list (the draft's original plan) to a per-module `_MODULE_IMPORTS` table, after a shape-wide import list failed `go build` ("imported and not used") the moment the two sinks this shape can render turned out to need different package sets (`unchecked_url_fetch` needs no `net`/`net/url`; `scheme_and_resolved_ip_allowlist` needs both).
+  - [x] new source/sink templates, both using a bounded `http.Client{Timeout: 5 * time.Second}`, never a bare `http.Get` — done
+  - [x] `tests/test_labgen_go_net_http_modules.py`/`.py`/`_conformance.py` extended — done
+  - [x] `tests/test_labgen_go_live_boot.py` extended (real, executed, slow-marked; plain-HTTP + self-signed-TLS HTTPS loopback listeners isolating the scheme check from the IP-allowlist check, per the corrected test plan above) — done
+  - [x] `lab/manifests/ssrf_go_sample.yaml` — done
+  - [x] `docs/components/01-target-lab/requirements.md` (new `FR-LAB-66`, re-verified next-free — `FR-LAB-65` was confirmed the branch's true highest entry) — done
+  - [x] `docs/ARCHITECTURE.md` — done
+- Effectiveness (assessed 2026-09-23): effective. Observed directly, not
+  inferred: `go build`/`go vet`/`gofmt -l` all pass over both shapes
+  assembled together; a real boot proves three isolated cases over real
+  HTTP — the vulnerable twin fetches a throwaway plain-HTTP loopback
+  listener successfully, the secure twin rejects that same plain-HTTP
+  target (scheme check), and the secure twin *also* rejects a throwaway
+  self-signed-TLS HTTPS loopback listener specifically (the resolved-IP-
+  allowlist check, isolated from the scheme check per the corrected test
+  design). 27/27 `go_net_http`-related tests pass, including both real
+  live-boot proofs (`tests/test_labgen_go_live_boot.py`, executed this
+  session, not skipped); the full non-slow suite was re-run afterward and
+  shows no regression (the same 15 pre-existing `gitleaks`-related
+  failures as `CC-LAB-0090`/`CC-LAB-0091`, unrelated to and pre-dating
+  this change). One real design gap was found and fixed during
+  implementation itself, before any code shipped incorrectly: the
+  reviewed draft's `_ModuleSet.imports` field was shape-level, which
+  compiles for a shape with one fixed sink but fails the moment a shape
+  (this one) has two sinks needing different import sets — caught while
+  assembling the vulnerable twin for a real `go build` and fixed by
+  moving to a per-module import table (`_MODULE_IMPORTS`), keyed by
+  source/op/sink name and unioned per cell at render time.
+
+  Reviewed by 2 independent agents pre-implementation (accuracy + adequacy passes); both rounds' findings (a corrected FR-LAB-61 precedent -> a new FR-LAB-66 rather than widening FR-LAB-64; a corrected live-boot test plan isolating the IP-allowlist check from the scheme check; a bounded-HTTP-client deliverable; an explicit outbound-fetch-containment risk note) are incorporated above. 3/3 agreement reached before implementation began.
+
+
 ### CC-LAB-0091 — `java_spring_boot` emitter Phase A: real Maven/Spring Boot skeleton + live-boot harness + one illustrative CWE-502 Jackson-deserialization cell (2026-09-22)
 
 - Change: Adds this project's second new stack from the category 4 pilot

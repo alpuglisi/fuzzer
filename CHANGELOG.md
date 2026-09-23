@@ -4,6 +4,33 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (category 4 pilot, Phase B first increment — Go/SSRF)
+- LAB: `go_net_http` Phase B, first increment (`CC-LAB-0092`/`FR-LAB-66`) —
+  a second illustrative shape, CWE-918/SSRF (a clip-thumbnail-fetch proxy:
+  `unchecked_url_fetch` vulnerable vs. `scheme_and_resolved_ip_allowlist`
+  secure), reusing `lab/safety_matrix.yaml`'s existing
+  `server_side_http_fetch` family/ops verbatim. Reviewed pre-implementation
+  by 2 independent agents; both rounds' findings — a corrected `FR-LAB-61`
+  precedent (mint a new `FR-LAB-66` rather than widen `FR-LAB-64`), a
+  corrected live-boot test plan (isolate the resolved-IP-allowlist check
+  from the scheme check using both a plain-HTTP and a self-signed-TLS
+  HTTPS loopback listener, since a single plain-HTTP listener would only
+  prove the scheme check fires), a bounded-`http.Client` deliverable, and
+  an explicit outbound-fetch-containment risk note — are incorporated into
+  the landed entry. A genuine module-composition divergence from the
+  webhook-signature shape: the vulnerable/secure difference lives in
+  which **sink** module renders (validation-then-fetch is one inseparable
+  operation), not a transform-then-fixed-sink split — which in turn
+  required moving `go_net_http`'s import-list bookkeeping from per-shape
+  to per-module after a shape-wide list failed a real `go build` the
+  moment this shape's two sinks turned out to need different standard-
+  library packages (found and fixed during implementation). Tier 0
+  (`go vet`/`gofmt -l`, now exercised over both shapes together) and Tier
+  3 both pass; the real live-boot test proves three isolated cases against
+  two throwaway local listeners (never a real external host). Per-run
+  database and the richer Twitch EventSub header/replay-window checks
+  remain explicitly deferred, not added by this increment.
+
 ## 2026-09-22 (category 4 pilot, Phase A build — Netflix/Java)
 - LAB: `java_spring_boot` Phase A — this project's first JVM/Java
   target-lab stack (`CC-LAB-0091`/`FR-LAB-65`). A real Maven/Spring Boot

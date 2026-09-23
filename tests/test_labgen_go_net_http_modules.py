@@ -1,5 +1,5 @@
 """Module-composition unit tests for `go_net_http` (category 4 pilot,
-`CC-LAB-0090`/`FR-LAB-64`).
+`CC-LAB-0090`/`FR-LAB-64` Phase A, `CC-LAB-0092`/`FR-LAB-66` Phase B).
 
 Mirrors `tests/test_labgen_node_express_modules.py`'s convention exactly,
 scoped to `fuzzlab.labgen.emitters.go_net_http.modules`'s own registries
@@ -67,3 +67,29 @@ def test_render_only_complexity_wraps_body_in_handler_func() -> None:
 def test_render_route_line_uses_method_pattern_syntax() -> None:
     line = render_route_line(method="POST", path="/generated/labgen-go-0001", handler_name="handleLabgenGo0001")
     assert line.strip() == 'mux.HandleFunc("POST /generated/labgen-go-0001", handleLabgenGo0001)'
+
+
+# -- CC-LAB-0092 Phase B: SSRF (server_side_http_fetch) -----------------------
+
+
+def test_read_url_query_param_source_reads_the_named_query_param() -> None:
+    result = SOURCES["read_url_query_param"].render({"var_name": "targetUrl", "param_name": "url"})
+    assert result.code.strip() == 'targetUrl := r.URL.Query().Get("url")'
+
+
+def test_unchecked_url_fetch_sink_has_no_validation_before_fetching() -> None:
+    result = SINKS["unchecked_url_fetch"].render({"var_name": "targetUrl"})
+    assert "client.Get(targetUrl)" in result.code
+    assert "http.Client{Timeout:" in result.code
+    assert "url.Parse" not in result.code
+    assert "LookupIP" not in result.code
+
+
+def test_scheme_and_resolved_ip_allowlist_sink_rejects_non_https_and_checks_resolved_ip() -> None:
+    result = SINKS["scheme_and_resolved_ip_allowlist"].render({"var_name": "targetUrl"})
+    assert 'parsed.Scheme != "https"' in result.code
+    assert "net.LookupIP(parsed.Hostname())" in result.code
+    assert "ip.IsLoopback()" in result.code
+    assert "ip.IsPrivate()" in result.code
+    assert "ip.IsLinkLocalUnicast()" in result.code
+    assert "http.Client{Timeout:" in result.code

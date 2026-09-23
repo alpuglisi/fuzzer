@@ -1960,6 +1960,71 @@ lane) can submit a payload as
     `docs/research/site-architecture-survey-functionality-netflix.md` §2's
     own Phase B note.
 
+- **FR-LAB-66** *(`go_net_http` Phase B, first increment: a second
+  illustrative shape, CWE-918/SSRF; `CC-LAB-0092`, 2026-09-23, category 4
+  pilot's Twitch pick).* Given its own new FR number rather than widening
+  `FR-LAB-64` in place — a distinct vuln class with a genuinely different
+  module-composition shape deserves independent discoverability, per this
+  entry's own change-control review (which also corrected a backwards
+  precedent citation for the opposite choice; see `CC-LAB-0092`).
+  - `fuzzlab.labgen.emitters.go_net_http.GoEmitter` renders a second
+    shape — `("ssrf", "server_side_http_fetch")`, a clip-thumbnail-fetch
+    proxy handler (`GET /api/clips/thumbnail?url=...`) that server-side-
+    fetches the caller-supplied URL either with no validation at all
+    (vulnerable — CWE-918, `unchecked_url_fetch`) or after rejecting any
+    scheme but `https` and rejecting a resolved IP that is loopback/
+    private/link-local/unspecified (secure —
+    `scheme_and_resolved_ip_allowlist`, checked against the *resolved*
+    address, closing the DNS-rebinding gap a hostname-string-only
+    allowlist would leave open). Reuses `lab/safety_matrix.yaml`'s
+    existing `server_side_http_fetch` family/ops verbatim (added by
+    `CC-LAB-0063`) — no new safety-matrix entry needed.
+  - **A deliberate module-composition divergence from the webhook-
+    signature shape:** the vulnerable/secure difference here lives
+    entirely in *which sink module renders* (the validation-then-fetch
+    logic is one inseparable operation, not a value transform composed
+    before a shared sink) — the manifest's one op names a **sink**
+    directly. `GoEmitter`'s per-module import table
+    (`_MODULE_IMPORTS`) is keyed per-module, not per-shape, for exactly
+    this reason: the two sinks this shape can render need different Go
+    standard-library packages (`unchecked_url_fetch` needs no `net`/
+    `net/url`; `scheme_and_resolved_ip_allowlist` needs both), found and
+    fixed during implementation after a shape-wide fixed import list
+    failed `go build`/`gofmt` with an "imported and not used" error.
+  - Both sinks use a bounded `http.Client{Timeout: 5 * time.Second}`,
+    never a bare `http.Get` — this shape's entire point is a real
+    outbound call, so an unbounded client would let either twin's
+    *generated code* hang against a slow/unresponsive target, not just
+    this dispatch's own test harness.
+  - Proven end to end by
+    `tests/test_labgen_go_live_boot.py`'s real live-boot test: two
+    throwaway loopback listeners this test process itself starts (a
+    plain-HTTP one and a self-signed-TLS HTTPS one) isolate the secure
+    twin's scheme-check rejection from its resolved-IP-allowlist
+    rejection specifically — a corrected test design after the first
+    draft's plan (a single plain-HTTP listener) would have proven only
+    the scheme check, not the IP-allowlist logic the shape's own name
+    promises (`CC-LAB-0092`'s own adequacy-review correction). Neither
+    listener is a real external or production host, per `CLAUDE.md`'s
+    lab-only/authorized-only discipline; a "secure twin successfully
+    fetches some real allowed external target" positive case is
+    explicitly deferred (no real target allowlist exists yet for this
+    stack), not silently omitted.
+  - Tier 0 (`go vet`/`gofmt -l`, now exercised over both shapes together)
+    and Tier 3 both pass for the combined cell set
+    (`lab/manifests/ssrf_go_sample.yaml`, alongside the existing
+    `webhook_signature_go_sample.yaml`).
+  - **Per-run database: still deferred, not added by this increment.**
+    This shape doesn't read/write persisted data either — `modernc.org/
+    sqlite` (a pure-Go, cgo-free driver) was verified to resolve cleanly
+    through this sandbox's proxy during this dispatch's own research, for
+    whichever future increment adds a data-touching shape.
+  - **Deliberately out of scope here:** the richer real Twitch EventSub
+    message-ID/timestamp-concatenation/replay-window check for the
+    existing webhook-signature cell (refines an already-proven shape
+    rather than adding vuln-class breadth, which this project ranks
+    lower) — deferred to a later increment, not dropped.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

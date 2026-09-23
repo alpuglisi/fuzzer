@@ -1,5 +1,6 @@
 """Conformance-suite pass for `go_net_http` (category 4 pilot,
-`CC-LAB-0090`/`FR-LAB-64`, T-LAB0.7 Tier 3).
+`CC-LAB-0090`/`FR-LAB-64` Phase A, `CC-LAB-0092`/`FR-LAB-66` Phase B,
+T-LAB0.7 Tier 3).
 
 - Tier 0 (lint): `go vet`/`gofmt -l` on the rendered output -- owned by
   `tests/test_labgen_go_net_http.py` already; this module focuses on the
@@ -26,16 +27,24 @@ from fuzzlab.labgen.emitters.go_net_http import GoEmitter
 from fuzzlab.labgen.schema import load_manifest
 
 
-def test_regenerate_and_diff_emitter_passes_for_the_go_net_http_sample_manifest() -> None:
-    manifest = load_manifest("lab/manifests/webhook_signature_go_sample.yaml")
+_MANIFESTS = (
+    "lab/manifests/webhook_signature_go_sample.yaml",
+    "lab/manifests/ssrf_go_sample.yaml",
+)
+
+
+def test_regenerate_and_diff_emitter_passes_for_every_go_net_http_sample_manifest() -> None:
     emitter = GoEmitter()
-    # Should not raise -- byte-identical across two full regenerations.
-    regenerate_and_diff_emitter(emitter, manifest.cells)
+    for path in _MANIFESTS:
+        manifest = load_manifest(path)
+        # Should not raise -- byte-identical across two full regenerations.
+        regenerate_and_diff_emitter(emitter, manifest.cells)
 
 
 def test_render_whole_sample_produces_one_unique_handler_path_per_cell() -> None:
-    manifest = load_manifest("lab/manifests/webhook_signature_go_sample.yaml")
     emitter = GoEmitter()
-    tree = render_whole_sample(emitter, manifest.cells)
-    assert len(tree) == len(manifest.cells)
-    assert all(path.startswith("labgen_go_") and path.endswith(".go") for path in tree)
+    for path in _MANIFESTS:
+        manifest = load_manifest(path)
+        tree = render_whole_sample(emitter, manifest.cells)
+        assert len(tree) == len(manifest.cells)
+        assert all(p.startswith("labgen_go_") and p.endswith(".go") for p in tree)

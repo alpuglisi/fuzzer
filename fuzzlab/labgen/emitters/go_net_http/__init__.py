@@ -21,6 +21,25 @@ own Phase-A "exactly one shape" scope. CWE-918 (SSRF) and CWE-862 (GraphQL
 field authorization, on the sibling Netflix/Java pick) stay deferred to
 Phase B, per this pilot's own research note.
 
+**Phase B, first increment (``CC-LAB-0092``/``FR-LAB-66``): a second
+shape**, ``("ssrf", "server_side_http_fetch")`` — a clip-thumbnail-fetch
+proxy handler that server-side-fetches a caller-supplied URL either with
+no validation at all (vulnerable, CWE-918, ``unchecked_url_fetch``) or
+after rejecting any scheme but ``https`` and rejecting a resolved IP that
+is loopback/private/link-local (secure, ``scheme_and_resolved_ip_
+allowlist`` -- closes the DNS-rebinding gap a hostname-string-only
+allowlist would leave open). **A deliberate module-composition divergence
+from the webhook-signature shape, decided during implementation:** the
+vulnerable/secure difference here lives entirely in *which sink module
+renders* (the validation-then-fetch logic is one inseparable operation,
+not a value transform composed before a shared downstream sink), so this
+shape's single manifest op names a **sink** directly rather than a
+transform -- ``_ModuleSet.sink is None`` is this module's signal for that
+convention; see :meth:`GoEmitter.render`'s own comment at the branch point.
+Each shape also declares its own Go ``import`` list now (the fixed,
+webhook-only import block became per-shape once a second shape needed a
+different set).
+
 **Multi-file output, like every other routed emitter.** Per this project's
 routed-emitter convention (``node_express``, ``ruby_rails``), a ``route``-
 category *accumulator* module (``net/http.ServeMux`` registration lines)
@@ -45,16 +64,41 @@ __all__ = ["GoEmitter"]
 
 class _ModuleSet(NamedTuple):
     source: str
-    sink: str
+    #: The fixed sink module name for shapes where the manifest's
+    #: transform ops modify a *value* the sink then renders unconditionally
+    #: (the webhook-signature shape). ``None`` signals the other
+    #: convention this stack now has two of: the manifest's one op names a
+    #: **sink** module directly (the SSRF shape) -- see
+    #: :meth:`GoEmitter.render`.
+    sink: str | None
     complexity: str
 
 
 #: (vuln_class, sink_context.family) -> which modules render this shape.
-#: Exactly one entry in this Phase A dispatch -- see the module docstring.
 _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("webhook_signature", "webhook_signature_verification"): _ModuleSet(
         "read_webhook_signature", "webhook_signature_verification", "render_only"
     ),
+    ("ssrf", "server_side_http_fetch"): _ModuleSet("read_url_query_param", None, "render_only"),
+}
+
+#: Per-module (source/transform-op/sink name) -> the extra Go standard-
+#: library packages that module's own rendered code references, beyond
+#: ``net/http`` (always included -- every handler signature needs it).
+#: Keyed per-module rather than per-shape (``CC-LAB-0092``'s own fix,
+#: found while assembling the SSRF shape's vulnerable twin: that twin's
+#: sink, ``unchecked_url_fetch``, does not use ``net``/``net/url`` at all,
+#: so a shape-level fixed import list -- covering the union every sink a
+#: shape *could* pick needs -- fails `go build`/`gofmt` with an "imported
+#: and not used" error the moment a shape has two sinks with different
+#: import needs). :meth:`GoEmitter.render` unions exactly the modules a
+#: given cell actually renders with, never a shape-wide superset.
+_MODULE_IMPORTS: dict[str, tuple[str, ...]] = {
+    "read_webhook_signature": ("crypto/hmac", "crypto/sha256", "encoding/hex", "io"),
+    "webhook_signature_verification": (),
+    "read_url_query_param": (),
+    "unchecked_url_fetch": ("io", "time"),
+    "scheme_and_resolved_ip_allowlist": ("io", "net", "net/url", "time"),
 }
 
 #: Per-route static context this Phase A emitter needs beyond the
@@ -62,6 +106,7 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
 #: rationale as every other stack's own per-route params table.
 _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     "/webhooks/eventsub": {},
+    "/api/clips/thumbnail": {"var_name": "targetUrl", "param_name": "url"},
 }
 
 
@@ -99,26 +144,59 @@ class GoEmitter(Emitter):
         ctx = source_result.context
 
         applied_ops = list(cell.transform.ops) or ["naive_string_compare"]
-        transform_code_blocks: list[str] = []
-        for op in applied_ops:
-            if op not in TRANSFORMS:
+
+        if modules.sink is not None:
+            # Convention 1 (webhook-signature): every op is a transform
+            # that modifies a value the fixed sink then renders.
+            transform_code_blocks: list[str] = []
+            for op in applied_ops:
+                if op not in TRANSFORMS:
+                    raise ValueError(
+                        f"{cell.cell_id}: go_net_http has no transform module for op {op!r} "
+                        f"-- known ops: {sorted(TRANSFORMS)}"
+                    )
+                transform_result = TRANSFORMS[op].render(ctx)
+                ctx = transform_result.context
+                transform_code_blocks.append(transform_result.code)
+            sink_result = SINKS[modules.sink].render(ctx)
+            body_parts = (source_result.code, *transform_code_blocks, sink_result.code)
+            sink_name_for_composition = modules.sink
+        else:
+            # Convention 2 (SSRF, CC-LAB-0092): the manifest's one op names
+            # a SINK module directly -- there is no separate transform
+            # stage, since the vulnerable/secure difference here is one
+            # inseparable validate-then-fetch operation, not a value
+            # rewrite feeding a shared sink. See the module docstring.
+            if len(applied_ops) != 1:
                 raise ValueError(
-                    f"{cell.cell_id}: go_net_http has no transform module for op {op!r} "
-                    f"-- known ops: {sorted(TRANSFORMS)}"
+                    f"{cell.cell_id}: go_net_http's sink-selecting shapes take exactly one op "
+                    f"(the sink module name), got {applied_ops!r}"
                 )
-            transform_result = TRANSFORMS[op].render(ctx)
-            ctx = transform_result.context
-            transform_code_blocks.append(transform_result.code)
+            (sink_op,) = applied_ops
+            if sink_op not in SINKS:
+                raise ValueError(
+                    f"{cell.cell_id}: go_net_http has no sink module for op {sink_op!r} "
+                    f"-- known sinks: {sorted(SINKS)}"
+                )
+            sink_result = SINKS[sink_op].render(ctx)
+            body_parts = (source_result.code, sink_result.code)
+            sink_name_for_composition = sink_op
 
-        sink_result = SINKS[modules.sink].render(ctx)
-
-        body = _indent_block(
-            "\n".join((source_result.code, *transform_code_blocks, sink_result.code)),
-            "\t",
-        )
+        body = _indent_block("\n".join(body_parts), "\t")
         complexity_result = COMPLEXITIES[modules.complexity].render({**ctx, "body": body})
 
-        composition = " -> ".join((modules.source, *applied_ops, modules.sink, modules.complexity))
+        # For convention 2 (sink is None), `applied_ops` already names the
+        # sink module -- adding it again here would render a redundant
+        # "... -> unchecked_url_fetch -> unchecked_url_fetch -> ...".
+        composition_sink_part = (sink_name_for_composition,) if modules.sink is not None else ()
+        composition = " -> ".join((modules.source, *applied_ops, *composition_sink_part, modules.complexity))
+
+        used_module_names = {modules.source, sink_name_for_composition, *applied_ops}
+        extra_imports: set[str] = set()
+        for name in used_module_names:
+            extra_imports.update(_MODULE_IMPORTS.get(name, ()))
+        all_imports = sorted({"net/http", *extra_imports})
+        import_lines = "".join(f'\t"{pkg}"\n' for pkg in all_imports)
         go_source = (
             "package main\n"
             "\n"
@@ -127,11 +205,7 @@ class GoEmitter(Emitter):
             f"// Module composition: {composition}\n"
             "\n"
             "import (\n"
-            '\t"crypto/hmac"\n'
-            '\t"crypto/sha256"\n'
-            '\t"encoding/hex"\n'
-            '\t"io"\n'
-            '\t"net/http"\n'
+            f"{import_lines}"
             ")\n"
             "\n"
             f"{complexity_result.code}"
