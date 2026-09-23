@@ -13,6 +13,18 @@
       "expected_vulnerable": true,
       "rendering": "server-json",
       "notes": "Whole raw request body deserialized polymorphically by Jackson default-typing, with the concrete runtime type resolved from an attacker-controlled type hint embedded in the JSON itself (CWE-502) -- modeled on Netflix's real playback-resume mutation resolver (docs/research/site-architecture-survey-functionality-netflix.md). No single named field carries the taint (the entire body is the sink input), so `param` is the literal string \"body\" rather than a form/query field name -- a deliberate, explicitly-recorded convention for this whole-body-JSON shape (CC-LAB-0174), distinct from every other `param` value in this project's ground truth, all of which name a real field/header/query key. `LABGEN-JV-0001` in lab/manifests/insecure_deserialization_spring_boot_sample.yaml, CC-LAB-0173/FR-LAB-79 (Netflix cell ported into the shared `spring_boot` package) -- never a PFF-* case."
+    },
+    {
+      "case_id": "NFLX-0002",
+      "url": "/api/content/import",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "vuln_class": "xxe",
+      "sink_context": "xml",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "notes": "Whole raw request body (an XML partner content-metadata feed) parsed with a default-configured DocumentBuilderFactory that resolves external entities/DOCTYPE declarations (CWE-611) -- modeled on Netflix's real B2B content-metadata ingestion surface (DDEX ERN messages are XSD-validated XML; Netflix is a confirmed EIDR participant alongside the major studios and MovieLabs -- see lab/manifests/xxe_netflix_sample.yaml's own sourcing note for the fact-vs-inference split). No single named field carries the taint, so `param` is the literal string \"body\", same whole-body convention as NFLX-0001 (CC-LAB-0174). `rendering` is \"server\" (plain text, not JSON) -- distinct from NFLX-0001's \"server-json\". `LABGEN-JV-0003` in lab/manifests/xxe_netflix_sample.yaml, CC-LAB-0179 (reuses TrackerNest's own already-built xml_external_entities_enabled/_disabled shape, CC-LAB-0131, at a new Netflix-specific route) -- never a PFF-* case."
     }
   ]
 }

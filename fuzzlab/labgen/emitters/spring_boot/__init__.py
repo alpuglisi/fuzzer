@@ -76,6 +76,7 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
     "/integrations/webhook-payload": {"var_name": "request"},
     "/api/playback/resume": {},
     "/api/hotels/search-sort": {"var_name": "sortExpr", "param_name": "sortBy"},
+    "/api/content/import": {"var_name": "contentFeedXml"},
 }
 
 #: Per-op source override (`CC-LAB-0173`) -- checked *after* the shape-level

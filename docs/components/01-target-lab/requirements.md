@@ -3839,6 +3839,31 @@ lane) can submit a payload as
     differential an attacker-chosen `channel_id` vs. the caller's own
     identity produces), tracked in §8, not attempted here.
 
+- **FR-LAB-119** *(Netflix's second real page: partner content-metadata
+  ingestion, XXE; `CC-LAB-0179`, 2026-09-23).* Reuses TrackerNest's own
+  already-built XXE shape (`raw_body` source,
+  `xml_external_entities_enabled`/`_disabled` sinks, `CC-LAB-0131`) at a
+  new Netflix route, `POST /api/content/import` — zero new generator
+  code, only a new `_PAGE_PARAMS` entry + manifest + ground truth. Real
+  grounding: DDEX's ERN messages (the B2B media-metadata-exchange
+  standard) are confirmed XSD-validated XML, and Netflix is a confirmed
+  EIDR participant (both facts, cited); the endpoint design itself is
+  labeled as this manifest's own illustrative inference. Cells
+  `LABGEN-JV-0003`/`0004`; ground truth `NFLX-0002`
+  (`vuln_class="xxe"`, `sink_context="xml"`, both pre-existing enum
+  values). Real live-boot proof (vulnerable resolves an external entity,
+  secure rejects any DOCTYPE with HTTP 400, both still parse legitimate
+  documents). **Accepted, explicitly-stated risk**: the shared XXE
+  modules are not forked between TrackerNest and Netflix, so a future
+  template change to one could silently affect the other — mitigated by
+  a new joint regression test rendering both apps' XXE cells together
+  every run. **Not itself detection capability, and not covered by
+  Phase E's multitarget wiring**: `SpringBootLiveBootHarness` takes
+  exactly one cell per real server instance, so `NFLX-0002` needs its
+  own separate `TargetSpec`/hand-rolled multi-cell fixture (the same
+  real, sized follow-on category 3's own `CC-LAB-0138` needed for
+  TrackerNest) — not built here.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

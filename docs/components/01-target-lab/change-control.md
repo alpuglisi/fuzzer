@@ -3547,6 +3547,110 @@ implementation may begin.
   exclusion stated, Tier 1/2 status stated). 3/3 agreement reached by
   incorporating every concrete finding from both reviews without contesting
   any of them; implementation proceeds on this revised entry.
+### CC-LAB-0179 — Netflix's second real page: partner content-metadata ingestion, XXE, `spring_boot` (2026-09-23)
+
+- Change: category 4's own "coherent page/route set" depth work for
+  Netflix (previously stuck at 1 page). Reuses TrackerNest's own
+  already-built, already-live-boot-proved XXE shape (`CC-LAB-0131`: source
+  `raw_body`, sinks `xml_external_entities_enabled`/`_disabled`, sink
+  family `xml_parse_input`, concern `xxe_entity_resolution`) at a new,
+  Netflix-specific route — **zero new generator code**, only a new
+  manifest, a new `_PAGE_PARAMS` route entry, and ground truth.
+  Dispatched through this component's pre-change review gate (accuracy +
+  adequacy passes) before implementation; the adequacy pass's three
+  additions are incorporated:
+  1. **Stronger, primary-sourced real-world grounding, fact vs. inference
+     labeled** (the first draft's one-sentence, uncited justification was
+     flagged as thinner than this project's own research bar): real,
+     checkable web research confirms DDEX's ERN messages (the
+     industry-standard B2B media-metadata exchange format) are XSD-validated
+     XML documents (ddex.net's own knowledge base), and that Netflix is a
+     confirmed EIDR participant alongside the major studios and MovieLabs
+     (2020 industry reporting) — both facts, cited in the manifest's own
+     sourcing note; the actual endpoint design (a content-metadata
+     ingestion route) is labeled explicitly as this manifest's own
+     illustrative inference, not a confirmed Netflix-internal
+     implementation detail.
+  2. **A real cross-branch collision check performed and recorded** (the
+     new route path, `LABGEN-JV-0003`/`0004`, `NFLX-0002`) against every
+     other active category branch — none found.
+  3. **The shared-template mutation risk stated explicitly as an accepted
+     risk**, not left implicit: the XXE source/sink modules are shared
+     code with TrackerNest's own cell, not forked, so a future
+     TrackerNest-motivated template change could silently affect Netflix's
+     cell too. Mitigated with a new joint regression test
+     (`test_trackernest_and_netflix_xxe_cells_render_together_without_collision`)
+     rendering both apps' XXE cells in the same test run, and a real
+     live-boot run of all three of `spring_boot`'s own XXE/deserialization
+     live-boot test files together (6 tests, all pass) proving the shared
+     modules serve both apps correctly today.
+  - **Real Netflix functionality**: `POST /api/content/import`, a partner
+    content-metadata ingestion endpoint. **Vulnerable**
+    (`LABGEN-JV-0003`, `xml_external_entities_enabled`): resolves a
+    DOCTYPE-declared external entity from the ingested feed into the
+    response. **Secure** (`LABGEN-JV-0004`,
+    `xml_external_entities_disabled`): rejects any DOCTYPE-bearing
+    document with a real HTTP 400.
+  - **A cosmetic, accepted gap found and recorded, not silently
+    inherited**: the shared sink templates hardcode TrackerNest-flavored
+    response text ("Imported issue title: ..."), which a real
+    `test_labgen_spring_boot_trackernest_multitarget.py` test already
+    asserts on literally — left unchanged (fixing the wording would risk
+    breaking that established, unrelated test) rather than forced into a
+    Netflix-specific rewrite; this cell's own new live-boot test
+    deliberately asserts only on the shared marker/title *content*, never
+    the surrounding TrackerNest-flavored wording.
+  - Ground truth: `NFLX-0002` added to `lab/ground-truth-netflix-clone/`
+    (`vuln_class="xxe"`, `sink_context="xml"` — both already exist in
+    `labels.schema.json`'s enums from TrackerNest's own prior widening, no
+    schema change needed this time). `rendering="server"` (plain text),
+    distinct from `NFLX-0001`'s `"server-json"`.
+  - **Not attempted here, recorded not silently skipped**: Phase E's own
+    multitarget wiring does not cover `NFLX-0002` — `SpringBootLiveBootHarness`
+    takes exactly one cell per real server instance (a deliberate,
+    documented constraint, not this entry's own limitation), so a single
+    `TargetSpec`/one real running server cannot represent both of
+    Netflix's cells at once without a hand-rolled multi-cell boot fixture
+    (the same real, sized workaround category 3's own `CC-LAB-0138` needed
+    for TrackerNest's own multi-cell Phase E coverage) — not built here.
+    An audit rule/oracle strategy for `xxe` also still doesn't exist
+    anywhere in the project (a pre-existing, shared gap, not introduced or
+    worsened by this entry).
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/__init__.py` (`_PAGE_PARAMS`,
+    one new route entry)
+  - `lab/manifests/xxe_netflix_sample.yaml` (new)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended)
+  - `tests/test_labgen_spring_boot_netflix_xxe_live_boot.py` (new)
+  - `tests/test_labgen_spring_boot_xxe.py` (extended: Netflix unit
+    coverage + the joint regression test)
+  - `tests/test_labels_contract_category4.py` (extended)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-119`, new)
+- Impact (other components / project): additive only — one new
+  `_PAGE_PARAMS` key (cannot collide with any existing route), one new
+  manifest, ground truth extension. No existing cell's rendered output
+  changes (verified: `spring_boot`'s full existing test suite re-run
+  unmodified-in-assertion, plus the new joint regression test).
+- Risk (level; mitigation or accepted-risk justification): **low**.
+  Reuses fully-built, already-tested modules verbatim; the only genuinely
+  new artifact is config (manifest + route params + ground truth), not
+  code. The one real shared-code risk (future TrackerNest template
+  changes silently affecting Netflix) is named explicitly and mitigated
+  with a joint regression test, per the adequacy review's own requirement.
+- Deliverables:
+  - [x] `_PAGE_PARAMS["/api/content/import"]` added
+  - [x] Manifest + real live-boot proof (vulnerable resolves entity,
+    secure rejects DOCTYPE, both still parse legitimate documents)
+  - [x] Ground truth extended (`NFLX-0002`)
+  - [x] Cross-branch collision check performed and recorded
+  - [x] Joint regression test added, covering the accepted shared-template risk
+  - [x] Full non-slow suite + all category-4/spring_boot real live-boot
+    slow tests re-verified green
+- Effectiveness (assessed 2026-09-23): met — Netflix now has two real,
+  live-boot-proven pages; the shared-module risk this entry's own reuse
+  pattern introduces is named and covered, not just assumed safe.
+
 ### CC-LAB-0178 — Twitch's third real page: access-control/IDOR on a channel-analytics lookup, `go_net_http` (2026-09-23)
 
 - Change: category 4's own "coherent page/route set" depth work (per

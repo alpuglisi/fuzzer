@@ -4,6 +4,20 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Netflix's second real page, XXE)
+- Lab: Netflix's own page/route depth, reusing TrackerNest's already-built
+  XXE shape (`raw_body`/`xml_external_entities_enabled`/`_disabled`,
+  `CC-LAB-0131`) at a new route, `POST /api/content/import` (partner
+  content-metadata ingestion) — zero new generator code. Grounding:
+  DDEX's ERN messages are confirmed XSD-validated XML and Netflix is a
+  confirmed EIDR participant (both cited facts); the endpoint itself is
+  this manifest's own labeled inference, not a confirmed implementation
+  detail. Real live-boot proof; the shared-template risk with TrackerNest
+  is stated explicitly and mitigated with a new joint regression test.
+  Found and fixed a real test staleness (my own earlier `CC-FUZZ-0028`
+  test assumed Netflix had exactly one whole-body point; now has two) —
+  caught by the full suite, not silently missed. `CC-LAB-0179`/`FR-LAB-119`.
+
 ## 2026-09-23 (LAB: Twitch's third real page, access-control/IDOR)
 - Lab: category 4's own "coherent page/route set" depth work. Twitch's
   research only shortlisted two CWEs (both already built), so this reuses

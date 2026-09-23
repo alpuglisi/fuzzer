@@ -8,6 +8,13 @@
       "param": "body",
       "location": "body",
       "rendering": "server-json"
+    },
+    {
+      "url": "/api/content/import",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "rendering": "server"
     }
   ]
 }

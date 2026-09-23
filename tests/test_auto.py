@@ -123,10 +123,16 @@ def test_points_from_ground_truth_sets_body_content_type_only_for_json_cases():
     # (e.g. TrackerNest's XXE/insecure-deserialization cases stay `None`,
     # unaffected -- checked directly here since a wrong assumption would be a
     # silent false-negative risk the moment those categories get a rule).
+    # CC-LAB-0179: Netflix now has two whole-body points -- NFLX-0001
+    # (JSON, rendering="server-json") and NFLX-0002 (XML/XXE,
+    # rendering="server") -- so this must distinguish them by URL, not just
+    # grab "the" body point.
     netflix_gt = contract.load("lab/ground-truth-netflix-clone")
     points, _ = points_from_ground_truth(netflix_gt, "http://127.0.0.1:8080")
-    (body_point,) = [p for p in points if p.param == "body"]
-    assert body_point.body_content_type == "application/json"
+    body_points = {p.url: p for p in points if p.param == "body"}
+    assert len(body_points) == 2
+    assert body_points["http://127.0.0.1:8080/api/playback/resume"].body_content_type == "application/json"
+    assert body_points["http://127.0.0.1:8080/api/content/import"].body_content_type is None
 
     trackernest_gt = contract.load("lab/ground-truth-trackernest")
     points, _ = points_from_ground_truth(trackernest_gt, "http://127.0.0.1:8080")
