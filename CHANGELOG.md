@@ -12,6 +12,23 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (cross-branch review, by the category 1 pilot session, round 2)
+- Docs/LAB: reviewed this branch's Django Phase B widening (sqli/
+  sql_string_literal at `/api/login`, xss/html_body at `/api/profile`,
+  the route-method-gated `@csrf_exempt` fix) — no code defects found; all
+  4 real live-boot tests pass genuinely (real `manage.py runserver` boot,
+  real HTTP, ~45s). Found and fixed a fresh cross-branch bookkeeping-ID
+  collision: this branch's new `FR-LAB-74`/`75` (Django Phase B) collided
+  with `FR-LAB-74`/`75` already used on `claude/category-3-build-iuu5k9`
+  (its own `spring_boot` SSTI/XXE cells) — both branches picked "next
+  free" independently since a prior fix to this exact class of collision
+  doesn't prevent a *new* one once either branch keeps building past the
+  point it was fixed at. Renumbered to `FR-LAB-88`/`89` (beyond the
+  current global ceiling, `FR-LAB-87`, per `claude/second-target-cat1-
+  ecommerce`'s own latest work). `CC-LAB-0091` itself never collided, so
+  it is unchanged. Full suite reverified green after the rename (1783
+  passed, 8 skipped, matching the pre-fix count exactly).
+
 ## 2026-09-23
 - LAB: fixed a self-contradictory cross-branch bookkeeping warning left by
   an earlier fix commit (a blind find/replace had rewritten its own
@@ -22,7 +39,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   is 69) that no actual collision exists; replaced the stale warning with
   a corrected note. See `docs/components/01-target-lab/requirements.md`.
 - LAB: widened `django` (category 2 pilot's Instagram/Python-Django pick)
-  to Phase B — `CC-LAB-0091`/`FR-LAB-74`/`FR-LAB-75`, pre-change review
+  to Phase B — `CC-LAB-0091`/`FR-LAB-88`/`FR-LAB-89`, pre-change review
   gate cleared (2 independent reviewer agents, 5 findings incorporated: a
   wrong plan-doc citation fixed, the deferral of a researched Django-
   specific XSS footgun to Phase C stated explicitly, a wrong `CR-LAB-0001`

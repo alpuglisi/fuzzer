@@ -1939,7 +1939,7 @@ lane) can submit a payload as
   non-matching literal string, never executed as SQL) — the same
   syntax-break-vs.-safely-bound differential every other stack's first
   live-boot test proves.
-- **FR-LAB-74** *(the `django` emitter widened to Tier-A depth; `CC-LAB-0091`,
+- **FR-LAB-88** *(the `django` emitter widened to Tier-A depth; `CC-LAB-0091`,
   2026-09-23).* `fuzzlab.labgen.emitters.django.DjangoEmitter` widened from
   Phase A's one shape to the same three-shape Tier-A bar `node_express`
   already proves: `sqli`/`sql_string_literal` (a login-style lookup, POST
@@ -1962,7 +1962,7 @@ lane) can submit a payload as
   `{% autoescape off %}`, `docs/research/category2-social-ugc-
   functionality-and-cwe-research.md` §4) stay out of scope — the latter
   deliberately deferred to Phase C's own corpus-grounded page design.
-- **FR-LAB-75** *(real live-boot proof for both widened shapes, including
+- **FR-LAB-89** *(real live-boot proof for both widened shapes, including
   a `PA-0034` adversarial test; `CC-LAB-0091`, 2026-09-23).* Real, executed,
   skip-guarded (PA-0005) proof in `tests/test_labgen_django_live_boot_
   phase_b.py`: a real `POST /api/login` request with a classic SQLi

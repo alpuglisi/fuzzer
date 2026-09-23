@@ -3,7 +3,7 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0091 — `django` emitter Phase B: widen to node_express's own Tier-A three-shape bar (FR-LAB-74/FR-LAB-75) (2026-09-23)
+### CC-LAB-0091 — `django` emitter Phase B: widen to node_express's own Tier-A three-shape bar (FR-LAB-88/FR-LAB-89) (2026-09-23)
 
 - **Change:** Widens `fuzzlab.labgen.emitters.django` from Phase A's one
   shape (`CC-LAB-0090`, `sqli`/`sql_numeric_literal`) to the same
@@ -211,8 +211,8 @@ Component code: **LAB**. Entry format and required fields: see
     **observed passing for real this session** (4 passed in ~53s, after
     the `BUG-0034` fix — the adversarial test genuinely failed first,
     exactly as `PA-0034` exists to catch, before the fix landed).
-  - [x] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-74`/
-    `FR-LAB-75` — done. **Numbering re-verified immediately before
+  - [x] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-88`/
+    `FR-LAB-89` — done. **Numbering re-verified immediately before
     landing** (not merely from the earlier check above): this branch's own
     highest `FR-LAB-` number was `73` and `claude/second-target-cat1-
     ecommerce`'s own highest (re-fetched) was `69` — `74`/`75` confirmed
