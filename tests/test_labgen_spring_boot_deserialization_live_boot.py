@@ -1,12 +1,12 @@
 """Live-boot conformance check for `spring_boot`'s insecure-deserialization
-cell (`CC-LAB-0092`, TrackerNest's third and final designed cell).
+cell (`CC-LAB-0132`, TrackerNest's third and final designed cell).
 
 Real, on-host integration test, same shape as the SSTI/XXE live-boot
 proofs: assembles a real Spring Boot project, runs a real `mvn package`,
 boots a real executable jar, and sends real HTTP POSTs with a raw
 Java-serialization-protocol body.
 
-**Fixture generation.** Per `CC-LAB-0092`'s change-control entry, fixture
+**Fixture generation.** Per `CC-LAB-0132`'s change-control entry, fixture
 bytes are produced by running the skeleton's own
 `com.fuzzlab.trackernest.tools.SerializeFixtureTool` helper directly against
 the harness's own assembled `target/classes` (via the new

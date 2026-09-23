@@ -1,4 +1,4 @@
-{# CC-LAB-0092: this shape's sink reads request.getInputStream() directly
+{# CC-LAB-0132: this shape's sink reads request.getInputStream() directly
    (binary deserialization -- converting to a String first, as raw_body.java.j2
    does for the XML/text-shaped XXE cell, would corrupt binary data). This
    source module intentionally renders no code; it exists to keep this

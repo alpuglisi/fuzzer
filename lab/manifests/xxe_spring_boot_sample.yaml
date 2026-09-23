@@ -1,4 +1,4 @@
-# XXE sample manifest (`CC-LAB-0091`/`FR-LAB-65`), `spring_boot`.
+# XXE sample manifest (`CC-LAB-0131`/`FR-LAB-75`), `spring_boot`.
 #
 # TrackerNest's (category 3, Atlassian pick) second cell -- see
 # docs/research/category3-saas-functionality-and-cwe-research.md sec 6b for
@@ -9,7 +9,7 @@
 # way; the vulnerable twin (`xml_external_entities_enabled`) resolves a
 # DOCTYPE-declared external entity referenced from inside `<title>` into
 # the echoed response, the secure twin (`xml_external_entities_disabled`,
-# `CC-LAB-0091`'s new `lab/safety_matrix.yaml` entry) rejects any document
+# `CC-LAB-0131`'s new `lab/safety_matrix.yaml` entry) rejects any document
 # containing a DOCTYPE outright. Same route, never live-booted together --
 # see `mass_assignment_laravel_sample.yaml`'s own twin-pair precedent.
 manifest_version: 1

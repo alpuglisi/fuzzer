@@ -1,4 +1,4 @@
-"""Live-boot conformance harness for ``spring_boot`` (`CC-LAB-0090`,
+"""Live-boot conformance harness for ``spring_boot`` (`CC-LAB-0130`,
 TrackerNest, category 3's Atlassian pick).
 
 Mirrors ``fuzzlab.labgen.conformance.live_boot``'s ``LiveBootHarness`` for
@@ -35,7 +35,7 @@ cell, and compare the two real responses.
 A real, bounded Maven Central dependency-resolution round trip
 (``mvn dependency:get`` for a real, small, already-declared artifact) --
 never a raw socket/DNS check standing in for it. Confirmed working in this
-build sandbox on 2026-09-22 (see `CC-LAB-0090`'s change-control entry for
+build sandbox on 2026-09-22 (see `CC-LAB-0130`'s change-control entry for
 the exact commands); if unreachable in a future environment, this probe
 returns ``False`` and every caller SKIPs, per this project's `[design]`-only
 fallback convention for a newly-built stack (matching `python_fastapi`/
@@ -211,7 +211,7 @@ class SpringBootLiveBootHarness:
 
     @property
     def app_dir(self) -> Path:
-        """The assembled app's real root directory (`CC-LAB-0092`) -- valid
+        """The assembled app's real root directory (`CC-LAB-0132`) -- valid
         only after ``build()``/``__enter__`` has run, and until ``close()``.
         Public so a caller can reach real build output the harness itself
         does not expose a dedicated method for (e.g. `target/classes`, for
@@ -299,7 +299,7 @@ class SpringBootLiveBootHarness:
         """A real HTTP request against the booted app. Never follows a
         redirect (matching ``live_boot.py``'s own convention, `BUG-0028`).
 
-        ``data``/``content_type`` (`CC-LAB-0091`): a raw request body for a
+        ``data``/``content_type`` (`CC-LAB-0131`): a raw request body for a
         cell whose payload cannot travel as a query parameter (e.g. an XML
         document with a DOCTYPE) -- sent exactly as given, never form-
         encoded, unlike ``live_boot.py``'s own ``post()`` (which is
@@ -317,7 +317,7 @@ class SpringBootLiveBootHarness:
         return self.request("GET", path, params=params)
 
     def post(self, path: str, *, data: bytes, content_type: str = "application/xml") -> HttpResponse:
-        """A real HTTP POST with a raw request body (`CC-LAB-0091`) -- e.g.
+        """A real HTTP POST with a raw request body (`CC-LAB-0131`) -- e.g.
         an XML document, sent byte-for-byte, never form-encoded."""
         return self.request("POST", path, data=data, content_type=content_type)
 

@@ -12,6 +12,32 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (cross-branch review, by the category 1 pilot session)
+- Docs/LAB: reviewed this branch's code and tests — no code defects
+  found. The SSTI/OGNL pair (`Ognl.getValue()` on raw user input vs. a
+  fixed-key `HashMap` lookup) and the XXE pair (`disallow-doctype-decl`
+  vs. a default-permissive `DocumentBuilderFactory`) are both correct,
+  and all 4 real live-boot tests pass genuinely in this sandbox (real
+  `mvn package`/boot/HTTP, ~32s). Found and fixed a real cross-branch
+  bookkeeping-ID collision: this branch's `CC-LAB-0090`/`0091`/`FR-LAB-64`/
+  `65` collided with the same IDs independently claimed by categories 2,
+  4, and 5's own Phase A work — all four branches picked "next free after
+  category 1's 0070-0089 block" without seeing each other. Renumbered to
+  `CC-LAB-0130`/`0131` and `FR-LAB-74`/`75` (this category's assigned
+  `0130`-`0169` block). While this fix was in progress, this branch
+  pushed a third cell (`CC-LAB-0092`/`FR-LAB-66`, insecure
+  deserialization) that collided with category 1's own `FR-LAB-66`
+  (Rails webhook-signature) — pulled it in and renumbered it too, to
+  `CC-LAB-0132`/`FR-LAB-80`. Full suite reverified green after both
+  rounds of renumbering (1811 passed, 8 skipped, including the pulled
+  third cell's own tests). Also synced the §9.2 stack-reuse ledger:
+  flagged that this branch's `spring_boot` and category 4's
+  `java_spring_boot` are two independently-built, real Java/Spring Boot
+  emitters that didn't know about each other (a project-owner
+  consolidation decision, not something to merge mechanically), and
+  added the missing Ruby-on-Rails/Django/Go rows this branch's copy of
+  the ledger never had.
+
 ## 2026-09-22
 - `fuzzlab/labgen/emitters/spring_boot/`: TrackerNest's third and final
   designed cell, insecure deserialization (`POST /integrations/webhook-
@@ -28,7 +54,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   a real HTTP 400 while still accepting the expected type. Closes
   TrackerNest's full three-cell designed set (SSTI, XXE, insecure
   deserialization) — 38 tests total for this stack, all passing.
-  `CC-LAB-0092`/`FR-LAB-66`.
+  `CC-LAB-0132`/`FR-LAB-80`.
 - `fuzzlab/labgen/emitters/spring_boot/`: TrackerNest's second cell, XXE
   (`POST /issues/import`, real `javax.xml.parsers.DocumentBuilderFactory`
   parse of the raw request body) — a new, additive
@@ -41,7 +67,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   entity into a real, harness-owned fixture file's contents; the secure
   twin returns a real HTTP 400 rejecting any DOCTYPE while still parsing
   an ordinary document correctly. 13 new tests (26 total for this stack),
-  all passing. `CC-LAB-0091`/`FR-LAB-65`.
+  all passing. `CC-LAB-0131`/`FR-LAB-75`.
 - `fuzzlab/labgen/emitters/spring_boot/` (new): the project's fourth
   emitter and first JVM stack, TrackerNest (category 3's Atlassian pick) —
   a real, checked-in minimal Spring Boot skeleton, a `SpringBootEmitter`
@@ -52,9 +78,9 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   end to end (`macroExpr=7*7` -> `49` vulnerable-side, an unrecognized
   macro name secure-side) grounded in the real Confluence
   CVE-2021-26084/CVE-2022-26134 shape. 13 new tests, all passing against
-  a real `mvn package` + `java -jar` boot. `CC-LAB-0090`/`FR-LAB-64`.
+  a real `mvn package` + `java -jar` boot. `CC-LAB-0130`/`FR-LAB-74`.
 - Docs: `docs/components/01-target-lab/change-control.md` — drafted
-  `CC-LAB-0090` (TrackerNest's Java/Kotlin+Spring Boot emitter, Tier-A depth)
+  `CC-LAB-0130` (TrackerNest's Java/Kotlin+Spring Boot emitter, Tier-A depth)
   and passed it through this repo's mandatory 2-reviewer pre-change review
   gate; the reviewed-and-revised entry narrows the first build increment to
   skeleton+harness+probe+one cell (SSTI/OGNL), defers XXE/insecure-
@@ -73,7 +99,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   chosen for breadth per the plan's own §0a item 4 constraint.
 - Docs: `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4/§9.2/§9.6 —
   category 3 (SaaS/productivity/collaboration) claimed as piloting on
-  `claude/category-3-build-iuu5k9`, reserved `CC-LAB-0090`-`0119`, and
+  `claude/category-3-build-iuu5k9`, reserved `CC-LAB-0130`-`0119`, and
   recorded its §9.1 site-pair pick (Slack, reusing `php_laravel`; Atlassian,
   a new Java/Kotlin+Spring Boot emitter) — done first, per §9.3's
   coordination contract, before any category-3 build work.

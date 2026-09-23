@@ -1,4 +1,4 @@
-"""Unit coverage for the `spring_boot` emitter's XXE cell (`CC-LAB-0091`,
+"""Unit coverage for the `spring_boot` emitter's XXE cell (`CC-LAB-0131`,
 TrackerNest's second cell).
 
 No network/java/mvn required -- pure Python emitter-output checks, mirroring
@@ -60,10 +60,10 @@ def test_vulnerable_twin_has_no_doctype_guard_secure_twin_does() -> None:
 
 
 def test_xxe_and_ssti_controllers_have_disjoint_class_names() -> None:
-    """Two different cells (different classes, `CC-LAB-0090`'s SSTI cell and
+    """Two different cells (different classes, `CC-LAB-0130`'s SSTI cell and
     this entry's XXE cell) must never collide on a generated file path/class
     name -- guaranteed by `_class_name_for()` deriving from each cell's own
-    id, not a new naming decision (see `CC-LAB-0091`'s change-control
+    id, not a new naming decision (see `CC-LAB-0131`'s change-control
     entry)."""
     emitter = SpringBootEmitter()
     xxe_manifest = load_manifest(_MANIFEST_PATH)

@@ -1,4 +1,4 @@
-"""Live-boot conformance check for `spring_boot`'s XXE cell (`CC-LAB-0091`,
+"""Live-boot conformance check for `spring_boot`'s XXE cell (`CC-LAB-0131`,
 TrackerNest's second cell).
 
 Real, on-host integration test, same shape as
@@ -11,7 +11,7 @@ executable jar, and sends a real HTTP POST with a raw XML body.
 local file via a `file://` `SYSTEM` identifier. The target here is a fixture
 file this test creates and owns for the duration of one test run
 (`tempfile.NamedTemporaryFile`, deleted in a `finally`) -- never a real host
-path -- per `CC-LAB-0091`'s own risk mitigation, mirroring this project's
+path -- per `CC-LAB-0131`'s own risk mitigation, mirroring this project's
 existing safety discipline for other exploit-shaped proofs (e.g. the
 mass-assignment live-boot test's syntax-injection-shaped key).
 

@@ -1,4 +1,4 @@
-"""``StackEnv`` for the ``spring_boot`` stack (`CC-LAB-0090`, category 3's
+"""``StackEnv`` for the ``spring_boot`` stack (`CC-LAB-0130`, category 3's
 Atlassian pick).
 
 Mirrors ``fuzzlab.labgen.emitters.php_laravel.stack_env``'s ``StackEnv``
@@ -55,7 +55,7 @@ BASE_IMAGE = f"{_BASE_IMAGE_TAG}@{_BASE_IMAGE_DIGEST}"
 WORKDIR = "/app"
 #: Matches `fuzzlab.labgen.conformance.live_boot_spring_boot`'s own real
 #: boot command shape (`java -jar trackernest.jar`); a future Dockerfile for
-#: this stack (out of this entry's scope, see `CC-LAB-0090`'s "Out of scope"
+#: this stack (out of this entry's scope, see `CC-LAB-0130`'s "Out of scope"
 #: section) would use this literally as its `ENTRYPOINT`.
 ENTRYPOINT_CMD: tuple[str, ...] = ("java", "-jar", "trackernest.jar")
 

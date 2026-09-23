@@ -1,5 +1,5 @@
 """Conformance-suite pass for `spring_boot`
-(`CC-LAB-0090`/`CC-LAB-0091`/`CC-LAB-0092`, T-LAB0.7 Tiers 0/3).
+(`CC-LAB-0130`/`CC-LAB-0131`/`CC-LAB-0132`, T-LAB0.7 Tiers 0/3).
 
 - Tier 0 (compile check): a real `mvn compile` of the checked-in skeleton
   overlaid with one cell's generated controller, skip-guarded on
@@ -20,7 +20,7 @@
   has none -- see its own module docstring for why).
 
 Tiers 1/2 beyond the one cell's live-boot proof are not attempted here, per
-`CC-LAB-0090`'s stated scope.
+`CC-LAB-0130`'s stated scope.
 """
 
 from __future__ import annotations
@@ -41,8 +41,8 @@ from fuzzlab.labgen.emitters.spring_boot import SpringBootEmitter
 from fuzzlab.labgen.schema import load_manifest
 
 
-#: Every `spring_boot` manifest this stack has as of `CC-LAB-0092` (SSTI,
-#: `CC-LAB-0090`; XXE, `CC-LAB-0091`; insecure deserialization, `CC-LAB-0092`
+#: Every `spring_boot` manifest this stack has as of `CC-LAB-0132` (SSTI,
+#: `CC-LAB-0130`; XXE, `CC-LAB-0131`; insecure deserialization, `CC-LAB-0132`
 #: -- TrackerNest's full, three-cell designed set) -- all go through the
 #: same stack-agnostic Tier 0/3 checks below.
 _MANIFEST_PATHS = [

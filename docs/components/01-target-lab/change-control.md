@@ -3,13 +3,13 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0092 — TrackerNest: insecure-deserialization cell, closing the three-cell set (FR-LAB-66) (2026-09-22)
+### CC-LAB-0132 — TrackerNest: insecure-deserialization cell, closing the three-cell set (FR-LAB-80) (2026-09-22)
 - Change: Extends `SpringBootEmitter`/`modules.py` with a third shape,
   `(vuln_class="insecure_deserialization", sink_context.family="object_deserialization")`
   — `POST /integrations/webhook-payload`, a real Java
   `ObjectInputStream.readObject()` deserialization of the raw request body
   (CWE-502). Reuses two **existing** `lab/safety_matrix.yaml` ops for this
-  sink_family (no new safety-matrix entry needed, unlike `CC-LAB-0091`'s
+  sink_family (no new safety-matrix entry needed, unlike `CC-LAB-0131`'s
   XXE entry): `function_executing_deserialize` (vulnerable — an
   unrestricted `ObjectInputStream` that will construct any `Serializable`
   class present on the classpath the stream names) and
@@ -17,7 +17,7 @@ Component code: **LAB**. Entry format and required fields: see
   permitting exactly one expected class name, rejecting everything else
   with `InvalidClassException`) — both already `neutralises`/`no_effect`
   as needed, confirmed against the file directly. This is a deliberate
-  refinement of `CC-LAB-0090`'s original "Out of scope" wording ("a Jackson
+  refinement of `CC-LAB-0130`'s original "Out of scope" wording ("a Jackson
   mapper with polymorphic typing" as one option) down to the more specific
   shape `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s own 2026-09-22
   scoping note already recorded before this entry was drafted — cited here
@@ -39,7 +39,7 @@ Component code: **LAB**. Entry format and required fields: see
   bytes and rejecting `UnexpectedType` bytes with `InvalidClassException`).
 
   **Harness change, an explicit deliverable** (the same class of gap
-  `CC-LAB-0091`'s own review caught for its fixture-file plan):
+  `CC-LAB-0131`'s own review caught for its fixture-file plan):
   `SpringBootLiveBootHarness` gains a public `app_dir` property (previously
   private, `_app_dir`, with no accessor — another test module in this repo
   already reaches into the equivalent private attribute on the
@@ -54,7 +54,7 @@ Component code: **LAB**. Entry format and required fields: see
   to produce each fixture's real bytes. **Redundant-generation call made
   explicitly:** each twin's live-boot test boots its own separate harness
   instance (same-route twins are never booted together, per
-  `CC-LAB-0090`'s own precedent) and therefore regenerates both fixtures
+  `CC-LAB-0130`'s own precedent) and therefore regenerates both fixtures
   against its own copy of `target/classes` rather than sharing bytes across
   the two independent harness/test boundaries — accepted as-is (the
   fixture classes are fixed/checked-in, byte-identical either way, and
@@ -75,11 +75,11 @@ Component code: **LAB**. Entry format and required fields: see
   (`SerializeFixtureTool`) exists in the tree. Tier 0 (`mvn compile`)/
   Tier 3 (`regenerate_and_diff_emitter`) for the new cell.
 
-  **This closes TrackerNest's three-cell set** (SSTI `CC-LAB-0090`, XXE
-  `CC-LAB-0091`, insecure deserialization here) — the full page/
+  **This closes TrackerNest's three-cell set** (SSTI `CC-LAB-0130`, XXE
+  `CC-LAB-0131`, insecure deserialization here) — the full page/
   vulnerability-class design `docs/research/category3-saas-functionality-and-cwe-research.md`
   §6b scoped for this app. **Explicitly still out of scope after this
-  entry**, restated per `CC-LAB-0090`/`CC-LAB-0091`'s own convention rather
+  entry**, restated per `CC-LAB-0130`/`CC-LAB-0131`'s own convention rather
   than silently dropped: ground truth (`labels.json`/`injection-points.json`);
   wiring into `multitarget.py`; "Huddle Hub" (the Slack pick, reusing
   `php_laravel`, not yet started).
@@ -99,12 +99,12 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] `WebhookEvent.java`/`UnexpectedType.java` skeleton support classes — done
   - [x] `SerializeFixtureTool.java` skeleton helper — done
   - [x] `SpringBootLiveBootHarness.app_dir` public property — done
-  - [x] `pom.xml` `<mainClass>` disambiguation — done (also fixed a real XML-comment `--` syntax error found while validating this exact edit — Maven's POM parser rejects `--` inside an XML comment; same class of mistake `CC-LAB-0090`'s own `pom.xml` header comments had already hit and fixed once)
+  - [x] `pom.xml` `<mainClass>` disambiguation — done (also fixed a real XML-comment `--` syntax error found while validating this exact edit — Maven's POM parser rejects `--` inside an XML comment; same class of mistake `CC-LAB-0130`'s own `pom.xml` header comments had already hit and fixed once)
   - [x] `SpringBootEmitter` insecure-deserialization shape + 2 cells — done
   - [x] `lab/manifests/insecure_deserialization_spring_boot_sample.yaml` — done
   - [x] Live-boot test proving the real differential — done (`tests/test_labgen_spring_boot_deserialization_live_boot.py`, 2 tests, real `mvn package` + `java -jar` + real `SerializeFixtureTool`-generated bytes over real HTTP, both PASSED: the vulnerable twin constructs and reports `UnexpectedType` for bytes naming it; the secure twin returns a real HTTP 400 naming the rejection while still accepting real `WebhookEvent` bytes)
   - [x] Tier 0/Tier 3 conformance — done (extended `tests/test_labgen_spring_boot_conformance.py` to a third manifest); `tests/test_labgen_spring_boot_deserialization.py` unit coverage (verdict/determinism/allowlist-presence/three-cell class-name disjointness) — 38/38 spring_boot tests passed in this sandbox (all three TrackerNest cells combined)
-  - [x] `requirements.md` FR-LAB-66 entry — done
+  - [x] `requirements.md` FR-LAB-80 entry — done
   - [x] `CHANGELOG.md` line — done
 - Effectiveness (assessed 2026-09-22): **met.** Every deliverable is real
   and executed: a real `mvn package` builds the assembled skeleton+cell, a
@@ -112,15 +112,15 @@ Component code: **LAB**. Entry format and required fields: see
   serialization-protocol bytes against the harness's own compiled classes,
   and a real HTTP POST with those bytes proves the payload differential for
   both twins. Full non-slow suite re-run after this change: 1570 passed (up
-  from 1557 pre-`CC-LAB-0092`), 15 failed (the same pre-existing,
-  unrelated `gitleaks`-absence failures `CC-LAB-0090`/`0091`'s own
+  from 1557 pre-`CC-LAB-0132`), 15 failed (the same pre-existing,
+  unrelated `gitleaks`-absence failures `CC-LAB-0130`/`0091`'s own
   effectiveness notes already recorded — confirmed unchanged and unrelated
   to `spring_boot`/deserialization/`TrackerNest`), 52 skipped — no
   regression. This closes TrackerNest's full three-cell designed set.
 - Pre-change review gate: drafted, reviewed by 2 independent agents
   (accuracy: no inaccuracies found, ACCURATE, with one traceability note
   incorporated above — cite the plan doc's own prior refinement of
-  `CC-LAB-0090`'s wording rather than presenting the shape as newly
+  `CC-LAB-0130`'s wording rather than presenting the shape as newly
   decided; adequacy: 4 findings — a missing public `app_dir` accessor
   presented as if the plan already worked, unstated exact fixture-
   generation timing, an unaddressed redundant-generation-across-twins
@@ -129,7 +129,7 @@ Component code: **LAB**. Entry format and required fields: see
   concrete finding from both reviews without contesting any of them;
   implementation proceeds on this revised entry.
 
-### CC-LAB-0091 — TrackerNest: XXE cell, plus `xxe_entity_resolution`'s missing secure counterpart in `lab/safety_matrix.yaml` (FR-LAB-65) (2026-09-22)
+### CC-LAB-0131 — TrackerNest: XXE cell, plus `xxe_entity_resolution`'s missing secure counterpart in `lab/safety_matrix.yaml` (FR-LAB-75) (2026-09-22)
 - Change: Four parts, revised after two-reviewer pre-change review (see
   below). (1) `lab/safety_matrix.yaml`: add one new, additive entry (no
   version bump — a brand-new op under an existing sink_family, per this
@@ -157,7 +157,7 @@ Component code: **LAB**. Entry format and required fields: see
   `modules.py` with a second supported shape,
   `(vuln_class="xxe", sink_context.family="xml_parse_input")`, rendering
   TrackerNest's second cell, `POST /issues/import` (route simplified from
-  the research doc's original `/issues/{id}/import`, matching `CC-LAB-0090`'s
+  the research doc's original `/issues/{id}/import`, matching `CC-LAB-0130`'s
   own precedent — `Cell`/`Route` has no path-parameter concept). A source
   module reads the raw request body as the XML document string. The
   request body is a fixed, documented shape both twins parse identically:
@@ -174,14 +174,14 @@ Component code: **LAB**. Entry format and required fields: see
   stripped, so the differential is "entity expanded into the response"
   vs. "request rejected," not two different success bodies. Controller
   class names are derived from each cell's own id via the same
-  `_class_name_for()` `CC-LAB-0090` already established (e.g.
+  `_class_name_for()` `CC-LAB-0130` already established (e.g.
   `LabgenXxe0001Controller`/`LabgenXxe0002Controller`, package
   `com.fuzzlab.trackernest.generated`) — disjoint from the SSTI cell's
   `LabgenSsti0001Controller`/`LabgenSsti0002Controller` by construction
   (distinct cell ids), not a new naming decision. New manifest
   `lab/manifests/xxe_spring_boot_sample.yaml`, two cells (`LABGEN-XXE-0001`
   vulnerable, `LABGEN-XXE-0002` secure), same route, never live-booted
-  together (mirrors `CC-LAB-0090`'s own twin-pair precedent). (4) The
+  together (mirrors `CC-LAB-0130`'s own twin-pair precedent). (4) The
   live-boot test's fixture is created independently by the **test itself**
   (`tempfile.NamedTemporaryFile`, outside the harness, referenced by its
   own absolute path in the DOCTYPE's `SYSTEM` identifier) — not inside the
@@ -192,7 +192,7 @@ Component code: **LAB**. Entry format and required fields: see
   this lab controls end to end, never a real host path. Tier 0
   (`mvn compile`)/Tier 3 (`regenerate_and_diff_emitter`) for the new cell.
   **Explicitly still out of scope after this entry** (unchanged from
-  `CC-LAB-0090`'s own "Out of scope" section): TrackerNest's third designed
+  `CC-LAB-0130`'s own "Out of scope" section): TrackerNest's third designed
   cell, insecure deserialization (`/integrations/webhook-payload`); ground
   truth; `multitarget.py` wiring.
 - Impact (other components / project): Component 1 (LAB) only. The
@@ -201,10 +201,10 @@ Component code: **LAB**. Entry format and required fields: see
   verdict changes (`verdict()` is a pure function of the matrix version +
   the exact pair; this only adds a pair no existing cell references). The
   harness's new `post()` method is additive (new method, `get`/`request`
-  unchanged) — `CC-LAB-0090`'s own live-boot test is unaffected.
+  unchanged) — `CC-LAB-0130`'s own live-boot test is unaffected.
 - Risk (level; mitigation or accepted-risk justification): Low-medium. The
   live-boot proof is a real, classic external-entity file-read
-  proof-of-concept — mitigated exactly as `CC-LAB-0090`'s own review
+  proof-of-concept — mitigated exactly as `CC-LAB-0130`'s own review
   required for its OGNL proof: the target is a fixture this test creates
   and owns for the duration of one test run, never a real host path,
   mirroring this project's existing safety discipline for other
@@ -219,7 +219,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] `lab/manifests/xxe_spring_boot_sample.yaml` — done
   - [x] Live-boot test proving the real differential — done (`tests/test_labgen_spring_boot_xxe_live_boot.py`, 2 tests, real `mvn package` + `java -jar` + real HTTP POST, both PASSED: a DOCTYPE-declared external entity resolves a harness-owned fixture file's contents into the response on the vulnerable twin; the secure twin returns a real HTTP 400 rejecting the DOCTYPE while still correctly parsing a legitimate no-DOCTYPE document)
   - [x] Tier 0/Tier 3 conformance for the new cell — done (`tests/test_labgen_spring_boot_conformance.py`, extended to parametrize over both manifests, plus a new disjoint-path check across both); `tests/test_labgen_spring_boot_xxe.py` unit coverage (verdict/determinism/class-name-disjointness) — 26/26 spring_boot tests passed in this sandbox (SSTI + XXE combined)
-  - [x] `requirements.md` FR-LAB-65 entry — done
+  - [x] `requirements.md` FR-LAB-75 entry — done
   - [x] `CHANGELOG.md` line — done
 - Effectiveness (assessed 2026-09-22): **met.** Every deliverable is real
   and executed: a real `mvn package` builds the assembled skeleton+cell, a
@@ -229,9 +229,9 @@ Component code: **LAB**. Entry format and required fields: see
   external-entity file-read, never a real host path; the secure twin
   rejects the same payload with a real HTTP 400 while still correctly
   parsing an ordinary, DOCTYPE-free document. Full non-slow suite re-run
-  after this change: 1557 passed (up from 1532 pre-`CC-LAB-0091`), 15
+  after this change: 1557 passed (up from 1532 pre-`CC-LAB-0131`), 15
   failed (same pre-existing, unrelated `gitleaks`-absence failures
-  `CC-LAB-0090`'s own effectiveness note already recorded — confirmed by
+  `CC-LAB-0130`'s own effectiveness note already recorded — confirmed by
   inspection that the failing list is unchanged and none reference
   `spring_boot`/`xxe`/`TrackerNest`), 52 skipped — no regression.
 - Pre-change review gate: drafted, reviewed by 2 independent agents
@@ -245,7 +245,7 @@ Component code: **LAB**. Entry format and required fields: see
   from both reviews without contesting any of them; implementation proceeds
   on this revised entry.
 
-### CC-LAB-0090 — TrackerNest: Java/Kotlin+Spring Boot emitter, Tier-A depth, one cell (FR-LAB-64) (2026-09-22)
+### CC-LAB-0130 — TrackerNest: Java/Kotlin+Spring Boot emitter, Tier-A depth, one cell (FR-LAB-74) (2026-09-22)
 - Change: Add `fuzzlab/labgen/emitters/spring_boot/` — an `Emitter` subclass
   implementing the `Cell -> EmittedFiles` contract (per `fuzzlab/labgen/emitter.py`'s
   ABC: `supports(vuln_class, sink_context)`, `render(cell) -> EmittedFiles`,
@@ -331,7 +331,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] `spring_boot_boot_available()` capability probe — done (`live_boot_spring_boot.py`, verified real against Maven Central in this sandbox)
   - [x] `SpringBootLiveBootHarness` + 1 executed live-boot test — done, and extended to both twin cells (`tests/test_labgen_spring_boot_live_boot.py`, 2 tests, real `mvn package` + `java -jar` + real HTTP, both PASSED — `macroExpr=7*7` evaluates to `49` on the vulnerable twin, is treated as an unrecognized macro name on the secure twin)
   - [x] Tier 0/Tier 3 conformance for the one cell — done (`tests/test_labgen_spring_boot_conformance.py`: `mvn compile` per cell, `regenerate_and_diff_emitter`/`render_whole_sample`); plus `tests/test_labgen_spring_boot.py` unit coverage (supports/render-determinism/verdict/unsupported-cell fail-loud) — 13/13 tests passed in this sandbox
-  - [x] `requirements.md` FR-LAB-64 entry — done
+  - [x] `requirements.md` FR-LAB-74 entry — done
   - [x] `CHANGELOG.md` line — done
 - Effectiveness (assessed 2026-09-22): **met**, with one real divergence
   from this entry's own "Change" text above, reflected back per this

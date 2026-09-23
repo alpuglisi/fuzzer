@@ -1839,8 +1839,8 @@ lane) can submit a payload as
     only the `git rm -r puppy-fort-factory/` once the first commit's own
     full test run (fast suite + the live-boot slow suite) was green.
 
-- **FR-LAB-64** *(`spring_boot`: the fourth emitter, category 3's Atlassian
-  pick, "TrackerNest"; `CC-LAB-0090`, 2026-09-22).* Per
+- **FR-LAB-74** *(`spring_boot`: the fourth emitter, category 3's Atlassian
+  pick, "TrackerNest"; `CC-LAB-0130`, 2026-09-22).* Per
   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` sec 9 (the 12-app
   category expansion) and its own functionality/CWE research
   (`docs/research/category3-saas-functionality-and-cwe-research.md`), a
@@ -1873,8 +1873,8 @@ lane) can submit a payload as
   beyond the one proven live-boot cell, matching `python_fastapi`/
   `node_express`'s own stated status for a newly-built stack.
 
-- **FR-LAB-65** *(`spring_boot`: TrackerNest's second cell, XXE; `CC-LAB-0091`,
-  2026-09-22).* Extends `FR-LAB-64`'s `spring_boot` emitter with a second
+- **FR-LAB-75** *(`spring_boot`: TrackerNest's second cell, XXE; `CC-LAB-0131`,
+  2026-09-22).* Extends `FR-LAB-74`'s `spring_boot` emitter with a second
   supported shape, `(vuln_class="xxe", sink_context.family="xml_parse_input")`
   — `POST /issues/import`, a real Java `javax.xml.parsers.
   DocumentBuilderFactory` parse of the raw request body (CWE-611). The
@@ -1892,19 +1892,19 @@ lane) can submit a payload as
   a DOCTYPE-declared external entity into a real, harness-owned fixture
   file's contents (never a real host path); the secure twin returns a real
   HTTP 400 rejecting any DOCTYPE while still correctly parsing an ordinary
-  document. **Still deferred** (per `CC-LAB-0090`'s original "Out of scope"
+  document. **Still deferred** (per `CC-LAB-0130`'s original "Out of scope"
   section, restated here rather than left ambiguous): TrackerNest's third
   designed cell, insecure deserialization; ground truth; `multitarget.py`
   wiring.
 
-- **FR-LAB-66** *(`spring_boot`: TrackerNest's third and final cell, insecure
-  deserialization; `CC-LAB-0092`, 2026-09-22).* Extends `FR-LAB-65`'s
+- **FR-LAB-80** *(`spring_boot`: TrackerNest's third and final cell, insecure
+  deserialization; `CC-LAB-0132`, 2026-09-22).* Extends `FR-LAB-75`'s
   `spring_boot` emitter with a third supported shape,
   `(vuln_class="insecure_deserialization", sink_context.family="object_deserialization")`
   — `POST /integrations/webhook-payload`, a real Java
   `ObjectInputStream.readObject()` deserialization of the raw request body
   (CWE-502). Reuses two **existing** `lab/safety_matrix.yaml` ops (no new
-  entry needed, unlike `FR-LAB-65`'s XXE addition):
+  entry needed, unlike `FR-LAB-75`'s XXE addition):
   `function_executing_deserialize` (vulnerable — unrestricted, constructs
   any classpath-present `Serializable` type the stream names) and
   `handler_registry_lookup` (secure — a `resolveClass()`-override allowlist
@@ -1925,7 +1925,7 @@ lane) can submit a payload as
   `UnexpectedType` for bytes naming it; the secure twin returns a real HTTP
   400 rejecting the same bytes while still correctly accepting real
   `WebhookEvent` bytes. **This closes TrackerNest's full three-cell
-  designed set** (`FR-LAB-64` SSTI, `FR-LAB-65` XXE, this entry insecure
+  designed set** (`FR-LAB-74` SSTI, `FR-LAB-75` XXE, this entry insecure
   deserialization) per `docs/research/category3-saas-functionality-and-cwe-research.md`
   sec 6b. **Still out of scope:** ground truth
   (`labels.json`/`injection-points.json`); `multitarget.py` wiring; "Huddle

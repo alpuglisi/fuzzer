@@ -1,4 +1,4 @@
-# Insecure-deserialization sample manifest (`CC-LAB-0092`/`FR-LAB-66`),
+# Insecure-deserialization sample manifest (`CC-LAB-0132`/`FR-LAB-80`),
 # `spring_boot`.
 #
 # TrackerNest's (category 3, Atlassian pick) third and final designed cell
@@ -7,7 +7,7 @@
 # research (real Java `ObjectInputStream` unrestricted-type-construction
 # footgun, CWE-502). Both twins reuse EXISTING `lab/safety_matrix.yaml`
 # ops for the `object_deserialization` family (no new safety-matrix entry
-# needed, unlike CC-LAB-0091's XXE cell): the vulnerable twin
+# needed, unlike CC-LAB-0131's XXE cell): the vulnerable twin
 # (`function_executing_deserialize`) constructs whatever `Serializable`
 # class a request's serialized bytes name; the secure twin
 # (`handler_registry_lookup`) allowlists exactly one expected class name

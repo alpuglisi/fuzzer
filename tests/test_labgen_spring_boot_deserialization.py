@@ -1,5 +1,5 @@
 """Unit coverage for the `spring_boot` emitter's insecure-deserialization
-cell (`CC-LAB-0092`, TrackerNest's third and final designed cell).
+cell (`CC-LAB-0132`, TrackerNest's third and final designed cell).
 
 No network/java/mvn required -- pure Python emitter-output checks, mirroring
 `tests/test_labgen_spring_boot.py`/`tests/test_labgen_spring_boot_xxe.py`'s
@@ -62,7 +62,7 @@ def test_vulnerable_twin_has_no_allowlist_secure_twin_does() -> None:
 
 
 def test_all_three_trackernest_controllers_have_disjoint_class_names() -> None:
-    """TrackerNest's three cells (SSTI `CC-LAB-0090`, XXE `CC-LAB-0091`,
+    """TrackerNest's three cells (SSTI `CC-LAB-0130`, XXE `CC-LAB-0131`,
     insecure deserialization here) must never collide on a generated file
     path/class name -- guaranteed by `_class_name_for()` deriving from each
     cell's own id."""

@@ -468,7 +468,7 @@ entries:
   - op: xml_external_entities_enabled
     sink_family: xml_parse_input
     effect: no_effect
-  # Added CC-LAB-0091/FR-LAB-65: the secure counterpart `xml_parse_input`
+  # Added CC-LAB-0131/FR-LAB-75: the secure counterpart `xml_parse_input`
   # lacked until now (vulnerable-only coverage since CC-LAB-0063) -- the
   # real, standard Java XXE fix (Xerces/JAXP's disallow-doctype-decl
   # feature). Additive; no version bump (this file's own header convention:

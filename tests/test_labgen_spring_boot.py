@@ -1,4 +1,4 @@
-"""Unit coverage for the `spring_boot` emitter (`CC-LAB-0090`, TrackerNest).
+"""Unit coverage for the `spring_boot` emitter (`CC-LAB-0130`, TrackerNest).
 
 No network/java/mvn required -- pure Python emitter-output checks, mirroring
 `tests/test_labgen_node_express.py`'s own shape for its stack.

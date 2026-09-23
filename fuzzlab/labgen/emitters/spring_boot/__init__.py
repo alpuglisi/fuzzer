@@ -1,5 +1,5 @@
 """``spring_boot``: the fourth emitter, category 3's Atlassian pick
-(`CC-LAB-0090`, TrackerNest).
+(`CC-LAB-0130`, TrackerNest).
 
 Implements :class:`fuzzlab.labgen.emitter.Emitter` for Java/Spring Boot by
 assembling :mod:`fuzzlab.labgen.emitters.spring_boot.modules` fragments per
@@ -8,14 +8,14 @@ cell -- the same module-composition architecture
 independently for this stack (``docs/LAB_IMPLEMENTATION_PLAN.md`` Phase 3's
 "no stack's emitter package imports another's" rule).
 
-**Scope, stated plainly (one cell only, per `CC-LAB-0090`'s pre-change
+**Scope, stated plainly (one cell only, per `CC-LAB-0130`'s pre-change
 review).** This emitter supports exactly one shape as of this entry:
 ``(vuln_class="ssti", sink_context.family="template_render")``, TrackerNest's
 ``/wiki/pages/render`` cell (see
 ``docs/research/category3-saas-functionality-and-cwe-research.md`` sec 6b).
 The XXE and insecure-deserialization cells for the same app are deliberately
 deferred to a follow-on entry, not silently unfinished -- see
-``docs/components/01-target-lab/change-control.md``'s `CC-LAB-0090` "Out of
+``docs/components/01-target-lab/change-control.md``'s `CC-LAB-0130` "Out of
 scope" section.
 
 **No route accumulator, unlike `php_laravel`/`node_express`.** Spring Boot's
@@ -63,7 +63,7 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
 
 _CLASS_NAME_SANITIZE_RE = re.compile(r"[^A-Za-z0-9]+")
 
-#: Spring's per-HTTP-method mapping annotations (`CC-LAB-0091`: the first
+#: Spring's per-HTTP-method mapping annotations (`CC-LAB-0131`: the first
 #: entry to need anything but GET -- the XXE cell's `/issues/import` is a
 #: POST).
 _MAPPING_ANNOTATION_BY_METHOD: dict[str, str] = {

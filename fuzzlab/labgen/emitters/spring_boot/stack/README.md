@@ -2,7 +2,7 @@
 
 Per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9 (category 3, the
 Atlassian pick) and `docs/components/01-target-lab/change-control.md`'s
-`CC-LAB-0090`.
+`CC-LAB-0130`.
 
 ## `skeleton/`
 
@@ -40,7 +40,7 @@ curl https://repo.maven.apache.org/maven2/ognl/ognl/maven-metadata.xml
 
 A real, bounded HTTPS GET through this sandbox's configured proxy to
 `repo.maven.apache.org/maven2/org/springframework/boot/spring-boot/maven-metadata.xml`
-returns `200` — confirmed on 2026-09-22 (see `CC-LAB-0090`'s change-control
+returns `200` — confirmed on 2026-09-22 (see `CC-LAB-0130`'s change-control
 entry for the exact command) — so a real `mvn package` against this `pom.xml`
 is buildable in this environment; only the Initializr *convenience* endpoint
 itself is unreachable, not Maven Central dependency resolution.

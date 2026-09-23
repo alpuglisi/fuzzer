@@ -1,4 +1,4 @@
-"""Live-boot conformance check for `spring_boot` (`CC-LAB-0090`, TrackerNest,
+"""Live-boot conformance check for `spring_boot` (`CC-LAB-0130`, TrackerNest,
 category 3's Atlassian pick, one cell only per that entry's pre-change
 review).
 
@@ -24,7 +24,7 @@ its fixed body), never compiling tainted input as an expression. This proves
 live-boot capability and one real, observable payload differential -- the
 same bar `php_laravel`'s very first live-boot test set (`CC-LAB-0054`) --
 not an oracle-grade Tier 2 parity gate, and not XXE/insecure-deserialization
-(deferred to a follow-on entry, `CC-LAB-0090`'s "Out of scope" section).
+(deferred to a follow-on entry, `CC-LAB-0130`'s "Out of scope" section).
 """
 
 from __future__ import annotations

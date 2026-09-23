@@ -1,4 +1,4 @@
-"""Composable rendering modules for the ``spring_boot`` emitter (`CC-LAB-0090`,
+"""Composable rendering modules for the ``spring_boot`` emitter (`CC-LAB-0130`,
 TrackerNest, category 3's Atlassian pick).
 
 Mirrors ``fuzzlab.labgen.emitters.python_fastapi.modules``'s module-
@@ -128,7 +128,7 @@ class FileLoadedTemplateNameSink(TemplateModule):
 
 class RawBodySource(TemplateModule):
     """Reads the entire raw request body as a UTF-8 string
-    (`CC-LAB-0091`) -- for a cell whose tainted value (e.g. an XML document
+    (`CC-LAB-0131`) -- for a cell whose tainted value (e.g. an XML document
     with a DOCTYPE) cannot be a query parameter."""
 
     def __init__(self) -> None:
@@ -142,7 +142,7 @@ class RawBodySource(TemplateModule):
 
 
 class XmlExternalEntitiesEnabledSink(TemplateModule):
-    """The vulnerable op (`CC-LAB-0091`): parses the tainted XML body with a
+    """The vulnerable op (`CC-LAB-0131`): parses the tainted XML body with a
     default-configured ``DocumentBuilderFactory`` -- external entities and
     DOCTYPE declarations are resolved, matching `lab/safety_matrix.yaml`'s
     `xml_external_entities_enabled` op (CWE-611)."""
@@ -154,7 +154,7 @@ class XmlExternalEntitiesEnabledSink(TemplateModule):
 
 
 class XmlExternalEntitiesDisabledSink(TemplateModule):
-    """The secure twin (`CC-LAB-0091`): the same parse, but with Xerces/
+    """The secure twin (`CC-LAB-0131`): the same parse, but with Xerces/
     JAXP's `disallow-doctype-decl` feature set first -- the real, standard
     Java XXE fix, matching `lab/safety_matrix.yaml`'s
     `xml_external_entities_disabled` neutralizing op."""
@@ -166,7 +166,7 @@ class XmlExternalEntitiesDisabledSink(TemplateModule):
 
 
 class RequestStreamSource(TemplateModule):
-    """A no-op source (`CC-LAB-0092`): the deserialization shape's sink
+    """A no-op source (`CC-LAB-0132`): the deserialization shape's sink
     reads `request.getInputStream()` directly (binary data -- converting to
     a `String` first, as `RawBodySource` does for the text-shaped XXE cell,
     would corrupt it). Exists to keep this emitter's source/sink/complexity
@@ -184,7 +184,7 @@ class RequestStreamSource(TemplateModule):
 
 
 class FunctionExecutingDeserializeSink(TemplateModule):
-    """The vulnerable op (`CC-LAB-0092`): an unrestricted
+    """The vulnerable op (`CC-LAB-0132`): an unrestricted
     `ObjectInputStream.readObject()` -- will construct any `Serializable`
     class present on the classpath the stream names, matching
     `lab/safety_matrix.yaml`'s `function_executing_deserialize` op
@@ -197,7 +197,7 @@ class FunctionExecutingDeserializeSink(TemplateModule):
 
 
 class HandlerRegistryLookupSink(TemplateModule):
-    """The secure twin (`CC-LAB-0092`): a `resolveClass()`-override
+    """The secure twin (`CC-LAB-0132`): a `resolveClass()`-override
     allowlist permitting exactly one expected class name, matching
     `lab/safety_matrix.yaml`'s `handler_registry_lookup` neutralizing op."""
 
