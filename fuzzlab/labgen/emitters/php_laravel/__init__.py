@@ -246,6 +246,12 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("ssrf", "server_side_http_fetch"): _ModuleSet(
         "get_param", "server_side_http_fetch", "single_statement"
     ),
+    # CC-LAB-0135: Huddle Hub's third and final designed cell, header
+    # injection in outgoing-webhook delivery. Same "op selects which
+    # transform gates the fixed sink" shape as CC-LAB-0133/0134.
+    ("outbound_header_injection", "outbound_http_request_header_value"): _ModuleSet(
+        "get_param", "outbound_webhook_delivery", "single_statement"
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -476,6 +482,11 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # reads the pasted URL as `?url=`. Illustrative served URL, same
     # reasoning as `/webhooks/events` above.
     "/messages/unfurl": {"var_name": "unfurlUrl", "param_name": "url"},
+    # CC-LAB-0135: Huddle Hub's header-injection cell -- `get_param` reads
+    # the admin-configured trigger word as `?triggerWord=`. Illustrative
+    # served URL, same reasoning as `/webhooks/events`/`/messages/unfurl`
+    # above.
+    "/integrations/outgoing-webhook": {"var_name": "triggerWord", "param_name": "triggerWord"},
     # POST string-literal lookup. `password_var`/`password_param` are sink
     # boilerplate (an already-hashed secret), not a second injection point.
     "/login": {

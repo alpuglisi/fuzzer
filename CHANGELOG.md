@@ -30,6 +30,25 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
 
 ## 2026-09-23
 - `fuzzlab/labgen/emitters/php_laravel/`: Huddle Hub's (category 3's Slack
+  pick) third and final designed cell — outbound header injection in
+  outgoing-webhook delivery (a Slack-style feature that embeds an
+  admin-configured trigger word in a custom outbound HTTP request
+  header). New `outbound_http_request_header_value` sink_family and
+  concern in `lab/safety_matrix.yaml` with two new ops:
+  `raw_header_concat` (vulnerable: raw string concatenation into a
+  stream-context header block) and `structured_http_client_headers`
+  (secure: Laravel's `Http` facade, Guzzle-backed, rejects any
+  CRLF-bearing header value with a real `InvalidArgumentException`).
+  Both twins bound the outbound call with an explicit timeout and read
+  the destination URL from an env var with an RFC-2606 `.invalid`-TLD
+  fail-closed fallback. Live-boot-proven against a real local marker
+  HTTP server: the vulnerable twin's crafted trigger word genuinely
+  splices a real extra header the marker server actually parses; the
+  secure twin rejects it with a real HTTP 400 and never reaches the
+  marker server. This closes Huddle Hub's full three-cell designed set
+  (ground truth and `multitarget.py` wiring remain deferred for category
+  3 as a whole). See `CC-LAB-0135`/`FR-LAB-99`.
+- `fuzzlab/labgen/emitters/php_laravel/`: Huddle Hub's (category 3's Slack
   pick) second designed cell — SSRF via link unfurling (a Slack-style
   feature that fetches a user-pasted URL to generate a message preview).
   Reuses two existing `lab/safety_matrix.yaml` ops (`unchecked_url_fetch`
