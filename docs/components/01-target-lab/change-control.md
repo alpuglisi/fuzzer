@@ -3,6 +3,118 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0084 — vuln-corpus Phase 3: real gVisor dynamic-validation sandbox (FR-LAB-102) (2026-09-23)
+- Change: New `fuzzlab/tools/corpus_validation_sandbox.py` and
+  `tests/test_corpus_validation_sandbox.py`, implementing
+  `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s "Validation execution sandbox"
+  section — the containment required before any collected/manufactured
+  `docs/research/corpus-examples/` pair can be dynamically executed to
+  validate a CWE claim for real. `run_in_sandbox()` drives gVisor
+  (`runsc run`, not `runc`) directly against a hand-built OCI bundle (no
+  Docker/containerd in the loop): a deliberately empty network namespace
+  (no interface ever attached, so nothing to allow-list — an SSRF/exfil
+  attempt fails at the syscall boundary `runsc` intercepts), an
+  `-overlay2=all:memory` ephemeral write layer (every write vanishes with
+  the container, matching `runsc do`'s own reference-implementation
+  mechanism for this exact pattern), real cgroup v1 `memory`/`pids`
+  controls (not `ulimit` approximations — a genuine OOM-kill and a
+  genuine fork-bomb cap, both verified below), a `nobody` (uid/gid 65534)
+  non-root process with an empty capability set and `noNewPrivileges`,
+  and a wall-clock `timeout(1)` wrapper. Requires explicit
+  `authorized=True` (mirrors this project's own lab `--authorized`
+  convention) and appends a JSONL audit-log entry for every call
+  regardless of outcome. New pytest marker `sandbox` (alongside `slow`),
+  skip-guarded on the module's own `sandbox_available()` capability probe
+  (same convention `live_boot_available()` already established for
+  `slow`).
+  Two documented, deliberate deviations from the plan's literal spec
+  (both because this environment's egress policy blocks every container
+  registry's blob-serving CDN — Docker Hub, ECR Public, and GCR were all
+  checked and all route through a blocked CDN backend, so no base image
+  can be pulled at all): (1) the sandbox reuses the host's own
+  already-installed PHP/Python/Node interpreters (mounted as the OCI
+  root, per the note above) rather than a purpose-built minimal image —
+  trades filesystem-read minimalism for not needing a bespoke per-language
+  rootfs, judged acceptable since this environment is itself an ephemeral,
+  disposable remote sandbox with no live secrets a *read* (as opposed to a
+  write, which the ephemeral overlay already prevents from persisting, or
+  an exfil, which the empty network namespace already prevents) could
+  expose; (2) `runsc` is invoked directly rather than via `docker run
+  --runtime=runsc` per the plan's illustrative example — a strictly
+  stronger, more inspectable path with no daemon in between, and
+  necessary anyway once image pulls turned out to be infeasible. Both are
+  spelled out in the module's own docstring, not silent substitutions.
+  `runsc` itself (release-20260914.0, fetched from `google/gvisor`'s own
+  GitHub releases after `gvisor.dev`/`storage.googleapis.com/gvisor`
+  turned out to be blocked by this environment's egress policy — GitHub
+  release assets for an already-`add_repo`-attached repo were not) is
+  installed at `/usr/local/bin/runsc` plus its `gvisor-bin/` sidecar
+  helpers as an environment-setup step; this change does not automate
+  that install (a systemwide binary install has no business happening as
+  a side effect of running the test suite).
+- Impact (other components / project): Component 1 (LAB) only. Purely
+  additive tooling under `fuzzlab/tools/`; does not touch
+  `lab/safety_matrix.yaml`, any emitter, or anything that builds the
+  actual generated lab. Per the plan's own "Validated data only reaches
+  lab-generation-facing files" rule, this sandbox is infrastructure for
+  *producing* a `validated: true` verdict on a corpus entry — it does not
+  itself flip that flag on any entry (no entries were validated by this
+  change; that is the next, separate step).
+- Risk (level; mitigation or accepted-risk justification): Medium,
+  accepted and mitigated. This is the one piece of tooling in this
+  project whose entire job is to execute real, sometimes deliberately
+  vulnerabilized, third-party code — a materially different risk profile
+  from everything else in this repository. Mitigated by defense in depth
+  (gVisor syscall interception + zero network + ephemeral filesystem +
+  real cgroup resource limits + non-root + explicit opt-in + mandatory
+  audit logging), each layer verified independently and for real in
+  `tests/test_corpus_validation_sandbox.py` (not asserted from the
+  containment mechanism's existence alone). Residual accepted risk: the
+  filesystem-read-scope deviation noted above (documented, not silent).
+- Deliverables:
+  - [x] gVisor (`runsc`) installed and registered as a working runtime in
+    this environment — done (`release-20260914.0`)
+  - [x] Zero-network containment, verified for real (an outbound
+    `file_get_contents`/`socket.create_connection`/`net.createConnection`
+    call genuinely fails with `ENETUNREACH`/"Network is unreachable",
+    not merely times out) — done,
+    `test_network_is_genuinely_unreachable`
+  - [x] Ephemeral-filesystem containment, verified for real (a write
+    succeeds *inside* the sandbox, proving the overlay is writable, but
+    does not exist on the real host once the container is torn down) —
+    done, `test_filesystem_writes_never_reach_the_real_host`
+  - [x] Real cgroup v1 memory limit, verified for real (a 200×10MiB
+    allocation against a 64MiB cap is OOM-killed, exit code 137) — done,
+    `test_memory_limit_is_enforced`
+  - [x] Real cgroup v1 pids limit, verified for real (an unbounded
+    `os.fork()` loop terminates well inside the wall-clock timeout
+    instead of running away) — done, `test_pids_limit_bounds_a_fork_bomb`
+  - [x] Wall-clock timeout, verified for real (an infinite loop is killed
+    at the requested deadline, not "eventually") — done,
+    `test_wall_clock_timeout_kills_a_hanging_process`
+  - [x] Non-root execution, verified for real (`posix_getuid()` inside the
+    sandbox reports 65534, not 0) — done,
+    `test_php_executes_and_reports_a_non_root_uid`
+  - [x] Explicit opt-in enforced (`authorized=False` raises
+    `PermissionError` before anything runs) — done,
+    `test_authorized_false_refuses_without_running_anything`
+  - [x] Audit log written for every call — done,
+    `test_audit_log_records_every_call`
+  - [x] All three corpus languages (PHP, Python, Node) execute inside the
+    sandbox — done, `test_php_executes_and_reports_a_non_root_uid`/
+    `test_python_executes`/`test_node_executes`
+- Effectiveness (assessed 2026-09-23): **met.** `python3 -m pytest -q -m
+  sandbox` → 12 passed, 2 deselected-then-skipped (unrelated tests
+  incidentally matching the marker name in collection, not this file's
+  own tests). Full non-slow suite re-run: 1891 passed, 8 skipped, 42
+  deselected (up from 30 — the 12 new tests are `slow`+`sandbox`-marked)
+  — no regression. This closes the "Phase 3: validation execution sandbox
+  actually built/tested" item in `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s
+  Status checklist; "Phase 3: all pairs validated" (actually running this
+  sandbox against the real corpus to flip `validated: true` on entries)
+  and "Phase 3: manufactured pairs generated" remain separate, not-yet-
+  started work.
+
 ### CC-LAB-0083 — §6 step 2: combine ForgeCart + MeadowMart `TargetSpec`s in one `run_targets` call (FR-LAB-87) (2026-09-23)
 - Change: New `tests/test_multitarget_category1_combined.py`. Both Phase E
   lanes (`CC-LAB-0079` MeadowMart, `CC-LAB-0082` ForgeCart) built their own

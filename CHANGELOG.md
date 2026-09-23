@@ -12,6 +12,28 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (vuln corpus Phase 3: real gVisor validation sandbox)
+- LAB (`CC-LAB-0084`/`FR-LAB-102`): built and tested the "Validation
+  execution sandbox" `docs/VULN_CORPUS_EXPANSION_PLAN.md` requires before
+  any collected/manufactured corpus pair can be dynamically executed.
+  New `fuzzlab/tools/corpus_validation_sandbox.py` drives gVisor (`runsc
+  run`, no Docker/containerd) with zero network, an ephemeral memory
+  overlay, real cgroup v1 memory/pids limits, non-root, a wall-clock
+  timeout, explicit opt-in, and mandatory audit logging — every
+  containment property verified for real (not just asserted) in
+  `tests/test_corpus_validation_sandbox.py`'s 12 tests. gVisor's own
+  install sources (`gvisor.dev`, `storage.googleapis.com/gvisor`) were
+  blocked by this environment's egress policy; fetched the `runsc`
+  binary instead from `google/gvisor`'s GitHub releases after attaching
+  the repo read-only via `add_repo`. Two deliberate, documented
+  deviations from the plan's literal spec (host interpreters as the OCI
+  root instead of a purpose-built image; `runsc` invoked directly instead
+  of through `docker run --runtime=runsc`), both forced by this
+  environment's egress policy blocking every container registry's blob
+  CDN (Docker Hub, ECR Public, and GCR were all checked). Full details in
+  `CC-LAB-0084`'s change-control entry. Does not yet validate any real
+  corpus entry — that is separate, not-yet-started work.
+
 ## 2026-09-23 (vuln corpus Phase 3: safety_matrix.yaml handoff audit)
 - Docs: audited the vuln-corpus expansion plan's remaining Phase 3 status
   item — "`suggested_op`/`suggested_sink_family` proposals acted on

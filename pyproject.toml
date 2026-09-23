@@ -129,4 +129,5 @@ markers = [
     # skip-guarded) by default, this marker exists so `pytest -m slow` /
     # `pytest -m "not slow"` can select or deselect it explicitly.
     "slow: exercises a real composer install + live php artisan serve boot (network + wall-clock heavy)",
+    "sandbox: exercises the real gVisor corpus-validation sandbox (fuzzlab.tools.corpus_validation_sandbox) -- spins up an actual runsc container per test, several seconds each. Skip-guarded on that module's own sandbox_available() capability probe, same PA-0005 convention as 'slow', so it degrades to a clean skip wherever runsc/cgroup v1 controllers are absent rather than failing.",
 ]

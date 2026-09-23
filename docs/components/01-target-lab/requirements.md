@@ -2351,6 +2351,41 @@ lane) can submit a payload as
   both `FR-LAB-83` and `FR-LAB-86` already flagged as separate follow-on
   work) and does not modify `fuzzlab/harness/multitarget.py` itself. This
   closes Category 1 (E-commerce)'s full Phase A-E build.
+- **FR-LAB-102** *(vuln-corpus Phase 3: real gVisor dynamic-validation
+  sandbox; `CC-LAB-0084`, 2026-09-23).* New
+  `fuzzlab/tools/corpus_validation_sandbox.py`:
+  `run_in_sandbox(language, script_path, authorized=True, ...)` executes
+  a `docs/research/corpus-examples/` fixture under gVisor (`runsc run`
+  against a hand-built OCI bundle, no Docker/containerd) with a
+  deliberately empty network namespace (no interface ever attached — an
+  SSRF/exfil attempt fails at the kernel-facing boundary `runsc`
+  intercepts, not an allow-list), an `-overlay2=all:memory` ephemeral
+  write layer (every write vanishes with the container), real cgroup v1
+  `memory`/`pids` limits (a genuine OOM-kill and a genuine fork-bomb cap,
+  not `ulimit` approximations), a non-root (`nobody`, uid/gid 65534)
+  process with an empty capability set and `noNewPrivileges`, and a
+  wall-clock timeout. Refuses to run anything without explicit
+  `authorized=True` and appends a JSONL audit-log entry for every call.
+  Implements `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s "Validation execution
+  sandbox" section, required before any collected/manufactured pair can
+  be dynamically executed to earn `validated: true`. Two documented
+  deviations from that section's literal spec (both because this
+  environment's egress policy blocks the blob-serving CDN every
+  container registry checked routes through, so no base image is
+  pullable): the sandbox mounts the host's own already-installed PHP/
+  Python/Node interpreters as the OCI root instead of a purpose-built
+  minimal image, and `runsc` is invoked directly rather than via `docker
+  run --runtime=runsc` — see `CC-LAB-0084`'s own entry for the full
+  reasoning and the accepted-risk framing. Every containment property is
+  verified for real (not asserted from the mechanism's existence alone)
+  in `tests/test_corpus_validation_sandbox.py`: network unreachability,
+  filesystem ephemerality, the memory cap, the pids cap, the wall-clock
+  kill, the non-root uid, the opt-in gate, and the audit log. New pytest
+  marker `sandbox`, skip-guarded on `sandbox_available()` (same
+  convention as `slow`'s `live_boot_available()` guard) so this degrades
+  to a clean skip, never a failure, wherever `runsc`/cgroup v1 are
+  absent. Does not itself validate any real corpus entry or flip
+  `validated: true` anywhere — that is separate, not-yet-started work.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

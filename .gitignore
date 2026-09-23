@@ -27,3 +27,8 @@ lab/.snapshots/
 # clones/pulls into -- multi-gigabyte upstream data, never the deliverable
 # (the deliverable is the small, hand-curated lab/patterns/cards/*.yaml).
 .cache/
+
+# runtime audit log fuzzlab/tools/corpus_validation_sandbox.py appends to
+# on every real gVisor sandbox run (CC-LAB-0084/FR-LAB-102) -- regenerated
+# noise from running the test suite locally, not a tracked deliverable.
+docs/research/corpus-validation-audit.jsonl

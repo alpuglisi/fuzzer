@@ -634,8 +634,24 @@ sources (OWASP LLM Top 10) before Phase 2 either includes or skips it.
       and assigning a genuinely specific, non-colliding MITRE ID)
 - [ ] Phase 3: manufactured pairs generated (floor met per CWE — see
       "Pair generation")
-- [ ] Phase 3: validation execution sandbox actually built/tested (not just
-      specified) — required before any dynamic check can run for real
+- [x] Phase 3: validation execution sandbox actually built/tested (not just
+      specified) — `fuzzlab/tools/corpus_validation_sandbox.py`
+      (`CC-LAB-0084`/`FR-LAB-102`, 2026-09-23): real gVisor (`runsc run`),
+      zero network namespace, `-overlay2=all:memory` ephemeral writes,
+      real cgroup v1 memory/pids limits, non-root, wall-clock timeout,
+      explicit `authorized=True` opt-in, mandatory audit log. Every
+      containment property verified for real in
+      `tests/test_corpus_validation_sandbox.py` (12 tests, all passing),
+      not asserted from the mechanism's existence alone. Two documented
+      deviations from this section's literal spec, both forced by this
+      environment's egress policy blocking every container registry's
+      blob CDN (no base image is pullable at all): reuses the host's own
+      interpreters as the OCI root rather than a purpose-built minimal
+      image, and drives `runsc` directly rather than via `docker run
+      --runtime=runsc` — see `CC-LAB-0084`'s change-control entry for the
+      full reasoning. This sandbox does not itself validate any real
+      corpus entry (see the still-unchecked "all pairs validated" item
+      below) — it only makes that step possible.
 - [ ] Phase 3: all pairs validated (report as "N of M", per "Validated data
       only reaches lab-generation-facing files" — never rounded up)
 - [x] Phase 3: `suggested_op`/`suggested_sink_family` proposals acted on
