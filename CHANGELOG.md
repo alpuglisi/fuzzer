@@ -4,6 +4,19 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (category 5: Phase D Tier 1/2 conformance)
+- LAB: real, executed Tier 1/2 proof for three of category 5's four
+  currently-built shapes (`csv_formula_injection`/`price_integrity_
+  bypass` on `php_laravel`, `spel_injection` on `spring_boot`), reusing
+  `fuzzlab.labgen.conformance.tier1`/`tier2` unchanged against each
+  shape's own live-boot harness. `open_redirect` is deliberately
+  excluded: its evidence lives in the `Location` response header, which
+  Tier 1/2's marker-in-body model cannot express — a genuine model
+  mismatch, not a gap worked around. A real test-design mistake (the CSV
+  evidence marker remaining a substring of the secure twin's quote-
+  prefixed output too) was caught and fixed by this entry's own first
+  execution before landing. See `CC-LAB-0216`.
+
 ## 2026-09-23 (overnight autonomous build plan)
 - Docs: saved `docs/OVERNIGHT_AUTONOMOUS_BUILD_PLAN.md` at the user's
   request before they logged off for the night — the orchestration

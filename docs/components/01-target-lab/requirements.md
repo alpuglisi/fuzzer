@@ -3795,6 +3795,29 @@ lane) can submit a payload as
   `redirect`/`csv` minting convention, not forced into an existing
   bucket, per the adequacy review).
 
+- **FR-LAB-117** *(category 5 Phase D: Tier 1/2 conformance;
+  `CC-LAB-0216`, 2026-09-23).* Real, executed Tier 1/2 proof
+  (`fuzzlab.labgen.conformance.tier1`/`tier2`, unchanged) for three of
+  this category's four currently-built shapes: `csv_formula_injection`/
+  `price_integrity_bypass` on `php_laravel` (both twins booted together
+  in one `LiveBootHarness`, using `served_url_for()` for each twin's real
+  served URL rather than the manifest's shared literal `route.path`) and
+  `spel_injection` on `spring_boot` (one boot per twin, via a small local
+  `Tier1Client`/`Tier2Client` adapter over `SpringBootLiveBootHarness`'s
+  existing `get()` method). `open_redirect` is deliberately not included:
+  its evidence is the `Location` response *header*, which Tier 1/2's
+  marker-in-response-body model cannot express — recorded as a genuine
+  model mismatch, matching category 4's own precedent for its webhook-
+  signature cell's timing side channel, not silently worked around.
+  - A real test-design mistake was caught and fixed by this entry's own
+    first execution: the initial CSV `evidence_marker` (the bare trigger
+    payload) remained a substring of the secure twin's body too, since
+    that twin's real fix *prefixes* a quote rather than stripping the
+    trigger character — fixed by including the preceding newline in the
+    marker, which the quote-prefixed secure twin's row no longer matches.
+  - Tests: `tests/test_labgen_phase_d_tier12_category5.py` (4 real
+    live-boot tests, all green after the fix above).
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

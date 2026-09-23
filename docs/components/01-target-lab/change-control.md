@@ -3,6 +3,74 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0216 — category 5 pilot, Phase D: Tier 1/2 conformance for its currently-built cells (FR-LAB-117) (2026-09-23)
+- Change: real, executed Tier 1/2 proof (`fuzzlab.labgen.conformance.tier1`/
+  `tier2`, unchanged) for three of category 5's four currently-built
+  shapes — `csv_formula_injection`/`price_integrity_bypass` on
+  `php_laravel` (both twins booted together in one `LiveBootHarness`, this
+  stack's own established convention since each cell serves at its own
+  `served_url_for()`-derived `/cell/<slug>` URL, never the manifest's
+  literal shared `route.path`) and `spel_injection` on `spring_boot`
+  (`SpringBootLiveBootHarness`, one boot per twin via a small local
+  `Tier1Client`/`Tier2Client` adapter class over its existing, unmodified
+  `get()` method — mirrors `tests/test_labgen_phase_d_tier12_category4.py`'s
+  own `_GoSsrfTier12Client` shape exactly). Mirrors that same file's overall
+  structure (per-shape sections, a small local adapter where a harness
+  doesn't already implement the `Tier1Client`/`Tier2Client` protocols
+  directly) rather than inventing a new pattern.
+
+  The fourth shape, `open_redirect`, is **not** forced into this proof:
+  its own evidence is the `Location` *response header*
+  (`tests/test_labgen_open_redirect.py`'s own live-boot test checks
+  `resp.headers.get("Location", "")`, never `resp.body`), which
+  `evaluate_tier1_response`'s "marker appears in `response_body`" model
+  cannot express at all — the same honesty rule category 4's own Phase D
+  entry already established for its webhook-signature cell's timing side
+  channel (a shape Tier 1/2's single-request model genuinely cannot
+  confirm, recorded as an open question rather than worked around).
+
+  A real test-design mistake was found and fixed during this entry's own
+  first execution (before landing, not after): the initial
+  `csv_formula_injection` `evidence_marker` was the bare trigger payload
+  string (`=cmd|'/c calc'!A1`) — but the secure twin's real fix
+  *prefixes* a single quote rather than stripping the trigger character,
+  so the raw payload text remains a substring of the secure twin's body
+  too (`'=cmd|...` still contains `=cmd|...`), making the marker
+  indistinguishable between twins and the secure-twin test fail with
+  `detected=True` when `expected_vulnerable=False`. Fixed by including
+  the newline immediately preceding the CSV cell's value in the marker
+  (`"\n" + trigger_payload`): the vulnerable twin's row starts `\n=cmd|`
+  (no quote), the secure twin's starts `\n'=cmd|` (quote inserted) — only
+  the former contains the fixed marker.
+  1. **Tests**: `tests/test_labgen_phase_d_tier12_category5.py` (4 real
+     live-boot tests: CSV formula injection both twins, price integrity
+     both twins, SpEL injection each twin separately) — all green after
+     the marker-design fix above. Whole-repo `pytest tests/` run before
+     considering this increment complete (`PA-0036`) — see Effectiveness
+     for the pass/skip/fail counts.
+  2. `docs/components/01-target-lab/requirements.md`: `FR-LAB-117`.
+  3. `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated.
+- Impact (other components / project): test-only — no production code
+  changed, no new safety-matrix rows, no new emitter modules. No other of
+  the 13 components touched.
+- Risk (level; mitigation or accepted-risk justification): low — reuses
+  `fuzzlab.labgen.conformance.tier1`/`tier2` entirely unchanged, against
+  each shape's own already-built, already-tested live-boot harness. The
+  one real design mistake this entry's own first execution caught (the
+  CSV marker collision) was found and fixed before landing, not
+  discovered later by a flaky/misleading pass.
+- Deliverables:
+  - [x] `tests/test_labgen_phase_d_tier12_category5.py` (4 tests, all green) — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-117` — done
+  - [x] `CHANGELOG.md` line — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done
+- Effectiveness (assessed 2026-09-23): achieved its intent, with evidence.
+  Three of four currently-built shapes now have real Tier 1/2 proof beyond
+  each shape's own bespoke live-boot test; the fourth's genuine model
+  mismatch is documented rather than forced. Full whole-repo
+  `pytest tests/` run: see the commit message / `CHANGELOG.md` line for
+  the exact pass/skip/fail counts.
+
 ### CC-LAB-0084 — vuln-corpus Phase 3: real gVisor dynamic-validation sandbox (FR-LAB-112) (2026-09-23)
 - Change: New `fuzzlab/tools/corpus_validation_sandbox.py` and
   `tests/test_corpus_validation_sandbox.py`, implementing
