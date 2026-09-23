@@ -26,6 +26,12 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
     ``rendering=js``) are audited only when a **browser** is available (M6); otherwise
     they are returned as ``skipped`` (path, method, param, reason) so the gap is
     explicit and they score as false negatives until a browser is provided.
+    **Header-carried points** (``location="header"``, e.g. a webhook-signature check
+    against a header value -- `CC-LAB-0174`'s `TWCH-0001`) are always ``skipped``
+    with their own reason: neither this function's point model nor
+    ``fuzzlab.tools.probesender``'s senders carry a header-injection convention yet
+    (`FR-FUZZ-12`), a real, distinct gap from the DOM/browser one -- never folded
+    into that reason string, which would misreport *why* the point can't be audited.
     """
     base = base_url.rstrip("/")
     points: list[InjectionPoint] = []
@@ -34,7 +40,8 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
         path = gp.url if gp.url.startswith("/") else "/" + gp.url
         is_dom = (gp.client_only or (gp.rendering or "") == "js"
                   or gp.location == "fragment")
-        if not is_dom and gp.method.upper() in ("GET", "POST") \
+        is_header = gp.location == "header"
+        if not is_dom and not is_header and gp.method.upper() in ("GET", "POST") \
                 and gp.location in ("query", "body"):
             points.append(InjectionPoint(url=base + path, param=gp.param,
                                          method=gp.method.upper(), location=gp.location))
@@ -42,6 +49,10 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
             loc = gp.location if gp.location in ("query", "fragment") else "query"
             points.append(InjectionPoint(url=base + path, param=gp.param,
                                          method="GET", location=loc))
+        elif is_header:
+            skipped.append((path, gp.method, gp.param,
+                            "header-carried injection point (no header-capable "
+                            "point/sender wiring yet, FR-FUZZ-12)"))
         else:
             skipped.append((path, gp.method, gp.param,
                             "client-only/DOM (needs browser execution, M6)"))

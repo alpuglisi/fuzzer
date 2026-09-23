@@ -98,6 +98,25 @@ def test_points_from_ground_truth_filters_to_testable():
     assert all(r.endswith("M6)") for _p, _m, _pm, r in skipped)   # only DOM gaps remain
 
 
+def test_points_from_ground_truth_gives_header_points_their_own_skip_reason():
+    # CC-LAB-0176/FR-FUZZ-12: a header-carried point (Twitch's webhook-signature
+    # case, location="header") must be skipped with an honest, distinct reason --
+    # never folded into the DOM/browser one, which would misreport why it can't
+    # be audited (no header-injection point/sender convention exists yet, not
+    # "needs a browser").
+    gt = contract.load("lab/ground-truth-twitch-clone")
+    points, skipped = points_from_ground_truth(gt, "http://127.0.0.1:8080")
+
+    tested = {(p.url, p.param, p.method) for p in points}
+    assert ("http://127.0.0.1:8080/generated/labgen-go-0003", "url", "GET") in tested
+
+    skipped_by_param = {param: reason for _p, _m, param, reason in skipped}
+    assert "X-Signature-256" in skipped_by_param
+    reason = skipped_by_param["X-Signature-256"]
+    assert "header" in reason and "FR-FUZZ-12" in reason
+    assert "M6" not in reason and "browser" not in reason   # not the DOM reason
+
+
 def test_run_auto_ground_truth_points_beats_crawl_coverage(tmp_path):
     gt = contract.load(GT_DIR)
     with Store(tmp_path / "u.db") as store:

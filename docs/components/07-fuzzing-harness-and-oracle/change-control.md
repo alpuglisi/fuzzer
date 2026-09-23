@@ -3,6 +3,59 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0025 — Give header-carried ground-truth points their own honest skip reason (2026-09-23)
+
+- Change: `fuzzlab.harness.auto.points_from_ground_truth` treated a
+  header-located ground-truth point (``location="header"``) as a
+  client-only/DOM point, skipping it under the reason string
+  ``"client-only/DOM (needs browser execution, M6)"`` — factually wrong: a
+  header-carried value has nothing to do with DOM rendering or a browser,
+  it is simply not yet expressible by this function's point model or by
+  any of `fuzzlab.tools.probesender`'s senders. Found while wiring category
+  4's Twitch app into Phase E (`CC-LAB-0176`): its webhook-signature case
+  (`TWCH-0001`, `lab/ground-truth-twitch-clone/`) is the project's first
+  header-located ground-truth point, and the misleading reason string
+  surfaced immediately on inspection. Fixed with a distinct `is_header`
+  branch and its own reason
+  (``"header-carried injection point (no header-capable point/sender
+  wiring yet, FR-FUZZ-12)"``), never folded into the DOM reason. Building
+  actual header-injection support (a point type + a header-capable sender)
+  is real, sized follow-on work, not attempted here — this change only
+  makes the current, correct "cannot be audited yet" outcome honestly
+  labeled.
+  - **Not routed through the bug protocol**: the *behavior* was already
+    correct (the point was, and still is, excluded from probing either
+    way) — only the *diagnostic reason string* was inaccurate. No test
+    asserted a wrong result, no crash, no regression; this is a clarity
+    fix to a message, not a defect in what the function does. Recorded
+    here in full regardless, per this component's own bookkeeping
+    discipline.
+  New/changed files:
+  - `fuzzlab/harness/auto.py` (`points_from_ground_truth`)
+  - `tests/test_auto.py` (`test_points_from_ground_truth_gives_header_points_their_own_skip_reason`)
+  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md` (`FR-FUZZ-12`, new)
+- Impact (other components / project): none outside this function's own
+  return value (`skipped`'s reason strings) — the set of points actually
+  audited is unchanged (header points were already excluded before this
+  change), so no scoring/detection behavior changes for any existing
+  ground truth. `tests/test_auto.py`'s own pre-existing assertion (every
+  default-lab skip reason ends in `"M6)"`) still holds unchanged, since the
+  default `lab/ground-truth/` has no header-located points.
+- Risk (level; mitigation or accepted-risk justification): **low**. A
+  message-accuracy fix with no behavior change to what is audited;
+  verified by re-running the full non-slow suite (1606 passed, same 15
+  pre-existing unrelated failures) and category 4's own real live-boot
+  Phase E test.
+- Deliverables:
+  - [x] `points_from_ground_truth` gives header-located points their own,
+    accurate skip reason
+  - [x] New test proving the reason string is accurate and distinct from
+    the DOM/browser one
+  - [x] Full non-slow suite re-verified green (no new failures, one new
+    pass)
+- Effectiveness (assessed 2026-09-23): met — `TWCH-0001`'s skip reason no
+  longer claims a browser is the blocker.
+
 ### CC-FUZZ-0024 — Wire M10 grey-box confirmation into the oracle pipeline (2026-09-22)
 - Change: built the seam layer for the M10 grey-box mechanism whose pure decision
   logic (`fuzzlab/greybox/confirm.py::greybox_confirms()`/`m10_evidence()`) and

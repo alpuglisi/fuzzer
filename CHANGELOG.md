@@ -4,6 +4,16 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (FUZZ: honest header-point skip reason, found via category 4)
+- Fuzzing harness: `fuzzlab.harness.auto.points_from_ground_truth` was
+  mislabeling a header-carried ground-truth point (`location="header"`) as
+  a client-only/DOM point needing a browser — factually wrong; the real gap
+  is that no header-injection point type or sender exists yet. Found while
+  wiring category 4's Twitch app (its webhook-signature case is the
+  project's first header-located ground-truth point) into Phase E. Fixed
+  with its own accurate skip reason; no audited-point behavior changed.
+  `CC-FUZZ-0025`/`FR-FUZZ-12`.
+
 ## 2026-09-23 (category 4, Phase E multitarget wiring)
 - Lab: wired both of category 4's apps into `fuzzlab.harness.multitarget` for
   real — `TargetSpec`s pointing at real live-booted instances (Go/Twitch,
