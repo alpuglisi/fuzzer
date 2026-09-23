@@ -3,7 +3,7 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0211 — category 5 pilot, second increment: `csv_formula_injection` (CWE-1236) shape on `php_laravel`, Booking.com's Extranet export (FR-LAB-80, FR-LAB-81) (2026-09-23)
+### CC-LAB-0211 — category 5 pilot, second increment: `csv_formula_injection` (CWE-1236) shape on `php_laravel`, Booking.com's Extranet export (FR-LAB-90, FR-LAB-91) (2026-09-23)
 - Change: the second buildable increment of category 5's Booking.com app
   (first: `CC-LAB-0210`'s `open_redirect` shape) — CSV/report export
   formula injection (CWE-1236), grounded in Booking.com's real Extranet/
@@ -133,8 +133,8 @@ Component code: **LAB**. Entry format and required fields: see
      `injection-points.json`. `fuzzlab/labels/schemas/labels.schema.json`'s
      `vuln_class`/`sink_context` enums widened again, additively
      (`csv_formula_injection`/`csv`).
-  8. `docs/components/01-target-lab/requirements.md`: `FR-LAB-80`
-     (the shape), `FR-LAB-81` (ground truth's second case), written at the
+  8. `docs/components/01-target-lab/requirements.md`: `FR-LAB-90`
+     (the shape), `FR-LAB-91` (ground truth's second case), written at the
      same file-by-file granularity as `FR-LAB-78`/`65`, per the adequacy
      review's explicit demand that the draft's placeholder-level text not
      ship as the final spec.
@@ -189,7 +189,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] `lab/ground-truth-booking-clone/`: `BKNG-0002` in all 3 files — done
   - [x] `fuzzlab/labgen/conformance/static_precheck.py`: new entry — done
   - [x] `tests/test_labgen_modules.py`: 2 new fixture entries + rename (done *before* the whole-repo run, `PA-0036`) — done
-  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-80`/`67`, and `FR-LAB-78` updated in place for the rename — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-90`/`67`, and `FR-LAB-78` updated in place for the rename — done
   - [x] `tests/test_labgen_csv_export_injection.py` (10 tests, all green including the real live-boot test and the framework-independent neutralizer proof) — done
   - [x] `tests/test_labgen_open_redirect.py`: cardinality-assumption fix (item 9) — done
   - [x] `CHANGELOG.md` line — done

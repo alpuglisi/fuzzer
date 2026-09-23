@@ -1869,7 +1869,7 @@ lane) can submit a payload as
     module set has needed, since neither `single_statement` nor
     `render_only` fits a sink that is itself the terminal `return`;
     originally named `redirect_response`, **renamed to `terminal_response`
-    by `FR-LAB-80`/`CC-LAB-0211`** once a second, unrelated sink family
+    by `FR-LAB-90`/`CC-LAB-0211`** once a second, unrelated sink family
     needed the identical, already sink-agnostic wrapper — this entry
     updated in place to the current name, per this file's own living-doc
     convention; `CC-LAB-0210`'s append-only change-control record keeps the
@@ -1930,7 +1930,7 @@ lane) can submit a payload as
   is the first test in this repository to load two ground-truth
   directories in the same process and confirm neither's `contract.load()`
   call is affected by the other's existence.
-- **FR-LAB-80** *(CSV/report export formula-injection shape, `php_laravel`;
+- **FR-LAB-90** *(CSV/report export formula-injection shape, `php_laravel`;
   `CC-LAB-0211`, 2026-09-22).* Category 5's Booking.com app, second
   increment (first: `FR-LAB-78`'s `open_redirect` shape).
   - A genuinely new `(vuln_class, sink_context.family)` shape,
@@ -2022,7 +2022,7 @@ lane) can submit a payload as
     `CC-LAB-0210`-`0119` block. After this increment: 2 of 5 originally
     shortlisted shapes landed, 2 pages, still short of Phase C's "coherent
     page/route set" bar.
-- **FR-LAB-81** *(ground truth's second case in the existing directory;
+- **FR-LAB-91** *(ground truth's second case in the existing directory;
   `CC-LAB-0211`, 2026-09-22).* `BKNG-0002` appended to the *same*
   `lab/ground-truth-booking-clone/` directory `FR-LAB-79` created (not a
   third directory) — verified against the real loader
