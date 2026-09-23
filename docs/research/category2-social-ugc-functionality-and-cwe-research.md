@@ -177,7 +177,56 @@ mass assignment — per `lab/safety_matrix.yaml`'s existing op list).
 | News feed / comments "share to" or redirect-after-action flow | A `header("Location: " . $_GET['next'])`-shaped redirect built directly from an unvalidated `next`/`redirect_to` query parameter, without an open-redirect allowlist or a CRLF-stripping check, permitting a `\r\n`-carrying value to inject additional response headers | CWE-113 (HTTP response splitting / header injection) | `header-injection` corpus dir already exists; new realistic trigger (post/comment "share" redirect) not yet used by either PHP stack. |
 | Account/session preference storage (e.g., "remember my last-viewed album" or a signed preference cookie) | `unserialize()` called directly on an attacker-controlled cookie or cached value, with no `allowed_classes` restriction (PHP's own documented `unserialize()` footgun and the classic POP-gadget-chain CWE-502 pattern, distinct from `insecure-deserialization`'s existing Node/PHP/Python corpus entries if those don't already cover the bare-`unserialize()`-on-cookie shape specifically) | CWE-502 (insecure deserialization) | `insecure-deserialization/php` corpus dir already exists — verify at manifest-design time (Phase C) whether it already covers the bare-`unserialize()`-on-cookie shape or only a different PHP deserialization sink, and only add this if it's genuinely a new shape, per the "prefer classes that expand real coverage" instruction. |
 
-## 6. What this research does not yet do
+## 6. Page-set design (Phase C, §4 step 1) — PicTrail (Instagram/Django) and CircleFeed (Facebook/PHP)
+
+Per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4 step 1: "a coherent
+page/route set spanning the chosen vulnerability classes... not a loose bag
+of unrelated illustrative cells." App identities (never reusing
+`puppy-fort-factory`'s or `php_laravel`'s case-ID namespace, per §4's own
+requirement): **PicTrail** (Instagram-style, built on `django`) and
+**CircleFeed** (Facebook-style, built on `php_current`/`php_laravel`) —
+original, clearly-fictional names, not the real platforms' own branding,
+modeling their real functionality per §2/§3 above.
+
+Each row below names the real feature it's grounded in (§2/§3), the CWE
+research backing it (§4/§5), and its build status. Not every page needs a
+brand-new emitter shape — reusing an already-proven generic shape (SQLi
+numeric-literal) on a real, named, corpus-grounded route is itself a valid
+way to stand up an app's identity/ground-truth machinery, per the
+"reflect what would be observed in real life" bar (§0a item 5): a
+photo-detail page with an unvalidated numeric ID is exactly the realistic
+shape a real Instagram-style post-detail endpoint would have, whether or
+not the specific *sink mechanism* is the newest researched one.
+
+**PicTrail (Instagram/Django) page set:**
+
+| # | Page (route) | Real feature (§2) | Vuln class / CWE | Shape | Status |
+|---|---|---|---|---|---|
+| 1 | Post detail (`/post/<id>`) | §2 item 3, post detail + comments | `sqli` / CWE-89 | Reuses the existing, proven `sql_numeric_literal` shape (Phase A/B) | **Built this session** — see below. |
+| 2 | Comments (`/post/<id>/comments`) | §2 item 3, `@mention`/`#hashtag` auto-linking | `xss` / CWE-79 | The researched, Django-specific footgun (§4 row 2): `mark_safe()`/`{% autoescape off %}` disabling template autoescaping — needs new template-rendering emitter infrastructure (a real `.html` template file, not a raw `HttpResponse` string) | Deferred from Phase B; planned next for this app, not built this session. |
+| 3 | Link-preview unfurl (`/upload/link-preview`) | §2 item 7, upload flow's link preview | `ssrf` / CWE-918 | New shape: an unfurl view fetching a user-supplied URL with no hostname/private-IP allowlist (§4 row 1) | Planned, not built. |
+| 4 | Account settings (`/settings`) | §2 item 8 | `mass_assignment` / CWE-915 | New shape: a `ModelForm` with `fields = "__all__"` | Planned, not built. |
+| 5 | Explore/search (`/explore?sort=`) | §2 item 6 | `sqli` (identifier/`ORDER BY` position) | New shape: `.extra()`/`RawSQL()` instead of the ORM's parameterized `.order_by()` (§4 row 4) | Planned, not built. |
+| 6 | DM inbox (`/inbox`) | §2 item 4 | `insecure_deserialization` / CWE-502 | New shape: `PickleSerializer` session backend (§4 row 5) | Planned, not built. |
+
+**CircleFeed (Facebook/PHP) page set:**
+
+| # | Page (route) | Real feature (§3) | Vuln class / CWE | Shape | Status |
+|---|---|---|---|---|---|
+| 1 | Photo/tag detail | §3 item 4, tagging vs. album privacy | `access_control` (IDOR) / CWE-639 | Reuses the existing `ownership_check_bypass` op, new page-origin | Planned, not built. |
+| 2 | Groups webhook receiver | §3 item 5, Messenger-style webhook | `webhook_signature` / CWE-345 | New realistic inbound-receiver trigger (§5 row 2) | Planned, not built. |
+| 3 | Comment "share" redirect | §3 item 1/2 | `header_injection` / CWE-113 | New realistic trigger (§5 row 3) | Planned, not built. |
+| 4 | Session/preference cookie | account settings | `insecure_deserialization` / CWE-502 | Bare `unserialize()` on a cookie value (§5 row 4) | Planned, not built — verify at build time whether the existing `insecure-deserialization/php` corpus example already covers this exact shape (§5's own caveat). |
+
+**Sequencing note:** PicTrail's page 1 lands this session (proving the
+app-identity/ground-truth pattern end to end for the first time on this
+stack). Every other row is real, sized, next work — not attempted here.
+Each new shape (rows needing "new template-rendering infrastructure" or a
+wholly new sink module) should get its own change-control entry and
+pre-change review, following the same discipline Phase A/B already used,
+rather than batching several brand-new shapes into one entry.
+
+## 7. What this research does not yet do
 
 - Does not compute the exact `(vuln_class, sink_family)` gap against
   `lab/safety_matrix.yaml` the way Phase B's own task 1 requires — that is
