@@ -3,6 +3,201 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0192 — Netflix's 7th real page: first mass_assignment instance on `spring_boot`, `/api/account/settings` (FR-LAB-132) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing
+  `unfiltered_object_assign`/`typed_schema_allowlist` mechanism
+  (`orm_entity_bulk_assign` sink family, `CC-LAB-0063`, already built on
+  `php_current`/`ruby_rails`/`php_laravel`/`go_net_http` -- see
+  `CC-LAB-0182` for the closest precedent, Twitch's own channel-profile
+  page, modeled on directly) on `spring_boot`, this stack's first
+  instance: `POST /api/account/settings` (served by
+  `LABGEN-JV-0013`/`0014`), an account-settings-update endpoint (CWE-915)
+  -- a real, plausible Netflix feature (e.g. updating a display name/bio),
+  distinct from this app's other two body-taking mutation pages
+  (`/api/profiles/switch`, insecure_deserialization; `/api/account/
+  billing`, access_control). Java, like Go, has no ORM/ActiveRecord
+  bulk-assign call to misuse, so this shape is modeled idiomatically,
+  ported directly from `CC-LAB-0182`'s own Go design: the vulnerable sink
+  (`unfiltered_object_assign`) parses the raw JSON body with a plain
+  Jackson 3 `JsonMapper.readTree()` (this stack's existing Jackson-3
+  convention, `CC-LAB-0173`) and assigns EVERY field present onto the
+  account record's in-memory representation, including `is_partner` --
+  never exposed by this endpoint's own intended form; the secure sink
+  (`typed_schema_allowlist`) parses the identical body but only ever
+  reads `display_name`/`bio` out of it, leaving `is_partner` at its
+  seeded `false` regardless of what the request carries. Both twins echo
+  the resulting record straight back in the response (this stack's own
+  "no database in Phase A" scope call, matching `CC-LAB-0182`'s own
+  no-persisted-read-back convention).
+  **Module composition, a genuine reuse-not-new-source finding (checked
+  before building, not assumed):** unlike `CC-LAB-0182`'s own `go_net_http`
+  design, which needed a new `ReadChannelProfileBodySource` because this
+  stack's prior sources all read named fields, `spring_boot` already has a
+  general-purpose whole-body source, `raw_body` (`CC-LAB-0131`, built for
+  the XXE shape) -- it reads the entire request body as a UTF-8 `String`
+  and publishes it as `value_expr`, exactly what this shape's own sinks
+  need. Reused verbatim; no new source module was needed at all, a
+  smaller footprint than the Go instantiation's own new source. Only two
+  new sink modules (`UnfilteredObjectAssignSink`/`TypedSchemaAllowlistSink`)
+  and one new `_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS` entry pair were added.
+  Convention 2 (like SSRF/access-control/price-integrity/file-upload on
+  this stack): the manifest's one op names a sink module directly.
+  **Response-shape design decision, checked directly against the existing
+  strategy's source before building (task's own explicit ask), not
+  assumed to "probably work":** `MassAssignmentPrivilegedFieldStrategy`
+  (`fuzzlab/oracle/strategies.py`, built for Twitch's `go_net_http` cell)
+  hardcodes a fixed field name (`is_partner`) and a fixed pair of intended
+  fields (`display_name`/`bio`) it reads back from a flat top-level JSON
+  object -- reading its `confirm()` method directly (not just its
+  docstring) confirmed this is a hardcoded literal match, not a
+  configurable parameter. Rather than inventing a differently-named
+  privileged field (e.g. `is_premium`/`account_tier`, the task's own
+  suggested alternative) and then needing to widen or adapt the strategy,
+  this entry deliberately reuses the exact same field names/response
+  shape -- this session's own established "fixed demo field name as
+  declared simplification" convention (already used this way by
+  `CC-LAB-0189`'s own `plan_tier`/`monthly_charge` reuse for
+  `PriceIntegrityBypassStrategy`) -- so the existing strategy generalizes
+  to this new stack with genuinely zero new or widened detection code,
+  verified for real rather than assumed (see below), landed in the SAME
+  commit as the lab page (unlike `CC-LAB-0182`'s own detection, which was
+  deliberately deferred as a separate follow-on since no rule/strategy
+  existed for this class at all at the time).
+  Real live-boot proof
+  (`tests/test_labgen_spring_boot_netflix_settings_mass_assignment_live_
+  boot.py`): the vulnerable twin's response reflects `is_partner: true`
+  when the request sets it (`{"display_name":"new_name","bio":"hi",
+  "is_partner":true}` -> response echoes `is_partner:true`); the secure
+  twin's response never reflects anything but the seeded `false`, even
+  given the identical request body -- both assertions passed on the
+  first real `mvn package`/boot/HTTP round trip. A second test class in
+  the same file proves `MassAssignmentPrivilegedFieldStrategy` needs
+  zero new detection code: it confirms the new vulnerable twin and
+  correctly fails closed on the secure twin, driven against the real
+  booted app (not a fake sender) -- the third proof this strategy
+  generalizes across stacks in the direction `go_net_http` ->
+  `spring_boot` (after `AccessControlIdorStrategy`'s own `CC-LAB-0187`
+  proof and `UnrestrictedFileUploadContentTypeTrustStrategy`'s own
+  `CC-LAB-0191` proof).
+  Ground truth extended (`NFLX-0007`, `param="body"`/`location="body"` --
+  the whole-body-point convention `TWCH-0006`/`NFLX-0001`/`NFLX-0003`/
+  `NFLX-0005` already use, not a per-named-field `param`, for the same
+  reason `CC-LAB-0182`'s own entry recorded: `fuzzlab.harness.auto.
+  points_from_ground_truth` only marks a body point's content type as
+  JSON when `param == "body"` exactly). No schema widening needed:
+  `mass_assignment` was already a valid `vuln_class`/`sink_context` enum
+  value (from `php_current`/`ruby_rails`/`php_laravel`/`go_net_http`'s own
+  ground truth), and `body`/`POST` are both pre-existing `location`/
+  `param`/`method` shapes.
+  `tests/test_auto.py`'s own whole-body-JSON `body_content_type` count
+  (`test_points_from_ground_truth_sets_body_content_type_only_for_json_
+  cases`) re-derived from 4 to 5 and a new assertion added for
+  `/api/account/settings` -- checked directly, not assumed unaffected,
+  since this is exactly the kind of hardcoded-cardinality assertion
+  `BUG-0040`/`PA-0042` exists to catch.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0191`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` with a
+  direct query before concluding this, not assumed absent) -- substituted
+  with a documented, rigorous self-review performed and recorded here.
+  **(1) Accuracy** -- checked by direct source inspection, not assumed:
+  `orm_entity_bulk_assign`/`unfiltered_object_assign`/
+  `typed_schema_allowlist` exist verbatim in `lab/safety_matrix.yaml` with
+  the documented `no_effect`/`neutralises` ladder; `LABGEN-JV-0013`/`0014`
+  were confirmed free (highest existing `LABGEN-JV-` id across every
+  manifest was `LABGEN-JV-0012`, from `CC-LAB-0191`); `raw_body`'s own
+  `value_expr` contract and `MassAssignmentPrivilegedFieldStrategy`'s own
+  `confirm()` method (exact field names, the two-probe differential, the
+  `content_type == "application/json"` gate) were read directly from
+  source before designing the sink templates around them, not assumed
+  from the docstring alone -- all differential and generalization
+  assertions passed on the first real live-boot run. **(2) Adequacy** --
+  checked that this increment does not silently duplicate an existing
+  route (grepped `_PAGE_PARAMS` for `/api/account/settings`: absent) and
+  does not need a second, redundant sink pair (the manifest's
+  minimal-pair invariant: one vulnerable, one secure op, both new for
+  this stack). Checked the bookkeeping-ID discipline this session's own
+  dispatch flagged as a recurring risk (`CC-LAB-0191`'s own numbering-
+  collision story): confirmed `CC-LAB-0192` against this branch's own
+  reserved block (`CC-LAB-0170`-`0209`) and the highest number actually
+  used in this log (`CC-LAB-0191`), not merely mentioned anywhere in this
+  branch's merged docs (category 5's `CC-LAB-0210`-`0249` block is also
+  present in this branch's history and must not be mistaken for
+  "next free"). Checked `tests/test_multitarget_category4.py`/
+  `tests/test_auto.py`/`tests/test_labels_contract_category4.py` for
+  hardcoded fraction/count assertions depending on Netflix's ground-truth
+  cardinality (per `BUG-0040`/`PA-0042`) and re-ran all three directly
+  (not just the non-slow suite) after updating them.
+  Cross-branch collision check done before starting: both category 3's
+  (`claude/category-3-build-iuu5k9`) and category 5's
+  (`claude/category-5-build-6boejs`) sibling branches were fetched and
+  diffed against every shared file this entry touches
+  (`fuzzlab/labgen/emitters/spring_boot/`, `fuzzlab/oracle/strategies.py`)
+  -- both are strictly behind this branch on every one of those files, so
+  this is a pure, non-colliding addition.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/modules.py`
+    (`UnfilteredObjectAssignSink`, `TypedSchemaAllowlistSink`)
+  - `fuzzlab/labgen/emitters/spring_boot/__init__.py` (new
+    `_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS` entries)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sinks/
+    unfiltered_object_assign.java.j2`, `typed_schema_allowlist.java.j2`
+  - `lab/manifests/mass_assignment_netflix_settings_sample.yaml`
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,
+    expectedresults.csv}`
+  - `tests/test_labgen_spring_boot_netflix_settings_mass_assignment.py`
+    (new)
+  - `tests/test_labgen_spring_boot_netflix_settings_mass_assignment_
+    live_boot.py` (new)
+  - `tests/test_labels_contract_category4.py` (NFLX-0007 cross-check)
+  - `tests/test_auto.py` (body-point count re-derived, 4 -> 5)
+  - `tests/test_multitarget_category4.py` (Netflix recall re-derived,
+    both single-cell and multi-cell boots; multi-cell manifest/cell-id
+    lists extended)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-132`, new)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category-4 tracker
+    row)
+  - `docs/ARCHITECTURE.md` (Netflix page/detection counts)
+- Impact (other components / project): purely additive to `spring_boot`
+  and `lab/ground-truth-netflix-clone`; no other stack/app touched. No
+  audit-rule/oracle-strategy bookkeeping change was needed (`CC-AUD-0022`/
+  `CC-FUZZ-0035` already exist and needed no code change) -- only their
+  own generalization is newly proven and recorded, here and in
+  `tests/test_multitarget_category4.py`'s own docstring.
+  `tests/test_multitarget_category4.py`'s Netflix recall assertions move
+  from `6/6` to `7/7` (multi-cell boot) and from `1/6` to `1/7`
+  (single-cell wiring test).
+- Risk (level; mitigation or accepted-risk justification): Low. A new,
+  additive lab page, ground-truth case, and a verified-not-just-assumed
+  detection generalization; no existing behavior changed. The self-review
+  substitution above (in place of two independent reviewer agents) is the
+  one real process risk this entry accepts and states explicitly,
+  mitigated by the real `mvn package`/boot/HTTP verification actually
+  performed before landing (both the differential and the strategy
+  generalization).
+- Deliverables:
+  - [x] `UnfilteredObjectAssignSink`/`TypedSchemaAllowlistSink` render
+        correctly (unit tests in `tests/test_labgen_spring_boot_netflix_
+        settings_mass_assignment.py`) -- done
+  - [x] Real live-boot differential proof
+        (`tests/test_labgen_spring_boot_netflix_settings_mass_
+        assignment_live_boot.py`) -- done
+  - [x] Real live-boot detection-generalization proof (same file,
+        `TestMassAssignmentPrivilegedFieldStrategyGeneralizesToSpring
+        Boot`) -- done
+  - [x] Ground-truth contract cross-check
+        (`tests/test_labels_contract_category4.py`) -- done
+  - [x] `tests/test_multitarget_category4.py` updated for the new 7/7
+        (multi-cell)/1/7 (single-cell) recall math and re-run against a
+        real pipeline (both slow tests pass) -- done
+  - [x] `tests/test_auto.py`'s body-content-type count re-derived and
+        re-run -- done
+- Effectiveness (assessed 2026-09-23): achieved, both as a lab page and
+  for detection -- Netflix's own real, scored `multitarget` recall is now
+  `7/7` in the multi-cell boot.
+
 ### CC-LAB-0191 — Netflix's 6th real page: first unrestricted_file_upload instance on `spring_boot`, `/api/profiles/avatar` (FR-LAB-131) (2026-09-23)
 
 - **Numbering correction, caught and fixed before this entry was ever

@@ -540,6 +540,43 @@ class ExtensionAllowlistMagicByteCheckSink(TemplateModule):
         )
 
 
+class UnfilteredObjectAssignSink(TemplateModule):
+    """The vulnerable op (`lab/safety_matrix.yaml`'s existing
+    `unfiltered_object_assign` op, `orm_entity_bulk_assign` sink family,
+    `CC-LAB-0063` -- already instantiated on `php_current`/`ruby_rails`/
+    `php_laravel`/`go_net_http`; `CC-LAB-0192` is its first instantiation
+    for `spring_boot`): parses the raw request body with a plain Jackson 3
+    `JsonMapper.readTree()` (this stack's existing Jackson-3 convention,
+    `CC-LAB-0173`) and assigns EVERY field present onto the account
+    record's in-memory representation, including `is_partner` -- a field
+    this endpoint's own intended form (display name/bio) never exposes --
+    CWE-915, mass assignment. Mirrors `go_net_http`'s own
+    `UnfilteredObjectAssignSink` (`CC-LAB-0182`) design, ported
+    idiomatically: Java has no ORM/ActiveRecord bulk-assign call to
+    misuse either, so this reads the whole body tree itself rather than
+    unmarshalling onto a struct with every field declared."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unfiltered_object_assign", "sink", SINK_ENV, "unfiltered_object_assign.java.j2"
+        )
+
+
+class TypedSchemaAllowlistSink(TemplateModule):
+    """The secure twin (`typed_schema_allowlist`, `neutralises` --
+    `CC-LAB-0192`): parses the identical raw body, but only ever reads
+    `display_name`/`bio` out of it -- `is_partner` is never read from
+    client input at all, the same "narrow, typed allowlist has no field
+    for the privileged key" shape `go_net_http`'s own `TypedSchema
+    AllowlistSink` (`CC-LAB-0182`) established, ported to Jackson's
+    `JsonNode` API rather than a Go typed unmarshal target."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "typed_schema_allowlist", "sink", SINK_ENV, "typed_schema_allowlist.java.j2"
+        )
+
+
 SOURCES: dict[str, Module] = {
     "query_param": QueryParamSource(),
     "raw_body": RawBodySource(),
@@ -569,6 +606,8 @@ SINKS: dict[str, Module] = {
     "server_recomputed_amount": ServerRecomputedAmountSink(),
     "no_extension_check": NoExtensionCheckContentTypeTrustSink(),
     "extension_allowlist_mime_check": ExtensionAllowlistMagicByteCheckSink(),
+    "unfiltered_object_assign": UnfilteredObjectAssignSink(),
+    "typed_schema_allowlist": TypedSchemaAllowlistSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_handler": SingleHandlerComplexity(),

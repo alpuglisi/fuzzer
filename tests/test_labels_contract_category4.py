@@ -15,7 +15,7 @@ TWITCH_GT_DIR = "lab/ground-truth-twitch-clone"
 def test_netflix_ground_truth_loads_and_cross_checks():
     gt = contract.load(NETFLIX_GT_DIR)
     assert gt.target == "spring_boot"
-    assert len(gt.cases) == 6
+    assert len(gt.cases) == 7
     case = gt.case_by_id("NFLX-0001")
     assert case is not None
     assert case.expected_vulnerable
@@ -82,6 +82,18 @@ def test_netflix_ground_truth_loads_and_cross_checks():
     assert avatar_case.method == "POST"
     assert avatar_case.param == "file"
     assert avatar_case.location == "body"
+
+    # CC-LAB-0192: Netflix's seventh real page, first mass_assignment
+    # instance, /api/account/settings.
+    settings_case = gt.case_by_id("NFLX-0007")
+    assert settings_case is not None
+    assert settings_case.expected_vulnerable
+    assert settings_case.vuln_class == "mass_assignment"
+    assert settings_case.sink_context == "mass_assignment"
+    assert settings_case.url == "/api/account/settings"
+    assert settings_case.method == "POST"
+    assert settings_case.param == "body"
+    assert settings_case.location == "body"
 
     # Opaque case IDs: no vuln class leaks into the identifier.
     for case in gt.cases:

@@ -4559,6 +4559,63 @@ lane) can submit a payload as
   concluding this, not assumed absent) -- substituted with a documented,
   rigorous self-review performed and recorded in `CC-LAB-0191`.
 
+- **FR-LAB-132** *(Netflix's seventh real page: first `mass_assignment`
+  instance on `spring_boot`, `/api/account/settings`; `CC-LAB-0192`,
+  2026-09-23).* Instantiates `lab/safety_matrix.yaml`'s existing
+  `orm_entity_bulk_assign` sink family and its `unfiltered_object_assign`/
+  `typed_schema_allowlist` ops (`CC-LAB-0063`, already on `php_current`/
+  `ruby_rails`/`php_laravel`/`go_net_http` per `CC-LAB-0182`/`FR-LAB-122`)
+  on `spring_boot` for the FIRST time -- genuinely new breadth, not a
+  depth reuse. An account-settings-update endpoint (a real, plausible
+  Netflix feature, e.g. updating a display name/bio), distinct from this
+  app's other two body-taking mutation pages (`/api/profiles/switch`,
+  insecure_deserialization; `/api/account/billing`, access_control).
+  Java, like Go, has no ORM/ActiveRecord bulk-assign call to misuse, so
+  this shape is modeled idiomatically, ported directly from
+  `CC-LAB-0182`'s own Go design: the vulnerable sink
+  (`unfiltered_object_assign`) parses the raw JSON body with a plain
+  Jackson 3 `JsonMapper.readTree()` (this stack's existing Jackson-3
+  convention, `CC-LAB-0173`) and assigns every field present onto the
+  account record's in-memory representation, including `is_partner` --
+  never exposed by this endpoint's own intended form; the secure sink
+  (`typed_schema_allowlist`) parses the identical body but only ever
+  reads `display_name`/`bio` out of it. Reuses the pre-existing `raw_body`
+  source verbatim (`CC-LAB-0131`) -- no new source module needed, since
+  it already reads the entire body as a UTF-8 `String` and publishes it
+  as `value_expr`, exactly what this shape needs. Convention 2 (the
+  manifest's one op names a sink directly, like SSRF/access-control/
+  price-integrity/file-upload). Cells `LABGEN-JV-0013`/`0014`; ground
+  truth `NFLX-0007` (`vuln_class="mass_assignment"`,
+  `sink_context="mass_assignment"`, both existing enum values, no schema
+  change; `param="body"`/`location="body"`, the whole-body-point
+  convention `TWCH-0006`/`NFLX-0001`/`NFLX-0003`/`NFLX-0005` already
+  establish; `rendering="server-json"`).
+  **Detection generalizes with zero new code, verified live**:
+  `MassAssignmentPrivilegedFieldStrategy` (`CC-FUZZ-0035`/`CC-AUD-0022`,
+  built for Twitch's `TWCH-0006`) hardcodes a fixed field name
+  (`is_partner`) and fixed intended fields (`display_name`/`bio`) it
+  reads back from a flat top-level JSON object -- rather than inventing a
+  differently-named privileged field, this entry deliberately reuses the
+  exact same field names/response shape (this session's own "fixed demo
+  field name as declared simplification" convention), so the existing
+  strategy generalizes to this new stack with no adaptation needed;
+  confirmed against a real booted `spring_boot` app
+  (`tests/test_labgen_spring_boot_netflix_settings_mass_assignment_live_
+  boot.py`), landed in the SAME commit as the lab page (unlike
+  `CC-LAB-0182`'s own detection, deliberately deferred as a separate
+  follow-on at the time since no rule/strategy existed for this class at
+  all). Netflix's own real, scored recall moves from `6/6` to `7/7` in
+  the multi-cell boot and from `1/6` to `1/7` in the single-cell wiring
+  test (`tests/test_multitarget_category4.py`, both re-derived per
+  `PA-0042`). `tests/test_auto.py`'s own whole-body-JSON
+  `body_content_type` count re-derived from 4 to 5.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0191`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded in `CC-LAB-0192`.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

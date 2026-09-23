@@ -93,6 +93,17 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("unrestricted_file_upload", "fs_web_root_write"): _ModuleSet(
         "read_uploaded_avatar_file", "single_handler_binary"
     ),
+    # CC-LAB-0192: Netflix's seventh real page, this stack's first
+    # mass_assignment instance -- reuses lab/safety_matrix.yaml's existing
+    # orm_entity_bulk_assign sink family and unfiltered_object_assign/
+    # typed_schema_allowlist ops (CC-LAB-0063), already instantiated on
+    # php_current/ruby_rails/php_laravel/go_net_http (CC-LAB-0182). No new
+    # safety-matrix entry needed. Reuses the pre-existing raw_body source
+    # verbatim (like the XXE shape) -- this shape's own point is that the
+    # ENTIRE body reaches the sink unfiltered, which raw_body already
+    # publishes as a whole UTF-8 String, so no new source module is
+    # needed.
+    ("mass_assignment", "orm_entity_bulk_assign"): _ModuleSet("raw_body", "single_handler"),
 }
 
 #: Per-route static render context, the same "render-only information, not
@@ -131,6 +142,12 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
     # "file" part itself, read directly off the raw request by
     # ReadUploadedAvatarFileSource, not a query param/header/JSON field.
     "/api/profiles/avatar": {},
+    # CC-LAB-0192: Netflix's seventh real page, an account-settings-update
+    # endpoint -- this stack's first mass_assignment page. `var_name` is
+    # the raw_body source's own Java local variable name for the whole
+    # request body String; no param_name needed, the tainted material is
+    # the entire JSON body, not a single named field.
+    "/api/account/settings": {"var_name": "accountSettingsBody"},
 }
 
 #: Per-op source override (`CC-LAB-0173`) -- checked *after* the shape-level

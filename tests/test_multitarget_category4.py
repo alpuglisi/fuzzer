@@ -178,6 +178,25 @@ second proof this strategy generalizes across stacks
 (`go_net_http` -> `spring_boot`), the same direction `CC-LAB-0187`'s own
 `AccessControlIdorStrategy` proof made. Netflix's own real, scored recall
 in that multi-cell boot moves from 5/5 to 6/6.
+
+`NFLX-0007` (`CC-LAB-0192`, `/api/account/settings`) is Netflix's seventh
+real page: an account-settings-update endpoint, `spring_boot`'s first
+`mass_assignment` instance (CWE-915) -- reuses `lab/safety_matrix.yaml`'s
+existing `orm_entity_bulk_assign` sink family and `unfiltered_object_assign`/
+`typed_schema_allowlist` ops (`CC-LAB-0063`, already on `go_net_http` per
+`CC-LAB-0182`/`FR-LAB-122`). This one needed zero new detection code:
+`MassAssignmentPrivilegedFieldStrategy` (already built for Twitch's
+`TWCH-0006`/`CC-FUZZ-0035`/`CC-AUD-0022`) confirmed the new vulnerable twin
+and correctly failed closed on its new secure twin, verified against a real
+booted app both by a dedicated live-boot test
+(`tests/test_labgen_spring_boot_netflix_settings_mass_assignment_live_boot.py`)
+and by `test_netflix_multi_cell_boot_confirms_all_positives` below -- the
+third proof this strategy generalizes across stacks in the direction
+`go_net_http` -> `spring_boot` (after `AccessControlIdorStrategy` and
+`UnrestrictedFileUploadContentTypeTrustStrategy`), achieved by deliberately
+reusing the strategy's own hardcoded `is_partner`/`display_name`/`bio`
+field-name/response-shape convention verbatim on this stack too. Netflix's
+own real, scored recall in that multi-cell boot moves from 6/6 to 7/7.
 One gap remains open:
 
 1. **No audit `Rule`/oracle strategy exists yet for `webhook_signature`**
@@ -369,27 +388,28 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # XxeInBandMarkerStrategy, CC-FUZZ-0031), the second
     # insecure-deserialization instance (NFLX-0003, CC-LAB-0184), the
     # first access_control/IDOR instance (NFLX-0004, CC-LAB-0187), the
-    # first price_integrity_bypass instance (NFLX-0005, CC-LAB-0188), and
-    # the first unrestricted_file_upload instance (NFLX-0006, CC-LAB-0191)
-    # are simply not booted in this single-cell test -- one of its now-six
+    # first price_integrity_bypass instance (NFLX-0005, CC-LAB-0188), the
+    # first unrestricted_file_upload instance (NFLX-0006, CC-LAB-0191), and
+    # the first mass_assignment instance (NFLX-0007, CC-LAB-0192) are simply
+    # not booted in this single-cell test -- one of its now-seven
     # positives, not all (only NFLX-0001's own vulnerable twin,
     # LABGEN-JV-0001, is booted here) -- see
     # test_netflix_multi_cell_boot_confirms_all_positives below for the
-    # multi-cell boot that confirms all six together. PA-0042: this
-    # hardcoded fraction was re-derived, not left stale, when NFLX-0006
-    # was added (ground-truth cardinality moved from 5 to 6; tp stays 1,
-    # so recall moves from 1/5 to 1/6).
+    # multi-cell boot that confirms all seven together. PA-0042: this
+    # hardcoded fraction was re-derived, not left stale, when NFLX-0007
+    # was added (ground-truth cardinality moved from 6 to 7; tp stays 1,
+    # so recall moves from 1/6 to 1/7).
     netflix_report = by_name["netflix-clone"].report
     assert netflix_report.tp == 1 and netflix_report.fp == 0
-    assert round(netflix_report.recall, 4) == round(1 / 6, 4)
+    assert round(netflix_report.recall, 4) == round(1 / 7, 4)
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
     # PA-0042: re-derived, not left stale, from the ground-truth-cardinality
     # changes TWCH-0011/CC-LAB-0190 (Twitch's own recall moved from 9/10 to
-    # 9/11) and NFLX-0006/CC-LAB-0191 (Netflix's own recall in THIS
-    # single-cell test moved from 1/5 to 1/6) both made.
-    assert round(summary["macro_recall"], 4) == round(((9 / 11) + (1 / 6)) / 2, 4)
+    # 9/11) and NFLX-0007/CC-LAB-0192 (Netflix's own recall in THIS
+    # single-cell test moved from 1/6 to 1/7) both made.
+    assert round(summary["macro_recall"], 4) == round(((9 / 11) + (1 / 7)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True
@@ -413,10 +433,13 @@ _NETFLIX_MULTI_MANIFESTS = (
     # CC-LAB-0191: sixth real page, first unrestricted_file_upload instance
     # (/api/profiles/avatar) -- a sixth, distinct route, no collision.
     "lab/manifests/unrestricted_file_upload_netflix_avatar_sample.yaml",
+    # CC-LAB-0192: seventh real page, first mass_assignment instance
+    # (/api/account/settings) -- a seventh, distinct route, no collision.
+    "lab/manifests/mass_assignment_netflix_settings_sample.yaml",
 )
 _NETFLIX_MULTI_CELL_IDS = {
     "LABGEN-JV-0001", "LABGEN-JV-0003", "LABGEN-JV-0005", "LABGEN-JV-0007",
-    "LABGEN-JV-0009", "LABGEN-JV-0011",
+    "LABGEN-JV-0009", "LABGEN-JV-0011", "LABGEN-JV-0013",
 }
 _BUILD_TIMEOUT_S = 240.0
 _BOOT_TIMEOUT_S = 30.0
@@ -451,10 +474,12 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
     (insecure-deserialization, `/api/profiles/switch`, `CC-LAB-0184`),
     `LABGEN-JV-0007` (access_control/IDOR, `/api/account/billing`,
     `CC-LAB-0187`), `LABGEN-JV-0009` (price_integrity_bypass,
-    `/api/subscription/change-plan`, `CC-LAB-0188`), and `LABGEN-JV-0011`
-    (unrestricted_file_upload, `/api/profiles/avatar`, `CC-LAB-0191`) --
-    into one real booted app (six distinct routes, no collision), then
-    runs the real generic `run_targets` pipeline against it. Originally
+    `/api/subscription/change-plan`, `CC-LAB-0188`), `LABGEN-JV-0011`
+    (unrestricted_file_upload, `/api/profiles/avatar`, `CC-LAB-0191`), and
+    `LABGEN-JV-0013` (mass_assignment, `/api/account/settings`,
+    `CC-LAB-0192`) -- into one real booted app (seven distinct routes, no
+    collision), then runs the real generic `run_targets` pipeline against
+    it. Originally
     closed the follow-on `CC-FUZZ-0032` flagged (both of Netflix's
     positives confirming together in one real boot); extended by
     `CC-LAB-0184` to prove the third positive confirms alongside the other
@@ -478,6 +503,14 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
     live in `tests/test_labgen_spring_boot_netflix_avatar_upload_live_
     boot.py` first, then reproduced here in the shared multi-cell boot --
     moving Netflix's own scored recall in this boot from 5/5 to 6/6.
+    Extended again by `CC-LAB-0192` to add the seventh positive,
+    `NFLX-0007`: `MassAssignmentPrivilegedFieldStrategy` (`CC-FUZZ-0035`/
+    `CC-AUD-0022`, already built for Twitch's `go_net_http` channel-profile
+    cell) needed zero new detection code to confirm it too -- verified live
+    in `tests/test_labgen_spring_boot_netflix_settings_mass_assignment_
+    live_boot.py` first, then reproduced here in the shared multi-cell
+    boot -- moving Netflix's own scored recall in this boot from 6/6 to
+    7/7.
     """
     root = tmp_path_factory.mktemp("netflix_multitarget")
     shutil.copytree(SKELETON_DIR, root, dirs_exist_ok=True)
@@ -520,15 +553,18 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
                                    oob=listener)
         outcome = outcomes[0]
         assert outcome.scored is True and outcome.report is not None
-        # All six of Netflix's own positives confirm in this one real boot
-        # (NFLX-0001..NFLX-0006) -- CC-LAB-0184 moved this from 2/2 to 3/3,
-        # CC-LAB-0187 moved it from 3/3 to 4/4 (both with zero new detection
-        # code), CC-FUZZ-0037 moved it from 4/4 to 5/5 with its own
-        # genuinely new PriceIntegrityBypassStrategy, and CC-LAB-0191 moves
+        # All seven of Netflix's own positives confirm in this one real
+        # boot (NFLX-0001..NFLX-0007) -- CC-LAB-0184 moved this from 2/2 to
+        # 3/3, CC-LAB-0187 moved it from 3/3 to 4/4 (both with zero new
+        # detection code), CC-FUZZ-0037 moved it from 4/4 to 5/5 with its
+        # own genuinely new PriceIntegrityBypassStrategy, CC-LAB-0191 moved
         # it from 5/5 to 6/6 with zero new detection code again
         # (UnrestrictedFileUploadContentTypeTrustStrategy, already built
-        # for Twitch's go_net_http emote-upload cell).
-        assert outcome.report.tp == 6 and outcome.report.fp == 0
+        # for Twitch's go_net_http emote-upload cell), and CC-LAB-0192
+        # moves it from 6/6 to 7/7 with zero new detection code again
+        # (MassAssignmentPrivilegedFieldStrategy, already built for
+        # Twitch's go_net_http channel-profile cell).
+        assert outcome.report.tp == 7 and outcome.report.fp == 0
         assert outcome.report.recall == 1.0
     finally:
         listener.stop()

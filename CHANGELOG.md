@@ -4,6 +4,44 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Netflix's 7th real page, first mass_assignment instance on spring_boot, CC-LAB-0192/FR-LAB-132)
+- Target lab: `POST /api/account/settings` (an account-settings-update
+  endpoint — a real, plausible Netflix feature, e.g. updating a display
+  name/bio). `spring_boot`'s **first** instantiation of
+  `lab/safety_matrix.yaml`'s existing `orm_entity_bulk_assign` sink
+  family / `mass_assignment` concern (`CC-LAB-0063`, already
+  instantiated on `php_current`/`ruby_rails`/`php_laravel`/`go_net_http`
+  — `CC-LAB-0182`'s own Twitch channel-profile page is the closest
+  precedent, modeled on directly). The vulnerable sink
+  (`unfiltered_object_assign`) parses the raw JSON body with a plain
+  Jackson 3 `JsonMapper.readTree()` and assigns EVERY field present onto
+  the account record's in-memory representation, including `is_partner`
+  — never exposed by this endpoint's own intended form (CWE-915). The
+  secure sink (`typed_schema_allowlist`) parses the identical body but
+  only ever reads `display_name`/`bio` out of it. No new safety-matrix
+  entry needed. Reuses the pre-existing `raw_body` source verbatim (no
+  new source module) — Convention 2 (the manifest's one op names a sink
+  directly), matching SSRF/access-control/price-integrity/file-upload on
+  this stack. Real live-boot proof (`tests/test_labgen_spring_boot_
+  netflix_settings_mass_assignment_live_boot.py`): the vulnerable twin's
+  response reflects `is_partner: true` when the request sets it; the
+  secure twin's response never does. Ground truth extended (`NFLX-0007`).
+  **Detection generalizes with zero new code, verified live**: both
+  twins deliberately echo the resulting record using the exact
+  `display_name`/`bio`/`is_partner` field names/shape
+  `MassAssignmentPrivilegedFieldStrategy` (`CC-FUZZ-0035`/`CC-AUD-0022`,
+  built for Twitch's `go_net_http` cell) already hardcodes — this
+  session's own "fixed demo field name as declared simplification"
+  convention — so the strategy confirmed the new vulnerable twin and
+  correctly failed closed on the secure twin with no adaptation needed,
+  the third proof this strategy generalizes across stacks
+  (`go_net_http` -> `spring_boot`), landed in the same commit as the lab
+  page. Netflix's own real, scored recall moves from `6/6` to `7/7` in
+  the multi-cell boot and from `1/6` to `1/7` in the single-cell wiring
+  test (`tests/test_multitarget_category4.py`), both re-derived per
+  `PA-0042`. See `docs/components/01-target-lab/change-control.md`
+  (`CC-LAB-0192`) for the full record.
+
 ## 2026-09-23 (LAB: Netflix's 6th real page, first unrestricted_file_upload instance on spring_boot, CC-LAB-0191/FR-LAB-131)
 - Target lab: `POST /api/profiles/avatar` (a per-profile avatar-image
   upload endpoint — a real, plausible Netflix feature, each of a

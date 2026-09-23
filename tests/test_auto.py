@@ -135,14 +135,18 @@ def test_points_from_ground_truth_sets_body_content_type_only_for_json_cases():
     # to this same whole-body convention, since a per-field `param` for a
     # body point never satisfies this function's own `param == "body"`
     # gate below and would silently leave `body_content_type` at `None`.
+    # CC-LAB-0192 adds a fifth, NFLX-0007 (JSON, rendering="server-json",
+    # /api/account/settings) -- the same whole-body-JSON shape as
+    # NFLX-0001/NFLX-0003/NFLX-0005, at a different URL.
     netflix_gt = contract.load("lab/ground-truth-netflix-clone")
     points, _ = points_from_ground_truth(netflix_gt, "http://127.0.0.1:8080")
     body_points = {p.url: p for p in points if p.param == "body"}
-    assert len(body_points) == 4
+    assert len(body_points) == 5
     assert body_points["http://127.0.0.1:8080/api/playback/resume"].body_content_type == "application/json"
     assert body_points["http://127.0.0.1:8080/api/content/import"].body_content_type is None
     assert body_points["http://127.0.0.1:8080/api/profiles/switch"].body_content_type == "application/json"
     assert body_points["http://127.0.0.1:8080/api/subscription/change-plan"].body_content_type == "application/json"
+    assert body_points["http://127.0.0.1:8080/api/account/settings"].body_content_type == "application/json"
 
     trackernest_gt = contract.load("lab/ground-truth-trackernest")
     points, _ = points_from_ground_truth(trackernest_gt, "http://127.0.0.1:8080")

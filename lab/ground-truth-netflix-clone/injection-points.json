@@ -43,6 +43,13 @@
       "param": "file",
       "location": "body",
       "rendering": "server"
+    },
+    {
+      "url": "/api/account/settings",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "rendering": "server-json"
     }
   ]
 }
