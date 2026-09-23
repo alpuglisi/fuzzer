@@ -67,6 +67,24 @@ _VULN_TO_CATEGORY = {
     "mass_assignment": "mass-assignment",
     "unrestricted_file_upload": "unrestricted-file-upload",
     "price_integrity_bypass": "price-integrity-bypass",
+    # `open_redirect` (BUG-0043/PA-0045): the eighth-plus real instance of
+    # this same underscore/hyphen mismatch, and the first one the guard
+    # test (`test_every_ruled_strategy_category_is_reachable_from_its_
+    # vuln_class`, CC-FUZZ-0030) failed to catch -- that guard iterates
+    # `fuzzlab.oracle.strategies._CATEGORY_TO_CLASS`'s own keys, where
+    # `_CATEGORY_TO_CLASS["open-redirect"] == "open-redirect"` (identical,
+    # since `OpenRedirectStrategy.vuln_class` happens to already be
+    # hyphenated) trivially skipped its own `vuln_class == category`
+    # early-continue, never checking against what ground-truth
+    # `labels.json` files actually spell the class as (`"open_redirect"`,
+    # underscored, this project's labels-schema convention -- and the
+    # actual string `categories_from_vuln_classes` calls `to_category`
+    # with at run time). `R-OPEN-REDIRECT`/`OpenRedirectStrategy` (already
+    # built, verified live for category 5's Booking.com pilot and this
+    # stack's own Twitch page, `CC-LAB-0199`) were both genuinely reachable
+    # all along -- only this mapping entry was missing, found empirically
+    # via a real `run_targets` pipeline run, not by the existing guard.
+    "open_redirect": "open-redirect",
 }
 
 

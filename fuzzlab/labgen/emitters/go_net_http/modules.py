@@ -830,6 +830,58 @@ class AllowlistAndRuntimeCrlfRejectionSink(TemplateModule):
         )
 
 
+class RawConcatSink(TemplateModule):
+    """The ``raw_concat`` op (``lab/safety_matrix.yaml``, ``http_redirect_
+    location`` family, ``no_effect`` -- added by ``CC-LAB-0210`` for
+    ``php_laravel``'s Booking.com pilot, reused verbatim here as this
+    stack's first instantiation, ``CC-LAB-0199``): a "return here after
+    login" convenience endpoint (``GET /auth/login-redirect?next=`` -- a
+    real, plausible Twitch feature, and a genuinely common real-world
+    open-redirect vector on many real sites) sets the caller-supplied
+    ``next`` value as the ``Location`` header verbatim, through Go's
+    ordinary ``w.Header().Set()``/``w.WriteHeader()`` path, with no check
+    at all that it stays on this site (CWE-601). Deliberately NOT the
+    ``http.Hijacker`` bypass ``RawSocketResponseWriteSink`` needs for
+    ``http_header_injection`` (CC-LAB-0198): that shape needs a raw CR/LF
+    byte to reach the wire, which Go's ordinary header-writing path
+    already defeats (verified empirically, see that op's own
+    change-control entry) -- open redirect needs no CR/LF at all, since a
+    bare absolute external URL (e.g. ``https://evil.example/phish``) is
+    already a perfectly well-formed ``Location`` header value that Go's
+    ordinary API sends without complaint. A **sink** module (Convention 2,
+    like SSRF/mass-assignment/file-upload/price-integrity/path-traversal/
+    ssti/http-header-injection): the manifest's one op names the sink
+    directly."""
+
+    def __init__(self) -> None:
+        super().__init__("raw_concat", "sink", _SINK_ENV, "raw_concat.go.j2")
+
+
+class RedirectTargetAllowlistSink(TemplateModule):
+    """The ``redirect_target_allowlist`` op (``lab/safety_matrix.yaml``,
+    ``http_redirect_location`` family, ``neutralises`` -- the secure twin,
+    added by ``CC-LAB-0210``, reused verbatim here): rejects (HTTP 400) any
+    ``next`` value that is not a genuine, same-origin, site-relative path
+    -- exactly one leading ``/`` immediately followed by an alphanumeric
+    character, with everything after limited to a safe path/query
+    character class -- mirroring ``php_laravel``'s own
+    ``RedirectTargetAllowlistTransform`` at the level this stack's
+    sink-selecting convention naturally supports (a sink-level guard, not
+    a value-rewrite transform feeding a shared sink). Closes every bypass
+    shape ``OpenRedirectStrategy``'s own ``confirm()`` could otherwise walk
+    through: a protocol-relative target (``//evil.example``), a
+    backslash-prefixed target (``/\\evil.example``), a scheme-qualified
+    absolute URL (the strategy's own canary, ``https://oracle<token>.
+    example/cb``), and a ``javascript:``-shaped value -- none of these
+    start with ``/`` immediately followed by an alphanumeric character, so
+    none of them can match the allowlist regex."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "redirect_target_allowlist", "sink", _SINK_ENV, "redirect_target_allowlist.go.j2"
+        )
+
+
 class RenderOnlyComplexity(TemplateModule):
     """Wraps the composed source/transform/sink body as the entire body of
     one ``net/http.HandlerFunc`` -- the Go analogue of every other stack's
@@ -884,6 +936,8 @@ SINKS: dict[str, Module] = {
     "file_loaded_template_name": FileLoadedTemplateNameSink(),
     "raw_socket_response_write": RawSocketResponseWriteSink(),
     "allowlist_and_runtime_crlf_rejection": AllowlistAndRuntimeCrlfRejectionSink(),
+    "raw_concat": RawConcatSink(),
+    "redirect_target_allowlist": RedirectTargetAllowlistSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "render_only": RenderOnlyComplexity(),

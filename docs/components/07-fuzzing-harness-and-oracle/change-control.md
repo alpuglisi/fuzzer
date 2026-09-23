@@ -3,6 +3,89 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0040 — fix: `open_redirect` silently unreachable in a scored pipeline -- missing category mapping, then a wrongly-hyphenated strategy `vuln_class` (BUG-0043/PA-0045) (2026-09-23)
+
+- Change: `fuzzlab/core/runmode.py::_VULN_TO_CATEGORY` gains
+  `"open_redirect": "open-redirect"`. `fuzzlab/oracle/strategies.py::
+  OpenRedirectStrategy.vuln_class` corrected from `"open-redirect"`
+  (hyphenated, wrongly copied from its own `category` field) to
+  `"open_redirect"` (underscored, matching ground truth's own
+  `labels.json` spelling and every other strategy's own convention in the
+  file); `_CATEGORY_TO_CLASS["open-redirect"]` updated to `"open_redirect"`
+  to match. `tests/test_oracle_vectors.py`'s one affected assertion
+  updated. New, stronger generic guard test added: `tests/test_oracle.py::
+  test_ground_truth_vuln_classes_with_a_ruled_hyphenated_twin_are_mapped`
+  -- scans every real `lab/ground-truth*/labels.json` file's own
+  `vuln_class` strings directly (not the oracle's own internal
+  `_CATEGORY_TO_CLASS` dict, which `test_every_ruled_strategy_category_
+  is_reachable_from_its_vuln_class`, `CC-FUZZ-0030`, checks and which
+  stayed silently blind to this exact instance since
+  `_CATEGORY_TO_CLASS["open-redirect"]` was itself trivially
+  self-consistent, just wrong).
+  Found while wiring `LAB`'s `CC-LAB-0199` cell (Twitch's first
+  `open_redirect` page) into the real, full `run_targets`/multitarget
+  pipeline for the first time: a hand-built `Candidate` confirmed
+  `OpenRedirectStrategy` worked directly against the real booted page,
+  but the same page showed up as a missed (false negative) finding in the
+  real pipeline -- `plan.categories` never included `"open-redirect"`
+  because `to_category("open_redirect")` returned the string unchanged
+  (defect 1). Adding the missing mapping entry alone then produced a
+  false-positive/false-negative pair instead of a true positive, because
+  the `finding` row's `vuln_class` (from `Verdict.vuln_class`, i.e.
+  `OpenRedirectStrategy.vuln_class`) was `"open-redirect"` while ground
+  truth's own `Case.vuln_class` was `"open_redirect"` -- `fuzzlab.harness.
+  scoring.score`'s exact `(url, method, param, vuln_class)` key match
+  never matched (defect 2, independent of defect 1). Fixing defect 2 also
+  surfaced a third, genuine (not a bug) finding, closed in `LAB`'s own
+  `CC-LAB-0199` entry, not here: `CC-LAB-0198`'s existing page is
+  independently, honestly open-redirect-vulnerable too, at the same
+  url/param `R-OPEN-REDIRECT`'s own `name_regex` (`...|dest|...`) already
+  matches via `destination`.
+- Impact (other components / project): `FUZZ` primarily (`runmode.py`,
+  `strategies.py`, their own tests). `LAB`'s `CC-LAB-0199`/`CC-LAB-0198`
+  entries depend on this fix to score correctly in the shared multitarget
+  pipeline (see `CC-LAB-0199`). Category 5's own Booking.com pilot
+  (`BKNG-0001`) shares the identical `open_redirect` root cause for both
+  defects and benefits from this fix too, though its own scored-pipeline
+  wiring is out of scope for this branch to verify directly.
+- Risk (level; mitigation or accepted-risk justification): Low-medium.
+  Purely additive/corrective: `_VULN_TO_CATEGORY` gains one entry (no
+  existing entry changed), and `OpenRedirectStrategy.vuln_class`'s
+  correction only affects what string a `Verdict`/`finding` row for THIS
+  vuln class carries -- no other strategy, rule, or dispatch path reads
+  that field's literal value except the scorer's own exact-tuple match
+  (checked: `category_to_oracle_class`'s only real consumer,
+  `GreyboxSignal`'s vuln_class-family split, is scoped to
+  `sql-injection`/`xss` only and never reaches `open-redirect`) and the
+  web UI's severity mapper (`fuzzlab/web/results.py`), which already
+  defensively maps BOTH spellings to the same severity and needed no
+  change. Mitigated by a real, live, scored multitarget pipeline
+  re-verification (not just the unit-test fake senders) before and after
+  each of the two fixes, isolating which defect produced which wrong
+  outcome (missed -> false-positive/false-negative pair -> correct true
+  positive), per PA-0045's own explicit instruction.
+- Deliverables:
+  - [x] `fuzzlab/core/runmode.py` -- `_VULN_TO_CATEGORY` entry added
+  - [x] `fuzzlab/oracle/strategies.py` -- `OpenRedirectStrategy.vuln_class`
+    corrected; `_CATEGORY_TO_CLASS` updated to match
+  - [x] `tests/test_oracle_vectors.py` -- one assertion updated
+  - [x] `tests/test_oracle.py` -- new guard test,
+    `test_ground_truth_vuln_classes_with_a_ruled_hyphenated_twin_are_mapped`,
+    verified to fail on the pre-fix code and pass after
+  - [x] `tests/test_labgen_go_live_boot.py` -- asserts
+    `verdict.vuln_class == "open_redirect"` directly (regression test for
+    defect 2)
+  - [x] `docs/bugs/BUG-0043-*.md` -- full RCA, prior-PA-failure analysis
+  - [x] `docs/PREVENTIVE_ACTIONS.md` -- `PA-0045`
+  - [x] `ERROR_LOG.md` -- dated entry
+- Effectiveness (assessed 2026-09-23): effective, verified live and end to
+  end -- `tests/test_multitarget_category4.py::
+  test_both_apps_run_through_multitarget_for_real` scores Twitch
+  `tp=12, fp=0` after both fixes + the `TWCH-0015` ground-truth addition
+  (was: `TWCH-0014` missed with neither fix; `tp=10, fp=2` with only
+  defect 1 fixed, `TWCH-0013`'s own page false-alarming as open-redirect
+  once reachable but not yet honestly labeled).
+
 ### CC-FUZZ-0039 — fix: oracle-facing `requests`-based senders silently followed HTTP redirects (BUG-0042/PA-0044) (2026-09-23)
 
 - Change: `fuzzlab/tools/probesender.py::RequestsProbeSender.send()`,

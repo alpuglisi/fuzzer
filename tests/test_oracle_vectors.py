@@ -178,7 +178,7 @@ def test_command_injection_not_confirmed_when_sleep_ignored():
 # --- category wiring ---------------------------------------------------------
 
 def test_new_categories_map_to_oracle_classes():
-    assert category_to_oracle_class("open-redirect") == "open-redirect"
+    assert category_to_oracle_class("open-redirect") == "open_redirect"
     assert category_to_oracle_class("server-side-template-injection") == "ssti"
     assert category_to_oracle_class("file-inclusion") == "file-inclusion"
     assert category_to_oracle_class("command-injection") == "command-injection"

@@ -153,12 +153,12 @@ def test_netflix_ground_truth_loads_and_cross_checks():
 def test_twitch_ground_truth_loads_and_cross_checks():
     gt = contract.load(TWITCH_GT_DIR)
     assert gt.target == "go_net_http"
-    assert len(gt.cases) == 13
+    assert len(gt.cases) == 15
     ids = {c.case_id for c in gt.cases}
     assert ids == {
         "TWCH-0001", "TWCH-0002", "TWCH-0003", "TWCH-0004", "TWCH-0005", "TWCH-0006",
         "TWCH-0007", "TWCH-0008", "TWCH-0009", "TWCH-0010", "TWCH-0011", "TWCH-0012",
-        "TWCH-0013",
+        "TWCH-0013", "TWCH-0014", "TWCH-0015",
     }
 
     webhook = gt.case_by_id("TWCH-0001")
@@ -285,6 +285,34 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert header_injection.method == "GET"
     assert header_injection.param == "destination"
     assert header_injection.location == "query"
+
+    # CC-LAB-0199: Twitch's 14th real page, this stack's first
+    # open_redirect/http_redirect_location instance (reuses an existing,
+    # multi-stack concern from php_laravel's Booking.com pilot -- genuinely
+    # new breadth, not a genuinely new mechanism).
+    open_redirect = gt.case_by_id("TWCH-0014")
+    assert open_redirect.expected_vulnerable
+    assert open_redirect.vuln_class == "open_redirect"
+    assert open_redirect.sink_context == "redirect"
+    assert open_redirect.url == "/generated/labgen-go-0027"
+    assert open_redirect.method == "GET"
+    assert open_redirect.param == "next"
+    assert open_redirect.location == "query"
+
+    # CC-LAB-0199/BUG-0043: Twitch's 15th real case is NOT a new page -- it
+    # is a second, honest vuln_class label at TWCH-0013's own url/param
+    # (/generated/labgen-go-0025?destination=), found empirically once
+    # open_redirect's runmode category mapping made it reachable: that
+    # sink is genuinely ALSO open-redirect-vulnerable (a plain external
+    # `destination` needs no CRLF at all), not just http_header_injection.
+    second_label = gt.case_by_id("TWCH-0015")
+    assert second_label.expected_vulnerable
+    assert second_label.vuln_class == "open_redirect"
+    assert second_label.sink_context == "redirect"
+    assert second_label.url == "/generated/labgen-go-0025"
+    assert second_label.method == "GET"
+    assert second_label.param == "destination"
+    assert second_label.location == "query"
 
     for case in gt.cases:
         for token in ("webhook", "ssrf", "vuln", "idor", "access", "jwt", "entropy", "mass", "upload",

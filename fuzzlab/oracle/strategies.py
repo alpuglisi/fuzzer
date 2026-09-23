@@ -257,8 +257,23 @@ class ReflectedXssStrategy(ConfirmationStrategy):
 
 
 class OpenRedirectStrategy(ConfirmationStrategy):
-    """M9: the parameter controls the redirect target (Location or meta refresh)."""
-    vuln_class = "open-redirect"
+    """M9: the parameter controls the redirect target (Location or meta refresh).
+
+    ``vuln_class`` is deliberately underscored (``"open_redirect"``), NOT
+    hyphenated like ``category`` -- matching every other strategy in this
+    file (`AccessControlIdorStrategy.vuln_class == "access_control"`,
+    `InsecureDeserializationTypeConfusionStrategy.vuln_class ==
+    "insecure_deserialization"`, etc., all underscored to match ground
+    truth's own `labels.json` `vuln_class` enum spelling, while `category`
+    stays hyphenated to match the audit rule's category slug). This field
+    was originally hyphenated to match `category` (a real bug, BUG-0043/
+    PA-0045: the mismatch against ground truth's underscored spelling made
+    every `open_redirect` positive an unconditional false positive/false
+    negative pair in `fuzzlab.harness.scoring.score`'s exact-tuple key
+    match, found empirically via a real `run_targets` pipeline run against
+    this stack's own `TWCH-0014`/`CC-LAB-0199` page -- the same root cause
+    also silently affects category 5's own Booking.com `BKNG-0001` case)."""
+    vuln_class = "open_redirect"
     mechanism = "redirect-target-control"
     category = "open-redirect"
 
@@ -1586,7 +1601,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
 _CATEGORY_TO_CLASS = {
     "sql-injection": "sqli",
     "xss": "xss-reflected",
-    "open-redirect": "open-redirect",
+    "open-redirect": "open_redirect",
     "server-side-template-injection": "ssti",
     "file-inclusion": "file-inclusion",
     "command-injection": "command-injection",

@@ -1,0 +1,32 @@
+// Secure: {{ var_name }} must be a genuine, same-origin, site-relative
+// path before it is ever used as a redirect target -- mirroring
+// php_laravel's own RedirectTargetAllowlistTransform (CC-LAB-0210) at the
+// level this stack's sink-selecting convention (Convention 2) naturally
+// supports: a sink-level guard, not a value-rewrite transform. The
+// allowlist is an explicit character-class match on the WHOLE value (not
+// a "does it start with a slash?" prefix check, PA-0026), requiring
+// exactly one leading '/' immediately followed by an alphanumeric
+// character -- which is what rejects every open-redirect bypass shape
+// this op is meant to close in one check: a protocol-relative target
+// ("//evil.example" -- second character is '/'), a backslash-prefixed
+// target ("/\evil.example" -- second character is '\', which some
+// browsers normalize to a leading slash), a triple-slash target
+// ("///evil.example"), and any value that does not begin with exactly
+// one '/' at all ("evil.example", "\evil.example",
+// "https://evil.example", "javascript:alert(1)" -- none of these start
+// with '/' immediately followed by an alphanumeric character, so none of
+// them can match). Everything after that second character is limited to
+// an explicit safe path/query character class (no colon, no backslash, no
+// whitespace/control characters), so a scheme or a host cannot be
+// smuggled in later in the string either. Anything that fails this check
+// is rejected outright (HTTP 400, fail closed) rather than silently
+// collapsed to a default -- Go's ops have no shared downstream sink to
+// fall back to here, unlike php_laravel's transform-then-fixed-sink
+// convention.
+var allowedRedirectTarget = regexp.MustCompile(`^/[A-Za-z0-9][A-Za-z0-9\-_.\/?=&%]*$`)
+if !allowedRedirectTarget.MatchString({{ var_name }}) {
+	http.Error(w, "invalid redirect target", http.StatusBadRequest)
+	return
+}
+w.Header().Set("Location", {{ var_name }})
+w.WriteHeader(http.StatusFound)

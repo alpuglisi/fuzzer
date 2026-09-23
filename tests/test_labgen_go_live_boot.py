@@ -1557,3 +1557,107 @@ def test_real_boot_proves_the_http_header_injection_differential_for_both_twins(
         )
         assert secure_injected.status == 400, secure_injected.body
         assert _HEADER_INJECTION_CANARY_HEADER not in secure_injected.headers
+
+
+# -- Phase B fourteenth increment: open redirect (open_redirect,
+# http_redirect_location, CC-LAB-0199) ------------------------------------
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_open_redirect_differential_for_both_twins() -> None:
+    """Real assertions against a real booted app (`CC-LAB-0199`):
+
+    (a) both twins serve a legitimate, plain-path `next` value identically
+        -- this shape's functional contract ("return here after login") is
+        unaffected by which twin handles the request.
+    (b) the vulnerable twin reflects a caller-supplied ABSOLUTE EXTERNAL
+        URL verbatim into the `Location` header (CWE-601) -- no CR/LF byte
+        involved at all, unlike CC-LAB-0198's own http_header_injection
+        shape, since a bare external URL is already a well-formed
+        `Location` value.
+    (c) the secure twin rejects that same external-URL payload, a
+        protocol-relative bypass (`//evil.example`), and a
+        backslash-prefixed bypass (`/\\evil.example`) outright (HTTP 400),
+        and never sets a `Location` header pointing off-site.
+    (d) `fuzzlab.oracle.strategies.OpenRedirectStrategy` -- already built,
+        with zero new detection code needed -- confirms the vulnerable
+        twin for real and returns no verdict for the secure twin, sending
+        real probes over the network via `RequestsProbeSender` (not a
+        stub), which is ALSO a live regression proof that `BUG-0042`'s fix
+        (the sender now sets `allow_redirects=False`) still holds: had it
+        regressed, the strategy's canary probe against the vulnerable
+        twin would follow the external `Location` chain and raise
+        `TooManyRedirects`/a connection error instead of ever seeing the
+        header it needs.
+    """
+    from urllib.parse import quote
+
+    from fuzzlab.oracle.probe import Candidate
+    from fuzzlab.oracle.strategies import OpenRedirectStrategy
+    from fuzzlab.tools.probesender import RequestsProbeSender
+
+    manifest = load_manifest("lab/manifests/open_redirect_login_go_sample.yaml")
+    emitter = GoEmitter()
+    cells = {c.cell_id: c for c in manifest.cells}
+
+    with GoLiveBootHarness(emitter, list(cells.values())) as harness:
+        # (a) a legitimate next: both twins redirect identically.
+        vuln_ok = harness.request("GET", "/generated/labgen-go-0027?next=/ok")
+        assert vuln_ok.status == 302
+        assert vuln_ok.headers.get("Location") == "/ok"
+
+        secure_ok = harness.request("GET", "/generated/labgen-go-0028?next=/ok")
+        assert secure_ok.status == 302
+        assert secure_ok.headers.get("Location") == "/ok"
+
+        # (b) vulnerable twin: an absolute external URL is reflected
+        # verbatim into Location -- no CRLF needed at all.
+        external = "https://evil.example/phish"
+        vuln_bad = harness.request(
+            "GET", f"/generated/labgen-go-0027?next={quote(external, safe='')}"
+        )
+        assert vuln_bad.status == 302, vuln_bad.body
+        assert vuln_bad.headers.get("Location") == external, (
+            f"vulnerable twin did not reflect the external next verbatim -- "
+            f"headers were {vuln_bad.headers!r}"
+        )
+
+        # (c) secure twin: rejects the identical external-URL payload...
+        secure_bad = harness.request(
+            "GET", f"/generated/labgen-go-0028?next={quote(external, safe='')}"
+        )
+        assert secure_bad.status == 400, secure_bad.body
+        assert "evil.example" not in (secure_bad.headers.get("Location") or "")
+
+        # ...and every other open-redirect bypass shape this concern is
+        # meant to close: protocol-relative and backslash-prefixed.
+        for bypass in ("//evil.example", "/\\evil.example"):
+            resp = harness.request(
+                "GET", f"/generated/labgen-go-0028?next={quote(bypass, safe='')}"
+            )
+            assert resp.status == 400, (bypass, resp.status, resp.body)
+            assert "evil.example" not in (resp.headers.get("Location") or "")
+
+        # (d) OpenRedirectStrategy confirms the vulnerable twin for real,
+        # over the network, with zero new detection code, and correctly
+        # declines the secure twin -- also a live regression proof BUG-0042's
+        # fix (allow_redirects=False) holds: a regression here would surface
+        # as an exception from `sender.send`, not a wrong verdict.
+        sender = RequestsProbeSender(timeout=10.0)
+        strategy = OpenRedirectStrategy()
+
+        vuln_candidate = Candidate(
+            url=f"{harness.base_url}/generated/labgen-go-0027", param="next",
+            method="GET", location="query",
+        )
+        verdict = strategy.confirm(vuln_candidate, sender)
+        assert verdict is not None and verdict.confirmed, verdict
+        assert verdict.vuln_class == "open_redirect"
+        assert verdict.evidence.get("sink") == "location-header"
+
+        secure_candidate = Candidate(
+            url=f"{harness.base_url}/generated/labgen-go-0028", param="next",
+            method="GET", location="query",
+        )
+        assert strategy.confirm(secure_candidate, sender) is None

@@ -5065,6 +5065,99 @@ lane) can submit a payload as
   concluding this, not assumed absent) -- substituted with a documented,
   rigorous self-review performed and recorded in `CC-LAB-0198`.
 
+- **FR-LAB-139** *(Twitch's fourteenth real page: this stack's first
+  `open_redirect`/`http_redirect_location` instance, `go_net_http`,
+  `GET /auth/login-redirect?next=`; `CC-LAB-0199`, 2026-09-23).*
+  Instantiates `lab/safety_matrix.yaml`'s existing `open_redirect` concern
+  / `http_redirect_location` sink family (`CC-LAB-0210`, built for
+  `php_laravel`'s Booking.com pilot, category 5 -- never before built on
+  this stack, grepped `fuzzlab/labgen/emitters/go_net_http/`/
+  `lab/manifests/*.yaml` before starting) for the first time on this
+  stack. A "return here after login" convenience endpoint (a genuinely
+  common, real-world open-redirect vector on many real sites, and a real,
+  plausible Twitch feature), CWE-601. Convention 2 (like SSRF/mass-
+  assignment/price-integrity/path-traversal/ssti/http-header-injection):
+  the manifest's one op names a sink module directly, reusing
+  `read_url_query_param` verbatim as its source, and reusing
+  `lab/safety_matrix.yaml`'s existing `raw_concat`/`redirect_target_
+  allowlist` op rows verbatim -- no safety-matrix change needed. Unlike
+  `FR-LAB-138`'s own vulnerable twin, this shape needs NO `http.Hijacker`
+  bypass: an open redirect is buildable through Go's ordinary
+  `w.Header().Set()`/`w.WriteHeader()` path, since a bare absolute
+  external URL needs no CR/LF byte at all to be a dangerous, well-formed
+  `Location` value. Real, live-boot-proven differential (`tests/
+  test_labgen_go_live_boot.py::
+  test_real_boot_proves_the_open_redirect_differential_for_both_twins`):
+  both twins redirect a legitimate plain-path `next` identically; the
+  vulnerable twin (`raw_concat`) reflects an absolute external `next`
+  verbatim into `Location`; the secure twin (`redirect_target_allowlist`)
+  rejects that value, a protocol-relative target, and a backslash-
+  prefixed target outright with HTTP 400. `fuzzlab.oracle.strategies.
+  OpenRedirectStrategy` (already built) confirms the vulnerable twin for
+  real, live, and correctly declines the secure twin -- verified in the
+  same test, which doubles as a genuine regression proof that `BUG-0042`'s
+  `RequestsProbeSender` redirect-following fix still holds (a regression
+  would surface as the strategy's own probe following the vulnerable
+  twin's external `Location` chain into `TooManyRedirects` instead of ever
+  reading the header it needs).
+  **Two real, genuine pipeline bugs found and fixed while wiring this cell
+  into the shared, scored `run_targets` pipeline for the first time, not
+  routed around -- see `BUG-0043`/`PA-0045`.** (1) `fuzzlab.core.runmode.
+  _VULN_TO_CATEGORY` was missing an `"open_redirect": "open-redirect"`
+  entry -- the same underscore/hyphen category-mapping mismatch class
+  `access_control`/`insecure_deserialization` already hit, but the
+  existing generic guard test (`test_every_ruled_strategy_category_is_
+  reachable_from_its_vuln_class`, `CC-FUZZ-0030`) never caught this
+  instance, since it only compares the oracle's own already-
+  self-consistent `_CATEGORY_TO_CLASS` dict (where `"open-redirect":
+  "open-redirect"` was trivially identical) rather than what ground
+  truth's real `labels.json` files actually spell the class as. A new,
+  stronger guard (`tests/test_oracle.py::
+  test_ground_truth_vuln_classes_with_a_ruled_hyphenated_twin_are_mapped`)
+  closes that hole generically, scanning every `lab/ground-truth*/
+  labels.json` file directly. (2) `OpenRedirectStrategy.vuln_class` was
+  itself wrongly hyphenated (`"open-redirect"`, matching its own
+  `category` field) instead of underscored like every other strategy's
+  `vuln_class` in the file (matching ground truth's own spelling) --
+  `fuzzlab.harness.scoring.score`'s exact `(url, method, param,
+  vuln_class)` key match silently turned every real confirmation into a
+  false-positive/false-negative pair even once fix (1) made the category
+  reachable at all. Fixing (2) also surfaced a third, genuine (not a bug)
+  finding, not routed around either: `FR-LAB-138`'s own existing
+  vulnerable twin (`LABGEN-GO-0025`) is independently, honestly
+  open-redirect-vulnerable too (a plain external `destination` value
+  needs no CRLF at all to reach `Location` verbatim -- verified live),
+  and its secure twin (`LABGEN-GO-0026`) already independently closes
+  that too -- now honestly labeled as a second ground-truth case,
+  `TWCH-0015`, at that same url/param (`fuzzlab.labels.contract`'s own
+  supported multi-vuln_class-per-endpoint pattern, since `Case.key`
+  includes `vuln_class`).
+  Twitch's own ground-truth cardinality grows from 13 to 15 (`TWCH-0014`,
+  `TWCH-0015`); its own real, scored `multitarget` recall moves from
+  `10/13` to `12/15` (`tp` moves from `10` to `12`, `fp` stays `0`).
+  Ground truth: `TWCH-0014` (`vuln_class="open_redirect"`, a new,
+  additively-widened `labels.schema.json` enum value; `sink_context=
+  "redirect"`, an existing enum value; `param="next"`/`location="query"`,
+  url `/generated/labgen-go-0027`) and `TWCH-0015` (same `vuln_class`/
+  `sink_context`, `param="destination"`, url `/generated/labgen-go-0025`
+  -- `FR-LAB-138`'s own existing sink, second label only).
+  PA-0042/PA-0043 compliance: `tests/test_multitarget_category4.py` has
+  exactly two independent Twitch-cardinality-dependent hardcoded
+  fractions (`test_both_apps_run_through_multitarget_for_real`'s own
+  `twitch_report.recall` and its sibling `summary["macro_recall"]`) --
+  grep-counted and BOTH updated (`10/13` -> `12/15`);
+  `test_labels_contract_category4.py`'s case count/cross-check
+  re-derived; `test_auto.py` checked by direct inspection and run, found
+  genuinely unaffected (its cardinality-dependent assertions filter
+  Netflix's own ground truth/`param == "body"`, inapplicable to these
+  Twitch `query`-location cases).
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0198`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded in `CC-LAB-0199`.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

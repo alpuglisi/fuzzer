@@ -18,6 +18,55 @@ Format per entry:
 
 ---
 
+## 2026-09-23 — `open_redirect` silently unreachable in a scored pipeline: missing category mapping, then a wrongly-hyphenated strategy `vuln_class` (fixed, BUG-0043/PA-0045)
+
+- **Symptom:** wiring `CC-LAB-0199`'s new `open_redirect` Twitch cell
+  (`/auth/login-redirect?next=`) into `tests/test_multitarget_
+  category4.py`'s real, full `run_targets` pipeline showed the new case,
+  `TWCH-0014`, as a missed (false negative) finding, despite
+  `fuzzlab.oracle.strategies.OpenRedirectStrategy` (already built)
+  confirming the identical URL/param directly via a hand-built
+  `Candidate` moments earlier. After fixing the reachability gap, the
+  same case then scored as a false-positive/false-negative pair instead
+  of a true positive.
+- **Root cause:** two independent, pre-existing defects. (1)
+  `fuzzlab.core.runmode._VULN_TO_CATEGORY` had no `"open_redirect":
+  "open-redirect"` entry, so `to_category("open_redirect")` returned it
+  unchanged and the real `R-OPEN-REDIRECT` rule's category
+  (`"open-redirect"`) never entered `plan.categories` — the underscore/
+  hyphen category-mismatch class this project has hit repeatedly, this
+  time NOT caught by the existing generic guard test
+  (`test_every_ruled_strategy_category_is_reachable_from_its_vuln_class`),
+  because that guard only checks the oracle's own internal
+  `_CATEGORY_TO_CLASS` dict for self-consistency, not real ground truth.
+  (2) `OpenRedirectStrategy.vuln_class` was itself wrongly hyphenated
+  (`"open-redirect"`, copied from its own `category` field) instead of
+  underscored like every other strategy's `vuln_class` in the file —
+  `fuzzlab.harness.scoring.score`'s exact `(url, method, param,
+  vuln_class)` key match never matched ground truth's own underscored
+  `"open_redirect"`, even once (1) was fixed. Fixing (2) also surfaced a
+  third, genuine (not a bug) finding: `CC-LAB-0198`'s own existing page
+  is independently, honestly open-redirect-vulnerable too (verified
+  live), closed by adding a second, honest ground-truth case (`TWCH-0015`)
+  at that same url/param rather than routed around.
+- **Remediation:** added the missing `_VULN_TO_CATEGORY` entry; corrected
+  `OpenRedirectStrategy.vuln_class` to `"open_redirect"` (and
+  `_CATEGORY_TO_CLASS` to match); added a second, stronger guard test
+  (`tests/test_oracle.py::
+  test_ground_truth_vuln_classes_with_a_ruled_hyphenated_twin_are_mapped`)
+  that checks every real `lab/ground-truth*/labels.json` file directly
+  instead of the oracle's own internal dict; added `TWCH-0015`. Re-
+  verified against real booted apps: `test_both_apps_run_through_
+  multitarget_for_real` now scores Twitch `tp=12, fp=0` (was `tp=10` with
+  both new cases missed before either fix, then `tp=10, fp=2` after fix 1
+  alone).
+- **Status:** Fixed (BUG-0043/PA-0045 — see `docs/bugs/BUG-0043-open-
+  redirect-category-mapping-and-strategy-vuln-class-spelling.md`; this is
+  the same underscore/hyphen mismatch class `runmode.py`'s own comment
+  already documents finding repeatedly, but the FIRST instance the
+  existing generic guard test failed to catch, since it checks internal
+  consistency rather than real ground truth).
+
 ## 2026-09-23 — the oracle's own `RequestsProbeSender`/`RequestsCorrelatingSender` silently followed HTTP redirects (fixed, BUG-0042/PA-0044)
 
 - **Symptom:** wiring `CC-LAB-0198`'s new `http_header_injection` Twitch

@@ -3,6 +3,165 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0199 — Twitch's 14th real page: this stack's first `open_redirect`/`http_redirect_location` instance, `go_net_http`, `/auth/login-redirect` (FR-LAB-139) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing `open_redirect`
+  concern / `http_redirect_location` sink family (added by `CC-LAB-0210`
+  for `php_laravel`'s Booking.com pilot, category 5, never before
+  instantiated on `go_net_http` -- grepped `fuzzlab/labgen/emitters/
+  go_net_http/`/`lab/manifests/*.yaml` before starting) for the first time
+  on this stack: a "return here after login" convenience endpoint
+  (`GET /auth/login-redirect?next=`, a genuinely common, real-world
+  open-redirect vector on many real sites, and a real, plausible Twitch
+  feature), CWE-601. New manifest `lab/manifests/
+  open_redirect_login_go_sample.yaml` (`LABGEN-GO-0027`/`0028`, confirmed
+  free -- highest existing was `LABGEN-GO-0026`, from `CC-LAB-0198`), two
+  new sink modules/templates (`RawConcatSink`/`RedirectTargetAllowlistSink`,
+  `raw_concat.go.j2`/`redirect_target_allowlist.go.j2`), one new
+  `_MODULE_SET_BY_SHAPE`/`_ROUTE_PARAMS` entry pair in `fuzzlab/labgen/
+  emitters/go_net_http/__init__.py`. No safety-matrix change needed
+  (reuses `raw_concat`/`redirect_target_allowlist` op rows verbatim).
+  Convention 2 (like SSRF/mass-assignment/price-integrity/path-traversal/
+  ssti/http-header-injection): the manifest's one op names a sink module
+  directly. Reuses `read_url_query_param` verbatim as its source.
+  - **Vulnerable** (`LABGEN-GO-0027`, `raw_concat`): sets the
+    caller-supplied `next` value as the `Location` header verbatim, through
+    Go's ORDINARY `w.Header().Set()`/`w.WriteHeader()` path -- deliberately
+    NOT the `http.Hijacker` bypass `CC-LAB-0198`'s vulnerable twin needed,
+    since open redirect requires no CR/LF byte to reach the wire at all (a
+    bare absolute external URL is already a well-formed `Location` value).
+    **Secure** (`LABGEN-GO-0028`, `redirect_target_allowlist`): rejects
+    (HTTP 400) any `next` value that is not a genuine site-relative path
+    (exactly one leading `/` immediately followed by an alphanumeric
+    character, mirroring `php_laravel`'s own `RedirectTargetAllowlist
+    Transform`, `CC-LAB-0210`) before ever setting the header.
+  - **Real live-boot proof** (`tests/test_labgen_go_live_boot.py::
+    test_real_boot_proves_the_open_redirect_differential_for_both_twins`):
+    both twins redirect a legitimate plain-path `next` identically; the
+    vulnerable twin reflects an absolute external `next` verbatim into
+    `Location`; the secure twin rejects that value, a protocol-relative
+    target (`//evil.example`), and a backslash-prefixed target
+    (`/\evil.example`) outright with HTTP 400.
+  - **Detection, verified live, zero new detection CODE (though two real
+    pipeline bugs were found and fixed getting there -- see `CC-FUZZ-0040`/
+    `BUG-0043`/`PA-0045`):** `fuzzlab.oracle.strategies.
+    OpenRedirectStrategy` (already built) confirms the vulnerable twin for
+    real and correctly declines the secure twin, verified both via a
+    direct hand-built `Candidate` call AND via the real, full, scored
+    `run_targets`/multitarget pipeline (`tests/
+    test_multitarget_category4.py::
+    test_both_apps_run_through_multitarget_for_real`) -- the same test
+    also doubles as a live regression proof that `BUG-0042`'s
+    `RequestsProbeSender` redirect-following fix still holds (a regression
+    would surface as the strategy's own probe following the vulnerable
+    twin's external `Location` chain into `TooManyRedirects`/a connection
+    error instead of ever reading the header it needs; it did not).
+  - **Two real, genuine pipeline bugs found and fixed while wiring this
+    cell into the shared, scored pipeline for the first time, not routed
+    around -- see `CC-FUZZ-0040`/`BUG-0043`/`PA-0045`.** (1)
+    `fuzzlab.core.runmode._VULN_TO_CATEGORY` was missing an
+    `"open_redirect": "open-redirect"` entry, so `open-redirect` never
+    became a reachable category and the strategy was never even tried by
+    the real pipeline despite confirming directly. (2) Independently,
+    `OpenRedirectStrategy.vuln_class` was itself wrongly hyphenated
+    (matching its own `category` field) instead of underscored like every
+    other strategy's `vuln_class` -- `fuzzlab.harness.scoring.score`'s
+    exact-tuple key match silently turned every real confirmation into a
+    false-positive/false-negative pair even once (1) was fixed. Fixing (2)
+    surfaced a third, genuine (not a bug) finding, closed honestly rather
+    than routed around: `CC-LAB-0198`'s own existing vulnerable/secure
+    twins (`LABGEN-GO-0025`/`0026`) are independently, honestly
+    open-redirect-vulnerable too (`R-OPEN-REDIRECT`'s own `name_regex`
+    matches `destination` via its `dest` alternative; verified live that a
+    plain external `destination` produces a real off-site `302` on the
+    vulnerable twin and HTTP 400 on the secure twin, no CRLF involved at
+    all) -- labeled as a second, honest ground-truth case, `TWCH-0015`, at
+    that same url/param (`fuzzlab.labels.contract`'s own supported
+    multi-vuln_class-per-endpoint pattern, since `Case.key` includes
+    `vuln_class`), not suppressed or worked around.
+  - **Cross-branch independent-discovery check, performed and recorded**
+    (the same recurring diligence `CC-LAB-0191`'s/`CC-LAB-0196`'s/
+    `CC-LAB-0197`'s/`CC-LAB-0198`'s own stories flag): `git fetch origin
+    claude/category-5-build-6boejs claude/category-3-build-iuu5k9`
+    followed by a diff of every shared file this task touched
+    (`fuzzlab/core/runmode.py`, `fuzzlab/oracle/strategies.py`,
+    `fuzzlab/labgen/emitters/go_net_http/`, `lab/safety_matrix.yaml`,
+    `fuzzlab/labels/schemas/labels.schema.json`) against both sibling
+    branches. Both sibling branches are strictly BEHIND this branch on
+    `go_net_http`'s own files (no conflicting edit). Category 5's own
+    branch, however, had ALREADY independently found and fixed the exact
+    same two-part `open_redirect` defect this entry's own `CC-FUZZ-0040`
+    fixes -- its own `_VULN_TO_CATEGORY` already has `"open_redirect":
+    "open-redirect"`, and its own `OpenRedirectStrategy.vuln_class` is
+    already `"open_redirect"` (underscored), with its own docstring
+    citing an independently-discovered `BUG-0039` (category 5's own
+    numbering) for the same root cause -- an independent cross-branch
+    CONVERGENCE on the identical fix (same two lines, same values), not a
+    conflicting edit: trivially mergeable, and strong independent evidence
+    this fix is correct. Recorded here rather than silently landed, per
+    this branch's own standing cross-branch-diligence convention.
+  - **Bookkeeping-ID discipline, checked directly, not assumed:** confirmed
+    `CC-LAB-0199` against this branch's own reserved block (`CC-LAB-0170`-
+    `0209`) and the highest number actually USED in this log (`CC-LAB-0198`,
+    from the immediately-preceding entry), not merely mentioned anywhere in
+    this branch's merged docs. `BUG-0043`/`PA-0045`/`CC-FUZZ-0040`
+    confirmed free the same way against the highest USED numbers in
+    `docs/bugs/` (`BUG-0042`), `docs/PREVENTIVE_ACTIONS.md` (`PA-0044`),
+    and `docs/components/07-fuzzing-harness-and-oracle/change-control.md`
+    (`CC-FUZZ-0039`).
+  - Per `BUG-0040`/`PA-0042`/`PA-0043`, grepped `tests/
+    test_multitarget_category4.py`/`tests/test_auto.py`/`tests/
+    test_labels_contract_category4.py` for hardcoded fraction/count
+    assertions depending on Twitch's ground-truth cardinality: exactly two
+    independent hardcoded-fraction occurrences in
+    `test_multitarget_category4.py` (`twitch_report.recall` and
+    `summary["macro_recall"]`), grep-counted and BOTH re-derived
+    (`10/13` -> `12/15`, reflecting BOTH new cases, not just `TWCH-0014`);
+    `test_labels_contract_category4.py`'s case-count/id-set/cross-check
+    re-derived (13 -> 15, `TWCH-0014` and `TWCH-0015` both added);
+    `test_auto.py` checked by direct inspection and re-run, found
+    genuinely unaffected (its cardinality-dependent assertions filter
+    Netflix's own ground truth/`param == "body"`, doubly inapplicable to
+    these Twitch `query`-location cases).
+- Impact (other components / project): `LAB` (this app's own page/ground
+  truth) and `FUZZ` (the runmode/strategy fix, `CC-FUZZ-0040`). No impact
+  on Netflix/`spring_boot` or any other stack.
+- Risk (level; mitigation or accepted-risk justification): Low. A pure,
+  additive new page reusing every existing mechanism (safety-matrix rows,
+  audit rule, oracle strategy) verbatim; the two pipeline-wiring bugs found
+  along the way are fixed, tested, and verified live end to end (see
+  `CC-FUZZ-0040`), and the resulting third finding (`TWCH-0015`) is an
+  honest label of a real, pre-existing vulnerability this project already
+  built, not a new risk.
+- Deliverables:
+  - [x] `lab/manifests/open_redirect_login_go_sample.yaml` -- done
+  - [x] `fuzzlab/labgen/emitters/go_net_http/modules.py`/`__init__.py` --
+    two new sink modules + shape/route-profile entries -- done
+  - [x] `fuzzlab/labgen/emitters/go_net_http/templates/sinks/
+    raw_concat.go.j2`/`redirect_target_allowlist.go.j2` -- done
+  - [x] `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,
+    expectedresults.csv}` -- `TWCH-0014` (new page) and `TWCH-0015`
+    (second label on `CC-LAB-0198`'s own sink) -- done
+  - [x] Real live-boot differential test -- done
+  - [x] Real live, scored multitarget pipeline verification -- done
+  - [x] `CC-FUZZ-0040`/`BUG-0043`/`PA-0045` -- full bug protocol -- done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`/
+    `docs/ARCHITECTURE.md` -- tracker/status updated -- done
+- Effectiveness (assessed 2026-09-23): effective, verified live end to
+  end -- real `go run`/live-boot differential for both twins, real
+  `OpenRedirectStrategy` confirmation via both a direct `Candidate` call
+  and the full scored multitarget pipeline (`tp=12, fp=0` for Twitch,
+  recall `12/15`, up from `10/13`), and a genuine `BUG-0042` regression
+  check (redirect-following fix still holds) all passed.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0198`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review, including the empirical live-boot proofs above and
+  the cross-branch independent-discovery check, both performed before
+  this entry was closed out.
+
 ### CC-LAB-0198 — Twitch's 13th real page: this project's first `http_header_injection`/`http_response_header_value` instance on any stack, `go_net_http`, `/channels/redirect` (FR-LAB-138) (2026-09-23)
 
 - Change: instantiates `lab/safety_matrix.yaml`'s existing

@@ -18,3 +18,5 @@ TWCH-0010,/generated/labgen-go-0019,POST,body,body,price_integrity_bypass,true,/
 TWCH-0011,/generated/labgen-go-0021,GET,filename,query,path_traversal,true,/generated/labgen-go-0021,sink,,direct
 TWCH-0012,/generated/labgen-go-0023,POST,body,body,ssti,true,/generated/labgen-go-0023,sink,,direct
 TWCH-0013,/generated/labgen-go-0025,GET,destination,query,http_header_injection,true,/generated/labgen-go-0025,sink,,direct
+TWCH-0014,/generated/labgen-go-0027,GET,next,query,open_redirect,true,/generated/labgen-go-0027,sink,,direct
+TWCH-0015,/generated/labgen-go-0025,GET,destination,query,open_redirect,true,/generated/labgen-go-0025,sink,,direct

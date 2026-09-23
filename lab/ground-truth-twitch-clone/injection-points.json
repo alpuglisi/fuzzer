@@ -92,6 +92,13 @@
       "param": "destination",
       "location": "query",
       "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0027",
+      "method": "GET",
+      "param": "next",
+      "location": "query",
+      "rendering": "server-json"
     }
   ]
 }

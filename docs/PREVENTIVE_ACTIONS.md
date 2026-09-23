@@ -584,3 +584,34 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   whether the caller is a `ConfirmationStrategy`/oracle that needs the
   UN-followed response, not blanket avoidance of `allow_redirects=True`
   everywhere. (from BUG-0042)
+- **PA-0045** — When adding a `ConfirmationStrategy` (or the first ground-truth
+  case for an existing one) whose category needs a `fuzzlab.core.
+  runmode._VULN_TO_CATEGORY` entry (its category's hyphenated slug differs
+  from ground truth's own underscored `vuln_class` spelling), do not trust
+  `test_every_ruled_strategy_category_is_reachable_from_its_vuln_class`
+  (`CC-FUZZ-0030`) alone to catch a missing entry: that guard only checks
+  the oracle's own internal `_CATEGORY_TO_CLASS` dict for self-consistency,
+  and stays silently blind whenever a strategy's own `vuln_class` field is
+  ITSELF mis-spelled to already match its `category` (as
+  `OpenRedirectStrategy.vuln_class` was, hyphenated instead of
+  underscored) — the guard's own early-continue ("identical either way, no
+  mapping needed") then fires on a value that was only "identical" because
+  it was wrong. Two things follow, both now enforced: (1) run
+  `tests/test_oracle.py::
+  test_ground_truth_vuln_classes_with_a_ruled_hyphenated_twin_are_mapped`
+  (or extend it), which checks the SAME invariant against every real
+  `lab/ground-truth*/labels.json` file's own `vuln_class` strings, not the
+  oracle's own internal dict — verify it live against a real, scored
+  `run_targets`/multitarget pipeline run (not just the unit-test fake
+  senders) before declaring the new class reachable, since a category gap
+  and a `vuln_class`-spelling gap are independent defects that can each
+  hide the other; (2) every new `ConfirmationStrategy.vuln_class` value
+  must be underscored to match ground truth's own `labels.json`
+  `vuln_class` enum spelling (never hyphenated to match its own
+  `category` field, which is a DIFFERENT, deliberately hyphenated slug) —
+  check this directly against the strategy's own field value, not by
+  pattern-matching a naming convention that could itself miss a variant.
+  Confirming a new page's detection with a hand-built `Candidate` alone is
+  not sufficient proof it works end to end; a live, scored multitarget
+  pipeline run is the only check that exercises category reachability AND
+  the scoring key's exact vuln_class match together. (from BUG-0043)

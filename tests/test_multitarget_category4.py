@@ -319,6 +319,61 @@ injection-aware), so `TWCH-0013`'s own positive stays an honest, explicitly
 tracked false negative, the same lab-then-detection split `CC-LAB-0190`
 used. Twitch's own ground-truth cardinality grows from 12 to 13; its own
 scored recall in this multi-cell boot moves from `10/12` to `10/13`.
+
+**Twitch's 14th real page (`CC-LAB-0199`/`FR-LAB-139`): this stack's first
+`open_redirect`/`http_redirect_location` instance** (`TWCH-0014`,
+`/auth/login-redirect`, reusing `lab/safety_matrix.yaml`'s existing
+`open_redirect` concern / `http_redirect_location` sink family verbatim --
+added by `CC-LAB-0210` for `php_laravel`'s Booking.com pilot, category 5,
+never before instantiated on this stack). Unlike `TWCH-0013`'s own
+`http_header_injection` shape, this one needs no `http.Hijacker` bypass at
+all: an open redirect's vulnerable instance is buildable through Go's
+ordinary `w.Header().Set()`/`w.WriteHeader()` path, since a bare absolute
+external URL is already a well-formed `Location` value with no CR/LF byte
+involved. `fuzzlab.oracle.strategies.OpenRedirectStrategy` -- already
+built, category 5's own Booking.com use -- confirms this vulnerable twin
+for real with ZERO new detection code (verified live,
+`tests/test_labgen_go_live_boot.py::
+test_real_boot_proves_the_open_redirect_differential_for_both_twins`),
+which doubles as a live regression proof that `BUG-0042`'s
+`RequestsProbeSender` redirect-following fix still holds: a regression
+there would surface as the strategy's own probe following the vulnerable
+twin's external `Location` chain instead of ever reading the header it
+needs. Twitch's own ground-truth cardinality grows from 13 to 14, and its
+own tp grows from 10 to 11 (this new case is a real, confirmed finding,
+not a tracked false negative).
+
+Wiring `open_redirect` into the runmode category plan for the first time
+(so `OpenRedirectStrategy` could reach a real candidate at all) surfaced
+two genuine, pre-existing defects, both fixed in this same change
+(`BUG-0043`/`PA-0045`): `fuzzlab.core.runmode._VULN_TO_CATEGORY` was
+missing an `"open_redirect": "open-redirect"` entry (the underscore/hyphen
+mismatch class `access_control`/`insecure_deserialization` already hit,
+but the existing guard test, `test_every_ruled_strategy_category_is_
+reachable_from_its_vuln_class`, never caught this instance -- it only
+compares the oracle's own already-self-consistent `_CATEGORY_TO_CLASS`
+dict, where `"open-redirect": "open-redirect"` is trivially identical,
+never what ground truth's `labels.json` files actually spell the class
+as; a new, stronger guard closes that hole generically, see
+`tests/test_oracle.py::
+test_ground_truth_vuln_classes_with_a_ruled_hyphenated_twin_are_mapped`);
+and `OpenRedirectStrategy.vuln_class` was itself wrongly hyphenated
+(matching its own `category` field) instead of underscored like every
+other strategy's `vuln_class` in the file, so `fuzzlab.harness.scoring.
+score`'s exact `(url, method, param, vuln_class)` key match silently
+turned every real confirmation into a false-positive/false-negative pair
+even once the category was reachable. Fixing that second bug also
+surfaced a third, genuine (not a bug) finding: TWCH-0013's OWN existing
+vulnerable twin (`LABGEN-GO-0025`) is independently, honestly
+open-redirect-vulnerable too (a plain external `destination` value needs
+no CRLF at all to reach `Location` verbatim -- verified live), and its
+secure twin (`LABGEN-GO-0026`) already independently closes that too --
+now honestly labeled as a second case, `TWCH-0015`, at the same url/param
+(`fuzzlab.labels.contract`'s own supported multi-vuln_class-per-endpoint
+pattern, since `Case.key` includes `vuln_class`). Twitch's own
+ground-truth cardinality therefore moves from 13 to 15 (TWCH-0014 AND
+TWCH-0015), and tp moves from 10 to 12 (fp stays 0) -- scored recall in
+this multi-cell boot moves from `10/13` to `12/15`.
 """
 
 from __future__ import annotations
@@ -415,10 +470,20 @@ def _twitch_cells():
     http_header_injection = load_manifest(
         "lab/manifests/http_header_injection_redirect_go_sample.yaml"
     ).cells
+    # CC-LAB-0199: this stack's first open_redirect/http_redirect_location
+    # instance (/auth/login-redirect), reusing lab/safety_matrix.yaml's
+    # existing concern/family/ops verbatim (added by CC-LAB-0210 for
+    # php_laravel's Booking.com pilot). Needs zero new detection code:
+    # OpenRedirectStrategy (already built for Booking.com) confirms it
+    # verbatim, live -- see tests/test_labgen_go_live_boot.py::
+    # test_real_boot_proves_the_open_redirect_differential_for_both_twins.
+    open_redirect = load_manifest(
+        "lab/manifests/open_redirect_login_go_sample.yaml"
+    ).cells
     return (
         webhook + ssrf + access_control + jwt + weak_token + mass_assignment
         + access_control_subscribers + ssrf_clips_download + unrestricted_file_upload
-        + price_integrity + path_traversal + ssti + http_header_injection
+        + price_integrity + path_traversal + ssti + http_header_injection + open_redirect
     )
 
 
@@ -531,14 +596,51 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # dispatch's own lab-then-detection split, mirroring TWCH-0011's own
     # path-traversal deferral); tp stays 10 (only webhook-signature,
     # path-traversal, and now http_header_injection remain undetected,
-    # each for its own distinct, tracked reason), so recall moves from
-    # 10/12 to 10/13 (PA-0042: this hardcoded fraction was re-derived, not
-    # left stale, for this change; PA-0043: BOTH this single-cell
+    # each for its own distinct, tracked reason). Cardinality then grows
+    # from 13 to 14 (TWCH-0014/CC-LAB-0199, the 14th real page,
+    # open_redirect/http_redirect_location) -- this one DOES confirm for
+    # real: `OpenRedirectStrategy` (already built for category 5's own
+    # Booking.com pilot) needs zero new detection code to confirm the
+    # vulnerable `raw_concat` twin and correctly declines the secure
+    # `redirect_target_allowlist` twin (see
+    # `tests/test_labgen_go_live_boot.py::
+    # test_real_boot_proves_the_open_redirect_differential_for_both_twins`).
+    # Wiring `open_redirect` into the runmode category plan for the FIRST
+    # time surfaced two genuine, pre-existing defects (BUG-0043/PA-0045,
+    # fixed in the same change): (a) `_VULN_TO_CATEGORY` was missing an
+    # `"open_redirect": "open-redirect"` entry (the same underscore/hyphen
+    # mismatch class `access_control`/`insecure_deserialization` already
+    # hit, but the existing generic guard test never caught THIS instance
+    # since it only compared the oracle's own internal, already-
+    # self-consistent `_CATEGORY_TO_CLASS` dict, not what ground truth
+    # actually spells the class as -- a new, stronger guard,
+    # `test_ground_truth_vuln_classes_with_a_ruled_hyphenated_twin_are_
+    # mapped` in `tests/test_oracle.py`, closes that hole generically); and
+    # (b) `OpenRedirectStrategy.vuln_class` was itself wrongly hyphenated
+    # (`"open-redirect"`, matching its own `category` field) instead of
+    # underscored like every other strategy's `vuln_class`
+    # (`"open_redirect"`, matching ground truth's own spelling) --
+    # `fuzzlab.harness.scoring.score`'s exact `(url, method, param,
+    # vuln_class)` key match silently turned every real confirmation into a
+    # false-positive/false-negative pair. Fixing (b) also surfaced a third,
+    # genuine (not a bug) finding: TWCH-0013's OWN existing vulnerable twin
+    # (`LABGEN-GO-0025`) is independently, honestly open-redirect-
+    # vulnerable too (a plain external `destination` value needs no CRLF at
+    # all to reach `Location` verbatim -- verified live), and its secure
+    # twin (`LABGEN-GO-0026`) already independently closes that too -- a
+    # genuine second vuln_class at the same sink, now honestly labeled as
+    # `TWCH-0015` (`fuzzlab.labels.contract`'s own supported multi-
+    # vuln_class-per-endpoint pattern, `Case.key` includes `vuln_class`).
+    # Twitch's own ground-truth cardinality therefore moves from 13 to 15
+    # (TWCH-0014 AND TWCH-0015), and tp moves from 10 to 12 (both new cases
+    # are real, confirmed findings, fp stays 0) -- recall moves from
+    # `10/13` to `12/15` (PA-0042: this hardcoded fraction was re-derived,
+    # not left stale, for this change; PA-0043: BOTH this single-cell
     # assertion and the multi-target `macro_recall` assertion below were
     # grep-counted and updated together).
     twitch_report = by_name["twitch-clone"].report
-    assert twitch_report.tp == 10 and twitch_report.fp == 0
-    assert round(twitch_report.recall, 4) == round(10 / 13, 4)
+    assert twitch_report.tp == 12 and twitch_report.fp == 0
+    assert round(twitch_report.recall, 4) == round(12 / 15, 4)
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002, which does have a rule/strategy, R-XXE/
@@ -577,11 +679,19 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # 1/9 to 1/10 to 1/11), CC-FUZZ-0038's new `GoTemplateSstiStrategy`
     # closing TWCH-0012's own detection gap (Twitch's own tp moved from 9
     # to 10, recall from 9/12 to 10/12; no ground-truth-cardinality change
-    # that time, a pure detection increment), and TWCH-0013/CC-LAB-0198
+    # that time, a pure detection increment), TWCH-0013/CC-LAB-0198
     # (Twitch's own ground-truth cardinality moved from 12 to 13, tp stays
     # 10, recall from 10/12 to 10/13 -- an undetected new page, the same
-    # kind of cardinality-only change TWCH-0011 made).
-    assert round(summary["macro_recall"], 4) == round(((10 / 13) + (1 / 11)) / 2, 4)
+    # kind of cardinality-only change TWCH-0011 made), and TWCH-0014/
+    # TWCH-0015/CC-LAB-0199/BUG-0043 together (Twitch's own ground-truth
+    # cardinality moves from 13 to 15 AND tp moves from 10 to 12 --
+    # `OpenRedirectStrategy`, already built for category 5's own
+    # Booking.com pilot, confirms both the new open_redirect page and a
+    # second, honest open_redirect label on TWCH-0013's own existing
+    # sink for real with zero new detection CODE, only a runmode-mapping
+    # fix + a strategy vuln_class-spelling fix + a second ground-truth
+    # label, recall from 10/13 to 12/15).
+    assert round(summary["macro_recall"], 4) == round(((12 / 15) + (1 / 11)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True

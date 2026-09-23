@@ -1,0 +1,13 @@
+// Vulnerable (CWE-601, open redirect): {{ var_name }} -- the caller-
+// supplied "return here after login" target -- is set as the redirect's
+// Location header verbatim, through Go's ordinary net/http header-writing
+// path, with no check at all that it stays on this site. This is a
+// genuinely different concern from raw_socket_response_write's own
+// CRLF-splicing bypass (CC-LAB-0198): there is no CR/LF stripping to
+// defeat here, since a redirect target that is simply an absolute,
+// external URL (e.g. "https://evil.example/phish") needs no CR/LF at all
+// to be dangerous -- Go's own header-writing path happily sends it as a
+// perfectly well-formed Location header, sending the caller's browser
+// straight to an attacker-controlled destination after they log in.
+w.Header().Set("Location", {{ var_name }})
+w.WriteHeader(http.StatusFound)

@@ -143,6 +143,40 @@ manifest's one op names a sink module directly. Reuses
 `read_url_query_param` verbatim as its source (like the SSRF/path-
 traversal shapes) -- no new source module needed.
 
+**Phase B, fourteenth increment (`CC-LAB-0199`/`FR-LAB-139`): this
+stack's first `open_redirect`/`http_redirect_location` instance**,
+`("open_redirect", "http_redirect_location")` -- a "return here after
+login" convenience endpoint (`GET /auth/login-redirect?next=` -- a real,
+plausible Twitch feature, and a genuinely common real-world open-redirect
+vector on many real sites) that either sets the caller-supplied `next`
+value as the `Location` header verbatim, through Go's ORDINARY
+`w.Header().Set()`/`w.WriteHeader()` path with no check at all that it
+stays on this site (vulnerable, CWE-601, `raw_concat`), or rejects
+(HTTP 400) any `next` value that is not a genuine site-relative path
+before ever setting the header (secure, `redirect_target_allowlist`).
+Reuses `lab/safety_matrix.yaml`'s existing `open_redirect` concern /
+`http_redirect_location` sink family and its existing
+`raw_concat`/`redirect_target_allowlist` op rows verbatim (added by
+`CC-LAB-0210` for `php_laravel`'s Booking.com pilot, never before
+instantiated on this stack -- grepped `fuzzlab/labgen/emitters/
+go_net_http/` for "open_redirect"/"redirect_target_allowlist" before
+starting and found no prior instance) -- no safety-matrix change needed.
+Unlike `http_header_injection`'s own vulnerable twin (`CC-LAB-0198`),
+this shape's vulnerable twin needs NO `http.Hijacker` bypass: open
+redirect requires no CR/LF byte to reach the wire at all (a bare absolute
+external URL, e.g. `https://evil.example/phish`, is already a perfectly
+well-formed `Location` header value), so Go's ordinary header-writing
+path is already sufficient to build an honest vulnerable instance --
+verified by this increment's own live-boot test alongside a genuine
+regression check that the `BUG-0042` redirect-following fix holds (a
+live confirmation via `fuzzlab.oracle.strategies.OpenRedirectStrategy`
+would immediately re-expose `TooManyRedirects` if that fix somehow
+regressed, since the strategy's own canary is a `Location:`-header value
+the probe sender must NOT follow). Convention 2 again: the manifest's
+one op names a sink module directly. Reuses `read_url_query_param`
+verbatim as its source, exactly like the SSRF/path-traversal/http-
+header-injection shapes.
+
 **Multi-file output, like every other routed emitter.** Per this project's
 routed-emitter convention (``node_express``, ``ruby_rails``), a ``route``-
 category *accumulator* module (``net/http.ServeMux`` registration lines)
@@ -256,6 +290,19 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("http_header_injection", "http_response_header_value"): _ModuleSet(
         "read_url_query_param", None, "render_only"
     ),
+    # Convention 2 again (like SSRF/mass-assignment/price-integrity/path-
+    # traversal/ssti/http-header-injection): the manifest's one op names a
+    # sink module directly. This stack's first `open_redirect`/`http_
+    # redirect_location` instance (`CC-LAB-0199`), reusing
+    # `lab/safety_matrix.yaml`'s existing concern/family and its existing
+    # `raw_concat`/`redirect_target_allowlist` op rows verbatim (added by
+    # `CC-LAB-0210` for `php_laravel`'s Booking.com pilot) -- no
+    # safety-matrix change needed. Reuses `read_url_query_param` verbatim
+    # as its source, exactly like the SSRF/path-traversal/http-header-
+    # injection shapes.
+    ("open_redirect", "http_redirect_location"): _ModuleSet(
+        "read_url_query_param", None, "render_only"
+    ),
 }
 
 #: Per-module (source/transform-op/sink name) -> the extra Go standard-
@@ -304,6 +351,8 @@ _MODULE_IMPORTS: dict[str, tuple[str, ...]] = {
     "file_loaded_template_name": ("encoding/json",),
     "raw_socket_response_write": (),
     "allowlist_and_runtime_crlf_rejection": ("regexp",),
+    "raw_concat": (),
+    "redirect_target_allowlist": ("regexp",),
 }
 
 #: Per-route static context this Phase A emitter needs beyond the
@@ -352,6 +401,11 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     # /api/clips/thumbnail's/`/clips/export`'s own entries above) --
     # destination is read from the `destination` query param.
     "/channels/redirect": {"var_name": "destination", "param_name": "destination"},
+    # CC-LAB-0199: this stack's first open_redirect/http_redirect_location
+    # instance. Reuses ReadUrlQueryParamSource's own var_name/param_name
+    # convention (like /channels/redirect's own entry above) -- the
+    # redirect target is read from the `next` query param.
+    "/auth/login-redirect": {"var_name": "nextTarget", "param_name": "next"},
 }
 
 

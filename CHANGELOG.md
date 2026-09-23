@@ -4,6 +4,47 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (lab: Twitch's 14th real page, this stack's first open_redirect instance; fix: two genuine detection-pipeline bugs found wiring it in, BUG-0043/PA-0045)
+- `go_net_http` gains Twitch's 14th real page, `GET /auth/login-redirect?next=`
+  (a "return here after login" convenience endpoint — a genuinely common,
+  real-world open-redirect vector on many real sites) — this stack's FIRST
+  instantiation of `lab/safety_matrix.yaml`'s existing `open_redirect`
+  concern / `http_redirect_location` sink family (CWE-601, added by
+  `CC-LAB-0210` for `php_laravel`'s Booking.com pilot, category 5).
+  Unlike `CC-LAB-0198`'s own vulnerable twin, this shape needs no
+  `http.Hijacker` bypass: a bare external URL needs no CR/LF byte at all
+  to be a well-formed `Location` value, so Go's ordinary
+  `w.Header().Set()`/`w.WriteHeader()` path is already sufficient.
+  `fuzzlab.oracle.strategies.OpenRedirectStrategy` (already built)
+  confirms the vulnerable twin for real, live, with zero new detection
+  code, and correctly declines the secure twin — this test also doubles
+  as a genuine regression proof that `BUG-0042`'s redirect-following fix
+  still holds. `CC-LAB-0199`/`FR-LAB-139`.
+- Fix: wiring `open_redirect` into the shared, scored `run_targets`
+  pipeline for the first time surfaced two real, pre-existing defects,
+  both project-wide, not routed around. (1) `fuzzlab.core.runmode.
+  _VULN_TO_CATEGORY` was missing an `"open_redirect": "open-redirect"`
+  entry — the same underscore/hyphen category-mismatch class
+  `access_control`/`insecure_deserialization` already hit, but the
+  existing generic guard test never caught this instance (it only
+  compared the oracle's own already-self-consistent internal dict, not
+  what ground truth's real `labels.json` files actually spell the class
+  as) — a new, stronger guard (`tests/test_oracle.py::
+  test_ground_truth_vuln_classes_with_a_ruled_hyphenated_twin_are_mapped`)
+  closes that hole generically. (2) `OpenRedirectStrategy.vuln_class` was
+  itself wrongly hyphenated (matching its own `category` field) instead
+  of underscored like every other strategy in the file, so the scorer's
+  exact-tuple key match silently turned every real confirmation into a
+  false-positive/false-negative pair even once (1) was fixed — this
+  affects category 5's Booking.com pilot identically, both branches share
+  the same root cause. Fixing (2) also surfaced a third, genuine finding:
+  `CC-LAB-0198`'s own existing vulnerable twin is independently, honestly
+  open-redirect-vulnerable too (verified live) — now honestly labeled as
+  a second ground-truth case, `TWCH-0015`, at that same url/param rather
+  than routed around. Twitch's own ground truth grows from 13 to 15 cases
+  (`TWCH-0014`, `TWCH-0015`); its own real, scored recall moves from
+  `10/13` to `12/15` (`tp` 10→12, `fp` stays 0). `BUG-0043`/`PA-0045`.
+
 ## 2026-09-23 (lab: Twitch's 13th real page, this project's first http_header_injection instance on any stack; fix: oracle senders silently followed redirects, BUG-0042/PA-0044)
 - `go_net_http` gains Twitch's 13th real page, `GET /channels/redirect?destination=`
   (a post-subscribe/-follow redirect convenience endpoint) — this project's
