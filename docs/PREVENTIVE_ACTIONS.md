@@ -537,3 +537,22 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   neither covers: a pre-existing, unrelated-looking, cross-cutting test
   file whose hardcoded assertion merely happens to depend on a
   ground-truth directory's total count or shape. (from BUG-0040)
+- **PA-0043** — Sharpens `PA-0042` from file-level to match-level
+  verification, after `PA-0042`'s own fix (`CC-LAB-0197`) missed a second,
+  independent hardcoded fraction in the same file it had just edited and
+  re-run: a file passing `pytest` after you fix ONE hardcoded ground-
+  truth-cardinality assertion does not prove there is no SECOND,
+  independent occurrence of the same pattern elsewhere in that file —
+  `pytest` re-running green only proves the assertions it collected are
+  internally consistent with each other and the code, not that you found
+  every assertion that needed changing. Before considering such a fix
+  complete, count how many times the target's own recall/`tp`/count
+  pattern actually matches across the whole file (e.g. `grep -c` it, or
+  visually confirm every occurrence), and confirm that exact number of
+  assertions was edited — not just that the file as a whole now passes.
+  Applies with specific, recurring force to
+  `tests/test_multitarget_category4.py`'s own single-cell-boot +
+  multi-cell-boot test-pairing convention (each target gets one assertion
+  in each), where a single ground-truth-cardinality change routinely
+  invalidates TWO independent assertions in that one file, not one — do
+  not stop at the first one found. (from BUG-0041)

@@ -509,34 +509,37 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # first price_integrity_bypass instance (NFLX-0005, CC-LAB-0188), the
     # first unrestricted_file_upload instance (NFLX-0006, CC-LAB-0191), the
     # first mass_assignment instance (NFLX-0007, CC-LAB-0192), the first
-    # jwt_algorithm_confusion instance (NFLX-0008, CC-LAB-0193), and the
-    # first ssrf instance (NFLX-0009, CC-LAB-0194) are simply not booted
-    # in this single-cell test -- one of its now-nine positives, not all
-    # (only NFLX-0001's own vulnerable twin, LABGEN-JV-0001, is booted
-    # here) -- see test_netflix_multi_cell_boot_confirms_all_positives
-    # below for the multi-cell boot that confirms all nine together.
-    # PA-0042: this hardcoded fraction was re-derived, not left stale,
-    # when NFLX-0009 was added (ground-truth cardinality moved from 8 to
-    # 9; tp stays 1, so recall moved from 1/8 to 1/9) and again when
-    # NFLX-0010/CC-LAB-0195 was added (cardinality moved from 9 to 10; tp
-    # still stays 1, so recall moves from 1/9 to 1/10 -- the tenth
-    # positive's own vulnerable twin, LABGEN-JV-0019, is not booted in
-    # this single-cell test either).
+    # jwt_algorithm_confusion instance (NFLX-0008, CC-LAB-0193), the
+    # first ssrf instance (NFLX-0009, CC-LAB-0194), the first
+    # weak_token_entropy instance (NFLX-0010, CC-LAB-0195), and the first
+    # ssti/template_render instance on this app identity (NFLX-0011,
+    # CC-LAB-0197) are simply not booted in this single-cell test -- one
+    # of its now-eleven positives, not all (only NFLX-0001's own
+    # vulnerable twin, LABGEN-JV-0001, is booted here) -- see
+    # test_netflix_multi_cell_boot_confirms_all_positives below for the
+    # multi-cell boot that confirms all eleven together.
+    # PA-0042: this hardcoded fraction is re-derived, not left stale,
+    # every time Netflix's own ground-truth cardinality grows here (most
+    # recently 1/10 -> 1/11 when NFLX-0011/CC-LAB-0197 landed -- a real
+    # stale-assertion instance this exact PA exists to catch, found here
+    # by an independent re-run after CC-LAB-0197's own commit, not caught
+    # by that commit's own PA-0042 pass, which updated the sibling
+    # multi-cell assertion below but missed this one).
     netflix_report = by_name["netflix-clone"].report
     assert netflix_report.tp == 1 and netflix_report.fp == 0
-    assert round(netflix_report.recall, 4) == round(1 / 10, 4)
+    assert round(netflix_report.recall, 4) == round(1 / 11, 4)
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
     # PA-0042: re-derived, not left stale, from the ground-truth-cardinality
     # changes TWCH-0011/CC-LAB-0190 (Twitch's own recall moved from 9/10 to
-    # 9/11 to 9/12) and NFLX-0009/CC-LAB-0194 + NFLX-0010/CC-LAB-0195
+    # 9/11 to 9/12), NFLX-0009/CC-LAB-0194 through NFLX-0011/CC-LAB-0197
     # (Netflix's own recall in THIS single-cell test moved from 1/8 to
-    # 1/9 to 1/10) all made, and again from CC-FUZZ-0038's new
-    # `GoTemplateSstiStrategy` closing TWCH-0012's own detection gap
-    # (Twitch's own tp moved from 9 to 10, recall from 9/12 to 10/12; no
-    # ground-truth-cardinality change this time, a pure detection increment).
-    assert round(summary["macro_recall"], 4) == round(((10 / 12) + (1 / 10)) / 2, 4)
+    # 1/9 to 1/10 to 1/11), and CC-FUZZ-0038's new `GoTemplateSstiStrategy`
+    # closing TWCH-0012's own detection gap (Twitch's own tp moved from 9
+    # to 10, recall from 9/12 to 10/12; no ground-truth-cardinality change
+    # that time, a pure detection increment).
+    assert round(summary["macro_recall"], 4) == round(((10 / 12) + (1 / 11)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True

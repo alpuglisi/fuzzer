@@ -4,6 +4,24 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (fix: PA-0042's own fix missed a second hardcoded recall assertion in the same file, BUG-0041/PA-0043)
+- `tests/test_multitarget_category4.py::test_both_apps_run_through_multitarget_for_real`'s
+  own hardcoded Netflix recall assertion (`1/10`) went stale the moment
+  `CC-LAB-0197` (Netflix's 11th page, below) raised the ground-truth case
+  count to 11 — a real, already-pushed test failure caught by an
+  independent re-verification pass, not by that commit's own `PA-0042`
+  check, which correctly updated the *sibling* assertion in
+  `test_netflix_multi_cell_boot_confirms_all_positives` (same file,
+  different test function) but missed this one. Corrected to `1/11`
+  (and its paired `macro_recall` assertion); full bug-workflow bookkeeping
+  landed: `BUG-0041` (with the required prior-preventive-action-failure
+  analysis against `PA-0042`, the immediately preceding entry in
+  `ERROR_LOG.md`), `PA-0043` sharpening `PA-0042` from file-level to
+  match-level verification (a file passing after one fix doesn't prove no
+  second, independent occurrence of the same pattern was missed
+  elsewhere in it). A codebase-wide sweep of every other multitarget test
+  file found no other current instance of this class.
+
 ## 2026-09-23 (lab: Netflix's 11th real page, first `ssti`/`template_render` instance on this app identity, CC-LAB-0197/FR-LAB-137)
 - New Netflix cell (category 4, `spring_boot`): a customer-support-agent
   template-preview endpoint, `GET /api/support/template-preview?expr=`

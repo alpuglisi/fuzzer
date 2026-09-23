@@ -18,6 +18,37 @@ Format per entry:
 
 ---
 
+## 2026-09-23 — PA-0042's own fix missed a second hardcoded recall assertion in the same test file (fixed, BUG-0041/PA-0043)
+
+- **Symptom:** `CC-LAB-0197` (Netflix's 11th real page, an `ssti` instance)
+  added `NFLX-0011` to `lab/ground-truth-netflix-clone/` and, per `PA-0042`,
+  re-derived and re-ran `tests/test_multitarget_category4.py`'s hardcoded
+  recall assertions before committing and pushing. An independent
+  re-verification pass afterward found
+  `test_both_apps_run_through_multitarget_for_real`'s own hardcoded
+  `netflix_report.recall == round(1/10, 4)` assertion still stale
+  (`1/11` was correct) — a second, separate hardcoded fraction for the
+  same target in the *same file* `CC-LAB-0197`'s own PA-0042 pass had
+  just run, sitting in a different test function
+  (`test_netflix_multi_cell_boot_confirms_all_positives`'s own sibling
+  assertion, in the same file, was correctly updated).
+- **Root cause:** `PA-0042` instructs re-running every FILE a grep for
+  hardcoded fractions surfaces, but does not say a file can contain more
+  than one independent hardcoded fraction for the same target (a
+  single-cell test and a multi-cell test each keep their own separate
+  assertion) — an agent that finds and fixes one occurrence in a file,
+  then re-runs that file and sees it pass, can reasonably (but wrongly)
+  conclude the file is "handled," when a second occurrence elsewhere in
+  the same file was never located because the grep or manual scan
+  stopped at the first match rather than confirming every match.
+- **Remediation:** corrected the stale `1/10` -> `1/11` assertion (and
+  its own paired `macro_recall` assertion) in the same commit-adjacent
+  fix, re-verified by re-running `test_multitarget_category4.py`,
+  `test_auto.py`, and `test_labels_contract_category4.py` together (21
+  passed). See
+  `docs/bugs/BUG-0041-pa-0042-fix-missed-a-second-hardcoded-assertion-in-the-same-file.md`.
+- **Status:** Fixed.
+
 ## 2026-09-23 — Adding a ground-truth case silently broke two already-pushed, slow-marked recall assertions (fixed, BUG-0040/PA-0042)
 
 - **Symptom:** `CC-LAB-0188` (Netflix's `price_integrity_bypass` lab page)
