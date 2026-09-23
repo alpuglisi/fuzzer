@@ -12,6 +12,21 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (cross-branch bookkeeping fix #2, by the category 1 pilot session)
+- LAB: renumbered this branch's own just-fixed `FR-LAB-105`→`FR-LAB-115`
+  and `FR-LAB-106`→`FR-LAB-116` (Huddle Hub's webhook-signature and
+  SSRF-via-link-unfurling cells) after a follow-up cross-branch scan found
+  these landed on the same numbers category 2 had independently assigned
+  to its own PicTrail SSRF cells — a fresh collision introduced by the
+  prior `FR-LAB-94→105`/`98→106` fix below, which picked its target
+  numbers without checking category 2's concurrent claim. No behavior
+  change, pure renumbering across `lab/ground-truth-huddlehub/
+  labels.json`, `lab/manifests/ssrf_huddlehub_sample.yaml`,
+  `lab/manifests/webhook_signature_huddlehub_sample.yaml`,
+  `docs/components/01-target-lab/requirements.md`,
+  `docs/components/01-target-lab/change-control.md`,
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`.
+
 ## 2026-09-23 (cross-branch bookkeeping fix, by the category 1 pilot session)
 - Docs/LAB: fixed seven real cross-branch `FR-LAB` ID collisions found
   during a cross-branch review — this branch's own sequential numbering
@@ -86,7 +101,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   cross-references) — renumbered this branch's `FR-LAB-83`→`FR-LAB-107`
   (exact-token replacement, including the CC-LAB-0135 entry's own old
   cross-references to the just-renumbered `FR-LAB-81`/`FR-LAB-82`, updated
-  to `FR-LAB-105`/`FR-LAB-106` throughout). Resolved the resulting
+  to `FR-LAB-115`/`FR-LAB-116` throughout). Resolved the resulting
   `change-control.md` merge conflict by keeping both `CC-LAB-0134` and
   `CC-LAB-0135` entries, newest (`0135`) first, per the log's own
   append-only/newest-first convention. Full non-slow suite re-run after
@@ -103,8 +118,8 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   cell) had been independently claimed by category 1 for its Phase D
   whole-app conformance entry. Since this branch's usages had fewer
   cross-file references to update than category 1's (the authoritative,
-  earlier claim on both), renumbered them: `FR-LAB-81`→`FR-LAB-105`,
-  `FR-LAB-82`→`FR-LAB-106`, via exact-token replacement across
+  earlier claim on both), renumbered them: `FR-LAB-81`→`FR-LAB-115`,
+  `FR-LAB-82`→`FR-LAB-116`, via exact-token replacement across
   `requirements.md`/`change-control.md`/`CHANGELOG.md`/
   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`. Full non-slow test
   suite re-run confirms no regression (1831 passed / 8 skipped, identical
@@ -147,7 +162,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   rejects both forms with a real HTTP 400 (confirmed via the marker
   server's own hit counter staying at zero) while still accepting a real
   public URL. 9 new tests, all passing; full non-slow suite re-run shows
-  no regression. `CC-LAB-0134`/`FR-LAB-106`.
+  no regression. `CC-LAB-0134`/`FR-LAB-116`.
 
 ## 2026-09-23 (cross-category doc sync, round 2)
 - Docs (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, all five second-target
@@ -187,7 +202,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   proving the actual "magic hash" comparison-operator differential — a
   live HTTP test cannot force a real SHA-256 HMAC output to itself be
   magic-hash-shaped. 9 new tests, all passing; full non-slow suite re-run
-  shows no regression. `CC-LAB-0133`/`FR-LAB-105`.
+  shows no regression. `CC-LAB-0133`/`FR-LAB-115`.
 
 ## 2026-09-23 (cross-branch review, by the category 1 pilot session)
 - Docs/LAB: reviewed this branch's code and tests — no code defects

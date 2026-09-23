@@ -250,7 +250,7 @@ Component code: **LAB**. Entry format and required fields: see
   reviews without contesting any of them; implementation proceeds on this
   revised entry.
 
-### CC-LAB-0134 — Huddle Hub: SSRF-via-link-unfurling cell on `php_laravel` (FR-LAB-106) (2026-09-23)
+### CC-LAB-0134 — Huddle Hub: SSRF-via-link-unfurling cell on `php_laravel` (FR-LAB-116) (2026-09-23)
 - Change: Adds Huddle Hub's second designed cell to the existing, shared
   `php_laravel` emitter. New shape: `(vuln_class="ssrf",
   sink_context.family="server_side_http_fetch")`,
@@ -348,7 +348,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] `lab/manifests/ssrf_huddlehub_sample.yaml` — done
   - [x] Live-boot test (local marker server, IP-literal + hostname forms) — done (`tests/test_labgen_ssrf_live_boot.py`, 3 tests, real `composer install`/`artisan serve` boot + a real local marker HTTP server, all PASSED: vulnerable twin reaches the marker both as an IP literal and as a resolved hostname; secure twin rejects both with a real HTTP 400 and the marker server's hit counter stays at zero; secure twin still accepts a real public URL)
   - [x] Tier 0/Tier 3 conformance for the new cell — done (`php -l` clean, `regenerate_and_diff_emitter` byte-identical); `tests/test_labgen_ssrf.py` unit coverage (verdict/determinism/both-twins-bounded-timeout/disjoint-paths) — 9 new tests, all passing
-  - [x] `requirements.md` FR-LAB-106 entry — done
+  - [x] `requirements.md` FR-LAB-116 entry — done
   - [x] `CHANGELOG.md` line — done
 - Effectiveness (assessed 2026-09-23): **met.** Every deliverable is real
   and executed: a real `composer install` builds the assembled skeleton+
@@ -376,7 +376,7 @@ Component code: **LAB**. Entry format and required fields: see
   without contesting any of them; implementation proceeds on this
   revised entry.
 
-### CC-LAB-0133 — Huddle Hub: webhook-signature-verification cell on `php_laravel` (FR-LAB-105) (2026-09-23)
+### CC-LAB-0133 — Huddle Hub: webhook-signature-verification cell on `php_laravel` (FR-LAB-115) (2026-09-23)
 - Change: Adds Huddle Hub's (category 3's Slack pick) first designed cell
   to the existing, shared `php_laravel` emitter — **not** a new emitter,
   per §9.2's ledger note that this pick reuses `php_laravel`'s paradigm
@@ -547,7 +547,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] Live-boot test (functional correctness, both twins) — done (`tests/test_labgen_webhook_signature_live_boot.py`, 3 tests, real `composer install` + `artisan serve` boot + real HTTP, all PASSED)
   - [x] `php`-executed magic-hash comparison-semantics test (the actual security differential) — done (`tests/test_labgen_webhook_signature_magic_hash.py`, 6 tests, real `php -r` execution, all PASSED)
   - [x] Tier 0/Tier 3 conformance for the new cell — done (`php -l` clean, `regenerate_and_diff_emitter` byte-identical)
-  - [x] `requirements.md` FR-LAB-105 entry — done
+  - [x] `requirements.md` FR-LAB-115 entry — done
   - [x] `CHANGELOG.md` line — done
 - Effectiveness (assessed 2026-09-23): **met.** Every deliverable is real
   and executed: a real `composer install` builds the assembled skeleton+
