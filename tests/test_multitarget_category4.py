@@ -20,26 +20,25 @@ depth work), and two of the three now confirm for real. The SSRF case
 access-control/IDOR case (`TWCH-0003`, `CC-FUZZ-0029`):
 `AccessControlIdorStrategy` sees the vulnerable twin (`LABGEN-GO-0005`)
 accept and echo back any `channel_id`, and correctly does not confirm the
-secure twin (`LABGEN-GO-0006`, blocked by its identity-match check). One
-gap remains open, already flagged and not fixed here:
+secure twin (`LABGEN-GO-0006`, blocked by its identity-match check).
+
+Netflix's `NFLX-0001` (insecure-deserialization) is now also a real,
+confirmed finding (`CC-FUZZ-0030`): the whole-body-JSON case
+`CC-FUZZ-0028` made content-type-aware now succeeds end to end through
+this exact generic pipeline (not just the dedicated Phase D Tier1/2 test) --
+`InsecureDeserializationTypeConfusionStrategy` sees the vulnerable twin
+(`LABGEN-JV-0001`) accept and successfully deserialize an attacker-named
+JDK class via Jackson's `WRAPPER_ARRAY` polymorphic-type format, and
+correctly does not confirm the secure twin (`LABGEN-JV-0002`, no
+polymorphic typing configured at all). `NFLX-0002` (XXE) still has no
+rule/strategy. One gap remains open, already flagged and not fixed here:
 
 1. **No audit `Rule`/oracle strategy exists yet for `webhook_signature`/
-   `insecure_deserialization`** (`ssrf`/`access_control` now both have one,
-   `CC-FUZZ-0027`/`CC-FUZZ-0029`) -- `fuzzlab.core.runmode._VULN_TO_CATEGORY`
-   still doesn't map these two, so they fall through to their own name as
-   the category and find no matching rule.
-2. **The whole-body-JSON deserialization case (`param="body"`) still can't
-   succeed through this generic sender.** `CC-FUZZ-0028` made the sender
-   content-type-aware (`RequestsProbeSender` now sends raw JSON for a point
-   the ground truth marks `rendering="server-json"`), but Spring Boot's
-   `JacksonBodySource` reads the raw request body directly
-   (`request.getInputStream().readAllBytes()`), bypassing Spring's own
-   `@RequestBody` binding -- this endpoint's real behavior has not yet been
-   independently re-verified end to end through the full generic pipeline
-   with the new sender, only via the dedicated Phase D Tier1/2 test.
-   Header points (`TWCH-0001`) are now real, audited points, not skipped
-   (`CC-FUZZ-0028`) -- that structural gap is closed, only the detection
-   *capability* remains open for that class.
+   `xxe`** (`ssrf`/`access_control`/`insecure_deserialization` now all have
+   one, `CC-FUZZ-0027`/`CC-FUZZ-0029`/`CC-FUZZ-0030`) --
+   `fuzzlab.core.runmode._VULN_TO_CATEGORY` still doesn't map these two, so
+   they fall through to their own name as the category and find no
+   matching rule.
 """
 
 from __future__ import annotations
@@ -123,14 +122,17 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     assert twitch_report.tp == 2 and twitch_report.fp == 0
     assert round(twitch_report.recall, 4) == round(2 / 3, 4)
 
-    # Netflix: still a real, structural zero -- the whole-body-JSON case
-    # can't be expressed by the generic sender yet (see module docstring).
+    # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
+    # finding; XXE (NFLX-0002) still has no rule/strategy (see module
+    # docstring) -- one of its two positives, not both (only NFLX-0001's
+    # own vulnerable twin, LABGEN-JV-0001, is booted here).
     netflix_report = by_name["netflix-clone"].report
-    assert netflix_report.tp == 0
+    assert netflix_report.tp == 1 and netflix_report.fp == 0
+    assert round(netflix_report.recall, 4) == round(1 / 2, 4)
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
-    assert round(summary["macro_recall"], 4) == round((2 / 3) / 2, 4)
-    # Only one of the two targets shows recall > 0 -- not yet "generalizes"
-    # by this project's own >= 2 definition (transfer_summary's docstring).
-    assert summary["generalizes"] is False
+    assert round(summary["macro_recall"], 4) == round(((2 / 3) + (1 / 2)) / 2, 4)
+    # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
+    # definition (transfer_summary's docstring) is met for the first time.
+    assert summary["generalizes"] is True

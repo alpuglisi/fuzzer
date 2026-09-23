@@ -37,9 +37,17 @@ MANUAL = "manual"
 # differ, unlike e.g. `ssrf` (identical either way, so it needs no entry);
 # `R-ACCESS-CONTROL`/`AccessControlIdorStrategy`, verified live against
 # Twitch's real IDOR twins (`test_real_boot_proves_the_access_control_idor_
-# strategy_end_to_end`). `webhook_signature`/`insecure_deserialization` (and
-# `xxe`/`outbound_header_injection`) still have no confirmer built -- stay
-# unmapped until each does.
+# strategy_end_to_end`). `insecure_deserialization` (CC-FUZZ-0030): same
+# underscore/hyphen mismatch, `R-INSECURE-DESERIALIZATION`/
+# `InsecureDeserializationTypeConfusionStrategy`, verified live against
+# Netflix's real Jackson-deserialization twins. This is the *second* time a
+# new category forgot this entry until a real-run trace caught it (the first
+# was `access_control` itself, `CC-FUZZ-0029`) -- `tests/test_oracle.py::
+# test_every_strategy_category_is_reachable_from_its_vuln_class` now guards
+# the whole dict pairing generically so a third instance fails loudly at
+# test time instead of silently shipping an unreachable strategy.
+# `webhook_signature` (and `xxe`/`outbound_header_injection`) still have no
+# confirmer built -- stay unmapped until each does.
 _VULN_TO_CATEGORY = {
     "sqli": "sql-injection",
     "xss-reflected": "xss",
@@ -47,6 +55,7 @@ _VULN_TO_CATEGORY = {
     "xss-dom": "xss",
     "ssti": "server-side-template-injection",
     "access_control": "access-control",
+    "insecure_deserialization": "insecure-deserialization",
 }
 
 

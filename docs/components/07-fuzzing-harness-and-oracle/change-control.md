@@ -3,6 +3,139 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0030 — `InsecureDeserializationTypeConfusionStrategy`: real detection for `insecure_deserialization`; a `sink_context` propagation defect found and fixed (2026-09-23)
+
+- Change: adds the project's first oracle confirmation strategy for
+  `insecure_deserialization` (CWE-502), closing one of Netflix's two
+  remaining structural detection zeros (`NFLX-0001`).
+  1. **`fuzzlab/oracle/strategies.py`**: `InsecureDeserializationTypeConfusionStrategy`
+     (`vuln_class="insecure_deserialization"`, `mechanism=
+     "polymorphic-type-confusion"`, `category="insecure-deserialization"`).
+     A two-probe differential over Jackson's `WRAPPER_ARRAY` polymorphic-type
+     format (`["<class>",{}]`): probe A names a real, always-present JDK
+     class (`java.util.HashMap`) and must succeed (200); probe B names a
+     freshly-minted (`_token()`-suffixed), guaranteed-nonexistent class and
+     must fail *specifically* by echoing that exact class name back in the
+     rejection body — proof the target genuinely attempted
+     attacker-controlled class resolution, not merely "any body succeeds."
+     Deliberately never sends a real gadget-chain/RCE payload (no
+     `ProcessBuilder`/JNDI/template trigger) — this project's own
+     no-new-dual-use-infra posture, the same reasoning that shelved the
+     URLDNS follow-on for this class (`docs/components/07-fuzzing-harness-
+     and-oracle/requirements.md` §8). Registered in `default_strategies()`
+     and `_CATEGORY_TO_CLASS`.
+  2. **A real, previously dormant defect found and fixed**:
+     `fuzzlab/harness/auto.py::points_from_ground_truth` never propagated
+     `sink_context` from the ground truth's scoring `Case` onto the
+     audited `fuzzlab.audit.InjectionPoint` at all — the enumerated
+     *points* (`injection-points.json`, `fuzzlab.labels.contract.
+     InjectionPoint`) carry no `sink_context` field by design (it lives
+     only on `Case`/`labels.json`), and nothing ever bridged the two. This
+     was harmless for every rule built before this entry (none used the
+     `sink_context_in` predicate), so it caused no observed wrong
+     behavior in the field — but it would have silently zeroed out
+     `R-INSECURE-DESERIALIZATION` (the first rule ever keyed on
+     `sink_context_in`) forever. Caught by the real, executed
+     `test_multitarget_category4.py` run showing `netflix_report.tp == 0`
+     despite a working rule+strategy pair, not assumed correct from unit
+     tests alone. Fixed by looking up the matching `Case` by
+     `(url, method, param)` identity and threading its `sink_context`
+     through; pinned by a dedicated test
+     (`test_points_from_ground_truth_carries_sink_context_from_the_
+     matching_case`).
+  3. **`fuzzlab/core/runmode.py`**: `_VULN_TO_CATEGORY` gained
+     `"insecure_deserialization": "insecure-deserialization"` — the
+     *second* instance of the exact gap `CC-FUZZ-0029` found and fixed for
+     `access_control` minutes earlier in this same session. Added a
+     structural guard this time instead of just noting the pattern:
+     `tests/test_oracle.py::
+     test_every_ruled_strategy_category_is_reachable_from_its_vuln_class`
+     asserts the `_CATEGORY_TO_CLASS`/`_VULN_TO_CATEGORY` pairing for
+     every category that already has a real audit `Rule` (so a third
+     instance fails loudly at test time). Deliberately scoped to
+     *ruled* categories only — an earlier, unscoped draft of this guard
+     failed on the MeadowMart app's own already-documented, deliberately-
+     deferred `redos`/`prototype_pollution` gap
+     (`tests/test_labgen_node_bff_multitarget.py`'s own docstring), which
+     must stay un-flagged, not accidentally forced closed by an
+     over-broad guard.
+  4. **`fuzzlab/audit/rules_data/default_rules.json`**: `R-INSECURE-
+     DESERIALIZATION` (see the paired `CC-AUD-0018` entry for the rule
+     itself, recorded in both logs per this README's "touches more than
+     one component" rule).
+  - Dispatched through this component's mandatory pre-change review gate
+    (accuracy + adequacy passes). Accuracy pass independently re-booted
+    both real twins and re-confirmed the claimed HTTP behavior byte for
+    byte (status codes and error-message shapes). Adequacy pass required,
+    and this entry incorporates: (a) the two-probe differential itself —
+    the original draft's bare `probe.status == 200` check was judged
+    insufficient evidence on its own (a false positive against an
+    endpoint that validates nothing at all); (b) explicitly documenting
+    that `R-INSECURE-DESERIALIZATION` is reachable only from
+    ground-truth-sourced points today (`sink_context` is not yet inferred
+    generically by the auditor for an arbitrary crawled target — see
+    `FR-AUD-9`); (c) fixing the recurring `_VULN_TO_CATEGORY` gap with a
+    real structural guard rather than only a comment, per item 3 above.
+  New/changed files:
+  - `fuzzlab/oracle/strategies.py`
+  - `fuzzlab/core/runmode.py`
+  - `fuzzlab/harness/auto.py` (the `sink_context` propagation fix)
+  - `fuzzlab/audit/rules_data/default_rules.json` (shared with `CC-AUD-0018`)
+  - `tests/test_oracle_strategies_insecure_deserialization.py` (new)
+  - `tests/test_oracle.py` (the new reachability guard test)
+  - `tests/test_auto.py` (the new `sink_context` propagation pinning test)
+  - `tests/test_labgen_spring_boot_deserialization_jackson_live_boot.py`
+    (new `test_real_boot_proves_the_insecure_deserialization_strategy_
+    end_to_end`)
+  - `tests/test_multitarget_category4.py` (Netflix's real, scored recall
+    moves from 0 to 1/2; `generalizes` is `True` for the first time)
+  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    (`FR-FUZZ-17`, new)
+- Impact (other components / project): `fuzzlab/oracle/strategies.py`,
+  `fuzzlab/core/runmode.py`, and `fuzzlab/harness/auto.py` are all shared
+  across every category/target (fresh `git show` collision check against
+  category-2/3/5 and second-target-cat1-ecommerce before landing — all
+  four are simply behind this branch's own prior `CC-FUZZ-0029` commit,
+  no independent edits). The `sink_context` propagation fix changes real
+  behavior for every ground-truth-sourced run project-wide (any future
+  `sink_context_in`-keyed rule now actually works; no existing rule used
+  that predicate before this entry, so no existing behavior changes).
+  `fuzzlab.harness.multitarget`'s real, scored Netflix report for
+  category 4's own Phase E test now shows `tp=1` instead of `tp=0`, and
+  `generalizes=True` instead of `False` — a real behavior change
+  reflected in `test_multitarget_category4.py`'s updated assertions.
+- Risk (level; mitigation or accepted-risk justification): Low-medium.
+  The strategy's own documented false-positive class (a legitimate
+  two-element-array DTO whose validation error happens to echo a string
+  back for an unrelated reason) is real and accepted, not eliminated —
+  judged unlikely, the same evidentiary bar `SsrfInBandMarkerStrategy`
+  already uses, and stated explicitly in the strategy's own docstring.
+  The `sink_context` propagation fix touches a widely-shared function;
+  mitigated by running the full non-slow suite plus every directly
+  affected slow live-boot/multitarget test after the change, not just the
+  tests written for this entry.
+- Deliverables:
+  - [x] `InsecureDeserializationTypeConfusionStrategy` implemented,
+        registered, unit-tested (vulnerable/secure/false-positive/
+        no-content-type/fresh-token cases) — done
+  - [x] `sink_context` propagation defect found, fixed, pinned — done
+  - [x] `_VULN_TO_CATEGORY` fix + a real structural guard (scoped to
+        ruled categories only) — done
+  - [x] Real live-boot proof against Netflix's real booted Spring Boot
+        app — done
+  - [x] `test_multitarget_category4.py` updated to the new real recall
+        and `generalizes=True` — done
+  - [x] Full non-slow suite + directly-affected slow tests re-run green
+        at the stable baseline — done
+- Effectiveness (assessed 2026-09-23): achieved. Netflix's real, scored
+  `multitarget` recall for category 4 moved from 0 to 1/2 (`tp=1, fp=0`),
+  and the project's own cross-target `generalizes` definition (recall > 0
+  on ≥ 2 scored targets) is met for the first time (`True`), proven by a
+  real, executed `run_targets()` call against two real booted apps
+  (`tests/test_multitarget_category4.py`), and the strategy independently
+  confirms/fails-closed correctly against real vulnerable/secure twins via
+  a dedicated live-boot test, not only mocked senders.
+
 ### CC-FUZZ-0029 — `AccessControlIdorStrategy`: real detection for `access_control` (IDOR/BOLA) (2026-09-23)
 
 - Change: adds the project's first oracle confirmation strategy for the

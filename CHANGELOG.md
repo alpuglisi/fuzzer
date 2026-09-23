@@ -4,6 +4,47 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (FUZZ/AUD: real detection for `insecure_deserialization`)
+- Fuzzing harness/oracle: a new audit rule (`R-INSECURE-DESERIALIZATION`,
+  keyed on `sink_context_in=["deserialization"]`, the project's first use
+  of that previously-unexercised `when` predicate) and oracle strategy
+  (`InsecureDeserializationTypeConfusionStrategy`) for `insecure_
+  deserialization` (CWE-502), closing one of Netflix's two remaining
+  structural detection zeros. A two-probe differential over Jackson's
+  `WRAPPER_ARRAY` polymorphic-type format, grounded in real, empirically
+  observed behavior (both twins booted for real before writing any code):
+  a real benign JDK class (`java.util.HashMap`) succeeds against the
+  vulnerable twin; a freshly-minted, guaranteed-nonexistent class name
+  fails, but specifically with a rejection that echoes the exact class
+  name back — proof the target genuinely attempted attacker-controlled
+  class resolution, not just "any body succeeds" weak validation.
+  Deliberately no real gadget-chain/RCE payload, matching this project's
+  own no-new-dual-use-infra posture (the same reasoning that shelved the
+  URLDNS follow-on for this class). Found and fixed a real, previously
+  dormant defect along the way: `fuzzlab.harness.auto.points_from_
+  ground_truth` never propagated `sink_context` from the ground truth's
+  scoring `Case` onto the audited `InjectionPoint` at all — harmless
+  until this was the first rule ever keyed on `sink_context_in`, at
+  which point it silently zeroed out every such rule; caught by the real,
+  executed `test_multitarget_category4.py` run showing `tp=0` despite a
+  working rule+strategy pair, not assumed. Also added a structural guard
+  (`test_every_ruled_strategy_category_is_reachable_from_its_vuln_class`)
+  after this was the *second* time a new category forgot its
+  `_VULN_TO_CATEGORY` entry (the first was `access_control`,
+  `CC-FUZZ-0029`, minutes earlier in this same session) — scoped to only
+  categories with a real audit rule, so it does not flag the MeadowMart
+  app's own deliberately-deferred `redos`/`prototype_pollution` gap.
+  Verified live against Netflix's real booted twins and through the real
+  `multitarget` Phase E wiring: Netflix's real, scored recall moves from
+  0 to 1/2, and the project's own cross-target `generalizes` (recall > 0
+  on ≥ 2 scored targets) is `True` for the first time. Two independent
+  review passes (accuracy + adequacy) ran before implementation; the
+  accuracy pass independently re-booted both twins and re-confirmed the
+  claimed HTTP behavior; the adequacy pass's required strengthening (a
+  bare `status==200` check was insufficient evidence on its own) is what
+  produced the two-probe differential design. `CC-FUZZ-0030`/`FR-FUZZ-17`,
+  `CC-AUD-0018`/`FR-AUD-9`.
+
 ## 2026-09-23 (FUZZ/AUD: real detection for `access_control` (IDOR/BOLA))
 - Fuzzing harness/oracle: the project's first real audit rule
   (`R-ACCESS-CONTROL`, id-shaped GET/query param names) and oracle

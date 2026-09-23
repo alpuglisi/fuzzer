@@ -23,13 +23,23 @@ def test_categories_from_vuln_classes_maps_ssti():
     assert cats == ["server-side-template-injection"]
 
 
+def test_categories_from_vuln_classes_maps_insecure_deserialization():
+    # CC-FUZZ-0030: insecure_deserialization now has a real, verified
+    # working rule+strategy pairing (R-INSECURE-DESERIALIZATION/
+    # InsecureDeserializationTypeConfusionStrategy) -- superseded this
+    # test's own prior "stays unmapped" assertion (see git history), same
+    # as ssti's own precedent above.
+    cats = categories_from_vuln_classes(["insecure_deserialization"])
+    assert cats == ["insecure-deserialization"]
+
+
 def test_categories_from_vuln_classes_leaves_unmapped_classes_unchanged():
-    # xxe/insecure_deserialization/etc. have no confirmer yet -- to_category()
+    # xxe/webhook_signature/etc. still have no confirmer -- to_category()
     # falls through to the raw class name (no audit rule matches it, so it
     # never nominates a candidate, and stays an honest false negative rather
     # than a mis-wired one).
-    cats = categories_from_vuln_classes(["xxe", "insecure_deserialization"])
-    assert cats == ["insecure_deserialization", "xxe"]
+    cats = categories_from_vuln_classes(["xxe", "webhook_signature"])
+    assert cats == ["webhook_signature", "xxe"]
 
 
 # --- D14: automatic against our lab auto-derives from ground truth -----------

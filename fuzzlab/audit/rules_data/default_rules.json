@@ -56,6 +56,13 @@
       "transaction_type": "Broken Object-Level Authorization",
       "when": { "method_in": ["GET"], "location_in": ["query"], "name_regex": "channel_id|resource_id|object_id|item_id|record_id|owner_id" },
       "reference": "access-control"
+    },
+    {
+      "id": "R-INSECURE-DESERIALIZATION",
+      "category": "insecure-deserialization",
+      "transaction_type": "Insecure Deserialization",
+      "when": { "location_in": ["body"], "sink_context_in": ["deserialization"] },
+      "reference": "insecure-deserialization"
     }
   ]
 }

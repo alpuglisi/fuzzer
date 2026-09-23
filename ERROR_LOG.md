@@ -18,6 +18,39 @@ Format per entry:
 
 ---
 
+## 2026-09-23 — `points_from_ground_truth` never propagated `sink_context`, silently defeating the first rule ever keyed on it (fixed, BUG-0039/PA-0041)
+
+- **Symptom:** building real detection for `insecure_deserialization`
+  (`R-INSECURE-DESERIALIZATION`, keyed on `sink_context_in=
+  ["deserialization"]` — the project's first rule to use that predicate),
+  `test_multitarget_category4.py`'s real, executed live-boot run against
+  Netflix kept showing `netflix_report.tp == 0` despite a real, unit-tested
+  working rule+strategy pair. Unit tests (which hand-construct a
+  `Candidate`/`InjectionPoint` with `sink_context` set directly) all
+  passed; only the real end-to-end run through
+  `fuzzlab.harness.auto.points_from_ground_truth` exposed the gap.
+- **Root cause:** `points_from_ground_truth` builds a
+  `fuzzlab.audit.InjectionPoint` from each of the ground truth's
+  enumerated *points* (`injection-points.json`,
+  `fuzzlab.labels.contract.InjectionPoint`) — a deliberately slim shape
+  that carries no `sink_context` field at all. `sink_context` instead
+  lives on the ground truth's scoring `Case` (`labels.json`), and nothing
+  in `points_from_ground_truth` ever bridged the two: the constructed
+  audit `InjectionPoint` simply never set `sink_context`, defaulting to
+  `None`, for every ground-truth-sourced point, project-wide, since this
+  function was first written. This caused no observed wrong behavior
+  until now because no rule had ever used the `sink_context_in` predicate
+  before `R-INSECURE-DESERIALIZATION` — a real, silent, already-shipped
+  gap that simply had no consumer to expose it.
+- **Remediation:** `points_from_ground_truth` now builds a
+  `(url, method, param) -> sink_context` lookup from `ground_truth.cases`
+  and threads the matching case's `sink_context` onto each constructed
+  `InjectionPoint`. Pinned by
+  `tests/test_auto.py::test_points_from_ground_truth_carries_sink_context_from_the_matching_case`.
+  Re-verified end to end: `test_multitarget_category4.py`'s real run now
+  shows `netflix_report.tp == 1`.
+- **Status:** Fixed.
+
 ## 2026-09-23 — `ruby_rails` skeleton's unpinned `json` gem 500'd every second request in a session (fixed, BUG-0035/PA-0037)
 
 - **Symptom:** building the Phase D whole-app conformance test and the Phase

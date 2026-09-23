@@ -213,6 +213,45 @@ rewards) derives from it.
   header point is a real, audited point today, not a skip reason. This
   entry is kept for history — it correctly named the gap at the time.
 
+- **FR-FUZZ-17** *(`InsecureDeserializationTypeConfusionStrategy`;
+  `CC-FUZZ-0030`, 2026-09-23).* The oracle supports real
+  **insecure-deserialization (CWE-502) confirmation**, paired with
+  `FR-AUD-9`'s candidate-generation rule, closing one of Netflix's two
+  remaining structural detection zeros:
+  - `InsecureDeserializationTypeConfusionStrategy` (`vuln_class=
+    "insecure_deserialization"`, `mechanism="polymorphic-type-
+    confusion"`): a two-probe differential over Jackson's `WRAPPER_ARRAY`
+    polymorphic-type format. Probe A names a real, always-present JDK
+    class (`java.util.HashMap`) and must succeed (200); probe B names a
+    freshly-minted, guaranteed-nonexistent class and must fail
+    *specifically* by echoing that exact class name back — proof of
+    genuine attacker-controlled class resolution, ruling out an endpoint
+    that simply validates nothing. Deliberately no real gadget-chain/RCE
+    payload sent, ever (this project's own no-new-dual-use-infra
+    posture, the same reasoning §8 records for why the URLDNS follow-on
+    was shelved for this same class).
+  - **A real, previously dormant defect found and fixed**:
+    `fuzzlab.harness.auto.points_from_ground_truth` never propagated
+    `sink_context` from the ground truth's scoring `Case` onto the
+    audited point at all — harmless until this was the first rule ever
+    keyed on `sink_context_in`, at which point it silently zeroed out
+    every such candidate. Fixed by looking up the matching `Case` by
+    `(url, method, param)` identity.
+  - `fuzzlab.core.runmode._VULN_TO_CATEGORY` gained
+    `"insecure_deserialization": "insecure-deserialization"` — the
+    second instance of the exact gap `FR-FUZZ-16` found for
+    `access_control`. A structural guard
+    (`test_every_ruled_strategy_category_is_reachable_from_its_vuln_class`)
+    now catches a third instance automatically, scoped to only
+    categories with a real audit rule (so it does not flag the
+    MeadowMart app's own deliberately-deferred `redos`/
+    `prototype_pollution` gap).
+  - Verified live against Netflix's real booted twins; through the real
+    `fuzzlab.harness.multitarget` Phase E wiring, Netflix's real, scored
+    recall moves from 0 to 1/2, and the project's own cross-target
+    `generalizes` definition (recall > 0 on ≥ 2 scored targets) is met
+    for the first time.
+
 - **FR-FUZZ-16** *(`AccessControlIdorStrategy`; `CC-FUZZ-0029`, 2026-09-23).*
   The oracle supports real **access-control (IDOR/BOLA) confirmation**,
   paired with `FR-AUD-8`'s candidate-generation rule, closing `CC-LAB-0178`'s
@@ -370,30 +409,28 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
   but a real, latent gap the moment a future grey-box-confirmable category
   does. Give it the same `content_type` handling when that happens, not
   before (no consumer to test it against yet).
-- (`CC-FUZZ-0028`, 2026-09-23; re-examined and corrected again 2026-09-23)
-  **No `insecure_deserialization` audit rule/oracle strategy exists.**
-  This lab's own cells have no working `ysoserial`-style RCE gadget chain
-  (`CC-LAB-0173`'s own declared scope boundary), so an OOB
-  *callback-from-code-execution* signal isn't available. A URLDNS-style
-  gadget-chain-free proof was proposed as a follow-on sketch (a
-  `HashMap<java.net.URL,...>` whose `hashCode()` triggers DNS resolution
-  purely from deserializing it, mirroring `SsrfOobStrategy`'s `OobListener`
-  pattern) — **checked directly against this project's own `OobListener`
-  and found not to fit it as sketched**: `URL.hashCode()` only ever
-  performs a DNS *resolution* (`InetAddress.getByName(host)`), never an
-  actual outbound TCP/HTTP connection to that host, so it can never
-  produce an inbound hit on `OobListener`'s embedded **HTTP** server —
-  `oob.py`'s own docstring is explicit that it deliberately has "no DNS
-  component" (a stated safety-scoping decision, not an oversight). Making
-  URLDNS actually observable would need a *real DNS listener* added to
-  the OOB mechanism — a materially larger, dual-use-sensitive
-  infrastructure expansion (this project's own safety posture already
-  treats "no DNS component, never a general-purpose... collaborator
-  service" as a deliberate boundary) that deserves its own dedicated
-  design/review pass, not a quick addition bundled into a detection-gap
-  fix. Left open, with the corrected, harder-than-first-thought scope
-  recorded rather than a sketch that would not actually work if built as
-  first proposed.
+- (`CC-FUZZ-0028`, 2026-09-23; re-examined and corrected 2026-09-23;
+  **resolved** `CC-FUZZ-0030`/`CC-AUD-0018`, 2026-09-23, by a different,
+  non-DNS mechanism) **No `insecure_deserialization` audit rule/oracle
+  strategy exists.** ~~This lab's own cells have no working
+  `ysoserial`-style RCE gadget chain ... a URLDNS-style gadget-chain-free
+  proof ... checked directly against this project's own `OobListener` and
+  found not to fit it as sketched ... Left open~~. The URLDNS OOB/DNS-
+  listener path recorded above remains genuinely not viable without new
+  infrastructure and was never built — but a materially simpler,
+  single-request, no-new-infra mechanism was found instead: Jackson's
+  `WRAPPER_ARRAY` polymorphic-type format lets a black-box probe observe
+  *class-resolution* itself (not code execution) as a two-probe
+  differential (a real benign class succeeds; a freshly-minted
+  nonexistent one fails with an attributable, class-name-echoing
+  rejection) — `R-INSECURE-DESERIALIZATION`/
+  `InsecureDeserializationTypeConfusionStrategy` (`FR-AUD-9`/`FR-FUZZ-17`),
+  verified live against Netflix's real booted twins. This proves the
+  CWE-502 mechanism (attacker-controlled type id reaches class
+  resolution/instantiation), deliberately not a demonstrated RCE gadget
+  chain — narrower than a full exploit proof, but real detection where
+  there was none, without the DNS-listener infrastructure expansion the
+  URLDNS path would have required.
 - (`CC-LAB-0175`/`FR-LAB-98`, `CC-FUZZ-0028`, 2026-09-23) **No
   webhook-signature timing oracle.** Both twins behave identically for any
   single request (the divergence is comparison timing:

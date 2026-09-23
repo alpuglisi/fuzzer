@@ -571,6 +571,70 @@ class AccessControlIdorStrategy(ConfirmationStrategy):
                        {"probe_a": a.text[:120], "probe_b": b.text[:120]})
 
 
+class InsecureDeserializationTypeConfusionStrategy(ConfirmationStrategy):
+    """Confirms unrestricted polymorphic-type deserialization (CWE-502) by a
+    two-probe differential over Jackson's `WRAPPER_ARRAY` type-id format
+    (`["<class-name>", {...}]`), the same shape `activateDefaultTyping`
+    produces by default: real behavior, empirically verified against this
+    project's own vulnerable/secure twins before this strategy was written
+    (`LABGEN-JV-0001`/`LABGEN-JV-0002`, `lab/manifests/
+    insecure_deserialization_spring_boot_sample.yaml`).
+
+    Probe A names a real, always-present JDK class (`java.util.HashMap`) --
+    a vulnerable target with no subtype allowlist accepts and instantiates
+    it (HTTP 200). Probe B names a freshly-minted, guaranteed-nonexistent
+    class (a random per-run token, never reused, so the response can't be
+    an unrelated canned page): a vulnerable target still *attempts* class
+    resolution using the literal attacker string and rejects it with an
+    error that echoes that exact string back (empirically observed:
+    `Could not resolve type id '<name>' as a subtype ...`); a secure target
+    that never configured polymorphic typing at all categorically rejects
+    the array-wrapped format outright (its own error never mentions our
+    class name, since it never got that far). Confirms only when: A is 200;
+    B is not 200; and B's body contains the literal minted class name --
+    proof the rejection was specifically about *resolving that class*, not
+    generic "any array body fails" behavior a non-vulnerable endpoint would
+    also show. A bare "the benign probe returned 200" is deliberately not
+    enough on its own -- an endpoint that returns 200 for any body without
+    validating it at all would false-positive on that alone; requiring B's
+    class-resolution-specific rejection rules that out.
+
+    Known limitation, not silently swept under the rug: deliberately never
+    sends a real gadget-chain payload (`ProcessBuilder`, JNDI/template
+    triggers, etc.) -- this project's own no-new-dual-use-infra posture
+    (the same reasoning that shelved the URLDNS follow-on for this same
+    vuln class). It proves the CWE-502 *mechanism* (an attacker-controlled
+    type id reaches class resolution and instantiation), not a demonstrated
+    RCE impact. False-positive class: a legitimate endpoint whose actual
+    DTO genuinely is a two-element JSON array with a string in the first
+    slot that happens to parse as *some* value, and whose own validation
+    error text happens to echo that string back for an unrelated reason --
+    judged unlikely enough to accept, the same evidentiary bar this
+    project's other single-request differentials (`SsrfInBandMarkerStrategy`)
+    already use.
+    """
+    vuln_class = "insecure_deserialization"
+    mechanism = "polymorphic-type-confusion"
+    category = "insecure-deserialization"
+
+    _BENIGN_CLASS = "java.util.HashMap"
+
+    def confirm(self, candidate, sender):
+        if candidate.content_type != "application/json":
+            return None    # only a declared-JSON whole-body point can carry this format
+        real = self._send(sender, candidate, '["%s",{}]' % self._BENIGN_CLASS)
+        if real.status != 200:
+            return None
+        bogus_class = "zqxdeser" + _token() + ".NoSuchClass"
+        bogus = self._send(sender, candidate, '["%s",{}]' % bogus_class)
+        if bogus.status == 200:
+            return None     # the bogus class also "succeeded" -- no differential signal
+        if bogus_class not in (bogus.text or ""):
+            return None     # rejection isn't attributable to resolving our exact class name
+        return Verdict(True, self.vuln_class, self.mechanism,
+                       {"benign_class": self._BENIGN_CLASS, "bogus_class": bogus_class})
+
+
 # Grey-box (M10) default confirmation-side probes: something that would reach the
 # vulnerable sink (a SQLi syntax-breaker; an XSS canary) so the coverage/DB-fault
 # side channel has something to observe. Distinct from the black-box strategies'
@@ -734,6 +798,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
             CommandInjectionOobStrategy(oob), RegexDosStrategy(),
             SsrfInBandMarkerStrategy(oob), SsrfOobStrategy(oob),
             AccessControlIdorStrategy(),
+            InsecureDeserializationTypeConfusionStrategy(),
             GreyboxConfirmationStrategy(coverage, dbfault)]
 
 
@@ -752,6 +817,7 @@ _CATEGORY_TO_CLASS = {
     "regular-expression": "redos",
     "ssrf": "ssrf",
     "access-control": "access_control",
+    "insecure-deserialization": "insecure_deserialization",
 }
 
 

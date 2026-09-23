@@ -141,6 +141,24 @@ def test_points_from_ground_truth_sets_body_content_type_only_for_json_cases():
     assert all(p.body_content_type is None for p in body_points)
 
 
+def test_points_from_ground_truth_carries_sink_context_from_the_matching_case():
+    # CC-FUZZ-0030: `injection-points.json`'s own `InjectionPoint` (a point
+    # to probe) carries no `sink_context` at all -- it lives only on the
+    # scoring `Case` (`labels.json`). A real defect found while proving
+    # `R-INSECURE-DESERIALIZATION` (`sink_context_in=["deserialization"]`)
+    # end to end through the generic pipeline: without this lookup, every
+    # ground-truth-sourced `fuzzlab.audit.InjectionPoint.sink_context` was
+    # silently `None`, so a `sink_context_in` rule could never fire for any
+    # ground-truth point, ever -- caught by the real, executed
+    # `test_multitarget_category4.py` live-boot run (`netflix_report.tp`
+    # stayed 0 despite a real rule+strategy pair existing), not assumed.
+    netflix_gt = contract.load("lab/ground-truth-netflix-clone")
+    points, _ = points_from_ground_truth(netflix_gt, "http://127.0.0.1:8080")
+    by_url = {p.url: p for p in points}
+    assert by_url["http://127.0.0.1:8080/api/playback/resume"].sink_context == "deserialization"
+    assert by_url["http://127.0.0.1:8080/api/content/import"].sink_context == "xml"
+
+
 def test_run_auto_ground_truth_points_beats_crawl_coverage(tmp_path):
     gt = contract.load(GT_DIR)
     with Store(tmp_path / "u.db") as store:

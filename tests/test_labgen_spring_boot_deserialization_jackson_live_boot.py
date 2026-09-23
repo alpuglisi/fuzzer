@@ -112,3 +112,45 @@ def test_ported_secure_twin_accepts_plain_body_but_rejects_the_type_hinted_one()
             "secure twin accepted an attacker-type-hinted body -- it should have no polymorphic "
             "deserialization path to honor that hint on"
         )
+
+
+def test_real_boot_proves_the_insecure_deserialization_strategy_end_to_end() -> None:
+    """The real `InsecureDeserializationTypeConfusionStrategy`
+    (CC-FUZZ-0030/FR-FUZZ-17), driven against a real booted app rather than
+    a fake sender: confirms the vulnerable twin and fails closed on the
+    secure twin, using the exact two-probe differential the strategy
+    itself sends."""
+    from fuzzlab.oracle.probe import Candidate, Probe
+    from fuzzlab.oracle.strategies import InsecureDeserializationTypeConfusionStrategy
+
+    emitter = SpringBootEmitter()
+    cells = _cells()
+
+    def _cand():
+        return Candidate(url=f"http://h{_ROUTE}", param="body", method="POST", location="body",
+                         vuln_class="insecure_deserialization", category="insecure-deserialization",
+                         content_type="application/json")
+
+    strategy = InsecureDeserializationTypeConfusionStrategy()
+
+    with SpringBootLiveBootHarness(emitter, cells["LABGEN-JV-0001"]) as harness:
+        class _HarnessSender:
+            def send(self, url, param, value, timing=False, method="POST",
+                      location="body", content_type=None):
+                resp = harness.post(_ROUTE, data=value.encode("utf-8"), content_type=content_type)
+                return Probe(resp.status, resp.body)
+
+        verdict = strategy.confirm(_cand(), _HarnessSender())
+        assert verdict is not None and verdict.confirmed, "strategy failed to confirm the real vulnerable twin"
+        assert verdict.vuln_class == "insecure_deserialization"
+
+    with SpringBootLiveBootHarness(emitter, cells["LABGEN-JV-0002"]) as harness:
+        class _HarnessSender:
+            def send(self, url, param, value, timing=False, method="POST",
+                      location="body", content_type=None):
+                resp = harness.post(_ROUTE, data=value.encode("utf-8"), content_type=content_type)
+                return Probe(resp.status, resp.body)
+
+        assert strategy.confirm(_cand(), _HarnessSender()) is None, (
+            "strategy incorrectly confirmed the real secure twin"
+        )

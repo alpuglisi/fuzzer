@@ -3,6 +3,57 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0018 — `R-INSECURE-DESERIALIZATION` audit rule (2026-09-23)
+
+- Change: adds `R-INSECURE-DESERIALIZATION`, category
+  `insecure-deserialization`, to `fuzzlab/audit/rules_data/
+  default_rules.json` — `{"location_in": ["body"], "sink_context_in":
+  ["deserialization"]}`. The project's first rule to use the
+  `sink_context_in` `when` predicate (`fuzzlab/audit/rules.py`'s own
+  docstring has always listed it as supported; no prior rule exercised
+  it). Necessary shape: this vulnerability class has no informative
+  *parameter name* to key off (`param="body"` for a whole-body point,
+  the same literal string every whole-body point of any class uses), so
+  `sink_context` (what kind of sink the point actually is) is the only
+  available signal, unlike every previous rule in this file. Paired with
+  `CC-FUZZ-0030`'s new `InsecureDeserializationTypeConfusionStrategy`
+  oracle confirmation. Reviewed pre-implementation per the component's
+  pre-change review gate (accuracy + adequacy passes — see `CC-FUZZ-0030`
+  for the full review record, since both passes covered the rule and the
+  strategy together).
+  New/changed files:
+  - `fuzzlab/audit/rules_data/default_rules.json`
+  - `docs/components/05-auditor/requirements.md` (`FR-AUD-9`, new)
+- Impact (other components / project): `default_rules.json` is shared
+  across every category and every existing target's own run — purely
+  additive (a new rule appended after `R-ACCESS-CONTROL`). Being the
+  first `sink_context_in` rule, it also exposed a real, previously
+  dormant defect in `fuzzlab.harness.auto.points_from_ground_truth`
+  (`sink_context` was never propagated onto a ground-truth-sourced
+  `InjectionPoint` at all) — recorded and fixed in `CC-FUZZ-0030`, not
+  duplicated here, since this rule alone cannot itself cause a false
+  finding (that risk lives in the paired strategy).
+- Risk (level; mitigation or accepted-risk justification): Low-medium.
+  `sink_context` is currently populated only from ground truth, not
+  inferred generically by the auditor for an arbitrary crawled target
+  (`FR-AUD-9` states this explicitly) — this rule is reachable only in
+  the project's own detection-benchmark (ground-truth-scored) mode today,
+  not yet a general crawl-driven capability. Documented as a real,
+  explicit scope limit rather than silently assumed to generalize.
+- Deliverables:
+  - [x] `R-INSECURE-DESERIALIZATION` added to `default_rules.json` — done
+  - [x] Unit tests confirming the rule's `when` predicate matches/excludes
+        as scoped (`test_r_insecure_deserialization_rule_matches_a_body_
+        deserialization_point`,
+        `test_r_insecure_deserialization_rule_does_not_match_an_
+        unrelated_sink_context`) — done
+- Effectiveness (assessed 2026-09-23): achieved. Paired with
+  `InsecureDeserializationTypeConfusionStrategy`, the rule correctly
+  nominates Netflix's real `NFLX-0001` point and is proven end-to-end
+  against a real booted app, including through the real generic
+  ground-truth-driven pipeline (not just a dedicated Tier1/2 test) — see
+  `CC-FUZZ-0030`'s Effectiveness note.
+
 ### CC-AUD-0017 — `R-ACCESS-CONTROL` audit rule (2026-09-23)
 
 - Change: adds `R-ACCESS-CONTROL`, category `access-control`, to

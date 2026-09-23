@@ -36,6 +36,19 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
     base = base_url.rstrip("/")
     points: list[InjectionPoint] = []
     skipped: list[tuple[str, str, str, str]] = []
+    # The enumerated *points* (`injection-points.json`) carry no `sink_context`
+    # at all (`fuzzlab.labels.contract.InjectionPoint` is deliberately slim --
+    # just what surface to probe); `sink_context` lives on the scoring
+    # `Case` (`labels.json`) instead. A rule keyed on `sink_context_in`
+    # (`R-INSECURE-DESERIALIZATION`, `CC-FUZZ-0030`) needs it on the audited
+    # point too, so look it up by the same (url, method, param) identity a
+    # point and its case share (one case per point in every corpus checked
+    # so far -- ambiguous only if a future corpus gives one point two
+    # differently-typed cases, not attempted here).
+    sink_context_by_point = {
+        (c.url if c.url.startswith("/") else "/" + c.url, c.method.upper(), c.param): c.sink_context
+        for c in ground_truth.cases
+    }
     for gp in ground_truth.points:
         path = gp.url if gp.url.startswith("/") else "/" + gp.url
         is_dom = (gp.client_only or (gp.rendering or "") == "js"
@@ -54,9 +67,11 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
                 if gp.param == "body" and gp.location == "body" and gp.rendering == "server-json"
                 else None
             )
+            sink_context = sink_context_by_point.get((path, gp.method.upper(), gp.param))
             points.append(InjectionPoint(url=base + path, param=gp.param,
                                          method=gp.method.upper(), location=gp.location,
-                                         body_content_type=body_content_type))
+                                         body_content_type=body_content_type,
+                                         sink_context=sink_context))
         elif is_dom and browser_available:
             loc = gp.location if gp.location in ("query", "fragment") else "query"
             points.append(InjectionPoint(url=base + path, param=gp.param,

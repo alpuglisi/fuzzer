@@ -485,3 +485,26 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   e.g. `expectedresults.csv`, that `fuzzlab.labels.contract.load()` requires
   unconditionally, compounded here by that file also being unreachable via
   `git add` for lack of a `.gitignore` negation). (from BUG-0036)
+- **PA-0041** — `fuzzlab.labels.contract`'s ground truth has two distinct
+  shapes per app: the *point* (`injection-points.json`, "where to probe" —
+  url/method/param/location/rendering) and the *case*
+  (`labels.json`, "the scored ground truth" — adds `vuln_class`,
+  `sink_context`, `expected_vulnerable`). They are not automatically kept
+  in sync, and a function building an audit `InjectionPoint`/`Candidate`
+  from ground truth (e.g. `fuzzlab.harness.auto.points_from_ground_truth`)
+  only has direct access to the *point* shape's own fields. Before adding a
+  new rule or strategy that keys on a ground-truth-sourced field (a new
+  `when` predicate, a new `Candidate` attribute), check which shape that
+  field actually lives on — if it's case-only (as `sink_context` was), the
+  construction site must explicitly cross-reference the matching case (by
+  `(url, method, param)` identity) and carry the value over; it will not
+  appear "for free." Then prove the real value flows through with an
+  end-to-end test exercising the actual construction function against a
+  real or realistic ground-truth fixture — never only a hand-built
+  `Candidate`/`InjectionPoint` fixture that pre-supplies the field directly,
+  which looks like coverage but cannot catch a missing propagation step
+  (the same masking failure mode `PA-0006` names for a different root
+  cause — see `BUG-0039`'s own recurrence-review section for why these two
+  bugs are siblings, not a recurrence of one another: `PA-0006` is about a
+  value that doesn't exist yet at a pipeline stage; this is about a value
+  that exists elsewhere but was never wired through). (from BUG-0039)

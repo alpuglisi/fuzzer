@@ -46,6 +46,20 @@ budget where a vulnerability is plausible.
   `location_in`) to bound the false-positive risk a broader match would
   carry for this category (see `CC-AUD-0017`). Rule-generation only —
   confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-16`).
+- **FR-AUD-9** *(`CC-AUD-0018`, 2026-09-23).* A candidate is generated for
+  the `insecure-deserialization` category: `R-INSECURE-DESERIALIZATION`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a `body`-location
+  point whose `sink_context` is `"deserialization"` — this project's first
+  use of the `sink_context_in` predicate, since this class has no
+  informative parameter name to key off (every whole-body point shares the
+  literal `param="body"`). **Scope limit, stated explicitly**:
+  `sink_context` is currently populated only from ground truth
+  (`fuzzlab.harness.auto.points_from_ground_truth` looks it up from the
+  matching scoring `Case`); the auditor does not yet infer `sink_context`
+  generically for an arbitrary crawled target, so this rule is reachable
+  only in the project's own ground-truth-scored detection-benchmark mode
+  today, not yet a general crawl-driven capability. Rule-generation only —
+  confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-17`).
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that

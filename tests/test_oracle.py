@@ -149,3 +149,37 @@ def test_oracle_only_runs_applicable_strategies():
     # An xss candidate must not be confirmed by a SQLi sender/strategy.
     cand = Candidate(url="http://localhost/x", param="q", vuln_class="xss-reflected")
     assert Oracle().confirm(cand, ErrorSender()) is None
+
+
+def test_every_ruled_strategy_category_is_reachable_from_its_vuln_class():
+    """PA-worthy guard (CC-FUZZ-0030): for every category that already has a
+    real audit `Rule` (i.e. is genuinely meant to be reachable from a
+    ground-truth-driven run right now, not just a strategy with no upstream
+    candidate-generation yet -- see `test_labgen_node_bff_multitarget.py`'s
+    own documented, deliberately-deferred `redos`/`prototype_pollution` gap,
+    which this guard must NOT flag), `fuzzlab.oracle.strategies.
+    _CATEGORY_TO_CLASS` and `fuzzlab.core.runmode._VULN_TO_CATEGORY` must
+    stay inverses whenever the category slug differs from its vuln_class
+    (e.g. `access-control`/`access_control`,
+    `insecure-deserialization`/`insecure_deserialization`) -- a mismatch
+    means a real rule+strategy pair is silently unreachable
+    (`plan.categories` never includes it). This exact gap was found twice
+    by a manual trace (`access_control`, then `insecure_deserialization`);
+    this test makes a third *ruled* instance fail loudly instead of
+    shipping unreachable.
+    """
+    from fuzzlab.audit.rules import load_rules
+    from fuzzlab.core.runmode import to_category
+    from fuzzlab.oracle.strategies import _CATEGORY_TO_CLASS
+
+    ruled_categories = {r.category for r in load_rules()}
+    for category, vuln_class in _CATEGORY_TO_CLASS.items():
+        if category not in ruled_categories:
+            continue    # no audit rule yet -- not meant to be reachable, same as redos/prototype_pollution
+        if vuln_class == category:
+            continue    # identical either way -- no _VULN_TO_CATEGORY entry needed
+        assert to_category(vuln_class) == category, (
+            f"category {category!r} has strategy vuln_class {vuln_class!r}, but "
+            f"runmode.to_category({vuln_class!r}) == {to_category(vuln_class)!r} "
+            f"-- add {vuln_class!r}: {category!r} to _VULN_TO_CATEGORY"
+        )
