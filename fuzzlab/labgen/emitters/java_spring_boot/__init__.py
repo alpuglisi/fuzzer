@@ -1,11 +1,11 @@
 """``java_spring_boot``: this project's first JVM/Java stack (category 4
 pilot, ``docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`` §9.4/§9.5, Netflix
-pick; ``CC-LAB-0091``/``FR-LAB-65``).
+pick; ``CC-LAB-0171``/``FR-LAB-77``).
 
 Implements :class:`fuzzlab.labgen.emitter.Emitter` for Spring Boot 3.4.1 /
 Spring MVC (plain ``@RestController``/``@PostMapping`` — **no
 `spring-boot-starter-graphql`/Netflix DGS dependency in this Phase A**; see
-``CC-LAB-0091``'s explicit scope call) by assembling
+``CC-LAB-0171``'s explicit scope call) by assembling
 :mod:`fuzzlab.labgen.emitters.java_spring_boot.modules` fragments per cell.
 
 **Phase A scope, stated plainly.** Exactly one shape:
@@ -30,7 +30,7 @@ ABC for any stack — every routed emitter added it as an ad-hoc extension
 the ABC does not require).
 
 **The package/file-layout guarantee this relies on, made explicit
-(``CC-LAB-0091``'s own adequacy-review correction).** Every generated cell
+(``CC-LAB-0171``'s own adequacy-review correction).** Every generated cell
 controller is rendered to a **fixed** path,
 ``src/main/java/com/fuzzlab/lab/cells/Cell<PascalCaseCellId>.java``,
 declaring ``package com.fuzzlab.lab.cells;`` — a subpackage of the scanned

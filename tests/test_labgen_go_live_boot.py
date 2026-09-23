@@ -1,5 +1,5 @@
 """Real, executed live-boot proof for `go_net_http` (category 4 pilot,
-`CC-LAB-0090`/`FR-LAB-64`, Phase A). Mirrors
+`CC-LAB-0170`/`FR-LAB-76`, Phase A). Mirrors
 `tests/test_labgen_ruby_rails_live_boot.py`'s convention: skip-guarded on
 the real capability probe (never a bare socket check -- `PA-0035`/
 `BUG-0033`), one real assemble+build+boot+HTTP round trip proving a real
@@ -65,7 +65,7 @@ def test_real_boot_proves_correct_and_incorrect_signature_for_both_twins() -> No
             assert missing.status == 401, f"{cell_id}: missing signature header was accepted"
 
 
-# -- CC-LAB-0092 Phase B: SSRF (server_side_http_fetch) -----------------------
+# -- CC-LAB-0172 Phase B: SSRF (server_side_http_fetch) -----------------------
 
 
 class _ThumbHandler(http.server.BaseHTTPRequestHandler):
@@ -86,7 +86,7 @@ def _free_loopback_port() -> int:
 
 def _start_plain_http_listener() -> http.server.HTTPServer:
     """A throwaway plain-HTTP loopback listener this test process itself
-    starts and owns -- never a real external host, per `CC-LAB-0092`'s own
+    starts and owns -- never a real external host, per `CC-LAB-0172`'s own
     lab-only/authorized-only safety scoping (`CLAUDE.md`)."""
     server = http.server.HTTPServer(("127.0.0.1", _free_loopback_port()), _ThumbHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -99,7 +99,7 @@ def _start_https_loopback_listener(cert_dir: Path) -> http.server.HTTPServer:
     to isolate the secure twin's *resolved-IP* rejection from its *scheme*
     rejection (a plain-HTTP loopback target would be rejected on the
     scheme check alone, proving nothing about the IP-allowlist logic
-    specifically; see `CC-LAB-0092`'s change-control entry for why the
+    specifically; see `CC-LAB-0172`'s change-control entry for why the
     first draft of this test was wrong)."""
     cert_path = cert_dir / "cert.pem"
     key_path = cert_dir / "key.pem"
@@ -125,7 +125,7 @@ def _start_https_loopback_listener(cert_dir: Path) -> http.server.HTTPServer:
 @pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
 def test_real_boot_proves_the_ssrf_ip_allowlist_specifically_not_just_the_scheme_check() -> None:
     """Three cases, each isolating one specific piece of logic (per
-    `CC-LAB-0092`'s adequacy-review correction):
+    `CC-LAB-0172`'s adequacy-review correction):
 
     (a) the vulnerable twin fetches a plain-HTTP loopback target
         successfully -- no validation at all (CWE-918).
@@ -138,7 +138,7 @@ def test_real_boot_proves_the_ssrf_ip_allowlist_specifically_not_just_the_scheme
     A "secure twin successfully fetches some real allowed external
     target" positive case is explicitly out of scope for this increment
     (no real target allowlist exists yet for this stack) -- deferred, not
-    silently omitted; see `CC-LAB-0092`'s own change-control entry.
+    silently omitted; see `CC-LAB-0172`'s own change-control entry.
     """
     manifest = load_manifest("lab/manifests/ssrf_go_sample.yaml")
     emitter = GoEmitter()

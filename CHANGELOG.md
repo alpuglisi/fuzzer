@@ -5,35 +5,59 @@ Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
 ## 2026-09-23 (category 4 pilot, Phase B first increment — Go/SSRF)
-- LAB: `go_net_http` Phase B, first increment (`CC-LAB-0092`/`FR-LAB-66`) —
-  a second illustrative shape, CWE-918/SSRF (a clip-thumbnail-fetch proxy:
+- LAB: `go_net_http` Phase B, first increment (`CC-LAB-0172`/`FR-LAB-78` —
+  numbered against this category's `0170`-`0209` block per the
+  cross-branch collision fix recorded immediately below; this increment
+  was built before that fix landed on this branch, so it originally used
+  now-superseded `CC-LAB-0092`/`FR-LAB-66`, corrected here on merge) — a
+  second illustrative shape, CWE-918/SSRF (a clip-thumbnail-fetch proxy:
   `unchecked_url_fetch` vulnerable vs. `scheme_and_resolved_ip_allowlist`
   secure), reusing `lab/safety_matrix.yaml`'s existing
   `server_side_http_fetch` family/ops verbatim. Reviewed pre-implementation
   by 2 independent agents; both rounds' findings — a corrected `FR-LAB-61`
-  precedent (mint a new `FR-LAB-66` rather than widen `FR-LAB-64`), a
-  corrected live-boot test plan (isolate the resolved-IP-allowlist check
-  from the scheme check using both a plain-HTTP and a self-signed-TLS
-  HTTPS loopback listener, since a single plain-HTTP listener would only
-  prove the scheme check fires), a bounded-`http.Client` deliverable, and
-  an explicit outbound-fetch-containment risk note — are incorporated into
-  the landed entry. A genuine module-composition divergence from the
-  webhook-signature shape: the vulnerable/secure difference lives in
-  which **sink** module renders (validation-then-fetch is one inseparable
-  operation), not a transform-then-fixed-sink split — which in turn
-  required moving `go_net_http`'s import-list bookkeeping from per-shape
-  to per-module after a shape-wide list failed a real `go build` the
-  moment this shape's two sinks turned out to need different standard-
-  library packages (found and fixed during implementation). Tier 0
-  (`go vet`/`gofmt -l`, now exercised over both shapes together) and Tier
-  3 both pass; the real live-boot test proves three isolated cases against
-  two throwaway local listeners (never a real external host). Per-run
+  precedent (mint a new FR number rather than widen the Phase A entry in
+  place), a corrected live-boot test plan (isolate the resolved-IP-
+  allowlist check from the scheme check using both a plain-HTTP and a
+  self-signed-TLS HTTPS loopback listener, since a single plain-HTTP
+  listener would only prove the scheme check fires), a bounded-
+  `http.Client` deliverable, and an explicit outbound-fetch-containment
+  risk note — are incorporated into the landed entry. A genuine
+  module-composition divergence from the webhook-signature shape: the
+  vulnerable/secure difference lives in which **sink** module renders
+  (validation-then-fetch is one inseparable operation), not a
+  transform-then-fixed-sink split — which in turn required moving
+  `go_net_http`'s import-list bookkeeping from per-shape to per-module
+  after a shape-wide list failed a real `go build` the moment this
+  shape's two sinks turned out to need different standard-library
+  packages (found and fixed during implementation). Tier 0 (`go vet`/
+  `gofmt -l`, now exercised over both shapes together) and Tier 3 both
+  pass; the real live-boot test proves three isolated cases against two
+  throwaway local listeners (never a real external host). Per-run
   database and the richer Twitch EventSub header/replay-window checks
   remain explicitly deferred, not added by this increment.
 
+## 2026-09-22 (cross-branch review, by the category 1 pilot session)
+- Docs/LAB: reviewed this branch's code and tests (no code defects found —
+  the Go webhook-signature and Java Jackson-deserialization vulnerable/
+  secure pairs are correct, and both real live-boot tests pass in this
+  sandbox). Found and fixed a real cross-branch bookkeeping-ID collision:
+  this branch's `go_net_http`/`java_spring_boot` Phase A work had claimed
+  `CC-LAB-0090`/`0091` and `FR-LAB-64`/`65`, the same IDs independently
+  claimed by categories 2, 3, and 5's own Phase A work on their own
+  branches (all four branches picked "next free after category 1's
+  0070-0089 block" without seeing each other). Renumbered this branch's
+  IDs to `CC-LAB-0170`/`0171` and `FR-LAB-76`/`77` (category 4's assigned
+  block, `0170`-`0209`) across every file referencing them (code
+  docstrings, tests, manifests, `lab/safety_matrix.yaml`, and this
+  branch's own bookkeeping docs) via exact-token replacement; full suite
+  reverified green (1808 passed, 8 skipped) after the rename. See
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s category-4 tracker
+  row and this component's `CC-LAB-0170`/`0171` entries for the corrected
+  IDs going forward.
+
 ## 2026-09-22 (category 4 pilot, Phase A build — Netflix/Java)
 - LAB: `java_spring_boot` Phase A — this project's first JVM/Java
-  target-lab stack (`CC-LAB-0091`/`FR-LAB-65`). A real Maven/Spring Boot
+  target-lab stack (`CC-LAB-0171`/`FR-LAB-77`). A real Maven/Spring Boot
   3.4.1 skeleton (`spring-boot-starter-web` only, no GraphQL/DGS
   dependency — see the entry's explicit scope call), a `JavaEmitter`
   rendering one illustrative shape (a playback-resume endpoint, CWE-502:
@@ -61,7 +85,7 @@ changed, and the reason. Reference the commit hash where useful.
 
 ## 2026-09-22 (category 4 pilot, Phase A build)
 - LAB: `go_net_http` Phase A — this project's first Go target-lab stack
-  (`CC-LAB-0090`/`FR-LAB-64`). A real, checked-in `net/http`-only skeleton,
+  (`CC-LAB-0170`/`FR-LAB-76`). A real, checked-in `net/http`-only skeleton,
   a `GoEmitter` rendering one illustrative shape (an EventSub-webhook-
   receiver-shaped handler, CWE-347: Go's `==` vs. `crypto/hmac.Equal`),
   and `GoLiveBootHarness` (real `go build`, real boot, real HTTP) —
@@ -72,7 +96,7 @@ changed, and the reason. Reference the commit hash where useful.
   capability-probe/boot-subprocess environment bug that made
   `go_boot_available()` under-report, and a route-accumulator bug that
   double-registered a vulnerable/secure twin pair at the same path) —
-  see `CC-LAB-0090`'s Effectiveness note. Reuses `lab/safety_matrix.yaml`'s
+  see `CC-LAB-0170`'s Effectiveness note. Reuses `lab/safety_matrix.yaml`'s
   existing `webhook_signature_verification` family/ops verbatim (no new
   entry needed — a scope reduction found and corrected during
   implementation). Tier 0 (`go vet`/`gofmt -l`) and Tier 3
@@ -116,7 +140,7 @@ changed, and the reason. Reference the commit hash where useful.
   project-preferred for expanding real coverage; CWE-862 (GraphQL
   field-authorization) and CWE-918 (SSRF) are recorded as Phase B
   follow-ups for the respective stacks, not declined. Reserved
-  `CC-LAB-0090`-`0129` for this category's build (two brand-new emitters —
+  `CC-LAB-0170`-`0129` for this category's build (two brand-new emitters —
   Java/Spring Boot and Go — a larger block than a single-stack category,
   sized comparably to category 1's Ruby-on-Rails-only reservation). Updated
   §9.2's stack-reuse ledger with the Ruby-on-Rails row category 1 had left

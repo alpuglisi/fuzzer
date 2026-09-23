@@ -1,5 +1,5 @@
 """Emitter-level tests for `go_net_http` (category 4 pilot,
-`CC-LAB-0090`/`FR-LAB-64` Phase A, `CC-LAB-0092`/`FR-LAB-66` Phase B):
+`CC-LAB-0170`/`FR-LAB-76` Phase A, `CC-LAB-0172`/`FR-LAB-78` Phase B):
 `GoEmitter.render`/`render_route_accumulator`, plus a real, executed
 `go vet`/`gofmt -l`-equivalent Tier 0 lint pass over the rendered output
 -- this project's Go analogue of `node --check`
@@ -105,7 +105,7 @@ def test_two_renders_of_the_same_cell_are_byte_identical() -> None:
     assert first.content == second.content
 
 
-# -- CC-LAB-0092 Phase B: SSRF (server_side_http_fetch) -----------------------
+# -- CC-LAB-0172 Phase B: SSRF (server_side_http_fetch) -----------------------
 
 
 def test_ssrf_vulnerable_twin_has_no_validation_and_only_needed_imports() -> None:

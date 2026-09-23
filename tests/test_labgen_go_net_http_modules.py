@@ -1,5 +1,5 @@
 """Module-composition unit tests for `go_net_http` (category 4 pilot,
-`CC-LAB-0090`/`FR-LAB-64` Phase A, `CC-LAB-0092`/`FR-LAB-66` Phase B).
+`CC-LAB-0170`/`FR-LAB-76` Phase A, `CC-LAB-0172`/`FR-LAB-78` Phase B).
 
 Mirrors `tests/test_labgen_node_express_modules.py`'s convention exactly,
 scoped to `fuzzlab.labgen.emitters.go_net_http.modules`'s own registries
@@ -69,7 +69,7 @@ def test_render_route_line_uses_method_pattern_syntax() -> None:
     assert line.strip() == 'mux.HandleFunc("POST /generated/labgen-go-0001", handleLabgenGo0001)'
 
 
-# -- CC-LAB-0092 Phase B: SSRF (server_side_http_fetch) -----------------------
+# -- CC-LAB-0172 Phase B: SSRF (server_side_http_fetch) -----------------------
 
 
 def test_read_url_query_param_source_reads_the_named_query_param() -> None:

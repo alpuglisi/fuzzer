@@ -1,6 +1,6 @@
 """Live-boot conformance harness for ``go_net_http`` (category 4 pilot,
 ``docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`` §9.4/§9.5 — Phase A,
-``CC-LAB-0090``/``FR-LAB-64``). This is the Go port of
+``CC-LAB-0170``/``FR-LAB-76``). This is the Go port of
 ``fuzzlab.labgen.conformance.live_boot.LiveBootHarness`` and
 ``rails_live_boot.RailsLiveBootHarness``, built the same way: entirely
 inside this project's own offline test suite, using the real ``go`` CLI.
@@ -29,7 +29,7 @@ resolution), it is just not gated behind a separate install subcommand.
 stack's one illustrative shape (an HMAC-signature-verified webhook
 receiver) is stateless -- no read/write to persisted data -- so unlike
 every other stack's own Phase-A harness, this one has no ``_seed_db``/
-``query_db`` at all. See ``CC-LAB-0090``'s change-control entry for the
+``query_db`` at all. See ``CC-LAB-0170``'s change-control entry for the
 explicit scope call and when this stack gets a real per-run database
 (Phase B, alongside its CWE-918 SSRF pick).
 

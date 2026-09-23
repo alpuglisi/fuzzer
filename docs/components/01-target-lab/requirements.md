@@ -1839,12 +1839,12 @@ lane) can submit a payload as
     only the `git rm -r puppy-fort-factory/` once the first commit's own
     full test run (fast suite + the live-boot slow suite) was green.
 
-- **FR-LAB-64** *(`go_net_http` Phase A: this project's first Go target-lab
-  stack; `CC-LAB-0090`, 2026-09-22, category 4 pilot — Media/streaming,
+- **FR-LAB-76** *(`go_net_http` Phase A: this project's first Go target-lab
+  stack; `CC-LAB-0170`, 2026-09-22, category 4 pilot — Media/streaming,
   Twitch pick, `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4/§9.5).*
   The toolkit supports a Go/`net/http` target stack at Phase-A depth: one
   real, live-bootable illustrative shape, matching every other stack's own
-  Phase-A bar (`ruby_rails`'s `FR-LAB-65` being the immediately preceding
+  Phase-A bar (`ruby_rails`'s `FR-LAB-77` being the immediately preceding
   precedent for this exact scope level).
   - `fuzzlab.labgen.emitters.go_net_http.GoEmitter` renders exactly one
     shape — `("webhook_signature", "webhook_signature_verification")`, an
@@ -1885,13 +1885,13 @@ lane) can submit a payload as
     stack (which would be the first shape needing the per-run database
     above).
 
-- **FR-LAB-65** *(`java_spring_boot` Phase A: this project's first JVM/Java
-  target-lab stack; `CC-LAB-0091`, 2026-09-22, category 4 pilot — Media/
+- **FR-LAB-77** *(`java_spring_boot` Phase A: this project's first JVM/Java
+  target-lab stack; `CC-LAB-0171`, 2026-09-22, category 4 pilot — Media/
   streaming, Netflix pick, `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
   §9.4/§9.5).* The toolkit supports a Spring Boot 3.4.1/Spring MVC target
   stack at Phase-A depth: one real, live-bootable illustrative shape,
   matching every other stack's own Phase-A bar (`go_net_http`'s
-  `FR-LAB-64` being the immediately preceding precedent for this exact
+  `FR-LAB-76` being the immediately preceding precedent for this exact
   scope level, within the same category-4 pilot).
   - `fuzzlab.labgen.emitters.java_spring_boot.JavaEmitter` renders exactly
     one shape — `("insecure_deserialization", "object_deserialization")`,
@@ -1912,7 +1912,7 @@ lane) can submit a payload as
     `Application.java`'s package (`com.fuzzlab.lab`); every generated cell
     controller is hardcoded to the fixed subpackage
     `com.fuzzlab.lab.cells`, guaranteed by construction, never derived
-    from anything manifest-supplied (`CC-LAB-0091`'s own adequacy-review
+    from anything manifest-supplied (`CC-LAB-0171`'s own adequacy-review
     correction made this package/file-layout guarantee explicit).
   - A real, checked-in skeleton (`fuzzlab/labgen/emitters/java_spring_boot/
     stack/skeleton/`: a `pom.xml` inheriting `spring-boot-starter-parent`
@@ -1938,7 +1938,7 @@ lane) can submit a payload as
     the probe never uses anything but the real `mvn` client, which
     resolves the same dependency successfully), and every Maven/JVM
     subprocess call inherits the full process environment rather than a
-    hand-picked subset (the exact bug `CC-LAB-0090`'s own `go` probe had
+    hand-picked subset (the exact bug `CC-LAB-0170`'s own `go` probe had
     and fixed, applied correctly here from the start).
   - Tier 0 (`mvn -q compile`, `tests/test_labgen_java_spring_boot.py` —
     necessarily network-coupled for this stack, since compiling against
@@ -1960,13 +1960,13 @@ lane) can submit a payload as
     `docs/research/site-architecture-survey-functionality-netflix.md` §2's
     own Phase B note.
 
-- **FR-LAB-66** *(`go_net_http` Phase B, first increment: a second
-  illustrative shape, CWE-918/SSRF; `CC-LAB-0092`, 2026-09-23, category 4
+- **FR-LAB-78** *(`go_net_http` Phase B, first increment: a second
+  illustrative shape, CWE-918/SSRF; `CC-LAB-0172`, 2026-09-23, category 4
   pilot's Twitch pick).* Given its own new FR number rather than widening
-  `FR-LAB-64` in place — a distinct vuln class with a genuinely different
+  `FR-LAB-76` in place — a distinct vuln class with a genuinely different
   module-composition shape deserves independent discoverability, per this
   entry's own change-control review (which also corrected a backwards
-  precedent citation for the opposite choice; see `CC-LAB-0092`).
+  precedent citation for the opposite choice; see `CC-LAB-0172`).
   - `fuzzlab.labgen.emitters.go_net_http.GoEmitter` renders a second
     shape — `("ssrf", "server_side_http_fetch")`, a clip-thumbnail-fetch
     proxy handler (`GET /api/clips/thumbnail?url=...`) that server-side-
@@ -2004,7 +2004,7 @@ lane) can submit a payload as
     rejection specifically — a corrected test design after the first
     draft's plan (a single plain-HTTP listener) would have proven only
     the scheme check, not the IP-allowlist logic the shape's own name
-    promises (`CC-LAB-0092`'s own adequacy-review correction). Neither
+    promises (`CC-LAB-0172`'s own adequacy-review correction). Neither
     listener is a real external or production host, per `CLAUDE.md`'s
     lab-only/authorized-only discipline; a "secure twin successfully
     fetches some real allowed external target" positive case is

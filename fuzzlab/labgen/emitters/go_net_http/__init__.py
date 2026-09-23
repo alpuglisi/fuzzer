@@ -1,6 +1,6 @@
 """``go_net_http``: this project's first Go stack (category 4 pilot,
 ``docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`` §9.4/§9.5, Twitch pick;
-``CC-LAB-0090``/``FR-LAB-64``).
+``CC-LAB-0170``/``FR-LAB-76``).
 
 Implements :class:`fuzzlab.labgen.emitter.Emitter` for Go's standard-library
 ``net/http`` (no third-party router/framework — matching Twitch's own
@@ -21,7 +21,7 @@ own Phase-A "exactly one shape" scope. CWE-918 (SSRF) and CWE-862 (GraphQL
 field authorization, on the sibling Netflix/Java pick) stay deferred to
 Phase B, per this pilot's own research note.
 
-**Phase B, first increment (``CC-LAB-0092``/``FR-LAB-66``): a second
+**Phase B, first increment (``CC-LAB-0172``/``FR-LAB-78``): a second
 shape**, ``("ssrf", "server_side_http_fetch")`` — a clip-thumbnail-fetch
 proxy handler that server-side-fetches a caller-supplied URL either with
 no validation at all (vulnerable, CWE-918, ``unchecked_url_fetch``) or
@@ -85,7 +85,7 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
 #: Per-module (source/transform-op/sink name) -> the extra Go standard-
 #: library packages that module's own rendered code references, beyond
 #: ``net/http`` (always included -- every handler signature needs it).
-#: Keyed per-module rather than per-shape (``CC-LAB-0092``'s own fix,
+#: Keyed per-module rather than per-shape (``CC-LAB-0172``'s own fix,
 #: found while assembling the SSRF shape's vulnerable twin: that twin's
 #: sink, ``unchecked_url_fetch``, does not use ``net``/``net/url`` at all,
 #: so a shape-level fixed import list -- covering the union every sink a
@@ -162,7 +162,7 @@ class GoEmitter(Emitter):
             body_parts = (source_result.code, *transform_code_blocks, sink_result.code)
             sink_name_for_composition = modules.sink
         else:
-            # Convention 2 (SSRF, CC-LAB-0092): the manifest's one op names
+            # Convention 2 (SSRF, CC-LAB-0172): the manifest's one op names
             # a SINK module directly -- there is no separate transform
             # stage, since the vulnerable/secure difference here is one
             # inseparable validate-then-fetch operation, not a value

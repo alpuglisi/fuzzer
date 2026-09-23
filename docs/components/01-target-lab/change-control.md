@@ -3,16 +3,16 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0092 — `go_net_http` Phase B, first increment: one illustrative CWE-918 SSRF cell (clip-thumbnail fetch) (2026-09-23)
+### CC-LAB-0172 — `go_net_http` Phase B, first increment: one illustrative CWE-918 SSRF cell (clip-thumbnail fetch) (2026-09-23)
 
 - Change: The first Phase B increment for `go_net_http` (category 4 pilot,
-  Twitch pick; Phase A landed as `CC-LAB-0090`/`FR-LAB-64`). Adds a second
+  Twitch pick; Phase A landed as `CC-LAB-0170`/`FR-LAB-76`). Adds a second
   illustrative shape to this stack's module inventory:
   `vuln_class="ssrf"`, `sink_context.family="server_side_http_fetch"` —
   reusing `lab/safety_matrix.yaml`'s existing family and both its ops
   (`unchecked_url_fetch`, vulnerable; `scheme_and_resolved_ip_allowlist`,
   secure — added by `CC-LAB-0063`) verbatim, the same family-reuse
-  `CC-LAB-0090` did for `webhook_signature_verification` — **no new
+  `CC-LAB-0170` did for `webhook_signature_verification` — **no new
   safety-matrix entry needed** for this increment.
 
   **The shape, grounded in the research pick's own §2 Phase B note**
@@ -33,7 +33,7 @@ Component code: **LAB**. Entry format and required fields: see
   on this family names).
 
   **Per-run database: still deferred, not added in this increment.**
-  `CC-LAB-0090`'s own scope call said a per-run database would land "when
+  `CC-LAB-0170`'s own scope call said a per-run database would land "when
   Phase B adds a shape that actually reads or writes data." This SSRF
   shape doesn't read/write persisted data either (it fetches an external
   URL and relays/inspects the response) — so this increment does not add
@@ -99,10 +99,10 @@ Component code: **LAB**. Entry format and required fields: see
     one-manifest-per-illustrative-shape-group convention elsewhere, e.g.
     `mass_assignment_sample.yaml` vs. `prototype_pollution_node_sample.yaml`).
   - `docs/components/01-target-lab/requirements.md` — add a **new**
-    `FR-LAB-66` (next-free after `FR-LAB-65`, `java_spring_boot` Phase A;
+    `FR-LAB-78` (next-free after `FR-LAB-77`, `java_spring_boot` Phase A;
     re-verify against this branch's actual state at implementation time,
-    per `CC-LAB-0090`'s own numbering lesson). **Corrected by both
-    reviews:** the original draft proposed widening `FR-LAB-64` in place
+    per `CC-LAB-0170`'s own numbering lesson). **Corrected by both
+    reviews:** the original draft proposed widening `FR-LAB-76` in place
     rather than minting a new ID, citing `php_laravel`'s `FR-LAB-61` as
     precedent for "widen, don't renumber." Accuracy review checked that
     citation directly and found it backwards: `FR-LAB-61` is itself a
@@ -114,7 +114,7 @@ Component code: **LAB**. Entry format and required fields: see
     signature verification) with a genuinely different module-composition
     shape (validation logic lives in the sink, not a transform stage) —
     a distinct, discoverable capability that a buried widening of
-    `FR-LAB-64` would obscure, not a refinement of that entry's existing
+    `FR-LAB-76` would obscure, not a refinement of that entry's existing
     scope.
   - `docs/ARCHITECTURE.md` — update the `go_net_http` paragraph's "Phase A
     only" framing to note this Phase B increment.
@@ -161,7 +161,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] `tests/test_labgen_go_net_http_modules.py`/`.py`/`_conformance.py` extended — done
   - [x] `tests/test_labgen_go_live_boot.py` extended (real, executed, slow-marked; plain-HTTP + self-signed-TLS HTTPS loopback listeners isolating the scheme check from the IP-allowlist check, per the corrected test plan above) — done
   - [x] `lab/manifests/ssrf_go_sample.yaml` — done
-  - [x] `docs/components/01-target-lab/requirements.md` (new `FR-LAB-66`, re-verified next-free — `FR-LAB-65` was confirmed the branch's true highest entry) — done
+  - [x] `docs/components/01-target-lab/requirements.md` (new `FR-LAB-78`, re-verified next-free — `FR-LAB-77` was confirmed the branch's true highest entry) — done
   - [x] `docs/ARCHITECTURE.md` — done
 - Effectiveness (assessed 2026-09-23): effective. Observed directly, not
   inferred: `go build`/`go vet`/`gofmt -l` all pass over both shapes
@@ -175,7 +175,7 @@ Component code: **LAB**. Entry format and required fields: see
   live-boot proofs (`tests/test_labgen_go_live_boot.py`, executed this
   session, not skipped); the full non-slow suite was re-run afterward and
   shows no regression (the same 15 pre-existing `gitleaks`-related
-  failures as `CC-LAB-0090`/`CC-LAB-0091`, unrelated to and pre-dating
+  failures as `CC-LAB-0170`/`CC-LAB-0171`, unrelated to and pre-dating
   this change). One real design gap was found and fixed during
   implementation itself, before any code shipped incorrectly: the
   reviewed draft's `_ModuleSet.imports` field was shape-level, which
@@ -185,15 +185,15 @@ Component code: **LAB**. Entry format and required fields: see
   moving to a per-module import table (`_MODULE_IMPORTS`), keyed by
   source/op/sink name and unioned per cell at render time.
 
-  Reviewed by 2 independent agents pre-implementation (accuracy + adequacy passes); both rounds' findings (a corrected FR-LAB-61 precedent -> a new FR-LAB-66 rather than widening FR-LAB-64; a corrected live-boot test plan isolating the IP-allowlist check from the scheme check; a bounded-HTTP-client deliverable; an explicit outbound-fetch-containment risk note) are incorporated above. 3/3 agreement reached before implementation began.
+  Reviewed by 2 independent agents pre-implementation (accuracy + adequacy passes); both rounds' findings (a corrected FR-LAB-61 precedent -> a new FR-LAB-78 rather than widening FR-LAB-76; a corrected live-boot test plan isolating the IP-allowlist check from the scheme check; a bounded-HTTP-client deliverable; an explicit outbound-fetch-containment risk note) are incorporated above. 3/3 agreement reached before implementation began.
 
 
-### CC-LAB-0091 — `java_spring_boot` emitter Phase A: real Maven/Spring Boot skeleton + live-boot harness + one illustrative CWE-502 Jackson-deserialization cell (2026-09-22)
+### CC-LAB-0171 — `java_spring_boot` emitter Phase A: real Maven/Spring Boot skeleton + live-boot harness + one illustrative CWE-502 Jackson-deserialization cell (2026-09-22)
 
 - Change: Adds this project's second new stack from the category 4 pilot
   (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4/§9.5, Netflix
   pick) and its first JVM/Java stack: `java_spring_boot`, following the
-  same Phase-A scope `CC-LAB-0090` (`go_net_http`) and category 1's
+  same Phase-A scope `CC-LAB-0170` (`go_net_http`) and category 1's
   `ruby_rails` pilot already set — a real, checked-in, minimal Spring Boot
   3.4.1 web app (Maven, `spring-boot-starter-web` only — **no
   `spring-boot-starter-graphql`/Netflix DGS dependency in this Phase A**,
@@ -221,7 +221,7 @@ Component code: **LAB**. Entry format and required fields: see
   model. This Phase A therefore renders a plain Spring MVC
   `@RestController`/`@PostMapping` REST endpoint that Jackson-deserializes
   its body, exactly the same "simplest illustrative slice, richer
-  framework-idiom modeling deferred" scope call `CC-LAB-0090` made for
+  framework-idiom modeling deferred" scope call `CC-LAB-0170` made for
   Twitch's full EventSub header/replay-window scheme. The GraphQL/DGS
   federation layer, and the CWE-862 field-authorization pick, are Phase B
   work for this stack, per the research note's own §2.
@@ -229,7 +229,7 @@ Component code: **LAB**. Entry format and required fields: see
   **The one illustrative shape** (`vuln_class="insecure_deserialization"`,
   `sink_context.family="object_deserialization"` -- reusing
   `lab/safety_matrix.yaml`'s existing family, added by `CC-LAB-0063`, the
-  same reuse `CC-LAB-0090` did for `webhook_signature_verification`, but
+  same reuse `CC-LAB-0170` did for `webhook_signature_verification`, but
   **new ops are needed this time**: neither of the family's existing op
   pairs (Node's `vm_script_execution`/`handler_registry_lookup`, PHP's
   `unauthenticated_deserialize`/`authenticated_encrypt_then_deserialize`,
@@ -286,7 +286,7 @@ Component code: **LAB**. Entry format and required fields: see
   future regression of this guarantee fails loud rather than silently.
 
   **Made explicit by adequacy review (this was omitted in the prior draft
-  revision, the same gap `CC-LAB-0090` was sent back for): no per-run
+  revision, the same gap `CC-LAB-0170` was sent back for): no per-run
   database in this Phase A, deferred.** Like `go_net_http`'s Phase A, this
   stack's one illustrative shape (deserialize a POST body, return an ack)
   is stateless — no read/write to persisted data. This Phase A ships with
@@ -322,7 +322,7 @@ Component code: **LAB**. Entry format and required fields: see
     `mvn dependency:resolve` / `mvn -o dependency:go-offline`-shaped check
     against a throwaway/already-verified-reachable real dependency through
     the actual Maven client, not a bare socket/DNS check — the same
-    `BUG-0033`-avoidance discipline `CC-LAB-0090` applied to `go`, applied
+    `BUG-0033`-avoidance discipline `CC-LAB-0170` applied to `go`, applied
     here for a third package manager), bounded timeouts on every
     subprocess step (`mvn package`, boot, request).
   - `tests/test_labgen_java_spring_boot_modules.py` (new, unit-level, no
@@ -348,7 +348,7 @@ Component code: **LAB**. Entry format and required fields: see
     explicit `@class` polymorphic-type hint is accepted/routed by the
     vulnerable twin's deserializer where the secure twin's fixed-type
     deserializer would reject the same body's extra/mistyped shape -- the
-    same honest scoping `CC-LAB-0090`'s own live-boot test used for
+    same honest scoping `CC-LAB-0170`'s own live-boot test used for
     CWE-347's non-functional timing property: this dispatch does not claim
     to demonstrate a working RCE gadget chain, only the real, observable
     difference in what each twin's deserializer accepts).
@@ -358,10 +358,10 @@ Component code: **LAB**. Entry format and required fields: see
     following that section's own convention).
   - `lab/manifests/insecure_deserialization_java_sample.yaml` (new) -- the
     one illustrative vulnerable/secure cell pair.
-  - `docs/components/01-target-lab/requirements.md` -- add **`FR-LAB-65`**
-    (next-free on this branch after this dispatch's own `FR-LAB-64` for
+  - `docs/components/01-target-lab/requirements.md` -- add **`FR-LAB-77`**
+    (next-free on this branch after this dispatch's own `FR-LAB-76` for
     `go_net_http`, re-verified against this branch's actual state at
-    dispatch time per the `CC-LAB-0090` accuracy-review lesson -- never
+    dispatch time per the `CC-LAB-0170` accuracy-review lesson -- never
     inferred from an unmerged sibling branch).
   - `docs/ARCHITECTURE.md` -- record the new `java_spring_boot` stack (a
     sixth stack emitter), including the "no route accumulator needed"
@@ -378,7 +378,7 @@ Component code: **LAB**. Entry format and required fields: see
   the capability-probe correctness class `BUG-0033` already burned this
   project on twice now for two different package managers (`composer`,
   and this dispatch's own `go` probe originally under-reporting due to an
-  env-replacement bug, caught and fixed before `CC-LAB-0090` landed) --
+  env-replacement bug, caught and fixed before `CC-LAB-0170` landed) --
   mitigated by building `java_boot_available()` to the same PA-0035
   standard from the first commit, and by inheriting the full process
   environment for every Maven/JVM subprocess call from the start (the
@@ -399,7 +399,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] `tests/test_labgen_java_spring_boot_conformance.py` (Tier 3) — done
   - [x] `tests/test_labgen_java_live_boot.py` (real, executed, slow-marked) — done
   - [x] `lab/safety_matrix.yaml` (two new ops) + `lab/manifests/insecure_deserialization_java_sample.yaml` — done
-  - [x] `docs/components/01-target-lab/requirements.md` (`FR-LAB-65`, re-verified next-free at dispatch time — confirmed `FR-LAB-64` was the branch's true highest entry, not the `FR-LAB-65` string appearing only in unmerged-branch prose) — done
+  - [x] `docs/components/01-target-lab/requirements.md` (`FR-LAB-77`, re-verified next-free at dispatch time — confirmed `FR-LAB-76` was the branch's true highest entry, not the `FR-LAB-77` string appearing only in unmerged-branch prose) — done
   - [x] `docs/ARCHITECTURE.md` — record the new `java_spring_boot` stack — done
 - Effectiveness (assessed 2026-09-22): effective. Observed directly, not
   inferred: a real `mvn package` compiles the assembled skeleton + two
@@ -416,25 +416,25 @@ Component code: **LAB**. Entry format and required fields: see
   differential against a real boot. 16/16 new tests pass (`pytest tests/
   test_labgen_java_spring_boot*.py tests/test_labgen_java_live_boot.py`);
   the full non-slow suite was re-run afterward and shows no regression
-  (the same 15 pre-existing `gitleaks`-related failures as `CC-LAB-0090`,
+  (the same 15 pre-existing `gitleaks`-related failures as `CC-LAB-0170`,
   unrelated to and pre-dating this change). One design correction made
   during implementation itself, before any code was written to disk
   incorrectly: the initial plan (implicit in the reviewed draft) would
   have mapped both twins' `@PostMapping` to the same literal
   `cell.route.path`, which Spring Boot's handler-mapping registration
   would reject as ambiguous at boot (two controllers, same method+path) —
-  caught while writing `render()` and fixed the same way `CC-LAB-0090`'s
+  caught while writing `render()` and fixed the same way `CC-LAB-0170`'s
   own route-accumulator bug was fixed, by deriving the served path from
   `cell_id` (`/generated/<cell_id.lower()>`) instead.
 
   Reviewed by 2 independent agents pre-implementation (accuracy + adequacy passes, per the component README's pre-change review gate); both rounds' findings (two LOC-estimate corrections; the explicit no-database scope call and the exact component-scan package/file-layout guarantee, both omitted in the first draft) are incorporated above. 3/3 agreement reached before implementation began.
 
 
-### CC-LAB-0090 — `go_net_http` emitter Phase A: real skeleton + live-boot harness + one illustrative CWE-347 webhook-signature cell (2026-09-22)
+### CC-LAB-0170 — `go_net_http` emitter Phase A: real skeleton + live-boot harness + one illustrative CWE-347 webhook-signature cell (2026-09-22)
 
 - Change: Adds this project's first Go stack, `go_net_http`, mirroring the
   Phase-A scope and shape category 1's `ruby_rails` pilot already set
-  (`CC-LAB-0071`/`FR-LAB-65`): a real, checked-in, minimal Go HTTP service
+  (`CC-LAB-0071`/`FR-LAB-77`): a real, checked-in, minimal Go HTTP service
   skeleton (standard library `net/http` only — no third-party router/
   framework, matching Twitch's own documented "Go-centric microservices,
   new API edge" architecture, per `docs/research/site-architecture-survey.md`
@@ -530,18 +530,18 @@ Component code: **LAB**. Entry format and required fields: see
     for `go_net_http` alongside its existing per-stack entries.
   - `lab/manifests/webhook_signature_go_sample.yaml` (new) — the one
     illustrative vulnerable/secure cell pair.
-  - `docs/components/01-target-lab/requirements.md` — add **`FR-LAB-64`**
+  - `docs/components/01-target-lab/requirements.md` — add **`FR-LAB-76`**
     ("the toolkit supports a Go/`net/http` target stack, Phase-A depth:
     one real, live-bootable illustrative shape") in place. **Corrected by
     accuracy review:** the draft originally assumed `ruby_rails` (which
-    would be `FR-LAB-65`) is already landed on this branch and picked
+    would be `FR-LAB-77`) is already landed on this branch and picked
     `FR-LAB-70` as next-free by extension. On `claude/category-4-build-
     t9uz3y`, `ruby_rails` does not exist — it lives only on unmerged
     `origin/claude/second-target-cat1-ecommerce`. This branch's real
     highest requirement ID (confirmed by grep against
     `docs/components/01-target-lab/requirements.md` on this branch) is
-    `FR-LAB-63`, so the correct next-free number here is `FR-LAB-64`. (The
-    `CC-LAB-0090` change-control number is unaffected — it is independently
+    `FR-LAB-63`, so the correct next-free number here is `FR-LAB-76`. (The
+    `CC-LAB-0170` change-control number is unaffected — it is independently
     pre-reserved for this category in
     `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s §9.4 tracker/§9.2
     ledger regardless of which branch merges first; `requirements.md`,
@@ -599,7 +599,7 @@ Component code: **LAB**. Entry format and required fields: see
     This dispatch's module inventory (`modules.py`) reuses that family and
     both ops verbatim rather than adding a new `hmac_signature_check`
     family, as the original draft had assumed before checking.
-  - [x] `docs/components/01-target-lab/requirements.md` (`FR-LAB-64`) — done
+  - [x] `docs/components/01-target-lab/requirements.md` (`FR-LAB-76`) — done
   - [x] `docs/ARCHITECTURE.md` — recorded the new `go_net_http` stack, and
     (found undocumented during this pass) `node_express` alongside it —
     done

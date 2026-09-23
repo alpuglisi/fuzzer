@@ -342,7 +342,7 @@ tracked in the requirements files, not here.
   the shared `app.js` route-registration file, fed by one fragment per
   supported cell sorted by cell ID. A **fifth stack emitter**
   (`fuzzlab/labgen/emitters/go_net_http/`, category 4 second-target pilot's
-  `CC-LAB-0090`/`FR-LAB-64`, 2026-09-22) is this project's first Go stack —
+  `CC-LAB-0170`/`FR-LAB-76`, 2026-09-22) is this project's first Go stack —
   standard-library `net/http` only, Phase A depth (one illustrative
   shape: an HMAC-signature-verified webhook receiver, CWE-347, reusing
   `lab/safety_matrix.yaml`'s existing `webhook_signature_verification`
@@ -354,7 +354,7 @@ tracked in the requirements files, not here.
   to Phase B for this stack: a per-run database (this Phase A's one shape
   is stateless), CWE-918 (SSRF), and the richer Twitch EventSub message-ID/
   timestamp/replay-window checks. **Phase B's first increment landed**
-  (`CC-LAB-0092`/`FR-LAB-66`): a second shape, `("ssrf",
+  (`CC-LAB-0172`/`FR-LAB-78`): a second shape, `("ssrf",
   "server_side_http_fetch")` — a clip-thumbnail-fetch proxy, vulnerable
   (`unchecked_url_fetch`, no validation) vs. secure
   (`scheme_and_resolved_ip_allowlist`, rejects non-`https` schemes and
@@ -367,7 +367,7 @@ tracked in the requirements files, not here.
   twin's generated code can hang. Still deferred: the per-run database
   and the richer EventSub header checks. A **sixth stack emitter**
   (`fuzzlab/labgen/emitters/java_spring_boot/`, category 4 second-target
-  pilot's `CC-LAB-0091`/`FR-LAB-65`, 2026-09-22) is this project's first
+  pilot's `CC-LAB-0171`/`FR-LAB-77`, 2026-09-22) is this project's first
   JVM/Java stack — Spring Boot 3.4.1/Spring MVC, Phase A depth (one
   illustrative shape: a Jackson-polymorphic-deserialization endpoint,
   CWE-502, reusing `lab/safety_matrix.yaml`'s existing

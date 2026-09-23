@@ -1,5 +1,5 @@
 """Conformance-suite pass for `go_net_http` (category 4 pilot,
-`CC-LAB-0090`/`FR-LAB-64` Phase A, `CC-LAB-0092`/`FR-LAB-66` Phase B,
+`CC-LAB-0170`/`FR-LAB-76` Phase A, `CC-LAB-0172`/`FR-LAB-78` Phase B,
 T-LAB0.7 Tier 3).
 
 - Tier 0 (lint): `go vet`/`gofmt -l` on the rendered output -- owned by

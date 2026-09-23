@@ -1,5 +1,5 @@
 """Conformance-suite pass for `java_spring_boot` (category 4 pilot,
-`CC-LAB-0091`/`FR-LAB-65`, T-LAB0.7 Tier 3).
+`CC-LAB-0171`/`FR-LAB-77`, T-LAB0.7 Tier 3).
 
 - Tier 0 (lint): `mvn -q compile` on the rendered output -- owned by
   `tests/test_labgen_java_spring_boot.py` already; this module focuses on
