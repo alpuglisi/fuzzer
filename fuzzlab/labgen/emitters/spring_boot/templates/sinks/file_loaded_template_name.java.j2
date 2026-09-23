@@ -1,0 +1,5 @@
+        java.util.Map<String, String> knownMacros = new java.util.HashMap<>();
+        knownMacros.put("welcome", "Welcome to the team wiki!");
+        knownMacros.put("footer", "-- TrackerNest Wiki");
+        String rendered = knownMacros.getOrDefault({{ value_expr }}, "Unknown macro");
+        return org.springframework.http.ResponseEntity.ok("Rendered macro result: " + rendered);

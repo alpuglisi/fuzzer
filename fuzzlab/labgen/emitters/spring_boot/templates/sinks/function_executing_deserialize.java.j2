@@ -1,0 +1,9 @@
+        try (java.io.ObjectInputStream ois = new java.io.ObjectInputStream(request.getInputStream())) {
+            Object result = ois.readObject();
+            return org.springframework.http.ResponseEntity.ok(
+                "Processed webhook payload: " + result.getClass().getName() + " -> " + result.toString()
+            );
+        } catch (Exception e) {
+            return org.springframework.http.ResponseEntity.status(400)
+                .body("Webhook payload error: " + e.getMessage());
+        }

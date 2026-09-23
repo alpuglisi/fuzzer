@@ -230,6 +230,28 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     # through a request parameter -- it is worth keeping the two classes
     # visibly distinct rather than conflating them under "xss".
     ("xss-dom", "dom_html_sink"): _ModuleSet("dom_url_source", "dom_innerhtml_echo", "render_only"),
+    # CC-LAB-0133: Huddle Hub's (category 3's Slack pick) webhook-signature-
+    # verification cell -- the first non-migration illustrative shape built
+    # for a *different* app identity on this stack, per §9.2's ledger note
+    # that Huddle Hub reuses php_laravel's paradigm rather than a separate
+    # emitter.
+    ("webhook_signature_bypass", "webhook_signature_verification"): _ModuleSet(
+        "webhook_request", "webhook_signature_verification", "single_statement"
+    ),
+    # CC-LAB-0134: Huddle Hub's second cell, SSRF via link unfurling. The
+    # op selects which transform gates the fixed sink (mirroring
+    # CC-LAB-0133's own webhook-signature shape) -- the module composition
+    # line's "sink" position is always `server_side_http_fetch`; whichever
+    # fetch-validation transform ran decides whether it's ever reached.
+    ("ssrf", "server_side_http_fetch"): _ModuleSet(
+        "get_param", "server_side_http_fetch", "single_statement"
+    ),
+    # CC-LAB-0135: Huddle Hub's third and final designed cell, header
+    # injection in outgoing-webhook delivery. Same "op selects which
+    # transform gates the fixed sink" shape as CC-LAB-0133/0134.
+    ("outbound_header_injection", "outbound_http_request_header_value"): _ModuleSet(
+        "get_param", "outbound_webhook_delivery", "single_statement"
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -448,6 +470,23 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
         "id_column": "id",
         "allowed_fields": ("display_name", "bio", "avatar_url"),
     },
+    # CC-LAB-0133: Huddle Hub's (category 3's Slack pick) webhook-signature-
+    # verification cell -- a Slack-style Events-API-style callback receiver.
+    # This key is used only for template-context lookup (`_profile_for`);
+    # the cell is actually served at the illustrative `/cell/<slug>` URL
+    # (`_served_route_for`), since Huddle Hub has no migrated real page to
+    # anchor a pinned URL to. `secret` is a lab-only shared secret, never a
+    # real credential.
+    "/webhooks/events": {"var_name": "webhookRawBody", "secret": "lab-only-huddlehub-webhook-secret"},
+    # CC-LAB-0134: Huddle Hub's SSRF-via-link-unfurling cell -- `get_param`
+    # reads the pasted URL as `?url=`. Illustrative served URL, same
+    # reasoning as `/webhooks/events` above.
+    "/messages/unfurl": {"var_name": "unfurlUrl", "param_name": "url"},
+    # CC-LAB-0135: Huddle Hub's header-injection cell -- `get_param` reads
+    # the admin-configured trigger word as `?triggerWord=`. Illustrative
+    # served URL, same reasoning as `/webhooks/events`/`/messages/unfurl`
+    # above.
+    "/integrations/outgoing-webhook": {"var_name": "triggerWord", "param_name": "triggerWord"},
     # POST string-literal lookup. `password_var`/`password_param` are sink
     # boilerplate (an already-hashed secret), not a second injection point.
     "/login": {

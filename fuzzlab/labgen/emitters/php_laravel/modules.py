@@ -247,6 +247,27 @@ class AllPostParamsSource(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class WebhookRequestSource(TemplateModule):
+    """The ``webhook_request`` source (`CC-LAB-0133`, Huddle Hub's
+    webhook-signature-verification cell): the raw request body plus the
+    ``X-Signature`` header and a fixed, lab-only shared secret -- the same
+    real Slack-style Events-API-callback shape
+    ``docs/research/corpus-examples/webhook-signature/php/`` already models
+    as research, built here as a real cell for the first time. Publishes
+    ``value_expr`` (the raw body) for the transform stage's HMAC
+    recomputation."""
+
+    def __init__(self) -> None:
+        super().__init__("webhook_request", "source", _SOURCE_ENV, "webhook_request.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        template = self._env.get_template(self._template_name)
+        code = template.render(var_name=ctx["var_name"], secret=ctx["secret"])
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = f"${ctx['var_name']}"
+        return RenderResult(code=code, context=new_ctx)
+
+
 # --- transforms -----------------------------------------------------------
 
 
@@ -480,6 +501,86 @@ class DomTextContentTransform(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class LooseEqualityCompareTransform(TemplateModule):
+    """The ``loose_equality_compare`` op (`CC-LAB-0133`, `weak_signature_
+    comparison` concern): PHP's ``==`` operator both short-circuits and
+    type-juggles hex-looking strings as equal numbers (the documented "magic
+    hash" bypass). Safety matrix: ``effect=partial``,
+    ``neutralizes: [weak_signature_comparison]`` -- a lone ``partial`` op
+    never moves a concern into ``verdict()``'s fully-satisfied set, so this
+    cell is VULNERABLE overall despite the transform doing a real (just
+    unsafe) comparison."""
+
+    def __init__(self) -> None:
+        super().__init__("loose_equality_compare", "transform", _TRANSFORM_ENV, "loose_equality_compare.php.j2")
+
+
+class ConstantTimeCompareTransform(TemplateModule):
+    """The ``constant_time_compare`` op (`CC-LAB-0133`, secure twin):
+    PHP's ``hash_equals()``, its own documented constant-time comparison
+    primitive. Safety matrix: ``effect=neutralises``,
+    ``neutralizes: [weak_signature_comparison]``."""
+
+    def __init__(self) -> None:
+        super().__init__("constant_time_compare", "transform", _TRANSFORM_ENV, "constant_time_compare.php.j2")
+
+
+class UncheckedUrlFetchTransform(TemplateModule):
+    """The ``unchecked_url_fetch`` op (`CC-LAB-0134`, `ssrf_request_forgery`
+    concern): fetches the pasted URL via ``file_get_contents()`` with zero
+    host/scheme validation -- SSRF. Safety matrix: ``effect=no_effect``."""
+
+    def __init__(self) -> None:
+        super().__init__("unchecked_url_fetch", "transform", _TRANSFORM_ENV, "unchecked_url_fetch.php.j2")
+
+
+class SchemeAndResolvedIpAllowlistTransform(TemplateModule):
+    """The ``scheme_and_resolved_ip_allowlist`` op (`CC-LAB-0134`, secure
+    twin): validates the URL scheme and the *resolved* IP (not just the
+    hostname string -- the DNS-rebinding gap ``hostname_allowlist`` leaves
+    open) against private/reserved ranges before fetching. Safety matrix:
+    ``effect=neutralises``, ``neutralizes: [ssrf_request_forgery]``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "scheme_and_resolved_ip_allowlist",
+            "transform",
+            _TRANSFORM_ENV,
+            "scheme_and_resolved_ip_allowlist.php.j2",
+        )
+
+
+class RawHeaderConcatTransform(TemplateModule):
+    """The ``raw_header_concat`` op under the new `CC-LAB-0135`
+    ``outbound_http_request_header_value`` sink_family (a distinct
+    `(op, sink_family)` row from the existing `email_header_value` entry
+    of the same op name): the tainted trigger word is concatenated
+    directly into a raw ``"Name: value\\r\\n"`` header block for PHP's
+    stream-context ``header`` string option -- an embedded ``\\r\\n``
+    splices in an arbitrary extra header line. Safety matrix:
+    ``effect=no_effect``."""
+
+    def __init__(self) -> None:
+        super().__init__("raw_header_concat", "transform", _TRANSFORM_ENV, "raw_header_concat.php.j2")
+
+
+class StructuredHttpClientHeadersTransform(TemplateModule):
+    """The ``structured_http_client_headers`` op (`CC-LAB-0135`, secure
+    twin): Laravel's ``Http`` facade (Guzzle-backed) sets the header as a
+    structured value, never raw-concatenated text -- Guzzle's real PSR-7
+    ``Request`` constructor rejects any CRLF-bearing header value. Safety
+    matrix: ``effect=neutralises``,
+    ``neutralizes: [outbound_header_injection]``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "structured_http_client_headers",
+            "transform",
+            _TRANSFORM_ENV,
+            "structured_http_client_headers.php.j2",
+        )
+
+
 # --- sinks ----------------------------------------------------------------
 #
 # Every sink branches on `bound` where a bound form exists at all, so one
@@ -627,6 +728,39 @@ class OrmEntityBulkAssignSink(TemplateModule):
 
     def __init__(self) -> None:
         super().__init__("orm_entity_bulk_assign", "sink", _SINK_ENV, "orm_entity_bulk_assign.php.j2")
+
+
+class WebhookSignatureVerificationSink(TemplateModule):
+    """The ``webhook_signature_verification`` sink family (`CC-LAB-0133`,
+    Huddle Hub): accepts and "processes" the event -- illustrative, sets
+    ``$rows`` for ``single_statement``'s default JSON-response tail. Reached
+    only if whichever signature-verification transform ran didn't already
+    return a 403 response above it."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "webhook_signature_verification", "sink", _SINK_ENV, "webhook_signature_verification.php.j2"
+        )
+
+
+class ServerSideHttpFetchSink(TemplateModule):
+    """The ``server_side_http_fetch`` sink family (`CC-LAB-0134`, Huddle
+    Hub): returns a preview of whatever content the fetch-validation
+    transform produced -- illustrative, sets ``$rows``. Reached only if
+    that transform didn't already return a 400 response above it."""
+
+    def __init__(self) -> None:
+        super().__init__("server_side_http_fetch", "sink", _SINK_ENV, "server_side_http_fetch.php.j2")
+
+
+class OutboundWebhookDeliverySink(TemplateModule):
+    """The ``outbound_webhook_delivery`` sink family (`CC-LAB-0135`, Huddle
+    Hub): returns the delivery result whichever header-construction
+    transform produced -- illustrative, sets ``$rows``. Reached only if
+    that transform didn't already return a 400 response above it."""
+
+    def __init__(self) -> None:
+        super().__init__("outbound_webhook_delivery", "sink", _SINK_ENV, "outbound_webhook_delivery.php.j2")
 
 
 class DomInnerhtmlEchoSink(TemplateModule):
@@ -912,6 +1046,7 @@ SOURCES: dict[str, Module] = {
     "all_post_params": AllPostParamsSource(),
     # L-P3.3c-DOM (reviews.php/feedback.php): no PHP source at all.
     "dom_url_source": DomUrlSource(),
+    "webhook_request": WebhookRequestSource(),
 }
 #: Transform ops. Every name here must also have a row for every sink family
 #: it is authored against in ``lab/safety_matrix.yaml`` -- an op this emitter
@@ -931,6 +1066,12 @@ TRANSFORMS: dict[str, Module] = {
     "runtime_field_allowlist": RuntimeFieldAllowlistTransform(),
     # L-P3.3c-DOM (reviews.php/feedback.php): the client-side write mechanism.
     "dom_text_content": DomTextContentTransform(),
+    "loose_equality_compare": LooseEqualityCompareTransform(),
+    "constant_time_compare": ConstantTimeCompareTransform(),
+    "unchecked_url_fetch": UncheckedUrlFetchTransform(),
+    "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistTransform(),
+    "raw_header_concat": RawHeaderConcatTransform(),
+    "structured_http_client_headers": StructuredHttpClientHeadersTransform(),
 }
 #: Sinks. The three HTML sinks render a **Blade view** body rather than a
 #: controller statement; :data:`VIEW_SINKS` names them so the emitter knows
@@ -951,6 +1092,9 @@ SINKS: dict[str, Module] = {
     "orm_entity_bulk_assign": OrmEntityBulkAssignSink(),
     # L-P3.3c-DOM: reviews.php/feedback.php's client-only DOM-XSS sink.
     "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
+    "webhook_signature_verification": WebhookSignatureVerificationSink(),
+    "server_side_http_fetch": ServerSideHttpFetchSink(),
+    "outbound_webhook_delivery": OutboundWebhookDeliverySink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

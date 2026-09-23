@@ -239,6 +239,25 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
     "unescaped_regex_construct": {},
     "regex_escape_construct": {},
     "regex_highlight_match": {"value_expr": "$term"},
+    # CC-LAB-0133: registered in the shared vocabulary so minimal_pair can
+    # classify them (this cell is built on php_laravel only, category 3's
+    # Huddle Hub).
+    "webhook_request": {"var_name": "webhookRawBody", "secret": "test-secret"},
+    "loose_equality_compare": {"value_expr": "$webhookRawBody"},
+    "constant_time_compare": {"value_expr": "$webhookRawBody"},
+    "webhook_signature_verification": {"value_expr": "$webhookRawBody"},
+    # CC-LAB-0134: registered in the shared vocabulary so minimal_pair can
+    # classify them (this cell is built on php_laravel only, category 3's
+    # Huddle Hub).
+    "unchecked_url_fetch": {"value_expr": "$unfurlUrl"},
+    "scheme_and_resolved_ip_allowlist": {"value_expr": "$unfurlUrl"},
+    "server_side_http_fetch": {"value_expr": "$unfurlUrl"},
+    # CC-LAB-0135: registered in the shared vocabulary so minimal_pair can
+    # classify them (this cell is built on php_laravel only, category 3's
+    # Huddle Hub).
+    "raw_header_concat": {"value_expr": "$triggerWord"},
+    "structured_http_client_headers": {"value_expr": "$triggerWord"},
+    "outbound_webhook_delivery": {"value_expr": "$triggerWord"},
 }
 
 

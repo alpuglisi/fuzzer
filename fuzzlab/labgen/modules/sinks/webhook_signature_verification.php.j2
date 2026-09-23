@@ -1,0 +1,6 @@
+// The event is accepted and "processed" -- illustrative: only reached if
+// whichever signature-verification transform ran didn't already return
+// early above. `value_expr` is the raw body; echoed via its length only
+// (this sink never escapes/filters the value itself, per this file's own
+// convention -- see orm_entity_bulk_assign.php.j2's docstring).
+$row = ['status' => 'accepted', 'received_bytes' => strlen({{ value_expr }})];

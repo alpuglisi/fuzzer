@@ -1,0 +1,5 @@
+// The delivery result is returned -- illustrative: only reached if
+// whichever header-construction transform ran didn't already reject
+// above. `value_expr` is the trigger word; echoed verbatim (this sink
+// never escapes/filters it itself, per this stack's own convention).
+$rows = ['trigger_word' => {{ value_expr }}, 'delivery_preview' => substr($__deliveryResult, 0, 200)];

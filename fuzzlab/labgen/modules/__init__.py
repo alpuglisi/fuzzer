@@ -780,6 +780,141 @@ class RegexHighlightMatchSink(TemplateModule):
 
     def __init__(self) -> None:
         super().__init__("regex_highlight_match", "sink", _SINK_ENV, "regex_highlight_match.php.j2")
+class WebhookRequestSource(TemplateModule):
+    """The ``webhook_request`` source (`CC-LAB-0133`, Huddle Hub's
+    webhook-signature-verification cell): the raw request body plus the
+    ``X-Signature`` header (via ``$_SERVER``/``php://input``, this stack's
+    own idiom) and a fixed, lab-only shared secret. Registered for the
+    shared minimal-pair vocabulary only -- ``php_current``'s own
+    ``_MODULE_SET_BY_SHAPE`` is not widened to this shape (the cell is
+    built on ``php_laravel`` only, per category 3's stack pick); this
+    registration is what lets `php_laravel`'s own composition line
+    classify by name (see this module's own docstring, decision 1)."""
+
+    def __init__(self) -> None:
+        super().__init__("webhook_request", "source", _SOURCE_ENV, "webhook_request.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        template = self._env.get_template(self._template_name)
+        code = template.render(var_name=ctx["var_name"], secret=ctx["secret"])
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = f"${ctx['var_name']}"
+        return RenderResult(code=code, context=new_ctx)
+
+
+class LooseEqualityCompareTransform(TemplateModule):
+    """The ``loose_equality_compare`` op (`CC-LAB-0133`, `weak_signature_
+    comparison` concern): PHP's ``==``/``!=`` operators both short-circuit
+    and type-juggle hex-looking numeric strings as equal numbers (the
+    documented "magic hash" bypass). Safety matrix: ``effect=partial``,
+    ``neutralizes: [weak_signature_comparison]``. Registered for the shared
+    minimal-pair vocabulary only, same reasoning as
+    :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("loose_equality_compare", "transform", _TRANSFORM_ENV, "loose_equality_compare.php.j2")
+
+
+class ConstantTimeCompareTransform(TemplateModule):
+    """The ``constant_time_compare`` op (`CC-LAB-0133`, secure twin): PHP's
+    ``hash_equals()``. Safety matrix: ``effect=neutralises``,
+    ``neutralizes: [weak_signature_comparison]``. Registered for the shared
+    minimal-pair vocabulary only, same reasoning as
+    :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("constant_time_compare", "transform", _TRANSFORM_ENV, "constant_time_compare.php.j2")
+
+
+class WebhookSignatureVerificationSink(TemplateModule):
+    """The ``webhook_signature_verification`` sink family (`CC-LAB-0133`):
+    accepts and "processes" the event -- illustrative, echoes ``value_expr``
+    via its length only (never escapes/filters it itself, per this file's
+    own convention). Registered for the shared minimal-pair vocabulary
+    only, same reasoning as :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "webhook_signature_verification", "sink", _SINK_ENV, "webhook_signature_verification.php.j2"
+        )
+
+
+class UncheckedUrlFetchTransform(TemplateModule):
+    """The ``unchecked_url_fetch`` op (`CC-LAB-0134`): fetches a tainted URL
+    with zero host/scheme validation -- SSRF. Safety matrix:
+    ``effect=no_effect``. Registered for the shared minimal-pair vocabulary
+    only, same reasoning as :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("unchecked_url_fetch", "transform", _TRANSFORM_ENV, "unchecked_url_fetch.php.j2")
+
+
+class SchemeAndResolvedIpAllowlistTransform(TemplateModule):
+    """The ``scheme_and_resolved_ip_allowlist`` op (`CC-LAB-0134`, secure
+    twin): validates the URL scheme and the resolved IP (not just the
+    hostname string) against private/reserved ranges. Safety matrix:
+    ``effect=neutralises``, ``neutralizes: [ssrf_request_forgery]``.
+    Registered for the shared minimal-pair vocabulary only, same reasoning
+    as :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "scheme_and_resolved_ip_allowlist",
+            "transform",
+            _TRANSFORM_ENV,
+            "scheme_and_resolved_ip_allowlist.php.j2",
+        )
+
+
+class ServerSideHttpFetchSink(TemplateModule):
+    """The ``server_side_http_fetch`` sink family (`CC-LAB-0134`): returns a
+    preview of the fetched content -- illustrative, echoes ``value_expr``
+    (the requested URL) verbatim. Registered for the shared minimal-pair
+    vocabulary only, same reasoning as :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("server_side_http_fetch", "sink", _SINK_ENV, "server_side_http_fetch.php.j2")
+
+
+class RawHeaderConcatTransform(TemplateModule):
+    """The ``raw_header_concat`` op under the `CC-LAB-0135`
+    ``outbound_http_request_header_value`` sink_family (a distinct
+    `(op, sink_family)` row from the existing `email_header_value` entry
+    of the same op name): raw string header-block concatenation, an
+    embedded CRLF splices in an arbitrary extra outbound request header.
+    Safety matrix: ``effect=no_effect``. Registered for the shared
+    minimal-pair vocabulary only, same reasoning as
+    :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("raw_header_concat", "transform", _TRANSFORM_ENV, "raw_header_concat.php.j2")
+
+
+class StructuredHttpClientHeadersTransform(TemplateModule):
+    """The ``structured_http_client_headers`` op (`CC-LAB-0135`, secure
+    twin): a structured HTTP-client header API that rejects CRLF-bearing
+    values. Safety matrix: ``effect=neutralises``,
+    ``neutralizes: [outbound_header_injection]``. Registered for the
+    shared minimal-pair vocabulary only, same reasoning as
+    :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "structured_http_client_headers",
+            "transform",
+            _TRANSFORM_ENV,
+            "structured_http_client_headers.php.j2",
+        )
+
+
+class OutboundWebhookDeliverySink(TemplateModule):
+    """The ``outbound_webhook_delivery`` sink family (`CC-LAB-0135`):
+    returns the delivery result -- illustrative, echoes ``value_expr``
+    (the trigger word) verbatim. Registered for the shared minimal-pair
+    vocabulary only, same reasoning as :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("outbound_webhook_delivery", "sink", _SINK_ENV, "outbound_webhook_delivery.php.j2")
 
 
 SOURCES: dict[str, Module] = {
@@ -794,6 +929,9 @@ SOURCES: dict[str, Module] = {
     # CC-LAB-0070: prototype pollution -- vocabulary-only, same discipline as
     # dom_url_source above. node_express is the only emitter that renders it.
     "post_body_json": PostBodyJsonSource(),
+    # CC-LAB-0133: registered for the shared minimal-pair vocabulary only --
+    # this cell is built on php_laravel only (category 3's Huddle Hub).
+    "webhook_request": WebhookRequestSource(),
 }
 class UnguardedDeepMergeTransform(TemplateModule):
     """CC-LAB-0070: vocabulary-only registration of the JS/node_express
@@ -849,6 +987,18 @@ TRANSFORMS: dict[str, Module] = {
     # renders either op for real.
     "unescaped_regex_construct": UnescapedRegexConstructTransform(),
     "regex_escape_construct": RegexEscapeConstructTransform(),
+    # CC-LAB-0133: registered for the shared minimal-pair vocabulary only --
+    # this cell is built on php_laravel only (category 3's Huddle Hub).
+    "loose_equality_compare": LooseEqualityCompareTransform(),
+    "constant_time_compare": ConstantTimeCompareTransform(),
+    # CC-LAB-0134: registered for the shared minimal-pair vocabulary only --
+    # this cell is built on php_laravel only (category 3's Huddle Hub).
+    "unchecked_url_fetch": UncheckedUrlFetchTransform(),
+    "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistTransform(),
+    # CC-LAB-0135: registered for the shared minimal-pair vocabulary only --
+    # this cell is built on php_laravel only (category 3's Huddle Hub).
+    "raw_header_concat": RawHeaderConcatTransform(),
+    "structured_http_client_headers": StructuredHttpClientHeadersTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -880,6 +1030,11 @@ SINKS: dict[str, Module] = {
     # object_property_bulk_set above. node_express is the only emitter that
     # renders it.
     "regex_highlight_match": RegexHighlightMatchSink(),
+    # CC-LAB-0133: registered for the shared minimal-pair vocabulary only --
+    # this cell is built on php_laravel only (category 3's Huddle Hub).
+    "webhook_signature_verification": WebhookSignatureVerificationSink(),
+    "server_side_http_fetch": ServerSideHttpFetchSink(),
+    "outbound_webhook_delivery": OutboundWebhookDeliverySink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

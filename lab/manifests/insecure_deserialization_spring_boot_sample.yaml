@@ -1,0 +1,37 @@
+# Insecure-deserialization sample manifest (`CC-LAB-0132`/`FR-LAB-80`),
+# `spring_boot`.
+#
+# TrackerNest's (category 3, Atlassian pick) third and final designed cell
+# -- see docs/research/category3-saas-functionality-and-cwe-research.md
+# sec 6b for the page/vulnerability-class design and sec 4 for the CWE
+# research (real Java `ObjectInputStream` unrestricted-type-construction
+# footgun, CWE-502). Both twins reuse EXISTING `lab/safety_matrix.yaml`
+# ops for the `object_deserialization` family (no new safety-matrix entry
+# needed, unlike CC-LAB-0131's XXE cell): the vulnerable twin
+# (`function_executing_deserialize`) constructs whatever `Serializable`
+# class a request's serialized bytes name; the secure twin
+# (`handler_registry_lookup`) allowlists exactly one expected class name
+# (`com.fuzzlab.trackernest.generated.WebhookEvent`) via a
+# `resolveClass()` override, rejecting everything else. Same route, never
+# live-booted together -- see `mass_assignment_laravel_sample.yaml`'s own
+# twin-pair precedent.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-DESER-0001
+    class: insecure_deserialization
+    stack_profile: spring_boot
+    route: { method: POST, path: /integrations/webhook-payload }
+    sink_context:
+      family: object_deserialization
+      required_neutralizations: [insecure_deserialization]
+    transform: [function_executing_deserialize]
+
+  - cell_id: LABGEN-DESER-0002
+    class: insecure_deserialization
+    stack_profile: spring_boot
+    route: { method: POST, path: /integrations/webhook-payload }
+    sink_context:
+      family: object_deserialization
+      required_neutralizations: [insecure_deserialization]
+    transform: [handler_registry_lookup]

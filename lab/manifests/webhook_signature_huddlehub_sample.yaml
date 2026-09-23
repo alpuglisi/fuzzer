@@ -1,0 +1,34 @@
+# Webhook-signature-verification sample manifest (`CC-LAB-0133`/`FR-LAB-115`),
+# `php_laravel`.
+#
+# Huddle Hub's (category 3's Slack pick) first designed cell -- see
+# docs/research/category3-saas-functionality-and-cwe-research.md sec 6a for
+# the page/vulnerability-class design and sec 2 for the CWE research (real
+# PHP "magic hash" `==` type-juggling comparison bug, matching
+# docs/research/corpus-examples/webhook-signature/php/vulnerable-loose-equal-5.php).
+# The vulnerable twin (`loose_equality_compare`) recomputes the HMAC and
+# compares it with PHP's `==` operator; the secure twin
+# (`constant_time_compare`) uses `hash_equals()`. Both share the same
+# illustrative route (served at `/cell/<slug>`, per `php_laravel`'s own
+# convention for a non-migrated page), never live-booted together --
+# mirrors `mass_assignment_laravel_sample.yaml`'s own twin-pair precedent.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-HHB-0001
+    class: webhook_signature_bypass
+    stack_profile: php_laravel
+    route: { method: POST, path: /webhooks/events }
+    sink_context:
+      family: webhook_signature_verification
+      required_neutralizations: [weak_signature_comparison]
+    transform: [loose_equality_compare]
+
+  - cell_id: LABGEN-HHB-0002
+    class: webhook_signature_bypass
+    stack_profile: php_laravel
+    route: { method: POST, path: /webhooks/events }
+    sink_context:
+      family: webhook_signature_verification
+      required_neutralizations: [weak_signature_comparison]
+    transform: [constant_time_compare]

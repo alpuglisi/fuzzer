@@ -8,6 +8,11 @@ venv/
 !lab/ground-truth/*.csv
 !lab/ground-truth-meadowmart/*.csv
 !lab/ground-truth-picktrail-django/*.csv
+# CC-LAB-0136/CC-LAB-0137: category 3's TrackerNest and Huddle Hub apps
+# each have their own ground-truth directory (D9's out-of-band contract),
+# same "tracked, not generated" rule
+!lab/ground-truth-trackernest/*.csv
+!lab/ground-truth-huddlehub/*.csv
 # python build / test artifacts
 *.egg-info/
 build/
