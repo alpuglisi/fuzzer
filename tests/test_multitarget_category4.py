@@ -10,17 +10,24 @@ the `run_targets()` passthrough gap and added the project's first `ssrf`
 audit rule + oracle strategies).
 
 **What this now proves, and what remains honestly open (recorded here, not
-routed around).** Twitch now has nine real cells (webhook-signature,
+routed around).** Twitch now has ten real cells (webhook-signature,
 SSRF, access-control/IDOR, JWT `alg:none` confusion, predictable session
 tokens, channel-profile mass assignment, a second access-control/IDOR
 instance at `/channels/subscribers`, a second SSRF instance at
-`/clips/download`, and an unrestricted-file-upload cell at `/channels/
-emotes/upload` -- `CC-LAB-0178`/`CC-LAB-0180`/`CC-LAB-0181`/`CC-LAB-0182`/
-`CC-LAB-0183`/`CC-LAB-0185`/`CC-LAB-0186`, the "coherent page/route set"
-depth work), and eight of the nine now confirm for real (only
-webhook-signature does not -- its CWE-347 timing side channel is
+`/clips/download`, an unrestricted-file-upload cell at `/channels/
+emotes/upload`, and a price-integrity-bypass cell at `/subscriptions/
+purchase` -- `CC-LAB-0178`/`CC-LAB-0180`/`CC-LAB-0181`/`CC-LAB-0182`/
+`CC-LAB-0183`/`CC-LAB-0185`/`CC-LAB-0186`/`CC-LAB-0189`, the "coherent
+page/route set" depth work), and nine of the ten now confirm for real
+(only webhook-signature does not -- its CWE-347 timing side channel is
 empirically infeasible for this project's wall-clock HTTP measurement
-model). The unrestricted-file-upload cell's own detection follow-on
+model). The price-integrity-bypass cell (`TWCH-0010`, `CC-LAB-0189`)
+needed zero new detection code: `PriceIntegrityBypassStrategy` (already
+built for `spring_boot`'s Netflix cell, `CC-FUZZ-0037`) confirms the new
+vulnerable twin and correctly fails closed on its new secure twin as-is,
+verified against a real booted `go_net_http` app -- the first proof this
+strategy generalizes across stacks in the direction `spring_boot` ->
+`go_net_http`. The unrestricted-file-upload cell's own detection follow-on
 (`TWCH-0009`, `CC-AUD-0023`/`CC-FUZZ-0036`) is new, genuinely new
 detection logic (not a zero-new-code generalization like the two below):
 `UnrestrictedFileUploadContentTypeTrustStrategy` sends a real
@@ -222,9 +229,17 @@ def _twitch_cells():
     unrestricted_file_upload = load_manifest(
         "lab/manifests/unrestricted_file_upload_go_sample.yaml"
     ).cells
+    # CC-LAB-0189: this stack's first price_integrity_bypass/
+    # payment_charge_amount instance (/subscriptions/purchase). Needed zero
+    # new detection code: PriceIntegrityBypassStrategy (already built for
+    # spring_boot's Netflix cell, CC-FUZZ-0037) confirms it verbatim.
+    price_integrity = load_manifest(
+        "lab/manifests/price_integrity_twitch_subscription_sample.yaml"
+    ).cells
     return (
         webhook + ssrf + access_control + jwt + weak_token + mass_assignment
         + access_control_subscribers + ssrf_clips_download + unrestricted_file_upload
+        + price_integrity
     )
 
 
@@ -297,11 +312,23 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # `probe.svg` back as `image/svg+xml` regardless of its real, non-image
     # bytes, and correctly fails closed on the secure
     # `extension_allowlist_mime_check` twin (`LABGEN-GO-0018`, which rejects
-    # the non-allowlisted upload outright). Eight of nine positives confirm
-    # here now (only webhook-signature remains permanently undetected).
+    # the non-allowlisted upload outright). The 10th page's
+    # price-integrity-bypass cell (TWCH-0010, CC-LAB-0189) ALSO confirms for
+    # real, needing zero new detection code: `PriceIntegrityBypassStrategy`
+    # (already built for `spring_boot`'s Netflix cell, `CC-FUZZ-0037`) sees
+    # the vulnerable `client_trusted_amount` twin (`LABGEN-GO-0019`) track
+    # both of its two deliberately different, implausible submitted amounts
+    # exactly, and correctly fails closed on the secure
+    # `server_recomputed_amount` twin (`LABGEN-GO-0020`, which rejects the
+    # unrecognized `plan_tier="standard"` probe outright with HTTP 400) --
+    # the first proof this strategy generalizes across stacks in the
+    # direction `spring_boot` -> `go_net_http` (complementing
+    # `CC-LAB-0187`'s own proof of `AccessControlIdorStrategy` generalizing
+    # the other way). Nine of ten positives confirm here now (only
+    # webhook-signature remains permanently undetected).
     twitch_report = by_name["twitch-clone"].report
-    assert twitch_report.tp == 8 and twitch_report.fp == 0
-    assert round(twitch_report.recall, 4) == round(8 / 9, 4)
+    assert twitch_report.tp == 9 and twitch_report.fp == 0
+    assert round(twitch_report.recall, 4) == round(9 / 10, 4)
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002, which does have a rule/strategy, R-XXE/
@@ -320,7 +347,7 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
-    assert round(summary["macro_recall"], 4) == round(((8 / 9) + (1 / 5)) / 2, 4)
+    assert round(summary["macro_recall"], 4) == round(((9 / 10) + (1 / 5)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True

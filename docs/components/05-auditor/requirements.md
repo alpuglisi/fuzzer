@@ -122,6 +122,13 @@ budget where a vulnerability is plausible.
   closing `CC-LAB-0188`'s own deliberately-deferred detection follow-on
   for Netflix's price-integrity-bypass cell (`NFLX-0005`). Rule-generation
   only — confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-23`).
+  **Cross-stack generalization, verified live (`CC-LAB-0189`,
+  2026-09-23, updated in place)**: this rule's own `location_in`/
+  `sink_context_in` gate was never stack-specific, so it needed **zero**
+  changes to also generate a candidate for `go_net_http`'s new
+  `price_integrity_bypass` cell (`TWCH-0010`, Twitch's channel-
+  subscription-purchase endpoint) — verified directly, not merely
+  assumed from the rule's shape.
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that

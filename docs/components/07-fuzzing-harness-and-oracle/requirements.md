@@ -421,6 +421,22 @@ rewards) derives from it.
     wiring (`test_netflix_multi_cell_boot_confirms_all_positives`,
     extended): Netflix's real, scored recall in that multi-cell boot
     moves from 4/4 to 5/5.
+  - **Cross-stack generalization, verified live (`CC-LAB-0189`,
+    2026-09-23, updated in place)**: `go_net_http` gained its own first
+    `price_integrity_bypass` instance (`TWCH-0010`, Twitch's channel-
+    subscription-purchase endpoint) using the same fixed `plan_tier`/
+    `monthly_charge` field names this strategy already hardcodes, as a
+    deliberate design choice made specifically to prove reuse. This
+    strategy needed **zero** new code to confirm the new `go_net_http`
+    vulnerable twin and correctly fail closed on its new secure twin --
+    the first proof this strategy generalizes across stacks in the
+    direction `spring_boot` -> `go_net_http` (this entry's own original
+    proof, above, was single-stack; `FR-LAB-127`'s `AccessControlIdor
+    Strategy` proof went the other direction, `go_net_http` ->
+    `spring_boot`). Verified through the real `fuzzlab.harness.
+    multitarget` pipeline (`tests/test_multitarget_category4.py::
+    test_both_apps_run_through_multitarget_for_real`, extended): Twitch's
+    real, scored recall in that boot moves from 8/9 to 9/10.
 
 - **FR-FUZZ-19** *(`JwtAlgNoneConfusionStrategy`; `CC-FUZZ-0033`,
   2026-09-23).* The oracle supports real **JWT algorithm-confusion

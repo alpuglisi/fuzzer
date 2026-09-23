@@ -888,3 +888,131 @@ def test_real_boot_proves_the_unrestricted_file_upload_differential_for_both_twi
             f"secure twin did not serve a real PNG back as image/png -- got "
             f"{secure_ok_resp.headers.get('Content-Type')!r}"
         )
+
+
+# -- Phase B tenth increment: price-integrity-bypass (payment_charge_amount) --
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_price_integrity_differential_for_both_twins() -> None:
+    """Three real assertions, isolating exactly what the server-side price
+    lookup controls (CC-LAB-0189):
+
+    (a) the vulnerable twin echoes back whatever `monthly_charge` the
+        client sends, for an entirely made-up `plan_tier` -- it never
+        looks the price up at all (CWE-807).
+    (b) the secure twin fails closed (HTTP 400) on that same made-up
+        `plan_tier`, since its price table has no entry for it -- the
+        client-supplied amount is never trusted as a fallback.
+    (c) the secure twin's lookup is genuinely data-driven, not a
+        disguised constant: two different real tiers (`tier1`/`tier2`)
+        return two different, real, fixed prices, both independent of
+        whatever the client submitted.
+    """
+    import json
+
+    manifest = load_manifest("lab/manifests/price_integrity_twitch_subscription_sample.yaml")
+    emitter = GoEmitter()
+
+    with GoLiveBootHarness(emitter, manifest.cells) as harness:
+        # (a) vulnerable twin: the client-supplied amount tracks verbatim.
+        vuln_low = harness.request(
+            "POST", "/generated/labgen-go-0019",
+            body=json.dumps({"plan_tier": "standard", "monthly_charge": 0.01}).encode(),
+        )
+        assert vuln_low.status == 200
+        assert json.loads(vuln_low.body)["monthly_charge"] == 0.01
+
+        vuln_high = harness.request(
+            "POST", "/generated/labgen-go-0019",
+            body=json.dumps({"plan_tier": "standard", "monthly_charge": 999999.99}).encode(),
+        )
+        assert vuln_high.status == 200
+        assert json.loads(vuln_high.body)["monthly_charge"] == 999999.99, (
+            "vulnerable twin did not honor the client-supplied monthly_charge -- "
+            "not actually price-integrity-bypassable"
+        )
+
+        # (b) secure twin: an unrecognized plan_tier fails closed, never
+        # falling back to the client-supplied amount.
+        secure_unknown = harness.request(
+            "POST", "/generated/labgen-go-0020",
+            body=json.dumps({"plan_tier": "standard", "monthly_charge": 0.01}).encode(),
+        )
+        assert secure_unknown.status == 400, (
+            f"secure twin did not fail closed on an unrecognized plan_tier "
+            f"(status={secure_unknown.status})"
+        )
+
+        # (c) secure twin: two real tiers return two distinct, real, fixed
+        # prices -- a genuine data-driven lookup, never a disguised constant.
+        secure_tier1 = harness.request(
+            "POST", "/generated/labgen-go-0020",
+            body=json.dumps({"plan_tier": "tier1", "monthly_charge": 0.01}).encode(),
+        )
+        secure_tier2 = harness.request(
+            "POST", "/generated/labgen-go-0020",
+            body=json.dumps({"plan_tier": "tier2", "monthly_charge": 0.01}).encode(),
+        )
+        assert secure_tier1.status == 200 and secure_tier2.status == 200
+        price_tier1 = json.loads(secure_tier1.body)["monthly_charge"]
+        price_tier2 = json.loads(secure_tier2.body)["monthly_charge"]
+        assert price_tier1 == 4.99
+        assert price_tier2 == 9.99
+        assert price_tier1 != price_tier2, (
+            "secure twin's plan_tier price lookup returned the same price for "
+            "two different tiers -- a disguised constant, not a real map"
+        )
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_price_integrity_strategy_generalizes_from_spring_boot() -> None:
+    """The real `PriceIntegrityBypassStrategy` (`CC-FUZZ-0037`, built for
+    `spring_boot`'s Netflix cell, `CC-LAB-0188`), driven against a real
+    booted `go_net_http` app rather than a fake sender: needs **zero** new
+    code to confirm this stack's new vulnerable twin and correctly fail
+    closed on its new secure twin -- the first proof this strategy
+    generalizes across stacks in the direction `spring_boot` ->
+    `go_net_http` (complementing `CC-LAB-0187`'s own proof of
+    `AccessControlIdorStrategy` generalizing `go_net_http` ->
+    `spring_boot`)."""
+    from fuzzlab.oracle.probe import Candidate, Probe
+    from fuzzlab.oracle.strategies import PriceIntegrityBypassStrategy
+
+    manifest = load_manifest("lab/manifests/price_integrity_twitch_subscription_sample.yaml")
+    emitter = GoEmitter()
+    cells = {c.cell_id: c for c in manifest.cells}
+
+    def _cand():
+        return Candidate(url="http://h/generated/labgen-go-0019", param="body",
+                         method="POST", location="body",
+                         vuln_class="price_integrity_bypass",
+                         category="price-integrity-bypass", content_type="application/json")
+
+    strategy = PriceIntegrityBypassStrategy()
+
+    with GoLiveBootHarness(emitter, [cells["LABGEN-GO-0019"]]) as harness:
+        class _HarnessSender:
+            def send(self, url, param, value, timing=False, method="POST",
+                      location="body", content_type=None):
+                resp = harness.request("POST", "/generated/labgen-go-0019",
+                                       body=value.encode("utf-8"))
+                return Probe(resp.status, resp.body)
+
+        verdict = strategy.confirm(_cand(), _HarnessSender())
+        assert verdict is not None and verdict.confirmed, "strategy failed to confirm the real vulnerable twin"
+        assert verdict.vuln_class == "price_integrity_bypass"
+
+    with GoLiveBootHarness(emitter, [cells["LABGEN-GO-0020"]]) as harness:
+        class _HarnessSender:
+            def send(self, url, param, value, timing=False, method="POST",
+                      location="body", content_type=None):
+                resp = harness.request("POST", "/generated/labgen-go-0020",
+                                       body=value.encode("utf-8"))
+                return Probe(resp.status, resp.body)
+
+        assert strategy.confirm(_cand(), _HarnessSender()) is None, (
+            "strategy incorrectly confirmed the real secure twin"
+        )

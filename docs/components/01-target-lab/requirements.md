@@ -4324,6 +4324,99 @@ lane) can submit a payload as
   later, unlike the clean "no divergent work found" result `CC-LAB-0184`/
   `CC-LAB-0187` were able to report for their own, narrower touch sets.
 
+- **FR-LAB-129** *(Twitch's tenth real page: first `price_integrity_
+  bypass` instance, `/subscriptions/purchase`; `CC-LAB-0189`,
+  2026-09-23).* Genuinely new breadth for `go_net_http`, not a depth
+  reuse: this stack never had a `price_integrity_bypass` page before,
+  even though `spring_boot` already has one, real and detected
+  (`CC-LAB-0188`/`FR-LAB-128`, `PriceIntegrityBypassStrategy`/
+  `R-PRICE-INTEGRITY`, `CC-FUZZ-0037`/`CC-AUD-0025`). Reuses `lab/
+  safety_matrix.yaml`'s existing `payment_charge_amount` sink family and
+  its `client_trusted_amount`/`server_recomputed_amount` ops
+  (`CC-LAB-0063`) verbatim -- no new safety-matrix entry needed
+  (confirmed absent from every emitter on this stack before starting:
+  `grep -rln "client_trusted_amount\|payment_charge_amount"
+  fuzzlab/labgen/emitters/go_net_http/` returned nothing). A
+  channel-subscription purchase endpoint (`POST /subscriptions/
+  purchase`, subscribing to a broadcaster's channel at a chosen tier --
+  Twitch's own signature, real, core monetization feature), genuinely
+  distinct from every other route this stack already has.
+  **Design, read directly from `CC-LAB-0188`'s own change-control entry
+  before building, not ported code**: this stack's module system already
+  has no separate transform stage for its Convention-2 shapes (SSRF,
+  mass-assignment, file-upload -- confirmed by reading `modules.py`'s own
+  docstring, not assumed), so this shape follows that same convention:
+  the manifest's one op names a sink module directly. A new source,
+  `ReadSubscriptionPurchaseRequestSource`, reads the whole raw request
+  body (the same "publish the raw body, let the sink parse its own JSON"
+  shape `ReadChannelProfileBodySource` already established for this
+  stack's other whole-body shape, mass-assignment -- reused as its own
+  distinct source class, not the same instance, since the two concerns
+  are conceptually unrelated). The vulnerable twin
+  (`ClientTrustedAmountSink`) unmarshals `plan_tier`/`monthly_charge`
+  from the body and echoes `monthly_charge` straight back verbatim, with
+  no server-side price lookup and no validation of `plan_tier` at all
+  (CWE-807). The secure twin (`ServerRecomputedAmountSink`) discards the
+  client-supplied amount entirely and looks the real price up in a
+  fixed, server-owned `plan_tier -> price` map (`tier1`/`tier2`/`tier3`,
+  three distinct real prices -- genuinely data-driven, not a disguised
+  constant, `CC-LAB-0188`'s own adequacy-review lesson applied
+  proactively here, before any implementation, not found missing by a
+  later review pass: proven live by the `tier1`/`tier2` live-boot cases
+  returning distinct real prices), failing closed (HTTP 400) on an
+  unrecognized `plan_tier` rather than silently defaulting -- the same
+  fail-closed design call `CC-LAB-0188` made for Netflix's own closed
+  tier enumeration, since a subscription-tier set has no legitimate
+  "unknown tier" case.
+  **Field names are this shape's own fixed, declared simplification,
+  chosen deliberately for detection reuse**: `plan_tier`/`monthly_charge`
+  are the exact field names `PriceIntegrityBypassStrategy` already
+  hardcodes (built for `spring_boot`'s Netflix cell) -- the same "accept
+  a fixed demo field/header name" convention this project already uses
+  elsewhere (`X-Broadcaster-Id`, `CC-LAB-0178`), chosen here specifically
+  so this new twin reuses that strategy verbatim rather than needing the
+  strategy widened.
+  Cells `LABGEN-GO-0019`/`0020`
+  (`lab/manifests/price_integrity_twitch_subscription_sample.yaml`);
+  ground truth `TWCH-0010` (`vuln_class="price_integrity_bypass"`,
+  `sink_context="payment_charge"` -- both pre-existing enum values from
+  Netflix's own `NFLX-0005`, no schema widening needed; `param="body"`/
+  `location="body"`, the same whole-body convention `TWCH-0005`/
+  `TWCH-0006` already use, applying `CC-FUZZ-0037`'s own correction
+  directly rather than repeating its mistake -- never a per-named-field
+  `param`, which would silently starve the harness's whole-body-JSON
+  Content-Type gate).
+  **Real live-boot proof**
+  (`tests/test_labgen_go_live_boot.py`, real assemble/build/boot/HTTP
+  round trip): a manipulated
+  `{"plan_tier":"standard","monthly_charge":0.01}` request is trusted and
+  reflected verbatim by the vulnerable twin (and again for
+  `999999.99`), while the secure twin fails closed (HTTP 400) on that
+  same unrecognized `plan_tier`, and returns distinct real prices for
+  `tier1`/`tier2` (`4.99`/`9.99`).
+  **Detection generalization, verified for real against a real booted
+  app, not asserted from theory**: `PriceIntegrityBypassStrategy`
+  (`CC-FUZZ-0037`, built for `spring_boot`'s Netflix cell) needed **zero**
+  new code to confirm this new `go_net_http` vulnerable twin and
+  correctly fail closed on its new secure twin -- the first proof this
+  strategy generalizes **across stacks** in the direction `spring_boot`
+  -> `go_net_http` (complementing `CC-LAB-0187`'s own proof of
+  `AccessControlIdorStrategy` generalizing the other way,
+  `go_net_http` -> `spring_boot`). The real
+  `fuzzlab.harness.multitarget.run_targets` pipeline was then run end to
+  end against a real booted Twitch instance assembling all ten of
+  Twitch's own cells in one hand-rolled multi-target boot
+  (`tests/test_multitarget_category4.py::
+  test_both_apps_run_through_multitarget_for_real`, extended), and shows
+  Twitch's own real, scored recall in that boot moving from `8/9` to
+  `9/10` (`tp=9, fp=0`) with no new audit-rule/strategy code at all.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0188`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded in `CC-LAB-0189`.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

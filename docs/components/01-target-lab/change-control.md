@@ -3,6 +3,204 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0189 — Twitch's 10th real page: first price_integrity_bypass instance, `/subscriptions/purchase` (FR-LAB-129) (2026-09-23)
+
+- Change: genuinely new breadth for category 4's Twitch pick, explicitly
+  **not** a cheap "second instance" depth increment like `CC-LAB-0180`-
+  `0186` -- Twitch has never had a `price_integrity_bypass` page before,
+  even though `spring_boot` already has one, real and detected
+  (`CC-LAB-0188`/`FR-LAB-128`, `PriceIntegrityBypassStrategy`/
+  `R-PRICE-INTEGRITY`, `CC-FUZZ-0037`/`CC-AUD-0025`). Reuses `lab/
+  safety_matrix.yaml`'s existing `payment_charge_amount` sink family and
+  its `client_trusted_amount`/`server_recomputed_amount` ops
+  (`CC-LAB-0063`) verbatim -- no new safety-matrix entry needed
+  (confirmed absent from every emitter on this stack before starting:
+  `grep -rln "client_trusted_amount\|payment_charge_amount"
+  fuzzlab/labgen/emitters/go_net_http/` returned nothing). A
+  channel-subscription purchase endpoint (`POST /subscriptions/
+  purchase`, subscribing to a broadcaster's channel at a chosen tier --
+  Twitch's own real, plausible, signature monetization feature), a real,
+  distinct route from every other one this stack already has.
+
+  **Cross-branch collision check, performed and recorded**: `git fetch
+  origin claude/category-3-build-iuu5k9 claude/category-5-build-6boejs`
+  followed by `git diff --numstat HEAD <branch> -- <file>` against both
+  sibling branches for every file this entry touches
+  (`fuzzlab/labgen/emitters/go_net_http/__init__.py`,
+  `fuzzlab/labgen/emitters/go_net_http/modules.py`, its new templates,
+  `lab/manifests/price_integrity_twitch_subscription_sample.yaml`,
+  `lab/ground-truth-twitch-clone/`, this component's `requirements.md`):
+  every diff showed only deletions relative to this branch (both sibling
+  branches strictly behind this branch's own tip on every one of those
+  files) -- no divergent work to reconcile. `fuzzlab/oracle/strategies.py`
+  and `fuzzlab/audit/rules_data/default_rules.json` were read but not
+  edited by this entry (the existing `PriceIntegrityBypassStrategy`/
+  `R-PRICE-INTEGRITY` generalized with zero new code, verified live
+  below) -- not fetched/diffed against the sibling branches since this
+  entry makes no change to either file.
+
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0188`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded here rather than silently
+  skipping the gate. **(1) Accuracy** -- checked by direct source
+  inspection, not assumed: `go_net_http`'s existing Convention-2 shapes
+  (SSRF, mass-assignment, file-upload -- `modules.py`'s own docstring,
+  read before designing anything) already establish "the manifest's one
+  op names a sink module directly, no separate transform stage" for a
+  shape whose vulnerable/secure difference is one inseparable operation
+  -- this concern fits that convention exactly (trust-the-client vs.
+  recompute-server-side is inseparable from which sink renders, the same
+  reasoning `CC-LAB-0188` used for `spring_boot`'s own shape, which
+  independently arrived at the identical "op selects sink" convention for
+  a different underlying reason, that stack having no transform stage at
+  all). `PriceIntegrityBypassStrategy`'s own confirmation contract (read
+  directly from its docstring/`confirm()` source before assuming
+  generalization, not assumed from the class name alone: JSON body,
+  `plan_tier`/`monthly_charge` fields, two probes at `0.01`/`999999.99`,
+  requires both readings to track their own submitted amount exactly)
+  was checked against this shape's own design **before** implementation
+  -- the field names `plan_tier`/`monthly_charge` were chosen
+  specifically to match the strategy's own hardcoded names, a deliberate
+  design decision (per this task's own explicit design freedom to do
+  so), not a coincidence discovered after the fact; then verified for
+  real against a real booted instance (see below), not assumed from the
+  name match alone. Cell IDs `LABGEN-GO-0019`/`0020` were confirmed free
+  (grepped `LABGEN-GO-` across every manifest, highest existing was
+  `LABGEN-GO-0018`). **(2) Adequacy** -- checked that this increment does
+  not silently duplicate an existing route (grepped `_ROUTE_PARAMS` for
+  `/subscriptions/purchase`: absent, and distinct from the existing,
+  differently-shaped `/channels/subscribers` route); applied
+  `CC-LAB-0188`'s own adequacy-review lesson *proactively*, before any
+  implementation, rather than needing a second review pass to catch it
+  after the fact: the secure twin's price map is a genuine, data-driven,
+  multi-entry lookup (`tier1`/`tier2`/`tier3`, three distinct real
+  prices), never a disguised single constant, proven live (the
+  `tier1`/`tier2` live-boot cases return distinct real prices); chose
+  fail-closed (HTTP 400) on an unrecognized `plan_tier`, the same design
+  call `CC-LAB-0188` made for Netflix's own closed tier enumeration, for
+  the same reason (a subscription-tier set has no legitimate "unknown
+  tier" case). Also checked, before assuming zero-new-code
+  generalization would actually hold, whether `R-PRICE-INTEGRITY`'s own
+  `when` gate (`location_in: ["body"]`, `sink_context_in:
+  ["payment_charge"]`) was stack-specific in any way -- read directly:
+  it is purely structural, so it needed no change either, verified live
+  alongside the strategy.
+  Ground truth: `TWCH-0010` added to `lab/ground-truth-twitch-clone/`
+  (`vuln_class="price_integrity_bypass"`, `sink_context="payment_charge"`
+  -- both pre-existing enum values from Netflix's own `NFLX-0005`, no
+  schema widening needed; `param="body"`/`location="body"`, the same
+  whole-body convention `TWCH-0005`/`TWCH-0006` already use -- applying
+  `CC-FUZZ-0037`'s own already-recorded correction directly, rather than
+  repeating the per-named-field `param` mistake `CC-LAB-0188`'s original
+  entry made).
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py` (new
+    `ReadSubscriptionPurchaseRequestSource`/`ClientTrustedAmountSink`/
+    `ServerRecomputedAmountSink` classes + registrations)
+  - `fuzzlab/labgen/emitters/go_net_http/__init__.py`
+    (`_MODULE_SET_BY_SHAPE`/`_MODULE_IMPORTS`/`_ROUTE_PARAMS`, one new
+    shape + one new route entry; module docstring extended)
+  - `fuzzlab/labgen/emitters/go_net_http/templates/sources/
+    read_subscription_purchase_request.go.j2` (new)
+  - `fuzzlab/labgen/emitters/go_net_http/templates/sinks/
+    {client_trusted_amount,server_recomputed_amount}.go.j2` (new)
+  - `lab/manifests/price_integrity_twitch_subscription_sample.yaml` (new,
+    `LABGEN-GO-0019`/`0020`)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended, `TWCH-0010`)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-129`)
+  - `docs/components/05-auditor/requirements.md` (`FR-AUD-15`, cross-stack
+    generalization note added in place)
+  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    (`FR-FUZZ-23`, cross-stack generalization note added in place)
+  - `tests/test_labgen_go_net_http_modules.py` (extended, 3 new unit
+    tests, no network required)
+  - `tests/test_labgen_go_net_http_conformance.py` (extended, new
+    manifest added to the Tier-3 regeneration/diff sweep)
+  - `tests/test_labgen_go_live_boot.py` (extended, 2 new live-boot tests:
+    the differential, and the detection-generalization proof)
+  - `tests/test_labels_contract_category4.py` (extended, `TWCH-0010`
+    assertions)
+  - `tests/test_multitarget_category4.py` (`_twitch_cells()` extended;
+    module docstring extended; recall assertion `8/9` -> `9/10`,
+    `macro_recall` accordingly -- a real assertion re-verified against a
+    real pipeline run, not assumed)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category 4 tracker
+    row updated)
+  - `CHANGELOG.md`
+  **Detection landed in the same commit, not deferred**: unlike
+  `CC-LAB-0188` (which had genuinely no detection capability to reuse at
+  all), this increment's own field-name design choice let it prove
+  zero-new-code generalization immediately -- there was no reason to
+  split lab-then-detection here, since nothing new needed to be built or
+  reviewed on the detection side.
+- Impact (other components / project): additive-only across `lab/
+  safety_matrix.yaml` (no change, only reuse), `fuzzlab/labgen/emitters/
+  go_net_http/` (one new source/sink module triple + templates, existing
+  ones untouched), and the existing `lab/ground-truth-twitch-clone/`
+  directory (grown again, not replaced). No change to `fuzzlab/oracle/
+  strategies.py` or `fuzzlab/audit/rules_data/default_rules.json` at all
+  -- this increment is a cross-stack generalization proof of
+  already-shipped detection capability, the mirror image of
+  `CC-LAB-0187`'s own proof in the opposite stack direction.
+- Risk (level; mitigation or accepted-risk justification): low -- this
+  shape reuses an already-reviewed, already-accepted safety-matrix
+  concern (`CC-LAB-0063`) and an already-proven-real design pattern
+  (`CC-LAB-0188`'s own recompute-vs-trust twin), rather than introducing
+  either from scratch; the one genuinely new risk this entry's own review
+  gate flagged pre-implementation (disguised-constant secure twin,
+  `CC-LAB-0212`'s own past mistake, already recorded once more in
+  `CC-LAB-0188`) was designed around from the start, not discovered after
+  the fact. No DB write, filesystem write, or outbound network call is
+  involved at all -- the entire mechanism is JSON-in/JSON-out, matching
+  `CC-LAB-0188`'s own lowest-risk sink shape.
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml`: no change (reuse confirmed) -- done
+  - [x] `fuzzlab/labgen/emitters/go_net_http/modules.py` + `__init__.py`
+    + 3 new templates -- done
+  - [x] `lab/manifests/price_integrity_twitch_subscription_sample.yaml`
+    (2 cells) -- done
+  - [x] `lab/ground-truth-twitch-clone/`: `TWCH-0010` in all 3 files --
+    done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-129` --
+    done
+  - [x] `docs/components/05-auditor/requirements.md` and `docs/
+    components/07-fuzzing-harness-and-oracle/requirements.md`:
+    cross-stack generalization notes added in place -- done
+  - [x] `tests/test_labgen_go_net_http_modules.py` extended (3 tests) --
+    done
+  - [x] `tests/test_labgen_go_net_http_conformance.py` extended -- done
+  - [x] `tests/test_labgen_go_live_boot.py` extended (2 tests, real live
+    boot, all green) -- done
+  - [x] `tests/test_labels_contract_category4.py` extended -- done
+  - [x] `tests/test_multitarget_category4.py` extended and re-verified
+    against a real pipeline run (recall `8/9` -> `9/10`) -- done
+  - [x] Whole-repo `pytest -m "not slow"` run before considering this
+    increment complete (`PA-0040`) -- see Effectiveness
+  - [x] PA-0042's own hardcoded-recall-assertion grep + explicit re-run
+    of `tests/test_multitarget_category4.py`/`tests/test_auto.py`/
+    `tests/test_labels_contract_category4.py` (all `@pytest.mark.slow`-
+    exempt from the grep, or already updated) -- see Effectiveness
+  - [x] `CHANGELOG.md` line -- done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` category 4
+    tracker row updated -- done
+  - [x] Cross-branch collision check performed and recorded -- done
+  - [x] Pre-change review gate, `Agent`-tool-absence substitution noted
+    explicitly, matching `CC-LAB-0182`-`0188`'s own precedent wording --
+    done
+- Effectiveness (assessed 2026-09-23): met -- Twitch now has ten real,
+  live-boot-proven pages, and this project's `PriceIntegrityBypassStrategy`
+  is now proven, not just assumed, to generalize across a genuinely
+  different stack (`spring_boot` -> `go_net_http`) with zero new
+  detection code, the strongest generalization proof this mechanism has
+  had yet (the first Netflix-cell strategy proven to generalize onto
+  Twitch, complementing `CC-LAB-0187`'s own Twitch-onto-Netflix proof for
+  `AccessControlIdorStrategy`). Twitch's own real, scored recall in the
+  multi-target live-boot pipeline moves from 8/9 to 9/10.
+
 ### CC-LAB-0188 — Netflix's 5th real page: first price_integrity_bypass instance, `/api/subscription/change-plan` (FR-LAB-128) (2026-09-23)
 
 - Change: genuinely new breadth for category 4's Netflix pick, explicitly

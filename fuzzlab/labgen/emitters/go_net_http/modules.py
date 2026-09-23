@@ -575,6 +575,71 @@ class ExtensionAllowlistMimeCheckSink(TemplateModule):
         )
 
 
+class ReadSubscriptionPurchaseRequestSource(TemplateModule):
+    """Reads the whole raw request body -- the price-integrity-bypass
+    shape's source (``CC-LAB-0189``, this stack's first
+    ``price_integrity_bypass`` instance, mirroring ``spring_boot``'s own
+    first instantiation, ``CC-LAB-0188``). Publishes ``body_var`` (a Go
+    ``[]byte`` identifier), the same "publish the raw body, let the sink
+    do its own JSON parsing" convention ``ReadChannelProfileBodySource``
+    already established for this stack's other whole-body-JSON shape
+    (mass-assignment) -- reused here as its own distinct source class
+    (not the same instance) since the two shapes are conceptually
+    unrelated even though the body-read line is byte-identical, matching
+    every other shape in this stack having its own dedicated source
+    class."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "read_subscription_purchase_request", "source", _SOURCE_ENV,
+            "read_subscription_purchase_request.go.j2",
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        render_ctx = dict(ctx)
+        render_ctx.setdefault("body_var", "reqBody")
+        return super().render(render_ctx)
+
+
+class ClientTrustedAmountSink(TemplateModule):
+    """The ``client_trusted_amount`` op (``lab/safety_matrix.yaml``,
+    ``payment_charge_amount`` family, ``no_effect`` -- added by
+    ``CC-LAB-0063``; this stack's first instantiation, mirroring
+    ``spring_boot``'s own ``ClientTrustedAmountSink``, ``CC-LAB-0188``):
+    unmarshals the request body's ``plan_tier``/``monthly_charge`` fields
+    and echoes ``monthly_charge`` straight back as the charged amount,
+    verbatim, with no server-side price lookup at all and no validation
+    of ``plan_tier`` either (CWE-807). Convention 2 (like SSRF/mass-
+    assignment/file-upload): the manifest's one op names a **sink**
+    module directly -- the vulnerable/secure difference here is one
+    inseparable trust-the-client-vs-recompute-server-side operation, not
+    a value rewrite feeding a shared sink."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "client_trusted_amount", "sink", _SINK_ENV, "client_trusted_amount.go.j2"
+        )
+
+
+class ServerRecomputedAmountSink(TemplateModule):
+    """The ``server_recomputed_amount`` op (``lab/safety_matrix.yaml``,
+    ``payment_charge_amount`` family, ``neutralises`` -- the secure
+    twin): discards the client-supplied ``monthly_charge`` entirely and
+    looks the real charge up in a fixed, server-owned
+    ``plan_tier -> price`` map (``tier1``/``tier2``/``tier3``, three
+    genuinely distinct prices -- a real, data-driven lookup, never a
+    disguised single constant, the same adequacy-review lesson
+    ``CC-LAB-0188`` applied for ``spring_boot``'s own twin). An
+    unrecognized ``plan_tier`` fails closed (HTTP 400) rather than
+    silently defaulting, the same fail-closed design call ``CC-LAB-0188``
+    made for Netflix's own closed tier enumeration."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "server_recomputed_amount", "sink", _SINK_ENV, "server_recomputed_amount.go.j2"
+        )
+
+
 class RenderOnlyComplexity(TemplateModule):
     """Wraps the composed source/transform/sink body as the entire body of
     one ``net/http.HandlerFunc`` -- the Go analogue of every other stack's
@@ -598,6 +663,7 @@ SOURCES: dict[str, Module] = {
     "no_op_token_request": NoOpTokenRequestSource(),
     "read_channel_profile_body": ReadChannelProfileBodySource(),
     "read_uploaded_file": ReadUploadedFileSource(),
+    "read_subscription_purchase_request": ReadSubscriptionPurchaseRequestSource(),
 }
 TRANSFORMS: dict[str, Module] = {
     "naive_string_compare": NaiveStringCompareTransform(),
@@ -619,6 +685,8 @@ SINKS: dict[str, Module] = {
     "typed_schema_allowlist": TypedSchemaAllowlistSink(),
     "no_extension_check": NoExtensionCheckSink(),
     "extension_allowlist_mime_check": ExtensionAllowlistMimeCheckSink(),
+    "client_trusted_amount": ClientTrustedAmountSink(),
+    "server_recomputed_amount": ServerRecomputedAmountSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "render_only": RenderOnlyComplexity(),

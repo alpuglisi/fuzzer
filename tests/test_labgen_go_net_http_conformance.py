@@ -43,6 +43,9 @@ _MANIFESTS = (
     # CC-LAB-0186: this stack's first unrestricted_file_upload/
     # fs_web_root_write instance (a genuinely new mechanism, not a reuse).
     "lab/manifests/unrestricted_file_upload_go_sample.yaml",
+    # CC-LAB-0189: this stack's first price_integrity_bypass/
+    # payment_charge_amount instance (a genuinely new mechanism, not a reuse).
+    "lab/manifests/price_integrity_twitch_subscription_sample.yaml",
 )
 
 

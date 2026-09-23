@@ -247,6 +247,39 @@ def test_no_extension_check_sink_derives_content_type_from_the_filename() -> Non
     assert "http.DetectContentType" not in result.code
 
 
+# -- Phase B tenth increment: price-integrity-bypass (payment_charge_amount) --
+
+
+def test_read_subscription_purchase_request_source_publishes_default_body_var() -> None:
+    result = SOURCES["read_subscription_purchase_request"].render({})
+    assert "io.ReadAll(r.Body)" in result.code
+    assert result.context["body_var"] == "reqBody"
+
+
+def test_client_trusted_amount_sink_echoes_the_client_supplied_charge_verbatim() -> None:
+    result = SINKS["client_trusted_amount"].render({"body_var": "reqBody"})
+    assert "json.Unmarshal(reqBody, &req)" in result.code
+    assert "MonthlyCharge: req.MonthlyCharge" in result.code
+    # No server-side price table at all -- the whole point of this twin.
+    assert "tierPrices" not in result.code
+    assert "http.StatusBadRequest" not in result.code
+
+
+def test_server_recomputed_amount_sink_looks_up_a_real_data_driven_price_table() -> None:
+    result = SINKS["server_recomputed_amount"].render({"body_var": "reqBody"})
+    assert "json.Unmarshal(reqBody, &req)" in result.code
+    # Genuinely data-driven: three distinct real prices, not a disguised
+    # single constant (CC-LAB-0188's own adequacy-review lesson).
+    assert '"tier1": 4.99' in result.code
+    assert '"tier2": 9.99' in result.code
+    assert '"tier3": 24.99' in result.code
+    # The client-supplied amount never reaches the response.
+    assert "req.MonthlyCharge" not in result.code
+    assert "MonthlyCharge: serverPrice" in result.code
+    # Fails closed on an unrecognized plan_tier.
+    assert "http.StatusBadRequest" in result.code
+
+
 def test_extension_allowlist_mime_check_sink_sniffs_real_bytes() -> None:
     result = SINKS["extension_allowlist_mime_check"].render(
         {

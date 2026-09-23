@@ -4,6 +4,27 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Twitch's 10th real page, first price_integrity_bypass instance on go_net_http, CC-LAB-0189/FR-LAB-129)
+- Target lab: `/subscriptions/purchase` (a channel-subscription purchase
+  endpoint — Twitch's own signature monetization feature). Genuinely new
+  breadth for `go_net_http`, not a depth reuse: this stack never had a
+  `price_integrity_bypass` page before (`spring_boot` already does,
+  `CC-LAB-0188`). Reuses `lab/safety_matrix.yaml`'s existing
+  `payment_charge_amount` sink family/ops verbatim; the vulnerable twin
+  trusts a client-supplied `monthly_charge` field and reflects it
+  verbatim, the secure twin recomputes it server-side from a fixed
+  `plan_tier` price map, failing closed on an unrecognized tier — the
+  same recompute-vs-trust design `CC-LAB-0188`/`CC-LAB-0212` already
+  established. Deliberately reuses the exact `plan_tier`/`monthly_charge`
+  field names `PriceIntegrityBypassStrategy` (`CC-FUZZ-0037`) already
+  hardcodes: verified live that the strategy needed **zero** new code to
+  confirm the new vulnerable twin and correctly fail closed on the secure
+  one — the first proof this strategy generalizes across stacks in the
+  direction `spring_boot` -> `go_net_http`. Twitch's real, scored recall
+  in the multi-target live-boot pipeline moves from 8/9 to 9/10
+  (`tests/test_multitarget_category4.py`, re-verified against a real
+  pipeline run). Ground truth `TWCH-0010` added.
+
 ## 2026-09-23 (FUZZ/AUD: real detection for price_integrity_bypass, CC-FUZZ-0037/CC-AUD-0025/FR-FUZZ-23/FR-AUD-15)
 - Fuzzing harness and oracle, auditor: builds the detection follow-on
   `CC-LAB-0188` deliberately deferred — `PriceIntegrityBypassStrategy` +

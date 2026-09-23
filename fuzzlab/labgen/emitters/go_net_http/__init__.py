@@ -40,6 +40,19 @@ Each shape also declares its own Go ``import`` list now (the fixed,
 webhook-only import block became per-shape once a second shape needed a
 different set).
 
+**Phase B, tenth increment (``CC-LAB-0189``/``FR-LAB-129``): this stack's
+first `price_integrity_bypass` instance**, ``("price_integrity_bypass",
+"payment_charge_amount")`` -- a channel-subscription purchase handler
+(``POST /subscriptions/purchase``, a real, plausible, core Twitch feature:
+subscribing to a broadcaster's channel at a chosen tier) that either
+trusts the caller-supplied ``monthly_charge`` field verbatim (vulnerable,
+CWE-807, ``client_trusted_amount``) or discards it entirely and looks the
+real price up server-side from a fixed ``plan_tier -> price`` map
+(secure, ``server_recomputed_amount``), mirroring ``spring_boot``'s own
+first instantiation of this concern (``CC-LAB-0188``). Convention 2, like
+SSRF/mass-assignment/file-upload: the manifest's one op names a sink
+module directly.
+
 **Multi-file output, like every other routed emitter.** Per this project's
 routed-emitter convention (``node_express``, ``ruby_rails``), a ``route``-
 category *accumulator* module (``net/http.ServeMux`` registration lines)
@@ -114,6 +127,16 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("unrestricted_file_upload", "fs_web_root_write"): _ModuleSet(
         "read_uploaded_file", None, "render_only"
     ),
+    # Convention 2 again (like SSRF/mass-assignment/file-upload): the
+    # manifest's one op names a sink module directly -- the vulnerable/
+    # secure difference is one inseparable trust-the-client-vs-recompute-
+    # server-side operation, not a value rewrite feeding a shared sink.
+    # This stack's first `price_integrity_bypass`/`payment_charge_amount`
+    # instance on any Go page (`CC-LAB-0189`), mirroring `spring_boot`'s
+    # own first instantiation of the same concern (`CC-LAB-0188`).
+    ("price_integrity_bypass", "payment_charge_amount"): _ModuleSet(
+        "read_subscription_purchase_request", None, "render_only"
+    ),
 }
 
 #: Per-module (source/transform-op/sink name) -> the extra Go standard-
@@ -152,6 +175,9 @@ _MODULE_IMPORTS: dict[str, tuple[str, ...]] = {
     "read_uploaded_file": ("io",),
     "no_extension_check": ("mime", "os", "path/filepath"),
     "extension_allowlist_mime_check": ("os", "path/filepath", "strings"),
+    "read_subscription_purchase_request": ("io",),
+    "client_trusted_amount": ("encoding/json",),
+    "server_recomputed_amount": ("encoding/json",),
 }
 
 #: Per-route static context this Phase A emitter needs beyond the
@@ -177,6 +203,12 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     # (ReadUploadedFileSource publishes its own default identifiers),
     # matching /webhooks/eventsub's/`/channels/settings`'s own empty entries.
     "/channels/emotes/upload": {},
+    # CC-LAB-0189: this stack's first price_integrity_bypass/
+    # payment_charge_amount instance -- no per-route var_name/param_name
+    # needed (ReadSubscriptionPurchaseRequestSource publishes its own
+    # default identifiers), matching /webhooks/eventsub's/
+    # /channels/settings's/`/channels/emotes/upload`'s own empty entries.
+    "/subscriptions/purchase": {},
 }
 
 
