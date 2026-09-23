@@ -4,6 +4,19 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (FUZZ: Netflix's own multi-cell boot confirms both real positives together)
+- Fuzzing harness: closes the follow-on the previous entry's own test
+  docstring flagged — Netflix's `NFLX-0002` (XXE) is now exercised in a
+  real `multitarget` run against a real boot, not just proven in
+  isolation elsewhere. `test_netflix_multi_cell_boot_confirms_both_
+  positives` hand-rolls a multi-cell Spring Boot boot (bypassing
+  `SpringBootLiveBootHarness`'s single-cell restriction, mirroring
+  TrackerNest's own established pattern), assembling `LABGEN-JV-0001`
+  (insecure-deserialization, `/api/playback/resume`) and `LABGEN-JV-0003`
+  (XXE, `/api/content/import`) together — distinct routes, no collision —
+  and runs the real `run_targets` pipeline against it. Both of Netflix's
+  own positives confirm: `tp=2, fp=0, recall=1.0`. `CC-FUZZ-0032`.
+
 ## 2026-09-23 (FUZZ/AUD: real detection for `xxe`; several stale multitarget tests fixed)
 - Fuzzing harness/oracle: the project's first real audit rule
   (`R-XXE`, `sink_context_in=["xml"]`) and two oracle strategies

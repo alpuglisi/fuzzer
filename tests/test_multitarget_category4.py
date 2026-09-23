@@ -35,16 +35,20 @@ polymorphic typing configured at all).
 `NFLX-0002` (XXE) now also has a real rule/strategy pair
 (`R-XXE`/`XxeInBandMarkerStrategy`, `CC-FUZZ-0031`, verified live against
 TrackerNest's own XXE twins -- `tests/test_labgen_spring_boot_xxe_live_boot.py`
-and `tests/test_labgen_spring_boot_trackernest_multitarget.py`), but it is
-**not yet exercised in this specific test**: `_netflix_cell()` below boots
-only `LABGEN-JV-0001` (the insecure-deserialization vulnerable twin) via
-`SpringBootLiveBootHarness`'s one-cell-per-boot constraint, so `NFLX-0002`'s
-own point (a different route the booted app doesn't serve) is still a
-structural false negative *here* -- not because detection is missing, but
-because this test's own single-cell boot doesn't include it. Closing that
-is its own separately-scoped follow-on (a hand-rolled multi-cell fixture
-like TrackerNest's or category 3's `CC-LAB-0138`, or a second `TargetSpec`
-booting `NFLX-0002` on its own), not attempted here. One gap remains open:
+and `tests/test_labgen_spring_boot_trackernest_multitarget.py`).
+`test_both_apps_run_through_multitarget_for_real` below still boots only
+`LABGEN-JV-0001` (the insecure-deserialization vulnerable twin) via
+`SpringBootLiveBootHarness`'s one-cell-per-boot constraint, so `NFLX-0002`
+is a structural false negative *in that one test* -- not because
+detection is missing, but because that test's single-cell boot doesn't
+serve it. `test_netflix_multi_cell_boot_confirms_both_positives` below
+closes that gap the way `tests/test_labgen_spring_boot_trackernest_
+multitarget.py` already does for TrackerNest: a hand-rolled multi-cell
+boot (bypassing `SpringBootLiveBootHarness`'s single-cell restriction,
+assembling `LABGEN-JV-0001` and `LABGEN-JV-0003` together -- distinct
+routes, `/api/playback/resume` and `/api/content/import`, so no
+same-route collision), proving both of Netflix's own positives confirm
+together in one real boot. One gap remains open:
 
 1. **No audit `Rule`/oracle strategy exists yet for `webhook_signature`**
    (`ssrf`/`access_control`/`insecure_deserialization`/`xxe` now all have
@@ -55,6 +59,12 @@ booting `NFLX-0002` on its own), not attempted here. One gap remains open:
 
 from __future__ import annotations
 
+import shutil
+import socket
+import subprocess
+import time
+from pathlib import Path
+
 import pytest
 
 from fuzzlab.core.store import Store
@@ -62,6 +72,7 @@ from fuzzlab.harness.multitarget import TargetSpec, run_targets, transfer_summar
 from fuzzlab.labels import contract
 from fuzzlab.labgen.conformance.go_live_boot import GoLiveBootHarness, go_boot_available
 from fuzzlab.labgen.conformance.live_boot_spring_boot import (
+    SKELETON_DIR,
     SpringBootLiveBootHarness,
     spring_boot_boot_available,
 )
@@ -148,3 +159,99 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True
+
+
+# --- Netflix multi-cell boot: both of its own positives, one app (CC-FUZZ-0032) ---
+
+_NETFLIX_MULTI_MANIFESTS = (
+    "lab/manifests/insecure_deserialization_spring_boot_sample.yaml",
+    "lab/manifests/xxe_netflix_sample.yaml",
+)
+_NETFLIX_MULTI_CELL_IDS = {"LABGEN-JV-0001", "LABGEN-JV-0003"}
+_BUILD_TIMEOUT_S = 240.0
+_BOOT_TIMEOUT_S = 30.0
+
+
+def _free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _wait_until_listening(port: int, timeout_s: float = _BOOT_TIMEOUT_S) -> None:
+    deadline = time.monotonic() + timeout_s
+    last_exc: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                return
+        except OSError as exc:
+            last_exc = exc
+            time.sleep(0.25)
+    raise AssertionError(f"java -jar never started listening on 127.0.0.1:{port}: {last_exc}")
+
+
+def test_netflix_multi_cell_boot_confirms_both_positives(tmp_path_factory, tmp_path) -> None:
+    """Hand-rolled multi-cell boot (bypassing `SpringBootLiveBootHarness`'s
+    single-cell restriction), mirroring `tests/test_labgen_spring_boot_
+    trackernest_multitarget.py`'s own established pattern: assembles both
+    of Netflix's own vulnerable twins -- `LABGEN-JV-0001`
+    (insecure-deserialization, `/api/playback/resume`) and `LABGEN-JV-0003`
+    (XXE, `/api/content/import`) -- into one real booted app (distinct
+    routes, no collision), then runs the real generic `run_targets`
+    pipeline against it. Closes the follow-on this module's own docstring
+    flags: both of Netflix's positives now confirm together in one real
+    boot, not just each proven individually elsewhere.
+    """
+    root = tmp_path_factory.mktemp("netflix_multitarget")
+    shutil.copytree(SKELETON_DIR, root, dirs_exist_ok=True)
+
+    emitter = SpringBootEmitter()
+    cells = [c for m in _NETFLIX_MULTI_MANIFESTS for c in load_manifest(m).cells
+             if c.cell_id in _NETFLIX_MULTI_CELL_IDS]
+    assert {c.cell_id for c in cells} == _NETFLIX_MULTI_CELL_IDS
+    for cell in cells:
+        for f in emitter.render(cell):
+            dest = root / f.path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(f.content)
+
+    package_result = subprocess.run(
+        ["mvn", "-q", "-B", "package", "-DskipTests"],
+        cwd=root, capture_output=True, text=True, timeout=_BUILD_TIMEOUT_S,
+    )
+    assert package_result.returncode == 0, (
+        f"mvn package failed:\nstdout={package_result.stdout}\nstderr={package_result.stderr}"
+    )
+
+    port = _free_port()
+    jar_path = root / "target" / "trackernest.jar"
+    proc = subprocess.Popen(
+        ["java", "-jar", str(jar_path), f"--server.port={port}"],
+        cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    listener = OobListener()
+    listener.start()
+    try:
+        _wait_until_listening(port)
+        base_url = f"http://127.0.0.1:{port}"
+
+        netflix_gt = contract.load("lab/ground-truth-netflix-clone")
+        spec = TargetSpec("netflix-clone-multi", base_url, ground_truth=netflix_gt,
+                          points_source="ground-truth")
+        with Store(tmp_path / "u.db") as store:
+            outcomes = run_targets([spec], store, sender_for=lambda s: RequestsProbeSender(timeout=10.0),
+                                   oob=listener)
+        outcome = outcomes[0]
+        assert outcome.scored is True and outcome.report is not None
+        # Both of Netflix's own positives confirm in this one real boot.
+        assert outcome.report.tp == 2 and outcome.report.fp == 0
+        assert outcome.report.recall == 1.0
+    finally:
+        listener.stop()
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=5)

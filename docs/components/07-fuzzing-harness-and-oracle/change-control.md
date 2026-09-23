@@ -3,6 +3,45 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0032 — Netflix's own multi-cell boot confirms both real positives together (2026-09-23)
+
+- Change: `tests/test_multitarget_category4.py` gained
+  `test_netflix_multi_cell_boot_confirms_both_positives`, closing the
+  follow-on `CC-FUZZ-0031`'s own module-docstring update flagged: proving
+  `NFLX-0002` (XXE) through the real generic `run_targets` pipeline
+  against a real boot, not only via `tests/test_labgen_spring_boot_xxe_
+  live_boot.py`'s dedicated proof or TrackerNest's own multitarget test.
+  A hand-rolled multi-cell Spring Boot boot (`shutil.copytree(SKELETON_DIR,
+  ...)` + a real `mvn package` + `java -jar`), mirroring `tests/
+  test_labgen_spring_boot_trackernest_multitarget.py`'s own established
+  pattern exactly (no new mechanism invented): assembles `LABGEN-JV-0001`
+  (insecure-deserialization, `/api/playback/resume`) and `LABGEN-JV-0003`
+  (XXE, `/api/content/import`) into one running app — distinct routes,
+  confirmed no collision — then runs `run_targets` (with a real, started
+  `OobListener`) against it for real.
+  New/changed files:
+  - `tests/test_multitarget_category4.py` (new test + supporting fixture
+    helpers, module docstring updated)
+- Impact (other components / project): test-only change; no production
+  code touched. Netflix's own real, scored recall in this dedicated
+  multi-cell test is `1.0` (`tp=2, fp=0`) — both of its own ground-truth
+  positives now confirm together in one real boot.
+- Risk (level; mitigation or accepted-risk justification): Low. Reuses an
+  already-established, already-reviewed pattern (TrackerNest's own
+  hand-rolled multi-cell fixture) verbatim; no new mechanism or safety
+  surface introduced.
+- Deliverables:
+  - [x] Multi-cell Netflix boot fixture implemented — done
+  - [x] Real, executed `run_targets` proof against it — done
+  - [x] `test_multitarget_category4.py`'s own module docstring updated to
+        no longer describe this as an open follow-on — done
+  - [x] Full non-slow suite + both `test_multitarget_category4.py` tests
+        re-run green — done
+- Effectiveness (assessed 2026-09-23): achieved. Netflix's own multi-cell
+  boot shows `tp=2, fp=0, recall=1.0` for real, proven by a real, executed
+  `run_targets()` call against a real booted app with both of its
+  vulnerable cells present, not a mock.
+
 ### CC-FUZZ-0031 — `XxeInBandMarkerStrategy`/`XxeOobStrategy`: real detection for `xxe`; two stale multitarget tests fixed (2026-09-23)
 
 - Change: adds the project's first oracle confirmation strategies for
