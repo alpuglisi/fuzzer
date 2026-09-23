@@ -3,6 +3,227 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0216 — CircleFeed (category 2, Facebook pick): first real cell, photo/tag-detail access control / IDOR (FR-LAB-123) (2026-09-23)
+
+- **Change:** Establishes CircleFeed (category 2's Facebook pick, the
+  second app on the existing `php_laravel` emitter after Huddle Hub) and
+  lands its first designed cell: a photo/tag-detail page reachable by
+  primary-key id, modeling `docs/research/category2-social-ugc-
+  functionality-and-cwe-research.md` §3 item 4 (tagging vs. album
+  privacy) and §6 row 1 of that doc's CircleFeed page-set table. Reuses
+  `lab/safety_matrix.yaml`'s existing access-control section
+  (`ownership_check_bypass` concern, added `CC-LAB-0063`, sink families
+  `db_row_by_id_lookup`/`keyed_resource_lookup`) — **this project's first
+  real implementation of those ops by any emitter**, on any stack. (Note
+  on terminology, caught by this entry's own pre-change review: the
+  matrix file's own comment titles this block "access-control", hyphenated,
+  never literally the string `access_control` -- this change introduces
+  `access_control` as the new `vuln_class`/Cell.class value, a separate,
+  new piece of vocabulary this entry's own code adds, not a pre-existing
+  name reused from the matrix file.)
+
+  Two ops implemented, both at the `db_row_by_id_lookup` sink family (a
+  direct primary-key fetch, chosen over `keyed_resource_lookup` because a
+  photo id is exactly that shape):
+  - `no_ownership_check` (vulnerable): fetches
+    `Photo::where('id', $id)->firstOrFail()` — no check that the
+    requesting user owns the photo. Safety matrix: `effect=no_effect`.
+  - `identity_match_before_fetch` (secure): adds
+    `->where('owner_id', $__currentUserId)` to the fetch itself — a real
+    Eloquent ownership-scoped query, chosen over the matrix's other two
+    neutralising ops for `db_row_by_id_lookup`. Concretely:
+    `ownership_query_filter` names essentially the same single-query
+    shape (a `WHERE` clause folded into the fetch) — the matrix carries
+    both as distinct rows, but they are not distinguishable at the code
+    level for a direct Eloquent `where()` chain, so this entry treats
+    `identity_match_before_fetch` as the one that actually describes
+    *this* fetch (the check runs as part of, before, the row is
+    materialized) rather than authoring a second, redundant module for
+    an op the generated code could not tell apart from the first.
+    `ownership_check_after_fetch` is a genuinely different, less
+    idiomatic Eloquent shape (`Photo::findOrFail($id)` unconditionally,
+    then `abort_if($photo->owner_id !== $userId, 404)`) — rejected here
+    because it would briefly materialize another user's private row
+    into a PHP variable before checking it, the less realistic pattern
+    for a hand-written Laravel controller and a real ("first" of two
+    fetches) tell if it were ever logged. Safety matrix:
+    `effect=neutralises`, `neutralizes: [ownership_check_bypass]`.
+
+  **Sink is neutral, security boundary lives in the transform — applied
+  here as "the transform decides the WHERE clause the sink's one fixed
+  fetch statement uses"**, the closest fit to this stack's existing
+  convention for an Eloquent ownership check: `NoOwnershipCheckTransform`/
+  `IdentityMatchBeforeFetchTransform` each set an `ownership_where`
+  context flag (empty string, or
+  `"->where('owner_id', $__currentUserId)"`), which
+  `DbRowByIdLookupSink`'s one fixed template splices into the query —
+  mirroring `ParamBindTransform`'s existing `bound` flag and
+  `DomTextContentTransform`'s existing `dom_write_prop` flag exactly, not
+  a new convention.
+
+  Concretely:
+  1. **New page profile**, `_PAGE_PROFILES["/photos/view"]` —
+     `{"var_name": "id", "param_name": "id"}`, `GET`, reusing the
+     existing `get_param` source unchanged. No `table`/`column`: the sink
+     names the `Photo` model and its `id` column itself (a real Eloquent
+     fetch, not a raw `DB::select`).
+  2. **Illustrative served URL** (`_served_route_for`'s no-`real_page`
+     branch, `/cell/<slug>`) — CircleFeed, like Huddle Hub before it, has
+     no migrated real `puppy-fort-factory/` page to anchor a pinned URL
+     to, so this reuses Huddle Hub's own established precedent
+     (`CC-LAB-0133`) rather than opting into the `real_page`/
+     `canonical_cell_id` mechanism, which is a migration-URL-pinning
+     tool, not a general "give a new app a nice URL" one.
+  3. **New transform ops**, `no_ownership_check`/
+     `identity_match_before_fetch` — registered in *both*
+     `fuzzlab.labgen.emitters.php_laravel.modules` (the real rendering)
+     and `fuzzlab.labgen.modules` (the shared minimal-pair vocabulary
+     `fuzzlab.labgen.minimal_pair` classifies every emitter's composition
+     line against — same "registered for the shared vocabulary only"
+     discipline the CC-LAB-0210/0211/0212 entries already established).
+  4. **New sink**, `db_row_by_id_lookup` — same dual registration.
+  5. **Real `App\Models\Photo` model + migration** added to the shared
+     `php_laravel` skeleton (`stack/skeleton/app/Models/Photo.php`,
+     `stack/skeleton/database/migrations/
+     0001_01_01_000100_create_photos_table.php`) — `owner_id` (FK to
+     `users`), `caption`, `image_path`, `is_private`. Inert for every
+     other manifest on this skeleton (no other cell references it).
+  6. **`LiveBootHarness` extended** (`fuzzlab/labgen/conformance/
+     live_boot.py`, additive only): a `photos` table mirroring the real
+     migration's schema; a second real, independently-loginnable seeded
+     user (`SEED_USER_B_ID`/`SEED_USERNAME_B`/`SEED_PASSWORD_B`, id=2,
+     same md5-hash convention as the existing `SEED_USER_ID`) logged in
+     through the *same* real `/login.php` page and session-establishment
+     mechanism `SEED_USER_ID` already uses — no second login mechanism
+     invented; two seeded photos (`SEED_PHOTO_A_ID`/`SEED_PHOTO_B_ID`),
+     one private photo per seeded user. Every pre-existing test that
+     reads the `users`/`photos` tables is unaffected: `SEED_USER_ID`'s
+     row is still first under `ORDER BY id`, and no existing test asserts
+     an exact total row count (checked directly against
+     `tests/test_labgen_mass_assignment_live_boot.py`, the one test that
+     reads `users` row-for-row).
+  7. **New manifest**, `lab/manifests/access_control_circlefeed_sample.yaml`
+     — `LABGEN-CF-0001` (vulnerable) / `LABGEN-CF-0002` (secure), sharing
+     one illustrative route, never live-booted together as a *pair*
+     (mirrors `webhook_signature_huddlehub_sample.yaml`'s own twin-pair
+     precedent) — though both share one `LiveBootHarness` instance
+     alongside the real login cell in the new live-boot test, since a
+     genuine ownership-check differential needs one real session per
+     seeded user.
+  8. **New ground truth**, `lab/ground-truth-circlefeed/` (own
+     `labels.json`/`injection-points.json`/`expectedresults.csv`, `CF-`
+     case-id prefix — checked for collision against every other
+     ground-truth directory's prefix first: `BKNG-`/`EXPD-`/`FCART-`/
+     `HHUB-`/`MMART-`/`NFLX-`/`PFF-`/`PT-`/`TNEST-`/`TWCH-`, none
+     colliding). One case, `CF-0001` → `LABGEN-CF-0001`
+     (`vuln_class: "access_control"`, `sink_context: "sql"`) — only the
+     vulnerable cell gets its own labels.json case, matching Huddle
+     Hub's own vulnerable-cells-only convention; the secure twin's
+     behavior is proven directly by the new live-boot test instead, not
+     restated as a ground-truth case.
+  9. **Schema widened**: `fuzzlab/labels/schemas/labels.schema.json`'s
+     `vuln_class` enum gains `"access_control"` (additive, matching
+     `CC-LAB-0095a`'s own precedent for widening this enum). No
+     `sink_context` enum change needed — `"sql"` already covers a DB
+     lookup (matching `price_integrity_bypass`'s own precedent, which
+     also uses `sink_context: "sql"` for a DB write).
+  10. **Tests**: a pure-Python unit/Tier-0/Tier-3 file
+      (`tests/test_labgen_access_control_circlefeed.py` — manifest
+      load/validate, verdict, supports(), determinism, minimal-pair,
+      disjoint-paths-from-Huddle-Hub, `php -l` lint, Tier 3 whole-manifest
+      regeneration) and a real, executed live-boot file
+      (`tests/test_labgen_php_laravel_access_control_live_boot.py`,
+      `@pytest.mark.slow`, skip-guarded on `live_boot_available()`) —
+      three tests proving, from real HTTP responses against a real booted
+      app: the vulnerable twin lets user B fetch user A's private photo
+      (real 200, real content); the secure twin refuses the same request
+      (real 404) while still letting user B fetch their own photo (real
+      200); both twins reject an unauthenticated request (real 401).
+      Confirmed run for real in this session (`live_boot_available()` is
+      `True` in this environment) — all three pass.
+
+- **Deliberately out of scope, stated explicitly**: the other three rows
+  of §6's CircleFeed page-set table (friend-request/relationship-graph
+  IDOR, Marketplace listing XSS, group-post SSRF-via-link-preview) —
+  this change is exactly the "first real page" increment
+  `CC-LAB-0092` (PicTrail) was for category 2, not the full four-page
+  design. No `real_page`/`canonical_cell_id` URL pinning (see point 2
+  above for why). No wiring into `fuzzlab.harness.multitarget`'s
+  `TargetSpec`/`run_targets` (Huddle Hub's own Phase E,
+  `CC-LAB-0139`) — a further increment, not required for "first real
+  page" scope, and `access_control` is not yet mapped in
+  `fuzzlab.core.runmode._VULN_TO_CATEGORY` either (same documented gap
+  `CC-LAB-0137`/`CC-LAB-0139` already carry for Huddle Hub's three vuln
+  classes) — flagged here, not fixed, matching this project's own
+  "flag a gap rather than silently route around it" discipline.
+
+- **Bookkeeping**: `CHANGELOG.md` (one line);
+  `docs/components/01-target-lab/requirements.md` — new `FR-LAB-123`
+  (this entry); `docs/ARCHITECTURE.md` (CircleFeed app identity noted
+  alongside Huddle Hub/TrackerNest under the `php_laravel` emitter);
+  `docs/research/category2-social-ugc-functionality-and-cwe-research.md`
+  §6 (CircleFeed row 1 marked built, referencing this entry);
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 (category 2
+  tracker row updated). No bug found — no `docs/bugs/` entry, no
+  `ERROR_LOG.md` entry, no new `docs/PREVENTIVE_ACTIONS.md` rule.
+
+- **Pre-change review gate**: two independent reviewer subagents ran
+  against this entry's draft before implementation was finalized (one
+  factual-accuracy-only, one adequacy/completeness-only). Findings and
+  fixes:
+  - **Terminology imprecision** (factual reviewer): the draft's earlier
+    phrasing called `lab/safety_matrix.yaml`'s block an `access_control`
+    "family" — the file's own comment titles it "access-control"
+    (hyphenated), never literally the underscored string. Fixed
+    throughout this entry and every other doc this change touches: now
+    "access-control section," with `access_control` reserved for the
+    genuinely new `vuln_class` string this change introduces.
+  - **`fuzzlab/labgen/modules/__init__.py`'s determinism-ctx completeness
+    table** (adequacy reviewer, and independently caught by this
+    entry's own required PA-0040 whole-repo `pytest tests/` run before
+    considering the change complete): `tests/test_labgen_modules.py`'s
+    `_DETERMINISM_CTX_BY_MODULE` had no entries for the three newly
+    dual-registered names, failing
+    `test_every_registered_module_has_a_determinism_ctx_fixture`/
+    `test_every_module_renders_deterministically_twice`. Fixed by adding
+    the three entries.
+  - **`.gitignore`'s `*.csv` exception** (adequacy reviewer, flagging
+    this exact BUG-0036/CC-LAB-0215 recurrence risk): without adding
+    `!lab/ground-truth-circlefeed/*.csv`, `expectedresults.csv` would be
+    silently gitignored and never actually committed. Fixed proactively,
+    before any commit — confirmed with `git check-ignore`/`git add -n`.
+  - **Cell-ID/enum collision check** (adequacy reviewer): confirmed no
+    other manifest under `lab/manifests/` uses `LABGEN-CF-0001`/
+    `LABGEN-CF-0002`, and `sink_context: "sql"` was already a legal
+    enum value (no widening needed there, only `vuln_class`).
+  - **Secure-op choice under-justified** (adequacy reviewer): the
+    original one-line "more idiomatic" justification for picking
+    `identity_match_before_fetch` over the matrix's other two
+    neutralising ops was thin. Expanded above with the concrete
+    per-op reasoning (why `ownership_query_filter` is the same code
+    shape as `identity_match_before_fetch` here, and why
+    `ownership_check_after_fetch`'s materialize-then-check pattern was
+    rejected).
+  - Both reviewers separately confirmed every other numbered claim in
+    the draft (the `access-control` matrix rows themselves; that no
+    emitter anywhere in the repo had rendered this family before this
+    change; Huddle Hub's own `_REAL_PAGE_KEY`-free precedent and its
+    exact "no migrated real page to anchor" wording; the full existing
+    ground-truth case-id prefix set, with `CF-` absent from it; this
+    branch's real `CC-LAB-0215`/`FR-LAB-122` ceiling at the time of
+    review) as accurate, and the plan's scope/deferrals as adequate for
+    a "first real page" increment, no further gaps found.
+
+- **Numbering**: `CC-LAB-0216` (this branch's real ceiling was
+  `CC-LAB-0215` at the time of this change — re-verified against this
+  branch's own log, not the stale `CC-LAB-0098` figure this task's
+  instructions carried in from an earlier point in this multi-branch
+  session). `FR-LAB-123` (this branch's own ceiling was `FR-LAB-122`;
+  the coordinating sibling branches' own ceilings — checked by fetching
+  `claude/second-target-cat1-ecommerce`, `claude/category-3-build-iuu5k9`,
+  `claude/category-4-build-t9uz3y`, `claude/category-5-build-6boejs` —
+  were all `<= FR-LAB-117`, so this branch's own ceiling governs).
+
 ### CC-LAB-0097 — PicTrail's sixth real page: inbox insecure deserialization via pickle (FR-LAB-121/FR-LAB-122) (2026-09-23)
 
 - **Change:** Lands PicTrail's sixth real, ground-truth-bearing page,

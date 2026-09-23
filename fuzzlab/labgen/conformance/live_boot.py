@@ -553,7 +553,25 @@ CREATE TABLE IF NOT EXISTS bookings (
     room_type TEXT NOT NULL,
     total_amount REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id INTEGER NOT NULL,
+    caption TEXT NOT NULL,
+    image_path TEXT NOT NULL,
+    is_private INTEGER NOT NULL DEFAULT 0
+);
 """
+#: `photos` (CC-LAB-0216, category 2's CircleFeed `access_control`/
+#: `db_row_by_id_lookup` shape): mirrors the real
+#: `database/migrations/..._create_photos_table.php` schema this harness's
+#: own sqlite fast path does not run (see this module's own "real schema,
+#: real seed data" docstring section for why the harness seeds directly
+#: rather than through `artisan migrate`). Seeded below with one private
+#: photo per seeded user (`SEED_USER_ID`/`SEED_USER_B_ID`), so the
+#: differential a live-boot test proves -- user B reaching user A's private
+#: photo on the vulnerable twin, rejected on the secure twin, while user B
+#: can still reach their own -- has two real, distinctly-owned rows to work
+#: with.
 #: `bookings` (CC-LAB-0212, category 5's `price_integrity_bypass` shape):
 #: no seed rows -- each test inserts its own row via a real HTTP request and
 #: reads it back with :meth:`LiveBootHarness.query_db`, the same pattern
@@ -590,11 +608,33 @@ SEED_EMAIL = "user_a@example.test"
 SEED_FULL_NAME = "User A"
 SEED_BIO = "Just a puppy fan."
 
+#: A second real, seeded, independently-loginnable user (CC-LAB-0216,
+#: CircleFeed's access-control shape) -- additive alongside `SEED_USER_ID`
+#: above, never a replacement for it: every pre-existing test that reads
+#: `users` still finds `SEED_USER_ID`'s row first (`ORDER BY id`). Logged in
+#: through the same real `/login.php` page and md5-hashed password
+#: convention as `SEED_USER_ID` (`auth_session.py`), so a live-boot test can
+#: establish a real session for *either* identity with the one existing
+#: session-establishment mechanism -- no second login page/mechanism
+#: invented for this.
+SEED_USER_B_ID = 2
+SEED_USERNAME_B = "user_b"
+SEED_PASSWORD_B = "another-horse-battery-staple"
+SEED_EMAIL_B = "user_b@example.test"
+SEED_FULL_NAME_B = "User B"
+SEED_BIO_B = "Also a puppy fan."
 
-def _seed_password_hash() -> str:
+#: CircleFeed's two seeded photos (CC-LAB-0216) -- one private photo per
+#: seeded user, ids fixed so a test can name them directly rather than
+#: re-deriving them from a query.
+SEED_PHOTO_A_ID = 1
+SEED_PHOTO_B_ID = 2
+
+
+def _seed_password_hash(password: str = SEED_PASSWORD) -> str:
     import hashlib
 
-    return hashlib.md5(SEED_PASSWORD.encode("utf-8")).hexdigest()
+    return hashlib.md5(password.encode("utf-8")).hexdigest()
 
 
 _SEED_SQL = """
@@ -767,10 +807,32 @@ class LiveBootHarness:
                     SEED_USER_ID,
                     SEED_USERNAME,
                     SEED_EMAIL,
-                    _seed_password_hash(),
+                    _seed_password_hash(SEED_PASSWORD),
                     SEED_FULL_NAME,
                     SEED_BIO,
                 ),
+            )
+            conn.execute(
+                "INSERT INTO users (id, username, email, password, full_name, bio) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    SEED_USER_B_ID,
+                    SEED_USERNAME_B,
+                    SEED_EMAIL_B,
+                    _seed_password_hash(SEED_PASSWORD_B),
+                    SEED_FULL_NAME_B,
+                    SEED_BIO_B,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO photos (id, owner_id, caption, image_path, is_private) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (SEED_PHOTO_A_ID, SEED_USER_ID, "User A's private beach photo", "beach-a.jpg", 1),
+            )
+            conn.execute(
+                "INSERT INTO photos (id, owner_id, caption, image_path, is_private) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (SEED_PHOTO_B_ID, SEED_USER_B_ID, "User B's private beach photo", "beach-b.jpg", 1),
             )
             conn.commit()
         finally:

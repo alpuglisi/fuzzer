@@ -816,8 +816,24 @@ tracked in the requirements files, not here.
   **PicTrail's own six-page design (per the research doc's §6) is now
   fully built.** The full auto-linking-specific XSS shape (§4 row 2's
   own fuller `@mention`/`#hashtag` mechanism, deliberately simplified in
-  `CC-LAB-0093`) and CircleFeed (the Facebook-style PHP app) stay
-  planned, not built — each its own future, separately-gated increment.
+  `CC-LAB-0093`) stays planned, not built.
+  **CircleFeed (`CC-LAB-0216`), category 2's Facebook pick, landed its
+  first real page** — the second app identity built on the existing
+  `php_laravel` emitter (after Huddle Hub, category 3): a photo/tag-
+  detail page implementing `lab/safety_matrix.yaml`'s existing
+  access-control section (`ownership_check_bypass`, added `CC-LAB-0063`)
+  for the first time on any emitter/stack — `no_ownership_check` (a
+  direct Eloquent primary-key fetch, no owner check) vs.
+  `identity_match_before_fetch` (a real `->where('owner_id', ...)`
+  clause on the fetch itself), at the `db_row_by_id_lookup` sink family.
+  A new `App\Models\Photo` model/migration was added to the shared
+  `php_laravel` skeleton, and `LiveBootHarness` gained a second real
+  seeded user so a real ownership-check differential could be proven
+  against two genuinely distinct sessions. Its own `lab/ground-truth-
+  circlefeed/` contract (`CF-` case-id prefix). CircleFeed's remaining
+  three page-set rows (per the research doc's §6) stay planned, not
+  built — each its own future, separately-gated increment, the same
+  discipline PicTrail's own page-by-page landings above followed.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

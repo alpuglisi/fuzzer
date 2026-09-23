@@ -275,6 +275,12 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
     # classify them (php_current's shape map does not use any of them).
     "server_recomputed_amount": {"value_expr": "$amount"},
     "payment_charge_insert": {"value_expr": "$amount"},
+    # CC-LAB-0216: registered in the shared vocabulary so minimal_pair can
+    # classify them (php_current's shape map does not use any of them --
+    # php_laravel is what actually renders this shape, for CircleFeed).
+    "no_ownership_check": {"value_expr": "$id"},
+    "identity_match_before_fetch": {"value_expr": "$id"},
+    "db_row_by_id_lookup": {"value_expr": "$id"},
 }
 
 

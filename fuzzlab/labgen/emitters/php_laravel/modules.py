@@ -747,6 +747,42 @@ class StructuredHttpClientHeadersTransform(TemplateModule):
         )
 
 
+class NoOwnershipCheckTransform(TemplateModule):
+    """The ``no_ownership_check`` op (`CC-LAB-0216`, CircleFeed's
+    access-control/IDOR shape, `ownership_check_bypass` concern): flags the
+    sink to fetch the photo by its primary key alone, with no ownership
+    filter. Safety matrix: ``effect=no_effect``."""
+
+    def __init__(self) -> None:
+        super().__init__("no_ownership_check", "transform", _TRANSFORM_ENV, "no_ownership_check.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["ownership_where"] = ""
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class IdentityMatchBeforeFetchTransform(TemplateModule):
+    """The ``identity_match_before_fetch`` op (`CC-LAB-0216`, CircleFeed's
+    secure twin): flags the sink to add a real ``->where('owner_id', ...)``
+    clause to the fetch itself, so the check runs *before* (as part of) the
+    query rather than as a comparison against an already-fetched row.
+    Safety matrix: ``effect=neutralises``,
+    ``neutralizes: [ownership_check_bypass]``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "identity_match_before_fetch", "transform", _TRANSFORM_ENV, "identity_match_before_fetch.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["ownership_where"] = "->where('owner_id', $__currentUserId)"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 # --- sinks ----------------------------------------------------------------
 #
 # Every sink branches on `bound` where a bound form exists at all, so one
@@ -894,6 +930,20 @@ class OrmEntityBulkAssignSink(TemplateModule):
 
     def __init__(self) -> None:
         super().__init__("orm_entity_bulk_assign", "sink", _SINK_ENV, "orm_entity_bulk_assign.php.j2")
+
+
+class DbRowByIdLookupSink(TemplateModule):
+    """The ``db_row_by_id_lookup`` sink family (`CC-LAB-0216`, CircleFeed's
+    photo/tag-detail page): a direct Eloquent primary-key fetch
+    (``Photo::where('id', ...)->firstOrFail()``). Whether an ownership
+    filter is appended is decided entirely by whichever access-control
+    transform ran (``ownership_where``, set by
+    :class:`NoOwnershipCheckTransform`/:class:`IdentityMatchBeforeFetchTransform`)
+    -- this stack's first implementation of ``lab/safety_matrix.yaml``'s
+    ``access_control`` family, on any stack."""
+
+    def __init__(self) -> None:
+        super().__init__("db_row_by_id_lookup", "sink", _SINK_ENV, "db_row_by_id_lookup.php.j2")
 
 
 class WebhookSignatureVerificationSink(TemplateModule):
@@ -1325,6 +1375,10 @@ TRANSFORMS: dict[str, Module] = {
     "csv_formula_neutralize": CsvFormulaNeutralizeTransform(),
     # CC-LAB-0212 (price_integrity_bypass, category 5's Booking.com pilot app).
     "server_recomputed_amount": ServerRecomputedAmountTransform(),
+    # CC-LAB-0216 (access_control, category 2's CircleFeed app -- this
+    # stack's first ownership_check_bypass/access_control shape).
+    "no_ownership_check": NoOwnershipCheckTransform(),
+    "identity_match_before_fetch": IdentityMatchBeforeFetchTransform(),
 }
 #: Sinks. The three HTML sinks render a **Blade view** body rather than a
 #: controller statement; :data:`VIEW_SINKS` names them so the emitter knows
@@ -1354,6 +1408,8 @@ SINKS: dict[str, Module] = {
     "csv_export_row": CsvExportRowSink(),
     # CC-LAB-0212 (price_integrity_bypass, category 5's Booking.com pilot app).
     "payment_charge_insert": PaymentChargeInsertSink(),
+    # CC-LAB-0216 (access_control, category 2's CircleFeed app).
+    "db_row_by_id_lookup": DbRowByIdLookupSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

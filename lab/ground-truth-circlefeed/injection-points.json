@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "target": "php_laravel",
+  "points": [
+    { "url": "/cell/labgen-cf-0001", "method": "GET", "param": "id", "location": "query", "rendering": "server-json" }
+  ]
+}

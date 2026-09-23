@@ -2298,6 +2298,35 @@ lane) can submit a payload as
   internals, against a real booted request at the exact URL/method/param
   it names.
 
+- **FR-LAB-123** *(CircleFeed's first real page, `php_laravel`'s first
+  `access_control`/IDOR implementation; `CC-LAB-0216`, 2026-09-23).*
+  Establishes CircleFeed (category 2's Facebook pick, the second app
+  identity on the existing `php_laravel` emitter after Huddle Hub) and
+  lands its first designed cell: a photo/tag-detail page
+  (`docs/research/category2-social-ugc-functionality-and-cwe-
+  research.md` §3 item 4, §6 row 1), reusing `lab/safety_matrix.yaml`'s
+  existing access-control section (`ownership_check_bypass` concern,
+  added `CC-LAB-0063`) -- this project's first real implementation of
+  that family by any emitter. Vulnerable twin (`no_ownership_check`)
+  fetches `Photo::where('id', $id)->firstOrFail()` with no owner check;
+  secure twin (`identity_match_before_fetch`) adds a real
+  `->where('owner_id', $__currentUserId)` clause to the fetch itself.
+  New `App\Models\Photo` model + migration on the shared `php_laravel`
+  skeleton; `LiveBootHarness` extended with a `photos` table and a
+  second real, independently-loginnable seeded user. New ground truth,
+  `lab/ground-truth-circlefeed/` (`CF-` case-id prefix). Real, executed,
+  skip-guarded (PA-0005) live-boot proof in `tests/
+  test_labgen_php_laravel_access_control_live_boot.py`: the vulnerable
+  twin genuinely lets a second real seeded user fetch a first seeded
+  user's private photo (real HTTP 200, real content); the secure twin
+  genuinely refuses the identical request (real HTTP 404) while the
+  same user can still fetch their own photo through it (real HTTP 200);
+  both twins reject an unauthenticated request (real HTTP 401). Scope
+  deliberately limited to this one page -- the other three rows of
+  CircleFeed's page-set table, `TargetSpec`/`run_targets` wiring, and
+  `access_control`'s mapping in `fuzzlab.core.runmode._VULN_TO_CATEGORY`
+  are out of scope and named as open follow-on work, not built.
+
 - **FR-LAB-64** *(prototype pollution, CWE-1321, `node_express`; `CC-LAB-0070`,
   2026-09-22).* Per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a's
   decided Category-1 (e-commerce) Walmart/Node cell list, the `node_express`

@@ -1000,6 +1000,49 @@ class PaymentChargeInsertSink(TemplateModule):
         super().__init__("payment_charge_insert", "sink", _SINK_ENV, "payment_charge_insert.php.j2")
 
 
+# --- CC-LAB-0216: access control / IDOR (category 2, CircleFeed) ----------
+#
+# Registered here (unrendered by `php_current`'s own `_MODULE_SET_BY_SHAPE`,
+# same reasoning as the CC-LAB-0210 block above) purely for the shared
+# minimal-pair vocabulary -- `php_laravel` is the emitter that actually
+# renders this shape, for CircleFeed (category 2's Facebook pick).
+
+
+class NoOwnershipCheckTransform(TemplateModule):
+    """The ``no_ownership_check`` op (`ownership_check_bypass` concern):
+    flags the sink to fetch a resource by its primary key alone, with no
+    ownership filter -- see
+    ``fuzzlab.labgen.emitters.php_laravel.modules.NoOwnershipCheckTransform``
+    (the emitter that actually renders this op) for the real check."""
+
+    def __init__(self) -> None:
+        super().__init__("no_ownership_check", "transform", _TRANSFORM_ENV, "no_ownership_check.php.j2")
+
+
+class IdentityMatchBeforeFetchTransform(TemplateModule):
+    """The ``identity_match_before_fetch`` op (secure twin): flags the sink
+    to add a real ownership-scoped WHERE clause to the fetch itself. Safety
+    matrix: ``effect=neutralises``, ``neutralizes: [ownership_check_bypass]``.
+    See ``fuzzlab.labgen.emitters.php_laravel.modules.
+    IdentityMatchBeforeFetchTransform`` (the emitter that actually renders
+    this op) for the real check."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "identity_match_before_fetch", "transform", _TRANSFORM_ENV, "identity_match_before_fetch.php.j2"
+        )
+
+
+class DbRowByIdLookupSink(TemplateModule):
+    """The ``db_row_by_id_lookup`` sink family: a direct primary-key fetch.
+    Whether an ownership filter is appended is decided entirely by whichever
+    access-control transform ran. Registered for the shared minimal-pair
+    vocabulary only, same reasoning as :class:`RedirectTargetAllowlistTransform`."""
+
+    def __init__(self) -> None:
+        super().__init__("db_row_by_id_lookup", "sink", _SINK_ENV, "db_row_by_id_lookup.php.j2")
+
+
 class TerminalResponseComplexity(TemplateModule):
     """The ``terminal_response`` complexity: the controller method for a
     cell whose sink's own code already is the terminal statement (e.g. the
@@ -1117,6 +1160,11 @@ TRANSFORMS: dict[str, Module] = {
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
     # php_laravel is what actually renders it.
     "server_recomputed_amount": ServerRecomputedAmountTransform(),
+    # CC-LAB-0216: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it (CircleFeed).
+    "no_ownership_check": NoOwnershipCheckTransform(),
+    "identity_match_before_fetch": IdentityMatchBeforeFetchTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -1165,6 +1213,10 @@ SINKS: dict[str, Module] = {
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
     # php_laravel is what actually renders it.
     "payment_charge_insert": PaymentChargeInsertSink(),
+    # CC-LAB-0216: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it (CircleFeed).
+    "db_row_by_id_lookup": DbRowByIdLookupSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

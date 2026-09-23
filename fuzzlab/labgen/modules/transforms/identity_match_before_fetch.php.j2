@@ -1,0 +1,9 @@
+// identity_match_before_fetch (CC-LAB-0216, CircleFeed's secure twin): the
+// fetch's own WHERE clause requires the photo's owner_id to match the
+// currently authenticated user -- Eloquent's real idiomatic
+// ownership-scoped fetch, applied by the sink below
+// (->where('owner_id', $__currentUserId)). A photo that exists but belongs
+// to someone else produces the exact same "not found" (404, via
+// firstOrFail()) result as a nonexistent id, so this never leaks whether
+// the id exists at all. Safety matrix: effect=neutralises,
+// neutralizes: [ownership_check_bypass].

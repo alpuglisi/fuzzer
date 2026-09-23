@@ -25,6 +25,10 @@ venv/
 # directory too; without this exception expectedresults.csv is silently
 # gitignored (caught *.csv above) and can never actually be committed
 !lab/ground-truth-expedia-clone/*.csv
+# CC-LAB-0216: category 2's CircleFeed app has its own ground-truth
+# directory too, same BUG-0036 trap -- added proactively this time, not
+# found by a later missing-file bug
+!lab/ground-truth-circlefeed/*.csv
 # python build / test artifacts
 *.egg-info/
 build/

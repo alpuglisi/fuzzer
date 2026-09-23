@@ -4,6 +4,21 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (CircleFeed's first real page: photo/tag-detail access control)
+- `php_laravel`: establishes CircleFeed (category 2's Facebook pick, the
+  second app identity on this emitter after Huddle Hub) and lands its
+  first real, ground-truth-bearing page -- a photo/tag-detail endpoint
+  implementing `lab/safety_matrix.yaml`'s existing `access_control`
+  family (`ownership_check_bypass`, added `CC-LAB-0063`) for the first
+  time on any emitter: vulnerable twin fetches a photo by primary key
+  alone (`no_ownership_check`), secure twin adds a real Eloquent
+  ownership-scoped WHERE clause (`identity_match_before_fetch`). New
+  `Photo` model/migration on the shared skeleton; `LiveBootHarness`
+  gained a `photos` table and a second real seeded user; new
+  `lab/ground-truth-circlefeed/` (`CF-` prefix); real, executed
+  live-boot tests prove both directions of the differential against two
+  real seeded users. `CC-LAB-0216`/`FR-LAB-123`.
+
 ## 2026-09-23 (vuln corpus Phase 3: manufactured-pair gap analysis)
 - Docs: saved `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md` — the concrete
   gap analysis for the last unchecked `docs/VULN_CORPUS_EXPANSION_PLAN.md`

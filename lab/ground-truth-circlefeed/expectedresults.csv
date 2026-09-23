@@ -1,0 +1,7 @@
+# fuzzlab expected results (Benchmark-style) for category 2's CircleFeed
+# app (php_laravel). Derived from labels.json; the loader cross-checks the
+# two so they cannot drift. category is the vuln class; expected_vulnerable
+# is the ground-truth verdict for that (url, param) case. CC-LAB-0216/
+# FR-LAB-123.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+CF-0001,/cell/labgen-cf-0001,GET,id,query,access_control,true,/cell/labgen-cf-0001,sink,,direct

@@ -285,6 +285,17 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("price_integrity_bypass", "payment_charge_amount"): _ModuleSet(
         "post_param", "payment_charge_insert", "single_statement"
     ),
+    # CC-LAB-0216 (category 2, CircleFeed -- the Facebook pick, category 2's
+    # second app on this emitter after PicTrail/django): a photo/tag detail
+    # page, direct-primary-key access control (docs/research/category2-
+    # social-ugc-functionality-and-cwe-research.md sec 3 item 4 / sec 6 row
+    # 1). This stack's -- and this project's -- first implementation of
+    # `lab/safety_matrix.yaml`'s `access_control` family. Sink shared
+    # between twins; the vulnerable/secure distinction lives entirely in
+    # the transform (`no_ownership_check` vs. `identity_match_before_fetch`).
+    ("access_control", "db_row_by_id_lookup"): _ModuleSet(
+        "get_param", "db_row_by_id_lookup", "single_statement"
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -547,6 +558,16 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # served URL, same reasoning as `/webhooks/events`/`/messages/unfurl`
     # above.
     "/integrations/outgoing-webhook": {"var_name": "triggerWord", "param_name": "triggerWord"},
+    # CC-LAB-0216: CircleFeed's (category 2's Facebook pick) photo/tag-detail
+    # page -- a Facebook-style single-photo view, reachable by anyone logged
+    # in who knows/guesses the id (docs/research/category2-social-ugc-
+    # functionality-and-cwe-research.md sec 3 item 4). Illustrative served
+    # URL (`_served_route_for`'s no-`real_page` branch), same reasoning as
+    # Huddle Hub's own pages: CircleFeed, like Huddle Hub, has no migrated
+    # real puppy-fort-factory page to anchor a pinned URL to. No
+    # `table`/`column`: `DbRowByIdLookupSink` names the `Photo` model and
+    # its `id` column itself (an Eloquent fetch, not a raw `DB::select`).
+    "/photos/view": {"var_name": "id", "param_name": "id"},
     # POST string-literal lookup. `password_var`/`password_param` are sink
     # boilerplate (an already-hashed secret), not a second injection point.
     "/login": {
