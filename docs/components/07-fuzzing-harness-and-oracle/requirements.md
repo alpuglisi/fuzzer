@@ -213,6 +213,35 @@ rewards) derives from it.
   header point is a real, audited point today, not a skip reason. This
   entry is kept for history — it correctly named the gap at the time.
 
+- **FR-FUZZ-16** *(`AccessControlIdorStrategy`; `CC-FUZZ-0029`, 2026-09-23).*
+  The oracle supports real **access-control (IDOR/BOLA) confirmation**,
+  paired with `FR-AUD-8`'s candidate-generation rule, closing `CC-LAB-0178`'s
+  open question:
+  - `AccessControlIdorStrategy` (`vuln_class="access_control"`,
+    `mechanism="identity-differential"`): sends two unrelated id values;
+    confirms only when both return HTTP 200, echo the requested id back in
+    a non-empty body, contain no generic denial phrase (`\b`-anchored,
+    PA-0022), and the two bodies differ — else fails closed. A generic
+    differential in the same family as `SqliBooleanStrategy`/
+    `SsrfInBandMarkerStrategy`, not a lab-specific hardcode.
+  - `fuzzlab.core.runmode._VULN_TO_CATEGORY` gained
+    `"access_control": "access-control"` — required for the rule/strategy
+    to actually be selected by a ground-truth-driven run (the vuln_class
+    and category slugs genuinely differ here, unlike `ssrf`).
+  - **Documented, not eliminated, false-positive class**: a legitimate
+    endpoint that echoes an arbitrary id back without gating anything
+    sensitive by ownership will still confirm (pinned by
+    `test_documented_false_positive_class_a_public_echo_endpoint_does_
+    confirm`) — stated in the strategy's own docstring per the pre-change
+    review's adequacy pass, mitigated only by `R-ACCESS-CONTROL`'s
+    narrowed rule scope (`FR-AUD-8`), not by the strategy itself. This is
+    the project's first strategy for this class; broader validation
+    against a second, differently-shaped target is expected before it is
+    trusted beyond this lab.
+  - Verified live against Twitch's real booted twins
+    (`test_real_boot_proves_the_access_control_idor_strategy_end_to_end`);
+    Twitch's real, scored `multitarget` recall moves from 1/3 to 2/3.
+
 - **FR-FUZZ-15** *(header points become real, audited points; a
   content-type-aware whole-body sender; `CC-FUZZ-0028`, 2026-09-23).*
   Closes `FR-FUZZ-13`'s own gap and one of `FR-LAB-99`'s three flagged

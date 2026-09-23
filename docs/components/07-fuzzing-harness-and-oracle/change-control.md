@@ -3,6 +3,106 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0029 — `AccessControlIdorStrategy`: real detection for `access_control` (IDOR/BOLA) (2026-09-23)
+
+- Change: adds the project's first oracle confirmation strategy for the
+  `access_control` vulnerability class, closing the `CC-LAB-0178` open
+  question (`docs/components/01-target-lab/requirements.md` §8).
+  1. **`fuzzlab/oracle/strategies.py`**: `AccessControlIdorStrategy`
+     (`vuln_class="access_control"`, `mechanism="identity-differential"`,
+     `category="access-control"`). Sends two unrelated id values via
+     `_send()`; confirms only when both legs return HTTP 200, a non-empty
+     body that echoes the requested id back verbatim, no generic
+     denial-phrase match (`\b`-anchored regex, per PA-0022), and the two
+     bodies differ from each other — else fails closed (`None`), the same
+     posture every other strategy in this file uses. Registered in
+     `default_strategies()` (appended before the cross-cutting
+     `GreyboxConfirmationStrategy`, after the category-specific SSRF
+     strategies — matches existing ordering convention, not a literal
+     reordering of any existing entry) and in `_CATEGORY_TO_CLASS`
+     (`"access-control": "access_control"`).
+  2. **`fuzzlab/core/runmode.py`**: `_VULN_TO_CATEGORY` gained
+     `"access_control": "access-control"`. Without this, ground truth's
+     `vuln_class="access_control"` (underscore) never maps to the rule's
+     `category="access-control"` (hyphen) — the two genuinely differ,
+     unlike `ssrf` (identical either way, needing no entry) — so the new
+     rule/strategy would never actually be selected by a ground-truth-driven
+     run despite existing. Found by re-tracing the real category-selection
+     path (`categories_from_vuln_classes` → `resolve_run` → `plan.categories`)
+     before considering this done, not assumed from the SSRF precedent.
+  3. **`fuzzlab/audit/rules_data/default_rules.json`**: `R-ACCESS-CONTROL`
+     (see the paired `CC-AUD-0017` entry for the rule itself — cross-cutting
+     to both components' data contracts, so recorded in both logs per this
+     README's "if a change touches more than one component" rule).
+  - Dispatched through this component's mandatory pre-change review gate
+    (accuracy + adequacy passes, both agents given the actual draft and the
+    real repo to check against). Accuracy pass: no factual errors found.
+    Adequacy pass required, and this entry incorporates: (a) narrowing
+    `R-ACCESS-CONTROL`'s scope to `GET`/`query` only and dropping the
+    overly broad `account_id` term (a legitimate multi-account search
+    feature was flagged as a realistic false-positive source); (b) the
+    id-echo check (item 1 above), added specifically to raise precision
+    against the false-positive class the adequacy pass named; (c) moving
+    the strategy's documented limitation into its own docstring (matching
+    `SsrfOobStrategy`'s convention) rather than leaving it only in a
+    scratch draft; (d) the `\b`-anchored denial-marker regex per PA-0022;
+    (e) explicitly re-verifying the cross-branch collision check and the
+    `docs/PREVENTIVE_ACTIONS.md`/`docs/ARCHITECTURE.md` bookkeeping
+    questions the adequacy pass raised (confirmed: no other active branch
+    touches `access_control`/`R-ACCESS-CONTROL`; `docs/ARCHITECTURE.md`
+    does not track per-strategy detection coverage at this granularity
+    anywhere else, so it needs no edit for this change).
+  New/changed files:
+  - `fuzzlab/oracle/strategies.py`
+  - `fuzzlab/core/runmode.py`
+  - `fuzzlab/audit/rules_data/default_rules.json` (shared with `CC-AUD-0017`)
+  - `tests/test_oracle_strategies_access_control.py` (new)
+  - `tests/test_labgen_go_live_boot.py` (new
+    `test_real_boot_proves_the_access_control_idor_strategy_end_to_end`)
+  - `tests/test_multitarget_category4.py` (Twitch's real, scored recall
+    moves from 1/3 to 2/3 — updated assertions, not just a docstring)
+  - `docs/components/01-target-lab/requirements.md` (§8 open question
+    resolved)
+  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    (`FR-FUZZ-16`, new)
+- Impact (other components / project): `fuzzlab/oracle/strategies.py` and
+  `fuzzlab/core/runmode.py` are both shared across every category/target
+  (confirmed no active branch collision via a fresh `git show` against
+  category-2/3/5 and second-target-cat1-ecommerce before landing). Purely
+  additive — no existing strategy, rule, or category mapping is changed,
+  only a new entry appended to each. `fuzzlab.harness.multitarget`'s
+  real, scored Twitch report for category 4's own Phase E test now shows
+  `tp=2` instead of `tp=1` (a real behavior change, not just new code —
+  any consumer asserting the old `tp=1`/`recall=1/3` figures needs the
+  same update this entry makes to `test_multitarget_category4.py`).
+- Risk (level; mitigation or accepted-risk justification): Low-medium. The
+  strategy's own documented false-positive class (a legitimate
+  arbitrary-id-echoing public lookup with nothing sensitive gated by
+  ownership) is real and accepted, not eliminated — mitigated by scoping
+  the triggering rule narrowly (GET/query, a short id-shaped name list)
+  and by this project's own detection-benchmark framing (a confirmed
+  finding here is scored against known ground truth, not shipped as an
+  unreviewed live-scan verdict against a real target without human
+  review — `docs/README.md`'s own lab-only/authorized-only scoping).
+  Documented explicitly in the strategy's own docstring and pinned by
+  `test_documented_false_positive_class_a_public_echo_endpoint_does_confirm`
+  rather than discovered later as a surprise.
+- Deliverables:
+  - [x] `AccessControlIdorStrategy` implemented, registered, unit-tested
+        (vulnerable/secure/false-positive/false-negative cases) — done
+  - [x] `_VULN_TO_CATEGORY` fix so the strategy is actually reachable — done
+  - [x] Real live-boot proof against Twitch's real booted Go app — done
+  - [x] `test_multitarget_category4.py` updated to the new real recall — done
+  - [x] Full non-slow suite re-run green at the stable baseline — done
+    (18 failed pre-existing/environment, rest passed)
+- Effectiveness (assessed 2026-09-23): achieved. Twitch's real, scored
+  `multitarget` recall for category 4 moved from 1/3 to 2/3
+  (`tp=2, fp=0`), proven by a real, executed `run_targets()` call against
+  a real booted app (`tests/test_multitarget_category4.py`), and the
+  strategy independently confirms/fails-closed correctly against real
+  vulnerable/secure twins via a dedicated live-boot test, not only mocked
+  senders.
+
 ### CC-FUZZ-0028 — Header-location points become real, audited points; a content-type-aware whole-body sender (2026-09-23)
 
 - Change: closes the two structural gaps `CC-LAB-0176`/`FR-LAB-99`

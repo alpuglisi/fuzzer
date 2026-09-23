@@ -37,6 +37,15 @@ budget where a vulnerability is plausible.
   `name_regex`-only shape `R-OPEN-REDIRECT`/`R-FILE-INCLUSION`/
   `R-COMMAND-INJECTION` already use. Rule-generation only — confirmation is
   `fuzzlab.oracle`'s job (`FR-FUZZ-14`).
+- **FR-AUD-8** *(`CC-AUD-0017`, 2026-09-23).* A candidate is generated for the
+  `access-control` category: `R-ACCESS-CONTROL`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a `GET`/`query`
+  parameter whose name looks like an object identifier (`channel_id`,
+  `resource_id`, `object_id`, `item_id`, `record_id`, `owner_id`) —
+  narrower than `R-SSRF`'s bare-`name_regex` shape (adds `method_in`/
+  `location_in`) to bound the false-positive risk a broader match would
+  carry for this category (see `CC-AUD-0017`). Rule-generation only —
+  confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-16`).
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that

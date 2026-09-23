@@ -242,3 +242,45 @@ def test_real_boot_proves_the_idor_differential_for_both_twins() -> None:
             f"{secure_match_resp.body!r}"
         )
         assert "own-channel" in secure_match_resp.body and "subscriber_count" in secure_match_resp.body
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_access_control_idor_strategy_end_to_end() -> None:
+    """The real `AccessControlIdorStrategy` (CC-FUZZ-0029/FR-FUZZ-16), driven
+    against a real booted app rather than a fake sender: confirms the
+    vulnerable twin and fails closed on the secure twin, using the exact
+    probes the strategy itself sends (no `X-Broadcaster-Id` header -- the
+    strategy has no session/identity to drive)."""
+    from fuzzlab.oracle.probe import Candidate, Probe
+    from fuzzlab.oracle.strategies import AccessControlIdorStrategy
+
+    manifest = load_manifest("lab/manifests/access_control_go_sample.yaml")
+    emitter = GoEmitter()
+
+    with GoLiveBootHarness(emitter, manifest.cells) as harness:
+
+        class _HarnessSender:
+            def __init__(self, path: str):
+                self._path = path
+
+            def send(self, url, param, value, timing=False, method="GET",
+                      location="query", content_type=None):
+                resp = harness.request("GET", f"{self._path}?{param}={value}")
+                return Probe(resp.status, resp.body)
+
+        strategy = AccessControlIdorStrategy()
+        vuln_cand = Candidate(url="http://h/generated/labgen-go-0005", param="channel_id",
+                              method="GET", location="query",
+                              vuln_class="access_control", category="access-control")
+        secure_cand = Candidate(url="http://h/generated/labgen-go-0006", param="channel_id",
+                                method="GET", location="query",
+                                vuln_class="access_control", category="access-control")
+
+        verdict = strategy.confirm(vuln_cand, _HarnessSender("/generated/labgen-go-0005"))
+        assert verdict is not None and verdict.confirmed, "strategy failed to confirm the real vulnerable twin"
+        assert verdict.vuln_class == "access_control"
+
+        assert strategy.confirm(secure_cand, _HarnessSender("/generated/labgen-go-0006")) is None, (
+            "strategy incorrectly confirmed the real secure twin"
+        )

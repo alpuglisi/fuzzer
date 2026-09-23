@@ -24,24 +24,29 @@ AUTOMATIC = "automatic"
 MANUAL = "manual"
 
 # Ground-truth vuln_class values normalized to reference-style category slugs.
-# `ssti` (CC-CORE-0020): the only one of category 3's 6 new classes mapped so
-# far -- it already has a real, independently-verified working rule+strategy
-# pairing (`R-SSTI` in fuzzlab/audit/rules_data/default_rules.json,
-# `SstiStrategy` in fuzzlab/oracle/strategies.py), verified live against both
-# of TrackerNest's real twins before landing. The other 5
-# (`xxe`/`insecure_deserialization`/`webhook_signature_bypass`/`ssrf`/
-# `outbound_header_injection`) have no confirmer built yet -- mapping them
-# now would only relabel an honest false negative as a false negative that
-# looks wired but never confirms (evaluate() would nominate a candidate with
-# no strategy to confirm it, `category_to_oracle_class()` returning None),
-# not a real improvement, so they stay unmapped until each has its own
-# verified confirmer.
+# A class is added here once it has a real, independently-verified working
+# rule+strategy pairing -- mapping one before that would only relabel an
+# honest false negative as a false negative that looks wired but never
+# confirms (evaluate() would nominate a candidate with no strategy to confirm
+# it, `category_to_oracle_class()` returning None), not a real improvement.
+# `ssti` (CC-CORE-0020): `R-SSTI`/`SstiStrategy`, verified live against both
+# of TrackerNest's real twins. `access_control` (CC-FUZZ-0029): its
+# vuln_class ("access_control", underscore -- ground truth's own convention)
+# and its category ("access-control", hyphen -- this project's reference-slug
+# convention, matching every other multi-word category here) genuinely
+# differ, unlike e.g. `ssrf` (identical either way, so it needs no entry);
+# `R-ACCESS-CONTROL`/`AccessControlIdorStrategy`, verified live against
+# Twitch's real IDOR twins (`test_real_boot_proves_the_access_control_idor_
+# strategy_end_to_end`). `webhook_signature`/`insecure_deserialization` (and
+# `xxe`/`outbound_header_injection`) still have no confirmer built -- stay
+# unmapped until each does.
 _VULN_TO_CATEGORY = {
     "sqli": "sql-injection",
     "xss-reflected": "xss",
     "xss-stored": "xss",
     "xss-dom": "xss",
     "ssti": "server-side-template-injection",
+    "access_control": "access-control",
 }
 
 

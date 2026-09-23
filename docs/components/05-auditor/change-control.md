@@ -3,6 +3,52 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0017 — `R-ACCESS-CONTROL` audit rule (2026-09-23)
+
+- Change: adds `R-ACCESS-CONTROL`, category `access-control`, to
+  `fuzzlab/audit/rules_data/default_rules.json` — `{"method_in": ["GET"],
+  "location_in": ["query"], "name_regex": "channel_id|resource_id|
+  object_id|item_id|record_id|owner_id"}`. The project's first
+  candidate-generation rule for the `access_control` (IDOR/BOLA) category,
+  closing the `CC-LAB-0178` open question. Narrower than `R-SSRF`'s own
+  bare-`name_regex` shape by design — the adequacy pass of the paired
+  `CC-FUZZ-0029` pre-change review gate flagged the originally-drafted
+  bare `name_regex` (which also matched `account_id`) as a realistic
+  false-positive source against a legitimate multi-account search
+  feature; `method_in`/`location_in` were added and `account_id` dropped
+  from the term list in response. Paired with `CC-FUZZ-0029`'s new
+  `AccessControlIdorStrategy` oracle confirmation (this rule alone only
+  generates a candidate; that strategy confirms it).
+  Reviewed pre-implementation per the component's pre-change review gate
+  (accuracy + adequacy passes — see `CC-FUZZ-0029` for the full review
+  record, since both passes covered the rule and the strategy together).
+  New/changed files:
+  - `fuzzlab/audit/rules_data/default_rules.json`
+  - `docs/components/05-auditor/requirements.md` (`FR-AUD-8`, new)
+- Impact (other components / project): `default_rules.json` is shared
+  across every category and every existing target's own run — purely
+  additive (a new rule appended after `R-SSRF`, nothing else changed), so
+  no existing rule's behavior is affected. Requires the paired
+  `fuzzlab.core.runmode._VULN_TO_CATEGORY` fix (`CC-FUZZ-0029`) to
+  actually be reachable from a ground-truth-driven run — recorded there,
+  not duplicated here.
+- Risk (level; mitigation or accepted-risk justification): Low. A rule
+  only nominates a candidate for confirmation; it cannot itself produce a
+  false "confirmed" finding (that risk lives in the paired strategy,
+  assessed in `CC-FUZZ-0029`). The narrowed `method_in`/`location_in`
+  scope reduces how often the rule fires on an unrelated GET/query param
+  that happens to share a common id-shaped name.
+- Deliverables:
+  - [x] `R-ACCESS-CONTROL` added to `default_rules.json` — done
+  - [x] Unit tests confirming the rule's `when` predicate matches/excludes
+        as scoped (`test_r_access_control_rule_matches_a_channel_id_query_
+        get_point`, `test_r_access_control_rule_does_not_match_a_body_or_
+        post_point`) — done
+- Effectiveness (assessed 2026-09-23): achieved. Paired with
+  `AccessControlIdorStrategy`, the rule correctly nominates Twitch's real
+  `TWCH-0003` point and is proven end-to-end against a real booted app
+  (see `CC-FUZZ-0029`'s Effectiveness note).
+
 ### CC-AUD-0016 — `R-SSRF` audit rule (2026-09-23)
 
 - Change: adds `R-SSRF`, category `ssrf`, to

@@ -4,6 +4,33 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (FUZZ/AUD: real detection for `access_control` (IDOR/BOLA))
+- Fuzzing harness/oracle: the project's first real audit rule
+  (`R-ACCESS-CONTROL`, id-shaped GET/query param names) and oracle
+  strategy (`AccessControlIdorStrategy`) for the `access_control`
+  vulnerability class, closing the `CC-LAB-0178` open question. Sends two
+  unrelated id values and confirms only when both succeed (200), echo the
+  requested id back, contain no denial phrase, and differ from each other
+  — a generic differential in the same family as `SqliBooleanStrategy`/
+  `SsrfInBandMarkerStrategy`, documented (in the strategy's own docstring,
+  matching `SsrfOobStrategy`'s convention) as proving "no ownership check
+  rejects an arbitrary id", not a genuine cross-tenant-access proof, with
+  its known false-positive class stated and pinned by a dedicated test.
+  Also fixed `fuzzlab.core.runmode._VULN_TO_CATEGORY`, which had no entry
+  for `access_control` (underscore, ground truth's convention) against
+  `access-control` (hyphen, this project's reference-slug convention) —
+  without it the new rule/strategy would never actually run in a
+  ground-truth-driven scan. Verified live against Twitch's real booted
+  IDOR twins (`TWCH-0003`): Twitch's real, scored `multitarget` recall
+  moves from 1/3 to 2/3 (`tp=2, fp=0`), confirmed by a real, executed
+  `run_targets()` call, not a mock. Two independent review passes
+  (accuracy + adequacy, this project's mandatory pre-change review gate)
+  ran before implementation; the adequacy pass's required additions
+  (narrower rule scope — GET/query only, dropped the overly broad
+  `account_id`; an id-echo check to raise precision; `\b`-anchored denial
+  markers per PA-0022; the docstring-embedded limitation) were all
+  incorporated. `CC-FUZZ-0029`/`FR-FUZZ-16`, `CC-AUD-0017`/`FR-AUD-8`.
+
 ## 2026-09-23 (LAB: Netflix's second real page, XXE)
 - Lab: Netflix's own page/route depth, reusing TrackerNest's already-built
   XXE shape (`raw_body`/`xml_external_entities_enabled`/`_disabled`,

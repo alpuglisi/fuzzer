@@ -3996,15 +3996,14 @@ None (it is the system under test).
   `tests/test_labgen_harder_shapes.py` and `tests/test_labgen_identifier_sqli_assertion.py`.
 
 ## 8. Open questions
-- (`CC-LAB-0178`, 2026-09-23) **No audit rule/oracle strategy exists for
-  `access_control`.** Twitch's `TWCH-0003` (an attacker-chosen `channel_id`
-  vs. the caller's own `X-Broadcaster-Id`) is a real, buildable follow-on:
-  a rule matching a `channel_id`/`resource_id`-shaped param name (mirroring
-  `R-SSRF`'s own `name_regex`-only shape) plus a strategy comparing the
-  response for the point's own identity value vs. a different, adjacent
-  one (a genuinely general differential, not hardcoded to this lab's own
-  response text — the same "does the response actually differ" shape
-  `SsrfInBandMarkerStrategy` already uses). Not attempted in this entry.
+- (`CC-LAB-0178`, 2026-09-23; **resolved** `CC-FUZZ-0029`/`CC-AUD-0017`,
+  2026-09-23) **No audit rule/oracle strategy exists for `access_control`.**
+  ~~Twitch's `TWCH-0003` ... is a real, buildable follow-on ... Not
+  attempted in this entry.~~ Built: `R-ACCESS-CONTROL`
+  (`fuzzlab/audit/rules_data/default_rules.json`, `FR-AUD-8`) +
+  `AccessControlIdorStrategy` (`fuzzlab/oracle/strategies.py`,
+  `FR-FUZZ-16`), verified live against Twitch's real booted `TWCH-0003`
+  twins. Twitch's real, scored `multitarget` recall moves from 1/3 to 2/3.
 - (`CC-LAB-0139`, 2026-09-23) **`fuzzlab.harness.auto.points_from_ground_truth` has no
   `location="header"` branch.** A ground-truth point with `location="header"` (Huddle
   Hub's `HHUB-0001`, the first such point in this project — see

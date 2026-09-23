@@ -511,6 +511,66 @@ class SsrfOobStrategy(ConfirmationStrategy):
         return None
 
 
+class AccessControlIdorStrategy(ConfirmationStrategy):
+    """Confirms broken object-level authorization (IDOR/BOLA, CWE-639/862) by a
+    differential: does the target return distinct, successful, id-keyed data for
+    two arbitrary, unrelated id values with nothing rejecting either?
+
+    Sends two unrelated id values and requires, for *both* legs: HTTP 200; a
+    non-empty body that echoes the requested id value back (proving the
+    response is actually keyed by what was sent, not a canned page); no
+    generic access-denial phrase in the body; and that the two bodies differ
+    (proof of two distinct records, not one static page repeated). All four
+    must hold, or this fails closed (returns None) -- a real ownership check
+    almost always denies with a non-2xx status, or an id-mismatch response,
+    for at least one of two unrelated values.
+
+    Known limitation, not silently swept under the rug: this cannot
+    authenticate as two different real identities (this project's lab targets
+    have no full session/auth system to drive yet -- see `FR-LAB-118`'s own
+    scoping note), so it only proves "arbitrary ids are accepted with no
+    ownership check", the IDOR/BOLA shape this project's own lab cells model --
+    not a genuine cross-tenant-access proof against a live multi-user app. It
+    can also false-positive on a legitimate endpoint that echoes an arbitrary
+    id back without that id gating access to anything sensitive (e.g. a
+    public lookup keyed by id rather than a private one); `R-ACCESS-CONTROL`
+    scopes the rule to GET/query id-shaped param names to bound that risk, not
+    eliminate it. This is the project's first strategy for this class and is
+    expected to need broader validation against a second, differently-shaped
+    target before being trusted beyond this lab (tracked as an open note in
+    `docs/components/07-fuzzing-harness-and-oracle/requirements.md`).
+    """
+    vuln_class = "access_control"
+    mechanism = "identity-differential"
+    category = "access-control"
+
+    # \b-anchored per PA-0022 (avoid an accidental substring hit, e.g.
+    # "unauthorized" inside "preauthorized"); a false collision here only
+    # costs a false negative (fails closed), never a false positive.
+    _DENIAL_MARKERS = re.compile(
+        r"\bforbidden\b|\bunauthorized\b|\baccess denied\b|\bnot found\b|\bpermission denied\b",
+        re.I,
+    )
+    _ID_A = "50172"
+    _ID_B = "88190475"
+
+    def confirm(self, candidate, sender):
+        a = self._send(sender, candidate, self._ID_A)
+        b = self._send(sender, candidate, self._ID_B)
+        if a.status != 200 or b.status != 200:
+            return None
+        if not a.text or not b.text:
+            return None
+        if self._DENIAL_MARKERS.search(a.text) or self._DENIAL_MARKERS.search(b.text):
+            return None
+        if self._ID_A not in a.text or self._ID_B not in b.text:
+            return None
+        if a.text == b.text:
+            return None
+        return Verdict(True, self.vuln_class, self.mechanism,
+                       {"probe_a": a.text[:120], "probe_b": b.text[:120]})
+
+
 # Grey-box (M10) default confirmation-side probes: something that would reach the
 # vulnerable sink (a SQLi syntax-breaker; an XSS canary) so the coverage/DB-fault
 # side channel has something to observe. Distinct from the black-box strategies'
@@ -673,6 +733,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
             PathTraversalStrategy(), CommandInjectionStrategy(),
             CommandInjectionOobStrategy(oob), RegexDosStrategy(),
             SsrfInBandMarkerStrategy(oob), SsrfOobStrategy(oob),
+            AccessControlIdorStrategy(),
             GreyboxConfirmationStrategy(coverage, dbfault)]
 
 
@@ -690,6 +751,7 @@ _CATEGORY_TO_CLASS = {
     "command-injection": "command-injection",
     "regular-expression": "redos",
     "ssrf": "ssrf",
+    "access-control": "access_control",
 }
 
 

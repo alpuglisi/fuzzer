@@ -12,20 +12,22 @@ audit rule + oracle strategies).
 **What this now proves, and what remains honestly open (recorded here, not
 routed around).** Twitch now has three real cells (webhook-signature, SSRF,
 and access-control/IDOR -- `CC-LAB-0178`, the "coherent page/route set"
-depth work). The SSRF case (`TWCH-0002`) is a real, confirmed finding:
-`SsrfInBandMarkerStrategy` sees the vulnerable twin (`LABGEN-GO-0003`) echo
-the OOB marker back in its own response body (`io.Copy(w, resp.Body)`), and
-correctly does not confirm the secure twin (`LABGEN-GO-0004`, blocked by
-its scheme/IP allowlist before any fetch). Two gaps remain open, both
-already flagged and not fixed here:
+depth work), and two of the three now confirm for real. The SSRF case
+(`TWCH-0002`): `SsrfInBandMarkerStrategy` sees the vulnerable twin
+(`LABGEN-GO-0003`) echo the OOB marker back in its own response body
+(`io.Copy(w, resp.Body)`), and correctly does not confirm the secure twin
+(`LABGEN-GO-0004`, blocked by its scheme/IP allowlist before any fetch). The
+access-control/IDOR case (`TWCH-0003`, `CC-FUZZ-0029`):
+`AccessControlIdorStrategy` sees the vulnerable twin (`LABGEN-GO-0005`)
+accept and echo back any `channel_id`, and correctly does not confirm the
+secure twin (`LABGEN-GO-0006`, blocked by its identity-match check). One
+gap remains open, already flagged and not fixed here:
 
 1. **No audit `Rule`/oracle strategy exists yet for `webhook_signature`/
-   `insecure_deserialization`/`access_control`** (only `ssrf` has one,
-   `CC-FUZZ-0027`) -- `fuzzlab.core.runmode._VULN_TO_CATEGORY` still only
-   maps `sqli`/`xss-*`/`ssti` beyond that, so these fall through to their
-   own name as the category and find no matching rule. `access_control`'s
-   own differential (an attacker-chosen `channel_id` vs. the caller's own
-   identity) is a real, buildable follow-on -- not attempted in this entry.
+   `insecure_deserialization`** (`ssrf`/`access_control` now both have one,
+   `CC-FUZZ-0027`/`CC-FUZZ-0029`) -- `fuzzlab.core.runmode._VULN_TO_CATEGORY`
+   still doesn't map these two, so they fall through to their own name as
+   the category and find no matching rule.
 2. **The whole-body-JSON deserialization case (`param="body"`) still can't
    succeed through this generic sender.** `CC-FUZZ-0028` made the sender
    content-type-aware (`RequestsProbeSender` now sends raw JSON for a point
@@ -113,13 +115,13 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # Real run against a real boot: distinct run IDs, no exception raised.
     assert by_name["twitch-clone"].run_id != by_name["netflix-clone"].run_id
 
-    # Twitch: SSRF (TWCH-0002) is now a real, confirmed finding; the
-    # webhook-signature (TWCH-0001) and access-control/IDOR (TWCH-0003)
-    # cases still have no rule/point support (see module docstring) --
-    # one of its three positives, not all three.
+    # Twitch: SSRF (TWCH-0002) and access-control/IDOR (TWCH-0003) are now
+    # real, confirmed findings; the webhook-signature (TWCH-0001) case still
+    # has no rule/point support (see module docstring) -- two of its three
+    # positives, not all three.
     twitch_report = by_name["twitch-clone"].report
-    assert twitch_report.tp == 1 and twitch_report.fp == 0
-    assert round(twitch_report.recall, 4) == round(1 / 3, 4)
+    assert twitch_report.tp == 2 and twitch_report.fp == 0
+    assert round(twitch_report.recall, 4) == round(2 / 3, 4)
 
     # Netflix: still a real, structural zero -- the whole-body-JSON case
     # can't be expressed by the generic sender yet (see module docstring).
@@ -128,7 +130,7 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
-    assert round(summary["macro_recall"], 4) == round((1 / 3) / 2, 4)
+    assert round(summary["macro_recall"], 4) == round((2 / 3) / 2, 4)
     # Only one of the two targets shows recall > 0 -- not yet "generalizes"
     # by this project's own >= 2 definition (transfer_summary's docstring).
     assert summary["generalizes"] is False

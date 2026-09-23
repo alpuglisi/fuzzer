@@ -49,6 +49,13 @@
       "transaction_type": "Server-Side Request Forgery",
       "when": { "name_regex": "url|uri|link|src|source|target|endpoint|fetch|proxy|webhook|image|thumbnail|avatar" },
       "reference": "ssrf"
+    },
+    {
+      "id": "R-ACCESS-CONTROL",
+      "category": "access-control",
+      "transaction_type": "Broken Object-Level Authorization",
+      "when": { "method_in": ["GET"], "location_in": ["query"], "name_regex": "channel_id|resource_id|object_id|item_id|record_id|owner_id" },
+      "reference": "access-control"
     }
   ]
 }
