@@ -227,6 +227,13 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
         "dom_suffix": "-post",
         "dom_write_prop": "innerHTML",
     },
+    # CC-LAB-0133: registered in the shared vocabulary so minimal_pair can
+    # classify them (this cell is built on php_laravel only, category 3's
+    # Huddle Hub).
+    "webhook_request": {"var_name": "webhookRawBody", "secret": "test-secret"},
+    "loose_equality_compare": {"value_expr": "$webhookRawBody"},
+    "constant_time_compare": {"value_expr": "$webhookRawBody"},
+    "webhook_signature_verification": {"value_expr": "$webhookRawBody"},
 }
 
 

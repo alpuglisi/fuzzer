@@ -247,6 +247,27 @@ class AllPostParamsSource(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class WebhookRequestSource(TemplateModule):
+    """The ``webhook_request`` source (`CC-LAB-0133`, Huddle Hub's
+    webhook-signature-verification cell): the raw request body plus the
+    ``X-Signature`` header and a fixed, lab-only shared secret -- the same
+    real Slack-style Events-API-callback shape
+    ``docs/research/corpus-examples/webhook-signature/php/`` already models
+    as research, built here as a real cell for the first time. Publishes
+    ``value_expr`` (the raw body) for the transform stage's HMAC
+    recomputation."""
+
+    def __init__(self) -> None:
+        super().__init__("webhook_request", "source", _SOURCE_ENV, "webhook_request.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        template = self._env.get_template(self._template_name)
+        code = template.render(var_name=ctx["var_name"], secret=ctx["secret"])
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = f"${ctx['var_name']}"
+        return RenderResult(code=code, context=new_ctx)
+
+
 # --- transforms -----------------------------------------------------------
 
 
@@ -480,6 +501,30 @@ class DomTextContentTransform(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class LooseEqualityCompareTransform(TemplateModule):
+    """The ``loose_equality_compare`` op (`CC-LAB-0133`, `weak_signature_
+    comparison` concern): PHP's ``==`` operator both short-circuits and
+    type-juggles hex-looking strings as equal numbers (the documented "magic
+    hash" bypass). Safety matrix: ``effect=partial``,
+    ``neutralizes: [weak_signature_comparison]`` -- a lone ``partial`` op
+    never moves a concern into ``verdict()``'s fully-satisfied set, so this
+    cell is VULNERABLE overall despite the transform doing a real (just
+    unsafe) comparison."""
+
+    def __init__(self) -> None:
+        super().__init__("loose_equality_compare", "transform", _TRANSFORM_ENV, "loose_equality_compare.php.j2")
+
+
+class ConstantTimeCompareTransform(TemplateModule):
+    """The ``constant_time_compare`` op (`CC-LAB-0133`, secure twin):
+    PHP's ``hash_equals()``, its own documented constant-time comparison
+    primitive. Safety matrix: ``effect=neutralises``,
+    ``neutralizes: [weak_signature_comparison]``."""
+
+    def __init__(self) -> None:
+        super().__init__("constant_time_compare", "transform", _TRANSFORM_ENV, "constant_time_compare.php.j2")
+
+
 # --- sinks ----------------------------------------------------------------
 #
 # Every sink branches on `bound` where a bound form exists at all, so one
@@ -627,6 +672,19 @@ class OrmEntityBulkAssignSink(TemplateModule):
 
     def __init__(self) -> None:
         super().__init__("orm_entity_bulk_assign", "sink", _SINK_ENV, "orm_entity_bulk_assign.php.j2")
+
+
+class WebhookSignatureVerificationSink(TemplateModule):
+    """The ``webhook_signature_verification`` sink family (`CC-LAB-0133`,
+    Huddle Hub): accepts and "processes" the event -- illustrative, sets
+    ``$rows`` for ``single_statement``'s default JSON-response tail. Reached
+    only if whichever signature-verification transform ran didn't already
+    return a 403 response above it."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "webhook_signature_verification", "sink", _SINK_ENV, "webhook_signature_verification.php.j2"
+        )
 
 
 class DomInnerhtmlEchoSink(TemplateModule):
@@ -912,6 +970,7 @@ SOURCES: dict[str, Module] = {
     "all_post_params": AllPostParamsSource(),
     # L-P3.3c-DOM (reviews.php/feedback.php): no PHP source at all.
     "dom_url_source": DomUrlSource(),
+    "webhook_request": WebhookRequestSource(),
 }
 #: Transform ops. Every name here must also have a row for every sink family
 #: it is authored against in ``lab/safety_matrix.yaml`` -- an op this emitter
@@ -931,6 +990,8 @@ TRANSFORMS: dict[str, Module] = {
     "runtime_field_allowlist": RuntimeFieldAllowlistTransform(),
     # L-P3.3c-DOM (reviews.php/feedback.php): the client-side write mechanism.
     "dom_text_content": DomTextContentTransform(),
+    "loose_equality_compare": LooseEqualityCompareTransform(),
+    "constant_time_compare": ConstantTimeCompareTransform(),
 }
 #: Sinks. The three HTML sinks render a **Blade view** body rather than a
 #: controller statement; :data:`VIEW_SINKS` names them so the emitter knows
@@ -951,6 +1012,7 @@ SINKS: dict[str, Module] = {
     "orm_entity_bulk_assign": OrmEntityBulkAssignSink(),
     # L-P3.3c-DOM: reviews.php/feedback.php's client-only DOM-XSS sink.
     "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
+    "webhook_signature_verification": WebhookSignatureVerificationSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

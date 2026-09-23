@@ -1931,6 +1931,39 @@ lane) can submit a payload as
   (`labels.json`/`injection-points.json`); `multitarget.py` wiring; "Huddle
   Hub" (the Slack pick, reusing `php_laravel`, not yet started).
 
+- **FR-LAB-81** *(Huddle Hub: webhook-signature-verification cell on
+  `php_laravel`; `CC-LAB-0133`, 2026-09-23).* Category 3's Slack pick,
+  "Huddle Hub," gets its first designed cell — built on the existing,
+  shared `php_laravel` emitter, not a new one, per §9.2's ledger note.
+  New shape: `(vuln_class="webhook_signature_bypass",
+  sink_context.family="webhook_signature_verification")`,
+  `required_neutralizations: [weak_signature_comparison]` — a Slack-style
+  Events-API-style callback receiver (profile-keyed at `/webhooks/events`
+  for template-context lookup; actually served at the illustrative
+  `/cell/<slug>` URL, since Huddle Hub has no migrated real page to anchor
+  a pinned URL to). Reuses two existing `lab/safety_matrix.yaml` ops —
+  `loose_equality_compare` (vulnerable: PHP's `==`/`!=` "magic hash"
+  type-juggling bug) and `constant_time_compare` (secure: `hash_equals()`)
+  — no new safety-matrix entry needed. New source/sink/transform modules
+  registered in **both** `php_laravel`'s own registries and the shared
+  `fuzzlab.labgen.modules` registry (`php_current`'s package) — required by
+  this stack's own module-composition convention (the shared
+  `fuzzlab.labgen.minimal_pair` classifier looks every composition-line
+  name up there), with `php_current` gaining matching, classifiable module
+  names/templates only, not a working cell of its own (mirrors the
+  `dom_url_source`/L-P3.3c-DOM and `html_attribute_quoted_echo`/
+  L-P3.3c-G6 precedent exactly). Also adds an additive `headers` parameter
+  to `LiveBootHarness.request()`/`post()` (previously no way to send a
+  custom request header at all). Live-boot-proven (real
+  `composer install`/`artisan serve` boot/HTTP) for ordinary functional
+  correctness on both twins, and separately, real-`php`-executed-proven for
+  the actual "magic hash" comparison-operator differential itself (a live
+  HTTP test cannot force the server's own freshly-computed SHA-256 HMAC
+  output to itself be magic-hash-shaped — see `CC-LAB-0133`'s own
+  change-control entry for the full reasoning). **Still deferred:** Huddle
+  Hub's other two designed cells (SSRF via link unfurling, header injection
+  in outgoing-webhook delivery); ground truth; `multitarget.py` wiring.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

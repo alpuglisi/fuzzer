@@ -715,6 +715,65 @@ class DomInnerhtmlEchoSink(TemplateModule):
         super().__init__("dom_innerhtml_echo", "sink", _SINK_ENV, "dom_innerhtml_echo.php.j2")
 
 
+class WebhookRequestSource(TemplateModule):
+    """The ``webhook_request`` source (`CC-LAB-0133`, Huddle Hub's
+    webhook-signature-verification cell): the raw request body plus the
+    ``X-Signature`` header (via ``$_SERVER``/``php://input``, this stack's
+    own idiom) and a fixed, lab-only shared secret. Registered for the
+    shared minimal-pair vocabulary only -- ``php_current``'s own
+    ``_MODULE_SET_BY_SHAPE`` is not widened to this shape (the cell is
+    built on ``php_laravel`` only, per category 3's stack pick); this
+    registration is what lets `php_laravel`'s own composition line
+    classify by name (see this module's own docstring, decision 1)."""
+
+    def __init__(self) -> None:
+        super().__init__("webhook_request", "source", _SOURCE_ENV, "webhook_request.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        template = self._env.get_template(self._template_name)
+        code = template.render(var_name=ctx["var_name"], secret=ctx["secret"])
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = f"${ctx['var_name']}"
+        return RenderResult(code=code, context=new_ctx)
+
+
+class LooseEqualityCompareTransform(TemplateModule):
+    """The ``loose_equality_compare`` op (`CC-LAB-0133`, `weak_signature_
+    comparison` concern): PHP's ``==``/``!=`` operators both short-circuit
+    and type-juggle hex-looking numeric strings as equal numbers (the
+    documented "magic hash" bypass). Safety matrix: ``effect=partial``,
+    ``neutralizes: [weak_signature_comparison]``. Registered for the shared
+    minimal-pair vocabulary only, same reasoning as
+    :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("loose_equality_compare", "transform", _TRANSFORM_ENV, "loose_equality_compare.php.j2")
+
+
+class ConstantTimeCompareTransform(TemplateModule):
+    """The ``constant_time_compare`` op (`CC-LAB-0133`, secure twin): PHP's
+    ``hash_equals()``. Safety matrix: ``effect=neutralises``,
+    ``neutralizes: [weak_signature_comparison]``. Registered for the shared
+    minimal-pair vocabulary only, same reasoning as
+    :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("constant_time_compare", "transform", _TRANSFORM_ENV, "constant_time_compare.php.j2")
+
+
+class WebhookSignatureVerificationSink(TemplateModule):
+    """The ``webhook_signature_verification`` sink family (`CC-LAB-0133`):
+    accepts and "processes" the event -- illustrative, echoes ``value_expr``
+    via its length only (never escapes/filters it itself, per this file's
+    own convention). Registered for the shared minimal-pair vocabulary
+    only, same reasoning as :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "webhook_signature_verification", "sink", _SINK_ENV, "webhook_signature_verification.php.j2"
+        )
+
+
 SOURCES: dict[str, Module] = {
     "get_param": GetParamSource(),
     "post_param": PostParamSource(),
@@ -724,6 +783,9 @@ SOURCES: dict[str, Module] = {
     # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
     "dom_url_source": DomUrlSource(),
+    # CC-LAB-0133: registered for the shared minimal-pair vocabulary only --
+    # this cell is built on php_laravel only (category 3's Huddle Hub).
+    "webhook_request": WebhookRequestSource(),
 }
 TRANSFORMS: dict[str, Module] = {
     "identity": IdentityTransform(),
@@ -745,6 +807,10 @@ TRANSFORMS: dict[str, Module] = {
     # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
     "dom_text_content": DomTextContentTransform(),
+    # CC-LAB-0133: registered for the shared minimal-pair vocabulary only --
+    # this cell is built on php_laravel only (category 3's Huddle Hub).
+    "loose_equality_compare": LooseEqualityCompareTransform(),
+    "constant_time_compare": ConstantTimeCompareTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -768,6 +834,9 @@ SINKS: dict[str, Module] = {
     # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
     "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
+    # CC-LAB-0133: registered for the shared minimal-pair vocabulary only --
+    # this cell is built on php_laravel only (category 3's Huddle Hub).
+    "webhook_signature_verification": WebhookSignatureVerificationSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

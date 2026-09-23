@@ -1,0 +1,8 @@
+// A real Slack-style Events-API-style callback receiver: the raw request
+// body and the signature header Slack attaches to every real callback
+// (docs/research/category3-saas-functionality-and-cwe-research.md sec 1).
+${{ var_name }} = file_get_contents('php://input');
+$__webhookSignature = $_SERVER['HTTP_X_SIGNATURE'] ?? '';
+// Lab-only shared secret -- never a real credential (D12 governs
+// *production* secrets, which this deliberately-vulnerable lab is not).
+$__webhookSecret = '{{ secret }}';

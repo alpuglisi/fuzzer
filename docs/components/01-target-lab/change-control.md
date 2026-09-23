@@ -3,6 +3,210 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0133 — Huddle Hub: webhook-signature-verification cell on `php_laravel` (FR-LAB-81) (2026-09-23)
+- Change: Adds Huddle Hub's (category 3's Slack pick) first designed cell
+  to the existing, shared `php_laravel` emitter — **not** a new emitter,
+  per §9.2's ledger note that this pick reuses `php_laravel`'s paradigm
+  group rather than a separate Hack/HHVM emitter. New shape:
+  `(vuln_class="webhook_signature_bypass", sink_context.family="webhook_signature_verification")`,
+  `required_neutralizations: [weak_signature_comparison]` — a Slack-style
+  Events-API-style callback receiver, profile-keyed at `/webhooks/events`
+  (matching `docs/research/category3-saas-functionality-and-cwe-research.md`
+  §6a's design) for template-context lookup only; the cell is actually
+  **served** at Laravel's standard illustrative-cell URL,
+  `/cell/<cell-slug>` (e.g. `/cell/labgen-hhb-0001`) — confirmed directly
+  against `_served_route_for`'s own documented behavior (an illustrative
+  page profile, no `_REAL_PAGE_KEY`, is never served at its profile-key
+  path). Huddle Hub has no migrated real page to anchor a pinned URL to
+  (unlike `php_laravel`'s PFF-migration cells or TrackerNest's own
+  corpus-designed routes on `spring_boot`), so the illustrative mechanism
+  is the correct, deliberate choice here, not a shortcut.
+
+  Reuses two **existing** `lab/safety_matrix.yaml` ops for this sink_family
+  (no new safety-matrix entry needed) — corrected during pre-change review
+  from this entry's own first draft, which had picked `no_signature_check`
+  (a total-bypass, `no_effect` op with no `neutralizes` entry at all) where
+  the research doc's own §2/§6a design specifically calls for the PHP
+  `==`/magic-hash comparison bug: **`loose_equality_compare`** (vulnerable
+  transform — `effect: partial`, `neutralizes: [weak_signature_comparison]`;
+  verified against `fuzzlab.labgen.verdict.verdict()`'s own algorithm that a
+  lone `partial` op still yields an overall **VULNERABLE** verdict, since
+  `partial` never moves a concern into the `fully`-satisfied set) and
+  **`constant_time_compare`** (secure transform — `effect: neutralises`,
+  PHP's `hash_equals()`, aborting with a real HTTP 403 on mismatch). This is
+  the same PHP-specific "magic hash" footgun
+  `docs/research/corpus-examples/webhook-signature/php/vulnerable-loose-equal-5.php`
+  already models as research, now built as a real, live-boot-proven lab
+  cell for the first time.
+
+  New source module `webhook_request` (reads `$request->getContent()` as
+  the raw body, the `X-Signature` header, and a fixed, lab-only shared
+  secret constant) and a new sink module `webhook_signature_verification`
+  (accepts and "processes" the event — illustrative, sets `$rows` for the
+  existing `single_statement` complexity's default JSON-response tail: a
+  fixed `['status' => 'accepted']` shape, reached only if whichever
+  transform ran didn't already return a 403). New manifest
+  `lab/manifests/webhook_signature_huddlehub_sample.yaml`, two cells:
+  `LABGEN-HHB-0001` (vulnerable) and `LABGEN-HHB-0002` (secure) — the
+  `HHB` code checked, at dispatch time, against every other currently
+  active category branch's own `php_laravel` cell-id prefixes
+  (`git grep cell_id` on `origin/claude/second-target-cat1-ecommerce`,
+  `origin/claude/category-2-build-bomomg`, `origin/claude/category-5-build-6boejs`:
+  `EX`/`HS`/`MA`/`NE`/`PL`/`PLA`/`PLRP`/`PY`/`RP`/`RPL`/`DJ`/`RD`/`RR`/`PP`/`BC`
+  — no `HHB` anywhere) — the real cross-branch collision vector this
+  session already hit once this session (the `CC-LAB`/`FR-LAB` renumbering
+  another session had to do) is a route-URL collision at
+  `fuzzlab.labgen.assemble.assemble_lab`'s production build time (it globs
+  **every** `lab/manifests/*.yaml` into one app and `RouteAccumulator`
+  raises `DuplicateRouteError` on a real URL collision) — `/cell/<slug>` is
+  deterministic from `cell_id`, so a distinct, checked-unused prefix is the
+  actual mitigation, not merely "additive dict entries."
+
+  **A real gap found during implementation, corrected here rather than
+  left in the shipped entry:** the live-boot proof needs a request header
+  (`X-Signature`) `LiveBootHarness.request()`/`post()` had no way to send
+  at all (query-string `params` and a form-encoded `data` body only) —
+  this entry therefore also adds an optional `headers: dict[str, str] |
+  None = None` parameter to both methods (merged in after the
+  `Content-Type` a form-encoded `data` body sets, so an explicit caller
+  header still wins), purely additive: every pre-existing call site passes
+  no `headers` and is unaffected.
+
+  **The "attacker forges a magic-hash collision against the live
+  HMAC" framing in this entry's own first draft overclaimed
+  practicality, corrected here.** The server computes a fresh, real
+  `hash_hmac('sha256', $rawBody, $secret)` per request; that 64-hex-char
+  output happening to itself be shaped like `0e<all digits>` (the
+  precondition for the PHP `==` type-juggling bug to fire at all) has
+  probability on the order of `(10/16)^62` — not achievable by an attacker
+  (or a test) choosing the request body, since the attacker does not know
+  the value being compared *before* the server computes it. This entry's
+  proof is therefore split into two real, honest parts rather than one
+  overclaiming live-HTTP demonstration: **(1)** the live-boot HTTP test
+  (below) proves ordinary functional correctness — a correctly-computed
+  HMAC signature is accepted (HTTP 200) on both twins, and an ordinary,
+  non-numeric-string wrong signature is rejected (HTTP 403) on both twins
+  (the loose-equality bug does not fire for an ordinary wrong value, only
+  for a magic-hash-shaped one) — via the **existing, unmodified** (besides
+  the additive `headers` parameter above) `LiveBootHarness`, confirmed
+  generic (assembles/builds/boots/serves whatever cell list a caller
+  passes it, nothing migration-specific); this test constructs the harness
+  from only this new manifest's own two cells, never a glob, so no
+  cross-branch collision is possible at this branch's own test time
+  either way. **(2)** a separate, fast, `php`-executed unit test (no live
+  Laravel boot) reproduces the exact comparison expressions the two
+  generated sinks use (`$a != $b` for the vulnerable twin, `!hash_equals($a,
+  $b)` for the secure twin) against two real, independently well-documented
+  "magic hash" strings (`0e830400451993494058024219903391`/
+  `0e291242476940776845150308577824` — both `0e`-plus-all-digits, so PHP's
+  `==`/`!=` treat them as the numeric value `0`, a real,
+  reproducible-today PHP language-semantics fact, verified directly via
+  `php -r` before drafting this correction), proving the vulnerable twin's
+  operator would incorrectly treat these two different strings as matching
+  (`!=` evaluates `false` — no rejection) while the secure twin's
+  `hash_equals()` correctly does not (evaluates `true` — rejects). Together,
+  (1) and (2) prove the real, complete differential without overclaiming
+  what a bounded live-HTTP test can actually force a real SHA-256 HMAC
+  output to do. Tier 0 (`php -l`)/Tier 3 (`regenerate_and_diff_emitter`)
+  for the new cell.
+
+  **A second real gap found during implementation, corrected here.**
+  `php_laravel`'s own module-composition convention (`modules.py`'s own
+  docstring, decision 1) requires every module name it registers to also
+  exist in the **shared** `fuzzlab.labgen.modules` registry (`php_current`'s
+  package) with a matching category — `fuzzlab.labgen.minimal_pair`
+  classifies a cell's `// Module composition: ...` line by looking each
+  name up there, and raises for one it cannot find. This entry's first
+  implementation pass registered `webhook_request`/`loose_equality_compare`/
+  `constant_time_compare`/`webhook_signature_verification` in
+  `php_laravel`'s own registries only, which broke this project's own
+  `test_module_names_are_classifiable_by_the_shared_minimal_pair_checker`
+  and (via the sink's `$rows` needing to reflect `value_expr`, which the
+  first sink template didn't) `test_no_sink_escapes_anything_itself`. Fixed
+  by adding the same four module names to the shared
+  `fuzzlab/labgen/modules/` registry too, following exactly the precedent
+  `dom_url_source`/`dom_text_content`/`dom_innerhtml_echo` (L-P3.3c-DOM)
+  and `html_attribute_quoted_echo`/`sql_string_literal_like` (L-P3.3c-G6)
+  already set: "registered for the shared minimal-pair vocabulary only —
+  `php_current`'s own `_MODULE_SET_BY_SHAPE` is not widened to this shape"
+  — i.e. `php_current` does not need a working webhook-signature cell of
+  its own, only matching, classifiable module names and templates (plain
+  `$_SERVER`/`php://input`-based PHP, since `php_current` has no Laravel
+  `Request` object). Also updated both sink templates (Laravel's and the
+  shared one) to echo `value_expr`'s length, and added the four new names
+  to `tests/test_labgen_modules.py`'s `_DETERMINISM_CTX_BY_MODULE` fixture
+  map (a second, independent completeness gate that same file's own
+  `test_every_registered_module_has_a_determinism_ctx_fixture` enforces).
+  Full non-slow suite re-run after both fixes: back to only the same
+  pre-existing, unrelated `gitleaks`/`scikit-learn`-absence failures.
+
+  **Explicitly out of scope for this entry** (tracked for follow-on
+  `CC-LAB-013x` entries, not silently absent, matching `CC-LAB-0130`'s own
+  convention): Huddle Hub's other two designed cells — SSRF via link
+  unfurling (`/messages/unfurl`) and header injection in outgoing-webhook
+  delivery (`/integrations/outgoing-webhook`), both per
+  `docs/research/category3-saas-functionality-and-cwe-research.md` §6a;
+  ground truth; `multitarget.py` wiring.
+- Impact (other components / project): Component 1 (LAB) only. No
+  safety-matrix change (reuses existing ops). Additive to `php_laravel`'s
+  shared `_MODULE_SET_BY_SHAPE`/`_PAGE_PROFILES`/`SOURCES`/`TRANSFORMS`/
+  `SINKS` dicts — does not modify any existing shape's own entry, so no
+  existing cell's rendered output changes (re-verified: full non-slow suite
+  + this cell's own live-boot test both green, see Effectiveness).
+- Risk (level; mitigation or accepted-risk justification): Low-medium.
+  `php_laravel` is a large, shared file multiple concurrent category
+  branches (1, 2, 5) independently add cells to — the concrete risk is a
+  **route-URL collision at `assemble_lab`'s production-build time**
+  (merging two branches whose cells happen to share a `cell_id`), not a
+  Python-level merge conflict. Mitigated by checking every other active
+  branch's actual `cell_id` prefixes before picking `HHB` (done, see
+  Change) rather than assuming "next free" the way the `CC-LAB`/`FR-LAB`
+  numbering collision this session already had to have fixed by another
+  session was caused. Also mitigated the ordinary way: touching only
+  additive dict entries, never editing an existing shape's own code.
+- Deliverables:
+  - [x] `webhook_request` source module + template (`php_laravel` and shared) — done
+  - [x] `loose_equality_compare`/`constant_time_compare` transform modules + templates (`php_laravel` and shared) — done
+  - [x] `webhook_signature_verification` sink module + template (`php_laravel` and shared) — done
+  - [x] `_MODULE_SET_BY_SHAPE`/`_PAGE_PROFILES` entries — done
+  - [x] `LiveBootHarness.request()`/`post()` additive `headers` parameter — done
+  - [x] `lab/manifests/webhook_signature_huddlehub_sample.yaml` — done
+  - [x] Live-boot test (functional correctness, both twins) — done (`tests/test_labgen_webhook_signature_live_boot.py`, 3 tests, real `composer install` + `artisan serve` boot + real HTTP, all PASSED)
+  - [x] `php`-executed magic-hash comparison-semantics test (the actual security differential) — done (`tests/test_labgen_webhook_signature_magic_hash.py`, 6 tests, real `php -r` execution, all PASSED)
+  - [x] Tier 0/Tier 3 conformance for the new cell — done (`php -l` clean, `regenerate_and_diff_emitter` byte-identical)
+  - [x] `requirements.md` FR-LAB-81 entry — done
+  - [x] `CHANGELOG.md` line — done
+- Effectiveness (assessed 2026-09-23): **met.** Every deliverable is real
+  and executed: a real `composer install` builds the assembled skeleton+
+  cell, a real `php artisan serve` boots it, a real HTTP POST with a
+  correctly-computed HMAC signature is accepted on both twins and an
+  ordinary wrong one is rejected on both (3 tests), and a real `php -r`
+  execution proves the actual security differential the safety-matrix ops
+  are about — two genuine "magic hash" strings, PHP's `!=` treats them as
+  equal (vulnerable operator, would wrongly accept) while `hash_equals()`
+  correctly does not (secure operator, correctly rejects) (6 tests). Two
+  real implementation-time gaps were found and fixed, not routed around:
+  the harness had no way to send a custom header at all, and this stack's
+  own shared-minimal-pair-vocabulary convention required matching
+  registrations in `fuzzlab.labgen.modules` (`php_current`'s package) too.
+  Full non-slow suite re-run after all fixes: 1580 passed, 15 failed (the
+  same pre-existing, unrelated `gitleaks`/`scikit-learn`-absence failures
+  this session's `CC-LAB-0130`/`0131`/`0132` entries already recorded —
+  confirmed unchanged and none reference `webhook_signature`/
+  `HHB`/`Huddle Hub`), 52 skipped — no regression.
+- Pre-change review gate: drafted, reviewed by 2 independent agents
+  (accuracy: 1 finding — the drafted op (`no_signature_check`) didn't match
+  this session's own cited research design (`loose_equality_compare`), plus
+  leftover unresolved scratch text in the draft's shape declaration, both
+  fixed above; adequacy: 5 findings — the same op/design mismatch, an
+  unaddressed cross-branch route-collision risk via `assemble_lab`'s
+  manifest glob, an under-specified risk mitigation, a missing explicit
+  out-of-scope restatement, and a vague live-boot assertion — all
+  incorporated above, including checking every other active branch's
+  cell-id prefixes before naming `HHB`). 3/3 agreement reached by
+  incorporating every concrete finding from both reviews without
+  contesting any of them; implementation proceeds on this revised entry.
+
 ### CC-LAB-0132 — TrackerNest: insecure-deserialization cell, closing the three-cell set (FR-LAB-80) (2026-09-22)
 - Change: Extends `SpringBootEmitter`/`modules.py` with a third shape,
   `(vuln_class="insecure_deserialization", sink_context.family="object_deserialization")`

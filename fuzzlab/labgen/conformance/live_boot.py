@@ -841,10 +841,17 @@ class LiveBootHarness:
         return f"http://127.0.0.1:{self._port}"
 
     def request(self, method: str, path: str, *, params: dict[str, str] | None = None,
-                data: dict[str, str] | None = None) -> HttpResponse:
+                data: dict[str, str] | None = None, headers: dict[str, str] | None = None) -> HttpResponse:
         """A real HTTP request against the booted app. Uses only the standard
         library (``urllib``) so this module needs no extra runtime
         dependency beyond what :mod:`fuzzlab` already declares.
+
+        ``headers`` (`CC-LAB-0133`): extra request headers a cell needs to
+        set itself (e.g. a webhook's signature header) -- merged in after
+        the ``Content-Type`` this method sets for a form-encoded ``data``
+        body, so an explicit caller-supplied ``Content-Type`` here still
+        wins if given. Every pre-existing caller passes no ``headers``
+        (``None``, the default), so this is purely additive.
 
         Never follows a redirect (``BUG-0028``): a real login/session page
         (``/login.php``) and a stored-second-order write endpoint
@@ -863,21 +870,25 @@ class LiveBootHarness:
 
         url = self._base_url() + path
         body: bytes | None = None
-        headers = {}
+        req_headers: dict[str, str] = {}
         if params:
             url += "?" + urllib.parse.urlencode(params)
         if data is not None:
             body = urllib.parse.urlencode(data).encode("utf-8")
-            headers["Content-Type"] = "application/x-www-form-urlencoded"
-        req = urllib.request.Request(url, data=body, method=method.upper(), headers=headers)
+            req_headers["Content-Type"] = "application/x-www-form-urlencoded"
+        if headers:
+            req_headers.update(headers)
+        req = urllib.request.Request(url, data=body, method=method.upper(), headers=req_headers)
         with _NO_REDIRECT_OPENER.open(req, timeout=REQUEST_TIMEOUT_S) as resp:
             return HttpResponse(status=resp.status, body=resp.read().decode("utf-8", errors="replace"))
 
     def get(self, path: str, *, params: dict[str, str] | None = None) -> HttpResponse:
         return self.request("GET", path, params=params)
 
-    def post(self, path: str, *, data: dict[str, str] | None = None) -> HttpResponse:
-        return self.request("POST", path, data=data)
+    def post(
+        self, path: str, *, data: dict[str, str] | None = None, headers: dict[str, str] | None = None
+    ) -> HttpResponse:
+        return self.request("POST", path, data=data, headers=headers)
 
     # -- Tier1Client conformance ---------------------------------------------
 

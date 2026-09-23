@@ -1,0 +1,11 @@
+// loose_equality_compare: PHP's `==` operator both short-circuits (a timing
+// side channel) and type-juggles hex-looking strings in scientific
+// notation ("0e123...") as equal numbers -- PHP's well-documented "magic
+// hash" comparison bypass. Safety matrix: effect=partial,
+// neutralizes: [weak_signature_comparison] -- a genuinely harder attack
+// than skipping verification entirely, but still VULNERABLE overall (a
+// crafted magic-hash-shaped signature bypasses this check).
+$__expectedSignature = hash_hmac('sha256', {{ value_expr }}, $__webhookSecret);
+if ($__expectedSignature != $__webhookSignature) {
+    return response()->json(['error' => 'invalid signature'], 403);
+}

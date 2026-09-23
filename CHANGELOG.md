@@ -12,6 +12,28 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23
+- `fuzzlab/labgen/emitters/php_laravel/`: Huddle Hub's (category 3's Slack
+  pick) first designed cell — webhook-signature-verification bypass at a
+  Slack-style Events-API-style callback receiver, built on the existing,
+  shared `php_laravel` emitter (no new emitter). Uses the real PHP `==`
+  "magic hash" type-juggling bug (`loose_equality_compare`, vulnerable) vs.
+  `hash_equals()` (`constant_time_compare`, secure) — both existing
+  `lab/safety_matrix.yaml` ops, no new entry needed. Found and fixed two
+  real gaps during implementation: `LiveBootHarness` had no way to send a
+  custom request header (added an additive `headers` parameter to
+  `request()`/`post()`), and this stack's shared-minimal-pair-vocabulary
+  convention required matching module registrations in
+  `fuzzlab.labgen.modules` (`php_current`'s package) too, mirroring the
+  existing DOM-XSS precedent (classifiable names/templates only, not a
+  working `php_current` cell). Proof is split honestly: a real live-boot
+  HTTP test (real `composer install`/`artisan serve` boot) for ordinary
+  functional correctness, plus a separate real `php -r`-executed test
+  proving the actual "magic hash" comparison-operator differential — a
+  live HTTP test cannot force a real SHA-256 HMAC output to itself be
+  magic-hash-shaped. 9 new tests, all passing; full non-slow suite re-run
+  shows no regression. `CC-LAB-0133`/`FR-LAB-81`.
+
 ## 2026-09-23 (cross-branch review, by the category 1 pilot session)
 - Docs/LAB: reviewed this branch's code and tests — no code defects
   found. The SSTI/OGNL pair (`Ognl.getValue()` on raw user input vs. a
