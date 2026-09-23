@@ -27,6 +27,16 @@ changed, and the reason. Reference the commit hash where useful.
   echo-the-body case unconfirmed) drove the in-band strategy.
   `CC-FUZZ-0027`/`FR-FUZZ-14`, `CC-LAB-0177`/`FR-LAB-117`.
 
+## 2026-09-23 (vuln corpus Phase 3: manufactured-pair gap analysis)
+- Docs: saved `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md` — the concrete
+  gap analysis for the last unchecked `docs/VULN_CORPUS_EXPANSION_PLAN.md`
+  Phase 3 item ("manufactured pairs generated, floor met per CWE"),
+  computed directly from all 35 collected corpus manifests: 39
+  manufactured pairs needed across 33 (feature+language cell, CWE) groups
+  spanning all 12 wave-1 feature areas. No pairs manufactured yet — this
+  is the plan only, saved so the work can be picked up without
+  re-deriving the analysis.
+
 ## 2026-09-23 (cross-branch bookkeeping fix, by the category 1 pilot session)
 - Docs/FUZZ: fixed a real cross-branch ID collision found during a
   cross-branch review — this branch's freshly-pushed `CC-FUZZ-0025`/
