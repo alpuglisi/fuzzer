@@ -4,6 +4,22 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (CircleFeed's second real page: Groups webhook receiver, webhook-signature bypass)
+- `php_laravel`: lands CircleFeed's second designed cell (§3 item 5,
+  §5 row 2, §6 row 2 of `docs/research/category2-social-ugc-
+  functionality-and-cwe-research.md`) -- a Groups webhook receiver
+  modeling Meta's own Messenger Platform `X-Hub-Signature`-style webhook
+  contract. Pure wiring: reuses the exact `webhook_signature_bypass`/
+  `webhook_signature_verification` module composition Huddle Hub's own
+  `/webhooks/events` cell already registers (`CC-LAB-0133`), via a new
+  `/groups/webhook` page profile (own lab-only secret) and a new
+  manifest. No new transform/sink module. Ground truth extended with
+  `CF-0002`. Real, executed proof split the same way Huddle Hub's own
+  webhook cell split it: a live-boot HTTP test for ordinary correctness,
+  plus a separate real-`php`-executed test for the actual `==`
+  "magic hash" vs. `hash_equals()` comparison-operator differential.
+  `CC-LAB-0217`/`FR-LAB-124`.
+
 ## 2026-09-23 (CircleFeed's first real page: photo/tag-detail access control)
 - `php_laravel`: establishes CircleFeed (category 2's Facebook pick, the
   second app identity on this emitter after Huddle Hub) and lands its

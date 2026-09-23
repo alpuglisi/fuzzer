@@ -568,6 +568,21 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # `table`/`column`: `DbRowByIdLookupSink` names the `Photo` model and
     # its `id` column itself (an Eloquent fetch, not a raw `DB::select`).
     "/photos/view": {"var_name": "id", "param_name": "id"},
+    # CC-LAB-0217: CircleFeed's (category 2's Facebook pick) second designed
+    # cell -- a Groups webhook receiver, modeling Meta's own publicly
+    # documented Messenger Platform `X-Hub-Signature`-style webhook contract
+    # (docs/research/category2-social-ugc-functionality-and-cwe-research.md
+    # sec 3 item 5, sec 5 row 2, sec 6 row 2). Reuses the exact
+    # `webhook_signature_bypass`/`webhook_signature_verification` module
+    # composition Huddle Hub's own `/webhooks/events` page already
+    # registers (`CC-LAB-0133`) -- pure page-profile wiring, no new
+    # transform/sink module. Illustrative served URL (`_served_route_for`'s
+    # no-`real_page` branch), same reasoning as every other CircleFeed/
+    # Huddle Hub page: CircleFeed has no migrated real puppy-fort-factory
+    # page to anchor a pinned URL to. `secret` is a lab-only shared secret,
+    # never a real credential, and deliberately distinct from Huddle Hub's
+    # own so the two apps' cells can never be confused by a shared value.
+    "/groups/webhook": {"var_name": "webhookRawBody", "secret": "lab-only-circlefeed-webhook-secret"},
     # POST string-literal lookup. `password_var`/`password_param` are sink
     # boilerplate (an already-hashed secret), not a second injection point.
     "/login": {

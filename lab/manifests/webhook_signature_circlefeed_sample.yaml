@@ -1,0 +1,40 @@
+# Webhook-signature-verification sample manifest (`CC-LAB-0217`/`FR-LAB-124`),
+# `php_laravel`.
+#
+# CircleFeed's (category 2's Facebook pick) second designed cell -- see
+# docs/research/category2-social-ugc-functionality-and-cwe-research.md sec 3
+# item 5 (Groups notifications / webhook-style integration, Meta's own
+# publicly documented Messenger Platform `X-Hub-Signature`-verified POST
+# callback) for the page/vulnerability-class design, sec 5 row 2 for the
+# PHP/Hack-specific CWE research, and sec 6 row 2 for the page-set entry this
+# manifest builds. Reuses the exact `webhook_signature_bypass`/
+# `webhook_signature_verification` module composition Huddle Hub's own
+# `/webhooks/events` cell already registers (`CC-LAB-0133`) -- pure wiring:
+# a new page profile (`/groups/webhook`, its own lab-only secret) and this
+# manifest, no new transform/sink module. The vulnerable twin
+# (`loose_equality_compare`) recomputes the HMAC and compares it with PHP's
+# `==` operator (the documented "magic hash" type-juggling footgun); the
+# secure twin (`constant_time_compare`) uses `hash_equals()`. Both share the
+# same illustrative route (served at `/cell/<slug>`, per `php_laravel`'s own
+# convention for a non-migrated page), never live-booted together -- mirrors
+# `webhook_signature_huddlehub_sample.yaml`'s own twin-pair precedent.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-CF-0003
+    class: webhook_signature_bypass
+    stack_profile: php_laravel
+    route: { method: POST, path: /groups/webhook }
+    sink_context:
+      family: webhook_signature_verification
+      required_neutralizations: [weak_signature_comparison]
+    transform: [loose_equality_compare]
+
+  - cell_id: LABGEN-CF-0004
+    class: webhook_signature_bypass
+    stack_profile: php_laravel
+    route: { method: POST, path: /groups/webhook }
+    sink_context:
+      family: webhook_signature_verification
+      required_neutralizations: [weak_signature_comparison]
+    transform: [constant_time_compare]

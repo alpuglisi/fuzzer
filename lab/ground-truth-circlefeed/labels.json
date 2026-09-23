@@ -13,6 +13,18 @@
       "expected_vulnerable": true,
       "rendering": "server-json",
       "notes": "The id query parameter selects a photo by primary key alone -- no check that the requesting user actually owns it: an authenticated user can view another user's private photo by guessing/incrementing id (IDOR, CWE-639/CWE-862). Modeled on a real Facebook-style photo/tag-detail page (docs/research/category2-social-ugc-functionality-and-cwe-research.md sec 3 item 4, sec 6 row 1). Reuses lab/safety_matrix.yaml's existing ownership_check_bypass concern/access_control family (added CC-LAB-0063, first implemented by any emitter here). Served at its own illustrative per-cell URL (served_url_for(), not the shared manifest route.path /photos/view, since CircleFeed has no migrated real page to anchor a pinned URL to -- same reasoning as Huddle Hub's own pages). LABGEN-CF-0001 in lab/manifests/access_control_circlefeed_sample.yaml, CC-LAB-0216/FR-LAB-123 -- never a PFF-* case. The secure twin (LABGEN-CF-0002, identity_match_before_fetch) is not its own labels.json case, matching Huddle Hub's own vulnerable-cells-only convention -- proven directly by tests/test_labgen_php_laravel_access_control_live_boot.py instead."
+    },
+    {
+      "case_id": "CF-0002",
+      "url": "/cell/labgen-cf-0003",
+      "method": "POST",
+      "param": "X-Signature",
+      "location": "header",
+      "vuln_class": "webhook_signature_bypass",
+      "sink_context": "webhook",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "A Groups webhook receiver modeling Meta's own publicly documented Messenger Platform X-Hub-Signature-verified POST callback contract (docs/research/category2-social-ugc-functionality-and-cwe-research.md sec 3 item 5, sec 5 row 2, sec 6 row 2). The vulnerable twin recomputes the HMAC and compares it against the X-Signature header with PHP's `==` operator, which both short-circuits (a genuinely harder attack than a total bypass, D20 partial) and, for a magic-hash-shaped (`^0e[0-9]+$`) pair, type-juggles two different strings as equal (CWE-345 bypass / CWE-303 improper authentication -- the same 'magic hash' footgun Huddle Hub's own webhook-signature cell, CC-LAB-0133, first modeled on this stack). Reuses lab/safety_matrix.yaml's existing webhook_signature_verification sink family/weak_signature_comparison concern and the loose_equality_compare/constant_time_compare ops unchanged -- no new op, pure page-profile wiring (a new /groups/webhook page profile with its own lab-only secret, distinct from Huddle Hub's). LABGEN-CF-0003 in lab/manifests/webhook_signature_circlefeed_sample.yaml, CC-LAB-0217/FR-LAB-124 -- never an HHUB-* case. The secure twin (LABGEN-CF-0004, constant_time_compare) is not its own labels.json case, matching Huddle Hub's own vulnerable-cells-only convention -- proven directly by tests/test_labgen_php_laravel_webhook_signature_circlefeed_live_boot.py and tests/test_labgen_webhook_signature_circlefeed_magic_hash.py instead."
     }
   ]
 }

@@ -830,10 +830,21 @@ tracked in the requirements files, not here.
   `php_laravel` skeleton, and `LiveBootHarness` gained a second real
   seeded user so a real ownership-check differential could be proven
   against two genuinely distinct sessions. Its own `lab/ground-truth-
-  circlefeed/` contract (`CF-` case-id prefix). CircleFeed's remaining
-  three page-set rows (per the research doc's §6) stay planned, not
-  built — each its own future, separately-gated increment, the same
-  discipline PicTrail's own page-by-page landings above followed.
+  circlefeed/` contract (`CF-` case-id prefix). **CircleFeed's second
+  real page (`CC-LAB-0217`) landed a Groups webhook receiver** modeling
+  Meta's own Messenger Platform `X-Hub-Signature`-style webhook contract
+  — pure wiring, reusing the exact `webhook_signature_bypass`/
+  `webhook_signature_verification` module composition Huddle Hub's own
+  `/webhooks/events` cell already registers (`CC-LAB-0133`), via a new
+  `/groups/webhook` page profile (own lab-only secret) and manifest; no
+  new transform/sink module. Ground truth extended (`CF-0002`). Real,
+  executed proof split the same way Huddle Hub's own webhook cell split
+  it (a live-boot HTTP-correctness test plus a separate real-`php`-
+  executed comparison-operator differential test for the "magic hash"
+  bug). CircleFeed's remaining two page-set rows (per the research doc's
+  §6) stay planned, not built — each its own future, separately-gated
+  increment, the same discipline PicTrail's own page-by-page landings
+  above followed.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

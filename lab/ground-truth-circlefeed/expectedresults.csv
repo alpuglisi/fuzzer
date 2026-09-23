@@ -2,6 +2,7 @@
 # app (php_laravel). Derived from labels.json; the loader cross-checks the
 # two so they cannot drift. category is the vuln class; expected_vulnerable
 # is the ground-truth verdict for that (url, param) case. CC-LAB-0216/
-# FR-LAB-123.
+# FR-LAB-123 (CF-0001); CC-LAB-0217/FR-LAB-124 (CF-0002).
 case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
 CF-0001,/cell/labgen-cf-0001,GET,id,query,access_control,true,/cell/labgen-cf-0001,sink,,direct
+CF-0002,/cell/labgen-cf-0003,POST,X-Signature,header,webhook_signature_bypass,true,/cell/labgen-cf-0003,sink,,direct

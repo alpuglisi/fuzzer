@@ -3,6 +3,202 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0217 — CircleFeed (category 2, Facebook pick): second real cell, Groups webhook receiver / webhook-signature bypass (FR-LAB-124) (2026-09-23)
+
+- **Change:** Lands CircleFeed's second designed cell — a Groups webhook
+  receiver modeling Meta's own publicly documented Messenger Platform
+  `X-Hub-Signature`-verified POST callback contract
+  (`docs/research/category2-social-ugc-functionality-and-cwe-research.md`
+  §3 item 5, §5 row 2, §6 row 2 of that doc's CircleFeed page-set table).
+  This shape already exists on `php_laravel`: category 3's own Huddle Hub
+  app (`CC-LAB-0133`) built the exact op pair needed —
+  `loose_equality_compare`/`constant_time_compare` at the
+  `webhook_signature_verification` sink family, keyed to the
+  `webhook_signature_bypass` vuln class. Because `fuzzlab.labgen.emitters.
+  php_laravel`'s module-composition table (`_MODULE_SETS`, in
+  `fuzzlab/labgen/emitters/php_laravel/__init__.py`) is keyed by
+  `(vuln_class, sink_context.family)` — never by app identity — and
+  Huddle Hub's own `("webhook_signature_bypass", "webhook_signature_
+  verification")` entry already exists there, this change needed **no new
+  transform or sink module, and no new `_MODULE_SETS` entry**: it is pure
+  wiring, exactly as this task's own brief predicted, confirmed by
+  reading the composition table before writing any code (the "confirm
+  whether any new sink/module code is actually needed" check this task's
+  own "what done means" section names).
+
+  `constant_time_signature_and_timestamp_check` (the third neutralising
+  op the matrix's `webhook_signature_verification` family also carries,
+  `lab/safety_matrix.yaml` ~line 786) was considered and **not** used —
+  Huddle Hub's own twin pair (`loose_equality_compare`/
+  `constant_time_compare`) is the exact minimal pair this cell's
+  vulnerability-class research (§5 row 2) names, and using a third op
+  here would not add coverage this cell is scoped to demonstrate (a
+  timestamp-replay check is a distinct concern, not part of the "magic
+  hash" comparison-operator bug this cell targets); left for a future
+  cell if that distinct concern is ever built.
+
+  Concretely:
+  1. **New page profile**, `_PAGE_PROFILES["/groups/webhook"]` —
+     `{"var_name": "webhookRawBody", "secret": "lab-only-circlefeed-
+     webhook-secret"}`, `POST`. The secret is a new, own lab-only value,
+     deliberately distinct from Huddle Hub's own
+     `lab-only-huddlehub-webhook-secret` so the two apps' cells can never
+     be confused by a shared value (checked by a new test,
+     `test_circlefeed_webhook_secret_is_distinct_from_huddlehubs`).
+  2. **Illustrative served URL** (`_served_route_for`'s no-`real_page`
+     branch, `/cell/<slug>`) — CircleFeed, like Huddle Hub, has no
+     migrated real `puppy-fort-factory/` page to anchor a pinned URL to,
+     same reasoning `CC-LAB-0216`/`CC-LAB-0133` already established.
+  3. **New manifest**,
+     `lab/manifests/webhook_signature_circlefeed_sample.yaml` —
+     `LABGEN-CF-0003` (vulnerable, `loose_equality_compare`) /
+     `LABGEN-CF-0004` (secure, `constant_time_compare`), sharing one
+     illustrative route, never live-booted together as a pair (mirrors
+     `webhook_signature_huddlehub_sample.yaml`'s own twin-pair
+     precedent).
+  4. **Ground truth extended** (not a new directory), `CF-0002` in
+     `lab/ground-truth-circlefeed/` (`vuln_class:
+     "webhook_signature_bypass"`, `sink_context: "webhook"` — both enum
+     values already legal in `fuzzlab/labels/schemas/labels.schema.json`,
+     added by `CC-LAB-0133`, no schema widening needed here) →
+     `LABGEN-CF-0003`. Only the vulnerable cell gets its own
+     `labels.json` case, matching both Huddle Hub's and `CC-LAB-0216`'s
+     own vulnerable-cells-only convention; the secure twin's behavior is
+     proven directly by the new live-boot test instead. `injection-
+     points.json`/`expectedresults.csv` extended in lockstep (checked
+     cross-consistent with `labels.json` the same way the loader does).
+  5. **No skeleton/model/migration change, no `LiveBootHarness` change**
+     — unlike `CC-LAB-0216`'s access-control cell, this shape needs no
+     database row or seeded user: the webhook receiver's entire state is
+     the request itself (raw body + `X-Signature` header) and a fixed
+     server-side secret, exactly like Huddle Hub's own `/webhooks/events`
+     cell, so `LiveBootHarness` needed no extension.
+  6. **Tests**: a pure-Python unit/Tier-0/Tier-3 file
+     (`tests/test_labgen_webhook_signature_circlefeed.py` — manifest
+     load/validate, verdict, `supports()`, determinism, twin-comparison-
+     operator assertion, own-secret-is-distinct assertion, `php -l`
+     lint, minimal-pair, disjoint-paths-from-Huddle-Hub-and-from-
+     CircleFeed's-own-access-control-cell, Tier 3 whole-manifest
+     regeneration — 12 tests, mirroring
+     `tests/test_labgen_access_control_circlefeed.py`'s own structure).
+     Real, executed proof split the same way `CC-LAB-0133`'s own split
+     (a live HTTP test cannot force a real SHA-256 HMAC output to itself
+     be magic-hash-shaped, per that entry's own reasoning, confirmed
+     unchanged here):
+     - `tests/test_labgen_php_laravel_webhook_signature_circlefeed_
+       live_boot.py` (`@pytest.mark.slow`, skip-guarded on
+       `live_boot_available()`) — three tests proving ordinary HTTP
+       correctness from a real booted app: the vulnerable twin accepts a
+       genuinely correct signature and rejects an ordinary wrong one; the
+       secure twin does the same. Confirmed run for real in this session
+       (`live_boot_available()` is `True` here) — all three pass.
+     - `tests/test_labgen_webhook_signature_circlefeed_magic_hash.py`
+       (skip-guarded on `php_available()`) — six tests reproducing the
+       two generated sinks' exact comparison expressions against two
+       real, independently published "magic hash" strings, executed by
+       the real `php` interpreter, proving the vulnerable twin's `!=`
+       would wrongly accept the collision while the secure twin's
+       `hash_equals()` correctly rejects it, plus two tests confirming
+       the emitter's real rendered output actually uses those exact
+       expressions. Confirmed run for real in this session
+       (`php_available()` is `True` here) — all six pass.
+
+- **Deliberately out of scope, stated explicitly**: the other two rows
+  of §6's CircleFeed page-set table still planned (comment "share"
+  redirect / header injection; session-preference-cookie insecure
+  deserialization) — this change is the "second real page" increment,
+  not the full four-page design. No `real_page`/`canonical_cell_id` URL
+  pinning (same reasoning as `CC-LAB-0216`/`CC-LAB-0133`). No wiring
+  into `fuzzlab.harness.multitarget`'s `TargetSpec`/`run_targets`, and
+  `webhook_signature_bypass` is not mapped in `fuzzlab.core.runmode.
+  _VULN_TO_CATEGORY` for CircleFeed specifically (Huddle Hub's own
+  instance of this same documented gap is carried by `CC-LAB-0137`/
+  `CC-LAB-0139`) — flagged here, not fixed.
+
+- **Bookkeeping**: `CHANGELOG.md` (one line);
+  `docs/components/01-target-lab/requirements.md` — new `FR-LAB-124`
+  (this entry); `docs/ARCHITECTURE.md` (CircleFeed's second page noted
+  alongside its first); `docs/research/category2-social-ugc-
+  functionality-and-cwe-research.md` §6 (CircleFeed row 2 marked built,
+  referencing this entry); `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.
+  md` §9.4 (category 2 tracker row updated, including the bookkeeping
+  column). No bug found — no `docs/bugs/` entry, no `ERROR_LOG.md`
+  entry, no new `docs/PREVENTIVE_ACTIONS.md` rule.
+
+- **Pre-change review gate**: this task's own instructions named a
+  specific mechanism — "use the Agent tool to spawn 2 independent
+  reviewer subagents (one factual-accuracy-only, one adequacy/
+  completeness-only) BEFORE writing any code." That tool was not present
+  in this session's actual tool set (checked via `ToolSearch` for any
+  subagent-spawning tool — only `SendMessage` to *already-running* peer
+  agents exists here, not a create/dispatch primitive), and this session
+  is itself a dispatched subagent with no create-subagent capability of
+  its own. Per this project's own multi-agent orchestration discipline
+  ("require that sub-agent to confirm which mechanism it actually used,
+  and to stop and flag rather than silently substitute if the specified
+  one is unavailable") this is recorded here, honestly, rather than
+  silently proceeding as if the two-subagent gate had run: **the gate
+  was run as two explicit, separate self-review passes against the
+  drafted entry before implementation, not as two independent
+  subagents**, because no subagent-dispatch tool was available. Findings
+  from those two passes, applied before/during implementation:
+  - **Factual-accuracy pass**: verified directly against the source
+    files (not from this task's own prompt, which the CLAUDE.md-mandated
+    "check the real current ceiling yourself" instruction already warns
+    may be stale) — `_MODULE_SETS["webhook_signature_bypass",
+    "webhook_signature_verification"]` really does exist unchanged since
+    `CC-LAB-0133` (`fuzzlab/labgen/emitters/php_laravel/__init__.py`);
+    `_DETERMINISM_CTX_BY_MODULE` (`tests/test_labgen_modules.py`)
+    already carries entries for `webhook_request`/
+    `loose_equality_compare`/`constant_time_compare`/
+    `webhook_signature_verification` from `CC-LAB-0133` — unlike
+    `CC-LAB-0216`'s three brand-new registrations, this change adds none,
+    so no completeness-table gap exists here (checked, not assumed);
+    `labels.schema.json`'s `vuln_class`/`sink_context` enums already
+    legally carry `webhook_signature_bypass`/`webhook`
+    (`CC-LAB-0133`) — no widening needed; the real branch/FR-LAB ceiling
+    was re-derived from `git log`/`grep`, not trusted from the prompt
+    (found `CC-LAB-0216`/`FR-LAB-123`, matching the prompt's own stated
+    value this time, plus a fresh fetch of all four sibling category
+    branches, all `<= CC-LAB-0216`/`FR-LAB-118`).
+  - **Adequacy/completeness pass**: confirmed the `.gitignore` negation
+    for `lab/ground-truth-circlefeed/*.csv` already exists from
+    `CC-LAB-0216` (PA-0038; re-checked with `git check-ignore`/`git
+    status`, not assumed carried over); confirmed no cell-ID/case-ID
+    collision (`LABGEN-CF-0003`/`LABGEN-CF-0004` unused in any manifest;
+    `CF-0002` unused in `lab/ground-truth-circlefeed/`); confirmed the
+    two-file live-boot/magic-hash test split this task's own brief
+    demanded was actually followed, not merged into one file; confirmed
+    both new test files were actually collected and run (not just
+    claimed) as their own separate `pytest` invocations, per PA-0038's
+    own sharpening of PA-0040 — see Effectiveness below for the literal
+    counts.
+
+- **Effectiveness / test results**: `pytest tests/
+  test_labgen_webhook_signature_circlefeed.py tests/
+  test_labgen_webhook_signature_circlefeed_magic_hash.py -q` → **16
+  passed**. `pytest tests/
+  test_labgen_php_laravel_webhook_signature_circlefeed_live_boot.py -q -m
+  slow` → **3 passed** (real live-boot run, `live_boot_available()` is
+  `True` in this environment). Regression check: `pytest tests/
+  test_labgen_access_control_circlefeed.py tests/
+  test_labgen_php_laravel_huddlehub_multitarget.py tests/
+  test_labgen_webhook_signature_live_boot.py tests/test_labgen_modules.py
+  -q -m "not slow"` → **26 passed, 5 deselected**, confirming Huddle
+  Hub's own webhook cell and CircleFeed's own access-control cell are
+  both unaffected. Whole-repo non-slow suite run before push; result
+  quoted in this session's own final report (expected ~18 pre-existing
+  environment-gap failures — gitleaks/scikit-learn — unrelated to this
+  change, per this task's own brief).
+
+- **Numbering**: `CC-LAB-0217` (this branch's real ceiling was
+  `CC-LAB-0216` at the time of this change). `FR-LAB-124` (this branch's
+  own ceiling was `FR-LAB-123`; the coordinating sibling branches'
+  ceilings — `claude/second-target-cat1-ecommerce`,
+  `claude/category-3-build-iuu5k9`, `claude/category-4-build-t9uz3y`,
+  `claude/category-5-build-6boejs` — were all `<= FR-LAB-118`, so this
+  branch's own ceiling governs).
+
 ### CC-LAB-0216 — CircleFeed (category 2, Facebook pick): first real cell, photo/tag-detail access control / IDOR (FR-LAB-123) (2026-09-23)
 
 - **Change:** Establishes CircleFeed (category 2's Facebook pick, the

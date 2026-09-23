@@ -2327,6 +2327,44 @@ lane) can submit a payload as
   `access_control`'s mapping in `fuzzlab.core.runmode._VULN_TO_CATEGORY`
   are out of scope and named as open follow-on work, not built.
 
+- **FR-LAB-124** *(CircleFeed's second real page, Groups webhook receiver;
+  `CC-LAB-0217`, 2026-09-23).* Lands CircleFeed's second designed cell
+  (`docs/research/category2-social-ugc-functionality-and-cwe-
+  research.md` §3 item 5, §5 row 2, §6 row 2): a Groups webhook receiver
+  modeling Meta's own publicly documented Messenger Platform
+  `X-Hub-Signature`-verified POST callback contract. Pure wiring, no new
+  transform/sink module: reuses the exact `webhook_signature_bypass`/
+  `webhook_signature_verification` module composition Huddle Hub's own
+  `/webhooks/events` cell already registers (`CC-LAB-0133`) via a new
+  `/groups/webhook` page profile (its own lab-only secret, distinct from
+  Huddle Hub's). Vulnerable twin (`loose_equality_compare`) recomputes
+  the HMAC and compares it with PHP's `==` operator (the documented
+  "magic hash" type-juggling footgun, CWE-345/CWE-303); secure twin
+  (`constant_time_compare`) uses `hash_equals()`. New manifest,
+  `lab/manifests/webhook_signature_circlefeed_sample.yaml`
+  (`LABGEN-CF-0003`/`LABGEN-CF-0004`). Ground truth extended (not a new
+  directory) with `CF-0002` in `lab/ground-truth-circlefeed/` (`vuln_class:
+  "webhook_signature_bypass"`, `sink_context: "webhook"` -- both enum
+  values already legal, added by `CC-LAB-0133`). Real, executed proof
+  split the same way `CC-LAB-0133` split it (a live HTTP test cannot
+  force a real SHA-256 HMAC output to itself be magic-hash-shaped): `tests/
+  test_labgen_php_laravel_webhook_signature_circlefeed_live_boot.py`
+  (skip-guarded on `live_boot_available()`, `@pytest.mark.slow`) proves
+  ordinary HTTP correctness -- a genuinely correct signature is accepted
+  on both twins, an ordinary wrong one is rejected on both twins; `tests/
+  test_labgen_webhook_signature_circlefeed_magic_hash.py` (skip-guarded
+  on `php_available()`) proves the actual PHP `==`/`hash_equals()`
+  comparison-operator differential against two real, independently
+  published magic-hash strings, executed by a real `php` interpreter.
+  Confirmed run for real in this session (both `live_boot_available()`
+  and `php_available()` are `True` in this environment) -- all tests
+  pass. Scope deliberately limited to this one page -- CircleFeed's
+  remaining two page-set rows (comment "share" redirect / header
+  injection; session-preference-cookie insecure deserialization),
+  `TargetSpec`/`run_targets` wiring, and `webhook_signature_bypass`'s
+  mapping in `fuzzlab.core.runmode._VULN_TO_CATEGORY` are out of scope
+  and named as open follow-on work, not built.
+
 - **FR-LAB-64** *(prototype pollution, CWE-1321, `node_express`; `CC-LAB-0070`,
   2026-09-22).* Per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a's
   decided Category-1 (e-commerce) Walmart/Node cell list, the `node_express`
