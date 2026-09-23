@@ -1,0 +1,7 @@
+        // no_ownership_check: {{ caller_id_var }} (the caller's own
+        // X-Account-Id) is read but never compared to the requested
+        // account_id (CWE-639/862, broken object-level authorization / IDOR).
+        return org.springframework.http.ResponseEntity.ok()
+            .header("Content-Type", "application/json")
+            .body("{\"account_id\":\"" + {{ account_id_var }} + "\",\"payment_method\":\"visa-ending-4242\","
+                + "\"last_invoice_amount_usd\":15.49,\"billing_cycle\":\"monthly\"}");

@@ -4,6 +4,42 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Netflix's 4th real page, first access_control/IDOR instance, `/api/account/billing`, CC-LAB-0187/FR-LAB-127)
+- Target lab: category 4's continued "coherent page/route set" depth work,
+  but genuinely new breadth for Netflix, not another depth increment —
+  Netflix has never had an `access_control`/IDOR (broken object-level
+  authorization) page before, even though this project's Go stack
+  (Twitch) already has this exact mechanism, real and detected
+  (`CC-LAB-0178`/`CC-LAB-0183`). New `GET /api/account/billing?account_id=`
+  account-billing-details lookup, requiring the caller's own identity (a
+  fixed demo `X-Account-Id` header — this stack's own design call, since
+  neither TrackerNest's nor Netflix's other `spring_boot` pages have any
+  caller-identity convention; mirrors `go_net_http`'s own fixed demo
+  `X-Broadcaster-Id`) to match the requested `account_id`. Reuses
+  `lab/safety_matrix.yaml`'s existing `db_row_by_id_lookup` sink family and
+  `no_ownership_check`/`identity_match_before_fetch` ops (`CC-LAB-0063`) —
+  no new safety-matrix entry — but this is the mechanism's first
+  instantiation for `spring_boot`: a new source module
+  (`read_account_id_and_caller_header`) and two new sink modules
+  (`no_ownership_check`/`identity_match_before_fetch`, this stack's
+  op-selects-sink convention, since it has no separate transform stage).
+  New manifest `lab/manifests/access_control_netflix_billing_sample.yaml`
+  (`LABGEN-JV-0007`/`0008`), new ground truth `NFLX-0004`. Also widens
+  `SpringBootLiveBootHarness.request()`/`get()` (additive `headers` param)
+  to send a caller-identity header for the first time on this stack.
+- Auditor: widens `R-ACCESS-CONTROL`'s `name_regex` to also match
+  `account_id` (additive-only; no existing param name affected) so the
+  rule fires on the new page.
+- Detection generalized for free: `AccessControlIdorStrategy`
+  (`CC-FUZZ-0029`, built for Twitch's `go_net_http` cells) needed **zero**
+  new code to confirm the new Spring Boot vulnerable twin and correctly
+  fail closed on its new secure twin — verified live
+  (`tests/test_labgen_spring_boot_account_billing_live_boot.py`), the
+  first proof this strategy generalizes across stacks
+  (`go_net_http` → `spring_boot`), not just across routes on one stack.
+  Netflix's own real, scored recall in the multi-cell live-boot test
+  (`tests/test_multitarget_category4.py`) moves from 3/3 to 4/4.
+
 ## 2026-09-23 (AUDITOR + FUZZ: real detection for `unrestricted_file_upload`, CC-AUD-0023/FR-AUD-14/CC-FUZZ-0036/FR-FUZZ-22)
 - Auditor + oracle: builds `CC-LAB-0186`'s own deliberately-deferred
   detection follow-on — closes Twitch's `TWCH-0009` structural detection

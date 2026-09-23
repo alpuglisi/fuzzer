@@ -457,6 +457,21 @@ rewards) derives from it.
   - Verified live against Twitch's real booted twins
     (`test_real_boot_proves_the_access_control_idor_strategy_end_to_end`);
     Twitch's real, scored `multitarget` recall moves from 1/3 to 2/3.
+  - **Cross-stack generalization now verified** (`CC-LAB-0187`,
+    2026-09-23): the "broader validation against a second,
+    differently-shaped target" this requirement's own note called for
+    has now happened — driven with zero new code against Netflix's first
+    `access_control` page (`spring_boot`, `LABGEN-JV-0007`/`0008`,
+    `/api/account/billing`), confirming the vulnerable twin and
+    correctly failing closed on the secure twin
+    (`tests/test_labgen_spring_boot_account_billing_live_boot.py::
+    test_real_boot_proves_the_access_control_idor_strategy_generalizes_to_spring_boot`).
+    Netflix's own real, scored recall moves from 3/3 to 4/4 in the
+    multi-cell live-boot test. This is the first time this strategy has
+    been proven to generalize across two genuinely different stacks
+    (`go_net_http` and `spring_boot`), not just across routes on the
+    same stack (`CC-LAB-0183`'s own `channel_id`/`/channels/subscribers`
+    proof).
 
 - **FR-FUZZ-15** *(header points become real, audited points; a
   content-type-aware whole-body sender; `CC-FUZZ-0028`, 2026-09-23).*

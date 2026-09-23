@@ -4156,6 +4156,68 @@ lane) can submit a payload as
   this page per this session's own established lab-then-detection
   pattern (the same split `FR-LAB-120`/`FR-LAB-121` established), landed
   as its own separately-scoped follow-on.
+- **FR-LAB-127** *(Netflix's fourth real page: first access_control/IDOR
+  instance, `/api/account/billing`; `CC-LAB-0187`, 2026-09-23).*
+  Instantiates `lab/safety_matrix.yaml`'s existing `db_row_by_id_lookup`
+  sink family and its `no_ownership_check`/`identity_match_before_fetch`
+  ops (`CC-LAB-0063`) on `spring_boot` for the FIRST time -- genuinely
+  new breadth for Netflix, not a depth reuse like `FR-LAB-124`: Netflix
+  never had an `access_control` page before, though `go_net_http`
+  already did (`FR-LAB-118`/`FR-LAB-123`). An account-billing-details
+  lookup (`GET /api/account/billing?account_id=<id>`, returning payment
+  method/last invoice amount/billing cycle). A new source,
+  `ReadAccountIdAndCallerHeaderSource`, reads the attacker-visible
+  `account_id` query param and a fixed demo `X-Account-Id` header
+  standing in for the caller's own identity (this stack has no session/
+  auth system yet; the identical declared simplification `FR-LAB-118`
+  already used for `go_net_http`'s own `X-Broadcaster-Id`, and this
+  entry's own explicit design call, since neither TrackerNest's nor
+  Netflix's other `spring_boot` pages have any caller-identity
+  convention to reuse). Unlike `go_net_http`'s source+transform+sink
+  triad, `spring_boot`'s shape has no separate transform stage (see
+  `fuzzlab/labgen/emitters/spring_boot/modules.py`'s own docstring), so
+  the op selects the sink directly (this stack's existing `ssti`/`xxe`
+  convention): the vulnerable twin (`no_ownership_check`) returns canned
+  billing data for whatever `account_id` is given, ignoring
+  `X-Account-Id` entirely; the secure twin
+  (`identity_match_before_fetch`) requires `accountId.equals(
+  callerAccountId)`, and a mismatch (or missing header) is a real HTTP
+  403. Cells `LABGEN-JV-0007`/`0008`; ground truth `NFLX-0004`
+  (`vuln_class="access_control"`, `sink_context="object_lookup"`, both
+  pre-existing enum values from Twitch's own ground truth, no schema
+  widening needed; `param="account_id"`/`location="query"`,
+  `rendering="server-json"`). `R-ACCESS-CONTROL`'s own `name_regex`
+  (auditor component, `CC-AUD-0024`) was widened additively to also
+  match `account_id` -- read and confirmed absent before widening, not
+  assumed. `SpringBootLiveBootHarness.request()`/`get()`
+  (`fuzzlab/labgen/conformance/live_boot_spring_boot.py`) additively
+  gained a `headers` keyword-only parameter (default `None`) -- this
+  stack's first cell needing a caller-identity header sent by a test;
+  every existing call site is unaffected, re-verified by re-running this
+  stack's full pre-existing live-boot suite unmodified-in-assertion.
+  Real live-boot proof (the vulnerable twin returns distinct,
+  id-echoing billing data for two unrelated `account_id` values with no
+  header sent at all; the secure twin rejects a mismatched
+  `X-Account-Id`, rejects a request with no identity header at all, and
+  accepts a matching one). **Detection generalizes for free, verified
+  live, not assumed**: `AccessControlIdorStrategy` (`CC-FUZZ-0029`,
+  already built for Twitch's `go_net_http` cells) needed zero new code to
+  confirm the new Spring Boot vulnerable twin and correctly fail closed
+  on its new secure twin -- the first proof this strategy generalizes
+  across stacks (`go_net_http` -> `spring_boot`), not just across routes
+  on one stack (`FR-LAB-123` already proved the latter). Netflix's own
+  real, scored recall in the hand-rolled multi-cell live-boot test moves
+  from 3/3 to 4/4. **Pre-change review gate, mechanism fidelity noted
+  explicitly (same substitution as `CC-LAB-0182`-`0186`'s own precedent
+  wording):** the `Agent` tool for a two-independent-reviewer accuracy/
+  adequacy pass was not present in this session's toolset (checked via
+  `ToolSearch`, not assumed absent) -- substituted with a documented,
+  rigorous self-review (accuracy + adequacy), recorded in `CC-LAB-0187`.
+  **Cross-branch collision check performed and recorded**: every shared
+  file this task named was diffed against both sibling category
+  branches (`claude/category-3-build-iuu5k9`, `claude/category-5-build-
+  6boejs`) before any was touched -- both strictly behind this branch's
+  own tip on all of them, no divergent work found.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

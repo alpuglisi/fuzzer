@@ -37,6 +37,18 @@
       "expected_vulnerable": true,
       "rendering": "server-json",
       "notes": "Whole raw request body deserialized polymorphically by Jackson default-typing, with the concrete runtime type resolved from an attacker-controlled type hint embedded in the JSON itself (CWE-502) -- the identical mechanism NFLX-0001 already models (source jackson_body, sinks jackson_default_typing_deserialize/jackson_typed_allowlist_deserialize, both via _SOURCE_OVERRIDE_BY_OP, CC-LAB-0173), reused verbatim at a second, distinct real Netflix feature: switching the account's active profile (a real, core Netflix feature -- Netflix's own Help Center documents up to 5 profiles per account, each with its own maturity-rating/autoplay/subtitle preferences), not a cosmetic rename of NFLX-0001's own playback-resume mutation. No single named field carries the taint, so `param` is the literal string \"body\", same whole-body convention as NFLX-0001/NFLX-0002 (CC-LAB-0174). `LABGEN-JV-0005` in lab/manifests/insecure_deserialization_netflix_profiles_sample.yaml, CC-LAB-0184/FR-LAB-124 (Netflix's third real page, zero new generator code) -- never a PFF-* case."
+    },
+    {
+      "case_id": "NFLX-0004",
+      "url": "/api/account/billing",
+      "method": "GET",
+      "param": "account_id",
+      "location": "query",
+      "vuln_class": "access_control",
+      "sink_context": "object_lookup",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "An account_id query param used to look up account billing details (payment method, last invoice amount, billing cycle) with no check that it matches the caller's own X-Account-Id (CWE-639/862, broken object-level authorization / IDOR) -- modeled on a real, plausible Netflix account-billing/payment-method page, a textbook OWASP API1:2023 BOLA surface, and Netflix's first access_control/IDOR page (the Twitch/go_net_http pick already has this mechanism, TWCH-0003/TWCH-0007, but Netflix never did before this entry). Reuses lab/safety_matrix.yaml's existing db_row_by_id_lookup sink family and no_ownership_check/identity_match_before_fetch ops (added by CC-LAB-0063) -- no new safety-matrix entry needed; this is, however, this mechanism's first instantiation for the spring_boot stack (a new source module and two new sink modules, since this stack's shape has no separate transform stage -- see fuzzlab/labgen/emitters/spring_boot/modules.py's own docstring). `X-Account-Id` is a fixed demo header standing in for the caller's own authenticated identity (this stack has no session/auth system yet; the header models only the ownership-check-bypass mechanism in isolation, never a real session/auth system, the same declared simplification CC-LAB-0178 already used for go_net_http's own X-Broadcaster-Id header). `LABGEN-JV-0007` in lab/manifests/access_control_netflix_billing_sample.yaml, CC-LAB-0187/FR-LAB-127 -- never a PFF-* case. Verified live: AccessControlIdorStrategy (already built for TWCH-0003/CC-FUZZ-0029, keyed on vuln_class=access_control + sink shape, not per-stack) confirms this new vulnerable twin with zero new detection code, and correctly does not confirm the secure twin (LABGEN-JV-0008) -- the first proof this strategy generalizes across stacks (go_net_http -> spring_boot), not just across routes on the same stack."
     }
   ]
 }

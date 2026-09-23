@@ -3,6 +3,73 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0024 — `R-ACCESS-CONTROL` widened to also match `account_id` (2026-09-23)
+
+- Change: widens `R-ACCESS-CONTROL`'s `name_regex` in `fuzzlab/audit/
+  rules_data/default_rules.json` from `channel_id|resource_id|object_id|
+  item_id|record_id|owner_id` to `channel_id|resource_id|object_id|
+  item_id|record_id|owner_id|account_id` — one new alternative, additive
+  only, nothing else about the rule changes (`method_in: ["GET"]`,
+  `location_in: ["query"]`, `reference: "access-control"` all unchanged).
+  Needed because `CC-LAB-0187` (Netflix's `/api/account/billing`, this
+  project's first `access_control`/IDOR page on `spring_boot`) uses
+  `account_id` as its query-param name — the idiomatically correct name
+  for a real account-billing feature — and that name did not already
+  match the rule (read and confirmed directly before widening, not
+  assumed). Reviewed via the mandatory pre-change review gate: the
+  `Agent` tool for a two-independent-reviewer pass was checked for and
+  found unavailable in this session's toolset (via `ToolSearch`) — the
+  same substitution precedent `CC-LAB-0182`-`0186`/`CC-AUD-0023` already
+  used, documented here rather than silently skipped. **(1) Accuracy** —
+  confirmed by direct source inspection: the pre-existing regex, read
+  verbatim from the file before editing, genuinely lacked `account_id`;
+  grepped every existing manifest and every ground-truth `labels.json`
+  in the project for `account_id` first and found none, so this widening
+  cannot silently start matching (and therefore rescoring) any
+  pre-existing case. **(2) Adequacy** — checked this widening does not
+  make the rule dangerously broad: `account_id` is exactly as
+  specific as the six names already present (a `_id`-suffixed
+  object-identifier name, not a generic token like `id` alone), and the
+  rule's own `method_in`/`location_in` scoping (GET query params only)
+  is unchanged, so the same bounded false-positive risk
+  `AccessControlIdorStrategy`'s own docstring already documents and
+  accepts is not widened in kind, only in the set of param names that
+  can reach it; confirmed via a real, executed `run_targets` pipeline
+  run (`tests/test_multitarget_category4.py::
+  test_netflix_multi_cell_boot_confirms_all_positives`) that the widened
+  rule actually fires for `NFLX-0004`'s real ground-truth point and the
+  paired, already-existing `AccessControlIdorStrategy` actually confirms
+  it, moving Netflix's own real, scored recall from 3/3 to 4/4 — not
+  assumed correct from unit tests alone.
+  New/changed files:
+  - `fuzzlab/audit/rules_data/default_rules.json`
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-127`, paired
+    lab-side entry)
+- Impact (other components / project): `default_rules.json` is shared
+  across every category and every existing target's own run — additive
+  only (one new regex alternative on an existing rule). No other ground
+  truth in the project currently uses `account_id` (grepped and
+  confirmed before landing), so no other target's scoring changes.
+  Paired with `CC-LAB-0187` (target lab) — see that entry for the full
+  new-page record.
+- Risk (level; mitigation or accepted-risk justification): **low**.
+  A single-alternative regex widening on an already-scoped rule
+  (`method_in`/`location_in` unchanged); confirmed to affect zero
+  pre-existing cases by grep before landing, and to correctly fire for
+  the one new case it targets by a real, executed pipeline run.
+- Deliverables:
+  - [x] Regex widened, additive-only, confirmed to affect no pre-existing
+    case
+  - [x] Verified live against a real booted app via
+    `test_netflix_multi_cell_boot_confirms_all_positives` — recall
+    `3/3` -> `4/4`
+  - [x] Full non-slow suite re-verified green
+  - [x] Pre-change review gate's `Agent`-tool absence flagged explicitly,
+    substituted with a documented self-review (accuracy + adequacy)
+- Effectiveness (assessed 2026-09-23): met — `R-ACCESS-CONTROL` now fires
+  for Netflix's own `account_id`-keyed page with no other case affected,
+  verified live, not assumed.
+
 ### CC-AUD-0023 — `R-UNRESTRICTED-FILE-UPLOAD` audit rule (2026-09-23)
 
 - Change: adds `R-UNRESTRICTED-FILE-UPLOAD`, category

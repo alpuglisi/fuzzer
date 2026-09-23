@@ -1,0 +1,8 @@
+        String {{ account_id_var }} = request.getParameter("{{ param_name }}");
+        if ({{ account_id_var }} == null) {
+            {{ account_id_var }} = "";
+        }
+        String {{ caller_id_var }} = request.getHeader("X-Account-Id");
+        if ({{ caller_id_var }} == null) {
+            {{ caller_id_var }} = "";
+        }

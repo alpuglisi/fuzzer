@@ -66,6 +66,14 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("xxe", "xml_parse_input"): _ModuleSet("raw_body", "single_handler"),
     ("insecure_deserialization", "object_deserialization"): _ModuleSet("request_stream", "single_handler"),
     ("spel_injection", "spel_expression_evaluate"): _ModuleSet("query_param", "single_handler"),
+    # CC-LAB-0187: Netflix's fourth real page, this stack's first
+    # access_control/IDOR instance -- reuses lab/safety_matrix.yaml's
+    # existing db_row_by_id_lookup sink family and no_ownership_check/
+    # identity_match_before_fetch ops (CC-LAB-0063), already instantiated on
+    # go_net_http (CC-LAB-0178). No new safety-matrix entry needed.
+    ("access_control", "db_row_by_id_lookup"): _ModuleSet(
+        "read_account_id_and_caller_header", "single_handler"
+    ),
 }
 
 #: Per-route static render context, the same "render-only information, not
@@ -83,6 +91,10 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
     # (via `_SOURCE_OVERRIDE_BY_OP`, unchanged) -- no var_name/param_name
     # needed, matching "/api/playback/resume"'s own whole-body-JSON `{}`.
     "/api/profiles/switch": {},
+    # CC-LAB-0187: Netflix's fourth real page, an account-billing-details
+    # lookup keyed by an attacker-visible account_id query param -- this
+    # stack's first access_control/IDOR page.
+    "/api/account/billing": {"param_name": "account_id"},
 }
 
 #: Per-op source override (`CC-LAB-0173`) -- checked *after* the shape-level

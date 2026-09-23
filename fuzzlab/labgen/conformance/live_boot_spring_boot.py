@@ -302,6 +302,7 @@ class SpringBootLiveBootHarness:
         params: dict[str, str] | None = None,
         data: bytes | None = None,
         content_type: str | None = None,
+        headers: dict[str, str] | None = None,
     ) -> HttpResponse:
         """A real HTTP request against the booted app. Never follows a
         redirect (matching ``live_boot.py``'s own convention, `BUG-0028`).
@@ -311,17 +312,32 @@ class SpringBootLiveBootHarness:
         document with a DOCTYPE) -- sent exactly as given, never form-
         encoded, unlike ``live_boot.py``'s own ``post()`` (which is
         form-body-only, matching `php_laravel`'s cells; this stack's first
-        POST cell needs a raw body instead)."""
+        POST cell needs a raw body instead).
+
+        ``headers`` (`CC-LAB-0187`): extra request headers on top of
+        ``Content-Type`` -- this stack's first cell needing a caller-
+        identity header (the ``access_control``/IDOR shape's fixed demo
+        ``X-Account-Id`` header, mirroring ``go_net_http``'s own fixed demo
+        ``X-Broadcaster-Id``). Optional and additive: every pre-existing
+        caller keeps working unchanged with no ``headers`` argument."""
         url = self._base_url() + path
         if params:
             url += "?" + urllib.parse.urlencode(params)
-        headers = {"Content-Type": content_type} if content_type else {}
-        req = urllib.request.Request(url, data=data, method=method.upper(), headers=headers)
+        req_headers = {"Content-Type": content_type} if content_type else {}
+        if headers:
+            req_headers.update(headers)
+        req = urllib.request.Request(url, data=data, method=method.upper(), headers=req_headers)
         with _NO_REDIRECT_OPENER.open(req, timeout=REQUEST_TIMEOUT_S) as resp:
             return HttpResponse(status=resp.status, body=resp.read().decode("utf-8", errors="replace"))
 
-    def get(self, path: str, *, params: dict[str, str] | None = None) -> HttpResponse:
-        return self.request("GET", path, params=params)
+    def get(
+        self,
+        path: str,
+        *,
+        params: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> HttpResponse:
+        return self.request("GET", path, params=params, headers=headers)
 
     def post(self, path: str, *, data: bytes, content_type: str = "application/xml") -> HttpResponse:
         """A real HTTP POST with a raw request body (`CC-LAB-0131`) -- e.g.

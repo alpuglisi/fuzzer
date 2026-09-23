@@ -15,7 +15,7 @@ TWITCH_GT_DIR = "lab/ground-truth-twitch-clone"
 def test_netflix_ground_truth_loads_and_cross_checks():
     gt = contract.load(NETFLIX_GT_DIR)
     assert gt.target == "spring_boot"
-    assert len(gt.cases) == 3
+    assert len(gt.cases) == 4
     case = gt.case_by_id("NFLX-0001")
     assert case is not None
     assert case.expected_vulnerable
@@ -47,9 +47,21 @@ def test_netflix_ground_truth_loads_and_cross_checks():
     assert profiles_case.param == "body"
     assert profiles_case.location == "body"
 
+    # CC-LAB-0187: Netflix's fourth real page, first access_control/IDOR
+    # instance, /api/account/billing.
+    billing_case = gt.case_by_id("NFLX-0004")
+    assert billing_case is not None
+    assert billing_case.expected_vulnerable
+    assert billing_case.vuln_class == "access_control"
+    assert billing_case.sink_context == "object_lookup"
+    assert billing_case.url == "/api/account/billing"
+    assert billing_case.method == "GET"
+    assert billing_case.param == "account_id"
+    assert billing_case.location == "query"
+
     # Opaque case IDs: no vuln class leaks into the identifier.
     for case in gt.cases:
-        for token in ("jackson", "deser", "vuln", "xxe"):
+        for token in ("jackson", "deser", "vuln", "xxe", "idor", "access"):
             assert token not in case.case_id.lower()
 
 

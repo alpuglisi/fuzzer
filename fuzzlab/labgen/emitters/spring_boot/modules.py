@@ -292,6 +292,63 @@ class SimpleEvaluationContextRestrictedSink(TemplateModule):
         )
 
 
+class ReadAccountIdAndCallerHeaderSource(TemplateModule):
+    """Reads the attacker-visible ``account_id`` query param and the fixed
+    demo ``X-Account-Id`` header standing in for the caller's own
+    authenticated identity (`CC-LAB-0187`) -- this stack has no session/
+    auth system yet, the same declared simplification
+    ``go_net_http``'s own ``ReadChannelIdAndBroadcasterHeaderSource``
+    (`CC-LAB-0178`) already uses for its ``X-Broadcaster-Id`` header, ported
+    here for Netflix's first ``access_control``/IDOR page. Publishes
+    ``account_id_var``/``caller_id_var`` (two Java identifiers) for the sink
+    module (selected by the op, per this package's own op-selects-sink
+    convention -- see this module's own docstring) to compose its own
+    ownership decision. Unlike ``go_net_http``'s shape, this stack has no
+    separate transform stage, so there is no ``value_expr`` published here:
+    each sink implements its own ownership check (or deliberate lack of
+    one) directly, rather than branching on a value a transform computed."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "read_account_id_and_caller_header", "source", SOURCE_ENV,
+            "read_account_id_and_caller_header.java.j2",
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        render_ctx = dict(ctx)
+        render_ctx.setdefault("account_id_var", "accountId")
+        render_ctx.setdefault("caller_id_var", "callerAccountId")
+        result = super().render(render_ctx)
+        return RenderResult(code=result.code, context=render_ctx)
+
+
+class NoOwnershipCheckObjectLookupSink(TemplateModule):
+    """The vulnerable op (`lab/safety_matrix.yaml`'s ``no_ownership_check``,
+    ``db_row_by_id_lookup`` family, ``no_effect`` -- added by `CC-LAB-0063`,
+    already instantiated on ``go_net_http`` by `CC-LAB-0178`; `CC-LAB-0187`
+    is its first instantiation for ``spring_boot``): returns canned
+    account-billing data (payment method, last invoice amount, billing
+    cycle) for whatever ``account_id`` is given, ignoring the caller's own
+    ``X-Account-Id`` entirely (CWE-639/862, broken object-level
+    authorization / IDOR)."""
+
+    def __init__(self) -> None:
+        super().__init__("no_ownership_check", "sink", SINK_ENV, "no_ownership_check.java.j2")
+
+
+class IdentityMatchBeforeFetchObjectLookupSink(TemplateModule):
+    """The secure twin (``identity_match_before_fetch``, ``neutralises`` --
+    `CC-LAB-0187`): requires the requested ``account_id`` to equal the
+    caller's own ``X-Account-Id`` before returning any billing data; a
+    mismatch is a real HTTP 403 with no data, matching ``go_net_http``'s own
+    ``ObjectLookupAuthorizationCheckSink`` shape."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "identity_match_before_fetch", "sink", SINK_ENV, "identity_match_before_fetch.java.j2"
+        )
+
+
 class SingleHandlerComplexity(TemplateModule):
     def __init__(self) -> None:
         super().__init__("single_handler", "complexity", COMPLEXITY_ENV, "single_handler.java.j2")
@@ -313,6 +370,7 @@ SOURCES: dict[str, Module] = {
     "raw_body": RawBodySource(),
     "request_stream": RequestStreamSource(),
     "jackson_body": JacksonBodySource(),
+    "read_account_id_and_caller_header": ReadAccountIdAndCallerHeaderSource(),
 }
 #: Keyed by the op name that selects this sink (see this module's own
 #: docstring for why the op selects the sink here, not a pre-sink
@@ -328,6 +386,8 @@ SINKS: dict[str, Module] = {
     "jackson_typed_allowlist_deserialize": JacksonTypedAllowlistDeserializeSink(),
     "standard_evaluation_context_unrestricted": StandardEvaluationContextUnrestrictedSink(),
     "simple_evaluation_context_restricted": SimpleEvaluationContextRestrictedSink(),
+    "no_ownership_check": NoOwnershipCheckObjectLookupSink(),
+    "identity_match_before_fetch": IdentityMatchBeforeFetchObjectLookupSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_handler": SingleHandlerComplexity(),

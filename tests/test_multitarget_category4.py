@@ -114,8 +114,28 @@ live_boot.py`) and by `test_netflix_multi_cell_boot_confirms_all_
 positives` below -- Netflix's own real, scored recall in that multi-cell
 boot moves from 2/2 to 3/3, proving the existing detection generalizes to
 a second instance of the same shape, the same generalization proof
-`CC-LAB-0183` made for Twitch's `access_control` detection. One gap
-remains open:
+`CC-LAB-0183` made for Twitch's `access_control` detection.
+
+`NFLX-0004` (`CC-LAB-0187`, `/api/account/billing`) is Netflix's fourth
+real page, and genuinely new breadth rather than a depth increment:
+Netflix's first `access_control`/IDOR (broken object-level authorization)
+page, an account-billing-details lookup keyed by an attacker-visible
+`account_id` query param. Reuses `lab/safety_matrix.yaml`'s existing
+`db_row_by_id_lookup` sink family and `no_ownership_check`/
+`identity_match_before_fetch` ops (`CC-LAB-0063`) -- no new safety-matrix
+entry needed -- but this is this mechanism's first instantiation for the
+`spring_boot` stack (a new source module and two new sink modules, since
+this stack's shape has no separate transform stage). Detection needed
+zero new code: `AccessControlIdorStrategy` (`CC-FUZZ-0029`, already built
+for Twitch's `go_net_http` cells, `TWCH-0003`/`TWCH-0007`) confirmed the
+new vulnerable twin and correctly failed closed on its new secure twin,
+verified against a real booted app both by a dedicated live-boot strategy
+test (`tests/test_labgen_spring_boot_account_billing_live_boot.py`) and by
+`test_netflix_multi_cell_boot_confirms_all_positives` below -- Netflix's
+own real, scored recall in that multi-cell boot moves from 3/3 to 4/4,
+the first proof this strategy generalizes across stacks
+(`go_net_http` -> `spring_boot`), not just across routes on the same
+stack. One gap remains open:
 
 1. **No audit `Rule`/oracle strategy exists yet for `webhook_signature`**
    (`ssrf`/`access_control`/`insecure_deserialization`/`xxe` now all have
@@ -266,20 +286,21 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002, which does have a rule/strategy, R-XXE/
-    # XxeInBandMarkerStrategy, CC-FUZZ-0031) and the second
-    # insecure-deserialization instance (NFLX-0003, CC-LAB-0184) are simply
-    # not booted in this single-cell test -- one of its now-three
+    # XxeInBandMarkerStrategy, CC-FUZZ-0031), the second
+    # insecure-deserialization instance (NFLX-0003, CC-LAB-0184), and the
+    # first access_control/IDOR instance (NFLX-0004, CC-LAB-0187) are simply
+    # not booted in this single-cell test -- one of its now-four
     # positives, not all (only NFLX-0001's own vulnerable twin,
     # LABGEN-JV-0001, is booted here) -- see
     # test_netflix_multi_cell_boot_confirms_all_positives below for the
-    # multi-cell boot that confirms all three together.
+    # multi-cell boot that confirms all four together.
     netflix_report = by_name["netflix-clone"].report
     assert netflix_report.tp == 1 and netflix_report.fp == 0
-    assert round(netflix_report.recall, 4) == round(1 / 3, 4)
+    assert round(netflix_report.recall, 4) == round(1 / 4, 4)
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
-    assert round(summary["macro_recall"], 4) == round(((8 / 9) + (1 / 3)) / 2, 4)
+    assert round(summary["macro_recall"], 4) == round(((8 / 9) + (1 / 4)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True
@@ -293,8 +314,13 @@ _NETFLIX_MULTI_MANIFESTS = (
     "lab/manifests/insecure_deserialization_spring_boot_sample.yaml",
     "lab/manifests/xxe_netflix_sample.yaml",
     "lab/manifests/insecure_deserialization_netflix_profiles_sample.yaml",
+    # CC-LAB-0187: fourth real page, first access_control/IDOR instance
+    # (/api/account/billing) -- a fourth, distinct route, no collision.
+    "lab/manifests/access_control_netflix_billing_sample.yaml",
 )
-_NETFLIX_MULTI_CELL_IDS = {"LABGEN-JV-0001", "LABGEN-JV-0003", "LABGEN-JV-0005"}
+_NETFLIX_MULTI_CELL_IDS = {
+    "LABGEN-JV-0001", "LABGEN-JV-0003", "LABGEN-JV-0005", "LABGEN-JV-0007",
+}
 _BUILD_TIMEOUT_S = 240.0
 _BOOT_TIMEOUT_S = 30.0
 
@@ -322,18 +348,27 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
     """Hand-rolled multi-cell boot (bypassing `SpringBootLiveBootHarness`'s
     single-cell restriction), mirroring `tests/test_labgen_spring_boot_
     trackernest_multitarget.py`'s own established pattern: assembles all
-    three of Netflix's own vulnerable twins -- `LABGEN-JV-0001`
+    four of Netflix's own vulnerable twins -- `LABGEN-JV-0001`
     (insecure-deserialization, `/api/playback/resume`), `LABGEN-JV-0003`
-    (XXE, `/api/content/import`), and `LABGEN-JV-0005`
-    (insecure-deserialization, `/api/profiles/switch`, `CC-LAB-0184`) --
-    into one real booted app (three distinct routes, no collision), then
-    runs the real generic `run_targets` pipeline against it. Originally
-    closed the follow-on `CC-FUZZ-0032` flagged (both of Netflix's
-    positives confirming together in one real boot); extended by
+    (XXE, `/api/content/import`), `LABGEN-JV-0005`
+    (insecure-deserialization, `/api/profiles/switch`, `CC-LAB-0184`), and
+    `LABGEN-JV-0007` (access_control/IDOR, `/api/account/billing`,
+    `CC-LAB-0187`) -- into one real booted app (four distinct routes, no
+    collision), then runs the real generic `run_targets` pipeline against
+    it. Originally closed the follow-on `CC-FUZZ-0032` flagged (both of
+    Netflix's positives confirming together in one real boot); extended by
     `CC-LAB-0184` to prove the third positive confirms alongside the other
     two with zero new detection code -- the same generalization proof
     `CC-LAB-0183` made for Twitch's `access_control` detection, moving
-    Netflix's own scored recall in this boot from 2/2 to 3/3.
+    Netflix's own scored recall in this boot from 2/2 to 3/3. Extended
+    again by `CC-LAB-0187` to add the fourth positive, `NFLX-0004`: this
+    is Netflix's first `access_control`/IDOR page, and
+    `AccessControlIdorStrategy` (`CC-FUZZ-0029`, already built for
+    Twitch's `go_net_http` cells) needed zero new detection code to
+    confirm it too, moving Netflix's own scored recall in this boot from
+    3/3 to 4/4 -- the first proof this strategy generalizes across
+    stacks (go_net_http -> spring_boot), not just across routes on the
+    same stack.
     """
     root = tmp_path_factory.mktemp("netflix_multitarget")
     shutil.copytree(SKELETON_DIR, root, dirs_exist_ok=True)
@@ -376,10 +411,11 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
                                    oob=listener)
         outcome = outcomes[0]
         assert outcome.scored is True and outcome.report is not None
-        # All three of Netflix's own positives confirm in this one real boot
-        # (NFLX-0001, NFLX-0002, NFLX-0003) -- CC-LAB-0184 moves this from
-        # 2/2 to 3/3 with zero new detection code.
-        assert outcome.report.tp == 3 and outcome.report.fp == 0
+        # All four of Netflix's own positives confirm in this one real boot
+        # (NFLX-0001, NFLX-0002, NFLX-0003, NFLX-0004) -- CC-LAB-0184 moved
+        # this from 2/2 to 3/3, CC-LAB-0187 moves it from 3/3 to 4/4, both
+        # with zero new detection code.
+        assert outcome.report.tp == 4 and outcome.report.fp == 0
         assert outcome.report.recall == 1.0
     finally:
         listener.stop()

@@ -54,7 +54,7 @@
       "id": "R-ACCESS-CONTROL",
       "category": "access-control",
       "transaction_type": "Broken Object-Level Authorization",
-      "when": { "method_in": ["GET"], "location_in": ["query"], "name_regex": "channel_id|resource_id|object_id|item_id|record_id|owner_id" },
+      "when": { "method_in": ["GET"], "location_in": ["query"], "name_regex": "channel_id|resource_id|object_id|item_id|record_id|owner_id|account_id" },
       "reference": "access-control"
     },
     {

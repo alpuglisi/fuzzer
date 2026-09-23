@@ -3,6 +3,230 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0187 — Netflix's 4th real page: first access_control/IDOR instance, `/api/account/billing` (FR-LAB-127) (2026-09-23)
+
+- Change: genuinely new breadth for category 4's Netflix pick, explicitly
+  **not** a cheap "second instance" depth increment like `CC-LAB-0179`/
+  `CC-LAB-0184` -- Netflix has never had an `access_control`/IDOR (broken
+  object-level authorization) page before, even though this project's Go
+  stack (Twitch) already has this exact mechanism, real and detected
+  (`CC-LAB-0178`/`CC-LAB-0183`, `AccessControlIdorStrategy`/
+  `R-ACCESS-CONTROL`). Reuses `lab/safety_matrix.yaml`'s existing
+  `db_row_by_id_lookup` sink family and `no_ownership_check`/
+  `identity_match_before_fetch` ops (`CC-LAB-0063`) verbatim -- no new
+  safety-matrix entry -- but this is the mechanism's **first**
+  instantiation for `spring_boot` (only `go_net_http` had it before).
+  **Cross-branch collision check, performed and recorded**: `git fetch
+  origin claude/category-3-build-iuu5k9 claude/category-5-build-6boejs`
+  followed by a diff of every shared file this task named (`fuzzlab/
+  labgen/emitters/spring_boot/`, `fuzzlab/oracle/strategies.py`,
+  `fuzzlab/core/runmode.py`, `fuzzlab/audit/rules_data/default_rules.json`,
+  `fuzzlab/labels/schemas/labels.schema.json`, `fuzzlab/tools/
+  probesender.py`) against both sibling branches: every diff showed only
+  deletions relative to this branch (both sibling branches strictly
+  behind this branch's own tip on every one of those files) -- no
+  divergent work to reconcile.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0186`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded here rather than silently
+  skipping the gate: (1) **accuracy** -- confirmed by direct source
+  inspection, not assumed: `spring_boot`'s module system has no separate
+  transform stage (`modules.py`'s own docstring, confirmed by reading it
+  before designing anything), so the shape's `no_ownership_check`/
+  `identity_match_before_fetch` ops had to become two sink modules
+  (op-selects-sink, this stack's existing convention for `ssti`/`xxe`),
+  not a source+transform+sink triad like `go_net_http`'s; cell IDs
+  `LABGEN-JV-0007`/`0008` were confirmed free (grepped `LABGEN-JV-`
+  across every manifest, highest existing was `LABGEN-JV-0006`);
+  `AccessControlIdorStrategy`'s own confirmation contract (HTTP 200 for
+  both probes, non-empty body, no denial-marker text, both probed ids
+  echoed back literally, the two bodies differing) was checked against
+  the exact rendered vulnerable-twin template
+  (`no_ownership_check.java.j2`, echoes `accountId` verbatim into the
+  JSON body) before assuming it would confirm, and was then actually
+  driven against a real booted instance (see below), not assumed from
+  the class/shape match alone. (2) **adequacy** -- checked that this
+  increment does not silently duplicate an existing route (grepped
+  `_PAGE_PARAMS` for `/api/account/billing`: absent); confirmed
+  `R-ACCESS-CONTROL`'s own `name_regex` (`channel_id|resource_id|
+  object_id|item_id|record_id|owner_id`) did **not** already match
+  `account_id` -- read directly, not assumed -- so the rule needed
+  widening (additive-only, one new alternative) or the param needed
+  renaming; chose widening the regex since `account_id` is the
+  idiomatically correct name for this real feature and no existing
+  manifest/ground-truth case uses that name (grepped first, confirmed
+  absent) so no existing case is affected; confirmed the caller-identity
+  header design (`X-Account-Id`, this project's own design call, stated
+  explicitly per the task's instruction -- no existing `spring_boot`
+  convention for "the caller's own identity" was found: TrackerNest's
+  and Netflix's other pages are all whole-body-JSON mutations with no
+  identity concept at all) mirrors `go_net_http`'s own already-accepted
+  fixed-demo-header simplification (`CC-LAB-0178`'s `X-Broadcaster-Id`),
+  not a novel unreviewed pattern.
+  - **Real Netflix functionality (grounded, not invented)**: an
+    account-billing-details lookup (`GET /api/account/billing?account_id=
+    <id>`, returning payment method/last invoice amount/billing cycle) --
+    a real, plausible, core Netflix account-management feature (viewing
+    your own billing/payment info is a standard SaaS/streaming
+    account-settings page), genuinely distinct from `/api/playback/
+    resume` (playback-position mutation), `/api/content/import` (B2B
+    partner content ingestion), and `/api/profiles/switch`
+    (profile-switching mutation) -- a textbook OWASP API1:2023 BOLA
+    surface, the same class of real page `CC-LAB-0178` grounded for
+    Twitch's own per-channel analytics lookup.
+  - **A genuinely new module set for this stack, not a template port.**
+    `ReadAccountIdAndCallerHeaderSource` (`read_account_id_and_caller_
+    header`) reads the attacker-visible `account_id` query param
+    (`HttpServletRequest.getParameter`) and the fixed demo
+    `X-Account-Id` header (`getHeader`), publishing `accountIdVar`/
+    `callerIdVar` for the sink to compose its own ownership decision --
+    unlike `go_net_http`'s source+transform+sink triad, this stack's
+    shape has no transform stage, so each sink implements its own
+    ownership check (or deliberate lack of one) directly:
+    `NoOwnershipCheckObjectLookupSink` and
+    `IdentityMatchBeforeFetchObjectLookupSink`.
+  - **Vulnerable** (`LABGEN-JV-0007`, `no_ownership_check`): returns
+    canned billing data (`payment_method`/`last_invoice_amount_usd`/
+    `billing_cycle`, echoing the requested `account_id` back) for
+    whatever `account_id` is given, ignoring `X-Account-Id` entirely.
+    **Secure** (`LABGEN-JV-0008`, `identity_match_before_fetch`):
+    requires `accountId.equals(callerAccountId)` before returning any
+    data; a mismatch (or a missing header) is a real HTTP 403.
+  - **Audit rule widened, additively, not replaced**: `R-ACCESS-CONTROL`'s
+    `name_regex` (`fuzzlab/audit/rules_data/default_rules.json`) gains
+    `|account_id` -- see the paired `CC-AUD-0024` entry for the full
+    impact/risk assessment of this rule change; that entry, not this
+    one, is this widening's own controlled record (this component's own
+    change is the new page/module set only).
+  - **The live-boot harness itself needed one small, additive widening**:
+    `SpringBootLiveBootHarness.request()`/`get()`
+    (`fuzzlab/labgen/conformance/live_boot_spring_boot.py`) gained an
+    optional `headers` keyword-only parameter (default `None`) -- this
+    stack's first cell needing a caller-identity header sent by a test,
+    the same kind of harness gap `CC-LAB-0131`'s `data`/`content_type`
+    params closed for a raw request body. Confirmed identical across
+    all three active category branches before touching it (see the
+    cross-branch collision check above).
+  - **Real, live-boot proof**
+    (`tests/test_labgen_spring_boot_account_billing_live_boot.py`, 3
+    tests): (a) the vulnerable twin returns distinct, id-echoing billing
+    data for two unrelated `account_id` values with no header sent at
+    all; (b) the secure twin rejects a mismatched `X-Account-Id`, rejects
+    a request with no identity header at all, and accepts a matching
+    one; (c) the detection-generalization proof below.
+  - **Detection generalization, verified for real against a real booted
+    app, not asserted from theory**: `AccessControlIdorStrategy`
+    (`CC-FUZZ-0029`, built for Twitch's `go_net_http` cells) needed
+    **zero** new code to confirm the new Spring Boot vulnerable twin and
+    correctly fail closed on its new secure twin -- the first proof this
+    strategy generalizes **across stacks** (`go_net_http` ->
+    `spring_boot`), not just across routes on the same stack (which
+    `CC-LAB-0183` already proved). The real
+    `fuzzlab.harness.multitarget.run_targets` pipeline was then run end
+    to end against a real booted Netflix instance assembling all four of
+    Netflix's own vulnerable twins in one hand-rolled multi-cell boot
+    (`tests/test_multitarget_category4.py::
+    test_netflix_multi_cell_boot_confirms_all_positives`, extended from
+    `CC-LAB-0184`'s own three-cell precedent), and shows Netflix's own
+    real, scored recall in that boot moving from `3/3` to `4/4` (`tp=4,
+    fp=0`) with no new audit-rule/strategy code beyond the additive
+    regex widening above.
+  - Ground truth: `NFLX-0004` added to `lab/ground-truth-netflix-clone/`
+    (`vuln_class="access_control"`, `sink_context="object_lookup"` --
+    both pre-existing enum values from Twitch's own `TWCH-0003`/
+    `TWCH-0007`, no schema widening needed).
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/modules.py` (new
+    `ReadAccountIdAndCallerHeaderSource`/
+    `NoOwnershipCheckObjectLookupSink`/
+    `IdentityMatchBeforeFetchObjectLookupSink` classes + registrations)
+  - `fuzzlab/labgen/emitters/spring_boot/__init__.py`
+    (`_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS`, one new shape + one new
+    route entry)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sources/
+    read_account_id_and_caller_header.java.j2` (new)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sinks/
+    {no_ownership_check,identity_match_before_fetch}.java.j2` (new)
+  - `fuzzlab/labgen/conformance/live_boot_spring_boot.py` (additive
+    `headers` param on `request()`/`get()`)
+  - `lab/manifests/access_control_netflix_billing_sample.yaml` (new)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended)
+  - `tests/test_labgen_spring_boot_account_billing.py` (new, 7 unit
+    tests, no network required)
+  - `tests/test_labgen_spring_boot_account_billing_live_boot.py` (new, 3
+    live-boot tests)
+  - `tests/test_labels_contract_category4.py` (extended)
+  - `tests/test_multitarget_category4.py` (module docstring extended;
+    `_NETFLIX_MULTI_MANIFESTS`/`_NETFLIX_MULTI_CELL_IDS` extended;
+    multi-cell recall assertion `3/3` -> `4/4`; single-cell test's own
+    Netflix recall assertion updated `1/3` -> `1/4` and `macro_recall`
+    accordingly, since ground truth now has four cases -- a real
+    assertion re-verified against a real pipeline run, not assumed)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-127`, new)
+  - `docs/components/05-auditor/requirements.md` (`FR-AUD-8`, updated in
+    place for the widened regex)
+  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    (`FR-FUZZ-16`, updated in place: cross-stack generalization now
+    verified)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category-4 tracker
+    row updated)
+  - `CHANGELOG.md`
+- Impact (other components / project): additive only -- one new
+  `_MODULE_SET_BY_SHAPE` entry (keyed on a shape tuple no other cell
+  uses), one new `_PAGE_PARAMS` key (cannot collide with any existing
+  route: `spring_boot` component-scans and each cell's class name
+  derives from its own `cell_id`), one new manifest, ground truth
+  extension, one additive param on the live-boot harness (default
+  `None`, every pre-existing caller unaffected -- re-ran the full
+  pre-existing `spring_boot` live-boot suite unmodified-in-assertion to
+  confirm). The audit-rule regex widening's own impact is assessed in
+  `CC-AUD-0024`. No new `fuzzlab.oracle`/`fuzzlab.core.runmode` code at
+  all -- this increment is a cross-stack generalization proof of
+  already-shipped detection capability.
+- Risk (level; mitigation or accepted-risk justification): **low**.
+  Reuses the fully-built, already-tested `AccessControlIdorStrategy` and
+  the already-catalogued safety-matrix ops verbatim; the only genuinely
+  new code is one source + two sink template/module pairs (small,
+  independently unit-tested) and one harness parameter (additive,
+  default-`None`, covered by the pre-existing suite passing unmodified).
+  The one real shared-code risk (a future change to these new sink
+  templates silently affecting only this one route, since they are not
+  shared with any other cell) is minimal by construction. Verified end
+  to end with a real `mvn package`/boot/HTTP round trip and a real
+  `run_targets` pipeline run, not assumed from the shape-match argument
+  alone.
+- Deliverables:
+  - [x] New source + two new sink modules/templates (this stack's first
+    `access_control` instantiation), new manifest, new `_PAGE_PARAMS`
+    entry
+  - [x] Live-boot harness widened additively (`headers` param)
+  - [x] Real live-boot proof (3 tests: vulnerable differential, secure
+    identity-match/mismatch/no-header, detection-generalization)
+  - [x] Ground truth extended (`NFLX-0004`)
+  - [x] Cross-branch collision check performed and recorded (no
+    divergent work found)
+  - [x] Detection generalization verified live (dedicated strategy
+    live-boot test + real `run_targets` pipeline run via a hand-rolled
+    4-cell boot) -- recall `3/3` -> `4/4`
+  - [x] `R-ACCESS-CONTROL` regex widened additively, own change-control
+    entry (`CC-AUD-0024`)
+  - [x] Full non-slow suite + the relevant category-4/`spring_boot` real
+    live-boot slow tests re-verified green
+  - [x] Pre-change review gate's `Agent`-tool absence flagged explicitly,
+    substituted with a documented self-review (accuracy + adequacy),
+    matching `CC-LAB-0182`-`0186`'s own precedent wording
+- Effectiveness (assessed 2026-09-23): met -- Netflix now has four real,
+  live-boot-proven pages and, for the first time, its own
+  `access_control`/IDOR page; the project's existing
+  `AccessControlIdorStrategy` detection is now proven, not just assumed,
+  to generalize across a genuinely different stack (`go_net_http` ->
+  `spring_boot`) with zero new detection code, the strongest
+  generalization proof this mechanism has had yet.
+
 ### CC-LAB-0186 — Twitch's 9th real page: first unrestricted-file-upload instance, `/channels/emotes/upload` (FR-LAB-126) (2026-09-23)
 
 - Change: genuinely new breadth for category 4's Twitch pick, explicitly
