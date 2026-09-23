@@ -1838,27 +1838,32 @@ lane) can submit a payload as
     `puppy-fort-factory/` still present and every test green, a second doing
     only the `git rm -r puppy-fort-factory/` once the first commit's own
     full test run (fast suite + the live-boot slow suite) was green.
-> **⚠ Cross-branch bookkeeping-ID collision flagged 2026-09-22, by the
-> Category 1 (E-commerce) pilot session working `claude/second-target-cat1-ecommerce`.**
-> The two `FR-LAB-72`/`FR-LAB-73` entries immediately below (this branch's
-> django emitter Phase A) collide with `FR-LAB-72`/`FR-LAB-73` already used
-> and pushed on `claude/second-target-cat1-ecommerce` (FR-LAB-72 = the
-> `node_express` CWE-1321 prototype-pollution module, FR-LAB-73 = the
-> `ruby_rails` Phase A skeleton/live-boot harness). Neither branch is merged
-> into `main` yet, so each session independently picked "next free" off its
-> own stale copy of this file and collided. `CC-LAB-0090` itself is fine —
-> outside cat1's reserved `CC-LAB-0070`-`0089` block, no collision there.
-> **Recommend renumbering this branch's `FR-LAB-72`/`FR-LAB-73` to the next
-> free numbers above cat1's current ceiling (cat1 is through `FR-LAB-71` as
-> of its last landed lane, per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
-> §9.4's category-1 tracker row) before building further on this branch** —
-> it only gets more entries to renumber the longer both branches keep going.
-> Also worth checking `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.2's
-> stack-reuse ledger — cat1 added a Ruby-on-Rails row there that this branch
-> won't have seen if it forked before that commit. (No direct session-to-
-> session messaging path was available to deliver this any other way — it's
-> being left here per §9.3's "check shared state before assuming staleness"
-> rule, for whoever resumes this branch to see on next read.)
+> **✅ Cross-branch bookkeeping-ID collision, resolved (originally flagged
+> 2026-09-22 by the Category 1 (E-commerce) pilot session; correction note
+> added 2026-09-23 by this branch's own session).** This branch's `django`
+> emitter Phase A originally landed as `FR-LAB-64`/`FR-LAB-65`, which
+> collided with `FR-LAB-64`/`FR-LAB-65` independently claimed on
+> `claude/second-target-cat1-ecommerce` (its own `node_express` CWE-1321
+> module / `ruby_rails` Phase A harness) — neither branch merged into
+> `main` yet, so each session picked "next free" off its own stale copy of
+> this file. A fix commit on this branch (`a04127f`) renumbered this
+> branch's entries to `FR-LAB-72`/`FR-LAB-73`. **That fix commit's own
+> warning text (the paragraph this note replaces) had a real, self-
+> introduced bug**, found on a later re-read of this file: its find/replace
+> renumbered every `64`/`65` it found, including inside the warning
+> message's own prose — so the warning ended up asserting "`FR-LAB-72`/
+> `FR-LAB-73` collide with cat1's own `FR-LAB-72`/`FR-LAB-73`," a
+> self-contradictory claim (72/73 was the *target* of the renumbering, not
+> a second collision). **Verified directly against a real fetch of
+> `origin/claude/second-target-cat1-ecommerce`'s current
+> `requirements.md`, 2026-09-23: its highest `FR-LAB-` number is
+> `FR-LAB-69`** — `FR-LAB-72`/`FR-LAB-73` do not exist there and do not
+> collide with anything on that branch's actual pushed state (the prior
+> note's "cat1 is through `FR-LAB-71`" claim was also not quite matched by
+> that branch's real file content at fetch time, though close). This
+> branch's `FR-LAB-72`/`FR-LAB-73` are confirmed clear as of this check;
+> a session merging either branch into `main` later should still re-verify
+> at merge time, since both branches keep advancing independently.
 - **FR-LAB-72** *(the `django` emitter exists, Phase A scope; `CC-LAB-0090`,
   2026-09-22).* A new `Emitter` implementation
   (`fuzzlab.labgen.emitters.django.DjangoEmitter`) for category 2's
