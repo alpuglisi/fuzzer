@@ -23,6 +23,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-1336, CWE-94, CWE-532, CWE-501]
   cwe_shared: [CWE-1336, CWE-94]
   cwe_unique: [CWE-532, CWE-501]
   cwe_rationale: >
@@ -53,6 +54,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-1336, CWE-94, CWE-538, CWE-613]
   cwe_shared: [CWE-1336, CWE-94]
   cwe_unique: [CWE-538, CWE-613]
   cwe_rationale: >
@@ -79,6 +81,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-1336, CWE-94, CWE-614, CWE-617]
   cwe_shared: [CWE-1336, CWE-94]
   cwe_unique: [CWE-614, CWE-617]
   cwe_rationale: >
@@ -105,6 +108,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-1336, CWE-94, CWE-646, CWE-649]
   cwe_shared: [CWE-1336, CWE-94]
   cwe_unique: [CWE-646, CWE-649]
   cwe_rationale: >

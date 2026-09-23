@@ -23,8 +23,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-347, CWE-757, CWE-1164, CWE-393]
   cwe_shared: [CWE-347, CWE-757]
-  cwe_unique: [CWE-1023, CWE-354]
+  cwe_unique: [CWE-1164, CWE-393]
   cwe_rationale: >
     Shared (this pair's core class, documented once for both entries):
     CWE-347 (Improper Verification of Cryptographic Signature) is the
@@ -32,15 +33,17 @@
     Negotiation, 'Algorithm Downgrade') is the specific named CWE for an
     attacker forcing acceptance of a weaker algorithm -- exactly the
     RS256-replayed-as-HS256-secret shape.
-    Unique to this entry, researched against the MITRE CWE index: CWE-1023
-    (Incomplete Comparison with Missing Factors) -- the code checks that
-    `alg` is *some* algorithm the library implements, but is missing the
-    necessary second factor (that it's the algorithm the *caller* expects
-    for this key) -- checking the wrong thing, not merely checking nothing;
-    CWE-354 (Improper Validation of Integrity Check Value) -- the JWT
-    signature is exactly an integrity check value, and this entry's
-    validation of it is improperly implemented (it never confirms the
-    check ran with the key/algorithm pairing the caller intended).
+    Unique to this entry, researched against the MITRE CWE index: CWE-1164
+    (Irrelevant Code) -- `decode()`'s own signature accepts an `$algs`
+    parameter, but the parameter is never referenced anywhere in the
+    function body (the fix's `$allowed_algs` is, by contrast, actually
+    enforced with `in_array()`), so this entry's own version of the
+    parameter is dead code that gives the false impression an allow-list
+    is honored; CWE-393 (Return of Wrong Status Code) -- `verify()`'s
+    'openssl' branch returns the raw `$signature` bytes on success while
+    its 'hash_hmac' branch returns a proper boolean, an inconsistent
+    return contract from the same function that happens to work today
+    only because a non-empty string is truthy.
   suggested_op: jwt_alg_unchecked
   suggested_sink_family: jwt_signature_verification
 
@@ -57,20 +60,24 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-347, CWE-757, CWE-303, CWE-253]
   cwe_shared: [CWE-347, CWE-757]
-  cwe_unique: [CWE-284, CWE-754]
+  cwe_unique: [CWE-303, CWE-253]
   cwe_rationale: >
     Shared: see vulnerable-1.php's cwe_rationale above.
-    Unique to this entry: CWE-284 (Improper Access Control) -- the fix
-    shifts responsibility to the *caller*, who must now supply a correctly-
-    scoped `$allowed_algs`; the fix's real-world correctness now depends on
-    every caller configuring this correctly, a distinct residual concern
-    from the library-internal bug it closes; CWE-754 (Improper Check for
-    Unusual or Exceptional Conditions) -- `decode()` throws typed
-    exceptions on failure (e.g. a signature mismatch); a caller that
-    doesn't catch and handle the specific exception type correctly can
-    still fail open, a concern this fix's own design doesn't resolve on
-    its own.
+    Unique to this entry: CWE-303 (Incorrect Implementation of
+    Authentication Algorithm) -- the whole alg/signature-verification
+    block, allow-list enforcement included, is gated behind
+    `if (isset($key))`; when a caller invokes `decode()` without a `$key`,
+    the method falls straight through to `return $payload;` having
+    performed zero cryptographic verification, so this fix's authentication
+    check is only conditionally implemented, not unconditionally applied to
+    every decode; CWE-253 (Incorrect Check of Function Return Value) --
+    `verify()`'s 'openssl' branch treats `openssl_verify()`'s three
+    possible return values (1 valid, 0 invalid, -1 error) as a single
+    boolean via `if (!$success)`, so an internal OpenSSL error is
+    indistinguishable from a genuinely invalid signature, a check this fix
+    carries over unchanged from vulnerable-1.php.
   suggested_op: jwt_alg_allowlist
   suggested_sink_family: jwt_signature_verification
 
@@ -87,8 +94,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-330, CWE-640, CWE-328, CWE-201]
   cwe_shared: [CWE-330, CWE-640]
-  cwe_unique: [CWE-328, CWE-760]
+  cwe_unique: [CWE-328, CWE-201]
   cwe_rationale: >
     Shared (this pair's core class): CWE-330 (Use of Insufficiently Random
     Values); CWE-640 (Weak Password Recovery Mechanism for Forgotten
@@ -97,10 +105,14 @@
     distinct concern from the *predictability* of the inputs: CWE-328 (Use
     of Weak Hash) -- MD5 is a broken hash for any security purpose
     regardless of input quality, an independent weakness even if the
-    inputs were random; CWE-760 (Use of a One-Way Hash with a Predictable
-    Salt) -- `salt()` is called with no per-token/per-user variation shown;
-    if it returns a static, application-wide value, one derived salt
-    compromises every token's remaining entropy identically.
+    inputs were random; CWE-201 (Insertion of Sensitive Information Into
+    Sent Data) -- this excerpt goes on to build
+    `$email_resetlink = site_url('sessions/passwordreset/' . $token)` and
+    hand it straight to the outgoing password-reset email
+    (`emails/passwordreset` view), so the highly sensitive token itself
+    (not a hash or a short-lived opaque reference to it) is what actually
+    gets transmitted, exposing it to any downstream mail/log/proxy that
+    sees the sent message.
   suggested_op: predictable_token_source
   suggested_sink_family: session_token_generation
 
@@ -117,8 +129,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-330, CWE-640, CWE-598, CWE-312]
   cwe_shared: [CWE-330, CWE-640]
-  cwe_unique: [CWE-598, CWE-208]
+  cwe_unique: [CWE-598, CWE-312]
   cwe_rationale: >
     Shared: see vulnerable-2.php's cwe_rationale above.
     Unique to this entry: CWE-598 (Use of GET Request Method With Sensitive
@@ -126,11 +139,13 @@
     delivered as a URL in a password-reset email; if that link is a GET
     request, the token can leak via Referer headers, browser history, or
     server access logs, a concern independent of the token's own
-    randomness quality; CWE-208 (Observable Timing Discrepancy) -- this
-    excerpt shows correct *generation* but not the later *comparison*
-    step; a non-constant-time comparison at verification time can still
-    leak the token character-by-character via timing, even though
-    generation here is sound.
+    randomness quality; CWE-312 (Cleartext Storage of Sensitive
+    Information) -- the caller excerpt's `$db_array =
+    ['user_passwordreset_token' => $token]` persists the generated token
+    itself, unhashed, into `ip_users.user_passwordreset_token`; switching
+    the *generation* step to a CSPRNG (this entry's own fix) doesn't
+    change that the value granting a password reset still sits in the
+    database in directly-usable cleartext form, unlike a stored hash of it.
   suggested_op: csprng_token
   suggested_sink_family: session_token_generation
 
@@ -165,8 +180,9 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-613, CWE-287, CWE-863, CWE-546, CWE-690]
   cwe_shared: [CWE-613, CWE-287, CWE-863]
-  cwe_unique: [CWE-390, CWE-476]
+  cwe_unique: [CWE-546, CWE-690]
   cwe_rationale: >
     Shared (this pair's core class, documented once): CWE-613 (Insufficient
     Session Expiration) -- a blocked account's session should logically
@@ -176,16 +192,18 @@
     is applied at the wrong point in the request lifecycle on the
     vulnerable side.
     Unique to this entry, and grounded in a real defect this specific
-    excerpt has: CWE-390 (Detection of Error Condition Without Action) --
-    when `$user` is null, the method logs a warning ("User is null, throw
-    exception?" -- the comment's own uncertainty, left in as-collected) but
-    does not return or throw, falling through instead; CWE-476 (NULL
-    Pointer Dereference) -- because of that fall-through, the final,
-    unconditional `Log::debug(sprintf('User #%d is not blocked.',
-    $user->id))` dereferences `$user->id` even when `$user` is null (the
-    method's own `?User $user` signature explicitly allows null), a real
-    latent defect distinct from the per-request-revalidation property this
-    entry was collected to illustrate.
+    excerpt has: CWE-546 (Suspicious Comment) -- `Log::warning('User is
+    null, throw exception?')` is a literal, shipped question left in the
+    method's own null branch, exactly the kind of comment/log text that
+    signals incomplete or uncertain handling of that condition; CWE-690
+    (Unchecked Return Value to NULL Pointer Dereference) -- the null case
+    that triggers that warning is detected but never acted on (no return,
+    no throw), so the method falls through to the final, unconditional
+    `Log::debug(sprintf('User #%d is not blocked.', $user->id))`, which
+    dereferences `$user->id` even though the method's own `?User $user`
+    signature explicitly allows `$user` to be null, a real latent defect
+    distinct from the per-request-revalidation property this entry was
+    collected to illustrate.
   suggested_op: per_request_status_revalidation   # distinct mechanism from
                              # this cell's jwt_alg_*/csprng_token/
                              # weak_prng_token ops -- proposed as new
@@ -214,19 +232,24 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-613, CWE-287, CWE-863, CWE-459, CWE-372]
   cwe_shared: [CWE-613, CWE-287, CWE-863]
-  cwe_unique: [CWE-672, CWE-664]
+  cwe_unique: [CWE-459, CWE-372]
   cwe_rationale: >
     Shared: see idiomatic-firefly-blocked-check-1.php's cwe_rationale
     above.
-    Unique to this entry: CWE-672 (Operation on a Resource after
-    Expiration or Release) -- the session continues to be used
-    (authorized requests keep succeeding) after the account's authorized
-    status has effectively been released (blocked), with nothing in this
-    controller acting on that; CWE-664 (Improper Control of a Resource
-    Through its Lifetime) -- the session's authorization is only
-    established once, at creation (`Auth::login($user)`), with no
-    mechanism controlling it across the rest of its lifetime.
+    Unique to this entry: CWE-459 (Incomplete Cleanup) -- this controller's
+    blocked-status check only ever gates new login attempts
+    (`Auth::logout()` runs solely in that inline branch); it performs no
+    cleanup of a session that was already established before the account
+    was blocked, so that resource is left in place with nothing here to
+    tear it down; CWE-372 (Incomplete Internal State Distinction) -- the
+    same `Auth::login($user)` call is treated as establishing authorization
+    for the remainder of the session's lifetime, with no internal state
+    kept to distinguish "was authorized at login time" from "is still
+    authorized now" -- exactly the distinction the idiomatic side's
+    per-request `validateBlockedUser()` call maintains and this controller
+    does not.
   suggested_op: login_time_only_check   # proposed as new, paired with
                              # per_request_status_revalidation above
   suggested_sink_family: session_authorization_state

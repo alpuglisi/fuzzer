@@ -12,6 +12,34 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (vuln corpus Phase 3: CWE mapping)
+- Docs (`docs/research/corpus-examples/*/manifest.yaml`, all wave-1 feature
+  cells): completed Phase 3 of `docs/VULN_CORPUS_EXPANSION_PLAN.md` —
+  every entry across all 12 feature areas (access-control, auth-session,
+  ecommerce-logic, file-handling, ssti, mass-assignment, search-export,
+  webhook-signature, ssrf, ugc-xss, header-injection,
+  insecure-deserialization) now carries a flat `cwe: [...]` field (the
+  union of each entry's `cwe_shared`/`cwe_unique` split, where that split
+  schema was already in use) alongside its `suggested_op`/
+  `suggested_sink_family` proposals, closing the backlog item this
+  session's task list had flagged as pending. Also found and fixed a real
+  cross-cell data-quality defect this pass surfaced: several entries in
+  different, unrelated feature cells had independently claimed the same
+  CWE ID as each one's own supposedly-unique finding (e.g. `CWE-1284`
+  claimed unique by both `access-control/node` and `mass-assignment/node`,
+  `CWE-501` by both `ssti/php` and `ugc-xss/python`) — a `cwe_unique`
+  value is only meaningful if it's actually unique corpus-wide, so each
+  duplicate was re-researched against the actual source file and replaced
+  with a genuinely specific, MITRE-grounded CWE ID that doesn't collide
+  with any other entry's unique claim. `suggested_op`/`suggested_sink_family`
+  proposals were left as-is where already correct; none of this closes out
+  the plan's remaining Phase 3 steps (new `op`/`sink_family` rows into
+  `lab/safety_matrix.yaml` itself, pair-generation validation) — those
+  stay for a follow-on change. A few residual same-class CWE collisions
+  involving `ecommerce-logic/php` (a manifest not touched by this pass)
+  were found during the corpus-wide check but are pre-existing and out of
+  this change's scope.
+
 ## 2026-09-23 (cross-category doc sync, round 2)
 - Docs (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, all five second-target
   category branches): re-synced §9.2 (stack-reuse ledger), §9.2a (Java/Spring

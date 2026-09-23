@@ -12,6 +12,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-502, CWE-20, CWE-1321, CWE-843]
   cwe_shared: [CWE-502, CWE-20]
   cwe_unique: [CWE-1321, CWE-843]
   cwe_rationale: >
@@ -44,6 +45,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-502, CWE-20, CWE-470, CWE-96]
   cwe_shared: [CWE-502, CWE-20]
   cwe_unique: [CWE-470, CWE-96]
   cwe_rationale: >
@@ -69,13 +71,15 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-502, CWE-20, CWE-789, CWE-407]
   cwe_shared: [CWE-502, CWE-20]
-  cwe_unique: [CWE-770, CWE-407]
+  cwe_unique: [CWE-789, CWE-407]
   cwe_rationale: >
     Shared: see idiomatic-job-spec-no-eval-2.js above.
-    Unique: CWE-770 (Allocation of Resources Without Limits or
-    Throttling) -- no size limit is placed on `rawBody` before it's
-    parsed; CWE-407 (Inefficient Algorithmic Complexity) -- a maliciously
+    Unique: CWE-789 (Memory Allocation with Excessive Size Value) -- no
+    size limit is placed on `rawBody` before it's parsed, so an
+    arbitrarily large request body is allocated in memory in full before
+    `JSON.parse()` ever runs; CWE-407 (Inefficient Algorithmic Complexity) -- a maliciously
     deeply-nested JSON structure can cause pathological parse time even
     though JSON.parse() itself is safe from code execution.
   suggested_op: json_parse_only
@@ -97,6 +101,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-502, CWE-20, CWE-77, CWE-1104]
   cwe_shared: [CWE-502, CWE-20]
   cwe_unique: [CWE-77, CWE-1104]
   cwe_rationale: >
