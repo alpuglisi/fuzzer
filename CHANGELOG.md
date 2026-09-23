@@ -4,6 +4,21 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (FUZZ: URLDNS follow-on sketch corrected)
+- Docs: the `insecure_deserialization` follow-on sketch (`requirements.md`
+  §8, `CC-FUZZ-0028`) proposed a URLDNS-style gadget-chain-free OOB proof
+  (a `HashMap<java.net.URL,...>` whose `hashCode()` triggers DNS
+  resolution on deserialization). Checked directly against this project's
+  own `OobListener` and found it doesn't fit as sketched: `URL.hashCode()`
+  only performs a DNS *lookup*, never an outbound connection, so it can
+  never produce a hit on `OobListener`'s HTTP-only listener (which
+  deliberately has "no DNS component," a stated safety boundary, not an
+  oversight). Making this real would need a genuinely new DNS-listener
+  capability — a larger, dual-use-sensitive infrastructure decision
+  deserving its own review, not bundled into a detection-gap fix. Open
+  question corrected in place rather than left as a sketch that would not
+  actually work if built as first proposed.
+
 ## 2026-09-23 (FUZZ: header points become real; a content-type-aware whole-body sender)
 - Fuzzing harness/oracle: a `location="header"` ground-truth point (e.g.
   Twitch's `TWCH-0001`) is now a real, audited point, not skipped —

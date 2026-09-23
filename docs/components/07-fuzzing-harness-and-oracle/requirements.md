@@ -341,22 +341,30 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
   but a real, latent gap the moment a future grey-box-confirmable category
   does. Give it the same `content_type` handling when that happens, not
   before (no consumer to test it against yet).
-- (`CC-FUZZ-0028`, 2026-09-23) **No `insecure_deserialization` audit
-  rule/oracle strategy exists, and the reason is narrower than "no
-  observable signal" — corrected here after the pre-change review's
-  adequacy pass caught the overstatement.** This lab's own cells have no
-  working `ysoserial`-style RCE gadget chain (`CC-LAB-0173`'s own declared
-  scope boundary), so an OOB *callback-from-code-execution* signal isn't
-  available — but a URLDNS-style gadget-chain-free proof is: a
-  `HashMap<java.net.URL,...>` (or the Jackson-default-typing equivalent)
-  whose `hashCode()` triggers real DNS resolution purely from
-  deserializing it, no RCE gadget required, mirroring
-  `SsrfOobStrategy`/`CommandInjectionOobStrategy`'s own `OobListener`
-  pattern exactly (mint a canary, wait for a hit). This is real,
-  buildable, general-purpose (not hardcoded to this lab's own response
-  text) follow-on work — genuinely new engineering (constructing a valid
-  Java-serialized byte stream, or a Jackson `@class`-hinted payload,
-  naming the canary host), not attempted in this entry.
+- (`CC-FUZZ-0028`, 2026-09-23; re-examined and corrected again 2026-09-23)
+  **No `insecure_deserialization` audit rule/oracle strategy exists.**
+  This lab's own cells have no working `ysoserial`-style RCE gadget chain
+  (`CC-LAB-0173`'s own declared scope boundary), so an OOB
+  *callback-from-code-execution* signal isn't available. A URLDNS-style
+  gadget-chain-free proof was proposed as a follow-on sketch (a
+  `HashMap<java.net.URL,...>` whose `hashCode()` triggers DNS resolution
+  purely from deserializing it, mirroring `SsrfOobStrategy`'s `OobListener`
+  pattern) — **checked directly against this project's own `OobListener`
+  and found not to fit it as sketched**: `URL.hashCode()` only ever
+  performs a DNS *resolution* (`InetAddress.getByName(host)`), never an
+  actual outbound TCP/HTTP connection to that host, so it can never
+  produce an inbound hit on `OobListener`'s embedded **HTTP** server —
+  `oob.py`'s own docstring is explicit that it deliberately has "no DNS
+  component" (a stated safety-scoping decision, not an oversight). Making
+  URLDNS actually observable would need a *real DNS listener* added to
+  the OOB mechanism — a materially larger, dual-use-sensitive
+  infrastructure expansion (this project's own safety posture already
+  treats "no DNS component, never a general-purpose... collaborator
+  service" as a deliberate boundary) that deserves its own dedicated
+  design/review pass, not a quick addition bundled into a detection-gap
+  fix. Left open, with the corrected, harder-than-first-thought scope
+  recorded rather than a sketch that would not actually work if built as
+  first proposed.
 - (`CC-LAB-0175`/`FR-LAB-98`, `CC-FUZZ-0028`, 2026-09-23) **No
   webhook-signature timing oracle.** Both twins behave identically for any
   single request (the divergence is comparison timing:
