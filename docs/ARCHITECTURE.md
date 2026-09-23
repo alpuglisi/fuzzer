@@ -354,7 +354,7 @@ tracked in the requirements files, not here.
   to Phase B for this stack: a per-run database (this Phase A's one shape
   is stateless), CWE-918 (SSRF), and the richer Twitch EventSub message-ID/
   timestamp/replay-window checks. **Phase B's first increment landed**
-  (`CC-LAB-0172`/`FR-LAB-78`): a second shape, `("ssrf",
+  (`CC-LAB-0172`/`FR-LAB-92`): a second shape, `("ssrf",
   "server_side_http_fetch")` — a clip-thumbnail-fetch proxy, vulnerable
   (`unchecked_url_fetch`, no validation) vs. secure
   (`scheme_and_resolved_ip_allowlist`, rejects non-`https` schemes and
@@ -374,7 +374,7 @@ tracked in the requirements files, not here.
   and its own insecure-deserialization cell, `CC-LAB-0130`-`0132`), the one
   Netflix cell (`CC-LAB-0171`'s Jackson-polymorphic-deserialization
   endpoint, CWE-502) was ported into `spring_boot` and `java_spring_boot`
-  was deleted entirely (`CC-LAB-0173`/`FR-LAB-79`). The port surfaced a
+  was deleted entirely (`CC-LAB-0173`/`FR-LAB-93`). The port surfaced a
   real Jackson major-version API break (Spring Boot 4.1.1, `spring_boot`'s
   pin, resolves Jackson 3's `tools.jackson.databind.*`, not the Jackson 2
   `com.fasterxml.jackson.databind.*` `java_spring_boot`'s code used) and

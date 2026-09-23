@@ -54,7 +54,7 @@ Component code: **LAB**. Entry format and required fields: see
   - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,expectedresults.csv}` (new)
   - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}` (new)
   - `tests/test_labels_contract_category4.py` (new)
-  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-80`, new)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-97`, new)
 - Impact (other components / project): touches the shared `fuzzlab.labels`
   schema used by every ground-truth directory in the project. Purely
   additive — verified by re-running the default `lab/ground-truth/`'s own
@@ -273,8 +273,8 @@ Component code: **LAB**. Entry format and required fields: see
     (`java_spring_boot`) superseded-by-port in place (living doc, edited
     in place per this project's own convention — the requirement itself,
     "the toolkit supports a JVM/Java stack with this shape," is now met by
-    `spring_boot` instead), add a new `FR-LAB-79` (next-free after this
-    dispatch's own `FR-LAB-78`) recording the ported capability under
+    `spring_boot` instead), add a new `FR-LAB-93` (next-free after this
+    dispatch's own `FR-LAB-92`) recording the ported capability under
     `spring_boot`.
   - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` — §9.2's ledger row
     for "Java/Kotlin, Spring Boot microservice" updated from "pending" to
@@ -323,7 +323,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] Full non-slow repo suite re-run after the deletion, confirming no other file broke — done (1602 passed, 52 skipped, 27 deselected; same 15 pre-existing `gitleaks`-related failures as every prior category-4 entry)
   - [x] Coverage-diff check: deleted `test_labgen_java_live_boot.py`'s three assertions (vulnerable accepts type-hinted body; secure accepts plain body; secure rejects type-hinted body) all present in `tests/test_labgen_spring_boot_deserialization_jackson_live_boot.py` — done
   - [x] `CC-LAB-0171` append-only retirement note — done
-  - [x] `FR-LAB-77` marked superseded in place; new `FR-LAB-79` added — done
+  - [x] `FR-LAB-77` marked superseded in place; new `FR-LAB-93` added — done
   - [x] Plan doc §9.2/§9.2a/§9.4 updated to record the port as done — done
 - Effectiveness (assessed 2026-09-23): effective. Observed directly, not
   inferred: a real, isolated Maven probe confirmed the Jackson-3 API
@@ -451,7 +451,7 @@ Component code: **LAB**. Entry format and required fields: see
     one-manifest-per-illustrative-shape-group convention elsewhere, e.g.
     `mass_assignment_sample.yaml` vs. `prototype_pollution_node_sample.yaml`).
   - `docs/components/01-target-lab/requirements.md` — add a **new**
-    `FR-LAB-78` (next-free after `FR-LAB-77`, `java_spring_boot` Phase A;
+    `FR-LAB-92` (next-free after `FR-LAB-77`, `java_spring_boot` Phase A;
     re-verify against this branch's actual state at implementation time,
     per `CC-LAB-0170`'s own numbering lesson). **Corrected by both
     reviews:** the original draft proposed widening `FR-LAB-76` in place
@@ -513,7 +513,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] `tests/test_labgen_go_net_http_modules.py`/`.py`/`_conformance.py` extended — done
   - [x] `tests/test_labgen_go_live_boot.py` extended (real, executed, slow-marked; plain-HTTP + self-signed-TLS HTTPS loopback listeners isolating the scheme check from the IP-allowlist check, per the corrected test plan above) — done
   - [x] `lab/manifests/ssrf_go_sample.yaml` — done
-  - [x] `docs/components/01-target-lab/requirements.md` (new `FR-LAB-78`, re-verified next-free — `FR-LAB-77` was confirmed the branch's true highest entry) — done
+  - [x] `docs/components/01-target-lab/requirements.md` (new `FR-LAB-92`, re-verified next-free — `FR-LAB-77` was confirmed the branch's true highest entry) — done
   - [x] `docs/ARCHITECTURE.md` — done
 - Effectiveness (assessed 2026-09-23): effective. Observed directly, not
   inferred: `go build`/`go vet`/`gofmt -l` all pass over both shapes
@@ -537,7 +537,7 @@ Component code: **LAB**. Entry format and required fields: see
   moving to a per-module import table (`_MODULE_IMPORTS`), keyed by
   source/op/sink name and unioned per cell at render time.
 
-  Reviewed by 2 independent agents pre-implementation (accuracy + adequacy passes); both rounds' findings (a corrected FR-LAB-61 precedent -> a new FR-LAB-78 rather than widening FR-LAB-76; a corrected live-boot test plan isolating the IP-allowlist check from the scheme check; a bounded-HTTP-client deliverable; an explicit outbound-fetch-containment risk note) are incorporated above. 3/3 agreement reached before implementation began.
+  Reviewed by 2 independent agents pre-implementation (accuracy + adequacy passes); both rounds' findings (a corrected FR-LAB-61 precedent -> a new FR-LAB-92 rather than widening FR-LAB-76; a corrected live-boot test plan isolating the IP-allowlist check from the scheme check; a bounded-HTTP-client deliverable; an explicit outbound-fetch-containment risk note) are incorporated above. 3/3 agreement reached before implementation began.
 
 
 ### CC-LAB-0171 — `java_spring_boot` emitter Phase A: real Maven/Spring Boot skeleton + live-boot harness + one illustrative CWE-502 Jackson-deserialization cell (2026-09-22)
