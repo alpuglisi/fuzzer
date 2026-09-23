@@ -74,6 +74,37 @@ _READ_STORED_BIO_HELPER = (
     "    return row[0] if row else \"\"\n"
 )
 
+# CC-LAB-0093: same convention as `_READ_STORED_BIO_HELPER` above -- a
+# fixed, unconditional helper backing the `read_stored_field` source's
+# `stored_expr` for the `/post/comments` page with a real, seedable value
+# (a raw cursor SELECT against a `comments` table `DjangoLiveBootHarness`
+# seeds).
+_READ_STORED_COMMENT_HELPER = (
+    "def _read_stored_comment():\n"
+    "    with connection.cursor() as cursor:\n"
+    "        cursor.execute(\"SELECT body FROM comments WHERE id = 1\")\n"
+    "        row = cursor.fetchone()\n"
+    "    return row[0] if row else \"\"\n"
+)
+
+# CC-LAB-0093: the companion template for the `django_template_render`
+# sink -- a **fixed Python string constant, never a `.j2` file rendered
+# through this emitter's own Jinja2 module-composition system**
+# (`fuzzlab.labgen.emitters.django.modules`'s Jinja2 environments use the
+# same `{{ }}` delimiter Django's own template engine uses for a context
+# variable; a `.html.j2` generation template containing literal Django
+# syntax like `{{ comment }}` would collide with this project's own
+# generation-time Jinja2 pass -- exactly the collision `php_laravel`'s own
+# Blade views avoid by using Blade's raw-echo `{!! $value !!}` syntax,
+# never Blade's own `{{ $value }}` form, in its `.blade.php.j2` sink
+# templates, for the identical reason). Since this content is identical
+# between the vulnerable and secure twin (the differing behavior lives
+# entirely in the transform, not the template), it needs no per-cell
+# interpolation at generation time at all -- written byte-for-byte,
+# untouched by Jinja2, so Django's own template engine is the only thing
+# that ever evaluates `{{ comment }}`, at real request time.
+_COMMENT_TEMPLATE_HTML = '<div class="comment">{{ comment }}</div>\n'
+
 
 class _ModuleSet(NamedTuple):
     """Same shape as ``php_current``'s/``node_express``'s ``_ModuleSet``:
@@ -94,6 +125,13 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("sqli", "sql_numeric_literal"): _ModuleSet("get_param", "sql_numeric_lookup", "single_statement"),
     ("sqli", "sql_string_literal"): _ModuleSet("post_param", "sql_string_literal_lookup", "single_statement"),
     ("xss", "html_body"): _ModuleSet("read_stored_field", "html_body_echo", "render_only"),
+    # CC-LAB-0093: a genuinely new shape, not a rendering of `html_body`
+    # above -- see `lab/safety_matrix.yaml`'s own `html_body_template`
+    # family comment for why this sink family inverts the usual
+    # dangerous-by-default convention.
+    ("xss", "html_body_template"): _ModuleSet(
+        "read_stored_field", "django_template_render", "render_only"
+    ),
 }
 
 #: Per-route static context (table/column/param names, or the stored field
@@ -119,6 +157,9 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
         "password_param": "password",
     },
     "/api/profile": {"var_name": "bio", "stored_expr": "_read_stored_bio()", "css_class": "bio"},
+    # PicTrail's real comments page (CC-LAB-0093, Phase C's second real
+    # page) -- a distinct `comments` table.
+    "/post/comments": {"var_name": "comment", "stored_expr": "_read_stored_comment()"},
 }
 
 #: Cell IDs that are **real, ground-truth-bearing pages** (`CC-LAB-0092`,
@@ -133,7 +174,7 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
 #: twin is deliberately not added here: ground truth only ever needs to
 #: describe the one real, exploitable page, matching how a ``php_current``
 #: secure twin does not necessarily get its own ``PFF-`` case either.
-_REAL_PAGE_CELL_IDS: frozenset[str] = frozenset({"LABGEN-DJ-0007"})
+_REAL_PAGE_CELL_IDS: frozenset[str] = frozenset({"LABGEN-DJ-0007", "LABGEN-DJ-0009"})
 
 
 class DjangoEmitter(Emitter):
@@ -163,8 +204,10 @@ class DjangoEmitter(Emitter):
                 f"{cell.cell_id}: django has no route profile for route {cell.route.path!r} "
                 f"-- known routes: {sorted(_ROUTE_PARAMS)}"
             )
+        cell_slug = _snake_case(cell.cell_id)
         ctx: dict[str, Any] = dict(_ROUTE_PARAMS[cell.route.path])
-        ctx["handler_name"] = f"handle_{_snake_case(cell.cell_id)}"
+        ctx["handler_name"] = f"handle_{cell_slug}"
+        ctx["cell_slug"] = cell_slug
 
         source_result = SOURCES[modules.source].render(ctx)
         ctx = source_result.context
@@ -211,17 +254,39 @@ class DjangoEmitter(Emitter):
             "\n"
             "from django.db import connection\n"
             "from django.http import HttpResponse, JsonResponse\n"
+            "from django.shortcuts import render\n"
             "from django.utils.html import escape\n"
+            "from django.utils.safestring import mark_safe\n"
             "from django.views.decorators.csrf import csrf_exempt\n"
             "\n"
             "\n"
             f"{_READ_STORED_BIO_HELPER}"
             "\n"
+            f"{_READ_STORED_COMMENT_HELPER}"
+            "\n"
             f"{view_code}"
         )
-        cell_slug = _snake_case(cell.cell_id)
         path = f"fuzlab_django_lab/views/{cell_slug}.py"
-        return (EmittedFile(path=path, content=py_source.encode("utf-8"), role="view"),)
+        view_file = EmittedFile(path=path, content=py_source.encode("utf-8"), role="view")
+
+        # CC-LAB-0093: a cell rendering through Django's real template
+        # engine also emits its own companion template file -- the
+        # template's content is a fixed, byte-identical constant (never
+        # rendered through this emitter's own Jinja2 module-composition
+        # system, which shares Django's own `{{ }}` delimiter -- see this
+        # module's own `_COMMENT_TEMPLATE_HTML` docstring), so it is the
+        # same for the vulnerable and secure twin alike, keeping the
+        # minimal-pair diff confined to the transform region.
+        if modules.sink == "django_template_render":
+            template_path = f"fuzlab_django_lab/templates/{cell_slug}.html"
+            template_file = EmittedFile(
+                path=template_path,
+                content=_COMMENT_TEMPLATE_HTML.encode("utf-8"),
+                role="template",
+            )
+            return (view_file, template_file)
+
+        return (view_file,)
 
     def render_route_accumulator(self, cells: list[Cell]) -> EmittedFile:
         """Build ``fuzlab_django_lab/urls.py`` -- the ``route``-category

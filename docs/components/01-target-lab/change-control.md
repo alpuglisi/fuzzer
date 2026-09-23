@@ -174,47 +174,59 @@ Component code: **LAB**. Entry format and required fields: see
   shape).
 
 - **Deliverables:**
-  - [ ] `fuzzlab/labgen/emitters/django/templates/transforms/
-    mark_safe_wrap.py.j2` — todo.
-  - [ ] `fuzzlab/labgen/emitters/django/templates/sinks/
-    django_template_render.py.j2` — todo.
-  - [ ] `fuzzlab/labgen/emitters/django/modules.py` — new
+  - [x] `fuzzlab/labgen/emitters/django/templates/transforms/
+    mark_safe_wrap.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/sinks/
+    django_template_render.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/modules.py` — new
     `MarkSafeWrapTransform`/`DjangoTemplateRenderSink` classes + registry
-    entries — todo.
-  - [ ] `fuzzlab/labgen/emitters/django/__init__.py` — new
+    entries — done.
+  - [x] `fuzzlab/labgen/emitters/django/__init__.py` — new
     `_MODULE_SET_BY_SHAPE`/`_ROUTE_PARAMS` entries; a fixed
-    `_COMMENT_TEMPLATE_HTML` string constant (never a `.j2` file — see
-    item 1's redesign above); `render()` branches to emit a second
-    `EmittedFile` (the template, that constant's bytes verbatim) when
-    `modules.sink == "django_template_render"`; `_read_stored_comment()`
-    fixed header helper; `_REAL_PAGE_CELL_IDS` gains this cell — todo.
-  - [ ] `fuzzlab/labgen/emitters/django/stack_env.py` —
-    `settings_py_content()`'s `TEMPLATES[0]["DIRS"]` change — todo.
-  - [ ] `fuzzlab/labgen/conformance/django_live_boot.py` — seed a real
-    `comments` table; `seed_comment` constructor parameter — todo.
-  - [ ] `lab/manifests/phase_c_picktrail_comments.yaml` — todo.
-  - [ ] `lab/ground-truth-picktrail-django/labels.json`/
+    `_COMMENT_TEMPLATE_HTML` string constant (never a `.j2` file); a new
+    `_READ_STORED_COMMENT_HELPER`; `render()` computes `cell_slug` up
+    front (moved earlier so the sink can use it) and branches to emit a
+    second `EmittedFile` (the template, that constant's bytes verbatim)
+    when `modules.sink == "django_template_render"`;
+    `_REAL_PAGE_CELL_IDS` gains `LABGEN-DJ-0009` — done.
+  - [x] `fuzzlab/labgen/emitters/django/stack_env.py` —
+    `settings_py_content()`'s `TEMPLATES[0]["DIRS"]` change — done.
+  - [x] `fuzzlab/labgen/conformance/django_live_boot.py` — seeded a real
+    `comments` table; `seed_comment` constructor parameter — done.
+  - [x] `lab/manifests/phase_c_picktrail_comments.yaml` — done.
+  - [x] `lab/ground-truth-picktrail-django/labels.json`/
     `injection-points.json`/`expectedresults.csv` — extended with
-    `PT-0002` — todo.
-  - [ ] `tests/test_labgen_django_conformance.py` — Tier 0/3 for the new
-    manifest, including the template file's own byte-determinism; **plus
-    a generation-time test (reviewer #2's most important finding)**
-    asserting the emitted `.html` file's literal bytes are exactly
-    `<div class="comment">{{ comment }}</div>`, unevaluated — proving
-    this project's own Jinja2 generation pass never touches it — todo.
-  - [ ] A new live-boot test module — real template-engine round trip
-    proof: the vulnerable twin serves the raw payload (`mark_safe()`
-    genuinely bypasses autoescaping through the real engine), **and** the
-    secure twin serves the real HTML-entity-escaped form (Django's default
-    autoescaping genuinely still applies when not opted out of) — both
-    directions proven, not just the vulnerable one; plus the ground-truth
-    cross-check for `PT-0002` (mirroring `CC-LAB-0092`'s own pattern) —
-    todo.
-  - [ ] `docs/research/category2-social-ugc-functionality-and-cwe-
-    research.md` §6 — already updated this session (route notation fixed
-    to `/post/comments`, no `?id=`, matching the `read_stored_field`
-    shape's own no-request-parameter convention; row marked built) —
-    done.
+    `PT-0002` (`sink_context: "html"` included) — done, validated against
+    `fuzzlab.labels.schemas`.
+  - [x] **Real divergence found and reflected back during
+    implementation, not silently absorbed:** this shape needed a genuinely
+    new `lab/safety_matrix.yaml` sink family, `html_body_template` — not
+    anticipated in the draft's own plan, which assumed `sink_context.
+    family` could stay `html_body`. Django's template auto-escaping is
+    **safe by default**, the inverse of every other HTML-sink family in
+    this project (dangerous by default, secured by an explicit transform)
+    — modeled via the matrix's existing `introduces` mechanic (the
+    vulnerable twin's `mark_safe_wrap` op introduces `html_tag_break`;
+    the secure twin's empty pipeline never triggers it), mirroring
+    `verbose_error_leak`'s own use of `introduces` at a different family.
+    Verified directly: `verdict()` computes `VULNERABLE`/`SECURE`
+    correctly for both twins before any code was written to render them.
+  - [x] `tests/test_labgen_django_conformance.py` — Tier 0/3 for the new
+    manifest (2 tests), plus the generation-time test asserting the
+    emitted `.html` file's literal bytes are exactly `<div
+    class="comment">{{ comment }}</div>`, unevaluated and byte-identical
+    between twins — done, **observed passing for real** (13 passed, up
+    from `CC-LAB-0092`'s 9).
+  - [x] `tests/test_labgen_django_live_boot_picktrail_comments.py` (new
+    module) — done, **observed passing for real this session** (3 passed
+    in ~22s): the vulnerable twin's real response body contains the raw
+    `<script>alert(1)</script>` payload; the secure twin's real response
+    body contains the real `&lt;script&gt;`-escaped form (both directions
+    proven separately, not one inferred from the other); the `PT-0002`
+    ground-truth cross-check against a real booted request.
+  - [x] `docs/research/category2-social-ugc-functionality-and-cwe-
+    research.md` §6 — route notation fixed to `/post/comments`, no
+    `?id=`; row marked built — done.
   - [x] `FR-LAB-102`/`FR-LAB-103` checked as next-free — done, against
     **all four other active category branches**, not just cat1 (this
     category's numbers have now collided three times — `CC-LAB-0090`'s
@@ -227,18 +239,45 @@ Component code: **LAB**. Entry format and required fields: see
     and this branch's own originally-planned `FR-LAB-92`/`93` would have
     collided with its `FR-LAB-93` — caught here, before landing, not
     after). `FR-LAB-102`/`103` sit above every checked branch's ceiling.
-  - [ ] `docs/components/01-target-lab/requirements.md` — new
-    `FR-LAB-102`/`FR-LAB-103` — todo.
-  - [ ] `docs/ARCHITECTURE.md` — note the second real page and the new
-    template-rendering mechanism — todo.
-  - [ ] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 tracker row
-    — todo.
-  - [ ] `CHANGELOG.md` line — todo.
-  - [ ] Full bug protocol for any genuine defect surfaced — todo (only if
-    one occurs).
+  - [x] `docs/components/01-target-lab/requirements.md` — new
+    `FR-LAB-102`/`FR-LAB-103` — done.
+  - [x] `docs/ARCHITECTURE.md` — the second real page, the new
+    template-rendering mechanism, and the Jinja2/Django collision finding
+    noted — done.
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 tracker row
+    — done.
+  - [x] `CHANGELOG.md` line — done.
+  - [x] Full bug protocol for any genuine defect surfaced — n/a, no
+    genuine code defect found while building this (the new safety-matrix
+    sink family was a real, anticipated-during-implementation design gap
+    in the draft, resolved before any code shipped — not a defect in
+    landed code).
 
-- **Effectiveness (assessed 2026-09-23): pending** — left pending until the
-  deliverables above land and the new tests are observed to pass for real.
+- **Effectiveness (assessed 2026-09-23): effective.** Every deliverable
+  landed and was independently, really exercised this session: Tier 0/3
+  pass for real (`tests/test_labgen_django_conformance.py`, 13 passed,
+  including the generation-time test proving the redesign that resolved
+  reviewer #2's most important finding actually works — the emitted
+  template bytes are untouched by this project's own Jinja2 pass); the
+  full live-boot proof passes for real
+  (`tests/test_labgen_django_live_boot_picktrail_comments.py`, 3 passed)
+  — both directions of the differential through the *real* Django
+  template engine (not a unit-level string check), plus the `PT-0002`
+  ground-truth cross-check. The broader suite shows no regression
+  (`pytest tests/ -q -m "not slow"`, 1539 passed, up from `CC-LAB-0092`'s
+  1533 by exactly the 6 new non-slow tests added; 13 slow Django tests
+  all pass; the same 30 pre-existing `gitleaks`/`numpy`-environment
+  failures, confirmed unrelated). All 4 pre-change-review additions (from
+  reviewer #2) were incorporated as designed — most importantly, the
+  Jinja2/Django delimiter collision was resolved by redesign (a fixed
+  string constant, never Jinja2-rendered) and that redesign was itself
+  verified by a real, executed generation-time test, not merely asserted
+  to work. One real divergence from the draft's own plan was found during
+  implementation (a new `html_body_template` safety-matrix sink family
+  was needed, not anticipated) and reflected back into this entry's
+  Deliverables per the pre-change review gate's own rule, the same
+  discipline `CC-LAB-0090`'s "no separate Django app needed" divergence
+  already established.
 
 ---
 **Pre-change review gate record:** reviewer #1 (accuracy) — APPROVE AS-IS

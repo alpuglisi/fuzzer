@@ -707,3 +707,21 @@ entries:
     sink_family: dom_html_sink
     effect: neutralises
     neutralizes: [html_tag_break]
+
+  # `html_body_template` (CC-LAB-0093): a genuinely new family, not a
+  # rendering of `html_body`. Every `html_body` entry above models a sink
+  # that is *dangerous by default* (a raw, unescaped echo) and needs an
+  # explicit transform op to become secure. This family inverts that: the
+  # sink is Django's own template engine, which auto-escapes a value handed
+  # to a template context *by default* -- the cell's `sink_context.
+  # required_neutralizations` is therefore empty (nothing needs neutralizing
+  # for the no-op/default pipeline to be SECURE), and the vulnerable twin's
+  # own transform (`mark_safe_wrap`) is what actively re-introduces the
+  # concern Django's default already closed, via the `introduces` mechanic
+  # (mirroring `verbose_error_leak`'s own use of it above, at a different
+  # family). The concern is still `html_tag_break` -- the same meaning it
+  # has at every other HTML-sink family in this file.
+  - op: mark_safe_wrap
+    sink_family: html_body_template
+    effect: introduces
+    introduces: [html_tag_break]

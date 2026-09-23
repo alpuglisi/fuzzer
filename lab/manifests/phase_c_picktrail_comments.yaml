@@ -1,0 +1,33 @@
+# Phase C, PicTrail's second real page (category 2 pilot, `CC-LAB-0093`).
+#
+# The researched, Django-specific mark_safe()/template-autoescape footgun
+# deliberately deferred from Phase B (CC-LAB-0091), per
+# docs/research/category2-social-ugc-functionality-and-cwe-research.md §4
+# row 2 -- a deliberately simplified, generic mark_safe()-on-raw-value
+# shape (not the full @mention/#hashtag auto-linking shape that row
+# researched; see this app's own change-control entry for the reasoning).
+#
+# Extends, not replaces, lab/manifests/phase_c_picktrail_post_detail.yaml.
+# The canonical vulnerable cell (LABGEN-DJ-0009) owns PicTrail's real
+# `/post/comments` URL and is the one described by
+# lab/ground-truth-picktrail-django/'s own labels.json (case PT-0002).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-DJ-0009
+    class: xss
+    stack_profile: django
+    route: { method: GET, path: /post/comments }
+    sink_context:
+      family: html_body_template
+      required_neutralizations: []
+    transform: [mark_safe_wrap]
+
+  - cell_id: LABGEN-DJ-0010
+    class: xss
+    stack_profile: django
+    route: { method: GET, path: /post/comments }
+    sink_context:
+      family: html_body_template
+      required_neutralizations: []
+    transform: []

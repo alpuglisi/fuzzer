@@ -15,6 +15,19 @@
       "rendering": "server-json",
       "stack": "django",
       "notes": "PicTrail (Instagram-style) post-detail lookup: id concatenated raw into a WHERE clause via a raw connection.cursor() query (never the ORM); real, seeded SQLite backend. CC-LAB-0092, category 2 (Social/UGC platforms) pilot's first real, ground-truth-bearing page."
+    },
+    {
+      "case_id": "PT-0002",
+      "url": "/post/comments",
+      "method": "GET",
+      "param": "comment",
+      "location": "body",
+      "vuln_class": "xss-stored",
+      "sink_context": "html",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "stack": "django",
+      "notes": "PicTrail comment body rendered through Django's real template engine after being wrapped in django.utils.safestring.mark_safe(), which marks it 'already safe' and defeats Django's own default template auto-escaping (CWE-79). A deliberately simplified, generic mark_safe()-on-raw-value shape -- not the full @mention/#hashtag auto-linking footgun researched in docs/research/category2-social-ugc-functionality-and-cwe-research.md §4 row 2, which stays a later, separately-scoped increment. This generator's read_stored_field source models the sink side only (no write endpoint is generated) -- source_url deliberately omitted, not silently implied. CC-LAB-0093."
     }
   ]
 }

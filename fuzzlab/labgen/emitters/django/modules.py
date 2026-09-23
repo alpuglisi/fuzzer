@@ -1,5 +1,5 @@
 """Composable Python/Django rendering modules for the ``django`` emitter
-(category 2 pilot, `CC-LAB-0090`/`CC-LAB-0091`).
+(category 2 pilot, `CC-LAB-0090`/`CC-LAB-0091`/`CC-LAB-0093`).
 
 Mirrors ``fuzzlab.labgen.modules``' module-composition shape (source/
 transform/sink/complexity categories, a ``Module``/``TemplateModule`` base
@@ -213,6 +213,27 @@ class HtmlEntityEscapeTransform(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class MarkSafeWrapTransform(TemplateModule):
+    """The ``mark_safe_wrap`` op (`CC-LAB-0093`): wraps ``value_expr`` in
+    Django's own ``django.utils.safestring.mark_safe()``, marking
+    untrusted content "already safe" so Django's own template
+    auto-escaping skips it when the sink hands it to the template
+    context -- the researched, Django-specific XSS footgun deferred from
+    Phase B (`CC-LAB-0091`), per `docs/research/category2-social-ugc-
+    functionality-and-cwe-research.md` §4 row 2 (a deliberately simpler,
+    generic version of that row's own auto-linking-specific shape, see
+    that entry's own "deliberate narrowing" note)."""
+
+    def __init__(self) -> None:
+        super().__init__("mark_safe_wrap", "transform", _TRANSFORM_ENV, "mark_safe_wrap.py.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = f"mark_safe({ctx['value_expr']})"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 class SqlStringLiteralLookupSink(TemplateModule):
     """A single-row lookup by a quoted-string-literal-position column, with
     a second, non-tainted, already-hashed condition (a login-style password
@@ -240,6 +261,25 @@ class HtmlBodyEchoSink(TemplateModule):
 
     def __init__(self) -> None:
         super().__init__("html_body_echo", "sink", _SINK_ENV, "html_body_echo.py.j2")
+
+
+class DjangoTemplateRenderSink(TemplateModule):
+    """Renders through Django's real template engine
+    (``django.shortcuts.render()``), the first sink in this emitter to
+    do so rather than hand-building an ``HttpResponse``/``JsonResponse``
+    string (`CC-LAB-0093`). Publishes no new context -- the companion
+    ``.html`` template file this shape needs is **not** rendered through
+    this module-composition system at all (a fixed Python string
+    constant, `_COMMENT_TEMPLATE_HTML` in
+    ``fuzzlab.labgen.emitters.django``, written directly by
+    ``DjangoEmitter.render()`` -- seeCC-LAB-0093's own change-control
+    entry for why: this project's own Jinja2 generation environments use
+    the same ``{{ }}`` delimiter Django's own template engine uses, so a
+    ``.html.j2`` generation template containing literal Django syntax
+    would collide with generation-time rendering)."""
+
+    def __init__(self) -> None:
+        super().__init__("django_template_render", "sink", _SINK_ENV, "django_template_render.py.j2")
 
 
 class SingleStatementComplexity(TemplateModule):
@@ -283,11 +323,13 @@ TRANSFORMS: dict[str, Module] = {
     "identity": IdentityTransform(),
     "param_bind": ParamBindTransform(),
     "html_entity_escape": HtmlEntityEscapeTransform(),
+    "mark_safe_wrap": MarkSafeWrapTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
     "sql_string_literal_lookup": SqlStringLiteralLookupSink(),
     "html_body_echo": HtmlBodyEchoSink(),
+    "django_template_render": DjangoTemplateRenderSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

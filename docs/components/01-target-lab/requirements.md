@@ -2033,6 +2033,66 @@ lane) can submit a payload as
   second, per-target ground-truth set is
   `fuzzlab.harness.multitarget.TargetSpec.ground_truth` (Phase E, not
   attempted here).
+- **FR-LAB-102** *(PicTrail's second real page, `/post/comments`, and this
+  emitter's first real Django template-engine round trip; `CC-LAB-0093`,
+  2026-09-23).* Django's real `mark_safe()`/template-autoescaping-bypass
+  footgun, deliberately deferred from Phase B (`CC-LAB-0091`) — a
+  **deliberate narrowing** of the fuller researched shape (`docs/research/
+  category2-social-ugc-functionality-and-cwe-research.md` §4 row 2's
+  `@mention`/`#hashtag` auto-linking-specific footgun): this entry builds
+  the simpler, generic `mark_safe()`-on-the-entire-raw-comment version,
+  stated explicitly, not implied as full grounding — the auto-linking
+  shape stays a real, later increment. New `_ROUTE_PARAMS["/post/
+  comments"]`; a new `(xss, html_body_template)` shape in
+  `_MODULE_SET_BY_SHAPE`, backed by a new `lab/safety_matrix.yaml` sink
+  family, `html_body_template` — genuinely new, not a rendering of
+  `html_body`, because this sink is **safe by default** (Django's own
+  template auto-escaping) rather than dangerous by default: the
+  vulnerable twin's `mark_safe_wrap` transform uses the matrix's
+  `introduces` mechanic to add the `html_tag_break` concern only when
+  applied, mirroring `verbose_error_leak`'s own use of that mechanic at a
+  different family. `DjangoEmitter.render()` returns a **second
+  `EmittedFile`** for this shape (this emitter's first two-file-per-cell
+  render) — a companion `.html` template, emitted as a **fixed Python
+  string constant, never a `.j2` file rendered through this emitter's own
+  Jinja2 module-composition system**: that system's Jinja2 environments
+  use the same `{{ }}` delimiter Django's own template engine does, so a
+  `.j2` generation template containing literal Django syntax
+  (`{{ comment }}`) would collide with generation-time rendering — the
+  exact collision `php_laravel`'s own Blade views avoid via raw-echo
+  `{!! $value !!}` syntax for the identical reason (this project's
+  pre-change review caught this before it was built, not after). Since
+  the template content is identical between twins, it needs no per-cell
+  interpolation at generation time at all — a real generation-time test
+  (`tests/test_labgen_django_conformance.py::
+  test_comment_template_is_never_evaluated_by_this_projects_own_jinja2_
+  pass`) confirms the emitted bytes are exactly `{{ comment }}`,
+  untouched, and byte-identical between twins. Real `TEMPLATES[0]["DIRS"]`
+  settings change (`fuzzlab.labgen.emitters.django.stack_env.
+  settings_py_content()`). Passes Tier 0/Tier 3 for the new manifest
+  (`lab/manifests/phase_c_picktrail_comments.yaml`).
+- **FR-LAB-103** *(real live-boot proof through the real Django template
+  engine, both directions of the differential, plus ground-truth
+  extension; `CC-LAB-0093`, 2026-09-23).* Real, executed, skip-guarded
+  (PA-0005) proof in `tests/test_labgen_django_live_boot_picktrail_
+  comments.py`: a real seeded `comments` row carrying a
+  `<script>alert(1)</script>` payload (`DjangoLiveBootHarness`'s
+  `seed_comment` constructor parameter, mirroring `seed_bio`'s
+  convention); the vulnerable twin's real response body contains the raw,
+  unescaped payload (`mark_safe()` genuinely defeats Django's
+  auto-escaping through the real engine); **and, proven separately, not
+  merely inferred** — the secure twin's real response body contains the
+  real HTML-entity-escaped form (`&lt;script&gt;`), confirming Django's
+  own default template auto-escaping is genuinely still in effect when
+  the transform does not opt out of it. Ground truth extended (not a new
+  directory) with `PT-0002` in `lab/ground-truth-picktrail-django/`
+  (`vuln_class: "xss-stored"`, `sink_context: "html"` — required, not
+  cosmetic, since `fuzzlab.mutation.xss`/`fuzzlab.audit.rules` both key
+  XSS payload/audit selection off this field — mirroring `lab/ground-
+  truth/labels.json`'s own `PFF-0005` shape on both counts), loaded for
+  real and cross-checked, independently of the emitter's own internals,
+  against a real booted request at the exact URL/method it names, seeded
+  with the same adversarial payload.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

@@ -12,6 +12,44 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (PicTrail comments page)
+- LAB: landed PicTrail's second real page — `CC-LAB-0093`/`FR-LAB-102`/
+  `FR-LAB-103`, pre-change review gate cleared (2 independent reviewer
+  agents; reviewer #1 approved as-is; reviewer #2's 4 findings
+  incorporated). `/post/comments`: Django's real `mark_safe()`-defeats-
+  template-autoescaping footgun, deliberately deferred from Phase B
+  (`CC-LAB-0091`) — a stated, deliberate simplification of the fuller
+  researched `@mention`/`#hashtag` auto-linking shape, not silently
+  narrowed. This emitter's first two-file-per-cell render (a view + a
+  real `.html` template) and first real Django template-engine round
+  trip (`django.shortcuts.render()`, a new `TEMPLATES["DIRS"]` setting).
+  **The pre-change review caught a real Jinja2/Django `{{ }}` delimiter
+  collision before any code was written**: this project's own Jinja2
+  generation pass shares Django's own template-variable syntax, so a
+  `.j2` generation template containing literal `{{ comment }}` would
+  collide with generation-time rendering — exactly the collision
+  `php_laravel`'s own Blade views avoid via raw-echo syntax for the
+  identical reason. Resolved by redesign: the template (byte-identical
+  between twins) is emitted as a fixed Python string constant, never
+  routed through Jinja2 at all, verified by a real generation-time test.
+  A new `lab/safety_matrix.yaml` sink family, `html_body_template`,
+  models Django's inverted "safe by default" semantics via the matrix's
+  existing `introduces` mechanic — a real divergence from the original
+  draft's plan, found during implementation and reflected back into the
+  change-control entry, not silently absorbed. Real live-boot proof
+  covers **both directions** of the differential through the real
+  template engine (the vulnerable twin's raw payload; the secure twin's
+  real HTML-entity-escaped form, proven separately, not inferred), plus
+  a `PT-0002` ground-truth extension (`lab/ground-truth-picktrail-
+  django/`, sink_context: "html" included, matching `PFF-0005`'s own
+  shape). A fresh bookkeeping check against all four other active
+  category branches (not just cat1) caught a real would-be `FR-LAB-93`
+  collision with category 4 before it happened. No regression in the
+  broader suite (1539 non-slow passed; 13 slow Django tests passed; same
+  30 pre-existing environment-only failures). Full record:
+  `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0093`
+  entry.
+
 ## 2026-09-23 (cross-branch bookkeeping fix, by the category 1 pilot session)
 - Docs/LAB: fixed a real cross-branch `FR-LAB` ID collision found during a
   cross-branch review — this branch's freshly-pushed `FR-LAB-90`/

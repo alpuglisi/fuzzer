@@ -569,10 +569,31 @@ tracked in the requirements files, not here.
   isn't fully response-realistic, and this ground truth isn't yet wired
   into the global `ground_truth_dir` config's consumers (the right home is
   `multitarget.TargetSpec.ground_truth`, Phase E, not attempted here).
-  PicTrail's remaining planned pages (comments/mention-XSS, SSRF link
-  preview, mass-assignment settings, identifier-SQLi search, session
-  deserialization) and CircleFeed (the Facebook-style PHP app) stay
-  planned, not built — each its own future, separately-gated increment.
+  **PicTrail's second real page (`CC-LAB-0093`) landed the deferred
+  Django-specific XSS footgun**: `/post/comments`, `mark_safe()` defeating
+  Django's own template auto-escaping — a deliberately simplified,
+  generic version of the fuller researched `@mention`/`#hashtag`
+  auto-linking shape, stated explicitly, not silently narrowed. This
+  emitter's first two-file-per-cell render (a view + a real `.html`
+  template) and first real Django template-engine round trip
+  (`django.shortcuts.render()`, a new `TEMPLATES["DIRS"]` setting). A new
+  `lab/safety_matrix.yaml` sink family, `html_body_template`, models the
+  inverted "safe by default" semantics (Django auto-escapes unless
+  `mark_safe()` opts out) via the matrix's existing `introduces` mechanic.
+  The template is emitted as a **fixed Python string constant, never a
+  `.j2` file** — this project's own Jinja2 generation pass shares Django's
+  `{{ }}` delimiter, a real collision `php_laravel`'s own Blade views
+  avoid via raw-echo syntax for the identical reason, caught by this
+  entry's own pre-change review before it was built. Real live-boot proof
+  covers **both directions** of the differential through the real
+  template engine (`mark_safe()` genuinely bypasses auto-escaping; a
+  plain string is genuinely still protected by it), plus a real
+  generation-time test confirming the template's own bytes are never
+  touched by this project's Jinja2 pass. PicTrail's remaining planned
+  pages (SSRF link preview, mass-assignment settings, identifier-SQLi
+  search, session deserialization, the full auto-linking-specific XSS
+  shape) and CircleFeed (the Facebook-style PHP app) stay planned, not
+  built — each its own future, separately-gated increment.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

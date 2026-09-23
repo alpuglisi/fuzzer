@@ -127,6 +127,66 @@ def test_tier0_lint_passes_for_the_picktrail_post_detail_manifest() -> None:
     assert result.ok, f"{accumulator.path}: {result.detail}"
 
 
+def test_regenerate_and_diff_emitter_passes_for_the_picktrail_comments_manifest() -> None:
+    manifest = load_manifest("lab/manifests/phase_c_picktrail_comments.yaml")
+    emitter = DjangoEmitter()
+    regenerate_and_diff_emitter(emitter, manifest.cells)
+
+
+def test_tier0_lint_passes_for_the_picktrail_comments_manifest() -> None:
+    """Only lints the `.py` view file -- `lint_python_emitted_files`
+    already filters to `.py` paths, so the companion `.html` template
+    file (this shape's second `EmittedFile`) is correctly skipped, not
+    silently un-checked."""
+    if not python_available():
+        import pytest
+
+        pytest.skip("no python interpreter on PATH for py_compile (PA-0005)")
+
+    manifest = load_manifest("lab/manifests/phase_c_picktrail_comments.yaml")
+    emitter = DjangoEmitter()
+    for cell in manifest.cells:
+        results = lint_python_emitted_files(emitter.render(cell))
+        assert results, f"{cell.cell_id}: no .py files emitted to lint"
+        for result in results:
+            assert result.ok, f"{cell.cell_id} ({result.path}): {result.detail}"
+
+    accumulator = emitter.render_route_accumulator(manifest.cells)
+    result = lint_python(accumulator.path, accumulator.content)
+    assert result.ok, f"{accumulator.path}: {result.detail}"
+
+
+def test_comment_template_is_never_evaluated_by_this_projects_own_jinja2_pass() -> None:
+    """`CC-LAB-0093`'s own pre-change review's most important finding: a
+    `.html.j2` generation template containing literal Django syntax
+    (`{{ comment }}`) would collide with this emitter's own Jinja2
+    generation-time pass (which uses the same `{{ }}` delimiter Django's
+    template engine does). Addressed by redesign -- the template is a
+    fixed Python string constant, never routed through Jinja2 at all.
+    This test proves the fix: the emitted `.html` file's literal bytes
+    must be exactly `{{ comment }}` inside the wrapper markup, completely
+    untouched by generation -- not empty, not a `StrictUndefined`
+    traceback, not a generation-time-substituted value. Also confirms the
+    template is byte-identical between the vulnerable and secure twin
+    (the minimal-pair diff stays confined to the transform region, per
+    `BUG-0027`'s own confinement invariant)."""
+    manifest = load_manifest("lab/manifests/phase_c_picktrail_comments.yaml")
+    emitter = DjangoEmitter()
+    templates: dict[str, bytes] = {}
+    for cell in manifest.cells:
+        files = emitter.render(cell)
+        template_files = [f for f in files if f.role == "template"]
+        assert len(template_files) == 1, f"{cell.cell_id}: expected exactly one template file"
+        templates[cell.cell_id] = template_files[0].content
+        assert templates[cell.cell_id] == b'<div class="comment">{{ comment }}</div>\n', (
+            f"{cell.cell_id}: template content was altered -- {templates[cell.cell_id]!r}"
+        )
+    assert templates["LABGEN-DJ-0009"] == templates["LABGEN-DJ-0010"], (
+        "the template must be byte-identical between twins -- the differential lives "
+        "entirely in the transform, never the template"
+    )
+
+
 def test_only_real_page_cell_ids_get_a_pinned_url() -> None:
     """`CC-LAB-0092`'s own regression check for the new
     `_REAL_PAGE_CELL_IDS`-based URL-pinning mechanism: a cell in that set
@@ -157,6 +217,7 @@ def test_every_non_get_cell_is_decorated_with_csrf_exempt() -> None:
         load_manifest("lab/manifests/phase_a_django_sample.yaml"),
         load_manifest("lab/manifests/phase_b_django_widen_sample.yaml"),
         load_manifest("lab/manifests/phase_c_picktrail_post_detail.yaml"),
+        load_manifest("lab/manifests/phase_c_picktrail_comments.yaml"),
     )
     checked_a_non_get_cell = False
     for manifest in manifests:

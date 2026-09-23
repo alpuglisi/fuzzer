@@ -215,6 +215,13 @@ INSERT INTO posts (id, name) VALUES
     (2, 'Sunset over the lake');
 """
 
+#: A real, default comment `body` row backing the `/post/comments` page's
+#: `_read_stored_comment()` helper (`CC-LAB-0093`) -- a benign default; a
+#: caller proving the `mark_safe()` differential passes an adversarial
+#: `seed_comment` to the constructor instead, mirroring `seed_bio`'s own
+#: convention exactly.
+DEFAULT_SEED_COMMENT = "Great shot! Love the lighting."
+
 
 class DjangoLiveBootHarness:
     """Assembles, installs, migrates, and boots one manifest's ``django``
@@ -238,17 +245,20 @@ class DjangoLiveBootHarness:
         *,
         install_timeout: float = 180.0,
         seed_bio: str = DEFAULT_SEED_BIO,
+        seed_comment: str = DEFAULT_SEED_COMMENT,
     ) -> None:
         """``seed_bio`` (`CC-LAB-0091`): the value seeded into the
         `read_stored_field` source's backing `profiles` row. A caller
         proving the stored-XSS differential passes an adversarial payload
         here (e.g. ``"<script>alert(1)</script>"``) -- the default is a
         benign value so a caller not exercising that shape gets ordinary
-        content."""
+        content. ``seed_comment`` (`CC-LAB-0093`): the same convention for
+        the `/post/comments` page's backing `comments` row."""
         self._emitter = emitter
         self._cells = [c for c in cells if emitter.supports(c.vuln_class, c.sink_context)]
         self._install_timeout = install_timeout
         self._seed_bio = seed_bio
+        self._seed_comment = seed_comment
         self._tmp: tempfile.TemporaryDirectory | None = None
         self._app_dir: Path | None = None
         self._venv_dir: Path | None = None
@@ -298,6 +308,10 @@ class DjangoLiveBootHarness:
             )
             conn.execute("INSERT INTO profiles (id, bio) VALUES (1, ?)", (self._seed_bio,))
             conn.executescript(_SEED_POSTS_SQL)
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY, body TEXT NOT NULL)"
+            )
+            conn.execute("INSERT INTO comments (id, body) VALUES (1, ?)", (self._seed_comment,))
             conn.commit()
         finally:
             conn.close()

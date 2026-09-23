@@ -171,7 +171,13 @@ def settings_py_content(*, secret_key: str = "django-insecure-FAKE-lab-only-plac
         "TEMPLATES = [\n"
         "    {\n"
         '        "BACKEND": "django.template.backends.django.DjangoTemplates",\n'
-        '        "DIRS": [],\n'
+        # CC-LAB-0093: a real, project-level templates directory --
+        # needed the first time a cell renders through Django's real
+        # template engine (django.shortcuts.render()) rather than a
+        # hand-built HttpResponse string. No Django "app" exists to
+        # provide APP_DIRS-discovered templates, so this is the only
+        # template search path.
+        '        "DIRS": [BASE_DIR / "fuzlab_django_lab" / "templates"],\n'
         '        "APP_DIRS": True,\n'
         '        "OPTIONS": {\n'
         '            "context_processors": [\n'
