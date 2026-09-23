@@ -382,3 +382,22 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   `_DETERMINISM_CTX_BY_MODULE`) from any single stack's own module-set tests, and a
   change that adds a shared-vocabulary-only registration (the `L-P3.3c-DOM`/
   `CC-LAB-0210` pattern) must satisfy both. (from BUG-0035)
+- **PA-0038** — Before considering any new `lab/ground-truth-*/` directory
+  complete: (a) confirm all three required files (`labels.json`,
+  `injection-points.json`, `expectedresults.csv`) show as tracked/addable via
+  `git status`/`git add -n` — `.gitignore`'s blanket `*.csv` rule requires its
+  own `!lab/ground-truth-<app>/*.csv` negation per directory, so a file
+  present on disk can still be silently ignored and never reach the commit;
+  and (b) run that shape's own test module as its own explicit, separate
+  `pytest` invocation (not just as part of a claimed whole-repo run) and quote
+  its literal pass count in the change-control entry's Effectiveness section.
+  An aggregate whole-repo pass count does not, on its own, prove any specific
+  new test file was actually collected and exercised against the final
+  committed tree — sharpens PA-0036's related but narrower finding (that a
+  cross-cutting change needs the whole suite run, not just the files judged
+  directly relevant) for the case where even a claimed whole-repo pass turns
+  out inconsistent with the new file's own directory-completeness contract
+  (a new `lab/ground-truth-*/` directory missing a required sibling file,
+  e.g. `expectedresults.csv`, that `fuzzlab.labels.contract.load()` requires
+  unconditionally, compounded here by that file also being unreachable via
+  `git add` for lack of a `.gitignore` negation). (from BUG-0036)

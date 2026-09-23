@@ -12,6 +12,27 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (cross-branch sync: bookkeeping-ID collision fix + BUG-0036)
+- LAB: renumbered this branch's `FR-LAB-102`→`FR-LAB-113` and
+  `FR-LAB-103`→`FR-LAB-114` after a fresh cross-branch collision was found
+  against categories 1/2/3 (concurrent build lanes independently claimed
+  the same "next free" numbers off their own stale local copy of the
+  shared bookkeeping files) — no behavior change, pure renumbering across
+  `lab/ground-truth-expedia-clone/labels.json`,
+  `lab/manifests/expedia_spel_injection_sample.yaml`,
+  `docs/components/01-target-lab/requirements.md`,
+  `docs/components/01-target-lab/change-control.md`,
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, `docs/ARCHITECTURE.md`.
+- LAB: fixed BUG-0036 — `lab/ground-truth-expedia-clone/` was missing its
+  required `expectedresults.csv` and the `.gitignore` exception needed to
+  track it (`fuzzlab.labels.contract.load()` requires all three
+  ground-truth files unconditionally). Authored the missing CSV and
+  `.gitignore` negation; added preventive action `PA-0038` (see
+  `CC-LAB-0215`, `docs/bugs/BUG-0036-*.md`, `ERROR_LOG.md`).
+  `pytest tests/test_labgen_spel_injection.py`: 9 passed (was 7
+  passed/2 failed). Whole-repo `pytest -m "not slow"`: 1865 passed, 8
+  skipped.
+
 ## 2026-09-23 (category 5: Expedia's first own shape, spel_injection)
 - LAB: added Expedia's first own vulnerability shape (not reused/ported
   code): `spel_injection` (CWE-917, Spring Expression Language injection)

@@ -502,7 +502,7 @@ tracked in the requirements files, not here.
   fully greenfield project-wide and is separate follow-on work.
 
   **Expedia's first own shape: `spel_injection`** (`CC-LAB-0214`/
-  `FR-LAB-102`/`FR-LAB-103`, 2026-09-23) — CWE-917, a hotel-search
+  `FR-LAB-113`/`FR-LAB-114`, 2026-09-23) — CWE-917, a hotel-search
   `sortBy` parameter evaluated as a Spring Expression Language (SpEL)
   expression. Genuinely new concern class (`lab/safety_matrix.yaml` gains
   `spel_injection`/`spel_expression_evaluate`), grounded in CVE-2018-1273

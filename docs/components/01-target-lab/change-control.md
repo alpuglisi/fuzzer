@@ -3,7 +3,49 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0214 — category 5 pilot, Expedia's first own shape: `spel_injection` (CWE-917) on `spring_boot`, hotel-search sort (FR-LAB-102, FR-LAB-103) (2026-09-23)
+### CC-LAB-0215 — fix BUG-0036: `lab/ground-truth-expedia-clone/` shipped without `expectedresults.csv` (and without the `.gitignore` exception needed to track it) (2026-09-23)
+- Change: `CC-LAB-0214`'s new `lab/ground-truth-expedia-clone/` directory
+  was missing the third file `fuzzlab.labels.contract.load()`
+  unconditionally requires, `expectedresults.csv` — every sibling
+  second-target ground-truth directory ships all three files
+  (`labels.json`, `injection-points.json`, `expectedresults.csv`) as one
+  atomic unit, and this one didn't. Compounding this, `.gitignore`'s
+  blanket `*.csv` rule had no `!lab/ground-truth-expedia-clone/*.csv`
+  negation (the pattern established for `lab/ground-truth/` and
+  `lab/ground-truth-booking-clone/` in `CC-LAB-0090`), so the file would
+  have remained untracked even once authored. Fixed both: authored
+  `expectedresults.csv` (one row, `EXPD-0001`, matching `labels.json`'s
+  existing case exactly, in the established column convention from
+  `lab/ground-truth-booking-clone/expectedresults.csv`) and added the
+  missing `.gitignore` negation. Full RCA in `docs/bugs/BUG-0036-expedia-
+  ground-truth-shipped-without-expectedresults-csv.md`; new preventive
+  action `PA-0038` in `docs/PREVENTIVE_ACTIONS.md`.
+- Impact (other components / project): none beyond this component — no
+  interface or contract change, `fuzzlab.labels.contract`'s loader
+  behavior is unchanged, only the previously-incomplete ground-truth
+  directory's own data is completed. `FR-LAB-113`/`FR-LAB-114` (this
+  shape's requirements, renumbered from `FR-LAB-102`/`103` in a separate,
+  unrelated cross-branch bookkeeping-ID collision fix earlier in this same
+  push) are unaffected by this entry.
+- Risk (level; mitigation or accepted-risk justification): low — additive
+  data-file fix plus a `.gitignore` exception; no code path changed. The
+  targeted test file and the whole-repo suite were both re-run clean (see
+  Effectiveness) before this entry was closed out, per the very `PA-0038`
+  rule this fix produced.
+- Deliverables:
+  - [x] `lab/ground-truth-expedia-clone/expectedresults.csv` authored — done
+  - [x] `.gitignore` `!lab/ground-truth-expedia-clone/*.csv` negation added — done
+  - [x] `docs/bugs/BUG-0036-*.md` full RCA — done
+  - [x] `ERROR_LOG.md` entry — done
+  - [x] `docs/PREVENTIVE_ACTIONS.md` `PA-0038` — done
+- Effectiveness (assessed 2026-09-23): `pytest
+  tests/test_labgen_spel_injection.py -v` — 9 passed (up from 7 passed, 2
+  failed with `FileNotFoundError`). Whole-repo `pytest -m "not slow"`
+  re-run: 1865 passed, 8 skipped — no regression elsewhere. `git status`
+  confirms `expectedresults.csv` now shows as addable rather than
+  gitignore-suppressed.
+
+### CC-LAB-0214 — category 5 pilot, Expedia's first own shape: `spel_injection` (CWE-917) on `spring_boot`, hotel-search sort (FR-LAB-113, FR-LAB-114) (2026-09-23)
 - Change: the first vulnerability shape built specifically for Expedia
   (Java/Spring Boot), on top of the freshly-ported `spring_boot` package
   (`CC-LAB-0213`) — distinct from that entry's ported Netflix Jackson
@@ -115,8 +157,8 @@ Component code: **LAB**. Entry format and required fields: see
      property-path-shaped expression (`'price'`) proves the secure twin
      still functions for legitimate input, not just that it rejects the
      attack — both twins pass this case too.
-  6. `docs/components/01-target-lab/requirements.md`: `FR-LAB-102` (the
-     shape), `FR-LAB-103` (ground truth).
+  6. `docs/components/01-target-lab/requirements.md`: `FR-LAB-113` (the
+     shape), `FR-LAB-114` (ground truth).
   7. **Tests**: `tests/test_labgen_spel_injection.py` (9 tests — manifest/
      verdict, static-precheck classification, `supports()`, determinism,
      twin-composition assertions, ground-truth cross-check, ground-truth-
@@ -153,7 +195,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] `lab/manifests/expedia_spel_injection_sample.yaml` (2 cells) — done
   - [x] `fuzzlab/labels/schemas/labels.schema.json`: `vuln_class`/`sink_context` widening — done
   - [x] `lab/ground-truth-expedia-clone/`: new directory, 3 files, `EXPD-0001` — done
-  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-102`/`103` — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-113`/`103` — done
   - [x] `docs/research/category5-travel-functionality-and-cwe-research.md`: CWE-89→917 correction — done
   - [x] `tests/test_labgen_spel_injection.py` (9 tests) — done
   - [x] `tests/test_labgen_spel_injection_live_boot.py` (2 real live-boot tests, all green) — done

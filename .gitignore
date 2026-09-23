@@ -9,6 +9,10 @@ venv/
 # CC-LAB-0090: category 5's Booking.com app has its own ground-truth
 # directory (D9's out-of-band contract), same "tracked, not generated" rule
 !lab/ground-truth-booking-clone/*.csv
+# CC-LAB-0215/BUG-0036: category 5's Expedia app has its own ground-truth
+# directory too; without this exception expectedresults.csv is silently
+# gitignored (caught *.csv above) and can never actually be committed
+!lab/ground-truth-expedia-clone/*.csv
 # python build / test artifacts
 *.egg-info/
 build/

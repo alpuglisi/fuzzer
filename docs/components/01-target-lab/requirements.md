@@ -2181,7 +2181,7 @@ lane) can submit a payload as
   modules, or corpus precedent exist anywhere in this repository for it)
   are separate, later requirements.
 
-- **FR-LAB-102** *(`spel_injection` shape, CWE-917, `spring_boot`;
+- **FR-LAB-113** *(`spel_injection` shape, CWE-917, `spring_boot`;
   `CC-LAB-0214`, 2026-09-23).* Expedia's first own shape (distinct from
   `FR-LAB-94`'s ported Netflix Jackson cell, which is TrackerNest/
   category-4 code reused, not built for Expedia). A hotel-search endpoint
@@ -2240,7 +2240,7 @@ lane) can submit a payload as
     property-path expression (`'price'`) proves the secure twin still
     functions for legitimate input.
 
-- **FR-LAB-103** *(Expedia's own ground-truth directory;
+- **FR-LAB-114** *(Expedia's own ground-truth directory;
   `CC-LAB-0214`, 2026-09-23).* New `lab/ground-truth-expedia-clone/`
   directory (opaque `EXPD-` case-ID prefix, never `PFF-*`) — matches
   `lab/ground-truth-booking-clone/`'s established per-app-identity

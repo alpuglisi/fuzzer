@@ -18,6 +18,36 @@ Format per entry:
 
 ---
 
+## 2026-09-23 — Category 5 pilot (Expedia, spel_injection shape): ground-truth directory shipped without expectedresults.csv (Fixed, BUG-0036/PA-0038)
+
+- **Symptom:** `CC-LAB-0214`'s new `lab/ground-truth-expedia-clone/`
+  directory had `labels.json` and `injection-points.json` but not
+  `expectedresults.csv`, which `fuzzlab.labels.contract.load()` requires
+  unconditionally. Found during a whole-repo `pytest -m "not slow"` run
+  performed as part of an unrelated cross-branch bookkeeping-ID collision
+  fix on this same branch — two tests in
+  `tests/test_labgen_spel_injection.py` failed with `FileNotFoundError`,
+  despite the shape's own authoring commit claiming a clean whole-repo
+  pass.
+- **Root cause:** an authoring omission when the new ground-truth
+  directory was created — every sibling second-target ground-truth
+  directory in this corpus ships all three files as one atomic unit, and
+  this one didn't; compounded by `.gitignore` never having gained the
+  per-directory `!lab/ground-truth-expedia-clone/*.csv` negation its
+  blanket `*.csv` rule requires, so the file could not have been
+  committed even if authored. See BUG-0036 for the full five-whys
+  (including why the authoring commit's own claimed whole-repo pass is
+  inconsistent with this file having been exercised against what was
+  actually committed).
+- **Remediation:** authored the missing `expectedresults.csv` (one row,
+  `EXPD-0001`, matching `labels.json`'s existing case and the established
+  column convention from `lab/ground-truth-booking-clone/
+  expectedresults.csv`) and added the missing `.gitignore` negation.
+  `pytest tests/test_labgen_spel_injection.py`:
+  9 passed (up from 7 passed/2 failed). Whole-repo re-run: 1865 passed, 8
+  skipped — no regression.
+- **Status:** Fixed.
+
 ## 2026-09-22 — Category 5 pilot (open_redirect shape): shared-vocabulary modules added without their determinism-fixture entries (Fixed, BUG-0035/PA-0036)
 
 - **Symptom:** `CC-LAB-0210`'s three new shared-vocabulary-only module
