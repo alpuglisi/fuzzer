@@ -3,6 +3,266 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0093 — PicTrail's second real page: comments' `mark_safe()` template-autoescape footgun + real Django template rendering (FR-LAB-102/FR-LAB-103) (2026-09-23)
+
+- **Change:** Lands PicTrail's second real, ground-truth-bearing page,
+  `/post/comments` (grounded in §2 item 3's comment feature), using
+  Django's real `mark_safe()`/template-autoescaping-bypass footgun
+  deliberately deferred from Phase B (`CC-LAB-0091`), per
+  `docs/research/category2-social-ugc-functionality-and-cwe-research.md`
+  §4 row 2.
+
+  **Deliberate narrowing from §4 row 2's own researched shape, stated
+  explicitly (reviewer #2's finding, not glossed over):** §4 row 2's real
+  footgun is a dev auto-linking `@mention`/`#hashtag` spans into real
+  `<a>` tags via `mark_safe()`, then failing to separately escape the
+  *surrounding free-text* comment body — a partial-escaping mistake, not
+  a blanket one. This entry builds the **simpler, generic** version
+  instead — `mark_safe()` wrapping the *entire* raw stored comment, no
+  mention/hashtag linkification — because building real anchor-tag
+  construction is its own, separately-scoped piece of work this
+  increment does not need to prove the underlying footgun mechanism
+  (`mark_safe()` defeats Django's auto-escaping; a plain string does
+  not). The full auto-linking-specific shape stays a real, sized, later
+  increment (updated in §6, not silently dropped) — this entry's
+  `mark_safe()`-on-raw-value pattern is still a real, common, independently
+  well-documented CWE-79 mistake in its own right, not an invented one.
+
+  This is genuinely new emitter *infrastructure*, not just a new shape on
+  existing infrastructure: it is the first cell in this emitter to render
+  through Django's real template engine (`django.shortcuts.render()` +
+  an actual `.html` template file), rather than a hand-built
+  `HttpResponse`/`JsonResponse` string. Concretely:
+
+  1. **A new file role — the template's content is a fixed Python string
+     constant, never a `.j2` file rendered through this emitter's own
+     Jinja2 module-composition system (reviewer #2's most important
+     finding, addressed by redesign, not by patching around it).**
+     `fuzzlab.labgen.emitters.django.modules`'s Jinja2 environments use
+     default `{{ }}` delimiters — the *same* syntax Django's own template
+     engine uses for a context variable. A `.html.j2` generation template
+     containing literal Django syntax (`{{ comment }}`) would collide
+     with this emitter's own generation-time Jinja2 pass (`StrictUndefined`
+     would raise on an undefined `comment` at generation time, or worse,
+     silently bake a generation-time value into the file if one happened
+     to be in scope) — exactly the collision `php_laravel`'s own Blade
+     views avoid by using Blade's raw-echo `{!! $value !!}` syntax
+     (never Blade's `{{ $value }}` form) in its own `.blade.php.j2`
+     sink templates, specifically because `{{ }}` is Blade's own
+     delimiter too. Since this page's template content is **identical**
+     between the vulnerable and secure twin regardless (the
+     vulnerable/secure distinction lives entirely in the **transform** —
+     `mark_safe()`-wrapped or not — never in the template), it needs **no
+     per-cell interpolation at generation time at all**: emitted as a
+     fixed Python string constant (`_COMMENT_TEMPLATE_HTML`, mirroring
+     `_READ_STORED_BIO_HELPER`'s own "plain Python string, not a Jinja2
+     module" convention exactly), written byte-for-byte to
+     `fuzlab_django_lab/templates/{cell_slug}.html`, role `"template"`,
+     as `DjangoEmitter.render()`'s new second `EmittedFile` for this one
+     shape (every other existing shape keeps returning exactly one file,
+     unchanged — `Emitter`'s own `EmittedFiles = tuple[EmittedFile, ...]`
+     already supports this per-cell, confirmed against the current code
+     before drafting, no shared-interface change needed). Content:
+     `<div class="comment">{{ comment }}</div>` — real Django template
+     syntax, never touched by this project's own Jinja2 pass, so Django's
+     own template engine is the only thing that ever evaluates it, at
+     real request time. Keeping the template byte-identical between twins
+     also keeps the minimal-pair diff confined to the transform region,
+     the same invariant every other shape in this project already holds
+     (`BUG-0027`'s own confinement checker — the actually-relevant prior
+     art, not `CR-LAB-0001` Addendum D, corrected from an earlier
+     revision of this draft per `CC-LAB-0092`'s own precedent finding).
+  2. **A new transform**, `mark_safe_wrap` (vulnerable): wraps
+     `value_expr` in `mark_safe(...)`
+     (`fuzzlab/labgen/emitters/django/templates/transforms/
+     mark_safe_wrap.py.j2` — a plain Python source line, no Django
+     template syntax, so no Jinja2/Django collision risk here). The
+     **secure** twin uses the existing `identity` transform unchanged (a
+     plain string handed to the template context, which Django's own
+     default auto-escaping protects — no new "secure" transform needed).
+  3. **A new sink**, `django_template_render`
+     (`fuzzlab/labgen/emitters/django/templates/sinks/
+     django_template_render.py.j2`, also plain Python source, no
+     collision risk): `return render(request, "{{ cell_slug }}.html",
+     {"comment": {{ value_expr }}})`. Reuses the existing `render_only`
+     complexity unchanged.
+  4. **A new, real, seedable stored value**: `_read_stored_comment()` (a
+     fixed, unconditional header helper, mirroring `_read_stored_bio()`'s
+     own real-raw-cursor-read pattern exactly, backed by a new `comments`
+     table `DjangoLiveBootHarness._seed_db()` seeds, with its own
+     `seed_comment` constructor parameter mirroring `seed_bio`'s).
+  5. **`settings_py_content()`**: `TEMPLATES[0]["DIRS"]` changes from `[]`
+     to `[BASE_DIR / "fuzlab_django_lab" / "templates"]` — the one real
+     settings change this entry needs; `APP_DIRS: True` stays (harmless,
+     no Django "app" exists to search).
+  6. New route profile, `_ROUTE_PARAMS["/post/comments"]`, and the new
+     real-page cell added to `_REAL_PAGE_CELL_IDS` (the existing
+     mechanism from `CC-LAB-0092`, not a new one).
+  7. New ground truth: **extends** `lab/ground-truth-picktrail-django/`
+     (not a third directory) with case `PT-0002` — `url: "/post/
+     comments"`, `vuln_class: "xss-stored"`, `sink_context: "html"`
+     (reviewer #2's finding — omitted from an earlier revision of this
+     draft; required, not cosmetic: `fuzzlab.mutation.xss.context_from_
+     sink()`/`fuzzlab.audit.rules`'s `sink_context_in` both key XSS
+     payload/audit selection off this field), mirroring `lab/ground-
+     truth/labels.json`'s own `PFF-0005` shape exactly on both counts —
+     a stored-XSS case with `param`/`location` naming the conceptual
+     write field, `source_url` **omitted** since this generator's
+     `read_stored_field` source models "the sink side only," per that
+     module's own docstring — the write path is not modeled here, stated
+     in `notes`, not silently implied.
+  8. New manifest, `lab/manifests/phase_c_picktrail_comments.yaml`
+     (extends, not replaces, `phase_c_picktrail_post_detail.yaml`).
+
+  **Why this stays one entry, not split into two (reviewer #2's
+  finding — §6's own "one new shape per entry" guidance addressed
+  explicitly, not silently overridden):** the redesign in item 1 above
+  substantially decouples the two mechanisms reviewer #2 flagged as
+  compounding risk. The "second `EmittedFile` per cell" mechanism is now
+  genuinely small and low-risk on its own (a fixed string constant
+  written to a second path — no new Jinja2 environment, no new template
+  category, no generation-time evaluation of any kind); the "real Django
+  template-engine round trip" risk is now cleanly isolated to Django's
+  own request-time library code (`django.shortcuts.render()`,
+  well-documented, stable, verified against the actual installed 5.2.17
+  package before drafting this entry), not this project's own generation
+  machinery. Splitting would mean landing the multi-file mechanism first
+  against a "boring" template with nothing to prove, then a second entry
+  to add the one line (`mark_safe_wrap`) that makes it a real vulnerable
+  shape — more process overhead for two mechanisms that, after this
+  redesign, no longer meaningfully compound each other's risk.
+
+- **Impact (other components / project):** Additive to the `django`
+  stack only. `Emitter`'s own ABC (`EmittedFiles = tuple[EmittedFile,
+  ...]`) already supports a per-cell multi-file return — confirmed
+  before drafting this entry, not assumed — so no interface change is
+  needed anywhere shared; only this one shape's own `render()` branch
+  returns two files instead of one. No existing cell's shape, output, or
+  test changes. `fuzzlab/harness/multitarget.py` unaffected.
+
+- **Risk (level: moderate):** Two new mechanisms land together here (a
+  second `EmittedFile` per cell; a real Django template-engine round
+  trip) — rated above `CC-LAB-0092`'s "low" for the same "first exercise
+  of a new mechanism" reasoning `CC-LAB-0090`/`CC-LAB-0091` already used,
+  even after the item-1 redesign substantially decouples them (see the
+  "why this stays one entry" note above). **The most likely concrete
+  failure mode, named explicitly per reviewer #2's finding (the risk
+  section's earlier revision missed this and reasoned only about
+  request-time autoescaping correctness, not generation-time
+  correctness):** a template file containing literal Django syntax could
+  be silently mishandled by this project's own Jinja2 generation pass —
+  addressed structurally, not just tested for, by emitting the template
+  as a fixed Python string constant never passed through Jinja2 at all
+  (item 1 above) — **and** verified directly: a generation-time test
+  asserts the emitted `.html` file's literal bytes are exactly `<div
+  class="comment">{{ comment }}</div>`, unevaluated, `{{ comment }}`
+  intact (Deliverables, below) — proving the fix, not just asserting the
+  redesign should work. Further mitigated by: (1) a real Tier-3
+  regenerate-and-diff check that the *template* file, not just the view
+  file, is also byte-deterministic across two renders; (2) a real
+  live-boot proof that the template actually renders through Django's
+  real template loader (`DIRS` pointed at the right path) rather than
+  only checking the Python source compiles; (3) per `PA-0034`, proving
+  **both directions** of the differential through the real template
+  engine — the vulnerable twin's `mark_safe()` genuinely bypasses
+  autoescaping, **and** the secure twin's plain string is genuinely still
+  protected by Django's own default autoescaping (not just asserting the
+  vulnerable direction and assuming the secure one is fine because it's
+  "the default") — a malformed/absent-stored-value adversarial case is
+  not applicable here (the helper always returns a real string or `""`,
+  matching `_read_stored_bio()`'s own existing, already-proven fail-safe
+  shape).
+
+- **Deliverables:**
+  - [ ] `fuzzlab/labgen/emitters/django/templates/transforms/
+    mark_safe_wrap.py.j2` — todo.
+  - [ ] `fuzzlab/labgen/emitters/django/templates/sinks/
+    django_template_render.py.j2` — todo.
+  - [ ] `fuzzlab/labgen/emitters/django/modules.py` — new
+    `MarkSafeWrapTransform`/`DjangoTemplateRenderSink` classes + registry
+    entries — todo.
+  - [ ] `fuzzlab/labgen/emitters/django/__init__.py` — new
+    `_MODULE_SET_BY_SHAPE`/`_ROUTE_PARAMS` entries; a fixed
+    `_COMMENT_TEMPLATE_HTML` string constant (never a `.j2` file — see
+    item 1's redesign above); `render()` branches to emit a second
+    `EmittedFile` (the template, that constant's bytes verbatim) when
+    `modules.sink == "django_template_render"`; `_read_stored_comment()`
+    fixed header helper; `_REAL_PAGE_CELL_IDS` gains this cell — todo.
+  - [ ] `fuzzlab/labgen/emitters/django/stack_env.py` —
+    `settings_py_content()`'s `TEMPLATES[0]["DIRS"]` change — todo.
+  - [ ] `fuzzlab/labgen/conformance/django_live_boot.py` — seed a real
+    `comments` table; `seed_comment` constructor parameter — todo.
+  - [ ] `lab/manifests/phase_c_picktrail_comments.yaml` — todo.
+  - [ ] `lab/ground-truth-picktrail-django/labels.json`/
+    `injection-points.json`/`expectedresults.csv` — extended with
+    `PT-0002` — todo.
+  - [ ] `tests/test_labgen_django_conformance.py` — Tier 0/3 for the new
+    manifest, including the template file's own byte-determinism; **plus
+    a generation-time test (reviewer #2's most important finding)**
+    asserting the emitted `.html` file's literal bytes are exactly
+    `<div class="comment">{{ comment }}</div>`, unevaluated — proving
+    this project's own Jinja2 generation pass never touches it — todo.
+  - [ ] A new live-boot test module — real template-engine round trip
+    proof: the vulnerable twin serves the raw payload (`mark_safe()`
+    genuinely bypasses autoescaping through the real engine), **and** the
+    secure twin serves the real HTML-entity-escaped form (Django's default
+    autoescaping genuinely still applies when not opted out of) — both
+    directions proven, not just the vulnerable one; plus the ground-truth
+    cross-check for `PT-0002` (mirroring `CC-LAB-0092`'s own pattern) —
+    todo.
+  - [ ] `docs/research/category2-social-ugc-functionality-and-cwe-
+    research.md` §6 — already updated this session (route notation fixed
+    to `/post/comments`, no `?id=`, matching the `read_stored_field`
+    shape's own no-request-parameter convention; row marked built) —
+    done.
+  - [x] `FR-LAB-102`/`FR-LAB-103` checked as next-free — done, against
+    **all four other active category branches**, not just cat1 (this
+    category's numbers have now collided three times — `CC-LAB-0090`'s
+    original `64`/`65`, `CC-LAB-0091`'s `74`/`75`, and `CC-LAB-0092`'s
+    `90`/`91`, each found only after the fact by cross-branch review):
+    a real fetch of `claude/second-target-cat1-ecommerce` (max
+    `FR-LAB-87`), `claude/category-5-build-6boejs` (max `FR-LAB-101` —
+    the current global ceiling), `claude/category-3-build-iuu5k9` (max
+    `FR-LAB-99`), and `claude/category-4-build-t9uz3y` (max `FR-LAB-97`,
+    and this branch's own originally-planned `FR-LAB-92`/`93` would have
+    collided with its `FR-LAB-93` — caught here, before landing, not
+    after). `FR-LAB-102`/`103` sit above every checked branch's ceiling.
+  - [ ] `docs/components/01-target-lab/requirements.md` — new
+    `FR-LAB-102`/`FR-LAB-103` — todo.
+  - [ ] `docs/ARCHITECTURE.md` — note the second real page and the new
+    template-rendering mechanism — todo.
+  - [ ] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 tracker row
+    — todo.
+  - [ ] `CHANGELOG.md` line — todo.
+  - [ ] Full bug protocol for any genuine defect surfaced — todo (only if
+    one occurs).
+
+- **Effectiveness (assessed 2026-09-23): pending** — left pending until the
+  deliverables above land and the new tests are observed to pass for real.
+
+---
+**Pre-change review gate record:** reviewer #1 (accuracy) — APPROVE AS-IS
+(every checkable claim verified against current code, a real cross-branch
+fetch, and the actual installed Django 5.2.17 package; found no
+inaccuracy). Reviewer #2 (adequacy) — APPROVE WITH ADDITIONS, 4 items:
+(1) the §4-row-2-vs-implemented-shape narrowing stated explicitly rather
+than implied as full grounding; (2) **the Jinja2/Django `{{ }}` delimiter
+collision — the draft's most important finding, addressed by redesign**
+(the template is now a fixed Python string constant, never routed
+through this emitter's own Jinja2 pass, plus a generation-time test
+proving it), not merely patched around; (3) `sink_context: "html"`
+added to the `PT-0002` ground-truth plan; (4) an explicit justification
+for keeping this as one entry rather than splitting, now that the
+redesign in (2) substantially decouples the two new mechanisms. All
+incorporated. Reviewer #2 explicitly found the increment's sequencing,
+non-overreach, and D9-compliance sound — the additions are corrections/
+strengthenings, not a rejection of scope. A fresh, wider next-free
+bookkeeping check (this branch plus all four other active category
+branches, not just cat1) also caught a real would-be collision with
+category 4 before it happened, renumbering to `FR-LAB-102`/`103`.
+Proposer (this session) accepts all findings as correct. 3/3 agreement
+reached on this revision — implementation may begin.
+
 ### CC-LAB-0092 — Phase C, first real page: PicTrail's `/post` detail page + its own ground truth (FR-LAB-95/FR-LAB-96) (2026-09-23)
 
 - **Change:** Establishes **PicTrail** — the Instagram-style app identity
