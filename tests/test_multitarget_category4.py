@@ -638,9 +638,24 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # not left stale, for this change; PA-0043: BOTH this single-cell
     # assertion and the multi-target `macro_recall` assertion below were
     # grep-counted and updated together).
+    #
+    # `CC-FUZZ-0041`: TWCH-0013's own `http_header_injection` case (the
+    # only remaining tracked-but-undetected page besides webhook-signature
+    # and path-traversal) now ALSO confirms for real -- the new
+    # `R-HEADER-INJECTION`/`HttpHeaderInjectionCrlfStrategy` pair (a real
+    # CRLF-response-header-injection differential, verified live against
+    # both of CC-LAB-0198's own twins before this change was written, see
+    # `tests/test_labgen_go_live_boot.py::
+    # test_http_header_injection_strategy_closes_the_crlf_detection_gap`)
+    # closes this project's own last known real category-4 detection gap.
+    # No ground-truth-cardinality change this time (a pure detection
+    # increment, the same shape CC-FUZZ-0038's `GoTemplateSstiStrategy`
+    # landing was) -- tp moves from 12 to 13, recall from `12/15` to
+    # `13/15` (PA-0042/PA-0043: re-derived, grep-counted, and both
+    # occurrences in this file updated together).
     twitch_report = by_name["twitch-clone"].report
-    assert twitch_report.tp == 12 and twitch_report.fp == 0
-    assert round(twitch_report.recall, 4) == round(12 / 15, 4)
+    assert twitch_report.tp == 13 and twitch_report.fp == 0
+    assert round(twitch_report.recall, 4) == round(13 / 15, 4)
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002, which does have a rule/strategy, R-XXE/
@@ -690,8 +705,12 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # second, honest open_redirect label on TWCH-0013's own existing
     # sink for real with zero new detection CODE, only a runmode-mapping
     # fix + a strategy vuln_class-spelling fix + a second ground-truth
-    # label, recall from 10/13 to 12/15).
-    assert round(summary["macro_recall"], 4) == round(((12 / 15) + (1 / 11)) / 2, 4)
+    # label, recall from 10/13 to 12/15). Then `CC-FUZZ-0041`'s new
+    # `HttpHeaderInjectionCrlfStrategy` closes TWCH-0013's own remaining
+    # `http_header_injection` gap (a pure detection increment, no
+    # cardinality change): Twitch's own tp moves from 12 to 13, recall
+    # from 12/15 to 13/15.
+    assert round(summary["macro_recall"], 4) == round(((13 / 15) + (1 / 11)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True

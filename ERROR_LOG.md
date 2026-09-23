@@ -18,6 +18,29 @@ Format per entry:
 
 ---
 
+## 2026-09-23 — FUZZ: `points_from_ground_truth` collapsed two cases sharing a point's `sink_context` (fixed, BUG-0044/PA-0046)
+
+- **Symptom:** building `CC-FUZZ-0041`'s `R-HEADER-INJECTION`/
+  `HttpHeaderInjectionCrlfStrategy` (closing category 4's last known real
+  detection gap, `http_header_injection` at Twitch's `TWCH-0013`) showed
+  the case still scoring as a missed (false negative) finding in a real
+  `run_targets` pipeline run, despite the strategy confirming the
+  identical candidate directly via a hand-built `Candidate`.
+- **Root cause:** `fuzzlab/harness/auto.py::points_from_ground_truth`'s
+  `sink_context_by_point` dict comprehension kept only the LAST
+  ground-truth case's `sink_context` for a given `(url, method, param)`
+  key — `TWCH-0015` (`sink_context="redirect"`, added by `BUG-0043`'s own
+  fix) silently overwrote `TWCH-0013`'s own `sink_context="header"` at
+  their shared sink, so `R-HEADER-INJECTION`'s `sink_context_in:
+  ["header"]` gate never matched that point.
+- **Remediation:** `sink_context_by_point` now collects every DISTINCT
+  `sink_context` value per point (a `set`) and emits one audited
+  `InjectionPoint` per distinct value, verified harmless against
+  `fuzzlab.harness.scoring.score`'s own set-based, vuln_class-keyed
+  dedup. `tp` for Twitch's real, scored pipeline run moves from 12 to 13
+  (recall `12/15` -> `13/15`).
+- **Status:** Fixed.
+
 ## 2026-09-23 — `open_redirect` silently unreachable in a scored pipeline: missing category mapping, then a wrongly-hyphenated strategy `vuln_class` (fixed, BUG-0043/PA-0045)
 
 - **Symptom:** wiring `CC-LAB-0199`'s new `open_redirect` Twitch cell

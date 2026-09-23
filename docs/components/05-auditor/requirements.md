@@ -129,6 +129,21 @@ budget where a vulnerability is plausible.
   `price_integrity_bypass` cell (`TWCH-0010`, Twitch's channel-
   subscription-purchase endpoint) — verified directly, not merely
   assumed from the rule's shape.
+- **FR-AUD-16** *(`CC-AUD-0026`, 2026-09-23).* A candidate is generated
+  for the `http-header-injection` category: `R-HEADER-INJECTION`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a `query`/`body`
+  point whose `sink_context` is `"header"` — the same `location_in`+
+  `sink_context_in` shape as `R-INSECURE-DESERIALIZATION`/
+  `R-UNRESTRICTED-FILE-UPLOAD`/`R-PRICE-INTEGRITY`. Closes `CC-LAB-0198`'s
+  own deliberately-deferred detection follow-on for Twitch's
+  `http_header_injection` cell (`TWCH-0013`). Checked directly (not
+  assumed) that the one other real user of `sink_context="header"`
+  (php_laravel's HuddleHub `outbound_header_injection` case, a genuinely
+  distinct concern) cannot false-positive through this rule: the
+  companion oracle strategy fails closed on that page, and that app's own
+  `vuln_class` has no category mapping that would ever include this
+  category in a real automatic run's `plan.categories`. Rule-generation
+  only — confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-25`).
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that

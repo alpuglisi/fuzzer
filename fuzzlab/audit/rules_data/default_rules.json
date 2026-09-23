@@ -105,6 +105,13 @@
       "transaction_type": "Price/Amount Integrity Bypass",
       "when": { "location_in": ["body"], "sink_context_in": ["payment_charge"] },
       "reference": "business-logic-price-manipulation"
+    },
+    {
+      "id": "R-HEADER-INJECTION",
+      "category": "http-header-injection",
+      "transaction_type": "HTTP Response Header Injection",
+      "when": { "location_in": ["query", "body"], "sink_context_in": ["header"] },
+      "reference": "http-response-splitting"
     }
   ]
 }

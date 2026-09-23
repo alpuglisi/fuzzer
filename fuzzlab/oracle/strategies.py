@@ -1561,6 +1561,112 @@ class PriceIntegrityBypassStrategy(ConfirmationStrategy):
                        {"field": self._FIELD, "low": reading_a, "high": reading_b})
 
 
+class HttpHeaderInjectionCrlfStrategy(ConfirmationStrategy):
+    """Confirms `http_header_injection` (CWE-113, HTTP response splitting --
+    `CC-LAB-0198`'s own deliberately-deferred detection follow-on, Twitch's
+    `TWCH-0013`, `GET /channels/redirect?destination=`) with a real,
+    live-verified CRLF-response-header-injection differential.
+
+    Read `fuzzlab/labgen/emitters/go_net_http/templates/sinks/
+    raw_socket_response_write.go.j2` (the vulnerable twin) before designing
+    this: it hijacks the raw connection (`http.Hijacker.Hijack()`) and
+    hand-writes ``"Location: " + destination + "\\r\\n"`` byte-for-byte,
+    with no CR/LF stripping at all -- the honest reason this concern can
+    exist on Go at all, since Go's *ordinary* `w.Header().Set()`/
+    `w.WriteHeader()` path already silently replaces a bare CR/LF byte with
+    a space before writing to the wire (verified empirically, see
+    `CC-LAB-0198`'s own change-control entry) -- an "honest vulnerable
+    instance" of this concern is impossible to build through that ordinary
+    path in Go, which is exactly why this lab's vulnerable twin needs the
+    hijack bypass.
+
+    **How this was actually verified, not assumed** (per this change's own
+    task): does a normal `requests`-based HTTP client actually observe a
+    genuinely-spliced-in extra response header, or does something in
+    `requests`/`urllib3`'s own header parsing normalize/merge/hide it
+    first? Booted the real app (`GoLiveBootHarness`) and sent a raw
+    `RequestsProbeSender` probe directly, before writing this class:
+    ``destination="/ok\\r\\nX-Injected-Marker: abc123marker"`` against the
+    vulnerable twin came back with `probe.headers == {"Location": "/ok",
+    "X-Injected-Marker": "abc123marker", "Content-Length": "0"}`; the same
+    payload against the secure twin (`allowlist_and_runtime_crlf_
+    rejection`) came back HTTP 400 with no injected header at all. `requests`
+    (via `urllib3` -> `http.client`'s own header parser) parses a genuinely
+    well-formed extra header LINE exactly like any other real header --
+    there is no merging/normalization defeating observation here, because
+    this payload shape (one injected header, no second blank-line-
+    terminated fake response) never triggers `requests`' own duplicate-
+    header-folding behavior (which only applies to a header name repeated
+    more than once, not a new header name). A raw-socket/`http.client`-level
+    probe (the alternative this class's own docstring above was asked to
+    consider) turned out to be unnecessary in practice -- confirmed
+    empirically, not assumed, before ruling it out.
+
+    **Differential design (a control probe defends against a false
+    positive)**: both probes carry the SAME randomly-generated, per-call
+    header name and token (never a name a real app would ever legitimately
+    emit, e.g. `X-Fuzzlab-Hdrinj-<hex>`) -- the only difference between them
+    is whether a real CR/LF byte pair precedes it.
+
+    - **Probe A (malicious)**: ``f"fuzzlab-ok\\r\\n{header_name}: {token}"``.
+      Confirms only if the response actually carries a header named
+      `header_name` (case-insensitive, matching `OpenRedirectStrategy`'s own
+      `_header` convention) whose value equals `token`.
+    - **Probe B (control)**: the identical text with the CR/LF replaced by a
+      single space (``f"fuzzlab-ok {header_name}: {token}"``) -- same bytes,
+      same header name/token substring present in the submitted value, no
+      CR/LF at all. Requires the injected header to be ABSENT here. This is
+      the real point of the differential: it rules out a target that, for
+      some unrelated reason, ever turns an arbitrary substring of an input
+      value into its own response header regardless of CR/LF (which would
+      be a different bug, not this one) -- probe A only counts once probe B
+      independently shows the identical marker text, submitted without a
+      CR/LF, produces no such header.
+
+    Confirms only when probe A shows the injected header and probe B does
+    not. A target that rejects probe A outright (a real allowlist/CRLF
+    rejection, `AllowlistAndRuntimeCrlfRejectionSink`'s own secure
+    behavior) fails closed, correctly, never a guess.
+
+    Known limitation, not silently swept under the rug: this detects CRLF
+    injection observable as an EXTRA response header on the very same
+    response the probe's own request received. A genuine full response-
+    splitting attack (a second CRLF CRLF sequence terminating the current
+    response and starting an entirely separate, fully attacker-controlled
+    fake response smuggled to a downstream cache/proxy) is a related but
+    distinct, stronger primitive this strategy does not attempt to detect
+    separately -- this project's own lab shape (`CC-LAB-0198`) only
+    instantiates the single-extra-header variant, so that is the only
+    variant verified live and is treated here as this concern's full
+    ground-truth scope, not silently narrowed."""
+    vuln_class = "http_header_injection"
+    mechanism = "crlf-response-header-injection-differential"
+    category = "http-header-injection"
+
+    @staticmethod
+    def _header(probe, name):
+        return next((v for k, v in probe.headers.items() if k.lower() == name), None)
+
+    def confirm(self, candidate, sender):
+        token = _token()
+        header_name = f"X-Fuzzlab-Hdrinj-{token}"
+
+        malicious = f"fuzzlab-ok\r\n{header_name}: {token}"
+        probe_a = self._send(sender, candidate, malicious)
+        injected = self._header(probe_a, header_name.lower())
+        if injected != token:
+            return None    # no genuinely spliced-in header -- fails closed
+
+        control = f"fuzzlab-ok {header_name}: {token}"
+        probe_b = self._send(sender, candidate, control)
+        if self._header(probe_b, header_name.lower()) is not None:
+            return None    # the same marker text, sans CRLF, ALSO produced the header
+                            # -- not attributable to CRLF splitting specifically
+
+        return Verdict(True, self.vuln_class, self.mechanism,
+                       {"header": header_name, "value": token})
+
+
 def default_strategies(browser: BrowserExecutor | None = None,
                        oob: OobListener | None = None,
                        coverage: CoverageSource | None = None,
@@ -1590,6 +1696,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
             MassAssignmentPrivilegedFieldStrategy(),
             UnrestrictedFileUploadContentTypeTrustStrategy(),
             PriceIntegrityBypassStrategy(),
+            HttpHeaderInjectionCrlfStrategy(),
             GreyboxConfirmationStrategy(coverage, dbfault)]
 
 
@@ -1615,6 +1722,7 @@ _CATEGORY_TO_CLASS = {
     "mass-assignment": "mass_assignment",
     "unrestricted-file-upload": "unrestricted_file_upload",
     "price-integrity-bypass": "price_integrity_bypass",
+    "http-header-injection": "http_header_injection",
 }
 
 

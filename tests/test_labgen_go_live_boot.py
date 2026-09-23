@@ -1559,6 +1559,52 @@ def test_real_boot_proves_the_http_header_injection_differential_for_both_twins(
         assert _HEADER_INJECTION_CANARY_HEADER not in secure_injected.headers
 
 
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_http_header_injection_strategy_closes_the_crlf_detection_gap() -> None:
+    """`CC-FUZZ-0041`: `HttpHeaderInjectionCrlfStrategy` (`fuzzlab/oracle/
+    strategies.py`) confirms `CC-LAB-0198`'s own vulnerable twin for real,
+    over the network via `RequestsProbeSender` (not a stub), and correctly
+    declines the secure twin -- closing `TWCH-0013`'s own deliberately-
+    deferred detection follow-on (its own `labels.json` `notes` field
+    explicitly tracked this as an open gap until this strategy landed).
+
+    Also a live regression proof that a plain `requests`-based sender
+    genuinely observes a CRLF-spliced-in extra response header without any
+    normalization/merging defeating it (verified directly, not assumed,
+    before this strategy was designed -- see its own docstring): had
+    `requests`/`urllib3` folded or dropped the injected header the way a
+    duplicate-header-name case gets comma-joined, this test would fail
+    with `verdict is None` rather than a wrong-but-passing result.
+    """
+    from fuzzlab.oracle.probe import Candidate
+    from fuzzlab.oracle.strategies import HttpHeaderInjectionCrlfStrategy
+    from fuzzlab.tools.probesender import RequestsProbeSender
+
+    manifest = load_manifest("lab/manifests/http_header_injection_redirect_go_sample.yaml")
+    emitter = GoEmitter()
+    cells = {c.cell_id: c for c in manifest.cells}
+
+    with GoLiveBootHarness(emitter, list(cells.values())) as harness:
+        sender = RequestsProbeSender(timeout=10.0)
+        strategy = HttpHeaderInjectionCrlfStrategy()
+
+        vuln_candidate = Candidate(
+            url=f"{harness.base_url}/generated/labgen-go-0025", param="destination",
+            method="GET", location="query",
+        )
+        verdict = strategy.confirm(vuln_candidate, sender)
+        assert verdict is not None and verdict.confirmed, verdict
+        assert verdict.vuln_class == "http_header_injection"
+        assert verdict.evidence["value"] and verdict.evidence["value"] in verdict.evidence["header"]
+
+        secure_candidate = Candidate(
+            url=f"{harness.base_url}/generated/labgen-go-0026", param="destination",
+            method="GET", location="query",
+        )
+        assert strategy.confirm(secure_candidate, sender) is None
+
+
 # -- Phase B fourteenth increment: open redirect (open_redirect,
 # http_redirect_location, CC-LAB-0199) ------------------------------------
 

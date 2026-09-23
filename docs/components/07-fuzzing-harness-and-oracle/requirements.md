@@ -551,6 +551,71 @@ rewards) derives from it.
     and `path_traversal` remain undetected, each for its own distinct,
     tracked reason).
 
+- **FR-FUZZ-25** *(`HttpHeaderInjectionCrlfStrategy`; `CC-FUZZ-0041`,
+  2026-09-23).* The oracle supports real **CRLF response-header-injection
+  (CWE-113) confirmation** for `http_header_injection`, paired with
+  `FR-AUD-16`'s candidate-generation rule, closing `CC-LAB-0198`'s own
+  deliberately-deferred detection follow-on for Twitch's `TWCH-0013`
+  (`/channels/redirect?destination=`) — this project's own last known
+  real category-4 detection gap:
+  - `HttpHeaderInjectionCrlfStrategy` (`vuln_class=
+    "http_header_injection"`, `mechanism=
+    "crlf-response-header-injection-differential"`): a two-probe
+    differential over a per-call random header name/token. Probe A
+    (malicious) sends `f"fuzzlab-ok\r\n{header_name}: {token}"`;
+    confirms only if the response genuinely carries a header named
+    `header_name` (case-insensitive lookup, matching
+    `OpenRedirectStrategy`'s own `_header` convention) whose value is
+    `token`. Probe B (control) sends the identical text with the `\r\n`
+    replaced by a single space; requires the same header to be ABSENT —
+    ruling out a target that turns an arbitrary input substring into a
+    response header for some unrelated reason, not specifically CRLF
+    splitting.
+  - **Verified empirically before design, not assumed** (read
+    `fuzzlab/labgen/emitters/go_net_http/templates/sinks/
+    raw_socket_response_write.go.j2`, the vulnerable twin's own
+    `http.Hijacker` mechanism, first): booted the real app and sent a
+    real `RequestsProbeSender` probe directly — `requests` (via
+    `urllib3` -> `http.client`'s own header parser) parses a genuinely
+    spliced-in extra header line exactly like any other real header, with
+    no merging/normalization defeating observation for this payload shape
+    (one injected header, no second blank-line-terminated fake response).
+    A raw-socket/`http.client`-level probe, the alternative this task's
+    own instructions asked to consider, turned out unnecessary in
+    practice.
+  - Known limitation, not silently swept under the rug: detects CRLF
+    injection observable as an extra header on the SAME response the
+    probe's own request received — a full response-SPLITTING attack (a
+    second `\r\n\r\n` terminating the current response and smuggling an
+    entirely separate fake response to a downstream cache/proxy) is a
+    related but stronger primitive this strategy does not separately
+    verify, since this project's own lab shape only instantiates the
+    single-extra-header variant.
+  - Real, executed live-boot proof (`tests/test_labgen_go_live_boot.py::
+    test_http_header_injection_strategy_closes_the_crlf_detection_gap`,
+    driven through a real `GoLiveBootHarness` boot, never a fake sender):
+    confirms the real vulnerable twin (`LABGEN-GO-0025`) and correctly
+    fails closed on the real secure twin (`LABGEN-GO-0026`, which rejects
+    the identical payload with HTTP 400).
+  - Verified through the real `fuzzlab.harness.multitarget` pipeline
+    (`tests/test_multitarget_category4.py::
+    test_both_apps_run_through_multitarget_for_real`, extended): Twitch's
+    `TWCH-0013` is now a real, confirmed finding; ground-truth cardinality
+    stays 15 (a pure detection increment), `tp` moves from 12 to 13, and
+    Twitch's own real, scored recall moves from `12/15` to `13/15` (only
+    `webhook_signature` and `path_traversal` remain undetected, each for
+    its own distinct, already-tracked reason).
+  - Wiring this into the real pipeline surfaced and fixed a second,
+    independent defect (`BUG-0044`/`PA-0046`): `fuzzlab/harness/auto.py::
+    points_from_ground_truth`'s `sink_context_by_point` lookup silently
+    collapsed `TWCH-0013`/`TWCH-0015`'s shared `destination` sink's two
+    distinct `sink_context` values down to one, discarding `"header"` —
+    fixed by keeping every distinct value per point and emitting one
+    audited point per value, verified harmless against `fuzzlab.harness.
+    scoring.score`'s own set-based, vuln_class-keyed dedup and against a
+    full non-slow-suite + multitarget/live-boot re-run (no new
+    regressions).
+
 - **FR-FUZZ-19** *(`JwtAlgNoneConfusionStrategy`; `CC-FUZZ-0033`,
   2026-09-23).* The oracle supports real **JWT algorithm-confusion
   (CWE-347) confirmation**, paired with `FR-AUD-11`'s candidate-

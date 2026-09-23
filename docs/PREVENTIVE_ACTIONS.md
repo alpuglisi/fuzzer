@@ -615,3 +615,30 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   not sufficient proof it works end to end; a live, scored multitarget
   pipeline run is the only check that exercises category reachability AND
   the scoring key's exact vuln_class match together. (from BUG-0043)
+- **PA-0046** — When adding a `sink_context_in`-gated audit rule (the
+  `R-INSECURE-DESERIALIZATION`/`R-HEADER-INJECTION` shape), do not assume
+  `fuzzlab.harness.auto.points_from_ground_truth` hands the audited
+  `InjectionPoint` the right `sink_context` just because the ground-truth
+  `Case` itself has the right one: that function's own `(url, method,
+  param) -> sink_context` lookup silently collapses to ONE value per key,
+  which is WRONG whenever more than one `Case` shares that key with a
+  DIFFERENT `sink_context` — a real, already-used pattern in this
+  project's own data model (`fuzzlab.labels.contract`'s
+  multi-vuln_class-per-endpoint support, e.g. `TWCH-0013`/`TWCH-0015`
+  sharing one sink with `sink_context` `"header"` vs `"redirect"`
+  respectively). Before declaring a new `sink_context_in`-gated rule
+  reachable, check directly whether its target url/param is one that
+  ground truth also labels with ANY other vuln_class, and if so, verify
+  the fix in `points_from_ground_truth` (or its future equivalent) emits
+  a point carrying every distinct `sink_context` at that key, not just
+  confirm the strategy against a hand-built `Candidate` and assume the
+  real pipeline agrees — the same "hand-built confirm succeeds but the
+  real pipeline still misses it" symptom `BUG-0043`'s own regression
+  discipline was built to catch, here from a different, independent root
+  cause (a collapsed one-to-many point-building lookup, not a category-
+  mapping/vuln_class-spelling mismatch). A duplicate `InjectionPoint`
+  differing only in `sink_context` is safe to emit (`fuzzlab.harness.
+  scoring.score`'s `detected_keys` is a set keyed on `(url, method,
+  param, vuln_class)`, never `sink_context`, so it cannot double-count a
+  TP/FP) — prefer emitting one point per distinct value over trying to
+  merge/prioritize them. (from BUG-0044)

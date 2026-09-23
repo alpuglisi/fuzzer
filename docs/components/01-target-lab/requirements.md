@@ -5037,10 +5037,14 @@ lane) can submit a payload as
   TooManyRedirects`. Fixed at the sender level (`allow_redirects=False`,
   matching `fuzzlab.core.http`'s own authenticated path), not by
   weakening this cell's own honest vulnerability.
-  Detection is genuinely deferred: no audit rule/oracle strategy exists
-  yet for `http_header_injection` (grepped `fuzzlab/oracle/strategies.py`
-  for "header" and found nothing CRLF-injection-aware) -- the same
-  lab-then-detection split `CC-LAB-0190`/`CC-LAB-0196` already used.
+  Detection was genuinely deferred at the time this cell landed: no audit
+  rule/oracle strategy existed yet for `http_header_injection` (grepped
+  `fuzzlab/oracle/strategies.py` for "header" and found nothing
+  CRLF-injection-aware) -- the same lab-then-detection split
+  `CC-LAB-0190`/`CC-LAB-0196` already used. **Closed, 2026-09-23**: see
+  `FUZZ`'s `FR-FUZZ-25`/`CC-FUZZ-0041` (`HttpHeaderInjectionCrlfStrategy`)
+  and `AUD`'s `FR-AUD-16`/`CC-AUD-0026` (`R-HEADER-INJECTION`) --
+  `TWCH-0013` is now a real, confirmed finding, verified live.
   Twitch's own ground-truth cardinality grows from 12 to 13 (`TWCH-0013`);
   its own real, scored `multitarget` recall moves from `10/12` to `10/13`
   (`tp` stays `10`, `fp` stays `0`).

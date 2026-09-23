@@ -3,6 +3,100 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0041 — `HttpHeaderInjectionCrlfStrategy` closes category 4's last known real detection gap (`http_header_injection`); fix: a second, independent `points_from_ground_truth` bug found wiring it in (BUG-0044/PA-0046) (2026-09-23)
+
+- Change: new `fuzzlab/oracle/strategies.py::HttpHeaderInjectionCrlfStrategy`
+  (`vuln_class="http_header_injection"`, `category="http-header-injection"`)
+  confirms `CC-LAB-0198`'s own deliberately-deferred `TWCH-0013` cell
+  (`/channels/redirect?destination=`, CWE-113) with a real two-probe
+  CRLF-response-header-injection differential: probe A sends
+  `f"fuzzlab-ok\r\n{header_name}: {token}"` (a per-call random,
+  never-legitimately-emitted header name/token) and requires the response
+  to carry that exact header; probe B (the control) sends the identical
+  text with the `\r\n` replaced by a single space and requires the header
+  to be ABSENT — ruling out a target that turns an arbitrary input
+  substring into a response header for some unrelated reason. Registered
+  in `default_strategies()`. `fuzzlab/core/runmode.py::_VULN_TO_CATEGORY`
+  gains `"http_header_injection": "http-header-injection"`;
+  `fuzzlab/oracle/strategies.py::_CATEGORY_TO_CLASS` gains
+  `"http-header-injection": "http_header_injection"` — both checked
+  directly before assuming either already existed (per `BUG-0043`'s own
+  lesson, not repeated here). Read `fuzzlab/labgen/emitters/go_net_http/
+  templates/sinks/raw_socket_response_write.go.j2` (the vulnerable twin's
+  own `http.Hijacker` mechanism) before designing this, and empirically
+  verified against a live boot, before writing the strategy, that a plain
+  `requests`-based sender genuinely observes the spliced-in header (via
+  `urllib3`/`http.client`'s own header parser) with no
+  normalization/merging defeating observation — a raw-socket-level probe
+  turned out to be unnecessary in practice, confirmed rather than assumed.
+  New live-boot test: `tests/test_labgen_go_live_boot.py::
+  test_http_header_injection_strategy_closes_the_crlf_detection_gap`.
+  `tests/test_multitarget_category4.py`'s two independent hardcoded
+  recall assertions (grep-counted per PA-0043: exactly 2 occurrences of
+  the stale fraction, both updated) move from `12/15` to `13/15`
+  (`tp` 12 -> 13, `fp` stays 0).
+  Second, independent defect found and fixed in the same change
+  (`BUG-0044`/`PA-0046`): `fuzzlab/harness/auto.py::
+  points_from_ground_truth`'s `sink_context_by_point` lookup silently
+  collapsed `TWCH-0013` (`sink_context="header"`) and `TWCH-0015`
+  (`sink_context="redirect"`, `BUG-0043`'s own addition, sharing the same
+  `destination` sink) down to whichever case sorted last in
+  `ground_truth.cases`, discarding the other's `sink_context` — the new
+  `R-HEADER-INJECTION` rule's own `sink_context_in: ["header"]` gate never
+  matched that point until this was fixed. Fixed by keeping every DISTINCT
+  `sink_context` value per `(url, method, param)` key (a `set`, not a
+  scalar) and emitting one audited `InjectionPoint` per distinct value —
+  verified harmless against `fuzzlab.harness.scoring.score`'s own
+  set-based, vuln_class-keyed dedup (a duplicate point differing only in
+  `sink_context` cannot double-count a TP/FP) before relying on it, and
+  verified to change nothing for every OTHER point in every existing
+  corpus (one case per point, one value in the set, same single point as
+  before).
+- Impact (other components / project): `FUZZ` (`strategies.py`,
+  `runmode.py`, `auto.py`) and `AUD` (`CC-AUD-0026`'s own
+  `R-HEADER-INJECTION` rule, this entry's companion). `LAB`'s `CC-LAB-0198`
+  entry's own detection follow-on is now closed (no `LAB` change needed —
+  the lab page and its ground-truth label already existed). The
+  `points_from_ground_truth` fix affects every corpus with a
+  multi-vuln_class-per-endpoint case pair going forward, not just Twitch's
+  own `TWCH-0013`/`TWCH-0015` — verified to change nothing for every
+  other existing point across every corpus (full non-slow suite plus
+  every multitarget/live-boot test file re-run, no new failures beyond
+  the 18 pre-existing, unrelated PHP Laravel/labgen-CLI ones).
+- Risk (level; mitigation or accepted-risk justification): Low. The new
+  strategy/rule are purely additive (new class registered, new dict
+  entries added, no existing entry changed) and fail closed by
+  construction (a target that rejects the CRLF probe, or whose control
+  probe also shows the marker, never confirms). The `points_from_ground_
+  truth` fix changes point CARDINALITY only for the one point that
+  actually has more than one distinct `sink_context` today — mitigated by
+  `scoring.py`'s own set-based dedup (read directly, not assumed) and by
+  re-running the full non-slow suite plus every multitarget/live-boot
+  test file, which found no new failures.
+- Deliverables:
+  - [x] `HttpHeaderInjectionCrlfStrategy` added and registered — done
+  - [x] `_VULN_TO_CATEGORY`/`_CATEGORY_TO_CLASS` entries added, verified
+        neither already existed — done
+  - [x] Empirically verified (before design) that `requests` observes the
+        spliced-in header without normalization defeating it — done
+  - [x] Live-boot test added and passing against a real booted app — done
+  - [x] `points_from_ground_truth` `sink_context` collapse bug found,
+        fixed, and documented (`BUG-0044`/`PA-0046`) — done
+  - [x] `tests/test_multitarget_category4.py`'s both independent
+        hardcoded recall assertions grep-counted and updated (PA-0043) —
+        done
+  - [x] Full non-slow suite + all multitarget/live-boot test files
+        re-run, no new failures — done
+- Effectiveness (assessed 2026-09-23): achieved. Twitch's own real, scored
+  recall in `test_both_apps_run_through_multitarget_for_real` moves from
+  `12/15` to `13/15` (`tp` 12 -> 13, `fp` 0), verified against a real
+  booted app over the real `run_targets`/`RequestsProbeSender` pipeline,
+  not merely a hand-built `Candidate` call. This closes this project's own
+  last known real category-4 detection gap for the classes it has ground
+  truth for (`webhook_signature`'s CWE-347 timing side channel and
+  `path_traversal` remain open, each for its own distinct, already-tracked
+  reason — not silently claimed closed).
+
 ### CC-FUZZ-0040 — fix: `open_redirect` silently unreachable in a scored pipeline -- missing category mapping, then a wrongly-hyphenated strategy `vuln_class` (BUG-0043/PA-0045) (2026-09-23)
 
 - Change: `fuzzlab/core/runmode.py::_VULN_TO_CATEGORY` gains

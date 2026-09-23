@@ -42,13 +42,40 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
     # `Case` (`labels.json`) instead. A rule keyed on `sink_context_in`
     # (`R-INSECURE-DESERIALIZATION`, `CC-FUZZ-0030`) needs it on the audited
     # point too, so look it up by the same (url, method, param) identity a
-    # point and its case share (one case per point in every corpus checked
-    # so far -- ambiguous only if a future corpus gives one point two
-    # differently-typed cases, not attempted here).
-    sink_context_by_point = {
-        (c.url if c.url.startswith("/") else "/" + c.url, c.method.upper(), c.param): c.sink_context
-        for c in ground_truth.cases
-    }
+    # point and its case share.
+    #
+    # `BUG-0044`/`PA-0046`: a (url, method, param) key is NOT always
+    # one-case-per-point -- `fuzzlab.labels.contract`'s own supported
+    # multi-vuln_class-per-endpoint pattern (`Case.key` includes
+    # `vuln_class`, e.g. Twitch's `TWCH-0013`/`TWCH-0015`, both at
+    # `/generated/labgen-go-0025`/`destination`, `sink_context="header"`
+    # vs `"redirect"` respectively) means more than one DISTINCT
+    # `sink_context` can legitimately apply to the same point. A plain
+    # `{key: sink_context}` dict comprehension here silently kept only
+    # whichever case happened to be LAST in `ground_truth.cases`' own
+    # iteration order, discarding the other -- a `sink_context_in`-gated
+    # rule for the discarded case's own vuln_class then never fired for
+    # this point at all, an unconditional false negative for as long as
+    # any two cases have shared a (url, method, param) key with different
+    # `sink_context` values (found empirically: `CC-FUZZ-0041`'s new
+    # `R-HEADER-INJECTION`/`sink_context_in=["header"]` rule never
+    # generated a candidate for `TWCH-0013` in a real `run_targets` run,
+    # despite `HttpHeaderInjectionCrlfStrategy` confirming the identical
+    # candidate directly when hand-built, because this dict's last-write-
+    # wins collapse had already overwritten `"header"` with `TWCH-0015`'s
+    # own `"redirect"` for that same key). Fixed by keeping every DISTINCT
+    # `sink_context` value per key (a `set`, not a scalar) and emitting one
+    # audited `InjectionPoint` per distinct value below -- `fuzzlab.harness.
+    # scoring.score`'s own `detected_keys` is a `set` keyed on `(url,
+    # method, param, vuln_class)` (never `sink_context`), so a duplicate
+    # point differing only in `sink_context` costs at most one extra,
+    # harmless re-probe of every OTHER (non-`sink_context`-gated) rule for
+    # that one point -- never a double-counted TP/FP, verified by
+    # `scoring.py`'s own set-based dedup logic before relying on it here.
+    sink_contexts_by_point: dict[tuple[str, str, str], set[str | None]] = {}
+    for c in ground_truth.cases:
+        key = (c.url if c.url.startswith("/") else "/" + c.url, c.method.upper(), c.param)
+        sink_contexts_by_point.setdefault(key, set()).add(c.sink_context)
     for gp in ground_truth.points:
         path = gp.url if gp.url.startswith("/") else "/" + gp.url
         is_dom = (gp.client_only or (gp.rendering or "") == "js"
@@ -67,11 +94,13 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
                 if gp.param == "body" and gp.location == "body" and gp.rendering == "server-json"
                 else None
             )
-            sink_context = sink_context_by_point.get((path, gp.method.upper(), gp.param))
-            points.append(InjectionPoint(url=base + path, param=gp.param,
-                                         method=gp.method.upper(), location=gp.location,
-                                         body_content_type=body_content_type,
-                                         sink_context=sink_context))
+            sink_contexts = sink_contexts_by_point.get(
+                (path, gp.method.upper(), gp.param), {None})
+            for sink_context in sorted(sink_contexts, key=lambda s: s or ""):
+                points.append(InjectionPoint(url=base + path, param=gp.param,
+                                             method=gp.method.upper(), location=gp.location,
+                                             body_content_type=body_content_type,
+                                             sink_context=sink_context))
         elif is_dom and browser_available:
             loc = gp.location if gp.location in ("query", "fragment") else "query"
             points.append(InjectionPoint(url=base + path, param=gp.param,

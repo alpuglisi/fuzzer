@@ -85,6 +85,13 @@ _VULN_TO_CATEGORY = {
     # all along -- only this mapping entry was missing, found empirically
     # via a real `run_targets` pipeline run, not by the existing guard.
     "open_redirect": "open-redirect",
+    # `http_header_injection` (CC-FUZZ-0041): the same underscore/hyphen
+    # mismatch class again, added proactively alongside `HttpHeaderInjection
+    # CrlfStrategy`/`R-HEADER-INJECTION` rather than being found empirically
+    # after the fact -- checked both this dict and `_CATEGORY_TO_CLASS`
+    # (`fuzzlab/oracle/strategies.py`) before assuming either already had
+    # an entry, per this change's own task instructions.
+    "http_header_injection": "http-header-injection",
 }
 
 

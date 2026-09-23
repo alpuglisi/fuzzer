@@ -3,6 +3,70 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0026 — `R-HEADER-INJECTION` audit rule (2026-09-23)
+
+- Change: adds `R-HEADER-INJECTION`, category `http-header-injection`, to
+  `fuzzlab/audit/rules_data/default_rules.json` — `{"location_in":
+  ["query", "body"], "sink_context_in": ["header"]}`, the same
+  `location_in`+`sink_context_in` shape as `R-INSECURE-DESERIALIZATION`/
+  `R-UNRESTRICTED-FILE-UPLOAD`/`R-PRICE-INTEGRITY`. `reference` is
+  `"http-response-splitting"` (no existing `references/` catalog
+  directory names this concern under that exact slug — the same kind of
+  deliberate departure from the "reference matches an existing catalog
+  dir" default `R-PRICE-INTEGRITY`'s own entry already took, for the same
+  reason: no catalog entry exists yet for this concern). Gated on
+  `sink_context_in: ["header"]` rather than a `name_regex` (the shape
+  `R-OPEN-REDIRECT` uses) deliberately: `sink_context="header"` is this
+  project's own ground-truth-schema label for exactly this concern
+  (`TWCH-0013`'s own `labels.json` entry), and a name-based regex would
+  either miss this shape (a redirect-style `destination` param, already
+  claimed by `R-OPEN-REDIRECT`'s own broader regex) or risk over-matching
+  unrelated params project-wide for a concern that is currently
+  single-instance — checked before choosing this gate: `sink_context=
+  "header"` is also used by `outbound_header_injection`
+  (php_laravel's HuddleHub `triggerWord`, `CC-LAB-0135`, a genuinely
+  distinct OUTBOUND-request-header concern, not this one), so this rule
+  DOES generate a second candidate there too under this rule's own
+  category — verified this cannot cause a false positive:
+  `HttpHeaderInjectionCrlfStrategy` (`CC-FUZZ-0041`) fails closed on that
+  page (no response-header splice is observable for an outbound-only
+  injection), and `outbound_header_injection`'s own `vuln_class` has no
+  `_VULN_TO_CATEGORY` entry mapping it to `http-header-injection`, so no
+  currently-automatic, ground-truth-driven run against HuddleHub ever
+  includes this category in `plan.categories` to generate the candidate
+  in the first place.
+- Impact (other components / project): `AUD` primarily
+  (`default_rules.json`). `FUZZ`'s `CC-FUZZ-0041` (this rule's own
+  companion oracle strategy, `HttpHeaderInjectionCrlfStrategy`) depends on
+  this rule to ever receive a candidate to confirm. Closes `CC-LAB-0198`'s
+  own deliberately-deferred detection follow-on for Twitch's
+  `TWCH-0013`.
+- Risk (level; mitigation or accepted-risk justification): Low.
+  Additive-only (one new rule entry, no existing rule changed). The
+  `sink_context_in` gate means this rule only ever fires for a point whose
+  `sink_context` was positively typed as `"header"` — never for a
+  crawled/untyped real point with no `sink_context` at all — so it cannot
+  spuriously widen candidate generation on an untyped black-box target.
+  The one cross-concern overlap found during review (`outbound_header_
+  injection`'s shared `sink_context` value) was checked directly, not
+  assumed, and shown structurally unable to produce a false positive
+  through either the strategy's own fail-closed confirm logic or the
+  category's own current unreachability from that app's ground truth.
+- Deliverables:
+  - [x] `R-HEADER-INJECTION` rule added — done
+  - [x] Cross-checked `sink_context="header"` against every other
+        `labels.json` file for an unintended overlap, and verified the
+        one found (`outbound_header_injection`) cannot false-positive —
+        done
+  - [x] Verified live via the real, scored multitarget pipeline
+        (`tests/test_multitarget_category4.py`) — done
+- Effectiveness (assessed 2026-09-23): achieved. `evaluate()` now
+  nominates a real candidate for `TWCH-0013`'s `destination` param under
+  category `http-header-injection`, which `HttpHeaderInjectionCrlfStrategy`
+  confirms — verified against a live-booted app through the real
+  `run_targets` pipeline (Twitch's own `tp` moves from 12 to 13, `fp`
+  stays 0).
+
 ### CC-AUD-0025 — `R-PRICE-INTEGRITY` audit rule (2026-09-23)
 
 - Change: adds `R-PRICE-INTEGRITY`, category `price-integrity-bypass`, to

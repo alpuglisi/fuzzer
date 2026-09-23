@@ -4,6 +4,51 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (FUZZ/AUD: `http_header_injection` detection closes category 4's last known real gap; fix: a second, independent point-building bug found wiring it in, BUG-0044/PA-0046)
+- New oracle strategy `fuzzlab/oracle/strategies.py::
+  HttpHeaderInjectionCrlfStrategy` (`CC-FUZZ-0041`) confirms `CC-LAB-0198`'s
+  own `http_header_injection` cell (Twitch's `TWCH-0013`,
+  `GET /channels/redirect?destination=`, CWE-113) with a real, live-
+  verified two-probe CRLF-response-header-injection differential: a
+  per-call random marker header spliced in via a real `\r\n` byte pair
+  must appear in the response; the identical marker text submitted
+  WITHOUT a `\r\n` must not. Empirically verified against a live boot
+  before designing it (per this change's own task) that a plain
+  `requests`-based sender genuinely observes the spliced-in header with
+  no normalization/merging defeating it — no raw-socket-level probing
+  was needed after all. New audit rule `R-HEADER-INJECTION`
+  (`fuzzlab/audit/rules_data/default_rules.json`, `CC-AUD-0026`,
+  `sink_context_in: ["header"]`, category `http-header-injection`).
+  `fuzzlab/core/runmode.py::_VULN_TO_CATEGORY` and `fuzzlab/oracle/
+  strategies.py::_CATEGORY_TO_CLASS` both gain the matching
+  `http_header_injection`/`http-header-injection` entries (checked both
+  directly rather than assuming either already existed, per BUG-0043's
+  own lesson). Verified live end to end
+  (`tests/test_labgen_go_live_boot.py::
+  test_http_header_injection_strategy_closes_the_crlf_detection_gap`)
+  and through the real, scored multitarget pipeline
+  (`tests/test_multitarget_category4.py`): Twitch's own recall moves from
+  `12/15` to `13/15` (`tp` 12 -> 13, `fp` stays 0) — this project's own
+  last known real category-4 detection gap (webhook-signature's CWE-347
+  timing side channel and path-traversal remain, each for its own
+  distinct, already-tracked reason).
+- Wiring this into the real pipeline surfaced a second, independent,
+  genuine pre-existing defect (`BUG-0044`/`PA-0046`, fixed in the same
+  change): `fuzzlab/harness/auto.py::points_from_ground_truth`'s
+  `sink_context_by_point` lookup silently collapsed two ground-truth
+  cases sharing a `(url, method, param)` key but differing `vuln_class`
+  (`TWCH-0013`'s `sink_context="header"` and `TWCH-0015`'s
+  `sink_context="redirect"`, both at the same `destination` sink — a
+  pattern `BUG-0043`'s own fix legitimately introduced) down to whichever
+  case sorted last, discarding the other's `sink_context` — a
+  `sink_context_in`-gated rule for the discarded case's own vuln_class
+  then never generated a candidate for that point at all. Fixed by
+  keeping every distinct `sink_context` value per point and emitting one
+  audited point per distinct value, verified harmless against
+  `fuzzlab.harness.scoring.score`'s own set-based, vuln_class-keyed
+  dedup, and verified to introduce no other regressions across the full
+  non-slow suite plus every multitarget/live-boot test file.
+
 ## 2026-09-23 (lab: Twitch's 14th real page, this stack's first open_redirect instance; fix: two genuine detection-pipeline bugs found wiring it in, BUG-0043/PA-0045)
 - `go_net_http` gains Twitch's 14th real page, `GET /auth/login-redirect?next=`
   (a "return here after login" convenience endpoint — a genuinely common,
