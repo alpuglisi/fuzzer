@@ -573,11 +573,15 @@ _NETFLIX_MULTI_MANIFESTS = (
     # CC-LAB-0195: tenth real page, first weak_token_entropy instance
     # (/api/session/refresh) -- a tenth, distinct route, no collision.
     "lab/manifests/weak_token_entropy_netflix_sample.yaml",
+    # CC-LAB-0197: eleventh real page, first ssti/template_render instance
+    # on THIS app identity (/api/support/template-preview) -- an eleventh,
+    # distinct route, no collision.
+    "lab/manifests/ssti_netflix_support_sample.yaml",
 )
 _NETFLIX_MULTI_CELL_IDS = {
     "LABGEN-JV-0001", "LABGEN-JV-0003", "LABGEN-JV-0005", "LABGEN-JV-0007",
     "LABGEN-JV-0009", "LABGEN-JV-0011", "LABGEN-JV-0013", "LABGEN-JV-0015",
-    "LABGEN-JV-0017", "LABGEN-JV-0019",
+    "LABGEN-JV-0017", "LABGEN-JV-0019", "LABGEN-JV-0021",
 }
 _BUILD_TIMEOUT_S = 240.0
 _BOOT_TIMEOUT_S = 30.0
@@ -619,9 +623,10 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
     `/api/account/preferences`, `CC-LAB-0193`), `LABGEN-JV-0017`
     (ssrf, `/api/content/thumbnail-import`, `CC-LAB-0194`), and
     `LABGEN-JV-0019` (weak_token_entropy, `/api/session/refresh`,
-    `CC-LAB-0195`) -- into one real booted app (ten distinct routes, no
-    collision), then runs the real generic `run_targets` pipeline against
-    it. Originally
+    `CC-LAB-0195`), and `LABGEN-JV-0021` (ssti, `/api/support/template-
+    preview`, `CC-LAB-0197`) -- into one real booted app (eleven distinct
+    routes, no collision), then runs the real generic `run_targets`
+    pipeline against it. Originally
     closed the follow-on `CC-FUZZ-0032` flagged (both of Netflix's
     positives confirming together in one real boot); extended by
     `CC-LAB-0184` to prove the third positive confirms alongside the other
@@ -672,7 +677,14 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
     zero new detection code to confirm it too -- verified live in
     `tests/test_labgen_spring_boot_netflix_session_refresh_live_boot.py`
     first, then reproduced here in the shared multi-cell boot -- moving
-    Netflix's own scored recall in this boot from 9/9 to 10/10.
+    Netflix's own scored recall in this boot from 9/9 to 10/10. Extended
+    again by `CC-LAB-0197` to add the eleventh positive, `NFLX-0011`: the
+    existing generic `SstiStrategy` (already built and live-boot-confirmed
+    against TrackerNest's own `/wiki/pages/render` cell, `TNEST-0001`)
+    needed zero new detection code to confirm it too -- verified live in
+    `tests/test_labgen_spring_boot_netflix_support_template_preview_live_
+    boot.py` first, then reproduced here in the shared multi-cell boot --
+    moving Netflix's own scored recall in this boot from 10/10 to 11/11.
     """
     root = tmp_path_factory.mktemp("netflix_multitarget")
     shutil.copytree(SKELETON_DIR, root, dirs_exist_ok=True)
@@ -731,11 +743,14 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
         # go_net_http channel-settings cell), CC-LAB-0194 moved it from
         # 8/8 to 9/9 with zero new detection code again
         # (SsrfInBandMarkerStrategy/SsrfOobStrategy, already built for
-        # Twitch's go_net_http SSRF cells), and CC-LAB-0195 moves it from
-        # 9/9 to 10/10 with zero new detection code again
+        # Twitch's go_net_http SSRF cells), CC-LAB-0195 moved it from 9/9
+        # to 10/10 with zero new detection code again
         # (PredictableTokenSourceStrategy, already built for Twitch's
-        # go_net_http session-refresh cell).
-        assert outcome.report.tp == 10 and outcome.report.fp == 0
+        # go_net_http session-refresh cell), and CC-LAB-0197 moves it from
+        # 10/10 to 11/11 with zero new detection code again (SstiStrategy,
+        # already built and live-boot-confirmed against TrackerNest's own
+        # /wiki/pages/render cell).
+        assert outcome.report.tp == 11 and outcome.report.fp == 0
         assert outcome.report.recall == 1.0
     finally:
         listener.stop()

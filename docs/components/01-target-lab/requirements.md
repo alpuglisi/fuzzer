@@ -4896,6 +4896,98 @@ lane) can submit a payload as
   concluding this, not assumed absent) -- substituted with a documented,
   rigorous self-review performed and recorded in `CC-LAB-0196`.
 
+- **FR-LAB-137** *(Netflix's eleventh real page: first `ssti`/
+  `template_render` instance on THIS app identity, `spring_boot`,
+  `GET /api/support/template-preview?expr=`; `CC-LAB-0197`, 2026-09-23).*
+  Instantiates `lab/safety_matrix.yaml`'s existing `template_render` sink
+  family and its `user_supplied_template_compile`/
+  `file_loaded_template_name` ops (`CC-LAB-0063`) on `spring_boot` for a
+  SECOND time -- TrackerNest (category 3, `CC-LAB-0130`) already hosts
+  this exact shape on this same shared package, at `/wiki/pages/render`;
+  this entry brings it to Netflix (category 4) at a new, distinct route --
+  zero new safety-matrix entry, zero new generator code (a new manifest +
+  `_PAGE_PARAMS` route entry only, the same "new manifest + route entry"
+  pattern `CC-LAB-0179`'s XXE reuse and `CC-LAB-0184`'s
+  insecure_deserialization reuse already used). A customer-support-agent
+  template-preview tool for personalized notification messages (a real,
+  plausible internal-tooling feature -- an agent-facing preview tool
+  letting a support agent see how a notification template will render
+  before it's sent, the same category of internal tool this project's own
+  TrackerNest wiki-macro page and Twitch chat-command page (`CC-LAB-0196`)
+  already model for their respective apps). Convention 2 (like SSRF/
+  mass-assignment/file-upload/price-integrity/predictable-token, and
+  identical to TrackerNest's own SSTI cell): the manifest's one op names
+  a sink module directly, reusing `query_param`'s own `var_name`/
+  `param_name` contract verbatim (already used by this stack's `ssrf`/
+  `spel_injection` cells). The vulnerable twin
+  (`user_supplied_template_compile`) evaluates the agent-supplied `expr`
+  query parameter directly as an OGNL expression via `Ognl.getValue()`
+  (CWE-1336, the identical mechanism TrackerNest's own `macroExpr` cell
+  uses). The secure twin (`file_loaded_template_name`) only ever selects
+  among a fixed, developer-defined preview-template map by name, never
+  compiling tainted input as an expression. Real, live-boot-proven
+  differential (`tests/test_labgen_spring_boot_netflix_support_template_
+  preview_live_boot.py::test_ssti_vulnerable_twin_evaluates_ognl_
+  expression_for_real`/`test_ssti_secure_twin_never_evaluates_the_tainted_
+  value`): the classic `7*7` -> `49` OGNL-evaluation proof on the
+  vulnerable twin; the secure twin never evaluates it (`"Unknown macro"`)
+  while a real, fixed, developer-defined template name still resolves.
+  **Detection generalization, verified empirically, not assumed from the
+  shape match alone -- the same rigor `CC-LAB-0196`'s own Go/`text/
+  template` investigation established, with the opposite outcome.** The
+  existing generic `SstiStrategy` (`fuzzlab/oracle/strategies.py`, already
+  built and live-boot-confirmed against TrackerNest's own `TNEST-0001`)
+  sends an arithmetic-expression payload in one of five template-engine
+  syntaxes (including OGNL-compatible ones) and checks whether the
+  numeric product appears while the literal expression does not. Unlike
+  Go's `text/template` (whose action grammar has no infix arithmetic
+  operators at all, `CC-LAB-0196`), Java/OGNL genuinely DOES support
+  this marker technique -- confirmed live in
+  `tests/test_labgen_spring_boot_netflix_support_template_preview_live_
+  boot.py::TestSstiStrategyGeneralizesToNetflix`: `SstiStrategy.confirm()`
+  correctly returns a confirmed verdict against the real booted vulnerable
+  twin and correctly returns `None` against the real booted secure twin,
+  needing zero new detection code. `R-SSTI`'s own audit-rule reachability
+  gate needed zero change -- this case's `location="query"` point is
+  already reachable through it, matching TrackerNest's own `TNEST-0001`
+  reachability. Netflix's own real, scored `multitarget` recall moves from
+  `10/10` to `11/11` (`tp` moves from 10 to 11).
+  PA-0042 compliance: `tests/test_multitarget_category4.py`'s recall
+  assertion and cell/manifest lists, and `tests/
+  test_labels_contract_category4.py`'s case count/cross-check, were
+  re-derived, not left stale; `tests/test_auto.py` was checked by direct
+  inspection (not assumed clean by analogy) and found genuinely
+  unaffected -- the new case's `param="expr"`/`location="query"` never
+  touches its whole-body-point (`param=="body"`) content-type-detection
+  count.
+  Ground truth: `NFLX-0011` added to `lab/ground-truth-netflix-clone/`
+  (`vuln_class="ssti"`, `sink_context="template"` -- both pre-existing
+  enum values already used by `spring_boot`'s TrackerNest ground truth and
+  by `TWCH-0012`; `param="expr"`/`location="query"`, the same per-field
+  query-param convention `NFLX-0004`/`NFLX-0009` already establish).
+  **Shared-file collision discipline, checked directly, not assumed:**
+  `fuzzlab/labgen/emitters/spring_boot/` is shared with category 3
+  (`claude/category-3-build-iuu5k9`, which owns TrackerNest's own existing
+  SSTI cell) and category 5 (`claude/category-5-build-6boejs`); both
+  sibling branches were fetched and diffed against this branch's own copy
+  of every touched file (`__init__.py`, `modules.py`, `templates/`) before
+  editing -- both diffs show only deletions relative to this branch
+  (strictly behind on every one of those files, no conflicting edit to
+  the same lines/keys), so no collision risk from either sibling branch.
+  **Bookkeeping-ID discipline, checked directly, not assumed:** confirmed
+  `CC-LAB-0197` against this branch's own reserved block (`CC-LAB-0170`-
+  `0209`) and the highest number actually USED in this log (`CC-LAB-0196`,
+  from the immediately-preceding `CC-LAB-0196`/`CC-FUZZ-0038` increment),
+  not merely mentioned anywhere in this branch's merged docs. `LABGEN-JV-
+  0021`/`0022` cell IDs confirmed free (grepped `LABGEN-JV-` across every
+  manifest, highest existing was `LABGEN-JV-0020`, from `CC-LAB-0195`).
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0196`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded in `CC-LAB-0197`.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

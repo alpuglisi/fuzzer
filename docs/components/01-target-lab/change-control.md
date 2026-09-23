@@ -3,6 +3,163 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0197 — Netflix's 11th real page: first ssti/template_render instance on THIS app identity, `spring_boot`, `/api/support/template-preview` (FR-LAB-137) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing `template_render`
+  sink family / `server_template_injection` concern (`user_supplied_
+  template_compile`/`file_loaded_template_name` ops, `CC-LAB-0063`)
+  on `spring_boot` a SECOND time -- TrackerNest (category 3, `CC-LAB-0130`)
+  already hosts this exact shape on this same shared package at
+  `/wiki/pages/render`. This entry brings the shape to Netflix (category
+  4) at a new, distinct route: `GET /api/support/template-preview?expr=`,
+  a customer-support-agent template-preview tool for personalized
+  notification messages -- a real, plausible internal-tooling feature
+  (the same category of internal tool this project's own TrackerNest
+  wiki-macro page and Twitch chat-command page, `CC-LAB-0196`, already
+  model for their respective apps). Zero new safety-matrix entry, zero
+  new generator code -- a new manifest
+  (`lab/manifests/ssti_netflix_support_sample.yaml`) plus one new
+  `_PAGE_PARAMS` route entry in `fuzzlab/labgen/emitters/spring_boot/
+  __init__.py`, the same "new manifest + route entry" pattern
+  `CC-LAB-0179`'s XXE reuse and `CC-LAB-0184`'s insecure_deserialization
+  reuse already used. Convention 2 (like SSRF/mass-assignment/file-
+  upload/price-integrity/predictable-token, and identical to
+  TrackerNest's own SSTI cell): the manifest's one op names a sink module
+  directly, reusing `query_param`'s own `var_name`/`param_name` contract
+  verbatim (already used by this stack's `ssrf`/`spel_injection` cells).
+  - **Vulnerable** (`LABGEN-JV-0021`, `user_supplied_template_compile`):
+    the agent-supplied `expr` query parameter is evaluated directly as an
+    OGNL expression via `Ognl.getValue()` (CWE-1336, the identical
+    mechanism TrackerNest's own `macroExpr` cell uses).
+    **Secure** (`LABGEN-JV-0022`, `file_loaded_template_name`): the same
+    `expr` value only ever selects among a fixed, developer-defined
+    preview-template map by name, never compiled/evaluated as an
+    expression.
+  - **Zero new generator infrastructure, no new modules/templates
+    either**: this is a pure route-reuse increment -- the vulnerable/
+    secure sink templates (`user_supplied_template_compile.java.j2`/
+    `file_loaded_template_name.java.j2`) and the `query_param` source
+    template are TrackerNest's own, unmodified, read but never changed.
+    Only `_PAGE_PARAMS["/api/support/template-preview"]` (a new dict
+    entry: `{"var_name": "previewExpr", "param_name": "expr"}`) is new
+    code, distinguishing this cell's Java local-variable name from
+    TrackerNest's own `macroExpr` cell so the two never collide on the
+    same shared package (verified directly: `tests/test_labgen_spring_
+    boot_netflix_support_template_preview.py::test_vulnerable_twin_calls_
+    ognl_get_value_secure_twin_does_not` asserts both `previewExpr` and
+    `request.getParameter("expr")` appear in the rendered source).
+  Real, live-boot-proven differential
+  (`tests/test_labgen_spring_boot_netflix_support_template_preview_live_
+  boot.py::test_ssti_vulnerable_twin_evaluates_ognl_expression_for_real`/
+  `test_ssti_secure_twin_never_evaluates_the_tainted_value`): the classic
+  `7*7` -> `49` OGNL-evaluation proof `CC-LAB-0130`'s own TrackerNest test
+  established, reproduced on this new route -- the vulnerable twin
+  evaluates it for real; the secure twin never does (`"Unknown macro"`)
+  while a real, fixed, developer-defined template name (`welcome`) still
+  resolves through its lookup path.
+  **Detection generalization, verified empirically via a real live-boot
+  run, not assumed from the shape match alone -- per this task's own
+  explicit instruction, given this session's own hard-won lesson from
+  `CC-LAB-0196`'s Go/`text/template` case (where an identical-looking
+  shape match did NOT generalize).** The existing generic `SstiStrategy`
+  (`fuzzlab/oracle/strategies.py`, arm `ssti:evaluation-marker`, already
+  built and live-boot-confirmed against TrackerNest's own `TNEST-0001`)
+  sends an arithmetic-expression payload in one of five template-engine
+  syntaxes (`${a*b}`/`{{a*b}}`/`<%= a*b %>`/`#{a*b}`/`${{a*b}}`) and
+  checks whether the numeric product appears while the literal expression
+  does not. Unlike Go's `text/template` (whose action grammar has no
+  infix arithmetic operators at all, a hard parser-level restriction,
+  `CC-LAB-0196`), Java's OGNL genuinely DOES evaluate arithmetic infix
+  expressions natively -- `Ognl.getValue()` parses and evaluates `7*7` (no
+  delimiter wrapping needed at all, unlike the templated-delimiter
+  engines `_ssti_payloads()` targets), so at least one of the five
+  wrapped payload syntaxes reaches OGNL's own expression parser
+  successfully and evaluates for real. This is verified live, not
+  inferred from the mechanism-level analogy alone, in
+  `tests/test_labgen_spring_boot_netflix_support_template_preview_live_
+  boot.py::TestSstiStrategyGeneralizesToNetflix`: against a real booted
+  vulnerable twin, `SstiStrategy().confirm(...)` returns a confirmed
+  verdict (`vuln_class="ssti"`); against a real booted secure twin, it
+  correctly returns `None`. Zero new detection code needed. `R-SSTI`'s
+  own audit-rule reachability gate (`when: {location_in:
+  ["query","body"]}`) needed zero change -- this case's
+  `location="query"` point is already reachable through it, matching
+  TrackerNest's own `TNEST-0001` reachability exactly.
+  Netflix's own real, scored `multitarget` recall in the shared
+  multi-cell live-boot pipeline
+  (`tests/test_multitarget_category4.py::test_netflix_multi_cell_boot_
+  confirms_all_positives`) moves from `10/10` to `11/11` (`tp` moves from
+  10 to 11, `fp` stays 0).
+  **Cross-branch collision check, performed and recorded** (the same
+  recurring risk `CC-LAB-0191`'s/`CC-LAB-0196`'s own numbering-collision/
+  shared-file-collision stories flag): `git fetch origin claude/
+  category-3-build-iuu5k9 claude/category-5-build-6boejs` followed by a
+  diff of every shared file this task touched (`fuzzlab/labgen/emitters/
+  spring_boot/__init__.py`, `modules.py`, and its `templates/` directory)
+  against both sibling branches: both diffs show only deletions relative
+  to this branch (strictly behind on every one of those files, no
+  conflicting edit to the same lines/keys, and zero additions to
+  `modules.py` or `templates/` from either sibling), so no collision risk
+  from either sibling branch. This is a pure, non-colliding addition.
+  **Bookkeeping-ID discipline, checked directly, not assumed:** confirmed
+  `CC-LAB-0197` against this branch's own reserved block (`CC-LAB-0170`-
+  `0209`) and the highest number actually USED in this log (`CC-LAB-0196`,
+  from the immediately-preceding entry), not merely mentioned anywhere in
+  this branch's merged docs (category 5's own `CC-LAB-0210`-`0249` block
+  is also present in this branch's history and must not be mistaken for
+  "next free"). `LABGEN-JV-0021`/`0022` cell IDs confirmed free (grepped
+  `LABGEN-JV-` across every manifest, highest existing was `LABGEN-JV-
+  0020`, from `CC-LAB-0195`). Per `BUG-0040`/`PA-0042`, grepped `tests/
+  test_multitarget_category4.py`/`tests/test_auto.py`/`tests/
+  test_labels_contract_category4.py` for hardcoded fraction/count
+  assertions depending on Netflix's ground-truth cardinality and re-ran
+  all three directly (not just the non-slow suite) after updating them:
+  `test_multitarget_category4.py`'s Netflix recall assertion moved from
+  `10/10` to `11/11`, its `_NETFLIX_MULTI_MANIFESTS`/
+  `_NETFLIX_MULTI_CELL_IDS` module-level tuples/sets gained the new
+  manifest/cell IDs; `test_labels_contract_category4.py`'s case count
+  moved from 10 to 11 with a new `NFLX-0011` cross-check (and the opaque-
+  case-ID token-denylist loop gained `"ssti"`/`"template"`); `test_auto.py`
+  was checked by DIRECT inspection (not assumed clean by analogy to
+  `CC-LAB-0196`'s own affected Twitch case): its one Netflix-ground-truth-
+  cardinality-dependent assertion,
+  `test_points_from_ground_truth_sets_body_content_type_only_for_json_
+  cases`'s `len(body_points) == 6`, counts only `param == "body"` points
+  -- `NFLX-0011`'s `param="expr"`/`location="query"` is not a body point
+  at all, so this count is genuinely unaffected, a real checked-and-
+  confirmed-clean finding, not a restated assumption.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0196`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review: (1) re-read `CC-LAB-0130`'s own TrackerNest SSTI
+  manifest and modules.py's real sink templates before choosing the new
+  route's `_PAGE_PARAMS` shape, rather than assuming the shape from the
+  task dispatch's own suggested route name alone; (2) ran the full
+  non-slow suite plus the two directly-affected slow test files
+  (`test_multitarget_category4.py`, `test_labgen_spring_boot_netflix_
+  support_template_preview_live_boot.py`) and confirmed green before
+  considering this entry done; (3) performed the cross-branch collision
+  check and bookkeeping-ID verification above directly, not by analogy.
+  - Requirement: `FR-LAB-137` (`docs/components/01-target-lab/
+    requirements.md`).
+  - Tests: `tests/test_labgen_spring_boot_netflix_support_template_
+    preview.py` (new manifest unit test, no network/java/mvn required),
+    `tests/test_labgen_spring_boot_netflix_support_template_preview_live_
+    boot.py` (real live-boot differential + `SstiStrategy` generalization
+    proof, `@pytest.mark.slow`, skip-guarded per `PA-0005`),
+    `tests/test_labels_contract_category4.py` (ground-truth contract
+    extension), `tests/test_multitarget_category4.py` (multi-cell boot
+    recall assertion, `@pytest.mark.slow`).
+  - Ground truth: `NFLX-0011` added to `lab/ground-truth-netflix-clone/`
+    (`labels.json`/`injection-points.json`/`expectedresults.csv`)
+    (`vuln_class="ssti"`, `sink_context="template"` -- both pre-existing
+    enum values already used by `spring_boot`'s TrackerNest ground truth
+    and by `TWCH-0012`; `param="expr"`/`location="query"`, the same
+    per-field query-param convention `NFLX-0004`/`NFLX-0009` already
+    establish).
+
 ### CC-LAB-0196 — Twitch's 12th real page: first ssti/template_render instance on `go_net_http`, `/channels/commands` (FR-LAB-136) (2026-09-23)
 
 - Change: instantiates `lab/safety_matrix.yaml`'s existing `template_render`

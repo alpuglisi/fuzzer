@@ -4,6 +4,27 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (lab: Netflix's 11th real page, first `ssti`/`template_render` instance on this app identity, CC-LAB-0197/FR-LAB-137)
+- New Netflix cell (category 4, `spring_boot`): a customer-support-agent
+  template-preview endpoint, `GET /api/support/template-preview?expr=`
+  (`LABGEN-JV-0021`/`0022`, `lab/manifests/ssti_netflix_support_sample.yaml`).
+  Reuses TrackerNest's (category 3) own already-built `ssti`/
+  `template_render` shape on this same shared `spring_boot` package
+  verbatim (`query_param` source, `user_supplied_template_compile`/
+  `file_loaded_template_name` sinks, `CC-LAB-0130`) at a new,
+  Netflix-specific route — zero new generator code. Verified live: the
+  existing generic `SstiStrategy` (already confirmed against
+  TrackerNest's own `TNEST-0001`) needs zero new detection code either,
+  since Java/OGNL (unlike Go's `text/template`, `CC-LAB-0196`) supports
+  its arithmetic-product-marker payloads — confirmed empirically, not
+  assumed from the shape match alone
+  (`tests/test_labgen_spring_boot_netflix_support_template_preview_live_boot.py`).
+  Netflix's own scored recall in the multi-cell live-boot pipeline moves
+  from 10/10 to 11/11 (`NFLX-0011`). New ground truth
+  (`lab/ground-truth-netflix-clone/`), `FR-LAB-137`, and this branch's
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`/`docs/ARCHITECTURE.md`
+  status paragraphs updated to match.
+
 ## 2026-09-23 (FUZZ: `GoTemplateSstiStrategy` closes `go_net_http`'s SSTI detection gap, CC-FUZZ-0038/FR-FUZZ-24)
 - New oracle confirmation strategy for SSTI on Go's `text/template`
   syntax, closing the real, honestly-documented detection gap

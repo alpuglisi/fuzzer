@@ -208,6 +208,14 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
     # "/api/profiles/avatar"'s own empty-dict shape for a different
     # reason.
     "/api/session/refresh": {},
+    # CC-LAB-0197: Netflix's eleventh real page, a customer-support-agent
+    # template-preview endpoint for personalized notification messages --
+    # this stack's first ssti/template_render instance on THIS app identity
+    # (TrackerNest, category 3, already has this shape at
+    # /wiki/pages/render, CC-LAB-0130). Reuses query_param's own var_name/
+    # param_name contract verbatim (the same shape ssrf/spel_injection
+    # already use on this stack).
+    "/api/support/template-preview": {"var_name": "previewExpr", "param_name": "expr"},
 }
 
 #: Per-op source override (`CC-LAB-0173`) -- checked *after* the shape-level
