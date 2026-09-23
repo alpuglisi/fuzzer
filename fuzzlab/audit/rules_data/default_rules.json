@@ -42,6 +42,13 @@
       "transaction_type": "Template Injection",
       "when": { "location_in": ["query", "body"] },
       "reference": "server-side-template-injection"
+    },
+    {
+      "id": "R-SSRF",
+      "category": "ssrf",
+      "transaction_type": "Server-Side Request Forgery",
+      "when": { "name_regex": "url|uri|link|src|source|target|endpoint|fetch|proxy|webhook|image|thumbnail|avatar" },
+      "reference": "ssrf"
     }
   ]
 }

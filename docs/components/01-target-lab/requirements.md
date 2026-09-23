@@ -3795,6 +3795,18 @@ lane) can submit a payload as
   `redirect`/`csv` minting convention, not forced into an existing
   bucket, per the adequacy review).
 
+- **FR-LAB-117** *(`run_targets()` gains `oob`/`coverage`/`dbfault`
+  passthrough; `CC-LAB-0177`, 2026-09-23).* `fuzzlab.harness.multitarget.
+  run_targets()` forwards `oob`/`coverage`/`dbfault` to `run_auto()`
+  (previously silently dropped, though `run_auto()` already accepted
+  them), the same `None`-defaulted keyword shape as its existing
+  `browser`/`scheduler`/`plugins` passthrough. Needed so a
+  `TargetSpec`-driven multitarget run can actually use `FR-FUZZ-14`'s new
+  SSRF oracle strategies — found and fixed while wiring category 4's own
+  Phase E test to that new capability. One shared instance across every
+  target in a batch is safe: `run_targets()` loops sequentially, never
+  concurrently, over `specs`.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

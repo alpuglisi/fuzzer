@@ -3,6 +3,45 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0016 — `R-SSRF` audit rule (2026-09-23)
+
+- Change: adds `R-SSRF`, category `ssrf`, to
+  `fuzzlab/audit/rules_data/default_rules.json` — a bare `name_regex`-only
+  rule (`url|uri|link|src|source|target|endpoint|fetch|proxy|webhook|
+  image|thumbnail|avatar`), the same shape `R-OPEN-REDIRECT`/
+  `R-FILE-INCLUSION`/`R-COMMAND-INJECTION` already use. The project's first
+  candidate-generation rule for the `ssrf` category, closing one of the
+  three "no audit rule yet" gaps `CC-LAB-0176`/`FR-LAB-99` (category 4's
+  Phase E) flagged as real follow-on work. Paired with
+  `CC-FUZZ-0027`'s new `SsrfInBandMarkerStrategy`/`SsrfOobStrategy`
+  oracle confirmation (this rule alone only generates a candidate; those
+  strategies confirm it). Overlaps `R-OPEN-REDIRECT`'s `target` term
+  deliberately — `fuzzlab.audit.rules.matches()` is non-exclusive (a
+  parameter can match more than one rule, each producing its own
+  candidate/category), so the overlap is harmless, not a bug.
+  Reviewed pre-implementation per the component's pre-change review gate
+  (accuracy + adequacy passes; the adequacy pass's one addition — a cheap
+  in-band confirmation layer alongside the OOB one — is reflected in the
+  paired FUZZ change, not this rule itself).
+  New/changed files:
+  - `fuzzlab/audit/rules_data/default_rules.json`
+  - `docs/components/05-auditor/requirements.md` (`FR-AUD-7`, new)
+- Impact (other components / project): `default_rules.json` is shared
+  across every category and every existing target's own run — purely
+  additive (one new rule appended; no existing rule changed). No existing
+  target's scoring changes (no existing ground truth uses the `ssrf`
+  category with this rule absent, so nothing regresses).
+- Risk (level; mitigation or accepted-risk justification): **low**.
+  Additive-only; verified by re-running the full non-slow suite (no new
+  failures) plus category 4's own real live-boot Phase E test, which now
+  shows a real, confirmed SSRF finding.
+- Deliverables:
+  - [x] `R-SSRF` rule added, additive
+  - [x] Full non-slow suite re-verified green
+- Effectiveness (assessed 2026-09-23): met — `evaluate()` now emits a
+  real `ssrf`-category candidate for category 4's real SSRF cell
+  (`LABGEN-GO-0003`), confirmed end to end by `CC-FUZZ-0027`.
+
 ### CC-AUD-0015 — `--dry-run` CLI flag (lane D0a) (2026-09-22)
 - Change: `fuzzlab/tools/fetcher.py::build_parser()` gained `--dry-run` (via the
   shared `fuzzlab/cli_dryrun.add_dry_run_flag()`). The module's `__main__` block

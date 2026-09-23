@@ -129,22 +129,34 @@ class OobListener:
 
 def _make_handler(listener: OobListener):
     class _Handler(BaseHTTPRequestHandler):
-        def _handle(self) -> None:
+        def _handle(self, *, write_body: bool) -> None:
             m = _TOKEN_RE.search(self.path)
+            body = b""
             if m:
-                listener.record(m.group(1), self.path, self.client_address[0])
+                token = m.group(1)
+                listener.record(token, self.path, self.client_address[0])
+                # Echo the token back in the response body -- lets a caller
+                # confirm SSRF in-band (a single request, no wait_for poll)
+                # when the target reflects the fetched resource's body back,
+                # not only via the out-of-band hit `record()` above already
+                # confirms. Purely additive: `wait_for`/`hits()` never read
+                # this body, so this changes nothing for an existing
+                # OOB-only caller (e.g. `CommandInjectionOobStrategy`).
+                body = token.encode("ascii")
             self.send_response(200)
-            self.send_header("Content-Length", "0")
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
+            if body and write_body:
+                self.wfile.write(body)
 
         def do_GET(self) -> None:      # noqa: N802 - BaseHTTPRequestHandler naming
-            self._handle()
+            self._handle(write_body=True)
 
         def do_POST(self) -> None:     # noqa: N802
-            self._handle()
+            self._handle(write_body=True)
 
-        def do_HEAD(self) -> None:     # noqa: N802
-            self._handle()
+        def do_HEAD(self) -> None:     # noqa: N802 - HEAD must never carry a body
+            self._handle(write_body=False)
 
         def log_message(self, fmt, *args) -> None:  # silence default stderr access log
             pass

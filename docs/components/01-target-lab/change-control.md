@@ -3547,6 +3547,43 @@ implementation may begin.
   exclusion stated, Tier 1/2 status stated). 3/3 agreement reached by
   incorporating every concrete finding from both reviews without contesting
   any of them; implementation proceeds on this revised entry.
+### CC-LAB-0177 — `run_targets()` gains `oob`/`coverage`/`dbfault` passthrough, closing a real Phase E gap (2026-09-23)
+
+- Change: `fuzzlab/harness/multitarget.py`'s `run_targets()` forwarded
+  `browser`/`scheduler`/`plugins` to `run_auto()` but silently dropped
+  `oob`/`coverage`/`dbfault`, which `run_auto()` already accepted — found
+  while wiring `CC-FUZZ-0027`'s new real SSRF detection into category 4's
+  own multitarget test: a `TargetSpec`-driven run had no way to actually
+  use the new OOB oracle strategies. Fixed with the same
+  keyword-passthrough shape as the existing three, default `None`,
+  forwarded unchanged. No existing caller affected (verified against
+  `tests/test_multitarget.py`'s own existing call sites, none of which
+  pass these keywords). Safe to share one `OobListener` across every
+  target in a batch: `run_targets()` loops sequentially over `specs`,
+  never concurrently, and `OobListener` correlates hits by a fresh
+  per-probe token, never by target — no cross-target signal possible.
+  New/changed files:
+  - `fuzzlab/harness/multitarget.py` (`run_targets()`)
+  - `tests/test_multitarget_category4.py` (now passes a real `OobListener`
+    through, proving the SSRF cell is a real, confirmed finding — see
+    `CC-FUZZ-0027` for the confirmation-side work)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-117`, new)
+- Impact (other components / project): `run_targets()` is shared across
+  every category's own multitarget wiring — additive only (three new
+  `None`-defaulted keyword params, no existing signature position
+  changed).
+- Risk (level; mitigation or accepted-risk justification): **low**.
+  Pure keyword-passthrough addition; verified by re-running the full
+  non-slow suite and category 4's own real live-boot Phase E test (no new
+  failures).
+- Deliverables:
+  - [x] `oob`/`coverage`/`dbfault` passthrough added to `run_targets()`
+  - [x] No existing caller broken (verified against `tests/test_multitarget.py`)
+  - [x] Full non-slow suite + real live-boot slow tests re-verified green
+- Effectiveness (assessed 2026-09-23): met — category 4's own Phase E test
+  now threads a real `OobListener` through `run_targets()` and gets a
+  real, confirmed SSRF finding out the other end.
+
 ### CC-LAB-0176 — Phase E: wire both apps into `fuzzlab.harness.multitarget` for real (2026-09-23)
 
 - Change: Constructs real `TargetSpec`s for both of this category's apps

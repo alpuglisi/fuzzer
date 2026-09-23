@@ -436,6 +436,77 @@ class CommandInjectionOobStrategy(ConfirmationStrategy):
         return None
 
 
+class SsrfInBandMarkerStrategy(ConfirmationStrategy):
+    """The cheap first layer for SSRF: a single request, no OOB wait needed.
+
+    Points the candidate directly at the `OobListener`'s own callback URL
+    (reused as a marker responder here, not for its hit-recording side) and
+    checks whether the *immediate* response to that one request echoes the
+    minted token back -- exactly what this project's own SSRF lab cells do
+    (`go_net_http`'s `unchecked_url_fetch` sink: `io.Copy(w, resp.Body)`).
+    Cheaper than `SsrfOobStrategy` (no polling wait), so it runs first in
+    `default_strategies()`, mirroring every other category's own
+    cheapest-first stacking (SQLi: error/boolean/timing; command injection:
+    timing then OOB). Needs the same injected, already-started
+    `OobListener` `SsrfOobStrategy` does; without one, no-ops (fail-closed).
+    """
+    vuln_class = "ssrf"
+    mechanism = "in-band-fetch-marker"
+    category = "ssrf"
+
+    def __init__(self, listener: OobListener | None = None):
+        self._listener = listener
+
+    def confirm(self, candidate, sender):
+        if self._listener is None:
+            return None
+        token = self._listener.register()
+        canary = self._listener.callback_url(token)
+        probe = self._send(sender, candidate, canary)
+        if token in (probe.text or ""):
+            return Verdict(True, self.vuln_class, self.mechanism,
+                           {"canary": canary, "marker": token})
+        return None
+
+
+class SsrfOobStrategy(ConfirmationStrategy):
+    """The fallback layer for SSRF, when the target does not echo the
+    fetched resource's body back (so `SsrfInBandMarkerStrategy` sees
+    nothing): the same out-of-band callback the target's own request for
+    that URL leaves in the loopback listener, per `CommandInjectionOobStrategy`'s
+    established M8 pattern. Simpler than that sibling: the injected value
+    *is* the callback URL sent directly -- an SSRF sink's own HTTP client
+    fetches whatever URL it is given, unlike command injection, which needs
+    a shell one-liner to turn a URL into an outbound fetch. A longer default
+    timeout than `CommandInjectionOobStrategy`'s 1.5s: a local shell `curl`
+    is near-instant, but an SSRF sink's own HTTP client call (DNS resolution,
+    connect, a full response round trip) can plausibly take longer even when
+    genuinely vulnerable. Needs an injected, already-started `OobListener`;
+    without one, no-ops (fail-closed), never reaching for a real network
+    listener on its own.
+    """
+    vuln_class = "ssrf"
+    mechanism = "oob-fetch-callback"
+    category = "ssrf"
+
+    def __init__(self, listener: OobListener | None = None, timeout: float = 3.0):
+        self._listener = listener
+        self._timeout = timeout
+
+    def confirm(self, candidate, sender):
+        if self._listener is None:
+            return None
+        token = self._listener.register()
+        canary = self._listener.callback_url(token)
+        self._send(sender, candidate, canary)
+        hit = self._listener.wait_for(token, timeout=self._timeout)
+        if hit is not None:
+            return Verdict(True, self.vuln_class, self.mechanism,
+                           {"canary": canary, "hit_path": hit.path,
+                            "remote_addr": hit.remote_addr})
+        return None
+
+
 # Grey-box (M10) default confirmation-side probes: something that would reach the
 # vulnerable sink (a SQLi syntax-breaker; an XSS canary) so the coverage/DB-fault
 # side channel has something to observe. Distinct from the black-box strategies'
@@ -597,6 +668,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
             OpenRedirectStrategy(), SstiStrategy(),
             PathTraversalStrategy(), CommandInjectionStrategy(),
             CommandInjectionOobStrategy(oob), RegexDosStrategy(),
+            SsrfInBandMarkerStrategy(oob), SsrfOobStrategy(oob),
             GreyboxConfirmationStrategy(coverage, dbfault)]
 
 
@@ -613,6 +685,7 @@ _CATEGORY_TO_CLASS = {
     "file-inclusion": "file-inclusion",
     "command-injection": "command-injection",
     "regular-expression": "redos",
+    "ssrf": "ssrf",
 }
 
 

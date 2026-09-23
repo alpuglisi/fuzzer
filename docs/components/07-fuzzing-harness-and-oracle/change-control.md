@@ -3,6 +3,108 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0027 — Real SSRF detection: `SsrfInBandMarkerStrategy` + `SsrfOobStrategy`, plus `run_targets()` OOB passthrough (2026-09-23)
+
+- Change: the project's first real, end-to-end detection path for the
+  `ssrf` vuln_class, closing one of the three "no audit rule/strategy yet"
+  gaps `CC-LAB-0176`/`FR-LAB-99` (category 4's Phase E) explicitly flagged
+  as real follow-on work. Paired with `CC-AUD-0016`'s new `R-SSRF` rule
+  (candidate generation); this entry is confirmation.
+  Dispatched through this component's pre-change review gate (accuracy +
+  adequacy passes) before implementation; the adequacy pass's finding —
+  OOB-only would leave an unreasonably large gap for the common case where
+  the target reflects the fetched resource back (this project's own SSRF
+  lab cells do exactly that) — is incorporated as `SsrfInBandMarkerStrategy`
+  below, not deferred.
+  - **`SsrfInBandMarkerStrategy`** (cheap first layer, `fuzzlab/oracle/
+    strategies.py`): points the candidate at the `OobListener`'s own
+    callback URL and checks whether the *immediate* response to that one
+    request echoes the minted token back — a single request, no polling
+    wait. Needed `OobListener`'s HTTP handler to actually serve a body
+    (previously always empty, `Content-Length: 0`) — an additive change
+    (`fuzzlab/oracle/oob.py`): `do_GET`/`do_POST` now echo the token as
+    the response body, `do_HEAD` correctly still sends none (a body on a
+    HEAD response is invalid HTTP). `wait_for`/`hits()`/`record()` never
+    read this body, so `CommandInjectionOobStrategy`'s own existing
+    OOB-only usage is unaffected — re-verified via its full existing test
+    suite.
+  - **`SsrfOobStrategy`** (fallback layer, when the target doesn't echo
+    the body back): modeled directly on `CommandInjectionOobStrategy`'s
+    established M8 pattern, but simpler — the injected value *is* the
+    callback URL sent directly, since an SSRF sink's own HTTP client
+    fetches whatever URL it's given (unlike command injection, which
+    needs a shell one-liner to turn a URL into an outbound fetch). A
+    longer default timeout (3.0s vs. `CommandInjectionOobStrategy`'s
+    1.5s) per the adequacy review's own finding: a local shell `curl` is
+    near-instant, but a real DNS-resolve-connect-fetch round trip can
+    plausibly take longer even when genuinely vulnerable.
+  - Both registered in `default_strategies()`, cheapest-first (in-band
+    before OOB), matching every other category's own stacking convention
+    (SQLi: error/boolean/timing; command injection: timing then OOB).
+    `_CATEGORY_TO_CLASS["ssrf"] = "ssrf"` added.
+  - **`fuzzlab/harness/multitarget.py`'s `run_targets()`** previously
+    forwarded `browser`/`scheduler`/`plugins` to `run_auto()` but silently
+    dropped `oob`/`coverage`/`dbfault`, which `run_auto()` already
+    accepted — found while wiring this change into category 4's own
+    multitarget test (a `TargetSpec`-driven run had no way to actually use
+    the new OOB strategies). Fixed by adding the same three
+    keyword-passthrough params, default `None`, forwarded unchanged (no
+    behavior change for any existing caller — verified against
+    `tests/test_multitarget.py`'s own existing call sites, none of which
+    pass these keywords). Safe to share one `OobListener` across every
+    target in a batch: `run_targets()` loops sequentially, never
+    concurrently, and `OobListener` correlates hits by a fresh per-probe
+    token, never by target.
+  - New offline unit tests (`tests/test_oracle_oob.py`): both strategies'
+    hit/no-hit/no-op cases, plus a stacking-order check
+    (`SsrfInBandMarkerStrategy` before `SsrfOobStrategy`).
+  - **Real, live-boot proof, not just unit tests**: `tests/test_multitarget_category4.py`
+    (updated) runs a real, started `OobListener` through `run_targets()`
+    against the real live-booted Twitch app — `LABGEN-GO-0003` (vulnerable)
+    is now a real, confirmed finding (`tp=1`, `recall=0.5` on that target's
+    own 2 SSRF/webhook positives); `LABGEN-GO-0004` (secure) correctly
+    stays unconfirmed (blocked by its scheme/IP allowlist before any
+    fetch, so the in-band marker never appears and the OOB callback never
+    fires).
+  New/changed files:
+  - `fuzzlab/oracle/strategies.py` (`SsrfInBandMarkerStrategy`, `SsrfOobStrategy`,
+    `default_strategies()`, `_CATEGORY_TO_CLASS`)
+  - `fuzzlab/oracle/oob.py` (`_make_handler`, additive body-echo)
+  - `fuzzlab/harness/multitarget.py` (`run_targets()` passthrough)
+  - `tests/test_oracle_oob.py` (new SSRF strategy tests)
+  - `tests/test_multitarget_category4.py` (updated to the real, non-zero
+    recall proof)
+  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    (`FR-FUZZ-14`, new)
+- Impact (other components / project): `default_strategies()`/
+  `_CATEGORY_TO_CLASS`/`OobListener` are shared across every category and
+  every existing target's own run — additive only (two new strategies
+  appended, one new category-map entry, one existing handler's response
+  body changed from always-empty to token-echoing when a token matches,
+  which no existing caller reads). `run_targets()`'s three new keyword
+  params default to `None`, matching every existing call site exactly.
+- Risk (level; mitigation or accepted-risk justification): **low-medium**.
+  Genuinely new production code in two shared, category-agnostic
+  components (audit rule + oracle strategies), but additive by
+  construction and directly modeled on an already-shipped, already-tested
+  sibling mechanism (`CommandInjectionOobStrategy`) rather than a novel
+  design; the `OobListener` body-echo change is the one shared-code touch,
+  verified not to break its existing (hit-recording-only) consumer.
+- Deliverables:
+  - [x] `SsrfInBandMarkerStrategy` + `SsrfOobStrategy` added, registered
+    cheapest-first, category-mapped
+  - [x] `OobListener` serves the token in its response body (additive)
+  - [x] `run_targets()` gains `oob`/`coverage`/`dbfault` passthrough
+  - [x] New offline unit tests (hit / no-hit / no-op / stacking order)
+  - [x] `tests/test_multitarget_category4.py` updated to a real, non-zero
+    recall proof for the SSRF case
+  - [x] Full non-slow suite + the real live-boot slow tests re-verified
+    green
+- Effectiveness (assessed 2026-09-23): met — a real, confirmed SSRF
+  finding against a real live-booted target, both layers exercised for
+  real (in-band on the echoing vulnerable twin; OOB unit-tested against a
+  blind-fetch fake).
+
 ### CC-FUZZ-0025 — Build the M1 timing-differential ReDoS oracle mechanism (`RegexDosStrategy`) (2026-09-22)
 - Change: built `RegexDosStrategy` (`fuzzlab/oracle/strategies.py`), the
   `("regular-expression", "redos")` confirmation strategy

@@ -1,7 +1,7 @@
 # Fuzzing Harness and Oracle — Requirement Specification
 
 Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5/M8; M10 grey-box wiring layer built, live sources on-host); harness generalization ongoing; greybox-run consumes mutation-engine variants (opt-in); coverage-frontier growth emitted to metric_series]`
-· Last updated: 2026-09-23 · see CC-FUZZ-0026
+· Last updated: 2026-09-23 · see CC-FUZZ-0027
 
 Related: `ARCHITECTURE.md` #7; `DECISIONS_AND_ROADMAP.md` (D1, D5, D7, Phase 2/3,
 Phase 8); `./change-control.md`.
@@ -216,6 +216,44 @@ rewards) derives from it.
   header-aware `InjectionPoint` shape, plus a header-capable sender
   alongside `RequestsProbeSender`/`SeamProbeSender`) is real, sized
   follow-on work this requirement does not cover.
+
+- **FR-FUZZ-14** *(`CC-FUZZ-0027`, 2026-09-23).* The oracle supports real
+  **SSRF confirmation**, cheapest-first, paired with `FR-AUD-7`'s
+  candidate-generation rule:
+  - `SsrfInBandMarkerStrategy` (`vuln_class="ssrf"`, `mechanism=
+    "in-band-fetch-marker"`): a single request, no wait. Points the
+    candidate at an injected `OobListener`'s callback URL (reused as a
+    marker responder) and confirms iff the *same* response echoes the
+    minted token back — the shape this project's own SSRF lab cells
+    actually have (`go_net_http`'s `unchecked_url_fetch`:
+    `io.Copy(w, resp.Body)`).
+  - `SsrfOobStrategy` (`mechanism="oob-fetch-callback"`): the fallback for
+    a target that fetches but never echoes the body. Same `OobListener`
+    seam as `FR-FUZZ-10`'s `CommandInjectionOobStrategy` (optional
+    constructor injection, fail-closed no-op without one), but the
+    injected value is the callback URL sent directly — an SSRF sink's own
+    HTTP client fetches whatever URL it's given, no shell wrapping
+    needed. Default timeout 3.0s (vs. `CommandInjectionOobStrategy`'s
+    1.5s): a real fetch round trip can plausibly take longer than a local
+    shell `curl` even when genuinely vulnerable.
+  - `OobListener` (`fuzzlab/oracle/oob.py`) now echoes the minted token as
+    its response body on a matching `GET`/`POST` (previously always
+    empty) — additive; `record()`/`hits()`/`wait_for()` never read this
+    body, so `CommandInjectionOobStrategy`'s existing OOB-only usage is
+    unaffected. `do_HEAD` still sends no body (correct HTTP semantics).
+  - `default_strategies()` registers both, in-band before OOB
+    (cheapest-first, matching every other category's own stacking); adds
+    `_CATEGORY_TO_CLASS["ssrf"] = "ssrf"`.
+  - `fuzzlab.harness.multitarget.run_targets()` gained `oob`/`coverage`/
+    `dbfault` keyword passthrough to `run_auto()` (previously silently
+    dropped, though `run_auto()` already accepted them) — needed so a
+    `TargetSpec`-driven multitarget run can actually use this new
+    capability. Additive: all three default `None`, no existing caller
+    affected.
+  - **Proven against a real target, not just unit tests**: category 4's
+    own `tests/test_multitarget_category4.py` confirms the real SSRF cell
+    (`LABGEN-GO-0003`) end to end via a real, started `OobListener`
+    threaded through `run_targets()` against the real live-booted Go app.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

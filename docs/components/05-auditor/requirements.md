@@ -1,6 +1,6 @@
 # Auditor / Fetcher — Requirement Specification
 
-Component code: **AUD** · Status: `[built; to harden]` · Last updated: 2026-09-21
+Component code: **AUD** · Status: `[built; to harden]` · Last updated: 2026-09-23
 
 Related: `ARCHITECTURE.md` #5; `DECISIONS_AND_ROADMAP.md` (D5, D6, D9, Phase 2);
 `./change-control.md`.
@@ -30,6 +30,13 @@ budget where a vulnerability is plausible.
   versioned feature vector; never emit a vulnerability label.
 - **FR-AUD-6** Read discovered surface from the shared store and write candidates
   back to it (no direct tool-to-tool calls). (D5)
+- **FR-AUD-7** *(`CC-AUD-0016`, 2026-09-23).* A candidate is generated for the
+  `ssrf` category: `R-SSRF` (`fuzzlab/audit/rules_data/default_rules.json`)
+  matches a parameter name against a common SSRF-fetch vocabulary (`url`,
+  `src`, `target`, `webhook`, `thumbnail`, etc.), the same bare
+  `name_regex`-only shape `R-OPEN-REDIRECT`/`R-FILE-INCLUSION`/
+  `R-COMMAND-INJECTION` already use. Rule-generation only — confirmation is
+  `fuzzlab.oracle`'s job (`FR-FUZZ-14`).
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that

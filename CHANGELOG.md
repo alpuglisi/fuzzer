@@ -4,6 +4,29 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (AUD/FUZZ/LAB: real SSRF detection, found via category 4)
+- Auditor: new `R-SSRF` audit rule (`fuzzlab/audit/rules_data/default_rules.json`),
+  the project's first candidate-generation rule for the `ssrf` category.
+  `CC-AUD-0016`/`FR-AUD-7`.
+- Fuzzing harness/oracle: real SSRF confirmation, cheapest-first —
+  `SsrfInBandMarkerStrategy` (a single request; confirms when the target
+  echoes the fetched resource's body back, this project's own SSRF lab
+  cells' real shape) and `SsrfOobStrategy` (the out-of-band fallback for a
+  blind fetch, modeled on the existing `CommandInjectionOobStrategy`).
+  `OobListener` now echoes its minted token in the response body
+  (additive; existing OOB-only consumers unaffected).
+  `fuzzlab.harness.multitarget.run_targets()` gained `oob`/`coverage`/
+  `dbfault` passthrough (previously silently dropped though `run_auto()`
+  already accepted them), needed to actually use this from a
+  `TargetSpec`-driven run. Closes one of the three "no audit rule/strategy
+  yet" gaps `CC-LAB-0176`/`FR-LAB-99` (category 4's Phase E) flagged as
+  real follow-on work — category 4's Twitch SSRF cell is now a real,
+  confirmed finding end to end against a real live-booted app. Dispatched
+  through the pre-change review gate (accuracy + adequacy passes); the
+  adequacy pass's finding (OOB-only would leave the common
+  echo-the-body case unconfirmed) drove the in-band strategy.
+  `CC-FUZZ-0027`/`FR-FUZZ-14`, `CC-LAB-0177`/`FR-LAB-117`.
+
 ## 2026-09-23 (cross-branch bookkeeping fix, by the category 1 pilot session)
 - Docs/FUZZ: fixed a real cross-branch ID collision found during a
   cross-branch review — this branch's freshly-pushed `CC-FUZZ-0025`/

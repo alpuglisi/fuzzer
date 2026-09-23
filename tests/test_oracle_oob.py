@@ -13,7 +13,11 @@ import pytest
 from fuzzlab.oracle import Candidate
 from fuzzlab.oracle.oob import OobListener
 from fuzzlab.oracle.probe import Probe
-from fuzzlab.oracle.strategies import CommandInjectionOobStrategy
+from fuzzlab.oracle.strategies import (
+    CommandInjectionOobStrategy,
+    SsrfInBandMarkerStrategy,
+    SsrfOobStrategy,
+)
 
 
 def _cand():
@@ -158,3 +162,131 @@ def test_oracle_confirm_uses_oob_mechanism_end_to_end():
         assert verdict is not None and verdict.mechanism == "oob-callback"
     finally:
         listener.stop()
+
+
+# --- SsrfInBandMarkerStrategy / SsrfOobStrategy (CC-FUZZ-0027) ---------------
+
+def _ssrf_cand():
+    return Candidate(url="http://h/thumb", param="url", vuln_class="ssrf",
+                     category="ssrf")
+
+
+class _SsrfEchoingSender:
+    """Simulates an SSRF sink that fetches the given URL and echoes the
+    response body back (this project's own `unchecked_url_fetch` shape:
+    `io.Copy(w, resp.Body)`)."""
+
+    def send(self, url, param, value, timing=False, method="GET", location="query"):
+        try:
+            with urllib.request.urlopen(value, timeout=2) as resp:
+                return Probe(200, resp.read().decode("ascii", "replace"))
+        except OSError:
+            return Probe(502, "")
+
+
+class _SsrfBlindFetchingSender:
+    """Simulates an SSRF sink that fetches the URL but never echoes the
+    body back (e.g. only status/side effects observable) -- only an OOB
+    hit, not the in-band marker, can confirm this one."""
+
+    def send(self, url, param, value, timing=False, method="GET", location="query"):
+        try:
+            urllib.request.urlopen(value, timeout=2)
+        except OSError:
+            pass
+        return Probe(200, "ok")
+
+
+class _SsrfSecureSender:
+    """Simulates a secure twin that never fetches the given URL at all
+    (blocked by a scheme/IP allowlist before any request is made)."""
+
+    def send(self, url, param, value, timing=False, method="GET", location="query"):
+        return Probe(403, "forbidden")
+
+
+def test_ssrf_in_band_strategy_confirms_when_the_body_is_echoed_back():
+    listener = OobListener()
+    listener.start()
+    try:
+        strategy = SsrfInBandMarkerStrategy(listener)
+        verdict = strategy.confirm(_ssrf_cand(), _SsrfEchoingSender())
+        assert verdict is not None and verdict.confirmed
+        assert verdict.vuln_class == "ssrf"
+        assert verdict.mechanism == "in-band-fetch-marker"
+        assert "marker" in verdict.evidence
+    finally:
+        listener.stop()
+
+
+def test_ssrf_in_band_strategy_does_not_confirm_a_blind_fetch():
+    listener = OobListener()
+    listener.start()
+    try:
+        strategy = SsrfInBandMarkerStrategy(listener)
+        assert strategy.confirm(_ssrf_cand(), _SsrfBlindFetchingSender()) is None
+    finally:
+        listener.stop()
+
+
+def test_ssrf_in_band_strategy_does_not_confirm_the_secure_twin():
+    listener = OobListener()
+    listener.start()
+    try:
+        strategy = SsrfInBandMarkerStrategy(listener)
+        assert strategy.confirm(_ssrf_cand(), _SsrfSecureSender()) is None
+    finally:
+        listener.stop()
+
+
+def test_ssrf_in_band_strategy_noops_without_a_listener():
+    strategy = SsrfInBandMarkerStrategy(listener=None)
+
+    class _ExplodingSender:
+        def send(self, *a, **k):
+            raise AssertionError("must not send any probe without a listener")
+
+    assert strategy.confirm(_ssrf_cand(), _ExplodingSender()) is None
+
+
+def test_ssrf_oob_strategy_confirms_a_blind_fetch_via_the_callback():
+    listener = OobListener()
+    listener.start()
+    try:
+        strategy = SsrfOobStrategy(listener, timeout=2.0)
+        verdict = strategy.confirm(_ssrf_cand(), _SsrfBlindFetchingSender())
+        assert verdict is not None and verdict.confirmed
+        assert verdict.vuln_class == "ssrf"
+        assert verdict.mechanism == "oob-fetch-callback"
+        assert "canary" in verdict.evidence
+    finally:
+        listener.stop()
+
+
+def test_ssrf_oob_strategy_fail_closed_when_the_secure_twin_never_fetches():
+    listener = OobListener()
+    listener.start()
+    try:
+        strategy = SsrfOobStrategy(listener, timeout=0.1)
+        assert strategy.confirm(_ssrf_cand(), _SsrfSecureSender()) is None
+    finally:
+        listener.stop()
+
+
+def test_ssrf_oob_strategy_noops_without_a_listener():
+    strategy = SsrfOobStrategy(listener=None)
+
+    class _ExplodingSender:
+        def send(self, *a, **k):
+            raise AssertionError("must not send any probe without a listener")
+
+    assert strategy.confirm(_ssrf_cand(), _ExplodingSender()) is None
+
+
+def test_ssrf_strategies_registered_in_default_strategies_cheapest_first():
+    from fuzzlab.oracle.strategies import default_strategies
+    strategies = default_strategies()
+    kinds = [type(s) for s in strategies]
+    assert SsrfInBandMarkerStrategy in kinds and SsrfOobStrategy in kinds
+    # Cheapest-first, matching every other category's own stacking order.
+    assert kinds.index(SsrfInBandMarkerStrategy) < kinds.index(SsrfOobStrategy)
