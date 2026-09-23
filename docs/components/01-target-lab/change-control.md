@@ -3,6 +3,218 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0092 — Phase C, first real page: PicTrail's `/post` detail page + its own ground truth (FR-LAB-90/FR-LAB-91) (2026-09-23)
+
+- **Change:** Establishes **PicTrail** — the Instagram-style app identity
+  for the `django` stack's Phase C content (category 2 pilot,
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§9; page-set design
+  recorded in `docs/research/category2-social-ugc-functionality-and-cwe-
+  research.md` §6, added this session) — and lands PicTrail's first real,
+  ground-truth-bearing page: `/post` (a post-detail lookup by numeric ID,
+  grounded in §2 item 3's real Instagram post-detail feature).
+
+  Deliberately reuses the existing, already-proven `sqli`/
+  `sql_numeric_literal` module set (Phase A, `CC-LAB-0090`) verbatim — zero
+  new sink/source/transform/complexity code. The value of this increment
+  is standing up the **app-identity/ground-truth pattern** end to end for
+  the first time on this stack (a real, named page with real out-of-band
+  ground truth, the D9 contract, `fuzzlab.labels.contract.load()`), not a
+  new vulnerability shape — per §6's own note, a realistic feature +
+  realistic vulnerability placement is what "corpus-grounded" requires,
+  not that every single page uses a brand-new CWE.
+
+  Concretely:
+  1. `fuzzlab/labgen/emitters/django/__init__.py` — a new `_ROUTE_PARAMS`
+     entry, `"/post": {"var_name": "id", "param_name": "id", "table":
+     "posts", "column": "id"}` (a `posts` table, not `products` — a
+     distinct, thematically-accurate table for PicTrail's real content,
+     not a reuse of Phase A's illustrative `/api/products` table). A new,
+     small `_REAL_PAGE_CELL_IDS: frozenset[str]` set
+     (`{"LABGEN-DJ-0007"}`) that `render_route_accumulator` checks: a cell
+     in this set is served at its own `cell.route.path` (stripped of the
+     leading slash) instead of the generic `generated/{cell_slug}/`
+     pattern every illustrative cell uses — mirroring, at a much smaller
+     scale, `php_laravel`'s own "a real page keeps its own exact URL"
+     convention (`_served_route_for`), without porting that mechanism's
+     full generality (no `_CANONICAL_CELL_KEY`/twin-URL machinery — this
+     increment has exactly one real-URL-owning cell). The **secure twin**
+     (`LABGEN-DJ-0008`) is illustrative-only, served at the generic
+     `generated/labgen_dj_0008/` pattern — ground truth only ever needs to
+     describe the one real, exploitable page; the secure comparison twin
+     needs no ground-truth-bearing URL of its own (matching how a
+     `php_current` secure twin does not necessarily get its own `PFF-`
+     case either).
+  2. `fuzzlab/labgen/conformance/django_live_boot.py` —
+     `DjangoLiveBootHarness`'s `_seed_db()` gains a real `posts` table
+     (`id INTEGER PRIMARY KEY, name TEXT NOT NULL`) with 2 seeded rows.
+     **Known, documented simplification — its response-plausibility cost
+     named explicitly, per reviewer #2's finding, not just its
+     implementation-diff cost:** the `single_statement.py.j2` complexity
+     template's `JsonResponse` field names (`{"id": row[0], "name":
+     row[1]})`) are hard-coded, shared across every cell using this
+     complexity (Phase A's `/api/products`, Phase B's `/api/login`,
+     this page's `/post`) — not parameterized per route. The real
+     `/post?id=` response is therefore literally `{"id": 1, "name":
+     "<caption text>"}`, a field key literally named `"name"` holding a
+     post caption, with no other post-detail fields (image URL, likes,
+     author) — **not** the response shape a real Instagram-style
+     post-detail endpoint would plausibly produce. **Accepted as a named
+     realism gap for this increment**, not silently glossed over: ground
+     truth only needs the injectable parameter and a real,
+     server-observable differential at the real URL, which this response
+     shape still genuinely provides; parameterizing the shared complexity
+     template's field names would touch a template three existing,
+     already-tested cells depend on (risking their own byte-identical
+     Tier-3/minimal-pair guarantees) for a cosmetic improvement this
+     increment does not need. If a later PicTrail page's ground truth
+     needs a more realistic response shape, parameterizing
+     `single_statement.py.j2`'s field names becomes its own,
+     separately-scoped change then — not spent here on a template every
+     other existing cell also depends on.
+  3. `lab/manifests/phase_c_picktrail_post_detail.yaml` — the two cells
+     (`LABGEN-DJ-0007` vulnerable / `LABGEN-DJ-0008` secure) at
+     `route.path = "/post"`.
+  4. **New, independent ground-truth directory**,
+     `lab/ground-truth-picktrail-django/` (`labels.json`/
+     `injection-points.json`/`expectedresults.csv`, D9's own three-file
+     contract) — never touching or merging into the existing
+     `lab/ground-truth/` (which stays `php_laravel`'s own, per §4's "never
+     reusing `puppy-fort-factory`'s... case IDs or identity" requirement).
+     One case, `PT-0001` (a fresh, opaque case-ID prefix — `PT` for
+     PicTrail — never `PFF-`/`LABGEN-*`, per D9's opaque-ID rule), for the
+     real `/post?id=` vulnerable page. `target: "picktrail_django"` in
+     both JSON files' own `target` field.
+  5. A real test loading this ground truth via
+     `fuzzlab.labels.contract.load("lab/ground-truth-picktrail-django")`
+     and cross-checking it against the real, live-booted app: the exact
+     URL/param/method the ground truth names actually serves, and the
+     real payload differential holds at that exact URL (not a
+     re-derivation of the URL from the emitter's own internals — an
+     independent check, the same discipline PA-0003/PA-0021 already
+     require elsewhere in this project for route/URL claims).
+
+- **Impact (other components / project):** Additive only. No existing
+  `DjangoEmitter`/`django.modules` registry entry, sink/source/transform/
+  complexity module, or `StackEnv` field changes. `DjangoLiveBootHarness`
+  gains one new seeded table; its existing `products`/`users`/`profiles`
+  seeding and every existing test keeps passing unchanged (verified, not
+  assumed, before this entry is finalized). `fuzzlab.labels.contract` is
+  consumed, not changed. `fuzzlab/harness/multitarget.py` unaffected
+  (Phase E scope).
+
+- **Risk (level: low, with two items named explicitly per reviewer #2's
+  findings rather than left implicit):** Every emitter/harness code path
+  this increment exercises is already proven (Phase A's exact module set,
+  the existing `_seed_db()`/live-boot pattern). The one genuinely new
+  mechanism is `_REAL_PAGE_CELL_IDS`-based URL pinning in
+  `render_route_accumulator` — small and additive, but this is the
+  **first real-URL/route-serving mechanism ever built for the `django`
+  emitter**, directly analogous to `php_laravel`'s own
+  `_served_route_for()` mechanism, whose first version (`BUG-0031`)
+  silently hardcoded the wrong HTTP method for a real page and produced
+  false ground truth — the exact reason `PA-0034` exists ("any code path
+  combining a request-derived value with a request-derived HTTP-verb/
+  route assumption for the first time" needs an adversarial, not just
+  happy-path, test). Named explicitly here rather than left an implicit
+  "small and additive" risk: a real, executed test (Deliverables, below)
+  hits the pinned `/post` URL with a mismatched HTTP method (`POST`
+  instead of `GET`) and confirms no crash/mis-route — Django's own
+  `request.GET` parses the query string independent of HTTP method, so
+  the expected, verified behavior is identical to the `GET` case, not a
+  new failure mode, but this must be *observed*, not assumed, precisely
+  because the mechanism is new.
+
+  **Second item, also named explicitly:** `lab/ground-truth-picktrail-
+  django/` is this project's **first-ever second, independent
+  ground-truth directory** — `fuzzlab.core.config`'s own
+  `ground_truth_dir` default (`"lab/ground-truth"`) and its several
+  hardcoded-path consumers (the web dashboard, `cutover_gate.py`,
+  `regression_gate.py`) are single-directory-scoped and are **not**
+  updated or wired to see this new directory by this entry — a named,
+  accepted limitation of this first slice, not an oversight: the right
+  home for a second, per-target ground-truth set is
+  `fuzzlab.harness.multitarget.TargetSpec.ground_truth` (already
+  per-target, already the mechanism this whole multi-app initiative
+  exists to eventually plug into), which is explicitly Phase E's job
+  (§6 of `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`), not
+  attempted here. PicTrail's ground truth is reachable, this entry, only
+  through the one bespoke test in Deliverables item 5 — stated plainly,
+  not left for a reader to discover by checking `config.py` themselves.
+
+- **Deliverables:**
+  - [ ] `fuzzlab/labgen/emitters/django/__init__.py` — `_ROUTE_PARAMS["/post"]`,
+    `_REAL_PAGE_CELL_IDS`, `render_route_accumulator` URL-pinning logic —
+    todo.
+  - [ ] `fuzzlab/labgen/conformance/django_live_boot.py` — seed a real
+    `posts` table — todo.
+  - [ ] `lab/manifests/phase_c_picktrail_post_detail.yaml` — todo.
+  - [ ] `lab/ground-truth-picktrail-django/{labels,injection-points}.json`
+    + `expectedresults.csv` — todo.
+  - [ ] `tests/test_labgen_django_conformance.py` — extend Tier 0/3 to the
+    new manifest; a regression test that only `_REAL_PAGE_CELL_IDS`
+    members get a pinned URL — todo.
+  - [ ] A new live-boot test module (or extend an existing one) — real
+    `fuzzlab.labels.contract.load()` of the new ground-truth directory,
+    cross-checked against a real booted request at the exact URL/param the
+    ground truth names, with the real payload differential; **plus the
+    `PA-0034` adversarial test** (reviewer #2's finding, citing `BUG-0031`
+    as the directly analogous precedent): a real request against the
+    pinned `/post` URL with a mismatched HTTP method (`POST` instead of
+    `GET`), confirming no crash/mis-route — todo.
+  - [x] `docs/research/category2-social-ugc-functionality-and-cwe-
+    research.md` §6 — **correction, reviewer #1's finding:** row 1/2's
+    route notation was originally written `/post/<id>`
+    (path-parameter-shaped), which `fuzzlab.labgen.schema.Route.path`
+    (a plain string, no path-parameter templating) cannot actually
+    express — corrected to `/post?id=`/`/post/comments?id=`
+    (query-parameter shape, matching every other real page in this
+    project), with the correction's own reasoning recorded in §6 itself,
+    the same "reflect a Route-IR-driven simplification back into the
+    research doc" discipline `CC-LAB-0131`'s TrackerNest route
+    simplification already established — done, ahead of the rest of this
+    entry landing (a docs-only correction, no gate needed for that part
+    alone). Row 1 will be marked "built" once the rest of this entry
+    lands — todo.
+  - [x] `FR-LAB-90`/`FR-LAB-91` checked as next-free (per `PA-0031`'s
+    spirit, reviewer #2's finding) — done: this branch's own highest is
+    `FR-LAB-89` (`CC-LAB-0091`, itself renumbered once already by a
+    cross-branch fix) and `claude/second-target-cat1-ecommerce`'s own
+    highest (re-fetched) is `FR-LAB-87` — `90`/`91` confirmed clear of
+    both immediately before drafting this entry.
+  - [ ] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-90`
+    (PicTrail app identity + `/post` real page exists, Tier 0/3
+    conformant) and `FR-LAB-91` (real ground truth authored, cross-checked
+    against a real live-booted request) — todo.
+  - [ ] `docs/ARCHITECTURE.md` — note PicTrail's first real page — todo.
+  - [ ] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 tracker row
+    — update Phase C status — todo.
+  - [ ] `CHANGELOG.md` line — todo.
+  - [ ] Full bug protocol for any genuine defect surfaced — todo (only if
+    one occurs).
+
+- **Effectiveness (assessed 2026-09-23): pending** — left pending until the
+  deliverables above land and the new tests are observed to pass for real.
+
+---
+**Pre-change review gate record:** reviewer #1 (accuracy) — APPROVE WITH
+CORRECTIONS, 1 item (research doc §6's `/post/<id>` route notation
+corrected to `/post?id=`, matching what `Route.path`'s plain-string IR
+can actually express, the same discipline `CC-LAB-0131` already
+established for an identical situation), incorporated. Reviewer #2
+(adequacy) — APPROVE WITH ADDITIONS, 6 items (the same route-notation
+fix; `PA-0034`/`BUG-0031` cited explicitly with an adversarial
+mismatched-method test added for the new URL-pinning mechanism; the
+`{"id","name"}` JSON-shape realism gap named and justified rather than
+left implicit; the second ground-truth directory's non-wiring into
+`fuzzlab.core.config`'s global consumers stated explicitly as an
+accepted, Phase-E-deferred limitation; `FR-LAB-90`/`91`'s next-free
+check stated), all incorporated. Neither reviewer found an issue with
+the increment's fundamental scope or phasing — reviewer #2 explicitly
+confirmed "one real page first" is a legitimately-scoped slice, matching
+how Phase A itself was scoped. Proposer (this session) accepts all
+findings as correct. 3/3 agreement reached on this revision —
+implementation may begin.
+
 ### CC-LAB-0091 — `django` emitter Phase B: widen to node_express's own Tier-A three-shape bar (FR-LAB-88/FR-LAB-89) (2026-09-23)
 
 - **Change:** Widens `fuzzlab.labgen.emitters.django` from Phase A's one

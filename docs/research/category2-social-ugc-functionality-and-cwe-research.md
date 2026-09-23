@@ -202,8 +202,8 @@ not the specific *sink mechanism* is the newest researched one.
 
 | # | Page (route) | Real feature (§2) | Vuln class / CWE | Shape | Status |
 |---|---|---|---|---|---|
-| 1 | Post detail (`/post/<id>`) | §2 item 3, post detail + comments | `sqli` / CWE-89 | Reuses the existing, proven `sql_numeric_literal` shape (Phase A/B) | **Built this session** — see below. |
-| 2 | Comments (`/post/<id>/comments`) | §2 item 3, `@mention`/`#hashtag` auto-linking | `xss` / CWE-79 | The researched, Django-specific footgun (§4 row 2): `mark_safe()`/`{% autoescape off %}` disabling template autoescaping — needs new template-rendering emitter infrastructure (a real `.html` template file, not a raw `HttpResponse` string) | Deferred from Phase B; planned next for this app, not built this session. |
+| 1 | Post detail (`/post?id=`) | §2 item 3, post detail + comments | `sqli` / CWE-89 | Reuses the existing, proven `sql_numeric_literal` shape (Phase A/B) | **Built this session** — see below. |
+| 2 | Comments (`/post/comments?id=`) | §2 item 3, `@mention`/`#hashtag` auto-linking | `xss` / CWE-79 | The researched, Django-specific footgun (§4 row 2): `mark_safe()`/`{% autoescape off %}` disabling template autoescaping — needs new template-rendering emitter infrastructure (a real `.html` template file, not a raw `HttpResponse` string) | Deferred from Phase B; planned next for this app, not built this session. |
 | 3 | Link-preview unfurl (`/upload/link-preview`) | §2 item 7, upload flow's link preview | `ssrf` / CWE-918 | New shape: an unfurl view fetching a user-supplied URL with no hostname/private-IP allowlist (§4 row 1) | Planned, not built. |
 | 4 | Account settings (`/settings`) | §2 item 8 | `mass_assignment` / CWE-915 | New shape: a `ModelForm` with `fields = "__all__"` | Planned, not built. |
 | 5 | Explore/search (`/explore?sort=`) | §2 item 6 | `sqli` (identifier/`ORDER BY` position) | New shape: `.extra()`/`RawSQL()` instead of the ORM's parameterized `.order_by()` (§4 row 4) | Planned, not built. |
@@ -225,6 +225,23 @@ Each new shape (rows needing "new template-rendering infrastructure" or a
 wholly new sink module) should get its own change-control entry and
 pre-change review, following the same discipline Phase A/B already used,
 rather than batching several brand-new shapes into one entry.
+
+**Route-notation correction (`CC-LAB-0092`'s own pre-change review,
+reflected back here per the same discipline `CC-LAB-0131`'s TrackerNest
+route simplification already established for this exact situation):**
+rows 1-2 above were originally written as `/post/<id>` /
+`/post/<id>/comments` (a path-parameter URL shape). This codebase's
+`fuzzlab.labgen.schema.Route.path` is a plain string key, with no
+path-parameter templating, and every emitter (`DjangoEmitter` included)
+looks up a cell's route profile by exact-matching `cell.route.path` as a
+literal dict key — so a `<id>`-templated path segment cannot actually be
+emitted as designed. Corrected to the query-parameter shape (`/post?id=`)
+every other real page in this project already uses (`php_current`'s own
+`/product.php?id=`, Phase A/B's own `/api/products?id=`) — a real,
+plausible URL shape for a page like this (query-string post lookups are
+common in real apps, including older/legacy versions of real platforms),
+not a step down from "corpus-grounded," just a notation correction to
+match what this generator's `Route` IR can actually express today.
 
 ## 7. What this research does not yet do
 
