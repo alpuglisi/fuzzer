@@ -524,6 +524,30 @@ tracked in the requirements files, not here.
   full module-inventory depth (mirroring `node_express`'s own three
   Tier-A shapes) and corpus-grounded page design (Phase C) are separate,
   later work — not attempted here.
+  **Phase B (`CC-LAB-0091`) widened `django` to that same three-shape
+  Tier-A bar**: `sqli`/`sql_string_literal` (a login-style lookup, POST
+  body source, an MD5'd-password-boilerplate sink) and `xss`/`html_body`
+  (a stored value — a real, seeded `profiles` row, read via a small fixed
+  `_read_stored_bio()` helper every generated view carries unconditionally,
+  since unlike `node_express` this harness genuinely boots and executes
+  the code — echoed raw vs. escaped with `django.utils.html.escape()`).
+  Any cell whose route method is not `GET` renders with `@csrf_exempt`,
+  gated on the cell's own route method (not on which complexity template
+  renders it, verified by a whole-collection regression check) — the same
+  real-CSRF-framework-absence reasoning `php_laravel`'s own skeleton
+  documents for disabling Laravel's default CSRF middleware. Real,
+  executed live-boot proof (`tests/test_labgen_django_live_boot_phase_b.py`)
+  includes a `PA-0034` adversarial test (a mismatched HTTP method against
+  the newly CSRF-exempt view) that **found and fixed a real code defect**
+  (`BUG-0034`/`PA-0036`: the vulnerable sink concatenated a possibly-`None`
+  value without a `str()` cast, a language-specific behavior — Python's
+  `+` raises on `str`+`None` where JS/PHP's equivalent operators coerce —
+  missed when porting `node_express`'s own sink shape across the language
+  boundary). The full `php_laravel`-depth nine-shape inventory, and the
+  researched, corpus-grounded Django-specific XSS footgun (Django template
+  autoescaping disabled via `mark_safe()`/`|safe`/`{% autoescape off %}`)
+  stay out of scope — the latter deliberately deferred to Phase C's own
+  corpus-grounded page design.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

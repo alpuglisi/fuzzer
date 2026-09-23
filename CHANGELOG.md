@@ -12,6 +12,45 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23
+- LAB: fixed a self-contradictory cross-branch bookkeeping warning left by
+  an earlier fix commit (a blind find/replace had rewritten its own
+  warning message's prose to assert "FR-LAB-72/73 collide with cat1's own
+  FR-LAB-72/73" — a self-contradiction, since 72/73 was the *target* of
+  the renumbering). Verified directly against a real fetch of
+  `origin/claude/second-target-cat1-ecommerce` (its highest FR-LAB number
+  is 69) that no actual collision exists; replaced the stale warning with
+  a corrected note. See `docs/components/01-target-lab/requirements.md`.
+- LAB: widened `django` (category 2 pilot's Instagram/Python-Django pick)
+  to Phase B — `CC-LAB-0091`/`FR-LAB-74`/`FR-LAB-75`, pre-change review
+  gate cleared (2 independent reviewer agents, 5 findings incorporated: a
+  wrong plan-doc citation fixed, the deferral of a researched Django-
+  specific XSS footgun to Phase C stated explicitly, a wrong `CR-LAB-0001`
+  citation corrected to `BUG-0027`, `@csrf_exempt` gating moved from
+  complexity-template membership to the cell's own HTTP method plus a
+  whole-collection regression check, a `PA-0034` adversarial test added,
+  risk raised from low to moderate). Widens `DjangoEmitter` to the same
+  three-shape Tier-A bar `node_express` already proves: `sqli`/
+  `sql_string_literal` (a login-style lookup, MD5'd-password-boilerplate
+  sink) and `xss`/`html_body` (a stored value — a real, seeded `profiles`
+  row read via a fixed `_read_stored_bio()` helper — echoed raw vs.
+  escaped with `django.utils.html.escape()`). Any non-`GET` cell renders
+  with `@csrf_exempt`. **The required `PA-0034` adversarial test (a
+  mismatched HTTP method against the newly CSRF-exempt view) found a real
+  code defect** (`BUG-0034`/`PA-0036`: the vulnerable sink concatenated a
+  possibly-`None` value without a `str()` cast — Python's `+` raises where
+  JS/PHP's equivalent operators coerce, missed when porting `node_express`'s
+  sink shape across the language boundary), fixed before landing. Real,
+  executed proof: Tier 0/Tier 3 for the widened manifest (7 passed) and a
+  real live-boot payload differential — a genuine SQLi login bypass (200,
+  not 404) on the vulnerable twin vs. a real 404 on the secure twin; a
+  real raw-vs-escaped stored-XSS differential (4 passed, after the
+  `BUG-0034` fix). No regression in the broader suite (1527 passed, same
+  30 pre-existing environment failures as before). Full record:
+  `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0091` entry;
+  full bug record: `ERROR_LOG.md`, `docs/bugs/BUG-0034-*.md`,
+  `docs/PREVENTIVE_ACTIONS.md`'s `PA-0036`.
+
 ## 2026-09-23 (cross-branch review, by the category 1 pilot session)
 - Docs/LAB: reviewed this branch's Django SQLi code and tests — no code
   defects found (parameterized `%s` cursor placeholder vs. string

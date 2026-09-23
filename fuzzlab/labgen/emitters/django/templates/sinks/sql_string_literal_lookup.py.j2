@@ -1,0 +1,16 @@
+{{ password_var }} = hashlib.md5((request.POST.get("{{ password_param }}") or "").encode("utf-8")).hexdigest()
+{% if bound %}
+with connection.cursor() as cursor:
+    cursor.execute(
+        "SELECT id, {{ column }} FROM {{ table }} WHERE {{ column }} = %s AND password = %s",
+        [{{ value_expr }}, {{ password_var }}],
+    )
+    row = cursor.fetchone()
+{% else %}
+with connection.cursor() as cursor:
+    cursor.execute(
+        "SELECT id, {{ column }} FROM {{ table }} WHERE {{ column }} = '" + str({{ value_expr }})
+        + "' AND password = '" + {{ password_var }} + "'"
+    )
+    row = cursor.fetchone()
+{% endif %}

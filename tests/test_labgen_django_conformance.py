@@ -1,5 +1,5 @@
-"""Conformance-suite pass for `django` Phase A (category 2 pilot,
-`CC-LAB-0090`, T-LAB0.7 Tiers 0/3).
+"""Conformance-suite pass for `django` Phase A + Phase B (category 2 pilot,
+`CC-LAB-0090`/`CC-LAB-0091`, T-LAB0.7 Tiers 0/3).
 
 - Tier 0 (lint): `python -m py_compile` on every generated view module and
   on the route accumulator (`fuzlab_django_lab/urls.py`), skip-guarded when
@@ -72,3 +72,64 @@ def test_tier0_lint_passes_for_every_generated_cell_and_the_accumulator() -> Non
     accumulator = emitter.render_route_accumulator(manifest.cells)
     result = lint_python(accumulator.path, accumulator.content)
     assert result.ok, f"{accumulator.path}: {result.detail}"
+
+
+# --- Phase B (CC-LAB-0091): the widened manifest's own Tier 0/3 pass -------
+
+
+def test_regenerate_and_diff_emitter_passes_for_the_phase_b_widen_manifest() -> None:
+    manifest = load_manifest("lab/manifests/phase_b_django_widen_sample.yaml")
+    emitter = DjangoEmitter()
+    regenerate_and_diff_emitter(emitter, manifest.cells)
+
+
+def test_tier0_lint_passes_for_the_phase_b_widen_manifest() -> None:
+    if not python_available():
+        import pytest
+
+        pytest.skip("no python interpreter on PATH for py_compile (PA-0005)")
+
+    manifest = load_manifest("lab/manifests/phase_b_django_widen_sample.yaml")
+    emitter = DjangoEmitter()
+    for cell in manifest.cells:
+        results = lint_python_emitted_files(emitter.render(cell))
+        assert results, f"{cell.cell_id}: no .py files emitted to lint"
+        for result in results:
+            assert result.ok, f"{cell.cell_id} ({result.path}): {result.detail}"
+
+    accumulator = emitter.render_route_accumulator(manifest.cells)
+    result = lint_python(accumulator.path, accumulator.content)
+    assert result.ok, f"{accumulator.path}: {result.detail}"
+
+
+def test_every_non_get_cell_is_decorated_with_csrf_exempt() -> None:
+    """`CC-LAB-0091`'s own regression check (`PA-0024`-style, a
+    whole-collection check rather than reliance on today's one-POST-cell
+    coincidence): every cell whose route method is not `GET`, across every
+    manifest this emitter supports, must render with `@csrf_exempt` --
+    catches a future POST-shaped cell on a *different* complexity template
+    silently shipping undecorated (the exact fragility `CC-LAB-0091`'s own
+    pre-change review found and fixed in the gating mechanism itself)."""
+    emitter = DjangoEmitter()
+    manifests = (
+        load_manifest("lab/manifests/phase_a_django_sample.yaml"),
+        load_manifest("lab/manifests/phase_b_django_widen_sample.yaml"),
+    )
+    checked_a_non_get_cell = False
+    for manifest in manifests:
+        for cell in manifest.cells:
+            if not emitter.supports(cell.vuln_class, cell.sink_context):
+                continue
+            files = emitter.render(cell)
+            body = b"\n".join(f.content for f in files).decode("utf-8")
+            if cell.route.method.upper() != "GET":
+                checked_a_non_get_cell = True
+                assert "@csrf_exempt" in body, (
+                    f"{cell.cell_id}: {cell.route.method} cell rendered with no "
+                    "@csrf_exempt decorator -- would hit a live CSRF 403"
+                )
+            else:
+                assert "@csrf_exempt" not in body, (
+                    f"{cell.cell_id}: GET cell should not carry @csrf_exempt"
+                )
+    assert checked_a_non_get_cell, "no non-GET cell found across the checked manifests -- test is vacuous"

@@ -167,61 +167,91 @@ Component code: **LAB**. Entry format and required fields: see
   unintended second code path).
 
 - **Deliverables:**
-  - [ ] `fuzzlab/labgen/emitters/django/templates/sources/post_param.py.j2`
-    — todo.
-  - [ ] `fuzzlab/labgen/emitters/django/templates/sources/
-    read_stored_field.py.j2` — todo.
-  - [ ] `fuzzlab/labgen/emitters/django/templates/sinks/
-    sql_string_literal_lookup.py.j2` — todo.
-  - [ ] `fuzzlab/labgen/emitters/django/templates/sinks/html_body_echo.py.j2`
-    — todo.
-  - [ ] `fuzzlab/labgen/emitters/django/templates/transforms/
-    html_entity_escape.py.j2` — todo.
-  - [ ] `fuzzlab/labgen/emitters/django/templates/complexities/
-    render_only.py.j2` — todo.
-  - [ ] `fuzzlab/labgen/emitters/django/modules.py` — new
+  - [x] `fuzzlab/labgen/emitters/django/templates/sources/post_param.py.j2`
+    — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/sources/
+    read_stored_field.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/sinks/
+    sql_string_literal_lookup.py.j2` — done. **A real code defect was found
+    and fixed here** (`BUG-0034`/`PA-0036`): the unbound branch concatenated
+    `value_expr` without a `str()` cast, crashing (`TypeError`) on a
+    possibly-`None` value — caught by the `PA-0034` adversarial test below,
+    fixed before landing.
+  - [x] `fuzzlab/labgen/emitters/django/templates/sinks/html_body_echo.py.j2`
+    — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/transforms/
+    html_entity_escape.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/complexities/
+    render_only.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/modules.py` — new
     `PostParamSource`/`ReadStoredFieldSource`/`SqlStringLiteralLookupSink`/
     `HtmlBodyEchoSink`/`HtmlEntityEscapeTransform`/`RenderOnlyComplexity`
-    classes + registry entries — todo.
-  - [ ] `fuzzlab/labgen/emitters/django/__init__.py` — widen
-    `_MODULE_SET_BY_SHAPE`/`_ROUTE_PARAMS`; add `@csrf_exempt` to the
-    generated view for any cell whose `cell.route.method != "GET"`
-    (gated on the cell's own route method, not on complexity-template
-    membership — see the Risk section's correction above); add
-    `hashlib`/`escape` to the fixed header imports — todo.
-  - [ ] `lab/manifests/phase_b_django_widen_sample.yaml` — todo.
-  - [ ] `tests/test_labgen_django_conformance.py` — extend to cover the
-    widened manifest (Tier 0/3) **and** add a whole-collection regression
-    check that every non-`GET` cell's rendered view carries `@csrf_exempt`
-    (`PA-0024`-style, so a future POST cell on a different complexity can't
-    silently ship undecorated) — todo.
-  - [ ] `tests/test_labgen_django_live_boot_single_shape.py` or a new
-    sibling module — a real live-boot proof for both new shapes (a real
-    `POST /api/login` SQLi-bypass-vs-safely-bound differential; a real
-    `GET /api/profile` stored-XSS raw-vs-escaped differential) **and** the
-    `PA-0034` adversarial test (a mismatched-method `GET` request against
-    `/api/login`, confirming no unintended widened behavior) — todo.
-  - [ ] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-74`
-    (the two widened shapes exist, Tier 0/3 conformant) and `FR-LAB-75`
-    (real live-boot proof for both) — todo. **Verified next-free as of
-    2026-09-23** by direct inspection of this branch's current
-    `requirements.md` (highest existing is `FR-LAB-73`, `CC-LAB-0090`'s
-    own, itself already renumbered once from an earlier `FR-LAB-64`/`65`
-    cross-branch collision with `claude/second-target-cat1-ecommerce` —
-    see that file's own correction note immediately above `FR-LAB-72`)
-    **and** by a real fetch of `origin/claude/second-target-cat1-ecommerce`
-    this session (its own highest is `FR-LAB-69` — `74`/`75` clear of it).
-    Given this exact category's numbers have already collided once, this
-    entry's own numbers should be re-verified against both branches again
-    immediately before landing, not assumed still clear from this check.
-  - [ ] `docs/ARCHITECTURE.md` — update the `django` paragraph to note the
-    widened shape count — todo.
-  - [ ] `CHANGELOG.md` line — todo.
-  - [ ] Full bug protocol for any genuine defect surfaced — todo (only if
-    one occurs).
+    classes + registry entries — done.
+  - [x] `fuzzlab/labgen/emitters/django/__init__.py` — widened
+    `_MODULE_SET_BY_SHAPE`/`_ROUTE_PARAMS`; `@csrf_exempt` applied to the
+    generated view for any cell whose `cell.route.method != "GET"` (gated
+    on the cell's own route method, not on complexity-template membership);
+    `hashlib`/`escape`/`csrf_exempt` added to the fixed header imports; a
+    small fixed `_read_stored_bio()` helper (a real, seedable raw-cursor
+    read, not a `request.session` read — this harness genuinely boots and
+    executes the code, unlike `node_express`) added unconditionally to
+    every generated view, backing the `read_stored_field` source — done.
+  - [x] `lab/manifests/phase_b_django_widen_sample.yaml` — done.
+  - [x] `tests/test_labgen_django_conformance.py` — extended (3 new tests:
+    Tier 0/3 for the widened manifest, plus the whole-collection
+    `@csrf_exempt` regression check) — done, **observed passing for real**
+    (7 passed, up from Phase A's 4).
+  - [x] `tests/test_labgen_django_live_boot_phase_b.py` (new sibling
+    module) — a real live-boot proof for both new shapes (a real `POST
+    /api/login` SQLi login-bypass-vs-safely-bound differential using a
+    real `' OR 1=1 -- ` comment-based bypass payload; a real `GET
+    /api/profile` stored-XSS raw-vs-escaped differential against a real
+    seeded `profiles` row) **and** the `PA-0034` adversarial test (a
+    mismatched-method `GET` request against `/api/login`) — done,
+    **observed passing for real this session** (4 passed in ~53s, after
+    the `BUG-0034` fix — the adversarial test genuinely failed first,
+    exactly as `PA-0034` exists to catch, before the fix landed).
+  - [x] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-74`/
+    `FR-LAB-75` — done. **Numbering re-verified immediately before
+    landing** (not merely from the earlier check above): this branch's own
+    highest `FR-LAB-` number was `73` and `claude/second-target-cat1-
+    ecommerce`'s own highest (re-fetched) was `69` — `74`/`75` confirmed
+    clear of both.
+  - [x] `docs/ARCHITECTURE.md` — updated the `django` paragraph with the
+    Phase B widening, the `@csrf_exempt` gating decision, and the
+    `BUG-0034` finding — done.
+  - [x] `CHANGELOG.md` line — done.
+  - [x] Full bug protocol for the genuine defect surfaced
+    (`BUG-0034`/`PA-0036`) — done: `ERROR_LOG.md` line,
+    `docs/bugs/BUG-0034-django-sql-string-literal-sink-crashes-on-none-
+    value.md` (full RCA, Five Whys, recurrence review — none found, this
+    is a new bug class for this codebase), `PA-0036` added to
+    `docs/PREVENTIVE_ACTIONS.md`, and the required PA-0002 sweep of every
+    other `django` template for the same `+`-concatenation-without-`str()`
+    shape (none found — this sink was the only instance).
 
-- **Effectiveness (assessed 2026-09-23): pending** — left pending until the
-  deliverables above land and the new tests are observed to pass for real.
+- **Effectiveness (assessed 2026-09-23): effective.** Every deliverable
+  landed and was independently, really exercised this session: Tier 0/3
+  pass for real for the widened manifest (`tests/test_labgen_django_
+  conformance.py`, 7 passed); the full live-boot proof passes for real
+  (`tests/test_labgen_django_live_boot_phase_b.py`, 4 passed) — a real
+  SQLi login-bypass (`200`, not `404`) on the vulnerable twin vs. a real
+  `404` on the secure twin; a real raw-vs-escaped XSS differential against
+  a real seeded `profiles` row; and the `PA-0034` adversarial test, which
+  **did its job**: it genuinely failed on first execution (a real `500`
+  instead of the expected `404`), surfacing a real code defect
+  (`BUG-0034`) that a happy-path-only test suite would have missed
+  entirely, fixed and re-verified passing before this entry landed. The
+  broader suite shows no regression (`pytest tests/ -q -m "not slow"`,
+  1527 passed, up from Phase A's 1521 by exactly the 6 new non-slow tests
+  added; the same 30 pre-existing `gitleaks`/`numpy`-environment failures,
+  confirmed unrelated). All 5 pre-change-review corrections/additions
+  (from both reviewers) were incorporated as designed, not just promised:
+  the `@csrf_exempt` gating genuinely uses `cell.route.method` (verified
+  by the whole-collection regression test, which would fail if a future
+  complexity-family assumption crept back in), and the deferred research
+  finding (the Django-specific XSS footgun) is recorded, not silently
+  dropped, for Phase C to pick up.
 
 ---
 **Pre-change review gate record:** reviewer #1 (accuracy) — APPROVE WITH

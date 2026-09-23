@@ -369,3 +369,25 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   a proxy signal for it — only `live_boot_available()`'s network half
   (`_network_reachable`, now `_composer_network_probe`) had this defect. (from
   BUG-0033)
+
+- **PA-0036 — a cross-language module port must re-verify every language-specific
+  runtime-behavior assumption the source language's shape relied on, not just its
+  syntax/structure.** Porting a proven module (source/transform/sink/complexity) from
+  one emitter's language to another's (e.g. `node_express`'s JS to `django`'s Python)
+  copies the module's shape correctly by construction if it renders the same
+  composition — but a runtime behavior the source language happened to make safe (JS's
+  `+`/PHP's `.` string-concatenation both coerce `null`/`undefined` to text rather than
+  raising) does not automatically hold in the new language (Python's `+` raises
+  `TypeError` concatenating `str` and `None`). A sink that concatenates a possibly-absent
+  tainted value directly into a string must defensively cast it to that language's own
+  string type first (`str(...)` in Python), matching whatever sibling sink in the same
+  emitter already does this correctly — never assume the port is complete once it
+  renders the intended composition; a value that is empty/absent at runtime, not just
+  the composition's shape, must also be checked. The PA-0002 sweep for this class
+  checked every other tainted-value concatenation site in the same emitter's own
+  template directory (`grep -rn "value_expr\|password_var"` over
+  `fuzzlab/labgen/emitters/django/templates/`) — only the one sink this bug was found
+  in lacked the cast; its siblings (`sql_numeric_lookup.py.j2`, `html_body_echo.py.j2`)
+  already had it. A future cross-language module port should run the same sweep before
+  considering that class of module "ported," not just "renders the same shape." (from
+  BUG-0034)

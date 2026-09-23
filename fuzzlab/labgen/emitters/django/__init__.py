@@ -1,22 +1,28 @@
 """``django``: category 2's new-stack pick (Instagram/Python-Django,
 `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9), Phase A
-(`CC-LAB-0090`).
+(`CC-LAB-0090`) + Phase B (`CC-LAB-0091`).
 
 Implements :class:`fuzzlab.labgen.emitter.Emitter` for Django by assembling
 :mod:`fuzzlab.labgen.emitters.django.modules` fragments per cell, following
 ``fuzzlab.labgen.emitters.node_express``'s own port of ``php_current``'s
 module-composition shape (Addendum C) as the closer structural template --
-both are Phase-A/Tier-A-scoped ports, unlike ``php_laravel``'s full-depth
-build. The actual Python/Django code is new.
+both are Tier-A-scoped ports, unlike ``php_laravel``'s full-depth build. The
+actual Python/Django code is new.
 
-**Scope, stated plainly (Phase A only, `CC-LAB-0090`):** exactly one
+**Scope, stated plainly:** Phase A (`CC-LAB-0090`) built exactly one
 well-documented, value-context shape -- ``sqli``/``sql_numeric_literal`` --
 the same first shape ``php_laravel``'s own L-P3.3a foundation lane and
 ``node_express``'s Phase A plan both picked, proving the scaffold renders
-and passes Tier 0 + Tier 3 end to end. The full module-inventory depth
-(mirroring ``node_express``'s own three Tier-A shapes, let alone
-``php_laravel``'s full nine) is a separate, later Phase B -- not attempted
-here.
+and passes Tier 0 + Tier 3 end to end. Phase B (`CC-LAB-0091`) widens this
+to the same three-shape Tier-A bar ``node_express`` already proves --
+``sqli``/``sql_string_literal`` (a login-style lookup) and ``xss``/
+``html_body`` (a stored value echoed raw vs. escaped). The full
+``php_laravel``-depth nine-shape inventory stays out of scope, as does the
+researched, corpus-grounded Django-specific XSS footgun (Django template
+autoescaping disabled via ``mark_safe()``/``|safe``/``{% autoescape off %}``
+-- see ``docs/research/category2-social-ugc-functionality-and-cwe-
+research.md`` §4) -- deliberately deferred to Phase C's own corpus-grounded
+page design, per `CC-LAB-0091`'s own reasoning.
 
 **Multi-file output, like ``node_express``.** Per Addendum D, a routed,
 multi-file emitter needs a ``route``-category *accumulator* module
@@ -48,6 +54,26 @@ from .modules import COMPLEXITIES, SINKS, SOURCES, TRANSFORMS, render_route_impo
 
 __all__ = ["DjangoEmitter"]
 
+# A small, fixed helper every generated view includes unconditionally
+# (CC-LAB-0091) -- present identically in every generated file regardless
+# of whether that cell's own shape uses it, mirroring node_express's own
+# `_ESCAPE_HTML_HELPER` convention (keeps the vulnerable/secure minimal-pair
+# diff confined to the transform region, BUG-0027). Backs the
+# `read_stored_field` source's `stored_expr` with a *real*, seedable value
+# (a raw cursor SELECT against a table `DjangoLiveBootHarness` seeds) --
+# deliberately not `request.session`-based: unlike `node_express` (which
+# has no live-boot harness and never actually executes this code),
+# `DjangoLiveBootHarness` genuinely boots and serves this file, so the
+# stored value must be real and directly seedable, not an idealized
+# property access on an undefined `currentUser`-style object.
+_READ_STORED_BIO_HELPER = (
+    "def _read_stored_bio():\n"
+    "    with connection.cursor() as cursor:\n"
+    "        cursor.execute(\"SELECT bio FROM profiles WHERE id = 1\")\n"
+    "        row = cursor.fetchone()\n"
+    "    return row[0] if row else \"\"\n"
+)
+
 
 class _ModuleSet(NamedTuple):
     """Same shape as ``php_current``'s/``node_express``'s ``_ModuleSet``:
@@ -62,26 +88,38 @@ class _ModuleSet(NamedTuple):
 
 
 #: (vuln_class, sink_context.family) -> which modules render this shape.
-#: Phase A scope only -- any pair not listed here is declared unsupported
-#: via supports().
+#: Tier-A scope only (Phase A + Phase B) -- any pair not listed here is
+#: declared unsupported via supports().
 _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("sqli", "sql_numeric_literal"): _ModuleSet("get_param", "sql_numeric_lookup", "single_statement"),
+    ("sqli", "sql_string_literal"): _ModuleSet("post_param", "sql_string_literal_lookup", "single_statement"),
+    ("xss", "html_body"): _ModuleSet("read_stored_field", "html_body_echo", "render_only"),
 }
 
-#: Per-route static context (table/column/param names) an emitter needs
-#: beyond the verdict-relevant Cell IR -- same separation rationale as
+#: Per-route static context (table/column/param names, or the stored field
+#: expression an HTML-sink cell reads) an emitter needs beyond the
+#: verdict-relevant Cell IR -- same separation rationale as
 #: ``php_current._PAGE_PARAMS``/``node_express._ROUTE_PARAMS``: table/column
 #: naming is render-only information, not verdict-relevant, so it lives
 #: here rather than growing the shared IR. Keyed by ``cell.route.path``,
 #: since a vulnerable cell and its secure twin share one route profile.
 _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     "/api/products": {"var_name": "id", "param_name": "id", "table": "products", "column": "id"},
+    "/api/login": {
+        "var_name": "username",
+        "param_name": "username",
+        "table": "users",
+        "column": "username",
+        "password_var": "password_hash",
+        "password_param": "password",
+    },
+    "/api/profile": {"var_name": "bio", "stored_expr": "_read_stored_bio()", "css_class": "bio"},
 }
 
 
 class DjangoEmitter(Emitter):
     """Renders a :class:`Cell` to a single Django view module via module
-    composition, Phase A's one shape only.
+    composition, Tier-A scope (Phase A + Phase B).
 
     ``render()`` never falls back to a default sink/transform/route-profile
     silently, matching ``php_current``'s/``node_express``'s "fail loud on
@@ -133,16 +171,34 @@ class DjangoEmitter(Emitter):
         complexity_result = COMPLEXITIES[modules.complexity].render({**ctx, "body": body})
 
         composition = " -> ".join((modules.source, *applied_ops, modules.sink, modules.complexity))
+        # CC-LAB-0091: any cell whose real HTTP method is not GET gets
+        # @csrf_exempt on its generated view. Gated on the cell's own
+        # `route.method` (never on which complexity/shape renders it) so a
+        # future POST-shaped cell on a *different* complexity than
+        # single_statement cannot silently ship undecorated and hit a live
+        # 403 -- see CC-LAB-0091's own change-control entry for the
+        # php_laravel-precedent reasoning (its skeleton disables Laravel's
+        # default CSRF middleware for the identical reason: the real pages
+        # every stack here models have no CSRF framework of their own).
+        view_code = complexity_result.code
+        if cell.route.method.upper() != "GET":
+            view_code = "@csrf_exempt\n" + view_code
         py_source = (
             f"# Generated by fuzzlab.labgen.emitters.django for cell {cell.cell_id}\n"
             f"# Route: {cell.route.method} {cell.route.path}\n"
             f"# Module composition: {composition}\n"
             "\n"
+            "import hashlib\n"
+            "\n"
             "from django.db import connection\n"
             "from django.http import HttpResponse, JsonResponse\n"
+            "from django.utils.html import escape\n"
+            "from django.views.decorators.csrf import csrf_exempt\n"
             "\n"
             "\n"
-            f"{complexity_result.code}"
+            f"{_READ_STORED_BIO_HELPER}"
+            "\n"
+            f"{view_code}"
         )
         cell_slug = _snake_case(cell.cell_id)
         path = f"fuzlab_django_lab/views/{cell_slug}.py"

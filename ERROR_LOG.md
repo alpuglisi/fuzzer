@@ -18,6 +18,29 @@ Format per entry:
 
 ---
 
+## 2026-09-23 — django `sql_string_literal` sink crashes (500, not 404) on a missing POST param, found by its own PA-0034 adversarial test (fixed, BUG-0034/PA-0036)
+
+- **Symptom:** `CC-LAB-0091`'s own required `PA-0034` adversarial test (a
+  mismatched-method `GET` request against the newly `@csrf_exempt`-decorated
+  `/api/login` view) returned a real `500` instead of the expected `404`.
+- **Root cause:** the vulnerable `sql_string_literal_lookup.py.j2` sink
+  template's unbound branch concatenated the tainted `value_expr` directly
+  (`"...'" + {{ value_expr }} + "'..."`) instead of casting it with `str()`
+  first, unlike its sibling `sql_numeric_lookup.py.j2` sink (which already
+  wraps in `str(...)`). `request.POST.get("username")` returns `None` on a
+  `GET` request, and Python's `+` operator raises `TypeError` concatenating
+  `str` and `NoneType` -- a crash the PHP/JS analogs of this same shape
+  don't have (PHP's `.` operator and JS's `+` on a string both coerce
+  `null`/`undefined` to text rather than raising).
+- **Remediation:** added the missing `str(...)` cast
+  (`fuzzlab/labgen/emitters/django/templates/sinks/
+  sql_string_literal_lookup.py.j2`), landed with `CC-LAB-0091`. Swept every
+  other `django` template for the same `+`-concatenation-without-`str()`
+  shape (`grep` over `fuzzlab/labgen/emitters/django/templates/`) -- no
+  other instance found; `html_body_echo.py.j2` and `sql_numeric_lookup.py.j2`
+  already cast correctly.
+- **Status:** Fixed (`BUG-0034`/`PA-0036`).
+
 ## 2026-09-22 — Mass-assignment codegen: smuggled SQLi, broken POST routing, and a nullable dereference, found by PR review (fixed, BUG-0031/PA-0034)
 
 - **Symptom:** PR #1's external review found the `orm_entity_bulk_assign`

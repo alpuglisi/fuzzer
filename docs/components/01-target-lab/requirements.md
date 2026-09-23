@@ -1939,6 +1939,48 @@ lane) can submit a payload as
   non-matching literal string, never executed as SQL) — the same
   syntax-break-vs.-safely-bound differential every other stack's first
   live-boot test proves.
+- **FR-LAB-74** *(the `django` emitter widened to Tier-A depth; `CC-LAB-0091`,
+  2026-09-23).* `fuzzlab.labgen.emitters.django.DjangoEmitter` widened from
+  Phase A's one shape to the same three-shape Tier-A bar `node_express`
+  already proves: `sqli`/`sql_string_literal` (a login-style lookup, POST
+  body source, an MD5'd-password-boilerplate sink, parameterized `%s`
+  placeholders vs. quoted-string concatenation) and `xss`/`html_body` (a
+  stored value — a real, seeded `profiles` row, read via a small fixed
+  `_read_stored_bio()` helper every generated view carries unconditionally
+  — echoed raw into an `HttpResponse` body vs. escaped with
+  `django.utils.html.escape()`). Any cell whose `route.method` is not
+  `GET` renders with `@csrf_exempt` (gated on the cell's own route method,
+  never on which complexity template renders it, so a future POST-shaped
+  cell on a different complexity cannot silently ship undecorated —
+  verified by a whole-collection regression check,
+  `tests/test_labgen_django_conformance.py::
+  test_every_non_get_cell_is_decorated_with_csrf_exempt`). Passes Tier 0/
+  Tier 3 for the widened manifest
+  (`lab/manifests/phase_b_django_widen_sample.yaml`). The full
+  `php_laravel`-depth nine-shape inventory, and the researched,
+  corpus-grounded Django-specific XSS footgun (`mark_safe()`/`|safe`/
+  `{% autoescape off %}`, `docs/research/category2-social-ugc-
+  functionality-and-cwe-research.md` §4) stay out of scope — the latter
+  deliberately deferred to Phase C's own corpus-grounded page design.
+- **FR-LAB-75** *(real live-boot proof for both widened shapes, including
+  a `PA-0034` adversarial test; `CC-LAB-0091`, 2026-09-23).* Real, executed,
+  skip-guarded (PA-0005) proof in `tests/test_labgen_django_live_boot_
+  phase_b.py`: a real `POST /api/login` request with a classic SQLi
+  login-bypass payload (`' OR 1=1 -- `) against the vulnerable twin's
+  unparameterized query returns a real `200` (a genuine, observable
+  authentication bypass — no correct password required), while the secure
+  twin's parameterized query returns a real `404` (no bypass); a real
+  `GET /api/profile` request against a `profiles` row seeded with a real
+  `<script>` payload returns the vulnerable twin's raw, unescaped payload
+  in the response body, and the secure twin's real `&lt;script&gt;`-escaped
+  form. **A real `PA-0034` adversarial test** (an input orthogonal to the
+  feature's own SQLi demonstration — a mismatched HTTP method, `GET`
+  instead of `POST`, against the newly `@csrf_exempt`-decorated `/api/login`
+  view) confirmed the CSRF exemption does not silently widen the attack
+  surface — this test **found a real code defect** (`BUG-0034`/`PA-0036`:
+  the vulnerable sink concatenated a possibly-`None` value without a
+  `str()` cast, crashing with a real `500` instead of the expected `404`
+  on a `GET` request), fixed before this entry landed, and now passing.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

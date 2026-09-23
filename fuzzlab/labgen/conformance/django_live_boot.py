@@ -44,6 +44,7 @@ not restated here.
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 import socket
 import sqlite3
@@ -186,6 +187,21 @@ INSERT INTO products (id, name) VALUES
     (2, 'Puppy Bed');
 """
 
+#: A real users row backing the `sql_string_literal` login shape
+#: (`CC-LAB-0091`) -- `password` is stored MD5-hashed, matching the
+#: generated sink's own `hashlib.md5(...)` choice (kept consistent with
+#: `node_express`'s identical illustrative-shape choice, not picked as a
+#: stronger hash here -- both stacks prove the same SQLi differential, not
+#: a hashing-strength lesson).
+SEED_USERNAME = "alice"
+SEED_PASSWORD = "correct-horse-battery-staple"
+
+#: A real, default profile `bio` row backing the `read_stored_field`
+#: source's `_read_stored_bio()` helper (`CC-LAB-0091`) -- a benign default;
+#: a caller proving the stored-XSS differential passes an adversarial
+#: `seed_bio` to the constructor instead (see `DjangoLiveBootHarness.__init__`).
+DEFAULT_SEED_BIO = "Hi, I'm a happy customer!"
+
 
 class DjangoLiveBootHarness:
     """Assembles, installs, migrates, and boots one manifest's ``django``
@@ -208,10 +224,18 @@ class DjangoLiveBootHarness:
         cells: list[Cell],
         *,
         install_timeout: float = 180.0,
+        seed_bio: str = DEFAULT_SEED_BIO,
     ) -> None:
+        """``seed_bio`` (`CC-LAB-0091`): the value seeded into the
+        `read_stored_field` source's backing `profiles` row. A caller
+        proving the stored-XSS differential passes an adversarial payload
+        here (e.g. ``"<script>alert(1)</script>"``) -- the default is a
+        benign value so a caller not exercising that shape gets ordinary
+        content."""
         self._emitter = emitter
         self._cells = [c for c in cells if emitter.supports(c.vuln_class, c.sink_context)]
         self._install_timeout = install_timeout
+        self._seed_bio = seed_bio
         self._tmp: tempfile.TemporaryDirectory | None = None
         self._app_dir: Path | None = None
         self._venv_dir: Path | None = None
@@ -248,6 +272,18 @@ class DjangoLiveBootHarness:
         conn = sqlite3.connect(db_path)
         try:
             conn.executescript(_SEED_PRODUCTS_SQL)
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS users ("
+                "id INTEGER PRIMARY KEY, username TEXT NOT NULL, password TEXT NOT NULL)"
+            )
+            conn.execute(
+                "INSERT INTO users (id, username, password) VALUES (?, ?, ?)",
+                (1, SEED_USERNAME, hashlib.md5(SEED_PASSWORD.encode("utf-8")).hexdigest()),
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS profiles (id INTEGER PRIMARY KEY, bio TEXT NOT NULL)"
+            )
+            conn.execute("INSERT INTO profiles (id, bio) VALUES (1, ?)", (self._seed_bio,))
             conn.commit()
         finally:
             conn.close()
