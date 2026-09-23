@@ -2030,6 +2030,52 @@ lane) can submit a payload as
   remain deferred for both Huddle Hub and TrackerNest as a whole (see
   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4/§9.6).
 
+- **FR-LAB-100** *(TrackerNest: Phase C ground truth; `CC-LAB-0136`,
+  2026-09-23).* TrackerNest's own `lab/ground-truth-trackernest/`
+  (`labels.json`/`injection-points.json`/`expectedresults.csv`, target
+  `spring_boot`, case prefix `TNEST`), per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4 step 2 — never a
+  `PFF-*` case. Describes the app instantiated with its three vulnerable
+  twins deployed (`LABGEN-SSTI-0001`/`LABGEN-XXE-0001`/
+  `LABGEN-DESER-0001`) — the only combination of these three same-route
+  twin pairs that is simultaneously real-bootable at all (two
+  `@RestController`s on the identical `@GetMapping`/`@PostMapping` path
+  is a real Spring Boot "Ambiguous mapping" boot failure). Three cases:
+  `TNEST-0001` (SSTI, `/wiki/pages/render`, GET, `macroExpr` query,
+  rendering `server` — plain-text `ResponseEntity`, not JSON);
+  `TNEST-0002` (XXE, `/issues/import`, POST, `body` — whole raw body, no
+  named field, matching category 4/Netflix's own established
+  convention); `TNEST-0003` (insecure deserialization,
+  `/integrations/webhook-payload`, POST, `body` — same whole-raw-body
+  convention). `fuzzlab/labels/schemas/labels.schema.json`'s
+  `vuln_class`/`sink_context` enums extended additively (no version
+  bump) for this category's 6 new classes, shared with `FR-LAB-101`
+  below (landed once, in the same commit). Verified: `fuzzlab.labels.
+  contract.load()` loads and cross-checks all 3 files without error;
+  every case's exactly-one-tainted-param claim confirmed by reading each
+  cell's actual rendered controller output directly.
+
+- **FR-LAB-101** *(Huddle Hub: Phase C ground truth; `CC-LAB-0137`,
+  2026-09-23).* Huddle Hub's own `lab/ground-truth-huddlehub/`
+  (target `php_laravel`, case prefix `HHUB`), same §4-step-2 contract as
+  `FR-LAB-100` above — never a `PFF-*` case. Each cell already has its
+  own unique `/cell/<slug>` URL (`served_url_for()`, keyed on `cell_id`),
+  so no route-collision constraint applies here the way it does for
+  TrackerNest, but this ground truth still records only the three
+  vulnerable cells' own URLs (never a paired "none" row for a secure
+  twin), matching category 5/Booking.com's own established convention.
+  Three cases: `HHUB-0001` (webhook-signature bypass,
+  `/cell/labgen-hhb-0001`, POST, `X-Signature` **header** — the
+  attacker-controlled input this CWE-347 case concerns is the signature
+  header value itself, not the body field the HMAC is computed over);
+  `HHUB-0002` (SSRF, `/cell/labgen-hhb-0003`, GET, `url` query);
+  `HHUB-0003` (outbound header injection, `/cell/labgen-hhb-0005`, GET,
+  `triggerWord` query). Verified the same way as `FR-LAB-100`. Cross-
+  branch enum-naming drift flagged, not silently left: category 4
+  independently named its own webhook class `webhook_signature` (this
+  project's `webhook_signature_bypass` is a distinct string, no actual
+  collision) — a merge-time reconciliation note, not a blocker.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

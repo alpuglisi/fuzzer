@@ -12,6 +12,26 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (Phase C ground truth)
+- `lab/ground-truth-trackernest/`, `lab/ground-truth-huddlehub/`: authors
+  Phase C ground truth (`labels.json`/`injection-points.json`/
+  `expectedresults.csv`) for both of category 3's designed apps, per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4 step 2 — each app's
+  own opaque case-ID scheme (`TNEST-*`/`HHUB-*`), never `PFF-*`. Split
+  into two separate change-control entries (`CC-LAB-0136`/`CC-LAB-0137`)
+  after the pre-change review's own adequacy pass flagged bundling both
+  apps into one entry as the same over-scoping anti-pattern `CC-LAB-0090`
+  was originally caught on. TrackerNest's ground truth describes the app
+  with its three vulnerable twins deployed (the only combination that is
+  simultaneously real-bootable, since its twins share a literal route);
+  Huddle Hub's records only its three vulnerable cells' own per-cell
+  URLs, matching category 5/Booking.com's own established convention.
+  `fuzzlab/labels/schemas/labels.schema.json`'s `vuln_class`/
+  `sink_context` enums extended additively for this category's 6 new
+  classes. Both directories verified to load and cross-check cleanly via
+  `fuzzlab.labels.contract.load()`. See `CC-LAB-0136`/`FR-LAB-100` and
+  `CC-LAB-0137`/`FR-LAB-101`.
+
 ## 2026-09-23 (cross-branch bookkeeping fix, round 2 — merge conflict)
 - Docs/LAB: while merging this branch's own concurrently-pushed
   `CC-LAB-0135`/`FR-LAB-83` (Huddle Hub's third cell, header injection),

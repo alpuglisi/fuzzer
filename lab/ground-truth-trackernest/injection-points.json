@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "target": "spring_boot",
+  "points": [
+    { "url": "/wiki/pages/render", "method": "GET", "param": "macroExpr", "location": "query", "rendering": "server" },
+    { "url": "/issues/import", "method": "POST", "param": "body", "location": "body", "rendering": "server" },
+    { "url": "/integrations/webhook-payload", "method": "POST", "param": "body", "location": "body", "rendering": "server" }
+  ]
+}

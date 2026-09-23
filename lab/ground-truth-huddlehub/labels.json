@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "target": "php_laravel",
+  "cases": [
+    {
+      "case_id": "HHUB-0001",
+      "url": "/cell/labgen-hhb-0001",
+      "method": "POST",
+      "param": "X-Signature",
+      "location": "header",
+      "vuln_class": "webhook_signature_bypass",
+      "sink_context": "webhook",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "The X-Signature request header (not the body field the HMAC is computed over) is the attacker-controlled input this CWE-347 case concerns: the vulnerable twin recomputes the HMAC and compares it to this header's value with PHP's `==` operator, vulnerable to a \"magic hash\" type-juggling collision. Modeled on a real Slack-style Events-API callback receiver (docs/research/category3-saas-functionality-and-cwe-research.md sec 1/6a). Served at its own illustrative per-cell URL (served_url_for(), not the shared manifest route.path `/webhooks/events`, since Huddle Hub has no migrated real page to anchor a pinned URL to). LABGEN-HHB-0001 in lab/manifests/webhook_signature_huddlehub_sample.yaml, CC-LAB-0133/FR-LAB-94 -- never a PFF-* case."
+    },
+    {
+      "case_id": "HHUB-0002",
+      "url": "/cell/labgen-hhb-0003",
+      "method": "GET",
+      "param": "url",
+      "location": "query",
+      "vuln_class": "ssrf",
+      "sink_context": "network",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "The pasted url is fetched server-side with zero validation of its host/scheme -- real SSRF, CWE-918. Modeled on a real Slack-style \"link unfurling\" feature (docs/research/category3-saas-functionality-and-cwe-research.md sec 2/6a). Served at its own illustrative per-cell URL, same reasoning as HHUB-0001. LABGEN-HHB-0003 in lab/manifests/ssrf_huddlehub_sample.yaml, CC-LAB-0134/FR-LAB-98 -- never a PFF-* case."
+    },
+    {
+      "case_id": "HHUB-0003",
+      "url": "/cell/labgen-hhb-0005",
+      "method": "GET",
+      "param": "triggerWord",
+      "location": "query",
+      "vuln_class": "outbound_header_injection",
+      "sink_context": "header",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "triggerWord is concatenated directly into a raw outbound HTTP request header block for a webhook-delivery POST -- an embedded CRLF splices in an arbitrary extra header the destination receives, CWE-93. Modeled on a real Slack-style outgoing-webhook delivery feature (docs/research/category3-saas-functionality-and-cwe-research.md sec 1/6a). Served at its own illustrative per-cell URL, same reasoning as HHUB-0001. LABGEN-HHB-0005 in lab/manifests/header_injection_huddlehub_sample.yaml, CC-LAB-0135/FR-LAB-99 -- never a PFF-* case."
+    }
+  ]
+}
