@@ -2237,6 +2237,98 @@ lane) can submit a payload as
   `run_targets` call (left for a follow-on step once both `TargetSpec`s
   exist, per §6 step 2's own note).
 
+- **FR-LAB-84** *(Phase C: ForgeCart app identity + coherent routes +
+  ground truth, `ruby_rails`; `CC-LAB-0080`, 2026-09-23).* Per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§9.4a/§9.5's Category
+  1 (E-commerce) Shopify/Rails pilot, the four existing real `ruby_rails`
+  shapes (`FR-LAB-65` reflected XSS, `FR-LAB-66` webhook-signature,
+  `FR-LAB-67` CWE-915 mass assignment, `FR-LAB-68` CWE-502 insecure
+  deserialization) are assembled into one small, coherent app identity, the
+  **ForgeCart storefront + admin** (a fictitious brand; its shape -- a
+  Shopify-style merchant storefront + admin -- is grounded in
+  `docs/research/site-architecture-survey-functionality-shopify.md`):
+  - `_REAL_PAGE_URL_BY_CELL_ID` (`fuzzlab/labgen/emitters/ruby_rails/__init__.py`),
+    checked first by `url_path_for`: five new real-page cell IDs
+    (`LABGEN-RR-RP-0001`..`0005`) get a real, coherent app URL (`/search`;
+    two real Shopify webhook topics, `/webhooks/orders/create` vulnerable
+    and `/webhooks/customers/update` secure; `/admin/customers/update`;
+    `/admin/products/import`). Every pre-existing cell (Phase A's
+    illustrative shape, Phase B's three sample pairs, `LABGEN-RR-0001`..
+    `0007`) is untouched and keeps its prior `/cell/<slug>` URL and passing
+    tests unchanged.
+  - Five new, always-included, genuinely inert surrounding routes
+    (`route_accumulator._STATIC_APP_ROUTES`: `/`, `/products`, `/cart`,
+    `/admin`, `/admin/orders`) with their own checked-in skeleton
+    controllers (`StorefrontController`/`AdminController`) -- no request
+    input read or reflected by any of them; added purely for app-identity
+    coherence, no manifest cell or ground-truth case of their own.
+  - New `lab/manifests/shopify_forgecart_real_pages.yaml`: the five
+    real-page cells, each reusing an existing shape's existing modules (no
+    new vulnerability module). Four vulnerable, one secure (a second,
+    distinct real Shopify webhook topic) -- a genuine negative real-page
+    case, not an all-positive set. Uses `POST`, not `PATCH`, for the
+    mass-assignment real page specifically so
+    `fuzzlab.harness.auto.points_from_ground_truth` (which only treats
+    GET/POST ground-truth points as actively auditable) can audit it
+    without any change to that shared CORE/FUZZ-layer code.
+  - New `lab/ground-truth-forgecart/` (`labels.json`/`injection-points.json`/
+    `expectedresults.csv`, D9's out-of-band contract): opaque `FCART-NNNN`
+    case IDs (distinct from `PFF-*` and the concurrent Node lane's
+    `MMART-*`), `target: "ruby_rails_forgecart"`, 4 positive/1 negative
+    case. Loads and validates via `fuzzlab.labels.contract.load`.
+  - `fuzzlab/labels/schemas/labels.schema.json`: additive enum widening --
+    `vuln_class` gains `webhook_signature`/`mass_assignment`/
+    `insecure_deserialization`, `sink_context` gains
+    `webhook_signature`/`mass_assignment`/`deserialization` (none of the
+    three classes could be expressed in the ground-truth contract before
+    this).
+
+- **FR-LAB-85** *(Phase D: whole-app live-boot conformance for ForgeCart,
+  plus `BUG-0035` fix; `CC-LAB-0081`, 2026-09-23).* Per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §5's standard, closes
+  the real gap every prior `ruby_rails` proof left open (one or two cells
+  booted in isolation, never the whole assembled app). New `tests/
+  test_labgen_ruby_rails_whole_app_live_boot.py`: assembles all 12 cells
+  this stack has ever built (Phase A's illustrative shape, Phase B's three
+  sample pairs, `FR-LAB-84`'s five real-page cells) onto one real, single
+  `bin/rails server` boot, with real HTTP against every route (the five
+  real vulnerability pages, the five inert surrounding pages, the health
+  check, and the pre-existing `/cell/<slug>` endpoints) and no route
+  collision. While building this, found and fixed a real, 100%-reproducible
+  defect: the checked-in skeleton's `Gemfile` never pinned the `json` gem,
+  so an unconstrained `bundle install` resolved `json 3.0.2`
+  (`activesupport` 8.1.3.1's own gemspec declares only `json >= 0`), whose
+  keyword-only `JSON.parse` broke `ActiveSupport::JSON.decode`'s own
+  positional call on the read path of every encrypted session-cookie read
+  -- 500'ing every second request of any session, invisible to Phase A/B's
+  single-request-per-test suite. Full RCA: `docs/bugs/BUG-0035-rails-
+  skeleton-json-gem-arity-breaks-second-request-in-a-session.md`;
+  preventive action `docs/PREVENTIVE_ACTIONS.md` `PA-0037`. Fixed by
+  pinning `gem "json", "~> 2.7"` and regenerating `Gemfile.lock` for real.
+
+- **FR-LAB-86** *(Phase E: ForgeCart `TargetSpec` wired into
+  `multitarget.py`; `CC-LAB-0082`, 2026-09-23).* Per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6, this app's half only
+  (the concurrent Walmart/Node lane owns its own `TargetSpec`). New
+  `tests/test_multitarget_ruby_rails_forgecart.py`: a real
+  `fuzzlab.harness.multitarget.TargetSpec` (`base_url` from the same real
+  live-booted app `FR-LAB-85` assembles; `ground_truth` from `FR-LAB-84`'s
+  `lab/ground-truth-forgecart`), run for real through
+  `run_targets`/`transfer_summary` using the existing, unmodified
+  `fuzzlab.tools.probesender.RequestsProbeSender`. Produces a real, scored
+  `ScoreReport` with `tp>=1` (the real `/search` reflected-XSS case is
+  genuinely confirmed -- `xss` is a category `run_auto`'s existing
+  detection machinery already knows how to confirm, unlike this app's
+  three brand-new vuln classes, which score 0 recall for the same
+  documented-gap reason the concurrent Node lane's own `FR-LAB-83` names
+  for its two brand-new classes) and a `transfer_summary` correctly
+  reporting the target in `found_on`. A second run against a fresh boot of
+  the same app gets its own distinct `run_id`. Deliberately out of scope:
+  building a confirmation oracle for `webhook_signature`/`mass_assignment`/
+  `insecure_deserialization`; running both this target and the Node target
+  together in one `run_targets` call (left for a follow-on step per §6 step
+  2's own note, same as `FR-LAB-83`).
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

@@ -13,6 +13,36 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-23
+- LAB (`claude/second-target-cat1-ecommerce`): ForgeCart storefront+admin
+  (`ruby_rails`) Phase C/D/E — the four existing real Rails cells (reflected
+  XSS, webhook-signature, CWE-915 mass assignment, CWE-502 insecure
+  deserialization) assembled into a coherent Shopify-grounded merchant
+  storefront+admin app identity (`CC-LAB-0080`/`FR-LAB-84`): five real-page
+  cells at real URLs (`/search`, two real Shopify webhook topics —
+  `/webhooks/orders/create` vulnerable, `/webhooks/customers/update`
+  secure, giving this app's own ground truth a genuine negative case —
+  `/admin/customers/update`, `/admin/products/import`), five fixed inert
+  surrounding routes/controllers (storefront home/products/cart, admin
+  dashboard/orders) for app coherence, a new `lab/ground-truth-forgecart/`
+  contract (`FCART-NNNN` case IDs), and an additive `labels.schema.json`
+  enum widening for the three previously-unrepresentable vuln classes.
+  Phase D (`CC-LAB-0081`/`FR-LAB-85`) closes the whole-app live-boot gap
+  every prior proof left open — all 12 cells this stack has ever built (1
+  Phase A + 6 Phase B sample-pair cells + 5 Phase C real-page cells)
+  assembled and booted together onto one real `bin/rails server` process,
+  driven with real HTTP against every route — and, while building it,
+  found and fixed a real, 100%-reproducible defect (`BUG-0035`/`PA-0037`):
+  the skeleton's unpinned `json` gem resolved to a version whose
+  `JSON.parse` broke `ActiveSupport::JSON.decode`'s own internal call,
+  500'ing every session-cookie read on the second request of any session —
+  invisible to two full build phases' worth of single-request tests. Phase
+  E (`CC-LAB-0082`/`FR-LAB-86`) wires this app into
+  `fuzzlab.harness.multitarget` as its own real `TargetSpec`, run for real
+  (a real HTTP sender against a real live-booted instance, real ground
+  truth, a real scored `ScoreReport` that genuinely confirms the real
+  `/search` reflected-XSS case) — this app's half of the toolkit-side
+  second-target proof; the concurrent Walmart/Node lane owns its own
+  `TargetSpec` on this same branch.
 - LAB (`claude/second-target-cat1-ecommerce`): MeadowMart BFF (`node_express`)
   Phase C/D/E — the two existing real Node cells (prototype pollution,
   ReDoS) assembled into a coherent, Walmart-grounded BFF app identity

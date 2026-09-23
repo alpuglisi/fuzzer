@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "target": "node_express_meadowmart_bff",
+  "cases": [
+    {
+      "case_id": "MMART-0001",
+      "url": "/api/preferences",
+      "method": "POST",
+      "param": "__proto__",
+      "location": "body",
+      "vuln_class": "prototype_pollution",
+      "sink_context": "object_property",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "stack": "node_express",
+      "notes": "MeadowMart BFF's account/cart preferences endpoint (CC-LAB-0070/CC-LAB-0077); unguarded_deep_merge writes every key of the request body onto the live preferences object with no guard, so a '__proto__'-shaped body pollutes Object.prototype itself (LABGEN-PP-0001). Served at the app's real, canonical URL (see fuzzlab.labgen.emitters.node_express's _REAL_PAGE_CANONICAL). The finding is invisible in this request's own HTTP response by nature -- see tests/test_labgen_prototype_pollution.py's real, executed Node-subprocess proof, and tests/test_labgen_node_bff_app.py for the same route proven reachable inside the fully assembled app over real HTTP."
+    },
+    {
+      "case_id": "MMART-0002",
+      "url": "/api/preferences-twin-labgen-pp-0002",
+      "method": "POST",
+      "param": "__proto__",
+      "location": "body",
+      "vuln_class": "prototype_pollution",
+      "sink_context": "object_property",
+      "expected_vulnerable": false,
+      "rendering": "server-json",
+      "stack": "node_express",
+      "notes": "The secure twin of MMART-0001 (LABGEN-PP-0002): proto_key_filtered_merge skips '__proto__'/'constructor'/'prototype' keys before the merge's own assignment, so the same adversarial body leaves Object.prototype untouched. Served at a deterministic twin URL (CC-LAB-0077's _twin_url_for) since both twins must coexist as distinct live routes in the one assembled app."
+    },
+    {
+      "case_id": "MMART-0003",
+      "url": "/api/search",
+      "method": "GET",
+      "param": "q",
+      "location": "query",
+      "vuln_class": "redos",
+      "sink_context": "regex",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "stack": "node_express",
+      "notes": "MeadowMart BFF's search/highlight endpoint (CC-LAB-0076/CC-LAB-0077); the search term is interpolated directly into `new RegExp(term, 'gi')` with no escaping, so a pathological pattern (e.g. '(a+)+$') causes catastrophic backtracking against the endpoint's own content (LABGEN-RD-0001). Served at the app's real, canonical URL. A real, directly observable real-HTTP timing differential -- see tests/test_labgen_redos.py's in-process proof and tests/test_labgen_node_bff_app.py's real-HTTP proof against the fully assembled app."
+    },
+    {
+      "case_id": "MMART-0004",
+      "url": "/api/search-twin-labgen-rd-0002",
+      "method": "GET",
+      "param": "q",
+      "location": "query",
+      "vuln_class": "redos",
+      "sink_context": "regex",
+      "expected_vulnerable": false,
+      "rendering": "server",
+      "stack": "node_express",
+      "notes": "The secure twin of MMART-0003 (LABGEN-RD-0002): regex_escape_construct escapes every regex metacharacter in the term before the RegExp is built, so the same adversarial pattern can only ever match itself literally. Served at a deterministic twin URL, same rationale as MMART-0002."
+    }
+  ]
+}

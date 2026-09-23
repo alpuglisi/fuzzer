@@ -3,6 +3,205 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0082 — Phase E: ForgeCart `TargetSpec` wired into `multitarget.py` (FR-LAB-86) (2026-09-23)
+- Change: `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6/§9.4a/§9.5's
+  Category 1 (E-commerce) Shopify/Rails pilot, Phase E, this app's half only
+  (the concurrent Walmart/Node lane owns its own `TargetSpec` on this same
+  branch, `CC-LAB-0077`/`0079`). New `tests/test_multitarget_ruby_rails_forgecart.py`:
+  builds a real `fuzzlab.harness.multitarget.TargetSpec` for ForgeCart
+  (`base_url` from a real, freshly `bundle install`ed + booted
+  `RailsLiveBootHarness` instance running all 5 of `CC-LAB-0080`'s
+  real-page cells; `ground_truth` from `CC-LAB-0080`'s
+  `lab/ground-truth-forgecart` contract), and runs
+  `fuzzlab.harness.multitarget.run_targets`/`transfer_summary` against it
+  for real using `fuzzlab.tools.probesender.RequestsProbeSender` (a real,
+  already-existing, unauthenticated HTTP sender — no new sender class
+  needed), same mechanism the concurrent Node lane's own Phase E test uses.
+  Unlike that lane's own result, this app's ground truth includes one case
+  (`FCART-0001`, the real `/search` reflected-XSS page) in a category
+  (`xss`) `run_auto`'s existing detection machinery already knows how to
+  confirm — so this run produces a real `tp>=1`, `scored=True` outcome, not
+  only a non-crashing zero-recall run: genuine evidence of cross-stack
+  transfer (the same reflected-XSS confirmation mechanism proven on
+  `php_laravel`/`php_current` also fires for real against a brand-new
+  Rails target it has never seen before).
+- Impact (other components / project): none to shipped code —
+  `fuzzlab.harness.multitarget`/`fuzzlab.tools.probesender` are used
+  exactly as they already exist, unmodified. Closes the toolkit-side half
+  of this app's Phase 10 `T10.6`-style proof; the live/on-host measurement
+  stays exactly as out of scope as `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
+  §7 already says.
+- Risk (level; mitigation or accepted-risk justification): Low. Test-only
+  addition; no production code path changed. Accepted, flagged limitation:
+  recall is 0 for the three brand-new vuln classes this app also carries
+  (`webhook_signature`, `mass_assignment`, `insecure_deserialization`) —
+  same documented-gap class as the concurrent Node lane's own
+  `prototype_pollution`/`redos` limitation (`CC-LAB-0079`'s own Risk
+  section): none of the three is mapped by
+  `fuzzlab.core.runmode._VULN_TO_CATEGORY`/known to
+  `fuzzlab.audit.rules.known_categories()`, and two of the three
+  (`webhook_signature`'s header-location point, `mass_assignment`'s
+  observable-only-via-timing-or-JSON-diff shape) have no dedicated
+  confirmation oracle built for them at all — building one for each is
+  real, sized follow-on work squarely out of this change's own scope (this
+  dispatch's own instructions: prove the wiring runs and produces metrics,
+  not build new toolkit-side detectors for brand-new generator vuln
+  classes).
+- Deliverables:
+  - [x] `TargetSpec` for ForgeCart, `base_url` from a real live boot — done
+  - [x] `run_targets`/`transfer_summary` executed for real against it,
+    producing a real, scored per-target `ScoreReport` with `tp>=1` (the
+    real `/search` XSS case genuinely confirmed) — done, see
+    `tests/test_multitarget_ruby_rails_forgecart.py`
+  - [x] A second real run against a fresh boot of the same app gets its own
+    distinct `run_id` (proves the wiring composes with a later, second run,
+    the same property the concurrent Node lane's own Phase E test proves
+    for its app) — done
+  - [x] `requirements.md` (`FR-LAB-86`) — done
+- Effectiveness (assessed 2026-09-23): `tests/test_multitarget_ruby_rails_forgecart.py`
+  passes for real (2 passed) against a real, freshly `bundle install`ed and
+  booted instance of the app `CC-LAB-0080`/`0081` assemble, with a real
+  `ScoreReport(tp=1, fp=0, ...)` for the `/search` case; full suite re-run
+  clean afterward (see this change's own final report for the exact
+  pass/skip counts).
+
+### CC-LAB-0081 — Phase D: whole-app live-boot conformance for ForgeCart, plus BUG-0035 fix (FR-LAB-85) (2026-09-23)
+- Change: `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §5/§9.4a/§9.5's
+  Category 1 (E-commerce) Shopify/Rails pilot, Phase D. Closes the
+  whole-app gap every prior `ruby_rails` proof left open: Phase A/B's own
+  live-boot tests each booted one or two cells at a time in isolation.
+  New `tests/test_labgen_ruby_rails_whole_app_live_boot.py`: assembles
+  **every** cell this stack has ever built — Phase A's illustrative shape,
+  all three Phase B sample pairs, and `CC-LAB-0080`'s five Phase C
+  real-page cells, 12 in total — onto one real, single `bin/rails server`
+  boot, and drives real HTTP against every route (the five real
+  vulnerability pages, the five fixed inert surrounding pages, the health
+  check, and Phase A/B's own pre-existing `/cell/<slug>` endpoints),
+  confirming `RouteAccumulator.render_file` raises no collision across the
+  full assembled set.
+  While building this test, found and fixed a real, 100%-reproducible
+  defect (`BUG-0035`, `docs/bugs/BUG-0035-rails-skeleton-json-gem-arity-
+  breaks-second-request-in-a-session.md`; preventive action `PA-0037`):
+  the checked-in skeleton's `Gemfile` never pinned the `json` gem, so an
+  unconstrained `bundle install` resolved `json 3.0.2` (`activesupport`
+  8.1.3.1's own gemspec declares only `json >= 0`) — but `json` 3.x made
+  `JSON.parse`'s options parameter keyword-only, while
+  `ActiveSupport::JSON.decode` still calls it positionally, on the read
+  path of every encrypted session-cookie read. This 500'd every second
+  request of any session against any route, invisible to Phase A/B's
+  single-request-per-test suite. Fixed by pinning `gem "json", "~> 2.7"` in
+  `fuzzlab/labgen/emitters/ruby_rails/stack/skeleton/Gemfile` and
+  regenerating `Gemfile.lock` for real (`bundle install`, resolves `json
+  2.21.2`).
+- Impact (other components / project): the `Gemfile`/`Gemfile.lock` fix
+  changes every future `ruby_rails` app's resolved `json` version — a
+  strictly narrower, compatible pin (`~> 2.7`, the last pre-3.0 line), not
+  a behavior change to any generated code. Re-ran the full pre-existing
+  `ruby_rails` live-boot suite (Phase A/B, all previously-passing) after
+  the pin change: unaffected, still passes for real.
+- Risk (level; mitigation or accepted-risk justification): Low for the
+  test addition (test-only, skip-guarded on `rails_boot_available()` per
+  every other `ruby_rails` live-boot test). The `Gemfile`/`Gemfile.lock`
+  fix carries the standard risk of any dependency-version change, mitigated
+  by re-running the full existing `ruby_rails` suite for real after it (no
+  regression observed) and by pinning to a version line (`2.x`) that is
+  itself still an actively-maintained, widely-used major version, not an
+  end-of-life one.
+- Deliverables:
+  - [x] Whole-app real `bundle install` + real `bin/rails server` boot, all
+    12 cells' routes plus the 5 inert pages registered together — done
+  - [x] Real HTTP round trip against every route — done
+  - [x] `BUG-0035`/`PA-0037` full bug protocol (ERROR_LOG.md, bug doc,
+    recurrence review, preventive action, Gemfile/Gemfile.lock fix) — done
+  - [x] `requirements.md` (`FR-LAB-85`) — done
+- Effectiveness (assessed 2026-09-23): `tests/test_labgen_ruby_rails_whole_app_live_boot.py`
+  passes for real (1 passed) against a real, freshly `bundle install`ed and
+  booted instance of the full 12-cell app, after the `json` gem fix; the
+  full pre-existing `ruby_rails` suite (12 slow tests total after this
+  change, 2 skip-guarded elsewhere) re-run and passes unchanged.
+
+### CC-LAB-0080 — Phase C: ForgeCart app identity + coherent routes + ground truth, `ruby_rails` (FR-LAB-84) (2026-09-23)
+- Change: `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§9.4a/§9.5's
+  Category 1 (E-commerce) Shopify/Rails pilot, Phase C. Assembles this
+  emitter's four existing real shapes (Phase A's illustrative reflected
+  XSS; Phase B's webhook-signature, CWE-915 mass assignment, CWE-502
+  insecure deserialization) into one small, coherent app identity grounded
+  in the real Shopify research
+  (`docs/research/site-architecture-survey-functionality-shopify.md`): the
+  fictitious **ForgeCart**, a Shopify-style merchant storefront + admin.
+  - `fuzzlab/labgen/emitters/ruby_rails/__init__.py`: new
+    `_REAL_PAGE_URL_BY_CELL_ID`, checked first by `url_path_for` — five new
+    real-page cell IDs (`LABGEN-RR-RP-0001`..`0005`) get their real,
+    coherent app URL (`/search`, `/webhooks/orders/create`,
+    `/webhooks/customers/update`, `/admin/customers/update`,
+    `/admin/products/import`); every other, pre-existing cell (Phase A's
+    illustrative shape, Phase B's three sample pairs) is untouched and
+    keeps its prior `/cell/<slug>` URL and passing tests unchanged.
+  - New, always-included, genuinely inert surrounding routes/controllers:
+    `route_accumulator._STATIC_APP_ROUTES` (`/`, `/products`, `/cart`,
+    `/admin`, `/admin/orders`) plus their own checked-in skeleton
+    controllers (`app/controllers/storefront_controller.rb`,
+    `admin_controller.rb`) — none reads or reflects any request input;
+    static/JSON-stub responses only, added purely so the assembled app
+    reads as a small Shopify-style storefront+admin, not four isolated
+    endpoints. Neither existing cell's own vulnerable/secure module logic
+    is touched.
+  - New `lab/manifests/shopify_forgecart_real_pages.yaml`: the five
+    real-page cells, each reusing an existing shape's existing modules —
+    no new vulnerability module written by this change. Four vulnerable
+    (this is a deliberately-vulnerable lab target); one secure
+    (`/webhooks/customers/update`, a second, distinct real Shopify webhook
+    topic, `constant_time_compare`) — a genuine negative real-page case for
+    this app's own ground truth, not an all-positive set. The
+    mass-assignment real page uses `POST`, not the sample manifest's
+    `PATCH` — `fuzzlab.harness.auto.points_from_ground_truth` only treats
+    GET/POST ground-truth points as actively auditable, and extending that
+    is out of this change's own scope (a CORE/FUZZ-layer change, not a
+    LAB-component one); POST is still a realistic real-world choice for
+    this endpoint and keeps the point actively auditable without touching
+    shared harness code.
+  - New `lab/ground-truth-forgecart/` (`labels.json`/`injection-points.json`/
+    `expectedresults.csv`), following the `lab/ground-truth` contract
+    exactly (D9): opaque `FCART-NNNN` case IDs (a distinct prefix from
+    `PFF-*` and the concurrent Node lane's `MMART-*`), 4 positive/1
+    negative case (one per real page), `target: "ruby_rails_forgecart"`.
+  - `fuzzlab/labels/schemas/labels.schema.json`: additive enum extension —
+    `vuln_class` gains `webhook_signature`/`mass_assignment`/
+    `insecure_deserialization`, `sink_context` gains
+    `webhook_signature`/`mass_assignment`/`deserialization` (none of the
+    three vuln classes could be expressed in the ground-truth contract
+    before this; the enum was already open to additive per-category
+    extension, per `CC-LAB-0090`'s prior `open_redirect` precedent on
+    another branch).
+- Impact (other components / project): the route accumulator's
+  `config/routes.rb` output changes (a fixed static-route block now always
+  precedes the per-cell routes) — re-confirmed collision-free and every
+  pre-existing `ruby_rails` test still passes unchanged (no other
+  manifest's cells route through any of the five new real URLs).
+  `labels.schema.json`'s enum widening is additive-only (existing ground
+  truth, including `lab/ground-truth`/`lab/ground-truth-meadowmart`,
+  re-validated unchanged).
+- Risk (level; mitigation or accepted-risk justification): Low. The
+  emitter/accumulator change is scoped to five named cell IDs and a fixed,
+  input-free static-route addition; the schema change is a pure enum
+  widening. Full pre-existing `ruby_rails` test suite re-run and passes
+  unchanged (see `CC-LAB-0081`'s own Effectiveness for the exact count,
+  since that change's whole-app test is what actually exercises every
+  route together).
+- Deliverables:
+  - [x] App identity + coherent route set (5 real pages + 5 inert
+    surrounding pages) — done
+  - [x] Real-page URL mapping for the 5 new cells, existing cells
+    unaffected — done
+  - [x] `lab/ground-truth-forgecart/` (labels/injection-points/expected
+    results), loads and validates via `fuzzlab.labels.contract.load` — done
+  - [x] `labels.schema.json` additive enum widening — done
+  - [x] `requirements.md` (`FR-LAB-84`) — done
+- Effectiveness (assessed 2026-09-23): `fuzzlab.labels.contract.load('lab/
+  ground-truth-forgecart')` loads and validates for real (5 cases, 4
+  positive/1 negative); Phase D/E (`CC-LAB-0081`/`0082`) build on and
+  exercise this app's real routes for real.
+
 ### CC-LAB-0079 — Phase E: MeadowMart BFF `TargetSpec` wired into `multitarget.py` (FR-LAB-83) (2026-09-23)
 - Change: `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6/§9.4a/§9.5's
   Category 1 (E-commerce) Walmart/Node pilot, Phase E, this app's half only

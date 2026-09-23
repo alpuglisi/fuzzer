@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "target": "node_express_meadowmart_bff",
+  "points": [
+    { "url": "/api/preferences", "method": "POST", "param": "__proto__", "location": "body", "rendering": "server-json" },
+    { "url": "/api/preferences-twin-labgen-pp-0002", "method": "POST", "param": "__proto__", "location": "body", "rendering": "server-json" },
+    { "url": "/api/search", "method": "GET", "param": "q", "location": "query", "rendering": "server" },
+    { "url": "/api/search-twin-labgen-rd-0002", "method": "GET", "param": "q", "location": "query", "rendering": "server" }
+  ]
+}

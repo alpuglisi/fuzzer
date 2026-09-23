@@ -657,7 +657,7 @@ one's own pilot:
 
 | # | Category | Status | Sites picked (stack) | New stack(s) needed | Branch | Bookkeeping block reserved | Notes |
 |---|---|---|---|---|---|---|---|
-| 1 | E-commerce/marketplaces | **Piloting — CWE selection done (§9.4a); Walmart/Node: both cells landed, plus Phase C (MeadowMart BFF app identity + ground truth, CC-LAB-0077), Phase D (whole-app live-boot conformance, CC-LAB-0078), and Phase E (own `TargetSpec` wired into `multitarget.py`, CC-LAB-0079) — this app's toolkit-side proof is now fully done; Rails/Shopify: Phase A+B done, its own Phase C/D/E built concurrently on this same branch by a sibling lane (see that lane's own report/commits for its exact bookkeeping IDs — not claimed here to avoid a collision)** | Shopify (Ruby on Rails); Walmart (Node/Express — reuses existing) | Ruby on Rails | `claude/second-target-cat1-ecommerce` | `CC-LAB-0070`-`0079` used so far (`0072`-`0075` Rails Phase B, `0077`-`0079` Walmart/Node Phase C/D/E, both exactly as pre-assigned/claimed-at-dispatch-time; `0080`-`0089` still free for the Rails/Shopify Phase C/D/E lane); `FR-LAB-81`-`83` used for Walmart/Node Phase C/D/E; `CC-FUZZ-0025`/`FR-FUZZ-12` used in the FUZZ component for the ReDoS oracle mechanism | See §9.4a for full detail (site-pair rationale, functionality findings, CWE shortlists, breadth ranking). |
+| 1 | E-commerce/marketplaces | **Both apps' full Phase A-E now done — this category's toolkit-side second-target proof is complete for both picks.** Walmart/Node: both cells landed, plus Phase C (MeadowMart BFF app identity + ground truth, CC-LAB-0077), Phase D (whole-app live-boot conformance, CC-LAB-0078), and Phase E (own `TargetSpec` wired into `multitarget.py`, CC-LAB-0079). Rails/Shopify: Phase A+B done, plus Phase C (ForgeCart app identity + ground truth, CC-LAB-0080 — note: renumbered up from the dispatch brief's originally-assigned `CC-LAB-0077`/`FR-LAB-81` after finding, at start-of-work, that the concurrent Walmart/Node lane had already landed those exact numbers first on this same branch — see this row's own bookkeeping column), Phase D (whole-app live-boot conformance across all 12 cells, plus a real dependency-pinning defect found and fixed along the way, CC-LAB-0081/BUG-0035/PA-0037), and Phase E (own `TargetSpec` wired into `multitarget.py`, with a real, scored `ScoreReport` genuinely confirming the app's real `/search` reflected-XSS case, CC-LAB-0082). Next for this category: combine both `TargetSpec`s in one `run_targets` call (§6 step 2, not yet done by either lane), then this category is ready for a PR into `main` per §9.3 point 6.** | Shopify (Ruby on Rails); Walmart (Node/Express — reuses existing) | Ruby on Rails | `claude/second-target-cat1-ecommerce` | `CC-LAB-0070`-`0082` used (`0072`-`0075` Rails Phase B; `0077`-`0079` Walmart/Node Phase C/D/E; `0080`-`0082` Rails/Shopify Phase C/D/E — **renumbered from the dispatch brief's stale `0077`-`0079`/`FR-LAB-81`-`83` after checking this file's own CHANGELOG.md/change-control.md at start-of-work and finding the Node lane had already claimed those exact numbers**, exactly the PA-0031 failure mode this section's own coordination contract warns about, caught and corrected before landing rather than colliding on merge; `0083`-`0089` still free for any further increment); `FR-LAB-84`-`86` used for Rails/Shopify Phase C/D/E (renumbered up from the stale `81`-`83` for the same reason); `CC-FUZZ-0025`/`FR-FUZZ-12` used in the FUZZ component for the ReDoS oracle mechanism | See §9.4a for full detail (site-pair rationale, functionality findings, CWE shortlists, breadth ranking). |
 | 2 | Social / UGC platforms | **Piloting — ⚠ see `docs/components/01-target-lab/requirements.md`'s flag note directly above `FR-LAB-72`: this branch's django Phase A `FR-LAB-72`/`FR-LAB-73` collide with the same IDs already used on `claude/second-target-cat1-ecommerce`; renumber before building further (flagged 2026-09-22 by the cat1 session, no direct messaging path was available)** | Instagram (Python/Django — new stack); Facebook (PHP/Hack — approximated via existing `php_current`/`php_laravel`, reuses) | Python/Django (synchronous MVC) | `claude/category-2-build-bomomg` | `CC-LAB-0090`-`0119` (reserved, not yet used) | YouTube excluded (Google-internal infra, no portable app-language claim — §9.1 step 1). Discord excluded (Elixir realtime/WebSocket, not a request/response fit — §9.1 step 1). Reddit excluded as redundant with Instagram: both are (Python, synchronous monolith) per §9.1 step 2, so picking both adds no distinctness; Instagram preferred as the far better-documented, larger production Django deployment. Facebook's real backend is PHP/**Hack**-on-HHVM specifically, not vanilla PHP — approximated via the existing PHP stack rather than building a literal HHVM/Hack runtime emitter (disproportionate for the vulnerability-shape fidelity it would buy); distinctness and corpus-grounding come from Facebook's real feature set and Meta-documented graph/storage model, not the runtime. Full reasoning: `docs/research/category2-social-ugc-functionality-and-cwe-research.md` §1. Functionality research (Instagram + Facebook) and Django/PHP-Hack-specific CWE research: **done** — see that doc §§2-5. Django emitter Phase A: **done** (`CC-LAB-0090`, pre-change review gate cleared, real `DjangoEmitter` + `DjangoLiveBootHarness`, Tier 0/3 + real live-boot proof all passing — see `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0090` entry for the full record). Next: either Phase B (full module-inventory depth for `django`, mirroring `node_express`'s three Tier-A shapes) or Phase C (corpus-grounded page design for both the Instagram/Django and Facebook/PHP apps, per §0a) — not yet started. |
 | 3 | SaaS / productivity / collaboration | **Piloting** | Slack (PHP/Hack web tier — reuses `php_laravel`); Atlassian (Java/Kotlin+Spring Boot — new emitter) | Java/Kotlin, Spring Boot | `claude/category-3-build-iuu5k9` | `CC-LAB-0130`-`0169` (reserved, not yet all used) | Google Workspace excluded per §9.1 step 1: OT algorithm + Spanner/Bigtable is confirmed at the algorithm/storage level only, no named portable app-framework/language claim, same exclusion class as Disney+/Trip.com. Notion excluded for the same reason: Postgres/Redis/Kafka are infra/data-model detail, not an app-framework/language claim the survey names — re-checked, still not found; would need dedicated research to unblock and two other candidates already give a stronger distinctness pair. Remaining three (Slack, Atlassian, MS365/Teams) grouped per §9.1 step 2: Slack = PHP/Hack, synchronous web-app tier (Java realtime-messaging tier excluded — not the app-logic tier, a WebSocket fan-out layer, poor fit for this generator's request/response IR); Atlassian = Java/Kotlin+Spring Boot microservice (picked over Atlassian's own Node+Express/Python options as the most distinct from stacks already built); MS365/Teams = Node.js+Apollo GraphQL BFF (same language family as the already-built/being-deepened `node_express`, so not the most distinct choice available). Slack vs. Atlassian is the most distinct pair (different language, different runtime, different paradigm) of the three viable candidates. Reuse-vs-new (§9.1 step 4): Slack's PHP/Hack web tier groups with `php_laravel`'s paradigm (synchronous MVC/template-rendering) — reused rather than built as a separate Hack/HHVM emitter (see §9.2 ledger note); Atlassian's Java/Kotlin+Spring Boot is genuinely new and doesn't overlap any built or reused stack, satisfying step 4's "other pick still distinct" requirement. Functionality + stack-specific CWE research + Phase C page design: **done**, see `docs/research/category3-saas-functionality-and-cwe-research.md` (apps: "Huddle Hub" for Slack, "TrackerNest" for Atlassian). Phase A, TrackerNest cell 1 (SSTI/OGNL at `/wiki/pages/render`): **done and verified**, `CC-LAB-0130` (13 tests). Phase A, TrackerNest cell 2 (XXE at `/issues/import`, route simplified from the design doc's `/issues/{id}/render` for the same `Route`-has-no-path-parameter reason `CC-LAB-0130` found — reflected back into the research doc's sec 6b; also added a new additive `xml_external_entities_disabled` entry to `lab/safety_matrix.yaml`, that family's first secure counterpart): **done and verified**, `CC-LAB-0131` (13 more tests, 26 total for this stack — real `mvn package` + `java -jar` boot + real HTTP POST proving a real external-entity file-read on the vulnerable twin vs. a real HTTP 400 DOCTYPE rejection on the secure twin). TrackerNest's third and final designed cell (insecure deserialization at `/integrations/webhook-payload`): **done and verified**, `CC-LAB-0132` — built despite the 2026-09-22 scoping note above flagging it as harder (it needed a real Java-side `SerializeFixtureTool` helper to produce real Java-serialization-protocol bytes, plus a new public `SpringBootLiveBootHarness.app_dir` accessor and a `pom.xml` `<mainClass>` fix — none of that was a judgment call requiring a human decision, so it was built rather than deferred). Real `mvn package` + `java -jar` boot + real HTTP POST proves the differential: the vulnerable twin constructs and reports an unexpected `Serializable` type's name; the secure twin's `resolveClass()` allowlist rejects it with a real HTTP 400 while still accepting the expected type. **TrackerNest's full three-cell set (SSTI, XXE, insecure deserialization) is now done and live-boot-verified — 38 tests, all passing.** Next for this category: Huddle Hub's Phase A (Slack pick, reuses `php_laravel`, no new emitter needed — smaller lift than TrackerNest's new-stack build), then Phase D (fuller conformance)/Phase E (`multitarget.py` wiring) for both apps — **in progress**. |
 | 4 | Media / streaming / content platforms | **Piloting** | Netflix (Java/Spring Boot, DGS Federated GraphQL); Twitch (Go, post-monolith API edge) | Java/Spring Boot; Go | `claude/category-4-build-t9uz3y` | `CC-LAB-0170`-`0209` (reserved, not yet all used) | Applied §9.1 in full: Amazon Prime Video excluded (AWS-service-oriented, no single confirmed app-language, same exclusion reasoning as category 1's Amazon-retail exclusion); Disney+ excluded per the survey's own "partially unconfirmed at the application-code level" note (§9.1 step 1). Remaining three group as {Netflix, Spotify} = Java/Spring-Boot microservices (same language and paradigm — both fit §9.1 step 2's "not architecturally distinct from each other" bar) vs. {Twitch} = Go, a genuinely distinct language and paradigm (compiled, minimalist stdlib, post-Rails-monolith migration). Picked the two most-distinct groups (step 3) and, within the Java/Spring group, picked Netflix over Spotify for its documented Federated-GraphQL-gateway pattern (a distinct architectural surface — a BFF-shaped federation boundary — beyond plain REST, and confirmed at the same two-independent-source confidence level as Spotify). No reuse-preference applied (step 4): neither Java nor Go maps to any already-built stack, so distinctness alone decided both picks. Functionality research (real pages/flows) and stack-specific CWE research done and recorded: `docs/research/site-architecture-survey-functionality-netflix.md` (pick: CWE-502, Jackson polymorphic deserialization in a DGS mutation resolver; CWE-862 GraphQL field-authorization flagged for Phase B) and `-twitch.md` (pick: CWE-347, naive/skipped HMAC comparison in an EventSub webhook receiver; CWE-918 SSRF flagged for Phase B). Both picks are new-stack instances of classes `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4 already names as project-preferred (insecure-deserialization, webhook-signature) and both currently have zero Java/Go instances in the corpus. **Go/Twitch Phase A: done** (`CC-LAB-0170`/`FR-LAB-76`, reviewed pre-implementation per the component's pre-change review gate) — real skeleton, `GoEmitter` (one shape: CWE-347 webhook-signature-verification), `GoLiveBootHarness` (real `go build`/boot/HTTP), Tier 0/3 + a real live-boot test all pass; see `CC-LAB-0170` for the two real defects found and fixed during the build. **Java/Netflix Phase A: done** (`CC-LAB-0171`/`FR-LAB-77`, reviewed pre-implementation per the component's pre-change review gate) — real Maven/Spring Boot skeleton (no GraphQL/DGS dependency in this Phase A — that's Phase B, see the entry's scope call), `JavaEmitter` (one shape: CWE-502 `object_deserialization`, two new safety-matrix ops), `JavaLiveBootHarness` (real `mvn package`/boot/HTTP), Tier 0 (`mvn -q compile`)/3 + a real live-boot test all pass; architecturally needs no route accumulator (Spring Boot component-scans); see `CC-LAB-0171` for the route-collision bug found and fixed during the build. **Both of this pilot's Phase-A builds are now done.** Next: Phase B (richer stack-idiomatic modules — GraphQL/DGS federation + CWE-862 for Java, CWE-918 SSRF + full EventSub header/replay-window checks for Go, per-run databases for both), then Phases C-E (corpus-grounded pages, conformance, `multitarget.py` wiring) per §9.5. |
@@ -978,3 +978,99 @@ Full test suite re-run clean after this lane's changes (1891 passed, 8
 skipped, 0 failed, `not slow`-marked tests deselected) -- see
 `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0077`-`0079`
 entries for full detail.
+
+**Progress update (2026-09-23, Rails/Shopify Phase C/D/E lane):** the
+Rails/Shopify half is now also **done**, built concurrently with the
+Walmart/Node lane's own Phase C/D/E work above on this same branch (each
+lane's own half only). **Bookkeeping note, read before trusting any ID
+below:** this lane's dispatch brief pre-assigned `CC-LAB-0077`-`0079`/
+`FR-LAB-81`-`83` for this work -- but at start-of-work this lane checked
+this file's own CHANGELOG.md/`docs/components/01-target-lab/change-
+control.md` (per §9.3 point 3's own instruction to check for updates from
+other sessions before assuming any are stale) and found the concurrent
+Walmart/Node lane had already landed those exact numbers first (see the
+progress update immediately above). Renumbered to the next actually-free
+block, `CC-LAB-0080`-`0082`/`FR-LAB-84`-`86`, before writing anything --
+exactly the coordination check §9.3/`PA-0031` exist to require, applied
+successfully rather than colliding on merge.
+
+- **Phase C (app identity + ground truth), `CC-LAB-0080`/`FR-LAB-84`:** the
+  four existing real Rails shapes (Phase A's illustrative reflected XSS;
+  Phase B's webhook-signature, CWE-915 mass assignment, CWE-502 insecure
+  deserialization) are now assembled into one small, coherent app
+  identity, the **ForgeCart storefront + admin** (a fictitious brand; its
+  shape -- a Shopify-style merchant storefront + admin -- is grounded in
+  this category's own `docs/research/site-architecture-survey-functionality-shopify.md`).
+  Five new real-page cells (`LABGEN-RR-RP-0001`..`0005`) get real,
+  coherent URLs (`_REAL_PAGE_URL_BY_CELL_ID`, checked first by
+  `url_path_for`): the storefront search box (`/search`, reflected XSS);
+  two real, distinct Shopify webhook topics (`/webhooks/orders/create`
+  vulnerable -- naive `==`; `/webhooks/customers/update` secure --
+  `secure_compare`, giving this app's own ground truth a genuine negative
+  real-page case, not an all-positive set); the merchant-admin
+  customer-account update (`/admin/customers/update`, CWE-915) and
+  product bulk-import (`/admin/products/import`, CWE-502). Every
+  pre-existing cell (`LABGEN-RR-0001`..`0007`) is untouched and keeps its
+  prior `/cell/<slug>` URL and passing tests unchanged. Five new,
+  always-included, genuinely inert surrounding routes/controllers
+  (storefront home/products/cart, admin dashboard/orders --
+  `route_accumulator._STATIC_APP_ROUTES` plus their own checked-in
+  `StorefrontController`/`AdminController`) make the assembled app read
+  as a small Shopify-style storefront+admin rather than four isolated
+  endpoints. New `lab/ground-truth-forgecart/` (opaque `FCART-NNNN` case
+  IDs, distinct from `PFF-*` and the concurrent Node lane's `MMART-*`;
+  `target: "ruby_rails_forgecart"`; 4 positive/1 negative case) follows
+  D9's out-of-band contract exactly and loads/validates for real via
+  `fuzzlab.labels.contract.load`. Required an additive
+  `labels.schema.json` enum widening (`vuln_class` gains
+  `webhook_signature`/`mass_assignment`/`insecure_deserialization`,
+  `sink_context` gains matching values -- none of the three classes could
+  be expressed in the ground-truth contract before this).
+- **Phase D (whole-app live-boot conformance), `CC-LAB-0081`/`FR-LAB-85`:**
+  closed the real gap every prior `ruby_rails` proof left open -- one or
+  two cells booted in isolation, never the whole assembled app. New
+  `tests/test_labgen_ruby_rails_whole_app_live_boot.py`: all 12 cells this
+  stack has ever built (1 Phase A + 6 Phase B + 5 Phase C), one real
+  `bin/rails server` boot, real HTTP against every route, no route
+  collision. **Found and fixed a real, 100%-reproducible defect while
+  building this** (full bug protocol run, not just a code fix):
+  `BUG-0035`/`PA-0037` -- the checked-in skeleton's `Gemfile` never pinned
+  the `json` gem, so an unconstrained `bundle install` resolved `json
+  3.0.2` (`activesupport` 8.1.3.1's own gemspec declares only `json >=
+  0`), whose keyword-only `JSON.parse` broke `ActiveSupport::JSON.decode`'s
+  own positional call on the read path of every encrypted session-cookie
+  read -- 500'ing every second request of any session, invisible to two
+  full build phases' worth of single-request-per-test coverage. Fixed by
+  pinning `gem "json", "~> 2.7"` and regenerating `Gemfile.lock` for real
+  (resolves `json 2.21.2`); full RCA in `docs/bugs/BUG-0035-rails-skeleton-
+  json-gem-arity-breaks-second-request-in-a-session.md`, preventive action
+  `PA-0037` in `docs/PREVENTIVE_ACTIONS.md`.
+- **Phase E (`multitarget.py` wiring), `CC-LAB-0082`/`FR-LAB-86`:** this
+  app's own real `TargetSpec` (`base_url` from the same real live-booted
+  app Phase D assembles; `ground_truth` from Phase C's
+  `lab/ground-truth-forgecart`), run for real through
+  `fuzzlab.harness.multitarget.run_targets`/`transfer_summary` using the
+  existing, unmodified `fuzzlab.tools.probesender.RequestsProbeSender`.
+  New `tests/test_multitarget_ruby_rails_forgecart.py` proves a real,
+  scored `ScoreReport` with **`tp>=1`** -- the real `/search`
+  reflected-XSS case is genuinely confirmed by `run_auto`'s existing,
+  unmodified detection machinery (`xss` is a category it already knows how
+  to confirm on `php_laravel`/`php_current`; this proves that same
+  mechanism transfers to a brand-new Rails target it has never seen
+  before), unlike this app's three brand-new vuln classes
+  (`webhook_signature`/`mass_assignment`/`insecure_deserialization`),
+  which score 0 recall for the same documented-gap reason the Node lane's
+  own two brand-new classes do above. A second run against a fresh boot of
+  the same app gets its own distinct `run_id`. Combining this `TargetSpec`
+  with the Walmart/Node lane's own one in a single `run_targets` call (§6
+  step 2) is left for a follow-on step, once both exist on a merged
+  branch -- same note the Node lane's own update above already makes.
+
+Full `ruby_rails`-scoped test suite re-run clean after this lane's changes
+(12 slow tests passed, 2 skipped, 0 failed) and the shared
+`contract`/`schema` suite re-run clean too (57 passed, 2 skipped) -- see
+`docs/components/01-target-lab/change-control.md`'s `CC-LAB-0080`-`0082`
+entries for full detail. **Both apps' full Phase A-E are now done** --
+category 1's remaining work is combining both `TargetSpec`s in one
+`run_targets` call (§6 step 2) and, per §9.3 point 6, opening a PR into
+`main` once this branch is otherwise ready.
