@@ -1981,7 +1981,7 @@ lane) can submit a payload as
   the vulnerable sink concatenated a possibly-`None` value without a
   `str()` cast, crashing with a real `500` instead of the expected `404`
   on a `GET` request), fixed before this entry landed, and now passing.
-- **FR-LAB-90** *(PicTrail app identity + `/post` real page; `CC-LAB-0092`,
+- **FR-LAB-95** *(PicTrail app identity + `/post` real page; `CC-LAB-0092`,
   2026-09-23).* Establishes **PicTrail** — the Instagram-style app
   identity for the `django` stack's Phase C content (category 2 pilot;
   page-set design in `docs/research/category2-social-ugc-functionality-
@@ -2000,7 +2000,7 @@ lane) can submit a payload as
   owning cell, no twin/canonical-cell machinery). Passes Tier 0/Tier 3
   for the new manifest
   (`lab/manifests/phase_c_picktrail_post_detail.yaml`).
-- **FR-LAB-91** *(real, independent ground truth authored and cross-
+- **FR-LAB-96** *(real, independent ground truth authored and cross-
   checked against a real live-booted request, including a `PA-0034`
   adversarial test; `CC-LAB-0092`, 2026-09-23).* A brand-new, independent
   ground-truth directory, `lab/ground-truth-picktrail-django/` (D9's

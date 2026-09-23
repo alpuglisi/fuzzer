@@ -3,7 +3,7 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0092 — Phase C, first real page: PicTrail's `/post` detail page + its own ground truth (FR-LAB-90/FR-LAB-91) (2026-09-23)
+### CC-LAB-0092 — Phase C, first real page: PicTrail's `/post` detail page + its own ground truth (FR-LAB-95/FR-LAB-96) (2026-09-23)
 
 - **Change:** Establishes **PicTrail** — the Instagram-style app identity
   for the `django` stack's Phase C content (category 2 pilot,
@@ -187,14 +187,14 @@ Component code: **LAB**. Entry format and required fields: see
     entry landing (a docs-only correction, no gate needed for that part
     alone). Row 1 will be marked "built" once the rest of this entry
     lands — todo.
-  - [x] `FR-LAB-90`/`FR-LAB-91` checked as next-free (per `PA-0031`'s
+  - [x] `FR-LAB-95`/`FR-LAB-96` checked as next-free (per `PA-0031`'s
     spirit, reviewer #2's finding) — done: this branch's own highest is
     `FR-LAB-89` (`CC-LAB-0091`, itself renumbered once already by a
     cross-branch fix) and `claude/second-target-cat1-ecommerce`'s own
     highest (re-fetched) is `FR-LAB-87` — `90`/`91` confirmed clear of
     both immediately before drafting this entry.
-  - [x] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-90`/
-    `FR-LAB-91` — done.
+  - [x] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-95`/
+    `FR-LAB-96` — done.
   - [x] `docs/ARCHITECTURE.md` — PicTrail's first real page noted, plus the
     remaining planned pages named as still-planned — done.
   - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 tracker row
@@ -228,7 +228,7 @@ Component code: **LAB**. Entry format and required fields: see
   landed in the research doc before this entry's code did; the
   `{"id","name"}` realism gap and the ground-truth-directory non-wiring
   are both named explicitly in this entry's own Risk section, not
-  silently absent; `FR-LAB-90`/`91`'s next-free check was verified against
+  silently absent; `FR-LAB-95`/`91`'s next-free check was verified against
   both this branch and a real fetch of `claude/second-target-cat1-
   ecommerce` before landing.
 
@@ -244,7 +244,7 @@ mismatched-method test added for the new URL-pinning mechanism; the
 `{"id","name"}` JSON-shape realism gap named and justified rather than
 left implicit; the second ground-truth directory's non-wiring into
 `fuzzlab.core.config`'s global consumers stated explicitly as an
-accepted, Phase-E-deferred limitation; `FR-LAB-90`/`91`'s next-free
+accepted, Phase-E-deferred limitation; `FR-LAB-95`/`91`'s next-free
 check stated), all incorporated. Neither reviewer found an issue with
 the increment's fundamental scope or phasing — reviewer #2 explicitly
 confirmed "one real page first" is a legitimately-scoped slice, matching

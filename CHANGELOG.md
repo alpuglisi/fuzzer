@@ -12,9 +12,24 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (cross-branch bookkeeping fix, by the category 1 pilot session)
+- Docs/LAB: fixed a real cross-branch `FR-LAB` ID collision found during a
+  cross-branch review — this branch's freshly-pushed `FR-LAB-90`/
+  `FR-LAB-91` (PicTrail Phase C app identity + first real page,
+  `CC-LAB-0092`) had been independently claimed by category 5 for its
+  already-established, more heavily cross-referenced `CC-LAB-0211`
+  CSV-formula-injection shape (already baked into the shared
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` tracker synced across
+  all five branches). Renumbered this branch's usages to `FR-LAB-95`/
+  `FR-LAB-96` via exact-token replacement across
+  `requirements.md`/`change-control.md`/`CHANGELOG.md`/
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`. Full non-slow test
+  suite re-run confirms no regression (1789 passed / 8 skipped, identical
+  to this branch's own pre-fix baseline).
+
 ## 2026-09-23 (Phase C)
 - LAB: started Phase C for category 2's Django pick — `CC-LAB-0092`/
-  `FR-LAB-90`/`FR-LAB-91`, pre-change review gate cleared (2 independent
+  `FR-LAB-95`/`FR-LAB-96`, pre-change review gate cleared (2 independent
   reviewer agents, 7 findings incorporated: a route-notation fix — `Route
   .path`'s plain-string IR can't express `/post/<id>`, corrected to
   `/post?id=` in the research doc first, matching `CC-LAB-0131`'s own
@@ -55,7 +70,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   after reviewing and correcting category 4's Go/Twitch Phase B increment and
   the completed Java/Spring Boot port, and category 5's CSV-formula-injection
   shape (which had a fresh `FR-LAB-80`/`81` collision with category 3,
-  renumbered to `FR-LAB-90`/`91`). §9.2a's "Decided" text is updated from
+  renumbered to `FR-LAB-95`/`91`). §9.2a's "Decided" text is updated from
   pending/future tense to reflect the consolidation is now **done**:
   category 4's `java_spring_boot` package is deleted, Netflix's cell is
   ported into `spring_boot` as `CC-LAB-0173`, and category 5 does not build
