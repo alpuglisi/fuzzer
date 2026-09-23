@@ -811,6 +811,47 @@ class ServerSideHttpFetchSink(TemplateModule):
         super().__init__("server_side_http_fetch", "sink", _SINK_ENV, "server_side_http_fetch.php.j2")
 
 
+class RawHeaderConcatTransform(TemplateModule):
+    """The ``raw_header_concat`` op under the `CC-LAB-0135`
+    ``outbound_http_request_header_value`` sink_family (a distinct
+    `(op, sink_family)` row from the existing `email_header_value` entry
+    of the same op name): raw string header-block concatenation, an
+    embedded CRLF splices in an arbitrary extra outbound request header.
+    Safety matrix: ``effect=no_effect``. Registered for the shared
+    minimal-pair vocabulary only, same reasoning as
+    :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("raw_header_concat", "transform", _TRANSFORM_ENV, "raw_header_concat.php.j2")
+
+
+class StructuredHttpClientHeadersTransform(TemplateModule):
+    """The ``structured_http_client_headers`` op (`CC-LAB-0135`, secure
+    twin): a structured HTTP-client header API that rejects CRLF-bearing
+    values. Safety matrix: ``effect=neutralises``,
+    ``neutralizes: [outbound_header_injection]``. Registered for the
+    shared minimal-pair vocabulary only, same reasoning as
+    :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "structured_http_client_headers",
+            "transform",
+            _TRANSFORM_ENV,
+            "structured_http_client_headers.php.j2",
+        )
+
+
+class OutboundWebhookDeliverySink(TemplateModule):
+    """The ``outbound_webhook_delivery`` sink family (`CC-LAB-0135`):
+    returns the delivery result -- illustrative, echoes ``value_expr``
+    (the trigger word) verbatim. Registered for the shared minimal-pair
+    vocabulary only, same reasoning as :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("outbound_webhook_delivery", "sink", _SINK_ENV, "outbound_webhook_delivery.php.j2")
+
+
 SOURCES: dict[str, Module] = {
     "get_param": GetParamSource(),
     "post_param": PostParamSource(),
@@ -852,6 +893,10 @@ TRANSFORMS: dict[str, Module] = {
     # this cell is built on php_laravel only (category 3's Huddle Hub).
     "unchecked_url_fetch": UncheckedUrlFetchTransform(),
     "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistTransform(),
+    # CC-LAB-0135: registered for the shared minimal-pair vocabulary only --
+    # this cell is built on php_laravel only (category 3's Huddle Hub).
+    "raw_header_concat": RawHeaderConcatTransform(),
+    "structured_http_client_headers": StructuredHttpClientHeadersTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -879,6 +924,7 @@ SINKS: dict[str, Module] = {
     # this cell is built on php_laravel only (category 3's Huddle Hub).
     "webhook_signature_verification": WebhookSignatureVerificationSink(),
     "server_side_http_fetch": ServerSideHttpFetchSink(),
+    "outbound_webhook_delivery": OutboundWebhookDeliverySink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

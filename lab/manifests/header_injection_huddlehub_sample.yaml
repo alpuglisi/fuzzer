@@ -1,0 +1,36 @@
+# Header-injection sample manifest (`CC-LAB-0135`/`FR-LAB-83`),
+# `php_laravel`.
+#
+# Huddle Hub's (category 3's Slack pick) third and final designed cell --
+# see docs/research/category3-saas-functionality-and-cwe-research.md
+# sec 6a for the page/vulnerability-class design (outgoing-webhook
+# delivery: an admin-configured trigger word is embedded in a custom
+# header on the outbound POST to the configured webhook URL) and sec 1
+# for the CWE research (CWE-93 CRLF injection into an outbound HTTP
+# request header, distinct from the existing email-header/HTTP-response-
+# header families). The vulnerable twin (`raw_header_concat`) builds the
+# outbound header block via raw string concatenation; the secure twin
+# (`structured_http_client_headers`) uses Laravel's Http facade
+# (Guzzle-backed), which rejects a CRLF-bearing header value outright.
+# Same route, never live-booted together -- mirrors
+# `mass_assignment_laravel_sample.yaml`'s own twin-pair precedent.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-HHB-0005
+    class: outbound_header_injection
+    stack_profile: php_laravel
+    route: { method: GET, path: /integrations/outgoing-webhook }
+    sink_context:
+      family: outbound_http_request_header_value
+      required_neutralizations: [outbound_header_injection]
+    transform: [raw_header_concat]
+
+  - cell_id: LABGEN-HHB-0006
+    class: outbound_header_injection
+    stack_profile: php_laravel
+    route: { method: GET, path: /integrations/outgoing-webhook }
+    sink_context:
+      family: outbound_http_request_header_value
+      required_neutralizations: [outbound_header_injection]
+    transform: [structured_http_client_headers]

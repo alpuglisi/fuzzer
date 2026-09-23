@@ -1989,6 +1989,47 @@ lane) can submit a payload as
   Hub's third designed cell (header injection in outgoing-webhook
   delivery); ground truth; `multitarget.py` wiring.
 
+- **FR-LAB-83** *(Huddle Hub: outbound-header-injection cell on
+  `php_laravel`; `CC-LAB-0135`, 2026-09-23).* Extends `FR-LAB-81`/
+  `FR-LAB-82`'s Huddle Hub app with its third and final designed cell,
+  `(vuln_class="outbound_header_injection",
+  sink_context.family="outbound_http_request_header_value")`,
+  `required_neutralizations: [outbound_header_injection]` — a Slack-style
+  outgoing-webhook delivery feature (an admin-configured trigger word is
+  embedded in a custom header on the outbound POST to the configured
+  webhook URL), profile-keyed at `/integrations/outgoing-webhook`. A
+  genuinely new sink_family/concern in `lab/safety_matrix.yaml`
+  (additive, no version bump) with two new ops: `raw_header_concat`
+  (vulnerable: the trigger word is concatenated directly into a raw
+  `"Name: value\r\n"` header block for PHP's stream-context `header`
+  string option — an embedded `\r\n` splices in an arbitrary extra
+  header the destination actually receives) and
+  `structured_http_client_headers` (secure: Laravel's `Http` facade,
+  Guzzle-backed — Guzzle's real PSR-7 `Request` constructor rejects any
+  CRLF-bearing header value outright, caught and turned into an HTTP
+  400). Both twins bound the outbound call with an explicit 5s timeout
+  (PA-0035 spirit, matching `FR-LAB-82`'s own precedent) and read the
+  destination webhook URL from `env('HUDDLEHUB_WEBHOOK_URL', ...)` with
+  an RFC-2606 `.invalid`-TLD fallback so an unset env var fails closed
+  rather than reaching something real; the URL itself is not a tainted
+  parameter (kept out of scope for this header-injection-only cell). New
+  module names registered in both `php_laravel`'s own registries and the
+  shared `fuzzlab.labgen.modules` registry, per `FR-LAB-81`/`FR-LAB-82`'s
+  own established precedent. Live-boot-proven against a real local
+  marker HTTP server: the vulnerable twin's crafted trigger word
+  (`innocuous\r\nX-Injected: proof`) results in the marker server
+  genuinely receiving a real, separate `X-Injected: proof` header
+  alongside the intact original `X-Huddle-Trigger: innocuous` header,
+  verified by inspecting the marker server's own actually-parsed
+  headers; the secure twin rejects the identical value with a real HTTP
+  400 and never reaches the marker server, while still accepting an
+  ordinary trigger word. **This closes Huddle Hub's full three-cell
+  designed set** — Huddle Hub's *cell design* is now complete, but the
+  app itself is not yet usable end-to-end: ground truth
+  (`labels.json`/`injection-points.json`) and `multitarget.py` wiring
+  remain deferred for both Huddle Hub and TrackerNest as a whole (see
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4/§9.6).
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

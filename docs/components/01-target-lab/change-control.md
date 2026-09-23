@@ -3,6 +3,167 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0135 — Huddle Hub: header-injection cell in outgoing-webhook delivery on `php_laravel` (FR-LAB-83) (2026-09-23)
+- Change: Adds Huddle Hub's third and final designed cell to the existing,
+  shared `php_laravel` emitter. New shape:
+  `(vuln_class="outbound_header_injection",
+  sink_context.family="outbound_http_request_header_value")`,
+  `required_neutralizations: [outbound_header_injection]` — a Slack-style
+  outgoing-webhook delivery feature (an admin-configured trigger word is
+  embedded in a custom header on the outbound POST to the configured
+  webhook URL, per `docs/research/category3-saas-functionality-and-cwe-research.md`
+  §1/§6a), profile-keyed at `/integrations/outgoing-webhook`. This is a
+  genuinely new sink_family and concern ID (added to
+  `lab/safety_matrix.yaml`'s header comment and entries, additive, no
+  version bump) — verified neither existing header-injection family
+  (`email_header_value`, `http_response_header_value`) fits an outbound
+  HTTP *request* header a server sends out, as distinct from a mail
+  header or a response header sent back to a browser.
+
+  Op name `raw_header_concat`, matching the existing
+  `email_header_value`/`http_response_header_value` op-naming convention
+  for this vulnerable shape — but this requires authoring a **new**
+  module/template (checked: no module of this name currently exists in
+  either registry; it only appears in unrelated
+  `docs/research/corpus-examples/header-injection/*/manifest.yaml`
+  research fixtures), not reusing an existing one — the matrix's
+  `(op, sink_family)` keying means this is a distinct row from the
+  existing `email_header_value` entry, never a duplicate. Renders PHP's
+  raw stream-context `header` string option, built by concatenating the
+  tainted trigger word directly into a `"Name: value\r\n"` block, so an
+  embedded `\r\n` splices in an arbitrary extra header line the
+  destination actually receives. Secure op `structured_http_client_headers`
+  (new name; checked the two existing families' own op names —
+  `strip_crlf`/`structured_mail_options`/`structured_mail_headers`/
+  `allowlist_and_runtime_crlf_rejection` — share no single naming scheme
+  with each other, so a fresh name is not obligated to match anything)
+  uses Laravel's `Http` facade (`Http::withHeaders([...])`, built on the
+  already-present `guzzlehttp/guzzle` dependency, confirmed in
+  `stack/composer.lock`) — Guzzle's real PSR-7 `Request` constructor
+  throws `InvalidArgumentException` for a CRLF-bearing header value
+  (independently re-verified during pre-change review: installed
+  `guzzlehttp/guzzle` in a scratch directory and confirmed the real
+  exception and message), caught and turned into a real HTTP 400.
+
+  Both twins put all differentiating logic in the transform stage with a
+  single fixed sink (`outbound_webhook_delivery`, returns `$rows` with a
+  delivery preview) — the only pattern this stack's `render()` supports
+  for a vulnerable/secure pair sharing one page profile+family
+  (`_SINK_OVERRIDE_KEY` is keyed by profile+family, not by transform op,
+  confirmed by reading `render()` directly, so it cannot differentiate
+  two twins of the same profile — matches `CC-LAB-0133`/`0134`'s own
+  established pattern). The destination webhook URL is **not** itself a
+  tainted parameter (deliberately, to avoid smuggling an unlabeled
+  SSRF-shaped surface into a header-injection-only cell) — read via
+  `env('HUDDLEHUB_WEBHOOK_URL', 'https://hooks.example.invalid/default')`.
+  The fallback domain uses the `.invalid` TLD, reserved by RFC 2606
+  specifically so it must never resolve — stated explicitly, not left
+  implicit, so an unset env var in some future context fails closed
+  (a connection attempt to a guaranteed-non-resolving name) rather than
+  silently reaching something real. The live-boot test sets this real OS
+  environment variable before invoking `LiveBootHarness` (inherited by
+  the `php artisan serve` subprocess, since `Popen` is given no explicit
+  `env=` and inherits the parent process's environment, confirmed by
+  reading `live_boot.py` directly) — using `pytest`'s `monkeypatch.setenv`
+  fixture specifically (not a bare `os.environ[...] =`), so it is
+  automatically restored after each test regardless of ordering or
+  failure, closing a real gap this entry's own adequacy review caught
+  (a bare env-var set with no `finally`/fixture-based cleanup could leak
+  a stale value — e.g. a dead port from an earlier test — into a later
+  test). Only the trigger-word query parameter (via the existing
+  `get_param` source) is tainted. New module names registered in both
+  `php_laravel`'s own registries and the shared `fuzzlab.labgen.modules`
+  registry, per `CC-LAB-0133`'s precedent (checked: no collision with
+  `CC-LAB-0134`'s `unchecked_url_fetch`/`scheme_and_resolved_ip_allowlist`/
+  `server_side_http_fetch`, or with anything else currently registered).
+
+  New manifest `lab/manifests/header_injection_huddlehub_sample.yaml`, two
+  cells: `LABGEN-HHB-0005` (vulnerable), `LABGEN-HHB-0006` (secure) —
+  continuing the checked, reserved `HHB` prefix.
+
+  **Live-boot proof.** A real local marker HTTP server (same pattern as
+  `CC-LAB-0134`) inspects the headers it actually receives — the
+  vulnerable twin's crafted trigger word (`innocuous\r\nX-Injected: proof`)
+  is asserted to result in the marker server genuinely receiving a real,
+  separate `X-Injected: proof` header (verified during implementation by
+  inspecting the actual raw request the marker server parses, not merely
+  assumed a priori — a real gap this entry's own adequacy review flagged,
+  since `CC-LAB-0134`'s own hard-won lesson was exactly this shape of
+  unverified assumption); the secure twin's same crafted value never
+  reaches the marker server at all (Guzzle rejects it client-side with a
+  real 400 before any connection opens). Tier 0 (`php -l`)/Tier 3
+  (`regenerate_and_diff_emitter`) for the new cell.
+
+  **This closes Huddle Hub's full three-cell designed set** (webhook-
+  signature `CC-LAB-0133`, SSRF `CC-LAB-0134`, header injection here) —
+  but, restated explicitly rather than dropped now that there is no
+  fourth cell to defer (a real gap this entry's own adequacy review
+  caught): Huddle Hub's **cell design** is now complete, not the app
+  itself — ground truth (`labels.json`/`injection-points.json`) and
+  `multitarget.py` wiring remain the two things blocking this app from
+  being usable end-to-end, and neither is addressed by this entry.
+- Impact (other components / project): Component 1 (LAB) only. Additive
+  safety-matrix entry (a new sink_family/concern; no existing pair's
+  effect changes). Additive to `php_laravel`'s and the shared registry's
+  dicts only.
+- Risk (level; mitigation or accepted-risk justification): Low-medium.
+  Same cross-branch `HHB`-prefix mitigation as `CC-LAB-0133`/`0134`. The
+  new risk class this entry introduces (a generated cell performing a
+  real outbound network call) is mitigated by an explicit timeout on
+  both twins (matching `CC-LAB-0134`'s own PA-0035 fix) and by the
+  `.invalid`-TLD fail-closed default described above.
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml` new `outbound_http_request_header_value` sink_family + 2 ops — done
+  - [x] `raw_header_concat`/`structured_http_client_headers` transform modules + templates (both registries) — done
+  - [x] `outbound_webhook_delivery` sink module + template (both registries) — done
+  - [x] `_MODULE_SET_BY_SHAPE`/`_PAGE_PROFILES` entries — done
+  - [x] `lab/manifests/header_injection_huddlehub_sample.yaml` — done
+  - [x] Live-boot test (marker server real header inspection, `monkeypatch.setenv`) — done
+  - [x] Tier 0/Tier 3 conformance for the new cell — done
+  - [x] `requirements.md` FR-LAB-83 entry — done
+  - [x] `CHANGELOG.md` line — done
+- Effectiveness (assessed 2026-09-23): Met. Both cells render (`php -l`
+  clean) and pass Tier 3 (`regenerate_and_diff_emitter`, byte-identical on
+  a second render). `verdict()` against the real safety matrix returns
+  VULNERABLE for `LABGEN-HHB-0005` and SECURE for `LABGEN-HHB-0006`,
+  matching the designed shape. New unit suite
+  `tests/test_labgen_header_injection.py` (6 tests) passes: manifest
+  load, verdict match, `supports()`, determinism, vulnerable-vs-secure
+  code-shape assertions (raw `stream_context_create`/`\r\n` concatenation
+  vs. `Http::withHeaders`/`InvalidArgumentException`, both twins bounding
+  the outbound call with a 5s timeout), and disjoint generated paths
+  against both `CC-LAB-0133`'s and `CC-LAB-0134`'s own manifests. New
+  live-boot suite `tests/test_labgen_header_injection_live_boot.py`
+  (3 `@pytest.mark.slow` tests, all run and passing on this host, ~75s):
+  the vulnerable twin's crafted trigger word
+  (`innocuous\r\nX-Injected: proof`) genuinely splices a real, separate
+  `X-Injected: proof` header into the outbound request, verified by
+  inspecting the local marker server's own actually-parsed
+  `email.message.Message` headers (not merely assumed a priori) — the
+  original `X-Huddle-Trigger: innocuous` header survives intact alongside
+  it; the secure twin rejects the identical crafted value with a real
+  HTTP 400 and the marker server is never reached (`hits == 0`); the
+  secure twin still accepts an ordinary trigger word and delivers it
+  correctly. `tests/test_labgen_modules.py`'s determinism-fixture map was
+  extended for the three new module names and passes (17/17). Full
+  non-slow suite: 1600 passed, 52 skipped, 15 failed — all 15 the same
+  pre-existing, unrelated `gitleaks`-binary/`scikit-learn`-dependency
+  environment gaps present before this change (verified: identical
+  failing test names/messages), zero regressions attributable to this
+  entry.
+- Pre-change review gate: drafted, reviewed by 2 independent agents
+  (accuracy: no inaccuracies found, ACCURATE, including an independent
+  re-verification of the Guzzle CRLF-rejection claim; adequacy: 7
+  findings — a dropped "still deferred" restatement now that this is the
+  last cell, missing env-var test cleanup, the `.invalid`-TLD fail-closed
+  behavior not stated explicitly, the header-parsing proof asserted
+  without a stated implementation-time verification step, an unstated
+  module-collision check, an unstated op-naming-convention check, and
+  confusing "reused by name" phrasing — all incorporated above). 3/3
+  agreement reached by incorporating every concrete finding from both
+  reviews without contesting any of them; implementation proceeds on this
+  revised entry.
+
 ### CC-LAB-0134 — Huddle Hub: SSRF-via-link-unfurling cell on `php_laravel` (FR-LAB-82) (2026-09-23)
 - Change: Adds Huddle Hub's second designed cell to the existing, shared
   `php_laravel` emitter. New shape: `(vuln_class="ssrf",

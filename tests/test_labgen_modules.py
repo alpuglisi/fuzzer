@@ -240,6 +240,12 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
     "unchecked_url_fetch": {"value_expr": "$unfurlUrl"},
     "scheme_and_resolved_ip_allowlist": {"value_expr": "$unfurlUrl"},
     "server_side_http_fetch": {"value_expr": "$unfurlUrl"},
+    # CC-LAB-0135: registered in the shared vocabulary so minimal_pair can
+    # classify them (this cell is built on php_laravel only, category 3's
+    # Huddle Hub).
+    "raw_header_concat": {"value_expr": "$triggerWord"},
+    "structured_http_client_headers": {"value_expr": "$triggerWord"},
+    "outbound_webhook_delivery": {"value_expr": "$triggerWord"},
 }
 
 

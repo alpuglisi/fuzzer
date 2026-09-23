@@ -550,6 +550,37 @@ class SchemeAndResolvedIpAllowlistTransform(TemplateModule):
         )
 
 
+class RawHeaderConcatTransform(TemplateModule):
+    """The ``raw_header_concat`` op under the new `CC-LAB-0135`
+    ``outbound_http_request_header_value`` sink_family (a distinct
+    `(op, sink_family)` row from the existing `email_header_value` entry
+    of the same op name): the tainted trigger word is concatenated
+    directly into a raw ``"Name: value\\r\\n"`` header block for PHP's
+    stream-context ``header`` string option -- an embedded ``\\r\\n``
+    splices in an arbitrary extra header line. Safety matrix:
+    ``effect=no_effect``."""
+
+    def __init__(self) -> None:
+        super().__init__("raw_header_concat", "transform", _TRANSFORM_ENV, "raw_header_concat.php.j2")
+
+
+class StructuredHttpClientHeadersTransform(TemplateModule):
+    """The ``structured_http_client_headers`` op (`CC-LAB-0135`, secure
+    twin): Laravel's ``Http`` facade (Guzzle-backed) sets the header as a
+    structured value, never raw-concatenated text -- Guzzle's real PSR-7
+    ``Request`` constructor rejects any CRLF-bearing header value. Safety
+    matrix: ``effect=neutralises``,
+    ``neutralizes: [outbound_header_injection]``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "structured_http_client_headers",
+            "transform",
+            _TRANSFORM_ENV,
+            "structured_http_client_headers.php.j2",
+        )
+
+
 # --- sinks ----------------------------------------------------------------
 #
 # Every sink branches on `bound` where a bound form exists at all, so one
@@ -720,6 +751,16 @@ class ServerSideHttpFetchSink(TemplateModule):
 
     def __init__(self) -> None:
         super().__init__("server_side_http_fetch", "sink", _SINK_ENV, "server_side_http_fetch.php.j2")
+
+
+class OutboundWebhookDeliverySink(TemplateModule):
+    """The ``outbound_webhook_delivery`` sink family (`CC-LAB-0135`, Huddle
+    Hub): returns the delivery result whichever header-construction
+    transform produced -- illustrative, sets ``$rows``. Reached only if
+    that transform didn't already return a 400 response above it."""
+
+    def __init__(self) -> None:
+        super().__init__("outbound_webhook_delivery", "sink", _SINK_ENV, "outbound_webhook_delivery.php.j2")
 
 
 class DomInnerhtmlEchoSink(TemplateModule):
@@ -1029,6 +1070,8 @@ TRANSFORMS: dict[str, Module] = {
     "constant_time_compare": ConstantTimeCompareTransform(),
     "unchecked_url_fetch": UncheckedUrlFetchTransform(),
     "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistTransform(),
+    "raw_header_concat": RawHeaderConcatTransform(),
+    "structured_http_client_headers": StructuredHttpClientHeadersTransform(),
 }
 #: Sinks. The three HTML sinks render a **Blade view** body rather than a
 #: controller statement; :data:`VIEW_SINKS` names them so the emitter knows
@@ -1051,6 +1094,7 @@ SINKS: dict[str, Module] = {
     "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
     "webhook_signature_verification": WebhookSignatureVerificationSink(),
     "server_side_http_fetch": ServerSideHttpFetchSink(),
+    "outbound_webhook_delivery": OutboundWebhookDeliverySink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

@@ -1,0 +1,21 @@
+// raw_header_concat: the tainted trigger word is concatenated directly
+// into a raw "Name: value\r\n" header block for PHP's stream-context
+// `header` string option -- an embedded \r\n in the trigger word splices
+// in an arbitrary extra header line the destination service actually
+// receives (outbound HTTP request header injection). A bounded timeout is
+// still applied (a generated cell must never hang indefinitely on a
+// slow/dead destination, independent of this op's own security defect).
+// Safety matrix: effect=no_effect.
+$__webhookUrl = env('HUDDLEHUB_WEBHOOK_URL', 'https://hooks.example.invalid/default');
+$__headerBlock = "Content-Type: application/json\r\nX-Huddle-Trigger: " . {{ value_expr }} . "\r\n";
+$__deliveryContext = stream_context_create(['http' => [
+    'method' => 'POST',
+    'header' => $__headerBlock,
+    'content' => '{}',
+    'timeout' => 5,
+    'ignore_errors' => true,
+]]);
+$__deliveryResult = @file_get_contents($__webhookUrl, false, $__deliveryContext);
+if ($__deliveryResult === false) {
+    $__deliveryResult = '';
+}

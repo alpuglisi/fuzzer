@@ -75,6 +75,12 @@
 #   weak_signature_comparison — a webhook/HMAC signature is verified with a
 #     non-constant-time or type-juggling-prone comparison, or verification
 #     is skipped/bypassable entirely (added CC-LAB-0063)
+#   outbound_header_injection — tainted input reaches a raw *outbound* HTTP
+#     request header (a server-to-server call the app itself initiates)
+#     with no CR/LF stripping, allowing an extra header to be smuggled into
+#     the request the destination service receives -- distinct from
+#     `http_header_injection` (a *response* header the app sends back to a
+#     browser) (added CC-LAB-0135)
 version: 1
 entries:
   # --- SQL sinks -----------------------------------------------------
@@ -646,6 +652,20 @@ entries:
     sink_family: http_response_header_value
     effect: neutralises
     neutralizes: [http_header_injection]
+  # Added CC-LAB-0135/FR-LAB-83: a third header-injection sink_family --
+  # neither `email_header_value` nor `http_response_header_value` fits an
+  # outbound HTTP *request* header a server sends out (as opposed to a
+  # mail header or a response header sent back to a browser). `op:
+  # raw_header_concat` is the same op *name* as the `email_header_value`
+  # entry above but a distinct (op, sink_family) row -- the matrix keys on
+  # the pair, never the bare op name alone.
+  - op: raw_header_concat
+    sink_family: outbound_http_request_header_value
+    effect: no_effect
+  - op: structured_http_client_headers
+    sink_family: outbound_http_request_header_value
+    effect: neutralises
+    neutralizes: [outbound_header_injection]
 
   # --- webhook-signature: HMAC/signature verification correctness ---------
   # From docs/research/corpus-examples/webhook-signature/
