@@ -18,6 +18,40 @@ Format per entry:
 
 ---
 
+## 2026-09-23 — `ruby_rails` skeleton's unpinned `json` gem 500'd every second request in a session (fixed, BUG-0035/PA-0037)
+
+- **Symptom:** building the Phase D whole-app conformance test and the Phase
+  E `multitarget.py` wiring test for category 1's "ForgeCart" (Shopify/
+  `ruby_rails`) app, the real `/search` reflected-XSS page's second HTTP
+  probe (the ordinary marker-then-breakout round trip
+  `fuzzlab.oracle.strategies.ReflectedXssStrategy.confirm` performs) 500'd —
+  `ActionView::Template::Error` wrapping `ArgumentError: wrong number of
+  arguments (given 2, expected 1)`. Reproducible on the *second* real
+  request of *any* session, against *any* route, including the app's own
+  inert static pages — not specific to `/search` or to this app's own new
+  code.
+- **Root cause:** the checked-in skeleton's `Gemfile` never pinned the
+  `json` gem; `activesupport` 8.1.3.1's own gemspec declares only `json >=
+  0`, so an unconstrained `bundle install` resolved `json 3.0.2`, whose 3.x
+  line made `JSON.parse`'s options parameter keyword-only — but
+  `ActiveSupport::JSON.decode` still calls `::JSON.parse(json, options)`
+  positionally, which every encrypted session-cookie read goes through.
+  Every prior `ruby_rails` live-boot test (Phase A/B) sent exactly one
+  request per booted instance, so this 100%-reproducible defect (it only
+  fires on a request that *presents* an already-set session cookie, never
+  the request that creates one) shipped latent through two full build
+  phases.
+- **Remediation:** pinned `gem "json", "~> 2.7"` in
+  `fuzzlab/labgen/emitters/ruby_rails/stack/skeleton/Gemfile`, regenerated
+  `Gemfile.lock` for real (resolves `json 2.21.2`), and verified the exact
+  two-request session sequence that 500'd before the fix now returns
+  200/200 after it. Full RCA: `docs/bugs/BUG-0035-rails-skeleton-json-gem-
+  arity-breaks-second-request-in-a-session.md`; preventive action:
+  `docs/PREVENTIVE_ACTIONS.md` `PA-0037`.
+- **Status:** Fixed.
+
+---
+
 ## 2026-09-22 — `ruby_rails` emitter's generated controller 500'd: Rails' inflector does not round-trip a class name with digits abutting a letter (fixed, BUG-0034/PA-0036)
 
 - **Symptom:** the first real live-boot test of the new `ruby_rails` emitter

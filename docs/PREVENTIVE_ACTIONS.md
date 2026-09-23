@@ -392,3 +392,40 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   operation path) — this is about generated code's own naming consistency with a
   target framework's implicit conventions, a failure mode neither prior rule covers.
   (from BUG-0034)
+- **PA-0037** — Two related rules from a real, 100%-reproducible defect that shipped
+  latent through two full build phases because no test's own scope ever took the
+  request pattern that triggers it:
+  1. **Pin every transitive dependency a checked-in stack skeleton's own direct
+     dependency under-constrains, when that dependency has a documented history of
+     breaking major-version changes** (a semver-major bump that changes a widely-used
+     method's calling convention, e.g. positional-to-keyword-only parameters). A direct
+     dependency's own gemspec/package manifest declaring an unbounded or overly wide
+     range on a transitive dependency (e.g. `activesupport`'s `json >= 0`) is not
+     evidence that dependency is actually safe at every resolvable version — an
+     unconstrained `bundle install`/`npm install`/`composer install` can silently
+     resolve a newer major line that breaks an internal call site the direct
+     dependency's own maintainers have not yet reconciled. Pin it explicitly in the
+     skeleton's own manifest (with a comment naming the incompatibility and this rule),
+     verified by a real install + the specific multi-step interaction below — never
+     assumed safe because "it's just a transitive dependency."
+  2. **A live-boot/integration test suite built entirely from single-request,
+     single-cell tests (each individually correct and sufficient for its own narrow
+     purpose) can still, in aggregate, never exercise a realistic multi-step
+     interaction a real deployment needs** — e.g. two requests sharing one session/
+     cookie, a request that depends on state a prior request created. Any stack's
+     live-boot conformance suite must include at least one test that sends **two or
+     more sequential real requests within the same client session** against the fully
+     assembled app (not a single cell in isolation) before that stack's whole-app
+     conformance (this project's own Phase D standard) is considered proven — a
+     single-request-per-test suite structurally cannot surface a defect reachable only
+     on request #2+ (session/cookie handling, any stateful middleware), regardless of
+     how many individually-passing single-request tests exist. Distinct from PA-0035
+     (a capability *probe's* fidelity to the real operation path) and PA-0033/PA-0034
+     (quantitative floors and adversarial inputs for code-generation sinks) — this is
+     about a test *suite's* aggregate request-pattern coverage, a failure mode none of
+     the prior rules cover. Concrete instance: the `ruby_rails` skeleton's unpinned
+     `json` gem resolved to a version whose `JSON.parse` broke
+     `ActiveSupport::JSON.decode`'s own internal call, 500'ing every session-cookie
+     read on the second request of any session — invisible to two full build phases'
+     worth of single-request tests, found only once a whole-app, multi-request test was
+     built. (from BUG-0035)

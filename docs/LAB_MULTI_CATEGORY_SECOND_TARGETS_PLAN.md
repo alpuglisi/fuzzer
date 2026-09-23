@@ -657,7 +657,7 @@ one's own pilot:
 
 | # | Category | Status | Sites picked (stack) | New stack(s) needed | Branch | Bookkeeping block reserved | Notes |
 |---|---|---|---|---|---|---|---|
-| 1 | E-commerce/marketplaces | **Piloting — CWE selection done (§9.4a); Walmart/Node cells 2 of 2 landed (CC-LAB-0070 CWE-1321 prototype pollution; CC-LAB-0076 CWE-1333 ReDoS, plus its own M1 timing-differential oracle mechanism, CC-FUZZ-0025); Rails Phase A (skeleton + live-boot harness) landed (CC-LAB-0071); Rails Phase B all 3 cells landed (CC-LAB-0072 webhook-signature, CC-LAB-0073 CWE-915 mass assignment, CC-LAB-0074 CWE-502 insecure deserialization, shared infra CC-LAB-0075) — both apps' full cell lists (3 Rails + 2 Node) are now built and proven end to end; next: wire node_express + ruby_rails + the new oracle strategy into multitarget.py, Phase C page design** | Shopify (Ruby on Rails); Walmart (Node/Express — reuses existing) | Ruby on Rails | `claude/second-target-cat1-ecommerce` | `CC-LAB-0070`-`0076` used (`0072`-`0075` used by this Rails Phase B lane exactly as pre-assigned; `0077`-`0089` still free); `CC-FUZZ-0025`/`FR-FUZZ-12` used in the FUZZ component for the new oracle mechanism | See §9.4a for full detail (site-pair rationale, functionality findings, CWE shortlists, breadth ranking). |
+| 1 | E-commerce/marketplaces | **Piloting — CWE selection done (§9.4a); Walmart/Node: both cells landed, plus Phase C (MeadowMart BFF app identity + ground truth, CC-LAB-0077), Phase D (whole-app live-boot conformance, CC-LAB-0078), and Phase E (own `TargetSpec` wired into `multitarget.py`, CC-LAB-0079) — this app's toolkit-side proof is now fully done; Rails/Shopify: Phase A+B done, its own Phase C/D/E built concurrently on this same branch by a sibling lane (see that lane's own report/commits for its exact bookkeeping IDs — not claimed here to avoid a collision)** | Shopify (Ruby on Rails); Walmart (Node/Express — reuses existing) | Ruby on Rails | `claude/second-target-cat1-ecommerce` | `CC-LAB-0070`-`0079` used so far (`0072`-`0075` Rails Phase B, `0077`-`0079` Walmart/Node Phase C/D/E, both exactly as pre-assigned/claimed-at-dispatch-time; `0080`-`0089` still free for the Rails/Shopify Phase C/D/E lane); `FR-LAB-81`-`83` used for Walmart/Node Phase C/D/E; `CC-FUZZ-0025`/`FR-FUZZ-12` used in the FUZZ component for the ReDoS oracle mechanism | See §9.4a for full detail (site-pair rationale, functionality findings, CWE shortlists, breadth ranking). |
 | 2 | Social / UGC platforms | **Piloting — ⚠ see `docs/components/01-target-lab/requirements.md`'s flag note directly above `FR-LAB-72`: this branch's django Phase A `FR-LAB-72`/`FR-LAB-73` collide with the same IDs already used on `claude/second-target-cat1-ecommerce`; renumber before building further (flagged 2026-09-22 by the cat1 session, no direct messaging path was available)** | Instagram (Python/Django — new stack); Facebook (PHP/Hack — approximated via existing `php_current`/`php_laravel`, reuses) | Python/Django (synchronous MVC) | `claude/category-2-build-bomomg` | `CC-LAB-0090`-`0119` (reserved, not yet used) | YouTube excluded (Google-internal infra, no portable app-language claim — §9.1 step 1). Discord excluded (Elixir realtime/WebSocket, not a request/response fit — §9.1 step 1). Reddit excluded as redundant with Instagram: both are (Python, synchronous monolith) per §9.1 step 2, so picking both adds no distinctness; Instagram preferred as the far better-documented, larger production Django deployment. Facebook's real backend is PHP/**Hack**-on-HHVM specifically, not vanilla PHP — approximated via the existing PHP stack rather than building a literal HHVM/Hack runtime emitter (disproportionate for the vulnerability-shape fidelity it would buy); distinctness and corpus-grounding come from Facebook's real feature set and Meta-documented graph/storage model, not the runtime. Full reasoning: `docs/research/category2-social-ugc-functionality-and-cwe-research.md` §1. Functionality research (Instagram + Facebook) and Django/PHP-Hack-specific CWE research: **done** — see that doc §§2-5. Django emitter Phase A: **done** (`CC-LAB-0090`, pre-change review gate cleared, real `DjangoEmitter` + `DjangoLiveBootHarness`, Tier 0/3 + real live-boot proof all passing — see `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0090` entry for the full record). Next: either Phase B (full module-inventory depth for `django`, mirroring `node_express`'s three Tier-A shapes) or Phase C (corpus-grounded page design for both the Instagram/Django and Facebook/PHP apps, per §0a) — not yet started. |
 | 3 | SaaS / productivity / collaboration | **Piloting** | Slack (PHP/Hack web tier — reuses `php_laravel`); Atlassian (Java/Kotlin+Spring Boot — new emitter) | Java/Kotlin, Spring Boot | `claude/category-3-build-iuu5k9` | `CC-LAB-0130`-`0169` (reserved, not yet all used) | Google Workspace excluded per §9.1 step 1: OT algorithm + Spanner/Bigtable is confirmed at the algorithm/storage level only, no named portable app-framework/language claim, same exclusion class as Disney+/Trip.com. Notion excluded for the same reason: Postgres/Redis/Kafka are infra/data-model detail, not an app-framework/language claim the survey names — re-checked, still not found; would need dedicated research to unblock and two other candidates already give a stronger distinctness pair. Remaining three (Slack, Atlassian, MS365/Teams) grouped per §9.1 step 2: Slack = PHP/Hack, synchronous web-app tier (Java realtime-messaging tier excluded — not the app-logic tier, a WebSocket fan-out layer, poor fit for this generator's request/response IR); Atlassian = Java/Kotlin+Spring Boot microservice (picked over Atlassian's own Node+Express/Python options as the most distinct from stacks already built); MS365/Teams = Node.js+Apollo GraphQL BFF (same language family as the already-built/being-deepened `node_express`, so not the most distinct choice available). Slack vs. Atlassian is the most distinct pair (different language, different runtime, different paradigm) of the three viable candidates. Reuse-vs-new (§9.1 step 4): Slack's PHP/Hack web tier groups with `php_laravel`'s paradigm (synchronous MVC/template-rendering) — reused rather than built as a separate Hack/HHVM emitter (see §9.2 ledger note); Atlassian's Java/Kotlin+Spring Boot is genuinely new and doesn't overlap any built or reused stack, satisfying step 4's "other pick still distinct" requirement. Functionality + stack-specific CWE research + Phase C page design: **done**, see `docs/research/category3-saas-functionality-and-cwe-research.md` (apps: "Huddle Hub" for Slack, "TrackerNest" for Atlassian). Phase A, TrackerNest cell 1 (SSTI/OGNL at `/wiki/pages/render`): **done and verified**, `CC-LAB-0130` (13 tests). Phase A, TrackerNest cell 2 (XXE at `/issues/import`, route simplified from the design doc's `/issues/{id}/render` for the same `Route`-has-no-path-parameter reason `CC-LAB-0130` found — reflected back into the research doc's sec 6b; also added a new additive `xml_external_entities_disabled` entry to `lab/safety_matrix.yaml`, that family's first secure counterpart): **done and verified**, `CC-LAB-0131` (13 more tests, 26 total for this stack — real `mvn package` + `java -jar` boot + real HTTP POST proving a real external-entity file-read on the vulnerable twin vs. a real HTTP 400 DOCTYPE rejection on the secure twin). TrackerNest's third and final designed cell (insecure deserialization at `/integrations/webhook-payload`): **done and verified**, `CC-LAB-0132` — built despite the 2026-09-22 scoping note above flagging it as harder (it needed a real Java-side `SerializeFixtureTool` helper to produce real Java-serialization-protocol bytes, plus a new public `SpringBootLiveBootHarness.app_dir` accessor and a `pom.xml` `<mainClass>` fix — none of that was a judgment call requiring a human decision, so it was built rather than deferred). Real `mvn package` + `java -jar` boot + real HTTP POST proves the differential: the vulnerable twin constructs and reports an unexpected `Serializable` type's name; the secure twin's `resolveClass()` allowlist rejects it with a real HTTP 400 while still accepting the expected type. **TrackerNest's full three-cell set (SSTI, XXE, insecure deserialization) is now done and live-boot-verified — 38 tests, all passing.** Next for this category: Huddle Hub's Phase A (Slack pick, reuses `php_laravel`, no new emitter needed — smaller lift than TrackerNest's new-stack build), then Phase D (fuller conformance)/Phase E (`multitarget.py` wiring) for both apps — **in progress**. |
 | 4 | Media / streaming / content platforms | **Piloting** | Netflix (Java/Spring Boot, DGS Federated GraphQL); Twitch (Go, post-monolith API edge) | Java/Spring Boot; Go | `claude/category-4-build-t9uz3y` | `CC-LAB-0170`-`0209` (reserved, not yet all used) | Applied §9.1 in full: Amazon Prime Video excluded (AWS-service-oriented, no single confirmed app-language, same exclusion reasoning as category 1's Amazon-retail exclusion); Disney+ excluded per the survey's own "partially unconfirmed at the application-code level" note (§9.1 step 1). Remaining three group as {Netflix, Spotify} = Java/Spring-Boot microservices (same language and paradigm — both fit §9.1 step 2's "not architecturally distinct from each other" bar) vs. {Twitch} = Go, a genuinely distinct language and paradigm (compiled, minimalist stdlib, post-Rails-monolith migration). Picked the two most-distinct groups (step 3) and, within the Java/Spring group, picked Netflix over Spotify for its documented Federated-GraphQL-gateway pattern (a distinct architectural surface — a BFF-shaped federation boundary — beyond plain REST, and confirmed at the same two-independent-source confidence level as Spotify). No reuse-preference applied (step 4): neither Java nor Go maps to any already-built stack, so distinctness alone decided both picks. Functionality research (real pages/flows) and stack-specific CWE research done and recorded: `docs/research/site-architecture-survey-functionality-netflix.md` (pick: CWE-502, Jackson polymorphic deserialization in a DGS mutation resolver; CWE-862 GraphQL field-authorization flagged for Phase B) and `-twitch.md` (pick: CWE-347, naive/skipped HMAC comparison in an EventSub webhook receiver; CWE-918 SSRF flagged for Phase B). Both picks are new-stack instances of classes `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4 already names as project-preferred (insecure-deserialization, webhook-signature) and both currently have zero Java/Go instances in the corpus. **Go/Twitch Phase A: done** (`CC-LAB-0170`/`FR-LAB-76`, reviewed pre-implementation per the component's pre-change review gate) — real skeleton, `GoEmitter` (one shape: CWE-347 webhook-signature-verification), `GoLiveBootHarness` (real `go build`/boot/HTTP), Tier 0/3 + a real live-boot test all pass; see `CC-LAB-0170` for the two real defects found and fixed during the build. **Java/Netflix Phase A: done** (`CC-LAB-0171`/`FR-LAB-77`, reviewed pre-implementation per the component's pre-change review gate) — real Maven/Spring Boot skeleton (no GraphQL/DGS dependency in this Phase A — that's Phase B, see the entry's scope call), `JavaEmitter` (one shape: CWE-502 `object_deserialization`, two new safety-matrix ops), `JavaLiveBootHarness` (real `mvn package`/boot/HTTP), Tier 0 (`mvn -q compile`)/3 + a real live-boot test all pass; architecturally needs no route accumulator (Spring Boot component-scans); see `CC-LAB-0171` for the route-collision bug found and fixed during the build. **Both of this pilot's Phase-A builds are now done.** Next: Phase B (richer stack-idiomatic modules — GraphQL/DGS federation + CWE-862 for Java, CWE-918 SSRF + full EventSub header/replay-window checks for Go, per-run databases for both), then Phases C-E (corpus-grounded pages, conformance, `multitarget.py` wiring) per §9.5. |
@@ -851,7 +851,7 @@ this shape's own §9.4a decision flagged as needed:
 evil-regex shapes rather than a requested delay), fitted into the existing
 `ConfirmationStrategy` taxonomy and documented in
 `docs/architecture/oracle-confirmation.md`, which no longer lists ReDoS as
-deferred. Both Walmart/Node cells §9.4a's "Decided" block named are
+deferred. Both Walmart/Node cells §9.4a's "Decided" block named were
 therefore now built. Not done here (explicitly out of this lane's scope):
 wiring `node_express`/the new oracle strategy into `multitarget.py`, and
 running the oracle mechanism against a live target. The Rails skeleton
@@ -905,3 +905,76 @@ dispatch instructions): wiring `ruby_rails`/`node_express`/the ReDoS
 oracle strategy into `multitarget.py`; Phase C page design/identity for
 either app; the deferred `order`/`pluck` identifier-position SQLi variant
 §9.4a flags as a follow-up increment, not part of this pilot's first pass.
+
+**Progress update (2026-09-23, Walmart/Node Phase C/D/E lane):** the
+Walmart/Node half of the two items the previous update flagged as not done
+is now **done**, built concurrently with the Rails/Shopify lane's own
+Phase C/D/E work on this same branch (each lane's own half only, per
+`docs/MULTI_AGENT_ORCHESTRATION.md`'s coordination contract).
+
+- **Phase C (app identity + ground truth), `CC-LAB-0077`/`FR-LAB-81`:** the
+  two existing real Node cells (prototype pollution at `/api/preferences`,
+  ReDoS at `/api/search`) are now assembled into one small, coherent app
+  identity, the **MeadowMart BFF** (a fictitious brand; its shape -- a
+  Node/Express layer aggregating legacy services rather than owning its
+  own domain logic -- is grounded in the real Walmart Global Tech Blog
+  research this category's §9.4a research already did). Each real page's
+  canonical (vulnerable) cell is now served at its actual, coherent BFF
+  URL (`/api/preferences`, `/api/search` -- previously both cells of both
+  pairs landed at a synthetic, identity-free `/generated/<cell-id>` URL);
+  its secure twin at a deterministic `-twin-<cell-id>` variant of that same
+  URL (the same canonical/twin-URL mechanism `php_laravel` already uses,
+  for the identical "twins must coexist as distinct live routes in one
+  process" reason). Three new, always-included, genuinely inert
+  surrounding routes (`/api/products`, `/api/orders/:orderId`, `/api/cart`)
+  make the assembled app read as a small BFF storefront rather than two
+  isolated endpoints -- none reads or reflects any request input, and none
+  carries a manifest cell or ground-truth case of its own. New
+  `lab/ground-truth-meadowmart/` (opaque `MMART-NNNN` case IDs, distinct
+  from `PFF-*` and the concurrent Rails lane's `FCART-*`; `target:
+  "node_express_meadowmart_bff"`) follows D9's out-of-band contract exactly
+  and loads/validates for real via `fuzzlab.labels.contract.load`. This
+  required an additive `labels.schema.json` enum widening
+  (`vuln_class`/`sink_context` gain `prototype_pollution`/`redos` and
+  `object_property`/`regex` respectively -- neither class could be
+  expressed in the ground-truth contract before this).
+- **Phase D (whole-app live-boot conformance), `CC-LAB-0078`/`FR-LAB-82`:**
+  closed the real gap every prior `node_express` proof left open --
+  isolated `require()`-and-fake-`req`/`res` per cell, never the whole
+  assembled app (every cell's route, `render_route_accumulator`'s real
+  cardinality) booted together and driven over real HTTP. New
+  `tests/test_labgen_node_bff_app.py`: a real, network-reachable `npm
+  install`, a real `node app.js` boot on `127.0.0.1`, and real HTTP
+  (`urllib.request`) against every route -- the three inert pages, both
+  real pages' canonical URLs, both twins' URLs, and (directly observable
+  over real HTTP, unlike prototype pollution's own in-band-invisible
+  finding) the ReDoS cell's real timing differential, all proven against
+  the fully assembled app, not a single isolated handler.
+- **Phase E (`multitarget.py` wiring), `CC-LAB-0079`/`FR-LAB-83`:** this
+  app's own real `TargetSpec` (`base_url` from the same real live-booted
+  app Phase D assembles; `ground_truth` from Phase C's
+  `lab/ground-truth-meadowmart`), run for real through
+  `fuzzlab.harness.multitarget.run_targets`/`transfer_summary` using the
+  existing, unmodified `fuzzlab.tools.probesender.RequestsProbeSender` (a
+  real HTTP sender, not a hand-written fake). New
+  `tests/test_labgen_node_bff_multitarget.py` proves a real, scored
+  `ScoreReport` comes back (tp=0, fn=2, precision=recall=0.0 --
+  **honestly 0, not a bug**: neither `prototype_pollution`'s nor
+  `redos`'s raw vuln_class name is mapped by
+  `fuzzlab.core.runmode._VULN_TO_CATEGORY` nor known to
+  `fuzzlab.audit.rules.known_categories()`, so the audit stage nominates
+  zero candidates for either before any oracle confirmer is even reached;
+  `redos` already has a downstream confirmer, `RegexDosStrategy`, but under
+  a *different* category string, `regular-expression`, that nothing
+  upstream currently routes a candidate to) and `transfer_summary`
+  correctly reports `generalizes=False` for the single target. Wiring the
+  category mapping/an audit rule so these two classes can actually be
+  nominated and confirmed is real, sized follow-on work, flagged here, not
+  attempted by this lane. Combining this `TargetSpec` with the concurrent
+  Rails/Shopify lane's own one in a single `run_targets` call (§6 step 2)
+  is also left for a follow-on step, once both exist on a merged branch.
+
+Full test suite re-run clean after this lane's changes (1891 passed, 8
+skipped, 0 failed, `not slow`-marked tests deselected) -- see
+`docs/components/01-target-lab/change-control.md`'s `CC-LAB-0077`-`0079`
+entries for full detail.

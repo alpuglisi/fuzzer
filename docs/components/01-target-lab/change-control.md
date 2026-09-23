@@ -3,6 +3,193 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0079 — Phase E: MeadowMart BFF `TargetSpec` wired into `multitarget.py` (FR-LAB-83) (2026-09-23)
+- Change: `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6/§9.4a/§9.5's
+  Category 1 (E-commerce) Walmart/Node pilot, Phase E, this app's half only
+  (the concurrent Rails/Shopify lane owns its own `TargetSpec` on this same
+  branch). `tests/test_labgen_node_bff_multitarget.py` (new): builds a real
+  `fuzzlab.harness.multitarget.TargetSpec` for the MeadowMart BFF app
+  (`base_url` from a real, locally npm-installed + booted `node app.js`
+  instance -- same assembly as `CC-LAB-0078`; `ground_truth` from
+  `CC-LAB-0077`'s `lab/ground-truth-meadowmart` contract), and runs
+  `fuzzlab.harness.multitarget.run_targets`/`transfer_summary` against it for
+  real, using `fuzzlab.tools.probesender.RequestsProbeSender` (a real,
+  already-existing, unauthenticated HTTP sender -- no new sender class
+  needed) rather than a hand-written fake sender (unlike
+  `tests/test_multitarget.py`'s existing fake-`AutoSender` coverage of the
+  harness plumbing itself, which this does not replace).
+- Impact (other components / project): none to shipped code --
+  `fuzzlab.harness.multitarget`/`fuzzlab.tools.probesender` are used exactly
+  as they already exist, unmodified. Closes the toolkit-side half of this
+  app's Phase 10 `T10.6`-style proof (a second, real, locally-bootable
+  target the harness can actually run against and score) -- the live/
+  on-host measurement stays exactly as out of scope as `docs/
+  LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §7 already says.
+- Risk (level; mitigation or accepted-risk justification): Low. Test-only
+  addition; no production code path changed. Accepted, flagged limitation:
+  recall is 0 for both `prototype_pollution`/`redos` positives, because
+  neither raw vuln_class name is mapped by
+  `fuzzlab.core.runmode._VULN_TO_CATEGORY` nor known to
+  `fuzzlab.audit.rules.known_categories()`, so the audit stage nominates
+  zero candidates for either category before an oracle confirmer is even
+  reached (a downstream confirmer for ReDoS, `RegexDosStrategy`, already
+  exists under a *different* category string, `regular-expression` --
+  nothing upstream currently routes a candidate to it under `redos`) --
+  the same documented-gap discipline `points_from_ground_truth` already
+  uses for browser-gated DOM/stored-XSS points. This change proves the
+  wiring runs and scores for real, not that end-to-end detection exists
+  for these two brand-new classes; wiring the category mapping/audit rule
+  is real, sized follow-on work out of this change's scope.
+- Deliverables:
+  - [x] `TargetSpec` for the MeadowMart BFF, `base_url` from a real live
+    boot — done
+  - [x] `run_targets`/`transfer_summary` executed for real against it,
+    producing a real per-target `ScoreReport` (tp=0, fn=2, precision=0.0,
+    recall=0.0, `generalizes=False` for the single target) — done, see
+    `tests/test_labgen_node_bff_multitarget.py`
+  - [x] A second real run against the same live target gets a distinct
+    `run_id` (proves the wiring composes with a later, second run once
+    combined with the Rails/Shopify target per §6 step 2) — done
+  - [x] `requirements.md` (`FR-LAB-83`) — done
+- Effectiveness (assessed 2026-09-23): `tests/test_labgen_node_bff_multitarget.py`
+  passes for real (2 passed) against a real, freshly npm-installed and
+  booted instance of the app `CC-LAB-0077`/`CC-LAB-0078` assemble; full
+  suite re-run clean afterward (see this change's own final report for the
+  exact pass/skip counts).
+
+### CC-LAB-0078 — Phase D: whole-app live-boot conformance for the MeadowMart BFF (FR-LAB-82) (2026-09-23)
+- Change: `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §5/§9.4a/§9.5's
+  Category 1 (E-commerce) Walmart/Node pilot, Phase D. Closes a real gap
+  every prior `node_express` proof left open: `tests/
+  test_labgen_prototype_pollution.py`/`test_labgen_redos.py` each proved
+  their own cell's mechanism by `require()`-ing one rendered controller
+  module in isolation and driving it with a fake `req`/`res` -- never by
+  actually booting the **whole assembled app** (every cell's route,
+  `NodeExpressEmitter.render_route_accumulator`'s real cardinality, fed by
+  the full cell set at once) and hitting it over a real network round trip.
+  New `tests/test_labgen_node_bff_app.py`: assembles the full MeadowMart BFF
+  app tree (the scaffold's `package.json`/`db.js`, every cell of both real
+  manifests' controllers, one `app.js` built by `render_route_accumulator`
+  over all four cells together), runs a real, network-reachable `npm
+  install` (confirmed reachable in this sandbox through its configured
+  proxy at authoring time), boots `node app.js` for real bound to
+  `127.0.0.1`, and drives it with real HTTP (`urllib.request`, no mocking):
+  every surrounding inert page (`/api/products`, `/api/orders/:id`,
+  `/api/cart`), both real pages' canonical URLs, both twins' URLs, and the
+  ReDoS cell's real, directly-observable real-HTTP timing differential
+  (vulnerable canonical route slow on `(a+)+$`, secure twin route fast).
+  The prototype-pollution cell's own real-HTTP proof here is the ordinary-
+  payload round trip at both URLs (the pollution itself has no in-band HTTP
+  signal by its real nature -- stated plainly in the new test module's own
+  docstring, not glossed over); the pollution differential itself stays
+  proven by `CC-LAB-0070`'s already-real, already-executed Node-subprocess
+  test, now additionally confirmed reachable at its real, coherent URL
+  inside the fully assembled app.
+- Impact (other components / project): none to shipped code -- test-only.
+  Depends on `CC-LAB-0077`'s emitter/accumulator changes (canonical/twin
+  URLs, inert routes) to have real, coherent URLs to test against.
+- Risk (level; mitigation or accepted-risk justification): Low. Test-only;
+  skip-guarded (PA-0005's pattern) when `node`/`npm` are absent or the npm
+  registry is unreachable, so it degrades to a skip rather than a false
+  failure on a host without those. One real defect found and fixed during
+  this change's own development, before any test was ever reported passing
+  (not a defect in previously-shipped code, so the bug protocol does not
+  apply, matching `CC-LAB-0075`'s own precedent for this exact situation):
+  the two new test modules' `_npm_registry_reachable()` probe directories
+  collided when both modules ran in the same `pytest` session, because
+  `pytest_tmp_path_factory.mktemp()` already creates its returned directory
+  (a second `mkdir()` on it raised `FileExistsError`) and, separately,
+  `tmp_path_factory.mktemp()` results from *different* test modules share
+  one session-level base temp dir as their common parent (a fixed-name
+  probe subdirectory derived from another fixture's directory therefore
+  collides across modules) -- fixed by giving each module its own dedicated
+  `tmp_path_factory.mktemp("npm_probe")` directory and calling
+  `mkdir(exist_ok=True)` on it.
+- Deliverables:
+  - [x] Whole-app real `npm install` + real `node app.js` boot, all four
+    cells' routes plus the inert pages registered together — done
+  - [x] Real HTTP round trip against every route (inert + both real pages +
+    both twins) — done
+  - [x] Real-HTTP ReDoS timing differential (vulnerable slow, secure twin
+    fast) at the fully assembled app's own URLs — done
+  - [x] `requirements.md` (`FR-LAB-82`) — done
+- Effectiveness (assessed 2026-09-23): `tests/test_labgen_node_bff_app.py`
+  passes for real (6 passed) against a real, freshly npm-installed and
+  booted instance of the full app; full suite re-run clean afterward.
+
+### CC-LAB-0077 — Phase C: MeadowMart BFF app identity + coherent routes + ground truth, `node_express` (FR-LAB-81) (2026-09-23)
+- Change: `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§9.4a/§9.5's
+  Category 1 (E-commerce) Walmart/Node pilot, Phase C. Assembles this
+  emitter's two existing real cells (`CC-LAB-0070`'s prototype pollution at
+  `/api/preferences`, `CC-LAB-0076`'s ReDoS at `/api/search`) into one
+  small, coherent app identity grounded in the real Walmart Global Tech Blog
+  research (`docs/research/site-architecture-survey-functionality-walmart.md`):
+  the fictitious **MeadowMart BFF**, a Node/Express layer aggregating legacy
+  services rather than owning its own domain logic (order tracking as a
+  BPM-style state machine, product listing, cart, search, account/cart
+  preferences).
+  - `fuzzlab/labgen/emitters/node_express/__init__.py`: new
+    `_REAL_PAGE_CANONICAL`/`_twin_url_for`/`_served_url_for` -- the same
+    canonical/twin-URL mechanism `php_laravel` already uses
+    (`_served_route_for`/`_twin_url_for`), reused here for the identical
+    reason: a vulnerable cell and its secure twin must coexist as two
+    distinct, live routes in **one** running Express process, so the
+    canonical (vulnerable) cell of each real-page pair is now served at the
+    real, coherent BFF URL (`/api/preferences`, `/api/search`) and its
+    secure twin at a deterministic `-twin-<cell-id>` URL, instead of both
+    previously landing at the synthetic, identity-free
+    `/generated/<cell-id>` URL. Every other, non-"real-page" cell (the
+    Tier-A generic sample's own illustrative cells) keeps that prior
+    behavior unchanged.
+  - New, always-included, genuinely inert surrounding routes
+    (`_INERT_ROUTES_JS`) in `render_route_accumulator`'s `app.js`:
+    `/api/products` (listing), `/api/orders/:orderId` (tracking),
+    `/api/cart` (contents) -- none reads or reflects any request input;
+    static illustrative responses only, added purely so the assembled app
+    reads as a small BFF storefront, not two isolated endpoints. Neither
+    real cell's own vulnerable/secure transform logic is touched.
+  - New `lab/ground-truth-meadowmart/` (`labels.json`/`injection-points.json`/
+    `expectedresults.csv`), following the `lab/ground-truth`/`lab/ground-
+    truth-forgecart` contract exactly (D9): opaque `MMART-NNNN` case IDs
+    (a distinct prefix from `PFF-*` and the concurrent Rails lane's
+    `FCART-*`), 2 positive/2 negative cases (the canonical vulnerable cell
+    and its secure twin, for each of the two real pages), `target:
+    "node_express_meadowmart_bff"`.
+  - `fuzzlab/labels/schemas/labels.schema.json`: additive enum extension --
+    `vuln_class` gains `prototype_pollution`/`redos`, `sink_context` gains
+    `object_property`/`regex` (neither vuln class could be expressed in the
+    ground-truth contract before this; the enum was already open to
+    additive per-category extension, e.g. the pre-existing
+    `webhook_signature`/`mass_assignment`/`insecure_deserialization`
+    values).
+- Impact (other components / project): the accumulator's `app.js` output
+  changes (routes now use `_served_url_for` and always include the three
+  inert routes) -- re-confirmed byte-deterministic and every pre-existing
+  `node_express` test still passes unchanged (no other manifest's cells
+  route through `/api/preferences`/`/api/search`, so no other cell's served
+  URL changes). `labels.schema.json`'s enum widening is additive-only
+  (existing ground truth re-validated unchanged).
+- Risk (level; mitigation or accepted-risk justification): Low. The
+  emitter/accumulator change is scoped to two named routes and a fixed,
+  input-free addition; the schema change is a pure enum widening. Full
+  `node_express` test suite (113 tests across
+  `test_labgen_node_express*.py`/`test_labgen_prototype_pollution.py`/
+  `test_labgen_redos.py`/`test_oracle_redos.py`) re-run and passes
+  unchanged.
+- Deliverables:
+  - [x] App identity + coherent route set (2 real pages + 3 inert
+    surrounding pages) — done
+  - [x] Canonical/twin URL scheme for the 2 real pages — done
+  - [x] `lab/ground-truth-meadowmart/` (labels/injection-points/expected
+    results), loads and validates via `fuzzlab.labels.contract.load` — done
+  - [x] `labels.schema.json` additive enum widening — done
+  - [x] `requirements.md` (`FR-LAB-81`) — done
+- Effectiveness (assessed 2026-09-23): `fuzzlab.labels.contract.load('lab/
+  ground-truth-meadowmart')` loads and validates for real; every
+  pre-existing `node_express` test (113) still passes unchanged; Phase D/E
+  (`CC-LAB-0078`/`0079`) build on and exercise this app's real routes for
+  real, over real HTTP.
+
 ### CC-LAB-0075 — ruby_rails Phase B shared harness/tooling infrastructure (FR-LAB-66/67/68) (2026-09-22)
 - Change: the harness/tooling additions the three Rails Phase B vulnerability
   modules below (`CC-LAB-0072`/`0073`/`0074`) all depend on, landed together

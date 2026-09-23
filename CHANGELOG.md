@@ -12,6 +12,27 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23
+- LAB (`claude/second-target-cat1-ecommerce`): MeadowMart BFF (`node_express`)
+  Phase C/D/E — the two existing real Node cells (prototype pollution,
+  ReDoS) assembled into a coherent, Walmart-grounded BFF app identity
+  (`CC-LAB-0077`/`FR-LAB-81`): a canonical/twin URL scheme so each real
+  page's vulnerable twin is served at its actual BFF URL
+  (`/api/preferences`, `/api/search`) rather than a synthetic one, three
+  new inert surrounding routes (products/orders/cart) for app coherence,
+  a new `lab/ground-truth-meadowmart/` contract (`MMART-NNNN` case IDs),
+  and an additive `labels.schema.json` enum widening for the two
+  previously-unrepresentable vuln classes. Phase D
+  (`CC-LAB-0078`/`FR-LAB-82`) closes the whole-app live-boot gap every
+  prior proof left open: a real `npm install` + `node app.js` boot of the
+  full assembled app, driven with real HTTP, including the ReDoS cell's
+  real-HTTP timing differential. Phase E (`CC-LAB-0079`/`FR-LAB-83`) wires
+  this app into `fuzzlab.harness.multitarget` as its own real `TargetSpec`,
+  run for real (real HTTP sender, real ground truth, a real scored
+  `ScoreReport`) — this app's half of the toolkit-side second-target proof;
+  the concurrent Rails/Shopify lane owns its own `TargetSpec` on this same
+  branch.
+
 ## 2026-09-22
 - LAB (`claude/second-target-cat1-ecommerce`): `ruby_rails` Phase B — the
   three real, Shopify-grounded vulnerability modules

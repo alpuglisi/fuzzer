@@ -28,6 +28,20 @@ the sink itself renders) rather than ``render_only``'s separate view file,
 and none of them need a view: :data:`_MODULE_SET_BY_SHAPE`'s
 ``renders_view`` flag on each entry decides which path :meth:`RailsEmitter.render`
 takes -- see that method's own comments.
+
+**Phase C** (``CC-LAB-0077``/``FR-LAB-81``) gives this app its own real,
+coherent page/route identity -- "ForgeCart", a Shopify-style merchant
+storefront + admin -- instead of every cell living at an illustrative
+``/cell/<slug>`` URL. Five new real-page cells (``LABGEN-RR-RP-0001``..
+``0005``, :data:`_REAL_PAGE_URL_BY_CELL_ID`) reuse the four shapes already
+built above at real URLs (``/search``, two ``/webhooks/...`` topics, two
+``/admin/...`` endpoints); a handful of inert surrounding pages (storefront
+home/products/cart, admin dashboard/orders) are fixed, non-generated routes
+declared in ``route_accumulator._STATIC_APP_ROUTES`` with their own
+checked-in skeleton controllers (``StorefrontController``/
+``AdminController``) -- see ``lab/manifests/shopify_forgecart_real_pages.yaml``
+and ``lab/ground-truth-forgecart/`` for the manifest and out-of-band ground
+truth this identity is scored against.
 """
 
 from __future__ import annotations
@@ -160,14 +174,57 @@ def _controller_class_for(cell_id: str) -> str:
     return f"{camel}Controller"
 
 
+#: Real, coherent page URLs for "ForgeCart" (Phase C page/route identity,
+#: `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§9.5 --
+#: CC-LAB-0077/FR-LAB-81), one entry per real-page cell in
+#: `lab/manifests/shopify_forgecart_real_pages.yaml`. Mirrors
+#: `php_laravel`'s own real-page precedent (`_PAGE_PROFILES`'s URL keys,
+#: `LABGEN-PLRP-*` cell IDs): a *new*, distinct cell ID per real page,
+#: never reusing `LABGEN-RR-0001`..`0007`'s existing `/cell/<slug>` cells
+#: (those stay exactly where Phase A/B's own already-passing tests expect
+#: them -- see this module's own docstring). Every URL here also has a real,
+#: checked-in controller/route registered for it: the four `RailsEmitter`
+#: shapes render their own controller+route per cell as usual; the
+#: surrounding inert pages (`/`, `/products`, `/cart`, `/admin`,
+#: `/admin/orders`) are the fixed, non-generated routes in
+#: `route_accumulator._STATIC_APP_ROUTES`, kept in this same module's
+#: docstring cross-reference so the two lists can be read side by side.
+_REAL_PAGE_URL_BY_CELL_ID: dict[str, str] = {
+    # Storefront search -- reflects `?q=` into the results banner
+    # (`("xss", "html_body")`, the one shape Phase A built). Real Shopify
+    # storefront search internals are not independently confirmed beyond
+    # "the surface exists" (see the Shopify functionality research doc
+    # §1's own caveat); a `/search?q=` box is the standard shape every
+    # storefront exposes regardless.
+    "LABGEN-RR-RP-0001": "/search",
+    # Webhook receiver for the `orders/create` topic -- vulnerable twin
+    # (naive `==`), the real Shopify `X-Shopify-Hmac-SHA256` mechanism this
+    # category's research names as its strongest-grounded finding.
+    "LABGEN-RR-RP-0002": "/webhooks/orders/create",
+    # Webhook receiver for the `customers/update` topic -- secure twin
+    # (`ActiveSupport::SecurityUtils.secure_compare`). A second, real
+    # Shopify webhook topic (not a second endpoint for the same topic),
+    # matching the real ecosystem's "merchants subscribe per-topic"
+    # design and giving this app's ground truth a genuine negative
+    # (secure) real-page case alongside its four positive ones.
+    "LABGEN-RR-RP-0003": "/webhooks/customers/update",
+    # Merchant-admin customer-account update -- CWE-915 (`permit!`).
+    "LABGEN-RR-RP-0004": "/admin/customers/update",
+    # Merchant-admin product bulk-import -- CWE-502 (`YAML.unsafe_load`).
+    "LABGEN-RR-RP-0005": "/admin/products/import",
+}
+
+
 def url_path_for(cell_id: str) -> str:
-    """The illustrative URL a Phase A cell is served at -- cell-ID-derived,
-    exactly like ``php_laravel``'s own illustrative (non-``real_page``)
-    cells (``/cell/<slug>``). No real-page URL-pinning mechanism exists for
-    this stack yet (that is real-page-migration work, out of this
-    dispatch's scope, and this stack has no real target app to migrate
-    pages from in the first place -- Shopify/Walmart are external sites,
-    not a checked-in ``puppy-fort-factory``-style fixture)."""
+    """The URL a cell is served at. A Phase C real-page cell
+    (:data:`_REAL_PAGE_URL_BY_CELL_ID`) gets its real, coherent app URL;
+    every other cell (Phase A's illustrative shape, Phase B's
+    module-conformance sample pairs) keeps the cell-ID-derived illustrative
+    URL (``/cell/<slug>``), exactly like ``php_laravel``'s own illustrative
+    (non-``real_page``) cells -- unchanged so those cells' own already-
+    passing tests/manifests never have to move."""
+    if cell_id in _REAL_PAGE_URL_BY_CELL_ID:
+        return _REAL_PAGE_URL_BY_CELL_ID[cell_id]
     return f"/cell/{_slug_for(cell_id)}"
 
 

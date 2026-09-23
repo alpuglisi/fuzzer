@@ -6,6 +6,19 @@ gem "rails", "~> 8.1.3", ">= 8.1.3.1"
 gem "propshaft"
 # Use sqlite3 as the database for Active Record
 gem "sqlite3", ">= 2.1"
+
+# Pin json < 3.0 (BUG-0034, discovered building Phase C's whole-app
+# conformance test): json 3.x made `JSON.parse` keyword-args-only, but
+# `ActiveSupport::JSON.decode` (activesupport 8.1.3.1, this app's own
+# pinned Rails version) still calls `::JSON.parse(json, options)`
+# positionally -- a real, 100%-reproducible `ArgumentError` ("wrong number
+# of arguments (given 2, expected 1)") on ANY second request in the same
+# session that touches the encrypted session cookie (every request after
+# the first, in every real multi-request client, not merely this app's
+# own new pages). `activesupport`'s gemspec declares only `json >= 0` (no
+# upper bound), so an unpinned `bundle install` silently resolves the
+# newest, incompatible 3.x line. See docs/bugs/BUG-0034-*.md.
+gem "json", "~> 2.7"
 # Use the Puma web server [https://github.com/puma/puma]
 gem "puma", ">= 5.0"
 

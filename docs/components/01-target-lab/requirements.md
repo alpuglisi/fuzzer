@@ -2145,6 +2145,98 @@ lane) can submit a payload as
     `fuzzlab/harness/multitarget.py`; running the new oracle mechanism
     against a live target.
 
+- **FR-LAB-81** *(Phase C: MeadowMart BFF app identity + coherent routes +
+  ground truth, `node_express`; `CC-LAB-0077`, 2026-09-23).* Per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§9.4a/§9.5's Category
+  1 (E-commerce) Walmart/Node pilot, the two existing real `node_express`
+  cells (`FR-LAB-64` prototype pollution, `FR-LAB-69` ReDoS) are assembled
+  into one small, coherent app identity, the **MeadowMart BFF** (a
+  fictitious brand; its shape -- a Node/Express layer aggregating legacy
+  services -- is grounded in `docs/research/site-architecture-survey-functionality-walmart.md`):
+  - `_REAL_PAGE_CANONICAL`/`_twin_url_for`/`_served_url_for`
+    (`fuzzlab/labgen/emitters/node_express/__init__.py`): the canonical
+    (vulnerable) cell of each real-page pair is served at the real BFF URL
+    (`/api/preferences`, `/api/search`); its secure twin at a deterministic
+    `-twin-<cell-id>` URL — the same mechanism `php_laravel`'s
+    `_served_route_for`/`_twin_url_for` already uses, for the identical
+    reason (a twin pair must coexist as distinct live routes in one running
+    process). Every other cell keeps the prior `/generated/<cell-id>` URL.
+  - Three new, always-included, genuinely inert surrounding routes in
+    `render_route_accumulator`'s `app.js` (`/api/products`,
+    `/api/orders/:orderId`, `/api/cart`) — no request input read or
+    reflected by any of them; added purely for app-identity coherence, no
+    manifest cell or ground-truth case of their own.
+  - New `lab/ground-truth-meadowmart/` (`labels.json`/`injection-points.json`/
+    `expectedresults.csv`, D9's out-of-band contract): opaque `MMART-NNNN`
+    case IDs (distinct from `PFF-*` and the concurrent Rails lane's
+    `FCART-*`), `target: "node_express_meadowmart_bff"`, 2 positive/2
+    negative cases (the canonical cell and its secure twin, for each real
+    page). Loads and validates via `fuzzlab.labels.contract.load`.
+  - `fuzzlab/labels/schemas/labels.schema.json`: additive enum widening --
+    `vuln_class` gains `prototype_pollution`/`redos`, `sink_context` gains
+    `object_property`/`regex` (neither class could be expressed in the
+    ground-truth contract before this).
+  - Deliberately not attempted (out of scope, per the dispatch brief):
+    merging the generic Tier-A sample manifest's illustrative SQLi/XSS
+    cells (`lab/manifests/phase3_node_express_sample.yaml`) into this app;
+    it stays a separate, unrelated fixture.
+
+- **FR-LAB-82** *(Phase D: whole-app live-boot conformance for the
+  MeadowMart BFF; `CC-LAB-0078`, 2026-09-23).* Per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §5's standard, closes the
+  real gap every prior `node_express` proof left open (isolated
+  `require()`-and-fake-`req`/`res` per cell, never the whole assembled app
+  booted together). New `tests/test_labgen_node_bff_app.py`: assembles the
+  full app (all four cells of both real manifests + the three
+  `FR-LAB-81` inert routes, one `app.js` built by
+  `render_route_accumulator` over the full cell set at once), a real
+  network-reachable `npm install`, a real `node app.js` boot on
+  `127.0.0.1`, and real HTTP (`urllib.request`) against every route:
+  - Every inert page answers correctly.
+  - Both real pages are reachable at their coherent, canonical BFF URLs;
+    both secure twins at their own twin URLs.
+  - The ReDoS cell's real, directly-observable real-HTTP timing
+    differential (vulnerable canonical route slow on `(a+)+$`, secure twin
+    fast) holds over the fully assembled app, not just in isolation.
+  - Both preference-endpoint twins still merge ordinary (non-adversarial)
+    payloads correctly over real HTTP.
+  - Explicitly not re-derived here (stated in the test module's own
+    docstring): the prototype-pollution differential itself, since
+    polluting `Object.prototype` has no in-band HTTP signal by its real
+    nature -- that differential stays proven by `FR-LAB-64`'s real,
+    executed Node-subprocess test; this requirement additionally confirms
+    the route it lives at is reachable, real, and coherent inside the
+    fully assembled app.
+
+- **FR-LAB-83** *(Phase E: MeadowMart BFF `TargetSpec` wired into
+  `multitarget.py`; `CC-LAB-0079`, 2026-09-23).* Per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6, this app's half only
+  (the concurrent Rails/Shopify lane owns its own `TargetSpec`). New
+  `tests/test_labgen_node_bff_multitarget.py`: a real
+  `fuzzlab.harness.multitarget.TargetSpec` (`base_url` from the same real
+  live-booted app `FR-LAB-82` assembles; `ground_truth` from
+  `FR-LAB-81`'s `lab/ground-truth-meadowmart`), run for real through
+  `run_targets`/`transfer_summary` using the existing, unmodified
+  `fuzzlab.tools.probesender.RequestsProbeSender` — a real HTTP sender, not
+  a hand-written fake (unlike `tests/test_multitarget.py`'s existing
+  fake-sender coverage of the harness plumbing, which this does not
+  replace). Produces a real, scored `ScoreReport` (tp=0, fn=2,
+  precision=recall=0.0 — because neither raw vuln_class name is mapped by
+  `fuzzlab.core.runmode._VULN_TO_CATEGORY` nor known to
+  `fuzzlab.audit.rules.known_categories()`, so zero candidates are ever
+  nominated for either, a documented, flagged gap, not a defect — see
+  `tests/test_labgen_node_bff_multitarget.py`'s own docstring for the full
+  explanation) and a `transfer_summary` correctly reporting
+  `generalizes=False` for a single target. A second run against the same
+  live target gets a distinct `run_id`. Deliberately out of scope: wiring
+  the category mapping/an audit rule so `prototype_pollution`/`redos` (the
+  latter already has a downstream oracle confirmer,
+  `RegexDosStrategy`/`FR-FUZZ-12`, under a different category string,
+  `regular-expression`) can actually be nominated and confirmed; running
+  both this target and the Rails/Shopify target together in one
+  `run_targets` call (left for a follow-on step once both `TargetSpec`s
+  exist, per §6 step 2's own note).
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.
