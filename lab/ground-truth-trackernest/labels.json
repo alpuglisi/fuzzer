@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "target": "spring_boot",
+  "cases": [
+    {
+      "case_id": "TNEST-0001",
+      "url": "/wiki/pages/render",
+      "method": "GET",
+      "param": "macroExpr",
+      "location": "query",
+      "vuln_class": "ssti",
+      "sink_context": "template",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "notes": "macroExpr evaluated directly as an OGNL expression (ognl.Ognl.getValue) -- modeled on real Confluence CVE-2021-26084/CVE-2022-26134 OGNL-injection shape (docs/research/category3-saas-functionality-and-cwe-research.md sec 4/6b). LABGEN-SSTI-0001 in lab/manifests/ssti_spring_boot_sample.yaml, CC-LAB-0130/FR-LAB-74 -- never a PFF-* case."
+    },
+    {
+      "case_id": "TNEST-0002",
+      "url": "/issues/import",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "vuln_class": "xxe",
+      "sink_context": "xml",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "notes": "Whole raw request body parsed by a permissively-configured DocumentBuilderFactory (default external-entity/DOCTYPE resolution left enabled), CWE-611 -- modeled on real Java XML-parser defaults. No single named field carries the taint (the entire body is the sink input), so `param` is the literal string \"body\" rather than a form/query field name, matching CC-LAB-0174's (category 4/Netflix) own established whole-raw-body convention -- distinct from every other `param` value in this project's ground truth, all of which name a real field/header/query key. LABGEN-XXE-0001 in lab/manifests/xxe_spring_boot_sample.yaml, CC-LAB-0131/FR-LAB-75 -- never a PFF-* case."
+    },
+    {
+      "case_id": "TNEST-0003",
+      "url": "/integrations/webhook-payload",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "vuln_class": "insecure_deserialization",
+      "sink_context": "deserialization",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "notes": "Whole raw request body deserialized via a real java.io.ObjectInputStream with no resolveClass() allowlist -- unrestricted-type-construction, CWE-502. Same whole-raw-body `param=\"body\"` convention as TNEST-0002/CC-LAB-0174 above (the entire body is the sink input, no single named field). LABGEN-DESER-0001 in lab/manifests/insecure_deserialization_spring_boot_sample.yaml, CC-LAB-0132/FR-LAB-80 -- never a PFF-* case."
+    }
+  ]
+}

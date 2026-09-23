@@ -1,0 +1,5 @@
+// redirect_target_allowlist: only a same-origin relative path survives --
+// exactly one leading '/', not itself followed by another '/' or a
+// backslash, and containing no scheme/whitespace/control characters.
+// Anything else (a protocol-relative target, a backslash-prefixed target,
+// an absolute URL, a javascript: value) collapses to the safe default '/'.

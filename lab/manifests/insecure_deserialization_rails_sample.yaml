@@ -1,0 +1,35 @@
+# Insecure-deserialization sample manifest (CC-LAB-0074), ruby_rails.
+#
+# First Ruby/Psych instance of the existing `object_deserialization` sink
+# family (lab/safety_matrix.yaml, previously implemented only as a Python/
+# pickle idiom in the corpus docs, and not implemented by any emitter in
+# code before this lane). Mirrors CVE-2013-0156's own mechanism (Psych's
+# `init_with` hook honoring a `!ruby/object:...` YAML tag) applied to a
+# Shopify-app-style admin bulk-import feature accepting a YAML payload
+# (docs/research/site-architecture-survey-functionality-shopify.md §2).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: YAML.unsafe_load honors a `!ruby/object:...` tag, building
+  # an attacker-chosen Ruby object.
+  - cell_id: LABGEN-RR-0006
+    class: insecure_deserialization
+    stack_profile: ruby_rails
+    route: { method: POST, path: /cell/labgen_rr_0006 }
+    sink_context:
+      family: object_deserialization
+      required_neutralizations: [insecure_deserialization]
+    transform: [yaml_unsafe_load]
+
+  # Secure twin: the only difference is the transform region
+  # (yaml_safe_load instead of yaml_unsafe_load) -- the minimal-pair
+  # invariant. The same `!ruby/object:...` tag raises
+  # Psych::DisallowedClass instead of building the object.
+  - cell_id: LABGEN-RR-0007
+    class: insecure_deserialization
+    stack_profile: ruby_rails
+    route: { method: POST, path: /cell/labgen_rr_0007 }
+    sink_context:
+      family: object_deserialization
+      required_neutralizations: [insecure_deserialization]
+    transform: [yaml_safe_load]

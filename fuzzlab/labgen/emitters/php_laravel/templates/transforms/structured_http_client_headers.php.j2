@@ -1,0 +1,19 @@
+// structured_http_client_headers: the trigger word is passed to Laravel's
+// Http facade (Guzzle-backed) as a structured header *value*, never
+// concatenated into raw header text -- Guzzle's own PSR-7 Request
+// constructor rejects any header value containing CR/LF with a real
+// InvalidArgumentException, so a crafted trigger word is rejected before
+// any connection to the destination even opens. Safety matrix:
+// effect=neutralises, neutralizes: [outbound_header_injection].
+$__webhookUrl = env('HUDDLEHUB_WEBHOOK_URL', 'https://hooks.example.invalid/default');
+try {
+    $__deliveryResponse = \Illuminate\Support\Facades\Http::withHeaders([
+        'Content-Type' => 'application/json',
+        'X-Huddle-Trigger' => {{ value_expr }},
+    ])->timeout(5)->post($__webhookUrl, []);
+    $__deliveryResult = $__deliveryResponse->body();
+} catch (\InvalidArgumentException $e) {
+    return response()->json(['error' => 'invalid trigger word'], 400);
+} catch (\Throwable $e) {
+    $__deliveryResult = '';
+}

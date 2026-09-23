@@ -30,8 +30,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-79, CWE-116, CWE-489, CWE-453]
   cwe_shared: [CWE-79, CWE-116]
-  cwe_unique: [CWE-489, CWE-501]
+  cwe_unique: [CWE-489, CWE-453]
   cwe_rationale: >
     Shared (this entry's own primary class -- see this file's other
     XSS-family entries for the same shared pair, documented once per
@@ -43,13 +44,13 @@
     is deliberately kept live and publicly reachable alongside its
     `secure()` sibling in the very same deployed teaching app, the same
     real-world risk class as a debug/demo-only endpoint left reachable in
-    a shipped instance; CWE-501 (Trust Boundary Violation) -- per the
-    pattern field, the comment is stored "completely unsanitized," meaning
-    the untrusted-input/trusted-application-data trust boundary is crossed
-    unneutralized at *both* the storage-write step and the later
-    template-render step, not just at render time (contrast idiomatic-1.py,
-    where bleach.clean() neutralizes the value at the storage-write
-    crossing, leaving only render-time trust to establish).
+    a shipped instance; CWE-453 (Insecure Default Variable Initialization)
+    -- per the code itself, `session.get('user_id', 1)  # Default to user 1
+    if not logged in` initializes the security-relevant `user_id` variable
+    used to attribute the stored comment to a hard-coded, valid identity
+    (`1`) whenever no session is present, rather than to an anonymous/failed
+    state, silently letting an unauthenticated POST write comments under a
+    real user's identity.
   suggested_op: raw_concat   # Jinja2's |safe filter opts the value out of
                              # autoescaping entirely -- functionally the same
                              # "no transform at all" shape as the existing
@@ -74,6 +75,7 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-79, CWE-116, CWE-183, CWE-85]
   cwe_shared: [CWE-79, CWE-116]
   cwe_unique: [CWE-183, CWE-85]
   cwe_rationale: >
@@ -117,8 +119,9 @@
   validated: false
   validated_by: []
   redacted: false
+  cwe: [CWE-79, CWE-116, CWE-1188, CWE-86]
   cwe_shared: [CWE-79, CWE-116]
-  cwe_unique: [CWE-1188, CWE-436]
+  cwe_unique: [CWE-1188, CWE-86]
   cwe_rationale: >
     Shared: see vulnerable-1.py's cwe_rationale above -- same weakness
     class, an independent production instance of the mitigation.
@@ -126,12 +129,15 @@
     Resource) -- the pattern field says bleach.clean() runs with its
     "default allowlist," i.e. this production app relies on the library's
     shipped default configuration, not an app-reviewed/hardened allowlist,
-    as its security boundary; CWE-436 (Interpretation Conflict) -- the
-    sink method name (`TaskHistory.set_comment_action`) and its
-    persistence as task *history* implies this sanitized-but-still-HTML
-    value may be read later by a different consumer (an audit/export
-    view, a notification digest) that assumes history entries are plain
-    text -- two components interpreting the same stored data differently.
+    as its security boundary; CWE-86 (Improper Neutralization of Invalid
+    Characters in Identifiers in Web Pages) -- per the code, `bleach.clean(
+    comment)` is called with no extra character-handling/normalization step
+    of its own around it, so this entry's security boundary rests entirely
+    on bleach's own built-in handling of invalid/incomplete multi-byte
+    character sequences in tag and attribute names, a distinct, documented
+    class of allowlist-sanitizer bypass (malformed/invalid characters that
+    a browser still parses as markup) separate from the default-allowlist
+    configuration concern above.
   suggested_op: bleach_clean   # same allowlist-sanitizer mechanism as
                              # idiomatic-1.py, a second independent instance
                              # -- reused, not a new name
@@ -164,6 +170,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-79, CWE-116, CWE-83, CWE-838]
   cwe_shared: [CWE-79, CWE-116]
   cwe_unique: [CWE-83, CWE-838]
   cwe_rationale: >
@@ -213,6 +220,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-79, CWE-116, CWE-80, CWE-81]
   cwe_shared: [CWE-79, CWE-116]
   cwe_unique: [CWE-80, CWE-81]
   cwe_rationale: >

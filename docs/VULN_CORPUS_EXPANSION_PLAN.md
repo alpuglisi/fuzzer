@@ -625,12 +625,43 @@ sources (OWASP LLM Top 10) before Phase 2 either includes or skips it.
       ecommerce-logic; ~65 real, license-triaged, gitleaks-scanned,
       commit-pinned files under `docs/research/corpus-examples/`, verified
       independently). **Wave 2 (rows 7-11, priority 6) not yet dispatched.**
-- [ ] Phase 3: CWEs assigned to collected examples
+- [x] Phase 3: CWEs assigned to collected examples (all 12 wave-1 feature
+      cells now carry a flat `cwe: [...]` field per entry, plus
+      `suggested_op`/`suggested_sink_family`; a real cross-cell CWE-
+      uniqueness defect found during this pass — several entries in
+      unrelated cells had independently claimed the same "unique" CWE ID —
+      was fixed by re-researching each duplicate against its actual source
+      and assigning a genuinely specific, non-colliding MITRE ID)
 - [ ] Phase 3: manufactured pairs generated (floor met per CWE — see
       "Pair generation")
-- [ ] Phase 3: validation execution sandbox actually built/tested (not just
-      specified) — required before any dynamic check can run for real
+- [x] Phase 3: validation execution sandbox actually built/tested (not just
+      specified) — `fuzzlab/tools/corpus_validation_sandbox.py`
+      (`CC-LAB-0084`/`FR-LAB-112`, 2026-09-23): real gVisor (`runsc run`),
+      zero network namespace, `-overlay2=all:memory` ephemeral writes,
+      real cgroup v1 memory/pids limits, non-root, wall-clock timeout,
+      explicit `authorized=True` opt-in, mandatory audit log. Every
+      containment property verified for real in
+      `tests/test_corpus_validation_sandbox.py` (12 tests, all passing),
+      not asserted from the mechanism's existence alone. Two documented
+      deviations from this section's literal spec, both forced by this
+      environment's egress policy blocking every container registry's
+      blob CDN (no base image is pullable at all): reuses the host's own
+      interpreters as the OCI root rather than a purpose-built minimal
+      image, and drives `runsc` directly rather than via `docker run
+      --runtime=runsc` — see `CC-LAB-0084`'s change-control entry for the
+      full reasoning. This sandbox does not itself validate any real
+      corpus entry (see the still-unchecked "all pairs validated" item
+      below) — it only makes that step possible.
 - [ ] Phase 3: all pairs validated (report as "N of M", per "Validated data
       only reaches lab-generation-facing files" — never rounded up)
-- [ ] Phase 3: `suggested_op`/`suggested_sink_family` proposals acted on
-      (accepted/renamed/merged into `lab/safety_matrix.yaml`)
+- [x] Phase 3: `suggested_op`/`suggested_sink_family` proposals acted on
+      (accepted/renamed/merged into `lab/safety_matrix.yaml`) — audited
+      2026-09-23 against the now-CWE-complete corpus (all 12 wave-1
+      cells): every single `(suggested_op, suggested_sink_family)` pair
+      across all 32 manifest files already has an exact matching row in
+      `lab/safety_matrix.yaml`, applied earlier by `CC-LAB-0063`. Zero new
+      rows needed, zero op/sink_family naming collisions found. One open
+      gap noted for a future pass (not a missed proposal): `search-export`/
+      `node`'s manifest flags a still-uncollected secure-twin op for
+      `template_render_pipeline` that was never formally proposed via
+      `suggested_op` in the first place.

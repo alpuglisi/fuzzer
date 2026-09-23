@@ -1,0 +1,25 @@
+parsed, err := url.Parse({{ var_name }})
+if err != nil || parsed.Scheme != "https" {
+	w.WriteHeader(http.StatusForbidden)
+	return
+}
+ips, err := net.LookupIP(parsed.Hostname())
+if err != nil || len(ips) == 0 {
+	w.WriteHeader(http.StatusForbidden)
+	return
+}
+for _, ip := range ips {
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
+}
+client := &http.Client{Timeout: 5 * time.Second}
+resp, err := client.Get({{ var_name }})
+if err != nil {
+	w.WriteHeader(http.StatusBadGateway)
+	return
+}
+defer resp.Body.Close()
+w.WriteHeader(http.StatusOK)
+io.Copy(w, resp.Body)

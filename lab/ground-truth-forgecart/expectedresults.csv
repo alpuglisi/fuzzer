@@ -1,0 +1,15 @@
+# fuzzlab expected results (Benchmark-style) for "ForgeCart"
+# (ruby_rails, category 1 e-commerce pilot's Shopify pick, Phase C page/route
+# identity -- docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §4/§9.5,
+# CC-LAB-0078). Derived from labels.json; the loader cross-checks the two so
+# they cannot drift. category is the vuln class; expected_vulnerable is the
+# ground-truth verdict for that (url, param) case. Every row here is a
+# single-location case (primary_endpoint mirrors url, primary_role is sink,
+# related_endpoints empty, flow_variant direct), same convention as
+# lab/ground-truth/expectedresults.csv.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+FCART-0001,/search,GET,q,query,xss-reflected,true,/search,sink,,direct
+FCART-0002,/webhooks/orders/create,POST,X-Shopify-Hmac-SHA256,header,webhook_signature,true,/webhooks/orders/create,sink,,direct
+FCART-0003,/webhooks/customers/update,POST,X-Shopify-Hmac-SHA256,header,webhook_signature,false,/webhooks/customers/update,sink,,direct
+FCART-0004,/admin/customers/update,POST,user[role],body,mass_assignment,true,/admin/customers/update,sink,,direct
+FCART-0005,/admin/products/import,POST,yaml_payload,body,insecure_deserialization,true,/admin/products/import,sink,,direct

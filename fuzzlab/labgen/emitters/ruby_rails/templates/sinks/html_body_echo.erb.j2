@@ -1,0 +1,7 @@
+<%# HTML-body sink view. `raw` is used on purpose here: a sink never escapes
+    anything itself, so both twins of a minimal pair share this exact view
+    fragment and the cell's transform region alone decides whether the value
+    reaching this line was already escaped (mirrors php_laravel's own
+    html_body_echo.blade.php.j2 -- see that emitter's modules.py docstring,
+    decision 2, for the full rationale this stack reuses). %>
+<div class="cell-output"><%= raw @value %></div>

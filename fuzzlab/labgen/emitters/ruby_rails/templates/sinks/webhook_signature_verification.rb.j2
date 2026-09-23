@@ -1,0 +1,13 @@
+# Real HMAC-SHA256 webhook-signature verification, recomputed over the exact
+# raw request body ({{ var_name }}) -- {{ compare_expr }} decides whether the
+# recomputed digest is compared to the provided header value with a naive
+# `==` (naive_string_compare) or Rails' own constant-time
+# ActiveSupport::SecurityUtils.secure_compare (constant_time_compare).
+secret = {{ secret_rb }}
+computed = Base64.strict_encode64(OpenSSL::HMAC.digest("sha256", secret, {{ var_name }}))
+provided = request.headers["{{ header_name }}"].to_s
+if {{ compare_expr }}
+  render json: { verified: true }
+else
+  render json: { verified: false }, status: :unauthorized
+end

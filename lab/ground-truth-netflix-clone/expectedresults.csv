@@ -1,0 +1,7 @@
+# fuzzlab expected results (Benchmark-style) for category 4's Netflix-clone
+# app (spring_boot). Derived from labels.json; the loader cross-checks the
+# two so they cannot drift. category is the vuln class; expected_vulnerable
+# is the ground-truth verdict for that (url, param) case. CC-LAB-0173/
+# FR-LAB-79 (cell), CC-LAB-0174/FR-LAB-80 (this ground truth).
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+NFLX-0001,/api/playback/resume,POST,body,body,insecure_deserialization,true,/api/playback/resume,sink,,direct

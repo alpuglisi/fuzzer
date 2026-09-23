@@ -18,6 +18,32 @@ value-context shapes already proven on ``php_current`` --
 reflected XSS. No identifier/alias/connector-position SQLi or escaping-
 context-mismatch XSS modules exist here -- those stay deferred for this
 stack.
+
+CC-LAB-0070 adds one genuinely new, JS/Node-runtime-specific shape on top of
+that Tier-A baseline: ``prototype_pollution``/``object_property_bulk_set``
+(CWE-1321) -- an unguarded recursive merge of a JSON request body onto a
+live object, letting a ``__proto__``/``constructor``/``prototype`` key
+escape the target object and land on the shared ``Object.prototype`` chain.
+Node/Express's own npm-ecosystem CVE history (lodash ``merge`` et al.) is
+this stack's own well-documented shape for this class, per the Walmart
+functionality/CWE research this addition is grounded in (see
+``docs/research/site-architecture-survey-functionality-walmart.md``).
+
+CC-LAB-0076 adds a second, unrelated, genuinely new JS/Node-runtime-specific
+shape: ``redos``/``regex_highlight_match`` (CWE-1333) -- a search/highlight
+endpoint that builds a ``RegExp`` straight from a user-supplied search term.
+The vulnerable transform (``unescaped_regex_construct``) interpolates the
+raw term with no escaping, so an attacker-supplied pathological pattern
+(e.g. ``(a+)+$``) causes catastrophic backtracking against the endpoint's
+content; the secure transform (``regex_escape_construct``) escapes regex
+metacharacters first, so the term can only ever match itself literally.
+Distinct from ``object_property_bulk_set`` in the mechanism (regex-engine
+backtracking, not the prototype chain) but the same "genuinely new,
+JS-runtime-specific shape on top of the Tier-A baseline" category. See
+``docs/research/site-architecture-survey-functionality-walmart.md`` for the
+grounding research (CVE-2024-45296, ``path-to-regexp``) and
+``docs/architecture/oracle-confirmation.md`` for the timing-differential
+(M1) oracle mechanism this shape needed and that this addition builds.
 """
 
 from __future__ import annotations
@@ -139,6 +165,23 @@ class ReadStoredFieldSource(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class PostBodyJsonSource(TemplateModule):
+    """Extracts the WHOLE JSON request body (not one named field) -- the
+    Express analogue of ``fuzzlab.labgen.modules.AllPostParamsSource``,
+    needed for the ``object_property_bulk_set`` (prototype-pollution) sink
+    family (CC-LAB-0070), which needs the whole tainted key/value map to
+    decide what a recursive merge writes."""
+
+    def __init__(self) -> None:
+        super().__init__("post_body_json", "source", _SOURCE_ENV, "post_body_json.js.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = ctx["var_name"]
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 class IdentityTransform(TemplateModule):
     """The empty-pipeline transform: the tainted value used as-is."""
 
@@ -179,6 +222,102 @@ class HtmlEntityEscapeTransform(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class UnguardedDeepMergeTransform(TemplateModule):
+    """The ``unguarded_deep_merge`` op (CC-LAB-0070, ``proto_pollution``
+    concern): recursively merges ``value_expr``'s own keys onto a live
+    target object (``target_var``/``target_literal``, supplied by the
+    emitter's own route profile -- render-only metadata, same convention as
+    ``RuntimeFieldAllowlistTransform``'s ``allowed_fields``) with no check
+    that a key is ``__proto__``/``constructor``/``prototype``. Safety
+    matrix: ``effect=no_effect`` (the vulnerable twin). Publishes
+    ``value_expr = 'mergedPreferences'`` for the sink."""
+
+    def __init__(self) -> None:
+        super().__init__("unguarded_deep_merge", "transform", _TRANSFORM_ENV, "unguarded_deep_merge.js.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        for key in ("target_var", "target_literal"):
+            if key not in ctx:
+                raise ValueError(
+                    f"unguarded_deep_merge transform needs a {key!r} context value "
+                    "(the live object this endpoint merges onto) -- the emitter's "
+                    "route profile must supply it; there is no safe default"
+                )
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = "mergedPreferences"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class ProtoKeyFilteredMergeTransform(TemplateModule):
+    """The ``proto_key_filtered_merge`` op (CC-LAB-0070): the same recursive
+    merge as :class:`UnguardedDeepMergeTransform`, except every
+    ``__proto__``/``constructor``/``prototype`` key is skipped before it is
+    ever written onto the target object. Safety matrix:
+    ``effect=neutralises``, ``neutralizes: [proto_pollution]``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "proto_key_filtered_merge", "transform", _TRANSFORM_ENV, "proto_key_filtered_merge.js.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        for key in ("target_var", "target_literal"):
+            if key not in ctx:
+                raise ValueError(
+                    f"proto_key_filtered_merge transform needs a {key!r} context value "
+                    "(the live object this endpoint merges onto) -- the emitter's "
+                    "route profile must supply it; there is no safe default"
+                )
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = "mergedPreferences"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class UnescapedRegexConstructTransform(TemplateModule):
+    """The ``unescaped_regex_construct`` op (CC-LAB-0076, ``redos`` concern,
+    CWE-1333): builds a ``RegExp`` directly from ``value_expr`` (the raw
+    user-supplied search term) with no escaping, so a pathological pattern
+    causes catastrophic backtracking against the content it is later
+    matched over. Safety matrix: ``effect=no_effect`` (the vulnerable
+    twin). Publishes ``value_expr = 'highlightRegex'`` for the sink, the
+    same "transform builds the dangerous expression under a fixed name"
+    convention :class:`UnguardedDeepMergeTransform` established."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unescaped_regex_construct", "transform", _TRANSFORM_ENV, "unescaped_regex_construct.js.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = "highlightRegex"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class RegexEscapeConstructTransform(TemplateModule):
+    """The ``regex_escape_construct`` op (CC-LAB-0076): the secure twin of
+    :class:`UnescapedRegexConstructTransform` -- escapes every regex
+    metacharacter in ``value_expr`` via the ``escapeRegExp`` helper (see
+    ``__init__.py``, included unconditionally in every generated
+    controller, same convention as ``escapeHtml``) before building the
+    ``RegExp``, so the term can only ever match itself literally. Safety
+    matrix: ``effect=neutralises``, ``neutralizes: [redos]``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "regex_escape_construct", "transform", _TRANSFORM_ENV, "regex_escape_construct.js.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = "highlightRegex"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 class SqlNumericLookupSink(TemplateModule):
     """A single-row lookup by a numeric-literal-position column, via
     ``mysql2/promise``'s ``pool.query``. Branches on ``bound`` (published by
@@ -206,6 +345,44 @@ class HtmlBodyEchoSink(TemplateModule):
 
     def __init__(self) -> None:
         super().__init__("html_body_echo", "sink", _SINK_ENV, "html_body_echo.js.j2")
+
+
+class ObjectPropertyBulkSetSink(TemplateModule):
+    """The ``object_property_bulk_set`` sink family (CC-LAB-0070,
+    ``proto_pollution`` concern): responds with the merged object built by
+    whichever merge transform ran upstream. Never itself decides which keys
+    are legitimate -- like every other sink here, that is the transform's
+    job (``unguarded_deep_merge`` vs. ``proto_key_filtered_merge``); this
+    sink just serializes whatever ``value_expr`` resolves to."""
+
+    def __init__(self) -> None:
+        super().__init__("object_property_bulk_set", "sink", _SINK_ENV, "object_property_bulk_set.js.j2")
+
+
+class RegexHighlightMatchSink(TemplateModule):
+    """The ``regex_highlight_match`` sink family (CC-LAB-0076, ``redos``
+    concern): highlights matches of ``highlightRegex`` (built by whichever
+    transform ran upstream) inside a fixed content string and responds with
+    the result. Never itself decides which characters were escaped -- like
+    every other sink here, that is the transform's job (
+    ``unescaped_regex_construct`` vs. ``regex_escape_construct``); this
+    sink just applies whatever ``value_expr`` resolves to. Requires
+    ``content_literal`` in the assembly context (the emitter's route
+    profile's render-only metadata, same convention as
+    ``UnguardedDeepMergeTransform``'s ``target_literal``) -- there is no
+    safe default for what content a search/highlight endpoint serves."""
+
+    def __init__(self) -> None:
+        super().__init__("regex_highlight_match", "sink", _SINK_ENV, "regex_highlight_match.js.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        if "content_literal" not in ctx:
+            raise ValueError(
+                "regex_highlight_match sink needs a 'content_literal' context value "
+                "(the fixed content this endpoint searches/highlights) -- the emitter's "
+                "route profile must supply it; there is no safe default"
+            )
+        return super().render(ctx)
 
 
 class SingleStatementComplexity(TemplateModule):
@@ -241,16 +418,31 @@ SOURCES: dict[str, Module] = {
     "get_query_param": GetQueryParamSource(),
     "post_body_param": PostBodyParamSource(),
     "read_stored_field": ReadStoredFieldSource(),
+    # CC-LAB-0070: prototype-pollution's whole-body source (vs. one named
+    # field).
+    "post_body_json": PostBodyJsonSource(),
 }
 TRANSFORMS: dict[str, Module] = {
     "identity": IdentityTransform(),
     "param_bind": ParamBindTransform(),
     "html_entity_escape": HtmlEntityEscapeTransform(),
+    # CC-LAB-0070: prototype-pollution ops (lab/safety_matrix.yaml's
+    # object_property_bulk_set rows).
+    "unguarded_deep_merge": UnguardedDeepMergeTransform(),
+    "proto_key_filtered_merge": ProtoKeyFilteredMergeTransform(),
+    # CC-LAB-0076: ReDoS ops (lab/safety_matrix.yaml's regex_highlight_match
+    # rows).
+    "unescaped_regex_construct": UnescapedRegexConstructTransform(),
+    "regex_escape_construct": RegexEscapeConstructTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
     "sql_string_literal_lookup": SqlStringLiteralLookupSink(),
     "html_body_echo": HtmlBodyEchoSink(),
+    # CC-LAB-0070: prototype-pollution's sink family.
+    "object_property_bulk_set": ObjectPropertyBulkSetSink(),
+    # CC-LAB-0076: ReDoS's sink family.
+    "regex_highlight_match": RegexHighlightMatchSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

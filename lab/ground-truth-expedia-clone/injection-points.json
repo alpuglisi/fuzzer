@@ -1,0 +1,13 @@
+{
+    "version": 1,
+    "target": "spring_boot",
+    "points": [
+        {
+            "url": "/api/hotels/search-sort",
+            "method": "GET",
+            "param": "sortBy",
+            "location": "query",
+            "rendering": "server"
+        }
+    ]
+}

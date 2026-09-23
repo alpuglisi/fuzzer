@@ -6,7 +6,25 @@ venv/
 *.csv
 # ...but the ground-truth contract CSV is tracked, not a generated dataset
 !lab/ground-truth/*.csv
+!lab/ground-truth-meadowmart/*.csv
 !lab/ground-truth-picktrail-django/*.csv
+# CC-LAB-0136/CC-LAB-0137: category 3's TrackerNest and Huddle Hub apps
+# each have their own ground-truth directory (D9's out-of-band contract),
+# same "tracked, not generated" rule
+!lab/ground-truth-trackernest/*.csv
+!lab/ground-truth-huddlehub/*.csv
+# CC-LAB-0174: category 4's Netflix and Twitch apps each have their own
+# ground-truth directory (D9's out-of-band contract), same "tracked, not
+# generated" rule
+!lab/ground-truth-netflix-clone/*.csv
+!lab/ground-truth-twitch-clone/*.csv
+# CC-LAB-0090: category 5's Booking.com app has its own ground-truth
+# directory (D9's out-of-band contract), same "tracked, not generated" rule
+!lab/ground-truth-booking-clone/*.csv
+# CC-LAB-0215/BUG-0036: category 5's Expedia app has its own ground-truth
+# directory too; without this exception expectedresults.csv is silently
+# gitignored (caught *.csv above) and can never actually be committed
+!lab/ground-truth-expedia-clone/*.csv
 # python build / test artifacts
 *.egg-info/
 build/
@@ -27,3 +45,8 @@ lab/.snapshots/
 # clones/pulls into -- multi-gigabyte upstream data, never the deliverable
 # (the deliverable is the small, hand-curated lab/patterns/cards/*.yaml).
 .cache/
+
+# runtime audit log fuzzlab/tools/corpus_validation_sandbox.py appends to
+# on every real gVisor sandbox run (CC-LAB-0084/FR-LAB-102) -- regenerated
+# noise from running the test suite locally, not a tracked deliverable.
+docs/research/corpus-validation-audit.jsonl

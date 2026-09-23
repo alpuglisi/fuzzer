@@ -25,23 +25,22 @@
     same-file contrastive note, though not a separate runnable fixed file.
   validated: false
   validated_by: []
+  cwe: [CWE-639, CWE-862, CWE-20, CWE-561]
   cwe_shared: [CWE-639, CWE-862]
-  cwe_unique: [CWE-359, CWE-710]
+  cwe_unique: [CWE-20, CWE-561]
   cwe_rationale: >
     Shared (this pair's core class, documented once for both vulnerable-1.js
     and idiomatic-1.js below): CWE-639 (Authorization Bypass Through
     User-Controlled Key) and CWE-862 (Missing Authorization).
     Unique to this entry, researched against the MITRE CWE index and not
-    claimed elsewhere in this corpus: CWE-359 (Exposure of Private
-    Information) -- `displayAllocations()` exposes another user's
-    investment-allocation records specifically (NodeGoat is deliberately a
-    financial-tracking teaching app), a distinct sensitivity concern from
-    the access-control mechanism itself; CWE-710 (Improper Adherence to
-    Coding Standards) -- per this entry's own notes, the file's own inline
-    comment (lines 12-15, left in as-collected) documents the correct fix
-    ("take user id from session instead of from URL param") but the code
-    does not implement it -- the vulnerability contradicts guidance already
-    present in the same file.
+    claimed elsewhere in this corpus: CWE-20 (Improper Input Validation) --
+    `threshold` is destructured straight off `req.query` and passed as-is
+    into `allocationsDAO.getByUserIdAndThreshold(userId, threshold, ...)`
+    with no check that it is a well-formed numeric quantity before it
+    reaches the DB-lookup boundary; CWE-561 (Dead Code) -- the correct fix
+    (`const { userId } = req.session;`, lines 8-11) is left in the file as a
+    commented-out, never-executed block instead of being applied, so the
+    file itself contains an unreachable copy of its own remediation.
   suggested_op: no_ownership_check
   suggested_sink_family: db_row_by_id_lookup
 
@@ -66,14 +65,15 @@
     reference.
   validated: false
   validated_by: []
+  cwe: [CWE-639, CWE-862, CWE-287, CWE-799]
   cwe_shared: [CWE-639, CWE-862]
-  cwe_unique: [CWE-306, CWE-799]
+  cwe_unique: [CWE-287, CWE-799]
   cwe_rationale: >
     Shared: same core class as this cell's other pairs.
-    Unique to this entry: CWE-306 (Missing Authentication for Critical
-    Function) -- unlike every other entry in this cell (which has *some*
-    authentication and fails only on ownership), this route has no `auth`
-    middleware at all, per the pattern field; CWE-799 (Improper Control of
+    Unique to this entry: CWE-287 (Improper Authentication) -- unlike every
+    other entry in this cell (which has *some* authentication and fails
+    only on ownership), this route has no `auth` middleware at all, per the
+    pattern field; CWE-799 (Improper Control of
     Interaction Frequency) -- with no authentication and no rate limit
     shown, `:id` can be enumerated an unlimited number of times to harvest
     every ticket's barcode.
@@ -104,19 +104,22 @@
     authenticated token, not trusted from the URL.
   validated: false
   validated_by: []
+  cwe: [CWE-639, CWE-862, CWE-213, CWE-321]
   cwe_shared: [CWE-639, CWE-862]
-  cwe_unique: [CWE-209, CWE-798]
+  cwe_unique: [CWE-213, CWE-321]
   cwe_rationale: >
     Shared: same core class as vulnerable-1.js/vulnerable-2.js above.
-    Unique to this entry: CWE-209 (Generation of Error Message Containing
-    Sensitive Information) -- the response body literally returns the
-    string "IDOR attempt blocked" per the pattern field, revealing to a
-    probing caller the app's internal detection/classification of their
-    request; CWE-798 (Use of Hard-coded Credentials) -- per this entry's
-    own notes, the upstream repo's real source (before this corpus's own
-    required redaction) shipped a hardcoded JWT signing key alongside
-    fixture passwords, a property of the collected repo distinct from the
-    IDOR mechanism itself.
+    Unique to this entry: CWE-213 (Exposure of Sensitive Information Due to
+    Incompatible Policies) -- on a successful, authorized lookup the
+    handler does `res.status(200).json(user)`, sending the caller the
+    *entire* in-memory user record (including the plaintext `password`
+    field and `secret_data`) straight from the ORM's own default
+    find-by-id shape, a data-return policy incompatible with the
+    endpoint's own minimal-response contract; CWE-321 (Use of Hard-coded Cryptographic Key)
+    -- `SECRET_KEY` is a hard-coded constant used directly as the HMAC key
+    for both signing (`jwt.sign`) and verifying (`jwt.verify`) tokens, a
+    hard-coded *cryptographic key* specifically, distinct from the general
+    hard-coded-credentials class.
   suggested_op: identity_match_before_fetch
   suggested_sink_family: db_row_by_id_lookup
 
@@ -139,6 +142,7 @@
     object-ownership check are present.
   validated: false
   validated_by: []
+  cwe: [CWE-639, CWE-862]
   cwe_shared: [CWE-639, CWE-862]
   cwe_unique: [CWE-178, CWE-311]
   cwe_rationale: >
@@ -185,21 +189,24 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-639, CWE-862, CWE-595, CWE-654]
   cwe_shared: [CWE-639, CWE-862]
-  cwe_unique: [CWE-697, CWE-693]
+  cwe_unique: [CWE-595, CWE-654]
   cwe_rationale: >
     Shared (this cell's own recurring core class): CWE-639 (Authorization
     Bypass Through User-Controlled Key), CWE-862 (Missing Authorization).
-    Unique to this entry, researched against the MITRE CWE index: CWE-697
-    (Incorrect Comparison) -- `isActiveMember()` returns the result of
-    `Array.prototype.find()` (a member object or `undefined`), consumed by
-    the caller as an implicit boolean via `&&`; this truthy-coercion
-    pattern is correct here but fragile if reused with a strict `===`
-    comparison elsewhere in the codebase; CWE-693 (Protection Mechanism
-    Failure) -- `isVisibleBy()` is an opt-in method on the Board model,
-    with no framework-level (ORM row-security) guarantee that every code
-    path calling into board data actually invokes it -- exactly what the
-    vulnerable side below manufactures by not calling it.
+    Unique to this entry, researched against the MITRE CWE index: CWE-595
+    (Comparison of Object References Instead of Object Contents) --
+    `isActiveMember()`'s membership test is `member.userId === userId`, a
+    strict-equality comparison; if either side is ever passed in as a
+    MongoDB ObjectId instance rather than a primitive string, two distinct
+    ObjectId objects representing the identical underlying id are
+    different references and would fail this `===` check even though their
+    contents match; CWE-654 (Reliance on a Single Factor in a Security
+    Decision) -- for a private board, `isVisibleBy()`'s entire access
+    decision rests on the one `isActiveMember()` lookup, with no
+    independent second check (e.g. session freshness, org-level suspension)
+    backing up that single membership-list test.
   suggested_op: membership_check_helper   # this is the check *definition*,
                              # not a call site -- distinct from
                              # ownership_check_after_fetch (GuusK entry,
@@ -225,19 +232,23 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-639, CWE-862, CWE-200, CWE-670]
   cwe_shared: [CWE-639, CWE-862]
-  cwe_unique: [CWE-200, CWE-425]
+  cwe_unique: [CWE-200, CWE-670]
   cwe_rationale: >
     Shared: see idiomatic-wekan-board-1.js's cwe_rationale above.
     Unique to this entry: CWE-200 (Exposure of Sensitive Information to an
     Unauthorized Actor) -- the route returns the *entire* board document
     via `JsonRoutes.sendResult`, not a filtered projection, so even setting
     the wrong-board issue aside, any caller receives more of the board's
-    data (member lists, etc.) than a minimal response would expose; CWE-425
-    (Direct Request, 'Forced Browsing') -- this is a manufactured API
-    endpoint reachable by directly requesting a URL, bypassing whatever
-    normal UI-level navigation/authorization flow a legitimate client would
-    go through.
+    data (member lists, etc.) than a minimal response would expose;
+    CWE-670 (Always-Incorrect Control Flow Implementation) --
+    `JsonRoutes.sendResult` is called with a hard-coded `code: 200` on
+    every path through the handler regardless of whether `Boards.findOne`
+    actually found a matching document, so the control flow always takes
+    the "success" branch even when the lookup itself failed, a
+    handler-level defect distinct from the missing-authorization check
+    itself.
   suggested_op: no_ownership_check   # same shape/name already established
                              # by this cell's other vulnerable entries
                              # (GuusK, node-file below) -- reused

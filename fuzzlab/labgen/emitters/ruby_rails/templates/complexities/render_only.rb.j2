@@ -1,0 +1,14 @@
+  def {{ method_name }}
+{{ body }}
+    @value = {{ value_expr }}
+    # Rendered by explicit template path, never Rails' bare `render
+    # :{{ view_name }}` symbol form -- that form resolves the view directory
+    # via `self.class.controller_path`, which Rails derives from the class
+    # name through `ActiveSupport::Inflector#underscore`, and that inflector
+    # is not a reliable round trip for a class name containing digits
+    # abutting letters (e.g. `Rr0001` -> `rr0001`, not `rr_0001`): a
+    # generated controller class name derived from an arbitrary cell ID can
+    # hit exactly this case, silently looking in the wrong view directory.
+    # An explicit path sidesteps the inflector entirely.
+    render template: "{{ view_template }}"
+  end

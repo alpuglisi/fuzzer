@@ -1,0 +1,32 @@
+# Booking.com-themed open-redirect sample manifest (CC-LAB-0210/FR-LAB-78),
+# php_laravel -- category 5 (Travel/booking/marketplaces) pilot,
+# docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §9.4 row 5.
+#
+# The vulnerable/secure twin pair for the new `open_redirect` shape
+# (CWE-601), grounded in Booking.com's real "continue to partner/payment
+# provider" post-checkout-continuation and affiliate-redirect behavior --
+# see docs/research/category5-travel-functionality-and-cwe-research.md
+# §1.1/§2.1 for the citations. This is the first increment of category 5's
+# own, standalone Booking.com-style app (never puppy-fort-factory's
+# `PFF-*` identity); its ground truth lives in its own directory,
+# `lab/ground-truth-booking-clone/`, not in `lab/ground-truth/`.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-BC-0001
+    class: open_redirect
+    stack_profile: php_laravel
+    route: { method: GET, path: /booking/continue }
+    sink_context:
+      family: http_redirect_location
+      required_neutralizations: [open_redirect]
+    transform: []
+
+  - cell_id: LABGEN-BC-0002
+    class: open_redirect
+    stack_profile: php_laravel
+    route: { method: GET, path: /booking/continue }
+    sink_context:
+      family: http_redirect_location
+      required_neutralizations: [open_redirect]
+    transform: [redirect_target_allowlist]

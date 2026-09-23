@@ -30,6 +30,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-915, CWE-20, CWE-1287, CWE-732]
   cwe_shared: [CWE-915, CWE-20]
   cwe_unique: [CWE-1287, CWE-732]
   cwe_rationale: >
@@ -64,6 +65,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-915, CWE-20, CWE-471, CWE-668]
   cwe_shared: [CWE-915, CWE-20]
   cwe_unique: [CWE-471, CWE-668]
   cwe_rationale: >
@@ -91,16 +93,19 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-915, CWE-20, CWE-862, CWE-1284]
   cwe_shared: [CWE-915, CWE-20]
-  cwe_unique: [CWE-183, CWE-1284]
+  cwe_unique: [CWE-862, CWE-1284]
   cwe_rationale: >
     Shared: see idiomatic-vendure-typed-input-1.ts above.
-    Unique: CWE-183 (Permissive List of Allowed Inputs) -- flagging a
-    residual risk even in this mitigation: ALLOWED_FIELDS is a runtime
-    array a future edit could silently over-broaden, unlike a compiled
-    schema type; CWE-1284 (Improper Validation of Specified Type of Input)
-    -- `pick()` allowlists which keys pass through but does not itself
-    validate that e.g. `category` is the expected type/shape.
+    Unique: CWE-862 (Missing Authorization) -- this route has no
+    authentication/authorization middleware at all (contrast with
+    idiomatic-explicit-mapping-1.js's `requireAuth`), so the field-level
+    allowlist is the only control guarding `findByIdAndUpdate()`; any
+    caller can update any product by ID; CWE-1284 (Improper Validation of
+    Specified Type of Input) -- `pick()` allowlists which keys pass
+    through but does not itself validate that e.g. `category` is the
+    expected type/shape.
   suggested_op: runtime_field_allowlist
   suggested_sink_family: orm_entity_bulk_assign
 
@@ -118,6 +123,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-915, CWE-20, CWE-639, CWE-841]
   cwe_shared: [CWE-915, CWE-20]
   cwe_unique: [CWE-639, CWE-841]
   cwe_rationale: >
@@ -144,6 +150,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-915, CWE-20, CWE-706, CWE-863]
   cwe_shared: [CWE-915, CWE-20]
   cwe_unique: [CWE-706, CWE-863]
   cwe_rationale: >
@@ -172,6 +179,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-915, CWE-20, CWE-682, CWE-345]
   cwe_shared: [CWE-915, CWE-20]
   cwe_unique: [CWE-682, CWE-345]
   cwe_rationale: >
@@ -199,14 +207,16 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-915, CWE-20, CWE-252, CWE-840]
   cwe_shared: [CWE-915, CWE-20]
-  cwe_unique: [CWE-1188, CWE-840]
+  cwe_unique: [CWE-252, CWE-840]
   cwe_rationale: >
     Shared: see idiomatic-vendure-typed-input-1.ts above.
-    Unique: CWE-1188 (Insecure Default Initialization of Resource) -- this
-    mitigation's correctness is entirely a per-route developer habit, with
-    no shared default (unlike a framework-level `fields` option) that new
-    routes inherit automatically; CWE-840 (Business Logic Errors) --
+    Unique: CWE-252 (Unchecked Return Value) -- `Profile.findOne(...)`'s
+    result is assigned straight to `profile` and then written to
+    (`profile.displayName = ...`) and saved with no check that a matching
+    profile document was actually found, so a missing profile throws
+    instead of being handled; CWE-840 (Business Logic Errors) --
     flagged as a residual risk category here since the *set* of fields
     considered "safe to expose" is a business decision re-litigated by
     hand at every call site, not centrally enforced.
@@ -227,6 +237,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-915, CWE-20, CWE-99, CWE-390]
   cwe_shared: [CWE-915, CWE-20]
   cwe_unique: [CWE-99, CWE-390]
   cwe_rationale: >
@@ -255,6 +266,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-915, CWE-20, CWE-754, CWE-476]
   cwe_shared: [CWE-915, CWE-20]
   cwe_unique: [CWE-754, CWE-476]
   cwe_rationale: >
@@ -282,6 +294,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-915, CWE-20, CWE-354, CWE-1023]
   cwe_shared: [CWE-915, CWE-20]
   cwe_unique: [CWE-354, CWE-1023]
   cwe_rationale: >

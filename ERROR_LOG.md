@@ -18,7 +18,66 @@ Format per entry:
 
 ---
 
-## 2026-09-23 — django `sql_string_literal` sink crashes (500, not 404) on a missing POST param, found by its own PA-0034 adversarial test (fixed, BUG-0034/PA-0036)
+## 2026-09-23 — `ruby_rails` skeleton's unpinned `json` gem 500'd every second request in a session (fixed, BUG-0035/PA-0037)
+
+- **Symptom:** building the Phase D whole-app conformance test and the Phase
+  E `multitarget.py` wiring test for category 1's "ForgeCart" (Shopify/
+  `ruby_rails`) app, the real `/search` reflected-XSS page's second HTTP
+  probe (the ordinary marker-then-breakout round trip
+  `fuzzlab.oracle.strategies.ReflectedXssStrategy.confirm` performs) 500'd —
+  `ActionView::Template::Error` wrapping `ArgumentError: wrong number of
+  arguments (given 2, expected 1)`. Reproducible on the *second* real
+  request of *any* session, against *any* route, including the app's own
+  inert static pages — not specific to `/search` or to this app's own new
+  code.
+- **Root cause:** the checked-in skeleton's `Gemfile` never pinned the
+  `json` gem; `activesupport` 8.1.3.1's own gemspec declares only `json >=
+  0`, so an unconstrained `bundle install` resolved `json 3.0.2`, whose 3.x
+  line made `JSON.parse`'s options parameter keyword-only — but
+  `ActiveSupport::JSON.decode` still calls `::JSON.parse(json, options)`
+  positionally, which every encrypted session-cookie read goes through.
+  Every prior `ruby_rails` live-boot test (Phase A/B) sent exactly one
+  request per booted instance, so this 100%-reproducible defect (it only
+  fires on a request that *presents* an already-set session cookie, never
+  the request that creates one) shipped latent through two full build
+  phases.
+- **Remediation:** pinned `gem "json", "~> 2.7"` in
+  `fuzzlab/labgen/emitters/ruby_rails/stack/skeleton/Gemfile`, regenerated
+  `Gemfile.lock` for real (resolves `json 2.21.2`), and verified the exact
+  two-request session sequence that 500'd before the fix now returns
+  200/200 after it. Full RCA: `docs/bugs/BUG-0035-rails-skeleton-json-gem-
+  arity-breaks-second-request-in-a-session.md`; preventive action:
+  `docs/PREVENTIVE_ACTIONS.md` `PA-0037`.
+- **Status:** Fixed.
+
+---
+
+## 2026-09-22 — `ruby_rails` emitter's generated controller 500'd: Rails' inflector does not round-trip a class name with digits abutting a letter (fixed, BUG-0034/PA-0036)
+
+- **Symptom:** the first real live-boot test of the new `ruby_rails` emitter
+  (`tests/test_labgen_ruby_rails_live_boot.py`) got a real HTTP `500`
+  (`ActionView::MissingTemplate` for `cell_labgen_rr0001/show`) even though
+  the emitter had written the view file to the correctly-underscored
+  `app/views/cell_labgen_rr_0001/show.html.erb`.
+- **Root cause:** the generated controller used Rails' bare `render :show`
+  symbol form, which resolves the view directory from
+  `self.class.controller_path` — derived from the *class name* via
+  `ActiveSupport::Inflector#underscore` at runtime, not from any path string
+  the emitter itself wrote. That inflector does not insert an underscore
+  before a digit run directly following a letter (`"Rr0001".underscore` =>
+  `"rr0001"`, not `"rr_0001"`), so the emitter's own camelized class name and
+  Rails' own runtime reconstruction of a view path from it silently
+  disagreed — for exactly the letter-then-digits shape this project's own
+  `LABGEN-...-NNNN` cell-ID convention always produces. See
+  `docs/bugs/BUG-0034-*.md` for the full Five Whys.
+- **Remediation:** the generated controller now renders via an explicit
+  `render template: "<controller_name>/<view_name>"` path literal computed
+  directly from the same string the emitter used to write the view file,
+  never through Rails' inflector-derived `controller_path`. Verified for
+  real: the live-boot test now returns a real `200` with the expected
+  unescaped payload. New preventive action: **PA-0036**.
+- **Status:** Fixed.
+## 2026-09-23 — django `sql_string_literal` sink crashes (500, not 404) on a missing POST param, found by its own PA-0034 adversarial test (fixed, BUG-0037/PA-0039)
 
 - **Symptom:** `CC-LAB-0091`'s own required `PA-0034` adversarial test (a
   mismatched-method `GET` request against the newly `@csrf_exempt`-decorated
@@ -39,7 +98,111 @@ Format per entry:
   shape (`grep` over `fuzzlab/labgen/emitters/django/templates/`) -- no
   other instance found; `html_body_echo.py.j2` and `sql_numeric_lookup.py.j2`
   already cast correctly.
-- **Status:** Fixed (`BUG-0034`/`PA-0036`).
+- **Status:** Fixed (`BUG-0037`/`PA-0039`).
+## 2026-09-23 — Category 5 pilot (Expedia, spel_injection shape): ground-truth directory shipped without expectedresults.csv (Fixed, BUG-0036/PA-0038)
+
+- **Symptom:** `CC-LAB-0214`'s new `lab/ground-truth-expedia-clone/`
+  directory had `labels.json` and `injection-points.json` but not
+  `expectedresults.csv`, which `fuzzlab.labels.contract.load()` requires
+  unconditionally. Found during a whole-repo `pytest -m "not slow"` run
+  performed as part of an unrelated cross-branch bookkeeping-ID collision
+  fix on this same branch — two tests in
+  `tests/test_labgen_spel_injection.py` failed with `FileNotFoundError`,
+  despite the shape's own authoring commit claiming a clean whole-repo
+  pass.
+- **Root cause:** an authoring omission when the new ground-truth
+  directory was created — every sibling second-target ground-truth
+  directory in this corpus ships all three files as one atomic unit, and
+  this one didn't; compounded by `.gitignore` never having gained the
+  per-directory `!lab/ground-truth-expedia-clone/*.csv` negation its
+  blanket `*.csv` rule requires, so the file could not have been
+  committed even if authored. See BUG-0036 for the full five-whys
+  (including why the authoring commit's own claimed whole-repo pass is
+  inconsistent with this file having been exercised against what was
+  actually committed).
+- **Remediation:** authored the missing `expectedresults.csv` (one row,
+  `EXPD-0001`, matching `labels.json`'s existing case and the established
+  column convention from `lab/ground-truth-booking-clone/
+  expectedresults.csv`) and added the missing `.gitignore` negation.
+  `pytest tests/test_labgen_spel_injection.py`:
+  9 passed (up from 7 passed/2 failed). Whole-repo re-run: 1865 passed, 8
+  skipped — no regression.
+- **Status:** Fixed.
+
+## 2026-09-22 — Category 5 pilot (open_redirect shape): shared-vocabulary modules added without their determinism-fixture entries (Fixed, BUG-0038/PA-0040)
+
+- **Symptom:** `CC-LAB-0210`'s three new shared-vocabulary-only module
+  registrations (`redirect_target_allowlist`/`http_redirect_return`/
+  `redirect_response` in `fuzzlab/labgen/modules/__init__.py`) were pushed
+  in a commit that had only been verified with `tests/
+  test_labgen_open_redirect.py` and `tests/test_labgen_php_laravel_harder_
+  shapes.py` run directly — not the whole-repo `pytest tests/` suite. A
+  first whole-repo run (done as this same change's own closing
+  verification, before declaring it complete) failed two tests:
+  `tests/test_labgen_modules.py::test_every_module_renders_
+  deterministically_twice` and `::test_every_registered_module_has_a_
+  determinism_ctx_fixture`.
+- **Root cause:** `_DETERMINISM_CTX_BY_MODULE` (a hand-kept, per-module
+  fixture table in `tests/test_labgen_modules.py`, guarded by its own
+  completeness assertion) had no entries for the three new module names —
+  an authoring omission in the same commit that registered them, not a gap
+  in the guard test itself, which is exactly `PA-0001`/`PA-0027`'s "a
+  hand-maintained completeness table must be kept in sync, and a guard test
+  must fail loud when it isn't" pattern working as designed.
+- **Remediation:** added the three missing `_DETERMINISM_CTX_BY_MODULE`
+  entries (matching the file's own `L-P3.3c-DOM` precedent's comment
+  convention), verified with a second whole-repo `pytest tests/` run:
+  1618 passed, 30 skipped, 0 failed.
+- **Status:** Fixed. See `docs/bugs/BUG-0038-*.md` for the full RCA and
+  recurrence review: `PA-0001`/`PA-0027` already cover the registry/
+  guard-test discipline itself (and their guard test worked correctly here
+  — it failed loud on the very first run against the new code), so this is
+  not a recurrence of that root cause. The actual gap was this session's
+  own pre-push verification being scoped to "directly relevant test
+  files" rather than the whole suite; `PA-0040` (new) closes that
+  sequencing gap.
+
+## 2026-09-22 — Category 5 pilot (Expedia/Java-Spring-Boot): Maven Central unreachable through this sandbox's egress proxy (Open, Environment)
+
+- **Symptom:** building `node_express`/`php_laravel`'s equivalent of a real,
+  checked-in bootable skeleton for the new Java/Spring Boot emitter (this
+  category's Expedia pick, `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
+  §9.4 category 5) requires a real dependency resolution against Maven
+  Central, the same way `php_laravel`'s skeleton required a real
+  `composer create-project`/`composer update` against Packagist. Every
+  attempt (`curl` against `repo.maven.apache.org/maven2/.../maven-metadata.xml`,
+  four tries spaced ~15s apart) returned `HTTP 429` from Maven Central
+  itself (via Cloudflare, `server: cloudflare` header present — not a local
+  timeout or DNS failure). `start.spring.io` (Spring Initializr, the
+  standard way to generate a real trimmed Spring Boot project) returned
+  `403 Forbidden` at the proxy's own CONNECT tunnel step, before even
+  reaching the origin.
+- **Root cause:** this sandbox's outbound-HTTPS proxy explicitly allowlists
+  `registry.npmjs.org`, `pypi.org`/`files.pythonhosted.org`, `index.crates.io`,
+  and `proxy.golang.org` as direct-bypass (`noProxy`) hosts (confirmed via
+  `curl "$HTTPS_PROXY/__agentproxy/status"`), but **not** `repo.maven.apache.org`
+  or `start.spring.io` — Maven/Java package resolution is not one of this
+  environment's supported registries. `repo.maven.apache.org` traffic still
+  routes through the general proxy and is rate-limited/blocked upstream
+  (429) rather than reaching Maven Central cleanly; `start.spring.io` is
+  blocked outright at the proxy (403 on CONNECT).
+- **Remediation:** none available inside this sandbox — this is an
+  environment capability gap, not a code defect (no bug report/preventive
+  action owed; `CLAUDE.md`'s bug protocol is scoped to code defects). Per
+  this project's own `PA-0035` discipline (a capability probe must exercise
+  the real operation, never assume/stub it), Phase A's real-boot skeleton
+  work for the Java/Spring Boot emitter is **paused, not faked**, pending
+  either a sandbox with Maven Central/Spring Initializr egress allowed, or
+  an on-host environment (mirroring how `docs/ON_HOST_TASKS.md` already
+  tracks other real-infra-only work this project can't complete in-sandbox).
+  Category 5's other pick (Booking.com, PHP) has no such blocker — it reuses
+  the already-built, already-network-proven `php_laravel` skeleton/harness,
+  so that half of the pilot proceeds unblocked in this session.
+- **Status:** Open (Environment) — tracked in
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4's category 5 row;
+  re-check Maven Central/Spring Initializr reachability at the start of any
+  future session resuming this category's Java/Spring Boot Phase A before
+  assuming it's still blocked.
 
 ## 2026-09-22 — Mass-assignment codegen: smuggled SQLi, broken POST routing, and a nullable dereference, found by PR review (fixed, BUG-0031/PA-0034)
 

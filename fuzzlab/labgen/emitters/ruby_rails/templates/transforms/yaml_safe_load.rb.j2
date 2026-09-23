@@ -1,0 +1,5 @@
+# yaml_safe_load: flags the sink to parse {{ var_name }} with Psych's
+# restricted loader (YAML.safe_load) -- only YAML's built-in scalar/array/
+# hash types are permitted; a `!ruby/object:...` tag raises
+# Psych::DisallowedClass instead of building the object. Safety matrix:
+# effect=neutralises, neutralizes: [insecure_deserialization].

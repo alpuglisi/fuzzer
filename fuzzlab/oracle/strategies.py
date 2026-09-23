@@ -45,6 +45,20 @@ _TIMING_TEMPLATES = [
     "1' OR SLEEP({d})-- -",
 ]
 
+# --- ReDoS timing payloads (M1, escalating-shape variant) ------------------
+# Classic, independent (never nested/deepened) catastrophic-backtracking
+# shapes, one per common "run of a repeated character class" a target's own
+# content might contain. See RegexDosStrategy's own docstring for why this
+# is a genuinely different M1 variant from _TIMING_TEMPLATES/
+# _CMDI_TIMING_TEMPLATES's requested-delay shape.
+_REDOS_TEMPLATES = [
+    r"(a+)+$",
+    r"(a|a)*$",
+    r"(a|aa)+$",
+    r"([a-zA-Z]+)*$",
+    r"(\d+)+$",
+]
+
 # Command-injection timing templates (shell separators; {d} = delay seconds).
 _CMDI_TIMING_TEMPLATES = [
     "; sleep {d}",
@@ -301,6 +315,93 @@ class CommandInjectionStrategy(ConfirmationStrategy):
         return self._confirm_timing(candidate, sender, _CMDI_TIMING_TEMPLATES)
 
 
+class RegexDosStrategy(ConfirmationStrategy):
+    """M1 (differential timing), ReDoS variant: attacker-controlled regex-
+    pattern construction causes catastrophic backtracking (CWE-1333),
+    confirmed the same way SQLi/command-injection's timing use is --
+    latency must rise far above a robust baseline -- but escalating a
+    genuinely different axis, documented here rather than treated as a
+    silent special case.
+
+    **Why this is not `_confirm_timing` with a new template list.**
+    `_TIMING_TEMPLATES`/`_CMDI_TIMING_TEMPLATES` each embed an explicit,
+    attacker-*requested* delay (`SLEEP({d})`/`sleep {d}`) that a vulnerable
+    target is expected to honor almost exactly, so `_confirm_timing` can
+    assert both "well above baseline" AND "tracks the requested duration"
+    (`probe.elapsed >= d - tolerance`) across two escalating delays. A ReDoS
+    payload has no requested duration at all: how long a pathological
+    pattern takes to fail (or succeed) matching is an emergent property of
+    the regex engine's own backtracking over the TARGET's own content --
+    content this strategy never sees and cannot control the shape of (only
+    the pattern, sent as the probe value, is attacker-controlled here).
+    There is therefore nothing to compare the measured latency *against*
+    the way `_confirm_timing` compares it against `d`.
+
+    **The escalation axis used instead.** Several independent, single-level
+    (never nested/deepened) classic catastrophic-backtracking shapes
+    (`_REDOS_TEMPLATES`), each targeting a different common "run of a
+    repeated character class" (letters, digits, an alternation) a target's
+    real content might contain. Nesting depth was tried and explicitly
+    rejected during this mechanism's own calibration: deepening a single
+    evil shape by even one level (`(a+)+$` -> `((a+)+)+$`) compounds the
+    already-exponential blowup so violently that it hung well past any
+    CI-safe bound on ordinary lab content -- see
+    ``docs/architecture/oracle-confirmation.md``'s M1 ReDoS section for the
+    calibration numbers. Confirmation requires **at least two** independent
+    templates to each measure latency far above baseline
+    (``floor``/``k``, overridden below to fit this mechanism's
+    deliberately bounded, tens-to-low-hundreds-of-milliseconds probe
+    magnitude, never the multi-second scale ``_confirm_timing``'s own
+    ``floor=1.5`` assumes) -- the ReDoS analogue of "two escalating
+    delays," substituting "two independent evil shapes" for "two requested
+    durations" since no requested duration exists here.
+
+    **Stated limitation, not silently equated with the SQLi/cmdi uses.**
+    This can only detect ReDoS when the target's own content already
+    contains a run of the character class a template targets -- a
+    black-box confirmer has no way to know that shape in advance. Multiple
+    templates targeting different common runs raise the odds without
+    needing that knowledge, but coverage is inherently probabilistic here,
+    unlike every other M1 use in this module (which can always supply their
+    own exact requested delay). This mechanism was proven end to end
+    against this project's own `node_express` ReDoS lab cells
+    (`tests/test_labgen_redos.py`, real Node subprocess execution, not
+    simulated timing), not yet against an arbitrary external target.
+    """
+
+    vuln_class = "redos"
+    mechanism = "differential-timing"
+    category = "regular-expression"
+
+    # Overridden from the base class's SQLi/cmdi-tuned defaults: this
+    # mechanism's probes are deliberately bounded to tens/low-hundreds of
+    # milliseconds (never multi-second), so floor/k must be small enough to
+    # actually fire at that scale while still clearing ordinary request
+    # jitter (observed at low-single-digit milliseconds in this project's
+    # own calibration, see the class docstring above).
+    baseline_samples = 3
+    k = 4.0
+    floor = 0.02            # seconds (20ms) above baseline required
+    min_confirming_templates = 2
+    benign_probe = "ordinary-search-term"
+
+    def confirm(self, candidate, sender):
+        base = build_baseline([
+            self._send(sender, candidate, self.benign_probe, timing=True).elapsed
+            for _ in range(self.baseline_samples)
+        ])
+        confirming = []
+        for template in _REDOS_TEMPLATES:
+            probe = self._send(sender, candidate, template, timing=True)
+            if base.exceeds(probe.elapsed, k=self.k, floor=self.floor):
+                confirming.append({"template": template, "elapsed": round(probe.elapsed, 4)})
+                if len(confirming) >= self.min_confirming_templates:
+                    return Verdict(True, self.vuln_class, self.mechanism,
+                                   {"baseline_median": round(base.median, 4),
+                                    "confirming_templates": confirming})
+        return None
+
+
 class CommandInjectionOobStrategy(ConfirmationStrategy):
     """M8: blind command injection confirmed by an out-of-band callback.
 
@@ -495,7 +596,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
             ReflectedXssStrategy(), DomXssStrategy(browser), StoredXssStrategy(browser),
             OpenRedirectStrategy(), SstiStrategy(),
             PathTraversalStrategy(), CommandInjectionStrategy(),
-            CommandInjectionOobStrategy(oob),
+            CommandInjectionOobStrategy(oob), RegexDosStrategy(),
             GreyboxConfirmationStrategy(coverage, dbfault)]
 
 
@@ -511,6 +612,7 @@ _CATEGORY_TO_CLASS = {
     "server-side-template-injection": "ssti",
     "file-inclusion": "file-inclusion",
     "command-injection": "command-injection",
+    "regular-expression": "redos",
 }
 
 

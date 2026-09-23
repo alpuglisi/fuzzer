@@ -1,0 +1,24 @@
+        final class AllowlistObjectInputStream extends java.io.ObjectInputStream {
+            AllowlistObjectInputStream(java.io.InputStream in) throws java.io.IOException {
+                super(in);
+            }
+
+            @Override
+            protected Class<?> resolveClass(java.io.ObjectStreamClass desc)
+                    throws java.io.IOException, ClassNotFoundException {
+                if (!desc.getName().equals("com.fuzzlab.trackernest.generated.WebhookEvent")) {
+                    throw new java.io.InvalidClassException("Rejected unexpected class: " + desc.getName());
+                }
+                return super.resolveClass(desc);
+            }
+        }
+
+        try (AllowlistObjectInputStream ois = new AllowlistObjectInputStream(request.getInputStream())) {
+            Object result = ois.readObject();
+            return org.springframework.http.ResponseEntity.ok(
+                "Processed webhook payload: " + result.getClass().getName() + " -> " + result.toString()
+            );
+        } catch (Exception e) {
+            return org.springframework.http.ResponseEntity.status(400)
+                .body("Webhook payload error: " + e.getMessage());
+        }

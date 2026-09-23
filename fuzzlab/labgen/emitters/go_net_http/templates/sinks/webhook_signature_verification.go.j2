@@ -1,0 +1,7 @@
+if {{ value_expr }} {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("ok"))
+} else {
+	w.WriteHeader(http.StatusUnauthorized)
+	w.Write([]byte("invalid signature"))
+}

@@ -1,0 +1,18 @@
+{
+    "version": 1,
+    "target": "spring_boot",
+    "cases": [
+        {
+            "case_id": "EXPD-0001",
+            "url": "/api/hotels/search-sort",
+            "method": "GET",
+            "param": "sortBy",
+            "location": "query",
+            "vuln_class": "spel_injection",
+            "sink_context": "spel",
+            "expected_vulnerable": true,
+            "rendering": "server",
+            "notes": "sortBy parsed and evaluated as a Spring Expression Language (SpEL) expression against an unrestricted StandardEvaluationContext -- CWE-917, the real mechanism behind CVE-2018-1273 (Spring Data Commons) and CVE-2022-22980/CVE-2026-41717 (Spring Data MongoDB @Query/@Aggregation SpEL parameter binding) (docs/research/category5-travel-functionality-and-cwe-research.md). LABGEN-EXP-0001 in lab/manifests/expedia_spel_injection_sample.yaml, CC-LAB-0214/FR-LAB-113, category 5 pilot's first Expedia-specific cell (distinct from the ported Netflix cell, which is TrackerNest/category-4 code reused, not built for Expedia) -- never a PFF-* case."
+        }
+    ]
+}

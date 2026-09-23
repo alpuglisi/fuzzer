@@ -1,0 +1,3 @@
+# POST-body parameter -> local variable (Rails' unified `params` accessor
+# does not distinguish GET/POST origin, unlike PHP's separate superglobals).
+{{ var_name }} = params[:{{ param_name }}]

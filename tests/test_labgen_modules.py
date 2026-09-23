@@ -227,6 +227,54 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
         "dom_suffix": "-post",
         "dom_write_prop": "innerHTML",
     },
+    # CC-LAB-0070: prototype pollution -- registered in the shared vocabulary
+    # so minimal_pair can classify it (no php_current/php_laravel shape map
+    # uses any of these; node_express is the emitter that actually renders
+    # this shape).
+    "post_body_json": {},
+    "unguarded_deep_merge": {"value_expr": "$__wholeBody"},
+    "proto_key_filtered_merge": {"value_expr": "$__wholeBody"},
+    "object_property_bulk_set": {"value_expr": "$__wholeBody"},
+    # CC-LAB-0076: ReDoS -- vocabulary-only in this PHP-oriented registry.
+    "unescaped_regex_construct": {},
+    "regex_escape_construct": {},
+    "regex_highlight_match": {"value_expr": "$term"},
+    # CC-LAB-0133: registered in the shared vocabulary so minimal_pair can
+    # classify them (this cell is built on php_laravel only, category 3's
+    # Huddle Hub).
+    "webhook_request": {"var_name": "webhookRawBody", "secret": "test-secret"},
+    "loose_equality_compare": {"value_expr": "$webhookRawBody"},
+    "constant_time_compare": {"value_expr": "$webhookRawBody"},
+    "webhook_signature_verification": {"value_expr": "$webhookRawBody"},
+    # CC-LAB-0134: registered in the shared vocabulary so minimal_pair can
+    # classify them (this cell is built on php_laravel only, category 3's
+    # Huddle Hub).
+    "unchecked_url_fetch": {"value_expr": "$unfurlUrl"},
+    "scheme_and_resolved_ip_allowlist": {"value_expr": "$unfurlUrl"},
+    "server_side_http_fetch": {"value_expr": "$unfurlUrl"},
+    # CC-LAB-0135: registered in the shared vocabulary so minimal_pair can
+    # classify them (this cell is built on php_laravel only, category 3's
+    # Huddle Hub).
+    "raw_header_concat": {"value_expr": "$triggerWord"},
+    "structured_http_client_headers": {"value_expr": "$triggerWord"},
+    "outbound_webhook_delivery": {"value_expr": "$triggerWord"},
+    # CC-LAB-0210: registered in the shared vocabulary so minimal_pair can
+    # classify them (php_current's shape map does not use any of them).
+    # None of the three real templates reference a Jinja variable (see
+    # fuzzlab.labgen.modules' own docstring for these classes), so any
+    # non-empty ctx satisfies them -- value_expr is supplied anyway to match
+    # this table's own convention of a realistic-looking fixture per module.
+    "redirect_target_allowlist": {"value_expr": "$return_to"},
+    "http_redirect_return": {"value_expr": "$return_to"},
+    "terminal_response": {"body": "    // x\n", "method_name": "handle_x"},
+    # CC-LAB-0211: registered in the shared vocabulary so minimal_pair can
+    # classify them (php_current's shape map does not use any of them).
+    "csv_formula_neutralize": {"value_expr": "$label"},
+    "csv_export_row": {"value_expr": "$label"},
+    # CC-LAB-0212: registered in the shared vocabulary so minimal_pair can
+    # classify them (php_current's shape map does not use any of them).
+    "server_recomputed_amount": {"value_expr": "$amount"},
+    "payment_charge_insert": {"value_expr": "$amount"},
 }
 
 

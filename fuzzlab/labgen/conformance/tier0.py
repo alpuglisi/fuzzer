@@ -118,6 +118,42 @@ def lint_python_emitted_files(files: EmittedFiles) -> list[LintResult]:
     return [lint_python(f.path, f.content) for f in files if f.path.endswith(".py")]
 
 
+def ruby_available() -> bool:
+    """Whether a ``ruby`` interpreter is on this build host -- mirrors
+    :func:`php_available`/:func:`python_available` exactly (CC-LAB-0072..
+    0074, ``ruby_rails`` Phase B: the first stack in this registry needing a
+    Ruby syntax check)."""
+    return shutil.which("ruby") is not None
+
+
+def lint_ruby(path: str, content: bytes, *, timeout: float = 10.0) -> LintResult:
+    """Syntax-check one Ruby file's content with ``ruby -c`` (Ruby's own
+    "parse, don't execute" flag -- the Ruby analogue of ``php -l``/
+    ``python -m py_compile``). Raises :class:`RuntimeError` if ``ruby``
+    isn't available -- callers must guard with :func:`ruby_available`
+    first, mirroring :func:`lint_php`'s own contract exactly."""
+    if not ruby_available():
+        raise RuntimeError("ruby interpreter not available on this host -- guard with ruby_available() first")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        rb_path = Path(tmpdir) / "cell.rb"
+        rb_path.write_bytes(content)
+        result = subprocess.run(
+            ["ruby", "-c", str(rb_path)],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return LintResult(path=path, ok=result.returncode == 0, detail=result.stdout + result.stderr)
+
+
+def lint_ruby_emitted_files(files: EmittedFiles) -> list[LintResult]:
+    """Lint every ``.rb`` file an emitter produced for one cell (a ``.erb``
+    view template is not plain Ruby source -- ``ruby -c`` cannot parse its
+    ``<%= %>``/HTML mix directly -- so it is skipped here, not silently
+    reported as passing; the controller file(s) are what this checks)."""
+    return [lint_ruby(f.path, f.content) for f in files if f.path.endswith(".rb")]
+
+
 @dataclass(frozen=True)
 class MinimalPairResult:
     is_minimal_pair: bool

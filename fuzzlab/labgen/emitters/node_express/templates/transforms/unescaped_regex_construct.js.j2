@@ -1,0 +1,8 @@
+// unescaped_regex_construct transform (CC-LAB-0076, redos concern): builds a
+// RegExp directly from {{ value_expr }} with no escaping, so any regex
+// metacharacter in the user-supplied search term is interpreted as regex
+// syntax instead of a literal character. A pathological pattern such as
+// `(a+)+$` -- classic catastrophic backtracking, CWE-1333 -- then blows up
+// against content containing a run of the character the pattern nests over,
+// however long the response ends up taking to compute.
+const highlightRegex = new RegExp({{ value_expr }}, 'gi');

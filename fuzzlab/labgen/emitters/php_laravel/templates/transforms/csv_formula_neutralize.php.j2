@@ -1,0 +1,6 @@
+// csv_formula_neutralize: a value whose first non-whitespace character is
+// a CSV-formula trigger character (=, +, -, @, a tab, or a carriage
+// return) gets a leading single quote prepended, forcing most spreadsheet
+// applications to display the whole cell as literal text rather than
+// evaluate it as a formula. Defense-in-depth against CWE-1236 -- see this
+// op's own docstring for its documented scope/limits.

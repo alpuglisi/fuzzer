@@ -1,0 +1,9 @@
+# fuzzlab expected results (Benchmark-style) for category 3's TrackerNest
+# app (spring_boot). Derived from labels.json; the loader cross-checks the
+# two so they cannot drift. category is the vuln class; expected_vulnerable
+# is the ground-truth verdict for that (url, param) case. CC-LAB-0136/
+# FR-LAB-100.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+TNEST-0001,/wiki/pages/render,GET,macroExpr,query,ssti,true,/wiki/pages/render,sink,,direct
+TNEST-0002,/issues/import,POST,body,body,xxe,true,/issues/import,sink,,direct
+TNEST-0003,/integrations/webhook-payload,POST,body,body,insecure_deserialization,true,/integrations/webhook-payload,sink,,direct

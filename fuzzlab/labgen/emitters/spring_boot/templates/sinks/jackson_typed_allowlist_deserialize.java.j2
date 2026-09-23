@@ -1,0 +1,9 @@
+        try {
+            tools.jackson.databind.json.JsonMapper mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+            com.fuzzlab.trackernest.generated.PlaybackResumeRequest event = mapper.readValue(
+                {{ value_expr }}, com.fuzzlab.trackernest.generated.PlaybackResumeRequest.class);
+            return org.springframework.http.ResponseEntity.ok("{\"status\":\"ok\"}");
+        } catch (Exception e) {
+            return org.springframework.http.ResponseEntity.status(400)
+                .body("Playback event error: " + e.getMessage());
+        }

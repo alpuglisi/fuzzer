@@ -15,6 +15,55 @@ well-documented, value-context shapes -- ``sqli``/``sql_numeric_literal``,
 identifier/alias/connector-position SQLi or escaping-context-mismatch XSS
 on this stack; those stay deferred for Node/Express.
 
+CC-LAB-0070 adds a fourth shape, ``prototype_pollution``/
+``object_property_bulk_set`` (CWE-1321) -- genuinely new to this project's
+corpus and specific to the JS/Node runtime (an unguarded recursive merge
+that can write onto ``Object.prototype``), grounded in the Walmart
+(Node/Express BFF) functionality/CWE research (see
+``docs/research/site-architecture-survey-functionality-walmart.md``).
+
+CC-LAB-0076 adds a fifth shape, ``redos``/``regex_highlight_match``
+(CWE-1333) -- also genuinely new to this project's corpus and specific to
+regex-engine backtracking behavior: a search/highlight endpoint builds a
+``RegExp`` straight from a user-supplied search term with no escaping,
+so a pathological pattern causes catastrophic backtracking. Same Walmart
+research grounding (CVE-2024-45296, ``path-to-regexp``); needed a new
+timing-differential (M1) oracle mechanism, built alongside this shape --
+see ``docs/architecture/oracle-confirmation.md``.
+
+**CC-LAB-0077 (Phase C -- app identity + coherent route set).** This
+emitter's whole cell set (``prototype_pollution``/``object_property_bulk_set``
+at ``/api/preferences``, ``redos``/``regex_highlight_match`` at
+``/api/search``) is assembled into one small, coherent app identity: the
+**MeadowMart BFF** (a fictitious big-box e-commerce brand; the *identity*
+is invented, but its shape -- a Node/Express layer aggregating legacy
+services rather than owning its own domain logic -- is grounded in the
+real Walmart Global Tech Blog research at
+``docs/research/site-architecture-survey-functionality-walmart.md``: order
+management as a BPM-orchestrated state machine, search, and account/cart
+preferences). Two pieces of plumbing this adds, neither of which touches
+either cell's own vulnerable/secure transform logic:
+
+1. **Canonical/twin URLs for a "real page" pair** (:data:`_REAL_PAGE_CANONICAL`,
+   :func:`_twin_url_for`, :func:`_served_url_for`) -- the same mechanism
+   ``php_laravel`` already uses (``_served_route_for``/``_twin_url_for`` in
+   that emitter) for the same reason: a vulnerable cell and its secure twin
+   must coexist as two distinct, live routes in **one** running Express
+   process (unlike PHP's per-file twins, this app is a single ``app.js``),
+   so only one of the pair can be served at the real, BFF-plausible URL
+   (``/api/preferences``, ``/api/search``); the other is served at a
+   deterministic ``-twin-<cell-id>`` variant of it. Every other, non-"real
+   page" cell (the Tier-A generic sample's own illustrative cells) keeps the
+   prior ``/generated/<cell-id>`` behavior unchanged.
+2. **A small set of always-included, genuinely inert surrounding routes**
+   (:data:`_INERT_ROUTES_JS`) -- a product-listing page, an order-tracking
+   endpoint, and a cart-contents endpoint -- so the assembled app reads as a
+   small BFF storefront with the two vulnerable pages naturally embedded in
+   it, not two isolated endpoints with nothing around them. None of them
+   read or reflect any request input; they are static, illustrative
+   responses only, added for app-identity coherence, and carry no manifest
+   cell or ground-truth case of their own.
+
 **Multi-file output, unlike ``php_current``.** Per Addendum D, a routed,
 multi-file emitter needs a ``route``-category *accumulator* module
 (``app.js``'s route-registration lines) fed by one fragment per cell,
@@ -66,6 +115,19 @@ _ESCAPE_HTML_HELPER = (
     "}\n"
 )
 
+# CC-LAB-0076: a second small, fixed helper every generated controller
+# includes unconditionally, same rationale as _ESCAPE_HTML_HELPER above (its
+# presence in every controller, used or not, keeps the vulnerable/secure
+# diff confined to the transform region). The standard MDN-recommended
+# regex-metacharacter escape: turns any of the regex-special characters into
+# their literal, escaped form so a string built with it can only ever match
+# itself.
+_ESCAPE_REGEXP_HELPER = (
+    "function escapeRegExp(value) {\n"
+    "    return String(value).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');\n"
+    "}\n"
+)
+
 
 class _ModuleSet(NamedTuple):
     """Same shape as ``php_current``'s ``_ModuleSet``: which source/sink/
@@ -85,6 +147,18 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("sqli", "sql_numeric_literal"): _ModuleSet("get_query_param", "sql_numeric_lookup", "single_statement"),
     ("sqli", "sql_string_literal"): _ModuleSet("post_body_param", "sql_string_literal_lookup", "single_statement"),
     ("xss", "html_body"): _ModuleSet("read_stored_field", "html_body_echo", "render_only"),
+    # CC-LAB-0070: prototype pollution (CWE-1321) -- a genuinely new,
+    # JS/Node-runtime-specific shape, not part of the original Tier-A
+    # baseline above.
+    ("prototype_pollution", "object_property_bulk_set"): _ModuleSet(
+        "post_body_json", "object_property_bulk_set", "render_only"
+    ),
+    # CC-LAB-0076: ReDoS (CWE-1333) -- also a genuinely new,
+    # JS/Node-runtime-specific shape (regex-engine backtracking behavior),
+    # not part of the original Tier-A baseline above.
+    ("redos", "regex_highlight_match"): _ModuleSet(
+        "get_query_param", "regex_highlight_match", "render_only"
+    ),
 }
 
 #: Per-route static context (table/column/param names, or the stored field
@@ -106,7 +180,110 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
         "password_param": "password",
     },
     "/api/profile": {"var_name": "bio", "stored_expr": "currentUser.bio", "css_class": "bio"},
+    # CC-LAB-0070: a BFF-style "update account/cart preferences" endpoint
+    # (Walmart functionality research), deep-merging the whole request body
+    # onto a live preferences object -- target_var/target_literal are this
+    # shape's render-only metadata, the object_property_bulk_set transforms'
+    # own analogue of the mass-assignment family's `allowed_fields`.
+    "/api/preferences": {
+        "var_name": "incomingPreferences",
+        "target_var": "currentPreferences",
+        "target_literal": "{ theme: 'light', notifications: true }",
+    },
+    # CC-LAB-0076: a BFF-style "search results" endpoint (Walmart
+    # functionality research) that highlights matches of a user-supplied
+    # search term inside its (fixed, render-only) content -- content_literal
+    # is this shape's render-only metadata, the regex_highlight_match sink's
+    # own analogue of object_property_bulk_set's target_literal. The 22-'a'
+    # run is deliberate, calibrated lab content (see
+    # docs/architecture/oracle-confirmation.md's M1 ReDoS section and
+    # tests/test_labgen_redos.py): real product copy plausibly contains a
+    # run of a repeated character (a SKU, a repeated-letter brand name), and
+    # this run's length was chosen so the vulnerable twin's catastrophic
+    # backtracking against a classic evil pattern (`(a+)+$`) is a clear,
+    # reliably-reproducible tens-of-milliseconds-scale event -- never an
+    # open-ended, multi-second (let alone multi-minute) hang -- while the
+    # secure twin's escaped construction stays sub-millisecond regardless.
+    "/api/search": {
+        "var_name": "searchTerm",
+        "param_name": "q",
+        "content_literal": "'Comfortable running shoes with breathable mesh ' + 'a'.repeat(22) + '!'",
+    },
 }
+
+
+#: CC-LAB-0077: which cell is the "real page" canonical owner of a route
+#: path, for the two routes this app treats as real BFF pages (the two
+#: manifest-backed cells' shared conceptual endpoint). Mirrors
+#: ``php_laravel``'s own ``_CANONICAL_CELL_KEY`` idea, simplified to a flat
+#: mapping since this stack has no page-profile dict of its own. A route not
+#: listed here keeps the prior ``/generated/<cell-id>`` behavior.
+_REAL_PAGE_CANONICAL: dict[str, str] = {
+    "/api/preferences": "LABGEN-PP-0001",
+    "/api/search": "LABGEN-RD-0001",
+}
+
+
+def _twin_url_for(real_url: str, cell_id: str) -> str:
+    """The distinct URL a non-canonical cell of a "real page" route is
+    served at, e.g. ``/api/preferences`` + ``LABGEN-PP-0002`` ->
+    ``/api/preferences-twin-labgen-pp-0002``. A plain suffix, not a
+    ``.``-joined one (unlike ``php_laravel``'s ``.php``-suffixed twin URLs):
+    these are extensionless JSON API paths, and a literal ``.`` in an
+    Express route string is unnecessary surface to reason about, whereas a
+    ``-``-joined suffix is an ordinary path segment."""
+    return f"{real_url}-twin-{cell_id.lower()}"
+
+
+def _served_url_for(cell: Cell) -> str:
+    """The URL this cell is actually registered at in the assembled app
+    (CC-LAB-0077). The one shared derivation :meth:`render_route_accumulator`
+    uses, so the canonical/twin decision is made in exactly one place."""
+    canonical = _REAL_PAGE_CANONICAL.get(cell.route.path)
+    if canonical is None:
+        return f"/generated/{cell.cell_id.lower()}"
+    if cell.cell_id == canonical:
+        return cell.route.path
+    return _twin_url_for(cell.route.path, cell.cell_id)
+
+
+#: CC-LAB-0077: genuinely inert, always-included surrounding routes -- no
+#: request input is ever read or reflected by any of them. Added directly to
+#: the accumulator (not manifest/cell-driven: they carry no vulnerability
+#: class and no ground-truth case) purely so the assembled app reads as a
+#: small, coherent BFF storefront around the two real, manifest-backed pages
+#: rather than a bag of two disconnected endpoints -- see the module
+#: docstring's CC-LAB-0077 section for the grounding.
+_INERT_ROUTES_JS = (
+    "// Surrounding, inert BFF pages (CC-LAB-0077) -- no request input is\n"
+    "// read or reflected by any of these; static illustrative responses\n"
+    "// only, added for app-identity coherence around the two real pages\n"
+    "// above. None carries a manifest cell or a ground-truth case.\n"
+    "app.get('/api/products', (req, res) => {\n"
+    "    res.json({\n"
+    "        products: [\n"
+    "            { id: 101, name: 'Running shoes', price: 39.99 },\n"
+    "            { id: 102, name: 'Backpack', price: 24.5 },\n"
+    "            { id: 103, name: 'Water bottle', price: 8.0 },\n"
+    "        ],\n"
+    "    });\n"
+    "});\n"
+    "\n"
+    "app.get('/api/orders/:orderId', (req, res) => {\n"
+    "    res.json({\n"
+    "        status: 'in_transit',\n"
+    "        history: [\n"
+    "            { stage: 'payment_authorized', at: '2026-09-20T10:00:00Z' },\n"
+    "            { stage: 'inventory_reserved', at: '2026-09-20T10:05:00Z' },\n"
+    "            { stage: 'shipped', at: '2026-09-21T08:30:00Z' },\n"
+    "        ],\n"
+    "    });\n"
+    "});\n"
+    "\n"
+    "app.get('/api/cart', (req, res) => {\n"
+    "    res.json({ items: [{ productId: 101, quantity: 1 }], total: 39.99 });\n"
+    "});\n"
+)
 
 
 class NodeExpressEmitter(Emitter):
@@ -173,6 +350,8 @@ class NodeExpressEmitter(Emitter):
             "\n"
             f"{_ESCAPE_HTML_HELPER}"
             "\n"
+            f"{_ESCAPE_REGEXP_HELPER}"
+            "\n"
             f"{complexity_result.code}\n"
             f"module.exports = {ctx['handler_name']};\n"
         )
@@ -198,7 +377,7 @@ class NodeExpressEmitter(Emitter):
         route_lines = [
             render_route_line(
                 method=c.route.method,
-                path=f"/generated/{c.cell_id.lower()}",
+                path=_served_url_for(c),
                 handler_module=c.cell_id.lower(),
             )
             for c in by_id
@@ -209,12 +388,18 @@ class NodeExpressEmitter(Emitter):
             "// (CR-LAB-0001 Addendum D). Route lines below are sorted by cell ID at\n"
             "// render time, never by append/iteration order, so adding one cell can\n"
             "// never reshuffle this file (the whole-lab regeneration determinism gate).\n"
+            "// Per-route URLs come from _served_url_for (CC-LAB-0077): a \"real page\"\n"
+            "// route (see _REAL_PAGE_CANONICAL) serves its canonical cell at the real\n"
+            "// URL and every other cell of that route at a deterministic twin URL;\n"
+            "// every other cell keeps the illustrative /generated/<cell-id> URL.\n"
             "\n"
             "const express = require('express');\n"
             "\n"
             "const app = express();\n"
             "app.use(express.json());\n"
             "app.use(express.urlencoded({ extended: false }));\n"
+            "\n"
+            f"{_INERT_ROUTES_JS}"
             "\n"
             f"{''.join(route_lines)}"
             "\n"

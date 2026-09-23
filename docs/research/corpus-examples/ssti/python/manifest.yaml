@@ -12,6 +12,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-1336, CWE-94, CWE-657, CWE-359]
   cwe_shared: [CWE-1336, CWE-94]
   cwe_unique: [CWE-657, CWE-359]
   cwe_rationale: >
@@ -42,6 +43,7 @@
   validated: true
   validated_by: [manual-review]
   redacted: false
+  cwe: [CWE-1336, CWE-94, CWE-289, CWE-290]
   cwe_shared: [CWE-1336, CWE-94]
   cwe_unique: [CWE-289, CWE-290]
   cwe_rationale: >

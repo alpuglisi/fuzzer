@@ -715,6 +715,314 @@ class DomInnerhtmlEchoSink(TemplateModule):
         super().__init__("dom_innerhtml_echo", "sink", _SINK_ENV, "dom_innerhtml_echo.php.j2")
 
 
+class PostBodyJsonSource(TemplateModule):
+    """CC-LAB-0070: vocabulary-only registration of the JS/node_express
+    ``post_body_json`` source (the whole JSON request body). PHP has no
+    Object.prototype-style prototype chain, so nothing PHP-side can
+    meaningfully render the shape this feeds (``object_property_bulk_set``);
+    registered here purely so :mod:`fuzzlab.labgen.minimal_pair` (which
+    walks this registry and raises for a name it cannot find) recognizes
+    the name. ``node_express`` is the emitter that actually renders it, in
+    its own registry (``fuzzlab.labgen.emitters.node_express.modules``)."""
+
+    def __init__(self) -> None:
+        super().__init__("post_body_json", "source", _SOURCE_ENV, "post_body_json.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = "$__wholeBody"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class ObjectPropertyBulkSetSink(TemplateModule):
+    """CC-LAB-0070: vocabulary-only registration of the JS/node_express
+    ``object_property_bulk_set`` sink family -- responds with the object a
+    deep-merge transform built. Vocabulary-only in this PHP-oriented
+    package; ``node_express`` is the emitter that actually renders it."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "object_property_bulk_set", "sink", _SINK_ENV, "object_property_bulk_set.php.j2"
+        )
+
+
+class UnescapedRegexConstructTransform(TemplateModule):
+    """CC-LAB-0076: vocabulary-only registration of the JS/node_express
+    ``unescaped_regex_construct`` op. Registered here purely so
+    :mod:`fuzzlab.labgen.minimal_pair` recognizes the name; node_express's
+    own transform module is the one that actually renders it."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unescaped_regex_construct", "transform", _TRANSFORM_ENV, "unescaped_regex_construct.php.j2"
+        )
+
+
+class RegexEscapeConstructTransform(TemplateModule):
+    """CC-LAB-0076: vocabulary-only registration of the JS/node_express
+    ``regex_escape_construct`` op -- the secure twin of
+    :class:`UnescapedRegexConstructTransform`. Same vocabulary-only
+    rationale."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "regex_escape_construct", "transform", _TRANSFORM_ENV, "regex_escape_construct.php.j2"
+        )
+
+
+class RegexHighlightMatchSink(TemplateModule):
+    """CC-LAB-0076: vocabulary-only registration of the JS/node_express
+    ``regex_highlight_match`` sink family -- responds with content
+    highlighted by whichever regex-construction transform ran upstream.
+    Vocabulary-only in this PHP-oriented package; node_express is the
+    emitter that actually renders it."""
+
+    def __init__(self) -> None:
+        super().__init__("regex_highlight_match", "sink", _SINK_ENV, "regex_highlight_match.php.j2")
+class WebhookRequestSource(TemplateModule):
+    """The ``webhook_request`` source (`CC-LAB-0133`, Huddle Hub's
+    webhook-signature-verification cell): the raw request body plus the
+    ``X-Signature`` header (via ``$_SERVER``/``php://input``, this stack's
+    own idiom) and a fixed, lab-only shared secret. Registered for the
+    shared minimal-pair vocabulary only -- ``php_current``'s own
+    ``_MODULE_SET_BY_SHAPE`` is not widened to this shape (the cell is
+    built on ``php_laravel`` only, per category 3's stack pick); this
+    registration is what lets `php_laravel`'s own composition line
+    classify by name (see this module's own docstring, decision 1)."""
+
+    def __init__(self) -> None:
+        super().__init__("webhook_request", "source", _SOURCE_ENV, "webhook_request.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        template = self._env.get_template(self._template_name)
+        code = template.render(var_name=ctx["var_name"], secret=ctx["secret"])
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = f"${ctx['var_name']}"
+        return RenderResult(code=code, context=new_ctx)
+
+
+class LooseEqualityCompareTransform(TemplateModule):
+    """The ``loose_equality_compare`` op (`CC-LAB-0133`, `weak_signature_
+    comparison` concern): PHP's ``==``/``!=`` operators both short-circuit
+    and type-juggle hex-looking numeric strings as equal numbers (the
+    documented "magic hash" bypass). Safety matrix: ``effect=partial``,
+    ``neutralizes: [weak_signature_comparison]``. Registered for the shared
+    minimal-pair vocabulary only, same reasoning as
+    :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("loose_equality_compare", "transform", _TRANSFORM_ENV, "loose_equality_compare.php.j2")
+
+
+class ConstantTimeCompareTransform(TemplateModule):
+    """The ``constant_time_compare`` op (`CC-LAB-0133`, secure twin): PHP's
+    ``hash_equals()``. Safety matrix: ``effect=neutralises``,
+    ``neutralizes: [weak_signature_comparison]``. Registered for the shared
+    minimal-pair vocabulary only, same reasoning as
+    :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("constant_time_compare", "transform", _TRANSFORM_ENV, "constant_time_compare.php.j2")
+
+
+class WebhookSignatureVerificationSink(TemplateModule):
+    """The ``webhook_signature_verification`` sink family (`CC-LAB-0133`):
+    accepts and "processes" the event -- illustrative, echoes ``value_expr``
+    via its length only (never escapes/filters it itself, per this file's
+    own convention). Registered for the shared minimal-pair vocabulary
+    only, same reasoning as :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "webhook_signature_verification", "sink", _SINK_ENV, "webhook_signature_verification.php.j2"
+        )
+
+
+class UncheckedUrlFetchTransform(TemplateModule):
+    """The ``unchecked_url_fetch`` op (`CC-LAB-0134`): fetches a tainted URL
+    with zero host/scheme validation -- SSRF. Safety matrix:
+    ``effect=no_effect``. Registered for the shared minimal-pair vocabulary
+    only, same reasoning as :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("unchecked_url_fetch", "transform", _TRANSFORM_ENV, "unchecked_url_fetch.php.j2")
+
+
+class SchemeAndResolvedIpAllowlistTransform(TemplateModule):
+    """The ``scheme_and_resolved_ip_allowlist`` op (`CC-LAB-0134`, secure
+    twin): validates the URL scheme and the resolved IP (not just the
+    hostname string) against private/reserved ranges. Safety matrix:
+    ``effect=neutralises``, ``neutralizes: [ssrf_request_forgery]``.
+    Registered for the shared minimal-pair vocabulary only, same reasoning
+    as :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "scheme_and_resolved_ip_allowlist",
+            "transform",
+            _TRANSFORM_ENV,
+            "scheme_and_resolved_ip_allowlist.php.j2",
+        )
+
+
+class ServerSideHttpFetchSink(TemplateModule):
+    """The ``server_side_http_fetch`` sink family (`CC-LAB-0134`): returns a
+    preview of the fetched content -- illustrative, echoes ``value_expr``
+    (the requested URL) verbatim. Registered for the shared minimal-pair
+    vocabulary only, same reasoning as :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("server_side_http_fetch", "sink", _SINK_ENV, "server_side_http_fetch.php.j2")
+
+
+class RawHeaderConcatTransform(TemplateModule):
+    """The ``raw_header_concat`` op under the `CC-LAB-0135`
+    ``outbound_http_request_header_value`` sink_family (a distinct
+    `(op, sink_family)` row from the existing `email_header_value` entry
+    of the same op name): raw string header-block concatenation, an
+    embedded CRLF splices in an arbitrary extra outbound request header.
+    Safety matrix: ``effect=no_effect``. Registered for the shared
+    minimal-pair vocabulary only, same reasoning as
+    :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("raw_header_concat", "transform", _TRANSFORM_ENV, "raw_header_concat.php.j2")
+
+
+class StructuredHttpClientHeadersTransform(TemplateModule):
+    """The ``structured_http_client_headers`` op (`CC-LAB-0135`, secure
+    twin): a structured HTTP-client header API that rejects CRLF-bearing
+    values. Safety matrix: ``effect=neutralises``,
+    ``neutralizes: [outbound_header_injection]``. Registered for the
+    shared minimal-pair vocabulary only, same reasoning as
+    :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "structured_http_client_headers",
+            "transform",
+            _TRANSFORM_ENV,
+            "structured_http_client_headers.php.j2",
+        )
+
+
+class OutboundWebhookDeliverySink(TemplateModule):
+    """The ``outbound_webhook_delivery`` sink family (`CC-LAB-0135`):
+    returns the delivery result -- illustrative, echoes ``value_expr``
+    (the trigger word) verbatim. Registered for the shared minimal-pair
+    vocabulary only, same reasoning as :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("outbound_webhook_delivery", "sink", _SINK_ENV, "outbound_webhook_delivery.php.j2")
+# --- CC-LAB-0210: open redirect (category 5, Booking.com pilot) -----------
+#
+# Registered here (unrendered by `php_current`'s own `_MODULE_SET_BY_SHAPE`,
+# exactly like L-P3.3c-DOM's `dom_url_source`/`dom_text_content`/
+# `dom_innerhtml_echo` above) purely for the shared minimal-pair vocabulary
+# (:mod:`fuzzlab.labgen.minimal_pair` classifies every emitter's composition
+# positions against this package's registries and raises for a name it
+# cannot find) -- `php_laravel` is the emitter that actually renders this
+# shape, for the new Booking.com-themed illustrative app
+# (`lab/manifests/booking_open_redirect_sample.yaml`).
+
+
+class RedirectTargetAllowlistTransform(TemplateModule):
+    """The ``redirect_target_allowlist`` op: rewrites ``value_expr`` so only
+    a same-origin relative path survives -- see
+    ``fuzzlab.labgen.emitters.php_laravel.modules.RedirectTargetAllowlistTransform``
+    (the emitter that actually renders this op) for the real check."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "redirect_target_allowlist", "transform", _TRANSFORM_ENV, "redirect_target_allowlist.php.j2"
+        )
+
+
+class HttpRedirectReturnSink(TemplateModule):
+    """The ``http_redirect_return`` sink: a server-issued HTTP redirect whose
+    target is ``value_expr``. Unlike every other sink in this package, its
+    own rendered code is the terminal statement of the method it is
+    composed into (there is no row/value to return), which is why this
+    shape also needs its own ``complexity`` module rather than
+    ``single_statement``/``render_only``."""
+
+    def __init__(self) -> None:
+        super().__init__("http_redirect_return", "sink", _SINK_ENV, "http_redirect_return.php.j2")
+
+
+class CsvFormulaNeutralizeTransform(TemplateModule):
+    """The ``csv_formula_neutralize`` op: rewrites ``value_expr`` so a value
+    whose first non-whitespace character is a CSV-formula trigger character
+    gets a leading single quote -- see
+    ``fuzzlab.labgen.emitters.php_laravel.modules.CsvFormulaNeutralizeTransform``
+    (the emitter that actually renders this op) for the real check."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "csv_formula_neutralize", "transform", _TRANSFORM_ENV, "csv_formula_neutralize.php.j2"
+        )
+
+
+class CsvExportRowSink(TemplateModule):
+    """The ``csv_export_row`` sink: a small CSV report/export response body
+    embedding ``value_expr`` as a cell. Like :class:`HttpRedirectReturnSink`,
+    its own rendered code is the terminal statement of the method it is
+    composed into."""
+
+    def __init__(self) -> None:
+        super().__init__("csv_export_row", "sink", _SINK_ENV, "csv_export_row.php.j2")
+
+
+class ServerRecomputedAmountTransform(TemplateModule):
+    """The ``server_recomputed_amount`` op (`price_integrity_bypass`
+    concern, `CC-LAB-0212`): discards the tainted client-submitted amount
+    entirely and substitutes a value derived server-side from a
+    non-price, allowlist-shaped input -- see
+    ``fuzzlab.labgen.emitters.php_laravel.modules.ServerRecomputedAmountTransform``
+    (the emitter that actually renders this op) for the real check."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "server_recomputed_amount", "transform", _TRANSFORM_ENV, "server_recomputed_amount.php.j2"
+        )
+
+
+class PaymentChargeInsertSink(TemplateModule):
+    """The ``payment_charge_insert`` sink: a booking-charge write
+    (``DB::table('bookings')->insert(...)``) whose ``total_amount`` column
+    is ``value_expr``. Like :class:`~fuzzlab.labgen.modules.
+    OrmEntityBulkAssignSink`, it sets ``$rows`` rather than returning
+    directly, so the existing ``single_statement`` complexity's own tail
+    closes the method -- no new complexity needed for this sink."""
+
+    def __init__(self) -> None:
+        super().__init__("payment_charge_insert", "sink", _SINK_ENV, "payment_charge_insert.php.j2")
+
+
+class TerminalResponseComplexity(TemplateModule):
+    """The ``terminal_response`` complexity: the controller method for a
+    cell whose sink's own code already is the terminal statement (e.g. the
+    ``http_redirect_return`` sink's ``return redirect(...)``, or
+    ``csv_export_row``'s ``return response($csv, ...)``), so this wrapper
+    adds only the method signature, no additional tail -- unlike
+    ``single_statement`` (closes with a JSON response) or ``render_only``
+    (closes with ``return view(...)``), neither of which fits a sink with
+    no row/value to hand back. Named for its structural shape and shared
+    across unrelated sink families, exactly like ``single_statement``/
+    ``render_only`` are -- **renamed from `redirect_response`** (its
+    original, `open_redirect`-specific name, `CC-LAB-0210`) once a second,
+    unrelated sink family (`csv_cell_value`, `CC-LAB-0211`) needed the
+    identical, already sink-agnostic wrapper; the earlier name would have
+    been misleading for a non-redirect consumer. The template itself never
+    changed -- see `docs/components/01-target-lab/change-control.md`'s
+    `CC-LAB-0211` entry for the rename's own record (`CC-LAB-0210`'s own
+    entry is left as the historical record and not rewritten)."""
+
+    def __init__(self) -> None:
+        super().__init__("terminal_response", "complexity", _COMPLEXITY_ENV, "terminal_response.php.j2")
+
+
 SOURCES: dict[str, Module] = {
     "get_param": GetParamSource(),
     "post_param": PostParamSource(),
@@ -724,7 +1032,37 @@ SOURCES: dict[str, Module] = {
     # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
     "dom_url_source": DomUrlSource(),
+    # CC-LAB-0070: prototype pollution -- vocabulary-only, same discipline as
+    # dom_url_source above. node_express is the only emitter that renders it.
+    "post_body_json": PostBodyJsonSource(),
+    # CC-LAB-0133: registered for the shared minimal-pair vocabulary only --
+    # this cell is built on php_laravel only (category 3's Huddle Hub).
+    "webhook_request": WebhookRequestSource(),
 }
+class UnguardedDeepMergeTransform(TemplateModule):
+    """CC-LAB-0070: vocabulary-only registration of the JS/node_express
+    ``unguarded_deep_merge`` op. A PHP array has no prototype chain for this
+    op's real mechanism (CWE-1321) to affect at all, so this fragment
+    renders only a documentary comment; ``node_express``'s own registry
+    holds the module that actually performs the merge."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unguarded_deep_merge", "transform", _TRANSFORM_ENV, "unguarded_deep_merge.php.j2"
+        )
+
+
+class ProtoKeyFilteredMergeTransform(TemplateModule):
+    """CC-LAB-0070: vocabulary-only registration of the JS/node_express
+    ``proto_key_filtered_merge`` op -- the secure twin of
+    :class:`UnguardedDeepMergeTransform`. Same vocabulary-only rationale."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "proto_key_filtered_merge", "transform", _TRANSFORM_ENV, "proto_key_filtered_merge.php.j2"
+        )
+
+
 TRANSFORMS: dict[str, Module] = {
     "identity": IdentityTransform(),
     "param_bind": ParamBindTransform(),
@@ -745,6 +1083,40 @@ TRANSFORMS: dict[str, Module] = {
     # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
     "dom_text_content": DomTextContentTransform(),
+    # CC-LAB-0070: prototype pollution -- vocabulary-only, same discipline as
+    # dom_text_content above. node_express is the only emitter that renders
+    # either op for real.
+    "unguarded_deep_merge": UnguardedDeepMergeTransform(),
+    "proto_key_filtered_merge": ProtoKeyFilteredMergeTransform(),
+    # CC-LAB-0076: ReDoS -- vocabulary-only, same discipline as
+    # unguarded_deep_merge above. node_express is the only emitter that
+    # renders either op for real.
+    "unescaped_regex_construct": UnescapedRegexConstructTransform(),
+    "regex_escape_construct": RegexEscapeConstructTransform(),
+    # CC-LAB-0133: registered for the shared minimal-pair vocabulary only --
+    # this cell is built on php_laravel only (category 3's Huddle Hub).
+    "loose_equality_compare": LooseEqualityCompareTransform(),
+    "constant_time_compare": ConstantTimeCompareTransform(),
+    # CC-LAB-0134: registered for the shared minimal-pair vocabulary only --
+    # this cell is built on php_laravel only (category 3's Huddle Hub).
+    "unchecked_url_fetch": UncheckedUrlFetchTransform(),
+    "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistTransform(),
+    # CC-LAB-0135: registered for the shared minimal-pair vocabulary only --
+    # this cell is built on php_laravel only (category 3's Huddle Hub).
+    "raw_header_concat": RawHeaderConcatTransform(),
+    "structured_http_client_headers": StructuredHttpClientHeadersTransform(),
+    # CC-LAB-0210: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "redirect_target_allowlist": RedirectTargetAllowlistTransform(),
+    # CC-LAB-0211: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "csv_formula_neutralize": CsvFormulaNeutralizeTransform(),
+    # CC-LAB-0212: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "server_recomputed_amount": ServerRecomputedAmountTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -768,10 +1140,39 @@ SINKS: dict[str, Module] = {
     # L-P3.3c-DOM: registered for the shared minimal-pair vocabulary only --
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape.
     "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
+    # CC-LAB-0070: prototype pollution -- vocabulary-only, same discipline as
+    # dom_innerhtml_echo above. node_express is the only emitter that
+    # renders it.
+    "object_property_bulk_set": ObjectPropertyBulkSetSink(),
+    # CC-LAB-0076: ReDoS -- vocabulary-only, same discipline as
+    # object_property_bulk_set above. node_express is the only emitter that
+    # renders it.
+    "regex_highlight_match": RegexHighlightMatchSink(),
+    # CC-LAB-0133: registered for the shared minimal-pair vocabulary only --
+    # this cell is built on php_laravel only (category 3's Huddle Hub).
+    "webhook_signature_verification": WebhookSignatureVerificationSink(),
+    "server_side_http_fetch": ServerSideHttpFetchSink(),
+    "outbound_webhook_delivery": OutboundWebhookDeliverySink(),
+    # CC-LAB-0210: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "http_redirect_return": HttpRedirectReturnSink(),
+    # CC-LAB-0211: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "csv_export_row": CsvExportRowSink(),
+    # CC-LAB-0212: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "payment_charge_insert": PaymentChargeInsertSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),
     "render_only": RenderOnlyComplexity(),
+    # CC-LAB-0210: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "terminal_response": TerminalResponseComplexity(),
 }
 #: Depth-hop fragments (§3.5, L-P2.5). Keyed by fragment, not by depth level:
 #: `same_file_helper` and `cross_file` share the same helper definition and

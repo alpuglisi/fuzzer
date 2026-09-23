@@ -1,0 +1,12 @@
+# fuzzlab expected results (Benchmark-style) for the MeadowMart BFF (node_express),
+# CC-LAB-0077. Derived from labels.json; the loader cross-checks the two so they
+# cannot drift. category is the vuln class; expected_vulnerable is the ground-truth
+# verdict for that (url, param) case. Every row here is a single-location case, so
+# primary_endpoint mirrors url, primary_role is sink, related_endpoints is empty,
+# and flow_variant is direct -- same convention as lab/ground-truth/expectedresults.csv
+# and lab/ground-truth-forgecart/expectedresults.csv.
+case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
+MMART-0001,/api/preferences,POST,__proto__,body,prototype_pollution,true,/api/preferences,sink,,direct
+MMART-0002,/api/preferences-twin-labgen-pp-0002,POST,__proto__,body,prototype_pollution,false,/api/preferences-twin-labgen-pp-0002,sink,,direct
+MMART-0003,/api/search,GET,q,query,redos,true,/api/search,sink,,direct
+MMART-0004,/api/search-twin-labgen-rd-0002,GET,q,query,redos,false,/api/search-twin-labgen-rd-0002,sink,,direct

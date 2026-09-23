@@ -1,0 +1,33 @@
+# SSRF-via-link-unfurling sample manifest (`CC-LAB-0134`/`FR-LAB-116`),
+# `php_laravel`.
+#
+# Huddle Hub's (category 3's Slack pick) second designed cell -- see
+# docs/research/category3-saas-functionality-and-cwe-research.md sec 6a
+# for the page/vulnerability-class design (link unfurling: the server
+# fetches a user-pasted URL to generate a message preview) and sec 2 for
+# the CWE research (real SSRF, CWE-918). The vulnerable twin
+# (`unchecked_url_fetch`) fetches the URL with zero validation; the secure
+# twin (`scheme_and_resolved_ip_allowlist`) validates the scheme and the
+# *resolved* IP against private/reserved ranges before fetching. Same
+# route, never live-booted together -- mirrors
+# `mass_assignment_laravel_sample.yaml`'s own twin-pair precedent.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-HHB-0003
+    class: ssrf
+    stack_profile: php_laravel
+    route: { method: GET, path: /messages/unfurl }
+    sink_context:
+      family: server_side_http_fetch
+      required_neutralizations: [ssrf_request_forgery]
+    transform: [unchecked_url_fetch]
+
+  - cell_id: LABGEN-HHB-0004
+    class: ssrf
+    stack_profile: php_laravel
+    route: { method: GET, path: /messages/unfurl }
+    sink_context:
+      family: server_side_http_fetch
+      required_neutralizations: [ssrf_request_forgery]
+    transform: [scheme_and_resolved_ip_allowlist]

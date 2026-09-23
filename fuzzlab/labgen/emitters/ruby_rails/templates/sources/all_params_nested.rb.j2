@@ -1,0 +1,7 @@
+# Nested strong-parameters root -> local variable. Rails' own strong-
+# parameters convention nests one resource's fields under a single root key
+# (`params[:{{ resource_name }}][:field]`, not a flat top-level body) --
+# `require` also 400s (ActionController::ParameterMissing) if the client
+# omits the root key entirely, rather than silently degrading to an empty
+# hash.
+{{ var_name }} = params.require(:{{ resource_name }})

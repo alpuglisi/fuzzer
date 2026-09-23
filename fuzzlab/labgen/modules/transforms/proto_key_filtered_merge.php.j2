@@ -1,0 +1,6 @@
+// proto_key_filtered_merge (JS/node_express-specific op, CC-LAB-0070): the
+// secure twin of unguarded_deep_merge -- skips every
+// `__proto__`/`constructor`/`prototype` key before writing onto the target
+// object. As with unguarded_deep_merge, PHP has no prototype chain for this
+// to protect, so this fragment is a vocabulary-only placeholder;
+// node_express's own transform module is the one that actually renders it.

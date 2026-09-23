@@ -1,0 +1,10 @@
+// constant_time_compare: recompute the expected HMAC over the raw body and
+// compare it to the provided one using hash_equals() -- PHP's own
+// documented constant-time string comparison, added specifically so
+// comparing a user-supplied string against a known hash leaks no timing
+// information and never type-juggles. Safety matrix: effect=neutralises,
+// neutralizes: [weak_signature_comparison].
+$__expectedSignature = hash_hmac('sha256', {{ value_expr }}, $__webhookSecret);
+if (!hash_equals($__expectedSignature, $__webhookSignature)) {
+    return response()->json(['error' => 'invalid signature'], 403);
+}

@@ -1,0 +1,44 @@
+# Webhook-signature sample manifest (CC-LAB-0072), ruby_rails.
+#
+# First real implementation of the `webhook_signature_verification` sink
+# family (lab/safety_matrix.yaml's existing webhook-signature group -- no
+# emitter had implemented it in code before this lane). Mirrors Shopify's
+# own `X-Shopify-Hmac-SHA256` webhook-verification mechanism
+# (docs/research/site-architecture-survey-functionality-shopify.md §1):
+# recompute the HMAC-SHA256 over the raw request body with the app's shared
+# secret, then compare to the header value.
+#
+# Both twins correctly accept a matching signature and reject a mismatched
+# one -- the vulnerable/secure difference is *how* the comparison is made
+# (naive `==`, timing-unsafe, vs Rails' own constant-time
+# ActiveSupport::SecurityUtils.secure_compare), not a functional bypass.
+# See tests/test_labgen_ruby_rails_webhook_signature_live_boot.py's own
+# module docstring for how the actual timing-safety divergence is proven
+# (a real, isolated Ruby timing microbenchmark, not an HTTP-level timing
+# assertion, which real Rails/HTTP overhead would drown out).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: plain `==` -- a timing side channel (D20 `partial`, not
+  # `no_effect`: this still correctly rejects a wrong signature and accepts
+  # a right one for any single well-formed request).
+  - cell_id: LABGEN-RR-0002
+    class: webhook_signature
+    stack_profile: ruby_rails
+    route: { method: POST, path: /cell/labgen_rr_0002 }
+    sink_context:
+      family: webhook_signature_verification
+      required_neutralizations: [weak_signature_comparison]
+    transform: [naive_string_compare]
+
+  # Secure twin: the only difference is the transform region
+  # (constant_time_compare instead of naive_string_compare) -- the
+  # minimal-pair invariant.
+  - cell_id: LABGEN-RR-0003
+    class: webhook_signature
+    stack_profile: ruby_rails
+    route: { method: POST, path: /cell/labgen_rr_0003 }
+    sink_context:
+      family: webhook_signature_verification
+      required_neutralizations: [weak_signature_comparison]
+    transform: [constant_time_compare]

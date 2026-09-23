@@ -1,0 +1,11 @@
+// unescaped_regex_construct (JS/node_express-specific op, CC-LAB-0076): a
+// RegExp built directly from a user-supplied search term, with no escaping
+// -- a regex-engine-backtracking-behavior vulnerability mechanism
+// (CWE-1333, ReDoS). PHP's PCRE engine can *also* catastrophically
+// backtrack given the same pathological pattern, but no PHP page profile
+// in this project currently demonstrates it (this shape's real vulnerable/
+// secure pair lives on node_express, matching the Walmart functionality
+// research this addition is grounded in); registered for the shared
+// vocabulary only, per the same discipline as this package's DOM-XSS and
+// prototype-pollution fragments (see their own headers). node_express's
+// own transform module is the one that actually renders it.

@@ -1,0 +1,10 @@
+// post_body_json (JS/node_express-specific shape, CC-LAB-0070): the whole
+// JSON request body, not one named field. PHP's `$_POST` array has no
+// Object.prototype-style shared prototype chain, so there is no PHP-side
+// prototype-pollution mechanism this fragment could meaningfully
+// demonstrate -- registered for the shared minimal-pair vocabulary only
+// (fuzzlab.labgen.minimal_pair walks this registry and raises for a name
+// it cannot find), the same discipline L-P3.3c-DOM's fragments already
+// established. node_express is the only emitter that actually renders this
+// shape; no php_current/php_laravel page profile maps to it.
+$__wholeBody = $_POST;

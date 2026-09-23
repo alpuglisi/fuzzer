@@ -1,0 +1,4 @@
+# constant_time_compare: flags the sink to compare the computed and provided
+# HMAC digests with Rails' own ActiveSupport::SecurityUtils.secure_compare
+# (the real Shopify-adjacent idiom). Safety matrix: effect=neutralises,
+# neutralizes: [weak_signature_comparison].

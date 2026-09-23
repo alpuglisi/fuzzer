@@ -1,0 +1,41 @@
+# SSRF sample manifest (CC-LAB-0172), go_net_http.
+#
+# First Phase B increment for this stack (category 4 pilot, Media/
+# streaming, Twitch pick -- docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md
+# §9.4/§9.5). Grounded in the Twitch functionality/CWE research
+# (docs/research/site-architecture-survey-functionality-twitch.md §2's
+# Phase B note): a clip-thumbnail-fetch proxy endpoint that server-side-
+# fetches a caller-supplied URL.
+#
+# Reuses `lab/safety_matrix.yaml`'s existing `server_side_http_fetch` sink
+# family and its existing `unchecked_url_fetch`/
+# `scheme_and_resolved_ip_allowlist` ops verbatim (added by CC-LAB-0063 for
+# the corpus-examples/ssrf/{node,php,python} research) -- no new
+# safety-matrix entry was needed; this is simply the first `go_net_http`
+# instance of an already-modeled class.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: fetches the caller-supplied URL with no validation at all
+  # (CWE-918).
+  - cell_id: LABGEN-GO-0003
+    class: ssrf
+    stack_profile: go_net_http
+    route: { method: GET, path: /api/clips/thumbnail }
+    sink_context:
+      family: server_side_http_fetch
+      required_neutralizations: [ssrf_request_forgery]
+    transform: [unchecked_url_fetch]
+
+  # Secure twin: rejects any scheme but https, and rejects a resolved IP
+  # that is loopback/private/link-local -- checked against the resolved
+  # address, not just the hostname string (closes the DNS-rebinding gap a
+  # hostname-only allowlist would leave open).
+  - cell_id: LABGEN-GO-0004
+    class: ssrf
+    stack_profile: go_net_http
+    route: { method: GET, path: /api/clips/thumbnail }
+    sink_context:
+      family: server_side_http_fetch
+      required_neutralizations: [ssrf_request_forgery]
+    transform: [scheme_and_resolved_ip_allowlist]

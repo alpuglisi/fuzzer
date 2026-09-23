@@ -369,8 +369,68 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   a proxy signal for it — only `live_boot_available()`'s network half
   (`_network_reachable`, now `_composer_network_probe`) had this defect. (from
   BUG-0033)
+- **PA-0036** — When code-generation names an entity by one convention (a file path, a
+  route string) and separately derives a *related* name for it via a target
+  framework's own naming/inflection convention (a class name, or a symbol the
+  framework expands into a path at runtime), never assume the two are inverses of
+  each other without checking. Prefer computing the framework-facing value from the
+  same single source of truth (an explicit path/string, never re-derived through the
+  framework's own inflector) over relying on the round trip generatively; where an
+  inflected form must be relied upon anyway, execute the target framework's real
+  name-conversion function once against representative "hard" inputs (e.g. a run of
+  digits directly abutting a letter) before trusting it. Concrete instance: the
+  `ruby_rails` emitter's generated controller called Rails' bare `render :show`,
+  which resolves the view directory via `self.class.controller_path` — derived from
+  the class name through `ActiveSupport::Inflector#underscore` at runtime, which does
+  not insert an underscore before a digit run following a letter — so a class name
+  like `CellLabgenRr0001Controller` (from a cell ID like `LABGEN-RR-0001`, this
+  project's own convention) resolved to the wrong view directory and 500'd on every
+  real request. Fixed by rendering via an explicit `render template: "<path>"`
+  literal computed from the same string used to write the view file, never through
+  the inflector. Distinct from PA-0034 (executed adversarial tests for sinks that
+  construct executable text) and PA-0035 (a capability probe's fidelity to a real
+  operation path) — this is about generated code's own naming consistency with a
+  target framework's implicit conventions, a failure mode neither prior rule covers.
+  (from BUG-0034)
+- **PA-0037** — Two related rules from a real, 100%-reproducible defect that shipped
+  latent through two full build phases because no test's own scope ever took the
+  request pattern that triggers it:
+  1. **Pin every transitive dependency a checked-in stack skeleton's own direct
+     dependency under-constrains, when that dependency has a documented history of
+     breaking major-version changes** (a semver-major bump that changes a widely-used
+     method's calling convention, e.g. positional-to-keyword-only parameters). A direct
+     dependency's own gemspec/package manifest declaring an unbounded or overly wide
+     range on a transitive dependency (e.g. `activesupport`'s `json >= 0`) is not
+     evidence that dependency is actually safe at every resolvable version — an
+     unconstrained `bundle install`/`npm install`/`composer install` can silently
+     resolve a newer major line that breaks an internal call site the direct
+     dependency's own maintainers have not yet reconciled. Pin it explicitly in the
+     skeleton's own manifest (with a comment naming the incompatibility and this rule),
+     verified by a real install + the specific multi-step interaction below — never
+     assumed safe because "it's just a transitive dependency."
+  2. **A live-boot/integration test suite built entirely from single-request,
+     single-cell tests (each individually correct and sufficient for its own narrow
+     purpose) can still, in aggregate, never exercise a realistic multi-step
+     interaction a real deployment needs** — e.g. two requests sharing one session/
+     cookie, a request that depends on state a prior request created. Any stack's
+     live-boot conformance suite must include at least one test that sends **two or
+     more sequential real requests within the same client session** against the fully
+     assembled app (not a single cell in isolation) before that stack's whole-app
+     conformance (this project's own Phase D standard) is considered proven — a
+     single-request-per-test suite structurally cannot surface a defect reachable only
+     on request #2+ (session/cookie handling, any stateful middleware), regardless of
+     how many individually-passing single-request tests exist. Distinct from PA-0035
+     (a capability *probe's* fidelity to the real operation path) and PA-0033/PA-0034
+     (quantitative floors and adversarial inputs for code-generation sinks) — this is
+     about a test *suite's* aggregate request-pattern coverage, a failure mode none of
+     the prior rules cover. Concrete instance: the `ruby_rails` skeleton's unpinned
+     `json` gem resolved to a version whose `JSON.parse` broke
+     `ActiveSupport::JSON.decode`'s own internal call, 500'ing every session-cookie
+     read on the second request of any session — invisible to two full build phases'
+     worth of single-request tests, found only once a whole-app, multi-request test was
+     built. (from BUG-0035)
 
-- **PA-0036 — a cross-language module port must re-verify every language-specific
+- **PA-0039 — a cross-language module port must re-verify every language-specific
   runtime-behavior assumption the source language's shape relied on, not just its
   syntax/structure.** Porting a proven module (source/transform/sink/complexity) from
   one emitter's language to another's (e.g. `node_express`'s JS to `django`'s Python)
@@ -390,4 +450,38 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   in lacked the cast; its siblings (`sql_numeric_lookup.py.j2`, `html_body_echo.py.j2`)
   already had it. A future cross-language module port should run the same sweep before
   considering that class of module "ported," not just "renders the same shape." (from
-  BUG-0034)
+  BUG-0037)
+- **PA-0040** — When a change registers a module (or any entry) in a **shared,
+  cross-stack** registry consumed by more than one stack-specific module set or more
+  than one test file's own completeness table (as opposed to a change confined to one
+  stack's own emitter-local registry), run the whole-repo `pytest tests/` suite and
+  confirm it is green **before** the change is pushed/considered complete — not only
+  the test file(s) judged directly relevant to the change. Sharpens `CLAUDE.md`'s own
+  Definition-of-Done step 2 ("run the suite; keep it green") for the specific case
+  where "the suite" that matters is not obviously implied by which production file was
+  edited: `fuzzlab.labgen.modules`' shared registries have their own, separate
+  completeness table/guard test (`tests/test_labgen_modules.py`'s
+  `_DETERMINISM_CTX_BY_MODULE`) from any single stack's own module-set tests, and a
+  change that adds a shared-vocabulary-only registration (the `L-P3.3c-DOM`/
+  `CC-LAB-0210` pattern) must satisfy both. (from BUG-0038; this ID was originally
+  assigned `PA-0036` on `claude/category-5-build-6boejs`, which collided with this
+  branch's own, unrelated `PA-0036` — renumbered on merge, not restated.)
+- **PA-0038** — Before considering any new `lab/ground-truth-*/` directory
+  complete: (a) confirm all three required files (`labels.json`,
+  `injection-points.json`, `expectedresults.csv`) show as tracked/addable via
+  `git status`/`git add -n` — `.gitignore`'s blanket `*.csv` rule requires its
+  own `!lab/ground-truth-<app>/*.csv` negation per directory, so a file
+  present on disk can still be silently ignored and never reach the commit;
+  and (b) run that shape's own test module as its own explicit, separate
+  `pytest` invocation (not just as part of a claimed whole-repo run) and quote
+  its literal pass count in the change-control entry's Effectiveness section.
+  An aggregate whole-repo pass count does not, on its own, prove any specific
+  new test file was actually collected and exercised against the final
+  committed tree — sharpens PA-0040's related but narrower finding (that a
+  cross-cutting change needs the whole suite run, not just the files judged
+  directly relevant) for the case where even a claimed whole-repo pass turns
+  out inconsistent with the new file's own directory-completeness contract
+  (a new `lab/ground-truth-*/` directory missing a required sibling file,
+  e.g. `expectedresults.csv`, that `fuzzlab.labels.contract.load()` requires
+  unconditionally, compounded here by that file also being unreachable via
+  `git add` for lack of a `.gitignore` negation). (from BUG-0036)

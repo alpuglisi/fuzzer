@@ -1,0 +1,89 @@
+# ForgeCart real-page manifest (CC-LAB-0077), ruby_rails -- Phase C page/
+# route identity (docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §4/§9.5).
+#
+# Five real, coherent ForgeCart pages, each hosting exactly one of the four
+# shapes RailsEmitter Phase A/B already built (never a new module -- this
+# manifest is page identity, not new vulnerability-module work), at the real
+# URL fuzzlab.labgen.emitters.ruby_rails._REAL_PAGE_URL_BY_CELL_ID assigns
+# it. New cell IDs (LABGEN-RR-RP-0001..0005) -- the existing
+# LABGEN-RR-0001..0007 cells (Phase A/B's own illustrative/sample pairs,
+# still at /cell/<slug>) are untouched by this manifest and keep passing
+# their own existing tests unchanged.
+#
+# Mirrors php_laravel's own real-page precedent: one real URL hosts exactly
+# one deployed twin (never both a vulnerable and a secure cell at the same
+# URL -- that would collide in RouteAccumulator.render_file). Four of the
+# five real pages are the vulnerable twin (this is a deliberately vulnerable
+# lab target); the fifth (a second, distinct real Shopify webhook topic,
+# customers/update) is the secure twin, giving this app's own out-of-band
+# ground truth (lab/ground-truth-forgecart/) a genuine negative case, not an
+# all-positive set.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Storefront search -- reflects `?q=` unescaped into the results banner.
+  # Real page: /search (ForgeCart's storefront). See
+  # docs/research/site-architecture-survey-functionality-shopify.md §1's own
+  # caveat that storefront search internals are not independently confirmed
+  # beyond "the surface exists" -- a `/search?q=` box is the standard shape
+  # every storefront exposes regardless of that gap.
+  - cell_id: LABGEN-RR-RP-0001
+    class: xss
+    stack_profile: ruby_rails
+    route: { method: GET, path: /search }
+    sink_context:
+      family: html_body
+      required_neutralizations: [xss]
+    transform: []
+
+  # Webhook receiver, `orders/create` topic -- vulnerable: naive `==`
+  # compare of the recomputed HMAC-SHA256 (D20 `partial`: a real timing
+  # side channel, not a functional bypass -- see
+  # tests/test_labgen_ruby_rails_webhook_signature_live_boot.py's own
+  # module docstring for how the actual divergence is proven).
+  - cell_id: LABGEN-RR-RP-0002
+    class: webhook_signature
+    stack_profile: ruby_rails
+    route: { method: POST, path: /webhooks/orders/create }
+    sink_context:
+      family: webhook_signature_verification
+      required_neutralizations: [weak_signature_comparison]
+    transform: [naive_string_compare]
+
+  # Webhook receiver, `customers/update` topic -- secure: Rails' own
+  # ActiveSupport::SecurityUtils.secure_compare. A genuinely different real
+  # Shopify webhook topic (merchants subscribe per-topic in the real
+  # ecosystem), not a second endpoint duplicating the orders/create topic.
+  - cell_id: LABGEN-RR-RP-0003
+    class: webhook_signature
+    stack_profile: ruby_rails
+    route: { method: POST, path: /webhooks/customers/update }
+    sink_context:
+      family: webhook_signature_verification
+      required_neutralizations: [weak_signature_comparison]
+    transform: [constant_time_compare]
+
+  # Merchant-admin customer-account update -- CWE-915 mass assignment,
+  # vulnerable: unrestricted `permit!` lets an attacker also set the
+  # privileged `role` column via `user[role]` alongside the legitimate
+  # `user[bio]` field the form intends.
+  - cell_id: LABGEN-RR-RP-0004
+    class: mass_assignment
+    stack_profile: ruby_rails
+    route: { method: POST, path: /admin/customers/update }
+    sink_context:
+      family: orm_entity_bulk_assign
+      required_neutralizations: [mass_assignment]
+    transform: [permit_bang_unrestricted]
+
+  # Merchant-admin product bulk-import -- CWE-502 insecure deserialization,
+  # vulnerable: `YAML.unsafe_load` on an attacker-supplied `yaml_payload`
+  # body field honors a `!ruby/object:...` tag.
+  - cell_id: LABGEN-RR-RP-0005
+    class: insecure_deserialization
+    stack_profile: ruby_rails
+    route: { method: POST, path: /admin/products/import }
+    sink_context:
+      family: object_deserialization
+      required_neutralizations: [insecure_deserialization]
+    transform: [yaml_unsafe_load]

@@ -1,0 +1,4 @@
+# yaml_unsafe_load: flags the sink to parse {{ var_name }} with Psych's full
+# object-graph loader (YAML.unsafe_load) -- any `!ruby/object:...` tag in the
+# input is honored, constructing an attacker-chosen Ruby object. Safety
+# matrix: effect=no_effect.

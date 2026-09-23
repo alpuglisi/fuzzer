@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "target": "ruby_rails_forgecart",
+  "cases": [
+    {
+      "case_id": "FCART-0001",
+      "url": "/search",
+      "method": "GET",
+      "param": "q",
+      "location": "query",
+      "vuln_class": "xss-reflected",
+      "sink_context": "html",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "stack": "ruby_rails",
+      "notes": "storefront search box; q echoed unescaped into the results banner (RailsEmitter ('xss','html_body') shape, LABGEN-RR-RP-0001)"
+    },
+    {
+      "case_id": "FCART-0002",
+      "url": "/webhooks/orders/create",
+      "method": "POST",
+      "param": "X-Shopify-Hmac-SHA256",
+      "location": "header",
+      "vuln_class": "webhook_signature",
+      "sink_context": "webhook_signature",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "stack": "ruby_rails",
+      "notes": "orders/create webhook topic; naive '==' compare of the recomputed HMAC-SHA256 (LABGEN-RR-RP-0002) -- a real timing side channel (D20 'partial'), not a functional accept/reject bypass: a single well-formed request always verifies correctly either way, see tests/test_labgen_ruby_rails_webhook_signature_live_boot.py"
+    },
+    {
+      "case_id": "FCART-0003",
+      "url": "/webhooks/customers/update",
+      "method": "POST",
+      "param": "X-Shopify-Hmac-SHA256",
+      "location": "header",
+      "vuln_class": "webhook_signature",
+      "sink_context": "webhook_signature",
+      "expected_vulnerable": false,
+      "rendering": "server-json",
+      "stack": "ruby_rails",
+      "notes": "customers/update webhook topic (a second, distinct real Shopify topic, not a duplicate endpoint); ActiveSupport::SecurityUtils.secure_compare (LABGEN-RR-RP-0003) -- this app's one negative real-page case"
+    },
+    {
+      "case_id": "FCART-0004",
+      "url": "/admin/customers/update",
+      "method": "POST",
+      "param": "user[role]",
+      "location": "body",
+      "vuln_class": "mass_assignment",
+      "sink_context": "mass_assignment",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "stack": "ruby_rails",
+      "notes": "merchant-admin customer-account update; unrestricted permit! (CWE-915, LABGEN-RR-RP-0004) lets an attacker also set the privileged role column"
+    },
+    {
+      "case_id": "FCART-0005",
+      "url": "/admin/products/import",
+      "method": "POST",
+      "param": "yaml_payload",
+      "location": "body",
+      "vuln_class": "insecure_deserialization",
+      "sink_context": "deserialization",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "stack": "ruby_rails",
+      "notes": "merchant-admin bulk product import; YAML.unsafe_load (CWE-502, LABGEN-RR-RP-0005) honors a !ruby/object:... tag"
+    }
+  ]
+}

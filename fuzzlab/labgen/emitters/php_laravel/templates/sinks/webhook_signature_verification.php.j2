@@ -1,0 +1,6 @@
+// The event is accepted and "processed" -- illustrative: only reached if
+// whichever signature-verification transform ran didn't already return a
+// 403 above. `value_expr` is the raw body; echoed via its length only --
+// this sink never escapes/filters the value itself, per this stack's own
+// "a sink never escapes anything itself" convention.
+$rows = ['status' => 'accepted', 'received_bytes' => strlen({{ value_expr }})];

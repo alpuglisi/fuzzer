@@ -1,0 +1,11 @@
+// unchecked_url_fetch: the pasted URL is fetched server-side with no
+// validation of its host/scheme at all -- reaching internal/otherwise-
+// unreachable network targets (SSRF). A bounded stream-context timeout is
+// still applied (a generated cell must never hang indefinitely on a
+// slow/dead target, independent of this op's own security defect).
+// Safety matrix: effect=no_effect.
+$__unfurlContext = stream_context_create(['http' => ['timeout' => 5]]);
+$__unfurlContent = @file_get_contents({{ value_expr }}, false, $__unfurlContext);
+if ($__unfurlContent === false) {
+    $__unfurlContent = '';
+}

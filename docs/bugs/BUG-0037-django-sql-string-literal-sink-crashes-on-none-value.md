@@ -1,4 +1,4 @@
-# BUG-0034 — `django` emitter's `sql_string_literal` vulnerable sink crashes (500) instead of failing safely (404) on a missing POST parameter
+# BUG-0037 — `django` emitter's `sql_string_literal` vulnerable sink crashes (500) instead of failing safely (404) on a missing POST parameter
 
 ## Description
 
@@ -133,9 +133,9 @@ Re-ran `tests/test_labgen_django_live_boot_phase_b.py` for real after the
 fix: all 4 tests pass, including the `PA-0034` adversarial test that
 originally caught this (now observing the correct real `404`).
 
-## Preventive action (PA-0036, added to `docs/PREVENTIVE_ACTIONS.md`)
+## Preventive action (PA-0039, added to `docs/PREVENTIVE_ACTIONS.md`)
 
-**PA-0036 — a cross-language module port must re-verify every
+**PA-0039 — a cross-language module port must re-verify every
 language-specific runtime-behavior assumption the source language's shape
 relied on, not just its syntax/structure; a possibly-absent tainted value
 concatenated with `+`/string-building in a new sink must be defensively

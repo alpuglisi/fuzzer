@@ -1,0 +1,7 @@
+# Real ActiveRecord bulk-assignment write: every key present in
+# {{ var_name }} at this point (unrestricted when permit_bang_unrestricted
+# ran, allowlisted when strong_params_explicit_allowlist ran) becomes an
+# attribute this write sets. The sink never filters anything itself.
+user = User.find_by!(username: "shopper1")
+user.update!({{ var_name }})
+render json: user.reload.as_json(only: [:id, :username, :bio, :role])

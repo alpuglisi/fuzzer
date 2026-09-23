@@ -159,7 +159,7 @@ tracked in the requirements files, not here.
   `generalizes` verdict — the generalization evidence. The live run against an external
   validation lab is on-host; the manifest-generated second target plugs in as a
   `TargetSpec`.
-- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- four emitters (php_current, python_fastapi, php_laravel, django) built, django at Phase-A/foundation depth; node_express at Tier-A depth; Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself done]` (D8, target shape pinned by **D20**/
+- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- seven emitters (php_current, python_fastapi, php_laravel, node_express, django, go_net_http, spring_boot) built to varying depth: node_express at Tier-A depth, django at Phase-A/foundation depth (category 2's PicTrail pick), go_net_http at Phase A + one Phase B increment (category 4's Twitch pick), spring_boot at TrackerNest's full three-cell depth (category 3's Atlassian pick) now also hosting category 4's one ported Netflix cell per the §9.2a consolidation (java_spring_boot itself retired); ruby_rails (category 1's Shopify pick, docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md) now has its full Phase A-E built and proven for real: Phase A skeleton + live-boot harness (CC-LAB-0071/FR-LAB-65), Phase B's three vulnerability modules -- webhook-signature verification, CWE-915 mass assignment, CWE-502 insecure deserialization (CC-LAB-0072..0075/FR-LAB-66..68) -- Phase C's coherent "ForgeCart" app identity (5 real pages + 5 inert surrounding pages, its own lab/ground-truth-forgecart/ contract, CC-LAB-0080/FR-LAB-84), Phase D's whole-app (all 12 cells, one boot) live-boot conformance plus a real dependency-pinning defect found and fixed along the way (CC-LAB-0081/FR-LAB-85, BUG-0035/PA-0037), and Phase E's real fuzzlab.harness.multitarget.TargetSpec wiring with a real, scored ScoreReport genuinely confirming the app's real XSS page (CC-LAB-0082/FR-LAB-86); Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself done]` (D8, target shape pinned by **D20**/
   `CR-LAB-0001`): the "lab as a compiler" — one manifest plus a safety matrix,
   seed, and env-profile generate the app, labels, docs, and oracle tests, with a
   **binary** verdict derived from `(transform, sink context)` (a partially
@@ -333,7 +333,59 @@ tracked in the requirements files, not here.
   app byte-identically (`LAB_PHASE_0_PLAN.md`'s original, literal wording of
   the Phase 0 exit criterion) remains planned in that literal sense — no tool
   in this repo diffs generated source against `puppy-fort-factory/`'s actual
-  file bytes, for either `php_current` or `php_laravel`. **Superseded for the
+  file bytes, for either `php_current` or `php_laravel`. A **fourth stack
+  emitter** (`fuzzlab/labgen/emitters/node_express/`, L-P3.1, Tier-A depth)
+  is built: Express + `mysql2`, the same three value-context shapes
+  `php_current`/`python_fastapi` prove, via its own fully independent
+  module-composition system; a `route`-category accumulator method
+  (`render_route_accumulator`, not part of the base `Emitter` ABC) builds
+  the shared `app.js` route-registration file, fed by one fragment per
+  supported cell sorted by cell ID. A **fifth stack emitter**
+  (`fuzzlab/labgen/emitters/go_net_http/`, category 4 second-target pilot's
+  `CC-LAB-0170`/`FR-LAB-76`, 2026-09-22) is this project's first Go stack —
+  standard-library `net/http` only, Phase A depth (one illustrative
+  shape: an HMAC-signature-verified webhook receiver, CWE-347, reusing
+  `lab/safety_matrix.yaml`'s existing `webhook_signature_verification`
+  family) with a real checked-in skeleton, a real `GoLiveBootHarness`
+  (`fuzzlab/labgen/conformance/go_live_boot.py`, no separate
+  install-dependencies step since `go build` resolves and compiles in one),
+  and Tier 0 (`go vet`/`gofmt -l`)/Tier 3 conformance passing — the Go
+  analogue of `ruby_rails`'s own Phase-A dispatch for category 1. Deferred
+  to Phase B for this stack: a per-run database (this Phase A's one shape
+  is stateless), CWE-918 (SSRF), and the richer Twitch EventSub message-ID/
+  timestamp/replay-window checks. **Phase B's first increment landed**
+  (`CC-LAB-0172`/`FR-LAB-92`): a second shape, `("ssrf",
+  "server_side_http_fetch")` — a clip-thumbnail-fetch proxy, vulnerable
+  (`unchecked_url_fetch`, no validation) vs. secure
+  (`scheme_and_resolved_ip_allowlist`, rejects non-`https` schemes and
+  loopback/private/link-local *resolved* IPs) — reusing the safety
+  matrix's existing family/ops, with a genuinely different module-
+  composition shape from the webhook-signature cell (the manifest op
+  selects a **sink** module directly, since the vulnerable/secure
+  difference is one inseparable validate-then-fetch operation, not a
+  value transform); both sinks use a bounded `http.Client` so neither
+  twin's generated code can hang. Still deferred: the per-run database
+  and the richer EventSub header checks. **The originally-planned sixth
+  stack emitter, `java_spring_boot` (category 4 second-target pilot's
+  `CC-LAB-0171`/`FR-LAB-77`, 2026-09-22), was retired 2026-09-23** per the
+  project owner's §9.2a Java/Spring Boot consolidation decision: rather
+  than maintaining a second, shallower Java/Spring Boot emitter alongside
+  category 3's more mature `spring_boot` package (TrackerNest — SSTI, XXE,
+  and its own insecure-deserialization cell, `CC-LAB-0130`-`0132`), the one
+  Netflix cell (`CC-LAB-0171`'s Jackson-polymorphic-deserialization
+  endpoint, CWE-502) was ported into `spring_boot` and `java_spring_boot`
+  was deleted entirely (`CC-LAB-0173`/`FR-LAB-93`). The port surfaced a
+  real Jackson major-version API break (Spring Boot 4.1.1, `spring_boot`'s
+  pin, resolves Jackson 3's `tools.jackson.databind.*`, not the Jackson 2
+  `com.fasterxml.jackson.databind.*` `java_spring_boot`'s code used) and
+  required extending `SpringBootEmitter`'s dispatch (a new
+  `_SOURCE_OVERRIDE_BY_OP` map, since the ported ops need a different
+  source module than TrackerNest's own ops for the same shape tuple) —
+  see `CC-LAB-0173`'s own change-control entry for the full technical
+  record. Category 3's `spring_boot` package remains this project's one
+  canonical Java/Spring Boot stack going forward; a future category
+  researching a Java/Spring Boot pick reuses it rather than building a
+  third. **Superseded for the
   Layer-A/cutover purpose by D-open-1** (`docs/LAB_IMPLEMENTATION_PLAN.md`
   §4.3.6.7, decided 2026-09-22): the operative exit bar for closing Phase 0 on
   the 16 `PFF-` real-page cases is functional **parity/coverage**, not a
@@ -422,6 +474,105 @@ tracked in the requirements files, not here.
   server round trip to differentiate on, only the served markup/script's
   `innerHTML`/`textContent` shape. `PFF-0007`/`PFF-0008` are **no longer**
   in `lab/ground-truth/migration-exemptions.yaml` (covered, not exempt).
+
+  **Multi-category, multi-app expansion begun (`docs/LAB_MULTI_CATEGORY_
+  SECOND_TARGETS_PLAN.md` §9, category 5 pilot's first increment,
+  `CC-LAB-0210`/`FR-LAB-78`/`FR-LAB-79`, 2026-09-22).** The `php_laravel`
+  emitter now renders more than one lab-app *identity*, not just one
+  (`puppy-fort-factory`'s migrated pages plus illustrative pages): a new,
+  standalone Booking.com-themed app (`lab/manifests/
+  booking_open_redirect_sample.yaml`) with its own out-of-band ground truth
+  in its own directory (`lab/ground-truth-booking-clone/`, opaque `BKNG-`
+  case-ID prefix — never `PFF-*`), the first real precedent for
+  `fuzzlab.labels.contract.load()` serving more than one `ground_truth_dir`
+  and for `fuzzlab.labgen.cutover_gate`'s `PFF-`-scoped coverage gate
+  correctly ignoring a second app's cases by construction. Also the shape
+  inventory's first genuinely new vulnerability class since DOM-XSS above:
+  `("open_redirect", "http_redirect_location")` (CWE-601) — a server-issued
+  HTTP redirect (`redirect()`) whose real-code sink is the method's own
+  terminal statement, the first shape needing a third `complexity` module
+  (`redirect_response`) because neither `single_statement` nor `render_only`
+  fits it. `fuzzlab/labels/schemas/labels.schema.json`'s `vuln_class`/
+  `sink_context` enums widened additively (`open_redirect`/`redirect`) to
+  carry it. This is the pilot category of a planned 12-app expansion (2 apps
+  per researched site-category, 6 categories); category 1 (E-commerce,
+  Shopify/Rails + Walmart/Node) is piloting concurrently on its own branch,
+  categories 2-6 are open. See the plan doc's own §9.4 tracker for live,
+  per-category status rather than restating it here.
+
+  **Second increment (`CC-LAB-0211`/`FR-LAB-90`/`FR-LAB-91`, 2026-09-23):**
+  `("csv_formula_injection", "csv_cell_value")` (CWE-1236, a CSV/report
+  export response whose own code is likewise the method's terminal
+  statement) landed on the same Booking.com app, with `BKNG-0002` appended
+  to the existing ground-truth directory rather than a new one (the
+  directory/schema supports more than one case natively). This increment's
+  own review gate drove a naming correction to the first one's design: the
+  third complexity module (`redirect_response`) turned out to already be
+  fully sink-agnostic in implementation, so it was renamed
+  `terminal_response` and is now shared by both `http_redirect_return` and
+  the new `csv_export_row` sink, matching `single_statement`/`render_only`'s
+  own established convention of a structurally-named, shared complexity
+  module rather than one minted per sink type.
+
+  **Third increment (`CC-LAB-0212`/`FR-LAB-100`/`FR-LAB-101`, 2026-09-23):**
+  `("price_integrity_bypass", "payment_charge_amount")` reuses an
+  already-existing `lab/safety_matrix.yaml` concern/sink family
+  (`CC-LAB-0063`, previously rendered by no emitter on any stack) — a
+  checkout charge whose secure twin recomputes the total server-side from
+  a fixed rate table keyed by a non-tainted `room_type` parameter, never
+  from the client-submitted amount, closing Booking.com's shortlisted
+  PHP-shape roster at 3 of 3 unblocked shapes. This increment's own
+  `bookings` table (id, room_type, total_amount) was added to
+  `fuzzlab.labgen.conformance.live_boot._SCHEMA_SQL`, additive alongside
+  the existing `products`/`posts`/`users` tables — the first schema
+  addition any category-5 increment has needed.
+
+  **`spring_boot` package ported for Expedia's Java half** (`CC-LAB-0213`/
+  `FR-LAB-94`, 2026-09-23): per the plan doc's §9.2a cross-category
+  consolidation decision, category 5's Expedia app (Java/Spring Boot)
+  reuses category 3's `spring_boot` emitter package (built for TrackerNest;
+  already also the host of category 4's ported Netflix Jackson-
+  deserialization cell) rather than a from-scratch build. Since this
+  project's multi-branch model keeps each category's own new package
+  private to its branch until a PR merge, the package did not exist on
+  this branch before this entry — it was mechanically ported (`git
+  checkout <source-branch> --`, unmodified) from
+  `origin/claude/category-4-build-t9uz3y`, the more current of the two
+  possible sources. Running the ported test suite (rather than trusting
+  it clean) surfaced two small, real gaps: `lab/safety_matrix.yaml` was
+  missing two rows present on the source branches (the
+  `xml_external_entities_disabled`/`xml_parse_input` secure counterpart,
+  and the `jackson_default_typing_deserialize`/
+  `jackson_typed_allowlist_deserialize` pair for `object_deserialization`)
+  — `safety_matrix.yaml` being a shared file each category branch edits
+  independently between cross-branch syncs. Both added additively; all 41
+  ported tests (33 non-live-boot + 8 real live-boot, a genuine `mvn
+  package` + `java -jar` boot + HTTP round trip) then pass. This closes
+  the CWE-502 Jackson-deserialization half of Expedia's shortlist for
+  free (the ported Netflix cell already models the exact idiom Expedia's
+  own research shortlisted); Spring Data SpEL/`@Query` injection remains
+  fully greenfield project-wide and is separate follow-on work.
+
+  **Expedia's first own shape: `spel_injection`** (`CC-LAB-0214`/
+  `FR-LAB-113`/`FR-LAB-114`, 2026-09-23) — CWE-917, a hotel-search
+  `sortBy` parameter evaluated as a Spring Expression Language (SpEL)
+  expression. Genuinely new concern class (`lab/safety_matrix.yaml` gains
+  `spel_injection`/`spel_expression_evaluate`), grounded in CVE-2018-1273
+  (Spring Data Commons) and CVE-2022-22980/CVE-2026-41717 (Spring Data
+  MongoDB). Models Spring's own documented fix directly: both twins parse
+  and evaluate the identical tainted SpEL string; only the
+  `EvaluationContext` differs (`StandardEvaluationContext`, unrestricted,
+  vs. `SimpleEvaluationContext`, which rejects type references/method
+  invocation/bean resolution). The pre-change review gate's adequacy pass
+  caught a real, blocking classification error before implementation —
+  the draft had reasoned by a false SSTI-shape analogy (no spring_boot
+  `static_precheck` precedent exists at all) to the wrong conclusion; the
+  correct, adequacy-review-corrected classification is UNINFORMATIVE,
+  since both twins share one identical call shape a generic taint
+  checker cannot distinguish. Establishes Expedia's own cell-ID prefix
+  (`LABGEN-EXP-`) and its own dedicated ground-truth directory
+  (`lab/ground-truth-expedia-clone/`, `EXPD-` case prefix) — the first
+  shape built specifically for Expedia rather than reused/ported.
 
   **The parity/cutover coverage gate** (`CC-LAB-0053`/`FR-LAB-51`,
   `fuzzlab/labgen/cutover_gate.py`, plan §4.3.6.6 point 3) is the precondition
@@ -539,7 +690,7 @@ tracked in the requirements files, not here.
   executed live-boot proof (`tests/test_labgen_django_live_boot_phase_b.py`)
   includes a `PA-0034` adversarial test (a mismatched HTTP method against
   the newly CSRF-exempt view) that **found and fixed a real code defect**
-  (`BUG-0034`/`PA-0036`: the vulnerable sink concatenated a possibly-`None`
+  (`BUG-0037`/`PA-0039`: the vulnerable sink concatenated a possibly-`None`
   value without a `str()` cast, a language-specific behavior — Python's
   `+` raises on `str`+`None` where JS/PHP's equivalent operators coerce —
   missed when porting `node_express`'s own sink shape across the language

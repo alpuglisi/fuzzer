@@ -1,7 +1,7 @@
 # Target Lab and Ground Truth — Requirement Specification
 
 Component code: **LAB** · Status: `[built; generator is the single source of the PHP lab since L-P3.3c-CUT (2026-09-22) -- the hand-built app is retired]`
-· Last updated: 2026-09-22
+· Last updated: 2026-09-23
 
 Related: `ARCHITECTURE.md` #1; `DECISIONS_AND_ROADMAP.md` (D7, D8, D9, D10);
 `./change-control.md`.
@@ -1977,7 +1977,7 @@ lane) can submit a payload as
   feature's own SQLi demonstration — a mismatched HTTP method, `GET`
   instead of `POST`, against the newly `@csrf_exempt`-decorated `/api/login`
   view) confirmed the CSRF exemption does not silently widen the attack
-  surface — this test **found a real code defect** (`BUG-0034`/`PA-0036`:
+  surface — this test **found a real code defect** (`BUG-0037`/`PA-0039`:
   the vulnerable sink concatenated a possibly-`None` value without a
   `str()` cast, crashing with a real `500` instead of the expected `404`
   on a `GET` request), fixed before this entry landed, and now passing.
@@ -2176,6 +2176,1625 @@ lane) can submit a payload as
   request at the exact URL/method/param it names, pointed at the
   internal-service fixture.
 
+- **FR-LAB-64** *(prototype pollution, CWE-1321, `node_express`; `CC-LAB-0070`,
+  2026-09-22).* Per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a's
+  decided Category-1 (e-commerce) Walmart/Node cell list, the `node_express`
+  emitter gained a real, dedicated vulnerable/secure pair for CWE-1321 --
+  distinct from the incidental `cwe_unique` mention already present in
+  `docs/research/corpus-examples/insecure-deserialization/node/manifest.yaml`
+  (a bracket-lookup gadget side effect, never an actual pollution
+  mechanism):
+  - A genuinely new `(vuln_class, sink_context.family)` shape,
+    `("prototype_pollution", "object_property_bulk_set")`, at a BFF-style
+    `POST /api/preferences` endpoint that deep-merges the whole JSON
+    request body onto a live, in-memory preferences object.
+    `lab/safety_matrix.yaml` gained one new sink family
+    (`object_property_bulk_set`, required concern `proto_pollution` --
+    reusing the concern-id vocabulary `lab/patterns/sourcing/crosswalk.yaml`
+    already named for this class) and two new ops, both additive under the
+    existing `version: 1`: `unguarded_deep_merge` (`no_effect` -- no
+    `__proto__`/`constructor`/`prototype` key guard) and
+    `proto_key_filtered_merge` (`neutralises`, `neutralizes:
+    [proto_pollution]` -- those three keys are skipped before ever reaching
+    the merge's own assignment).
+  - New modules -- `post_body_json` (the whole-body source, vs. one named
+    field), `unguarded_deep_merge`/`proto_key_filtered_merge` (the two
+    merge transforms) and `object_property_bulk_set` (the sink, which never
+    itself decides which keys are legitimate, matching every other sink's
+    convention) -- registered in **both** `fuzzlab.labgen.modules`
+    (vocabulary-only there; no PHP emitter renders this JS/Node-runtime-
+    specific mechanism, since a PHP array has no `Object.prototype`-style
+    shared prototype chain for CWE-1321 to affect at all) and
+    `fuzzlab.labgen.emitters.node_express.modules` (rendered, via a new
+    `_MODULE_SET_BY_SHAPE` entry) -- the same "registered in the shared
+    vocabulary even where only one emitter renders it" discipline
+    `L-P3.3c-DOM`'s `dom_url_source` established.
+  - New sink family `object_property_bulk_set` is genuinely distinct from
+    the existing `orm_entity_bulk_assign` (mass-assignment) family: that
+    family writes a *persisted* entity through a SQL identifier-charset
+    guard; this one writes directly onto a *live in-memory* JS object,
+    where an attacker-chosen `__proto__`/`constructor`/`prototype` key can
+    escape the target object entirely and land on the shared prototype
+    chain -- a mechanism SQL has no equivalent for at all.
+  - New manifest `lab/manifests/prototype_pollution_node_sample.yaml`: two
+    cells (`LABGEN-PP-0001` vulnerable / `LABGEN-PP-0002` secure),
+    `stack_profile: node_express` -- no sibling manifest for another stack,
+    since this shape has no cross-stack equivalent (unlike
+    `mass_assignment_sample.yaml`'s `php_laravel` twin).
+  - `fuzzlab.labgen.conformance.static_precheck.STATIC_PRECHECK_BY_SHAPE`
+    gained `("prototype_pollution", "object_property_bulk_set") ->
+    UNINFORMATIVE` -- the conservative default; unlike some of this
+    registry's other rows, no Node-oriented static tool has actually been
+    spot-checked against this shape in this project yet, so the row makes
+    no claim about what a real tool could or could not find.
+  - Proved for real, not simulated: both twins are rendered and each
+    executed as a real `node` subprocess (Node v22.22.2, confirmed on the
+    build host) against a real `{"__proto__": {"polluted": true}}` payload,
+    asserting `Object.prototype`'s own state afterward -- `true` for the
+    vulnerable twin, `false` for the secure twin -- plus a third check that
+    both twins still merge an ordinary, non-adversarial key correctly (not
+    a stub that merely rejects the whole body). See
+    `tests/test_labgen_prototype_pollution.py`.
+  - CWE-1333 (ReDoS), the second Node cell §9.4a's Category-1 decision
+    names, was explicitly deferred to a later, separate lane at the time
+    this requirement was written (a different, timing-differential oracle
+    mechanism) -- now built, see **FR-LAB-69** below.
+
+- **FR-LAB-65** *(`ruby_rails` emitter Phase A: real skeleton + live-boot
+  harness; `CC-LAB-0071`, 2026-09-22).* This project's first Ruby-on-Rails
+  stack (category 1's Shopify pick,
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §2/§9.4a/§9.5), scoped to
+  Phase A only -- the real bootable skeleton and live-boot harness, proven
+  against one illustrative cell; the real Rails-idiom vulnerability modules
+  (webhook-signature, CWE-915 mass assignment, CWE-502 deserialization) are
+  a separate, later requirement/lane.
+  - New `fuzzlab.labgen.emitters.ruby_rails.RailsEmitter` (an
+    `Emitter` implementation): renders exactly one
+    `(vuln_class, sink_context.family)` shape, `("xss", "html_body")` --
+    a query-string parameter (`get_param`) reflected, unescaped
+    (`html_body_echo`), into a controller action's rendered view
+    (`render_only`) -- and one `Cell.context_depth`, `"direct"`. Reuses the
+    shared `get_param`/`identity`/`html_entity_escape`/`html_body_echo`/
+    `render_only` module-name vocabulary `php_current`/`php_laravel`
+    already use (not yet wired into `fuzzlab.labgen.minimal_pair`'s
+    category map, which is `php_current`-module-registry-sourced per the
+    open question this component's own requirements already record for
+    `php_laravel` -- widening it for a third stack is left to whichever
+    lane needs it, same as that existing note says).
+  - New `fuzzlab.labgen.emitters.ruby_rails.route_accumulator.
+    RouteAccumulator`: the Rails `config/routes.rb` analogue of
+    `php_laravel.route_accumulator`'s `CR-LAB-0001` Addendum D pattern
+    (`get '<path>', to: '<controller>#<action>' # cell: <id>` fragments,
+    always sorted by cell ID, duplicate-URL detection) -- adapted for
+    Rails' own `to: "controller#action"` string convention rather than
+    Laravel's `[Controller::class, 'action']` array form.
+  - New checked-in skeleton
+    `fuzzlab/labgen/emitters/ruby_rails/stack/skeleton/`: a real, trimmed
+    `rails new --minimal` output, Rails `8.1.3.1` (the verified-current
+    stable release on rubygems.org as of 2026-09-22, not a guessed `7.x`),
+    with one real migration (`db/migrate/..._create_users.rb` + a `User`
+    model) for the minimal per-run-database schema this requirement's own
+    dispatch instructions call for at minimum, though no Phase A cell reads
+    or writes it yet. Exact provenance/trim list in
+    `fuzzlab/labgen/emitters/ruby_rails/stack/README.md`.
+  - New `fuzzlab.labgen.conformance.rails_live_boot.RailsLiveBootHarness`
+    (`rails_boot_available()`): the Rails port of
+    `conformance.live_boot.LiveBootHarness`. Real `bundle install`, a real
+    `bin/rails db:prepare` against a real per-run SQLite database, a real
+    `bin/rails server` (Puma) boot, and real HTTP requests via the same
+    `urllib.request`-based client pattern (never a new HTTP client
+    abstraction). `rails_boot_available()`'s network probe
+    (`_bundle_network_probe`) runs a real, bounded `bundle lock` (the
+    actual dependency-resolution phase of `bundle install`, not a raw
+    socket/DNS check) against a throwaway `Gemfile`, per PA-0035 -- applied
+    correctly for this package manager from the start, not retrofitted
+    after a `BUG-0033`-shaped defect. Implements `Tier1Client`. Every real
+    subprocess step has its own bounded timeout, enforced at a shared
+    `_run()` helper.
+  - Proved for real, not simulated: `tests/test_labgen_ruby_rails_live_boot.py`
+    (1 test, `@pytest.mark.slow`, skip-guarded on `rails_boot_available()`)
+    assembles, real-`bundle install`s, real-migrates, real-boots, and sends
+    a real HTTP request to one illustrative cell, asserting the real
+    response body contains the unescaped payload it sent -- plus a real
+    `200` from Rails' own `/up` health endpoint. Passed for real: 1 passed
+    in ~4.9s.
+  - A real code defect was found and fixed during this same change (Rails'
+    `ActiveSupport::Inflector#underscore` does not round-trip a
+    cell-ID-derived class name whose digits abut a letter, so the
+    generated controller's bare `render :show` resolved the wrong view
+    directory) -- `docs/bugs/BUG-0034-*.md`/`PA-0036`; fixed by rendering
+    via an explicit `render template: "<path>"` literal instead.
+  - Explicitly out of this requirement's scope (a later, separate lane):
+    the Shopify-research-shortlisted vulnerability modules themselves,
+    widening `SUPPORTED_CONTEXT_DEPTHS`/`_MODULE_SET_BY_SHAPE` to full
+    depth, wiring this stack into `multitarget.py`/Tier 2, and touching
+    `lab/safety_matrix.yaml` for this stack.
+    **Now built -- see FR-LAB-66/67/68 below.**
+
+- **FR-LAB-66** *(`ruby_rails` Phase B, webhook-signature verification;
+  `CC-LAB-0072`/`CC-LAB-0075`, 2026-09-22).* First code-generation
+  implementation, in any stack, of the existing
+  `webhook_signature_verification` sink family (`lab/safety_matrix.yaml`)
+  -- Shopify's own `X-Shopify-Hmac-SHA256` mechanism
+  (`docs/research/site-architecture-survey-functionality-shopify.md` §1,
+  plan §9.4a's "Decided" block, item 1).
+  - New shape `("webhook_signature", "webhook_signature_verification")` in
+    `RailsEmitter._MODULE_SET_BY_SHAPE`. New source
+    `raw_request_body` (`request.body.read`) and new sink
+    `webhook_signature_verification` (recomputes an HMAC-SHA256 over the
+    raw body with a fixed lab secret and compares it to the
+    `X-Shopify-Hmac-SHA256` header). Reuses the existing
+    `naive_string_compare`/`constant_time_compare` op vocabulary verbatim
+    (`lab/safety_matrix.yaml` already had these rows from an earlier,
+    Node-only corpus pass; no new op minted).
+  - New manifest `lab/manifests/webhook_signature_rails_sample.yaml`
+    (`LABGEN-RR-0002` vulnerable/naive-`==`, `LABGEN-RR-0003` secure/
+    `ActiveSupport::SecurityUtils.secure_compare`).
+  - Proved for real, two ways
+    (`tests/test_labgen_ruby_rails_webhook_signature_live_boot.py`): (1) a
+    real HTTP round trip against both booted twins, forging a real valid
+    HMAC and a tampered one, confirming both twins correctly accept/reject
+    (the naive-vs-constant-time difference is a timing side channel, not a
+    functional bypass, per `lab/safety_matrix.yaml`'s own `partial`/D20
+    framing); (2) a real, isolated Ruby timing microbenchmark
+    (`RailsLiveBootHarness.run_ruby`, new in this change -- see
+    `CC-LAB-0075`) run inside the booted cell's own `bundle exec`,
+    demonstrating that plain `String#==` is measurably timing-variable by
+    early-vs-late mismatch position (~4.8x ratio measured) while the real
+    `ActiveSupport::SecurityUtils.secure_compare` from this app's own
+    resolved gem is not (~1.02x). Deliberately uses large (200,000-byte)
+    synthetic strings to make the effect measurable within a bounded,
+    non-flaky test, not this cell's own ~44-byte digest.
+
+- **FR-LAB-67** *(`ruby_rails` Phase B, CWE-915 mass assignment;
+  `CC-LAB-0073`/`CC-LAB-0075`, 2026-09-22).* First Ruby/Rails-idiomatic
+  instance of the existing `orm_entity_bulk_assign` sink family
+  (`lab/safety_matrix.yaml`, previously implemented only by `php_laravel`'s
+  own `DB::table(...)->update()` twin) -- Rails' own unrestricted
+  `permit!` vs an explicit `permit(:a, :b)` strong-parameters allowlist
+  (plan §9.4a's "Decided" block, item 2).
+  - New shape `("mass_assignment", "orm_entity_bulk_assign")` in
+    `RailsEmitter._MODULE_SET_BY_SHAPE`. New source `all_params_nested`
+    (`params.require(:user)`) and two new, Rails-strong-parameters-
+    specific ops in `lab/safety_matrix.yaml`/`ruby_rails.modules`:
+    `permit_bang_unrestricted` (`no_effect`) and
+    `strong_params_explicit_allowlist` (`neutralises`,
+    `[mass_assignment]`) -- genuinely new, since no other stack's op
+    vocabulary already names Rails' own `permit!` escape hatch. New sink
+    `orm_entity_bulk_assign` (Rails' own `ActiveRecord#update!` against
+    the checked-in `users` table).
+  - Extends the FR-LAB-65 skeleton with a new migration
+    (`db/migrate/20260922000001_add_role_to_users.rb`) adding the one
+    privilege-relevant column (`role`) the pair needs, seeding one real
+    `shopper1` row via the migration's own `up` block (this stack's
+    per-run-SQLite analogue of `php_laravel`'s `LiveBootHarness`-side
+    `REAL_SCHEMA_SQL` seed).
+  - New manifest `lab/manifests/mass_assignment_rails_sample.yaml`
+    (`LABGEN-RR-0004` vulnerable, `LABGEN-RR-0005` secure).
+  - Proved for real
+    (`tests/test_labgen_ruby_rails_mass_assignment_live_boot.py`): a real
+    HTTP PATCH against each booted twin with a `role` field alongside the
+    legitimate `bio` field -- the vulnerable twin's real ActiveRecord write
+    sets `role` to the attacker's value (`"admin"`), the secure twin's real
+    write silently drops it (stays `"customer"`). Each twin gets its own
+    fresh harness (and therefore its own fresh per-run database) so one
+    twin's write cannot leak into the other's assertion.
+
+- **FR-LAB-68** *(`ruby_rails` Phase B, CWE-502 insecure deserialization;
+  `CC-LAB-0074`/`CC-LAB-0075`, 2026-09-22).* First Ruby/Psych instance of
+  the existing `object_deserialization` sink family
+  (`lab/safety_matrix.yaml`, not previously implemented by any emitter in
+  code) -- `YAML.unsafe_load` vs `YAML.safe_load`, CVE-2013-0156's own
+  mechanism applied directly rather than through Rails' historical XML-
+  parameter-parser entry point (plan §9.4a's "Decided" block, item 3).
+  - New shape `("insecure_deserialization", "object_deserialization")` in
+    `RailsEmitter._MODULE_SET_BY_SHAPE`. New source `post_param`
+    (reused shared-vocabulary name). Two new Psych-specific ops in
+    `lab/safety_matrix.yaml`/`ruby_rails.modules`: `yaml_unsafe_load`
+    (`no_effect`) and `yaml_safe_load` (`neutralises`,
+    `[insecure_deserialization]`). New sink `object_deserialization`
+    (reports the parsed value's real Ruby class, or the raised exception's
+    class, as JSON).
+  - `app/controllers/application_controller.rb` (the FR-LAB-65 skeleton)
+    now `require "ostruct"` globally, so a `!ruby/object:OpenStruct` YAML
+    tag is loadable at all -- required for both twins, since requiring a
+    stdlib class is not itself the vulnerability.
+  - New manifest `lab/manifests/insecure_deserialization_rails_sample.yaml`
+    (`LABGEN-RR-0006` vulnerable, `LABGEN-RR-0007` secure).
+  - Proved for real
+    (`tests/test_labgen_ruby_rails_insecure_deserialization_live_boot.py`):
+    a real HTTP POST carrying a `!ruby/object:OpenStruct` YAML payload --
+    the vulnerable twin's real response reports `parsed_class: "OpenStruct"`
+    (an attacker-chosen Ruby object was actually constructed server-side);
+    the secure twin's real response reports
+    `error: "Psych::DisallowedClass"` (rejected before construction). A
+    third test confirms both twins still parse ordinary plain YAML
+    identically (the minimal-pair invariant, proven over a real HTTP round
+    trip).
+
+- **CC-LAB-0075 cross-reference** *(shared Phase-B harness/tooling
+  infrastructure the three requirements above depend on, 2026-09-22).*
+  Not a new vulnerability shape itself: `RailsLiveBootHarness` gained
+  `raw_body`/`headers` params on `request`/`post` (a webhook-signature
+  check needs the exact raw bytes it signs, which `data`'s own
+  `application/x-www-form-urlencoded` encoding would otherwise re-encode
+  out from under a forged signature) and a `run_ruby` method (a real,
+  isolated `bundle exec ruby` microbenchmark inside an already-installed
+  cell's app directory). `fuzzlab.labgen.conformance.tier0` gained
+  `ruby_available`/`lint_ruby`/`lint_ruby_emitted_files` (the Ruby analogue
+  of `lint_php`/`lint_python`, this project's first). `ApplicationController`
+  gained `skip_forgery_protection` (every Phase B cell is a non-GET write
+  endpoint a real HTTP client hits directly, with no browser CSRF-token
+  round trip of its own -- CSRF is orthogonal to every vulnerability class
+  this lane builds). `fuzzlab.labgen.conformance.static_precheck` gained
+  `UNINFORMATIVE` rows for the two genuinely new shapes (webhook-signature,
+  insecure-deserialization); the mass-assignment shape reused its existing
+  `CC-LAB-0063`/`0064` row (keyed on `(vuln_class, sink_family)` only, not
+  `stack_profile`).
+
+- **FR-LAB-69** *(ReDoS, CWE-1333, `node_express`; `CC-LAB-0076`,
+  2026-09-22).* Per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
+  §9.4a's decided Category-1 (e-commerce) Walmart/Node cell list (the
+  second Node cell, deferred by `FR-LAB-64` above until this shape's own
+  timing-differential oracle mechanism existed -- see `FR-FUZZ-12`,
+  `docs/components/07-fuzzing-harness-and-oracle/requirements.md`), the
+  `node_express` emitter gained a real, dedicated vulnerable/secure pair
+  for CWE-1333:
+  - A genuinely new `(vuln_class, sink_context.family)` shape,
+    `("redos", "regex_highlight_match")`, on a new `/api/search` route
+    (`_ROUTE_PARAMS`): a search/highlight endpoint that builds a `RegExp`
+    from a user-supplied search term and highlights matches inside fixed
+    content.
+  - Vulnerable: `unescaped_regex_construct` -- `new RegExp(term, 'gi')`
+    with no escaping, so a pathological pattern (e.g. `(a+)+$`) causes
+    catastrophic backtracking. Secure: `regex_escape_construct` -- escapes
+    every regex metacharacter (a new `escapeRegExp` helper, included
+    unconditionally in every generated controller) before constructing the
+    pattern, so it can only ever match itself literally.
+  - `content_literal` (the endpoint's fixed, searched content) is a
+    calibrated 22-character run of `'a'` embedded in otherwise-ordinary
+    product copy, chosen so the vulnerable twin's blowup against `(a+)+$`
+    is a clear, reliably-reproducible tens-of-milliseconds event -- never
+    an open-ended multi-second/multi-minute hang.
+  - Registered in `node_express`'s own `_MODULE_SET_BY_SHAPE` and,
+    vocabulary-only (the `L-P3.3c-DOM`/`FR-LAB-64` precedent), in the
+    shared `fuzzlab.labgen.modules` registry.
+  - New manifest `lab/manifests/redos_node_sample.yaml`
+    (`LABGEN-RD-0001` VULNERABLE/trivial, `LABGEN-RD-0002` SECURE), two new
+    `lab/safety_matrix.yaml` rows plus a new `redos` concern in the
+    matrix's concern vocabulary, and a new `static_precheck.py` row
+    (UNINFORMATIVE -- no Node-oriented static ReDoS tool has been
+    exercised against this shape in this project).
+  - Proved for real, not simulated: `tests/test_labgen_redos.py` renders
+    both twins for real and runs each as a real Node.js subprocess, timed
+    with `process.hrtime.bigint()` inside the subprocess (excluding Node
+    startup and Python subprocess overhead) against a benign term and
+    `(a+)+$`. Measured: vulnerable twin ~55-70ms on the evil term (vs. <1ms
+    on a benign term on the same handler); secure twin <1ms on both.
+    Repeated 5x with no observed flakiness.
+  - Judgment call, stated explicitly: the test's confirmation thresholds
+    (`_VULNERABLE_FLOOR_MS=20`, `_SECURE_CEILING_MS=5`) sit with wide
+    margin on both sides of the measured ~55-70ms/<1ms gap specifically so
+    ordinary CI scheduling jitter cannot flip the verdict, while staying
+    tight enough that a regression removing the escaping (or the
+    calibrated content run) would still fail the test.
+  - Out of this requirement's scope: wiring this stack into
+    `fuzzlab/harness/multitarget.py`; running the new oracle mechanism
+    against a live target.
+
+- **FR-LAB-81** *(Phase C: MeadowMart BFF app identity + coherent routes +
+  ground truth, `node_express`; `CC-LAB-0077`, 2026-09-23).* Per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§9.4a/§9.5's Category
+  1 (E-commerce) Walmart/Node pilot, the two existing real `node_express`
+  cells (`FR-LAB-64` prototype pollution, `FR-LAB-69` ReDoS) are assembled
+  into one small, coherent app identity, the **MeadowMart BFF** (a
+  fictitious brand; its shape -- a Node/Express layer aggregating legacy
+  services -- is grounded in `docs/research/site-architecture-survey-functionality-walmart.md`):
+  - `_REAL_PAGE_CANONICAL`/`_twin_url_for`/`_served_url_for`
+    (`fuzzlab/labgen/emitters/node_express/__init__.py`): the canonical
+    (vulnerable) cell of each real-page pair is served at the real BFF URL
+    (`/api/preferences`, `/api/search`); its secure twin at a deterministic
+    `-twin-<cell-id>` URL — the same mechanism `php_laravel`'s
+    `_served_route_for`/`_twin_url_for` already uses, for the identical
+    reason (a twin pair must coexist as distinct live routes in one running
+    process). Every other cell keeps the prior `/generated/<cell-id>` URL.
+  - Three new, always-included, genuinely inert surrounding routes in
+    `render_route_accumulator`'s `app.js` (`/api/products`,
+    `/api/orders/:orderId`, `/api/cart`) — no request input read or
+    reflected by any of them; added purely for app-identity coherence, no
+    manifest cell or ground-truth case of their own.
+  - New `lab/ground-truth-meadowmart/` (`labels.json`/`injection-points.json`/
+    `expectedresults.csv`, D9's out-of-band contract): opaque `MMART-NNNN`
+    case IDs (distinct from `PFF-*` and the concurrent Rails lane's
+    `FCART-*`), `target: "node_express_meadowmart_bff"`, 2 positive/2
+    negative cases (the canonical cell and its secure twin, for each real
+    page). Loads and validates via `fuzzlab.labels.contract.load`.
+  - `fuzzlab/labels/schemas/labels.schema.json`: additive enum widening --
+    `vuln_class` gains `prototype_pollution`/`redos`, `sink_context` gains
+    `object_property`/`regex` (neither class could be expressed in the
+    ground-truth contract before this).
+  - Deliberately not attempted (out of scope, per the dispatch brief):
+    merging the generic Tier-A sample manifest's illustrative SQLi/XSS
+    cells (`lab/manifests/phase3_node_express_sample.yaml`) into this app;
+    it stays a separate, unrelated fixture.
+
+- **FR-LAB-82** *(Phase D: whole-app live-boot conformance for the
+  MeadowMart BFF; `CC-LAB-0078`, 2026-09-23).* Per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §5's standard, closes the
+  real gap every prior `node_express` proof left open (isolated
+  `require()`-and-fake-`req`/`res` per cell, never the whole assembled app
+  booted together). New `tests/test_labgen_node_bff_app.py`: assembles the
+  full app (all four cells of both real manifests + the three
+  `FR-LAB-81` inert routes, one `app.js` built by
+  `render_route_accumulator` over the full cell set at once), a real
+  network-reachable `npm install`, a real `node app.js` boot on
+  `127.0.0.1`, and real HTTP (`urllib.request`) against every route:
+  - Every inert page answers correctly.
+  - Both real pages are reachable at their coherent, canonical BFF URLs;
+    both secure twins at their own twin URLs.
+  - The ReDoS cell's real, directly-observable real-HTTP timing
+    differential (vulnerable canonical route slow on `(a+)+$`, secure twin
+    fast) holds over the fully assembled app, not just in isolation.
+  - Both preference-endpoint twins still merge ordinary (non-adversarial)
+    payloads correctly over real HTTP.
+  - Explicitly not re-derived here (stated in the test module's own
+    docstring): the prototype-pollution differential itself, since
+    polluting `Object.prototype` has no in-band HTTP signal by its real
+    nature -- that differential stays proven by `FR-LAB-64`'s real,
+    executed Node-subprocess test; this requirement additionally confirms
+    the route it lives at is reachable, real, and coherent inside the
+    fully assembled app.
+
+- **FR-LAB-83** *(Phase E: MeadowMart BFF `TargetSpec` wired into
+  `multitarget.py`; `CC-LAB-0079`, 2026-09-23).* Per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6, this app's half only
+  (the concurrent Rails/Shopify lane owns its own `TargetSpec`). New
+  `tests/test_labgen_node_bff_multitarget.py`: a real
+  `fuzzlab.harness.multitarget.TargetSpec` (`base_url` from the same real
+  live-booted app `FR-LAB-82` assembles; `ground_truth` from
+  `FR-LAB-81`'s `lab/ground-truth-meadowmart`), run for real through
+  `run_targets`/`transfer_summary` using the existing, unmodified
+  `fuzzlab.tools.probesender.RequestsProbeSender` — a real HTTP sender, not
+  a hand-written fake (unlike `tests/test_multitarget.py`'s existing
+  fake-sender coverage of the harness plumbing, which this does not
+  replace). Produces a real, scored `ScoreReport` (tp=0, fn=2,
+  precision=recall=0.0 — because neither raw vuln_class name is mapped by
+  `fuzzlab.core.runmode._VULN_TO_CATEGORY` nor known to
+  `fuzzlab.audit.rules.known_categories()`, so zero candidates are ever
+  nominated for either, a documented, flagged gap, not a defect — see
+  `tests/test_labgen_node_bff_multitarget.py`'s own docstring for the full
+  explanation) and a `transfer_summary` correctly reporting
+  `generalizes=False` for a single target. A second run against the same
+  live target gets a distinct `run_id`. Deliberately out of scope: wiring
+  the category mapping/an audit rule so `prototype_pollution`/`redos` (the
+  latter already has a downstream oracle confirmer,
+  `RegexDosStrategy`/`FR-FUZZ-12`, under a different category string,
+  `regular-expression`) can actually be nominated and confirmed; running
+  both this target and the Rails/Shopify target together in one
+  `run_targets` call (left for a follow-on step once both `TargetSpec`s
+  exist, per §6 step 2's own note).
+
+- **FR-LAB-84** *(Phase C: ForgeCart app identity + coherent routes +
+  ground truth, `ruby_rails`; `CC-LAB-0080`, 2026-09-23).* Per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§9.4a/§9.5's Category
+  1 (E-commerce) Shopify/Rails pilot, the four existing real `ruby_rails`
+  shapes (`FR-LAB-65` reflected XSS, `FR-LAB-66` webhook-signature,
+  `FR-LAB-67` CWE-915 mass assignment, `FR-LAB-68` CWE-502 insecure
+  deserialization) are assembled into one small, coherent app identity, the
+  **ForgeCart storefront + admin** (a fictitious brand; its shape -- a
+  Shopify-style merchant storefront + admin -- is grounded in
+  `docs/research/site-architecture-survey-functionality-shopify.md`):
+  - `_REAL_PAGE_URL_BY_CELL_ID` (`fuzzlab/labgen/emitters/ruby_rails/__init__.py`),
+    checked first by `url_path_for`: five new real-page cell IDs
+    (`LABGEN-RR-RP-0001`..`0005`) get a real, coherent app URL (`/search`;
+    two real Shopify webhook topics, `/webhooks/orders/create` vulnerable
+    and `/webhooks/customers/update` secure; `/admin/customers/update`;
+    `/admin/products/import`). Every pre-existing cell (Phase A's
+    illustrative shape, Phase B's three sample pairs, `LABGEN-RR-0001`..
+    `0007`) is untouched and keeps its prior `/cell/<slug>` URL and passing
+    tests unchanged.
+  - Five new, always-included, genuinely inert surrounding routes
+    (`route_accumulator._STATIC_APP_ROUTES`: `/`, `/products`, `/cart`,
+    `/admin`, `/admin/orders`) with their own checked-in skeleton
+    controllers (`StorefrontController`/`AdminController`) -- no request
+    input read or reflected by any of them; added purely for app-identity
+    coherence, no manifest cell or ground-truth case of their own.
+  - New `lab/manifests/shopify_forgecart_real_pages.yaml`: the five
+    real-page cells, each reusing an existing shape's existing modules (no
+    new vulnerability module). Four vulnerable, one secure (a second,
+    distinct real Shopify webhook topic) -- a genuine negative real-page
+    case, not an all-positive set. Uses `POST`, not `PATCH`, for the
+    mass-assignment real page specifically so
+    `fuzzlab.harness.auto.points_from_ground_truth` (which only treats
+    GET/POST ground-truth points as actively auditable) can audit it
+    without any change to that shared CORE/FUZZ-layer code.
+  - New `lab/ground-truth-forgecart/` (`labels.json`/`injection-points.json`/
+    `expectedresults.csv`, D9's out-of-band contract): opaque `FCART-NNNN`
+    case IDs (distinct from `PFF-*` and the concurrent Node lane's
+    `MMART-*`), `target: "ruby_rails_forgecart"`, 4 positive/1 negative
+    case. Loads and validates via `fuzzlab.labels.contract.load`.
+  - `fuzzlab/labels/schemas/labels.schema.json`: additive enum widening --
+    `vuln_class` gains `webhook_signature`/`mass_assignment`/
+    `insecure_deserialization`, `sink_context` gains
+    `webhook_signature`/`mass_assignment`/`deserialization` (none of the
+    three classes could be expressed in the ground-truth contract before
+    this).
+
+- **FR-LAB-85** *(Phase D: whole-app live-boot conformance for ForgeCart,
+  plus `BUG-0035` fix; `CC-LAB-0081`, 2026-09-23).* Per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §5's standard, closes
+  the real gap every prior `ruby_rails` proof left open (one or two cells
+  booted in isolation, never the whole assembled app). New `tests/
+  test_labgen_ruby_rails_whole_app_live_boot.py`: assembles all 12 cells
+  this stack has ever built (Phase A's illustrative shape, Phase B's three
+  sample pairs, `FR-LAB-84`'s five real-page cells) onto one real, single
+  `bin/rails server` boot, with real HTTP against every route (the five
+  real vulnerability pages, the five inert surrounding pages, the health
+  check, and the pre-existing `/cell/<slug>` endpoints) and no route
+  collision. While building this, found and fixed a real, 100%-reproducible
+  defect: the checked-in skeleton's `Gemfile` never pinned the `json` gem,
+  so an unconstrained `bundle install` resolved `json 3.0.2`
+  (`activesupport` 8.1.3.1's own gemspec declares only `json >= 0`), whose
+  keyword-only `JSON.parse` broke `ActiveSupport::JSON.decode`'s own
+  positional call on the read path of every encrypted session-cookie read
+  -- 500'ing every second request of any session, invisible to Phase A/B's
+  single-request-per-test suite. Full RCA: `docs/bugs/BUG-0035-rails-
+  skeleton-json-gem-arity-breaks-second-request-in-a-session.md`;
+  preventive action `docs/PREVENTIVE_ACTIONS.md` `PA-0037`. Fixed by
+  pinning `gem "json", "~> 2.7"` and regenerating `Gemfile.lock` for real.
+
+- **FR-LAB-86** *(Phase E: ForgeCart `TargetSpec` wired into
+  `multitarget.py`; `CC-LAB-0082`, 2026-09-23).* Per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6, this app's half only
+  (the concurrent Walmart/Node lane owns its own `TargetSpec`). New
+  `tests/test_multitarget_ruby_rails_forgecart.py`: a real
+  `fuzzlab.harness.multitarget.TargetSpec` (`base_url` from the same real
+  live-booted app `FR-LAB-85` assembles; `ground_truth` from `FR-LAB-84`'s
+  `lab/ground-truth-forgecart`), run for real through
+  `run_targets`/`transfer_summary` using the existing, unmodified
+  `fuzzlab.tools.probesender.RequestsProbeSender`. Produces a real, scored
+  `ScoreReport` with `tp>=1` (the real `/search` reflected-XSS case is
+  genuinely confirmed -- `xss` is a category `run_auto`'s existing
+  detection machinery already knows how to confirm, unlike this app's
+  three brand-new vuln classes, which score 0 recall for the same
+  documented-gap reason the concurrent Node lane's own `FR-LAB-83` names
+  for its two brand-new classes) and a `transfer_summary` correctly
+  reporting the target in `found_on`. A second run against a fresh boot of
+  the same app gets its own distinct `run_id`. Deliberately out of scope:
+  building a confirmation oracle for `webhook_signature`/`mass_assignment`/
+  `insecure_deserialization`; running both this target and the Node target
+  together in one `run_targets` call (left for a follow-on step per §6 step
+  2's own note, same as `FR-LAB-83`).
+- **FR-LAB-87** *(§6 step 2: combine ForgeCart + MeadowMart `TargetSpec`s in
+  one `run_targets` call; `CC-LAB-0083`, 2026-09-23).* Closes the follow-on
+  both `FR-LAB-83` and `FR-LAB-86` left open. New
+  `tests/test_multitarget_category1_combined.py`: boots both apps for real
+  and simultaneously (`RailsLiveBootHarness` for ForgeCart, the same
+  `node app.js` boot helper `FR-LAB-83`'s test uses for MeadowMart, inlined
+  since both must be live at once rather than as independent fixtures),
+  builds both real `TargetSpec`s, and calls
+  `run_targets([forgecart_spec, meadowmart_spec], store, sender_for=...)`
+  once. Asserts: both outcomes scored, each with its own distinct `run_id`;
+  ForgeCart's real `/search` XSS confirmation (`tp>=1`) holds unchanged
+  when run alongside a second live target; MeadowMart's honest `tp==0`
+  (documented gap, unchanged) also holds; `transfer_summary` reports
+  `targets=2`, both names appear via `format_transfer`, and `generalizes`
+  is correctly `False` (only one of the two scored targets has recall > 0
+  — `generalizes` requires >= 2). This is the actual toolkit-side Phase 10
+  `T10.6`-style deliverable for category 1: `fuzzlab.harness.multitarget`
+  genuinely running and scoring two real, independent second targets in
+  one call. Does not attempt a true `generalizes=True` demonstration
+  (needs the `fuzzlab.core.runmode._VULN_TO_CATEGORY`/audit-rule wiring
+  both `FR-LAB-83` and `FR-LAB-86` already flagged as separate follow-on
+  work) and does not modify `fuzzlab/harness/multitarget.py` itself. This
+  closes Category 1 (E-commerce)'s full Phase A-E build.
+- **FR-LAB-112** *(vuln-corpus Phase 3: real gVisor dynamic-validation
+  sandbox; `CC-LAB-0084`, 2026-09-23).* New
+  `fuzzlab/tools/corpus_validation_sandbox.py`:
+  `run_in_sandbox(language, script_path, authorized=True, ...)` executes
+  a `docs/research/corpus-examples/` fixture under gVisor (`runsc run`
+  against a hand-built OCI bundle, no Docker/containerd) with a
+  deliberately empty network namespace (no interface ever attached — an
+  SSRF/exfil attempt fails at the kernel-facing boundary `runsc`
+  intercepts, not an allow-list), an `-overlay2=all:memory` ephemeral
+  write layer (every write vanishes with the container), real cgroup v1
+  `memory`/`pids` limits (a genuine OOM-kill and a genuine fork-bomb cap,
+  not `ulimit` approximations), a non-root (`nobody`, uid/gid 65534)
+  process with an empty capability set and `noNewPrivileges`, and a
+  wall-clock timeout. Refuses to run anything without explicit
+  `authorized=True` and appends a JSONL audit-log entry for every call.
+  Implements `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s "Validation execution
+  sandbox" section, required before any collected/manufactured pair can
+  be dynamically executed to earn `validated: true`. Two documented
+  deviations from that section's literal spec (both because this
+  environment's egress policy blocks the blob-serving CDN every
+  container registry checked routes through, so no base image is
+  pullable): the sandbox mounts the host's own already-installed PHP/
+  Python/Node interpreters as the OCI root instead of a purpose-built
+  minimal image, and `runsc` is invoked directly rather than via `docker
+  run --runtime=runsc` — see `CC-LAB-0084`'s own entry for the full
+  reasoning and the accepted-risk framing. Every containment property is
+  verified for real (not asserted from the mechanism's existence alone)
+  in `tests/test_corpus_validation_sandbox.py`: network unreachability,
+  filesystem ephemerality, the memory cap, the pids cap, the wall-clock
+  kill, the non-root uid, the opt-in gate, and the audit log. New pytest
+  marker `sandbox`, skip-guarded on `sandbox_available()` (same
+  convention as `slow`'s `live_boot_available()` guard) so this degrades
+  to a clean skip, never a failure, wherever `runsc`/cgroup v1 are
+  absent. Does not itself validate any real corpus entry or flip
+  `validated: true` anywhere — that is separate, not-yet-started work.
+
+- **FR-LAB-74** *(`spring_boot`: the fourth emitter, category 3's Atlassian
+  pick, "TrackerNest"; `CC-LAB-0130`, 2026-09-22).* Per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` sec 9 (the 12-app
+  category expansion) and its own functionality/CWE research
+  (`docs/research/category3-saas-functionality-and-cwe-research.md`), a
+  new Java/Kotlin+Spring Boot emitter (`fuzzlab.labgen.emitters.spring_boot`)
+  supporting exactly one shape as of this entry:
+  `(vuln_class="ssti", sink_context.family="template_render")`, TrackerNest's
+  `/wiki/pages/render` OGNL-injection cell (real Confluence
+  CVE-2021-26084/CVE-2022-26134 shape — an attacker-supplied string
+  compiled/evaluated as an OGNL expression via the real `ognl:ognl:3.4.13`
+  library, vs. the secure twin's fixed macro-name-only lookup). A real,
+  checked-in, minimal Spring Boot project skeleton
+  (`fuzzlab/labgen/emitters/spring_boot/stack/skeleton/`, hand-authored to
+  the shape Spring Initializr would produce — `start.spring.io` itself is
+  unreachable from this build sandbox, see the skeleton's own `README.md`),
+  a real capability probe (`spring_boot_boot_available()`, a bounded real
+  Maven Central round trip, `PA-0035`/`BUG-0033`), and a live-boot harness
+  (`fuzzlab.labgen.conformance.live_boot_spring_boot.SpringBootLiveBootHarness`)
+  that assembles, real-builds (`mvn package`), boots (`java -jar`), and
+  proves one real HTTP payload differential per cell (one cell per harness
+  instance — the twin pair shares a route, so they are never live-booted
+  together, mirroring `mass_assignment_laravel_sample.yaml`'s own precedent).
+  Tier 0 (`mvn compile`) and Tier 3 (`regenerate_and_diff_emitter`/
+  `render_whole_sample`) conformance cover both cells.
+  **Deliberately out of scope for this entry** (tracked for a follow-on
+  `CC-LAB-009x`): the XXE (`/issues/{id}/import`) and insecure-
+  deserialization (`/integrations/webhook-payload`) cells `docs/research/
+  category3-saas-functionality-and-cwe-research.md` sec 6b also designs for
+  TrackerNest; ground truth (`labels.json`/`injection-points.json`); wiring
+  into `fuzzlab.harness.multitarget`. **Tier 1/2 status: `[design]`-only**
+  beyond the one proven live-boot cell, matching `python_fastapi`/
+  `node_express`'s own stated status for a newly-built stack.
+
+- **FR-LAB-75** *(`spring_boot`: TrackerNest's second cell, XXE; `CC-LAB-0131`,
+  2026-09-22).* Extends `FR-LAB-74`'s `spring_boot` emitter with a second
+  supported shape, `(vuln_class="xxe", sink_context.family="xml_parse_input")`
+  — `POST /issues/import`, a real Java `javax.xml.parsers.
+  DocumentBuilderFactory` parse of the raw request body (CWE-611). The
+  vulnerable twin (`xml_external_entities_enabled`, already in
+  `lab/safety_matrix.yaml` since `CC-LAB-0063`) leaves external-entity/
+  DOCTYPE resolution at its default-permissive setting; the secure twin
+  uses a **new, additive** safety-matrix entry this requirement also adds,
+  `xml_external_entities_disabled` (Xerces/JAXP's `disallow-doctype-decl`
+  feature — the real, standard Java XXE fix), giving this sink family the
+  secure counterpart it lacked since `CC-LAB-0063`. Also adds
+  `SpringBootLiveBootHarness.post()` (a raw-body-capable POST — the SSTI
+  cell only ever needed `get()`) and a per-HTTP-method mapping-annotation
+  lookup in `SpringBootEmitter` (`GetMapping`/`PostMapping` — this is the
+  stack's first POST cell). Live-boot-proven: the vulnerable twin resolves
+  a DOCTYPE-declared external entity into a real, harness-owned fixture
+  file's contents (never a real host path); the secure twin returns a real
+  HTTP 400 rejecting any DOCTYPE while still correctly parsing an ordinary
+  document. **Still deferred** (per `CC-LAB-0130`'s original "Out of scope"
+  section, restated here rather than left ambiguous): TrackerNest's third
+  designed cell, insecure deserialization; ground truth; `multitarget.py`
+  wiring.
+
+- **FR-LAB-80** *(`spring_boot`: TrackerNest's third and final cell, insecure
+  deserialization; `CC-LAB-0132`, 2026-09-22).* Extends `FR-LAB-75`'s
+  `spring_boot` emitter with a third supported shape,
+  `(vuln_class="insecure_deserialization", sink_context.family="object_deserialization")`
+  — `POST /integrations/webhook-payload`, a real Java
+  `ObjectInputStream.readObject()` deserialization of the raw request body
+  (CWE-502). Reuses two **existing** `lab/safety_matrix.yaml` ops (no new
+  entry needed, unlike `FR-LAB-75`'s XXE addition):
+  `function_executing_deserialize` (vulnerable — unrestricted, constructs
+  any classpath-present `Serializable` type the stream names) and
+  `handler_registry_lookup` (secure — a `resolveClass()`-override allowlist
+  permitting exactly one expected class,
+  `com.fuzzlab.trackernest.generated.WebhookEvent`). Two new, fixed skeleton
+  support classes (`WebhookEvent`, `UnexpectedType` — an inert POJO
+  standing in for a real gadget-chain class, no RCE-capable code anywhere
+  on this classpath) and a test-only `SerializeFixtureTool` helper (a plain
+  `main()`, never Spring-managed) that produces real fixture bytes for the
+  live-boot proof, since Python cannot emit Java's serialization wire
+  format directly. Also adds `SpringBootLiveBootHarness.app_dir` (a public
+  property exposing the assembled app's real root directory, needed so the
+  live-boot test can run the fixture helper against the harness's own
+  compiled `target/classes`) and an explicit `<mainClass>` in `pom.xml`'s
+  `spring-boot-maven-plugin` config (disambiguating the executable jar's
+  entry point now that a second `main()` exists on the classpath).
+  Live-boot-proven: the vulnerable twin constructs and reports
+  `UnexpectedType` for bytes naming it; the secure twin returns a real HTTP
+  400 rejecting the same bytes while still correctly accepting real
+  `WebhookEvent` bytes. **This closes TrackerNest's full three-cell
+  designed set** (`FR-LAB-74` SSTI, `FR-LAB-75` XXE, this entry insecure
+  deserialization) per `docs/research/category3-saas-functionality-and-cwe-research.md`
+  sec 6b. **Still out of scope:** ground truth
+  (`labels.json`/`injection-points.json`); `multitarget.py` wiring; "Huddle
+  Hub" (the Slack pick, reusing `php_laravel`, not yet started).
+
+- **FR-LAB-115** *(Huddle Hub: webhook-signature-verification cell on
+  `php_laravel`; `CC-LAB-0133`, 2026-09-23).* Category 3's Slack pick,
+  "Huddle Hub," gets its first designed cell — built on the existing,
+  shared `php_laravel` emitter, not a new one, per §9.2's ledger note.
+  New shape: `(vuln_class="webhook_signature_bypass",
+  sink_context.family="webhook_signature_verification")`,
+  `required_neutralizations: [weak_signature_comparison]` — a Slack-style
+  Events-API-style callback receiver (profile-keyed at `/webhooks/events`
+  for template-context lookup; actually served at the illustrative
+  `/cell/<slug>` URL, since Huddle Hub has no migrated real page to anchor
+  a pinned URL to). Reuses two existing `lab/safety_matrix.yaml` ops —
+  `loose_equality_compare` (vulnerable: PHP's `==`/`!=` "magic hash"
+  type-juggling bug) and `constant_time_compare` (secure: `hash_equals()`)
+  — no new safety-matrix entry needed. New source/sink/transform modules
+  registered in **both** `php_laravel`'s own registries and the shared
+  `fuzzlab.labgen.modules` registry (`php_current`'s package) — required by
+  this stack's own module-composition convention (the shared
+  `fuzzlab.labgen.minimal_pair` classifier looks every composition-line
+  name up there), with `php_current` gaining matching, classifiable module
+  names/templates only, not a working cell of its own (mirrors the
+  `dom_url_source`/L-P3.3c-DOM and `html_attribute_quoted_echo`/
+  L-P3.3c-G6 precedent exactly). Also adds an additive `headers` parameter
+  to `LiveBootHarness.request()`/`post()` (previously no way to send a
+  custom request header at all). Live-boot-proven (real
+  `composer install`/`artisan serve` boot/HTTP) for ordinary functional
+  correctness on both twins, and separately, real-`php`-executed-proven for
+  the actual "magic hash" comparison-operator differential itself (a live
+  HTTP test cannot force the server's own freshly-computed SHA-256 HMAC
+  output to itself be magic-hash-shaped — see `CC-LAB-0133`'s own
+  change-control entry for the full reasoning). **Still deferred:** Huddle
+  Hub's other two designed cells (SSRF via link unfurling, header injection
+  in outgoing-webhook delivery); ground truth; `multitarget.py` wiring.
+
+- **FR-LAB-116** *(Huddle Hub: SSRF-via-link-unfurling cell on `php_laravel`;
+  `CC-LAB-0134`, 2026-09-23).* Extends `FR-LAB-115`'s Huddle Hub app with a
+  second designed cell, `(vuln_class="ssrf",
+  sink_context.family="server_side_http_fetch")` — a Slack-style "link
+  unfurling" feature (server fetches a user-pasted URL to generate a
+  message preview), profile-keyed at `/messages/unfurl`. Reuses the
+  existing `get_param` source. Reuses two existing `lab/safety_matrix.yaml`
+  ops — `unchecked_url_fetch` (vulnerable: zero validation) and
+  `scheme_and_resolved_ip_allowlist` (secure: validates scheme + the
+  *resolved* IP against private/reserved ranges, closing the DNS-rebinding
+  gap the matrix's own `hostname_allowlist` op — deliberately not modeled
+  in this cell — leaves open) — no new safety-matrix entry needed. Both
+  twins bound their fetch with an explicit stream-context timeout (PA-0035
+  spirit: a generated cell's own server-side fetch must never hang
+  indefinitely, independent of which op is vulnerable). New module names
+  registered in both `php_laravel`'s own registries and the shared
+  `fuzzlab.labgen.modules` registry, per `FR-LAB-115`'s own established
+  precedent. Live-boot-proven against a real local marker HTTP server this
+  test owns: the vulnerable twin reaches it via both an IP literal and a
+  resolved hostname; the secure twin rejects both forms with a real HTTP
+  400 (confirmed via the marker server's own hit counter staying at zero)
+  while still accepting a real public URL. **Still deferred:** Huddle
+  Hub's third designed cell (header injection in outgoing-webhook
+  delivery); ground truth; `multitarget.py` wiring.
+
+- **FR-LAB-107** *(Huddle Hub: outbound-header-injection cell on
+  `php_laravel`; `CC-LAB-0135`, 2026-09-23).* Extends `FR-LAB-115`/
+  `FR-LAB-116`'s Huddle Hub app with its third and final designed cell,
+  `(vuln_class="outbound_header_injection",
+  sink_context.family="outbound_http_request_header_value")`,
+  `required_neutralizations: [outbound_header_injection]` — a Slack-style
+  outgoing-webhook delivery feature (an admin-configured trigger word is
+  embedded in a custom header on the outbound POST to the configured
+  webhook URL), profile-keyed at `/integrations/outgoing-webhook`. A
+  genuinely new sink_family/concern in `lab/safety_matrix.yaml`
+  (additive, no version bump) with two new ops: `raw_header_concat`
+  (vulnerable: the trigger word is concatenated directly into a raw
+  `"Name: value\r\n"` header block for PHP's stream-context `header`
+  string option — an embedded `\r\n` splices in an arbitrary extra
+  header the destination actually receives) and
+  `structured_http_client_headers` (secure: Laravel's `Http` facade,
+  Guzzle-backed — Guzzle's real PSR-7 `Request` constructor rejects any
+  CRLF-bearing header value outright, caught and turned into an HTTP
+  400). Both twins bound the outbound call with an explicit 5s timeout
+  (PA-0035 spirit, matching `FR-LAB-116`'s own precedent) and read the
+  destination webhook URL from `env('HUDDLEHUB_WEBHOOK_URL', ...)` with
+  an RFC-2606 `.invalid`-TLD fallback so an unset env var fails closed
+  rather than reaching something real; the URL itself is not a tainted
+  parameter (kept out of scope for this header-injection-only cell). New
+  module names registered in both `php_laravel`'s own registries and the
+  shared `fuzzlab.labgen.modules` registry, per `FR-LAB-115`/`FR-LAB-116`'s
+  own established precedent. Live-boot-proven against a real local
+  marker HTTP server: the vulnerable twin's crafted trigger word
+  (`innocuous\r\nX-Injected: proof`) results in the marker server
+  genuinely receiving a real, separate `X-Injected: proof` header
+  alongside the intact original `X-Huddle-Trigger: innocuous` header,
+  verified by inspecting the marker server's own actually-parsed
+  headers; the secure twin rejects the identical value with a real HTTP
+  400 and never reaches the marker server, while still accepting an
+  ordinary trigger word. **This closes Huddle Hub's full three-cell
+  designed set** — Huddle Hub's *cell design* is now complete, but the
+  app itself is not yet usable end-to-end: ground truth
+  (`labels.json`/`injection-points.json`) and `multitarget.py` wiring
+  remain deferred for both Huddle Hub and TrackerNest as a whole (see
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4/§9.6).
+
+- **FR-LAB-108** *(TrackerNest: Phase C ground truth; `CC-LAB-0136`,
+  2026-09-23).* TrackerNest's own `lab/ground-truth-trackernest/`
+  (`labels.json`/`injection-points.json`/`expectedresults.csv`, target
+  `spring_boot`, case prefix `TNEST`), per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4 step 2 — never a
+  `PFF-*` case. Describes the app instantiated with its three vulnerable
+  twins deployed (`LABGEN-SSTI-0001`/`LABGEN-XXE-0001`/
+  `LABGEN-DESER-0001`) — the only combination of these three same-route
+  twin pairs that is simultaneously real-bootable at all (two
+  `@RestController`s on the identical `@GetMapping`/`@PostMapping` path
+  is a real Spring Boot "Ambiguous mapping" boot failure). Three cases:
+  `TNEST-0001` (SSTI, `/wiki/pages/render`, GET, `macroExpr` query,
+  rendering `server` — plain-text `ResponseEntity`, not JSON);
+  `TNEST-0002` (XXE, `/issues/import`, POST, `body` — whole raw body, no
+  named field, matching category 4/Netflix's own established
+  convention); `TNEST-0003` (insecure deserialization,
+  `/integrations/webhook-payload`, POST, `body` — same whole-raw-body
+  convention). `fuzzlab/labels/schemas/labels.schema.json`'s
+  `vuln_class`/`sink_context` enums extended additively (no version
+  bump) for this category's 6 new classes, shared with `FR-LAB-109`
+  below (landed once, in the same commit). Verified: `fuzzlab.labels.
+  contract.load()` loads and cross-checks all 3 files without error;
+  every case's exactly-one-tainted-param claim confirmed by reading each
+  cell's actual rendered controller output directly.
+
+- **FR-LAB-109** *(Huddle Hub: Phase C ground truth; `CC-LAB-0137`,
+  2026-09-23).* Huddle Hub's own `lab/ground-truth-huddlehub/`
+  (target `php_laravel`, case prefix `HHUB`), same §4-step-2 contract as
+  `FR-LAB-108` above — never a `PFF-*` case. Each cell already has its
+  own unique `/cell/<slug>` URL (`served_url_for()`, keyed on `cell_id`),
+  so no route-collision constraint applies here the way it does for
+  TrackerNest, but this ground truth still records only the three
+  vulnerable cells' own URLs (never a paired "none" row for a secure
+  twin), matching category 5/Booking.com's own established convention.
+  Three cases: `HHUB-0001` (webhook-signature bypass,
+  `/cell/labgen-hhb-0001`, POST, `X-Signature` **header** — the
+  attacker-controlled input this CWE-347 case concerns is the signature
+  header value itself, not the body field the HMAC is computed over);
+  `HHUB-0002` (SSRF, `/cell/labgen-hhb-0003`, GET, `url` query);
+  `HHUB-0003` (outbound header injection, `/cell/labgen-hhb-0005`, GET,
+  `triggerWord` query). Verified the same way as `FR-LAB-108`. Cross-
+  branch enum-naming drift flagged, not silently left: category 4
+  independently named its own webhook class `webhook_signature` (this
+  project's `webhook_signature_bypass` is a distinct string, no actual
+  collision) — a merge-time reconciliation note, not a blocker.
+
+- **FR-LAB-110** *(TrackerNest: Phase E — wire into `multitarget.py`;
+  `CC-LAB-0138`, 2026-09-23).* TrackerNest's own `TargetSpec`
+  (`spring_boot_trackernest`), a real boot of all 3 vulnerable cells
+  together, run through `fuzzlab.harness.multitarget.run_targets` for
+  real, per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6 steps
+  1-2. `tests/test_labgen_spring_boot_trackernest_multitarget.py`.
+  Recall is honestly 0 (`ssti`/`xxe`/`insecure_deserialization` unmapped
+  in `_VULN_TO_CATEGORY`, real follow-on work, not attempted here).
+
+- **FR-LAB-111** *(Huddle Hub: Phase E — wire into `multitarget.py`;
+  `CC-LAB-0139`, 2026-09-23).* Huddle Hub's own `TargetSpec`
+  (`php_laravel_huddlehub`), a real boot of all 3 vulnerable cells
+  together via the existing multi-cell-capable `LiveBootHarness`, run
+  through `run_targets` for real.
+  `tests/test_labgen_php_laravel_huddlehub_multitarget.py`. Two flagged,
+  unfixed gaps: recall 0 (same unmapped-vuln-class reason as
+  `FR-LAB-110`), and `fuzzlab.harness.auto.points_from_ground_truth`
+  having no `location="header"` branch (a real, pre-existing latent gap
+  first exercised by this project's own ground truth, flagged not fixed).
+
+- **FR-LAB-104** *(Category 3 §6 step 2: both apps run together;
+  `CC-LAB-0140`, 2026-09-23).* `tests/test_multitarget_category3_combined.py`
+  runs both `TargetSpec`s from `FR-LAB-110`/`FR-LAB-111` through one
+  `run_targets` call for real — two independent real boots (Java/Spring
+  Boot + PHP/Laravel), two distinct real `run_id`s, a real combined
+  `transfer_summary` (`targets: 2`, `generalizes: False` — correctly, no
+  scored target has recall > 0 yet). Closes the toolkit-side half of
+  category 3's own Phase 10 `T10.6`-style proof, matching category 1's
+  own established combined-run precedent.
+
+- **FR-LAB-76** *(`go_net_http` Phase A: this project's first Go target-lab
+  stack; `CC-LAB-0170`, 2026-09-22, category 4 pilot — Media/streaming,
+  Twitch pick, `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4/§9.5).*
+  The toolkit supports a Go/`net/http` target stack at Phase-A depth: one
+  real, live-bootable illustrative shape, matching every other stack's own
+  Phase-A bar (`ruby_rails`'s `FR-LAB-77` being the immediately preceding
+  precedent for this exact scope level).
+  - `fuzzlab.labgen.emitters.go_net_http.GoEmitter` renders exactly one
+    shape — `("webhook_signature", "webhook_signature_verification")`, an
+    EventSub-webhook-receiver-shaped handler comparing two HMAC-SHA256
+    digests either with Go's `==` (vulnerable — CWE-347, data-dependent-time
+    comparison) or `crypto/hmac.Equal` (secure — constant-time). Reuses
+    `lab/safety_matrix.yaml`'s existing `webhook_signature_verification`
+    sink family and its existing `naive_string_compare`/
+    `constant_time_compare` ops verbatim (added by `CC-LAB-0063` for the
+    corpus-examples research) — no new safety-matrix entry was needed.
+  - A real, checked-in skeleton (`fuzzlab/labgen/emitters/go_net_http/
+    stack/skeleton/`: a bare `go mod init` plus a hand-written `main.go`
+    wiring `net/http.NewServeMux()`) and a real live-boot harness
+    (`fuzzlab.labgen.conformance.go_live_boot.GoLiveBootHarness`) that
+    assembles, runs a real `go build`, boots the compiled binary, and
+    serves real HTTP requests — proven end to end by
+    `tests/test_labgen_go_live_boot.py` (real signature accepted/rejected
+    for both twins, `@pytest.mark.slow`, skip-guarded on
+    `go_boot_available()`).
+  - `go_boot_available()`'s network probe (`_go_module_proxy_probe`) runs a
+    real, bounded `go list -m -versions` against the real Go module proxy —
+    built correctly the first time per `PA-0035`, not a bare socket check
+    (`BUG-0033`'s exact mistake, avoided here for a new package manager).
+  - Tier 0 (`go vet`/`gofmt -l`, `tests/test_labgen_go_net_http.py`) and
+    Tier 3 (whole-manifest regenerate-and-diff,
+    `tests/test_labgen_go_net_http_conformance.py`) both pass for the one
+    illustrative cell pair (`lab/manifests/webhook_signature_go_sample.yaml`).
+  - **Explicit scope call: no per-run database in this Phase A.** The one
+    illustrative shape is stateless (no read/write to persisted data),
+    unlike every other stack's own Phase-A illustrative shape — deferred to
+    Phase B, when a data-touching shape (the CWE-918 SSRF pick recorded in
+    `docs/research/site-architecture-survey-functionality-twitch.md` §2) is
+    added for this stack.
+  - **Deliberately out of scope here** (Phase B, per the plan's own
+    "richer stack-idiomatic modules are a separate, later lane" split): the
+    real Twitch EventSub message-ID/timestamp concatenation and 10-minute
+    replay-window check, CWE-918 (SSRF), and any SQLi/XSS shape for this
+    stack (which would be the first shape needing the per-run database
+    above).
+
+- **FR-LAB-77** — **SUPERSEDED (2026-09-23, `CC-LAB-0173`, marked in
+  place per this project's living-doc convention — history stays below
+  for context, not deleted).** The `java_spring_boot` package this
+  requirement described is retired; its one capability (a JVM/Java target
+  stack supporting the Netflix CWE-502 Jackson-deserialization cell) is
+  now met by `spring_boot` — see `FR-LAB-93`. *(`java_spring_boot` Phase A:
+  this project's first JVM/Java
+  target-lab stack; `CC-LAB-0171`, 2026-09-22, category 4 pilot — Media/
+  streaming, Netflix pick, `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
+  §9.4/§9.5).* The toolkit supports a Spring Boot 3.4.1/Spring MVC target
+  stack at Phase-A depth: one real, live-bootable illustrative shape,
+  matching every other stack's own Phase-A bar (`go_net_http`'s
+  `FR-LAB-76` being the immediately preceding precedent for this exact
+  scope level, within the same category-4 pilot).
+  - `fuzzlab.labgen.emitters.java_spring_boot.JavaEmitter` renders exactly
+    one shape — `("insecure_deserialization", "object_deserialization")`,
+    a `/api/playback/resume`-shaped `@RestController`/`@PostMapping`
+    handler that Jackson-deserializes its request body either
+    polymorphically (vulnerable — CWE-502, `activateDefaultTyping()`
+    lets an attacker-supplied type hint in the JSON pick the concrete
+    class Jackson instantiates) or into a single, fixed, concrete DTO
+    class (secure — no polymorphism). Reuses `lab/safety_matrix.yaml`'s
+    existing `object_deserialization` sink family (added by `CC-LAB-0063`)
+    but adds two new ops to it — `jackson_default_typing_deserialize`/
+    `jackson_typed_allowlist_deserialize` — since none of that family's
+    existing node/php/python ops names this Java-specific idiom.
+  - **No route accumulator, a genuine architectural difference from every
+    other routed emitter (`node_express`/`ruby_rails`/`go_net_http`) —
+    Spring Boot's component scanning auto-discovers every generated
+    `@RestController` class on the classpath at boot**, rooted at
+    `Application.java`'s package (`com.fuzzlab.lab`); every generated cell
+    controller is hardcoded to the fixed subpackage
+    `com.fuzzlab.lab.cells`, guaranteed by construction, never derived
+    from anything manifest-supplied (`CC-LAB-0171`'s own adequacy-review
+    correction made this package/file-layout guarantee explicit).
+  - A real, checked-in skeleton (`fuzzlab/labgen/emitters/java_spring_boot/
+    stack/skeleton/`: a `pom.xml` inheriting `spring-boot-starter-parent`
+    3.4.1 with `spring-boot-starter-web`, resolved for real against Maven
+    Central) and a real live-boot harness
+    (`fuzzlab.labgen.conformance.java_live_boot.JavaLiveBootHarness`) that
+    assembles, runs a real `mvn package`, boots the packaged jar, and
+    serves real HTTP requests — proven end to end by
+    `tests/test_labgen_java_live_boot.py` (a real, observable
+    deserialization code-path differential: the vulnerable twin accepts a
+    caller-chosen type hint the secure twin rejects, `@pytest.mark.slow`,
+    skip-guarded on `java_boot_available()`). This is a **code-path**
+    proof, not a working `ysoserial`-style RCE gadget chain (neither twin
+    has one on its classpath) and not a timing-side-channel proof (CWE-502
+    has no timing property to prove) — stated explicitly per this
+    project's own honesty convention for non-exploit-chain illustrative
+    cells.
+  - `java_boot_available()`'s network probe (`_maven_central_probe`) runs
+    a real, bounded `mvn dependency:go-offline` against the checked-in
+    skeleton's own `pom.xml` — built correctly per `PA-0035` from the
+    first commit (a raw, unauthenticated `curl` against Maven Central
+    directly returned a real `429` during this dispatch's own research;
+    the probe never uses anything but the real `mvn` client, which
+    resolves the same dependency successfully), and every Maven/JVM
+    subprocess call inherits the full process environment rather than a
+    hand-picked subset (the exact bug `CC-LAB-0170`'s own `go` probe had
+    and fixed, applied correctly here from the start).
+  - Tier 0 (`mvn -q compile`, `tests/test_labgen_java_spring_boot.py` —
+    necessarily network-coupled for this stack, since compiling against
+    Spring Boot needs the same resolved dependencies the live-boot harness
+    needs; acknowledged, not silently assumed) and Tier 3 (whole-manifest
+    regenerate-and-diff, `tests/test_labgen_java_spring_boot_conformance.py`)
+    both pass for the one illustrative cell pair
+    (`lab/manifests/insecure_deserialization_java_sample.yaml`).
+  - **Explicit scope call: no per-run database in this Phase A.** Like
+    `go_net_http`'s Phase A, the one illustrative shape is stateless (no
+    read/write to persisted data) — deferred to Phase B, when a
+    data-touching shape (the CWE-862 GraphQL-field-authorization pick, or
+    the eventual DGS/GraphQL-federation layer itself) is added for this
+    stack.
+  - **Deliberately out of scope here** (Phase B): the GraphQL/DGS
+    federation layer (`spring-boot-starter-graphql`, `@DgsComponent`/
+    `@DgsData` resolvers, a federation directive set) and CWE-862
+    (GraphQL field authorization), per
+    `docs/research/site-architecture-survey-functionality-netflix.md` §2's
+    own Phase B note.
+
+- **FR-LAB-92** *(`go_net_http` Phase B, first increment: a second
+  illustrative shape, CWE-918/SSRF; `CC-LAB-0172`, 2026-09-23, category 4
+  pilot's Twitch pick).* Given its own new FR number rather than widening
+  `FR-LAB-76` in place — a distinct vuln class with a genuinely different
+  module-composition shape deserves independent discoverability, per this
+  entry's own change-control review (which also corrected a backwards
+  precedent citation for the opposite choice; see `CC-LAB-0172`).
+  - `fuzzlab.labgen.emitters.go_net_http.GoEmitter` renders a second
+    shape — `("ssrf", "server_side_http_fetch")`, a clip-thumbnail-fetch
+    proxy handler (`GET /api/clips/thumbnail?url=...`) that server-side-
+    fetches the caller-supplied URL either with no validation at all
+    (vulnerable — CWE-918, `unchecked_url_fetch`) or after rejecting any
+    scheme but `https` and rejecting a resolved IP that is loopback/
+    private/link-local/unspecified (secure —
+    `scheme_and_resolved_ip_allowlist`, checked against the *resolved*
+    address, closing the DNS-rebinding gap a hostname-string-only
+    allowlist would leave open). Reuses `lab/safety_matrix.yaml`'s
+    existing `server_side_http_fetch` family/ops verbatim (added by
+    `CC-LAB-0063`) — no new safety-matrix entry needed.
+  - **A deliberate module-composition divergence from the webhook-
+    signature shape:** the vulnerable/secure difference here lives
+    entirely in *which sink module renders* (the validation-then-fetch
+    logic is one inseparable operation, not a value transform composed
+    before a shared sink) — the manifest's one op names a **sink**
+    directly. `GoEmitter`'s per-module import table
+    (`_MODULE_IMPORTS`) is keyed per-module, not per-shape, for exactly
+    this reason: the two sinks this shape can render need different Go
+    standard-library packages (`unchecked_url_fetch` needs no `net`/
+    `net/url`; `scheme_and_resolved_ip_allowlist` needs both), found and
+    fixed during implementation after a shape-wide fixed import list
+    failed `go build`/`gofmt` with an "imported and not used" error.
+  - Both sinks use a bounded `http.Client{Timeout: 5 * time.Second}`,
+    never a bare `http.Get` — this shape's entire point is a real
+    outbound call, so an unbounded client would let either twin's
+    *generated code* hang against a slow/unresponsive target, not just
+    this dispatch's own test harness.
+  - Proven end to end by
+    `tests/test_labgen_go_live_boot.py`'s real live-boot test: two
+    throwaway loopback listeners this test process itself starts (a
+    plain-HTTP one and a self-signed-TLS HTTPS one) isolate the secure
+    twin's scheme-check rejection from its resolved-IP-allowlist
+    rejection specifically — a corrected test design after the first
+    draft's plan (a single plain-HTTP listener) would have proven only
+    the scheme check, not the IP-allowlist logic the shape's own name
+    promises (`CC-LAB-0172`'s own adequacy-review correction). Neither
+    listener is a real external or production host, per `CLAUDE.md`'s
+    lab-only/authorized-only discipline; a "secure twin successfully
+    fetches some real allowed external target" positive case is
+    explicitly deferred (no real target allowlist exists yet for this
+    stack), not silently omitted.
+  - Tier 0 (`go vet`/`gofmt -l`, now exercised over both shapes together)
+    and Tier 3 both pass for the combined cell set
+    (`lab/manifests/ssrf_go_sample.yaml`, alongside the existing
+    `webhook_signature_go_sample.yaml`).
+  - **Per-run database: still deferred, not added by this increment.**
+    This shape doesn't read/write persisted data either — `modernc.org/
+    sqlite` (a pure-Go, cgo-free driver) was verified to resolve cleanly
+    through this sandbox's proxy during this dispatch's own research, for
+    whichever future increment adds a data-touching shape.
+  - **Deliberately out of scope here:** the richer real Twitch EventSub
+    message-ID/timestamp-concatenation/replay-window check for the
+    existing webhook-signature cell (refines an already-proven shape
+    rather than adding vuln-class breadth, which this project ranks
+    lower) — deferred to a later increment, not dropped.
+
+- **FR-LAB-93** *(§9.2a Java/Spring Boot consolidation: Netflix's cell now
+  lives in `spring_boot`; `CC-LAB-0173`, 2026-09-23).* Supersedes
+  `FR-LAB-77`'s capability without restating it: the CWE-502 Jackson
+  polymorphic-deserialization cell (playback-resume shape) is ported out
+  of the now-retired `java_spring_boot` package into category 3's
+  `spring_boot` package (TrackerNest), as `(vuln_class=
+  "insecure_deserialization", sink_context.family="object_deserialization")`
+  with a new op pair (`jackson_default_typing_deserialize`/
+  `jackson_typed_allowlist_deserialize`) that already existed in
+  `lab/safety_matrix.yaml` from the original entry — no new safety-matrix
+  work needed.
+  - **Real Jackson major-version API break found and resolved.**
+    `spring_boot`'s skeleton pins `spring-boot-starter-parent` 4.1.1,
+    which resolves Jackson 3.1.5 (`tools.jackson.databind.*`), not the
+    Jackson 2 (`com.fasterxml.jackson.databind.*`) the original cell used
+    against Spring Boot 3.4.1. Verified directly via `javap` against the
+    real resolved jar before writing any port code: Jackson 3's
+    `ObjectMapper` has no instance `activateDefaultTyping` method (moved
+    to `JsonMapper.builder()...build()`), and `LaissezFaireSubTypeValidator`
+    is package-private in Jackson 3 (cannot be referenced from generated
+    code) — the ported vulnerable sink instead defines a small local
+    `PolymorphicTypeValidator.Base` subclass with the same "allow any
+    subtype" semantics. Confirmed working end to end in a real, isolated
+    Maven probe before any template code was written.
+  - **A real minimal-pair-vocabulary dispatch refactor.**
+    `SpringBootEmitter._MODULE_SET_BY_SHAPE` keys `(vuln_class,
+    sink_context.family) -> (source, complexity)`, with the sink selected
+    separately by `cell.transform.ops`. The pre-existing
+    `(insecure_deserialization, object_deserialization)` entry's default
+    source (`request_stream`, publishing the raw `HttpServletRequest`
+    itself) doesn't fit the ported Jackson ops, which need to read the
+    body into a `byte[]` instead. A new `_SOURCE_OVERRIDE_BY_OP` map lets
+    an op override the shape-level default source; only the two Jackson
+    ops are in it, every other op/shape keeps its existing dispatch
+    unchanged (re-verified: the pre-existing 32-test suite stays green
+    byte-for-byte). **Known, stated narrowing:** this overrides only the
+    source, not `_ModuleSet.complexity` — sufficient today (every op for
+    every shape uses `single_handler`) but would need widening for a
+    future op needing a different complexity module on an already-
+    supported shape.
+  - **Cell/page identity, addressed explicitly (not left as a bare
+    "cosmetic" note).** The ported class renders under
+    `com.fuzzlab.trackernest.generated` (the same package every other
+    `spring_boot` cell/DTO already lives in) — a **build/skeleton-level**
+    sharing decision only, the same shape `node_express` already has
+    precedent for (hosting Walmart's cells without merging app identity).
+    This does not make Netflix's cell "a TrackerNest page": no
+    TrackerNest ground truth or page/route design is touched, and the
+    ported cell keeps its own `LABGEN-JV-` cell-ID prefix (distinct from
+    TrackerNest's own `LABGEN-DESER-`/`LABGEN-SSTI-` prefixes) so
+    provenance stays distinguishable at the manifest/ground-truth level.
+    Category 4's own Phase C page design (not yet started for either
+    Netflix or Twitch) is unaffected.
+  - **Both twins share one literal route
+    (`POST /api/playback/resume`) safely**, matching TrackerNest's own
+    `LABGEN-DESER-0001`/`0002` twin-pair precedent: `spring_boot`'s own
+    live-boot harness (`SpringBootLiveBootHarness`) boots exactly one cell
+    per real Spring Boot instance, never both twins in one running app,
+    so an identical route across twins is not the ambiguous-mapping
+    hazard it would be under a multi-cell-per-boot harness (the shape
+    `go_net_http`/`java_spring_boot` both needed cell-ID-derived paths to
+    avoid) — confirmed by reading the harness's own constructor signature
+    and by a real boot hitting exactly this "Ambiguous mapping" Spring
+    Boot startup failure during this port's own initial manual
+    verification, before the correct single-cell convention was applied.
+  - Proven end to end by two real live-boot tests
+    (`tests/test_labgen_spring_boot_deserialization_jackson_live_boot.py`),
+    each its own separate `SpringBootLiveBootHarness` instance:
+    (a) the vulnerable twin accepts a type-hint-wrapped body naming an
+    arbitrary class; (b) the secure twin accepts its own well-formed
+    plain-JSON body and rejects the same type-hint-wrapped body — the
+    same three assertions the original, now-deleted
+    `tests/test_labgen_java_live_boot.py` made (a coverage-diff check
+    confirmed this before that file was deleted), adapted to
+    `spring_boot`'s real HTTP contract.
+  - **`java_spring_boot` retired in the same dispatch**: the package,
+    its conformance harness (`fuzzlab.labgen.conformance.java_live_boot`),
+    its manifest, and its 4 test files are deleted. `grep`-confirmed no
+    other file (including `fuzzlab/harness/multitarget.py`) referenced it
+    by name, so nothing else on this branch broke — the full non-slow
+    suite was re-run after the deletion to confirm (no regression, same
+    pre-existing `gitleaks`-related failures as before).
+
+- **FR-LAB-97** *(Phase C ground truth for category 4's Netflix and Twitch
+  apps, plus additive `labels.schema.json` widening; `CC-LAB-0174`,
+  2026-09-23).* Adds real, out-of-band ground truth (D9's contract) for
+  every vulnerable cell category 4 has built so far, each app in its own
+  directory with its own opaque case-ID prefix, mirroring category 5's own
+  already-reviewed precedent (`lab/ground-truth-booking-clone/`) for both
+  the per-app-directory layout and the schema-widening mechanism.
+  - `lab/ground-truth-netflix-clone/` (`target: "spring_boot"`, prefix
+    `NFLX-`): one case, `NFLX-0001`, for `LABGEN-JV-0001`
+    (`POST /api/playback/resume`, CWE-502 Jackson polymorphic
+    deserialization, `FR-LAB-93`). The tainted value is the entire raw
+    request body (Jackson deserializes it polymorphically), not one named
+    field, so `param` is the literal string `"body"` with
+    `location: "body"` — recorded explicitly as a judgment call, since the
+    schema has no "whole body, no field name" concept and no existing case
+    in this project's ground truth had this shape before.
+  - `lab/ground-truth-twitch-clone/` (`target: "go_net_http"`, prefix
+    `TWCH-`): two cases — `TWCH-0001` for `LABGEN-GO-0001`
+    (`POST /generated/labgen-go-0001`, CWE-347 webhook-signature,
+    `FR-LAB-76`), whose tainted value is a request **header**
+    (`X-Signature-256`); `param` is set to the literal header name, the
+    same convention a query-param case uses the literal query-string key
+    — this project's first header-carried ground-truth case, recorded as
+    a judgment call. `TWCH-0002` for `LABGEN-GO-0003`
+    (`GET /generated/labgen-go-0003`, CWE-918 SSRF, `FR-LAB-92`), an
+    ordinary query-param case (`param: "url"`, `location: "query"`).
+  - **Additive widening of `fuzzlab/labels/schemas/labels.schema.json`**:
+    append three `vuln_class` enum values (`webhook_signature`, `ssrf`,
+    `insecure_deserialization`, matching `Cell.vuln_class`'s real string
+    values verbatim) and three `sink_context` enum values (`webhook`,
+    `network`, `deserialization`, deliberately coarser than the internal
+    `SinkContext.family` strings, e.g.
+    `webhook_signature_verification`/`server_side_http_fetch`/
+    `object_deserialization`, matching this schema's own existing
+    convention of a coarser sink-context vocabulary). Purely additive: no
+    existing enum value changed or removed, so every already-valid
+    ground-truth directory (including the default `lab/ground-truth/`)
+    stays valid unchanged — re-verified directly
+    (`tests/test_labels_contract.py` stays green).
+  - New offline tests, `tests/test_labels_contract_category4.py`: asserts
+    concrete content (case counts, IDs, `vuln_class`/`sink_context`/
+    `url`/`method`/`param`/`location` per case, opaque-ID checks) for both
+    new directories, not just that `contract.load()` doesn't raise, plus
+    one test re-confirming the default `lab/ground-truth/`'s own contract
+    still loads/validates after the schema widening.
+  - **Deferred scope, explicitly**: this only completes §4 Phase C step 2
+    (author ground truth for cells as-built). Step 1 — designing a
+    coherent page/route set spanning each app's chosen vulnerability
+    classes, rather than ground truth over the single illustrative
+    route(s) Phase A/B happened to build — remains open, larger,
+    not-yet-started work for both apps, exactly as category 5's own
+    tracker entry records the same gap for Booking.com/Expedia ("Phase
+    C's 'coherent page/route set' bar... not yet begun"). Recorded here
+    rather than left to imply Phase C is now fully done for category 4.
+
+- **FR-LAB-98** *(Phase D: real Tier 1/2 conformance for two of category
+  4's three cells; `CC-LAB-0175`, 2026-09-23).* Real, executed Tier 1
+  (`fuzzlab.labgen.conformance.tier1.run_tier1_case`) and Tier 2
+  (`tier2.LiveBootTier2Oracle`/`run_tier2_case`) proof for the SSRF cell
+  (`LABGEN-GO-0003`/`0004`, `go_net_http`) and the Jackson-deserialization
+  cell (`LABGEN-JV-0001`/`0002`, `spring_boot`), reusing Phase A/B's own
+  live-boot harnesses through small local `Tier1Client`/`Tier2Client`
+  adapter classes — no change to either harness's existing, already-used
+  `request`/`post` methods. Both cells' verdicts confirmed for real (Tier
+  1 and Tier 2 alike) against a real `go build`/`mvn package` boot.
+  - **Open question, not a todo: the webhook-signature cell
+    (`LABGEN-GO-0001`/`0002`, CWE-347) is not Tier-1/2-confirmable as this
+    module is currently designed.** Tier 1/2's model is a single-request
+    marker/functional differential; both twins of this cell accept a
+    correct signature and reject an incorrect one identically for any one
+    request (`naive_string_compare` vs `hmac.Equal` diverge only in
+    comparison *timing*, which no single-request oracle can observe --
+    `tests/test_labgen_go_live_boot.py`'s own docstring already states
+    this same honesty rule for this cell's Tier 0/3 proof). Confirming it
+    would need a genuinely new timing-differential oracle (statistical,
+    multi-request timing measurement against a real boot) -- a different
+    kind of Tier-2 oracle than `LiveBootTier2Oracle`'s marker-differential
+    one, not built here. This mirrors the project's own existing
+    precedent for a class whose flaw is not a single-request functional
+    difference (the `identifier_charset_filter` open question above: an
+    *identifier-swap* differential mode, not yet built either).
+
+- **FR-LAB-99** *(Phase E: both apps wired into
+  `fuzzlab.harness.multitarget` for real; `CC-LAB-0176`, 2026-09-23).*
+  `TargetSpec`s for both apps, booted for real (`GoLiveBootHarness`,
+  `SpringBootLiveBootHarness` — each gained an additive `base_url`
+  property), run through `run_targets`/`transfer_summary` in one call with
+  the project's existing `RequestsProbeSender` (real HTTP, never a fake
+  sender) — satisfies §6's actual ask (construct the spec, run it, confirm
+  it produces metrics and a `generalizes` verdict).
+  - **Open, explicitly recorded (not a defect in this wiring): real
+    detection on these three vuln classes is a structural zero today, for
+    two independent reasons.** No audit `Rule` exists for
+    `webhook_signature`/`ssrf`/`insecure_deserialization`
+    (`fuzzlab.core.runmode._VULN_TO_CATEGORY` only maps `sqli`/`xss-*`) —
+    the same class of gap category 1's own Phase E entry flagged for its
+    own new vuln classes and left unattempted. And two of the three
+    ground-truth points don't fit the generic pipeline's point model: the
+    header-located webhook case is skipped by
+    `fuzzlab.harness.auto.points_from_ground_truth` (which has no
+    header-location case at all, not just no vulnerability-class rule —
+    it falls into the DOM/browser skip path, a small additional
+    mislabeling worth a future fix even though the point is correctly
+    excluded either way); the whole-body-JSON deserialization case is
+    included as a point, but `RequestsProbeSender`'s body-location
+    convention (`data={param: value}`, form-urlencoded) cannot send valid
+    JSON, so no payload could ever succeed through it. Only the SSRF
+    query-param case is genuinely probed as designed. Building a new
+    audit-rule category, a header-location point type, or a
+    whole-body-JSON sender convention are each real, sized follow-on work
+    — not attempted in this increment.
+- **FR-LAB-78** *(open-redirect shape, `php_laravel`; `CC-LAB-0210`,
+  2026-09-22).* Category 5's (Travel/booking/marketplaces,
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5) Booking.com
+  pilot's first increment. Note on numbering: `FR-LAB-63` is already spoken
+  for (`CC-LAB-0069`'s title cites it, although no `requirements.md` heading
+  for it exists — a pre-existing bookkeeping gap in that earlier entry, not
+  this one's to fix); this entry is `FR-LAB-78` to avoid a real collision.
+  - A genuinely new `(vuln_class, sink_context.family)` shape,
+    `("open_redirect", "http_redirect_location")`: a server-issued HTTP
+    redirect (Laravel's `redirect()` helper) whose target is a tainted
+    query parameter, grounded in Booking.com's real "continue to partner/
+    payment provider" post-checkout-continuation and affiliate-redirect
+    behavior (`docs/research/category5-travel-functionality-and-cwe-
+    research.md` §1.1/§2.1, CWE-601) — the first new vulnerability class
+    this project has added since `L-P3.3c-DOM`'s DOM-XSS shape (`FR-LAB-61`)
+    and the first that is not an XSS/SQLi/mass-assignment variant.
+    `lab/safety_matrix.yaml` gained one new sink family
+    (`http_redirect_location`) and one new concern (`open_redirect`), both
+    additive under the existing `version: 1`: `raw_concat`/`no_effect` (the
+    unvalidated baseline) and `redirect_target_allowlist`/`neutralises` (an
+    explicit same-origin-relative-path allowlist — not a "starts with `/`"
+    prefix check, which protocol-relative/backslash-prefixed bypasses would
+    defeat; see the transform's own docstring for the concrete character
+    class and PA-0026's allowlist-adapter discipline it follows).
+  - New modules — `redirect_target_allowlist`, `http_redirect_return`
+    (a sink whose own rendered code is the method's terminal statement, the
+    first sink shape in this project with no row/value to hand back) and
+    `terminal_response` (the first **third** complexity module any stack's
+    module set has needed, since neither `single_statement` nor
+    `render_only` fits a sink that is itself the terminal `return`;
+    originally named `redirect_response`, **renamed to `terminal_response`
+    by `FR-LAB-90`/`CC-LAB-0211`** once a second, unrelated sink family
+    needed the identical, already sink-agnostic wrapper — this entry
+    updated in place to the current name, per this file's own living-doc
+    convention; `CC-LAB-0210`'s append-only change-control record keeps the
+    original name, as the historical record of what that change actually
+    shipped) — registered in **both** `fuzzlab.labgen.modules` (`php_current`,
+    unrendered — for the shared minimal-pair vocabulary only, the same
+    discipline `CC-LAB-0051`/`FR-LAB-61` set) and
+    `fuzzlab.labgen.emitters.php_laravel.modules`/`__init__.py` (rendered,
+    via a new `_MODULE_SET_BY_SHAPE` entry and page profile,
+    `/booking/continue`, `return_to`).
+  - `fuzzlab.labgen.conformance.static_precheck.STATIC_PRECHECK_BY_SHAPE`
+    gained `("open_redirect", "http_redirect_location") ->
+    StaticPrecheckStatus.INFORMATIVE`: the vulnerable cell has nothing
+    between source and sink, a textbook static-analysis finding, the same
+    reasoning as `("xss", "html_body")`.
+  - New manifest `lab/manifests/booking_open_redirect_sample.yaml`
+    (`LABGEN-BC-0001`/`LABGEN-BC-0002`, the vulnerable/secure twin pair).
+    Deliberately narrow first increment: does not yet cover the rest of
+    Booking.com's researched functionality (search, listing, checkout,
+    Extranet) or the research doc's other shortlisted candidates
+    (price-integrity duplicate, CWE-1236 CSV-export) — those are later,
+    separate increments inside this category's reserved
+    `CC-LAB-0210`-`0249` block, tracked in
+    `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4.
+  - Real live-boot proof
+    (`tests/test_labgen_open_redirect.py::test_live_boot_redirect_manifest_blocks_the_bypass_shapes_the_allowlist_is_meant_to_catch`),
+    matching this component's `CC-LAB-0069` evidentiary bar: a real HTTP GET
+    against both twins with four adversarial `return_to` payloads
+    (`//evil.example`, `/\evil.example`, `https://evil.example`,
+    `javascript:alert(1)`) plus one benign in-origin payload, reading the
+    real (unfollowed — `LiveBootHarness`'s existing `_NoRedirectHttpErrorProcessor`,
+    `BUG-0028`) `Location:` header back for each: the vulnerable twin
+    reflects every adversarial target verbatim, the secure twin collapses
+    every one of them to `/`, and both twins pass the benign in-origin
+    payload through unchanged. This is the first caller of `LiveBootHarness`
+    that needs a response header rather than only status/body, so
+    `HttpResponse` gained an additive `headers: dict[str, str]` field
+    (default `{}`, every pre-existing construction unchanged) and
+    `LiveBootHarness.request()` now populates it from the real response.
+- **FR-LAB-79** *(second, independent ground-truth directory; `CC-LAB-0210`,
+  2026-09-22).* The ground-truth label contract (`fuzzlab.labels.contract`)
+  now has a real, tested precedent for more than one `ground_truth_dir`
+  serving more than one distinct lab app sharing an emitter/stack:
+  category 5's Booking.com app gets its own
+  `lab/ground-truth-booking-clone/{labels,injection-points}.json` +
+  `expectedresults.csv` (one case, `BKNG-0001`), with its own opaque
+  `BKNG-` case-id prefix (D9's out-of-band ground-truth contract; never
+  `PFF-*`) — kept wholly separate from `lab/ground-truth/`'s `PFF-` cases
+  and outside `fuzzlab.labgen.cutover_gate`'s `PFF-`-scoped coverage gate
+  (verified: `cutover_gate.DEFAULT_LABELS_DIR` is hardcoded to
+  `lab/ground-truth`, and `ground_truth_cases_for()` returns nothing for a
+  non-`real_page` profile, so the new directory's case is never walked by
+  that gate). `fuzzlab/labels/schemas/labels.schema.json`'s `vuln_class`/
+  `sink_context` enums gain `"open_redirect"`/`"redirect"` (additive;
+  existing enum values, and therefore every existing `PFF-` case, are
+  unchanged and re-validated by this change's own test run).
+  `tests/test_labgen_open_redirect.py::test_the_new_ground_truth_directory_loads_independently_of_the_default_one`
+  is the first test in this repository to load two ground-truth
+  directories in the same process and confirm neither's `contract.load()`
+  call is affected by the other's existence.
+- **FR-LAB-90** *(CSV/report export formula-injection shape, `php_laravel`;
+  `CC-LAB-0211`, 2026-09-22).* Category 5's Booking.com app, second
+  increment (first: `FR-LAB-78`'s `open_redirect` shape).
+  - A genuinely new `(vuln_class, sink_context.family)` shape,
+    `("csv_formula_injection", "csv_cell_value")`: a CSV/report export
+    response whose cell content is a tainted query parameter, grounded in
+    Booking.com's real Extranet/partner-admin booking-list export view
+    (`docs/research/category5-travel-functionality-and-cwe-research.md`
+    §1.1/§2.1, CWE-1236). `lab/safety_matrix.yaml` gained one new sink
+    family (`csv_cell_value`) and one new concern (`csv_formula_injection`),
+    both additive under the existing `version: 1`: `raw_concat`/
+    `no_effect` (the unvalidated baseline) and `csv_formula_neutralize`/
+    `neutralises` (a single-quote prefix applied when the value's first
+    *non-whitespace* character is one of the five OWASP-documented
+    CSV-formula trigger characters — `=`, `+`, `-`, `@`, a tab, or a
+    carriage return — not merely a "starts with a trigger character" check,
+    which the adequacy review for this entry demanded be closed rather than
+    described in prose; see the transform's own docstring, `PA-0026`).
+    This mitigation's scope is documented explicitly, not claimed
+    unqualified: the standard, most broadly effective client-side control
+    (reliable in Excel/LibreOffice Calc's normal CSV import path), not a
+    claim that every spreadsheet application's every import path behaves
+    identically (Google Sheets' handling has varied) — the concern-
+    vocabulary header in `lab/safety_matrix.yaml` states this bound.
+  - New modules — `csv_formula_neutralize` (transform) and
+    `csv_export_row` (sink, another sink whose own rendered code is the
+    method's terminal statement) — registered in **both**
+    `fuzzlab.labgen.modules` (`php_current`, unrendered — shared
+    minimal-pair vocabulary only) and
+    `fuzzlab.labgen.emitters.php_laravel.modules`/`__init__.py` (rendered,
+    via a new `_MODULE_SET_BY_SHAPE` entry and page profile,
+    `/extranet/export`, `label`). This second terminal-statement sink is
+    what surfaced that `FR-LAB-78`'s `redirect_response` complexity module
+    was already fully sink-agnostic in implementation (a bare
+    method-signature wrapper, no redirect-specific code at all) — **renamed
+    to `terminal_response`** and reused for both shapes, rather than
+    minting a second, near-duplicate complexity module, matching this
+    project's own `single_statement`/`render_only` convention of naming
+    shared modules by structural shape and reusing them across unrelated
+    vuln classes/sink families (caught during this entry's own accuracy
+    review; `FR-LAB-78`'s text above is updated in place to the current
+    name, per this file's own living-doc convention, while `CC-LAB-0210`'s
+    append-only change-control entry keeps the original name as the
+    historical record of what that change actually shipped). The rename
+    touches
+    `fuzzlab/labgen/modules/__init__.py`,
+    `fuzzlab/labgen/emitters/php_laravel/modules.py`, both stacks' own
+    `templates/complexities/{redirect_response.php.j2 ->
+    terminal_response.php.j2}`, `fuzzlab/labgen/emitters/php_laravel/
+    __init__.py`'s `open_redirect` `_ModuleSet` row, and
+    `tests/test_labgen_modules.py`'s `_DETERMINISM_CTX_BY_MODULE` key —
+    the template content itself is byte-identical to before, only the name
+    changed.
+  - `fuzzlab.labgen.conformance.static_precheck.STATIC_PRECHECK_BY_SHAPE`
+    gained `("csv_formula_injection", "csv_cell_value") ->
+    StaticPrecheckStatus.UNINFORMATIVE`: a PHP taint checker has no
+    CSV/spreadsheet-application model to recognize a single-quote prefix as
+    a real sanitizer against this specific downstream-interpretation risk.
+  - New manifest `lab/manifests/booking_csv_export_sample.yaml`
+    (`LABGEN-BC-0003`/`LABGEN-BC-0004`, the vulnerable/secure twin pair,
+    continuing this app's own cell-ID sequence from `FR-LAB-78`'s
+    `LABGEN-BC-0001`/`0002`).
+  - Real live-boot proof
+    (`tests/test_labgen_csv_export_injection.py::test_live_boot_csv_manifest_neutralizes_every_formula_trigger_shape`),
+    matching this component's `CC-LAB-0069`/`FR-LAB-78` evidentiary bar: a
+    real HTTP `GET` against both live-booted twins with real
+    trigger-character payloads (`=cmd|'/c calc'!A1`, `+1+1`, `-2+3`,
+    `@SUM(1,1)`) plus the leading-whitespace-bypass shape
+    (`" =cmd|'/c calc'!A1"`), reading the real CSV response *body* back and
+    asserting the whole differential (header row, trailing cell, and the
+    leading-quote-or-not on the tainted cell), not only its first byte.
+    **Real finding surfaced by this proof, not assumed:** the `php_laravel`
+    skeleton's default Laravel middleware stack (never disabled by
+    `bootstrap/app.php`) already strips leading/trailing whitespace from
+    every request input (`TrimStrings`) before either twin's own code
+    runs — confirmed because even the vulnerable twin (no transform at
+    all) never observed the leading-whitespace payload's leading space.
+    This does not make `csv_formula_neutralize`'s own whitespace handling
+    dead code (a different ingestion path would not get this framework-
+    level assist), so a second, framework-independent test
+    (`test_the_neutralize_expression_itself_closes_the_leading_whitespace_bypass`)
+    evaluates the transform's exact rendered PHP expression directly via
+    `php -r` against a raw, untrimmed string, proving the neutralizer's own
+    check is correct on its own terms, not merely coincidentally covered by
+    Laravel's default middleware.
+  - Deliberately narrow, matching `FR-LAB-78`'s own scoping: does not yet
+    cover the rest of Booking.com's researched functionality or the
+    research doc's remaining shortlisted candidate (the price-integrity
+    duplicate) — a later increment inside this category's reserved
+    `CC-LAB-0210`-`0249` block. After this increment: 2 of 5 originally
+    shortlisted shapes landed, 2 pages, still short of Phase C's "coherent
+    page/route set" bar.
+- **FR-LAB-91** *(ground truth's second case in the existing directory;
+  `CC-LAB-0211`, 2026-09-22).* `BKNG-0002` appended to the *same*
+  `lab/ground-truth-booking-clone/` directory `FR-LAB-79` created (not a
+  third directory) — verified against the real loader
+  (`fuzzlab.labels.contract.load_labels()` parses `labels.json`'s `cases`
+  array with no one-case-per-file restriction, and explicitly guards
+  against a duplicate `case_id`) that this is fully supported, not an
+  extrapolation from `FR-LAB-79`'s own single-case precedent. Every one of
+  the shared ground-truth contract's three files updated together, per the
+  adequacy review's explicit demand (a `labels.json`-only change would have
+  broken `load()`'s `expectedresults.csv` cross-check for the *whole*
+  directory, `BKNG-0001` included, not just left `BKNG-0002` unscored):
+  `labels.json` (`BKNG-0002`), `expectedresults.csv` (matching row),
+  `injection-points.json` (the `label`-parameter entry).
+  `fuzzlab/labels/schemas/labels.schema.json`'s `vuln_class`/`sink_context`
+  enums widened again, additively, with `"csv_formula_injection"`/`"csv"`
+  (existing values, and every existing case across both ground-truth
+  directories, unchanged and re-validated by this change's own test run).
+- **FR-LAB-100** *(price-integrity/business-logic amount-trust shape,
+  `php_laravel`; `CC-LAB-0212`, 2026-09-23).* Category 5's Booking.com app,
+  third increment (first: `FR-LAB-78`'s `open_redirect`; second: `FR-LAB-90`'s
+  `csv_formula_injection`).
+  - Reuses the **already-existing** `price_integrity_bypass` concern and
+    `payment_charge_amount` sink family in `lab/safety_matrix.yaml`
+    (`client_trusted_amount`/`trust_client_price_input`, both `no_effect`;
+    `server_recomputed_amount`/`hook_delegated_recompute`, both
+    `neutralises` → `neutralizes: [price_integrity_bypass]` — added by
+    `CC-LAB-0063`) — no safety-matrix change needed. Verified (grep, not
+    assumed) that no emitter on any stack rendered this shape before this
+    entry; `php_laravel` is the first. Grounded in Booking.com's real
+    checkout total computation
+    (`docs/research/category5-travel-functionality-and-cwe-research.md`
+    §1.1/§2.1) and the real QloApps (a real open-source hotel-booking
+    engine, OSL-3.0) `Cart::getOrderTotal()` pattern
+    (`docs/research/corpus-examples/ecommerce-logic/php/manifest.yaml`) —
+    explicitly the lowest-novelty pick of that research doc's shortlist (a
+    duplicate concern flavor, not a new CWE class), kept for its strong
+    real-site grounding.
+  - **The secure twin recomputes, it does not merely discard.** The
+    adequacy review for this entry demanded the fix genuinely match the
+    `server_recomputed_amount` op's own name and the cited QloApps
+    grounding (the real fix recomputes the total from cart/selection
+    state, never returns a bare hardcoded constant): the new
+    `ServerRecomputedAmountTransform` looks the charge up in a page-profile
+    -supplied `room_type_rates` table (an ordered tuple of `(room_type,
+    rate)` pairs, each validated as a bare identifier / `\d+\.\d{2}`
+    literal, PA-0026-style — no default, fails loud) keyed by a
+    *non-tainted* `room_type` request parameter, falling back to
+    `default_room_type`'s own rate for any unrecognized selection — never
+    to the tainted `amount`. New sink `PaymentChargeInsertSink`
+    (`DB::table('bookings')->insert(...)`), which — like
+    `OrmEntityBulkAssignSink` — sets `$rows` rather than returning
+    directly, so the *existing* `single_statement` complexity's own tail
+    closes the method; no new/`terminal_response`-shaped complexity needed
+    this time. Source reuses the existing `post_param` module unchanged.
+    Both new modules registered in **both** `fuzzlab.labgen.modules`
+    (`php_current`, unrendered — shared vocabulary only) and
+    `fuzzlab.labgen.emitters.php_laravel.modules`/`__init__.py` (rendered),
+    including `tests/test_labgen_modules.py`'s `_DETERMINISM_CTX_BY_MODULE`
+    entries for both, added *before* the whole-repo `pytest` run (`PA-0040`,
+    applied proactively this time — see `CC-LAB-0212`'s own Effectiveness).
+    New page profile `/booking/checkout` (`amount`,
+    `room_type_rates: (("standard","89.00"),("deluxe","149.00"),
+    ("suite","249.00"))`, `default_room_type: "standard"`), new
+    `_MODULE_SET_BY_SHAPE` row.
+    `fuzzlab.labgen.conformance.static_precheck.STATIC_PRECHECK_BY_SHAPE`
+    gained `("price_integrity_bypass", "payment_charge_amount") ->
+    UNINFORMATIVE`.
+  - **A real `bookings` table was missing and had to be added** — the
+    adequacy review caught, before implementation, that
+    `fuzzlab.labgen.conformance.live_boot._SCHEMA_SQL` (the SQLite schema
+    every `LiveBootHarness` build provisions) had no table this shape's
+    sink could write to; a live-boot proof would have failed to boot
+    entirely without it. Added additively (`products`/`posts`/`users`
+    unchanged) — `bookings(id, room_type, total_amount)`, no seed rows
+    (each test inserts its own row via a real HTTP request).
+  - New manifest `lab/manifests/booking_price_integrity_sample.yaml`
+    (`LABGEN-BC-0005`/`LABGEN-BC-0006`, continuing this app's own cell-ID
+    sequence).
+  - Real live-boot proof
+    (`tests/test_labgen_price_integrity.py::test_live_boot_price_integrity_manifest_ignores_the_client_amount_on_the_secure_twin`):
+    real HTTP `POST`s against both twins with an attacker-controlled
+    `amount` (`0.01`), reading the real inserted `bookings.total_amount`
+    row back via `LiveBootHarness.query_db` (the same DB-introspection
+    mechanism `CC-LAB-0056`'s real `register.php` `INSERT` proof already
+    established) immediately after each twin's own request (querying only
+    after both would read the same latest row twice — a real sequencing
+    mistake this test's own first run caught and fixed before landing, not
+    a design flaw). The vulnerable twin's real stored row equals the
+    attacker's own `0.01`; the secure twin's always equals its own
+    rate-table lookup (`89.00` default, `149.00` for a real `room_type=
+    deluxe` selection — proving the lookup is genuinely data-driven, not a
+    disguised constant), never the attacker's amount.
+  - Deliberately closes this app's shortlisted-shape roster on `php_laravel`
+    (3 of 3 unblocked shapes now landed — the remaining two, CWE-502
+    Jackson deserialization and Spring Data SpEL injection, are
+    Expedia/Java-Spring-Boot). 3 pages, 3 ground-truth cases; still short of
+    Phase C's "coherent page/route set" bar (search, listing, checkout-flow
+    completion, Extranet browsing — not yet begun as real page/route
+    coverage, only as illustrative injection-shape cells).
+- **FR-LAB-101** *(ground truth's third case in the existing directory;
+  `CC-LAB-0212`, 2026-09-23).* `BKNG-0003` appended to the same
+  `lab/ground-truth-booking-clone/` directory `FR-LAB-79`/`FR-LAB-91`
+  already grew — consistent with `fuzzlab.labels.contract`'s real,
+  multi-case-per-directory-supporting loader. All three of the shared
+  ground-truth directory's files updated together (`labels.json`,
+  `expectedresults.csv`, `injection-points.json`), per `FR-LAB-91`'s own
+  established precedent. `fuzzlab/labels/schemas/labels.schema.json`'s
+  `vuln_class` enum widened again, additively, with
+  `"price_integrity_bypass"` — `sink_context` reuses the existing `"sql"`
+  value rather than minting a new one (the sink mechanism genuinely is a
+  SQL `INSERT`, and the adequacy review preferred reuse over an
+  under-specified new token) — no `sink_context` schema change needed.
+
+- **FR-LAB-94** *(`spring_boot` emitter package ported onto this branch;
+  `CC-LAB-0213`, 2026-09-23).* Category 5's Expedia app (Java/Spring Boot)
+  needs the `spring_boot` stack per §9.2a's cross-category consolidation
+  decision: reuse category 3's `spring_boot` package (built for TrackerNest,
+  `CC-LAB-0130`/`0131`/`0132`, and already the host of category 4's ported
+  Netflix Jackson-deserialization cell, `CC-LAB-0173`) rather than building a
+  from-scratch Java/Spring Boot emitter for Expedia, since this repository's
+  multi-branch model keeps each category's own package private to its
+  branch until a PR merge. This requirement records the mechanical port: the
+  self-contained `fuzzlab/labgen/emitters/spring_boot/` package (emitter,
+  `modules.py`, Jinja templates, the checked-in Maven skeleton) and
+  `fuzzlab/labgen/conformance/live_boot_spring_boot.py` (real `mvn package`
+  + `java -jar` boot harness, no central-registry wiring needed — confirmed
+  by inspection that no CLI/`EMITTER_REGISTRY`/`static_precheck`/
+  `minimal_pair` file references `spring_boot` at all; the stack is
+  self-contained via Spring's own classpath component-scan, the same shape
+  `python_fastapi` already established) were copied unmodified from
+  `origin/claude/category-4-build-t9uz3y` (the more current of the two
+  source branches, since it already carries category 3's TrackerNest work
+  plus the Netflix port). The package's own 8 non-live-boot/live-boot test
+  files were ported alongside it (a 9th, category-4-specific
+  `tests/test_labels_contract_category4.py`, was excluded — it exercises
+  `lab/ground-truth-netflix-clone/`/`-twitch-clone/`, directories that don't
+  exist on this branch and aren't this category's to carry).
+  `lab/safety_matrix.yaml` gained two small, additive ports discovered
+  missing by running the ported tests rather than assumed present: the
+  `xml_external_entities_disabled`/`xml_parse_input` secure-counterpart row
+  (originally category 3's `CC-LAB-0131`/`FR-LAB-75`) and the
+  `jackson_default_typing_deserialize`/`jackson_typed_allowlist_deserialize`
+  rows for `object_deserialization` (originally category 4's `CC-LAB-0171`,
+  carried through the Netflix-cell port `CC-LAB-0173`) — both were present
+  on the source branches but not yet on this one, since `safety_matrix.yaml`
+  is a shared file each category branch edits independently until merge.
+  All 41 ported tests (33 non-live-boot + 8 real live-boot, the latter
+  proving a real Maven build/boot/HTTP round trip for TrackerNest's SSTI/
+  XXE/deserialization cells and the ported Netflix Jackson cell) pass
+  unmodified on this branch after the two safety-matrix additions. This
+  requirement is scoped to the port only — Expedia's own two shortlisted
+  shapes (CWE-502 Jackson deserialization, now already available via the
+  ported Netflix cell with no Expedia-specific work needed beyond a new
+  page profile/manifest reusing the existing ops; Spring Data SpEL/`@Query`
+  injection, confirmed genuinely new — no safety-matrix rows, emitter
+  modules, or corpus precedent exist anywhere in this repository for it)
+  are separate, later requirements.
+
+- **FR-LAB-113** *(`spel_injection` shape, CWE-917, `spring_boot`;
+  `CC-LAB-0214`, 2026-09-23).* Expedia's first own shape (distinct from
+  `FR-LAB-94`'s ported Netflix Jackson cell, which is TrackerNest/
+  category-4 code reused, not built for Expedia). A hotel-search endpoint
+  (`GET /api/hotels/search-sort`) accepts a `sortBy` query parameter,
+  parsed and evaluated as a Spring Expression Language (SpEL) expression.
+  - Grounded in real Spring CVEs: CVE-2018-1273 (Spring Data Commons,
+    `MapDataBinder`'s unrestricted `StandardEvaluationContext` — the
+    exact mechanism this shape models) and CVE-2022-22980/CVE-2026-41717
+    (Spring Data MongoDB `@Query`/`@Aggregation` SpEL parameter-binding
+    injection). New `lab/safety_matrix.yaml` concern `spel_injection`
+    (CWE-917) and sink family `spel_expression_evaluate`:
+    `standard_evaluation_context_unrestricted`/`no_effect` (vulnerable —
+    `new StandardEvaluationContext()`, permits type references/method
+    invocation/bean resolution) vs.
+    `simple_evaluation_context_restricted`/`neutralises` (secure —
+    `SimpleEvaluationContext.forReadOnlyDataBinding().build()`, Spring's
+    own documented CVE-2018-1273 fix). Both twins call the *identical*
+    `SpelExpressionParser().parseExpression(tainted).getValue(context)`
+    sequence; only the `EvaluationContext` object differs.
+  - Went through this component's pre-change review gate before
+    implementation. The accuracy pass returned clean ACCURATE on all 10
+    checked claims (including a real `mvn dependency:tree` run
+    confirming `spring-expression` ships transitively, no new Maven
+    dependency needed). The adequacy pass returned INADEQUATE, catching
+    a real, blocking classification error: the draft's own SSTI-shape
+    analogy for this shape's `static_precheck` flag was backwards — no
+    spring_boot `STATIC_PRECHECK_BY_SHAPE` precedent exists at all, and
+    the correct classification is UNINFORMATIVE (both twins share an
+    identical call shape, unlike SSTI's genuinely different vulnerable/
+    secure API calls) — plus a real omission (the draft hadn't flagged
+    that `labels.schema.json`'s `sink_context` enum needed widening).
+    Both fixed before implementation.
+  - `docs/research/category5-travel-functionality-and-cwe-research.md`'s
+    SpEL-injection shortlist entry corrected in the same change,
+    pre-implementation: MITRE/NVD classify this mechanism under CWE-917,
+    not the CWE-89 the doc had originally labeled it (CWE-89 describes
+    CVE-2016-6652's specific JPQL/SQL *outcome*, a different real CVE in
+    the same family) — corrected in place with a dated note.
+  - New `spring_boot` modules:
+    `StandardEvaluationContextUnrestrictedSink`/
+    `SimpleEvaluationContextRestrictedSink`, reusing the existing
+    `QueryParamSource`/`single_handler` modules — no new source or
+    complexity module needed. New `_MODULE_SET_BY_SHAPE` row, new
+    `_PAGE_PARAMS` route. `STATIC_PRECHECK_BY_SHAPE` gains
+    `("spel_injection", "spel_expression_evaluate") -> UNINFORMATIVE`.
+  - New manifest `lab/manifests/expedia_spel_injection_sample.yaml`
+    (`LABGEN-EXP-0001`/`LABGEN-EXP-0002`, Expedia's first cell-ID
+    prefix, checked for collision against every other active branch).
+  - Real live-boot proof
+    (`tests/test_labgen_spel_injection_live_boot.py`): both twins
+    receive `sortBy=T(java.lang.Math).abs(-99)` — a safe, side-effect-
+    free type-reference/method-invocation canary (not a
+    `Runtime.exec`-shaped payload, even in this lab-only sandbox).
+    Vulnerable twin: real HTTP 200 with `99` in the body. Secure twin:
+    real HTTP 400 (rejected `T(...)` reference). A second, benign
+    property-path expression (`'price'`) proves the secure twin still
+    functions for legitimate input.
+
+- **FR-LAB-114** *(Expedia's own ground-truth directory;
+  `CC-LAB-0214`, 2026-09-23).* New `lab/ground-truth-expedia-clone/`
+  directory (opaque `EXPD-` case-ID prefix, never `PFF-*`) — matches
+  `lab/ground-truth-booking-clone/`'s established per-app-identity
+  precedent (the adequacy review's resolution: TrackerNest's own
+  spring_boot cells have no ground-truth cross-check at all, so there
+  was no "reuse a shared dir" precedent to follow; Expedia is a new app
+  identity, like Booking/Netflix/Twitch, so it gets its own dedicated
+  directory). One case, `EXPD-0001`, cross-checked by
+  `fuzzlab.labels.contract` and by this shape's own test suite.
+  `fuzzlab/labels/schemas/labels.schema.json`'s `vuln_class` enum
+  widened additively (`spel_injection`); `sink_context` enum widened
+  additively (`spel` — a fresh, plain-word token matching Booking's own
+  `redirect`/`csv` minting convention, not forced into an existing
+  bucket, per the adequacy review).
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.
@@ -2308,6 +3927,48 @@ None (it is the system under test).
   `tests/test_labgen_harder_shapes.py` and `tests/test_labgen_identifier_sqli_assertion.py`.
 
 ## 8. Open questions
+- (`CC-LAB-0139`, 2026-09-23) **`fuzzlab.harness.auto.points_from_ground_truth` has no
+  `location="header"` branch.** A ground-truth point with `location="header"` (Huddle
+  Hub's `HHUB-0001`, the first such point in this project — see
+  `lab/ground-truth-huddlehub/labels.json`) falls into that function's generic
+  client-only/DOM `else` branch and is recorded `skipped` with the reason string
+  `"client-only/DOM (needs browser execution, M6)"` — technically inaccurate for a
+  header-location point, which needs a header-capable prober, not a browser. Two
+  pieces of real, sized follow-on work, neither attempted here: (1) give
+  `points_from_ground_truth` a real `location == "header"` branch with an accurate
+  skip reason (or a way to actually drive it); (2) build a header-capable prober
+  (`RequestsProbeSender.send()`'s own signature has no way to set an arbitrary
+  request header for an injection point either — see `fuzzlab/tools/probesender.py`).
+  Tracked here so this flagged gap is not lost; revisit when a header-location vuln
+  class (webhook-signature-bypass or any future one) needs real automated detection
+  coverage, not just wiring proof.
+- (`CC-LAB-0176`/`FR-LAB-99`, category 4) **Three real gaps between
+  category 4's cells and the generic detection pipeline, found while
+  wiring Phase E.** (1) No audit `Rule` category exists for
+  `webhook_signature`/`ssrf`/`insecure_deserialization` — same class of
+  gap category 1's own Phase E flagged for its own new vuln classes. (2)
+  `fuzzlab.harness.auto.points_from_ground_truth` has no header-location
+  case at all (only `query`/`body`/DOM); a header-carried ground-truth
+  point (e.g. `TWCH-0001`) is silently absorbed into the DOM/browser skip
+  path with a misleading reason string, rather than its own, honestly
+  labeled "header injection points aren't audited yet" skip reason. (3)
+  `fuzzlab.tools.probesender.RequestsProbeSender`'s `location="body"`
+  convention is single-form-field (`data={param: value}`); it has no way
+  to express "substitute the payload into a whole raw JSON body," so a
+  whole-body-JSON ground-truth point (e.g. `NFLX-0001`) can never be
+  meaningfully probed through it. None of the three are attempted here —
+  each is real, sized follow-on work.
+- (`CC-LAB-0175`/`FR-LAB-98`, category 4) **The webhook-signature cell
+  (`LABGEN-GO-0001`/`0002`, CWE-347) has no Tier 1/2 conformance path.**
+  `naive_string_compare` vs `hmac.Equal` are functionally identical for any
+  single request (both accept a correct signature, reject an incorrect
+  one) — they diverge only in comparison timing, which
+  `fuzzlab.labgen.conformance.tier1`/`tier2`'s marker/functional-
+  differential model cannot observe. Same shape as the
+  `identifier_charset_filter` open question below (a class whose flaw
+  isn't a single-request functional difference): needs a genuinely new,
+  statistical, multi-request timing-differential oracle, not attempted
+  here.
 - (L-P3.3b) **`fuzzlab.labgen.minimal_pair`'s module-category map is sourced from one
   emitter's registry.** It builds `_MODULE_CATEGORY` from `fuzzlab.labgen.modules`
   (`php_current`'s) alone, so *every* stack that wants the real (rather than the naive)

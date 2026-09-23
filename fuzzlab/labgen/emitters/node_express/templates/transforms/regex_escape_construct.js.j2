@@ -1,0 +1,6 @@
+// regex_escape_construct transform (CC-LAB-0076): escapes every regex
+// metacharacter in {{ value_expr }} via escapeRegExp before building the
+// RegExp, so the search term can only ever match itself as a literal
+// substring -- no catastrophic backtracking is possible regardless of the
+// term's content, closing CWE-1333 for this construction.
+const highlightRegex = new RegExp(escapeRegExp({{ value_expr }}), 'gi');
