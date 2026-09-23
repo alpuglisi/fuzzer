@@ -12,6 +12,19 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (labels schema: widen vuln_class/sink_context enums)
+
+- LAB: Widened `fuzzlab/labels/schemas/labels.schema.json`'s `vuln_class`
+  and `sink_context` enums (adds `ssti`/`xxe`/`insecure_deserialization`/
+  `webhook_signature_bypass`/`ssrf`/`outbound_header_injection` and
+  `template`/`xml`/`deserialization`/`webhook`/`network`/`header`
+  respectively) — needed for PicTrail's upcoming SSRF page's ground truth
+  (`CC-LAB-0094`), landed as its own standalone entry (`CC-LAB-0094a`)
+  since the schema is shared across every category branch. Adopts
+  category 3's own already-reviewed widening (`fa8207d` on
+  `claude/category-3-build-iuu5k9`) byte-identically rather than
+  inventing different values, to avoid cross-branch schema drift.
+
 ## 2026-09-23 (PicTrail comments page)
 - LAB: landed PicTrail's second real page — `CC-LAB-0093`/`FR-LAB-102`/
   `FR-LAB-103`, pre-change review gate cleared (2 independent reviewer

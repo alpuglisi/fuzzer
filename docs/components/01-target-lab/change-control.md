@@ -3,6 +3,58 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0094a — Widen `labels.schema.json`'s `vuln_class`/`sink_context` enums (adopts category 3's precedent verbatim) (2026-09-23)
+
+- **Change:** `fuzzlab/labels/schemas/labels.schema.json` — `vuln_class`
+  enum widened from `["sqli", "xss-reflected", "xss-stored", "xss-dom",
+  "none"]` to add `"ssti", "xxe", "insecure_deserialization",
+  "webhook_signature_bypass", "ssrf", "outbound_header_injection"`;
+  `sink_context` enum widened from `["sql", "html", "html-attribute",
+  "js", "dom", "none"]` to add `"template", "xml", "deserialization",
+  "webhook", "network", "header"`. Purely additive: no existing case's
+  `vuln_class`/`sink_context` meaning changes.
+
+  Landed as its own minimal, standalone entry, split out of `CC-LAB-0094`
+  (below) per that entry's own review-gate finding: this project's next
+  real ground-truth case needing `"ssrf"`/`"network"` (`PT-0003`, landed
+  under `CC-LAB-0094`) is what surfaces the gap, but the schema itself is
+  a shared artifact across every active category branch, not scoped to
+  this component's PicTrail work alone. Rather than inventing new enum
+  values for this project's own need, this adopts **category 3's own
+  already-landed, already-reviewed widening verbatim**: commit `fa8207d`
+  on `origin/claude/category-3-build-iuu5k9` ("Extend labels.schema.json
+  enums for category 3's vuln classes"), confirmed byte-identical via
+  `diff <(git show fa8207d:fuzzlab/labels/schemas/labels.schema.json)
+  fuzzlab/labels/schemas/labels.schema.json` before landing. Adopting the
+  identical values (rather than a differently-worded equivalent) avoids a
+  future cross-branch schema-drift collision when the category branches
+  eventually merge.
+
+- **Impact (other components / project):** Shared schema, used by every
+  category branch's own ground truth. Verified via
+  `fuzzlab.labels.contract.load()` against both `lab/ground-truth`
+  (16 `PFF-*` cases) and `lab/ground-truth-picktrail-django` (2 cases at
+  the time of this change) — both load and validate correctly after the
+  widening, confirming no existing case used a value this change would
+  invalidate (expected for an additive enum widening, confirmed directly
+  rather than assumed).
+
+- **Risk (level: low):** Purely additive JSON Schema enum widening,
+  copied from an already-reviewed cross-branch precedent rather than
+  invented. Mitigated by: (1) byte-identical `diff` against the source
+  commit; (2) a real `fuzzlab.labels.contract.load()` round trip against
+  every existing ground-truth directory in this branch.
+
+- **Deliverables:**
+  - [x] `fuzzlab/labels/schemas/labels.schema.json` widened as above.
+  - [x] Verified via `fuzzlab.labels.contract.load()` against
+    `lab/ground-truth` and `lab/ground-truth-picktrail-django`.
+  - [x] `CHANGELOG.md` line.
+
+- **Effectiveness (assessed 2026-09-23): effective** — schema widened,
+  verified byte-identical to the adopted precedent, and both existing
+  ground-truth directories still load/validate correctly.
+
 ### CC-LAB-0093 — PicTrail's second real page: comments' `mark_safe()` template-autoescape footgun + real Django template rendering (FR-LAB-102/FR-LAB-103) (2026-09-23)
 
 - **Change:** Lands PicTrail's second real, ground-truth-bearing page,
