@@ -495,7 +495,7 @@ one, not build two.
 | Ruby on Rails, synchronous MVC | Phase A + Phase B done (skeleton, live-boot harness, XSS cell, plus webhook-signature/CWE-915/CWE-502) | Category 1 (E-commerce, Shopify pick), `claude/second-target-cat1-ecommerce`, `fuzzlab/labgen/emitters/ruby_rails/` | Not merged to `main` yet. Rails 8.1.3.1 (verified live against rubygems.org, not guessed), `--minimal` skeleton, SQLite dev/test DB. A category wanting "Ruby" (e.g. category 6's Stripe) should check whether Rails specifically fits before building a second Ruby stack — see §9.1 step 2's paradigm-distinction rule. |
 | Python, synchronous MVC (Django) | Phase A built (`CC-LAB-0090`) — foundation depth, one shape | Category 2 (Social/UGC, Instagram pick), `claude/category-2-build-bomomg` | Distinct from `python_fastapi` (async API paradigm). `fuzzlab/labgen/emitters/django/` + `DjangoLiveBootHarness`, both real and passing. Phase B (full module-inventory depth) not started. Any later Python-Django-shaped pick should reuse this, not start a second Django emitter. |
 | PHP/Hack, synchronous MVC (HHVM) | Reused (mapped onto `php_laravel`'s paradigm group — company/runtime differ, paradigm doesn't) | Category 3 (Slack pick, "Huddle Hub"), `claude/category-3-build-iuu5k9` | Not a distinct emitter — an app identity built on the existing `php_laravel` emitter. |
-| Java/Kotlin, Spring Boot microservice | **⚠ Built independently TWICE (and a third pick pending) — flagged 2026-09-23, needs a project-owner consolidation decision, not a mechanical merge:** (1) `spring_boot` (category 3, `claude/category-3-build-iuu5k9`) — Phase A done (3 cells: SSTI/OGNL, XXE, insecure deserialization) for Atlassian's "TrackerNest" wiki app. (2) `java_spring_boot` (category 4, `claude/category-4-build-t9uz3y`) — a separately built, differently-named emitter package, Phase A done (CWE-502 Jackson deserialization) for Netflix's playback-resume shape, no route accumulator needed. Both are real, tested, real-live-boot-proven Phase A work — neither is wrong, they simply didn't know about each other. (3) Category 5's Expedia pick also named "Java/Spring Boot — new stack" but is environment-blocked (Maven Central unreachable per that branch's own `ERROR_LOG.md` as of its last check) and has not written code yet — **a real Maven build succeeded on category 4's branch in this same sandbox on 2026-09-22/23, after category 5's blocker was recorded, so that blocker may no longer hold; re-check before assuming it's still blocked.** Should reuse one of the two existing packages once unblocked, not build a third. | Any category researching a Java/Spring Boot pick (Wise, PayPal's historical Java tier, Cash App) **must** check with categories 3, 4, and 5 before building yet another one. |
+| Java/Kotlin, Spring Boot microservice | **Consolidation decided 2026-09-23 — see §9.2a for the full decision and implementation plan; not yet implemented as of this row.** `spring_boot` (category 3's package) is the canonical stack going forward; `java_spring_boot` (category 4's package) is to be retired after its one cell is ported in; category 5's Expedia pick reuses `spring_boot`, not a new package. Until the port actually lands, both packages still physically exist on their own branches — do not build a third while this is pending. | Any category researching a Java/Spring Boot pick (Wise, PayPal's historical Java tier, Cash App) **must** read §9.2a and reuse `spring_boot` — do not build a fourth. |
 | Go, synchronous HTTP API (`net/http`, post-monolith-migration paradigm) | Phase A done (skeleton, live-boot harness, CWE-347 webhook-signature cell) | Category 4 (Media/streaming, Twitch pick), `claude/category-4-build-t9uz3y` | Not merged to `main` yet. |
 | *(add a row per new stack the moment a category picks it — before building it, not after)* | — | — | — |
 
@@ -514,6 +514,103 @@ to all five branches so no session works from a stale copy. If you are
 reading this on a branch where these tables look different from what's
 described above, **that branch has since diverged again — check `git log`
 for what changed and reconcile before trusting either copy.**
+
+### 9.2a Java/Spring Boot consolidation — decision and implementation plan (2026-09-23)
+
+**Decided, by the project owner, after the category 1 pilot session's
+side-by-side comparison of both existing implementations:**
+**`spring_boot`** (category 3's package, `claude/category-3-build-iuu5k9`,
+TrackerNest) is the one canonical Java/Spring Boot stack going forward.
+Category 4's separately-built `java_spring_boot` package is retired after
+its one cell is ported into `spring_boot`. Category 5's Expedia pick
+reuses `spring_boot` once its Maven-access blocker is confirmed still
+real (per §9.2's note, it may already have resolved) — it must not build
+a third package.
+
+**Why `spring_boot`, not `java_spring_boot`, and not a from-scratch
+merge:**
+- `spring_boot` is materially deeper: 3 real, live-boot-proven cells
+  (SSTI/OGNL, XXE, insecure deserialization via raw
+  `ObjectInputStream.readObject()`) vs. `java_spring_boot`'s 1 cell
+  (insecure deserialization via Jackson polymorphic typing).
+- Porting `java_spring_boot`'s one cell into `spring_boot` is
+  substantially less work than the reverse (porting three cells into the
+  thinner package).
+- Both are architecturally identical otherwise (same module-composition
+  pattern — source/transform/sink/complexity registries — and both
+  correctly forgo a route accumulator in favor of Spring's own
+  `@RestController` component scanning), so nothing about the
+  consolidation direction is forced by architecture; it's forced by
+  which package is more built-out.
+
+**The real technical work this requires (verified directly, not
+assumed) — read this before starting, it is not a copy-paste job:**
+
+1. **Version reconciliation.** `spring_boot`'s skeleton pins
+   `spring-boot-starter-parent` **4.1.1**; `java_spring_boot`'s pins
+   **3.4.1**. Standardize on `spring_boot`'s 4.1.1 (the canonical
+   package's own version) — do not attempt to run both versions
+   side by side. Re-verify Netflix's ported cell actually compiles and
+   boots against 4.1.1 before considering the port done; Jackson's
+   `activateDefaultTyping`/`PolymorphicTypeValidator` API has moved
+   across Jackson major versions before, and Spring Boot 4.1.1 may pull
+   in a different Jackson version than 3.4.1 did — check this explicitly,
+   don't assume API compatibility.
+2. **A real minimal-pair vocabulary collision, not just a naming
+   collision.** Both cells target the exact same shape,
+   `(vuln_class="insecure_deserialization",
+   sink_context.family="object_deserialization")`, via genuinely
+   different mechanisms. `spring_boot`'s own `SpringBootEmitter`
+   currently dispatches its **sink** module by `cell.transform.ops`
+   (already separate from the source+complexity choice, which is keyed
+   purely by `(vuln_class, sink_context.family)` in
+   `_MODULE_SET_BY_SHAPE`) — see that class's own docstring. Absorbing
+   Netflix's cell means **the source dispatch needs extending to also
+   consider `cell.transform.ops` (or the route path), not just the
+   shape tuple**, since the Jackson-based cell needs a different source
+   module (`java_spring_boot`'s own JSON-body-reading source, likely
+   renamed) than the existing `request_stream` (raw byte stream) source
+   TrackerNest's own cell uses. This is a real, bounded refactor of
+   `_MODULE_SET_BY_SHAPE`'s shape (e.g. keying on
+   `(vuln_class, sink_context.family, op_family)` or a similar
+   discriminator) — plan for it, don't try to route around it.
+3. **Safety-matrix ops already coexist without collision** — verified:
+   `spring_boot`'s existing `function_executing_deserialize`/
+   `handler_registry_lookup` and `java_spring_boot`'s
+   `jackson_default_typing_deserialize`/`jackson_typed_allowlist_deserialize`
+   are four distinct op names already registered under the same
+   `object_deserialization` sink_family with no clash. No new
+   safety-matrix entries needed for the port itself.
+4. **Package/route identity.** `spring_boot`'s skeleton hardcodes
+   `com.fuzzlab.trackernest` as its scanned root package (TrackerNest's
+   own app identity); `java_spring_boot`'s cell currently renders to
+   `com.fuzzlab.lab.cells`. Per this project's own precedent
+   (`node_express`/`php_laravel` already host multiple categories' cells
+   under one shared skeleton and package root without issue — see
+   Walmart's cells on `node_express`), Netflix's ported cell should
+   render under `com.fuzzlab.trackernest.cells` (or wherever
+   `spring_boot`'s existing cells live) rather than inventing a second
+   package root inside the same skeleton. The literal package name is
+   cosmetic (app "identity" for this project lives in the manifest/page
+   design, not the Java package string) — don't block the port on
+   renaming it to something Netflix-flavored.
+5. **Bookkeeping.** This is a cross-branch consolidation — whichever
+   branch does the actual port (most naturally category 4's, since it's
+   the one being folded in and retired) needs a fresh `CC-LAB-0xxx`/
+   `FR-LAB-xx` entry for the port itself, picked from that category's
+   own reserved block, plus updates to `docs/LAB_MULTI_CATEGORY_SECOND_
+   TARGETS_PLAN.md`'s own §9.2/§9.4 (this file) recording the
+   consolidation as done and removing this section's "pending" framing —
+   and that updated file should then be re-synced to all five branches
+   the same way §9.2/§9.4 already were (see the sync note above), so
+   this doesn't reintroduce the exact five-way-divergence problem this
+   consolidation is meant to close out.
+6. **Test suite.** After the port, `java_spring_boot`'s own test files
+   are deleted (not left dangling pointing at a removed package); the
+   full non-slow suite must stay green, and `spring_boot`'s own
+   live-boot suite must grow by exactly Netflix's new cell's worth of
+   tests, still passing for real (real `mvn package`/boot/HTTP, not
+   simulated), before this is considered done.
 
 ### 9.3 Multi-session coordination contract (read this before touching any code)
 
