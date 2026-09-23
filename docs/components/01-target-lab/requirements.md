@@ -4042,6 +4042,48 @@ lane) can submit a payload as
   before concluding this, not assumed absent) -- substituted with a
   documented, rigorous self-review (accuracy + adequacy), recorded in
   `CC-LAB-0184`.
+- **FR-LAB-125** *(Twitch's eighth real page: second ssrf/
+  server_side_http_fetch instance, `/clips/download`; `CC-LAB-0185`,
+  2026-09-23).* Reuses `CC-LAB-0172`'s already-built `ssrf`/
+  `server_side_http_fetch` module set (`ReadUrlQueryParamSource`,
+  `UncheckedUrlFetchSink`/`SchemeAndResolvedIpAllowlistSink`) verbatim at
+  a second, distinct real Twitch feature: `GET /clips/download?source_url=`,
+  a clip-import/download endpoint that server-side-fetches an externally-
+  hosted clip file -- genuinely distinct from `/api/clips/thumbnail`'s own
+  thumbnail-fetch-and-render proxy (`TWCH-0002`), not a renamed copy of
+  it. **Zero new generator code**: only a new manifest
+  (`lab/manifests/ssrf_clips_download_go_sample.yaml`, cells
+  `LABGEN-GO-0015`/`0016`) and one new
+  `_ROUTE_PARAMS["/clips/download"]` entry in
+  `fuzzlab/labgen/emitters/go_net_http/__init__.py` -- no new module, op,
+  or safety-matrix entry, mirroring `CC-LAB-0183`'s own reuse-at-a-new-
+  route precedent. Ground truth `TWCH-0008` (`vuln_class="ssrf"`,
+  `sink_context="network"`, both pre-existing enum values from
+  `TWCH-0002` -- no schema widening needed). Real live-boot proof (same
+  differential shape as `CC-LAB-0172`'s own live-boot test): the
+  vulnerable twin fetches an unvalidated plain-HTTP loopback target
+  successfully; the secure twin rejects the same target (scheme check).
+  **This is the detection-generalization proof itself, verified for
+  real, not assumed from theory**: `SsrfInBandMarkerStrategy`/
+  `SsrfOobStrategy` (`CC-FUZZ-0027`, already built for `TWCH-0002`) are
+  keyed on `vuln_class` + sink shape, never per-route, so they needed
+  zero new audit-rule or oracle-strategy code to confirm `TWCH-0008`'s
+  new vulnerable twin and correctly fail closed on its new secure twin --
+  proven against a real `go build`/boot/HTTP round trip, using a real,
+  started `OobListener`
+  (`tests/test_labgen_go_live_boot.py::
+  test_real_boot_proves_the_ssrf_strategies_generalize_to_clips_download_route`)
+  and against the real `fuzzlab.harness.multitarget.run_targets` pipeline
+  end to end (`tests/test_multitarget_category4.py`), which shows
+  Twitch's own real, scored recall moving from 6/7 to 7/8 (`tp=7, fp=0`)
+  with no strategy/rule change.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`/`CC-LAB-0183`/`CC-LAB-0184`'s own
+  precedent wording):** the `Agent` tool for a two-independent-reviewer
+  accuracy/adequacy pass was not present in this session's toolset
+  (checked via `ToolSearch` before concluding this, not assumed absent)
+  -- substituted with a documented, rigorous self-review (accuracy +
+  adequacy), recorded in `CC-LAB-0185`.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

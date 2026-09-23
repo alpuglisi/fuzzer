@@ -3,6 +3,151 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0185 — Twitch's 8th real page: second ssrf/server_side_http_fetch instance, `/clips/download` (FR-LAB-125) (2026-09-23)
+
+- Change: a cheap, low-risk depth increment for category 4's Twitch pick
+  (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§9.4), the same
+  pattern as `CC-LAB-0183` (access-control second instance) and
+  `CC-LAB-0184` (Netflix insecure_deserialization second instance):
+  reuses `CC-LAB-0172`'s already-built `ssrf`/`server_side_http_fetch`
+  module set (`ReadUrlQueryParamSource`/`UncheckedUrlFetchSink`/
+  `SchemeAndResolvedIpAllowlistSink` -- checked directly against
+  `fuzzlab/labgen/emitters/go_net_http/modules.py` and
+  `_MODULE_SET_BY_SHAPE` in `__init__.py` before starting, not assumed
+  from the task's own suggested names) verbatim at a second, distinct
+  route: `GET /clips/download?source_url=`, a clip-import/download
+  endpoint that server-side-fetches an externally-hosted clip file -- a
+  real, plausible Twitch-clip-editor feature ("import a clip from an
+  external source URL"), genuinely distinct from `/api/clips/thumbnail`
+  (`TWCH-0002`, a thumbnail-*fetch-and-render* proxy), not a cosmetic
+  rename of it, mirroring `CC-LAB-0179`'s and `CC-LAB-0183`'s own
+  zero-new-generator-code "new manifest + new route entry + ground
+  truth" pattern for reusing an already-built shape at a new route.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`/`CC-LAB-0183`/`CC-LAB-0184`'s own
+  precedent wording):** the `Agent` tool for a two-independent-reviewer
+  accuracy/adequacy pass was not present in this session's toolset
+  (checked via `ToolSearch` before concluding this, not assumed absent)
+  -- substituted with a documented, rigorous self-review performed and
+  recorded here rather than silently skipping the gate, per this task's
+  own explicit instruction to flag the substitution: (1) **accuracy** --
+  confirmed by direct source inspection, not assumed: the three module
+  class names above exist verbatim in `modules.py`;
+  `_MODULE_SET_BY_SHAPE[("ssrf", "server_side_http_fetch")]` exists and
+  is unchanged; the served route is derived from `cell_id`, not the
+  manifest's own `route:` field (per this emitter's own established
+  convention), so no route-path collision risk exists regardless of
+  which path string the manifest declares; cell IDs `LABGEN-GO-0015`/
+  `0016` were confirmed free (highest existing Go cell ID across every
+  manifest in `lab/manifests/*.yaml` was `LABGEN-GO-0014`, grepped
+  directly); `SsrfInBandMarkerStrategy`/`SsrfOobStrategy`'s own
+  confirmation contract (the vulnerable twin's response echoes the
+  fetched body verbatim, or the target's own outbound fetch reaches a
+  real OOB listener) was checked against the exact rendered
+  vulnerable-twin sink template (`unchecked_url_fetch.go.j2`, unchanged,
+  `io.Copy(w, resp.Body)`s the fetched response straight back) before
+  assuming it would confirm, not assumed from the class/shape match
+  alone. (2) **adequacy** -- checked that this increment does not
+  silently duplicate an existing route (grepped `_ROUTE_PARAMS` for
+  `/clips/download`: absent), does not need a second, redundant strategy
+  (the task's own explicit constraint, honored: no new `Rule`/
+  `ConfirmationStrategy` code was written at all), and that the
+  "detection already works automatically" claim was actually run against
+  a real booted instance rather than asserted from theory (see below) --
+  both two new dedicated live-boot strategy/differential tests and the
+  full `fuzzlab.harness.multitarget.run_targets` pipeline were executed
+  for real before this entry claims the recall move.
+  - **Real Twitch functionality (grounded, not invented)**: a clip-
+    import/download endpoint that server-side-fetches an externally-
+    hosted clip file from a caller-supplied `source_url`, the same
+    CWE-918 SSRF class `CC-LAB-0172`'s thumbnail-fetch proxy already
+    models, at a genuinely different real API-edge feature -- consistent
+    with Twitch's own documented "Go-centric microservices, new API
+    edge" architecture
+    (`docs/research/site-architecture-survey-functionality-twitch.md`).
+  - **Vulnerable** (`LABGEN-GO-0015`, `unchecked_url_fetch`): fetches the
+    caller-supplied `source_url` with no validation at all. **Secure**
+    (`LABGEN-GO-0016`, `scheme_and_resolved_ip_allowlist`): rejects any
+    scheme but `https` and rejects a resolved IP that is loopback/
+    private/link-local, checked against the resolved address.
+  - **Zero new generator code, verified not just claimed**: the only
+    non-ground-truth code change is one new
+    `_ROUTE_PARAMS["/clips/download"] = {"var_name": "sourceUrl",
+    "param_name": "source_url"}` entry in
+    `fuzzlab/labgen/emitters/go_net_http/__init__.py` (config, not a new
+    class/template); rendering both cells was run directly before
+    writing any test and produced byte-for-byte the same handler shape
+    as `LABGEN-GO-0003`/`0004`, differing only in the served path,
+    query-param name, and `handleLabgenGo00{15,16}` function name.
+  - **Real, live-boot proof** (`tests/test_labgen_go_live_boot.py`, same
+    plain-HTTP-loopback differential shape as `CC-LAB-0172`'s own test):
+    (a) the vulnerable twin fetches an unvalidated plain-HTTP loopback
+    target successfully; (b) the secure twin rejects the same target
+    (scheme check).
+  - **Detection generalization, verified for real against a real booted
+    app, not asserted from theory**: a new live-boot test drives the
+    real, already-built `SsrfInBandMarkerStrategy`/`SsrfOobStrategy`
+    (`CC-FUZZ-0027`) directly against this new cell pair, using a real,
+    started `OobListener` -- confirms the vulnerable twin, fails closed
+    on the secure twin, with zero new strategy/rule code. The real
+    `fuzzlab.harness.multitarget.run_targets` pipeline was then run end
+    to end against a real booted Twitch instance (with a real
+    `OobListener` passed through, per `CC-FUZZ-0027`'s own `oob=`
+    passthrough) (`tests/test_multitarget_category4.py::
+    test_both_apps_run_through_multitarget_for_real`) and shows Twitch's
+    own real, scored recall moving from `6/7` to `7/8` (`tp=7, fp=0`)
+    with no audit-rule/strategy change -- the whole point of this
+    increment, proving the existing detection generalizes to a second
+    instance of the same shape rather than assuming it would.
+  - Ground truth: `TWCH-0008` added to `lab/ground-truth-twitch-clone/`
+    (`vuln_class="ssrf"`, `sink_context="network"` -- both pre-existing
+    enum values from `TWCH-0002`, no schema widening needed).
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/__init__.py` (`_ROUTE_PARAMS`,
+    one new route entry)
+  - `lab/manifests/ssrf_clips_download_go_sample.yaml` (new)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended)
+  - `tests/test_labgen_go_net_http_conformance.py` (manifest list
+    extended)
+  - `tests/test_labels_contract_category4.py` (extended)
+  - `tests/test_labgen_go_live_boot.py` (two new live-boot tests)
+  - `tests/test_multitarget_category4.py` (`_twitch_cells()` extended;
+    recall assertions moved 6/7 -> 7/8)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-125`, new)
+- Impact (other components / project): additive only -- one new
+  `_ROUTE_PARAMS` key (cannot collide with any existing route since served
+  routes are cell-ID-derived, not path-derived), one new manifest, ground
+  truth extension. No existing cell's rendered output changes (verified:
+  `go_net_http`'s full existing test suite re-run unmodified-in-assertion
+  alongside the new tests). No new detection code in `fuzzlab.oracle`/
+  `fuzzlab.core.runmode` at all -- this increment is purely a
+  generalization proof of already-shipped detection capability.
+- Risk (level; mitigation or accepted-risk justification): **low**. Reuses
+  fully-built, already-tested modules verbatim; the only genuinely new
+  artifacts are config (manifest + one route-params entry) and ground
+  truth. Verified end to end with a real `go build`/boot/HTTP round trip
+  and a real `run_targets` pipeline run (with a real `OobListener`), not
+  assumed from the shared-module argument alone.
+- Deliverables:
+  - [x] New manifest + one `_ROUTE_PARAMS` entry, zero new module/op code
+  - [x] Real live-boot proof (2 assertions, mirroring `CC-LAB-0172`'s own
+    plain-HTTP-loopback shape)
+  - [x] Ground truth extended (`TWCH-0008`)
+  - [x] Detection generalization verified live (dedicated strategy
+    live-boot test with a real `OobListener` + real `run_targets`
+    pipeline run) -- recall 6/7 -> 7/8
+  - [x] Full non-slow suite + the relevant category-4/`go_net_http` slow
+    tests re-verified green
+  - [x] Pre-change review gate's `Agent`-tool absence flagged explicitly,
+    substituted with a documented self-review (accuracy + adequacy),
+    matching `CC-LAB-0182`/`CC-LAB-0183`/`CC-LAB-0184`'s own precedent
+    wording
+- Effectiveness (assessed 2026-09-23): met -- Twitch now has eight real,
+  live-boot-proven pages, and the project's existing `ssrf` detection is
+  now proven, not just assumed, to generalize across distinct routes of
+  the same shape with zero new detection code.
+
 ### CC-LAB-0184 — Netflix's third real page: second insecure_deserialization instance, `/api/profiles/switch` (FR-LAB-124) (2026-09-23)
 
 - Change: a cheap, low-risk depth increment for category 4's Netflix pick

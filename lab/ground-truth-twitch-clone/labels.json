@@ -85,6 +85,18 @@
       "expected_vulnerable": true,
       "rendering": "server-json",
       "notes": "channel_id query param used to look up a channel's subscriber roster/count with no check that it matches the caller's own X-Broadcaster-Id (CWE-639/862, broken object-level authorization / IDOR) -- modeled on Twitch's real per-channel subscriber-roster API, a second, distinct textbook OWASP API1:2023 BOLA surface alongside TWCH-0003's per-channel analytics lookup, a realistic public API-edge feature for this app identity. Reuses CC-LAB-0178's already-built read_channel_id_and_broadcaster_header source, no_ownership_check/identity_match_before_fetch transforms, and object_lookup_authorization_check sink verbatim (lab/safety_matrix.yaml's existing db_row_by_id_lookup sink family) -- zero new generator code, only a new lab/manifests/access_control_subscribers_go_sample.yaml manifest and one new _ROUTE_PARAMS['/channels/subscribers'] route-profile entry in fuzzlab/labgen/emitters/go_net_http/__init__.py (config, not a new class/template), mirroring CC-LAB-0179's own zero-new-generator-code reuse-at-a-new-route precedent. `X-Broadcaster-Id` is the same fixed demo header CC-LAB-0178 already documented as modeling only the ownership-check-bypass mechanism in isolation, never a real session/auth system. `LABGEN-GO-0013` in lab/manifests/access_control_subscribers_go_sample.yaml, served at `/generated/labgen-go-0013` (same cell_id-derived-route convention as TWCH-0001..0006) -- never a PFF-* case. Verified live: AccessControlIdorStrategy (already built for TWCH-0003, keyed on vuln_class=access_control + sink shape, not per-route) confirms this new vulnerable twin with no new audit-rule/strategy code, and correctly does not confirm the secure twin (LABGEN-GO-0014)."
+    },
+    {
+      "case_id": "TWCH-0008",
+      "url": "/generated/labgen-go-0015",
+      "method": "GET",
+      "param": "source_url",
+      "location": "query",
+      "vuln_class": "ssrf",
+      "sink_context": "network",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "source_url query param fetched server-side with no scheme or resolved-IP allowlist check (CWE-918) -- modeled on Twitch's real clip-import/download feature (import a clip from an externally-hosted source URL), a second, distinct real Twitch feature from TWCH-0002's clip-thumbnail-fetch proxy, not a cosmetic rename of it. Reuses CC-LAB-0172's already-built read_url_query_param source and unchecked_url_fetch/scheme_and_resolved_ip_allowlist sinks verbatim (lab/safety_matrix.yaml's existing server_side_http_fetch sink family) -- zero new generator code, only a new lab/manifests/ssrf_clips_download_go_sample.yaml manifest and one new _ROUTE_PARAMS['/clips/download'] route-profile entry in fuzzlab/labgen/emitters/go_net_http/__init__.py (config, not a new class/template), mirroring CC-LAB-0183's own zero-new-generator-code reuse-at-a-new-route precedent. `LABGEN-GO-0015` in lab/manifests/ssrf_clips_download_go_sample.yaml, served at `/generated/labgen-go-0015` (same cell_id-derived-route convention as TWCH-0001..0007) -- never a PFF-* case. Verified live: SsrfInBandMarkerStrategy/SsrfOobStrategy (already built for TWCH-0002, keyed on vuln_class=ssrf + sink shape, not per-route) confirm this new vulnerable twin with no new audit-rule/strategy code, and correctly do not confirm the secure twin (LABGEN-GO-0016)."
     }
   ]
 }

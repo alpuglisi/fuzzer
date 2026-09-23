@@ -189,6 +189,98 @@ def test_real_boot_proves_the_ssrf_ip_allowlist_specifically_not_just_the_scheme
         plain_server.shutdown()
 
 
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_ssrf_differential_for_both_twins_at_clips_download_route() -> None:
+    """Same plain-HTTP-loopback differential as
+    `test_real_boot_proves_the_ssrf_ip_allowlist_specifically_not_just_the_scheme_check`
+    (`CC-LAB-0172`), against the second, distinct `/clips/download` route
+    (`CC-LAB-0185`) -- proving the already-built shape genuinely
+    generalizes to a new real page, not just a renamed copy of the same
+    one."""
+    manifest = load_manifest("lab/manifests/ssrf_clips_download_go_sample.yaml")
+    emitter = GoEmitter()
+
+    plain_server = _start_plain_http_listener()
+    try:
+        plain_port = plain_server.server_address[1]
+        plain_url = f"http://127.0.0.1:{plain_port}/clip.mp4"
+
+        with GoLiveBootHarness(emitter, manifest.cells) as harness:
+            # (a) vulnerable twin: plain-HTTP loopback target accepted.
+            vuln_resp = harness.request(
+                "GET", f"/generated/labgen-go-0015?source_url={plain_url}"
+            )
+            assert vuln_resp.status == 200, (
+                f"vulnerable twin rejected an unvalidated loopback target (status {vuln_resp.status})"
+            )
+            assert vuln_resp.body == "thumb-bytes"
+
+            # (b) secure twin: the same plain-HTTP target is rejected (scheme check).
+            secure_resp = harness.request(
+                "GET", f"/generated/labgen-go-0016?source_url={plain_url}"
+            )
+            assert secure_resp.status == 403, (
+                f"secure twin accepted a plain-HTTP loopback target (status {secure_resp.status}) "
+                "-- the scheme check should have rejected it"
+            )
+    finally:
+        plain_server.shutdown()
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_ssrf_strategies_generalize_to_clips_download_route() -> None:
+    """The real, already-built `SsrfInBandMarkerStrategy`/`SsrfOobStrategy`
+    (`CC-FUZZ-0027`), keyed only on `vuln_class`/sink shape, not per-route --
+    confirm this new vulnerable twin and fail closed on the new secure twin
+    with zero new detection code, using a real, started `OobListener`
+    (needed even for the in-band-marker layer, since it mints and checks
+    the callback token, not just for the OOB-wait fallback layer) -- the
+    same generalization proof `CC-LAB-0183` made for Twitch's
+    `access_control` detection."""
+    from fuzzlab.oracle.oob import OobListener
+    from fuzzlab.oracle.probe import Candidate, Probe
+    from fuzzlab.oracle.strategies import SsrfInBandMarkerStrategy, SsrfOobStrategy
+
+    manifest = load_manifest("lab/manifests/ssrf_clips_download_go_sample.yaml")
+    emitter = GoEmitter()
+
+    listener = OobListener()
+    listener.start()
+    try:
+        with GoLiveBootHarness(emitter, manifest.cells) as harness:
+
+            class _HarnessSender:
+                def __init__(self, path: str):
+                    self._path = path
+
+                def send(self, url, param, value, timing=False, method="GET",
+                          location="query", content_type=None):
+                    resp = harness.request("GET", f"{self._path}?{param}={value}")
+                    return Probe(resp.status, resp.body)
+
+            vuln_cand = Candidate(url="http://h/generated/labgen-go-0015", param="source_url",
+                                  method="GET", location="query",
+                                  vuln_class="ssrf", category="ssrf")
+            secure_cand = Candidate(url="http://h/generated/labgen-go-0016", param="source_url",
+                                    method="GET", location="query",
+                                    vuln_class="ssrf", category="ssrf")
+
+            for strategy in (SsrfInBandMarkerStrategy(listener), SsrfOobStrategy(listener)):
+                verdict = strategy.confirm(vuln_cand, _HarnessSender("/generated/labgen-go-0015"))
+                assert verdict is not None and verdict.confirmed, (
+                    f"{type(strategy).__name__} failed to confirm the real vulnerable twin"
+                )
+                assert verdict.vuln_class == "ssrf"
+
+                assert strategy.confirm(secure_cand, _HarnessSender("/generated/labgen-go-0016")) is None, (
+                    f"{type(strategy).__name__} incorrectly confirmed the real secure twin"
+                )
+    finally:
+        listener.stop()
+
+
 # -- Phase B increment 2: access-control / IDOR (db_row_by_id_lookup) --------
 
 

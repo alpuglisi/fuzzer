@@ -155,6 +155,10 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     # shape (CC-LAB-0178's own /channels/analytics), zero new generator
     # code -- just this route-profile entry.
     "/channels/subscribers": {"param_name": "channel_id"},
+    # CC-LAB-0185: second instance of the ssrf/server_side_http_fetch shape
+    # (CC-LAB-0172's own /api/clips/thumbnail), zero new generator code --
+    # just this route-profile entry.
+    "/clips/download": {"var_name": "sourceUrl", "param_name": "source_url"},
 }
 
 

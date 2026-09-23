@@ -4,6 +4,32 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Twitch's 8th real page — SSRF generalizes for free, CC-LAB-0185/FR-LAB-125)
+- Target lab: a cheap, low-risk depth increment for category 4's Twitch
+  pick, the same pattern as `CC-LAB-0183` (access-control second instance)
+  and `CC-LAB-0184` (Netflix insecure_deserialization second instance) —
+  reuses `CC-LAB-0172`'s already-built `ssrf`/`server_side_http_fetch`
+  module set (`read_url_query_param` source, `unchecked_url_fetch`/
+  `scheme_and_resolved_ip_allowlist` sinks) verbatim at a second, distinct
+  real route, `GET /clips/download?source_url=` (a clip-import/download
+  feature, genuinely distinct from `/api/clips/thumbnail`'s own
+  thumbnail-fetch-and-render proxy). Zero new generator code — one new
+  manifest (`lab/manifests/ssrf_clips_download_go_sample.yaml`, cells
+  `LABGEN-GO-0015`/`0016`) and one new `_ROUTE_PARAMS["/clips/download"]`
+  route entry. Ground truth `TWCH-0008` added; no schema widening needed.
+  **The point of this increment**: verified, not assumed, that the
+  already-built `SsrfInBandMarkerStrategy`/`SsrfOobStrategy`
+  (`CC-FUZZ-0027`) confirm the new vulnerable twin and fail closed on the
+  new secure twin with zero new detection code — proven live via two new
+  live-boot tests (a functional differential and a dedicated strategy
+  generalization test using a real, started `OobListener`) and the real
+  `fuzzlab.harness.multitarget.run_targets` pipeline, moving Twitch's own
+  real, scored recall from 6/7 to 7/8 (`tp=7, fp=0`). `Agent` tool absent
+  from this session's toolset (checked via `ToolSearch`); substituted a
+  documented rigorous self-review, per `CC-LAB-0182`/`CC-LAB-0183`/
+  `CC-LAB-0184`'s own precedent for that substitution. Full bookkeeping:
+  `CC-LAB-0185`, `FR-LAB-125`.
+
 ## 2026-09-23 (LAB: Netflix's 3rd real page — insecure_deserialization generalizes for free, CC-LAB-0184/FR-LAB-124)
 - Target lab: a cheap depth increment for category 4's Netflix pick,
   mirroring `CC-LAB-0183`'s own just-landed pattern — reuses

@@ -37,6 +37,9 @@ _MANIFESTS = (
     # CC-LAB-0183: second access_control/db_row_by_id_lookup instance,
     # reusing CC-LAB-0178's modules verbatim at a new route.
     "lab/manifests/access_control_subscribers_go_sample.yaml",
+    # CC-LAB-0185: second ssrf/server_side_http_fetch instance, reusing
+    # CC-LAB-0172's modules verbatim at a new route.
+    "lab/manifests/ssrf_clips_download_go_sample.yaml",
 )
 
 
