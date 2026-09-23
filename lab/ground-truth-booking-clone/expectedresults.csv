@@ -2,7 +2,7 @@
 # pilot app. Derived from labels.json; the loader cross-checks the two so
 # they cannot drift. category is the vuln class; expected_vulnerable is the
 # ground-truth verdict for that (url, param) case. CC-LAB-0210/FR-LAB-78,
-# CC-LAB-0211/FR-LAB-80, CC-LAB-0212/FR-LAB-82.
+# CC-LAB-0211/FR-LAB-90, CC-LAB-0212/FR-LAB-92.
 case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
 BKNG-0001,/cell/labgen-bc-0001,GET,return_to,query,open_redirect,true,/cell/labgen-bc-0001,sink,,direct
 BKNG-0002,/cell/labgen-bc-0003,GET,label,query,csv_formula_injection,true,/cell/labgen-bc-0003,sink,,direct

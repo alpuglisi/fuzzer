@@ -1,5 +1,5 @@
-"""The `csv_formula_injection` shape (CWE-1236, `CC-LAB-0211`/`FR-LAB-80`/
-`FR-LAB-81`) -- category 5's (Travel/booking/marketplaces) Booking.com
+"""The `csv_formula_injection` shape (CWE-1236, `CC-LAB-0211`/`FR-LAB-90`/
+`FR-LAB-91`) -- category 5's (Travel/booking/marketplaces) Booking.com
 pilot, second increment (first: `open_redirect`, `CC-LAB-0210`).
 `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5.
 

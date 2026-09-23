@@ -1,5 +1,5 @@
 # Booking.com-themed price-integrity/business-logic sample manifest
-# (CC-LAB-0212/FR-LAB-82), php_laravel -- category 5 (Travel/booking/
+# (CC-LAB-0212/FR-LAB-92), php_laravel -- category 5 (Travel/booking/
 # marketplaces) pilot, docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §9.4
 # row 5, third increment (first: booking_open_redirect_sample.yaml; second:
 # booking_csv_export_sample.yaml).

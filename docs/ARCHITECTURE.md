@@ -448,7 +448,7 @@ tracked in the requirements files, not here.
   categories 2-6 are open. See the plan doc's own §9.4 tracker for live,
   per-category status rather than restating it here.
 
-  **Second increment (`CC-LAB-0211`/`FR-LAB-80`/`FR-LAB-81`, 2026-09-23):**
+  **Second increment (`CC-LAB-0211`/`FR-LAB-90`/`FR-LAB-91`, 2026-09-23):**
   `("csv_formula_injection", "csv_cell_value")` (CWE-1236, a CSV/report
   export response whose own code is likewise the method's terminal
   statement) landed on the same Booking.com app, with `BKNG-0002` appended
@@ -462,7 +462,7 @@ tracked in the requirements files, not here.
   own established convention of a structurally-named, shared complexity
   module rather than one minted per sink type.
 
-  **Third increment (`CC-LAB-0212`/`FR-LAB-82`/`FR-LAB-83`, 2026-09-23):**
+  **Third increment (`CC-LAB-0212`/`FR-LAB-92`/`FR-LAB-93`, 2026-09-23):**
   `("price_integrity_bypass", "payment_charge_amount")` reuses an
   already-existing `lab/safety_matrix.yaml` concern/sink family
   (`CC-LAB-0063`, previously rendered by no emitter on any stack) — a

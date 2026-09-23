@@ -12,6 +12,44 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (cross-category doc sync, round 2)
+- Docs (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, all five second-target
+  category branches): re-synced §9.2 (stack-reuse ledger), §9.2a (Java/Spring
+  Boot consolidation), §9.3 (coordination contract), and §9.4 (category
+  tracker) to a single canonical, byte-identical block (SHA256-verified)
+  after reviewing and correcting category 4's Go/Twitch Phase B increment and
+  the completed Java/Spring Boot port, and category 5's CSV-formula-injection
+  shape (which had a fresh `FR-LAB-80`/`81` collision with category 3,
+  renumbered to `FR-LAB-90`/`91`). §9.2a's "Decided" text is updated from
+  pending/future tense to reflect the consolidation is now **done**:
+  category 4's `java_spring_boot` package is deleted, Netflix's cell is
+  ported into `spring_boot` as `CC-LAB-0173`, and category 5 does not build
+  a competing package. Documentation-only change; each branch's own full
+  test suite was re-run after the splice to confirm no regression (cat1:
+  1891 passed/8 skipped; cat2: 1783 passed/8 skipped; cat3: 1821 passed/8
+  skipped; cat4: 1843 passed/8 skipped; cat5: 1798 passed/8 skipped — all
+  identical to each branch's own pre-sync baseline).
+
+## 2026-09-23 (cross-branch review, by the category 1 pilot session, round 2)
+- Docs/LAB: reviewed this branch's `csv_formula_injection` (CWE-1236)
+  shape — no code defects found; the `csv_formula_neutralize` regex
+  (`^\s*[=+\-@\t\r]`) correctly matches leading-whitespace-then-trigger
+  values and prepends the quote before the whitespace as documented, and
+  all 10 real tests pass genuinely (including a real live-boot HTTP round
+  trip and a separate, framework-independent proof that the neutralizer's
+  own logic — not just Laravel's `TrimStrings` middleware, a real,
+  honestly-disclosed confound this branch's own commit already caught —
+  closes the leading-whitespace bypass). Found and fixed a fresh
+  cross-branch bookkeeping collision: this branch's new `FR-LAB-80`/`81`
+  collided with `FR-LAB-80`/`81` already used on `claude/category-3-
+  build-iuu5k9` (TrackerNest's third cell, Huddle Hub's webhook-signature
+  cell) — both branches picked "next free" independently past the point
+  of the last cross-branch sync. Renumbered to `FR-LAB-90`/`91` (beyond
+  the current global ceiling). `CC-LAB-0211` itself never collided
+  (within this category's own reserved `0210`-`0249` block), so it is
+  unchanged. Full suite reverified green after the rename (1798 passed,
+  8 skipped, matching the pre-fix count exactly).
+
 ## 2026-09-23
 - LAB: category 5 (Travel/booking) pilot, third increment — reuses the
   already-existing `price_integrity_bypass` concern/`payment_charge_amount`

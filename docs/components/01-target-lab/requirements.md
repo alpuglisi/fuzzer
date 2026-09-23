@@ -1869,7 +1869,7 @@ lane) can submit a payload as
     module set has needed, since neither `single_statement` nor
     `render_only` fits a sink that is itself the terminal `return`;
     originally named `redirect_response`, **renamed to `terminal_response`
-    by `FR-LAB-80`/`CC-LAB-0211`** once a second, unrelated sink family
+    by `FR-LAB-90`/`CC-LAB-0211`** once a second, unrelated sink family
     needed the identical, already sink-agnostic wrapper — this entry
     updated in place to the current name, per this file's own living-doc
     convention; `CC-LAB-0210`'s append-only change-control record keeps the
@@ -1930,7 +1930,7 @@ lane) can submit a payload as
   is the first test in this repository to load two ground-truth
   directories in the same process and confirm neither's `contract.load()`
   call is affected by the other's existence.
-- **FR-LAB-80** *(CSV/report export formula-injection shape, `php_laravel`;
+- **FR-LAB-90** *(CSV/report export formula-injection shape, `php_laravel`;
   `CC-LAB-0211`, 2026-09-22).* Category 5's Booking.com app, second
   increment (first: `FR-LAB-78`'s `open_redirect` shape).
   - A genuinely new `(vuln_class, sink_context.family)` shape,
@@ -2022,7 +2022,7 @@ lane) can submit a payload as
     `CC-LAB-0210`-`0249` block. After this increment: 2 of 5 originally
     shortlisted shapes landed, 2 pages, still short of Phase C's "coherent
     page/route set" bar.
-- **FR-LAB-81** *(ground truth's second case in the existing directory;
+- **FR-LAB-91** *(ground truth's second case in the existing directory;
   `CC-LAB-0211`, 2026-09-22).* `BKNG-0002` appended to the *same*
   `lab/ground-truth-booking-clone/` directory `FR-LAB-79` created (not a
   third directory) — verified against the real loader
@@ -2040,9 +2040,9 @@ lane) can submit a payload as
   enums widened again, additively, with `"csv_formula_injection"`/`"csv"`
   (existing values, and every existing case across both ground-truth
   directories, unchanged and re-validated by this change's own test run).
-- **FR-LAB-82** *(price-integrity/business-logic amount-trust shape,
+- **FR-LAB-92** *(price-integrity/business-logic amount-trust shape,
   `php_laravel`; `CC-LAB-0212`, 2026-09-23).* Category 5's Booking.com app,
-  third increment (first: `FR-LAB-78`'s `open_redirect`; second: `FR-LAB-80`'s
+  third increment (first: `FR-LAB-78`'s `open_redirect`; second: `FR-LAB-90`'s
   `csv_formula_injection`).
   - Reuses the **already-existing** `price_integrity_bypass` concern and
     `payment_charge_amount` sink family in `lab/safety_matrix.yaml`
@@ -2122,13 +2122,13 @@ lane) can submit a payload as
     Phase C's "coherent page/route set" bar (search, listing, checkout-flow
     completion, Extranet browsing — not yet begun as real page/route
     coverage, only as illustrative injection-shape cells).
-- **FR-LAB-83** *(ground truth's third case in the existing directory;
+- **FR-LAB-93** *(ground truth's third case in the existing directory;
   `CC-LAB-0212`, 2026-09-23).* `BKNG-0003` appended to the same
-  `lab/ground-truth-booking-clone/` directory `FR-LAB-79`/`FR-LAB-81`
+  `lab/ground-truth-booking-clone/` directory `FR-LAB-79`/`FR-LAB-91`
   already grew — consistent with `fuzzlab.labels.contract`'s real,
   multi-case-per-directory-supporting loader. All three of the shared
   ground-truth directory's files updated together (`labels.json`,
-  `expectedresults.csv`, `injection-points.json`), per `FR-LAB-81`'s own
+  `expectedresults.csv`, `injection-points.json`), per `FR-LAB-91`'s own
   established precedent. `fuzzlab/labels/schemas/labels.schema.json`'s
   `vuln_class` enum widened again, additively, with
   `"price_integrity_bypass"` — `sink_context` reuses the existing `"sql"`

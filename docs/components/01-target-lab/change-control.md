@@ -3,7 +3,7 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0212 — category 5 pilot, third increment: `price_integrity_bypass` (client-trusted payment amount) shape on `php_laravel`, Booking.com's checkout (FR-LAB-82, FR-LAB-83) (2026-09-23)
+### CC-LAB-0212 — category 5 pilot, third increment: `price_integrity_bypass` (client-trusted payment amount) shape on `php_laravel`, Booking.com's checkout (FR-LAB-92, FR-LAB-93) (2026-09-23)
 - Change: the third increment of category 5's Booking.com app (first two:
   `CC-LAB-0210` open_redirect, `CC-LAB-0211` csv_formula_injection).
   Reuses the **already-existing** `price_integrity_bypass` concern and
@@ -90,7 +90,7 @@ Component code: **LAB**. Entry format and required fields: see
      `room_type=deluxe` request stores `149.00`, not the default `89.00`.
   7. **Ground truth: `BKNG-0003` appended to the existing directory**
      (`lab/ground-truth-booking-clone/`, not a new one — `FR-LAB-79`/
-     `FR-LAB-81`'s own precedent, verified again against the real loader).
+     `FR-LAB-91`'s own precedent, verified again against the real loader).
      All three files updated together: `labels.json`, `expectedresults.csv`,
      `injection-points.json`. `fuzzlab/labels/schemas/labels.schema.json`'s
      `vuln_class` enum widened additively (`price_integrity_bypass`);
@@ -98,8 +98,8 @@ Component code: **LAB**. Entry format and required fields: see
      genuinely is a SQL `INSERT`) rather than minting an under-specified
      new token, per the adequacy review's explicit preference for reuse
      over vagueness.
-  8. `docs/components/01-target-lab/requirements.md`: `FR-LAB-82`
-     (the shape), `FR-LAB-83` (ground truth's third case), written at the
+  8. `docs/components/01-target-lab/requirements.md`: `FR-LAB-92`
+     (the shape), `FR-LAB-93` (ground truth's third case), written at the
      same file-by-file granularity as `FR-LAB-78`-`81` from the first
      draft (no placeholder-then-fix round needed this time).
   9. **Tests**: `tests/test_labgen_price_integrity.py` (9 tests) —
@@ -144,7 +144,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] `lab/ground-truth-booking-clone/`: `BKNG-0003` in all 3 files — done
   - [x] `fuzzlab/labgen/conformance/static_precheck.py`: new entry — done
   - [x] `tests/test_labgen_modules.py`: 2 new fixture entries (done *before* the whole-repo run) — done
-  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-82`/`83` — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-92`/`83` — done
   - [x] `tests/test_labgen_price_integrity.py` (9 tests, all green including the real live-boot test) — done
   - [x] `CHANGELOG.md` line — done
   - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done
@@ -164,7 +164,7 @@ Component code: **LAB**. Entry format and required fields: see
   `pytest tests/` run: see the commit message / `CHANGELOG.md` line for
   the exact pass/skip/fail counts.
 
-### CC-LAB-0211 — category 5 pilot, second increment: `csv_formula_injection` (CWE-1236) shape on `php_laravel`, Booking.com's Extranet export (FR-LAB-80, FR-LAB-81) (2026-09-23)
+### CC-LAB-0211 — category 5 pilot, second increment: `csv_formula_injection` (CWE-1236) shape on `php_laravel`, Booking.com's Extranet export (FR-LAB-90, FR-LAB-91) (2026-09-23)
 - Change: the second buildable increment of category 5's Booking.com app
   (first: `CC-LAB-0210`'s `open_redirect` shape) — CSV/report export
   formula injection (CWE-1236), grounded in Booking.com's real Extranet/
@@ -294,8 +294,8 @@ Component code: **LAB**. Entry format and required fields: see
      `injection-points.json`. `fuzzlab/labels/schemas/labels.schema.json`'s
      `vuln_class`/`sink_context` enums widened again, additively
      (`csv_formula_injection`/`csv`).
-  8. `docs/components/01-target-lab/requirements.md`: `FR-LAB-80`
-     (the shape), `FR-LAB-81` (ground truth's second case), written at the
+  8. `docs/components/01-target-lab/requirements.md`: `FR-LAB-90`
+     (the shape), `FR-LAB-91` (ground truth's second case), written at the
      same file-by-file granularity as `FR-LAB-78`/`65`, per the adequacy
      review's explicit demand that the draft's placeholder-level text not
      ship as the final spec.
@@ -350,7 +350,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] `lab/ground-truth-booking-clone/`: `BKNG-0002` in all 3 files — done
   - [x] `fuzzlab/labgen/conformance/static_precheck.py`: new entry — done
   - [x] `tests/test_labgen_modules.py`: 2 new fixture entries + rename (done *before* the whole-repo run, `PA-0036`) — done
-  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-80`/`67`, and `FR-LAB-78` updated in place for the rename — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-90`/`67`, and `FR-LAB-78` updated in place for the rename — done
   - [x] `tests/test_labgen_csv_export_injection.py` (10 tests, all green including the real live-boot test and the framework-independent neutralizer proof) — done
   - [x] `tests/test_labgen_open_redirect.py`: cardinality-assumption fix (item 9) — done
   - [x] `CHANGELOG.md` line — done
