@@ -652,7 +652,7 @@ entries:
     sink_family: http_response_header_value
     effect: neutralises
     neutralizes: [http_header_injection]
-  # Added CC-LAB-0135/FR-LAB-83: a third header-injection sink_family --
+  # Added CC-LAB-0135/FR-LAB-99: a third header-injection sink_family --
   # neither `email_header_value` nor `http_response_header_value` fits an
   # outbound HTTP *request* header a server sends out (as opposed to a
   # mail header or a response header sent back to a browser). `op:
