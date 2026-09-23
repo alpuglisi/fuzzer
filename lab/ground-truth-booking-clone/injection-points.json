@@ -15,6 +15,13 @@
       "param": "label",
       "location": "query",
       "rendering": "server"
+    },
+    {
+      "url": "/cell/labgen-bc-0005",
+      "method": "POST",
+      "param": "amount",
+      "location": "body",
+      "rendering": "server-json"
     }
   ]
 }

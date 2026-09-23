@@ -1,0 +1,36 @@
+# Booking.com-themed price-integrity/business-logic sample manifest
+# (CC-LAB-0212/FR-LAB-82), php_laravel -- category 5 (Travel/booking/
+# marketplaces) pilot, docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §9.4
+# row 5, third increment (first: booking_open_redirect_sample.yaml; second:
+# booking_csv_export_sample.yaml).
+#
+# The vulnerable/secure twin pair for the `price_integrity_bypass` shape,
+# reusing lab/safety_matrix.yaml's already-existing concern/sink family
+# (added by CC-LAB-0063, first rendered by any emitter here) -- grounded
+# in Booking.com's real checkout total computation and the real QloApps
+# (a real open-source hotel-booking engine) Cart::getOrderTotal() pattern,
+# see docs/research/category5-travel-functionality-and-cwe-research.md
+# §1.1/§2.1 and docs/research/corpus-examples/ecommerce-logic/php/
+# manifest.yaml for the citations. Continues this app's own cell-ID
+# sequence and out-of-band ground truth (lab/ground-truth-booking-clone/,
+# BKNG-0003) -- never puppy-fort-factory's `PFF-*` identity.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-BC-0005
+    class: price_integrity_bypass
+    stack_profile: php_laravel
+    route: { method: POST, path: /booking/checkout }
+    sink_context:
+      family: payment_charge_amount
+      required_neutralizations: [price_integrity_bypass]
+    transform: []
+
+  - cell_id: LABGEN-BC-0006
+    class: price_integrity_bypass
+    stack_profile: php_laravel
+    route: { method: POST, path: /booking/checkout }
+    sink_context:
+      family: payment_charge_amount
+      required_neutralizations: [price_integrity_bypass]
+    transform: [server_recomputed_amount]

@@ -462,6 +462,19 @@ tracked in the requirements files, not here.
   own established convention of a structurally-named, shared complexity
   module rather than one minted per sink type.
 
+  **Third increment (`CC-LAB-0212`/`FR-LAB-82`/`FR-LAB-83`, 2026-09-23):**
+  `("price_integrity_bypass", "payment_charge_amount")` reuses an
+  already-existing `lab/safety_matrix.yaml` concern/sink family
+  (`CC-LAB-0063`, previously rendered by no emitter on any stack) — a
+  checkout charge whose secure twin recomputes the total server-side from
+  a fixed rate table keyed by a non-tainted `room_type` parameter, never
+  from the client-submitted amount, closing Booking.com's shortlisted
+  PHP-shape roster at 3 of 3 unblocked shapes. This increment's own
+  `bookings` table (id, room_type, total_amount) was added to
+  `fuzzlab.labgen.conformance.live_boot._SCHEMA_SQL`, additive alongside
+  the existing `products`/`posts`/`users` tables — the first schema
+  addition any category-5 increment has needed.
+
   **The parity/cutover coverage gate** (`CC-LAB-0053`/`FR-LAB-51`,
   `fuzzlab/labgen/cutover_gate.py`, plan §4.3.6.6 point 3) is the precondition
   `L-P3.3c-CUT` needs before it can run, built ahead of and independent from

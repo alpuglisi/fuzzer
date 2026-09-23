@@ -474,6 +474,89 @@ class CsvFormulaNeutralizeTransform(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class ServerRecomputedAmountTransform(TemplateModule):
+    """The ``server_recomputed_amount`` op (CC-LAB-0212, `price_integrity_bypass`
+    concern): discards the tainted client-submitted amount entirely and
+    substitutes a value looked up server-side from a fixed rate table,
+    keyed by a *non-price* request parameter (``room_type``) rather than
+    the tainted amount itself -- the real-world shape
+    `docs/research/corpus-examples/ecommerce-logic/php/manifest.yaml`'s
+    QloApps `Cart::getOrderTotal()` entry documents (a server that derives
+    the charge from cart/selection state, never from a client-supplied
+    total field), not merely "return a hardcoded constant" -- a bare
+    literal would model "ignore the client" without modeling "recompute,"
+    which is what this op's own name and the cited grounding both promise.
+
+    Unrecognized/missing selections fall back to ``default_room_type``'s
+    own rate (never to the tainted amount) -- ``room_type`` is itself
+    request-controlled but only ever used as an array key against a fixed,
+    server-owned table, the same allowlist-lookup shape
+    :class:`IdentifierAllowlistTransform` already establishes elsewhere in
+    this module; it is not the axis this concern's verdict is about.
+
+    Requires ``room_type_rates`` (an ordered tuple of ``(room_type, rate)``
+    pairs; each ``room_type`` a bare lowercase identifier, each ``rate`` a
+    ``\\d+\\.\\d{2}`` decimal string) and ``default_room_type`` (one of
+    those room types) in the assembly context -- render-only metadata a
+    page profile supplies; there is no safe default rate table to invent."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "server_recomputed_amount", "transform", _TRANSFORM_ENV, "server_recomputed_amount.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        try:
+            rates = tuple(ctx["room_type_rates"])
+        except KeyError as exc:
+            raise ValueError(
+                "server_recomputed_amount transform needs a 'room_type_rates' context value "
+                "(an ordered tuple of (room_type, rate) pairs the server actually charges) -- "
+                "the emitter's page profile must supply it; there is no safe default"
+            ) from exc
+        if not rates:
+            raise ValueError(
+                "server_recomputed_amount 'room_type_rates' is empty -- a rate table with "
+                "nothing in it has no safe fallback to fall back to"
+            )
+        try:
+            default_room_type = ctx["default_room_type"]
+        except KeyError as exc:
+            raise ValueError(
+                "server_recomputed_amount transform needs a 'default_room_type' context value "
+                "(the room type its own fallback rate applies to) -- there is no safe default"
+            ) from exc
+        rates_by_type = {}
+        for room_type, rate in rates:
+            if not re.fullmatch(r"[a-z][a-z0-9_]*", str(room_type)):
+                raise ValueError(
+                    f"server_recomputed_amount room_type {room_type!r} is not a bare lowercase "
+                    "identifier ([a-z][a-z0-9_]*) -- room types are emitted into PHP source "
+                    "verbatim and are never escaped or quoted for you"
+                )
+            if not re.fullmatch(r"\d+\.\d{2}", str(rate)):
+                raise ValueError(
+                    f"server_recomputed_amount rate {rate!r} (room type {room_type!r}) is not a "
+                    "bare \\d+\\.\\d{2} decimal literal -- rates are emitted into PHP source "
+                    "verbatim and are never validated or cast for you"
+                )
+            rates_by_type[room_type] = rate
+        if default_room_type not in rates_by_type:
+            raise ValueError(
+                f"server_recomputed_amount default_room_type {default_room_type!r} names a room "
+                f"type not present in room_type_rates ({sorted(rates_by_type)}) -- the fallback "
+                "must itself be a real, priced room type"
+            )
+        rates_php = ", ".join(f"'{room_type}' => {rate}" for room_type, rate in rates)
+        default_rate = rates_by_type[default_room_type]
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = (
+            f"([{rates_php}][$request->input('room_type', '{default_room_type}')] ?? {default_rate})"
+        )
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 class AttrValueAllowlistTransform(TemplateModule):
     """The ``attr_value_allowlist`` op: rewrites ``value_expr`` so only a
     strict ``^[A-Za-z0-9_-]+$`` value survives (otherwise the page profile's
@@ -770,6 +853,21 @@ class CsvExportRowSink(TemplateModule):
 
     def __init__(self) -> None:
         super().__init__("csv_export_row", "sink", _SINK_ENV, "csv_export_row.php.j2")
+
+
+class PaymentChargeInsertSink(TemplateModule):
+    """The ``payment_charge_insert`` sink family (CC-LAB-0212,
+    `price_integrity_bypass` concern): a real Query Builder write
+    (``DB::table('bookings')->insert(...)``) whose ``total_amount`` column
+    is ``value_expr``.
+
+    Like :class:`OrmEntityBulkAssignSink`, it never ``return``s directly --
+    it sets ``$rows``, so the existing ``single_statement`` complexity's own
+    tail (``return response()->json($rows);``) closes the method; no new
+    complexity module is needed for this shape."""
+
+    def __init__(self) -> None:
+        super().__init__("payment_charge_insert", "sink", _SINK_ENV, "payment_charge_insert.php.j2")
 
 
 # --- views (the `view` module category, L-P3.3c-G2) -----------------------
@@ -1084,6 +1182,8 @@ TRANSFORMS: dict[str, Module] = {
     "redirect_target_allowlist": RedirectTargetAllowlistTransform(),
     # CC-LAB-0211 (csv_formula_injection, category 5's Booking.com pilot app).
     "csv_formula_neutralize": CsvFormulaNeutralizeTransform(),
+    # CC-LAB-0212 (price_integrity_bypass, category 5's Booking.com pilot app).
+    "server_recomputed_amount": ServerRecomputedAmountTransform(),
 }
 #: Sinks. The three HTML sinks render a **Blade view** body rather than a
 #: controller statement; :data:`VIEW_SINKS` names them so the emitter knows
@@ -1108,6 +1208,8 @@ SINKS: dict[str, Module] = {
     "http_redirect_return": HttpRedirectReturnSink(),
     # CC-LAB-0211 (csv_formula_injection, category 5's Booking.com pilot app).
     "csv_export_row": CsvExportRowSink(),
+    # CC-LAB-0212 (price_integrity_bypass, category 5's Booking.com pilot app).
+    "payment_charge_insert": PaymentChargeInsertSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

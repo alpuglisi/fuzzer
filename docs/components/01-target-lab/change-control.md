@@ -3,6 +3,167 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0212 — category 5 pilot, third increment: `price_integrity_bypass` (client-trusted payment amount) shape on `php_laravel`, Booking.com's checkout (FR-LAB-82, FR-LAB-83) (2026-09-23)
+- Change: the third increment of category 5's Booking.com app (first two:
+  `CC-LAB-0210` open_redirect, `CC-LAB-0211` csv_formula_injection).
+  Reuses the **already-existing** `price_integrity_bypass` concern and
+  `payment_charge_amount` sink family in `lab/safety_matrix.yaml` (added
+  by `CC-LAB-0063`, verified by grep to be rendered by no emitter on any
+  stack before this entry) rather than adding new safety-matrix rows.
+  Grounded in Booking.com's real checkout total computation
+  (`docs/research/category5-travel-functionality-and-cwe-research.md`
+  §1.1/§2.1) and the real QloApps (OSL-3.0, a real open-source
+  hotel-booking engine directly analogous to Booking.com)
+  `Cart::getOrderTotal()` pattern
+  (`docs/research/corpus-examples/ecommerce-logic/php/manifest.yaml`) —
+  explicitly the lowest-novelty pick of the research doc's shortlist (a
+  duplicate concern flavor, not a new CWE class), kept for its strong
+  real-site grounding rather than for breadth.
+
+  Went through this component's pre-change review gate a third time (a
+  drafted entry, reviewed independently by two agents). The accuracy pass
+  returned clean ACCURATE (every factual claim checked out — the first of
+  this category's three increments to clear accuracy review without a
+  correction). The adequacy pass returned **INADEQUATE**, catching two
+  real, blocking gaps neither the draft's author nor the accuracy reviewer
+  had: (1) the draft's secure-twin design (a bare hardcoded constant)
+  contradicted the `server_recomputed_amount` op's own name and the cited
+  QloApps grounding, which both describe genuine recomputation, not
+  "ignore the client and return a constant"; (2) the draft's live-boot
+  proof assumed a `bookings` database table that did not exist anywhere in
+  `LiveBootHarness`'s schema — the proof would have failed to boot at all.
+  Both were fixed before implementation, per this component's now-standing
+  practice of not proceeding past an INADEQUATE verdict without resolving
+  every blocking finding.
+
+  1. **`lab/safety_matrix.yaml`**: no changes (reuses `CC-LAB-0063`'s
+     existing four rows for `payment_charge_amount`/`price_integrity_bypass`
+     unchanged).
+  2. **The secure twin's real recompute** (the adequacy-review-demanded
+     fix): `ServerRecomputedAmountTransform` discards the tainted
+     `amount` entirely and looks the charge up in a page-profile-supplied
+     `room_type_rates` table (an ordered tuple of `(room_type, rate)`
+     pairs, each validated as a bare lowercase identifier /
+     `\d+\.\d{2}` decimal literal — PA-0026-style, no default, fails
+     loud) keyed by a *non-tainted* `room_type` request parameter, falling
+     back to `default_room_type`'s own rate for any unrecognized
+     selection — genuinely data-driven, not a disguised constant (proven
+     by the live-boot test's own `room_type=deluxe` case, item 6).
+  3. **New modules**, registered in **both** `fuzzlab.labgen.modules`
+     (`php_current`, unrendered — shared vocabulary only, the
+     `CC-LAB-0210`/`CC-LAB-0211` discipline) and
+     `fuzzlab.labgen.emitters.php_laravel.modules`/`__init__.py` (rendered):
+     `server_recomputed_amount` (transform, above) and
+     `payment_charge_insert` (sink — `DB::table('bookings')->insert(...)`,
+     the first sink in this app's own module set to *not* need
+     `terminal_response`: like `OrmEntityBulkAssignSink`, it sets `$rows`
+     rather than returning directly, so the pre-existing `single_statement`
+     complexity's own tail closes the method). New page profile
+     `/booking/checkout` (`amount`), new `_MODULE_SET_BY_SHAPE` row.
+     `fuzzlab.labgen.conformance.static_precheck.STATIC_PRECHECK_BY_SHAPE`
+     gained `("price_integrity_bypass", "payment_charge_amount") ->
+     UNINFORMATIVE`. `tests/test_labgen_modules.py`'s
+     `_DETERMINISM_CTX_BY_MODULE` entries for both new names added in the
+     *same* change, before the whole-repo run (item 9), not found missing
+     by it (`PA-0036`, `BUG-0035`'s own lesson applied proactively for the
+     second increment running).
+  4. **The missing `bookings` table** (the adequacy-review-caught blocking
+     gap): `fuzzlab.labgen.conformance.live_boot._SCHEMA_SQL` gained
+     `bookings(id, room_type, total_amount)`, additive alongside the
+     existing `products`/`posts`/`users` tables, no seed rows (each test
+     inserts its own row via a real HTTP request).
+  5. **New manifest** `lab/manifests/booking_price_integrity_sample.yaml`
+     (`LABGEN-BC-0005`/`LABGEN-BC-0006`, continuing this app's own cell-ID
+     sequence).
+  6. **Real live-boot proof**
+     (`tests/test_labgen_price_integrity.py::test_live_boot_price_integrity_manifest_ignores_the_client_amount_on_the_secure_twin`):
+     real HTTP `POST`s against both twins with an attacker-controlled
+     `amount` (`0.01`), reading the real inserted `bookings.total_amount`
+     row back via `LiveBootHarness.query_db` (the same DB-introspection
+     mechanism `CC-LAB-0056`'s real `register.php` `INSERT` proof already
+     established), each twin's row read immediately after its own request
+     (a real test-sequencing bug — querying only after both requests read
+     the same latest row twice — was caught and fixed by this test's own
+     first execution, before landing, exactly the kind of gap actually
+     running the proof catches that a purely structural check would not).
+     Also proves the lookup is genuinely data-driven: a real
+     `room_type=deluxe` request stores `149.00`, not the default `89.00`.
+  7. **Ground truth: `BKNG-0003` appended to the existing directory**
+     (`lab/ground-truth-booking-clone/`, not a new one — `FR-LAB-79`/
+     `FR-LAB-81`'s own precedent, verified again against the real loader).
+     All three files updated together: `labels.json`, `expectedresults.csv`,
+     `injection-points.json`. `fuzzlab/labels/schemas/labels.schema.json`'s
+     `vuln_class` enum widened additively (`price_integrity_bypass`);
+     `sink_context` reuses the existing `"sql"` value (the sink mechanism
+     genuinely is a SQL `INSERT`) rather than minting an under-specified
+     new token, per the adequacy review's explicit preference for reuse
+     over vagueness.
+  8. `docs/components/01-target-lab/requirements.md`: `FR-LAB-82`
+     (the shape), `FR-LAB-83` (ground truth's third case), written at the
+     same file-by-file granularity as `FR-LAB-78`-`81` from the first
+     draft (no placeholder-then-fix round needed this time).
+  9. **Tests**: `tests/test_labgen_price_integrity.py` (9 tests) —
+     verdict-derivation, static-precheck registration, Tier 0 (lint +
+     minimal-pair), Tier 3 (regen-diff, unique-path), CLI `--check`,
+     ground-truth cross-check, and the live-boot proof above. Whole-repo
+     `pytest tests/` run before considering this increment complete
+     (`PA-0036`) — see Effectiveness for the pass/skip/fail counts.
+  10. `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated
+      (closes this app's shortlisted PHP-shape roster: 3 of 3 unblocked
+      shapes landed).
+- Impact (other components / project): additive-only across
+  `lab/safety_matrix.yaml` (no change, only reuse), both `modules.py`
+  registries, `php_laravel/__init__.py`,
+  `fuzzlab/labels/schemas/labels.schema.json` (1 more enum value),
+  `fuzzlab.labgen.conformance.live_boot`'s `_SCHEMA_SQL` (new table, existing
+  tables unchanged), and the existing `lab/ground-truth-booking-clone/`
+  directory (grown again, not replaced). No other of the 13 components
+  touched. Category 5's remaining scope after this increment is entirely
+  Expedia/Java-Spring-Boot (CWE-502 Jackson deserialization, Spring Data
+  SpEL injection) plus Phase C's coherent-page-set bar for both apps.
+- Risk (level; mitigation or accepted-risk justification): low —
+  this shape reuses an already-reviewed, already-accepted safety-matrix
+  concern (`CC-LAB-0063`) rather than introducing a new one, and the
+  adequacy review's two blocking findings (recompute-vs-constant,
+  missing table) were both resolved before implementation rather than
+  discovered by execution after landing, unlike the previous two
+  increments' own post-implementation findings (`BUG-0035`'s
+  determinism-fixture gap, the `TrimStrings` live-boot surprise). The one
+  new genuinely untested-until-now mechanism is a DB-write live-boot proof
+  reading real inserted rows across two sequential requests to the same
+  table — mitigated by the real test-sequencing bug this entry's own
+  first execution caught and fixed (item 6) before landing.
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml`: no change (reuse confirmed) — done
+  - [x] `fuzzlab/labgen/modules/__init__.py`: shared-vocabulary registrations — done
+  - [x] `fuzzlab/labgen/emitters/php_laravel/modules.py` + 2 new templates — done
+  - [x] `fuzzlab/labgen/emitters/php_laravel/__init__.py`: page profile + module-set row — done
+  - [x] `fuzzlab/labgen/conformance/live_boot.py`: `bookings` table in `_SCHEMA_SQL` — done
+  - [x] `lab/manifests/booking_price_integrity_sample.yaml` (2 cells) — done
+  - [x] `fuzzlab/labels/schemas/labels.schema.json`: `vuln_class` widening — done
+  - [x] `lab/ground-truth-booking-clone/`: `BKNG-0003` in all 3 files — done
+  - [x] `fuzzlab/labgen/conformance/static_precheck.py`: new entry — done
+  - [x] `tests/test_labgen_modules.py`: 2 new fixture entries (done *before* the whole-repo run) — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-82`/`83` — done
+  - [x] `tests/test_labgen_price_integrity.py` (9 tests, all green including the real live-boot test) — done
+  - [x] `CHANGELOG.md` line — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done
+- Effectiveness (assessed 2026-09-23): achieved its intent, with evidence.
+  This increment's review gate caught two genuine, blocking design/
+  infrastructure gaps *before* any code was written (the recompute-vs-
+  constant design flaw and the missing `bookings` table), which the
+  previous two increments' own gates did not fully anticipate for their
+  own shapes (both needed a post-implementation fix instead: `BUG-0035`'s
+  determinism-fixture gap, the live-boot-surfaced `TrimStrings` finding).
+  This is read as the review-gate process maturing across repeated use
+  within the same category, not as this increment being inherently
+  simpler — the live-boot test's own first real execution still caught a
+  genuine sequencing bug (querying the DB after both requests instead of
+  after each) before landing, confirming that real execution remains
+  necessary even when the design review is clean. Full whole-repo
+  `pytest tests/` run: see the commit message / `CHANGELOG.md` line for
+  the exact pass/skip/fail counts.
+
 ### CC-LAB-0211 — category 5 pilot, second increment: `csv_formula_injection` (CWE-1236) shape on `php_laravel`, Booking.com's Extranet export (FR-LAB-80, FR-LAB-81) (2026-09-23)
 - Change: the second buildable increment of category 5's Booking.com app
   (first: `CC-LAB-0210`'s `open_redirect` shape) — CSV/report export
@@ -264,7 +425,7 @@ Component code: **LAB**. Entry format and required fields: see
      cover the rest of Booking.com's researched functionality or the
      research doc's other shortlisted candidates (price-integrity
      duplicate, CWE-1236 CSV-export) — later increments in the same
-     reserved `CC-LAB-0210`-`0119` block.
+     reserved `CC-LAB-0210`-`0249` block.
   5. **New, separate ground-truth directory**
      `lab/ground-truth-booking-clone/` (`labels.json`,
      `injection-points.json`, `expectedresults.csv`; one case, `BKNG-0001`)

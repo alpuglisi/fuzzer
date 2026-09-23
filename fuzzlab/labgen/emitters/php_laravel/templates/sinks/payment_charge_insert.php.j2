@@ -1,0 +1,5 @@
+// The booking's charged total is honored as given -- whether it was
+// recomputed server-side is decided entirely by this cell's transform,
+// not by this sink.
+DB::table('bookings')->insert(['room_type' => 'booking', 'total_amount' => {{ value_expr }}]);
+$rows = ['booked' => true, 'charged_amount' => {{ value_expr }}];

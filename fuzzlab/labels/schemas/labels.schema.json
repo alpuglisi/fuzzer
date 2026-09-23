@@ -25,7 +25,7 @@
         "method": { "enum": ["GET", "POST"] },
         "param": { "type": "string" },
         "location": { "enum": ["query", "body", "fragment", "header", "path"] },
-        "vuln_class": { "enum": ["sqli", "xss-reflected", "xss-stored", "xss-dom", "open_redirect", "csv_formula_injection", "none"] },
+        "vuln_class": { "enum": ["sqli", "xss-reflected", "xss-stored", "xss-dom", "open_redirect", "csv_formula_injection", "price_integrity_bypass", "none"] },
         "subtypes": { "type": "array", "items": { "type": "string" } },
         "sink_context": { "enum": ["sql", "html", "html-attribute", "js", "dom", "redirect", "csv", "none"] },
         "expected_vulnerable": { "type": "boolean" },

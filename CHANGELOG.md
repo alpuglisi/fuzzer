@@ -13,6 +13,25 @@ records (see `docs/components/README.md`). For the full change process — bookk
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
 ## 2026-09-23
+- LAB: category 5 (Travel/booking) pilot, third increment — reuses the
+  already-existing `price_integrity_bypass` concern/`payment_charge_amount`
+  sink family (`CC-LAB-0063`, previously rendered by no emitter) to add
+  a client-trusted-payment-amount shape on `php_laravel`'s Booking.com
+  checkout, grounded in the real QloApps (open-source hotel-booking
+  engine) `Cart::getOrderTotal()` pattern. Went through this repo's
+  pre-change review gate a third time; the accuracy pass returned clean
+  ACCURATE for the first time in this category, but the adequacy pass
+  again returned INADEQUATE, catching two real, blocking gaps before any
+  code was written: the secure twin's first design (a bare hardcoded
+  constant) contradicted the `server_recomputed_amount` op's own name and
+  the cited real-world grounding, which both describe genuine
+  recomputation — fixed by deriving the charge from a page-profile rate
+  table keyed by a non-tainted `room_type` parameter; and the live-boot
+  proof's planned `bookings` table didn't exist anywhere in
+  `LiveBootHarness`'s schema — fixed by adding it additively. This
+  closes Booking.com's shortlisted PHP-shape roster (3 of 3 unblocked
+  shapes now landed; the remaining two need Expedia's Java/Spring Boot
+  half). See `CC-LAB-0212`.
 - LAB: category 5 (Travel/booking) pilot, second increment — a new
   `csv_formula_injection` (CWE-1236) vulnerability shape on `php_laravel`
   (`lab/safety_matrix.yaml`'s new `csv_cell_value` sink family, a

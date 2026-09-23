@@ -240,6 +240,10 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
     # classify them (php_current's shape map does not use any of them).
     "csv_formula_neutralize": {"value_expr": "$label"},
     "csv_export_row": {"value_expr": "$label"},
+    # CC-LAB-0212: registered in the shared vocabulary so minimal_pair can
+    # classify them (php_current's shape map does not use any of them).
+    "server_recomputed_amount": {"value_expr": "$amount"},
+    "payment_charge_insert": {"value_expr": "$amount"},
 }
 
 

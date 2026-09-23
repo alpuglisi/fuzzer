@@ -548,7 +548,16 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TEXT,
     updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS bookings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_type TEXT NOT NULL,
+    total_amount REAL NOT NULL
+);
 """
+#: `bookings` (CC-LAB-0212, category 5's `price_integrity_bypass` shape):
+#: no seed rows -- each test inserts its own row via a real HTTP request and
+#: reads it back with :meth:`LiveBootHarness.query_db`, the same pattern
+#: `CC-LAB-0056`'s real `register.php` `INSERT` proof already established.
 #: ``created_at``/``updated_at`` above are for :class:`\\App\\Models\\User`
 #: alone (``login.php``/``register.php`` go through ``DB::table('users')``,
 #: which never touches them): Eloquent's default ``$timestamps = true``

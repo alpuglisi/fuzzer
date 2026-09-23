@@ -127,6 +127,15 @@ STATIC_PRECHECK_BY_SHAPE: dict[tuple[str, str], StaticPrecheckStatus] = {
     # call this shape's fix hangs off of at all, just a `preg_match`-guarded
     # string prefix a generic checker has no CSV-specific model for).
     ("csv_formula_injection", "csv_cell_value"): StaticPrecheckStatus.UNINFORMATIVE,
+    # --- CC-LAB-0212: price integrity / business-logic amount trust -------
+    # UNINFORMATIVE, same underlying reason as ("mass_assignment",
+    # "orm_entity_bulk_assign") above: a numeric business-value field
+    # (a payment amount) reaching a DB write looks syntactically
+    # unremarkable to a static tool with no business-logic awareness that
+    # *this specific* numeric value should never come from client input --
+    # there is no missing-sanitizer-shaped tell to key on, unlike the
+    # plain ("xss", "html_body") case.
+    ("price_integrity_bypass", "payment_charge_amount"): StaticPrecheckStatus.UNINFORMATIVE,
 }
 
 

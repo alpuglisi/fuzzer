@@ -25,6 +25,18 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "notes": "label used unvalidated as a cell in an exported CSV row -- modeled on Booking.com's real Extranet/partner-admin booking-list export view (docs/research/category5-travel-functionality-and-cwe-research.md, CWE-1236). CC-LAB-0211/FR-LAB-80, category 5 pilot's own ground truth -- never a PFF-* case."
+    },
+    {
+      "case_id": "BKNG-0003",
+      "url": "/cell/labgen-bc-0005",
+      "method": "POST",
+      "param": "amount",
+      "location": "body",
+      "vuln_class": "price_integrity_bypass",
+      "sink_context": "sql",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "amount used unvalidated as the booking's charged total in a real DB insert -- modeled on Booking.com's real checkout total computation and the real QloApps (open-source hotel-booking engine) Cart::getOrderTotal() pattern, which always recomputes server-side (docs/research/category5-travel-functionality-and-cwe-research.md; docs/research/corpus-examples/ecommerce-logic/php/manifest.yaml). Reuses the pre-existing price_integrity_bypass concern/payment_charge_amount sink family from CC-LAB-0063, first rendered by any emitter here. CC-LAB-0212/FR-LAB-82, category 5 pilot's own ground truth -- never a PFF-* case."
     }
   ]
 }

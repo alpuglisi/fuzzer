@@ -774,6 +774,32 @@ class CsvExportRowSink(TemplateModule):
         super().__init__("csv_export_row", "sink", _SINK_ENV, "csv_export_row.php.j2")
 
 
+class ServerRecomputedAmountTransform(TemplateModule):
+    """The ``server_recomputed_amount`` op (`price_integrity_bypass`
+    concern, `CC-LAB-0212`): discards the tainted client-submitted amount
+    entirely and substitutes a value derived server-side from a
+    non-price, allowlist-shaped input -- see
+    ``fuzzlab.labgen.emitters.php_laravel.modules.ServerRecomputedAmountTransform``
+    (the emitter that actually renders this op) for the real check."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "server_recomputed_amount", "transform", _TRANSFORM_ENV, "server_recomputed_amount.php.j2"
+        )
+
+
+class PaymentChargeInsertSink(TemplateModule):
+    """The ``payment_charge_insert`` sink: a booking-charge write
+    (``DB::table('bookings')->insert(...)``) whose ``total_amount`` column
+    is ``value_expr``. Like :class:`~fuzzlab.labgen.modules.
+    OrmEntityBulkAssignSink`, it sets ``$rows`` rather than returning
+    directly, so the existing ``single_statement`` complexity's own tail
+    closes the method -- no new complexity needed for this sink."""
+
+    def __init__(self) -> None:
+        super().__init__("payment_charge_insert", "sink", _SINK_ENV, "payment_charge_insert.php.j2")
+
+
 class TerminalResponseComplexity(TemplateModule):
     """The ``terminal_response`` complexity: the controller method for a
     cell whose sink's own code already is the terminal statement (e.g. the
@@ -835,6 +861,10 @@ TRANSFORMS: dict[str, Module] = {
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
     # php_laravel is what actually renders it.
     "csv_formula_neutralize": CsvFormulaNeutralizeTransform(),
+    # CC-LAB-0212: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "server_recomputed_amount": ServerRecomputedAmountTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -866,6 +896,10 @@ SINKS: dict[str, Module] = {
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
     # php_laravel is what actually renders it.
     "csv_export_row": CsvExportRowSink(),
+    # CC-LAB-0212: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it.
+    "payment_charge_insert": PaymentChargeInsertSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),
