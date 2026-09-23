@@ -3818,6 +3818,51 @@ lane) can submit a payload as
   - Tests: `tests/test_labgen_phase_d_tier12_category5.py` (4 real
     live-boot tests, all green after the fix above).
 
+- **FR-LAB-118** *(Booking.com: Phase E — wire into `multitarget.py`;
+  `CC-LAB-0217`, 2026-09-23).* Constructs a real `TargetSpec`
+  (`name="php_laravel_booking"`) from a real, locally-booted
+  `LiveBootHarness` instance covering all three vulnerable cells
+  (`LABGEN-BC-0001`/`0003`/`0005`) and Booking.com's own ground truth
+  (`lab/ground-truth-booking-clone/`), and runs it through
+  `fuzzlab.harness.multitarget.run_targets`. Reuses `LiveBootHarness`
+  directly (it already accepts a cell list, and each cell has its own
+  unique `served_url_for()` URL, so no same-route collision risk).
+  Recall is honestly 0 (`open_redirect`/`csv_formula_injection`/
+  `price_integrity_bypass` are all unmapped in
+  `fuzzlab.core.runmode._VULN_TO_CATEGORY`) — real, sized follow-on work
+  not attempted here. Tests: `tests/test_labgen_php_laravel_booking_
+  multitarget.py` (2 tests, real boot + real HTTP, all green).
+
+- **FR-LAB-119** *(Expedia: Phase E — wire into `multitarget.py`;
+  `CC-LAB-0218`, 2026-09-23).* Constructs a real `TargetSpec`
+  (`name="spring_boot_expedia"`) from a real, locally-booted
+  `SpringBootLiveBootHarness` instance (its public `.base_url` property)
+  covering the one cell Expedia's own ground truth describes
+  (`LABGEN-EXP-0001`, `lab/ground-truth-expedia-clone/`), and runs it
+  through `fuzzlab.harness.multitarget.run_targets`. Scoped to Expedia's
+  own designed page set only — the ported Netflix Jackson-deserialization
+  cell (`FR-LAB-94`) is reused infrastructure, not a page Expedia's own
+  ground truth describes (its ground truth lives in
+  `lab/ground-truth-netflix-clone/`, a different app identity); whether a
+  reused cell should belong to more than one app's ground truth at once
+  is an open question, not decided here (see §8). Recall is honestly 0
+  (`spel_injection` is unmapped in `_VULN_TO_CATEGORY`). Tests:
+  `tests/test_labgen_spring_boot_expedia_multitarget.py` (2 tests, real
+  boot + real HTTP, all green).
+
+- **FR-LAB-120** *(Category 5 §6 step 2: run both targets together;
+  `CC-LAB-0219`, 2026-09-23).* Runs `FR-LAB-118`'s and `FR-LAB-119`'s own
+  `TargetSpec`s through a single `run_targets` call — the one remaining
+  item both individual Phase E tests flag as "not mine to do," mirroring
+  category 3's own combined-run precedent. Neither app needs a
+  hand-rolled multi-cell boot fixture: both harnesses are used directly
+  as nested context managers. Verified for real: two independent,
+  distinct `run_id`s in one call; `transfer_summary` reports `targets: 2`
+  and `generalizes: False` (correctly — every one of this category's
+  four currently-built vuln classes is unmapped in `_VULN_TO_CATEGORY`).
+  Tests: `tests/test_multitarget_category5_combined.py` (1 test, real
+  dual boot + real dual HTTP, green).
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.
@@ -3950,6 +3995,23 @@ None (it is the system under test).
   `tests/test_labgen_harder_shapes.py` and `tests/test_labgen_identifier_sqli_assertion.py`.
 
 ## 8. Open questions
+- (`CC-LAB-0218`/`FR-LAB-119`, 2026-09-23) **Should a reused cell (rendered
+  by one app's own infrastructure but modeling a shape another app's
+  ground truth already covers) be declared under more than one app's
+  ground-truth directory at once?** The ported Netflix Jackson-
+  deserialization cell (`FR-LAB-94`) is reused by Expedia's own
+  `spring_boot` package but is not declared in
+  `lab/ground-truth-expedia-clone/` — its only ground-truth case
+  (`NFLX-0001`) lives under `lab/ground-truth-netflix-clone/`, category
+  4's own app identity. Expedia's Phase E `TargetSpec` (`FR-LAB-119`)
+  therefore does not include that cell, scoping itself to exactly what
+  its own ground truth describes (`EXPD-0001` only). Not decided here:
+  whether a future increment should mint a second, `EXPD-*`-prefixed
+  ground-truth case for the same underlying cell (double-counting a case
+  that already exists elsewhere) or leave reused cells permanently
+  outside the reusing app's own ground truth (understating that app's
+  real page/vuln-class coverage). Flagged for a future session or a
+  cross-category policy decision, not guessed at unilaterally.
 - (`CC-LAB-0139`, 2026-09-23) **`fuzzlab.harness.auto.points_from_ground_truth` has no
   `location="header"` branch.** A ground-truth point with `location="header"` (Huddle
   Hub's `HHUB-0001`, the first such point in this project — see

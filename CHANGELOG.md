@@ -4,6 +4,23 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (category 5: Phase E, wire both apps into multitarget.py)
+- LAB: constructs a real `TargetSpec` for Booking.com (`php_laravel`,
+  reusing `LiveBootHarness` directly for all 3 vulnerable cells) and for
+  Expedia (`spring_boot`, `SpringBootLiveBootHarness`, its own one-cell
+  ground truth), and runs both through `fuzzlab.harness.multitarget.
+  run_targets` — individually and together in one call (mirroring
+  category 3's own combined-run precedent). Real `composer install`/
+  `artisan serve` and `mvn package`/`java -jar` boots, real HTTP,
+  `generalizes` correctly `False` (this category's four vuln classes are
+  all unmapped in `fuzzlab.core.runmode._VULN_TO_CATEGORY`, flagged
+  plainly rather than glossed over). Also flags an open policy question:
+  whether the ported Netflix Jackson-deserialization cell Expedia reuses
+  should be double-counted under Expedia's own ground truth too, or stay
+  scoped to Netflix's — left undecided, not guessed at. This closes
+  category 5's toolkit-side Phase 10 `T10.6`-style proof. See
+  `CC-LAB-0217`/`0218`/`0219`.
+
 ## 2026-09-23 (category 5: Phase D Tier 1/2 conformance)
 - LAB: real, executed Tier 1/2 proof for three of category 5's four
   currently-built shapes (`csv_formula_injection`/`price_integrity_

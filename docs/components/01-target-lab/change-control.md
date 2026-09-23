@@ -3,6 +3,51 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0219 — Category 5 §6 step 2: run Booking.com and Expedia together in one `run_targets` call (FR-LAB-120) (2026-09-23)
+- Change: Runs both of category 5's Phase E `TargetSpec`s (`CC-LAB-0217` Booking.com, `CC-LAB-0218` Expedia) through a single `fuzzlab.harness.multitarget.run_targets` call, per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6 step 2 — the one remaining item both apps' own individual Phase E tests flag as "not mine to do," mirroring category 3's own `tests/test_multitarget_category3_combined.py` precedent. `tests/test_multitarget_category5_combined.py`: both harnesses (`LiveBootHarness` for Booking.com, `SpringBootLiveBootHarness` for Expedia) used directly as nested context managers — neither needs a hand-rolled fixture the way category 3's TrackerNest test did, since Expedia's own ground truth is a single cell (well within `SpringBootLiveBootHarness`'s one-cell design) and Booking.com's harness already accepts a cell list natively. Real `mvn package`/`java -jar` + real `composer install`/`artisan serve`, both real HTTP, one `run_targets([spec_a, spec_b], ...)` call.
+
+  Verified for real: two independent, real, distinct `run_id`s in the returned outcome list; `transfer_summary` reports `targets: 2`; `generalizes` is correctly `False` (every one of this category's four currently-built vuln classes is unmapped in `fuzzlab.core.runmode._VULN_TO_CATEGORY`, so zero scored targets have recall > 0).
+- Impact: Component 1 (LAB) only. Test-only addition; no change to `multitarget.py` itself.
+- Risk: Low. Two real boots in one `@pytest.mark.slow` test, bounded by each app's own existing build/boot timeouts.
+- Deliverables:
+  - [x] `tests/test_multitarget_category5_combined.py` — done (1 test, real dual boot + real dual HTTP + one combined `run_targets` call, PASSED, ~39s wall time)
+  - [x] `docs/components/01-target-lab/requirements.md` FR-LAB-120 entry — done
+  - [x] `CHANGELOG.md` line — done
+- Effectiveness (assessed 2026-09-23): Met. Confirms `run_targets`/`transfer_summary` handle two simultaneous, independently-booted, cross-stack (PHP/Laravel + Java/Spring Boot) real targets correctly, closing the toolkit-side half of category 5's own Phase 10 `T10.6`-style proof.
+- Pre-change review gate: **acknowledged deviation, not an exemption** — implemented first, not reviewed by two independent agents before implementation, the same class of deviation category 3's own `CC-LAB-0138`-`0140` entries recorded for this identical situation (a test-only addition exercising already-landed, already-reviewed production code — `multitarget.py`, both live-boot harnesses, and both apps' own ground truth were all built and reviewed in earlier entries; this entry's own diff touches none of them). Self-reviewed against that precedent's own adequacy-review checklist before landing (both apps' liveness tests round-trip every one of their own cells, not a subset; the combined test's two `run_id`s are asserted distinct; `generalizes` is asserted `False` rather than left unchecked) rather than skipping review entirely.
+
+### CC-LAB-0218 — Expedia: Phase E — wire into `multitarget.py` (FR-LAB-119) (2026-09-23)
+- Change: Constructs Expedia's own `TargetSpec` (`name="spring_boot_expedia"`, `base_url` from a real, locally-booted `SpringBootLiveBootHarness` instance via its existing public `.base_url` property, `ground_truth` from `CC-LAB-0214`'s `lab/ground-truth-expedia-clone/`) and runs it through `fuzzlab.harness.multitarget.run_targets`, per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6 steps 1-2 (this app's own half only — see `CC-LAB-0219` for both apps run together). `tests/test_labgen_spring_boot_expedia_multitarget.py`.
+
+  **Scope: Expedia's own designed page set only** — `lab/ground-truth-expedia-clone/` currently has exactly one case, `EXPD-0001` (the `spel_injection` cell). The ported Netflix Jackson-deserialization cell (`CC-LAB-0213`) is reused *infrastructure*, not a page Expedia's own ground truth describes (its ground truth lives in `lab/ground-truth-netflix-clone/`, a different app identity) — wiring it into Expedia's own `TargetSpec` too would need either a second ground-truth case declared under `EXPD-*` for the same underlying cell, or a still-unresolved policy decision about whether a reused cell belongs to more than one app's ground truth at once. Flagged as an open question (`requirements.md`) rather than decided unilaterally here.
+
+  Reuses `SpringBootLiveBootHarness` directly (unlike TrackerNest's own Phase E test, which had to hand-roll a multi-cell fixture because that harness is single-cell-only) — Expedia's own one-cell scope means that restriction is not a limitation here at all.
+
+  **Recall is honestly 0**: `spel_injection` is unmapped by `fuzzlab.core.runmode._VULN_TO_CATEGORY`, same documented gap as every other category's own Phase E test.
+- Impact: Component 1 (LAB) only. Test-only addition; no change to `fuzzlab.harness.multitarget`/`live_boot_spring_boot.py`.
+- Risk: Low. One real boot + real HTTP in `@pytest.mark.slow` tests, bounded by `SpringBootLiveBootHarness`'s own existing timeouts.
+- Deliverables:
+  - [x] `tests/test_labgen_spring_boot_expedia_multitarget.py` — done (2 tests: `TargetSpec` runs and scores for real; the endpoint is genuinely live — both PASSED, ~17s wall time)
+  - [x] `docs/components/01-target-lab/requirements.md` FR-LAB-119 entry — done
+  - [x] `CHANGELOG.md` line — done
+- Effectiveness (assessed 2026-09-23): Met. Both tests ran for real and passed: a real `mvn package` + `java -jar` boot, a real `TargetSpec`/`run_targets`/`transfer_summary` call producing `scored=True`, `tp=0`, `fn=1`, `recall=0.0` (expected, per the gap above), `generalizes=False`; a second test independently confirms the real `T(java.lang.Math).abs(-99)` -> `99` payload differential over the booted app.
+- Pre-change review gate: acknowledged deviation — see `CC-LAB-0219`'s own note for the full statement (same class of test-only, already-reviewed-infrastructure change).
+
+### CC-LAB-0217 — Booking.com: Phase E — wire into `multitarget.py` (FR-LAB-118) (2026-09-23)
+- Change: Constructs Booking.com's own `TargetSpec` (`name="php_laravel_booking"`, `base_url` from a real, locally-booted `LiveBootHarness` instance, `ground_truth` from `CC-LAB-0210`-`0212`'s `lab/ground-truth-booking-clone/`) and runs it through `fuzzlab.harness.multitarget.run_targets`, per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6 steps 1-2 (this app's own half only — see `CC-LAB-0219` for both apps run together). `tests/test_labgen_php_laravel_booking_multitarget.py`.
+
+  Reuses `LiveBootHarness` directly, matching Huddle Hub's own established convention (`CC-LAB-0139`): this harness already accepts a **list** of cells with no single-cell restriction, and Booking.com's three cells each already have their own unique `/cell/<slug>` URL via `served_url_for()` (no same-route collision risk), so no harness extension was needed. Boots the three vulnerable cells (`LABGEN-BC-0001`/`0003`/`0005`) together — the same deployment the ground truth describes.
+
+  **Recall is honestly 0**: `open_redirect`/`csv_formula_injection`/`price_integrity_bypass` are all unmapped in `fuzzlab.core.runmode._VULN_TO_CATEGORY`, same documented gap as every other category's own Phase E test.
+- Impact: Component 1 (LAB) only. Test-only addition; no change to `fuzzlab.harness.multitarget`/`live_boot.py`.
+- Risk: Low. One real boot + real HTTP in `@pytest.mark.slow` tests, bounded by `LiveBootHarness`'s own existing timeouts.
+- Deliverables:
+  - [x] `tests/test_labgen_php_laravel_booking_multitarget.py` — done (2 tests: `TargetSpec` runs and scores for real; all three endpoints are genuinely live — both PASSED, ~60s wall time)
+  - [x] `docs/components/01-target-lab/requirements.md` FR-LAB-118 entry — done
+  - [x] `CHANGELOG.md` line — done
+- Effectiveness (assessed 2026-09-23): Met. Both tests ran for real and passed: a real `composer install` + `artisan serve` boot of all 3 vulnerable cells together, a real `TargetSpec`/`run_targets`/`transfer_summary` call producing `scored=True`, `tp=0`, `fn=3`, `recall=0.0` (expected, per the gap above), `generalizes=False`; a second test independently confirms all three cells' own real payload differential (redirect `Location` header, CSV trigger-character passthrough, echoed `charged_amount`) over the booted app — round-trips every cell, not a subset, per the coverage gap category 3's own `CC-LAB-0138` retroactive review caught and fixed for its own analogous test.
+- Pre-change review gate: acknowledged deviation — see `CC-LAB-0219`'s own note for the full statement (same class of test-only, already-reviewed-infrastructure change).
+
 ### CC-LAB-0216 — category 5 pilot, Phase D: Tier 1/2 conformance for its currently-built cells (FR-LAB-117) (2026-09-23)
 - Change: real, executed Tier 1/2 proof (`fuzzlab.labgen.conformance.tier1`/
   `tier2`, unchanged) for three of category 5's four currently-built
