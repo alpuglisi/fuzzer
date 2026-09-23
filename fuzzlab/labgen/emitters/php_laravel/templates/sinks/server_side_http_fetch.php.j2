@@ -1,0 +1,6 @@
+// The fetched preview is returned -- illustrative: only reached if
+// whichever fetch-validation transform ran didn't already reject above.
+// `value_expr` is the requested URL; echoed verbatim (this sink never
+// escapes/filters it itself, per this stack's own convention) alongside
+// a short preview of whatever content the transform's fetch produced.
+$rows = ['requested_url' => {{ value_expr }}, 'preview' => substr($__unfurlContent, 0, 200)];

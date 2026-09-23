@@ -3,6 +3,132 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0134 — Huddle Hub: SSRF-via-link-unfurling cell on `php_laravel` (FR-LAB-82) (2026-09-23)
+- Change: Adds Huddle Hub's second designed cell to the existing, shared
+  `php_laravel` emitter. New shape: `(vuln_class="ssrf",
+  sink_context.family="server_side_http_fetch")`,
+  `required_neutralizations: [ssrf_request_forgery]` — a Slack-style "link
+  unfurling" feature (server fetches a user-pasted URL to generate a
+  message preview, per `docs/research/category3-saas-functionality-and-cwe-research.md`
+  §2/§6a), profile-keyed at `/messages/unfurl`, served illustratively at
+  `/cell/<slug>`. Reuses the **existing** `get_param` source module (the
+  URL arrives as a query parameter; no new source needed). Reuses two
+  **existing** `lab/safety_matrix.yaml` ops as transforms gating a fixed
+  sink (mirroring `CC-LAB-0133`'s own webhook-signature shape):
+  `unchecked_url_fetch` (vulnerable — fetches the URL via
+  `file_get_contents()` with zero validation) and
+  `scheme_and_resolved_ip_allowlist` (secure — validates the scheme is
+  http/https, resolves the hostname via `gethostbyname()`, and rejects if
+  the resolved IP is private/reserved/loopback per
+  `filter_var(..., FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)`
+  — confirmed via `php -r` this correctly returns `false` for `127.0.0.1`
+  before drafting this entry). Both fetches use an explicit, bounded
+  stream-context timeout (`stream_context_create(['http' => ['timeout' =>
+  5]])`) — a real gap this entry's own adequacy review caught (PA-0035's
+  "every real operation must be independently bounded" spirit, applied
+  here to a generated cell's own server-side fetch, not just this
+  project's test/build tooling; PHP's default socket timeout is ~60s, a
+  real robustness gap in the generated cell itself, not only a test-hang
+  risk). New sink `server_side_http_fetch` (fixed, both twins — returns a
+  preview of the fetched content plus the requested URL, reached only if
+  the transform didn't already reject). All three new module names (two
+  transforms + the sink) registered in **both** `php_laravel`'s own
+  registries and the shared `fuzzlab.labgen.modules` registry, per
+  `CC-LAB-0133`'s own established precedent (`php_current` gets
+  classifiable names/templates only, not a working cell — confirmed this
+  precedent actually landed as stated by grepping both registries for
+  `webhook_request`/`loose_equality_compare` before drafting this entry).
+  New manifest `lab/manifests/ssrf_huddlehub_sample.yaml`, two cells:
+  `LABGEN-HHB-0003` (vulnerable) and `LABGEN-HHB-0004` (secure) —
+  continuing the `HHB` prefix `CC-LAB-0133` already checked and reserved
+  against every other active branch.
+
+  **Live-boot proof, genuinely stronger than `CC-LAB-0133`'s own (no
+  probability-infeasibility caveat needed here).** The test spins up its
+  own tiny local HTTP server on an ephemeral loopback port serving a known
+  marker string — **bound and listening before the harness's own boot is
+  invoked**, and held open for the whole test (a real gap this entry's own
+  adequacy review asked to be stated explicitly: `LiveBootHarness._find_free_port()`
+  binds-reads-closes a socket in a TOCTOU window before the real
+  `php artisan serve` process binds later, so the marker server's own port
+  must be independently, separately bound and never released, which it
+  is — two unrelated ports, no shared allocation path). The Laravel app
+  (also running on loopback, via the existing `LiveBootHarness`) then
+  fetches the marker server two ways, not one — **a real gap this entry's
+  own adequacy review caught**: fetching only a bare IP literal
+  (`http://127.0.0.1:<port>/`) would never actually exercise
+  `scheme_and_resolved_ip_allowlist`'s distinguishing feature
+  (`gethostbyname()` hostname resolution — a no-op on an IP literal), so
+  this test also fetches `http://localhost:<port>/`, a real hostname that
+  resolves to loopback, genuinely exercising the resolution path. Both
+  URL forms: the vulnerable twin succeeds and echoes the marker; the
+  secure twin's IP-allowlist check correctly rejects the loopback target
+  with a real HTTP 400, never reaching the test server at all (asserted
+  by the test server's own hit counter staying at zero for both forms).
+  Tier 0 (`php -l`)/Tier 3 (`regenerate_and_diff_emitter`) for the new
+  cell.
+
+  **Deliberately not modeled here, stated explicitly rather than left
+  implicit** (a gap this entry's own adequacy review flagged): the safety
+  matrix's third `server_side_http_fetch` op, `hostname_allowlist`
+  (`effect: partial` — checks the hostname *string* against an allowlist
+  with no check of the IP it actually resolves to, the well-documented
+  DNS-rebinding gap `scheme_and_resolved_ip_allowlist` closes fully). This
+  is a legitimate scope choice, matching this project's own convention
+  that not every op pair needs every variant in one entry — not an
+  oversight.
+
+  **Explicitly out of scope for this entry** (tracked for follow-on
+  `CC-LAB-013x`, matching `CC-LAB-0133`'s own convention): Huddle Hub's
+  third designed cell (header injection in outgoing-webhook delivery);
+  ground truth; `multitarget.py` wiring.
+- Impact (other components / project): Component 1 (LAB) only. No
+  safety-matrix change (reuses existing ops). Additive to `php_laravel`'s
+  and the shared registry's dicts only — no existing shape's own entry
+  modified.
+- Risk (level; mitigation or accepted-risk justification): Low. Same
+  cross-branch route-collision mitigation as `CC-LAB-0133` (the `HHB`
+  prefix was already checked against every other active branch; this
+  entry only continues that same prefix's sequence, `-0003`/`-0004`, so no
+  new check was needed). The one new risk class this entry introduces
+  (a generated cell performing a real, unbounded-by-default network
+  fetch) is mitigated by the explicit stream-context timeout on both
+  twins, not just the vulnerable one.
+- Deliverables:
+  - [x] `unchecked_url_fetch`/`scheme_and_resolved_ip_allowlist` transform modules + templates (both registries) — done
+  - [x] `server_side_http_fetch` sink module + template (both registries) — done
+  - [x] `_MODULE_SET_BY_SHAPE`/`_PAGE_PROFILES` entries — done
+  - [x] `lab/manifests/ssrf_huddlehub_sample.yaml` — done
+  - [x] Live-boot test (local marker server, IP-literal + hostname forms) — done (`tests/test_labgen_ssrf_live_boot.py`, 3 tests, real `composer install`/`artisan serve` boot + a real local marker HTTP server, all PASSED: vulnerable twin reaches the marker both as an IP literal and as a resolved hostname; secure twin rejects both with a real HTTP 400 and the marker server's hit counter stays at zero; secure twin still accepts a real public URL)
+  - [x] Tier 0/Tier 3 conformance for the new cell — done (`php -l` clean, `regenerate_and_diff_emitter` byte-identical); `tests/test_labgen_ssrf.py` unit coverage (verdict/determinism/both-twins-bounded-timeout/disjoint-paths) — 9 new tests, all passing
+  - [x] `requirements.md` FR-LAB-82 entry — done
+  - [x] `CHANGELOG.md` line — done
+- Effectiveness (assessed 2026-09-23): **met.** Every deliverable is real
+  and executed: a real `composer install` builds the assembled skeleton+
+  cell, a real `php artisan serve` boots it, and a real local HTTP server
+  this test owns proves the actual SSRF differential end to end — the
+  vulnerable twin reaches an internal (loopback) target by both an IP
+  literal and a resolved hostname; the secure twin rejects both forms
+  with a real HTTP 400, confirmed by the marker server's own hit counter
+  never incrementing, while still correctly accepting a real public URL.
+  Full non-slow suite re-run after this change: 1590 passed (up from 1580
+  pre-`CC-LAB-0134`), 15 failed (the same pre-existing, unrelated
+  `gitleaks`/`scikit-learn`-absence failures this session's prior entries
+  already recorded — confirmed unchanged and none reference
+  `ssrf`/`HHB`/`Huddle Hub`), 52 skipped — no regression.
+- Pre-change review gate: drafted, reviewed by 2 independent agents
+  (accuracy: no inaccuracies found, ACCURATE, every specific technical
+  claim verified including a live `php -r` re-check of the `filter_var`
+  loopback-rejection behavior; adequacy: 4 findings — the live-boot proof
+  only exercised an IP literal and never actually tested hostname
+  resolution, no bounded timeout on the generated cell's own fetch, the
+  deliberately-unmodeled `hostname_allowlist` op wasn't stated as a
+  scope choice, and the marker-server-vs-`_find_free_port()` port-timing
+  guarantee wasn't stated — all incorporated above). 3/3 agreement
+  reached by incorporating every concrete finding from both reviews
+  without contesting any of them; implementation proceeds on this
+  revised entry.
+
 ### CC-LAB-0133 — Huddle Hub: webhook-signature-verification cell on `php_laravel` (FR-LAB-81) (2026-09-23)
 - Change: Adds Huddle Hub's (category 3's Slack pick) first designed cell
   to the existing, shared `php_laravel` emitter — **not** a new emitter,

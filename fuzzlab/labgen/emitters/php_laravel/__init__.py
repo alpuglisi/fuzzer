@@ -238,6 +238,14 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("webhook_signature_bypass", "webhook_signature_verification"): _ModuleSet(
         "webhook_request", "webhook_signature_verification", "single_statement"
     ),
+    # CC-LAB-0134: Huddle Hub's second cell, SSRF via link unfurling. The
+    # op selects which transform gates the fixed sink (mirroring
+    # CC-LAB-0133's own webhook-signature shape) -- the module composition
+    # line's "sink" position is always `server_side_http_fetch`; whichever
+    # fetch-validation transform ran decides whether it's ever reached.
+    ("ssrf", "server_side_http_fetch"): _ModuleSet(
+        "get_param", "server_side_http_fetch", "single_statement"
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -464,6 +472,10 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # anchor a pinned URL to. `secret` is a lab-only shared secret, never a
     # real credential.
     "/webhooks/events": {"var_name": "webhookRawBody", "secret": "lab-only-huddlehub-webhook-secret"},
+    # CC-LAB-0134: Huddle Hub's SSRF-via-link-unfurling cell -- `get_param`
+    # reads the pasted URL as `?url=`. Illustrative served URL, same
+    # reasoning as `/webhooks/events` above.
+    "/messages/unfurl": {"var_name": "unfurlUrl", "param_name": "url"},
     # POST string-literal lookup. `password_var`/`password_param` are sink
     # boilerplate (an already-hashed secret), not a second injection point.
     "/login": {

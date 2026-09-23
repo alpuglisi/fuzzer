@@ -1964,6 +1964,31 @@ lane) can submit a payload as
   Hub's other two designed cells (SSRF via link unfurling, header injection
   in outgoing-webhook delivery); ground truth; `multitarget.py` wiring.
 
+- **FR-LAB-82** *(Huddle Hub: SSRF-via-link-unfurling cell on `php_laravel`;
+  `CC-LAB-0134`, 2026-09-23).* Extends `FR-LAB-81`'s Huddle Hub app with a
+  second designed cell, `(vuln_class="ssrf",
+  sink_context.family="server_side_http_fetch")` — a Slack-style "link
+  unfurling" feature (server fetches a user-pasted URL to generate a
+  message preview), profile-keyed at `/messages/unfurl`. Reuses the
+  existing `get_param` source. Reuses two existing `lab/safety_matrix.yaml`
+  ops — `unchecked_url_fetch` (vulnerable: zero validation) and
+  `scheme_and_resolved_ip_allowlist` (secure: validates scheme + the
+  *resolved* IP against private/reserved ranges, closing the DNS-rebinding
+  gap the matrix's own `hostname_allowlist` op — deliberately not modeled
+  in this cell — leaves open) — no new safety-matrix entry needed. Both
+  twins bound their fetch with an explicit stream-context timeout (PA-0035
+  spirit: a generated cell's own server-side fetch must never hang
+  indefinitely, independent of which op is vulnerable). New module names
+  registered in both `php_laravel`'s own registries and the shared
+  `fuzzlab.labgen.modules` registry, per `FR-LAB-81`'s own established
+  precedent. Live-boot-proven against a real local marker HTTP server this
+  test owns: the vulnerable twin reaches it via both an IP literal and a
+  resolved hostname; the secure twin rejects both forms with a real HTTP
+  400 (confirmed via the marker server's own hit counter staying at zero)
+  while still accepting a real public URL. **Still deferred:** Huddle
+  Hub's third designed cell (header injection in outgoing-webhook
+  delivery); ground truth; `multitarget.py` wiring.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

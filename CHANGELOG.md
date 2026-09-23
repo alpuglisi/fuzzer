@@ -12,6 +12,26 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23
+- `fuzzlab/labgen/emitters/php_laravel/`: Huddle Hub's (category 3's Slack
+  pick) second designed cell — SSRF via link unfurling (a Slack-style
+  feature that fetches a user-pasted URL to generate a message preview).
+  Reuses two existing `lab/safety_matrix.yaml` ops (`unchecked_url_fetch`
+  vulnerable, `scheme_and_resolved_ip_allowlist` secure), both twins now
+  bounded with an explicit fetch timeout (a real gap this entry's own
+  pre-change review caught — PA-0035's spirit applied to a generated
+  cell's own server-side fetch, not just build tooling). Live-boot-proven
+  against a real local marker HTTP server this test owns and controls:
+  the vulnerable twin reaches it via both a bare IP literal and a real
+  resolved hostname (the hostname form specifically needed to exercise
+  the secure twin's `gethostbyname()` resolution path — another real gap
+  the review caught, since an IP-literal-only test would never
+  distinguish the secure op from a naive string check); the secure twin
+  rejects both forms with a real HTTP 400 (confirmed via the marker
+  server's own hit counter staying at zero) while still accepting a real
+  public URL. 9 new tests, all passing; full non-slow suite re-run shows
+  no regression. `CC-LAB-0134`/`FR-LAB-82`.
+
 ## 2026-09-23 (cross-category doc sync, round 2)
 - Docs (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, all five second-target
   category branches): re-synced §9.2 (stack-reuse ledger), §9.2a (Java/Spring

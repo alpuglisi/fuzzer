@@ -234,6 +234,12 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
     "loose_equality_compare": {"value_expr": "$webhookRawBody"},
     "constant_time_compare": {"value_expr": "$webhookRawBody"},
     "webhook_signature_verification": {"value_expr": "$webhookRawBody"},
+    # CC-LAB-0134: registered in the shared vocabulary so minimal_pair can
+    # classify them (this cell is built on php_laravel only, category 3's
+    # Huddle Hub).
+    "unchecked_url_fetch": {"value_expr": "$unfurlUrl"},
+    "scheme_and_resolved_ip_allowlist": {"value_expr": "$unfurlUrl"},
+    "server_side_http_fetch": {"value_expr": "$unfurlUrl"},
 }
 
 

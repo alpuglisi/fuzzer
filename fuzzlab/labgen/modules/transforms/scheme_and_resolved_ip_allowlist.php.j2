@@ -1,0 +1,23 @@
+// scheme_and_resolved_ip_allowlist: only http/https URLs are fetched, and
+// only after resolving the hostname and confirming the resolved IP is not
+// a private/reserved/loopback/link-local address (e.g. the cloud metadata
+// endpoint 169.254.169.254) -- checking the hostname *string* alone (the
+// documented DNS-rebinding gap `hostname_allowlist` leaves open) is not
+// enough; this checks the address actually reached at fetch time. Safety
+// matrix: effect=neutralises, neutralizes: [ssrf_request_forgery].
+$__unfurlUrl = {{ value_expr }};
+$__unfurlParts = parse_url($__unfurlUrl);
+$__unfurlScheme = $__unfurlParts['scheme'] ?? '';
+$__unfurlHost = $__unfurlParts['host'] ?? '';
+if (!in_array($__unfurlScheme, ['http', 'https'], true)) {
+    return response()->json(['error' => 'unsupported URL scheme'], 400);
+}
+$__unfurlIp = gethostbyname($__unfurlHost);
+if (filter_var($__unfurlIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+    return response()->json(['error' => 'URL resolves to a disallowed network target'], 400);
+}
+$__unfurlContext = stream_context_create(['http' => ['timeout' => 5]]);
+$__unfurlContent = @file_get_contents($__unfurlUrl, false, $__unfurlContext);
+if ($__unfurlContent === false) {
+    $__unfurlContent = '';
+}

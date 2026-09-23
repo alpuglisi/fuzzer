@@ -525,6 +525,31 @@ class ConstantTimeCompareTransform(TemplateModule):
         super().__init__("constant_time_compare", "transform", _TRANSFORM_ENV, "constant_time_compare.php.j2")
 
 
+class UncheckedUrlFetchTransform(TemplateModule):
+    """The ``unchecked_url_fetch`` op (`CC-LAB-0134`, `ssrf_request_forgery`
+    concern): fetches the pasted URL via ``file_get_contents()`` with zero
+    host/scheme validation -- SSRF. Safety matrix: ``effect=no_effect``."""
+
+    def __init__(self) -> None:
+        super().__init__("unchecked_url_fetch", "transform", _TRANSFORM_ENV, "unchecked_url_fetch.php.j2")
+
+
+class SchemeAndResolvedIpAllowlistTransform(TemplateModule):
+    """The ``scheme_and_resolved_ip_allowlist`` op (`CC-LAB-0134`, secure
+    twin): validates the URL scheme and the *resolved* IP (not just the
+    hostname string -- the DNS-rebinding gap ``hostname_allowlist`` leaves
+    open) against private/reserved ranges before fetching. Safety matrix:
+    ``effect=neutralises``, ``neutralizes: [ssrf_request_forgery]``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "scheme_and_resolved_ip_allowlist",
+            "transform",
+            _TRANSFORM_ENV,
+            "scheme_and_resolved_ip_allowlist.php.j2",
+        )
+
+
 # --- sinks ----------------------------------------------------------------
 #
 # Every sink branches on `bound` where a bound form exists at all, so one
@@ -685,6 +710,16 @@ class WebhookSignatureVerificationSink(TemplateModule):
         super().__init__(
             "webhook_signature_verification", "sink", _SINK_ENV, "webhook_signature_verification.php.j2"
         )
+
+
+class ServerSideHttpFetchSink(TemplateModule):
+    """The ``server_side_http_fetch`` sink family (`CC-LAB-0134`, Huddle
+    Hub): returns a preview of whatever content the fetch-validation
+    transform produced -- illustrative, sets ``$rows``. Reached only if
+    that transform didn't already return a 400 response above it."""
+
+    def __init__(self) -> None:
+        super().__init__("server_side_http_fetch", "sink", _SINK_ENV, "server_side_http_fetch.php.j2")
 
 
 class DomInnerhtmlEchoSink(TemplateModule):
@@ -992,6 +1027,8 @@ TRANSFORMS: dict[str, Module] = {
     "dom_text_content": DomTextContentTransform(),
     "loose_equality_compare": LooseEqualityCompareTransform(),
     "constant_time_compare": ConstantTimeCompareTransform(),
+    "unchecked_url_fetch": UncheckedUrlFetchTransform(),
+    "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistTransform(),
 }
 #: Sinks. The three HTML sinks render a **Blade view** body rather than a
 #: controller statement; :data:`VIEW_SINKS` names them so the emitter knows
@@ -1013,6 +1050,7 @@ SINKS: dict[str, Module] = {
     # L-P3.3c-DOM: reviews.php/feedback.php's client-only DOM-XSS sink.
     "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
     "webhook_signature_verification": WebhookSignatureVerificationSink(),
+    "server_side_http_fetch": ServerSideHttpFetchSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

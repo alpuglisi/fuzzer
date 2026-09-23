@@ -774,6 +774,43 @@ class WebhookSignatureVerificationSink(TemplateModule):
         )
 
 
+class UncheckedUrlFetchTransform(TemplateModule):
+    """The ``unchecked_url_fetch`` op (`CC-LAB-0134`): fetches a tainted URL
+    with zero host/scheme validation -- SSRF. Safety matrix:
+    ``effect=no_effect``. Registered for the shared minimal-pair vocabulary
+    only, same reasoning as :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("unchecked_url_fetch", "transform", _TRANSFORM_ENV, "unchecked_url_fetch.php.j2")
+
+
+class SchemeAndResolvedIpAllowlistTransform(TemplateModule):
+    """The ``scheme_and_resolved_ip_allowlist`` op (`CC-LAB-0134`, secure
+    twin): validates the URL scheme and the resolved IP (not just the
+    hostname string) against private/reserved ranges. Safety matrix:
+    ``effect=neutralises``, ``neutralizes: [ssrf_request_forgery]``.
+    Registered for the shared minimal-pair vocabulary only, same reasoning
+    as :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "scheme_and_resolved_ip_allowlist",
+            "transform",
+            _TRANSFORM_ENV,
+            "scheme_and_resolved_ip_allowlist.php.j2",
+        )
+
+
+class ServerSideHttpFetchSink(TemplateModule):
+    """The ``server_side_http_fetch`` sink family (`CC-LAB-0134`): returns a
+    preview of the fetched content -- illustrative, echoes ``value_expr``
+    (the requested URL) verbatim. Registered for the shared minimal-pair
+    vocabulary only, same reasoning as :class:`WebhookRequestSource`."""
+
+    def __init__(self) -> None:
+        super().__init__("server_side_http_fetch", "sink", _SINK_ENV, "server_side_http_fetch.php.j2")
+
+
 SOURCES: dict[str, Module] = {
     "get_param": GetParamSource(),
     "post_param": PostParamSource(),
@@ -811,6 +848,10 @@ TRANSFORMS: dict[str, Module] = {
     # this cell is built on php_laravel only (category 3's Huddle Hub).
     "loose_equality_compare": LooseEqualityCompareTransform(),
     "constant_time_compare": ConstantTimeCompareTransform(),
+    # CC-LAB-0134: registered for the shared minimal-pair vocabulary only --
+    # this cell is built on php_laravel only (category 3's Huddle Hub).
+    "unchecked_url_fetch": UncheckedUrlFetchTransform(),
+    "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -837,6 +878,7 @@ SINKS: dict[str, Module] = {
     # CC-LAB-0133: registered for the shared minimal-pair vocabulary only --
     # this cell is built on php_laravel only (category 3's Huddle Hub).
     "webhook_signature_verification": WebhookSignatureVerificationSink(),
+    "server_side_http_fetch": ServerSideHttpFetchSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),
