@@ -12,8 +12,21 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (cross-branch bookkeeping fix, pull-and-remediate round)
+- Docs/LAB: fixed a real cross-branch `FR-LAB-102` collision found during
+  a cross-branch review of categories 2-5's latest pushes — this
+  branch's own `FR-LAB-102` (the corpus-validation-sandbox entry just
+  below) had been independently claimed, in the same window, by both
+  category 2 (PicTrail's comments page) and category 5 (Expedia's
+  `spel_injection` shape). Since this branch's usage had the fewest
+  cross-file references of the three, renumbered it to `FR-LAB-112` via
+  exact-token replacement across `requirements.md`/`change-control.md`/
+  `CHANGELOG.md`/`docs/VULN_CORPUS_EXPANSION_PLAN.md`. Category 2 keeps
+  `FR-LAB-102` (most references); category 5 is being renumbered
+  separately on its own branch.
+
 ## 2026-09-23 (vuln corpus Phase 3: real gVisor validation sandbox)
-- LAB (`CC-LAB-0084`/`FR-LAB-102`): built and tested the "Validation
+- LAB (`CC-LAB-0084`/`FR-LAB-112`): built and tested the "Validation
   execution sandbox" `docs/VULN_CORPUS_EXPANSION_PLAN.md` requires before
   any collected/manufactured corpus pair can be dynamically executed.
   New `fuzzlab/tools/corpus_validation_sandbox.py` drives gVisor (`runsc

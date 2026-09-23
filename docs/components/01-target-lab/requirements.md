@@ -2351,7 +2351,7 @@ lane) can submit a payload as
   both `FR-LAB-83` and `FR-LAB-86` already flagged as separate follow-on
   work) and does not modify `fuzzlab/harness/multitarget.py` itself. This
   closes Category 1 (E-commerce)'s full Phase A-E build.
-- **FR-LAB-102** *(vuln-corpus Phase 3: real gVisor dynamic-validation
+- **FR-LAB-112** *(vuln-corpus Phase 3: real gVisor dynamic-validation
   sandbox; `CC-LAB-0084`, 2026-09-23).* New
   `fuzzlab/tools/corpus_validation_sandbox.py`:
   `run_in_sandbox(language, script_path, authorized=True, ...)` executes

@@ -3,7 +3,7 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0084 — vuln-corpus Phase 3: real gVisor dynamic-validation sandbox (FR-LAB-102) (2026-09-23)
+### CC-LAB-0084 — vuln-corpus Phase 3: real gVisor dynamic-validation sandbox (FR-LAB-112) (2026-09-23)
 - Change: New `fuzzlab/tools/corpus_validation_sandbox.py` and
   `tests/test_corpus_validation_sandbox.py`, implementing
   `docs/VULN_CORPUS_EXPANSION_PLAN.md`'s "Validation execution sandbox"

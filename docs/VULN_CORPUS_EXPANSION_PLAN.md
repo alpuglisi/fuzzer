@@ -636,7 +636,7 @@ sources (OWASP LLM Top 10) before Phase 2 either includes or skips it.
       "Pair generation")
 - [x] Phase 3: validation execution sandbox actually built/tested (not just
       specified) — `fuzzlab/tools/corpus_validation_sandbox.py`
-      (`CC-LAB-0084`/`FR-LAB-102`, 2026-09-23): real gVisor (`runsc run`),
+      (`CC-LAB-0084`/`FR-LAB-112`, 2026-09-23): real gVisor (`runsc run`),
       zero network namespace, `-overlay2=all:memory` ephemeral writes,
       real cgroup v1 memory/pids limits, non-root, wall-clock timeout,
       explicit `authorized=True` opt-in, mandatory audit log. Every
