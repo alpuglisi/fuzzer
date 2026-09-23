@@ -3,6 +3,94 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0034 — `PredictableTokenSourceStrategy`: real detection for `weak_token_entropy` (2026-09-23)
+
+- Change: adds the deliberately-separated detection follow-on `CC-LAB-0181`
+  flagged: an oracle confirmation strategy for `weak_token_entropy`
+  (CWE-330), closing Twitch's `TWCH-0005` structural detection zero.
+  1. **`fuzzlab/oracle/strategies.py`**: `PredictableTokenSourceStrategy`
+     (`vuln_class="weak_token_entropy"`, `mechanism=
+     "timestamp-derived-token"`). Two ordinary probes; parses each
+     response's `session_token` field; confirms iff both parse as
+     base-10 integers with a non-negative delta under a fixed
+     `_DELTA_CEILING_NS` (10 seconds in nanoseconds) — a generous,
+     jitter-immune backstop, not a precise measured-elapsed-time bound
+     (a design correction from an earlier draft's `time.time()`-based
+     window, per the adequacy pass). Registered in `default_strategies()`
+     and `_CATEGORY_TO_CLASS`.
+  2. **Primary false-positive defense named explicitly**: the hex-vs-
+     decimal parse gate, not delta-window tightness — a real
+     `crypto/rand`-sourced 64-character hex token essentially never
+     parses as an all-decimal integer (`(10/16)^64 ≈ 8.6e-14`, corrected
+     by the accuracy-review pass from an earlier draft's off-by-~5x
+     estimate of `4e-13`).
+  3. **`Verdict.evidence` deliberately never records a full raw token
+     value** — only an 8-character prefix of each plus the computed
+     delta (`token_a_prefix`/`token_b_prefix`/`delta_ns`). These are the
+     target's own issued session-token-shaped values, unlike this file's
+     existing strategies' own self-minted OOB canary tokens, an
+     adequacy-pass requirement.
+  4. **`fuzzlab/core/runmode.py`**: `_VULN_TO_CATEGORY` gained
+     `"weak_token_entropy": "weak-token-entropy"` — the fifth instance
+     of the recurring underscore/hyphen gap, caught automatically by the
+     structural guard test.
+  5. **`fuzzlab/audit/rules_data/default_rules.json`**: `R-WEAK-TOKEN-
+     ENTROPY` (see the paired `CC-AUD-0021` entry for the rule itself).
+  - Dispatched through this component's mandatory pre-change review gate
+    (accuracy + adequacy passes). Accuracy pass found and corrected the
+    false-positive probability math (item 2 above) before implementation.
+    Adequacy pass required: (a) removing dead code left over from an
+    abandoned measured-elapsed-time design (a `t_mid = time.time()`
+    variable that was no longer used once the fixed-ceiling design
+    replaced it); (b) sending `"{}"` rather than an empty string as the
+    probe body (the point's own `content_type="application/json"` means
+    an empty string is not valid JSON, risking a framework-level 400
+    before the handler that ignores the body is even reached — a
+    robustness fix, both real twins ignore the body either way); (c) the
+    raw-token redaction (item 3 above).
+  New/changed files:
+  - `fuzzlab/oracle/strategies.py`
+  - `fuzzlab/core/runmode.py`
+  - `fuzzlab/audit/rules_data/default_rules.json` (shared with `CC-AUD-0021`)
+  - `tests/test_oracle_strategies_weak_token_entropy.py` (new)
+  - `tests/test_labgen_go_live_boot.py` (new
+    `test_real_boot_proves_the_weak_token_entropy_strategy_end_to_end`)
+  - `tests/test_multitarget_category4.py` (Twitch's real, scored recall
+    moves from 3/5 to 4/5)
+  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    (`FR-FUZZ-20`, new)
+- Impact (other components / project): `fuzzlab/oracle/strategies.py`,
+  `fuzzlab/core/runmode.py`, and `fuzzlab/audit/rules_data/
+  default_rules.json` are shared across every category/target (fresh
+  `git show` collision check against category-2/3/5 and
+  second-target-cat1-ecommerce before landing — all behind this branch's
+  own prior commits, no independent edits). `fuzzlab.harness.multitarget`'s
+  real, scored Twitch report for category 4's own Phase E test now shows
+  `tp=4` instead of `tp=3`.
+- Risk (level; mitigation or accepted-risk justification): Low. The
+  parse-gate defense and fixed ceiling together directly close the
+  false-positive classes the review passes named; one narrow, documented,
+  accepted edge case remains (a target that always issues the literal
+  same token value also confirms, since a delta of exactly 0 is not
+  itself treated as suspicious — pinned by a dedicated test rather than
+  left as a silent surprise).
+- Deliverables:
+  - [x] `PredictableTokenSourceStrategy` implemented, registered,
+        unit-tested (vulnerable/secure/missing-field/zero-delta-edge-case
+        cases) — done
+  - [x] The false-positive-math correction and raw-token redaction
+        applied before implementation — done
+  - [x] Real live-boot proof against Twitch's real booted twins — done
+  - [x] `test_multitarget_category4.py` updated to the new real recall
+        — done
+  - [x] Full non-slow suite re-run green at the stable baseline — done
+- Effectiveness (assessed 2026-09-23): achieved. Twitch's real, scored
+  `multitarget` recall moved from 3/5 to 4/5 (`tp=4, fp=0`), proven by a
+  real, executed `run_targets()` call against a real booted app, and the
+  strategy independently confirms/fails-closed correctly against real
+  vulnerable/secure twins via a dedicated live-boot test, not only
+  mocked senders.
+
 ### CC-FUZZ-0033 — `JwtAlgNoneConfusionStrategy`: real detection for `jwt_algorithm_confusion` (2026-09-23)
 
 - Change: adds the deliberately-separated detection follow-on `CC-LAB-0180`

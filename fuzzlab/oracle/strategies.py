@@ -809,6 +809,70 @@ class JwtAlgNoneConfusionStrategy(ConfirmationStrategy):
         return Verdict(True, self.vuln_class, self.mechanism, {"marker": token})
 
 
+def _session_token(text: str | None) -> str | None:
+    import json
+    try:
+        return json.loads(text or "")["session_token"]
+    except (ValueError, TypeError, KeyError):
+        return None
+
+
+class PredictableTokenSourceStrategy(ConfirmationStrategy):
+    """Confirms a predictable, timestamp-derived session token (CWE-330,
+    this project's own `CC-LAB-0181` cell) with a two-probe differential:
+    send two ordinary probes, parse each response's own `session_token`
+    field, and confirm only if both parse as base-10 integers whose
+    difference is a small, non-negative number of nanoseconds.
+
+    **The primary false-positive defense is the parse gate, not the delta
+    bound**: a real `crypto/rand`-sourced hex token (this project's own
+    secure twin renders 64 lowercase hex characters) essentially never
+    parses as an all-decimal integer -- the probability every one of 64
+    independent hex digits happens to land in `{0-9}` rather than
+    `{a-f}` is `(10/16)**64 ~= 8.6e-14`, vanishingly small. The delta
+    bound (`_DELTA_CEILING_NS`) is a fixed, generous backstop
+    (10 seconds in nanoseconds -- several orders of magnitude above the
+    ~1ms deltas this project's own real live-boot test observes between
+    two ordinary sequential probes), not a precise measurement of actual
+    elapsed wall-clock time: a fixed ceiling is immune to test-
+    infrastructure jitter (a loaded CI runner, network latency to a real
+    target) in a way that trying to bound the delta to a *measured*
+    elapsed-time window would not be.
+
+    Known limitation, not silently swept under the rug: `Verdict.evidence`
+    deliberately does not record the full raw token values (unlike this
+    project's own self-minted OOB canary tokens elsewhere in this file,
+    these are the *target's own issued* session-token-shaped values) --
+    only a short prefix of each plus the computed delta, the same
+    "don't log a real secret verbatim" caution this project's own
+    lab-only/authorized-only posture implies even for a benchmark run.
+    """
+    vuln_class = "weak_token_entropy"
+    mechanism = "timestamp-derived-token"
+    category = "weak-token-entropy"
+
+    _DELTA_CEILING_NS = 10_000_000_000   # 10s -- a fixed backstop, not a
+                                          # measured-elapsed-time bound
+
+    def confirm(self, candidate, sender):
+        probe_a = self._send(sender, candidate, "{}")
+        probe_b = self._send(sender, candidate, "{}")
+        token_a = _session_token(probe_a.text)
+        token_b = _session_token(probe_b.text)
+        if token_a is None or token_b is None:
+            return None
+        try:
+            delta = int(token_b) - int(token_a)
+        except (ValueError, TypeError):
+            return None
+        if not (0 <= delta <= self._DELTA_CEILING_NS):
+            return None
+        return Verdict(True, self.vuln_class, self.mechanism,
+                       {"token_a_prefix": str(token_a)[:8],
+                        "token_b_prefix": str(token_b)[:8],
+                        "delta_ns": delta})
+
+
 # Grey-box (M10) default confirmation-side probes: something that would reach the
 # vulnerable sink (a SQLi syntax-breaker; an XSS canary) so the coverage/DB-fault
 # side channel has something to observe. Distinct from the black-box strategies'
@@ -975,6 +1039,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
             InsecureDeserializationTypeConfusionStrategy(),
             XxeInBandMarkerStrategy(oob), XxeOobStrategy(oob),
             JwtAlgNoneConfusionStrategy(),
+            PredictableTokenSourceStrategy(),
             GreyboxConfirmationStrategy(coverage, dbfault)]
 
 
@@ -996,6 +1061,7 @@ _CATEGORY_TO_CLASS = {
     "insecure-deserialization": "insecure_deserialization",
     "xxe": "xxe",
     "jwt-algorithm-confusion": "jwt_algorithm_confusion",
+    "weak-token-entropy": "weak_token_entropy",
 }
 
 

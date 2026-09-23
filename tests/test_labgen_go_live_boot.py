@@ -447,3 +447,49 @@ def test_real_boot_proves_the_weak_token_entropy_differential_for_both_twins() -
             with pytest.raises(ValueError):
                 int(tok)
         assert secure_token1 != secure_token2
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_weak_token_entropy_strategy_end_to_end() -> None:
+    """The real `PredictableTokenSourceStrategy` (CC-FUZZ-0034/FR-FUZZ-20),
+    driven against a real booted app rather than a fake sender: confirms
+    the vulnerable twin and fails closed on the secure twin."""
+    from fuzzlab.oracle.probe import Candidate, Probe
+    from fuzzlab.oracle.strategies import PredictableTokenSourceStrategy
+
+    manifest = load_manifest("lab/manifests/weak_token_entropy_go_sample.yaml")
+    emitter = GoEmitter()
+    cells = {c.cell_id: c for c in manifest.cells}
+
+    def _cand():
+        return Candidate(url="http://h/generated/labgen-go-0009", param="body",
+                         method="POST", location="body",
+                         vuln_class="weak_token_entropy",
+                         category="weak-token-entropy", content_type="application/json")
+
+    strategy = PredictableTokenSourceStrategy()
+
+    with GoLiveBootHarness(emitter, [cells["LABGEN-GO-0009"]]) as harness:
+        class _HarnessSender:
+            def send(self, url, param, value, timing=False, method="POST",
+                      location="body", content_type=None):
+                resp = harness.request("POST", "/generated/labgen-go-0009",
+                                       body=value.encode("utf-8"))
+                return Probe(resp.status, resp.body)
+
+        verdict = strategy.confirm(_cand(), _HarnessSender())
+        assert verdict is not None and verdict.confirmed, "strategy failed to confirm the real vulnerable twin"
+        assert verdict.vuln_class == "weak_token_entropy"
+
+    with GoLiveBootHarness(emitter, [cells["LABGEN-GO-0010"]]) as harness:
+        class _HarnessSender:
+            def send(self, url, param, value, timing=False, method="POST",
+                      location="body", content_type=None):
+                resp = harness.request("POST", "/generated/labgen-go-0010",
+                                       body=value.encode("utf-8"))
+                return Probe(resp.status, resp.body)
+
+        assert strategy.confirm(_cand(), _HarnessSender()) is None, (
+            "strategy incorrectly confirmed the real secure twin"
+        )

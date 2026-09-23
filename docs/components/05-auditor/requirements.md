@@ -74,6 +74,14 @@ budget where a vulnerability is plausible.
   (`authorization|jwt`) — scoped to header points only, mirroring
   `R-ACCESS-CONTROL`'s own location-narrowed shape. Rule-generation only
   — confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-19`).
+- **FR-AUD-12** *(`CC-AUD-0021`, 2026-09-23).* A candidate is generated for
+  the `weak-token-entropy` category: `R-WEAK-TOKEN-ENTROPY`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a `POST` point
+  whose `sink_context` is `"session_token"` — genuinely a new,
+  less-constrained rule shape (no `location_in`, since this class has no
+  real tainted location to key off at all; `method_in` substitutes as
+  the available constraint). Rule-generation only — confirmation is
+  `fuzzlab.oracle`'s job (`FR-FUZZ-20`).
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that

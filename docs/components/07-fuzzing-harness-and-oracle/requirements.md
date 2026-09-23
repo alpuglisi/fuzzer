@@ -213,6 +213,32 @@ rewards) derives from it.
   header point is a real, audited point today, not a skip reason. This
   entry is kept for history — it correctly named the gap at the time.
 
+- **FR-FUZZ-20** *(`PredictableTokenSourceStrategy`; `CC-FUZZ-0034`,
+  2026-09-23).* The oracle supports real **predictable session-token
+  (CWE-330) confirmation**, paired with `FR-AUD-12`'s candidate-
+  generation rule, closing Twitch's `TWCH-0005` structural detection
+  zero (`CC-LAB-0181`'s own deliberately-separated follow-on):
+  - `PredictableTokenSourceStrategy` (`vuln_class=
+    "weak_token_entropy"`, `mechanism="timestamp-derived-token"`): two
+    ordinary probes; parses each response's `session_token` field;
+    confirms iff both parse as base-10 integers with a non-negative
+    delta under a fixed 10-second-in-nanoseconds ceiling (a generous,
+    jitter-immune backstop, not a precise measured-elapsed-time bound).
+  - **Primary false-positive defense named explicitly**: the hex-vs-
+    decimal parse gate, not delta-window tightness — a real
+    `crypto/rand`-sourced 64-character hex token essentially never
+    parses as an all-decimal integer (`(10/16)^64 ≈ 8.6e-14`).
+  - `Verdict.evidence` never records a full raw token value — only an
+    8-character prefix of each plus the computed delta, since these are
+    the target's own issued session-token-shaped values.
+  - `fuzzlab.core.runmode._VULN_TO_CATEGORY` gained
+    `"weak_token_entropy": "weak-token-entropy"` — the fifth instance of
+    the recurring underscore/hyphen gap, caught automatically by the
+    structural guard test.
+  - Verified live against Twitch's real booted twins; through the real
+    `fuzzlab.harness.multitarget` Phase E wiring, Twitch's real, scored
+    recall moves from 3/5 to 4/5.
+
 - **FR-FUZZ-19** *(`JwtAlgNoneConfusionStrategy`; `CC-FUZZ-0033`,
   2026-09-23).* The oracle supports real **JWT algorithm-confusion
   (CWE-347) confirmation**, paired with `FR-AUD-11`'s candidate-

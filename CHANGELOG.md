@@ -4,6 +4,30 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (FUZZ/AUD: real detection for `weak_token_entropy`)
+- Fuzzing harness/oracle: the deliberately-separated detection follow-on
+  to `CC-LAB-0181` (Twitch's predictable-session-token page) — a new
+  audit rule (`R-WEAK-TOKEN-ENTROPY`, `method_in=["POST"]` +
+  `sink_context_in=["session_token"]`) and oracle strategy
+  (`PredictableTokenSourceStrategy`). Sends two ordinary probes, parses
+  each response's `session_token` field, and confirms only if both parse
+  as base-10 integers with a non-negative delta under a fixed 10-second
+  (in nanoseconds) ceiling. The primary false-positive defense is the
+  hex-vs-decimal parse gate, not delta-window tightness — a real
+  `crypto/rand`-sourced hex token essentially never parses as an
+  all-decimal integer (`(10/16)^64 ≈ 8.6e-14`, corrected from an earlier
+  draft's off-by-~5x estimate by the accuracy-review pass); the fixed
+  ceiling is a generous backstop (several orders of magnitude above the
+  ~1ms deltas this project's own real live-boot test observes), immune
+  to test-infrastructure jitter, not a precise measured-elapsed-time
+  bound. `Verdict.evidence` deliberately never records a full raw token
+  value (only an 8-character prefix plus the delta) — these are the
+  target's own issued session-token-shaped values, unlike this file's
+  self-minted OOB canary tokens elsewhere. Verified live against
+  Twitch's real booted twins and through the real `multitarget` Phase E
+  wiring: Twitch's real, scored recall moves from 3/5 to 4/5.
+  `CC-FUZZ-0034`/`FR-FUZZ-20`, `CC-AUD-0021`/`FR-AUD-12`.
+
 ## 2026-09-23 (LAB: Twitch's 5th real page, predictable session token)
 - Lab: a new mechanism from `lab/safety_matrix.yaml`
   (`predictable_token_source`/`csprng_token`, added by `CC-LAB-0063`,

@@ -57,6 +57,7 @@ _VULN_TO_CATEGORY = {
     "access_control": "access-control",
     "insecure_deserialization": "insecure-deserialization",
     "jwt_algorithm_confusion": "jwt-algorithm-confusion",
+    "weak_token_entropy": "weak-token-entropy",
 }
 
 

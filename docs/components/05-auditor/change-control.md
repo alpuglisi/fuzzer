@@ -3,6 +3,44 @@
 Component code: **AUD**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-AUD-0021 — `R-WEAK-TOKEN-ENTROPY` audit rule (2026-09-23)
+
+- Change: adds `R-WEAK-TOKEN-ENTROPY`, category `weak-token-entropy`, to
+  `fuzzlab/audit/rules_data/default_rules.json` — `{"method_in":
+  ["POST"], "sink_context_in": ["session_token"]}`. The project's first
+  candidate-generation rule for the `weak-token-entropy` category,
+  closing Twitch's `TWCH-0005` structural detection zero. Genuinely a
+  new, less-constrained rule shape (no `location_in`, unlike
+  `R-INSECURE-DESERIALIZATION`/`R-XXE`'s own `sink_context_in`+
+  `location_in` pairing) — this class has no real tainted location to
+  key off at all, so `method_in` substitutes as the available
+  constraint, confirmed by the accuracy-review pass as a deliberate,
+  documented departure from the established pattern, not an oversight.
+  Paired with `CC-FUZZ-0034`'s new `PredictableTokenSourceStrategy`
+  oracle confirmation. Reviewed pre-implementation per the component's
+  pre-change review gate (accuracy + adequacy passes — see `CC-FUZZ-0034`
+  for the full review record).
+  New/changed files:
+  - `fuzzlab/audit/rules_data/default_rules.json`
+  - `docs/components/05-auditor/requirements.md` (`FR-AUD-12`, new)
+- Impact (other components / project): `default_rules.json` is shared
+  across every category and every existing target's own run — purely
+  additive (a new rule appended after `R-JWT-ALG-NONE`).
+- Risk (level; mitigation or accepted-risk justification): Low. A rule
+  only nominates a candidate; it cannot itself produce a false
+  "confirmed" finding (that risk lives in the paired strategy, assessed
+  in `CC-FUZZ-0034`).
+- Deliverables:
+  - [x] `R-WEAK-TOKEN-ENTROPY` added to `default_rules.json` — done
+  - [x] Unit tests confirming the rule's `when` predicate matches/excludes
+        as scoped (`test_r_weak_token_entropy_rule_matches_a_post_
+        session_token_point`, `test_r_weak_token_entropy_rule_does_not_
+        match_a_get_point`) — done
+- Effectiveness (assessed 2026-09-23): achieved. Paired with
+  `PredictableTokenSourceStrategy`, the rule correctly nominates Twitch's
+  real `TWCH-0005` point and is proven end-to-end against a real booted
+  app — see `CC-FUZZ-0034`'s Effectiveness note.
+
 ### CC-AUD-0020 — `R-JWT-ALG-NONE` audit rule (2026-09-23)
 
 - Change: adds `R-JWT-ALG-NONE`, category `jwt-algorithm-confusion`, to
