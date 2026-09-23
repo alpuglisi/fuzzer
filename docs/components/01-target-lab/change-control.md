@@ -3,6 +3,91 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0175 — Phase D: real Tier 1/2 conformance for the SSRF and Jackson-deserialization cells (2026-09-23)
+
+- Change: Real, executed Tier 1 (in-process functional differential) and
+  Tier 2 (control/baseline-differential oracle) conformance proof for two
+  of this category's three vulnerable-cell shapes, per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §5 — reusing
+  `fuzzlab.labgen.conformance.tier1`/`tier2` (the same shared machinery
+  `php_laravel` uses) against Phase A/B's own already-built live-boot
+  harnesses (`GoLiveBootHarness`, `SpringBootLiveBootHarness`), never a new
+  stack-specific proof mechanism. Neither harness's existing, already-used
+  `request`/`post` methods were changed — each stack gets a small local
+  adapter class (in the new test file only) implementing the
+  `Tier1Client`/`Tier2Client` protocols by composing the harness, exactly
+  as `tier2.py`'s own docstring anticipates ("this module stays usable
+  against any future in-process client shaped the same way").
+  - **SSRF (`LABGEN-GO-0003` vulnerable / `LABGEN-GO-0004` secure,
+    `go_net_http`)**: real Tier 1 (`run_tier1_case`) and Tier 2
+    (`LiveBootTier2Oracle`) proof using the same throwaway plain-HTTP
+    loopback listener convention `CC-LAB-0172`'s own live-boot test
+    established (`evidence_marker="thumb-bytes"`), and a
+    connection-refused control (`http://127.0.0.1:1/`) that cannot itself
+    produce the marker on either twin. Built `Tier1Case` directly rather
+    than via `build_tier1_case` for this stack specifically: that helper
+    derives the served path from `cell.route.path`, which for
+    `go_net_http` is the manifest's own route-profile-lookup key, not the
+    real served path (`/generated/<cell_id.lower()>` — the route
+    accumulator's own convention since `CC-LAB-0170`); using the helper
+    here would have silently probed the wrong URL.
+  - **Insecure deserialization (`LABGEN-JV-0001` vulnerable /
+    `LABGEN-JV-0002` secure, `spring_boot`)**: real Tier 1/2 proof reusing
+    `CC-LAB-0173`'s own established evidence — both twins return
+    `{"status":"ok"}` on success and a 400 body otherwise, so
+    `evidence_marker='"status":"ok"'` cleanly distinguishes "accepted the
+    attacker type-hinted body" from "rejected it". `param_name="body"`
+    reuses `CC-LAB-0174`'s own whole-body-JSON convention: the adapter's
+    `post()` sends `data["body"]` verbatim as the raw request body, not a
+    form field. **A real control-value design mistake found and corrected
+    before landing**: the first draft used the secure twin's own
+    well-formed plain body as the Tier 2 control value, which the secure
+    twin legitimately accepts (200, marker present) — a control that can
+    itself produce the marker is unusable (`LiveBootTier2Oracle`'s own
+    fail-closed "inconclusive" rule would have fired, per PA-0025,
+    masking rather than confirming the secure twin's true verdict).
+    Fixed by using a deliberately malformed, not-valid-JSON control
+    (`"not-json-at-all"`) that fails identically on both twins.
+  - **Webhook-signature (`LABGEN-GO-0001`/`0002`, CWE-347) deliberately
+    NOT wired into Tier 1/2 here — not an oversight.** A single request
+    cannot distinguish a naive `==` compare from a constant-time
+    `hmac.Equal` compare; both twins accept a correct signature and reject
+    an incorrect one identically (`lab/safety_matrix.yaml`:
+    `naive_string_compare` is `partial`, not `no_effect` — it is still a
+    real, correct comparison). `tests/test_labgen_go_live_boot.py`'s own
+    docstring already states this exact honesty rule for this cell. Tier
+    1/2's marker/functional-differential model has no way to observe a
+    timing side channel, so forcing this cell through it would either
+    silently pass both twins as indistinguishable (useless) or invent a
+    misleading differential that isn't the real vulnerability. Recorded as
+    an open question (`FR-LAB-81` §8), not a todo — resolving it needs a
+    genuinely new timing-differential oracle design, out of this
+    increment's scope.
+  New/changed files:
+  - `tests/test_labgen_phase_d_tier12_category4.py` (new)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-81`, new; new
+    §8 open question)
+- Impact (other components / project): none outside this component — no
+  production code changed, only a new test file exercising existing,
+  already-tested public APIs (`fuzzlab.labgen.conformance.tier1`/`tier2`,
+  `GoLiveBootHarness`, `SpringBootLiveBootHarness`) exactly as designed to
+  be used.
+- Risk (level; mitigation or accepted-risk justification): **low**. Purely
+  additive test coverage against existing, unmodified interfaces; the one
+  real design mistake (the Tier 2 control-value choice) was found and
+  fixed before landing, not discovered as a later defect.
+- Deliverables:
+  - [x] Real Tier 1/Tier 2 proof for the SSRF cell (both twins)
+  - [x] Real Tier 1/Tier 2 proof for the Jackson-deserialization cell (both twins)
+  - [x] Webhook-signature Tier 1/2 non-applicability recorded as an open
+    question, not silently skipped
+  - [x] New tests verified against a real boot (both toolchains available
+    this session): 3 passed
+  - [x] Full non-slow suite re-verified green (no new failures)
+- Effectiveness (assessed 2026-09-23): met — both Tier 1 and Tier 2 pass
+  for both twins of both cells against a real `go build`/`mvn package`
+  boot, no mocks.
+
 ### CC-LAB-0174 — Phase C ground truth for the Netflix and Twitch apps; additive `labels.schema.json` widening (2026-09-23)
 
 - Change: The first real deliverable of Phase C

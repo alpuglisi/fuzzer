@@ -2169,6 +2169,33 @@ lane) can submit a payload as
     C's 'coherent page/route set' bar... not yet begun"). Recorded here
     rather than left to imply Phase C is now fully done for category 4.
 
+- **FR-LAB-81** *(Phase D: real Tier 1/2 conformance for two of category
+  4's three cells; `CC-LAB-0175`, 2026-09-23).* Real, executed Tier 1
+  (`fuzzlab.labgen.conformance.tier1.run_tier1_case`) and Tier 2
+  (`tier2.LiveBootTier2Oracle`/`run_tier2_case`) proof for the SSRF cell
+  (`LABGEN-GO-0003`/`0004`, `go_net_http`) and the Jackson-deserialization
+  cell (`LABGEN-JV-0001`/`0002`, `spring_boot`), reusing Phase A/B's own
+  live-boot harnesses through small local `Tier1Client`/`Tier2Client`
+  adapter classes — no change to either harness's existing, already-used
+  `request`/`post` methods. Both cells' verdicts confirmed for real (Tier
+  1 and Tier 2 alike) against a real `go build`/`mvn package` boot.
+  - **Open question, not a todo: the webhook-signature cell
+    (`LABGEN-GO-0001`/`0002`, CWE-347) is not Tier-1/2-confirmable as this
+    module is currently designed.** Tier 1/2's model is a single-request
+    marker/functional differential; both twins of this cell accept a
+    correct signature and reject an incorrect one identically for any one
+    request (`naive_string_compare` vs `hmac.Equal` diverge only in
+    comparison *timing*, which no single-request oracle can observe --
+    `tests/test_labgen_go_live_boot.py`'s own docstring already states
+    this same honesty rule for this cell's Tier 0/3 proof). Confirming it
+    would need a genuinely new timing-differential oracle (statistical,
+    multi-request timing measurement against a real boot) -- a different
+    kind of Tier-2 oracle than `LiveBootTier2Oracle`'s marker-differential
+    one, not built here. This mirrors the project's own existing
+    precedent for a class whose flaw is not a single-request functional
+    difference (the `identifier_charset_filter` open question above: an
+    *identifier-swap* differential mode, not yet built either).
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.
@@ -2301,6 +2328,17 @@ None (it is the system under test).
   `tests/test_labgen_harder_shapes.py` and `tests/test_labgen_identifier_sqli_assertion.py`.
 
 ## 8. Open questions
+- (`CC-LAB-0175`/`FR-LAB-81`, category 4) **The webhook-signature cell
+  (`LABGEN-GO-0001`/`0002`, CWE-347) has no Tier 1/2 conformance path.**
+  `naive_string_compare` vs `hmac.Equal` are functionally identical for any
+  single request (both accept a correct signature, reject an incorrect
+  one) — they diverge only in comparison timing, which
+  `fuzzlab.labgen.conformance.tier1`/`tier2`'s marker/functional-
+  differential model cannot observe. Same shape as the
+  `identifier_charset_filter` open question below (a class whose flaw
+  isn't a single-request functional difference): needs a genuinely new,
+  statistical, multi-request timing-differential oracle, not attempted
+  here.
 - (L-P3.3b) **`fuzzlab.labgen.minimal_pair`'s module-category map is sourced from one
   emitter's registry.** It builds `_MODULE_CATEGORY` from `fuzzlab.labgen.modules`
   (`php_current`'s) alone, so *every* stack that wants the real (rather than the naive)

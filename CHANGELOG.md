@@ -4,6 +4,19 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (category 4, Phase D Tier 1/2 conformance)
+- Lab: real, executed Tier 1/2 conformance proof (`fuzzlab.labgen.conformance.tier1`/
+  `tier2`, reused unchanged) for two of category 4's three cells — SSRF
+  (`LABGEN-GO-0003`/`0004`, `go_net_http`) and Jackson deserialization
+  (`LABGEN-JV-0001`/`0002`, `spring_boot`) — via small local adapter classes over
+  Phase A/B's own live-boot harnesses, no harness code changed. The
+  webhook-signature cell (CWE-347) is deliberately not wired in: both twins are
+  functionally identical for any single request (they diverge only in
+  comparison timing), so Tier 1/2's marker-differential model cannot confirm
+  it — recorded as an open question, not silently skipped. A real control-value
+  design mistake (a control that could itself produce the evidence marker) was
+  found and fixed before landing. `CC-LAB-0175`/`FR-LAB-81`.
+
 ## 2026-09-23 (category 4, Phase C ground truth)
 - Lab: added real, out-of-band ground truth for category 4's Netflix and
   Twitch apps (`lab/ground-truth-netflix-clone/`, `lab/ground-truth-twitch-clone/`,
