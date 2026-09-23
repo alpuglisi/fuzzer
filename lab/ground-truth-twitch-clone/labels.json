@@ -61,6 +61,18 @@
       "expected_vulnerable": true,
       "rendering": "server-json",
       "notes": "A session-refresh token is generated as the current nanosecond timestamp (CWE-330), trivially predictable -- an attacker who observes or roughly times one token knows every other token issued in a narrow, guessable window. Modeled on a session-token-refresh endpoint, a realistic API-edge auth shape for this app identity. Reuses lab/safety_matrix.yaml's existing session_token_generation sink family and predictable_token_source/csprng_token ops (added by CC-LAB-0063 for the corpus-examples/auth-session research) -- the first lab-generator instance of this mechanism on any stack. Genuinely no tainted request input at all (unlike every other case here) -- `param`/`location` are set to the whole-body-point convention (`body`/`body`) this project already uses for other no-per-field-param whole-body cases (e.g. NFLX-0001/insecure_deserialization), even though the request body itself is unused by this mechanism; the vulnerability is entirely in the response the sink generates, not in anything the caller sends. `LABGEN-GO-0009` in lab/manifests/weak_token_entropy_go_sample.yaml, served at `/generated/labgen-go-0009` (same cell_id-derived-route convention as TWCH-0001/0002/0003/0004) -- never a PFF-* case."
+    },
+    {
+      "case_id": "TWCH-0006",
+      "url": "/generated/labgen-go-0011",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "vuln_class": "mass_assignment",
+      "sink_context": "mass_assignment",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "A channel-profile-update endpoint unmarshals the raw request body directly onto the live channel record struct (CWE-915) -- any JSON field present, including `is_partner` (never exposed by this endpoint's own intended form), takes effect. Modeled on Twitch's real channel-profile-update surface, a realistic API-edge shape for this app identity. Reuses lab/safety_matrix.yaml's existing orm_entity_bulk_assign sink family and unfiltered_object_assign/typed_schema_allowlist ops (added by CC-LAB-0063 for the corpus-examples/mass-assignment research; already instantiated on php_current/ruby_rails/php_laravel) -- the first go_net_http instance of this mechanism. `param`/`location` are set to the whole-body-point convention (`body`/`body`) this project already uses for other no-per-field-param whole-body cases (e.g. TWCH-0005/weak_token_entropy), since the privileged field (`is_partner`) is one of several JSON keys in the request body, not a single named param -- also required for `fuzzlab.harness.auto.points_from_ground_truth`'s own content-type detection, which only marks a body point as JSON when `param==\"body\"` exactly. `LABGEN-GO-0011` in lab/manifests/mass_assignment_go_sample.yaml, served at `/generated/labgen-go-0011` (same cell_id-derived-route convention as TWCH-0001..0005) -- never a PFF-* case."
     }
   ]
 }

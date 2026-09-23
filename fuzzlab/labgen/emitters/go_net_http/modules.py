@@ -439,6 +439,68 @@ class CsprngTokenSink(TemplateModule):
         )
 
 
+class ReadChannelProfileBodySource(TemplateModule):
+    """Reads the whole raw request body -- the mass-assignment shape's
+    source (``CC-LAB-0182``). Publishes ``body_var`` (a Go ``[]byte``
+    identifier), matching ``ReadUrlQueryParamSource``'s own
+    "publish the Go identifier the sink reads" convention. Unlike every
+    other source in this stack, there is no single named field to read:
+    the shape's whole point is that the *entire* body reaches the sink
+    unfiltered, so the source stage does no field-level parsing at all --
+    that split (parse into a typed struct, or not) is exactly what the
+    two sink modules below differ on."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "read_channel_profile_body", "source", _SOURCE_ENV, "read_channel_profile_body.go.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        render_ctx = dict(ctx)
+        render_ctx.setdefault("body_var", "reqBody")
+        return super().render(render_ctx)
+
+
+class UnfilteredObjectAssignSink(TemplateModule):
+    """The ``unfiltered_object_assign`` op (``lab/safety_matrix.yaml``,
+    ``orm_entity_bulk_assign`` family, ``no_effect`` -- added by
+    ``CC-LAB-0063`` for the corpus-examples/mass-assignment research,
+    never before instantiated by any stack's generator): unmarshals the
+    raw request body directly onto a channel record struct that is
+    pre-seeded with the record's *entire* persisted shape, including
+    ``is_partner`` -- a field this endpoint's own intended form never
+    exposes. Go's standard-library ``encoding/json`` only ever sets the
+    fields actually present in the input and leaves the rest at their
+    seeded value, so any JSON key the struct declares, privileged or not,
+    takes effect the moment the client sends it (CWE-915). Echoes the
+    resulting record straight back in the response -- this stack's own
+    "no database in Phase A" scope call (see
+    ``fuzzlab.labgen.conformance.go_live_boot``'s module docstring)
+    applies here too: proving the mutation happened needs no persisted
+    read-back, only the same request's own response."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unfiltered_object_assign", "sink", _SINK_ENV, "unfiltered_object_assign.go.j2"
+        )
+
+
+class TypedSchemaAllowlistSink(TemplateModule):
+    """The ``typed_schema_allowlist`` op (``lab/safety_matrix.yaml``,
+    ``orm_entity_bulk_assign`` family, ``neutralises`` -- the secure
+    twin): unmarshals the request body into a narrow, separately typed
+    DTO struct that only declares the fields this endpoint intends to
+    accept (``display_name``/``bio``), then copies exactly those two
+    fields onto the channel record -- ``is_partner`` has no field in the
+    DTO at all, so no JSON key the client sends can ever reach it,
+    regardless of what the raw body contains."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "typed_schema_allowlist", "sink", _SINK_ENV, "typed_schema_allowlist.go.j2"
+        )
+
+
 class RenderOnlyComplexity(TemplateModule):
     """Wraps the composed source/transform/sink body as the entire body of
     one ``net/http.HandlerFunc`` -- the Go analogue of every other stack's
@@ -460,6 +522,7 @@ SOURCES: dict[str, Module] = {
     "read_channel_id_and_broadcaster_header": ReadChannelIdAndBroadcasterHeaderSource(),
     "read_authorization_bearer_token": ReadAuthorizationBearerTokenSource(),
     "no_op_token_request": NoOpTokenRequestSource(),
+    "read_channel_profile_body": ReadChannelProfileBodySource(),
 }
 TRANSFORMS: dict[str, Module] = {
     "naive_string_compare": NaiveStringCompareTransform(),
@@ -477,6 +540,8 @@ SINKS: dict[str, Module] = {
     "jwt_claims_response": JwtClaimsResponseSink(),
     "predictable_token_source": PredictableTokenSourceSink(),
     "csprng_token": CsprngTokenSink(),
+    "unfiltered_object_assign": UnfilteredObjectAssignSink(),
+    "typed_schema_allowlist": TypedSchemaAllowlistSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "render_only": RenderOnlyComplexity(),

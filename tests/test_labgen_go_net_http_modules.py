@@ -191,3 +191,28 @@ def test_csprng_token_sink_uses_crypto_rand() -> None:
     assert "rand.Read(buf)" in result.code
     assert "hex.EncodeToString(buf)" in result.code
     assert "session_token" in result.code
+
+
+def test_read_channel_profile_body_source_publishes_default_body_var() -> None:
+    result = SOURCES["read_channel_profile_body"].render({})
+    assert "io.ReadAll(r.Body)" in result.code
+    assert result.context["body_var"] == "reqBody"
+
+
+def test_unfiltered_object_assign_sink_unmarshals_onto_the_full_record() -> None:
+    result = SINKS["unfiltered_object_assign"].render({"body_var": "reqBody"})
+    assert "json.Unmarshal(reqBody, &channel)" in result.code
+    assert "IsPartner   bool" in result.code
+    # No separate allowlisted DTO struct -- the whole record is the target.
+    assert "var update struct" not in result.code
+
+
+def test_typed_schema_allowlist_sink_only_copies_the_dto_fields() -> None:
+    result = SINKS["typed_schema_allowlist"].render({"body_var": "reqBody"})
+    assert "var update struct" in result.code
+    assert "json.Unmarshal(reqBody, &update)" in result.code
+    assert "channel.DisplayName = update.DisplayName" in result.code
+    assert "channel.Bio = update.Bio" in result.code
+    # The DTO struct itself never declares `is_partner` -- no field to
+    # unmarshal into even if the client sends the key.
+    assert "IsPartner" not in result.code.split("var update struct", 1)[1].split("}", 1)[0]

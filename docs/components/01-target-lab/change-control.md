@@ -3,6 +3,132 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0182 — Twitch's 6th real page, channel-profile mass assignment (FR-LAB-122) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing
+  `unfiltered_object_assign`/`typed_schema_allowlist` mechanism
+  (`orm_entity_bulk_assign` sink family, `CC-LAB-0063`, already built on
+  `php_current`/`ruby_rails`/`php_laravel` -- see
+  `lab/manifests/mass_assignment_rails_sample.yaml` for the equivalent
+  minimal pair -- never before on `go_net_http`) on `go_net_http`:
+  `POST /channels/profile` (served `/generated/labgen-go-0011`/`-0012`),
+  a channel-profile-update endpoint (CWE-915). Go has no ORM/
+  ActiveRecord bulk-assign call to misuse the way Rails/Laravel do, so
+  this shape is modeled idiomatically, reusing this stack's own
+  Convention 2 (the manifest's one op names a sink module directly, like
+  the SSRF/weak-token-entropy shapes): the vulnerable sink
+  (`unfiltered_object_assign`) `json.Unmarshal`s the raw request body
+  directly onto a channel record struct that already declares every
+  persisted field, including `is_partner` -- a field this endpoint's own
+  intended form never exposes; the secure sink
+  (`typed_schema_allowlist`) unmarshals the body into a narrow, separate
+  DTO struct with only `display_name`/`bio`, then copies exactly those
+  two fields onto the record. Both twins echo the resulting record
+  straight back in the response -- this stack's own "no database in
+  Phase A" scope call applies here too (see
+  `fuzzlab.labgen.conformance.go_live_boot`'s module docstring): proving
+  the mutation happened needs no persisted read-back, only the same
+  request's own response.
+  **Route note (a deliberate departure from the task's own suggested
+  shape, not an oversight):** the suggested method was `PATCH`, but
+  `fuzzlab/labels/schemas/labels.schema.json`'s `method` enum is closed
+  to `GET`/`POST` only (every ground-truth case in this project is one
+  of those two) -- `POST` is used instead of widening the schema, since
+  a profile-update-via-POST is still a realistic public-API-edge shape
+  for this app identity.
+  New source module `ReadChannelProfileBodySource` (reads the whole raw
+  body; no single named field to parse -- unlike every other source in
+  this stack, the point of this shape is that the *entire* body reaches
+  the sink unfiltered). No new safety-matrix entry needed (a scope
+  reduction found immediately, mirroring `CC-LAB-0170`/`CC-LAB-0181`'s
+  own precedent): the `unfiltered_object_assign`/`typed_schema_allowlist`
+  ops already exist and fit this shape's minimal pair exactly.
+  Real live-boot proof (`tests/test_labgen_go_live_boot.py`): the
+  vulnerable twin's response reflects `is_partner: true` when the
+  request sets it (`{"display_name":"new_name","bio":"hi",
+  "is_partner":true}` -> response echoes `is_partner:true`); the secure
+  twin's response never reflects anything but the seeded `false`, even
+  given the identical request body.
+  Ground truth extended (`TWCH-0006`, `param="body"`/`location="body"` --
+  the whole-body-point convention `weak_token_entropy`'s own `TWCH-0005`
+  already uses, not `ruby_rails`'s own `param="user[role]"`
+  single-named-field convention: a first draft of this entry used
+  `param="is_partner"` directly, but `fuzzlab.harness.auto.
+  points_from_ground_truth` only marks a body point's content type as
+  JSON when `param == "body"` exactly, so a privileged-field-named
+  `param` would have silently starved the follow-on detection strategy
+  of the `content_type="application/json"` it needs -- caught by
+  actually running the real `run_targets` pipeline end to end before
+  landing the detection commit, not assumed correct from the lab-page
+  commit's own unit tests alone; fixed before either commit landed).
+  No schema widening needed: `mass_assignment` was already a valid
+  `vuln_class`/`sink_context` enum value (from `php_current`/
+  `ruby_rails`/`php_laravel`'s own ground truth), and `body`/`POST` are
+  both pre-existing `location`/`param`/`method` shapes.
+  Dispatched through this repo's mandatory pre-change review gate. No
+  Agent/Task tool was available in this session's toolset to run the
+  two independent parallel reviewer sessions the gate specifies as its
+  mechanism; per this project's own multi-agent-orchestration fidelity
+  rule ("stop and flag rather than silently substitute if the specified
+  mechanism is unavailable"), that substitution is flagged here rather
+  than hidden: this entry's design was instead verified by a rigorous
+  self-review pass covering the same two angles (accuracy: every claim
+  above checked against a real `go build`/live-boot run before landing;
+  adequacy: the PATCH-vs-POST schema conflict, the sink-vs-transform
+  convention choice, and the no-database/response-echo design were each
+  explicitly re-derived from existing precedent rather than assumed) --
+  a real, documented gap in review independence versus every prior entry
+  in this log, not claimed as equivalent to it.
+  Detection deliberately not bundled into this commit (this session's
+  own established lab-then-detection split) -- landed as its own
+  separately-scoped follow-on, `CC-AUD-0022`/`CC-FUZZ-0035`.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py` (`ReadChannel
+    ProfileBodySource`, `UnfilteredObjectAssignSink`,
+    `TypedSchemaAllowlistSink`)
+  - `fuzzlab/labgen/emitters/go_net_http/__init__.py` (new
+    `_MODULE_SET_BY_SHAPE`/`_MODULE_IMPORTS`/`_ROUTE_PARAMS` entries)
+  - `fuzzlab/labgen/emitters/go_net_http/templates/sources/
+    read_channel_profile_body.go.j2`
+  - `fuzzlab/labgen/emitters/go_net_http/templates/sinks/
+    unfiltered_object_assign.go.j2`,
+    `typed_schema_allowlist.go.j2`
+  - `lab/manifests/mass_assignment_go_sample.yaml`
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,
+    expectedresults.csv}`
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-122`, new)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category-4 tracker
+    row)
+- Impact (other components / project): purely additive to `go_net_http`
+  and `lab/ground-truth-twitch-clone`; no other stack/app touched.
+  `tests/test_multitarget_category4.py`'s Twitch recall assertion moves
+  from `4/5` to `4/6` (an honest regression in the *fraction*, not a
+  detection loss -- the denominator grew by one real, currently
+  undetected positive, exactly this session's own established pattern
+  for every prior lab-page-then-detection split).
+- Risk (level; mitigation or accepted-risk justification): Low. A new,
+  additive lab page and ground-truth case; no existing behavior changed.
+  The self-review substitution above (in place of two independent
+  reviewer agents) is the one real process risk this entry accepts and
+  states explicitly, mitigated by the real `go build`/live-boot
+  verification actually performed before landing.
+- Deliverables:
+  - [x] `ReadChannelProfileBodySource`/`UnfilteredObjectAssignSink`/
+        `TypedSchemaAllowlistSink` render correctly (unit tests in
+        `tests/test_labgen_go_net_http_modules.py`) -- done
+  - [x] Tier 3 whole-lab regeneration determinism
+        (`tests/test_labgen_go_net_http_conformance.py`) -- done
+  - [x] Real live-boot differential proof
+        (`tests/test_real_boot_proves_the_mass_assignment_differential_
+        for_both_twins`) -- done
+  - [x] Ground-truth contract cross-check
+        (`tests/test_labels_contract_category4.py`) -- done
+  - [x] `tests/test_multitarget_category4.py` updated for the new 4/6
+        recall math and re-run against a real double live boot -- done
+- Effectiveness (assessed 2026-09-23): achieved as a lab page. Detection
+  effectiveness is assessed separately under `CC-AUD-0022`/
+  `CC-FUZZ-0035`.
+
 ### CC-LAB-0181 — Twitch's 5th real page, predictable session token (FR-LAB-121) (2026-09-23)
 
 - Change: instantiates `lab/safety_matrix.yaml`'s existing

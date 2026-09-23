@@ -94,6 +94,16 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("weak_token_entropy", "session_token_generation"): _ModuleSet(
         "no_op_token_request", None, "render_only"
     ),
+    # Convention 2 again (like SSRF): the manifest's one op names a sink
+    # directly (`unfiltered_object_assign`/`typed_schema_allowlist`) --
+    # the vulnerable/secure difference is one inseparable
+    # unmarshal-onto-the-live-record-vs-unmarshal-into-a-narrow-DTO
+    # operation, not a value rewrite feeding a shared sink, same reasoning
+    # as `UncheckedUrlFetchSink`/`SchemeAndResolvedIpAllowlistSink`'s own
+    # docstrings (CC-LAB-0182).
+    ("mass_assignment", "orm_entity_bulk_assign"): _ModuleSet(
+        "read_channel_profile_body", None, "render_only"
+    ),
 }
 
 #: Per-module (source/transform-op/sink name) -> the extra Go standard-
@@ -126,6 +136,9 @@ _MODULE_IMPORTS: dict[str, tuple[str, ...]] = {
     "no_op_token_request": (),
     "predictable_token_source": ("fmt", "io", "time"),
     "csprng_token": ("crypto/rand", "encoding/hex", "io"),
+    "read_channel_profile_body": ("io",),
+    "unfiltered_object_assign": ("encoding/json",),
+    "typed_schema_allowlist": ("encoding/json",),
 }
 
 #: Per-route static context this Phase A emitter needs beyond the
@@ -137,6 +150,7 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     "/channels/analytics": {"param_name": "channel_id"},
     "/channels/settings": {},
     "/sessions/refresh": {},
+    "/channels/profile": {},
 }
 
 

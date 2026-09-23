@@ -45,9 +45,9 @@ def test_netflix_ground_truth_loads_and_cross_checks():
 def test_twitch_ground_truth_loads_and_cross_checks():
     gt = contract.load(TWITCH_GT_DIR)
     assert gt.target == "go_net_http"
-    assert len(gt.cases) == 5
+    assert len(gt.cases) == 6
     ids = {c.case_id for c in gt.cases}
-    assert ids == {"TWCH-0001", "TWCH-0002", "TWCH-0003", "TWCH-0004", "TWCH-0005"}
+    assert ids == {"TWCH-0001", "TWCH-0002", "TWCH-0003", "TWCH-0004", "TWCH-0005", "TWCH-0006"}
 
     webhook = gt.case_by_id("TWCH-0001")
     assert webhook.expected_vulnerable
@@ -94,8 +94,17 @@ def test_twitch_ground_truth_loads_and_cross_checks():
     assert weak_token.param == "body"
     assert weak_token.location == "body"
 
+    mass_assignment = gt.case_by_id("TWCH-0006")
+    assert mass_assignment.expected_vulnerable
+    assert mass_assignment.vuln_class == "mass_assignment"
+    assert mass_assignment.sink_context == "mass_assignment"
+    assert mass_assignment.url == "/generated/labgen-go-0011"
+    assert mass_assignment.method == "POST"
+    assert mass_assignment.param == "body"
+    assert mass_assignment.location == "body"
+
     for case in gt.cases:
-        for token in ("webhook", "ssrf", "vuln", "idor", "access", "jwt", "entropy"):
+        for token in ("webhook", "ssrf", "vuln", "idor", "access", "jwt", "entropy", "mass"):
             assert token not in case.case_id.lower()
 
 

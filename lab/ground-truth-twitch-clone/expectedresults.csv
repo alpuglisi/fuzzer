@@ -10,3 +10,4 @@ TWCH-0002,/generated/labgen-go-0003,GET,url,query,ssrf,true,/generated/labgen-go
 TWCH-0003,/generated/labgen-go-0005,GET,channel_id,query,access_control,true,/generated/labgen-go-0005,sink,,direct
 TWCH-0004,/generated/labgen-go-0007,GET,Authorization,header,jwt_algorithm_confusion,true,/generated/labgen-go-0007,sink,,direct
 TWCH-0005,/generated/labgen-go-0009,POST,body,body,weak_token_entropy,true,/generated/labgen-go-0009,sink,,direct
+TWCH-0006,/generated/labgen-go-0011,POST,body,body,mass_assignment,true,/generated/labgen-go-0011,sink,,direct

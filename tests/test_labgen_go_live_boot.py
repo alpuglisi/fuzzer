@@ -493,3 +493,45 @@ def test_real_boot_proves_the_weak_token_entropy_strategy_end_to_end() -> None:
         assert strategy.confirm(_cand(), _HarnessSender()) is None, (
             "strategy incorrectly confirmed the real secure twin"
         )
+
+
+# -- Phase B increment 5: channel-profile mass assignment (orm_entity_bulk_assign) --
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_mass_assignment_differential_for_both_twins() -> None:
+    """Two cases, isolating exactly what field-allowlisting controls:
+
+    (a) the vulnerable twin echoes back `is_partner: true` when the
+        request body sets it, even though no user-facing form for this
+        endpoint ever exposes that field (CWE-915).
+    (b) the secure twin silently drops the same `is_partner: true` key --
+        its response never reflects anything but the seeded `false`.
+    """
+    import json
+
+    manifest = load_manifest("lab/manifests/mass_assignment_go_sample.yaml")
+    emitter = GoEmitter()
+    body = b'{"display_name":"new_name","bio":"hi","is_partner":true}'
+
+    with GoLiveBootHarness(emitter, manifest.cells) as harness:
+        # (a) vulnerable twin: is_partner reaches the persisted record.
+        vuln_resp = harness.request("POST", "/generated/labgen-go-0011", body=body)
+        assert vuln_resp.status == 200
+        vuln_record = json.loads(vuln_resp.body)
+        assert vuln_record["display_name"] == "new_name"
+        assert vuln_record["is_partner"] is True, (
+            "vulnerable twin did not honor the privileged is_partner field -- "
+            "not actually mass-assignable"
+        )
+
+        # (b) secure twin: only display_name/bio ever reach the record.
+        secure_resp = harness.request("POST", "/generated/labgen-go-0012", body=body)
+        assert secure_resp.status == 200
+        secure_record = json.loads(secure_resp.body)
+        assert secure_record["display_name"] == "new_name"
+        assert secure_record["bio"] == "hi"
+        assert secure_record["is_partner"] is False, (
+            "secure twin incorrectly let is_partner through its DTO allowlist"
+        )

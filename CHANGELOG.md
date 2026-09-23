@@ -4,6 +4,32 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Twitch's 6th real page, channel-profile mass assignment)
+- Target lab (`go_net_http`): instantiates `lab/safety_matrix.yaml`'s
+  existing `unfiltered_object_assign`/`typed_schema_allowlist` mechanism
+  (`orm_entity_bulk_assign` sink family, `CC-LAB-0063`; already built on
+  `php_current`/`ruby_rails`/`php_laravel`, never before on Go) as
+  `POST /channels/profile` (CWE-915) -- Twitch's 6th real page. Go has no
+  ORM bulk-assign call to misuse, so the shape is modeled idiomatically:
+  the vulnerable sink `json.Unmarshal`s the raw request body directly
+  onto a channel struct that already declares every persisted field
+  (including `is_partner`, never exposed by this endpoint's own intended
+  form); the secure sink unmarshals into a narrow DTO struct with only
+  `display_name`/`bio`, then copies exactly those two fields. Real
+  live-boot proof: the vulnerable twin's response reflects
+  `is_partner: true` when the request sets it; the secure twin's never
+  does. Route note: the task's suggested method was `PATCH`, but
+  `labels.schema.json`'s `method` enum is closed to `GET`/`POST`, so
+  `POST` is used instead (documented departure, not a schema widening).
+  Ground truth extended (`TWCH-0006`); no schema widening needed
+  (`mass_assignment` was already a valid `vuln_class`/`sink_context`
+  enum value from other stacks' ground truth). Detection deliberately
+  not bundled into this commit, per this session's own established
+  lab-then-detection split -- landed as its own separately-scoped
+  follow-on. Full suite: stable baseline (18 pre-existing failures,
+  unrelated to this change). Bookkeeping: `CC-LAB-0182`/`FR-LAB-122`,
+  category-4 plan tracker row updated.
+
 ## 2026-09-23 (FUZZ/AUD: real detection for `weak_token_entropy`)
 - Fuzzing harness/oracle: the deliberately-separated detection follow-on
   to `CC-LAB-0181` (Twitch's predictable-session-token page) — a new

@@ -1,0 +1,65 @@
+# Mass-assignment sample manifest (CC-LAB-0182), go_net_http.
+#
+# Sixth real page for this stack's Twitch pick (category 4 pilot,
+# Media/streaming -- docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md
+# §9.4/§9.5), continuing this category's own "coherent page/route set"
+# depth work: a channel-profile-update endpoint (CWE-915).
+#
+# Reuses lab/safety_matrix.yaml's existing orm_entity_bulk_assign sink
+# family and its existing unfiltered_object_assign/typed_schema_allowlist
+# ops verbatim (added by CC-LAB-0063 for the corpus-examples/
+# mass-assignment research) -- no new safety-matrix entry needed; this is
+# the first go_net_http instance of this mechanism (already built on
+# php_current, ruby_rails, php_laravel -- see
+# lab/manifests/mass_assignment_rails_sample.yaml for the equivalent
+# minimal pair). Go has no ORM/ActiveRecord bulk-assign call to misuse
+# the way Rails/Laravel do, so this shape is modeled idiomatically: the
+# vulnerable sink `json.Unmarshal`s the raw request body directly onto a
+# channel record struct that already declares every persisted field
+# (including `is_partner`, never exposed by this endpoint's own intended
+# form); the secure sink unmarshals into a narrow, separately typed DTO
+# struct with only the two fields this endpoint intends
+# (`display_name`/`bio`), then copies exactly those onto the record.
+#
+# Route note: the task's own suggested shape was `PATCH /channels/
+# profile`, but fuzzlab.labels.schemas.labels.schema.json's `method` enum
+# is closed to `GET`/`POST` only (every other ground-truth case in this
+# project is one of those two) -- POST is used here instead, a
+# deliberate, documented departure from the suggestion rather than a
+# schema widening, since a profile-update-via-POST is still a realistic
+# public-API-edge shape for this app identity.
+#
+# Module composition is this stack's Convention 2 (like the SSRF shape):
+# the manifest's one op names a SINK module directly -- the vulnerable/
+# secure difference is one inseparable unmarshal-onto-the-live-record-vs-
+# unmarshal-into-a-narrow-DTO operation, not a value rewrite feeding a
+# shared sink.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: the raw request body is unmarshalled directly onto the
+  # live channel record -- any JSON field present, including
+  # `is_partner`, takes effect (CWE-915).
+  - cell_id: LABGEN-GO-0011
+    class: mass_assignment
+    stack_profile: go_net_http
+    route: { method: POST, path: /channels/profile }
+    sink_context:
+      family: orm_entity_bulk_assign
+      required_neutralizations: [mass_assignment]
+    transform: [unfiltered_object_assign]
+
+  # Secure twin: the only difference is which sink module renders
+  # (typed_schema_allowlist instead of unfiltered_object_assign) -- the
+  # minimal-pair invariant, this stack's own Convention 2 shape. Only
+  # `display_name`/`bio` ever reach the record; an `is_partner` key the
+  # request carries is silently dropped -- the DTO struct has no field
+  # for it at all.
+  - cell_id: LABGEN-GO-0012
+    class: mass_assignment
+    stack_profile: go_net_http
+    route: { method: POST, path: /channels/profile }
+    sink_context:
+      family: orm_entity_bulk_assign
+      required_neutralizations: [mass_assignment]
+    transform: [typed_schema_allowlist]

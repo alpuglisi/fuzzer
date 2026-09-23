@@ -1,0 +1,20 @@
+channel := struct {
+	DisplayName string `json:"display_name"`
+	Bio         string `json:"bio"`
+	IsPartner   bool   `json:"is_partner"`
+}{DisplayName: "twitch_lab_channel", Bio: "welcome to my channel", IsPartner: false}
+// Secure: the request body is unmarshalled into a narrow, typed DTO that
+// only has the fields this endpoint intends to accept, then exactly those
+// fields are copied onto the live channel record -- `is_partner` has no
+// field in `update` at all, so no JSON key can ever reach it.
+var update struct {
+	DisplayName string `json:"display_name"`
+	Bio         string `json:"bio"`
+}
+_ = json.Unmarshal({{ body_var }}, &update)
+channel.DisplayName = update.DisplayName
+channel.Bio = update.Bio
+respBody, _ := json.Marshal(channel)
+w.Header().Set("Content-Type", "application/json")
+w.WriteHeader(http.StatusOK)
+w.Write(respBody)

@@ -3918,6 +3918,38 @@ lane) can submit a payload as
   page per the pre-change review's adequacy pass (the same split
   `FR-LAB-120` established), landed as its own separately-scoped
   follow-on.
+- **FR-LAB-122** *(Twitch's sixth real page: channel-profile mass
+  assignment; `CC-LAB-0182`, 2026-09-23).* Instantiates
+  `lab/safety_matrix.yaml`'s existing `unfiltered_object_assign`/
+  `typed_schema_allowlist` mechanism (`orm_entity_bulk_assign` family,
+  `CC-LAB-0063`; already built on `php_current`/`ruby_rails`/
+  `php_laravel`, never before on `go_net_http`) on `go_net_http`:
+  `POST /channels/profile` (served `/generated/labgen-go-0011`/`-0012`).
+  Go has no ORM bulk-assign call to misuse, so the shape reuses this
+  stack's own Convention 2 (the manifest's one op names a sink module
+  directly, like the SSRF/weak-token-entropy shapes): the vulnerable
+  sink `json.Unmarshal`s the raw request body directly onto a channel
+  struct that already declares every persisted field, including
+  `is_partner` (never exposed by this endpoint's own intended form,
+  CWE-915); the secure sink unmarshals into a narrow DTO struct with
+  only `display_name`/`bio`, then copies exactly those two fields.
+  Route method is `POST`, not the task's own suggested `PATCH`
+  (`labels.schema.json`'s `method` enum is closed to `GET`/`POST`).
+  Cells `LABGEN-GO-0011`/`0012`; ground truth `TWCH-0006`
+  (`vuln_class="mass_assignment"`, `sink_context="mass_assignment"` --
+  both pre-existing enum values, no schema widening needed;
+  `param="body"` (the whole-body-point convention `weak_token_entropy`'s
+  own `TWCH-0005` already uses, not `ruby_rails`'s own single-named-field
+  `param="user[role]"` convention -- required so `fuzzlab.harness.auto.
+  points_from_ground_truth` marks this point's content type as JSON),
+  `location="body"`.
+  Real live-boot proof: the vulnerable twin's response reflects
+  `is_partner: true` when the request sets it; the secure twin's never
+  does, for the identical request body. **Not itself detection
+  capability**: no new audit rule or oracle strategy is added here --
+  deliberately split from this page per this session's own established
+  lab-then-detection pattern, landed as its own separately-scoped
+  follow-on.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
