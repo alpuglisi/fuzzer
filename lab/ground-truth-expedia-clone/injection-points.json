@@ -8,6 +8,13 @@
             "param": "sortBy",
             "location": "query",
             "rendering": "server"
+        },
+        {
+            "url": "/api/trips/restore",
+            "method": "POST",
+            "param": "body",
+            "location": "body",
+            "rendering": "server-json"
         }
     ]
 }

@@ -4,6 +4,17 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (category 5: Expedia's second own page, trip-restore)
+- LAB: adds `/api/trips/restore` (`LABGEN-EXP-0003`/`0004`), Expedia's
+  second own designed page, reusing `CC-LAB-0213`'s existing Jackson
+  deserialization ops (CWE-502) — no new safety-matrix rows or emitter
+  code. Closes a real design gap: that entry's own ported Netflix cell
+  sits on a borrowed Netflix route (`/api/playback/resume`), never
+  Expedia-branded. Grounded in Expedia's real, cited booking-history/
+  manage-your-trip functionality — a "resume your saved trip" feature.
+  `EXPD-0002` appended to the existing ground-truth directory. Real
+  live-boot proof for both twins. See `CC-LAB-0220`.
+
 ## 2026-09-23 (category 5: second real detection, generalizes=True for real)
 - FUZZ: builds `SpelInjectionStrategy` + a new `R-SPEL-INJECTION` rule for
   `spel_injection` (CWE-917) — unlike `ssti`/`open_redirect`, no existing

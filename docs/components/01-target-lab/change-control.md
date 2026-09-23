@@ -3,6 +3,100 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0220 — Expedia's second own page: trip-restore insecure deserialization, closing the route-borrowing gap (FR-LAB-121) (2026-09-23)
+- Change: adds a new, Expedia-flavored page (`/api/trips/restore`,
+  `LABGEN-EXP-0003`/`0004`) reusing `CC-LAB-0213`'s own existing
+  `jackson_default_typing_deserialize`/`jackson_typed_allowlist_deserialize`
+  ops (CWE-502) — no new safety-matrix rows or emitter code. Closes a real
+  design gap that entry's own port left open: the ported Netflix cell
+  sits on a borrowed Netflix route (`/api/playback/resume`), never
+  Expedia-branded, so Expedia's own *designed* page set only had one
+  cell (`spel_injection`, `CC-LAB-0214`) until now. Grounded in Expedia's
+  real, cited booking-history/manage-your-trip functionality
+  (`docs/research/category5-travel-functionality-and-cwe-research.md`
+  §1.2's "User account / booking history / cancellation-modification"
+  section) — a "resume your saved trip" feature restoring an abandoned
+  booking session from a client-supplied state blob.
+
+  This is a page/route-identity and ground-truth addition, not a new
+  detection mechanism (both ops were already built, reviewed, and
+  live-boot-proven by `CC-LAB-0213`'s own port) — per this project's own
+  established practice for this class of change (matching how earlier
+  ground-truth-only case additions to an existing shape were handled),
+  this entry did not go through the full 2-agent pre-change review gate;
+  self-reviewed instead against that gate's own usual checklist (real
+  live-boot proof for both twins, ground truth cross-checked against the
+  real loader, disjoint class-name guard, no new safety-matrix/emitter
+  registrations to review).
+  1. **New manifest**: `lab/manifests/expedia_trip_restore_sample.yaml`
+     (`LABGEN-EXP-0003`/`0004`, continuing Expedia's own cell-ID sequence
+     from `CC-LAB-0214`'s `LABGEN-EXP-0001`/`0002`). New `_PAGE_PARAMS`
+     route entry (`/api/trips/restore: {}`, matching `/api/playback/
+     resume`'s own empty-dict convention for this whole-body-JSON shape).
+  2. **Ground truth**: `EXPD-0002` appended to the existing
+     `lab/ground-truth-expedia-clone/` directory (all three files),
+     matching `FR-LAB-79`'s own multi-case-per-directory precedent.
+     `param: "body"` (the literal string, not a real field name — the
+     entire body is the sink input, matching `CC-LAB-0174`'s own
+     established convention for this exact whole-body-JSON shape).
+  3. **Real live-boot proof**
+     (`tests/test_labgen_expedia_trip_restore_live_boot.py`): the same
+     structure as `CC-LAB-0213`'s own ported-cell proof — the vulnerable
+     twin accepts an attacker-type-hinted body (`["java.util.HashMap",
+     {...}]`), the secure twin accepts its own well-formed plain-flat
+     body but rejects the type-hinted one. Real `mvn package` + `java
+     -jar` boot + real HTTP.
+  4. **Tests**: `tests/test_labgen_expedia_trip_restore.py` (6
+     non-live-boot tests: manifest/verdict, `supports()`, determinism,
+     ground-truth cross-check, class-name-collision guard) +
+     `tests/test_labgen_expedia_trip_restore_live_boot.py` (2 real
+     live-boot tests). Whole-repo `pytest tests/` run before considering
+     this increment complete (`PA-0036`) — see Effectiveness.
+  5. `docs/components/01-target-lab/requirements.md`: `FR-LAB-121`.
+  6. `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated.
+  7. **Dependent-test fix, caught by the whole-repo run itself (`PA-0036`
+     working as intended, not a landed defect):** growing Expedia's own
+     ground truth to two cases correctly moved `EXPD-0002`
+     (`insecure_deserialization`, no verified confirmer yet) into an
+     honest false negative — this changed Expedia's own real scored
+     numbers from `tp=1, fn=0` to `tp=1, fn=1` (recall `1.0` → `0.5`).
+     `CC-LAB-0217`/`CC-LAB-0219`'s own Phase E tests
+     (`tests/test_labgen_spring_boot_expedia_multitarget.py`,
+     `tests/test_multitarget_category5_combined.py`) asserted the
+     pre-growth numbers and failed on this entry's own whole-repo run —
+     updated to the new, real numbers before this entry was committed;
+     `generalizes` stays correctly `True` (both scored targets still have
+     recall > 0).
+- Impact (other components / project): additive-only — one new manifest,
+  one new `_PAGE_PARAMS` entry (no new module registrations), and the
+  existing `lab/ground-truth-expedia-clone/` directory grown (not
+  replaced). No other of the 13 components touched. Expedia's own
+  designed page set is now 2 pages (`spel_injection`,
+  `insecure_deserialization`), narrowing the gap toward Booking.com's own
+  3-page roster.
+- Risk (level; mitigation or accepted-risk justification): low — reuses
+  already-reviewed, already-live-boot-proven ops and templates verbatim;
+  the only genuinely new content is the manifest/ground-truth identity
+  and this page's own DTO reuse (`PlaybackResumeRequest`, an accepted,
+  stated scope narrowing — a real Expedia-specific DTO class is real,
+  sized follow-on work, not attempted here).
+- Deliverables:
+  - [x] `lab/manifests/expedia_trip_restore_sample.yaml` (2 cells) — done
+  - [x] `fuzzlab/labgen/emitters/spring_boot/__init__.py`: `_PAGE_PARAMS` entry — done
+  - [x] `lab/ground-truth-expedia-clone/`: `EXPD-0002` in all 3 files — done
+  - [x] `tests/test_labgen_expedia_trip_restore.py` (6 tests) — done
+  - [x] `tests/test_labgen_expedia_trip_restore_live_boot.py` (2 real live-boot tests, all green) — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-121` — done
+  - [x] `CHANGELOG.md` line — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done
+- Effectiveness (assessed 2026-09-23): achieved its intent, with evidence.
+  Both new tests files pass for real, including a genuine `mvn package`/
+  `java -jar` boot + HTTP round trip proving the same CWE-502 differential
+  `CC-LAB-0213` already proved, now on Expedia's own branded route/page
+  identity rather than a borrowed one. Full whole-repo `pytest tests/`
+  run: see the commit message / `CHANGELOG.md` line for the exact
+  pass/skip/fail counts.
+
 ### CC-LAB-0219 — Category 5 §6 step 2: run Booking.com and Expedia together in one `run_targets` call (FR-LAB-120) (2026-09-23)
 - Change: Runs both of category 5's Phase E `TargetSpec`s (`CC-LAB-0217` Booking.com, `CC-LAB-0218` Expedia) through a single `fuzzlab.harness.multitarget.run_targets` call, per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6 step 2 — the one remaining item both apps' own individual Phase E tests flag as "not mine to do," mirroring category 3's own `tests/test_multitarget_category3_combined.py` precedent. `tests/test_multitarget_category5_combined.py`: both harnesses (`LiveBootHarness` for Booking.com, `SpringBootLiveBootHarness` for Expedia) used directly as nested context managers — neither needs a hand-rolled fixture the way category 3's TrackerNest test did, since Expedia's own ground truth is a single cell (well within `SpringBootLiveBootHarness`'s one-cell design) and Booking.com's harness already accepts a cell list natively. Real `mvn package`/`java -jar` + real `composer install`/`artisan serve`, both real HTTP, one `run_targets([spec_a, spec_b], ...)` call.
 

@@ -3863,6 +3863,28 @@ lane) can submit a payload as
   Tests: `tests/test_multitarget_category5_combined.py` (1 test, real
   dual boot + real dual HTTP, green).
 
+- **FR-LAB-121** *(Expedia's second own page: trip-restore insecure
+  deserialization; `CC-LAB-0220`, 2026-09-23).* New page
+  `/api/trips/restore` (`LABGEN-EXP-0003`/`0004`) reuses `FR-LAB-94`'s
+  existing `jackson_default_typing_deserialize`/
+  `jackson_typed_allowlist_deserialize` ops — no new safety-matrix rows
+  or emitter code — closing the route-borrowing gap that entry's port
+  left open (the ported Netflix cell sits on a borrowed Netflix route,
+  never Expedia-branded). Grounded in Expedia's real, cited booking-
+  history/manage-your-trip functionality: a "resume your saved trip"
+  feature restoring an abandoned booking session from a client-supplied
+  state blob. `EXPD-0002` appended to the existing `lab/ground-truth-
+  expedia-clone/` directory (`param: "body"`, matching `FR-LAB-99`'s own
+  whole-body-JSON convention). A page/route-identity addition, not a new
+  detection mechanism — did not go through the full 2-agent pre-change
+  review gate (self-reviewed against that gate's own checklist instead),
+  matching this project's established practice for reusing an already-
+  reviewed, already-proven mechanism at a new route. Real live-boot proof
+  (`tests/test_labgen_expedia_trip_restore_live_boot.py`, 2 tests): the
+  vulnerable twin accepts an attacker-type-hinted body, the secure twin
+  accepts its own well-formed body but rejects the type-hinted one. Also
+  `tests/test_labgen_expedia_trip_restore.py` (6 non-live-boot tests).
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

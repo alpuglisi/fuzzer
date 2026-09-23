@@ -21,12 +21,16 @@ distinct, locally-booted second targets in one call and producing a real
 combined `transfer_summary`. **`generalizes` is `True`** -- `open_redirect`
 genuinely detects on Booking.com (`CC-CORE-0021`/`FR-CORE-11`, recall
 1/3) and `spel_injection` genuinely detects on Expedia (`CC-FUZZ-0028`,
-recall 1/1); `transfer_summary`'s own `generalizes` rule (`>= 2` scored
-targets with `recall > 0`) is satisfied by two *independently* mapped
-classes on two different stacks (PHP/Laravel and Java/Spring Boot), a
-real cross-target result, not a coincidence of one class counted twice.
-`csv_formula_injection`/`price_integrity_bypass` (Booking.com) remain
-honestly unmapped -- no verified confirmer exists for either yet.
+recall 1/2 -- Expedia's own ground truth grew to two cases with
+`CC-LAB-0220`'s `EXPD-0002`, whose `insecure_deserialization` class has
+no verified confirmer yet, an honest false negative); `transfer_summary`'s
+own `generalizes` rule (`>= 2` scored targets with `recall > 0`) is
+satisfied by two *independently* mapped classes on two different stacks
+(PHP/Laravel and Java/Spring Boot), a real cross-target result, not a
+coincidence of one class counted twice. `csv_formula_injection`/
+`price_integrity_bypass` (Booking.com) and `insecure_deserialization`
+(Expedia) remain honestly unmapped -- no verified confirmer exists for
+any of the three yet.
 
 Skip-guarded on both `spring_boot_boot_available()` and
 `live_boot_available()` (PA-0005/PA-0035). Marked `@pytest.mark.slow`.
@@ -116,11 +120,13 @@ def test_booking_and_expedia_run_together_in_one_call(tmp_path) -> None:
             # adequacy review caught exactly this pitfall (a shared loop would
             # silently apply one target's own numbers to the other). Booking.com
             # genuinely detects open_redirect (CC-CORE-0021/FR-CORE-11);
-            # Expedia genuinely detects spel_injection (CC-FUZZ-0028).
+            # Expedia genuinely detects spel_injection (CC-FUZZ-0028) but not
+            # insecure_deserialization (CC-LAB-0220's EXPD-0002, no verified
+            # confirmer yet -- an honest false negative).
             assert booking_outcome.report.tp == 1 and booking_outcome.report.fn == 2
             assert booking_outcome.report.recall == 1 / 3
-            assert expedia_outcome.report.tp == 1 and expedia_outcome.report.fn == 0
-            assert expedia_outcome.report.recall == 1.0
+            assert expedia_outcome.report.tp == 1 and expedia_outcome.report.fn == 1
+            assert expedia_outcome.report.recall == 0.5
             # Two independent real run_ids, one per target, in the same call.
             assert outcomes[0].run_id != outcomes[1].run_id
 

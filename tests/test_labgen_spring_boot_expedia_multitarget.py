@@ -31,10 +31,13 @@ means the existing harness's restriction is not a limitation here at all,
 and its public `.base_url` property (`CC-LAB-0132`'s own `app_dir`
 precedent, extended) is exactly what a `TargetSpec` needs.
 
-**Recall is 1/1**: `spel_injection` now genuinely detects
-(`CC-FUZZ-0028`/`CC-CORE-0021`-adjacent mapping, a new rule+strategy pair
-built specifically for this shape, live-verified before this test was
-updated to expect it).
+**Recall is 1/2**: `spel_injection` (`EXPD-0001`) genuinely detects
+(`CC-FUZZ-0028`, a new rule+strategy pair built specifically for this
+shape, live-verified before this test was updated to expect it).
+`insecure_deserialization` (`EXPD-0002`, `CC-LAB-0220`) has no verified
+confirmer yet -- an honest false negative, same documented gap as every
+other category's own unmapped classes -- not a regression from this
+ground truth directory growing to two cases.
 
 Skip-guarded on `spring_boot_boot_available()` (PA-0005/PA-0035). Marked
 `@pytest.mark.slow`.
@@ -90,11 +93,14 @@ def test_expedia_target_spec_runs_for_real_and_scores(tmp_path) -> None:
             outcome = outcomes[0]
             assert outcome.scored is True
             assert outcome.report is not None
-            # spel_injection genuinely detects now (CC-FUZZ-0028): tp=1, fn=0.
-            assert outcome.report.tp == 1 and outcome.report.fn == 0
+            # spel_injection genuinely detects (CC-FUZZ-0028): EXPD-0001 -> tp.
+            # insecure_deserialization (EXPD-0002, CC-LAB-0220) has no verified
+            # confirmer yet -- an honest false negative, same documented gap
+            # as every other category's own unmapped classes.
+            assert outcome.report.tp == 1 and outcome.report.fn == 1
             assert outcome.report.fp == 0
             assert outcome.report.precision == 1.0
-            assert outcome.report.recall == 1.0
+            assert outcome.report.recall == 0.5
 
             summary = transfer_summary(outcomes)
             assert summary["targets"] == 1
