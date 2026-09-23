@@ -12,6 +12,22 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (cross-branch bookkeeping fix, round 2 — merge conflict)
+- Docs/LAB: while merging this branch's own concurrently-pushed
+  `CC-LAB-0135`/`FR-LAB-83` (Huddle Hub's third cell, header injection),
+  found `FR-LAB-83` freshly collided with category 1's already-established
+  `FR-LAB-83` (Phase E MeadowMart `TargetSpec` wiring, with many internal
+  cross-references) — renumbered this branch's `FR-LAB-83`→`FR-LAB-99`
+  (exact-token replacement, including the CC-LAB-0135 entry's own old
+  cross-references to the just-renumbered `FR-LAB-81`/`FR-LAB-82`, updated
+  to `FR-LAB-94`/`FR-LAB-98` throughout). Resolved the resulting
+  `change-control.md` merge conflict by keeping both `CC-LAB-0134` and
+  `CC-LAB-0135` entries, newest (`0135`) first, per the log's own
+  append-only/newest-first convention. Full non-slow suite re-run after
+  the merge confirms no regression (1841 passed / 8 skipped — the
+  increase over the pre-merge 1831 baseline is exactly this cell's own 9
+  new tests).
+
 ## 2026-09-23 (cross-branch bookkeeping fix, by the category 1 pilot session)
 - Docs/LAB: fixed two real cross-branch `FR-LAB` ID collisions found during
   a cross-branch review — this branch's `FR-LAB-81` (Huddle Hub
