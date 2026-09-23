@@ -3,6 +3,242 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0091 — `django` emitter Phase B: widen to node_express's own Tier-A three-shape bar (FR-LAB-74/FR-LAB-75) (2026-09-23)
+
+- **Change:** Widens `fuzzlab.labgen.emitters.django` from Phase A's one
+  shape (`CC-LAB-0090`, `sqli`/`sql_numeric_literal`) to the same
+  three-shape Tier-A bar `node_express` already proves (correction,
+  reviewer #1's finding: this category's own §9.4 tracker row is the
+  correct citation for "widen to node_express's three shapes next" — §3 of
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` is a different thing
+  entirely, `node_express`'s own plan to go *beyond* three shapes to full
+  `safety_matrix.yaml` parity, not this increment's target) — not full
+  `php_laravel` depth (nine shapes) or `node_express`'s own eventual
+  full-parity target, either of which stays out of scope.
+
+  **Why the generic Tier-A shape, not the researched Django-specific
+  footgun, for the XSS cell (reviewer #2's finding, addressed rather than
+  left unstated):** `docs/research/category2-social-ugc-functionality-and-
+  cwe-research.md` §4 already researched a materially more Django-idiomatic
+  XSS footgun for this category — `mark_safe()`/`|safe`/`{% autoescape off
+  %}` disabling Django's own template autoescaping for a realistic feature
+  (auto-linking `@mention`/`#hashtag` spans in a comment body). That is the
+  *right* shape for Phase C's corpus-grounded Instagram page, once it
+  exists. This increment is deliberately not that: it is Tier-A parity
+  work (matching `node_express`'s existing three generic shapes, on
+  illustrative, non-corpus-grounded routes, `/api/login`/`/api/profile`,
+  the same illustrative-route convention `node_express`'s own Tier-A
+  manifest already uses), so it uses the same generic `html_body_echo`
+  raw-string-concat shape `node_express`/`php_current` already prove,
+  deliberately deferring the researched, template-autoescaping-specific
+  footgun to Phase C's own corpus-grounded page design, where it belongs
+  once a real Instagram-shaped comment page exists to place it on. Using
+  it here, on a generic illustrative route, would front-run Phase C's own
+  job of deciding *which* page it belongs on and muddy this increment's
+  narrower "Tier-A parity" purpose.
+
+  Two new shapes, added the same way Phase A's one shape was (module
+  composition, `CR-LAB-0001` Addendum C). `DjangoEmitter.supports()`/
+  `.render()`/`.render_route_accumulator()`'s own *logic/contract* does
+  not change (all three are already generic over the `_MODULE_SET_BY_SHAPE`/
+  `_ROUTE_PARAMS` dict lookups, confirmed by reading the current, already-
+  landed code) — but `render()`'s own fixed-header-imports string literal
+  and the `single_statement` complexity template ARE edited (see the
+  `@csrf_exempt` note below and the Deliverables list), so this is not a
+  zero-diff to `__init__.py`, only a contract-shape-unchanged one.
+
+  1. `(sqli, sql_string_literal)` — a login-style lookup: `request.POST`
+     source (new `post_param` module,
+     `fuzzlab/labgen/emitters/django/templates/sources/post_param.py.j2`,
+     `request.POST.get(...)`), a new `sql_string_literal_lookup` sink
+     mirroring `node_express.modules.SqlStringLiteralLookupSink` exactly in
+     shape: a non-tainted, already-hashed second condition (an MD5'd
+     `password` field, `hashlib.md5(...).hexdigest()` — matching
+     `node_express`'s own `crypto.createHash('md5')` choice, kept
+     consistent across stacks for the same illustrative shape rather than
+     picking a stronger hash here) folded in as sink boilerplate, branching
+     on `bound` between a parameterized `%s`-placeholder query and a
+     quoted-string-concatenated one. Route: `/api/login`, `POST`.
+  2. `(xss, html_body)` — a stored-XSS shape: a new `read_stored_field`
+     source (`{{ var_name }} = {{ stored_expr }}`, mirroring
+     `node_express`'s/`php_current`'s identical-shaped module exactly — a
+     stored value, not a request parameter), a new `html_body_echo` sink
+     (`return HttpResponse("<div class=\"...\">" + str(value) + "</div>")`
+     — raw string concatenation into an `HttpResponse` body, the realistic
+     Django footgun this shape needs: a dev building a response by hand
+     instead of through Django's own auto-escaping template layer), and a
+     new `html_entity_escape` transform wrapping `value_expr` in
+     `django.utils.html.escape()` (Django's own real HTML-escaping
+     utility, the direct analogue of PHP's `htmlspecialchars()`/JS's
+     hand-rolled `escapeHtml()` node_express needed because JS has no
+     stdlib equivalent — Django already ships one, so no hand-rolled
+     helper is needed here, unlike `node_express`'s `_ESCAPE_HTML_HELPER`).
+     A new `render_only` complexity (wraps the composed body as a view
+     function with no `row`/JSON-response boilerplate, mirroring
+     `node_express.modules.RenderOnlyComplexity`). Route: `/api/profile`,
+     `GET`.
+
+  New per-cell route profiles in `_ROUTE_PARAMS`
+  (`fuzzlab/labgen/emitters/django/__init__.py`) for both routes above,
+  same separation rationale as Phase A's own `_ROUTE_PARAMS` entry
+  (table/column/stored-expr naming is render-only metadata, not
+  verdict-relevant Cell IR).
+
+  **Fixed header imports, unconditional per generated file** (matching
+  `node_express`'s own convention of including its `escapeHtml` helper in
+  every generated controller regardless of that cell's own shape — keeps
+  the vulnerable/secure minimal-pair diff confined to the transform region;
+  correction, reviewer #2's finding: the relevant prior art is `BUG-0027`
+  (the minimal-pair confinement checker itself, which fails open when
+  composition names differ between twins) — not `CR-LAB-0001` Addendum D,
+  which is unrelated (a licensing/differentiation-record correction),
+  wrongly cited in this draft's earlier revision): `import hashlib` and
+  `from django.utils.html import escape` join the existing `from
+  django.db import connection` / `from django.http import HttpResponse,
+  JsonResponse` — present in every generated view file whether or not that
+  specific cell's shape uses them.
+
+  A new sample manifest,
+  `lab/manifests/phase_b_django_widen_sample.yaml`, with cells for all
+  three shapes (extending, not replacing,
+  `lab/manifests/phase_a_django_sample.yaml`, which stays as Phase A's own
+  fixed regression fixture per this project's additive-manifest
+  convention).
+
+- **Impact (other components / project):** Additive only. No existing
+  `DjangoEmitter`/`django.modules` registry entry, `StackEnv` field, or
+  `DjangoLiveBootHarness` method changes — Phase A's existing tests and
+  manifest keep passing unchanged (verified, not assumed, before this
+  entry is finalized). `fuzzlab/harness/multitarget.py` unaffected (Phase E
+  scope, not touched here).
+
+- **Risk (level: moderate — corrected up from an earlier "low," reviewer
+  #2's finding):** Both new shapes are direct ports of an already-proven
+  pattern (`node_express`'s own Tier-A three shapes, and `php_current`'s
+  `read_stored_field`/`html_body_echo` module *shape*, ported not copied)
+  — no new capability probe, no new subprocess integration, no new package
+  dependency, which argues for "low." But `DjangoLiveBootHarness`'s real
+  HTTP proof for a `POST` request is the first time this harness family
+  exercises Django's `CsrfViewMiddleware` on an unsafe method — exactly
+  the class of "first exercise of a new harness behavior" situation
+  `CC-LAB-0090` itself was revised *up* from "low-moderate" to "moderate"
+  for (a new pip/subprocess capability there; a new CSRF-exemption
+  mechanism here), per that entry's own reasoning citing `BUG-0028`/
+  `BUG-0033`. Rated "moderate" here for the same reason, not lower.
+
+  **`CsrfViewMiddleware` handling, decided now that a `POST`-shaped cell
+  exists (flagged as deferred in `fuzzlab/labgen/emitters/django/stack/
+  README.md`'s own "Django/ORM defaults" section, written during
+  `CC-LAB-0090`):** the generated view for any cell whose `cell.route.method`
+  is not `GET` is decorated with Django's own `@csrf_exempt`
+  (`django.views.decorators.csrf.csrf_exempt`) — **gated on the cell's
+  actual HTTP method, not on which complexity template renders it**
+  (correction, reviewer #2's finding: the earlier revision of this draft
+  gated on "the `single_statement`-family complexity template," which
+  would silently under-decorate a future `POST`-shaped cell rendered by a
+  *different* complexity — e.g. `render_only`, which this very entry
+  introduces — and ship a live `403 CSRF verification failed` no
+  `required_neutralizations` entry accounts for; gating on the cell's own
+  route method instead cannot miss a future POST cell regardless of which
+  complexity it uses). Matches the real precedent `php_laravel`'s own
+  skeleton README documents (`bootstrap/app.php` disables Laravel's
+  default CSRF middleware for exactly the same reason: the real pages this
+  project's stacks model have no CSRF framework of their own, so leaving
+  the framework default enabled would silently add an unmodeled security
+  control). Recorded here, not silently done, per `PA-0030`/`BUG-0028`'s
+  "enumerate and state a framework default before relying on a workaround
+  for it" discipline. A regression test (Deliverables, below) mechanically
+  checks every non-`GET` cell's rendered view carries the decorator — a
+  `PA-0024`-style whole-collection check, not reliance on today's
+  one-POST-cell coincidence.
+
+  **`PA-0034` (addition, reviewer #2's finding — not addressed in the
+  earlier revision of this draft):** this is the first Django cell
+  combining a request-derived value with a new HTTP-verb/CSRF-exemption
+  assumption in a given code path — `PA-0034` requires at least one test
+  exercising the generated code against an adversarial input *orthogonal*
+  to the feature's own demonstration (not just the happy-path/SQLi
+  differential). Added to Deliverables: a real live-boot request against
+  the `/api/login` cell with a **mismatched HTTP method** (`GET` instead
+  of `POST`) confirming the CSRF exemption does not silently widen the
+  attack surface beyond the labeled SQLi shape (Django's `request.POST` on
+  a `GET` request is an empty `QueryDict`, so the expected, verified
+  behavior is "no row matches" — never an unhandled exception or an
+  unintended second code path).
+
+- **Deliverables:**
+  - [ ] `fuzzlab/labgen/emitters/django/templates/sources/post_param.py.j2`
+    — todo.
+  - [ ] `fuzzlab/labgen/emitters/django/templates/sources/
+    read_stored_field.py.j2` — todo.
+  - [ ] `fuzzlab/labgen/emitters/django/templates/sinks/
+    sql_string_literal_lookup.py.j2` — todo.
+  - [ ] `fuzzlab/labgen/emitters/django/templates/sinks/html_body_echo.py.j2`
+    — todo.
+  - [ ] `fuzzlab/labgen/emitters/django/templates/transforms/
+    html_entity_escape.py.j2` — todo.
+  - [ ] `fuzzlab/labgen/emitters/django/templates/complexities/
+    render_only.py.j2` — todo.
+  - [ ] `fuzzlab/labgen/emitters/django/modules.py` — new
+    `PostParamSource`/`ReadStoredFieldSource`/`SqlStringLiteralLookupSink`/
+    `HtmlBodyEchoSink`/`HtmlEntityEscapeTransform`/`RenderOnlyComplexity`
+    classes + registry entries — todo.
+  - [ ] `fuzzlab/labgen/emitters/django/__init__.py` — widen
+    `_MODULE_SET_BY_SHAPE`/`_ROUTE_PARAMS`; add `@csrf_exempt` to the
+    generated view for any cell whose `cell.route.method != "GET"`
+    (gated on the cell's own route method, not on complexity-template
+    membership — see the Risk section's correction above); add
+    `hashlib`/`escape` to the fixed header imports — todo.
+  - [ ] `lab/manifests/phase_b_django_widen_sample.yaml` — todo.
+  - [ ] `tests/test_labgen_django_conformance.py` — extend to cover the
+    widened manifest (Tier 0/3) **and** add a whole-collection regression
+    check that every non-`GET` cell's rendered view carries `@csrf_exempt`
+    (`PA-0024`-style, so a future POST cell on a different complexity can't
+    silently ship undecorated) — todo.
+  - [ ] `tests/test_labgen_django_live_boot_single_shape.py` or a new
+    sibling module — a real live-boot proof for both new shapes (a real
+    `POST /api/login` SQLi-bypass-vs-safely-bound differential; a real
+    `GET /api/profile` stored-XSS raw-vs-escaped differential) **and** the
+    `PA-0034` adversarial test (a mismatched-method `GET` request against
+    `/api/login`, confirming no unintended widened behavior) — todo.
+  - [ ] `docs/components/01-target-lab/requirements.md` — new `FR-LAB-74`
+    (the two widened shapes exist, Tier 0/3 conformant) and `FR-LAB-75`
+    (real live-boot proof for both) — todo. **Verified next-free as of
+    2026-09-23** by direct inspection of this branch's current
+    `requirements.md` (highest existing is `FR-LAB-73`, `CC-LAB-0090`'s
+    own, itself already renumbered once from an earlier `FR-LAB-64`/`65`
+    cross-branch collision with `claude/second-target-cat1-ecommerce` —
+    see that file's own correction note immediately above `FR-LAB-72`)
+    **and** by a real fetch of `origin/claude/second-target-cat1-ecommerce`
+    this session (its own highest is `FR-LAB-69` — `74`/`75` clear of it).
+    Given this exact category's numbers have already collided once, this
+    entry's own numbers should be re-verified against both branches again
+    immediately before landing, not assumed still clear from this check.
+  - [ ] `docs/ARCHITECTURE.md` — update the `django` paragraph to note the
+    widened shape count — todo.
+  - [ ] `CHANGELOG.md` line — todo.
+  - [ ] Full bug protocol for any genuine defect surfaced — todo (only if
+    one occurs).
+
+- **Effectiveness (assessed 2026-09-23): pending** — left pending until the
+  deliverables above land and the new tests are observed to pass for real.
+
+---
+**Pre-change review gate record:** reviewer #1 (accuracy) — APPROVE WITH
+CORRECTIONS, 3 items (a false "already renumbered" claim later verified
+true by a real fetch and corrected in `requirements.md` directly; a
+citation-location nit; a clarity nit on "no change to `__init__.py`"), all
+incorporated. Reviewer #2 (adequacy) — APPROVE WITH ADDITIONS, 5 items
+(a wrong §3 citation; the researched Django-XSS-footgun deferral now
+stated explicitly; a wrong `CR-LAB-0001` Addendum D citation corrected to
+`BUG-0027`; `@csrf_exempt` gating moved from complexity-family to
+`cell.route.method`, plus a whole-collection regression check; a
+`PA-0034` adversarial test added; risk raised from "low" to "moderate"),
+all incorporated. Neither reviewer found an issue with the increment's
+fundamental scope or phasing. Proposer (this session) accepts all
+findings as correct. 3/3 agreement reached on this revision —
+implementation may begin.
+
 ### CC-LAB-0090 — `django` emitter Phase A: real bootable skeleton + `DjangoLiveBootHarness` (FR-LAB-72/FR-LAB-73) (2026-09-22)
 
 - **Change:** Adds the `django` stack as category 2's new-stack pick
