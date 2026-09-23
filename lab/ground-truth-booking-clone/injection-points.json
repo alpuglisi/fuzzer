@@ -8,6 +8,13 @@
       "param": "return_to",
       "location": "query",
       "rendering": "server"
+    },
+    {
+      "url": "/cell/labgen-bc-0003",
+      "method": "GET",
+      "param": "label",
+      "location": "query",
+      "rendering": "server"
     }
   ]
 }

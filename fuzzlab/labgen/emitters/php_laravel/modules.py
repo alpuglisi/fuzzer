@@ -430,6 +430,50 @@ class RedirectTargetAllowlistTransform(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class CsvFormulaNeutralizeTransform(TemplateModule):
+    """The ``csv_formula_neutralize`` op (CC-LAB-0091, `csv_formula_injection`
+    concern, CWE-1236): rewrites ``value_expr`` so a value whose first
+    *non-whitespace* character is a CSV-formula trigger character (``=``,
+    ``+``, ``-``, ``@``, a tab, or a carriage return -- the five characters
+    OWASP's CSV Injection guidance names) gets a leading single quote
+    prepended at the true start of the value, forcing most spreadsheet
+    applications to display the whole cell as literal text rather than
+    evaluate it as a formula.
+
+    Checks the first *non-whitespace* character, not just the literal first
+    character (PA-0026: enumerate every value-shape precondition, not only
+    the one that motivated the change) -- a naive ``^[=+\\-@]`` anchor would
+    miss a leading-whitespace-then-trigger value (e.g. ``" =cmd|..."``),
+    which several spreadsheet applications still evaluate as a formula after
+    trimming the leading whitespace on cell entry. The single quote is
+    prepended at position 0 (before any leading whitespace), not after it,
+    so the *whole* value -- whitespace included -- is forced to text.
+
+    Documented, bounded scope (`lab/safety_matrix.yaml`'s concern-vocabulary
+    header): this is the standard, most broadly effective client-side
+    mitigation (reliable in Excel and LibreOffice Calc's normal CSV import
+    path) but is not a claim that every spreadsheet application's every
+    import path treats a leading apostrophe identically (Google Sheets'
+    behavior has varied across versions/import methods) -- it neutralizes
+    the CWE-1236 threat model this project's generator models, not every
+    downstream consumer's own parsing quirks."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "csv_formula_neutralize", "transform", _TRANSFORM_ENV, "csv_formula_neutralize.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        value_expr = ctx["value_expr"]
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = (
+            "(preg_match('/^\\s*[=+\\-@\\t\\r]/', (string) "
+            f"{value_expr}) ? \"'\" . {value_expr} : {value_expr})"
+        )
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 class AttrValueAllowlistTransform(TemplateModule):
     """The ``attr_value_allowlist`` op: rewrites ``value_expr`` so only a
     strict ``^[A-Za-z0-9_-]+$`` value survives (otherwise the page profile's
@@ -700,14 +744,32 @@ class HttpRedirectReturnSink(TemplateModule):
     Unlike every other sink in this module, its own rendered code is the
     **terminal statement** of the method it is composed into -- there is no
     row/value for a complexity wrapper to hand back afterward, which is why
-    this shape also needs its own ``complexity`` module
-    (:class:`RedirectResponseComplexity`) rather than
+    this shape also needs the ``terminal_response`` complexity module
+    (:class:`TerminalResponseComplexity`) rather than
     ``single_statement``/``render_only``. Not a Blade view either (no
     ``.blade.php.j2`` suffix, so it stays out of :data:`VIEW_SINKS`): a
     redirect response has no presentation layer to render."""
 
     def __init__(self) -> None:
         super().__init__("http_redirect_return", "sink", _SINK_ENV, "http_redirect_return.php.j2")
+
+
+class CsvExportRowSink(TemplateModule):
+    """The ``csv_export_row`` sink family (CC-LAB-0091, `csv_formula_injection`
+    concern): a small CSV report/export response -- Booking.com's real
+    Extranet/partner-admin booking-list export view idiom -- embedding
+    ``value_expr`` as a cell in the exported row.
+
+    Like :class:`HttpRedirectReturnSink`, its own rendered code is the
+    **terminal statement** of the method it is composed into (a bare
+    ``response($csv, ...)`` call, nothing for a complexity wrapper to add
+    after it), so it shares :class:`TerminalResponseComplexity` rather than
+    ``single_statement``/``render_only``. Not a Blade view either (no
+    ``.blade.php.j2`` suffix): a CSV download has no presentation layer to
+    render."""
+
+    def __init__(self) -> None:
+        super().__init__("csv_export_row", "sink", _SINK_ENV, "csv_export_row.php.j2")
 
 
 # --- views (the `view` module category, L-P3.3c-G2) -----------------------
@@ -961,20 +1023,28 @@ class RenderOnlyComplexity(TemplateModule):
         return RenderResult(code=code, context=dict(ctx))
 
 
-class RedirectResponseComplexity(TemplateModule):
-    """The controller method for a cell whose sink is
-    :class:`HttpRedirectReturnSink`: the composed source/transform/sink body
-    *is* the whole method, closing with the sink's own ``return
-    redirect(...)`` statement. Neither :class:`SingleStatementComplexity`
-    (always adds its own ``return response()->json($rows)``/tail) nor
+class TerminalResponseComplexity(TemplateModule):
+    """The controller method for a cell whose sink's own code *is* the
+    whole method's terminal statement (:class:`HttpRedirectReturnSink`'s
+    ``return redirect(...)``; :class:`CsvExportRowSink`'s ``return
+    response($csv, ...)``) -- the composed source/transform/sink body needs
+    no added tail. Neither :class:`SingleStatementComplexity` (always adds
+    its own ``return response()->json($rows)``/tail) nor
     :class:`RenderOnlyComplexity` (always adds its own ``return
-    view(...)``) fits a sink whose code is already the method's terminal
-    statement -- both would emit unreachable code after a real ``return``,
-    which is exactly why this shape needs a third complexity rather than
-    reusing either."""
+    view(...)``) fits such a sink -- both would emit unreachable code after
+    a real ``return``, which is why this shape needs a third complexity.
+    Named for its structural shape (a bare method-signature wrapper around
+    an already-terminal body) and shared across unrelated sink families,
+    exactly like :class:`SingleStatementComplexity`/:class:`RenderOnlyComplexity`
+    are each shared across unrelated vuln classes -- **renamed from
+    `RedirectResponseComplexity`/`redirect_response`** (`CC-LAB-0090`) once
+    a second, unrelated sink family (`csv_cell_value`, `CC-LAB-0091`)
+    needed the identical, already sink-agnostic wrapper. See
+    `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0091` entry
+    for the rename's own record."""
 
     def __init__(self) -> None:
-        super().__init__("redirect_response", "complexity", _COMPLEXITY_ENV, "redirect_response.php.j2")
+        super().__init__("terminal_response", "complexity", _COMPLEXITY_ENV, "terminal_response.php.j2")
 
     def render(self, ctx: dict[str, Any]) -> RenderResult:
         template = self._env.get_template(self._template_name)
@@ -1012,6 +1082,8 @@ TRANSFORMS: dict[str, Module] = {
     "dom_text_content": DomTextContentTransform(),
     # CC-LAB-0090 (open_redirect, category 5's Booking.com pilot app).
     "redirect_target_allowlist": RedirectTargetAllowlistTransform(),
+    # CC-LAB-0091 (csv_formula_injection, category 5's Booking.com pilot app).
+    "csv_formula_neutralize": CsvFormulaNeutralizeTransform(),
 }
 #: Sinks. The three HTML sinks render a **Blade view** body rather than a
 #: controller statement; :data:`VIEW_SINKS` names them so the emitter knows
@@ -1034,12 +1106,14 @@ SINKS: dict[str, Module] = {
     "dom_innerhtml_echo": DomInnerhtmlEchoSink(),
     # CC-LAB-0090 (open_redirect, category 5's Booking.com pilot app).
     "http_redirect_return": HttpRedirectReturnSink(),
+    # CC-LAB-0091 (csv_formula_injection, category 5's Booking.com pilot app).
+    "csv_export_row": CsvExportRowSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),
     "render_only": RenderOnlyComplexity(),
     # CC-LAB-0090 (open_redirect, category 5's Booking.com pilot app).
-    "redirect_response": RedirectResponseComplexity(),
+    "terminal_response": TerminalResponseComplexity(),
 }
 #: ``view``-category modules (L-P3.3c-G2). Selected per page by the emitter's
 #: own page profile (``view_category``), never by the verdict-relevant shape

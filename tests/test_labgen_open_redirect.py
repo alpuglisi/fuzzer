@@ -173,7 +173,12 @@ def test_the_new_ground_truth_directory_loads_independently_of_the_default_one()
     booking_gt = labels_contract.load(GROUND_TRUTH_DIR)
 
     assert booking_gt.target == "php_laravel"
-    assert [c.case_id for c in booking_gt.cases] == ["BKNG-0001"]
+    # This app's own directory grows across increments (BKNG-0002 was added
+    # by CC-LAB-0091) -- assert this case is present, not that it is the
+    # directory's only case (PA-0027: a test's expectations must be a
+    # function of the specific record under test, never of the
+    # collection's cardinality).
+    assert booking_gt.case_by_id("BKNG-0001") is not None
     # Neither directory's case IDs bleed into the other's.
     assert "BKNG-0001" not in {c.case_id for c in default_gt.cases}
     assert not any(c.case_id.startswith("BKNG-") for c in default_gt.cases)

@@ -448,6 +448,20 @@ tracked in the requirements files, not here.
   categories 2-6 are open. See the plan doc's own §9.4 tracker for live,
   per-category status rather than restating it here.
 
+  **Second increment (`CC-LAB-0091`/`FR-LAB-66`/`FR-LAB-67`, 2026-09-23):**
+  `("csv_formula_injection", "csv_cell_value")` (CWE-1236, a CSV/report
+  export response whose own code is likewise the method's terminal
+  statement) landed on the same Booking.com app, with `BKNG-0002` appended
+  to the existing ground-truth directory rather than a new one (the
+  directory/schema supports more than one case natively). This increment's
+  own review gate drove a naming correction to the first one's design: the
+  third complexity module (`redirect_response`) turned out to already be
+  fully sink-agnostic in implementation, so it was renamed
+  `terminal_response` and is now shared by both `http_redirect_return` and
+  the new `csv_export_row` sink, matching `single_statement`/`render_only`'s
+  own established convention of a structurally-named, shared complexity
+  module rather than one minted per sink type.
+
   **The parity/cutover coverage gate** (`CC-LAB-0053`/`FR-LAB-51`,
   `fuzzlab/labgen/cutover_gate.py`, plan §4.3.6.6 point 3) is the precondition
   `L-P3.3c-CUT` needs before it can run, built ahead of and independent from

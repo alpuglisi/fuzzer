@@ -235,11 +235,21 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     # partner-continuation link Booking.com's real checkout flow uses
     # (docs/research/category5-travel-functionality-and-cwe-research.md
     # §1.1/§2.1). Neither `single_statement` nor `render_only` fits this
-    # sink (see `HttpRedirectReturnSink`/`RedirectResponseComplexity`'s own
-    # docstrings), which is why this is the first shape to name a third
-    # complexity module.
+    # sink (see `HttpRedirectReturnSink`/`TerminalResponseComplexity`'s own
+    # docstrings), which is why this was the first shape to name a third
+    # complexity module (`redirect_response`, renamed `terminal_response`
+    # by `CC-LAB-0091` once a second, unrelated sink family needed the
+    # identical wrapper).
     ("open_redirect", "http_redirect_location"): _ModuleSet(
-        "get_param", "http_redirect_return", "redirect_response"
+        "get_param", "http_redirect_return", "terminal_response"
+    ),
+    # CC-LAB-0091 (category 5, Booking.com pilot): a CSV/report export row
+    # whose own code is likewise the method's terminal statement -- the
+    # Extranet/partner-admin booking-list export view Booking.com's real
+    # property-owner surface has (docs/research/category5-travel-
+    # functionality-and-cwe-research.md §1.1/§2.1, CWE-1236).
+    ("csv_formula_injection", "csv_cell_value"): _ModuleSet(
+        "get_param", "csv_export_row", "terminal_response"
     ),
 }
 
@@ -459,6 +469,12 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # research.md §1.1). No `table`/`column`: the source is an ordinary GET
     # query parameter, not a database lookup.
     "/booking/continue": {"var_name": "return_to", "param_name": "return_to"},
+    # CC-LAB-0091 (category 5, Booking.com pilot app): the Extranet/
+    # partner-admin booking-list export view (docs/research/category5-
+    # travel-functionality-and-cwe-research.md §1.1/§2.1). No `table`/
+    # `column`: the source is an ordinary GET query parameter, not a
+    # database lookup.
+    "/extranet/export": {"var_name": "label", "param_name": "label"},
     "/example/account_settings": {
         "var_name": "postFields",
         "table": "users",

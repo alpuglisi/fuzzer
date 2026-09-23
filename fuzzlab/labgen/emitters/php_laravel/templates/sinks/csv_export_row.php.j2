@@ -1,0 +1,5 @@
+// The exported row's first cell is honored as given -- whether a leading
+// formula-trigger character is neutralized is decided entirely by this
+// cell's transform, not by this sink.
+$csv = "label,amount\n" . {{ value_expr }} . ",129.00\n";
+return response($csv, 200, ['Content-Type' => 'text/csv']);

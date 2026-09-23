@@ -1865,10 +1865,16 @@ lane) can submit a payload as
   - New modules — `redirect_target_allowlist`, `http_redirect_return`
     (a sink whose own rendered code is the method's terminal statement, the
     first sink shape in this project with no row/value to hand back) and
-    `redirect_response` (the first **third** complexity module any stack's
+    `terminal_response` (the first **third** complexity module any stack's
     module set has needed, since neither `single_statement` nor
-    `render_only` fits a sink that is itself the terminal `return`) —
-    registered in **both** `fuzzlab.labgen.modules` (`php_current`,
+    `render_only` fits a sink that is itself the terminal `return`;
+    originally named `redirect_response`, **renamed to `terminal_response`
+    by `FR-LAB-66`/`CC-LAB-0091`** once a second, unrelated sink family
+    needed the identical, already sink-agnostic wrapper — this entry
+    updated in place to the current name, per this file's own living-doc
+    convention; `CC-LAB-0090`'s append-only change-control record keeps the
+    original name, as the historical record of what that change actually
+    shipped) — registered in **both** `fuzzlab.labgen.modules` (`php_current`,
     unrendered — for the shared minimal-pair vocabulary only, the same
     discipline `CC-LAB-0051`/`FR-LAB-61` set) and
     `fuzzlab.labgen.emitters.php_laravel.modules`/`__init__.py` (rendered,
@@ -1924,6 +1930,116 @@ lane) can submit a payload as
   is the first test in this repository to load two ground-truth
   directories in the same process and confirm neither's `contract.load()`
   call is affected by the other's existence.
+- **FR-LAB-66** *(CSV/report export formula-injection shape, `php_laravel`;
+  `CC-LAB-0091`, 2026-09-22).* Category 5's Booking.com app, second
+  increment (first: `FR-LAB-64`'s `open_redirect` shape).
+  - A genuinely new `(vuln_class, sink_context.family)` shape,
+    `("csv_formula_injection", "csv_cell_value")`: a CSV/report export
+    response whose cell content is a tainted query parameter, grounded in
+    Booking.com's real Extranet/partner-admin booking-list export view
+    (`docs/research/category5-travel-functionality-and-cwe-research.md`
+    §1.1/§2.1, CWE-1236). `lab/safety_matrix.yaml` gained one new sink
+    family (`csv_cell_value`) and one new concern (`csv_formula_injection`),
+    both additive under the existing `version: 1`: `raw_concat`/
+    `no_effect` (the unvalidated baseline) and `csv_formula_neutralize`/
+    `neutralises` (a single-quote prefix applied when the value's first
+    *non-whitespace* character is one of the five OWASP-documented
+    CSV-formula trigger characters — `=`, `+`, `-`, `@`, a tab, or a
+    carriage return — not merely a "starts with a trigger character" check,
+    which the adequacy review for this entry demanded be closed rather than
+    described in prose; see the transform's own docstring, `PA-0026`).
+    This mitigation's scope is documented explicitly, not claimed
+    unqualified: the standard, most broadly effective client-side control
+    (reliable in Excel/LibreOffice Calc's normal CSV import path), not a
+    claim that every spreadsheet application's every import path behaves
+    identically (Google Sheets' handling has varied) — the concern-
+    vocabulary header in `lab/safety_matrix.yaml` states this bound.
+  - New modules — `csv_formula_neutralize` (transform) and
+    `csv_export_row` (sink, another sink whose own rendered code is the
+    method's terminal statement) — registered in **both**
+    `fuzzlab.labgen.modules` (`php_current`, unrendered — shared
+    minimal-pair vocabulary only) and
+    `fuzzlab.labgen.emitters.php_laravel.modules`/`__init__.py` (rendered,
+    via a new `_MODULE_SET_BY_SHAPE` entry and page profile,
+    `/extranet/export`, `label`). This second terminal-statement sink is
+    what surfaced that `FR-LAB-64`'s `redirect_response` complexity module
+    was already fully sink-agnostic in implementation (a bare
+    method-signature wrapper, no redirect-specific code at all) — **renamed
+    to `terminal_response`** and reused for both shapes, rather than
+    minting a second, near-duplicate complexity module, matching this
+    project's own `single_statement`/`render_only` convention of naming
+    shared modules by structural shape and reusing them across unrelated
+    vuln classes/sink families (caught during this entry's own accuracy
+    review; `FR-LAB-64`'s text above is updated in place to the current
+    name, per this file's own living-doc convention, while `CC-LAB-0090`'s
+    append-only change-control entry keeps the original name as the
+    historical record of what that change actually shipped). The rename
+    touches
+    `fuzzlab/labgen/modules/__init__.py`,
+    `fuzzlab/labgen/emitters/php_laravel/modules.py`, both stacks' own
+    `templates/complexities/{redirect_response.php.j2 ->
+    terminal_response.php.j2}`, `fuzzlab/labgen/emitters/php_laravel/
+    __init__.py`'s `open_redirect` `_ModuleSet` row, and
+    `tests/test_labgen_modules.py`'s `_DETERMINISM_CTX_BY_MODULE` key —
+    the template content itself is byte-identical to before, only the name
+    changed.
+  - `fuzzlab.labgen.conformance.static_precheck.STATIC_PRECHECK_BY_SHAPE`
+    gained `("csv_formula_injection", "csv_cell_value") ->
+    StaticPrecheckStatus.UNINFORMATIVE`: a PHP taint checker has no
+    CSV/spreadsheet-application model to recognize a single-quote prefix as
+    a real sanitizer against this specific downstream-interpretation risk.
+  - New manifest `lab/manifests/booking_csv_export_sample.yaml`
+    (`LABGEN-BC-0003`/`LABGEN-BC-0004`, the vulnerable/secure twin pair,
+    continuing this app's own cell-ID sequence from `FR-LAB-64`'s
+    `LABGEN-BC-0001`/`0002`).
+  - Real live-boot proof
+    (`tests/test_labgen_csv_export_injection.py::test_live_boot_csv_manifest_neutralizes_every_formula_trigger_shape`),
+    matching this component's `CC-LAB-0069`/`FR-LAB-64` evidentiary bar: a
+    real HTTP `GET` against both live-booted twins with real
+    trigger-character payloads (`=cmd|'/c calc'!A1`, `+1+1`, `-2+3`,
+    `@SUM(1,1)`) plus the leading-whitespace-bypass shape
+    (`" =cmd|'/c calc'!A1"`), reading the real CSV response *body* back and
+    asserting the whole differential (header row, trailing cell, and the
+    leading-quote-or-not on the tainted cell), not only its first byte.
+    **Real finding surfaced by this proof, not assumed:** the `php_laravel`
+    skeleton's default Laravel middleware stack (never disabled by
+    `bootstrap/app.php`) already strips leading/trailing whitespace from
+    every request input (`TrimStrings`) before either twin's own code
+    runs — confirmed because even the vulnerable twin (no transform at
+    all) never observed the leading-whitespace payload's leading space.
+    This does not make `csv_formula_neutralize`'s own whitespace handling
+    dead code (a different ingestion path would not get this framework-
+    level assist), so a second, framework-independent test
+    (`test_the_neutralize_expression_itself_closes_the_leading_whitespace_bypass`)
+    evaluates the transform's exact rendered PHP expression directly via
+    `php -r` against a raw, untrimmed string, proving the neutralizer's own
+    check is correct on its own terms, not merely coincidentally covered by
+    Laravel's default middleware.
+  - Deliberately narrow, matching `FR-LAB-64`'s own scoping: does not yet
+    cover the rest of Booking.com's researched functionality or the
+    research doc's remaining shortlisted candidate (the price-integrity
+    duplicate) — a later increment inside this category's reserved
+    `CC-LAB-0090`-`0119` block. After this increment: 2 of 5 originally
+    shortlisted shapes landed, 2 pages, still short of Phase C's "coherent
+    page/route set" bar.
+- **FR-LAB-67** *(ground truth's second case in the existing directory;
+  `CC-LAB-0091`, 2026-09-22).* `BKNG-0002` appended to the *same*
+  `lab/ground-truth-booking-clone/` directory `FR-LAB-65` created (not a
+  third directory) — verified against the real loader
+  (`fuzzlab.labels.contract.load_labels()` parses `labels.json`'s `cases`
+  array with no one-case-per-file restriction, and explicitly guards
+  against a duplicate `case_id`) that this is fully supported, not an
+  extrapolation from `FR-LAB-65`'s own single-case precedent. Every one of
+  the shared ground-truth contract's three files updated together, per the
+  adequacy review's explicit demand (a `labels.json`-only change would have
+  broken `load()`'s `expectedresults.csv` cross-check for the *whole*
+  directory, `BKNG-0001` included, not just left `BKNG-0002` unscored):
+  `labels.json` (`BKNG-0002`), `expectedresults.csv` (matching row),
+  `injection-points.json` (the `label`-parameter entry).
+  `fuzzlab/labels/schemas/labels.schema.json`'s `vuln_class`/`sink_context`
+  enums widened again, additively, with `"csv_formula_injection"`/`"csv"`
+  (existing values, and every existing case across both ground-truth
+  directories, unchanged and re-validated by this change's own test run).
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

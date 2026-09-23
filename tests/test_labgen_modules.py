@@ -235,7 +235,11 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
     # this table's own convention of a realistic-looking fixture per module.
     "redirect_target_allowlist": {"value_expr": "$return_to"},
     "http_redirect_return": {"value_expr": "$return_to"},
-    "redirect_response": {"body": "    // x\n", "method_name": "handle_x"},
+    "terminal_response": {"body": "    // x\n", "method_name": "handle_x"},
+    # CC-LAB-0091: registered in the shared vocabulary so minimal_pair can
+    # classify them (php_current's shape map does not use any of them).
+    "csv_formula_neutralize": {"value_expr": "$label"},
+    "csv_export_row": {"value_expr": "$label"},
 }
 
 

@@ -12,7 +12,33 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
-## 2026-09-22
+## 2026-09-23
+- LAB: category 5 (Travel/booking) pilot, second increment — a new
+  `csv_formula_injection` (CWE-1236) vulnerability shape on `php_laravel`
+  (`lab/safety_matrix.yaml`'s new `csv_cell_value` sink family, a
+  `csv_formula_neutralize` transform whose leading-whitespace-bypass
+  handling is verified twice — once via a real live boot, once via a
+  direct, framework-independent `php -r` evaluation of the exact rendered
+  check), rendered as a second standalone Booking.com-style page
+  (`lab/manifests/booking_csv_export_sample.yaml`) with a second case
+  (`BKNG-0002`) appended to this app's existing ground truth
+  (`lab/ground-truth-booking-clone/`). Went through this repo's pre-change
+  review gate a second time; the adequacy pass again returned INADEQUATE
+  on the first draft (the same class of gap as `CC-LAB-0090`'s own first
+  draft — an under-specified neutralization check), and the accuracy pass
+  drove a real design improvement: `CC-LAB-0090`'s `redirect_response`
+  complexity module was already fully sink-agnostic in implementation, so
+  it was renamed `terminal_response` and reused for both shapes rather
+  than minting a near-duplicate module, matching this project's own
+  `single_statement`/`render_only` convention. The real live-boot proof
+  then surfaced a genuine, non-obvious finding: this skeleton's default
+  Laravel `TrimStrings` middleware already neutralizes the
+  leading-whitespace bypass shape at the framework layer — which could
+  have silently masked a broken neutralizer behind a passing HTTP-level
+  test, caught only because a second, framework-independent proof of the
+  transform's own check was added. `PA-0036` (whole-repo `pytest` before
+  considering a shared-registry change complete) applied proactively this
+  time, not found missing after the fact. See `CC-LAB-0091`.
 - LAB: category 5 (Travel/booking/marketplaces) pilot, first increment —
   a new `open_redirect` (CWE-601) vulnerability shape on `php_laravel`
   (`lab/safety_matrix.yaml`'s new `http_redirect_location` sink family, a

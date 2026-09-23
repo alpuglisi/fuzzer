@@ -113,6 +113,20 @@ STATIC_PRECHECK_BY_SHAPE: dict[tuple[str, str], StaticPrecheckStatus] = {
     # context -- so a clean scan of the secure twin is not evidence of
     # nothing the way it is for those shapes.
     ("open_redirect", "http_redirect_location"): StaticPrecheckStatus.INFORMATIVE,
+    # --- CC-LAB-0091: CSV/report export formula injection (category 5) ----
+    # UNINFORMATIVE: a PHP taint checker analyzes PHP data flow and string
+    # sinks (echo/file writes/HTTP responses), not spreadsheet-application
+    # semantics -- it has no notion that a value's *first character* being
+    # `=`/`+`/`-`/`@`/tab/CR makes a downstream Excel/Sheets import execute
+    # it as a formula. Even a checker that flags "unescaped value reaches an
+    # HTTP response body" would flag this identically whether or not
+    # `csv_formula_neutralize` ran, since a single-quote prefix looks like
+    # ordinary string concatenation to a taint engine, not a recognized
+    # sanitizer -- the same reasoning as the escaping-context-mismatch XSS
+    # shapes above, one step further removed (there is no PHP-level function
+    # call this shape's fix hangs off of at all, just a `preg_match`-guarded
+    # string prefix a generic checker has no CSV-specific model for).
+    ("csv_formula_injection", "csv_cell_value"): StaticPrecheckStatus.UNINFORMATIVE,
 }
 
 

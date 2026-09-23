@@ -13,6 +13,18 @@
       "expected_vulnerable": true,
       "rendering": "server",
       "notes": "return_to used unvalidated as the redirect() Location target -- modeled on Booking.com's real post-checkout partner/payment-provider continuation link (docs/research/category5-travel-functionality-and-cwe-research.md, CWE-601). CC-LAB-0090/FR-LAB-64, category 5 pilot's own ground truth -- never a PFF-* case."
+    },
+    {
+      "case_id": "BKNG-0002",
+      "url": "/cell/labgen-bc-0003",
+      "method": "GET",
+      "param": "label",
+      "location": "query",
+      "vuln_class": "csv_formula_injection",
+      "sink_context": "csv",
+      "expected_vulnerable": true,
+      "rendering": "server",
+      "notes": "label used unvalidated as a cell in an exported CSV row -- modeled on Booking.com's real Extranet/partner-admin booking-list export view (docs/research/category5-travel-functionality-and-cwe-research.md, CWE-1236). CC-LAB-0091/FR-LAB-66, category 5 pilot's own ground truth -- never a PFF-* case."
     }
   ]
 }
