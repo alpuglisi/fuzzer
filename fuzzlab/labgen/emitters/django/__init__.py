@@ -105,6 +105,19 @@ _READ_STORED_COMMENT_HELPER = (
 # that ever evaluates `{{ comment }}`, at real request time.
 _COMMENT_TEMPLATE_HTML = '<div class="comment">{{ comment }}</div>\n'
 
+# CC-LAB-0095: fixed, unconditional constants backing the mass-assignment
+# shape's two transforms. `_KNOWN_PROFILE_COLUMNS` is SQL-column-name
+# hygiene only (every real column `profiles` has) -- not a security
+# boundary, applied by the vulnerable twin's own transform.
+# `_PUBLIC_SETTINGS_FIELDS` is the real settings form's own publicly-
+# settable subset -- the actual security boundary, applied by the secure
+# twin's transform. Present identically in every generated file
+# regardless of whether that cell's own shape uses them, mirroring
+# `_READ_STORED_BIO_HELPER`'s own convention (keeps the vulnerable/secure
+# minimal-pair diff confined to the transform region, BUG-0027).
+_KNOWN_PROFILE_COLUMNS = "_KNOWN_PROFILE_COLUMNS = {\"bio\", \"is_verified\"}\n"
+_PUBLIC_SETTINGS_FIELDS = "_PUBLIC_SETTINGS_FIELDS = {\"bio\"}\n"
+
 
 class _ModuleSet(NamedTuple):
     """Same shape as ``php_current``'s/``node_express``'s ``_ModuleSet``:
@@ -142,6 +155,16 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("ssrf", "server_side_http_fetch"): _ModuleSet(
         "get_param", "http_fetch_json_sink", "render_only"
     ),
+    # CC-LAB-0095: mass assignment (CWE-915) -- a genuinely new source
+    # shape too (the whole POST body as a dict, not one named param). No
+    # new safety-matrix design: `lab/safety_matrix.yaml` already has a
+    # real, corpus-grounded `orm_entity_bulk_assign` sink family. The
+    # sink is shared, byte-identical between twins; the vulnerable/secure
+    # distinction lives entirely in the transform (`unfiltered_body_update`
+    # vs. `runtime_field_allowlist`).
+    ("mass_assignment", "orm_entity_bulk_assign"): _ModuleSet(
+        "post_body_dict", "profile_bulk_update_sink", "render_only"
+    ),
 }
 
 #: Per-route static context (table/column/param names, or the stored field
@@ -174,6 +197,11 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     # third real page) -- ports docs/research/corpus-examples/ssrf/
     # python/{vulnerable,idiomatic}-oembed-unfurl-4.py almost verbatim.
     "/upload/link-preview": {"var_name": "url", "param_name": "url"},
+    # PicTrail's real account-settings page (CC-LAB-0095, Phase C's
+    # fourth real page) -- the whole-POST-body mass-assignment shape
+    # needs no `param_name` (the source reads the entire body, not one
+    # named field).
+    "/settings": {"var_name": "settings_fields"},
 }
 
 #: Cell IDs that are **real, ground-truth-bearing pages** (`CC-LAB-0092`,
@@ -189,7 +217,7 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
 #: describe the one real, exploitable page, matching how a ``php_current``
 #: secure twin does not necessarily get its own ``PFF-`` case either.
 _REAL_PAGE_CELL_IDS: frozenset[str] = frozenset(
-    {"LABGEN-DJ-0007", "LABGEN-DJ-0009", "LABGEN-DJ-0011"}
+    {"LABGEN-DJ-0007", "LABGEN-DJ-0009", "LABGEN-DJ-0011", "LABGEN-DJ-0013"}
 )
 
 
@@ -284,6 +312,9 @@ class DjangoEmitter(Emitter):
             f"{_READ_STORED_BIO_HELPER}"
             "\n"
             f"{_READ_STORED_COMMENT_HELPER}"
+            "\n"
+            f"{_KNOWN_PROFILE_COLUMNS}"
+            f"{_PUBLIC_SETTINGS_FIELDS}"
             "\n"
             f"{view_code}"
         )

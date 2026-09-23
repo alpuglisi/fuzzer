@@ -1,0 +1,35 @@
+# Phase C, PicTrail's fourth real page (category 2 pilot, `CC-LAB-0095`).
+#
+# The researched mass-assignment shape (docs/research/
+# category2-social-ugc-functionality-and-cwe-research.md §4 row 3,
+# CWE-915): an account-settings update that lets a POST body set a
+# privileged profile field (`is_verified`) the real settings form never
+# exposes. No new safety-matrix design: lab/safety_matrix.yaml's own
+# `orm_entity_bulk_assign` sink family already has all the ops this shape
+# needs (`unfiltered_body_update`/`no_effect`, `runtime_field_allowlist`/
+# `neutralises`).
+#
+# Extends, not replaces, the other phase_c_picktrail_*.yaml manifests. The
+# canonical vulnerable cell (LABGEN-DJ-0013) owns PicTrail's real
+# `/settings` URL and is the one described by
+# lab/ground-truth-picktrail-django/'s own labels.json (case PT-0004).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-DJ-0013
+    class: mass_assignment
+    stack_profile: django
+    route: { method: POST, path: /settings }
+    sink_context:
+      family: orm_entity_bulk_assign
+      required_neutralizations: [mass_assignment]
+    transform: [unfiltered_body_update]
+
+  - cell_id: LABGEN-DJ-0014
+    class: mass_assignment
+    stack_profile: django
+    route: { method: POST, path: /settings }
+    sink_context:
+      family: orm_entity_bulk_assign
+      required_neutralizations: [mass_assignment]
+    transform: [runtime_field_allowlist]

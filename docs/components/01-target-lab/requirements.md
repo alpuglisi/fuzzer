@@ -2175,6 +2175,64 @@ lane) can submit a payload as
   independently of the emitter's own internals, against a real booted
   request at the exact URL/method/param it names, pointed at the
   internal-service fixture.
+- **FR-LAB-117** *(PicTrail's fourth real page, `/settings`, and this
+  emitter's first whole-POST-body-dict source shape, feeding a
+  mass-assignment (CWE-915) sink; `CC-LAB-0095`, 2026-09-23).* Reuses
+  `lab/safety_matrix.yaml`'s existing `orm_entity_bulk_assign` sink
+  family unchanged — no new safety-matrix design needed. **Numbering
+  note**: picked against the now-discovered unified cross-category
+  branch's real ceiling (`FR-LAB-116`, see `CC-LAB-0095a`), not this
+  branch's own lower prior ceiling. New source, `post_body_dict`
+  (`request.POST.dict()`, publishing the entire body as one `value_expr`
+  dict — every other source in this inventory extracts exactly one named
+  parameter). Two new transforms, both filtering `value_expr` **in
+  place** (reassigning the same variable name — the only transforms in
+  this inventory that do not rewrite `value_expr` into a new wrapping
+  expression, since there is nothing to wrap): `unfiltered_body_update`
+  (vulnerable) filters only to `_KNOWN_PROFILE_COLUMNS` (`{"bio",
+  "is_verified"}`) — SQL-column-name hygiene, not a security boundary —
+  so every other real column, including the privileged `is_verified`
+  flag the real settings form never exposes, passes through unfiltered;
+  `runtime_field_allowlist` (secure) filters to
+  `_PUBLIC_SETTINGS_FIELDS` (`{"bio"}`), the actual security boundary.
+  Both constants are fixed, unconditional per-file constants (matching
+  `_READ_STORED_BIO_HELPER`'s own convention), never validated by the
+  sink itself. One shared sink, `profile_bulk_update_sink`: builds and
+  executes a parameterized, multi-column `UPDATE profiles SET ... WHERE
+  id = 1` from whatever fields survived the transform stage (column
+  *values* always parameterized; column *names* always safe because a
+  transform already filtered them to a fixed, code-controlled set before
+  the sink ever runs) — mirroring `CC-LAB-0093`/`CC-LAB-0094`'s own
+  "sink is neutral, the transform secures/breaks it" shape. Rendered
+  with `render_only` complexity (not `single_statement`, per the
+  `CC-LAB-0094` precedent this entry followed from the start). Passes
+  Tier 0/Tier 3 for the new manifest (`lab/manifests/
+  phase_c_picktrail_settings.yaml`).
+- **FR-LAB-118** *(real live-boot proof of the mass-assignment
+  differential, both directions in one request, plus ground-truth
+  extension; `CC-LAB-0095`, 2026-09-23).* Real, executed, skip-guarded
+  (PA-0005) proof in `tests/
+  test_labgen_django_live_boot_picktrail_settings.py`: a single POST
+  carrying both a legitimate field (`bio`) and the privileged one an
+  attacker should not be able to set (`is_verified`) genuinely persists
+  *both* real DB columns on the vulnerable twin, read back directly from
+  the harness's own seeded SQLite database (`query_db()`), not inferred
+  from the response body alone; **and, checked together in one
+  assertion, not two separate ones** — the secure twin genuinely applies
+  the legitimate field while leaving the privileged one at its seeded
+  default, closing the loophole a transform that simply dropped every
+  field would otherwise pass through. `DjangoLiveBootHarness._seed_db()`
+  gained a real `is_verified INTEGER NOT NULL DEFAULT 0` column on the
+  `profiles` table for this shape (additive, no other seeded table
+  changed). Ground truth extended (not a new directory) with `PT-0004`
+  in `lab/ground-truth-picktrail-django/` (`vuln_class:
+  "mass_assignment"`, `sink_context: "mass_assignment"`, `param:
+  "is_verified"` — names the specific privileged field being smuggled
+  in, matching `lab/ground-truth-forgecart`'s own `FCART-0004` mass-
+  assignment case convention rather than inventing a different one),
+  loaded for real and cross-checked, independently of the emitter's own
+  internals, against a real booted request at the exact URL/method/param
+  it names.
 
 - **FR-LAB-64** *(prototype pollution, CWE-1321, `node_express`; `CC-LAB-0070`,
   2026-09-22).* Per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a's

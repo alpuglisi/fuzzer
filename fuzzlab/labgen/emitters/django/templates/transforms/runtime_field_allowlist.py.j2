@@ -1,0 +1,4 @@
+# runtime_field_allowlist transform (CC-LAB-0095): filters {{ value_expr }}
+# down to the real settings form's own publicly-settable fields only --
+# the actual security boundary for this shape.
+{{ value_expr }} = {k: v for k, v in {{ value_expr }}.items() if k in _PUBLIC_SETTINGS_FIELDS}

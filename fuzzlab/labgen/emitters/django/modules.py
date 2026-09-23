@@ -155,6 +155,24 @@ class ReadStoredFieldSource(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class PostBodyDictSource(TemplateModule):
+    """Extracts the entire Django ``request.POST`` body as a plain
+    ``dict`` and publishes ``value_expr``/``bound=False`` -- the
+    "whole-body, multi-field" source shape mass-assignment (CWE-915)
+    needs, distinct from every other source in this inventory (which
+    each extract exactly one named parameter). `CC-LAB-0095`."""
+
+    def __init__(self) -> None:
+        super().__init__("post_body_dict", "source", _SOURCE_ENV, "post_body_dict.py.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = ctx["var_name"]
+        new_ctx.setdefault("bound", False)
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 class IdentityTransform(TemplateModule):
     """The empty-pipeline transform: the tainted value used as-is."""
 
@@ -269,6 +287,37 @@ class SchemeAndResolvedIpAllowlistTransform(TemplateModule):
         )
 
 
+class UnfilteredBodyUpdateTransform(TemplateModule):
+    """The ``unfiltered_body_update`` op (`CC-LAB-0095`): filters the
+    whole-POST-body dict down to this table's own known real columns only
+    -- SQL-column-name hygiene, not a security boundary. Every other
+    submitted field, including privileged ones the real settings form
+    never exposes, passes through unfiltered -- the mass-assignment
+    (CWE-915) footgun. Reassigns ``value_expr`` in place (the same
+    variable name, mutated to a filtered dict), unlike ``mark_safe_wrap``/
+    ``html_entity_escape``, which rewrite ``value_expr`` to a new wrapping
+    expression -- no context update is needed here since the variable
+    name the sink reads never changes."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unfiltered_body_update", "transform", _TRANSFORM_ENV, "unfiltered_body_update.py.j2"
+        )
+
+
+class RuntimeFieldAllowlistTransform(TemplateModule):
+    """The ``runtime_field_allowlist`` op (`CC-LAB-0095`): filters the
+    whole-POST-body dict down to the real settings form's own
+    publicly-settable fields only -- the actual security boundary for
+    this shape, closing the mass-assignment gap
+    `UnfilteredBodyUpdateTransform` leaves open."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "runtime_field_allowlist", "transform", _TRANSFORM_ENV, "runtime_field_allowlist.py.j2"
+        )
+
+
 class SqlStringLiteralLookupSink(TemplateModule):
     """A single-row lookup by a quoted-string-literal-position column, with
     a second, non-tainted, already-hashed condition (a login-style password
@@ -336,6 +385,28 @@ class HttpFetchJsonSink(TemplateModule):
         super().__init__("http_fetch_json_sink", "sink", _SINK_ENV, "http_fetch_json_sink.py.j2")
 
 
+class ProfileBulkUpdateSink(TemplateModule):
+    """Builds and executes a parameterized, multi-column ``UPDATE
+    profiles SET ...`` from whatever fields survived the transform stage
+    (`CC-LAB-0095`) -- the raw-``connection.cursor()`` analogue of a
+    ``ModelForm``/serializer bulk-assignment sink, matching this
+    emitter's own established "raw cursor, never the ORM" convention
+    (`CC-LAB-0090`'s own reasoning). Shared, byte-identical between
+    twins: the security boundary lives entirely in the **transform**
+    (which fields survive to reach this sink), never in the sink itself
+    -- the same "sink is neutral" shape `CC-LAB-0093`/`CC-LAB-0094`
+    already established for this emitter. Column *values* are always
+    parameterized (``%s`` placeholders); column *names* are always safe
+    because every transform in this shape's inventory filters to a fixed,
+    code-controlled set before the sink ever runs (never validated by
+    the sink itself, which stays sink-family-generic)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "profile_bulk_update_sink", "sink", _SINK_ENV, "profile_bulk_update_sink.py.j2"
+        )
+
+
 class SingleStatementComplexity(TemplateModule):
     """Wraps the composed source/transform/sink body as the entire body of
     one Django function-based view that responds with the looked-up row --
@@ -372,6 +443,7 @@ SOURCES: dict[str, Module] = {
     "get_param": GetParamSource(),
     "post_param": PostParamSource(),
     "read_stored_field": ReadStoredFieldSource(),
+    "post_body_dict": PostBodyDictSource(),
 }
 TRANSFORMS: dict[str, Module] = {
     "identity": IdentityTransform(),
@@ -380,6 +452,8 @@ TRANSFORMS: dict[str, Module] = {
     "mark_safe_wrap": MarkSafeWrapTransform(),
     "unchecked_url_fetch": UncheckedUrlFetchTransform(),
     "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistTransform(),
+    "unfiltered_body_update": UnfilteredBodyUpdateTransform(),
+    "runtime_field_allowlist": RuntimeFieldAllowlistTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -387,6 +461,7 @@ SINKS: dict[str, Module] = {
     "html_body_echo": HtmlBodyEchoSink(),
     "django_template_render": DjangoTemplateRenderSink(),
     "http_fetch_json_sink": HttpFetchJsonSink(),
+    "profile_bulk_update_sink": ProfileBulkUpdateSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

@@ -427,9 +427,12 @@ class DjangoLiveBootHarness:
                 (1, SEED_USERNAME, hashlib.md5(SEED_PASSWORD.encode("utf-8")).hexdigest()),
             )
             conn.execute(
-                "CREATE TABLE IF NOT EXISTS profiles (id INTEGER PRIMARY KEY, bio TEXT NOT NULL)"
+                "CREATE TABLE IF NOT EXISTS profiles ("
+                "id INTEGER PRIMARY KEY, bio TEXT NOT NULL, is_verified INTEGER NOT NULL DEFAULT 0)"
             )
-            conn.execute("INSERT INTO profiles (id, bio) VALUES (1, ?)", (self._seed_bio,))
+            conn.execute(
+                "INSERT INTO profiles (id, bio, is_verified) VALUES (1, ?, 0)", (self._seed_bio,)
+            )
             conn.executescript(_SEED_POSTS_SQL)
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY, body TEXT NOT NULL)"

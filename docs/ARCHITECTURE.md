@@ -774,11 +774,26 @@ tracked in the requirements files, not here.
   own standalone, pre-requisite entry (`CC-LAB-0094a`), adopting category
   3's own already-reviewed widening byte-identically rather than
   inventing different values, to avoid future cross-branch schema drift.
-  PicTrail's remaining planned pages (mass-assignment settings,
-  identifier-SQLi search, session deserialization, the full
-  auto-linking-specific XSS shape) and CircleFeed (the Facebook-style PHP
-  app) stay planned, not built — each its own future, separately-gated
-  increment.
+  **PicTrail's fourth real page (`CC-LAB-0095`) landed the researched
+  mass-assignment shape**: `POST /settings`, a whole-POST-body dict
+  source (this emitter's first source that is not "one named
+  parameter") feeding a shared, parameterized multi-column `UPDATE`
+  sink — `unfiltered_body_update` (SQL-column-name hygiene only) vs.
+  `runtime_field_allowlist` (the real security boundary), reusing
+  `lab/safety_matrix.yaml`'s existing `orm_entity_bulk_assign` sink
+  family unchanged. A deliberate, stated departure from the research
+  doc's own literal `ModelForm` wording: this emitter has never used the
+  Django ORM on either twin of any shape, so this entry ports the same
+  CWE-915 mechanism onto the established raw-`connection.cursor()`
+  convention instead of introducing a model/migration for the first
+  time. Real live-boot proof checks both halves of the differential in
+  one request (the legitimate `bio` field still applies; the privileged
+  `is_verified` field is blocked on the secure twin), reading the DB row
+  back directly rather than inferring it from the response.
+  PicTrail's remaining planned pages (identifier-SQLi search, session
+  deserialization, the full auto-linking-specific XSS shape) and
+  CircleFeed (the Facebook-style PHP app) stay planned, not built — each
+  its own future, separately-gated increment.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

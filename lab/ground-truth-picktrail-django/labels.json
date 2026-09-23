@@ -41,6 +41,19 @@
       "rendering": "server-json",
       "stack": "django",
       "notes": "PicTrail's link-preview upload flow fetches an attacker-supplied url server-side via requests.get() with no scheme or resolved-IP check (CWE-918), returning a JSON preview. Ports docs/research/corpus-examples/ssrf/python/vulnerable-oembed-unfurl-4.py almost verbatim. lab/safety_matrix.yaml's own server_side_http_fetch sink family: unchecked_url_fetch/no_effect (this case) vs. scheme_and_resolved_ip_allowlist/neutralises (the secure twin, LABGEN-DJ-0012, not separately ground-truthed here -- same convention as PT-0001/PT-0002's own secure twins). CC-LAB-0094."
+    },
+    {
+      "case_id": "PT-0004",
+      "url": "/settings",
+      "method": "POST",
+      "param": "is_verified",
+      "location": "body",
+      "vuln_class": "mass_assignment",
+      "sink_context": "mass_assignment",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "stack": "django",
+      "notes": "PicTrail's account-settings update writes the whole POST body's fields (filtered only to real DB columns, not to the real settings form's own publicly-settable subset) into the profiles row via a raw parameterized connection.cursor() UPDATE, letting a POST body also set the privileged is_verified column the real settings form never exposes (CWE-915). lab/safety_matrix.yaml's own orm_entity_bulk_assign sink family: unfiltered_body_update/no_effect (this case) vs. runtime_field_allowlist/neutralises (the secure twin, LABGEN-DJ-0014, not separately ground-truthed here -- same convention as PT-0001/PT-0002/PT-0003's own secure twins). param names the specific privileged field being smuggled in, matching lab/ground-truth-forgecart's own mass_assignment case (FCART-0004) convention. CC-LAB-0095."
     }
   ]
 }

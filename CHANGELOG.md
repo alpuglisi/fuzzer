@@ -258,6 +258,28 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (PicTrail account-settings mass-assignment page)
+- LAB: landed PicTrail's fourth real page — `CC-LAB-0095`/`FR-LAB-117`/
+  `FR-LAB-118`. `POST /settings`: a real mass-assignment (CWE-915) via a
+  whole-POST-body dict source (`post_body_dict`, this emitter's first
+  source that isn't one named parameter) feeding a shared, parameterized
+  multi-column `UPDATE profiles SET ...` sink — `unfiltered_body_update`
+  (SQL-column-name hygiene only) vs. `runtime_field_allowlist` (the real
+  security boundary), reusing `lab/safety_matrix.yaml`'s existing
+  `orm_entity_bulk_assign` sink family unchanged (no new matrix design).
+  Deliberately departs from the research doc's own literal `ModelForm`
+  wording: this emitter has never used the Django ORM on either twin of
+  any shape, so this entry ports the same CWE-915 mechanism onto the
+  established raw-`connection.cursor()` convention instead of introducing
+  a model/migration for the first time. Real live-boot proof checks both
+  halves of the differential in one request (the legitimate `bio` field
+  still applies; the privileged `is_verified` field is blocked on the
+  secure twin), reading the DB row back directly via `query_db()` rather
+  than inferring it from the response. Extends
+  `lab/ground-truth-picktrail-django/` with `PT-0004`. Full bookkeeping
+  in `docs/components/01-target-lab/{change-control,requirements}.md`,
+  `docs/ARCHITECTURE.md`, and the category-2 research doc.
+
 ## 2026-09-23 (labels schema: widen enums again + cross-branch consolidation discovery)
 
 - LAB: Widened `fuzzlab/labels/schemas/labels.schema.json`'s

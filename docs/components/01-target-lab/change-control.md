@@ -3,6 +3,164 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0095 — PicTrail's fourth real page: account-settings mass assignment (FR-LAB-117/FR-LAB-118) (2026-09-23)
+
+- **Change:** Lands PicTrail's fourth real, ground-truth-bearing page,
+  `POST /settings` (grounded in §2 item 8's account-settings feature),
+  the researched mass-assignment shape (`docs/research/
+  category2-social-ugc-functionality-and-cwe-research.md` §4 row 3,
+  CWE-915). No new safety-matrix design: `lab/safety_matrix.yaml`
+  already has a real, already-researched `orm_entity_bulk_assign` sink
+  family with ten ops across five independent allowlisting architectures
+  (from `docs/research/corpus-examples/mass-assignment/node/`); this
+  entry uses `unfiltered_body_update`/`no_effect` and
+  `runtime_field_allowlist`/`neutralises`.
+
+  **A deliberate departure from §4 row 3's own literal `ModelForm`
+  wording, stated explicitly**: row 3's research names a `ModelForm`
+  with `fields = "__all__"` as the Django-idiomatic footgun. This entry
+  does not build that — this emitter has never used the Django ORM on
+  either twin of any shape (`CC-LAB-0090`'s own foundational choice: a
+  raw `connection.cursor()` sink on both twins, so the vulnerable/secure
+  differential is never confounded with "ORM vs. raw SQL"). Introducing
+  a `ModelForm` here would mean introducing a real Django model/migration
+  into the stack for the first time, a genuinely larger architectural
+  change than this shape's own security lesson needs. Instead, this
+  entry ports the *same CWE-915 mechanism* (an unfiltered bulk write vs.
+  a runtime field allowlist) onto the emitter's own established raw-
+  cursor convention — the matrix's own `unfiltered_body_update`/
+  `runtime_field_allowlist` op pair (not `orm_update_no_fields_option`/
+  `orm_fields_option_allowlist`, which are the literal `ModelForm`-
+  `fields`-option idiom this entry deliberately does not build) is the
+  correct, already-researched fit for that choice.
+
+  Concretely:
+  1. **New route**, `_ROUTE_PARAMS["/settings"]` — `{"var_name":
+     "settings_fields"}`, `POST`, no `param_name` (this source reads the
+     entire body, not one named field).
+  2. **New source, `post_body_dict`**: `settings_fields =
+     request.POST.dict()` — this emitter's first source that is not "one
+     named request parameter." Publishes the whole dict as `value_expr`.
+  3. **New transform, `unfiltered_body_update`** (vulnerable): filters
+     `value_expr` to `_KNOWN_PROFILE_COLUMNS` (`{"bio", "is_verified"}`)
+     only — SQL-column-name hygiene, not a security boundary — so the
+     privileged `is_verified` flag the real settings form never exposes
+     passes straight through.
+  4. **New transform, `runtime_field_allowlist`** (secure): filters
+     `value_expr` to `_PUBLIC_SETTINGS_FIELDS` (`{"bio"}`) — the actual
+     security boundary. **Both new transforms are this emitter's first
+     that reassign `value_expr` in place** (the same variable name,
+     mutated to a filtered dict) rather than rewriting it into a new
+     wrapping expression (`mark_safe(...)`, `escape(...)`) — there is
+     nothing to wrap, only fields to drop.
+  5. **New sink, `profile_bulk_update_sink`** (shared, byte-identical
+     between twins, mirroring `CC-LAB-0093`/`CC-LAB-0094`'s own "sink is
+     neutral, the transform secures/breaks it" shape): builds and
+     executes a parameterized, multi-column `UPDATE profiles SET ...
+     WHERE id = 1` from whatever fields survived the transform stage.
+     Column *values* are always parameterized (`%s` placeholders);
+     column *names* are always safe because a transform already filtered
+     them to a fixed, code-controlled set before the sink ever runs —
+     the sink itself never re-validates column names, staying
+     sink-family-generic. An empty-dict guard (`if not value_expr:
+     return JsonResponse({"updated_fields": []})`) avoids a real
+     `UPDATE ... SET  WHERE ...` syntax-error crash on a request whose
+     every field got filtered out — a real edge case found while
+     designing the sink, fixed before it could ever be hit, not
+     discovered via a crash.
+  6. **Complexity: `render_only`**, not `single_statement` — applying
+     `CC-LAB-0094`'s own already-corrected lesson from the start this
+     time (that entry's own review found `single_statement`'s
+     DB-row-lookup epilogue is wrong for any sink that already returns
+     from within its own body).
+  7. **`DjangoLiveBootHarness._seed_db()`** gained a real `is_verified
+     INTEGER NOT NULL DEFAULT 0` column on the `profiles` table (additive
+     — no other seeded table changed).
+  8. New ground truth: extends `lab/ground-truth-picktrail-django/` with
+     `PT-0004` — `vuln_class: "mass_assignment"`, `sink_context:
+     "mass_assignment"`, `method: "POST"`, `param: "is_verified"` (names
+     the specific privileged field being smuggled in, matching
+     `lab/ground-truth-forgecart`'s own `FCART-0004` mass-assignment case
+     convention — checked before drafting, not invented), `location:
+     "body"`, `rendering: "server-json"`, `url: "/settings"`.
+  9. New manifest, `lab/manifests/phase_c_picktrail_settings.yaml`.
+
+- **Impact (other components / project):** No shared schema, safety-
+  matrix *op*, or existing emitter/module changes — the schema
+  dependency (`mass_assignment` as a `vuln_class`/`sink_context` value)
+  was already covered by `CC-LAB-0095a`, landed just before this entry
+  for the unrelated reason of the cross-branch consolidation discovery.
+  `fuzzlab/harness/multitarget.py` unaffected.
+
+- **Risk (level: low):** A new source/transform *shape* for this
+  emitter, but reusing an already-real, already-researched safety-matrix
+  sink family (no new matrix design) and this emitter's own established
+  raw-cursor sink convention (no ORM/model introduced). Mitigated by:
+  (1) a real generation-time/Tier-0 check (`py_compile`) that the
+  generated view compiles, including the empty-dict guard; (2) a real
+  live-boot test proving **both halves of the differential in one
+  request** (the legitimate field still applies, the privileged one is
+  blocked), closing the loophole a transform that dropped every field
+  indiscriminately would otherwise pass through if the two assertions
+  were checked separately; (3) the DB row read back directly via
+  `query_db()`, not inferred from the response body, so the test proves
+  the actual persisted state, not just what the view claims to have
+  done.
+
+- **Deliverables:**
+  - [x] `fuzzlab/labgen/emitters/django/templates/sources/
+    post_body_dict.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/transforms/
+    unfiltered_body_update.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/transforms/
+    runtime_field_allowlist.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/sinks/
+    profile_bulk_update_sink.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/modules.py` — new
+    `PostBodyDictSource`/`UnfilteredBodyUpdateTransform`/
+    `RuntimeFieldAllowlistTransform`/`ProfileBulkUpdateSink` classes +
+    registry entries — done.
+  - [x] `fuzzlab/labgen/emitters/django/__init__.py` — new
+    `_MODULE_SET_BY_SHAPE`/`_ROUTE_PARAMS` entries; `_KNOWN_PROFILE_
+    COLUMNS`/`_PUBLIC_SETTINGS_FIELDS` fixed constants added to the
+    unconditional header; `_REAL_PAGE_CELL_IDS` gains `LABGEN-DJ-0013`
+    — done.
+  - [x] `fuzzlab/labgen/conformance/django_live_boot.py` — `profiles`
+    seed gains `is_verified` — done.
+  - [x] `lab/manifests/phase_c_picktrail_settings.yaml` — done.
+  - [x] `lab/ground-truth-picktrail-django/labels.json`/
+    `injection-points.json`/`expectedresults.csv` — extended with
+    `PT-0004` — done.
+  - [x] `tests/test_labgen_django_conformance.py` — Tier 0/3 +
+    verdict-regression test for the new manifest, plus the URL-pinning
+    and `@csrf_exempt` collection regression tests extended — done,
+    19/19 passing.
+  - [x] `tests/test_labgen_django_live_boot_picktrail_settings.py` —
+    real both-directions-in-one-request proof; the `PT-0004`
+    ground-truth cross-check — done, 3/3 passing.
+  - [x] `docs/research/category2-social-ugc-functionality-and-cwe-
+    research.md` §6 — row 4 marked built — done.
+  - [x] `docs/components/01-target-lab/requirements.md` — new
+    `FR-LAB-117`/`FR-LAB-118` — done (picked against the unified
+    cross-category branch's real ceiling, `FR-LAB-116`, per
+    `CC-LAB-0095a`'s own discovery, not this branch's own lower prior
+    ceiling).
+  - [x] `docs/ARCHITECTURE.md` — fourth real page noted — done.
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 tracker row
+    — done.
+  - [x] `CHANGELOG.md` line — done.
+  - Full bug protocol for a genuine code defect: **not triggered** — the
+    empty-dict sink crash was a real hazard found and fixed while
+    designing the sink template, before any test ever observed it, the
+    same "caught, not shipped" distinction `CC-LAB-0094`'s own entry
+    drew for its own in-progress corrections.
+
+- **Effectiveness (assessed 2026-09-23): effective** — every deliverable
+  above is real, executed, and passing (19 Tier 0/3 tests, 3 real
+  live-boot tests, no skips in this environment since this shape's
+  proof needs no external network dependency beyond `django_boot_
+  available()`'s own already-required PyPI reachability).
+
 ### CC-LAB-0095a — Widen `labels.schema.json`'s `vuln_class`/`sink_context` enums again (adopts the now-unified cross-category branch's precedent verbatim) (2026-09-23)
 
 - **Change:** `fuzzlab/labels/schemas/labels.schema.json` — `vuln_class`
