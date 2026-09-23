@@ -4,6 +4,17 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (overnight autonomous build plan)
+- Docs: saved `docs/OVERNIGHT_AUTONOMOUS_BUILD_PLAN.md` at the user's
+  request before they logged off for the night — the orchestration
+  mechanism (5-minute check-ins into all 4 category sessions via
+  poke-only Routines + a self-rescheduling reminder, since the platform's
+  recurring-Routine scheduler floors at 1 hour), the standing
+  decide-and-proceed policy for every session involved, and the ordered
+  phases (finish all 5 categories -> merge/sync -> push to main -> work
+  the outstanding fuzzlab task list) this session will drive through
+  unattended.
+
 ## 2026-09-23 (vuln corpus Phase 3: manufactured-pair gap analysis)
 - Docs: saved `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md` — the concrete
   gap analysis for the last unchecked `docs/VULN_CORPUS_EXPANSION_PLAN.md`
