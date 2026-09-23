@@ -2328,6 +2328,29 @@ lane) can submit a payload as
   `insecure_deserialization`; running both this target and the Node target
   together in one `run_targets` call (left for a follow-on step per §6 step
   2's own note, same as `FR-LAB-83`).
+- **FR-LAB-87** *(§6 step 2: combine ForgeCart + MeadowMart `TargetSpec`s in
+  one `run_targets` call; `CC-LAB-0083`, 2026-09-23).* Closes the follow-on
+  both `FR-LAB-83` and `FR-LAB-86` left open. New
+  `tests/test_multitarget_category1_combined.py`: boots both apps for real
+  and simultaneously (`RailsLiveBootHarness` for ForgeCart, the same
+  `node app.js` boot helper `FR-LAB-83`'s test uses for MeadowMart, inlined
+  since both must be live at once rather than as independent fixtures),
+  builds both real `TargetSpec`s, and calls
+  `run_targets([forgecart_spec, meadowmart_spec], store, sender_for=...)`
+  once. Asserts: both outcomes scored, each with its own distinct `run_id`;
+  ForgeCart's real `/search` XSS confirmation (`tp>=1`) holds unchanged
+  when run alongside a second live target; MeadowMart's honest `tp==0`
+  (documented gap, unchanged) also holds; `transfer_summary` reports
+  `targets=2`, both names appear via `format_transfer`, and `generalizes`
+  is correctly `False` (only one of the two scored targets has recall > 0
+  — `generalizes` requires >= 2). This is the actual toolkit-side Phase 10
+  `T10.6`-style deliverable for category 1: `fuzzlab.harness.multitarget`
+  genuinely running and scoring two real, independent second targets in
+  one call. Does not attempt a true `generalizes=True` demonstration
+  (needs the `fuzzlab.core.runmode._VULN_TO_CATEGORY`/audit-rule wiring
+  both `FR-LAB-83` and `FR-LAB-86` already flagged as separate follow-on
+  work) and does not modify `fuzzlab/harness/multitarget.py` itself. This
+  closes Category 1 (E-commerce)'s full Phase A-E build.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

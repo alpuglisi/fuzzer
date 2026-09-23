@@ -12,6 +12,24 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (category 1 closeout)
+- LAB/FUZZ (`claude/second-target-cat1-ecommerce`, `CC-LAB-0083`/`FR-LAB-87`):
+  closed §6 step 2, the one item both Phase E lanes left flagged as "not
+  mine to do" — a new `tests/test_multitarget_category1_combined.py` runs
+  ForgeCart's (`ruby_rails`) and MeadowMart's (`node_express`) real
+  `TargetSpec`s through a single `fuzzlab.harness.multitarget.run_targets`
+  call (two real, independent, locally-booted second targets, one harness
+  invocation) — the actual toolkit-side Phase 10 `T10.6`-style deliverable.
+  ForgeCart's real `/search` reflected-XSS confirmation holds unchanged
+  when run alongside MeadowMart; `transfer_summary`'s `generalizes` is
+  correctly `False` (only one of the two scored targets has recall > 0,
+  since MeadowMart's `prototype_pollution`/`redos` classes are honestly
+  still unmapped in `fuzzlab.core.runmode._VULN_TO_CATEGORY` — the same
+  documented gap both Phase E lanes already flagged, not reintroduced
+  here). This closes out Category 1 (E-commerce)'s full Phase A-E build —
+  both apps' toolkit-side second-target proof is now complete; next is a
+  PR into `main` per §9.3 point 6.
+
 ## 2026-09-23
 - LAB (`claude/second-target-cat1-ecommerce`): ForgeCart storefront+admin
   (`ruby_rails`) Phase C/D/E — the four existing real Rails cells (reflected

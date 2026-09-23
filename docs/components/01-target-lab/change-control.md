@@ -3,6 +3,48 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0083 — §6 step 2: combine ForgeCart + MeadowMart `TargetSpec`s in one `run_targets` call (FR-LAB-87) (2026-09-23)
+- Change: New `tests/test_multitarget_category1_combined.py`. Both Phase E
+  lanes (`CC-LAB-0079` MeadowMart, `CC-LAB-0082` ForgeCart) built their own
+  `TargetSpec` and proved it in isolation, each explicitly flagging §6 step
+  2 (running both targets through one `fuzzlab.harness.multitarget.
+  run_targets` call) as out of their own scope. This entry closes that gap:
+  boots a real `ruby_rails` ForgeCart instance (`RailsLiveBootHarness`) and
+  a real `node_express` MeadowMart BFF instance (same boot helper
+  `tests/test_labgen_node_bff_multitarget.py` uses, inlined here since both
+  apps must be live simultaneously rather than as independent fixtures),
+  builds both apps' real `TargetSpec`s from their own Phase C ground truth,
+  and calls `run_targets([forgecart_spec, meadowmart_spec], store,
+  sender_for=...)` once.
+- Impact (other components / project): Component 1 (LAB) + Component 7
+  (FUZZ, `fuzzlab.harness.multitarget` consumed exactly as it already
+  exists — no change to that module). Closes the toolkit-side half of
+  category 1's own Phase 10 `T10.6`-style proof: `run_targets` accepting
+  two real, distinct, locally-booted second targets in one call and
+  producing a real combined `transfer_summary`. Does not touch
+  `fuzzlab/harness/multitarget.py` itself.
+- Risk (level; mitigation or accepted-risk justification): Low. Test-only
+  addition; no production code path changed. `transfer_summary`'s
+  `generalizes` field is correctly `False` here (ForgeCart alone has
+  recall > 0; MeadowMart's `prototype_pollution`/`redos` classes remain
+  unmapped in `fuzzlab.core.runmode._VULN_TO_CATEGORY`, the same
+  documented gap both Phase E lanes already flagged) — this entry does not
+  claim `generalizes=True`, only that the harness genuinely runs and
+  scores two real targets together, which is the actual deliverable.
+- Deliverables:
+  - [x] Both apps booted simultaneously, real HTTP against both — done
+  - [x] `run_targets` called once with both real `TargetSpec`s — done
+  - [x] ForgeCart's real `/search` XSS confirmation holds unchanged when
+    combined with a second live target — done
+  - [x] `transfer_summary`/`format_transfer` exercised for real over both
+    targets' outcomes — done
+- Effectiveness (assessed 2026-09-23): **met.** `python3 -m pytest -q
+  tests/test_multitarget_category1_combined.py` → 1 passed (real double
+  boot + real combined `run_targets` call). Full non-slow suite re-run:
+  1891 passed, 8 skipped, 30 deselected (up from 29 — the new test is
+  slow-marked) — no regression. This closes Category 1 (E-commerce)'s full
+  Phase A-E build; next is a PR into `main` per §9.3 point 6.
+
 ### CC-LAB-0082 — Phase E: ForgeCart `TargetSpec` wired into `multitarget.py` (FR-LAB-86) (2026-09-23)
 - Change: `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6/§9.4a/§9.5's
   Category 1 (E-commerce) Shopify/Rails pilot, Phase E, this app's half only
