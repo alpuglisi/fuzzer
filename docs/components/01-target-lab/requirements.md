@@ -3950,6 +3950,42 @@ lane) can submit a payload as
   deliberately split from this page per this session's own established
   lab-then-detection pattern, landed as its own separately-scoped
   follow-on.
+- **FR-LAB-123** *(Twitch's seventh real page: second access-control/IDOR
+  instance, `/channels/subscribers`; `CC-LAB-0183`, 2026-09-23).* Reuses
+  `CC-LAB-0178`'s already-built `access_control`/`db_row_by_id_lookup`
+  module set (`ReadChannelIdAndBroadcasterHeaderSource`/
+  `NoOwnershipCheckTransform`/`IdentityMatchBeforeFetchTransform`/
+  `ObjectLookupAuthorizationCheckSink`) verbatim at a second, distinct
+  real Twitch feature: `GET /channels/subscribers?channel_id=`, a
+  per-channel subscriber-roster lookup -- the same textbook OWASP
+  API1:2023 BOLA surface as `/channels/analytics` (`TWCH-0003`), reused
+  at a genuinely different real page, not a renamed copy of the same one.
+  **Zero new generator code**: only a new manifest
+  (`lab/manifests/access_control_subscribers_go_sample.yaml`, cells
+  `LABGEN-GO-0013`/`0014`) and one new
+  `_ROUTE_PARAMS["/channels/subscribers"]` entry in
+  `fuzzlab/labgen/emitters/go_net_http/__init__.py` -- no new module, op,
+  or safety-matrix entry, mirroring `CC-LAB-0179`'s own reuse-at-a-new-
+  route precedent. Ground truth `TWCH-0007`
+  (`vuln_class="access_control"`, `sink_context="object_lookup"`, both
+  pre-existing enum values from `TWCH-0003` -- no schema widening
+  needed). Real live-boot proof (same three-assertion shape as
+  `CC-LAB-0178`'s own live-boot test): the vulnerable twin leaks another
+  channel's subscriber data on a mismatched `channel_id`; the secure twin
+  rejects the same mismatch with a real HTTP 403; the secure twin still
+  serves the legitimate, matching-identity request.
+  **This is the detection-generalization proof itself, verified for
+  real, not assumed from theory**: `AccessControlIdorStrategy`
+  (`CC-FUZZ-0029`, already built for `TWCH-0003`) is keyed on
+  `vuln_class` + sink shape, never per-route, so it needed zero new audit-
+  rule or oracle-strategy code to confirm `TWCH-0007`'s new vulnerable
+  twin and correctly fail closed on its new secure twin -- proven against
+  a real `go build`/boot/HTTP round trip
+  (`test_real_boot_proves_the_access_control_idor_strategy_generalizes_
+  to_subscribers_route`) and against the real
+  `fuzzlab.harness.multitarget.run_targets` pipeline end to end
+  (`tests/test_multitarget_category4.py`), which shows Twitch's own real,
+  scored recall moving from 5/6 to 6/7 with no strategy/rule change.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

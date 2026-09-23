@@ -34,6 +34,9 @@ _MANIFESTS = (
     "lab/manifests/jwt_alg_confusion_go_sample.yaml",
     "lab/manifests/weak_token_entropy_go_sample.yaml",
     "lab/manifests/mass_assignment_go_sample.yaml",
+    # CC-LAB-0183: second access_control/db_row_by_id_lookup instance,
+    # reusing CC-LAB-0178's modules verbatim at a new route.
+    "lab/manifests/access_control_subscribers_go_sample.yaml",
 )
 
 

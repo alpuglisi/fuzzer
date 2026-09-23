@@ -151,6 +151,10 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     "/channels/settings": {},
     "/sessions/refresh": {},
     "/channels/profile": {},
+    # CC-LAB-0183: second instance of the access_control/db_row_by_id_lookup
+    # shape (CC-LAB-0178's own /channels/analytics), zero new generator
+    # code -- just this route-profile entry.
+    "/channels/subscribers": {"param_name": "channel_id"},
 }
 
 

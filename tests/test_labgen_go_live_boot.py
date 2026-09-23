@@ -286,6 +286,101 @@ def test_real_boot_proves_the_access_control_idor_strategy_end_to_end() -> None:
         )
 
 
+# -- Twitch's 7th real page (CC-LAB-0183): access-control/IDOR, second     --
+# -- instance, /channels/subscribers, reusing CC-LAB-0178's modules        --
+# -- verbatim at a new route -- zero new generator code.                  --
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_idor_differential_for_both_twins_at_subscribers_route() -> None:
+    """Same three-case differential as `test_real_boot_proves_the_idor_
+    differential_for_both_twins` (`CC-LAB-0178`), against the second,
+    distinct `/channels/subscribers` route (`CC-LAB-0183`) -- proving the
+    already-built shape genuinely generalizes to a new real page, not just
+    a renamed copy of the same one."""
+    manifest = load_manifest("lab/manifests/access_control_subscribers_go_sample.yaml")
+    emitter = GoEmitter()
+
+    with GoLiveBootHarness(emitter, manifest.cells) as harness:
+        # (a) vulnerable twin: mismatched IDs still leak the data.
+        vuln_resp = harness.request(
+            "GET", "/generated/labgen-go-0013?channel_id=victim-channel",
+            headers={"X-Broadcaster-Id": "attacker-channel"},
+        )
+        assert vuln_resp.status == 200, (
+            f"vulnerable twin rejected a mismatched channel_id (status {vuln_resp.status})"
+        )
+        assert "victim-channel" in vuln_resp.body and "subscriber_count" in vuln_resp.body, (
+            f"vulnerable twin did not leak the requested channel's subscriber data: {vuln_resp.body!r}"
+        )
+
+        # (b) secure twin: the same mismatched request is rejected outright.
+        secure_mismatch_resp = harness.request(
+            "GET", "/generated/labgen-go-0014?channel_id=victim-channel",
+            headers={"X-Broadcaster-Id": "attacker-channel"},
+        )
+        assert secure_mismatch_resp.status == 403, (
+            f"secure twin accepted a mismatched channel_id (status {secure_mismatch_resp.status}): "
+            f"{secure_mismatch_resp.body!r}"
+        )
+        assert "subscriber_count" not in secure_mismatch_resp.body
+
+        # (c) secure twin: the legitimate, matching-identity request still works.
+        secure_match_resp = harness.request(
+            "GET", "/generated/labgen-go-0014?channel_id=own-channel",
+            headers={"X-Broadcaster-Id": "own-channel"},
+        )
+        assert secure_match_resp.status == 200, (
+            f"secure twin rejected its own caller's legitimate request (status {secure_match_resp.status}): "
+            f"{secure_match_resp.body!r}"
+        )
+        assert "own-channel" in secure_match_resp.body and "subscriber_count" in secure_match_resp.body
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_access_control_idor_strategy_generalizes_to_subscribers_route() -> None:
+    """The real, already-built `AccessControlIdorStrategy` (`CC-FUZZ-0029`),
+    keyed only on `vuln_class`/sink shape, not per-route -- confirms this
+    new vulnerable twin and fails closed on the new secure twin with zero
+    new detection code, proving the existing detection genuinely
+    generalizes to a second instance of the same shape (`CC-LAB-0183`'s
+    own point)."""
+    from fuzzlab.oracle.probe import Candidate, Probe
+    from fuzzlab.oracle.strategies import AccessControlIdorStrategy
+
+    manifest = load_manifest("lab/manifests/access_control_subscribers_go_sample.yaml")
+    emitter = GoEmitter()
+
+    with GoLiveBootHarness(emitter, manifest.cells) as harness:
+
+        class _HarnessSender:
+            def __init__(self, path: str):
+                self._path = path
+
+            def send(self, url, param, value, timing=False, method="GET",
+                      location="query", content_type=None):
+                resp = harness.request("GET", f"{self._path}?{param}={value}")
+                return Probe(resp.status, resp.body)
+
+        strategy = AccessControlIdorStrategy()
+        vuln_cand = Candidate(url="http://h/generated/labgen-go-0013", param="channel_id",
+                              method="GET", location="query",
+                              vuln_class="access_control", category="access-control")
+        secure_cand = Candidate(url="http://h/generated/labgen-go-0014", param="channel_id",
+                                method="GET", location="query",
+                                vuln_class="access_control", category="access-control")
+
+        verdict = strategy.confirm(vuln_cand, _HarnessSender("/generated/labgen-go-0013"))
+        assert verdict is not None and verdict.confirmed, "strategy failed to confirm the real vulnerable twin"
+        assert verdict.vuln_class == "access_control"
+
+        assert strategy.confirm(secure_cand, _HarnessSender("/generated/labgen-go-0014")) is None, (
+            "strategy incorrectly confirmed the real secure twin"
+        )
+
+
 # -- Phase B increment 3: JWT alg:none confusion (jwt_signature_verification) --
 
 

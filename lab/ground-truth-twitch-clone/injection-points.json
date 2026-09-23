@@ -43,6 +43,13 @@
       "param": "body",
       "location": "body",
       "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0013",
+      "method": "GET",
+      "param": "channel_id",
+      "location": "query",
+      "rendering": "server-json"
     }
   ]
 }

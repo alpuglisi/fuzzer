@@ -3,6 +3,142 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0183 — Twitch's 7th real page: second access-control/IDOR instance, `/channels/subscribers` (FR-LAB-123) (2026-09-23)
+
+- Change: a cheap, low-risk depth increment for category 4's Twitch pick
+  (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§9.4): reuses
+  `CC-LAB-0178`'s already-built `access_control`/`db_row_by_id_lookup`
+  module set (`ReadChannelIdAndBroadcasterHeaderSource`/
+  `NoOwnershipCheckTransform`/`IdentityMatchBeforeFetchTransform`/
+  `ObjectLookupAuthorizationCheckSink` -- checked directly against
+  `fuzzlab/labgen/emitters/go_net_http/modules.py` and
+  `_MODULE_SET_BY_SHAPE` in `__init__.py` before starting, not assumed
+  from the task's own suggested names) verbatim at a second, distinct
+  route: `GET /channels/subscribers?channel_id=`, a per-channel
+  subscriber-roster lookup -- a real, plausible Twitch feature genuinely
+  distinct from `/channels/analytics` (`TWCH-0003`), the same textbook
+  OWASP API1:2023 BOLA surface reused at a second real page, not a
+  cosmetic rename of the first, mirroring `CC-LAB-0179`'s own
+  zero-new-generator-code "new manifest + new route entry + ground
+  truth" pattern for reusing an already-built shape at a new route.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`'s own precedent wording):** the `Agent`
+  tool for a two-independent-reviewer accuracy/adequacy pass was not
+  present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded here rather than silently
+  skipping the gate, per this task's own explicit instruction to flag
+  the substitution: (1) **accuracy** -- confirmed by direct source
+  inspection, not assumed: the four module class names above exist
+  verbatim in `modules.py`; `_MODULE_SET_BY_SHAPE[("access_control",
+  "db_row_by_id_lookup")]` exists and is unchanged; the served route is
+  derived from `cell_id`, not the manifest's own `route:` field (per this
+  emitter's own established convention), so no route-path collision risk
+  exists regardless of which path string the manifest declares; cell IDs
+  `LABGEN-GO-0013`/`0014` were confirmed free (highest existing Go cell
+  ID across every manifest in `lab/manifests/*.yaml` was `LABGEN-GO-0012`,
+  grepped directly); `AccessControlIdorStrategy`'s own confirmation
+  contract (HTTP 200, non-empty body, no denial-marker text, both probed
+  IDs echoed back, the two bodies differing) was checked against the
+  exact rendered vulnerable-twin response template
+  (`object_lookup_authorization_check.go.j2`, unchanged, echoes
+  `channel_id` verbatim into the JSON body) before assuming it would
+  confirm, not assumed from the class/shape match alone. (2) **adequacy**
+  -- checked that this increment does not silently duplicate an existing
+  route (grepped `_ROUTE_PARAMS` for `/channels/subscribers`: absent), does
+  not need a second, redundant strategy (the task's own explicit
+  constraint, honored: no new `Rule`/`ConfirmationStrategy` code was
+  written at all), and that the "detection already works automatically"
+  claim was actually run against a real booted instance rather than
+  asserted from theory (see below) -- both the dedicated live-boot
+  strategy test and the full `fuzzlab.harness.multitarget.run_targets`
+  pipeline were executed for real before this entry claims the recall
+  move.
+  - **Real Twitch functionality (grounded, not invented)**: a per-channel
+    subscriber-roster/count lookup, the same OWASP API1:2023 BOLA class
+    `CC-LAB-0178`'s analytics lookup already models, at a genuinely
+    different real API-edge feature -- consistent with Twitch's own
+    documented "Go-centric microservices, new API edge" architecture
+    (`docs/research/site-architecture-survey-functionality-twitch.md`).
+  - **Vulnerable** (`LABGEN-GO-0013`, `no_ownership_check`): returns
+    canned subscriber-roster data for whatever `channel_id` is given,
+    ignoring `X-Broadcaster-Id` entirely. **Secure** (`LABGEN-GO-0014`,
+    `identity_match_before_fetch`): requires `channel_id ==
+    X-Broadcaster-Id`; a mismatch returns a real HTTP 403 with no data.
+  - **Zero new generator code, verified not just claimed**: the only
+    non-ground-truth code change is one new
+    `_ROUTE_PARAMS["/channels/subscribers"] = {"param_name": "channel_id"}`
+    entry in `fuzzlab/labgen/emitters/go_net_http/__init__.py` (config,
+    not a new class/template); rendering both cells was run directly
+    before writing any test and produced byte-for-byte the same handler
+    shape as `LABGEN-GO-0005`/`0006`, differing only in the served path
+    and `handleLabgenGo00{13,14}` function name.
+  - **Real, live-boot proof** (`tests/test_labgen_go_live_boot.py`, same
+    three-assertion shape as `CC-LAB-0178`'s own test): (a) the
+    vulnerable twin leaks another channel's subscriber data on a
+    mismatched `channel_id`; (b) the secure twin rejects the same
+    mismatch with a real HTTP 403, no data; (c) the secure twin still
+    serves the legitimate, matching-identity request.
+  - **Detection generalization, verified for real against a real booted
+    app, not asserted from theory**: a new live-boot test drives the
+    real, already-built `AccessControlIdorStrategy` (`CC-FUZZ-0029`)
+    directly against this new cell pair -- confirms the vulnerable twin,
+    fails closed on the secure twin, with zero new strategy/rule code.
+    The real `fuzzlab.harness.multitarget.run_targets` pipeline was then
+    run end to end against a real booted Twitch instance
+    (`tests/test_multitarget_category4.py::
+    test_both_apps_run_through_multitarget_for_real`) and shows Twitch's
+    own real, scored recall moving from `5/6` to `6/7` (`tp=6, fp=0`)
+    with no audit-rule/strategy change -- the whole point of this
+    increment, proving the existing detection generalizes to a second
+    instance of the same shape rather than assuming it would.
+  - Ground truth: `TWCH-0007` added to `lab/ground-truth-twitch-clone/`
+    (`vuln_class="access_control"`, `sink_context="object_lookup"` --
+    both pre-existing enum values from `TWCH-0003`, no schema widening
+    needed).
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/__init__.py` (`_ROUTE_PARAMS`,
+    one new route entry)
+  - `lab/manifests/access_control_subscribers_go_sample.yaml` (new)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended)
+  - `tests/test_labgen_go_net_http_conformance.py` (manifest list
+    extended)
+  - `tests/test_labels_contract_category4.py` (extended)
+  - `tests/test_labgen_go_live_boot.py` (two new live-boot tests)
+  - `tests/test_multitarget_category4.py` (`_twitch_cells()` extended;
+    recall assertions moved 5/6 -> 6/7)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-123`, new)
+- Impact (other components / project): additive only -- one new
+  `_ROUTE_PARAMS` key (cannot collide with any existing route since served
+  routes are cell-ID-derived, not path-derived), one new manifest, ground
+  truth extension. No existing cell's rendered output changes (verified:
+  `go_net_http`'s full existing test suite re-run unmodified-in-assertion
+  alongside the new tests). No new detection code in `fuzzlab.oracle`/
+  `fuzzlab.core.runmode` at all -- this increment is purely a
+  generalization proof of already-shipped detection capability.
+- Risk (level; mitigation or accepted-risk justification): **low**. Reuses
+  fully-built, already-tested modules verbatim; the only genuinely new
+  artifacts are config (manifest + one route-params entry) and ground
+  truth. Verified end to end with a real `go build`/boot/HTTP round trip
+  and a real `run_targets` pipeline run, not assumed from the shared-
+  module argument alone.
+- Deliverables:
+  - [x] New manifest + one `_ROUTE_PARAMS` entry, zero new module/op code
+  - [x] Real live-boot proof (3 assertions, same shape as `CC-LAB-0178`)
+  - [x] Ground truth extended (`TWCH-0007`)
+  - [x] Detection generalization verified live (dedicated strategy
+    live-boot test + real `run_targets` pipeline run) -- recall 5/6 -> 6/7
+  - [x] Full non-slow suite + the relevant category-4/`go_net_http` slow
+    tests re-verified green
+  - [x] Pre-change review gate's `Agent`-tool absence flagged explicitly,
+    substituted with a documented self-review (accuracy + adequacy),
+    matching `CC-LAB-0182`'s own precedent wording
+- Effectiveness (assessed 2026-09-23): met -- Twitch now has seven real,
+  live-boot-proven pages, and the project's existing `access_control`
+  detection is now proven, not just assumed, to generalize across
+  distinct routes of the same shape with zero new detection code.
+
 ### CC-LAB-0182 — Twitch's 6th real page, channel-profile mass assignment (FR-LAB-122) (2026-09-23)
 
 - Change: instantiates `lab/safety_matrix.yaml`'s existing

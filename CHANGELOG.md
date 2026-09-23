@@ -4,6 +4,32 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Twitch's 7th real page — access-control/IDOR generalizes for free, CC-LAB-0183/FR-LAB-123)
+- Target lab: a cheap depth increment for category 4's Twitch pick —
+  reuses `CC-LAB-0178`'s already-built `access_control`/
+  `db_row_by_id_lookup` module set verbatim at a second, distinct real
+  route, `GET /channels/subscribers?channel_id=` (a subscriber-roster
+  lookup, the same OWASP API1:2023 BOLA surface as `/channels/analytics`,
+  reused at a genuinely different real Twitch feature). Zero new
+  generator code — one new manifest
+  (`lab/manifests/access_control_subscribers_go_sample.yaml`, cells
+  `LABGEN-GO-0013`/`0014`) and one new `_ROUTE_PARAMS` route-profile
+  entry, mirroring `CC-LAB-0179`'s own reuse-at-a-new-route precedent.
+  Ground truth `TWCH-0007` added; no schema widening needed. Real
+  live-boot proof (three assertions, mirroring `CC-LAB-0178`'s own test).
+  **The point of this increment**: verified, not assumed, that the
+  already-built `AccessControlIdorStrategy` (`CC-FUZZ-0029`) — keyed on
+  `vuln_class` + sink shape, never per-route — confirms this new
+  vulnerable twin and fails closed on its new secure twin with zero new
+  audit-rule/strategy code, both via a dedicated live-boot strategy test
+  and via a real, executed `fuzzlab.harness.multitarget.run_targets`
+  pipeline run against a real booted app: Twitch's own real, scored
+  recall moves from 5/6 to 6/7 (`tp=6, fp=0`). Pre-change review gate's
+  `Agent` tool was absent from this session's toolset (checked, not
+  assumed); substituted with a documented, rigorous self-review
+  (accuracy + adequacy), flagged explicitly in `CC-LAB-0183`, matching
+  `CC-LAB-0182`'s own precedent for this same substitution.
+
 ## 2026-09-23 (FUZZ/AUD: real detection for `mass_assignment`)
 - Fuzzing harness/oracle: the deliberately-separated detection follow-on
   to `CC-LAB-0182` (Twitch's channel-profile mass-assignment page) — a

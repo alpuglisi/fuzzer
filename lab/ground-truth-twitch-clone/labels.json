@@ -73,6 +73,18 @@
       "expected_vulnerable": true,
       "rendering": "server-json",
       "notes": "A channel-profile-update endpoint unmarshals the raw request body directly onto the live channel record struct (CWE-915) -- any JSON field present, including `is_partner` (never exposed by this endpoint's own intended form), takes effect. Modeled on Twitch's real channel-profile-update surface, a realistic API-edge shape for this app identity. Reuses lab/safety_matrix.yaml's existing orm_entity_bulk_assign sink family and unfiltered_object_assign/typed_schema_allowlist ops (added by CC-LAB-0063 for the corpus-examples/mass-assignment research; already instantiated on php_current/ruby_rails/php_laravel) -- the first go_net_http instance of this mechanism. `param`/`location` are set to the whole-body-point convention (`body`/`body`) this project already uses for other no-per-field-param whole-body cases (e.g. TWCH-0005/weak_token_entropy), since the privileged field (`is_partner`) is one of several JSON keys in the request body, not a single named param -- also required for `fuzzlab.harness.auto.points_from_ground_truth`'s own content-type detection, which only marks a body point as JSON when `param==\"body\"` exactly. `LABGEN-GO-0011` in lab/manifests/mass_assignment_go_sample.yaml, served at `/generated/labgen-go-0011` (same cell_id-derived-route convention as TWCH-0001..0005) -- never a PFF-* case."
+    },
+    {
+      "case_id": "TWCH-0007",
+      "url": "/generated/labgen-go-0013",
+      "method": "GET",
+      "param": "channel_id",
+      "location": "query",
+      "vuln_class": "access_control",
+      "sink_context": "object_lookup",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "channel_id query param used to look up a channel's subscriber roster/count with no check that it matches the caller's own X-Broadcaster-Id (CWE-639/862, broken object-level authorization / IDOR) -- modeled on Twitch's real per-channel subscriber-roster API, a second, distinct textbook OWASP API1:2023 BOLA surface alongside TWCH-0003's per-channel analytics lookup, a realistic public API-edge feature for this app identity. Reuses CC-LAB-0178's already-built read_channel_id_and_broadcaster_header source, no_ownership_check/identity_match_before_fetch transforms, and object_lookup_authorization_check sink verbatim (lab/safety_matrix.yaml's existing db_row_by_id_lookup sink family) -- zero new generator code, only a new lab/manifests/access_control_subscribers_go_sample.yaml manifest and one new _ROUTE_PARAMS['/channels/subscribers'] route-profile entry in fuzzlab/labgen/emitters/go_net_http/__init__.py (config, not a new class/template), mirroring CC-LAB-0179's own zero-new-generator-code reuse-at-a-new-route precedent. `X-Broadcaster-Id` is the same fixed demo header CC-LAB-0178 already documented as modeling only the ownership-check-bypass mechanism in isolation, never a real session/auth system. `LABGEN-GO-0013` in lab/manifests/access_control_subscribers_go_sample.yaml, served at `/generated/labgen-go-0013` (same cell_id-derived-route convention as TWCH-0001..0006) -- never a PFF-* case. Verified live: AccessControlIdorStrategy (already built for TWCH-0003, keyed on vuln_class=access_control + sink shape, not per-route) confirms this new vulnerable twin with no new audit-rule/strategy code, and correctly does not confirm the secure twin (LABGEN-GO-0014)."
     }
   ]
 }

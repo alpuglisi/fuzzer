@@ -10,13 +10,19 @@ the `run_targets()` passthrough gap and added the project's first `ssrf`
 audit rule + oracle strategies).
 
 **What this now proves, and what remains honestly open (recorded here, not
-routed around).** Twitch now has six real cells (webhook-signature, SSRF,
-access-control/IDOR, JWT `alg:none` confusion, predictable session
-tokens, and channel-profile mass assignment -- `CC-LAB-0178`/
-`CC-LAB-0180`/`CC-LAB-0181`/`CC-LAB-0182`, the "coherent page/route set"
-depth work), and four of the six now confirm for real (mass-assignment's
-own detection follow-on is a separately-scoped commit -- see this
-module's own body below for the split).
+routed around).** Twitch now has seven real cells (webhook-signature,
+SSRF, access-control/IDOR, JWT `alg:none` confusion, predictable session
+tokens, channel-profile mass assignment, and a second access-control/IDOR
+instance at `/channels/subscribers` -- `CC-LAB-0178`/`CC-LAB-0180`/
+`CC-LAB-0181`/`CC-LAB-0182`/`CC-LAB-0183`, the "coherent page/route set"
+depth work), and six of the seven now confirm for real. The second
+access-control/IDOR instance (`TWCH-0007`, `CC-LAB-0183`) needed zero new
+detection code: `AccessControlIdorStrategy` (already built for `TWCH-0003`,
+`CC-FUZZ-0029`) is keyed on `vuln_class` + sink shape, not per-route, and
+confirmed the new vulnerable twin (and correctly failed closed on its new
+secure twin) as-is, verified against a real booted app -- proving the
+existing detection genuinely generalizes to a second instance of the same
+shape.
 The predictable-session-token case (`TWCH-0005`, `CC-FUZZ-0034`):
 `PredictableTokenSourceStrategy` sees the vulnerable twin
 (`LABGEN-GO-0009`) issue two consecutive tokens that both parse as
@@ -119,7 +125,15 @@ def _twitch_cells():
     jwt = load_manifest("lab/manifests/jwt_alg_confusion_go_sample.yaml").cells
     weak_token = load_manifest("lab/manifests/weak_token_entropy_go_sample.yaml").cells
     mass_assignment = load_manifest("lab/manifests/mass_assignment_go_sample.yaml").cells
-    return webhook + ssrf + access_control + jwt + weak_token + mass_assignment
+    # CC-LAB-0183: second access_control/db_row_by_id_lookup instance
+    # (/channels/subscribers), reusing CC-LAB-0178's modules verbatim.
+    access_control_subscribers = load_manifest(
+        "lab/manifests/access_control_subscribers_go_sample.yaml"
+    ).cells
+    return (
+        webhook + ssrf + access_control + jwt + weak_token + mass_assignment
+        + access_control_subscribers
+    )
 
 
 def _netflix_cell():
@@ -163,15 +177,21 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
 
     # Twitch: SSRF (TWCH-0002), access-control/IDOR (TWCH-0003), JWT
     # alg:none confusion (TWCH-0004), predictable session tokens
-    # (TWCH-0005), and mass assignment (TWCH-0006, CC-LAB-0182 +
-    # CC-AUD-0022/CC-FUZZ-0035) are all now real, confirmed findings.
+    # (TWCH-0005), mass assignment (TWCH-0006, CC-LAB-0182 +
+    # CC-AUD-0022/CC-FUZZ-0035), and the second access-control/IDOR
+    # instance at /channels/subscribers (TWCH-0007, CC-LAB-0183) are all
+    # now real, confirmed findings. TWCH-0007 needed zero new detection
+    # code -- `AccessControlIdorStrategy` (already built for TWCH-0003) is
+    # keyed on vuln_class + sink shape, not per-route, and confirms the new
+    # vulnerable twin (and correctly fails closed on its new secure twin)
+    # exactly as-is, verified for real against this same real booted app.
     # webhook-signature (TWCH-0001) still has no rule/strategy (a CWE-347
     # timing side channel, empirically infeasible for this project's
-    # wall-clock HTTP measurement model). Five of six positives confirm
+    # wall-clock HTTP measurement model). Six of seven positives confirm
     # here.
     twitch_report = by_name["twitch-clone"].report
-    assert twitch_report.tp == 5 and twitch_report.fp == 0
-    assert round(twitch_report.recall, 4) == round(5 / 6, 4)
+    assert twitch_report.tp == 6 and twitch_report.fp == 0
+    assert round(twitch_report.recall, 4) == round(6 / 7, 4)
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002) still has no rule/strategy (see module
@@ -183,7 +203,7 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
-    assert round(summary["macro_recall"], 4) == round(((5 / 6) + (1 / 2)) / 2, 4)
+    assert round(summary["macro_recall"], 4) == round(((6 / 7) + (1 / 2)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True
