@@ -3,6 +3,65 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0039 — fix: oracle-facing `requests`-based senders silently followed HTTP redirects (BUG-0042/PA-0044) (2026-09-23)
+
+- Change: `fuzzlab/tools/probesender.py::RequestsProbeSender.send()`,
+  `fuzzlab/greybox/run.py::RequestsCorrelatingSender.send_correlated()`,
+  and `fuzzlab/tools/blind_sqli_fuzzer.py::RequestsSender.get()` now all
+  pass `allow_redirects=False` explicitly on every `requests` call, matching
+  `fuzzlab.core.http`'s own authenticated (`SeamProbeSender`) path, which
+  already did. Found while wiring `lab/target-lab`'s `CC-LAB-0198` cell
+  (Twitch's first `http_header_injection` page, a `Location:`-header
+  redirect endpoint) into the real, full `run_targets`/`RequestsProbeSender`
+  pipeline for the first time: the generic, vuln-class-agnostic
+  `SstiStrategy` sent its own `#{a*b}` payload as that endpoint's
+  `destination` query param; the vulnerable twin echoed it verbatim into
+  a real `Location: #{a*b}` response header (its own honest vulnerability,
+  CWE-113); `requests`' default redirect-following resolved that bare
+  `#`-fragment value to the SAME url on every hop (fragments are never
+  sent to the server), an infinite self-redirect loop that crashed
+  `run_targets()` with `requests.exceptions.TooManyRedirects`.
+  Independently of that crash, `OpenRedirectStrategy` (`fuzzlab/oracle/
+  strategies.py`) reads `probe.headers.get("location")` off the FIRST,
+  un-followed response -- with redirects silently followed by default, it
+  could never have worked correctly against a real target through this
+  sender at all (its own unit tests in `tests/test_oracle_vectors.py` use
+  hand-rolled fake `Sender`s that hand back the un-followed response
+  directly, so this gap was invisible to them).
+- Impact (other components / project): `FUZZ` only. No interface/contract
+  change -- `Probe`'s own shape is unchanged, only which response it now
+  correctly reports. `LAB`'s `CC-LAB-0198` depends on this fix to run
+  through the shared multitarget pipeline without crashing.
+- Risk (level; mitigation or accepted-risk justification): Low. Purely a
+  bug fix restoring the same "report the real response" contract
+  `fuzzlab.core.http`'s sibling sender already honors; every existing
+  caller of these three senders keeps working (none relied on
+  redirect-following, since no prior cell ever exercised it through
+  them). Mitigated by updating the fake-session test doubles in `tests/
+  test_probesender.py`/`tests/test_fuzzer_seam.py` to accept and record
+  `allow_redirects`, plus new regression assertions that it is actually
+  `False`.
+- Deliverables:
+  - [x] `fuzzlab/tools/probesender.py` -- `allow_redirects=False`
+  - [x] `fuzzlab/greybox/run.py` -- `allow_redirects=False`
+  - [x] `fuzzlab/tools/blind_sqli_fuzzer.py` -- `allow_redirects=False`
+  - [x] `tests/test_probesender.py`/`tests/test_fuzzer_seam.py` -- fake
+    sessions updated + new regression assertions
+  - [x] `docs/bugs/BUG-0042-*.md` -- full RCA, prior-PA-failure analysis
+    (`PA-0030`/`BUG-0028`), recurrence review
+  - [x] `docs/PREVENTIVE_ACTIONS.md` -- `PA-0044` (supersedes/strengthens
+    `PA-0030`)
+  - [x] `ERROR_LOG.md` -- dated entry
+  - [x] `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    -- new `NFR-FUZZ-response-fidelity`
+- Effectiveness (assessed 2026-09-23): Achieved. `tests/
+  test_multitarget_category4.py::test_both_apps_run_through_multitarget_
+  for_real` reproducibly crashed with `TooManyRedirects` before this fix
+  and reproducibly passes after it (verified both ways); `tests/
+  test_probesender.py::test_requests_probe_sender_never_follows_
+  redirects` and the updated `test_requests_sender_unchanged_standalone_
+  behavior` both pass; full non-slow suite green at the stable baseline.
+
 ### CC-FUZZ-0038 — `GoTemplateSstiStrategy`: closes `go_net_http`'s SSTI detection gap (2026-09-23)
 
 - Change: builds a genuinely new, Go-`text/template`-syntax-aware

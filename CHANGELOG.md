@@ -4,6 +4,40 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (lab: Twitch's 13th real page, this project's first http_header_injection instance on any stack; fix: oracle senders silently followed redirects, BUG-0042/PA-0044)
+- `go_net_http` gains Twitch's 13th real page, `GET /channels/redirect?destination=`
+  (a post-subscribe/-follow redirect convenience endpoint) — this project's
+  FIRST instantiation, on any stack, of `lab/safety_matrix.yaml`'s existing
+  `http_response_header_value` sink family / `http_header_injection`
+  concern (CWE-113, HTTP response splitting), added by `CC-LAB-0063` for
+  the header-injection corpus research but never before built into a
+  generated lab app. Checked empirically before design (per this task's
+  own honest-judgment discipline): Go's ordinary `net/http` header-writing
+  path already sanitizes bare CR/LF, so the vulnerable twin instead uses
+  `http.Hijacker.Hijack()` — a real, standard mechanism, not a contrivance
+  — mirroring this exact op's own Node/PHP corpus precedent
+  (raw-socket-write bypassing a framework's own CRLF protection). The
+  secure twin validates against a strict site-relative-path allowlist
+  before ever reaching the ordinary path. Real, live-boot-proven
+  differential; detection (audit rule/oracle strategy) is genuinely
+  unbuilt project-wide for this concern, so this stays an explicit,
+  tracked open follow-on, the same lab-then-detection split `CC-LAB-0190`/
+  `CC-LAB-0196` already used. Twitch's ground truth grows from 12 to 13
+  cases (`TWCH-0013`); `CC-LAB-0198`/`FR-LAB-138`.
+- Fix: wiring the new cell into the real, full `run_targets` pipeline
+  surfaced a genuine bug — `fuzzlab.tools.probesender.RequestsProbeSender`
+  (and, found by the same sweep, `fuzzlab.greybox.run.
+  RequestsCorrelatingSender` and `fuzzlab.tools.blind_sqli_fuzzer.
+  RequestsSender`) silently followed HTTP redirects by `requests`' own
+  default, crashing `run_targets()` with `TooManyRedirects` the moment a
+  caller-controlled value echoed into a real `Location:` header resolved
+  (via URL-fragment semantics) to a self-referencing redirect. All three
+  now pass `allow_redirects=False` explicitly, matching
+  `fuzzlab.core.http`'s own authenticated path, which already had it
+  right. `BUG-0042`/`PA-0044` (strengthens `PA-0030` from `BUG-0028`,
+  which named the same root-cause class but scoped it to conformance
+  harnesses only, not every sender feeding the oracle), `CC-FUZZ-0039`.
+
 ## 2026-09-23 (fix: PA-0042's own fix missed a second hardcoded recall assertion in the same file, BUG-0041/PA-0043)
 - `tests/test_multitarget_category4.py::test_both_apps_run_through_multitarget_for_real`'s
   own hardcoded Netflix recall assertion (`1/10`) went stale the moment

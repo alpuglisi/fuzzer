@@ -31,6 +31,25 @@ directory with no confinement check at all (vulnerable, CWE-22,
 resolved absolute form and rejects anything that escapes the export
 directory's own real form (secure, ``realpath_confine``). Convention 2
 again: the manifest's one op names a sink module directly.
+
+Phase B, thirteenth increment (``CC-LAB-0198``/``FR-LAB-138``): this
+project's first ``http_header_injection``/``http_response_header_value``
+instance on any stack -- a post-subscribe/-follow redirect convenience
+endpoint (``GET /channels/redirect?destination=``) that either hijacks the
+raw connection and hand-writes a ``302`` response line with the
+caller-supplied ``destination`` concatenated straight into the
+``Location:`` header, no CR/LF stripping (vulnerable, CWE-113,
+``raw_socket_response_write``), or validates ``destination`` against a
+strict site-relative-path allowlist before using Go's ordinary
+``w.Header().Set()``/``w.WriteHeader()`` path (secure, ``allowlist_and_
+runtime_crlf_rejection``). Go's own ordinary header-writing path was
+verified, empirically, to already replace a stray CR/LF byte with a space
+before writing to the wire -- see this increment's own change-control
+entry -- so the vulnerable twin deliberately bypasses that path via
+``http.Hijacker`` (a real, standard mechanism, not a contrivance) rather
+than forcing an honest-but-impossible vulnerable instance through the
+ordinary API. Convention 2 again: the manifest's one op names a sink
+module directly.
 """
 
 from __future__ import annotations
@@ -761,6 +780,56 @@ class FileLoadedTemplateNameSink(TemplateModule):
         )
 
 
+class RawSocketResponseWriteSink(TemplateModule):
+    """The ``raw_socket_response_write`` op (``lab/safety_matrix.yaml``,
+    ``http_response_header_value`` family, ``no_effect`` -- added by
+    ``CC-LAB-0063``; this project's FIRST instantiation of this family/
+    concern on any stack, ``CC-LAB-0198``): a "redirect me here after
+    subscribing/following" convenience endpoint (``GET /channels/
+    redirect?destination=`` -- a real pattern streaming platforms use for
+    post-action redirects) hijacks the connection
+    (``http.ResponseWriter.(http.Hijacker).Hijack()``, a real, standard
+    net/http mechanism) and writes a raw ``HTTP/1.1 302`` response
+    line-by-line, concatenating the caller-supplied ``destination`` value
+    straight into the ``Location:`` line with no CR/LF stripping at all
+    (CWE-113). This bypasses Go's own net/http response-header-writing
+    path, which -- verified empirically before this shape was designed,
+    see this op's own change-control entry -- already silently replaces a
+    bare CR/LF byte reaching ``w.Header().Set()`` with a space before
+    writing to the wire, making an honest vulnerable instance impossible
+    to construct through that ordinary path in Go. A **sink** module, not
+    a transform (Convention 2, like SSRF/mass-assignment/file-upload/
+    price-integrity/path-traversal/ssti): the vulnerable/secure difference
+    here is one inseparable hijack-and-hand-roll-vs-validate-and-use-the-
+    ordinary-header-API operation, not a value rewrite feeding a shared
+    sink."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "raw_socket_response_write", "sink", _SINK_ENV, "raw_socket_response_write.go.j2"
+        )
+
+
+class AllowlistAndRuntimeCrlfRejectionSink(TemplateModule):
+    """The ``allowlist_and_runtime_crlf_rejection`` op (``lab/safety_
+    matrix.yaml``, ``http_response_header_value`` family, ``neutralises``
+    -- the secure twin): rejects (HTTP 400) any ``destination`` value that
+    does not match a strict site-relative-path allowlist regex
+    (``^/[A-Za-z0-9/_-]*$``, no ``\\r``/``\\n``/any other header-breaking
+    character) before ever reaching Go's ordinary
+    ``w.Header().Set()``/``w.WriteHeader()`` path -- which, as this op's
+    own change-control entry documents empirically, independently
+    replaces any stray CR/LF byte with a space before writing the response
+    to the wire, a second, redundant layer of protection this twin never
+    relies on alone."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "allowlist_and_runtime_crlf_rejection", "sink", _SINK_ENV,
+            "allowlist_and_runtime_crlf_rejection.go.j2",
+        )
+
+
 class RenderOnlyComplexity(TemplateModule):
     """Wraps the composed source/transform/sink body as the entire body of
     one ``net/http.HandlerFunc`` -- the Go analogue of every other stack's
@@ -813,6 +882,8 @@ SINKS: dict[str, Module] = {
     "realpath_confine": RealpathConfineSink(),
     "user_supplied_template_compile": UserSuppliedTemplateCompileSink(),
     "file_loaded_template_name": FileLoadedTemplateNameSink(),
+    "raw_socket_response_write": RawSocketResponseWriteSink(),
+    "allowlist_and_runtime_crlf_rejection": AllowlistAndRuntimeCrlfRejectionSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "render_only": RenderOnlyComplexity(),

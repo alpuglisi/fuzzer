@@ -790,6 +790,30 @@ rewards) derives from it.
   `--max-mutation-variants`/`--allow-destructive` flags `CC-FUZZ-0019` (Lane
   C1/M8-wiring) added — was added by `CC-FUZZ-0022` (lane D0b), sequenced after
   C1 since both touch `fuzzlab/greybox/greybox_cli.py`.
+- **NFR-FUZZ-response-fidelity** *(`CC-FUZZ-0039`, `BUG-0042`/`PA-0044`)*
+  Every sender that builds a `Probe` (or a timing measurement) a
+  `ConfirmationStrategy`/timing oracle inspects as "the real target's
+  response" must report that response as the target actually sent it for
+  the specific request the strategy issued — never a client library
+  default's silent transformation of it (redirect-following in
+  particular, mirroring `PA-0030`'s harness-level rule, now widened to
+  cover senders too) — unless following that transformation is the
+  literal thing the strategy needs to observe. `RequestsProbeSender`
+  (`fuzzlab/tools/probesender.py`), `RequestsCorrelatingSender`
+  (`fuzzlab/greybox/run.py`), and `RequestsSender`
+  (`fuzzlab/tools/blind_sqli_fuzzer.py`) all now pass
+  `allow_redirects=False` explicitly, matching `fuzzlab.core.http`'s own
+  authenticated (`SeamProbeSender`) path, which already did. Found the
+  hard way: `OpenRedirectStrategy` needs the FIRST, un-followed response's
+  own `Location:` header, and a caller-controlled value echoed into a
+  real `Location:` header can resolve to a self-referencing redirect
+  (e.g. a bare `#...`-fragment value), which a redirect-following sender
+  chases forever until `requests.exceptions.TooManyRedirects` crashes the
+  whole run. A component whose job genuinely is to follow redirects (a
+  login-flow fetcher discovering an authenticated session, a crawler
+  discovering pages) is explicitly NOT covered by this requirement —
+  the discriminator is whether the caller is a confirmation/timing
+  oracle that needs the un-followed response.
 
 ## 5. Interfaces and data contracts
 Reads `candidate` rows (and scheduler choices); writes `attempt` rows (features,

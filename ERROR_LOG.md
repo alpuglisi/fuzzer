@@ -18,6 +18,43 @@ Format per entry:
 
 ---
 
+## 2026-09-23 — the oracle's own `RequestsProbeSender`/`RequestsCorrelatingSender` silently followed HTTP redirects (fixed, BUG-0042/PA-0044)
+
+- **Symptom:** wiring `CC-LAB-0198`'s new `http_header_injection` Twitch
+  cell (`/channels/redirect`, echoes a caller-supplied `destination` query
+  param into a real `Location:` response header) into
+  `tests/test_multitarget_category4.py`'s real, full `run_targets`
+  pipeline crashed with `requests.exceptions.TooManyRedirects: Exceeded 30
+  redirects.` The generic `SstiStrategy`'s own `#{a*b}` payload, echoed
+  into `Location: #{a*b}`, resolves (as a URL *fragment*, never sent to
+  the server) to the SAME url on every redirect hop — an infinite
+  self-redirect loop `requests` followed by default.
+- **Root cause:** `fuzzlab.tools.probesender.RequestsProbeSender.send()`
+  (and, found by the same sweep, `fuzzlab.greybox.run.
+  RequestsCorrelatingSender.send_correlated()` and `fuzzlab.tools.
+  blind_sqli_fuzzer.RequestsSender.get()`) called `requests`' own
+  `.request()`/`.get()` with no `allow_redirects` override, so `requests`'
+  library default (`True`) silently applied — following any redirect
+  a real target issues and reporting the FOLLOWED chain's final response
+  to a `ConfirmationStrategy` that needs the ORIGINAL, un-followed
+  response (`OpenRedirectStrategy` reads `Location:` off exactly that
+  first response). `fuzzlab.core.http`'s own authenticated path already
+  set `allow_redirects=False` for this reason — the unauthenticated
+  senders never received the same fix.
+- **Remediation:** added `allow_redirects=False` to all three senders;
+  updated their fake-session test doubles
+  (`tests/test_probesender.py`/`tests/test_fuzzer_seam.py`) to accept and
+  record the kwarg, and added a regression test asserting it is actually
+  passed. Re-verified against a real booted app:
+  `test_both_apps_run_through_multitarget_for_real` reproducibly crashed
+  before the fix and reproducibly passes after it.
+- **Status:** Fixed (BUG-0042/PA-0044 — see `docs/bugs/BUG-0042-oracle-
+  probe-senders-silently-followed-redirects.md`; strengthens `PA-0030`
+  from `BUG-0028`, which named the same root-cause class but scoped it to
+  conformance harnesses only, not every sender feeding the oracle).
+
+---
+
 ## 2026-09-23 — PA-0042's own fix missed a second hardcoded recall assertion in the same test file (fixed, BUG-0041/PA-0043)
 
 - **Symptom:** `CC-LAB-0197` (Netflix's 11th real page, an `ssti` instance)

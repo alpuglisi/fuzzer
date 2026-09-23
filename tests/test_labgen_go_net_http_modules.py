@@ -379,3 +379,45 @@ def test_file_loaded_template_name_sink_never_compiles_the_tainted_value() -> No
     assert "knownVars[req.Template]" in result.code
     assert 'knownVars := map[string]string{' in result.code
     assert '"uptime":  "3h27m"' in result.code
+
+
+# -- Phase B thirteenth increment: HTTP response header injection
+# (http_response_header_value, CC-LAB-0198) --
+
+
+def test_http_header_injection_shape_reuses_the_url_query_param_source() -> None:
+    # Convention 2 (like SSRF/path-traversal): no new source module
+    # needed -- the existing read_url_query_param source publishes
+    # whatever var_name the route profile names.
+    result = SOURCES["read_url_query_param"].render(
+        {"var_name": "destination", "param_name": "destination"}
+    )
+    assert 'destination := r.URL.Query().Get("destination")' in result.code
+
+
+def test_raw_socket_response_write_sink_hijacks_and_concatenates_with_no_crlf_stripping() -> None:
+    result = SINKS["raw_socket_response_write"].render({"var_name": "destination"})
+    # Vulnerable: bypasses net/http's own header-writing path entirely via
+    # Hijack(), then concatenates the caller-supplied value straight into
+    # the Location: line -- no strings.ReplaceAll/regexp/any CRLF-
+    # stripping call anywhere in this sink's own code.
+    assert "hj, ok := w.(http.Hijacker)" in result.code
+    assert "conn, bufrw, err := hj.Hijack()" in result.code
+    assert '"Location: " + destination + "\\r\\n"' in result.code
+    assert "strings.Replace" not in result.code
+    assert "regexp" not in result.code
+
+
+def test_allowlist_and_runtime_crlf_rejection_sink_rejects_before_using_the_ordinary_header_api() -> None:
+    result = SINKS["allowlist_and_runtime_crlf_rejection"].render({"var_name": "destination"})
+    # Secure: an explicit allowlist regex gates the value BEFORE it ever
+    # reaches Go's ordinary header-writing path -- never a raw hijacked
+    # write, never relying on the allowlist alone (the ordinary path's own
+    # ordinary net/http sanitization is this shape's second layer, per
+    # this sink's own template comment).
+    assert "regexp.MustCompile(`^/[A-Za-z0-9/_-]*$`)" in result.code
+    assert "allowedDestination.MatchString(destination)" in result.code
+    assert "http.StatusBadRequest" in result.code
+    assert 'w.Header().Set("Location", destination)' in result.code
+    assert "http.Hijacker" not in result.code
+    assert "Hijack()" not in result.code

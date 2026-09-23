@@ -18,8 +18,8 @@ class FakeSession:
     def __init__(self):
         self.calls = []
 
-    def get(self, url, params=None, timeout=None):
-        self.calls.append((url, params, timeout))
+    def get(self, url, params=None, timeout=None, allow_redirects=None):
+        self.calls.append((url, params, timeout, allow_redirects))
 
         class R:
             status_code = 200
@@ -32,7 +32,10 @@ def test_requests_sender_unchanged_standalone_behavior():
     sender = RequestsSender(sess)
     latency, status, size = sender.get("http://localhost/p.php", "id", "1", 15)
     assert status == 200 and size == len("<html>ok</html>") and latency >= 0
-    assert sess.calls == [("http://localhost/p.php", {"id": "1"}, 15)]
+    # BUG-0042/PA-0044: never silently follow a redirect -- a followed hop
+    # would add an unrelated round trip into this timing-sensitive
+    # measurement.
+    assert sess.calls == [("http://localhost/p.php", {"id": "1"}, 15, False)]
 
 
 def test_seam_sender_authenticates_and_measures():

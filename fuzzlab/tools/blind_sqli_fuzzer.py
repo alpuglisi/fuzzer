@@ -47,7 +47,13 @@ class RequestsSender:
     def get(self, url, param, value, timeout):
         start = time.perf_counter()
         try:
-            resp = self._session.get(url, params={param: value}, timeout=timeout)
+            # allow_redirects=False (BUG-0042/PA-0044 sweep): a followed
+            # redirect adds an extra, unrelated round trip into the
+            # measured elapsed time -- exactly the kind of client default
+            # PA-0030 already forbids silently applying to a timing-
+            # sensitive real response.
+            resp = self._session.get(url, params={param: value}, timeout=timeout,
+                                      allow_redirects=False)
             return time.perf_counter() - start, resp.status_code, len(resp.text)
         except requests.Timeout:
             return float(timeout), 504, 0

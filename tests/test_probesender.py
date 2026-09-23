@@ -12,9 +12,11 @@ class _FakeSession:
     def __init__(self):
         self.calls = []
 
-    def request(self, method, url, params=None, data=None, timeout=None, headers=None):
+    def request(self, method, url, params=None, data=None, timeout=None, headers=None,
+                allow_redirects=None):
         self.calls.append({"method": method, "url": url, "params": params,
-                           "data": data, "headers": headers})
+                           "data": data, "headers": headers,
+                           "allow_redirects": allow_redirects})
 
         class R:
             status_code = 200
@@ -28,6 +30,19 @@ def test_requests_probe_sender_get_query():
     p = RequestsProbeSender(session=session).send("http://localhost/x", "id", "1'")
     assert isinstance(p, Probe) and p.status == 200 and "ok" in p.text and p.elapsed >= 0
     assert session.calls[0]["method"] == "GET"
+
+
+def test_requests_probe_sender_never_follows_redirects():
+    """BUG-0042/PA-0044: this sender's own `Probe` is what a
+    `ConfirmationStrategy` (e.g. `OpenRedirectStrategy`) inspects directly
+    -- silently following a redirect would report the wrong response (and,
+    against a real target, a self-referencing `Location` value crashes
+    outright with `requests.exceptions.TooManyRedirects`). Every call must
+    pass `allow_redirects=False` explicitly, matching `fuzzlab.core.http`'s
+    own `SeamProbeSender` path."""
+    session = _FakeSession()
+    RequestsProbeSender(session=session).send("http://localhost/x", "id", "1'")
+    assert session.calls[0]["allow_redirects"] is False
     assert session.calls[0]["params"] == {"id": "1'"} and session.calls[0]["data"] is None
 
 

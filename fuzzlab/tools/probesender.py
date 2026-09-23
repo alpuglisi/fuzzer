@@ -69,7 +69,21 @@ class RequestsProbeSender:
              method: str = "GET", location: str = "query",
              content_type: str | None = None) -> Probe:
         import requests
-        kwargs = {"timeout": self._timeout}
+        # allow_redirects=False (BUG-0042/PA-0044, strengthening PA-0030 from
+        # BUG-0028): this sender's whole contract is "report the real
+        # server response" to a `ConfirmationStrategy` -- `OpenRedirectStrategy`
+        # in particular needs THIS response's own `Location:` header, not
+        # whatever a followed redirect chain's final response happens to
+        # contain. Silently following redirects also crashes outright
+        # (`requests.exceptions.TooManyRedirects`) the first time a
+        # caller-controlled value echoed into a real `Location:` header
+        # resolves to a self-referencing relative reference (e.g. a bare
+        # `#...` fragment payload -- unchanged by a redirect, so the same
+        # URL is refetched forever). Matches `fuzzlab.core.http`'s own
+        # `allow_redirects=False` (`SeamProbeSender`'s authenticated path),
+        # which already got this right -- this was the one sender that
+        # hadn't.
+        kwargs = {"timeout": self._timeout, "allow_redirects": False}
         if location == "header":
             kwargs["headers"] = {param: value}
         elif location == "body" and content_type:

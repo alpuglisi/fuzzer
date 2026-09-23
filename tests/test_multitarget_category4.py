@@ -298,6 +298,27 @@ the real secure twin (`LABGEN-GO-0024`, a fixed-map lookup that never
 evaluates `len` on caller input). `TWCH-0012` is now a real, confirmed
 finding, and Twitch's own scored recall in this multi-cell boot moves from
 `9/12` to `10/12`.
+
+**Twitch's 13th real page (`CC-LAB-0198`/`FR-LAB-138`): this project's
+first `http_header_injection`/`http_response_header_value` instance on any
+stack** (`TWCH-0013`, `/channels/redirect`, reusing `lab/safety_matrix.
+yaml`'s existing `http_response_header_value` sink family / `http_header_
+injection` concern verbatim -- added by `CC-LAB-0063`, never before
+instantiated in a generated lab app). Honest-vulnerable-instance judgment,
+checked empirically before finalizing the design: Go's ordinary `net/http`
+response-header-writing path (`w.Header().Set()` + `w.WriteHeader()`)
+already replaces a bare CR/LF byte with a space before writing to the
+wire (`tests/test_labgen_go_live_boot.py::
+test_go_net_http_header_set_sanitizes_bare_crlf_on_the_wire`), so the
+vulnerable twin instead uses `http.Hijacker.Hijack()` -- a real, standard
+net/http mechanism, not a contrivance -- to bypass that path and hand-write
+a raw response, mirroring this exact op's own Node/PHP corpus precedent.
+No audit rule/oracle strategy exists yet for this concern (grepped
+`fuzzlab/oracle/strategies.py` for "header" and found nothing CRLF-
+injection-aware), so `TWCH-0013`'s own positive stays an honest, explicitly
+tracked false negative, the same lab-then-detection split `CC-LAB-0190`
+used. Twitch's own ground-truth cardinality grows from 12 to 13; its own
+scored recall in this multi-cell boot moves from `10/12` to `10/13`.
 """
 
 from __future__ import annotations
@@ -382,10 +403,22 @@ def _twitch_cells():
     # text/template action grammar (verified empirically, see
     # tests/test_labgen_go_live_boot.py::test_ssti_strategy_does_not_generalize_to_go_text_template).
     ssti = load_manifest("lab/manifests/ssti_channel_commands_go_sample.yaml").cells
+    # CC-LAB-0198: this project's first http_header_injection/
+    # http_response_header_value instance on any stack
+    # (/channels/redirect). No audit rule/oracle strategy exists yet for
+    # this concern (grepped fuzzlab/oracle/strategies.py for "header"
+    # before starting and found nothing CRLF-injection-aware) -- included
+    # here so the pipeline sees the new vulnerable/secure twins for real,
+    # but this cell's own positive stays an (expected, tracked) false
+    # negative until that follow-on lands, the same lab-then-detection
+    # split CC-LAB-0190/CC-LAB-0196 already used.
+    http_header_injection = load_manifest(
+        "lab/manifests/http_header_injection_redirect_go_sample.yaml"
+    ).cells
     return (
         webhook + ssrf + access_control + jwt + weak_token + mass_assignment
         + access_control_subscribers + ssrf_clips_download + unrestricted_file_upload
-        + price_integrity + path_traversal + ssti
+        + price_integrity + path_traversal + ssti + http_header_injection
     )
 
 
@@ -492,14 +525,20 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # never evaluates `len` on caller input) -- see
     # `tests/test_labgen_go_live_boot.py::
     # test_go_template_ssti_strategy_closes_the_generalization_gap`.
-    # Ground-truth cardinality stays 12 positives; tp moves from 9 to 10
-    # (only webhook-signature and path-traversal remain undetected, each
-    # for its own distinct, tracked reason), so recall moves from 9/12 to
-    # 10/12 (PA-0042: this hardcoded fraction was re-derived, not left
-    # stale, for this change).
+    # Ground-truth cardinality grows from 12 to 13 (TWCH-0013/CC-LAB-0198,
+    # the 13th real page, http_header_injection/http_response_header_value
+    # -- no audit rule/oracle strategy exists yet for this concern, this
+    # dispatch's own lab-then-detection split, mirroring TWCH-0011's own
+    # path-traversal deferral); tp stays 10 (only webhook-signature,
+    # path-traversal, and now http_header_injection remain undetected,
+    # each for its own distinct, tracked reason), so recall moves from
+    # 10/12 to 10/13 (PA-0042: this hardcoded fraction was re-derived, not
+    # left stale, for this change; PA-0043: BOTH this single-cell
+    # assertion and the multi-target `macro_recall` assertion below were
+    # grep-counted and updated together).
     twitch_report = by_name["twitch-clone"].report
     assert twitch_report.tp == 10 and twitch_report.fp == 0
-    assert round(twitch_report.recall, 4) == round(10 / 12, 4)
+    assert round(twitch_report.recall, 4) == round(10 / 13, 4)
 
     # Netflix: insecure-deserialization (NFLX-0001) is now a real, confirmed
     # finding; XXE (NFLX-0002, which does have a rule/strategy, R-XXE/
@@ -535,11 +574,14 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # changes TWCH-0011/CC-LAB-0190 (Twitch's own recall moved from 9/10 to
     # 9/11 to 9/12), NFLX-0009/CC-LAB-0194 through NFLX-0011/CC-LAB-0197
     # (Netflix's own recall in THIS single-cell test moved from 1/8 to
-    # 1/9 to 1/10 to 1/11), and CC-FUZZ-0038's new `GoTemplateSstiStrategy`
+    # 1/9 to 1/10 to 1/11), CC-FUZZ-0038's new `GoTemplateSstiStrategy`
     # closing TWCH-0012's own detection gap (Twitch's own tp moved from 9
     # to 10, recall from 9/12 to 10/12; no ground-truth-cardinality change
-    # that time, a pure detection increment).
-    assert round(summary["macro_recall"], 4) == round(((10 / 12) + (1 / 11)) / 2, 4)
+    # that time, a pure detection increment), and TWCH-0013/CC-LAB-0198
+    # (Twitch's own ground-truth cardinality moved from 12 to 13, tp stays
+    # 10, recall from 10/12 to 10/13 -- an undetected new page, the same
+    # kind of cardinality-only change TWCH-0011 made).
+    assert round(summary["macro_recall"], 4) == round(((10 / 13) + (1 / 11)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True

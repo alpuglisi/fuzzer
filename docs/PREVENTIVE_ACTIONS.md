@@ -556,3 +556,31 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   in each), where a single ground-truth-cardinality change routinely
   invalidates TWO independent assertions in that one file, not one — do
   not stop at the first one found. (from BUG-0041)
+- **PA-0044** — Supersedes/strengthens `PA-0030`. `PA-0030`'s rule (a
+  component that claims to report "the real app's response" must not
+  silently apply a client default — redirect-following, retry-on-error,
+  automatic decompression, etc. — that transforms what the server
+  actually sent, unless that transformation is the literal thing under
+  test) is correct, but its own framing scoped it to conformance
+  harnesses (`*LiveBootHarness` classes) extending coverage to a new
+  behavior category. The rule's real scope is any component that builds a
+  `Probe` (or any object a `ConfirmationStrategy`/timing oracle treats as
+  "the real target's response") — this project had TWO more such
+  components (`fuzzlab.tools.probesender.RequestsProbeSender`,
+  `fuzzlab.greybox.run.RequestsCorrelatingSender`, plus a third,
+  lower-severity timing instance, `fuzzlab.tools.blind_sqli_fuzzer.
+  RequestsSender`) silently following `requests`' own default
+  redirect-following behavior, undetected because each was tested in
+  isolation against a fake session that never exercised a real redirect.
+  Before adding or extending ANY sender that feeds a `ConfirmationStrategy`
+  or timing oracle, explicitly set `allow_redirects=False` (mirroring
+  `fuzzlab.core.http`'s own authenticated path, which already got this
+  right) unless following a redirect is the literal thing that sender's
+  own strategy needs to observe, and add a fake-session test asserting the
+  kwarg was actually passed — not just that a fake response was returned
+  correctly. A component whose job genuinely IS to follow redirects (a
+  login-flow fetcher discovering an authenticated session, a crawler
+  discovering pages) is not an instance of this rule; the discriminator is
+  whether the caller is a `ConfirmationStrategy`/oracle that needs the
+  UN-followed response, not blanket avoidance of `allow_redirects=True`
+  everywhere. (from BUG-0042)

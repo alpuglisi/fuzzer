@@ -4988,6 +4988,83 @@ lane) can submit a payload as
   concluding this, not assumed absent) -- substituted with a documented,
   rigorous self-review performed and recorded in `CC-LAB-0197`.
 
+- **FR-LAB-138** *(Twitch's thirteenth real page: this project's first
+  `http_header_injection`/`http_response_header_value` instance on ANY
+  stack, `go_net_http`, `GET /channels/redirect?destination=`;
+  `CC-LAB-0198`, 2026-09-23).* Instantiates `lab/safety_matrix.yaml`'s
+  existing `http_response_header_value` sink family / `http_header_
+  injection` concern (`CC-LAB-0063`, previously unbuilt on any stack --
+  grepped `fuzzlab/labgen/emitters/*/modules.py`/`lab/manifests/*.yaml`
+  before starting) for the first time, project-wide. A post-subscribe/
+  -follow redirect convenience endpoint (a real pattern streaming
+  platforms use for post-action redirects, e.g. a `?next=`-style param),
+  CWE-113. Convention 2 (like SSRF/mass-assignment/file-upload/price-
+  integrity/path-traversal/ssti): the manifest's one op names a sink
+  module directly, reusing `read_url_query_param` verbatim as its source.
+  **Honest-vulnerable-instance judgment, checked empirically before
+  finalizing the design, per this task's own explicit instruction.** A
+  real `go run` check (`tests/test_labgen_go_live_boot.py::
+  test_go_net_http_header_set_sanitizes_bare_crlf_on_the_wire`) proves
+  Go's ORDINARY `net/http` response-header-writing path
+  (`w.Header().Set()` + `w.WriteHeader()`) already replaces a bare CR/LF
+  byte with a space before writing to the wire, so an honest vulnerable
+  instance cannot be built through that path in Go at all -- the
+  vulnerable twin (`raw_socket_response_write`) instead uses
+  `http.Hijacker.Hijack()`, a REAL, standard net/http mechanism (used for
+  WebSocket upgrades and other raw-protocol handling), to bypass that
+  path and hand-write the response, mirroring `docs/research/corpus-
+  examples/header-injection/{node,php}/manifest.yaml`'s own
+  `vulnerable-raw-socket-write-5.js`/`vulnerable-raw-socket-response-4.
+  php` precedent exactly (Node/PHP both bypass their own frameworks' CRLF
+  protection the same way). The secure twin (`allowlist_and_runtime_
+  crlf_rejection`) validates `destination` against a strict
+  site-relative-path allowlist regex before ever reaching Go's ordinary
+  header-writing path. Real, live-boot-proven differential (`tests/
+  test_labgen_go_live_boot.py::test_real_boot_proves_the_http_header_
+  injection_differential_for_both_twins`): a CRLF-bearing `destination`
+  splices in a real, independently-parsed extra response header on the
+  vulnerable twin; the secure twin rejects the identical payload outright
+  (HTTP 400) and never emits it; both twins redirect a legitimate
+  plain-path `destination` identically.
+  **A real, genuine pipeline bug found and fixed while wiring this cell
+  into the shared oracle pipeline, not routed around -- see `BUG-0042`/
+  `PA-0044`/`CC-FUZZ-0039`.** `fuzzlab.tools.probesender.
+  RequestsProbeSender` silently followed HTTP redirects by `requests`'
+  own default; the generic `SstiStrategy`'s own `#{a*b}` payload, echoed
+  into this cell's real `Location:` header, resolved via URL-fragment
+  semantics to the SAME url on every hop, an infinite self-redirect loop
+  that crashed `run_targets()` with `requests.exceptions.
+  TooManyRedirects`. Fixed at the sender level (`allow_redirects=False`,
+  matching `fuzzlab.core.http`'s own authenticated path), not by
+  weakening this cell's own honest vulnerability.
+  Detection is genuinely deferred: no audit rule/oracle strategy exists
+  yet for `http_header_injection` (grepped `fuzzlab/oracle/strategies.py`
+  for "header" and found nothing CRLF-injection-aware) -- the same
+  lab-then-detection split `CC-LAB-0190`/`CC-LAB-0196` already used.
+  Twitch's own ground-truth cardinality grows from 12 to 13 (`TWCH-0013`);
+  its own real, scored `multitarget` recall moves from `10/12` to `10/13`
+  (`tp` stays `10`, `fp` stays `0`).
+  Ground truth: `TWCH-0013` added to `lab/ground-truth-twitch-clone/`
+  (`vuln_class="http_header_injection"`, a new, additively-widened
+  `labels.schema.json` enum value; `sink_context="header"`, an existing
+  enum value; `param="destination"`/`location="query"`).
+  PA-0042/PA-0043 compliance: `tests/test_multitarget_category4.py` has
+  exactly two independent Twitch-cardinality-dependent hardcoded
+  fractions (`test_both_apps_run_through_multitarget_for_real`'s own
+  `twitch_report.recall` and its sibling `summary["macro_recall"]`) --
+  grep-counted and BOTH updated (`10/12` -> `10/13`);
+  `test_labels_contract_category4.py`'s case count/cross-check
+  re-derived; `test_auto.py` checked by direct inspection and run, found
+  genuinely unaffected (its one cardinality-dependent assertion filters
+  Netflix's own ground truth and `param == "body"`, doubly inapplicable
+  to this Twitch `query`-location case).
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0197`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded in `CC-LAB-0198`.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

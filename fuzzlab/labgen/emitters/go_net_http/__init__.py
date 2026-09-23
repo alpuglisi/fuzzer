@@ -105,6 +105,44 @@ but automatic confirmation via `SstiStrategy` is an explicitly open
 question, not silently claimed working. See `CC-LAB-0196`'s own
 change-control entry for the full analysis.
 
+**Phase B, thirteenth increment (``CC-LAB-0198``/``FR-LAB-138``): this
+project's first `http_header_injection`/`http_response_header_value`
+instance on any stack**, ``("http_header_injection",
+"http_response_header_value")`` -- a post-subscribe/-follow redirect
+convenience handler (``GET /channels/redirect?destination=``, a real
+pattern streaming platforms use for post-action redirects, e.g. a
+`?next=`-style param) that either hijacks the raw connection
+(``http.Hijacker``) and hand-writes a ``302`` response with the
+caller-supplied ``destination`` concatenated straight into the
+``Location:`` line, no CR/LF stripping at all (vulnerable, CWE-113,
+``raw_socket_response_write``), or validates ``destination`` against a
+strict site-relative-path allowlist regex before using Go's ordinary
+``w.Header().Set()``/``w.WriteHeader()`` path (secure, ``allowlist_and_
+runtime_crlf_rejection``). Reuses ``lab/safety_matrix.yaml``'s existing
+`http_response_header_value` sink family / `http_header_injection`
+concern and its existing `raw_socket_response_write`/`allowlist_and_
+runtime_crlf_rejection` op rows verbatim (added by `CC-LAB-0063` for the
+`docs/research/corpus-examples/header-injection/` research, never before
+instantiated in a generated lab app on any stack) -- no safety-matrix
+change needed. **Honest-vulnerable-instance judgment, checked empirically
+before finalizing the design (not assumed):** a real `go run` check
+(recorded in `CC-LAB-0198`'s own change-control entry) against a real
+booted `net/http.Server` shows Go's own ordinary
+`w.Header().Set()`+`w.WriteHeader()` path already replaces a bare CR/LF
+byte in a header value with a space before writing the response to the
+wire, so an honest vulnerable instance of this concern cannot be built
+through that ordinary API -- the vulnerable twin instead uses
+`http.Hijacker.Hijack()`, a real, standard net/http mechanism (used for
+WebSocket upgrades and other raw-protocol handling in real Go servers,
+not a contrivance invented for this lab), to obtain the raw connection
+and write the response itself, exactly mirroring this same op's own
+`vulnerable-raw-socket-write-5.js`/`vulnerable-raw-socket-response-4.php`
+corpus precedent (Node/PHP both bypass their own frameworks' built-in
+header-writing CRLF protection the same way). Convention 2 again: the
+manifest's one op names a sink module directly. Reuses
+`read_url_query_param` verbatim as its source (like the SSRF/path-
+traversal shapes) -- no new source module needed.
+
 **Multi-file output, like every other routed emitter.** Per this project's
 routed-emitter convention (``node_express``, ``ruby_rails``), a ``route``-
 category *accumulator* module (``net/http.ServeMux`` registration lines)
@@ -207,6 +245,17 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     # concern and mirroring `spring_boot`'s own TrackerNest
     # `ssti`/`template_render` shape (`CC-LAB-0130`).
     ("ssti", "template_render"): _ModuleSet("read_channel_command_request", None, "render_only"),
+    # Convention 2 again (like SSRF/mass-assignment/price-integrity/path-
+    # traversal/ssti): the manifest's one op names a sink module directly
+    # -- the vulnerable/secure difference here is one inseparable
+    # hijack-and-hand-roll-vs-validate-and-use-the-ordinary-header-API
+    # operation, not a value rewrite feeding a shared sink. This project's
+    # first `http_header_injection`/`http_response_header_value` instance
+    # on any stack (`CC-LAB-0198`). Reuses `read_url_query_param` verbatim
+    # as its source, exactly like the SSRF/path-traversal shapes.
+    ("http_header_injection", "http_response_header_value"): _ModuleSet(
+        "read_url_query_param", None, "render_only"
+    ),
 }
 
 #: Per-module (source/transform-op/sink name) -> the extra Go standard-
@@ -253,6 +302,8 @@ _MODULE_IMPORTS: dict[str, tuple[str, ...]] = {
     "read_channel_command_request": ("io",),
     "user_supplied_template_compile": ("bytes", "encoding/json", "text/template"),
     "file_loaded_template_name": ("encoding/json",),
+    "raw_socket_response_write": (),
+    "allowlist_and_runtime_crlf_rejection": ("regexp",),
 }
 
 #: Per-route static context this Phase A emitter needs beyond the
@@ -295,6 +346,12 @@ _ROUTE_PARAMS: dict[str, dict[str, Any]] = {
     # `/channels/emotes/upload`'s/`/subscriptions/purchase`'s own empty
     # entries.
     "/channels/commands": {},
+    # CC-LAB-0198: this project's first http_header_injection/
+    # http_response_header_value instance on any stack. Reuses
+    # ReadUrlQueryParamSource's own var_name/param_name convention (like
+    # /api/clips/thumbnail's/`/clips/export`'s own entries above) --
+    # destination is read from the `destination` query param.
+    "/channels/redirect": {"var_name": "destination", "param_name": "destination"},
 }
 
 

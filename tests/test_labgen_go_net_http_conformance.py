@@ -53,6 +53,11 @@ _MANIFESTS = (
     # (reuses an existing, multi-stack concern -- genuinely new breadth,
     # not a genuinely new mechanism).
     "lab/manifests/ssti_channel_commands_go_sample.yaml",
+    # CC-LAB-0198: this project's first http_header_injection/
+    # http_response_header_value instance on any stack (reuses an
+    # existing, never-before-instantiated safety-matrix concern --
+    # genuinely new breadth, not a new safety-matrix entry).
+    "lab/manifests/http_header_injection_redirect_go_sample.yaml",
 )
 
 

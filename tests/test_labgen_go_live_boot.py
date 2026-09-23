@@ -1396,3 +1396,164 @@ func main() {
                 # echoed back completely unevaluated (the product never
                 # appears, the literal expression always does).
                 assert output == f"OUTPUT:{payload}", f"{payload!r} -> {output!r} (expected verbatim echo)"
+
+
+# -- Phase B thirteenth increment: HTTP response header injection
+# (http_response_header_value, CC-LAB-0198) -------------------------------
+
+
+def test_go_net_http_header_set_sanitizes_bare_crlf_on_the_wire() -> None:
+    """Non-boot, fast, always-run reproduction of the empirical claim
+    `CC-LAB-0198`'s own change-control entry rests on: Go's ORDINARY
+    `net/http` response-header-writing path (`w.Header().Set()` +
+    `w.WriteHeader()`) already replaces a bare CR/LF byte in a header
+    value with a space before writing the response to the wire, so an
+    honest vulnerable instance of this concern cannot be built through
+    that ordinary path in Go -- this shape's vulnerable twin instead uses
+    `http.Hijacker.Hijack()` to bypass it. Mirrors
+    `test_ssti_go_text_template_syntax_mismatch`'s own "keep the empirical
+    claim checked on every ordinary run, not only under `-m slow`"
+    discipline: a real `go run` against a real, booted (via a raw TCP
+    dial, not `GoLiveBootHarness`, so this stays fast and dependency-light)
+    `net/http.Server`, skip-guarded on the `go` CLI alone (not
+    `go_boot_available()`'s module-proxy reachability requirement, since
+    this program imports only the standard library)."""
+    import shutil
+    import socket as _socket
+    import subprocess
+    import tempfile
+    from pathlib import Path as _Path
+
+    if shutil.which("go") is None:
+        pytest.skip("go CLI not available on this build host (PA-0005 pattern)")
+
+    go_src = '''package main
+
+import (
+	"fmt"
+	"net"
+	"net/http"
+	"os"
+)
+
+func main() {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/normal", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", r.URL.Query().Get("destination"))
+		w.WriteHeader(http.StatusFound)
+	})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(ln.Addr().String())
+	os.Stdout.Sync()
+	http.Serve(ln, mux)
+}
+'''
+    with tempfile.TemporaryDirectory(prefix="fuzzlab-header-injection-syntax-check-") as tmp:
+        main_go = _Path(tmp) / "main.go"
+        main_go.write_text(go_src)
+        proc = subprocess.Popen(
+            ["go", "run", str(main_go)],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
+        try:
+            addr_line = proc.stdout.readline().strip()
+            assert addr_line, "go program produced no listen-address line"
+            host, port_s = addr_line.rsplit(":", 1)
+            port = int(port_s)
+            with _socket.create_connection((host or "127.0.0.1", port), timeout=10.0) as conn:
+                request = (
+                    "GET /normal?destination=%2Fok%0d%0aX-Injected%3A%20evil "
+                    "HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
+                )
+                conn.sendall(request.encode("ascii"))
+                chunks = []
+                while True:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                raw_response = b"".join(chunks).decode("latin-1")
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+    # The CR/LF bytes reached w.Header().Set() as literal text, but
+    # net/http's own transfer-writer replaced them with spaces before
+    # writing to the wire -- no second "X-Injected:" header line exists,
+    # and the value itself no longer contains a raw CR/LF.
+    header_lines = raw_response.split("\r\n")
+    assert not any(line.lower().startswith("x-injected:") for line in header_lines), (
+        f"a bare CR/LF byte reaching w.Header().Set() produced a real second header line "
+        f"-- Go's own net/http sanitization did not fire as expected:\n{raw_response!r}"
+    )
+    location_line = next(line for line in header_lines if line.lower().startswith("location:"))
+    assert "\r" not in location_line and "\n" not in location_line
+    assert "X-Injected" in location_line, (
+        f"expected the sanitized (space-joined) Location value to still contain the literal "
+        f"text 'X-Injected', proving the bytes reached Set() rather than being dropped "
+        f"entirely: {location_line!r}"
+    )
+
+
+_HEADER_INJECTION_CANARY_HEADER = "X-Fuzzlab-Header-Injection-Canary"
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_http_header_injection_differential_for_both_twins() -> None:
+    """Real assertions against a real booted app (`CC-LAB-0198`):
+
+    (a) both twins serve a legitimate, plain-path `destination` value
+        identically -- this shape's functional contract (redirect the
+        caller somewhere after subscribing/following) is unaffected by
+        the fix.
+    (b) the vulnerable twin's raw-socket-hijack response genuinely
+        splices in a whole extra HTTP response header the caller did not
+        ask for by name (CWE-113) -- proven by reading it back as a real,
+        independently-parsed header on the response Python's own
+        `http.client` received, not by inspecting the raw bytes this
+        process itself wrote.
+    (c) the secure twin rejects the identical CRLF-bearing payload
+        outright (HTTP 400), and the injected header never appears.
+    """
+    from urllib.parse import quote
+
+    manifest = load_manifest("lab/manifests/http_header_injection_redirect_go_sample.yaml")
+    emitter = GoEmitter()
+    cells = {c.cell_id: c for c in manifest.cells}
+
+    with GoLiveBootHarness(emitter, list(cells.values())) as harness:
+        # (a) a legitimate destination: both twins redirect identically.
+        vuln_ok = harness.request("GET", "/generated/labgen-go-0025?destination=/ok")
+        assert vuln_ok.status == 302
+        assert vuln_ok.headers.get("Location") == "/ok"
+
+        secure_ok = harness.request("GET", "/generated/labgen-go-0026?destination=/ok")
+        assert secure_ok.status == 302
+        assert secure_ok.headers.get("Location") == "/ok"
+
+        # (b) vulnerable twin: a CRLF-bearing destination splices in a real
+        # extra response header (CWE-113), parsed independently by
+        # Python's own http.client, not merely present in raw bytes this
+        # test wrote itself.
+        payload = quote(f"/ok\r\n{_HEADER_INJECTION_CANARY_HEADER}: injected", safe="")
+        vuln_injected = harness.request("GET", f"/generated/labgen-go-0025?destination={payload}")
+        assert vuln_injected.status == 302, vuln_injected.body
+        assert vuln_injected.headers.get(_HEADER_INJECTION_CANARY_HEADER) == "injected", (
+            f"vulnerable twin did not splice in the injected header -- headers were "
+            f"{vuln_injected.headers!r}"
+        )
+
+        # (c) secure twin: the identical CRLF-bearing payload is rejected
+        # outright, and the injected header never appears at all.
+        secure_injected = harness.request(
+            "GET", f"/generated/labgen-go-0026?destination={payload}"
+        )
+        assert secure_injected.status == 400, secure_injected.body
+        assert _HEADER_INJECTION_CANARY_HEADER not in secure_injected.headers
