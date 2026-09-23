@@ -2435,6 +2435,80 @@ lane) can submit a payload as
   mapping in `fuzzlab.core.runmode._VULN_TO_CATEGORY` are out of scope
   and named as open follow-on work, not built.
 
+- **FR-LAB-126** *(CircleFeed's fourth and final real page, account-settings
+  preference-cookie insecure deserialization; `CC-LAB-0220`, 2026-09-23).*
+  Lands CircleFeed's fourth and final designed cell (`docs/research/
+  category2-social-ugc-functionality-and-cwe-research.md` §5 row 4, §6 row
+  4): a base64-encoded serialized PHP value stored in an account-settings
+  preference cookie (`pref`), unserialized bare, with no `allowed_classes`
+  restriction (CWE-502). Verified at build time (per §5 row 4's own
+  caveat) that the existing `docs/research/corpus-examples/insecure-
+  deserialization/php/` corpus (an APCu-cached-job-by-session-id lookup and
+  a Laravel-queue encrypted-command branch) does not already cover this
+  bare-`unserialize()`-on-a-cookie shape -- genuinely new, not a
+  duplicate. This project's first real implementation of `lab/
+  safety_matrix.yaml`'s `object_deserialization` sink family's PHP pair
+  (`unrestricted_unserialize`/`json_decode_type_check`, both existed
+  unimplemented since the family was added -- confirmed via `grep -rl
+  "unrestricted_unserialize\|json_decode_type_check" fuzzlab/` returning
+  nothing before any code was written). Ports `CC-LAB-0097`'s (PicTrail
+  inbox, Python `pickle.loads()`/`json.loads()`) and `CC-LAB-0074`'s
+  (`ruby_rails`, `YAML.unsafe_load`/`YAML.safe_load`) already-established
+  "flag-only transform, sink branches at generation time" convention into
+  PHP terms: `UnrestrictedUnserializeTransform`/`JsonDecodeTypeCheckTransform`
+  each set a `deserialize_method` context flag
+  (`"unserialize"`/`"json_decode"`), and `account_settings_deserialize_
+  sink.php.j2` renders one of two `{% if deserialize_method == ... %}`
+  branches at generation time -- never a runtime branch in the emitted
+  code. New source, `get_cookie` (`$request->cookie('pref')`); requires
+  the `pref` cookie name to be excluded from Laravel's default
+  `EncryptCookies` middleware (the skeleton's `bootstrap/app.php` gained
+  `$middleware->encryptCookies(except: ['pref'])`), or the framework would
+  try to decrypt an attacker-controlled cookie like any other and silently
+  hand the controller `null` -- found and fixed during implementation,
+  empirically verified against a real booted app, not assumed. New page
+  profile `/settings/preferences`, new manifest `lab/manifests/
+  insecure_deserialization_circlefeed_sample.yaml`
+  (`LABGEN-CF-0007`/`LABGEN-CF-0008`). Ground truth extended (not a new
+  directory) with `CF-0004` in `lab/ground-truth-circlefeed/`
+  (`location: "cookie"`, a new schema enum value in both `labels.schema.
+  json` and `injection-points.schema.json`).
+
+  Real, executed live-boot proof (`tests/test_labgen_insecure_
+  deserialization_circlefeed_live_boot.py`): a genuine PHP unserialize-RCE
+  -- a hand-crafted `serialize()`-format payload for a new, real,
+  autoloadable skeleton class, `App\Support\MarkerWriteGadget` (in
+  `app/Support/`, the booted app's own `App\` PSR-4 root, not a class
+  defined only in the test file -- the same class of mistake `CC-LAB-0097`'s
+  own pickle proof had to avoid for Python), whose `__wakeup()` magic
+  method writes a real, checkable marker file. The vulnerable twin
+  genuinely executes it, proven by the marker file's own existence on
+  disk after the request; the identical bytes reach the secure twin's
+  `json_decode()` instead, which cannot parse PHP's `serialize()` format
+  at all, so the marker file is never created and the secure twin reports
+  a real HTTP 400 parse failure; the secure twin's own positive path (a
+  legitimate JSON array payload still succeeds) is proven separately, so
+  the differential cannot pass by the secure twin trivially rejecting
+  everything. The `pref` cookie is sent as a raw, percent-encoded `Cookie`
+  request header (never an HTTP client's own cookie jar), since PHP's
+  automatic cookie-value `urldecode()` would otherwise turn a literal
+  `+` inside the base64 payload into a space, corrupting it. `CF-0004`
+  ground-truth cross-check included. Tier 0 (`php -l`)/Tier 3
+  (`regenerate_and_diff_emitter`)/minimal-pair pass in `tests/
+  test_labgen_insecure_deserialization_circlefeed.py` -- the sink
+  template's `deserialize_method` Jinja2 lookup is guarded with `is
+  defined` for the identity-emptied minimal-pair twin (which never runs a
+  transform and so never sets that flag), the same guard `CC-LAB-0218`'s
+  own `header_delivery_mode` needed, caught here during this entry's own
+  adequacy self-review pass rather than by a failing test.
+
+  **CircleFeed's own full four-page designed set (per the research doc's
+  §6) is now fully built**, mirroring how `CC-LAB-0097` called out
+  PicTrail's own six-page design as complete. Category 2's overall build
+  (PicTrail's six pages, `CC-LAB-0092`-`0097`, plus CircleFeed's four
+  pages, `CC-LAB-0216`-`0220`) is therefore now fully complete per the
+  plan doc's own designed page-set scope for this category.
+
 - **FR-LAB-64** *(prototype pollution, CWE-1321, `node_express`; `CC-LAB-0070`,
   2026-09-22).* Per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4a's
   decided Category-1 (e-commerce) Walmart/Node cell list, the `node_express`

@@ -1,0 +1,6 @@
+// unrestricted_unserialize: flags the sink to parse the base64-decoded
+// {{ var_name }} cookie value with PHP's bare unserialize() -- no
+// `allowed_classes` restriction, so any class the byte stream names is
+// reconstructed, and any magic method it defines (__wakeup()/__destruct())
+// runs as a real side effect of deserializing. Safety matrix:
+// effect=no_effect.

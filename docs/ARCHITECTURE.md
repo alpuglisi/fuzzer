@@ -860,11 +860,42 @@ tracked in the requirements files, not here.
   the raw-socket layer (a hand-rolled responder ported near-verbatim
   from this project's own header-injection corpus), both directions,
   real raw header bytes read directly off the wire. Ground truth
-  extended (`CF-0003`). CircleFeed's remaining page-set row (per the
-  research doc's §6, session/preference-cookie insecure deserialization)
-  stays planned, not built — its own future, separately-gated increment,
-  the same discipline PicTrail's own page-by-page landings above
-  followed.
+  extended (`CF-0003`).
+  **CircleFeed's fourth and final real page (`CC-LAB-0220`) landed an
+  account-settings preference-cookie insecure deserialization** — a
+  base64-encoded serialized PHP value stored in a `pref` cookie,
+  unserialized bare with no `allowed_classes` restriction (CWE-502).
+  Verified at build time (per the research doc's own §5 row 4 caveat)
+  that the existing `insecure-deserialization/php` corpus (an
+  APCu-cached-job lookup and a Laravel-queue encrypted command) does not
+  already cover this bare-`unserialize()`-on-a-cookie shape. This
+  project's first real implementation of `lab/safety_matrix.yaml`'s
+  `object_deserialization` sink family's PHP pair
+  (`unrestricted_unserialize`/`json_decode_type_check`). Ports
+  `CC-LAB-0097`'s (PicTrail `/inbox`, Python pickle/JSON) and
+  `CC-LAB-0074`'s (`ruby_rails`, YAML unsafe/safe load) "flag-only
+  transform, sink branches at generation time" convention into PHP: the
+  vulnerable twin's bare `unserialize()` reconstructs any class the
+  decoded cookie names and runs any magic method it defines; the secure
+  twin's `json_decode()` can never construct a PHP object at all. A new
+  skeleton class, `App\Support\MarkerWriteGadget` (a real, autoloadable
+  class in the booted app's own `App\` root, whose `__wakeup()` hook
+  writes a real marker file), is the PHP analogue of `CC-LAB-0097`'s
+  pickle `__reduce__` proof target; the skeleton's `bootstrap/app.php`
+  also gained `encryptCookies(except: ['pref'])` so the attacker-
+  controlled cookie reaches the controller as the client's raw bytes
+  rather than Laravel's own decryption attempt. Real, executed live-boot
+  proof: a hand-crafted `serialize()`-format payload genuinely triggers
+  the marker file's own on-disk creation on the vulnerable twin; the
+  identical bytes never parse on the secure twin (a real HTTP 400,
+  `json_decode()` cannot read PHP's serialize format), whose own
+  legitimate-JSON positive path is proven separately. Ground truth
+  extended (`CF-0004`; `location: "cookie"` widened into both label
+  schemas). **CircleFeed's own full four-page designed set (per the
+  research doc's §6) is now fully built, and category 2's overall build
+  (PicTrail's six pages plus CircleFeed's four pages) is now fully
+  complete** — the same "own page-set design complete" discipline
+  PicTrail's own page-by-page landings above followed.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

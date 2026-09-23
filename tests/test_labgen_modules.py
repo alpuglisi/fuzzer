@@ -287,6 +287,17 @@ _DETERMINISM_CTX_BY_MODULE: dict[str, dict[str, object]] = {
     "raw_socket_response_write": {"value_expr": "$next"},
     "allowlist_and_runtime_crlf_rejection": {"value_expr": "$next"},
     "raw_redirect_dispatch": {"value_expr": "$next"},
+    # CC-LAB-0220: registered in the shared vocabulary so minimal_pair can
+    # classify them (php_current's shape map does not use any of them --
+    # php_laravel is what actually renders this shape, for CircleFeed).
+    # `deserialize_method` is supplied so this determinism check exercises
+    # the same branch a real cell's transform would flag (the identity-
+    # emptied minimal-pair twin's own `is defined` guard is covered
+    # separately, by tests/test_labgen_insecure_deserialization_circlefeed.py).
+    "get_cookie": {"var_name": "pref", "param_name": "pref"},
+    "unrestricted_unserialize": {"value_expr": "$pref", "var_name": "pref"},
+    "json_decode_type_check": {"value_expr": "$pref", "var_name": "pref"},
+    "account_settings_deserialize_sink": {"value_expr": "$pref", "deserialize_method": "unserialize"},
 }
 
 

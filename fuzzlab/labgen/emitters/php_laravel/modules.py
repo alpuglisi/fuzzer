@@ -247,6 +247,29 @@ class AllPostParamsSource(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class GetCookieSource(TemplateModule):
+    """The ``get_cookie`` source (`CC-LAB-0220`, CircleFeed's fourth and
+    final designed cell): one cookie value read through Laravel's
+    ``Request`` accessor (``$request->cookie('pref')``) -- the
+    account-settings preference cookie §5 row 4 grounds this cell in.
+    Requires the cookie's own name to be excluded from Laravel's default
+    ``EncryptCookies`` middleware (see ``bootstrap/app.php``'s
+    ``encryptCookies(except: ['pref'])`` call in the skeleton) or the value
+    reaching the controller would be the framework's own decryption
+    attempt, never the client's raw bytes. Same ``value_expr``/``bound``
+    contract as :class:`GetParamSource`, a different request-data origin."""
+
+    def __init__(self) -> None:
+        super().__init__("get_cookie", "source", _SOURCE_ENV, "get_cookie.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = f"${ctx['var_name']}"
+        new_ctx.setdefault("bound", False)
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 class WebhookRequestSource(TemplateModule):
     """The ``webhook_request`` source (`CC-LAB-0133`, Huddle Hub's
     webhook-signature-verification cell): the raw request body plus the
@@ -1085,6 +1108,77 @@ class RawRedirectDispatchSink(TemplateModule):
         super().__init__("raw_redirect_dispatch", "sink", _SINK_ENV, "raw_redirect_dispatch.php.j2")
 
 
+class UnrestrictedUnserializeTransform(TemplateModule):
+    """The ``unrestricted_unserialize`` op (`CC-LAB-0220`,
+    ``insecure_deserialization`` concern): flags the sink to parse the
+    base64-decoded cookie value with PHP's bare ``unserialize()`` -- no
+    ``allowed_classes`` restriction, so any class the byte stream names is
+    reconstructed and any magic method it defines runs for real. A
+    flag-only transform (mirroring ``django``'s own
+    ``UnrestrictedPickleLoadsTransform``/``ruby_rails``'s
+    ``YamlUnsafeLoadTransform`` convention exactly): the actual
+    ``unserialize(...)`` call is emitted by the sink, not by this module,
+    since the deserialize call and the result-reporting logic that
+    observes it belong together in one place. Safety matrix:
+    ``effect=no_effect`` (the vulnerable twin)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unrestricted_unserialize", "transform", _TRANSFORM_ENV, "unrestricted_unserialize.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["deserialize_method"] = "unserialize"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class JsonDecodeTypeCheckTransform(TemplateModule):
+    """The ``json_decode_type_check`` op (`CC-LAB-0220`,
+    ``insecure_deserialization`` concern): flags the sink to parse the
+    base64-decoded cookie value with plain-data ``json_decode()`` instead
+    of ``unserialize()`` -- no PHP object is ever reconstructed and no
+    magic method is ever invoked -- and additionally requires the decoded
+    result to be an array. Safety matrix: ``effect=neutralises``,
+    ``neutralizes: [insecure_deserialization]``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "json_decode_type_check", "transform", _TRANSFORM_ENV, "json_decode_type_check.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["deserialize_method"] = "json_decode"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class AccountSettingsDeserializeSink(TemplateModule):
+    """Deserializes a base64-encoded, attacker-supplied account-settings
+    preference cookie (`CC-LAB-0220`, CircleFeed's fourth and final
+    designed cell) -- the bare ``unserialize()``-on-a-cookie footgun §5
+    row 4 grounds this cell in. Unlike most sinks in this emitter, this one
+    is **not** byte-identical between twins: the deserialize *mechanism
+    itself* (``unserialize()`` vs. plain ``json_decode()``) differs, so the
+    transform stage flags which branch to render via Jinja2-time
+    interpolation (``{% if deserialize_method == "unserialize" %}``) --
+    the same "flag-only transform, sink branches on it" convention
+    `CC-LAB-0097`'s (PicTrail inbox) ``InboxDeserializeSink``/
+    `CC-LAB-0074`'s (``ruby_rails``) ``YamlUnsafeLoadTransform`` pair
+    already established for the identical architectural reason. Its own
+    code is each method's terminal statement (several early
+    ``return response()->json(...)`` calls), which is why this reuses
+    ``terminal_response`` rather than ``single_statement`` -- the same
+    reasoning `RawRedirectDispatchSink` above already used."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "account_settings_deserialize_sink", "sink", _SINK_ENV, "account_settings_deserialize_sink.php.j2"
+        )
+
+
 class CsvExportRowSink(TemplateModule):
     """The ``csv_export_row`` sink family (CC-LAB-0211, `csv_formula_injection`
     concern): a small CSV report/export response -- Booking.com's real
@@ -1408,6 +1502,10 @@ SOURCES: dict[str, Module] = {
     # L-P3.3c-DOM (reviews.php/feedback.php): no PHP source at all.
     "dom_url_source": DomUrlSource(),
     "webhook_request": WebhookRequestSource(),
+    # CC-LAB-0220 (insecure_deserialization, category 2's CircleFeed app --
+    # this project's first real implementation of the `object_deserialization`
+    # sink family's PHP pair, on any stack).
+    "get_cookie": GetCookieSource(),
 }
 #: Transform ops. Every name here must also have a row for every sink family
 #: it is authored against in ``lab/safety_matrix.yaml`` -- an op this emitter
@@ -1448,6 +1546,11 @@ TRANSFORMS: dict[str, Module] = {
     # `http_response_header_value` sink family, on any stack).
     "raw_socket_response_write": RawSocketResponseWriteTransform(),
     "allowlist_and_runtime_crlf_rejection": AllowlistAndRuntimeCrlfRejectionTransform(),
+    # CC-LAB-0220 (insecure_deserialization, category 2's CircleFeed app --
+    # this project's first real implementation of the `object_deserialization`
+    # sink family's PHP pair, on any stack).
+    "unrestricted_unserialize": UnrestrictedUnserializeTransform(),
+    "json_decode_type_check": JsonDecodeTypeCheckTransform(),
 }
 #: Sinks. The three HTML sinks render a **Blade view** body rather than a
 #: controller statement; :data:`VIEW_SINKS` names them so the emitter knows
@@ -1483,6 +1586,10 @@ SINKS: dict[str, Module] = {
     # this project's first real implementation of the
     # `http_response_header_value` sink family, on any stack).
     "raw_redirect_dispatch": RawRedirectDispatchSink(),
+    # CC-LAB-0220 (insecure_deserialization, category 2's CircleFeed app --
+    # this project's first real implementation of the `object_deserialization`
+    # sink family's PHP pair, on any stack).
+    "account_settings_deserialize_sink": AccountSettingsDeserializeSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

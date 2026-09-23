@@ -4,6 +4,41 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (CircleFeed's fourth and final real page: account-settings preference-cookie insecure deserialization -- category 2's full four-page design now complete)
+- `php_laravel`: lands CircleFeed's fourth and final designed cell (§5 row
+  4, §6 row 4 of `docs/research/category2-social-ugc-functionality-and-
+  cwe-research.md`) -- an account-settings preference cookie (`pref`)
+  holding a base64-encoded serialized PHP value, unserialized bare with no
+  `allowed_classes` restriction (CWE-502). Verified at build time that the
+  existing `insecure-deserialization/php` corpus (APCu-cached-job lookup,
+  Laravel-queue encrypted command) does not already cover this
+  bare-`unserialize()`-on-a-cookie shape -- genuinely new. This project's
+  first real implementation of `lab/safety_matrix.yaml`'s
+  `object_deserialization` sink family's PHP pair
+  (`unrestricted_unserialize`/`json_decode_type_check`, both existed
+  unimplemented since the family was added). Ports `CC-LAB-0097`'s
+  (PicTrail inbox, Python pickle/JSON)/`CC-LAB-0074`'s (`ruby_rails`,
+  YAML unsafe/safe load) "flag-only transform, sink branches at
+  generation time" convention into PHP. New `get_cookie` source; the
+  skeleton's `bootstrap/app.php` gained `encryptCookies(except: ['pref'])`
+  so the client's raw cookie bytes reach the controller (found and fixed
+  during implementation, verified against a real booted app). New page
+  profile `/settings/preferences`, new manifest
+  (`LABGEN-CF-0007`/`LABGEN-CF-0008`), ground truth extended with
+  `CF-0004` (new `location: "cookie"` schema enum value). Real, executed
+  live-boot proof: a genuine unserialize-RCE via a new, real, autoloadable
+  skeleton class (`App\Support\MarkerWriteGadget`) whose `__wakeup()`
+  hook writes a real, checkable marker file -- proven on the vulnerable
+  twin, proven absent on the secure twin (a real HTTP 400 parse failure),
+  and the secure twin's own legitimate-JSON positive path proven
+  separately. **CircleFeed's own full four-page designed set is now
+  fully built, and category 2's overall build (PicTrail's six pages plus
+  CircleFeed's four pages) is now fully complete.** `CC-LAB-0220`/
+  `FR-LAB-126`. Pre-change review: the Agent tool was checked via
+  `ToolSearch` and found genuinely unavailable as a subagent-spawning
+  tool; two explicit self-review passes were done instead and recorded
+  honestly, per CLAUDE.md's own fallback instruction.
+
 ## 2026-09-23 (CircleFeed's third real page: comment "share" redirect, header injection)
 - `php_laravel`: lands CircleFeed's third designed cell (§3 item 1/2,
   §5 row 3, §6 row 3 of `docs/research/category2-social-ugc-

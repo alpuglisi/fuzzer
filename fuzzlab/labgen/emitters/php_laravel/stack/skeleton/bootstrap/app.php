@@ -26,6 +26,17 @@ return Application::configure(basePath: dirname(__DIR__))
         // page cannot silently reintroduce it by omission.
         $middleware->validateCsrfTokens(except: ['*']);
 
+        // CircleFeed's account-settings preference cookie (`CC-LAB-0220`,
+        // insecure_deserialization/CWE-502) must reach the controller as the
+        // exact bytes the client sent -- Laravel's default `EncryptCookies`
+        // middleware would otherwise try to decrypt/MAC-verify it like any
+        // other cookie and, failing that (an attacker-controlled cookie was
+        // never encrypted by this app), silently hand the controller `null`
+        // instead of the raw payload, masking the real vulnerability this
+        // cell exists to demonstrate. Excluded by name only -- every other
+        // cookie (the session cookie included) is still encrypted normally.
+        $middleware->encryptCookies(except: ['pref']);
+
         // Global chain, order matters (`L-P3.3c-CUT`, re-homing the
         // hand-built app's `includes/prepend.php` chain onto Laravel
         // middleware): the WAF runs first (it may block and exit a hostile

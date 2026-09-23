@@ -310,6 +310,21 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("http_header_injection", "http_response_header_value"): _ModuleSet(
         "get_param", "raw_redirect_dispatch", "terminal_response"
     ),
+    # CC-LAB-0220 (category 2, CircleFeed): CircleFeed's fourth and final
+    # designed cell -- an account-settings preference cookie holding a
+    # base64-encoded serialized PHP value (docs/research/category2-social-
+    # ugc-functionality-and-cwe-research.md sec 5 row 4, sec 6 row 4). This
+    # project's first real implementation of `lab/safety_matrix.yaml`'s
+    # `object_deserialization` sink family's PHP pair (both ops existed
+    # unimplemented since the family was added). Sink differs by twin
+    # (branched at generation time on the transform's own
+    # `deserialize_method` flag, see `AccountSettingsDeserializeSink`), not
+    # just `value_expr` -- and both twins' own rendered code is a terminal
+    # statement (several early `return response()->json(...)` calls), which
+    # is why this reuses `terminal_response` rather than `single_statement`.
+    ("insecure_deserialization", "object_deserialization"): _ModuleSet(
+        "get_cookie", "account_settings_deserialize_sink", "terminal_response"
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -604,6 +619,17 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # Huddle Hub page: CircleFeed has no migrated real puppy-fort-factory
     # page to anchor a pinned URL to.
     "/comments/share": {"var_name": "next", "param_name": "next"},
+    # CC-LAB-0220: CircleFeed's (category 2's Facebook pick) fourth and
+    # final designed cell -- an account-settings page, `get_cookie` reads
+    # the preference cookie as `pref`. This cookie name must also be listed
+    # in the skeleton's `bootstrap/app.php`
+    # `$middleware->encryptCookies(except: ['pref'])` call, or Laravel's
+    # default `EncryptCookies` middleware would try to decrypt it like any
+    # other cookie and silently hand the controller `null` instead of the
+    # client's raw bytes. Illustrative served URL (`_served_route_for`'s
+    # no-`real_page` branch), same reasoning as every other CircleFeed/
+    # Huddle Hub page.
+    "/settings/preferences": {"var_name": "pref", "param_name": "pref"},
     # POST string-literal lookup. `password_var`/`password_param` are sink
     # boilerplate (an already-hashed secret), not a second injection point.
     "/login": {

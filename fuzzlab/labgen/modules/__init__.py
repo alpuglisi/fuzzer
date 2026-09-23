@@ -1098,6 +1098,73 @@ class RawRedirectDispatchSink(TemplateModule):
         super().__init__("raw_redirect_dispatch", "sink", _SINK_ENV, "raw_redirect_dispatch.php.j2")
 
 
+# --- CC-LAB-0220: insecure deserialization via an account-settings
+# preference cookie (category 2, CircleFeed) ---------------------------
+#
+# Registered here (unrendered by `php_current`'s own `_MODULE_SET_BY_SHAPE`,
+# same reasoning as the three blocks above) purely for the shared
+# minimal-pair vocabulary -- `php_laravel` is the emitter that actually
+# renders this shape. This project's first real implementation of
+# `lab/safety_matrix.yaml`'s `object_deserialization` sink family's PHP pair
+# (`unrestricted_unserialize`/`json_decode_type_check`, both existed,
+# unimplemented, since the family was added).
+
+
+class GetCookieSource(TemplateModule):
+    """The ``get_cookie`` source: one cookie value read through Laravel's
+    ``Request`` accessor. Registered for the shared minimal-pair vocabulary
+    only. See ``fuzzlab.labgen.emitters.php_laravel.modules.GetCookieSource``
+    (the emitter that actually renders this op) for the real check."""
+
+    def __init__(self) -> None:
+        super().__init__("get_cookie", "source", _SOURCE_ENV, "get_cookie.php.j2")
+
+
+class UnrestrictedUnserializeTransform(TemplateModule):
+    """The ``unrestricted_unserialize`` op (`insecure_deserialization`
+    concern): flags the sink to parse the value with PHP's bare
+    ``unserialize()`` -- no ``allowed_classes`` restriction. Safety matrix:
+    ``effect=no_effect``. See ``fuzzlab.labgen.emitters.php_laravel.
+    modules.UnrestrictedUnserializeTransform`` (the emitter that actually
+    renders this op) for the real check."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unrestricted_unserialize", "transform", _TRANSFORM_ENV, "unrestricted_unserialize.php.j2"
+        )
+
+
+class JsonDecodeTypeCheckTransform(TemplateModule):
+    """The ``json_decode_type_check`` op (secure twin): flags the sink to
+    parse the value with plain-data ``json_decode()`` instead, requiring an
+    array result. Safety matrix: ``effect=neutralises``,
+    ``neutralizes: [insecure_deserialization]``. See
+    ``fuzzlab.labgen.emitters.php_laravel.modules.
+    JsonDecodeTypeCheckTransform`` (the emitter that actually renders this
+    op) for the real check."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "json_decode_type_check", "transform", _TRANSFORM_ENV, "json_decode_type_check.php.j2"
+        )
+
+
+class AccountSettingsDeserializeSink(TemplateModule):
+    """The ``account_settings_deserialize_sink`` sink: the twins' code
+    genuinely differs here (``unserialize()`` vs. ``json_decode()``),
+    branched at generation time on the transform's own
+    ``deserialize_method`` flag. Registered for the shared minimal-pair
+    vocabulary only, same reasoning as :class:`DbRowByIdLookupSink`."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "account_settings_deserialize_sink",
+            "sink",
+            _SINK_ENV,
+            "account_settings_deserialize_sink.php.j2",
+        )
+
+
 class TerminalResponseComplexity(TemplateModule):
     """The ``terminal_response`` complexity: the controller method for a
     cell whose sink's own code already is the terminal statement (e.g. the
@@ -1136,6 +1203,9 @@ SOURCES: dict[str, Module] = {
     # CC-LAB-0133: registered for the shared minimal-pair vocabulary only --
     # this cell is built on php_laravel only (category 3's Huddle Hub).
     "webhook_request": WebhookRequestSource(),
+    # CC-LAB-0220: registered for the shared minimal-pair vocabulary only --
+    # this cell is built on php_laravel only (category 2's CircleFeed).
+    "get_cookie": GetCookieSource(),
 }
 class UnguardedDeepMergeTransform(TemplateModule):
     """CC-LAB-0070: vocabulary-only registration of the JS/node_express
@@ -1225,6 +1295,11 @@ TRANSFORMS: dict[str, Module] = {
     # php_laravel is what actually renders it (CircleFeed).
     "raw_socket_response_write": RawSocketResponseWriteTransform(),
     "allowlist_and_runtime_crlf_rejection": AllowlistAndRuntimeCrlfRejectionTransform(),
+    # CC-LAB-0220: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it (CircleFeed).
+    "unrestricted_unserialize": UnrestrictedUnserializeTransform(),
+    "json_decode_type_check": JsonDecodeTypeCheckTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -1281,6 +1356,10 @@ SINKS: dict[str, Module] = {
     # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
     # php_laravel is what actually renders it (CircleFeed).
     "raw_redirect_dispatch": RawRedirectDispatchSink(),
+    # CC-LAB-0220: registered for the shared minimal-pair vocabulary only --
+    # php_current's own _MODULE_SET_BY_SHAPE is not widened to this shape;
+    # php_laravel is what actually renders it (CircleFeed).
+    "account_settings_deserialize_sink": AccountSettingsDeserializeSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

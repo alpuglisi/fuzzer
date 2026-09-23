@@ -22,7 +22,7 @@
         "url": { "type": "string" },
         "method": { "enum": ["GET", "POST"] },
         "param": { "type": "string" },
-        "location": { "enum": ["query", "body", "fragment", "header", "path"] },
+        "location": { "enum": ["query", "body", "fragment", "header", "path", "cookie"] },
         "rendering": { "enum": ["server", "js", "server-json"] },
         "client_only": {
           "type": "boolean",

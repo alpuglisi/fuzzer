@@ -1,0 +1,47 @@
+# Insecure-deserialization sample manifest (`CC-LAB-0220`/`FR-LAB-126`),
+# `php_laravel`.
+#
+# CircleFeed's (category 2's Facebook pick) fourth and final designed cell --
+# see docs/research/category2-social-ugc-functionality-and-cwe-research.md
+# sec 5 row 4 (account/session preference storage) for the PHP-specific CWE
+# research and sec 6 row 4 for the page-set entry this manifest builds. The
+# existing docs/research/corpus-examples/insecure-deserialization/php/
+# corpus (an APCu-cached-job-by-session-id lookup and a Laravel-queue
+# encrypted-command branch) was checked directly and does not cover the
+# bare-unserialize()-on-a-cookie shape this row names -- a genuinely new
+# shape, not a duplicate. This project's first real implementation of
+# `lab/safety_matrix.yaml`'s `object_deserialization` sink family's PHP pair
+# (`unrestricted_unserialize`/`json_decode_type_check`, both ops existed,
+# unimplemented, since the family was added). The vulnerable twin
+# (`unrestricted_unserialize`) reaches the sink's bare `unserialize()` call
+# on the base64-decoded `pref` cookie value with no `allowed_classes`
+# restriction -- any class the byte stream names is reconstructed, and any
+# magic method it defines (`__wakeup()`/`__destruct()`) runs for real; the
+# secure twin (`json_decode_type_check`) parses the identical bytes with
+# plain-data `json_decode()` instead (which cannot construct a PHP object at
+# all) and additionally requires the result to be an array. Both share the
+# same illustrative route (served at `/cell/<slug>`, per `php_laravel`'s own
+# convention for a non-migrated page, mirroring CircleFeed's own first three
+# cells' precedent). Real, executed live-boot proof (a genuine unserialize
+# RCE -- a real marker file written by a crafted payload's `__wakeup()` hook)
+# is in tests/test_labgen_insecure_deserialization_circlefeed_live_boot.py.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-CF-0007
+    class: insecure_deserialization
+    stack_profile: php_laravel
+    route: { method: GET, path: /settings/preferences }
+    sink_context:
+      family: object_deserialization
+      required_neutralizations: [insecure_deserialization]
+    transform: [unrestricted_unserialize]
+
+  - cell_id: LABGEN-CF-0008
+    class: insecure_deserialization
+    stack_profile: php_laravel
+    route: { method: GET, path: /settings/preferences }
+    sink_context:
+      family: object_deserialization
+      required_neutralizations: [insecure_deserialization]
+    transform: [json_decode_type_check]

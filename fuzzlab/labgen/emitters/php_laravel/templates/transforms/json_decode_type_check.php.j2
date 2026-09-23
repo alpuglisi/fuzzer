@@ -1,0 +1,6 @@
+// json_decode_type_check: flags the sink to parse the base64-decoded
+// {{ var_name }} cookie value with plain-data json_decode() instead of
+// unserialize() -- no PHP object is ever reconstructed and no magic method
+// is ever invoked, and the decoded result must additionally be an array
+// (not an arbitrary scalar) before the sink accepts it. Safety matrix:
+// effect=neutralises, neutralizes: [insecure_deserialization].

@@ -1,0 +1,7 @@
+// One cookie value -> local variable (Laravel Request accessor). CC-LAB-0220
+// (CircleFeed's account-settings preference cookie): `$request->cookie(...)`
+// returns exactly what the client sent for a cookie name excluded from
+// Laravel's default EncryptCookies middleware (see bootstrap/app.php's
+// `encryptCookies(except: ...)` call) -- an attacker-controlled cookie, not
+// a framework-signed one.
+${{ var_name }} = $request->cookie('{{ param_name }}');
