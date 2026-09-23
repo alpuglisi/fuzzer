@@ -4737,6 +4737,71 @@ lane) can submit a payload as
   only Netflix-cardinality-sensitive assertions there count whole-body
   `param="body"` points, which this new query-param point is not part
   of).
+
+- **FR-LAB-135** *(Netflix's tenth real page: first `weak_token_entropy`
+  instance on `spring_boot`, `/api/session/refresh`; `CC-LAB-0195`,
+  2026-09-23).* Instantiates `lab/safety_matrix.yaml`'s existing
+  `session_token_generation` sink family and its `predictable_token_
+  source`/`csprng_token` ops (`CC-LAB-0063`, already on `go_net_http` per
+  `CC-LAB-0181`'s `POST /sessions/refresh`) on `spring_boot` for the FIRST
+  time -- genuinely new breadth, not a depth reuse, and the last
+  realistically-portable-to-both-stacks Twitch mechanism this
+  cross-stack-generalization campaign had not yet given Netflix. A
+  session/token-refresh endpoint (refreshing an authenticated session
+  token -- a realistic API-edge auth shape, distinct from every one of
+  this app's other 9 real pages). Genuinely no tainted request input at
+  all (like `go_net_http`'s own port of this shape) -- the vulnerability
+  is entirely in how the sink generates its own output value. Unlike
+  `go_net_http` (where this was a genuinely new, third module-composition
+  convention, `CC-LAB-0181`), `spring_boot` already uses a single,
+  uniform "the manifest's one op selects a sink module directly"
+  convention for every shape it supports (see `fuzzlab/labgen/emitters/
+  spring_boot/modules.py`'s own docstring), so this needed only a new,
+  no-op source module (`NoOpTokenRequestSource`, mirroring
+  `RequestStreamSource`'s own "renders no code" precedent, `CC-LAB-0132`),
+  not a new composition shape. The vulnerable sink
+  (`predictable_token_source`) renders the session token as
+  `System.nanoTime()` (CWE-330) -- the JDK's own nanosecond-resolution
+  monotonic counter, the direct analog of Go's `time.Now().UnixNano()`,
+  chosen over `System.currentTimeMillis()` specifically for matching
+  resolution with `PredictableTokenSourceStrategy`'s own two-probe delta
+  check. The secure sink (`csprng_token`) renders 32 bytes from
+  `java.security.SecureRandom`, hex-encoded. Cells `LABGEN-JV-0019`/
+  `0020`; ground truth `NFLX-0010` (`vuln_class="weak_token_entropy"`,
+  `sink_context="session_token"`, both existing enum values from
+  `TWCH-0005`, no schema change; `param="body"`/`location="body"`, the
+  whole-body-point convention `TWCH-0005` already establishes even though
+  the request body itself is unused by this mechanism;
+  `rendering="server-json"`). **Detection generalizes with zero new
+  code, verified live**: `PredictableTokenSourceStrategy` (`CC-FUZZ-0034`/
+  `CC-AUD-0021`, built for Twitch's `TWCH-0005`) parses the response's own
+  `session_token` field -- both twins respond with the identical
+  `{"session_token":"..."}` shape `PredictableTokenSourceStrategy.confirm()`
+  expects -- so it confirms this new `spring_boot` vulnerable twin and
+  correctly fails closed on its secure twin with zero adaptation,
+  confirmed against a real booted app
+  (`tests/test_labgen_spring_boot_netflix_session_refresh_live_boot.py`),
+  landed in the SAME commit as the lab page. Also proves a genuine,
+  real-elapsed-time functional differential (the vulnerable twin's two
+  consecutive tokens both parse as decimal integers whose difference
+  tracks real elapsed wall-clock time; the secure twin's tokens are
+  64-character hex strings that never parse as base-10 integers at all).
+  Netflix's own real, scored recall moves from `9/9` to `10/10` in the
+  multi-cell boot and from `1/9` to `1/10` in the single-cell wiring test
+  (`tests/test_multitarget_category4.py`, both re-derived per `PA-0042`).
+  `tests/test_auto.py` re-run and, unlike `FR-LAB-134`'s own `location=
+  "query"` case, found to be AFFECTED this time (a real PA-0042 catch, not
+  assumed clean by analogy): this case's `param="body"`/`location="body"`
+  IS one of the whole-body points `test_points_from_ground_truth_sets_
+  body_content_type_only_for_json_cases` counts, so that test's own
+  hardcoded body-point count and per-URL `body_content_type` assertions
+  were re-derived (5 -> 6 whole-body points) and re-run green, not left
+  stale. With this increment, every realistically-portable-to-both-stacks
+  vuln class this session built (`access_control`, `mass_assignment`,
+  `unrestricted_file_upload`, `price_integrity_bypass`,
+  `jwt_algorithm_confusion`, `ssrf`, `weak_token_entropy`) now exists on
+  BOTH Twitch and Netflix, each with real, live-boot-proven, cross-stack-
+  generalized detection.
   **Pre-change review gate, mechanism fidelity noted explicitly (same
   substitution as `CC-LAB-0182`-`0193`'s own precedent wording):** the
   `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was

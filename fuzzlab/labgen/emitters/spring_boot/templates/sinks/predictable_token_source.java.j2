@@ -1,0 +1,12 @@
+        // predictable_token_source: the vulnerable op. The session-refresh
+        // token literally IS System.nanoTime() rendered as a decimal
+        // string (CWE-330) -- trivially predictable: an attacker who
+        // observes or roughly times one issued token knows every other
+        // token issued in a narrow, guessable window. Ported from
+        // go_net_http's own predictable_token_source.go.j2 (CC-LAB-0181,
+        // time.Now().UnixNano()); here the op selects the sink directly
+        // (this stack's own convention, see modules.py's docstring).
+        String sessionToken = Long.toString(System.nanoTime());
+        return org.springframework.http.ResponseEntity.ok()
+            .header("Content-Type", "application/json")
+            .body("{\"session_token\":\"" + sessionToken + "\"}");

@@ -126,6 +126,22 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     # go_net_http's SSRF cells (zero new sender/candidate plumbing needed
     # for SsrfInBandMarkerStrategy/SsrfOobStrategy to generalize here).
     ("ssrf", "server_side_http_fetch"): _ModuleSet("query_param", "single_handler"),
+    # CC-LAB-0195: Netflix's tenth real page, this stack's first
+    # weak_token_entropy instance -- reuses lab/safety_matrix.yaml's
+    # existing session_token_generation sink family and
+    # predictable_token_source/csprng_token ops (CC-LAB-0063), already
+    # instantiated on go_net_http (CC-LAB-0181). No new safety-matrix
+    # entry needed. Genuinely no tainted request input at all (like
+    # go_net_http's own port of this shape) -- the vulnerability is
+    # entirely in how the sink generates its own output, so this uses a
+    # new, no-op source (NoOpTokenRequestSource) rather than any
+    # pre-existing one; the manifest's one op still selects the sink
+    # directly, this package's own single, uniform convention (unlike
+    # go_net_http, this is not a "new, third convention" for this stack --
+    # see NoOpTokenRequestSource's own docstring).
+    ("weak_token_entropy", "session_token_generation"): _ModuleSet(
+        "no_op_token_request", "single_handler"
+    ),
 }
 
 #: Per-route static render context, the same "render-only information, not
@@ -185,6 +201,13 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
     # ssrf page. Reuses query_param's own var_name/param_name contract
     # verbatim (the same shape ssti/spel_injection already use).
     "/api/content/thumbnail-import": {"var_name": "thumbnailUrl", "param_name": "thumbnail_url"},
+    # CC-LAB-0195: Netflix's tenth real page, a session-refresh endpoint --
+    # this stack's first weak_token_entropy page. No var_name/param_name
+    # needed: there is no tainted request material at all
+    # (NoOpTokenRequestSource publishes nothing), matching
+    # "/api/profiles/avatar"'s own empty-dict shape for a different
+    # reason.
+    "/api/session/refresh": {},
 }
 
 #: Per-op source override (`CC-LAB-0173`) -- checked *after* the shape-level

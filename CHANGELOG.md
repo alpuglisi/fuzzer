@@ -4,6 +4,46 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Netflix's 10th real page, first weak_token_entropy instance on spring_boot, CC-LAB-0195/FR-LAB-135)
+- Target lab: `POST /api/session/refresh` (a session/token-refresh
+  endpoint, refreshing an authenticated session token — a realistic
+  API-edge auth shape, distinct from every one of this app's other 9 real
+  pages). `spring_boot`'s **first** instantiation of `lab/safety_matrix.
+  yaml`'s existing `session_token_generation` sink family /
+  `weak_token_entropy` concern (`CC-LAB-0063`, already instantiated on
+  `go_net_http`, `CC-LAB-0181`) — the last realistically-portable-to-both-
+  stacks Twitch mechanism this cross-stack-generalization campaign had
+  not yet given Netflix. Genuinely no tainted request input at all (like
+  `go_net_http`'s own port): the vulnerable twin's session token literally
+  is `System.nanoTime()` rendered as a decimal string (CWE-330); the
+  secure twin's token is 32 bytes from `java.security.SecureRandom`,
+  hex-encoded. Unlike `go_net_http` (a genuinely new, third module-
+  composition convention there), `spring_boot` already uses a single,
+  uniform "the manifest's one op selects a sink module directly"
+  convention for every shape it supports, so this needed only a new,
+  no-op source module (`NoOpTokenRequestSource`), not a new composition
+  shape. Detection generalized with **zero new code**, verified live in
+  the same commit: `PredictableTokenSourceStrategy` (built for Twitch)
+  confirms the new vulnerable twin and correctly fails closed on the
+  secure twin against a real booted `spring_boot` app. Also proved a real
+  differential (both twins' two consecutive tokens: the vulnerable twin's
+  both parse as decimal integers whose difference tracks real elapsed
+  wall-clock time; the secure twin's are 64-character hex strings that
+  never parse as base-10 integers at all). PA-0042 compliance: re-derived
+  (not left stale) a `tests/test_auto.py` whole-body-point count assertion
+  this new `param="body"`/`location="body"` case also affects (unlike
+  `CC-LAB-0194`'s `location="query"` case, which did not). Ground truth
+  extended (`NFLX-0010`); Netflix's own real, scored `multitarget` recall
+  moves from `9/9` to `10/10` (multi-cell boot) and from `1/9` to `1/10`
+  (single-cell wiring test). With this increment, every realistically-
+  portable-to-both-stacks vuln class this session built now exists on
+  BOTH Twitch and Netflix, each with real, live-boot-proven, cross-stack-
+  generalized detection — this session's own cross-stack-generalization
+  campaign reaches its natural completion point (see this dispatch's own
+  final report for why the remaining stack-asymmetric mechanisms are not
+  further candidates). Full bookkeeping in `docs/components/
+  01-target-lab/change-control.md`'s `CC-LAB-0195` entry.
+
 ## 2026-09-23 (LAB: Netflix's 9th real page, first ssrf instance on spring_boot, CC-LAB-0194/FR-LAB-134)
 - Target lab: `POST /api/content/thumbnail-import` (a partner-content
   thumbnail-import endpoint — importing a thumbnail image from a

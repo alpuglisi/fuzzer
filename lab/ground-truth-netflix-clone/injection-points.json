@@ -64,6 +64,13 @@
       "param": "thumbnail_url",
       "location": "query",
       "rendering": "server-json"
+    },
+    {
+      "url": "/api/session/refresh",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "rendering": "server-json"
     }
   ]
 }

@@ -1,0 +1,15 @@
+        // csprng_token: the secure twin. 32 bytes from
+        // java.security.SecureRandom (the JDK's own CSPRNG, the real
+        // analog of Go's crypto/rand), hex-encoded -- genuinely
+        // unpredictable. Ported from go_net_http's own csprng_token.go.j2
+        // (CC-LAB-0181).
+        byte[] tokenBytes = new byte[32];
+        new java.security.SecureRandom().nextBytes(tokenBytes);
+        StringBuilder sessionTokenHex = new StringBuilder();
+        for (byte tokenByte : tokenBytes) {
+            sessionTokenHex.append(String.format("%02x", tokenByte));
+        }
+        String sessionToken = sessionTokenHex.toString();
+        return org.springframework.http.ResponseEntity.ok()
+            .header("Content-Type", "application/json")
+            .body("{\"session_token\":\"" + sessionToken + "\"}");

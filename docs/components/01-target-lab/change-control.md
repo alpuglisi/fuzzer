@@ -3,7 +3,282 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
-### CC-LAB-0194 — Netflix's 9th real page: first ssrf instance on `spring_boot`, `/api/content/thumbnail-import` (FR-LAB-134) (2026-09-23)
+### CC-LAB-0195 — Netflix's 10th real page: first weak_token_entropy instance on `spring_boot`, `/api/session/refresh` (FR-LAB-135) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing
+  `session_token_generation` sink family / `weak_token_entropy` concern
+  (`predictable_token_source`/`csprng_token` ops, `CC-LAB-0063`, already
+  built on `go_net_http` -- `CC-LAB-0181`'s Twitch `POST /sessions/
+  refresh`, detection `CC-FUZZ-0034`/`CC-AUD-0021`,
+  `PredictableTokenSourceStrategy`) on `spring_boot`, this stack's first
+  instance: `POST /api/session/refresh` (served by `LABGEN-JV-0019`/
+  `0020`), a session/token-refresh endpoint -- refreshing an
+  authenticated session token, a realistic API-edge auth shape distinct
+  from every one of this app's other 9 real pages -- and this session's
+  own cross-stack-generalization campaign: giving Netflix the last
+  remaining Twitch mechanism this campaign had judged realistically
+  portable to Java (this session's own prior analysis found
+  `webhook_signature`'s timing side-channel undetectable and
+  `path_traversal`'s black-box detection unsafe/contrived to attempt, so
+  neither was a candidate).
+  **Design decision, checked directly against `CC-LAB-0181`'s own entry
+  and `PredictableTokenSourceStrategy`'s own `confirm()` contract before
+  building, not assumed to "probably work":** `CC-LAB-0181`'s own entry
+  frames this shape as needing a genuinely new, THIRD module-composition
+  convention for `go_net_http` specifically (neither "a transform
+  modifies a value a shared sink renders" nor "the manifest's op names a
+  sink directly, but with a real source still reading real request
+  input" -- this shape has no tainted source input at all). Checked
+  `modules.py`'s own docstring before assuming that framing carries over
+  identically: it does not. `spring_boot` already uses a SINGLE, uniform
+  convention for every shape it supports -- the manifest's one op always
+  selects a **sink** module directly, with no separate transform stage at
+  all (see `modules.py`'s own docstring, "Why this stack's shape has no
+  separate transform category"). So this is not a new convention for
+  THIS stack; it only needed a new, no-op **source** module
+  (`NoOpTokenRequestSource`) that publishes nothing, mirroring
+  `RequestStreamSource`'s own "renders no code, exists to keep the
+  source/sink/complexity composition contract uniform" precedent
+  (`CC-LAB-0132`) -- just with an even smaller footprint (that one still
+  publishes `value_expr`; this one publishes nothing at all, since no
+  sink here reads a request-derived value). **Adapted the design
+  accordingly** (the task's own explicit invitation to check this stack's
+  own conventions rather than assume Go's numbering applies identically).
+  The vulnerable twin (`predictable_token_source`) renders the session
+  token as `Long.toString(System.nanoTime())` (CWE-330) -- the JDK's own
+  nanosecond-resolution monotonic counter, chosen over
+  `System.currentTimeMillis()` specifically to match
+  `PredictableTokenSourceStrategy`'s own two-probe delta-check resolution
+  (millisecond resolution would make two rapid consecutive probes collide
+  on the same value far more often, a real false-negative risk this port
+  avoids by matching Go's own `UnixNano()` resolution rather than reusing
+  the less precise wall-clock call). The secure twin (`csprng_token`)
+  renders 32 bytes from `java.security.SecureRandom`, hex-encoded --
+  genuinely unpredictable, the JDK's own CSPRNG, the real analog of Go's
+  `crypto/rand`.
+  **Cross-branch collision check, performed and recorded**: `git fetch
+  origin claude/category-3-build-iuu5k9 claude/category-5-build-6boejs`
+  followed by a diff of every shared file this task named (`fuzzlab/
+  labgen/emitters/spring_boot/`, `fuzzlab/oracle/strategies.py`) against
+  both sibling branches: both diffs show only deletions relative to this
+  branch (strictly behind on every one of those files, no conflicting
+  edit to the same lines/keys), and this entry does not modify
+  `fuzzlab/oracle/strategies.py` at all (the detection strategy is reused
+  verbatim, zero new/changed lines there), so no collision risk from
+  either sibling branch's own new strategy classes. This is a pure,
+  non-colliding addition.
+  **Bookkeeping-ID discipline, checked directly, not assumed:** confirmed
+  `CC-LAB-0195` against this branch's own reserved block (`CC-LAB-0170`-
+  `0209`) and the highest number actually USED in this log (`CC-LAB-0194`),
+  not merely mentioned anywhere in this branch's merged docs (category
+  5's own `CC-LAB-0210`-`0249` block is also present in this branch's
+  history and must not be mistaken for "next free"). Checked
+  `tests/test_multitarget_category4.py`/`tests/test_auto.py`/
+  `tests/test_labels_contract_category4.py` for hardcoded fraction/count
+  assertions depending on Netflix's ground-truth cardinality (per
+  `BUG-0040`/`PA-0042`) and re-ran all three directly (not just the
+  non-slow suite) after updating them: `test_multitarget_category4.py`'s
+  Netflix recall assertions moved from `9/9` to `10/10` (multi-cell boot)
+  and `1/9` to `1/10` (single-cell wiring test), plus the macro-recall
+  average; `test_labels_contract_category4.py`'s case count moved from 9
+  to 10 with a new `NFLX-0010` cross-check; `test_auto.py`'s own
+  Netflix-cardinality-sensitive assertions were checked by DIRECT
+  inspection, not assumed clean by analogy to `CC-LAB-0194`'s own
+  `location="query"` case: this new case's `param="body"`/
+  `location="body"` (the whole-body-point convention, since there is no
+  per-field param at all) DOES fall inside
+  `test_points_from_ground_truth_sets_body_content_type_only_for_json_
+  cases`'s own whole-body-point count and per-URL `body_content_type`
+  assertions (unlike `CC-LAB-0194`'s `location="query"` SSRF point, which
+  did not) -- a real, caught-before-landing PA-0042 finding, not a
+  restated assumption. Re-derived that count (5 -> 6 whole-body points,
+  new `/api/session/refresh` entry asserting `body_content_type ==
+  "application/json"`) and re-ran green;
+  `test_points_from_ground_truth_carries_sink_context_from_the_matching_
+  case` inspects only three specific URLs by name, none of which is the
+  new one -- confirmed unaffected by direct inspection, not assumed.
+  - **Real Netflix functionality (grounded, not invented)**: a
+    session/token-refresh endpoint (a standard API-edge auth shape every
+    session-based web app needs; the specific `POST /api/session/
+    refresh` path is this manifest's own illustrative inference, not a
+    confirmed Netflix-internal implementation detail, labeled explicitly
+    in the manifest's own header, matching `CC-LAB-0179`'s/`CC-LAB-0194`'s
+    own fact-vs-inference discipline).
+  - **Vulnerable** (`LABGEN-JV-0019`, `predictable_token_source`): the
+    session token literally is `System.nanoTime()` as a decimal string.
+    **Secure** (`LABGEN-JV-0020`, `csprng_token`): 32 bytes from
+    `java.security.SecureRandom`, hex-encoded.
+  - **Zero new generator code beyond one source template + two sink
+    templates + a `_PAGE_PARAMS` entry**: the `single_handler` complexity
+    and the `_MODULE_SET_BY_SHAPE`/`SOURCES`/`SINKS` dict-registration
+    pattern are all pre-existing, unchanged infrastructure -- only three
+    new template files (`no_op_token_request.java.j2`/
+    `predictable_token_source.java.j2`/`csprng_token.java.j2`) and their
+    three `TemplateModule` subclasses are genuinely new code; rendering
+    both cells was run directly before writing any test and confirmed
+    clean, deterministic Java source.
+  - **Real, live-boot proof** (`tests/test_labgen_spring_boot_netflix_
+    session_refresh_live_boot.py`, mirroring `CC-LAB-0181`'s own
+    `go_net_http` two-case differential shape: the vulnerable twin's two
+    consecutive tokens both parse as decimal integers whose difference
+    tracks real elapsed wall-clock time; the secure twin's tokens are
+    64-character hex strings that never parse as base-10 integers at
+    all): 3 assertions pass against a real `mvn package`/boot/HTTP round
+    trip -- 3 passed in ~23s.
+  - **Detection generalization, verified for real against a real booted
+    app, not asserted from theory**: `PredictableTokenSourceStrategy`
+    (`CC-FUZZ-0034`) confirms the real vulnerable twin and correctly
+    fails closed on the real secure twin, with zero new detection code
+    (`TestPredictableTokenSourceStrategyGeneralizesToSpringBoot`, same
+    file). The real `fuzzlab.harness.multitarget.run_targets` pipeline
+    was then run end to end against both a single-cell boot
+    (`test_both_apps_run_through_multitarget_for_real`) and the shared
+    Netflix multi-cell boot
+    (`test_netflix_multi_cell_boot_confirms_all_positives`), both
+    re-verified green after the recall-math update: Netflix's own real,
+    scored recall moves from `9/9` to `10/10` in the multi-cell boot and
+    from `1/9` to `1/10` in the single-cell wiring test.
+  - Ground truth: `NFLX-0010` added to `lab/ground-truth-netflix-clone/`
+    (`vuln_class="weak_token_entropy"`, `sink_context="session_token"` --
+    both pre-existing enum values from `TWCH-0005`; `param="body"`/
+    `location="body"`, the whole-body-point convention `TWCH-0005`
+    already establishes even though the request body itself is unused by
+    this mechanism, no schema widening needed).
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0194`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded here rather than silently
+  skipping the gate: (1) **accuracy** -- confirmed by direct source
+  inspection, not assumed: `single_handler`'s module name exists verbatim
+  in `modules.py`; `PredictableTokenSourceStrategy`'s exact `confirm()`
+  contract (`fuzzlab/oracle/strategies.py`) and `_session_token()`'s
+  JSON-field-parse gate were read before designing the response shape;
+  `modules.py`'s own docstring was read before assuming `CC-LAB-0181`'s
+  "new, third convention" framing carried over to this stack (it does
+  not -- caught this way, BEFORE any template was written, not after a
+  failed test run, and documented above as its own design-decision
+  narrative rather than silently reusing the wrong precedent language);
+  cell IDs `LABGEN-JV-0019`/`0020` were confirmed free (grepped
+  `LABGEN-JV-` across every manifest, highest existing was
+  `LABGEN-JV-0018`, from `CC-LAB-0194`); rendering both cells was run
+  directly before writing any test. (2) **adequacy** -- checked that this
+  increment does not silently duplicate an existing route (grepped
+  `_PAGE_PARAMS` for `/api/session/refresh`: absent), does not need a
+  second, redundant strategy (no new `Rule`/`ConfirmationStrategy` code
+  was written at all), and that the "detection already works
+  automatically" claim was actually run against a real booted instance
+  rather than asserted from theory (see above) -- both a dedicated
+  live-boot strategy test and the full
+  `fuzzlab.harness.multitarget.run_targets` pipeline (both the
+  single-cell wiring test and the shared multi-cell boot) were executed
+  for real before this entry claims the recall move. The adequacy pass
+  also caught the `tests/test_auto.py` PA-0042 impact described above --
+  a real catch, not a restated assumption of safety by analogy to
+  `CC-LAB-0194`'s own (different-shaped, unaffected) case.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/modules.py`
+    (`NoOpTokenRequestSource`, `PredictableTokenSourceSink`,
+    `CsprngTokenSink`)
+  - `fuzzlab/labgen/emitters/spring_boot/__init__.py` (new
+    `_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS` entries)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sources/
+    no_op_token_request.java.j2`, `templates/sinks/
+    predictable_token_source.java.j2`, `templates/sinks/csprng_token.
+    java.j2` (new)
+  - `lab/manifests/weak_token_entropy_netflix_sample.yaml` (new)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,
+    expectedresults.csv}`
+  - `tests/test_labgen_spring_boot_netflix_session_refresh.py` (new)
+  - `tests/test_labgen_spring_boot_netflix_session_refresh_live_boot.py`
+    (new)
+  - `tests/test_labels_contract_category4.py` (NFLX-0010 cross-check)
+  - `tests/test_multitarget_category4.py` (Netflix recall re-derived,
+    both single-cell and multi-cell boots; multi-cell manifest/cell-id
+    lists extended)
+  - `tests/test_auto.py` (whole-body-point count re-derived, 5 -> 6, per
+    PA-0042 -- the real finding this entry's adequacy pass made)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-135`, new)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category-4 tracker
+    row)
+  - `docs/ARCHITECTURE.md` (Netflix page/detection counts, campaign
+    completion note)
+  - `CHANGELOG.md`
+- Impact (other components / project): purely additive to `spring_boot`
+  and `lab/ground-truth-netflix-clone`; no other stack/app touched. No
+  audit-rule/oracle-strategy bookkeeping change was needed
+  (`PredictableTokenSourceStrategy`/`CC-FUZZ-0034`/`CC-AUD-0021` already
+  exist and needed zero code change) -- only their own generalization to
+  a second real page (after `TWCH-0005`) and a second stack is newly
+  proven and recorded, here and in `tests/test_multitarget_category4.py`'s
+  own docstring. **Project-level milestone, stated plainly (this
+  dispatch's own explicit ask):** with this increment, every
+  realistically-portable-to-both-stacks vuln class this session built
+  (`access_control`, `mass_assignment`, `unrestricted_file_upload`,
+  `price_integrity_bypass`, `jwt_algorithm_confusion`, `ssrf`,
+  `weak_token_entropy`) now exists on BOTH Twitch and Netflix, each with
+  real, live-boot-proven, cross-stack-generalized detection -- this
+  session's own cross-stack-generalization campaign reaches its natural
+  completion point for category 4. The remaining stack-asymmetric
+  mechanisms (Netflix-only `insecure_deserialization`/`xxe`, Twitch-only
+  `webhook_signature`/`path_traversal`) are not further candidates, for
+  the reasons this session's own prior analysis already recorded (Go's
+  `encoding/xml` does not resolve external entities by default, unlike
+  Java's `DocumentBuilderFactory`, so an XXE port to Go would not be a
+  genuine vulnerability; `webhook_signature`'s timing side-channel was
+  judged empirically infeasible for this project's wall-clock HTTP
+  measurement model; `path_traversal`'s black-box detection was judged
+  unsafe/contrived to attempt) -- not invented here, restated for the
+  record at this campaign's own completion point.
+- Risk (level; mitigation or accepted-risk justification): **low**. Reuses
+  a fully-built, already-tested strategy verbatim; the only genuinely new
+  artifacts are three small templates, a manifest, and ground truth.
+  Verified end to end with a real `mvn package`/boot/HTTP round trip and a
+  real `run_targets` pipeline run, not assumed from the shared-mechanism
+  argument alone. No outbound-network/fetch capability is introduced by
+  this cell at all (unlike `CC-LAB-0194`'s own SSRF cell) -- the only real
+  process risk this entry accepts and states explicitly is the same
+  self-review substitution (in place of two independent reviewer agents)
+  every entry in this session has accepted, mitigated by the real `mvn
+  package`/boot/HTTP verification actually performed before landing (both
+  the differential and the strategy generalization).
+- Deliverables:
+  - [x] New no-op source + two sink templates, zero new source/complexity
+        infrastructure code -- done
+  - [x] Real live-boot proof (3 assertions, mirroring `CC-LAB-0181`'s own
+        two-twin differential shape) -- done
+  - [x] Ground truth extended (`NFLX-0010`) -- done
+  - [x] Detection generalization verified live (dedicated strategy
+        live-boot test + real `run_targets` pipeline runs, both single-
+        and multi-cell) -- recall `9/9` -> `10/10` (multi-cell), `1/9` ->
+        `1/10` (single-cell) -- done
+  - [x] `tests/test_labels_contract_category4.py`/`tests/test_auto.py`
+        re-run and confirmed green per `PA-0042` -- `tests/test_auto.py`
+        found genuinely affected (not a clean pass by analogy) and
+        re-derived, not just re-run -- done
+  - [x] Full non-slow suite + every directly-affected slow test re-run
+        green at the stable baseline (18 pre-existing, unrelated
+        failures; 2070 passed) -- done
+  - [x] Pre-change review gate's `Agent`-tool absence flagged explicitly,
+        substituted with a documented self-review (accuracy + adequacy),
+        matching `CC-LAB-0182`-`0194`'s own precedent wording
+  - [x] Cross-stack-generalization campaign completion assessed and
+        stated plainly, with reasons, per this dispatch's own explicit
+        ask -- done
+- Effectiveness (assessed 2026-09-23): achieved, both as a lab page and
+  for detection -- the real booted vulnerable twin's two consecutive
+  tokens both parse as decimal integers whose difference tracks real
+  elapsed wall-clock time (CWE-330 demonstrated); the real booted secure
+  twin's tokens are 64-character hex strings that never parse as base-10
+  integers at all; `PredictableTokenSourceStrategy` confirms the
+  vulnerable twin and correctly fails closed on the secure twin with zero
+  new detection code -- the sixth proof this session's own detection
+  strategies generalize across stacks (`go_net_http` -> `spring_boot`).
+  Netflix's own real, scored `multitarget` recall is now `10/10` in the
+  multi-cell boot.
+
+### CC-LAB-0194 — Netflix's 9th real page, first ssrf instance on `spring_boot`, `/api/content/thumbnail-import` (FR-LAB-134) (2026-09-23)
 
 - Change: instantiates `lab/safety_matrix.yaml`'s existing
   `server_side_http_fetch` sink family / `ssrf` concern

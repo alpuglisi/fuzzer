@@ -451,18 +451,23 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # below for the multi-cell boot that confirms all nine together.
     # PA-0042: this hardcoded fraction was re-derived, not left stale,
     # when NFLX-0009 was added (ground-truth cardinality moved from 8 to
-    # 9; tp stays 1, so recall moves from 1/8 to 1/9).
+    # 9; tp stays 1, so recall moved from 1/8 to 1/9) and again when
+    # NFLX-0010/CC-LAB-0195 was added (cardinality moved from 9 to 10; tp
+    # still stays 1, so recall moves from 1/9 to 1/10 -- the tenth
+    # positive's own vulnerable twin, LABGEN-JV-0019, is not booted in
+    # this single-cell test either).
     netflix_report = by_name["netflix-clone"].report
     assert netflix_report.tp == 1 and netflix_report.fp == 0
-    assert round(netflix_report.recall, 4) == round(1 / 9, 4)
+    assert round(netflix_report.recall, 4) == round(1 / 10, 4)
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
     # PA-0042: re-derived, not left stale, from the ground-truth-cardinality
     # changes TWCH-0011/CC-LAB-0190 (Twitch's own recall moved from 9/10 to
-    # 9/11) and NFLX-0009/CC-LAB-0194 (Netflix's own recall in THIS
-    # single-cell test moved from 1/8 to 1/9) both made.
-    assert round(summary["macro_recall"], 4) == round(((9 / 11) + (1 / 9)) / 2, 4)
+    # 9/11) and NFLX-0009/CC-LAB-0194 + NFLX-0010/CC-LAB-0195 (Netflix's own
+    # recall in THIS single-cell test moved from 1/8 to 1/9 to 1/10) all
+    # made.
+    assert round(summary["macro_recall"], 4) == round(((9 / 11) + (1 / 10)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True
@@ -496,11 +501,14 @@ _NETFLIX_MULTI_MANIFESTS = (
     # (/api/content/thumbnail-import) -- a ninth, distinct route, no
     # collision.
     "lab/manifests/ssrf_netflix_thumbnail_sample.yaml",
+    # CC-LAB-0195: tenth real page, first weak_token_entropy instance
+    # (/api/session/refresh) -- a tenth, distinct route, no collision.
+    "lab/manifests/weak_token_entropy_netflix_sample.yaml",
 )
 _NETFLIX_MULTI_CELL_IDS = {
     "LABGEN-JV-0001", "LABGEN-JV-0003", "LABGEN-JV-0005", "LABGEN-JV-0007",
     "LABGEN-JV-0009", "LABGEN-JV-0011", "LABGEN-JV-0013", "LABGEN-JV-0015",
-    "LABGEN-JV-0017",
+    "LABGEN-JV-0017", "LABGEN-JV-0019",
 }
 _BUILD_TIMEOUT_S = 240.0
 _BOOT_TIMEOUT_S = 30.0
@@ -539,10 +547,12 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
     (unrestricted_file_upload, `/api/profiles/avatar`, `CC-LAB-0191`), and
     `LABGEN-JV-0013` (mass_assignment, `/api/account/settings`,
     `CC-LAB-0192`), `LABGEN-JV-0015` (jwt_algorithm_confusion,
-    `/api/account/preferences`, `CC-LAB-0193`), and `LABGEN-JV-0017`
-    (ssrf, `/api/content/thumbnail-import`, `CC-LAB-0194`) -- into one
-    real booted app (nine distinct routes, no collision), then runs the
-    real generic `run_targets` pipeline against it. Originally
+    `/api/account/preferences`, `CC-LAB-0193`), `LABGEN-JV-0017`
+    (ssrf, `/api/content/thumbnail-import`, `CC-LAB-0194`), and
+    `LABGEN-JV-0019` (weak_token_entropy, `/api/session/refresh`,
+    `CC-LAB-0195`) -- into one real booted app (ten distinct routes, no
+    collision), then runs the real generic `run_targets` pipeline against
+    it. Originally
     closed the follow-on `CC-FUZZ-0032` flagged (both of Netflix's
     positives confirming together in one real boot); extended by
     `CC-LAB-0184` to prove the third positive confirms alongside the other
@@ -586,7 +596,14 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
     needed zero new detection code to confirm it too -- verified live in
     `tests/test_labgen_spring_boot_netflix_thumbnail_ssrf_live_boot.py`
     first, then reproduced here in the shared multi-cell boot -- moving
-    Netflix's own scored recall in this boot from 8/8 to 9/9.
+    Netflix's own scored recall in this boot from 8/8 to 9/9. Extended
+    again by `CC-LAB-0195` to add the tenth positive, `NFLX-0010`:
+    `PredictableTokenSourceStrategy` (`CC-FUZZ-0034`/`CC-AUD-0021`,
+    already built for Twitch's `go_net_http` session-refresh cell) needed
+    zero new detection code to confirm it too -- verified live in
+    `tests/test_labgen_spring_boot_netflix_session_refresh_live_boot.py`
+    first, then reproduced here in the shared multi-cell boot -- moving
+    Netflix's own scored recall in this boot from 9/9 to 10/10.
     """
     root = tmp_path_factory.mktemp("netflix_multitarget")
     shutil.copytree(SKELETON_DIR, root, dirs_exist_ok=True)
@@ -642,11 +659,14 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
         # Twitch's go_net_http channel-profile cell), CC-LAB-0193 moved it
         # from 7/7 to 8/8 with zero new detection code again
         # (JwtAlgNoneConfusionStrategy, already built for Twitch's
-        # go_net_http channel-settings cell), and CC-LAB-0194 moves it
-        # from 8/8 to 9/9 with zero new detection code again
+        # go_net_http channel-settings cell), CC-LAB-0194 moved it from
+        # 8/8 to 9/9 with zero new detection code again
         # (SsrfInBandMarkerStrategy/SsrfOobStrategy, already built for
-        # Twitch's go_net_http SSRF cells).
-        assert outcome.report.tp == 9 and outcome.report.fp == 0
+        # Twitch's go_net_http SSRF cells), and CC-LAB-0195 moves it from
+        # 9/9 to 10/10 with zero new detection code again
+        # (PredictableTokenSourceStrategy, already built for Twitch's
+        # go_net_http session-refresh cell).
+        assert outcome.report.tp == 10 and outcome.report.fp == 0
         assert outcome.report.recall == 1.0
     finally:
         listener.stop()

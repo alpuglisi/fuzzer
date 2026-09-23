@@ -687,6 +687,70 @@ class SchemeAndResolvedIpAllowlistSink(TemplateModule):
         )
 
 
+class NoOpTokenRequestSource(TemplateModule):
+    """A no-op source (`CC-LAB-0195`, `weak_token_entropy`'s first
+    `spring_boot` instantiation): unlike every other shape this stack
+    supports, `session_token_generation`'s vulnerability is entirely in
+    how the **sink** below generates its own output value, not in any
+    attacker-controlled value reaching it, so there is no tainted request
+    material to read at all. Renders a comment-only file stating that
+    explicitly (mirroring `go_net_http`'s own `NoOpTokenRequestSource`,
+    `CC-LAB-0181`) rather than silently omitting the source stage. Unlike
+    `go_net_http`, this is not a genuinely new module-composition
+    convention for THIS stack: every `spring_boot` shape already has the
+    manifest's one op select a **sink** module directly (this package's
+    own single, uniform "op selects sink" convention, see this module's
+    own docstring) -- this source module simply has nothing of its own to
+    publish for that sink to use, matching `RequestStreamSource`'s own
+    "renders no code, exists to keep the source/sink/complexity
+    composition contract uniform" precedent (`CC-LAB-0132`), just with an
+    even smaller footprint (that one still publishes `value_expr`; this
+    one publishes nothing, since no sink here reads a request-derived
+    value at all)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "no_op_token_request", "source", SOURCE_ENV, "no_op_token_request.java.j2"
+        )
+
+
+class PredictableTokenSourceSink(TemplateModule):
+    """The vulnerable op (`lab/safety_matrix.yaml`'s existing
+    `predictable_token_source` op, `session_token_generation` sink family,
+    `no_effect` -- added by `CC-LAB-0063` for the `corpus-examples/
+    auth-session` research, already instantiated on `go_net_http` by
+    `CC-LAB-0181`; `CC-LAB-0195` is its first instantiation for
+    `spring_boot`): the session-refresh token literally *is*
+    `System.nanoTime()` rendered as a decimal string (CWE-330) --
+    trivially predictable, the same "an attacker who observes or roughly
+    times one token knows every other token issued in a narrow, guessable
+    window" property `go_net_http`'s own `time.Now().UnixNano()` twin
+    has. `System.nanoTime()` (not `System.currentTimeMillis()`) is used
+    specifically because it is the JDK's own nanosecond-resolution
+    monotonic counter -- the direct analog of Go's `UnixNano()` this
+    strategy's own two-probe delta check (`PredictableTokenSourceStrategy`,
+    `fuzzlab/oracle/strategies.py`) expects (millisecond resolution would
+    make two rapid consecutive probes collide on the same value far more
+    often, a real false-negative risk this port avoids by matching Go's
+    own resolution rather than reusing the less precise wall-clock call)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "predictable_token_source", "sink", SINK_ENV, "predictable_token_source.java.j2"
+        )
+
+
+class CsprngTokenSink(TemplateModule):
+    """The secure twin (`csprng_token`, `neutralises` -- `CC-LAB-0195`):
+    32 bytes from `java.security.SecureRandom`, hex-encoded -- genuinely
+    unpredictable, the JDK's own CSPRNG (the real analog of Go's
+    `crypto/rand`), matching `go_net_http`'s own `CsprngTokenSink`
+    (`CC-LAB-0181`) design exactly."""
+
+    def __init__(self) -> None:
+        super().__init__("csprng_token", "sink", SINK_ENV, "csprng_token.java.j2")
+
+
 SOURCES: dict[str, Module] = {
     "query_param": QueryParamSource(),
     "raw_body": RawBodySource(),
@@ -696,6 +760,7 @@ SOURCES: dict[str, Module] = {
     "read_plan_change_request": ReadPlanChangeRequestSource(),
     "read_uploaded_avatar_file": ReadUploadedAvatarFileSource(),
     "read_authorization_bearer_token": ReadAuthorizationBearerTokenSource(),
+    "no_op_token_request": NoOpTokenRequestSource(),
 }
 #: Keyed by the op name that selects this sink (see this module's own
 #: docstring for why the op selects the sink here, not a pre-sink
@@ -723,6 +788,8 @@ SINKS: dict[str, Module] = {
     "jwt_none_alg_opt_in": JwtNoneAlgOptInSink(),
     "unchecked_url_fetch": UncheckedUrlFetchSink(),
     "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistSink(),
+    "predictable_token_source": PredictableTokenSourceSink(),
+    "csprng_token": CsprngTokenSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_handler": SingleHandlerComplexity(),

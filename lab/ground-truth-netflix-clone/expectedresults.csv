@@ -13,3 +13,4 @@ NFLX-0006,/api/profiles/avatar,POST,file,body,unrestricted_file_upload,true,/api
 NFLX-0007,/api/account/settings,POST,body,body,mass_assignment,true,/api/account/settings,sink,,direct
 NFLX-0008,/api/account/preferences,GET,Authorization,header,jwt_algorithm_confusion,true,/api/account/preferences,sink,,direct
 NFLX-0009,/api/content/thumbnail-import,POST,thumbnail_url,query,ssrf,true,/api/content/thumbnail-import,sink,,direct
+NFLX-0010,/api/session/refresh,POST,body,body,weak_token_entropy,true,/api/session/refresh,sink,,direct

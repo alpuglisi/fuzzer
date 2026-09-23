@@ -15,7 +15,7 @@ TWITCH_GT_DIR = "lab/ground-truth-twitch-clone"
 def test_netflix_ground_truth_loads_and_cross_checks():
     gt = contract.load(NETFLIX_GT_DIR)
     assert gt.target == "spring_boot"
-    assert len(gt.cases) == 9
+    assert len(gt.cases) == 10
     case = gt.case_by_id("NFLX-0001")
     assert case is not None
     assert case.expected_vulnerable
@@ -119,10 +119,22 @@ def test_netflix_ground_truth_loads_and_cross_checks():
     assert ssrf_case.param == "thumbnail_url"
     assert ssrf_case.location == "query"
 
+    # CC-LAB-0195: Netflix's tenth real page, first weak_token_entropy
+    # instance, /api/session/refresh.
+    token_case = gt.case_by_id("NFLX-0010")
+    assert token_case is not None
+    assert token_case.expected_vulnerable
+    assert token_case.vuln_class == "weak_token_entropy"
+    assert token_case.sink_context == "session_token"
+    assert token_case.url == "/api/session/refresh"
+    assert token_case.method == "POST"
+    assert token_case.param == "body"
+    assert token_case.location == "body"
+
     # Opaque case IDs: no vuln class leaks into the identifier.
     for case in gt.cases:
         for token in ("jackson", "deser", "vuln", "xxe", "idor", "access", "price", "charge",
-                      "jwt", "confusion", "ssrf", "fetch"):
+                      "jwt", "confusion", "ssrf", "fetch", "token", "entropy"):
             assert token not in case.case_id.lower()
 
 
