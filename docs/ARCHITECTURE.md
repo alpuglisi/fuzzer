@@ -774,11 +774,128 @@ tracked in the requirements files, not here.
   own standalone, pre-requisite entry (`CC-LAB-0094a`), adopting category
   3's own already-reviewed widening byte-identically rather than
   inventing different values, to avoid future cross-branch schema drift.
-  PicTrail's remaining planned pages (mass-assignment settings,
-  identifier-SQLi search, session deserialization, the full
-  auto-linking-specific XSS shape) and CircleFeed (the Facebook-style PHP
-  app) stay planned, not built — each its own future, separately-gated
-  increment.
+  **PicTrail's fourth real page (`CC-LAB-0095`) landed the researched
+  mass-assignment shape**: `POST /settings`, a whole-POST-body dict
+  source (this emitter's first source that is not "one named
+  parameter") feeding a shared, parameterized multi-column `UPDATE`
+  sink — `unfiltered_body_update` (SQL-column-name hygiene only) vs.
+  `runtime_field_allowlist` (the real security boundary), reusing
+  `lab/safety_matrix.yaml`'s existing `orm_entity_bulk_assign` sink
+  family unchanged. A deliberate, stated departure from the research
+  doc's own literal `ModelForm` wording: this emitter has never used the
+  Django ORM on either twin of any shape, so this entry ports the same
+  CWE-915 mechanism onto the established raw-`connection.cursor()`
+  convention instead of introducing a model/migration for the first
+  time. Real live-boot proof checks both halves of the differential in
+  one request (the legitimate `bio` field still applies; the privileged
+  `is_verified` field is blocked on the secure twin), reading the DB row
+  back directly rather than inferring it from the response.
+  **PicTrail's fifth real page (`CC-LAB-0096`) landed the researched
+  identifier/`ORDER BY`-position SQLi shape**: `GET /explore`, this
+  project's first real implementation of `lab/safety_matrix.yaml`'s own
+  `sql_order_by_clause` sink family (`orm_order_by_unvalidated` vs.
+  `identifier_allowlist`) on any stack — a shared raw-`connection.
+  cursor()` sink, security boundary entirely in the transform. Real
+  live-boot proof uses a real, legal, non-syntax-breaking payload
+  (`"id DESC"`) to reverse real row order on the vulnerable twin, while
+  the secure twin's allowlist ignores it and matches a legitimate
+  `sort=id` request exactly.
+  **PicTrail's sixth real page (`CC-LAB-0097`) landed the researched
+  insecure-deserialization shape**: `POST /inbox`, Django's own real,
+  documented `PickleSerializer` opt-in footgun (CWE-502), ported onto a
+  base64-encoded inbox-message payload. This emitter's first sink whose
+  deserialize *mechanism itself* (`pickle.loads()` vs. `json.loads()`)
+  differs between twins, not just a transform gating a shared operation
+  — resolved by porting `ruby_rails`'s own already-established
+  "flag-only transform, sink branches via Jinja2-time interpolation"
+  convention directly. Real live-boot proof is a genuine pickle-RCE: a
+  crafted `__reduce__` payload writes a real, checkable marker file when
+  unpickled on the vulnerable twin, while the secure twin's `json.loads()`
+  never creates it, and still correctly accepts a legitimate JSON
+  payload.
+  **PicTrail's own six-page design (per the research doc's §6) is now
+  fully built.** The full auto-linking-specific XSS shape (§4 row 2's
+  own fuller `@mention`/`#hashtag` mechanism, deliberately simplified in
+  `CC-LAB-0093`) stays planned, not built.
+  **CircleFeed (`CC-LAB-0216`), category 2's Facebook pick, landed its
+  first real page** — the second app identity built on the existing
+  `php_laravel` emitter (after Huddle Hub, category 3): a photo/tag-
+  detail page implementing `lab/safety_matrix.yaml`'s existing
+  access-control section (`ownership_check_bypass`, added `CC-LAB-0063`)
+  for the first time on any emitter/stack — `no_ownership_check` (a
+  direct Eloquent primary-key fetch, no owner check) vs.
+  `identity_match_before_fetch` (a real `->where('owner_id', ...)`
+  clause on the fetch itself), at the `db_row_by_id_lookup` sink family.
+  A new `App\Models\Photo` model/migration was added to the shared
+  `php_laravel` skeleton, and `LiveBootHarness` gained a second real
+  seeded user so a real ownership-check differential could be proven
+  against two genuinely distinct sessions. Its own `lab/ground-truth-
+  circlefeed/` contract (`CF-` case-id prefix). **CircleFeed's second
+  real page (`CC-LAB-0217`) landed a Groups webhook receiver** modeling
+  Meta's own Messenger Platform `X-Hub-Signature`-style webhook contract
+  — pure wiring, reusing the exact `webhook_signature_bypass`/
+  `webhook_signature_verification` module composition Huddle Hub's own
+  `/webhooks/events` cell already registers (`CC-LAB-0133`), via a new
+  `/groups/webhook` page profile (own lab-only secret) and manifest; no
+  new transform/sink module. Ground truth extended (`CF-0002`). Real,
+  executed proof split the same way Huddle Hub's own webhook cell split
+  it (a live-boot HTTP-correctness test plus a separate real-`php`-
+  executed comparison-operator differential test for the "magic hash"
+  bug). **CircleFeed's third real page (`CC-LAB-0218`) landed a comment
+  "share" redirect** — a `header("Location: " . $_GET['next'])`-shaped
+  redirect built directly from an unvalidated `next` query parameter
+  (CWE-113), this project's first real implementation of `lab/
+  safety_matrix.yaml`'s `http_response_header_value` sink family
+  (`raw_socket_response_write`/`allowlist_and_runtime_crlf_rejection`).
+  The vulnerable twin's own code is a literal, real `header(...); exit;`
+  call; the secure twin runtime-rejects (HTTP 400) any control character
+  or non-same-origin-relative target before Laravel's `redirect()->
+  away()` helper runs — the twins' code differs at the sink line itself,
+  branched at generation time on the transform's own flag (porting
+  `CC-LAB-0097`'s convention). Empirically verified during this entry's
+  pre-change review: PHP's own `header()` function has unconditionally
+  rejected an embedded CR/LF since PHP 5.1.2, so a live HTTP request to
+  the generated Laravel route cannot itself demonstrate a spliced
+  header — the genuine, real-executed differential is instead proven at
+  the raw-socket layer (a hand-rolled responder ported near-verbatim
+  from this project's own header-injection corpus), both directions,
+  real raw header bytes read directly off the wire. Ground truth
+  extended (`CF-0003`).
+  **CircleFeed's fourth and final real page (`CC-LAB-0220`) landed an
+  account-settings preference-cookie insecure deserialization** — a
+  base64-encoded serialized PHP value stored in a `pref` cookie,
+  unserialized bare with no `allowed_classes` restriction (CWE-502).
+  Verified at build time (per the research doc's own §5 row 4 caveat)
+  that the existing `insecure-deserialization/php` corpus (an
+  APCu-cached-job lookup and a Laravel-queue encrypted command) does not
+  already cover this bare-`unserialize()`-on-a-cookie shape. This
+  project's first real implementation of `lab/safety_matrix.yaml`'s
+  `object_deserialization` sink family's PHP pair
+  (`unrestricted_unserialize`/`json_decode_type_check`). Ports
+  `CC-LAB-0097`'s (PicTrail `/inbox`, Python pickle/JSON) and
+  `CC-LAB-0074`'s (`ruby_rails`, YAML unsafe/safe load) "flag-only
+  transform, sink branches at generation time" convention into PHP: the
+  vulnerable twin's bare `unserialize()` reconstructs any class the
+  decoded cookie names and runs any magic method it defines; the secure
+  twin's `json_decode()` can never construct a PHP object at all. A new
+  skeleton class, `App\Support\MarkerWriteGadget` (a real, autoloadable
+  class in the booted app's own `App\` root, whose `__wakeup()` hook
+  writes a real marker file), is the PHP analogue of `CC-LAB-0097`'s
+  pickle `__reduce__` proof target; the skeleton's `bootstrap/app.php`
+  also gained `encryptCookies(except: ['pref'])` so the attacker-
+  controlled cookie reaches the controller as the client's raw bytes
+  rather than Laravel's own decryption attempt. Real, executed live-boot
+  proof: a hand-crafted `serialize()`-format payload genuinely triggers
+  the marker file's own on-disk creation on the vulnerable twin; the
+  identical bytes never parse on the secure twin (a real HTTP 400,
+  `json_decode()` cannot read PHP's serialize format), whose own
+  legitimate-JSON positive path is proven separately. Ground truth
+  extended (`CF-0004`; `location: "cookie"` widened into both label
+  schemas). **CircleFeed's own full four-page designed set (per the
+  research doc's §6) is now fully built, and category 2's overall build
+  (PicTrail's six pages plus CircleFeed's four pages) is now fully
+  complete** — the same "own page-set design complete" discipline
+  PicTrail's own page-by-page landings above followed.
   Security assertions are **independent third-party tools invoked headlessly**
   (sqlmap, commix, SSTImap, ZAP, and Nuclei — `fuzzlab/labgen/{oracle_wrapper,
   zap_oracle,nuclei_oracle}.py`, see `docs/LAB_SEED_AUTHORING_PLAYBOOK.md`), not

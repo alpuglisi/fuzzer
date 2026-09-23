@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "target": "php_laravel",
+  "cases": [
+    {
+      "case_id": "CF-0001",
+      "url": "/cell/labgen-cf-0001",
+      "method": "GET",
+      "param": "id",
+      "location": "query",
+      "vuln_class": "access_control",
+      "sink_context": "sql",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "The id query parameter selects a photo by primary key alone -- no check that the requesting user actually owns it: an authenticated user can view another user's private photo by guessing/incrementing id (IDOR, CWE-639/CWE-862). Modeled on a real Facebook-style photo/tag-detail page (docs/research/category2-social-ugc-functionality-and-cwe-research.md sec 3 item 4, sec 6 row 1). Reuses lab/safety_matrix.yaml's existing ownership_check_bypass concern/access_control family (added CC-LAB-0063, first implemented by any emitter here). Served at its own illustrative per-cell URL (served_url_for(), not the shared manifest route.path /photos/view, since CircleFeed has no migrated real page to anchor a pinned URL to -- same reasoning as Huddle Hub's own pages). LABGEN-CF-0001 in lab/manifests/access_control_circlefeed_sample.yaml, CC-LAB-0216/FR-LAB-123 -- never a PFF-* case. The secure twin (LABGEN-CF-0002, identity_match_before_fetch) is not its own labels.json case, matching Huddle Hub's own vulnerable-cells-only convention -- proven directly by tests/test_labgen_php_laravel_access_control_live_boot.py instead."
+    },
+    {
+      "case_id": "CF-0002",
+      "url": "/cell/labgen-cf-0003",
+      "method": "POST",
+      "param": "X-Signature",
+      "location": "header",
+      "vuln_class": "webhook_signature_bypass",
+      "sink_context": "webhook",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "A Groups webhook receiver modeling Meta's own publicly documented Messenger Platform X-Hub-Signature-verified POST callback contract (docs/research/category2-social-ugc-functionality-and-cwe-research.md sec 3 item 5, sec 5 row 2, sec 6 row 2). The vulnerable twin recomputes the HMAC and compares it against the X-Signature header with PHP's `==` operator, which both short-circuits (a genuinely harder attack than a total bypass, D20 partial) and, for a magic-hash-shaped (`^0e[0-9]+$`) pair, type-juggles two different strings as equal (CWE-345 bypass / CWE-303 improper authentication -- the same 'magic hash' footgun Huddle Hub's own webhook-signature cell, CC-LAB-0133, first modeled on this stack). Reuses lab/safety_matrix.yaml's existing webhook_signature_verification sink family/weak_signature_comparison concern and the loose_equality_compare/constant_time_compare ops unchanged -- no new op, pure page-profile wiring (a new /groups/webhook page profile with its own lab-only secret, distinct from Huddle Hub's). LABGEN-CF-0003 in lab/manifests/webhook_signature_circlefeed_sample.yaml, CC-LAB-0217/FR-LAB-124 -- never an HHUB-* case. The secure twin (LABGEN-CF-0004, constant_time_compare) is not its own labels.json case, matching Huddle Hub's own vulnerable-cells-only convention -- proven directly by tests/test_labgen_php_laravel_webhook_signature_circlefeed_live_boot.py and tests/test_labgen_webhook_signature_circlefeed_magic_hash.py instead."
+    },
+    {
+      "case_id": "CF-0003",
+      "url": "/cell/labgen-cf-0005",
+      "method": "GET",
+      "param": "next",
+      "location": "query",
+      "vuln_class": "http_header_injection",
+      "sink_context": "header",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "A comment 'share' redirect built directly from an unvalidated next query parameter (docs/research/category2-social-ugc-functionality-and-cwe-research.md sec 3 item 1/2, sec 5 row 3, sec 6 row 3), the classic header(\"Location: \" . $_GET['next']) footgun (CWE-113, HTTP response splitting/header injection). This project's first real implementation of lab/safety_matrix.yaml's http_response_header_value sink family (raw_socket_response_write/allowlist_and_runtime_crlf_rejection, both ops existed unimplemented since the family was added). The vulnerable twin applies no CR/LF stripping and no allowlist before a raw `header(\"Location: \" . $value); exit;` call; the secure twin rejects (HTTP 400) any control character or non-same-origin-relative target before Laravel's structured `redirect()->away($value)` helper ever runs. Served at its own illustrative per-cell URL (served_url_for(), not the shared manifest route.path /comments/share, since CircleFeed has no migrated real page to anchor a pinned URL to -- same reasoning as CF-0001/CF-0002). LABGEN-CF-0005 in lab/manifests/header_injection_circlefeed_sample.yaml, CC-LAB-0218/FR-LAB-125 -- never an HHB-* case. PHP's own header() function has unconditionally rejected an embedded CR/LF since PHP 5.1.2 (re-verified empirically during CC-LAB-0218's pre-change review), so this exact route cannot itself demonstrate a spliced header over a real HTTP round trip through php artisan serve; the genuine, real-executed response-splitting differential is proven separately, at the raw-socket layer (a hand-rolled response writer, matching this project's own docs/research/corpus-examples/header-injection/php/vulnerable-raw-socket-response-4.php grounding), by tests/test_labgen_header_injection_circlefeed_live_boot.py -- see CC-LAB-0218's change-control entry for the full reasoning. The secure twin (LABGEN-CF-0006, allowlist_and_runtime_crlf_rejection) is not its own labels.json case, matching CF-0001/CF-0002's own vulnerable-cells-only convention -- proven directly by that same live-boot test instead."
+    },
+    {
+      "case_id": "CF-0004",
+      "url": "/cell/labgen-cf-0007",
+      "method": "GET",
+      "param": "pref",
+      "location": "cookie",
+      "vuln_class": "insecure_deserialization",
+      "sink_context": "deserialization",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "CircleFeed's fourth and final designed cell (docs/research/category2-social-ugc-functionality-and-cwe-research.md sec 5 row 4, sec 6 row 4): an account-settings preference cookie (`pref`) holding a base64-encoded serialized PHP value. Bare unserialize() with no `allowed_classes` restriction (CWE-502) -- verified at build time that the existing docs/research/corpus-examples/insecure-deserialization/php/ corpus (an APCu-cached-job-by-session-id lookup and a Laravel-queue encrypted-command branch) does not already cover this bare-unserialize()-on-a-cookie shape, per sec 5 row 4's own caveat, so this is a genuinely new shape, not a duplicate. This project's first real implementation of lab/safety_matrix.yaml's object_deserialization sink family's PHP pair (unrestricted_unserialize/json_decode_type_check, both ops existed unimplemented since the family was added) -- porting CC-LAB-0097's (PicTrail inbox, Python pickle.loads()/json.loads()) and CC-LAB-0074's (ruby_rails, YAML.unsafe_load/YAML.safe_load) already-established 'flag-only transform, sink branches at generation time' convention into PHP terms, since the deserialize mechanism itself (unserialize() vs. json_decode()) differs between twins, not just a value passing through a filter. The vulnerable twin reconstructs any class the decoded byte stream names and runs any magic method it defines (`__wakeup()`/`__destruct()`) for real; the secure twin's json_decode() can never construct a PHP object at all and additionally requires an array result. Served at its own illustrative per-cell URL (served_url_for(), not the shared manifest route.path /settings/preferences, since CircleFeed has no migrated real page to anchor a pinned URL to -- same reasoning as CF-0001/CF-0002/CF-0003). LABGEN-CF-0007 in lab/manifests/insecure_deserialization_circlefeed_sample.yaml, CC-LAB-0220/FR-LAB-126 -- never a PFF-* case. The `pref` cookie name is excluded from Laravel's default EncryptCookies middleware (bootstrap/app.php's `encryptCookies(except: ['pref'])`) so the client's raw bytes reach the controller unmodified -- the same real-app-plumbing check CC-LAB-0216's own second seeded-session proof and CC-LAB-0218's own header()/SAPI investigation both had to do before trusting the mechanism. Real, executed live-boot proof (a genuine unserialize()-RCE: a crafted `App\\Support\\MarkerWriteGadget` payload whose `__wakeup()` hook writes a real, checkable marker file, verified on disk) is in tests/test_labgen_insecure_deserialization_circlefeed_live_boot.py. The secure twin (LABGEN-CF-0008, json_decode_type_check) is not its own labels.json case, matching CF-0001/CF-0002/CF-0003's own vulnerable-cells-only convention -- proven directly by that same live-boot test instead."
+    }
+  ]
+}

@@ -247,6 +247,29 @@ class AllPostParamsSource(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class GetCookieSource(TemplateModule):
+    """The ``get_cookie`` source (`CC-LAB-0220`, CircleFeed's fourth and
+    final designed cell): one cookie value read through Laravel's
+    ``Request`` accessor (``$request->cookie('pref')``) -- the
+    account-settings preference cookie §5 row 4 grounds this cell in.
+    Requires the cookie's own name to be excluded from Laravel's default
+    ``EncryptCookies`` middleware (see ``bootstrap/app.php``'s
+    ``encryptCookies(except: ['pref'])`` call in the skeleton) or the value
+    reaching the controller would be the framework's own decryption
+    attempt, never the client's raw bytes. Same ``value_expr``/``bound``
+    contract as :class:`GetParamSource`, a different request-data origin."""
+
+    def __init__(self) -> None:
+        super().__init__("get_cookie", "source", _SOURCE_ENV, "get_cookie.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = f"${ctx['var_name']}"
+        new_ctx.setdefault("bound", False)
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 class WebhookRequestSource(TemplateModule):
     """The ``webhook_request`` source (`CC-LAB-0133`, Huddle Hub's
     webhook-signature-verification cell): the raw request body plus the
@@ -747,6 +770,42 @@ class StructuredHttpClientHeadersTransform(TemplateModule):
         )
 
 
+class NoOwnershipCheckTransform(TemplateModule):
+    """The ``no_ownership_check`` op (`CC-LAB-0216`, CircleFeed's
+    access-control/IDOR shape, `ownership_check_bypass` concern): flags the
+    sink to fetch the photo by its primary key alone, with no ownership
+    filter. Safety matrix: ``effect=no_effect``."""
+
+    def __init__(self) -> None:
+        super().__init__("no_ownership_check", "transform", _TRANSFORM_ENV, "no_ownership_check.php.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["ownership_where"] = ""
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class IdentityMatchBeforeFetchTransform(TemplateModule):
+    """The ``identity_match_before_fetch`` op (`CC-LAB-0216`, CircleFeed's
+    secure twin): flags the sink to add a real ``->where('owner_id', ...)``
+    clause to the fetch itself, so the check runs *before* (as part of) the
+    query rather than as a comparison against an already-fetched row.
+    Safety matrix: ``effect=neutralises``,
+    ``neutralizes: [ownership_check_bypass]``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "identity_match_before_fetch", "transform", _TRANSFORM_ENV, "identity_match_before_fetch.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["ownership_where"] = "->where('owner_id', $__currentUserId)"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 # --- sinks ----------------------------------------------------------------
 #
 # Every sink branches on `bound` where a bound form exists at all, so one
@@ -896,6 +955,20 @@ class OrmEntityBulkAssignSink(TemplateModule):
         super().__init__("orm_entity_bulk_assign", "sink", _SINK_ENV, "orm_entity_bulk_assign.php.j2")
 
 
+class DbRowByIdLookupSink(TemplateModule):
+    """The ``db_row_by_id_lookup`` sink family (`CC-LAB-0216`, CircleFeed's
+    photo/tag-detail page): a direct Eloquent primary-key fetch
+    (``Photo::where('id', ...)->firstOrFail()``). Whether an ownership
+    filter is appended is decided entirely by whichever access-control
+    transform ran (``ownership_where``, set by
+    :class:`NoOwnershipCheckTransform`/:class:`IdentityMatchBeforeFetchTransform`)
+    -- this stack's first implementation of ``lab/safety_matrix.yaml``'s
+    ``access_control`` family, on any stack."""
+
+    def __init__(self) -> None:
+        super().__init__("db_row_by_id_lookup", "sink", _SINK_ENV, "db_row_by_id_lookup.php.j2")
+
+
 class WebhookSignatureVerificationSink(TemplateModule):
     """The ``webhook_signature_verification`` sink family (`CC-LAB-0133`,
     Huddle Hub): accepts and "processes" the event -- illustrative, sets
@@ -969,6 +1042,141 @@ class HttpRedirectReturnSink(TemplateModule):
 
     def __init__(self) -> None:
         super().__init__("http_redirect_return", "sink", _SINK_ENV, "http_redirect_return.php.j2")
+
+
+class RawSocketResponseWriteTransform(TemplateModule):
+    """The ``raw_socket_response_write`` op (`CC-LAB-0218`, CircleFeed's
+    comment "share" redirect) under the ``http_response_header_value``
+    sink_family: this project's first real implementation of that family
+    (added `CC-LAB-0063`-era, never rendered by any emitter until this
+    entry -- verified directly, ``grep -rl`` for both this family's op
+    names across ``fuzzlab/`` returned nothing before this change). No
+    CR/LF stripping, no allowlist -- the redirect target reaches the sink
+    exactly as supplied, modeling the classic
+    ``header("Location: " . $_GET['next'])`` footgun (CWE-113). Safety
+    matrix: ``effect=no_effect``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "raw_socket_response_write", "transform", _TRANSFORM_ENV, "raw_socket_response_write.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["header_delivery_mode"] = "raw_concat"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class AllowlistAndRuntimeCrlfRejectionTransform(TemplateModule):
+    """The ``allowlist_and_runtime_crlf_rejection`` op (`CC-LAB-0218`,
+    secure twin): rejects any redirect target containing a raw control
+    character (CR/LF included) or that is not itself a same-origin
+    relative path, with a real runtime ``abort(400)``. Safety matrix:
+    ``effect=neutralises``, ``neutralizes: [http_header_injection]``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "allowlist_and_runtime_crlf_rejection",
+            "transform",
+            _TRANSFORM_ENV,
+            "allowlist_and_runtime_crlf_rejection.php.j2",
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["header_delivery_mode"] = "structured_redirect"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class RawRedirectDispatchSink(TemplateModule):
+    """The ``raw_redirect_dispatch`` sink (`CC-LAB-0218`): the one place
+    both `http_response_header_value` twins' code genuinely differs at the
+    sink line (not merely in ``value_expr``), branched at **generation
+    time** on the ``header_delivery_mode`` flag either transform op above
+    publishes -- porting `CC-LAB-0097`'s (PicTrail inbox)
+    "transform sets a flag, sink branches via Jinja2-time interpolation"
+    convention. Vulnerable (``raw_concat``): a literal
+    ``header("Location: " . $value); exit;`` call. Secure
+    (``structured_redirect``): Laravel's ``redirect()->away()`` helper,
+    the idiomatic-Laravel secure pattern. Both are their own method's
+    terminal statement (see :class:`TerminalResponseComplexity`, which
+    this shape reuses rather than ``single_statement``)."""
+
+    def __init__(self) -> None:
+        super().__init__("raw_redirect_dispatch", "sink", _SINK_ENV, "raw_redirect_dispatch.php.j2")
+
+
+class UnrestrictedUnserializeTransform(TemplateModule):
+    """The ``unrestricted_unserialize`` op (`CC-LAB-0220`,
+    ``insecure_deserialization`` concern): flags the sink to parse the
+    base64-decoded cookie value with PHP's bare ``unserialize()`` -- no
+    ``allowed_classes`` restriction, so any class the byte stream names is
+    reconstructed and any magic method it defines runs for real. A
+    flag-only transform (mirroring ``django``'s own
+    ``UnrestrictedPickleLoadsTransform``/``ruby_rails``'s
+    ``YamlUnsafeLoadTransform`` convention exactly): the actual
+    ``unserialize(...)`` call is emitted by the sink, not by this module,
+    since the deserialize call and the result-reporting logic that
+    observes it belong together in one place. Safety matrix:
+    ``effect=no_effect`` (the vulnerable twin)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unrestricted_unserialize", "transform", _TRANSFORM_ENV, "unrestricted_unserialize.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["deserialize_method"] = "unserialize"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class JsonDecodeTypeCheckTransform(TemplateModule):
+    """The ``json_decode_type_check`` op (`CC-LAB-0220`,
+    ``insecure_deserialization`` concern): flags the sink to parse the
+    base64-decoded cookie value with plain-data ``json_decode()`` instead
+    of ``unserialize()`` -- no PHP object is ever reconstructed and no
+    magic method is ever invoked -- and additionally requires the decoded
+    result to be an array. Safety matrix: ``effect=neutralises``,
+    ``neutralizes: [insecure_deserialization]``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "json_decode_type_check", "transform", _TRANSFORM_ENV, "json_decode_type_check.php.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["deserialize_method"] = "json_decode"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class AccountSettingsDeserializeSink(TemplateModule):
+    """Deserializes a base64-encoded, attacker-supplied account-settings
+    preference cookie (`CC-LAB-0220`, CircleFeed's fourth and final
+    designed cell) -- the bare ``unserialize()``-on-a-cookie footgun §5
+    row 4 grounds this cell in. Unlike most sinks in this emitter, this one
+    is **not** byte-identical between twins: the deserialize *mechanism
+    itself* (``unserialize()`` vs. plain ``json_decode()``) differs, so the
+    transform stage flags which branch to render via Jinja2-time
+    interpolation (``{% if deserialize_method == "unserialize" %}``) --
+    the same "flag-only transform, sink branches on it" convention
+    `CC-LAB-0097`'s (PicTrail inbox) ``InboxDeserializeSink``/
+    `CC-LAB-0074`'s (``ruby_rails``) ``YamlUnsafeLoadTransform`` pair
+    already established for the identical architectural reason. Its own
+    code is each method's terminal statement (several early
+    ``return response()->json(...)`` calls), which is why this reuses
+    ``terminal_response`` rather than ``single_statement`` -- the same
+    reasoning `RawRedirectDispatchSink` above already used."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "account_settings_deserialize_sink", "sink", _SINK_ENV, "account_settings_deserialize_sink.php.j2"
+        )
 
 
 class CsvExportRowSink(TemplateModule):
@@ -1294,6 +1502,10 @@ SOURCES: dict[str, Module] = {
     # L-P3.3c-DOM (reviews.php/feedback.php): no PHP source at all.
     "dom_url_source": DomUrlSource(),
     "webhook_request": WebhookRequestSource(),
+    # CC-LAB-0220 (insecure_deserialization, category 2's CircleFeed app --
+    # this project's first real implementation of the `object_deserialization`
+    # sink family's PHP pair, on any stack).
+    "get_cookie": GetCookieSource(),
 }
 #: Transform ops. Every name here must also have a row for every sink family
 #: it is authored against in ``lab/safety_matrix.yaml`` -- an op this emitter
@@ -1325,6 +1537,20 @@ TRANSFORMS: dict[str, Module] = {
     "csv_formula_neutralize": CsvFormulaNeutralizeTransform(),
     # CC-LAB-0212 (price_integrity_bypass, category 5's Booking.com pilot app).
     "server_recomputed_amount": ServerRecomputedAmountTransform(),
+    # CC-LAB-0216 (access_control, category 2's CircleFeed app -- this
+    # stack's first ownership_check_bypass/access_control shape).
+    "no_ownership_check": NoOwnershipCheckTransform(),
+    "identity_match_before_fetch": IdentityMatchBeforeFetchTransform(),
+    # CC-LAB-0218 (http_header_injection, category 2's CircleFeed app --
+    # this project's first real implementation of the
+    # `http_response_header_value` sink family, on any stack).
+    "raw_socket_response_write": RawSocketResponseWriteTransform(),
+    "allowlist_and_runtime_crlf_rejection": AllowlistAndRuntimeCrlfRejectionTransform(),
+    # CC-LAB-0220 (insecure_deserialization, category 2's CircleFeed app --
+    # this project's first real implementation of the `object_deserialization`
+    # sink family's PHP pair, on any stack).
+    "unrestricted_unserialize": UnrestrictedUnserializeTransform(),
+    "json_decode_type_check": JsonDecodeTypeCheckTransform(),
 }
 #: Sinks. The three HTML sinks render a **Blade view** body rather than a
 #: controller statement; :data:`VIEW_SINKS` names them so the emitter knows
@@ -1354,6 +1580,16 @@ SINKS: dict[str, Module] = {
     "csv_export_row": CsvExportRowSink(),
     # CC-LAB-0212 (price_integrity_bypass, category 5's Booking.com pilot app).
     "payment_charge_insert": PaymentChargeInsertSink(),
+    # CC-LAB-0216 (access_control, category 2's CircleFeed app).
+    "db_row_by_id_lookup": DbRowByIdLookupSink(),
+    # CC-LAB-0218 (http_header_injection, category 2's CircleFeed app --
+    # this project's first real implementation of the
+    # `http_response_header_value` sink family, on any stack).
+    "raw_redirect_dispatch": RawRedirectDispatchSink(),
+    # CC-LAB-0220 (insecure_deserialization, category 2's CircleFeed app --
+    # this project's first real implementation of the `object_deserialization`
+    # sink family's PHP pair, on any stack).
+    "account_settings_deserialize_sink": AccountSettingsDeserializeSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

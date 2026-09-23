@@ -1,0 +1,31 @@
+{% if deserialize_method is defined and deserialize_method == "unserialize" %}
+// Bare unserialize() on the account-settings preference cookie (CWE-502,
+// CC-LAB-0220) -- no `allowed_classes` restriction, so any class named in
+// the decoded byte stream is reconstructed and any magic method it defines
+// (__wakeup()/__destruct()) runs as a real side effect of this call.
+$__decoded = base64_decode((string) {{ value_expr }}, true);
+if ($__decoded === false) {
+    return response()->json(['ok' => false, 'error' => 'invalid_base64'], 400);
+}
+$__parsed = @unserialize($__decoded);
+if ($__parsed === false) {
+    return response()->json(['ok' => false, 'error' => 'unserialize_failed'], 400);
+}
+return response()->json([
+    'ok' => true,
+    'parsed_type' => is_object($__parsed) ? get_class($__parsed) : gettype($__parsed),
+]);
+{% else %}
+// json_decode() only -- no PHP object is ever reconstructed and no magic
+// method is ever invoked; the decoded result must additionally be a JSON
+// array/object (never an arbitrary scalar) before it is trusted.
+$__decoded = base64_decode((string) {{ value_expr }}, true);
+if ($__decoded === false) {
+    return response()->json(['ok' => false, 'error' => 'invalid_base64'], 400);
+}
+$__parsed = json_decode($__decoded, true);
+if (!is_array($__parsed)) {
+    return response()->json(['ok' => false, 'error' => 'invalid_json_object'], 400);
+}
+return response()->json(['ok' => true, 'parsed_type' => 'array']);
+{% endif %}

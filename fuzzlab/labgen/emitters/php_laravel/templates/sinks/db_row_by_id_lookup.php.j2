@@ -1,0 +1,19 @@
+// A direct primary-key fetch (db_row_by_id_lookup, CC-LAB-0216). Whether an
+// ownership filter is present is decided entirely by the cell's transform
+// -- this sink never adds or omits it itself, per this stack's own "sink is
+// neutral, the security boundary lives in the transform" convention
+// (mirrors ParamBindTransform's `bound` flag / DomTextContentTransform's
+// `dom_write_prop` flag). The unauthenticated guard below is shared,
+// non-differentiating boilerplate every twin renders identically.
+$__currentUserId = $request->session()->get('user_id');
+if (!$__currentUserId) {
+    return response()->json(['error' => 'unauthenticated'], 401);
+}
+$photo = \App\Models\Photo::where('id', {{ value_expr }}){{ ownership_where | default('') }}->firstOrFail();
+$rows = [
+    'id' => $photo->id,
+    'owner_id' => $photo->owner_id,
+    'caption' => $photo->caption,
+    'image_path' => $photo->image_path,
+    'is_private' => (bool) $photo->is_private,
+];

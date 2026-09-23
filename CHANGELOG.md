@@ -30,6 +30,93 @@ changed, and the reason. Reference the commit hash where useful.
   the outstanding fuzzlab task list) this session will drive through
   unattended.
 
+## 2026-09-23 (CircleFeed's fourth and final real page: account-settings preference-cookie insecure deserialization -- category 2's full four-page design now complete)
+- `php_laravel`: lands CircleFeed's fourth and final designed cell (§5 row
+  4, §6 row 4 of `docs/research/category2-social-ugc-functionality-and-
+  cwe-research.md`) -- an account-settings preference cookie (`pref`)
+  holding a base64-encoded serialized PHP value, unserialized bare with no
+  `allowed_classes` restriction (CWE-502). Verified at build time that the
+  existing `insecure-deserialization/php` corpus (APCu-cached-job lookup,
+  Laravel-queue encrypted command) does not already cover this
+  bare-`unserialize()`-on-a-cookie shape -- genuinely new. This project's
+  first real implementation of `lab/safety_matrix.yaml`'s
+  `object_deserialization` sink family's PHP pair
+  (`unrestricted_unserialize`/`json_decode_type_check`, both existed
+  unimplemented since the family was added). Ports `CC-LAB-0097`'s
+  (PicTrail inbox, Python pickle/JSON)/`CC-LAB-0074`'s (`ruby_rails`,
+  YAML unsafe/safe load) "flag-only transform, sink branches at
+  generation time" convention into PHP. New `get_cookie` source; the
+  skeleton's `bootstrap/app.php` gained `encryptCookies(except: ['pref'])`
+  so the client's raw cookie bytes reach the controller (found and fixed
+  during implementation, verified against a real booted app). New page
+  profile `/settings/preferences`, new manifest
+  (`LABGEN-CF-0007`/`LABGEN-CF-0008`), ground truth extended with
+  `CF-0004` (new `location: "cookie"` schema enum value). Real, executed
+  live-boot proof: a genuine unserialize-RCE via a new, real, autoloadable
+  skeleton class (`App\Support\MarkerWriteGadget`) whose `__wakeup()`
+  hook writes a real, checkable marker file -- proven on the vulnerable
+  twin, proven absent on the secure twin (a real HTTP 400 parse failure),
+  and the secure twin's own legitimate-JSON positive path proven
+  separately. **CircleFeed's own full four-page designed set is now
+  fully built, and category 2's overall build (PicTrail's six pages plus
+  CircleFeed's four pages) is now fully complete.** `CC-LAB-0220`/
+  `FR-LAB-126`. Pre-change review: the Agent tool was checked via
+  `ToolSearch` and found genuinely unavailable as a subagent-spawning
+  tool; two explicit self-review passes were done instead and recorded
+  honestly, per CLAUDE.md's own fallback instruction.
+
+## 2026-09-23 (CircleFeed's third real page: comment "share" redirect, header injection)
+- `php_laravel`: lands CircleFeed's third designed cell (§3 item 1/2,
+  §5 row 3, §6 row 3 of `docs/research/category2-social-ugc-
+  functionality-and-cwe-research.md`) -- a comment "share" redirect built
+  directly from an unvalidated `next` query parameter, the classic
+  `header("Location: " . $_GET['next'])` footgun (CWE-113). This
+  project's first real implementation of `lab/safety_matrix.yaml`'s
+  `http_response_header_value` sink family (`raw_socket_response_write`/
+  `allowlist_and_runtime_crlf_rejection`, both existed unimplemented
+  since the family was added). New page profile `/comments/share`, new
+  manifest (`LABGEN-CF-0005`/`LABGEN-CF-0006`), ground truth extended
+  with `CF-0003` (new `vuln_class` enum value, `http_header_injection`).
+  Pre-change-review finding, empirically verified: PHP's own `header()`
+  function has unconditionally rejected an embedded CR/LF since PHP
+  5.1.2, so a real HTTP request to the generated Laravel route cannot
+  itself demonstrate a spliced header -- the genuine, real-executed
+  response-splitting differential is instead proven at the raw-socket
+  layer (a hand-rolled responder ported near-verbatim from this
+  project's own header-injection corpus), both directions, real raw
+  header bytes inspected directly. `CC-LAB-0218`/`FR-LAB-125`.
+
+## 2026-09-23 (CircleFeed's second real page: Groups webhook receiver, webhook-signature bypass)
+- `php_laravel`: lands CircleFeed's second designed cell (§3 item 5,
+  §5 row 2, §6 row 2 of `docs/research/category2-social-ugc-
+  functionality-and-cwe-research.md`) -- a Groups webhook receiver
+  modeling Meta's own Messenger Platform `X-Hub-Signature`-style webhook
+  contract. Pure wiring: reuses the exact `webhook_signature_bypass`/
+  `webhook_signature_verification` module composition Huddle Hub's own
+  `/webhooks/events` cell already registers (`CC-LAB-0133`), via a new
+  `/groups/webhook` page profile (own lab-only secret) and a new
+  manifest. No new transform/sink module. Ground truth extended with
+  `CF-0002`. Real, executed proof split the same way Huddle Hub's own
+  webhook cell split it: a live-boot HTTP test for ordinary correctness,
+  plus a separate real-`php`-executed test for the actual `==`
+  "magic hash" vs. `hash_equals()` comparison-operator differential.
+  `CC-LAB-0217`/`FR-LAB-124`.
+
+## 2026-09-23 (CircleFeed's first real page: photo/tag-detail access control)
+- `php_laravel`: establishes CircleFeed (category 2's Facebook pick, the
+  second app identity on this emitter after Huddle Hub) and lands its
+  first real, ground-truth-bearing page -- a photo/tag-detail endpoint
+  implementing `lab/safety_matrix.yaml`'s existing `access_control`
+  family (`ownership_check_bypass`, added `CC-LAB-0063`) for the first
+  time on any emitter: vulnerable twin fetches a photo by primary key
+  alone (`no_ownership_check`), secure twin adds a real Eloquent
+  ownership-scoped WHERE clause (`identity_match_before_fetch`). New
+  `Photo` model/migration on the shared skeleton; `LiveBootHarness`
+  gained a `photos` table and a second real seeded user; new
+  `lab/ground-truth-circlefeed/` (`CF-` prefix); real, executed
+  live-boot tests prove both directions of the differential against two
+  real seeded users. `CC-LAB-0216`/`FR-LAB-123`.
+
 ## 2026-09-23 (vuln corpus Phase 3: manufactured-pair gap analysis)
 - Docs: saved `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md` — the concrete
   gap analysis for the last unchecked `docs/VULN_CORPUS_EXPANSION_PLAN.md`
@@ -308,6 +395,76 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (PicTrail explore/search + inbox pages — six-page design complete)
+- LAB: landed PicTrail's fifth real page — `CC-LAB-0096`/`FR-LAB-119`/
+  `FR-LAB-120`. `GET /explore`: identifier/`ORDER BY`-position SQLi
+  (CWE-89), this project's first real implementation of
+  `lab/safety_matrix.yaml`'s own `sql_order_by_clause` sink family, on
+  any stack (`orm_order_by_unvalidated` vs. `identifier_allowlist`, a
+  shared raw-`connection.cursor()` sink). Real live-boot proof uses a
+  real, legal, non-syntax-breaking payload (`"id DESC"`) to reverse real
+  row order on the vulnerable twin, matched against a legitimate
+  `sort=id` request on the secure twin.
+- LAB: landed PicTrail's sixth real page — `CC-LAB-0097`/`FR-LAB-121`/
+  `FR-LAB-122`. `POST /inbox`: insecure deserialization (CWE-502)
+  modeling Django's own real, documented `PickleSerializer` opt-in
+  footgun as an inbox message payload — this emitter's first sink whose
+  deserialize *mechanism itself* differs between twins (`pickle.loads()`
+  vs. `json.loads()`), resolved by porting `ruby_rails`'s own
+  already-established "flag-only transform, sink branches via
+  Jinja2-time interpolation" convention directly. Real live-boot proof is
+  a genuine pickle-RCE: a crafted `__reduce__` payload writes a real,
+  checkable marker file when unpickled on the vulnerable twin, never
+  created on the secure twin.
+- LAB: **PicTrail's own six-page design (per the category-2 research
+  doc's §6) is now fully built** — post detail (SQLi), comments
+  (stored XSS), link preview (SSRF), settings (mass assignment), explore
+  (identifier SQLi), inbox (insecure deserialization). Extends
+  `lab/ground-truth-picktrail-django/` with `PT-0005`/`PT-0006`. Full
+  bookkeeping in `docs/components/01-target-lab/{change-control,
+  requirements}.md`, `docs/ARCHITECTURE.md`, and the category-2 research
+  doc.
+
+## 2026-09-23 (PicTrail account-settings mass-assignment page)
+- LAB: landed PicTrail's fourth real page — `CC-LAB-0095`/`FR-LAB-117`/
+  `FR-LAB-118`. `POST /settings`: a real mass-assignment (CWE-915) via a
+  whole-POST-body dict source (`post_body_dict`, this emitter's first
+  source that isn't one named parameter) feeding a shared, parameterized
+  multi-column `UPDATE profiles SET ...` sink — `unfiltered_body_update`
+  (SQL-column-name hygiene only) vs. `runtime_field_allowlist` (the real
+  security boundary), reusing `lab/safety_matrix.yaml`'s existing
+  `orm_entity_bulk_assign` sink family unchanged (no new matrix design).
+  Deliberately departs from the research doc's own literal `ModelForm`
+  wording: this emitter has never used the Django ORM on either twin of
+  any shape, so this entry ports the same CWE-915 mechanism onto the
+  established raw-`connection.cursor()` convention instead of introducing
+  a model/migration for the first time. Real live-boot proof checks both
+  halves of the differential in one request (the legitimate `bio` field
+  still applies; the privileged `is_verified` field is blocked on the
+  secure twin), reading the DB row back directly via `query_db()` rather
+  than inferring it from the response. Extends
+  `lab/ground-truth-picktrail-django/` with `PT-0004`. Full bookkeeping
+  in `docs/components/01-target-lab/{change-control,requirements}.md`,
+  `docs/ARCHITECTURE.md`, and the category-2 research doc.
+
+## 2026-09-23 (labels schema: widen enums again + cross-branch consolidation discovery)
+
+- LAB: Widened `fuzzlab/labels/schemas/labels.schema.json`'s
+  `vuln_class`/`sink_context` enums again (adds `mass_assignment`,
+  `webhook_signature`, `prototype_pollution`, `redos`, `open_redirect`,
+  `csv_formula_injection`, `price_integrity_bypass`, `spel_injection`,
+  `object_property`, `regex`, `redirect`, `csv`, `spel`) — landed
+  standalone (`CC-LAB-0095a`), adopting byte-identical values from
+  categories 1/3/4/5's own now-**unified** branch (discovered via a fresh
+  cross-branch fetch: all four now point to the same merged commit).
+  Needed for `CC-LAB-0095`'s own `mass_assignment` ground truth.
+- Discovered, not assumed: categories 1/3/4/5 have been consolidated into
+  one unified branch by another session. This branch (category 2) is not
+  merged into it here (out of scope) but its own next `FR-LAB` numbers
+  are now picked against that branch's real, higher ceiling (116) rather
+  than this branch's own lower one, to avoid a predictable future
+  collision — recorded in `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`.
+
 ## 2026-09-23 (cross-branch bookkeeping fix, pull-and-remediate round)
 - Docs/LAB: fixed a real cross-branch `FR-LAB-102` collision found during
   a cross-branch review of categories 2-5's latest pushes — this
@@ -385,6 +542,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   involving `ecommerce-logic/php` (a manifest not touched by this pass)
   were found during the corpus-wide check but are pre-existing and out of
   this change's scope.
+
 ## 2026-09-23 (PicTrail link-preview SSRF page)
 - LAB: landed PicTrail's third real page — `CC-LAB-0094`/`FR-LAB-105`/
   `FR-LAB-106`, pre-change review gate cleared (2 independent reviewer

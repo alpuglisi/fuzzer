@@ -1,0 +1,40 @@
+# Access-control (IDOR) sample manifest (`CC-LAB-0216`/`FR-LAB-123`),
+# `php_laravel`.
+#
+# CircleFeed's (category 2's Facebook pick) first designed cell -- see
+# docs/research/category2-social-ugc-functionality-and-cwe-research.md sec 3
+# item 4 (tagging vs. album privacy) for the page/vulnerability-class design
+# and sec 5 for the PHP/Hack-specific CWE research, and sec 6 row 1 for the
+# page-set entry this manifest builds. Reuses `lab/safety_matrix.yaml`'s
+# existing `ownership_check_bypass` concern / `access_control` family
+# (`no_ownership_check` / `identity_match_before_fetch` x
+# `db_row_by_id_lookup`, added `CC-LAB-0063` but never implemented by any
+# emitter until this manifest) -- this project's first real detection cell
+# for the family. The vulnerable twin (`no_ownership_check`) fetches the
+# photo by its primary key alone (`Photo::where('id', $id)->firstOrFail()`);
+# the secure twin (`identity_match_before_fetch`) adds a real
+# `->where('owner_id', $__currentUserId)` ownership filter to the fetch
+# itself. Both share the same illustrative route (served at `/cell/<slug>`,
+# per `php_laravel`'s own convention for a non-migrated page, mirroring
+# Huddle Hub's own precedent) -- never live-booted together, mirroring
+# `webhook_signature_huddlehub_sample.yaml`'s own twin-pair precedent.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-CF-0001
+    class: access_control
+    stack_profile: php_laravel
+    route: { method: GET, path: /photos/view }
+    sink_context:
+      family: db_row_by_id_lookup
+      required_neutralizations: [ownership_check_bypass]
+    transform: [no_ownership_check]
+
+  - cell_id: LABGEN-CF-0002
+    class: access_control
+    stack_profile: php_laravel
+    route: { method: GET, path: /photos/view }
+    sink_context:
+      family: db_row_by_id_lookup
+      required_neutralizations: [ownership_check_bypass]
+    transform: [identity_match_before_fetch]

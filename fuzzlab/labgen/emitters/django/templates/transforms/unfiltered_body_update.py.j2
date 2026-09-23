@@ -1,0 +1,6 @@
+# unfiltered_body_update transform (CC-LAB-0095): filters {{ value_expr }}
+# down to this table's own known real columns only -- SQL-column-name
+# hygiene, not a security boundary. Every other submitted field, including
+# privileged ones the real settings form never exposes (e.g. is_verified),
+# passes through unfiltered.
+{{ value_expr }} = {k: v for k, v in {{ value_expr }}.items() if k in _KNOWN_PROFILE_COLUMNS}

@@ -1,0 +1,5 @@
+// no_ownership_check (CC-LAB-0216, CircleFeed's IDOR shape): the photo is
+// looked up by its primary key alone -- no check that the requesting user
+// actually owns it. Any authenticated user can view another user's private
+// photo by guessing/incrementing the id (IDOR, CWE-639). Safety matrix:
+// effect=no_effect.

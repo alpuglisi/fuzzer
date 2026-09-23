@@ -1,0 +1,6 @@
+// raw_socket_response_write: no CR/LF stripping and no allowlist check --
+// the redirect target reaches the sink exactly as the client supplied it.
+// Models the classic `header("Location: " . $_GET['next'])` footgun
+// (CWE-113) this row is grounded in (docs/research/category2-social-ugc-
+// functionality-and-cwe-research.md sec 5 row 3). Safety matrix:
+// effect=no_effect.

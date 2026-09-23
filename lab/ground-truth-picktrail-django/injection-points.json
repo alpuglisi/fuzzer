@@ -22,6 +22,27 @@
       "param": "url",
       "location": "query",
       "rendering": "server-json"
+    },
+    {
+      "url": "/settings",
+      "method": "POST",
+      "param": "is_verified",
+      "location": "body",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/explore",
+      "method": "GET",
+      "param": "sort",
+      "location": "query",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/inbox",
+      "method": "POST",
+      "param": "payload",
+      "location": "body",
+      "rendering": "server-json"
     }
   ]
 }

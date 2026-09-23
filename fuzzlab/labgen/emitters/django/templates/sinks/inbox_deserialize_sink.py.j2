@@ -1,0 +1,15 @@
+{% if loader == "pickle" %}
+try:
+    _parsed_{{ var_name }} = pickle.loads(base64.b64decode({{ value_expr }}))
+    return JsonResponse({"ok": True, "parsed_type": type(_parsed_{{ var_name }}).__name__})
+except Exception as exc:
+    return JsonResponse({"ok": False, "error": type(exc).__name__}, status=400)
+{% else %}
+try:
+    _parsed_{{ var_name }} = json.loads(base64.b64decode({{ value_expr }}))
+    if not isinstance(_parsed_{{ var_name }}, dict):
+        raise ValueError("expected a JSON object")
+    return JsonResponse({"ok": True, "parsed_type": type(_parsed_{{ var_name }}).__name__})
+except Exception as exc:
+    return JsonResponse({"ok": False, "error": type(exc).__name__}, status=400)
+{% endif %}

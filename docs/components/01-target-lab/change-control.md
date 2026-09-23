@@ -3,6 +3,1404 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0220 — CircleFeed (category 2, Facebook pick): fourth and final real cell, account-settings preference-cookie insecure deserialization (FR-LAB-126) (2026-09-23)
+
+- **Change:** Lands CircleFeed's fourth and final designed cell — an
+  account-settings preference cookie (`pref`) holding a base64-encoded
+  serialized PHP value
+  (`docs/research/category2-social-ugc-functionality-and-cwe-research.md`
+  §5 row 4, §6 row 4), unserialized bare with no `allowed_classes`
+  restriction (CWE-502, the classic PHP-object-injection footgun).
+
+  **Verified, not assumed, per §5 row 4's own explicit caveat**: before
+  writing any code, read both files in `docs/research/corpus-examples/
+  insecure-deserialization/php/` — `vulnerable-apcu-session-unserialize-5.php`
+  (an APCu cache entry keyed by session ID) and
+  `vulnerable-laravel-raw-command-1.php` (a queued-job command's raw
+  branch). Neither is a cookie-read shape at all (one is a server-side
+  cache lookup, the other a queue payload) — a genuinely new shape for
+  this corpus, not a duplicate. Also verified, via `grep -rl
+  "unrestricted_unserialize\|json_decode_type_check" fuzzlab/`, that
+  `lab/safety_matrix.yaml`'s `object_deserialization` sink family's PHP
+  pair (added alongside the family, never implemented by any emitter)
+  returned nothing — this entry is genuinely the first implementation,
+  not a duplicate of existing code.
+
+  **Architecture, ported from precedent rather than invented**: the
+  deserialize *mechanism itself* (`unserialize()` vs. `json_decode()`)
+  differs between twins, exactly the same architectural shape `CC-LAB-0097`
+  (PicTrail's `/inbox`, Python `pickle.loads()`/`json.loads()`) and
+  `CC-LAB-0074` (`ruby_rails`'s `YamlUnsafeLoadTransform`/
+  `YamlSafeLoadTransform`, Psych's `unsafe_load`/`safe_load`) already
+  established: a flag-only transform, a sink that branches at
+  **generation time** on the flag. `UnrestrictedUnserializeTransform`/
+  `JsonDecodeTypeCheckTransform` each set a `deserialize_method` context
+  flag (`"unserialize"`/`"json_decode"`); `account_settings_deserialize_
+  sink.php.j2` renders one of two `{% if deserialize_method is defined
+  and deserialize_method == "unserialize" %}` branches — never a runtime
+  branch in the emitted code, so each generated controller contains only
+  the one code path its own twin actually uses. The `is defined` guard
+  (found during this entry's own adequacy self-review pass, before it
+  could fail a test) is the same fix `CC-LAB-0218`'s `header_delivery_mode`
+  flag needed for the identity-emptied minimal-pair twin, which never
+  runs a transform and so never sets the flag.
+
+  Concretely:
+  1. **New source, `get_cookie`**: `$request->cookie('pref')`, the
+     Laravel `Request` accessor for a cookie value. Requires the cookie's
+     own name to be excluded from Laravel's default `EncryptCookies`
+     middleware, or Laravel would try to decrypt/MAC-verify an
+     attacker-controlled cookie like any other and silently hand the
+     controller `null` instead of the client's raw bytes, masking the
+     bug entirely. **Found and fixed before any test ran** (by reading
+     the skeleton's `bootstrap/app.php`, not by a failing request): added
+     `$middleware->encryptCookies(except: ['pref'])`, Laravel 11+'s own
+     documented fluent middleware-configuration method, right next to the
+     existing `validateCsrfTokens(except: ['*'])` call and its own
+     documented rationale.
+  2. **New transform, `unrestricted_unserialize`** (vulnerable): flag-only,
+     sets `deserialize_method="unserialize"`.
+  3. **New transform, `json_decode_type_check`** (secure): flag-only, sets
+     `deserialize_method="json_decode"`.
+  4. **New sink, `account_settings_deserialize_sink`**: both branches
+     `base64_decode()` the cookie value first (`(string)`-cast, so an
+     absent cookie fails cleanly rather than emitting a PHP 8.1+
+     null-to-non-nullable-parameter deprecation notice), then the
+     unserialize branch calls `@unserialize($__decoded)` (bare, no second
+     argument — PHP's own default is unrestricted class instantiation)
+     inside a false-check, reporting the parsed value's class/type name
+     on success or a 400 on failure; the json_decode branch calls
+     `json_decode($__decoded, true)` with an `is_array()` check (matching
+     `json_decode_type_check`'s own name — not just "parses as JSON," but
+     "parses as a JSON array/object"), same success/failure reporting
+     shape. Reuses the existing, sink-agnostic `terminal_response`
+     complexity (both branches' own code is their method's terminal
+     statement — several early `return response()->json(...)` calls),
+     the same reasoning `RawRedirectDispatchSink` (`CC-LAB-0218`) already
+     used, not `single_statement` (whose fixed `$rows`-to-JSON epilogue
+     does not fit this shape at all).
+  5. **New skeleton class, `App\Support\MarkerWriteGadget`**
+     (`app/Support/MarkerWriteGadget.php`): a real, checked-in class
+     inside the booted app's own `App\` PSR-4 autoload root, with a
+     public `$markerPath`/`$markerContents` and a `__wakeup()` magic
+     method that writes `$markerContents` to `$markerPath` — the PHP
+     analogue of `CC-LAB-0097`'s pickle `__reduce__`-to-`os.system` proof
+     target. **Deliberately not defined in the test file** — a class
+     `unserialize()` cannot resolve inside the real booted subprocess is
+     exactly the mistake `CC-LAB-0097`'s own pickle proof had to avoid
+     for Python (there, a `__reduce__` target had to be stdlib-resolvable
+     rather than test-module-defined, since the booted subprocess has no
+     access to this repo's test files at all); the PHP-idiomatic
+     resolution is different (there is no PHP stdlib class with a
+     suitable one-shot side-effect magic method), so this entry adds the
+     gadget class as a real file inside the generated/skeleton app
+     itself instead, exactly as this task's own brief suggested as one
+     legitimate option.
+  6. New ground truth: extends `lab/ground-truth-circlefeed/` with
+     `CF-0004` — `vuln_class: "insecure_deserialization"`,
+     `sink_context: "deserialization"`, `method: "GET"`, `param: "pref"`,
+     `location: "cookie"`, `rendering: "server-json"`,
+     `url: "/cell/labgen-cf-0007"`. **Required widening `location`'s
+     closed enum** in both `fuzzlab/labels/schemas/labels.schema.json`
+     and `fuzzlab/labels/schemas/injection-points.schema.json` (neither
+     had ever carried a `"cookie"` location before this entry — found by
+     actually loading the ground truth via `fuzzlab.labels.contract.load`,
+     not by inspection alone) to add `"cookie"`. `vuln_class:
+     "insecure_deserialization"`/`sink_context: "deserialization"` were
+     already legal (from `CC-LAB-0097`'s own PicTrail widening).
+  7. New manifest, `lab/manifests/insecure_deserialization_circlefeed_
+     sample.yaml`, two cells: `LABGEN-CF-0007` (vulnerable), `LABGEN-CF-0008`
+     (secure) — continuing the established sequential `LABGEN-CF-000N`
+     numbering (`0001`-`0006` already used by CircleFeed's first three
+     cells, checked directly). Vulnerable-cell-only ground-truth
+     convention, matching `CF-0001`-`CF-0003`'s own precedent (the secure
+     twin is proven directly by the live-boot test instead).
+
+  **Real, executed live-boot proof**
+  (`tests/test_labgen_insecure_deserialization_circlefeed_live_boot.py`,
+  skip-guarded on `live_boot_available()`, 4 tests, all run and passing):
+  a hand-crafted PHP `serialize()`-format string for one
+  `App\Support\MarkerWriteGadget` instance (never PHP's own `serialize()`
+  — there is no PHP object in the Python test process to serialize, which
+  is the point: this is exactly what an attacker who knows only the
+  target class's public property names would hand-craft) genuinely
+  executes its `__wakeup()` hook on the vulnerable twin, proven by the
+  marker file's own existence on disk after the request, not merely by
+  the response claiming success; the identical bytes reach the secure
+  twin's `json_decode()` instead, which cannot parse PHP's `serialize()`
+  format at all (it is not JSON), so the marker file is never created and
+  the secure twin reports a real HTTP 400; the secure twin's own
+  positive path (a legitimate JSON array payload still succeeds, HTTP
+  200, `parsed_type: "array"`) is proven separately, so the differential
+  cannot pass by the secure twin trivially rejecting everything; a fourth
+  test cross-checks `CF-0004` directly against a real booted request at
+  its own served URL. The `pref` cookie is sent as a raw, percent-encoded
+  `Cookie` request header (`LiveBootHarness.request()`'s own `headers`
+  parameter, never an HTTP client's cookie jar, which could re-encode or
+  drop it) — percent-encoding is load-bearing, not defensive
+  over-engineering: PHP's own automatic cookie-value `urldecode()` turns
+  a literal, un-encoded `+` into a space, which would silently corrupt a
+  base64 payload's `+` characters in transit; empirically confirmed this
+  matters by the live-boot test actually passing with it in place.
+
+- **Impact (other components / project):** Component 1 (LAB) only.
+  Additive safety-matrix *implementation* (no matrix row's own
+  `effect`/`neutralizes` changes — both ops already existed,
+  unimplemented; this entry implements them, it adds no new matrix
+  entries). Additive to `php_laravel`'s and the shared registry's dicts
+  only, one additive JSON-schema enum entry in each of two schema files,
+  and one additive skeleton PHP class file.
+- **Risk (level: low-moderate):** The real risk is any unserialize-RCE
+  test's own real, adversarial-execution proof — a crafted payload must
+  actually execute inside the booted subprocess, the same class of risk
+  `CC-LAB-0097`'s own pickle proof carried. Mitigated the same way: the
+  gadget's side effect is a real, checkable marker file written to a
+  `tmp_path`-scoped location and verified directly on disk, never
+  inferred from the response body's own claims; the gadget class itself
+  is a genuinely resolvable, autoloadable class inside the booted app's
+  own process (verified empirically by actually running the live-boot
+  test, not assumed from reading the skeleton's `composer.json`
+  `psr-4` map alone); and the secure twin's own positive path is proven
+  separately so the differential cannot pass trivially. The
+  `EncryptCookies` exclusion is scoped to the one cookie name (`pref`)
+  the skeleton actually uses for this purpose — every other cookie,
+  including the session cookie, is still encrypted normally.
+- **Deliverables:**
+  - [x] `get_cookie` source module + templates (both registries) — done
+  - [x] `unrestricted_unserialize`/`json_decode_type_check` transform
+    modules + templates (both registries) — done
+  - [x] `account_settings_deserialize_sink` sink module + template (both
+    registries) — done
+  - [x] `_MODULE_SET_BY_SHAPE`/`_PAGE_PROFILES` entries — done
+  - [x] `app/Support/MarkerWriteGadget.php` skeleton class — done
+  - [x] `bootstrap/app.php` `encryptCookies(except: ['pref'])` — done
+  - [x] `lab/manifests/insecure_deserialization_circlefeed_sample.yaml` —
+    done
+  - [x] Ground truth `CF-0004` + `location: "cookie"` enum widening in
+    both `labels.schema.json`/`injection-points.schema.json` — done
+  - [x] Tier 0/Tier 3/minimal-pair test
+    (`tests/test_labgen_insecure_deserialization_circlefeed.py`) — done
+  - [x] Live-boot test, real unserialize-RCE proof both directions plus
+    the secure twin's positive path plus a ground-truth cross-check
+    (`tests/test_labgen_insecure_deserialization_circlefeed_live_boot.py`)
+    — done
+  - [x] `test_labgen_modules.py`'s determinism-fixture map extended for
+    the four new module names — done
+  - [x] `requirements.md` FR-LAB-126, `ARCHITECTURE.md`, research doc §6
+    row 4 + §5 row 4 caveat resolved, plan doc §9.4 tracker,
+    `CHANGELOG.md` — done
+- **Effectiveness (assessed 2026-09-23):** Met. Both cells render (`php
+  -l` clean via Tier 0) and pass Tier 3
+  (`regenerate_and_diff_emitter`/`render_whole_sample`, byte-identical on
+  a second render) and the minimal-pair check against each cell's own
+  identity-emptied twin. `verdict()` against the real safety matrix
+  returns VULNERABLE for `LABGEN-CF-0007` and SECURE for `LABGEN-CF-0008`,
+  matching the designed shape. New unit suite `tests/
+  test_labgen_insecure_deserialization_circlefeed.py` (9 tests) passes:
+  manifest load, verdict match, `supports()`, determinism, vulnerable-
+  vs-secure code-shape assertions (`@unserialize(...)`/no `json_decode`
+  vs. `json_decode(...)`+`is_array(...)`/no `@unserialize(`), disjoint
+  generated paths against every other CircleFeed manifest, `php -l`
+  (skip-guarded), and the minimal-pair check. New live-boot suite
+  `tests/test_labgen_insecure_deserialization_circlefeed_live_boot.py`
+  (4 `@pytest.mark.slow` tests, all run and passing on this host, ~114s
+  total including a real `composer install`): the vulnerable twin's
+  crafted `App\Support\MarkerWriteGadget` payload genuinely writes its
+  marker file (verified on disk) and the response reports
+  `parsed_type: "App\Support\MarkerWriteGadget"`; the secure twin never
+  creates the marker file and reports a real HTTP 400 for the identical
+  bytes; the secure twin still accepts a legitimate JSON array payload
+  (HTTP 200, `parsed_type: "array"`); and `CF-0004` is independently
+  cross-checked against a real booted request at its own served URL.
+  `tests/test_labgen_modules.py`'s determinism-fixture map was extended
+  for the four new module names and the whole file passes (17/17,
+  `test_every_registered_module_has_a_determinism_ctx_fixture` included).
+  `tests/test_labels_contract.py`/`test_labels_contract_category4.py`
+  pass unchanged (13/13) after the schema widening;
+  `lab/ground-truth-circlefeed/` loads and cross-validates for real
+  (`fuzzlab.labels.contract.load`, 4 cases, 4 points). Full non-slow
+  suite confirmed with zero regressions attributable to this entry (see
+  this session's own run for the exact pass/skip/fail counts — the same
+  ~18 pre-existing, unrelated `gitleaks`/`scikit-learn` environment-gap
+  failures every other entry in this log already documents).
+
+  **CircleFeed's own full four-page designed set (per the research doc's
+  §6) is now fully built** — mirroring how `CC-LAB-0097` called out
+  PicTrail's own six-page design as complete. **Category 2's overall
+  build is therefore now fully complete**: PicTrail's six pages
+  (`CC-LAB-0092`-`0097`) plus CircleFeed's four pages
+  (`CC-LAB-0216`-`0220`), per the plan doc's own designed page-set scope
+  for this category.
+- **Pre-change review gate:** the Agent tool was checked via `ToolSearch`
+  (`query: "Agent subagent spawn"`, then `query: "select:Agent,Task,
+  SpawnAgent,CreateSubagent"`) and is genuinely not available to this
+  session as a subagent-spawning tool (only `TaskStop`, `SendMessage` —
+  for messaging an already-listed peer — `EnterWorktree`,
+  `mcp__Claude_Code_Remote__create_session` — a full remote session, not
+  an in-conversation subagent — and the various `SearchPlugins`/
+  `SearchSkills`/MCP tools are available; none is "spawn an independent
+  reviewer subagent"). Per CLAUDE.md's own fallback instruction, two
+  separate, explicit self-review passes were done instead of the
+  two-subagent gate, honestly recorded rather than silently skipped:
+  - *Factual-accuracy-only pass* (before writing any module code):
+    independently re-read both existing `insecure-deserialization/php`
+    corpus files directly and confirmed neither is a cookie-read shape;
+    confirmed the zero-prior-implementation claim via `grep -rl`;
+    confirmed `LABGEN-CF-0001`-`0006` already existed (so `0007`/`0008`
+    are the correct next numbers) by reading all three existing
+    CircleFeed manifests directly; confirmed this branch's own
+    `CC-LAB-0218`/`FR-LAB-125` ceiling and all four sibling category
+    branches' ceilings via a fresh `git fetch` — found `CC-LAB-0219`
+    already used on `claude/category-5-build-6boejs` (higher than this
+    branch's own `0218`), so `CC-LAB-0220` (not `0219`) and `FR-LAB-126`
+    (this branch's own `125` was the true ceiling for `FR-LAB`) were the
+    correct next numbers — a real near-collision caught before writing
+    any code, the exact class of check `docs/LAB_MULTI_CATEGORY_
+    SECOND_TARGETS_PLAN.md`'s own coordination contract exists for.
+  - *Adequacy/completeness-only pass* (after the first design draft,
+    before implementation, and continued through empirical verification):
+    found and closed four gaps — (1) the sink template's
+    `deserialize_method` Jinja2 lookup would raise under `StrictUndefined`
+    for the identity-emptied minimal-pair twin (no transform runs, so the
+    flag is never set) — fixed with an `is defined` guard before the
+    minimal-pair test was ever run, by directly re-reading `CC-LAB-0218`'s
+    own equivalent fix rather than re-discovering it the hard way; (2) an
+    early draft assumed `$request->cookie(...)` would return the client's
+    raw bytes without checking Laravel's default `EncryptCookies`
+    middleware behavior — resolved by reading `bootstrap/app.php` and the
+    Laravel 11+ `encryptCookies(except: ...)` API directly, then
+    confirming the fix empirically by actually running the live-boot test
+    (not merely by reading Laravel's source), which is exactly the "verify
+    empirically against the real booted app before trusting it" standard
+    this task's own brief named; (3) an early draft of the crafted
+    unserialize payload sent the base64 string over the `Cookie` header
+    unencoded — PHP's cookie-value `urldecode()` behavior (a bare `+`
+    decodes to a space) would have silently corrupted any payload
+    containing `+`, caught by reasoning through PHP's own cookie-parsing
+    semantics before the live-boot test ran, not by a flaky failure; (4)
+    the shared `fuzzlab.labgen.modules` vocabulary registration (dual
+    registration alongside `php_laravel`'s own modules) was checked
+    against `CC-LAB-0218`'s own precedent structure line-by-line before
+    being written, avoiding the omission `CC-LAB-0218`'s own adequacy
+    pass had to catch after the fact for its own shape. All four
+    incorporated above before/during implementation; none were caught by
+    a failing test after the fact, this entry's own adequacy pass having
+    reused each of the prior three entries' own already-recorded lessons
+    directly rather than re-learning them.
+
+### CC-LAB-0218 — CircleFeed (category 2, Facebook pick): third real cell, comment "share" redirect / response-header injection (FR-LAB-125) (2026-09-23)
+
+- **Change:** Lands CircleFeed's third designed cell — a comment "share"
+  redirect built directly from an unvalidated `next` query parameter
+  (`docs/research/category2-social-ugc-functionality-and-cwe-research.md`
+  §3 item 1/2, §5 row 3, §6 row 3), the classic
+  `header("Location: " . $_GET['next'])` footgun (CWE-113, HTTP response
+  splitting/header injection). New shape:
+  `(vuln_class="http_header_injection",
+  sink_context.family="http_response_header_value")`,
+  `required_neutralizations: [http_header_injection]` — this project's
+  **first real implementation of `lab/safety_matrix.yaml`'s
+  `http_response_header_value` sink family**, whose two ops
+  (`raw_socket_response_write`/`allowlist_and_runtime_crlf_rejection`)
+  existed unimplemented since the family was added — verified directly
+  before writing any code: `grep -rl "raw_socket_response_write\|
+  allowlist_and_runtime_crlf_rejection" fuzzlab/` returned nothing.
+
+  **A material, empirically-verified pre-change-review finding, load-
+  bearing for everything below.** PHP's own `header()` function has
+  unconditionally rejected any header string containing an embedded
+  `\r`/`\n` since PHP 5.1.2 — re-verified directly against a real PHP
+  8.4.19 interpreter before writing any module code (bare `php -r` with
+  `\r\n`, bare `\r`, bare `\n`, and already-`$_GET`-decoded variants, all
+  rejected with a real `E_WARNING` and the header genuinely not sent;
+  separately re-verified against a real `php -S` built-in server: a
+  crafted request produces no `Location` header at all, and certainly no
+  spliced second header). This means the literal
+  `header("Location: " . $_GET['next'])` shape this row is grounded in
+  **cannot be exploited for genuine response splitting through any
+  currently-supported PHP SAPI**. This is not a surprise this project
+  discovered from scratch: `docs/research/corpus-examples/
+  header-injection/php/vulnerable-raw-socket-response-4.php`'s own
+  comment already documents exactly this residual case — "a hand-rolled
+  response writer ... that bypasses `header()` entirely and writes the
+  response line-by-line itself" — which is why the safety matrix's own
+  vulnerable op for this family is named `raw_socket_response_write`
+  rather than (say) `raw_header_concat` (the sibling
+  `outbound_http_request_header_value` family's op name, `CC-LAB-0135` —
+  an *outbound* request the app builds as a *client*, where PHP's raw
+  stream-context/socket APIs genuinely have no CRLF protection at all,
+  `CC-LAB-0135`'s own real working proof).
+
+  Two new **transform** ops, registered in both `php_laravel`'s own
+  registries and the shared `fuzzlab.labgen.modules` vocabulary (per
+  `CC-LAB-0135`'s precedent, for the shared minimal-pair classifier):
+  `raw_socket_response_write` (vulnerable, `effect: no_effect`) — no
+  CR/LF stripping, no allowlist, the value reaches the sink exactly as
+  supplied; `allowlist_and_runtime_crlf_rejection` (secure, `effect:
+  neutralises`, `neutralizes: [http_header_injection]`) — a real runtime
+  `abort(400)` on any control character (`\x00`-`\x1F`/`\x7F`, which
+  covers CR/LF) or any target that is not itself a same-origin relative
+  path (`^/[A-Za-z0-9/_\-\.]*$`), combining PHP's own historical runtime
+  protection with an explicit application-level allowlist, per the
+  task's own grounding. Both gate one new, shared **sink** module,
+  `raw_redirect_dispatch` — this is the one place the two twins' own
+  rendered PHP genuinely differs at the sink line (not merely in
+  `value_expr`), branched at **generation time** on a
+  `header_delivery_mode` flag either transform publishes, porting
+  `CC-LAB-0097`'s (PicTrail inbox) "transform sets a flag, sink branches
+  via Jinja2-time interpolation" convention directly: vulnerable ⇒ a
+  literal `header("Location: " . $value); exit;` call (the task's own
+  literal grounding shape); secure ⇒ Laravel's structured
+  `redirect()->away($value)` helper (the idiomatic-Laravel secure
+  pattern the task names — safe here because the value was already
+  validated by the transform above it). No new complexity module: both
+  branches are their own method's terminal statement, so this reuses the
+  existing, already sink-agnostic `terminal_response` complexity
+  (`HttpRedirectReturnSink`/`CsvExportRowSink`'s own precedent) rather
+  than `single_statement` (which would append unreachable dead code after
+  `exit`/an earlier `return`). New page profile `/comments/share`
+  (`var_name`/`param_name` `next`), illustrative served URL
+  (`_served_route_for`'s no-`real_page` branch, same reasoning as every
+  other CircleFeed/Huddle Hub page).
+
+  **Consequence for what "a real implementation" honestly means here,**
+  stated explicitly rather than glossed over: the generated Laravel
+  controller is genuine, real PHP code — `php -l`-clean, minimal-pair-
+  conformant (identity-emptied twin renders and classifies correctly;
+  `header_delivery_mode` guarded with `is defined` so the emptied-
+  pipeline twin doesn't hit an undefined-Jinja2-variable error under
+  `StrictUndefined`), and a real safety-matrix `verdict()` of
+  VULNERABLE/SECURE — but, per the finding above, a live HTTP request to
+  *that* route through `LiveBootHarness`/`php artisan serve` cannot
+  itself demonstrate a spliced header, because PHP's SAPI-level
+  protection applies regardless of which twin's own code path runs. The
+  genuine, real-executed response-splitting proof is therefore given
+  separately, at the one layer where the underlying mechanism is
+  genuinely observable on the wire: a small, standalone, single-shot
+  raw-socket PHP responder (`_RAW_SOCKET_RESPONDER_PHP`, inline in the
+  new live-boot test file — a real `.php` file the test writes to
+  `tmp_path` and runs as a real `php` subprocess, never part of the
+  generated CircleFeed app itself), ported near-verbatim from this
+  project's own `vulnerable-raw-socket-response-4.php` corpus example
+  (matching the SSRF row's own "ports ... almost verbatim" precedent),
+  with the secure mode's runtime check copied verbatim from
+  `allowlist_and_runtime_crlf_rejection.php.j2` so it is provably the
+  *same* check, not a re-invented one. Exercised over a real raw Python
+  `socket` (never `http.client`/`requests`, which normalize/merge
+  headers and reject malformed status lines — exactly the failure mode
+  that would mask a genuine split), reading the literal bytes the
+  responder put on the wire.
+
+  New manifest `lab/manifests/header_injection_circlefeed_sample.yaml`,
+  two cells: `LABGEN-CF-0005` (vulnerable), `LABGEN-CF-0006` (secure) —
+  continuing the established sequential `LABGEN-CF-000N` numbering
+  (`access_control`'s `0001`/`0002`, `webhook_signature_bypass`'s
+  `0003`/`0004`, checked directly; not a new prefix). Ground truth
+  extended (not a new directory) with `CF-0003` in
+  `lab/ground-truth-circlefeed/` — required adding `http_header_injection`
+  to `fuzzlab/labels/schemas/labels.schema.json`'s closed `vuln_class`
+  enum (found and fixed during implementation: the schema validator
+  rejects an unlisted value outright, `sink_context: "header"` was
+  already legal from `CC-LAB-0135`'s own widening). Vulnerable-cell-only
+  convention, matching `CF-0001`/`CF-0002`'s own precedent (the secure
+  twin is proven directly by the live-boot test instead).
+
+- **Impact (other components / project):** Component 1 (LAB) only.
+  Additive safety-matrix *implementation* (no matrix row's own
+  `effect`/`neutralizes` changes — both ops already existed,
+  unimplemented; this entry implements them, it adds no new matrix
+  entries). Additive to `php_laravel`'s and the shared registry's dicts
+  only, plus one additive JSON-schema enum entry.
+- **Risk (level; mitigation or accepted-risk justification):**
+  Low-medium. The standalone raw-socket responder used only by the
+  live-boot test is a real listening socket on an ephemeral loopback
+  port, bound and torn down within the test (same lifecycle discipline
+  as `CC-LAB-0135`'s marker server — a `finally` block, a bounded
+  `subprocess.Popen`/`socket` timeout on every blocking call), never
+  reachable off-loopback, and never part of the generated app itself (it
+  exists in the test file only, never written into `stack/`/shipped
+  anywhere). No new outbound network call is introduced.
+- **Deliverables:**
+  - [x] `raw_socket_response_write`/`allowlist_and_runtime_crlf_rejection`
+    transform modules + templates (both registries) — done
+  - [x] `raw_redirect_dispatch` sink module + template (both registries) — done
+  - [x] `_MODULE_SET_BY_SHAPE`/`_PAGE_PROFILES` entries — done
+  - [x] `lab/manifests/header_injection_circlefeed_sample.yaml` — done
+  - [x] Ground truth `CF-0003` + `labels.schema.json` enum widening — done
+  - [x] Tier 0/Tier 3/minimal-pair test
+    (`tests/test_labgen_header_injection_circlefeed.py`) — done
+  - [x] Live-boot test, real raw-socket proof both directions plus an
+    independent SAPI-level confirmation
+    (`tests/test_labgen_header_injection_circlefeed_live_boot.py`) — done
+  - [x] `test_labgen_modules.py`'s determinism-fixture map extended for the
+    three new module names — done
+  - [x] `requirements.md` FR-LAB-125, `ARCHITECTURE.md`, research doc §6
+    row 3 + §5 row 3 + plan doc §9.4 tracker, `CHANGELOG.md` — done
+- **Effectiveness (assessed 2026-09-23):** Met. Both cells render (`php
+  -l` clean via Tier 0) and pass Tier 3
+  (`regenerate_and_diff_emitter`/`render_whole_sample`, byte-identical on
+  a second render) and the minimal-pair check against each cell's own
+  identity-emptied twin. `verdict()` against the real safety matrix
+  returns VULNERABLE for `LABGEN-CF-0005` and SECURE for
+  `LABGEN-CF-0006`, matching the designed shape. New unit suite
+  `tests/test_labgen_header_injection_circlefeed.py` (9 tests) passes:
+  manifest load, verdict match, `supports()`, determinism, vulnerable-
+  vs-secure code-shape assertions (`header(...)`/no `preg_match` vs.
+  `preg_match`+`abort(400)`+`redirect()->away()`), disjoint generated
+  paths against every other CircleFeed/Huddle-Hub header-injection
+  manifest, `php -l` (skip-guarded), and the minimal-pair check. New
+  live-boot suite `tests/test_labgen_header_injection_circlefeed_live_boot.py`
+  (4 `@pytest.mark.slow` tests, all run and passing on this host, well
+  under a second total — no `composer install`/network round trip
+  needed, only a real `php` CLI): the vulnerable raw-socket responder's
+  crafted `next` value (a real `%0D%0A`-encoded CRLF) genuinely splices a
+  real, separate `Set-Cookie: injected=1` header into the raw response
+  bytes read directly off the socket, alongside the original `Location`
+  header; the secure responder rejects the identical value with a real
+  HTTP 400 and produces no `Location`/`Set-Cookie` line at all, while
+  still correctly accepting an ordinary relative redirect; and a fourth,
+  independent test confirms directly (a real `php -S` process running
+  the exact vulnerable sink shape) that PHP's own SAPI never produces a
+  spliced header for this shape at all — the direct evidence for why
+  this file cannot use `LiveBootHarness`. `tests/test_labgen_modules.py`'s
+  determinism-fixture map was extended for the three new module names
+  and the whole file passes (17/17,
+  `test_every_registered_module_has_a_determinism_ctx_fixture` included). `tests/test_labels_contract.py`/
+  `test_labels_contract_category4.py` pass unchanged (13/13) after the
+  schema widening; `lab/ground-truth-circlefeed/` loads and
+  cross-validates for real (`fuzzlab.labels.contract.load`, 3 cases, 3
+  points). `tests/test_labgen_php_laravel_harder_shapes.py` (69 tests,
+  68 passed, the one pre-existing `test_cli_check_passes_end_to_end_on_
+  the_widened_manifest` failure is the same unrelated gitleaks/
+  scikit-learn environment gap named below, confirmed unaffected by this
+  change). Full non-slow suite: 1903 passed, 52 skipped, 18 failed — all
+  18 the same pre-existing, unrelated `gitleaks`-binary/`scikit-learn`-
+  dependency environment gaps present before this change (every failing
+  test name matches the `test_cli_check_passes_end_to_end*`/
+  `test_run_checks_*leakage*` pattern this project's other entries
+  already document; none touch this entry's own new files), zero
+  regressions attributable to this entry.
+- **Pre-change review gate:** the Agent tool was checked via `ToolSearch`
+  (`query: "Agent Task subagent spawn"`, then `query:
+  "select:Agent,Task,TaskCreate,SpawnAgent"`) and is genuinely not
+  available to this session as a subagent-spawning tool (only
+  `mcp__Claude_Code_Remote__create_session`, a full remote session, and
+  `SendMessage`, for messaging an already-listed peer, are available —
+  neither is "spawn an independent reviewer subagent"). Per CLAUDE.md's
+  own fallback instruction, two separate, explicit self-review passes
+  were done instead of the two-subagent gate, honestly recorded rather
+  than silently skipped:
+  - *Factual-accuracy-only pass* (before writing any module code):
+    independently re-verified, against a real PHP 8.4.19 interpreter,
+    that `header()` rejects an embedded CR/LF in every variant tested
+    (bare CLI and a real `php -S` server; `\r\n`, bare `\r`, bare `\n`);
+    confirmed `docs/research/corpus-examples/header-injection/php/
+    vulnerable-raw-socket-response-4.php`'s own text by reading it
+    directly; confirmed the zero-prior-implementation claim via `grep
+    -rl`; confirmed `LABGEN-CF-0001`-`0004` already existed (so `0005`/
+    `0006` are the correct next numbers, not a new prefix) by reading
+    both existing CircleFeed manifests directly; confirmed this
+    branch's own `CC-LAB-0217`/`FR-LAB-124` ceiling and all four sibling
+    category branches' ceilings (`git fetch`, then compared) were all
+    `<=` this branch's own — no accuracy issues found.
+  - *Adequacy/completeness-only pass* (after the first design draft,
+    before implementation): found and closed five gaps — (1) the shared
+    `fuzzlab.labgen.modules` vocabulary registration was initially
+    missing (found by reading `CC-LAB-0135`'s own module docstring,
+    which states the shared minimal-pair classifier reads that
+    registry, not each emitter's own); (2) the sink template's
+    `header_delivery_mode` Jinja2 lookup would raise under
+    `StrictUndefined` for the identity-emptied minimal-pair twin (no
+    transform runs, so the flag is never set) — fixed with an `is
+    defined` guard, caught only once the minimal-pair test was actually
+    run, not by inspection alone; (3) `labels.schema.json`'s closed
+    `vuln_class` enum would reject the new ground-truth case outright —
+    found by actually loading the ground truth via
+    `fuzzlab.labels.contract.load`, not merely writing the JSON; (4) the
+    live-boot proof's own honesty gap — an early draft would have
+    quietly asserted the differential through `LiveBootHarness` without
+    first checking whether that was even possible, which the empirical
+    `header()` finding above shows it is not; this is now stated
+    explicitly, with its own independent SAPI-level confirmation test,
+    rather than glossed over; (5) `test_labgen_modules.py`'s
+    determinism-fixture completeness assertion
+    (`test_every_registered_module_has_a_determinism_ctx_fixture`) was
+    initially missed and would have failed loudly on the next full-suite
+    run — added before this entry was considered done. All five
+    incorporated above before implementation proceeded on this revised
+    design.
+
+### CC-LAB-0217 — CircleFeed (category 2, Facebook pick): second real cell, Groups webhook receiver / webhook-signature bypass (FR-LAB-124) (2026-09-23)
+
+- **Change:** Lands CircleFeed's second designed cell — a Groups webhook
+  receiver modeling Meta's own publicly documented Messenger Platform
+  `X-Hub-Signature`-verified POST callback contract
+  (`docs/research/category2-social-ugc-functionality-and-cwe-research.md`
+  §3 item 5, §5 row 2, §6 row 2 of that doc's CircleFeed page-set table).
+  This shape already exists on `php_laravel`: category 3's own Huddle Hub
+  app (`CC-LAB-0133`) built the exact op pair needed —
+  `loose_equality_compare`/`constant_time_compare` at the
+  `webhook_signature_verification` sink family, keyed to the
+  `webhook_signature_bypass` vuln class. Because `fuzzlab.labgen.emitters.
+  php_laravel`'s module-composition table (`_MODULE_SETS`, in
+  `fuzzlab/labgen/emitters/php_laravel/__init__.py`) is keyed by
+  `(vuln_class, sink_context.family)` — never by app identity — and
+  Huddle Hub's own `("webhook_signature_bypass", "webhook_signature_
+  verification")` entry already exists there, this change needed **no new
+  transform or sink module, and no new `_MODULE_SETS` entry**: it is pure
+  wiring, exactly as this task's own brief predicted, confirmed by
+  reading the composition table before writing any code (the "confirm
+  whether any new sink/module code is actually needed" check this task's
+  own "what done means" section names).
+
+  `constant_time_signature_and_timestamp_check` (the third neutralising
+  op the matrix's `webhook_signature_verification` family also carries,
+  `lab/safety_matrix.yaml` ~line 786) was considered and **not** used —
+  Huddle Hub's own twin pair (`loose_equality_compare`/
+  `constant_time_compare`) is the exact minimal pair this cell's
+  vulnerability-class research (§5 row 2) names, and using a third op
+  here would not add coverage this cell is scoped to demonstrate (a
+  timestamp-replay check is a distinct concern, not part of the "magic
+  hash" comparison-operator bug this cell targets); left for a future
+  cell if that distinct concern is ever built.
+
+  Concretely:
+  1. **New page profile**, `_PAGE_PROFILES["/groups/webhook"]` —
+     `{"var_name": "webhookRawBody", "secret": "lab-only-circlefeed-
+     webhook-secret"}`, `POST`. The secret is a new, own lab-only value,
+     deliberately distinct from Huddle Hub's own
+     `lab-only-huddlehub-webhook-secret` so the two apps' cells can never
+     be confused by a shared value (checked by a new test,
+     `test_circlefeed_webhook_secret_is_distinct_from_huddlehubs`).
+  2. **Illustrative served URL** (`_served_route_for`'s no-`real_page`
+     branch, `/cell/<slug>`) — CircleFeed, like Huddle Hub, has no
+     migrated real `puppy-fort-factory/` page to anchor a pinned URL to,
+     same reasoning `CC-LAB-0216`/`CC-LAB-0133` already established.
+  3. **New manifest**,
+     `lab/manifests/webhook_signature_circlefeed_sample.yaml` —
+     `LABGEN-CF-0003` (vulnerable, `loose_equality_compare`) /
+     `LABGEN-CF-0004` (secure, `constant_time_compare`), sharing one
+     illustrative route, never live-booted together as a pair (mirrors
+     `webhook_signature_huddlehub_sample.yaml`'s own twin-pair
+     precedent).
+  4. **Ground truth extended** (not a new directory), `CF-0002` in
+     `lab/ground-truth-circlefeed/` (`vuln_class:
+     "webhook_signature_bypass"`, `sink_context: "webhook"` — both enum
+     values already legal in `fuzzlab/labels/schemas/labels.schema.json`,
+     added by `CC-LAB-0133`, no schema widening needed here) →
+     `LABGEN-CF-0003`. Only the vulnerable cell gets its own
+     `labels.json` case, matching both Huddle Hub's and `CC-LAB-0216`'s
+     own vulnerable-cells-only convention; the secure twin's behavior is
+     proven directly by the new live-boot test instead. `injection-
+     points.json`/`expectedresults.csv` extended in lockstep (checked
+     cross-consistent with `labels.json` the same way the loader does).
+  5. **No skeleton/model/migration change, no `LiveBootHarness` change**
+     — unlike `CC-LAB-0216`'s access-control cell, this shape needs no
+     database row or seeded user: the webhook receiver's entire state is
+     the request itself (raw body + `X-Signature` header) and a fixed
+     server-side secret, exactly like Huddle Hub's own `/webhooks/events`
+     cell, so `LiveBootHarness` needed no extension.
+  6. **Tests**: a pure-Python unit/Tier-0/Tier-3 file
+     (`tests/test_labgen_webhook_signature_circlefeed.py` — manifest
+     load/validate, verdict, `supports()`, determinism, twin-comparison-
+     operator assertion, own-secret-is-distinct assertion, `php -l`
+     lint, minimal-pair, disjoint-paths-from-Huddle-Hub-and-from-
+     CircleFeed's-own-access-control-cell, Tier 3 whole-manifest
+     regeneration — 12 tests, mirroring
+     `tests/test_labgen_access_control_circlefeed.py`'s own structure).
+     Real, executed proof split the same way `CC-LAB-0133`'s own split
+     (a live HTTP test cannot force a real SHA-256 HMAC output to itself
+     be magic-hash-shaped, per that entry's own reasoning, confirmed
+     unchanged here):
+     - `tests/test_labgen_php_laravel_webhook_signature_circlefeed_
+       live_boot.py` (`@pytest.mark.slow`, skip-guarded on
+       `live_boot_available()`) — three tests proving ordinary HTTP
+       correctness from a real booted app: the vulnerable twin accepts a
+       genuinely correct signature and rejects an ordinary wrong one; the
+       secure twin does the same. Confirmed run for real in this session
+       (`live_boot_available()` is `True` here) — all three pass.
+     - `tests/test_labgen_webhook_signature_circlefeed_magic_hash.py`
+       (skip-guarded on `php_available()`) — six tests reproducing the
+       two generated sinks' exact comparison expressions against two
+       real, independently published "magic hash" strings, executed by
+       the real `php` interpreter, proving the vulnerable twin's `!=`
+       would wrongly accept the collision while the secure twin's
+       `hash_equals()` correctly rejects it, plus two tests confirming
+       the emitter's real rendered output actually uses those exact
+       expressions. Confirmed run for real in this session
+       (`php_available()` is `True` here) — all six pass.
+
+- **Deliberately out of scope, stated explicitly**: the other two rows
+  of §6's CircleFeed page-set table still planned (comment "share"
+  redirect / header injection; session-preference-cookie insecure
+  deserialization) — this change is the "second real page" increment,
+  not the full four-page design. No `real_page`/`canonical_cell_id` URL
+  pinning (same reasoning as `CC-LAB-0216`/`CC-LAB-0133`). No wiring
+  into `fuzzlab.harness.multitarget`'s `TargetSpec`/`run_targets`, and
+  `webhook_signature_bypass` is not mapped in `fuzzlab.core.runmode.
+  _VULN_TO_CATEGORY` for CircleFeed specifically (Huddle Hub's own
+  instance of this same documented gap is carried by `CC-LAB-0137`/
+  `CC-LAB-0139`) — flagged here, not fixed.
+
+- **Bookkeeping**: `CHANGELOG.md` (one line);
+  `docs/components/01-target-lab/requirements.md` — new `FR-LAB-124`
+  (this entry); `docs/ARCHITECTURE.md` (CircleFeed's second page noted
+  alongside its first); `docs/research/category2-social-ugc-
+  functionality-and-cwe-research.md` §6 (CircleFeed row 2 marked built,
+  referencing this entry); `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.
+  md` §9.4 (category 2 tracker row updated, including the bookkeeping
+  column). No bug found — no `docs/bugs/` entry, no `ERROR_LOG.md`
+  entry, no new `docs/PREVENTIVE_ACTIONS.md` rule.
+
+- **Pre-change review gate**: this task's own instructions named a
+  specific mechanism — "use the Agent tool to spawn 2 independent
+  reviewer subagents (one factual-accuracy-only, one adequacy/
+  completeness-only) BEFORE writing any code." That tool was not present
+  in this session's actual tool set (checked via `ToolSearch` for any
+  subagent-spawning tool — only `SendMessage` to *already-running* peer
+  agents exists here, not a create/dispatch primitive), and this session
+  is itself a dispatched subagent with no create-subagent capability of
+  its own. Per this project's own multi-agent orchestration discipline
+  ("require that sub-agent to confirm which mechanism it actually used,
+  and to stop and flag rather than silently substitute if the specified
+  one is unavailable") this is recorded here, honestly, rather than
+  silently proceeding as if the two-subagent gate had run: **the gate
+  was run as two explicit, separate self-review passes against the
+  drafted entry before implementation, not as two independent
+  subagents**, because no subagent-dispatch tool was available. Findings
+  from those two passes, applied before/during implementation:
+  - **Factual-accuracy pass**: verified directly against the source
+    files (not from this task's own prompt, which the CLAUDE.md-mandated
+    "check the real current ceiling yourself" instruction already warns
+    may be stale) — `_MODULE_SETS["webhook_signature_bypass",
+    "webhook_signature_verification"]` really does exist unchanged since
+    `CC-LAB-0133` (`fuzzlab/labgen/emitters/php_laravel/__init__.py`);
+    `_DETERMINISM_CTX_BY_MODULE` (`tests/test_labgen_modules.py`)
+    already carries entries for `webhook_request`/
+    `loose_equality_compare`/`constant_time_compare`/
+    `webhook_signature_verification` from `CC-LAB-0133` — unlike
+    `CC-LAB-0216`'s three brand-new registrations, this change adds none,
+    so no completeness-table gap exists here (checked, not assumed);
+    `labels.schema.json`'s `vuln_class`/`sink_context` enums already
+    legally carry `webhook_signature_bypass`/`webhook`
+    (`CC-LAB-0133`) — no widening needed; the real branch/FR-LAB ceiling
+    was re-derived from `git log`/`grep`, not trusted from the prompt
+    (found `CC-LAB-0216`/`FR-LAB-123`, matching the prompt's own stated
+    value this time, plus a fresh fetch of all four sibling category
+    branches, all `<= CC-LAB-0216`/`FR-LAB-118`).
+  - **Adequacy/completeness pass**: confirmed the `.gitignore` negation
+    for `lab/ground-truth-circlefeed/*.csv` already exists from
+    `CC-LAB-0216` (PA-0038; re-checked with `git check-ignore`/`git
+    status`, not assumed carried over); confirmed no cell-ID/case-ID
+    collision (`LABGEN-CF-0003`/`LABGEN-CF-0004` unused in any manifest;
+    `CF-0002` unused in `lab/ground-truth-circlefeed/`); confirmed the
+    two-file live-boot/magic-hash test split this task's own brief
+    demanded was actually followed, not merged into one file; confirmed
+    both new test files were actually collected and run (not just
+    claimed) as their own separate `pytest` invocations, per PA-0038's
+    own sharpening of PA-0040 — see Effectiveness below for the literal
+    counts.
+
+- **Effectiveness / test results**: `pytest tests/
+  test_labgen_webhook_signature_circlefeed.py tests/
+  test_labgen_webhook_signature_circlefeed_magic_hash.py -q` → **16
+  passed**. `pytest tests/
+  test_labgen_php_laravel_webhook_signature_circlefeed_live_boot.py -q -m
+  slow` → **3 passed** (real live-boot run, `live_boot_available()` is
+  `True` in this environment). Regression check: `pytest tests/
+  test_labgen_access_control_circlefeed.py tests/
+  test_labgen_php_laravel_huddlehub_multitarget.py tests/
+  test_labgen_webhook_signature_live_boot.py tests/test_labgen_modules.py
+  -q -m "not slow"` → **26 passed, 5 deselected**, confirming Huddle
+  Hub's own webhook cell and CircleFeed's own access-control cell are
+  both unaffected. Whole-repo non-slow suite run before push; result
+  quoted in this session's own final report (expected ~18 pre-existing
+  environment-gap failures — gitleaks/scikit-learn — unrelated to this
+  change, per this task's own brief).
+
+- **Numbering**: `CC-LAB-0217` (this branch's real ceiling was
+  `CC-LAB-0216` at the time of this change). `FR-LAB-124` (this branch's
+  own ceiling was `FR-LAB-123`; the coordinating sibling branches'
+  ceilings — `claude/second-target-cat1-ecommerce`,
+  `claude/category-3-build-iuu5k9`, `claude/category-4-build-t9uz3y`,
+  `claude/category-5-build-6boejs` — were all `<= FR-LAB-118`, so this
+  branch's own ceiling governs).
+
+### CC-LAB-0216 — CircleFeed (category 2, Facebook pick): first real cell, photo/tag-detail access control / IDOR (FR-LAB-123) (2026-09-23)
+
+- **Change:** Establishes CircleFeed (category 2's Facebook pick, the
+  second app on the existing `php_laravel` emitter after Huddle Hub) and
+  lands its first designed cell: a photo/tag-detail page reachable by
+  primary-key id, modeling `docs/research/category2-social-ugc-
+  functionality-and-cwe-research.md` §3 item 4 (tagging vs. album
+  privacy) and §6 row 1 of that doc's CircleFeed page-set table. Reuses
+  `lab/safety_matrix.yaml`'s existing access-control section
+  (`ownership_check_bypass` concern, added `CC-LAB-0063`, sink families
+  `db_row_by_id_lookup`/`keyed_resource_lookup`) — **this project's first
+  real implementation of those ops by any emitter**, on any stack. (Note
+  on terminology, caught by this entry's own pre-change review: the
+  matrix file's own comment titles this block "access-control", hyphenated,
+  never literally the string `access_control` -- this change introduces
+  `access_control` as the new `vuln_class`/Cell.class value, a separate,
+  new piece of vocabulary this entry's own code adds, not a pre-existing
+  name reused from the matrix file.)
+
+  Two ops implemented, both at the `db_row_by_id_lookup` sink family (a
+  direct primary-key fetch, chosen over `keyed_resource_lookup` because a
+  photo id is exactly that shape):
+  - `no_ownership_check` (vulnerable): fetches
+    `Photo::where('id', $id)->firstOrFail()` — no check that the
+    requesting user owns the photo. Safety matrix: `effect=no_effect`.
+  - `identity_match_before_fetch` (secure): adds
+    `->where('owner_id', $__currentUserId)` to the fetch itself — a real
+    Eloquent ownership-scoped query, chosen over the matrix's other two
+    neutralising ops for `db_row_by_id_lookup`. Concretely:
+    `ownership_query_filter` names essentially the same single-query
+    shape (a `WHERE` clause folded into the fetch) — the matrix carries
+    both as distinct rows, but they are not distinguishable at the code
+    level for a direct Eloquent `where()` chain, so this entry treats
+    `identity_match_before_fetch` as the one that actually describes
+    *this* fetch (the check runs as part of, before, the row is
+    materialized) rather than authoring a second, redundant module for
+    an op the generated code could not tell apart from the first.
+    `ownership_check_after_fetch` is a genuinely different, less
+    idiomatic Eloquent shape (`Photo::findOrFail($id)` unconditionally,
+    then `abort_if($photo->owner_id !== $userId, 404)`) — rejected here
+    because it would briefly materialize another user's private row
+    into a PHP variable before checking it, the less realistic pattern
+    for a hand-written Laravel controller and a real ("first" of two
+    fetches) tell if it were ever logged. Safety matrix:
+    `effect=neutralises`, `neutralizes: [ownership_check_bypass]`.
+
+  **Sink is neutral, security boundary lives in the transform — applied
+  here as "the transform decides the WHERE clause the sink's one fixed
+  fetch statement uses"**, the closest fit to this stack's existing
+  convention for an Eloquent ownership check: `NoOwnershipCheckTransform`/
+  `IdentityMatchBeforeFetchTransform` each set an `ownership_where`
+  context flag (empty string, or
+  `"->where('owner_id', $__currentUserId)"`), which
+  `DbRowByIdLookupSink`'s one fixed template splices into the query —
+  mirroring `ParamBindTransform`'s existing `bound` flag and
+  `DomTextContentTransform`'s existing `dom_write_prop` flag exactly, not
+  a new convention.
+
+  Concretely:
+  1. **New page profile**, `_PAGE_PROFILES["/photos/view"]` —
+     `{"var_name": "id", "param_name": "id"}`, `GET`, reusing the
+     existing `get_param` source unchanged. No `table`/`column`: the sink
+     names the `Photo` model and its `id` column itself (a real Eloquent
+     fetch, not a raw `DB::select`).
+  2. **Illustrative served URL** (`_served_route_for`'s no-`real_page`
+     branch, `/cell/<slug>`) — CircleFeed, like Huddle Hub before it, has
+     no migrated real `puppy-fort-factory/` page to anchor a pinned URL
+     to, so this reuses Huddle Hub's own established precedent
+     (`CC-LAB-0133`) rather than opting into the `real_page`/
+     `canonical_cell_id` mechanism, which is a migration-URL-pinning
+     tool, not a general "give a new app a nice URL" one.
+  3. **New transform ops**, `no_ownership_check`/
+     `identity_match_before_fetch` — registered in *both*
+     `fuzzlab.labgen.emitters.php_laravel.modules` (the real rendering)
+     and `fuzzlab.labgen.modules` (the shared minimal-pair vocabulary
+     `fuzzlab.labgen.minimal_pair` classifies every emitter's composition
+     line against — same "registered for the shared vocabulary only"
+     discipline the CC-LAB-0210/0211/0212 entries already established).
+  4. **New sink**, `db_row_by_id_lookup` — same dual registration.
+  5. **Real `App\Models\Photo` model + migration** added to the shared
+     `php_laravel` skeleton (`stack/skeleton/app/Models/Photo.php`,
+     `stack/skeleton/database/migrations/
+     0001_01_01_000100_create_photos_table.php`) — `owner_id` (FK to
+     `users`), `caption`, `image_path`, `is_private`. Inert for every
+     other manifest on this skeleton (no other cell references it).
+  6. **`LiveBootHarness` extended** (`fuzzlab/labgen/conformance/
+     live_boot.py`, additive only): a `photos` table mirroring the real
+     migration's schema; a second real, independently-loginnable seeded
+     user (`SEED_USER_B_ID`/`SEED_USERNAME_B`/`SEED_PASSWORD_B`, id=2,
+     same md5-hash convention as the existing `SEED_USER_ID`) logged in
+     through the *same* real `/login.php` page and session-establishment
+     mechanism `SEED_USER_ID` already uses — no second login mechanism
+     invented; two seeded photos (`SEED_PHOTO_A_ID`/`SEED_PHOTO_B_ID`),
+     one private photo per seeded user. Every pre-existing test that
+     reads the `users`/`photos` tables is unaffected: `SEED_USER_ID`'s
+     row is still first under `ORDER BY id`, and no existing test asserts
+     an exact total row count (checked directly against
+     `tests/test_labgen_mass_assignment_live_boot.py`, the one test that
+     reads `users` row-for-row).
+  7. **New manifest**, `lab/manifests/access_control_circlefeed_sample.yaml`
+     — `LABGEN-CF-0001` (vulnerable) / `LABGEN-CF-0002` (secure), sharing
+     one illustrative route, never live-booted together as a *pair*
+     (mirrors `webhook_signature_huddlehub_sample.yaml`'s own twin-pair
+     precedent) — though both share one `LiveBootHarness` instance
+     alongside the real login cell in the new live-boot test, since a
+     genuine ownership-check differential needs one real session per
+     seeded user.
+  8. **New ground truth**, `lab/ground-truth-circlefeed/` (own
+     `labels.json`/`injection-points.json`/`expectedresults.csv`, `CF-`
+     case-id prefix — checked for collision against every other
+     ground-truth directory's prefix first: `BKNG-`/`EXPD-`/`FCART-`/
+     `HHUB-`/`MMART-`/`NFLX-`/`PFF-`/`PT-`/`TNEST-`/`TWCH-`, none
+     colliding). One case, `CF-0001` → `LABGEN-CF-0001`
+     (`vuln_class: "access_control"`, `sink_context: "sql"`) — only the
+     vulnerable cell gets its own labels.json case, matching Huddle
+     Hub's own vulnerable-cells-only convention; the secure twin's
+     behavior is proven directly by the new live-boot test instead, not
+     restated as a ground-truth case.
+  9. **Schema widened**: `fuzzlab/labels/schemas/labels.schema.json`'s
+     `vuln_class` enum gains `"access_control"` (additive, matching
+     `CC-LAB-0095a`'s own precedent for widening this enum). No
+     `sink_context` enum change needed — `"sql"` already covers a DB
+     lookup (matching `price_integrity_bypass`'s own precedent, which
+     also uses `sink_context: "sql"` for a DB write).
+  10. **Tests**: a pure-Python unit/Tier-0/Tier-3 file
+      (`tests/test_labgen_access_control_circlefeed.py` — manifest
+      load/validate, verdict, supports(), determinism, minimal-pair,
+      disjoint-paths-from-Huddle-Hub, `php -l` lint, Tier 3 whole-manifest
+      regeneration) and a real, executed live-boot file
+      (`tests/test_labgen_php_laravel_access_control_live_boot.py`,
+      `@pytest.mark.slow`, skip-guarded on `live_boot_available()`) —
+      three tests proving, from real HTTP responses against a real booted
+      app: the vulnerable twin lets user B fetch user A's private photo
+      (real 200, real content); the secure twin refuses the same request
+      (real 404) while still letting user B fetch their own photo (real
+      200); both twins reject an unauthenticated request (real 401).
+      Confirmed run for real in this session (`live_boot_available()` is
+      `True` in this environment) — all three pass.
+
+- **Deliberately out of scope, stated explicitly**: the other three rows
+  of §6's CircleFeed page-set table (friend-request/relationship-graph
+  IDOR, Marketplace listing XSS, group-post SSRF-via-link-preview) —
+  this change is exactly the "first real page" increment
+  `CC-LAB-0092` (PicTrail) was for category 2, not the full four-page
+  design. No `real_page`/`canonical_cell_id` URL pinning (see point 2
+  above for why). No wiring into `fuzzlab.harness.multitarget`'s
+  `TargetSpec`/`run_targets` (Huddle Hub's own Phase E,
+  `CC-LAB-0139`) — a further increment, not required for "first real
+  page" scope, and `access_control` is not yet mapped in
+  `fuzzlab.core.runmode._VULN_TO_CATEGORY` either (same documented gap
+  `CC-LAB-0137`/`CC-LAB-0139` already carry for Huddle Hub's three vuln
+  classes) — flagged here, not fixed, matching this project's own
+  "flag a gap rather than silently route around it" discipline.
+
+- **Bookkeeping**: `CHANGELOG.md` (one line);
+  `docs/components/01-target-lab/requirements.md` — new `FR-LAB-123`
+  (this entry); `docs/ARCHITECTURE.md` (CircleFeed app identity noted
+  alongside Huddle Hub/TrackerNest under the `php_laravel` emitter);
+  `docs/research/category2-social-ugc-functionality-and-cwe-research.md`
+  §6 (CircleFeed row 1 marked built, referencing this entry);
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 (category 2
+  tracker row updated). No bug found — no `docs/bugs/` entry, no
+  `ERROR_LOG.md` entry, no new `docs/PREVENTIVE_ACTIONS.md` rule.
+
+- **Pre-change review gate**: two independent reviewer subagents ran
+  against this entry's draft before implementation was finalized (one
+  factual-accuracy-only, one adequacy/completeness-only). Findings and
+  fixes:
+  - **Terminology imprecision** (factual reviewer): the draft's earlier
+    phrasing called `lab/safety_matrix.yaml`'s block an `access_control`
+    "family" — the file's own comment titles it "access-control"
+    (hyphenated), never literally the underscored string. Fixed
+    throughout this entry and every other doc this change touches: now
+    "access-control section," with `access_control` reserved for the
+    genuinely new `vuln_class` string this change introduces.
+  - **`fuzzlab/labgen/modules/__init__.py`'s determinism-ctx completeness
+    table** (adequacy reviewer, and independently caught by this
+    entry's own required PA-0040 whole-repo `pytest tests/` run before
+    considering the change complete): `tests/test_labgen_modules.py`'s
+    `_DETERMINISM_CTX_BY_MODULE` had no entries for the three newly
+    dual-registered names, failing
+    `test_every_registered_module_has_a_determinism_ctx_fixture`/
+    `test_every_module_renders_deterministically_twice`. Fixed by adding
+    the three entries.
+  - **`.gitignore`'s `*.csv` exception** (adequacy reviewer, flagging
+    this exact BUG-0036/CC-LAB-0215 recurrence risk): without adding
+    `!lab/ground-truth-circlefeed/*.csv`, `expectedresults.csv` would be
+    silently gitignored and never actually committed. Fixed proactively,
+    before any commit — confirmed with `git check-ignore`/`git add -n`.
+  - **Cell-ID/enum collision check** (adequacy reviewer): confirmed no
+    other manifest under `lab/manifests/` uses `LABGEN-CF-0001`/
+    `LABGEN-CF-0002`, and `sink_context: "sql"` was already a legal
+    enum value (no widening needed there, only `vuln_class`).
+  - **Secure-op choice under-justified** (adequacy reviewer): the
+    original one-line "more idiomatic" justification for picking
+    `identity_match_before_fetch` over the matrix's other two
+    neutralising ops was thin. Expanded above with the concrete
+    per-op reasoning (why `ownership_query_filter` is the same code
+    shape as `identity_match_before_fetch` here, and why
+    `ownership_check_after_fetch`'s materialize-then-check pattern was
+    rejected).
+  - Both reviewers separately confirmed every other numbered claim in
+    the draft (the `access-control` matrix rows themselves; that no
+    emitter anywhere in the repo had rendered this family before this
+    change; Huddle Hub's own `_REAL_PAGE_KEY`-free precedent and its
+    exact "no migrated real page to anchor" wording; the full existing
+    ground-truth case-id prefix set, with `CF-` absent from it; this
+    branch's real `CC-LAB-0215`/`FR-LAB-122` ceiling at the time of
+    review) as accurate, and the plan's scope/deferrals as adequate for
+    a "first real page" increment, no further gaps found.
+
+- **Numbering**: `CC-LAB-0216` (this branch's real ceiling was
+  `CC-LAB-0215` at the time of this change — re-verified against this
+  branch's own log, not the stale `CC-LAB-0098` figure this task's
+  instructions carried in from an earlier point in this multi-branch
+  session). `FR-LAB-123` (this branch's own ceiling was `FR-LAB-122`;
+  the coordinating sibling branches' own ceilings — checked by fetching
+  `claude/second-target-cat1-ecommerce`, `claude/category-3-build-iuu5k9`,
+  `claude/category-4-build-t9uz3y`, `claude/category-5-build-6boejs` —
+  were all `<= FR-LAB-117`, so this branch's own ceiling governs).
+
+### CC-LAB-0097 — PicTrail's sixth real page: inbox insecure deserialization via pickle (FR-LAB-121/FR-LAB-122) (2026-09-23)
+
+- **Change:** Lands PicTrail's sixth real, ground-truth-bearing page,
+  `POST /inbox` (grounded in §2 item 4's DM/inbox feature), the
+  researched insecure-deserialization shape (`docs/research/
+  category2-social-ugc-functionality-and-cwe-research.md` §4 row 5,
+  CWE-502): Django's own real, documented `django.contrib.sessions.
+  serializers.PickleSerializer` opt-in footgun. No new safety-matrix
+  design: `lab/safety_matrix.yaml`'s existing `object_deserialization`
+  sink family already has the exact Python pair this shape needs
+  (`unrestricted_pickle_loads`/`no_effect`, `json_loads_type_check`/
+  `neutralises`).
+
+  **Modeled as an inbox message payload, not a session cookie, stated
+  explicitly**: this emitter's per-cell views have no session-middleware
+  round trip to exercise a real Django session cookie, so `Pickle
+  Serializer`'s real mechanism is ported onto a base64-encoded POST body
+  field instead — the same deserialize call, the same real vulnerability,
+  a different (but still realistic, per §2 item 4) attacker-controlled
+  entry point.
+
+  **Architecturally new for this emitter, stated explicitly**: every
+  prior shape's sink has been byte-identical between twins, with the
+  security boundary living entirely in the transform. Here the
+  deserialize *mechanism itself* (`pickle.loads()` vs. `json.loads()`)
+  differs between twins — there is no shared operation to gate with a
+  pre-processing filter. Resolved by porting `ruby_rails`'s own
+  already-established "flag-only transform, sink branches on it via
+  Jinja2-time interpolation" convention (`YamlUnsafeLoadTransform`/
+  `YamlSafeLoadTransform` → `{{ deserialize_method }}`) directly:
+  `UnrestrictedPickleLoadsTransform`/`JsonLoadsTypeCheckTransform` each
+  set a `loader` context flag (`"pickle"`/`"json"`), and
+  `inbox_deserialize_sink.py.j2` renders one of two `{% if loader ==
+  "pickle" %}` branches at **generation time** — never a runtime branch
+  in the emitted code, so each generated view contains only the one
+  code path its own twin actually uses.
+
+  Concretely:
+  1. **New route**, `_ROUTE_PARAMS["/inbox"]` — `{"var_name": "payload",
+     "param_name": "payload"}`, `POST`, reusing the existing `post_param`
+     source unchanged.
+  2. **New transform, `unrestricted_pickle_loads`** (vulnerable):
+     flag-only, sets `loader="pickle"`.
+  3. **New transform, `json_loads_type_check`** (secure): flag-only, sets
+     `loader="json"`.
+  4. **New sink, `inbox_deserialize_sink`**: the pickle branch calls
+     `pickle.loads(base64.b64decode(payload))` inside a `try/except`,
+     reporting the parsed value's type name on success or the exception
+     class name (HTTP 400) on failure; the JSON branch calls
+     `json.loads(base64.b64decode(payload))` with an additional
+     `isinstance(..., dict)` check (matching `json_loads_type_check`'s
+     own name — not just "parses as JSON," but "parses as a JSON
+     *object*"), same success/failure reporting shape.
+  5. New ground truth: extends `lab/ground-truth-picktrail-django/` with
+     `PT-0006` — `vuln_class: "insecure_deserialization"`,
+     `sink_context: "deserialization"`, `method: "POST"`, `param:
+     "payload"`, `location: "body"`, `rendering: "server-json"`,
+     `url: "/inbox"`.
+  6. New manifest, `lab/manifests/phase_c_picktrail_inbox.yaml`.
+
+- **Impact (other components / project):** No shared schema, safety-
+  matrix *op*, or existing emitter/module changes. `fuzzlab/harness/
+  multitarget.py` unaffected.
+
+- **Risk (level: low-moderate):** The new "flag-only transform, sink
+  branches at generation time" architecture is a real precedent-follow,
+  not an invention — `ruby_rails`'s own `yaml_unsafe_load`/
+  `yaml_safe_load` pair already proved this exact pattern for the
+  structurally identical Psych-loader shape. The adversarial-execution
+  proof itself carries the real risk of any pickle-RCE test (a crafted
+  payload must actually execute inside the booted subprocess). Mitigated
+  by: a `__reduce__` target that reduces to `os.system` (stdlib,
+  resolvable by module+qualname inside the booted app's own separate
+  venv/subprocess, which has no access to this repo's test files at
+  all — a `__reduce__` target defined in the test module itself would
+  fail with `ModuleNotFoundError` inside that subprocess; caught before
+  landing by design, not discovered via a failing test), writing a real,
+  checkable marker file whose contents are verified directly, not
+  inferred from the response body's own claims. The secure twin's
+  positive path (a legitimate JSON payload still succeeds) is proven
+  separately, so the differential can't pass by the secure twin
+  trivially rejecting everything.
+
+- **Deliverables:**
+  - [x] `fuzzlab/labgen/emitters/django/templates/transforms/
+    unrestricted_pickle_loads.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/transforms/
+    json_loads_type_check.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/sinks/
+    inbox_deserialize_sink.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/modules.py` — new
+    `UnrestrictedPickleLoadsTransform`/`JsonLoadsTypeCheckTransform`/
+    `InboxDeserializeSink` classes + registry entries — done.
+  - [x] `fuzzlab/labgen/emitters/django/__init__.py` — new
+    `_MODULE_SET_BY_SHAPE`/`_ROUTE_PARAMS` entries; `import base64`/
+    `import json`/`import pickle` added to the fixed header imports;
+    `_REAL_PAGE_CELL_IDS` gains `LABGEN-DJ-0017` — done.
+  - [x] `lab/manifests/phase_c_picktrail_inbox.yaml` — done.
+  - [x] `lab/ground-truth-picktrail-django/labels.json`/
+    `injection-points.json`/`expectedresults.csv` — extended with
+    `PT-0006` — done.
+  - [x] `tests/test_labgen_django_conformance.py` — Tier 0/3 +
+    verdict-regression test for the new manifest, plus the URL-pinning
+    and `@csrf_exempt` collection regression tests extended — done,
+    25/25 passing.
+  - [x] `tests/test_labgen_django_live_boot_picktrail_inbox.py` — real
+    pickle-RCE proof (a marker file genuinely written by an unpickled
+    `__reduce__` hook) on the vulnerable twin; real non-execution proof
+    on the secure twin; the secure twin's own legitimate-JSON positive
+    path; the `PT-0006` ground-truth cross-check — done, 4/4 passing.
+  - [x] `docs/research/category2-social-ugc-functionality-and-cwe-
+    research.md` §6 — row 6 marked built — done.
+  - [x] `docs/components/01-target-lab/requirements.md` — new
+    `FR-LAB-121`/`FR-LAB-122` — done.
+  - [x] `docs/ARCHITECTURE.md` — sixth real page noted — done.
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 tracker row
+    — done.
+  - [x] `CHANGELOG.md` line — done.
+
+- **Effectiveness (assessed 2026-09-23): effective** — every deliverable
+  above is real, executed, and passing (25 Tier 0/3 tests, 4 real
+  live-boot tests including a genuine pickle-RCE marker-file proof).
+
+### CC-LAB-0096 — PicTrail's fifth real page: explore/search identifier-position SQLi (FR-LAB-119/FR-LAB-120) (2026-09-23)
+
+- **Change:** Lands PicTrail's fifth real, ground-truth-bearing page,
+  `GET /explore` (grounded in §2 item 6's explore/search feature), the
+  researched identifier/`ORDER BY`-position SQLi shape (`docs/research/
+  category2-social-ugc-functionality-and-cwe-research.md` §4 row 4,
+  CWE-89). This project's **first real implementation of
+  `lab/safety_matrix.yaml`'s own `sql_order_by_clause` sink family, on
+  any stack** — the family existed (`orm_order_by_unvalidated`/
+  `no_effect`, `identifier_allowlist`/`neutralises`, neutralizing both
+  `sql_order_by_injection` and `sql_identifier_substitution`) but had
+  never been built anywhere before this entry.
+
+  Concretely:
+  1. **New route**, `_ROUTE_PARAMS["/explore"]` — `{"var_name": "sort",
+     "param_name": "sort"}`, `GET`, reusing the existing `get_param`
+     source unchanged.
+  2. **New transform, `orm_order_by_unvalidated`** (vulnerable): an
+     explicit, self-documenting no-op (matches the matrix's own
+     `no_effect` row) — `value_expr` passes through unchanged.
+  3. **New transform, `identifier_allowlist`** (secure): maps
+     `value_expr` through a fixed, code-controlled dict
+     (`_ORDER_BY_ALLOWLIST = {"id": "id", "name": "name"}`), defaulting
+     to `"id"` for any unrecognized key — reassigns `value_expr` in
+     place (same convention as `CC-LAB-0095`'s own field-filtering
+     transforms).
+  4. **New sink, `explore_order_by_sink`** (shared, byte-identical
+     between twins, the "sink is neutral" shape every sink since
+     `CC-LAB-0093` has used): `SELECT id, name FROM posts ORDER BY " +
+     str(value_expr)` via a raw `connection.cursor()` — the
+     Django-idiomatic realistic trigger the research names (a dev
+     reaching for `.extra()`/`RawSQL()`-equivalent string concatenation
+     instead of the ORM's parameterized `.order_by()`), ported onto this
+     emitter's own established raw-cursor convention.
+  5. New ground truth: extends `lab/ground-truth-picktrail-django/` with
+     `PT-0005` — `vuln_class: "sqli"`, `subtypes: ["identifier"]`,
+     `sink_context: "sql"`, `method: "GET"`, `param: "sort"`, `location:
+     "query"`, `rendering: "server-json"`, `url: "/explore"`.
+  6. New manifest, `lab/manifests/phase_c_picktrail_explore.yaml`.
+
+- **Impact (other components / project):** No shared schema, safety-
+  matrix *op*, or existing emitter/module changes — this entry reuses
+  the matrix's existing `sql_order_by_clause` family exactly as
+  originally designed. `fuzzlab/harness/multitarget.py` unaffected.
+
+- **Risk (level: low):** A new shape for this emitter, but reusing an
+  already-real, already-researched safety-matrix sink family and this
+  emitter's own established raw-cursor sink convention. The one real
+  risk is proving a genuine *identifier-position* differential rather
+  than an ordinary string-literal syntax-break one (which this project
+  already proves elsewhere) — mitigated by choosing a payload
+  (`"id DESC"`) that is syntactically valid SQL with no quotes or
+  comment sequences, so only an identifier/clause-position injection (not
+  a syntax-break one) can exploit it, and by proving the secure twin's
+  own legitimate-`sort=id` request produces the identical row order the
+  payload-blocked request does (not merely "no error").
+
+- **Deliverables:**
+  - [x] `fuzzlab/labgen/emitters/django/templates/transforms/
+    orm_order_by_unvalidated.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/transforms/
+    identifier_allowlist.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/sinks/
+    explore_order_by_sink.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/modules.py` — new
+    `OrmOrderByUnvalidatedTransform`/`IdentifierAllowlistTransform`/
+    `ExploreOrderBySink` classes + registry entries — done.
+  - [x] `fuzzlab/labgen/emitters/django/__init__.py` — new
+    `_MODULE_SET_BY_SHAPE`/`_ROUTE_PARAMS` entries; `_ORDER_BY_ALLOWLIST`
+    fixed constant added to the unconditional header;
+    `_REAL_PAGE_CELL_IDS` gains `LABGEN-DJ-0015` — done.
+  - [x] `lab/manifests/phase_c_picktrail_explore.yaml` — done.
+  - [x] `lab/ground-truth-picktrail-django/labels.json`/
+    `injection-points.json`/`expectedresults.csv` — extended with
+    `PT-0005` — done.
+  - [x] `tests/test_labgen_django_conformance.py` — Tier 0/3 +
+    verdict-regression test for the new manifest, plus the URL-pinning
+    and `@csrf_exempt` collection regression tests extended — done,
+    22/22 passing.
+  - [x] `tests/test_labgen_django_live_boot_picktrail_explore.py` — real
+    row-order-reversal proof on the vulnerable twin (a real, legal,
+    non-syntax-breaking `ORDER BY` modifier); real ignored-payload proof
+    on the secure twin (matched against a legitimate `sort=id` request);
+    the `PT-0005` ground-truth cross-check — done, 3/3 passing.
+  - [x] `docs/research/category2-social-ugc-functionality-and-cwe-
+    research.md` §6 — row 5 marked built — done.
+  - [x] `docs/components/01-target-lab/requirements.md` — new
+    `FR-LAB-119`/`FR-LAB-120` — done.
+  - [x] `docs/ARCHITECTURE.md` — fifth real page noted — done.
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 tracker row
+    — done.
+  - [x] `CHANGELOG.md` line — done.
+
+- **Effectiveness (assessed 2026-09-23): effective** — every deliverable
+  above is real, executed, and passing (22 Tier 0/3 tests, 3 real
+  live-boot tests).
+
+### CC-LAB-0095 — PicTrail's fourth real page: account-settings mass assignment (FR-LAB-117/FR-LAB-118) (2026-09-23)
+
+- **Change:** Lands PicTrail's fourth real, ground-truth-bearing page,
+  `POST /settings` (grounded in §2 item 8's account-settings feature),
+  the researched mass-assignment shape (`docs/research/
+  category2-social-ugc-functionality-and-cwe-research.md` §4 row 3,
+  CWE-915). No new safety-matrix design: `lab/safety_matrix.yaml`
+  already has a real, already-researched `orm_entity_bulk_assign` sink
+  family with ten ops across five independent allowlisting architectures
+  (from `docs/research/corpus-examples/mass-assignment/node/`); this
+  entry uses `unfiltered_body_update`/`no_effect` and
+  `runtime_field_allowlist`/`neutralises`.
+
+  **A deliberate departure from §4 row 3's own literal `ModelForm`
+  wording, stated explicitly**: row 3's research names a `ModelForm`
+  with `fields = "__all__"` as the Django-idiomatic footgun. This entry
+  does not build that — this emitter has never used the Django ORM on
+  either twin of any shape (`CC-LAB-0090`'s own foundational choice: a
+  raw `connection.cursor()` sink on both twins, so the vulnerable/secure
+  differential is never confounded with "ORM vs. raw SQL"). Introducing
+  a `ModelForm` here would mean introducing a real Django model/migration
+  into the stack for the first time, a genuinely larger architectural
+  change than this shape's own security lesson needs. Instead, this
+  entry ports the *same CWE-915 mechanism* (an unfiltered bulk write vs.
+  a runtime field allowlist) onto the emitter's own established raw-
+  cursor convention — the matrix's own `unfiltered_body_update`/
+  `runtime_field_allowlist` op pair (not `orm_update_no_fields_option`/
+  `orm_fields_option_allowlist`, which are the literal `ModelForm`-
+  `fields`-option idiom this entry deliberately does not build) is the
+  correct, already-researched fit for that choice.
+
+  Concretely:
+  1. **New route**, `_ROUTE_PARAMS["/settings"]` — `{"var_name":
+     "settings_fields"}`, `POST`, no `param_name` (this source reads the
+     entire body, not one named field).
+  2. **New source, `post_body_dict`**: `settings_fields =
+     request.POST.dict()` — this emitter's first source that is not "one
+     named request parameter." Publishes the whole dict as `value_expr`.
+  3. **New transform, `unfiltered_body_update`** (vulnerable): filters
+     `value_expr` to `_KNOWN_PROFILE_COLUMNS` (`{"bio", "is_verified"}`)
+     only — SQL-column-name hygiene, not a security boundary — so the
+     privileged `is_verified` flag the real settings form never exposes
+     passes straight through.
+  4. **New transform, `runtime_field_allowlist`** (secure): filters
+     `value_expr` to `_PUBLIC_SETTINGS_FIELDS` (`{"bio"}`) — the actual
+     security boundary. **Both new transforms are this emitter's first
+     that reassign `value_expr` in place** (the same variable name,
+     mutated to a filtered dict) rather than rewriting it into a new
+     wrapping expression (`mark_safe(...)`, `escape(...)`) — there is
+     nothing to wrap, only fields to drop.
+  5. **New sink, `profile_bulk_update_sink`** (shared, byte-identical
+     between twins, mirroring `CC-LAB-0093`/`CC-LAB-0094`'s own "sink is
+     neutral, the transform secures/breaks it" shape): builds and
+     executes a parameterized, multi-column `UPDATE profiles SET ...
+     WHERE id = 1` from whatever fields survived the transform stage.
+     Column *values* are always parameterized (`%s` placeholders);
+     column *names* are always safe because a transform already filtered
+     them to a fixed, code-controlled set before the sink ever runs —
+     the sink itself never re-validates column names, staying
+     sink-family-generic. An empty-dict guard (`if not value_expr:
+     return JsonResponse({"updated_fields": []})`) avoids a real
+     `UPDATE ... SET  WHERE ...` syntax-error crash on a request whose
+     every field got filtered out — a real edge case found while
+     designing the sink, fixed before it could ever be hit, not
+     discovered via a crash.
+  6. **Complexity: `render_only`**, not `single_statement` — applying
+     `CC-LAB-0094`'s own already-corrected lesson from the start this
+     time (that entry's own review found `single_statement`'s
+     DB-row-lookup epilogue is wrong for any sink that already returns
+     from within its own body).
+  7. **`DjangoLiveBootHarness._seed_db()`** gained a real `is_verified
+     INTEGER NOT NULL DEFAULT 0` column on the `profiles` table (additive
+     — no other seeded table changed).
+  8. New ground truth: extends `lab/ground-truth-picktrail-django/` with
+     `PT-0004` — `vuln_class: "mass_assignment"`, `sink_context:
+     "mass_assignment"`, `method: "POST"`, `param: "is_verified"` (names
+     the specific privileged field being smuggled in, matching
+     `lab/ground-truth-forgecart`'s own `FCART-0004` mass-assignment case
+     convention — checked before drafting, not invented), `location:
+     "body"`, `rendering: "server-json"`, `url: "/settings"`.
+  9. New manifest, `lab/manifests/phase_c_picktrail_settings.yaml`.
+
+- **Impact (other components / project):** No shared schema, safety-
+  matrix *op*, or existing emitter/module changes — the schema
+  dependency (`mass_assignment` as a `vuln_class`/`sink_context` value)
+  was already covered by `CC-LAB-0095a`, landed just before this entry
+  for the unrelated reason of the cross-branch consolidation discovery.
+  `fuzzlab/harness/multitarget.py` unaffected.
+
+- **Risk (level: low):** A new source/transform *shape* for this
+  emitter, but reusing an already-real, already-researched safety-matrix
+  sink family (no new matrix design) and this emitter's own established
+  raw-cursor sink convention (no ORM/model introduced). Mitigated by:
+  (1) a real generation-time/Tier-0 check (`py_compile`) that the
+  generated view compiles, including the empty-dict guard; (2) a real
+  live-boot test proving **both halves of the differential in one
+  request** (the legitimate field still applies, the privileged one is
+  blocked), closing the loophole a transform that dropped every field
+  indiscriminately would otherwise pass through if the two assertions
+  were checked separately; (3) the DB row read back directly via
+  `query_db()`, not inferred from the response body, so the test proves
+  the actual persisted state, not just what the view claims to have
+  done.
+
+- **Deliverables:**
+  - [x] `fuzzlab/labgen/emitters/django/templates/sources/
+    post_body_dict.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/transforms/
+    unfiltered_body_update.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/transforms/
+    runtime_field_allowlist.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/templates/sinks/
+    profile_bulk_update_sink.py.j2` — done.
+  - [x] `fuzzlab/labgen/emitters/django/modules.py` — new
+    `PostBodyDictSource`/`UnfilteredBodyUpdateTransform`/
+    `RuntimeFieldAllowlistTransform`/`ProfileBulkUpdateSink` classes +
+    registry entries — done.
+  - [x] `fuzzlab/labgen/emitters/django/__init__.py` — new
+    `_MODULE_SET_BY_SHAPE`/`_ROUTE_PARAMS` entries; `_KNOWN_PROFILE_
+    COLUMNS`/`_PUBLIC_SETTINGS_FIELDS` fixed constants added to the
+    unconditional header; `_REAL_PAGE_CELL_IDS` gains `LABGEN-DJ-0013`
+    — done.
+  - [x] `fuzzlab/labgen/conformance/django_live_boot.py` — `profiles`
+    seed gains `is_verified` — done.
+  - [x] `lab/manifests/phase_c_picktrail_settings.yaml` — done.
+  - [x] `lab/ground-truth-picktrail-django/labels.json`/
+    `injection-points.json`/`expectedresults.csv` — extended with
+    `PT-0004` — done.
+  - [x] `tests/test_labgen_django_conformance.py` — Tier 0/3 +
+    verdict-regression test for the new manifest, plus the URL-pinning
+    and `@csrf_exempt` collection regression tests extended — done,
+    19/19 passing.
+  - [x] `tests/test_labgen_django_live_boot_picktrail_settings.py` —
+    real both-directions-in-one-request proof; the `PT-0004`
+    ground-truth cross-check — done, 3/3 passing.
+  - [x] `docs/research/category2-social-ugc-functionality-and-cwe-
+    research.md` §6 — row 4 marked built — done.
+  - [x] `docs/components/01-target-lab/requirements.md` — new
+    `FR-LAB-117`/`FR-LAB-118` — done (picked against the unified
+    cross-category branch's real ceiling, `FR-LAB-116`, per
+    `CC-LAB-0095a`'s own discovery, not this branch's own lower prior
+    ceiling).
+  - [x] `docs/ARCHITECTURE.md` — fourth real page noted — done.
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 tracker row
+    — done.
+  - [x] `CHANGELOG.md` line — done.
+  - Full bug protocol for a genuine code defect: **not triggered** — the
+    empty-dict sink crash was a real hazard found and fixed while
+    designing the sink template, before any test ever observed it, the
+    same "caught, not shipped" distinction `CC-LAB-0094`'s own entry
+    drew for its own in-progress corrections.
+
+- **Effectiveness (assessed 2026-09-23): effective** — every deliverable
+  above is real, executed, and passing (19 Tier 0/3 tests, 3 real
+  live-boot tests, no skips in this environment since this shape's
+  proof needs no external network dependency beyond `django_boot_
+  available()`'s own already-required PyPI reachability).
+
+### CC-LAB-0095a — Widen `labels.schema.json`'s `vuln_class`/`sink_context` enums again (adopts the now-unified cross-category branch's precedent verbatim) (2026-09-23)
+
+- **Change:** `fuzzlab/labels/schemas/labels.schema.json` — `vuln_class`
+  enum widened to add `webhook_signature`, `mass_assignment`,
+  `prototype_pollution`, `redos`, `open_redirect`,
+  `csv_formula_injection`, `price_integrity_bypass`, `spel_injection`;
+  `sink_context` enum widened to add `webhook_signature`,
+  `mass_assignment`, `object_property`, `regex`, `redirect`, `csv`,
+  `spel`. Purely additive.
+
+  **A real, load-bearing discovery made while starting this entry, not
+  assumed:** a fresh `git fetch` of all four other active category
+  branches (`claude/second-target-cat1-ecommerce`,
+  `claude/category-3-build-iuu5k9`, `claude/category-4-build-t9uz3y`,
+  `claude/category-5-build-6boejs`) found all four now point to the
+  **same** commit (`c2b8850`, "Merge category 5 ... into the unified
+  branch") — those four categories have been consolidated into one
+  unified branch by another session, outside this branch's own
+  knowledge until this check. That unified branch's own
+  `labels.schema.json` already carries this exact widening (confirmed
+  via `diff` after adoption: byte-identical). Rather than inventing a
+  third, possibly-divergent set of values for `mass_assignment` (needed
+  for `CC-LAB-0095`, below) on top of `CC-LAB-0094a`'s own already-landed
+  widening, this entry adopts the unified branch's **current full enum
+  list** verbatim — not just the one value this branch's own next page
+  needs — since a partial, independently-worded widening would only
+  create a second collision at the next merge, the exact failure mode
+  `CC-LAB-0094a` was landed to avoid recurring.
+
+  **This discovery also changes how the next `FR-LAB` number was picked
+  for `CC-LAB-0095`** (see that entry): the unified branch's own
+  `requirements.md` ceiling is `FR-LAB-116` — higher than this branch's
+  own prior ceiling (`FR-LAB-106`), because the other four categories'
+  own work has advanced further inside the now-consolidated branch. This
+  branch is not being merged into that unified branch as part of this
+  entry (out of scope, not requested) — but its own next `FR-LAB` number
+  is picked starting from the higher, real ceiling (`117`), not this
+  branch's own lower one, to avoid a real, predictable collision at
+  whatever future point this branch is itself merged in — the same
+  discipline this category's own numbering has required from the start,
+  applied to a newly-discovered, larger collision surface. `CC-LAB`
+  numbering is unaffected by this (this branch's own component log stays
+  append-only and self-consistent within its own reserved block,
+  `CC-LAB-0090`-`0119`; the unified branch's own renumbering of
+  `CC-LAB`/`BUG`/`PA` IDs at merge time, observed directly — e.g. this
+  category's own already-merged `BUG-0034`/`PA-0036` now read
+  `BUG-0037`/`PA-0039` in the unified branch — is a merge-time
+  reconciliation step for whoever next integrates the branches, not
+  something this entry attempts here).
+
+- **Impact (other components / project):** Shared schema, used by every
+  category branch's own ground truth. Verified via
+  `fuzzlab.labels.contract.load()` against both `lab/ground-truth`
+  (16 `PFF-*` cases) and `lab/ground-truth-picktrail-django` (3 cases at
+  the time of this change).
+
+- **Risk (level: low):** Purely additive JSON Schema enum widening,
+  copied from an already-real, already-merged cross-branch precedent
+  rather than invented. Mitigated by: (1) byte-identical `diff` against
+  the unified branch's own current schema; (2) a real
+  `fuzzlab.labels.contract.load()` round trip against every existing
+  ground-truth directory in this branch.
+
+- **Deliverables:**
+  - [x] `fuzzlab/labels/schemas/labels.schema.json` widened as above.
+  - [x] Verified via `fuzzlab.labels.contract.load()` against
+    `lab/ground-truth` and `lab/ground-truth-picktrail-django`.
+  - [x] `CHANGELOG.md` line.
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` — the
+    cross-branch-consolidation discovery recorded (§9.4 row).
+
+- **Effectiveness (assessed 2026-09-23): effective** — schema widened,
+  verified byte-identical to the unified branch's own current values,
+  and both existing ground-truth directories still load/validate
+  correctly.
+
 ### CC-LAB-0084 — vuln-corpus Phase 3: real gVisor dynamic-validation sandbox (FR-LAB-112) (2026-09-23)
 - Change: New `fuzzlab/tools/corpus_validation_sandbox.py` and
   `tests/test_corpus_validation_sandbox.py`, implementing
@@ -1160,6 +2558,7 @@ Component code: **LAB**. Entry format and required fields: see
   `{"__proto__": {"polluted": true}}` payload, with both twins still
   merging an ordinary key correctly -- not a stub that merely rejects the
   whole body. Full suite: 1796 passed, 8 skipped, 0 failed.
+
 ### CC-LAB-0094 — PicTrail's third real page: link-preview SSRF via `requests`, no resolved-IP check (FR-LAB-105/FR-LAB-106) (2026-09-23)
 
 - **Change:** Lands PicTrail's third real, ground-truth-bearing page,

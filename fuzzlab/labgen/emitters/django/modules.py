@@ -155,6 +155,24 @@ class ReadStoredFieldSource(TemplateModule):
         return RenderResult(code=result.code, context=new_ctx)
 
 
+class PostBodyDictSource(TemplateModule):
+    """Extracts the entire Django ``request.POST`` body as a plain
+    ``dict`` and publishes ``value_expr``/``bound=False`` -- the
+    "whole-body, multi-field" source shape mass-assignment (CWE-915)
+    needs, distinct from every other source in this inventory (which
+    each extract exactly one named parameter). `CC-LAB-0095`."""
+
+    def __init__(self) -> None:
+        super().__init__("post_body_dict", "source", _SOURCE_ENV, "post_body_dict.py.j2")
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = super().render(ctx)
+        new_ctx = dict(ctx)
+        new_ctx["value_expr"] = ctx["var_name"]
+        new_ctx.setdefault("bound", False)
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 class IdentityTransform(TemplateModule):
     """The empty-pipeline transform: the tainted value used as-is."""
 
@@ -269,6 +287,110 @@ class SchemeAndResolvedIpAllowlistTransform(TemplateModule):
         )
 
 
+class UnfilteredBodyUpdateTransform(TemplateModule):
+    """The ``unfiltered_body_update`` op (`CC-LAB-0095`): filters the
+    whole-POST-body dict down to this table's own known real columns only
+    -- SQL-column-name hygiene, not a security boundary. Every other
+    submitted field, including privileged ones the real settings form
+    never exposes, passes through unfiltered -- the mass-assignment
+    (CWE-915) footgun. Reassigns ``value_expr`` in place (the same
+    variable name, mutated to a filtered dict), unlike ``mark_safe_wrap``/
+    ``html_entity_escape``, which rewrite ``value_expr`` to a new wrapping
+    expression -- no context update is needed here since the variable
+    name the sink reads never changes."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unfiltered_body_update", "transform", _TRANSFORM_ENV, "unfiltered_body_update.py.j2"
+        )
+
+
+class RuntimeFieldAllowlistTransform(TemplateModule):
+    """The ``runtime_field_allowlist`` op (`CC-LAB-0095`): filters the
+    whole-POST-body dict down to the real settings form's own
+    publicly-settable fields only -- the actual security boundary for
+    this shape, closing the mass-assignment gap
+    `UnfilteredBodyUpdateTransform` leaves open."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "runtime_field_allowlist", "transform", _TRANSFORM_ENV, "runtime_field_allowlist.py.j2"
+        )
+
+
+class OrmOrderByUnvalidatedTransform(TemplateModule):
+    """The ``orm_order_by_unvalidated`` op (`CC-LAB-0096`): an explicit
+    no-op -- the raw sort key passes straight through to the sink's
+    ``ORDER BY`` clause, matching ``lab/safety_matrix.yaml``'s own
+    ``orm_order_by_unvalidated``/``no_effect`` row for the
+    ``sql_order_by_clause`` sink family."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "orm_order_by_unvalidated", "transform", _TRANSFORM_ENV, "orm_order_by_unvalidated.py.j2"
+        )
+
+
+class IdentifierAllowlistTransform(TemplateModule):
+    """The ``identifier_allowlist`` op (`CC-LAB-0096`): maps the raw sort
+    key through a fixed, code-controlled dict of known-safe column names
+    (``_ORDER_BY_ALLOWLIST``), defaulting to ``"id"`` for any
+    unrecognized key -- closes both the ``sql_order_by_injection`` and
+    ``sql_identifier_substitution`` concerns at once, matching
+    ``lab/safety_matrix.yaml``'s own ``identifier_allowlist`` row.
+    Reassigns ``value_expr`` in place (same convention as `CC-LAB-0095`'s
+    own field-filtering transforms), not a wrapping expression."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "identifier_allowlist", "transform", _TRANSFORM_ENV, "identifier_allowlist.py.j2"
+        )
+
+
+class UnrestrictedPickleLoadsTransform(TemplateModule):
+    """The ``unrestricted_pickle_loads`` op (`CC-LAB-0097`,
+    ``insecure_deserialization`` concern): flags the sink to parse the
+    tainted value with Python's full ``pickle.loads()`` deserializer --
+    any ``__reduce__`` hook in the byte stream is honored, executing
+    arbitrary code during unpickling. A flag-only transform (mirroring
+    ``ruby_rails``'s own ``YamlUnsafeLoadTransform``/``ParamBindTransform``
+    convention exactly): the actual ``pickle.loads(...)`` call is emitted
+    by the sink, not by this module, since the deserialize call and the
+    ``try/except`` that observes its result belong together in one
+    place. Safety matrix: ``effect=no_effect`` (the vulnerable twin)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "unrestricted_pickle_loads", "transform", _TRANSFORM_ENV, "unrestricted_pickle_loads.py.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = TemplateModule.render(self, ctx)
+        new_ctx = dict(ctx)
+        new_ctx["loader"] = "pickle"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class JsonLoadsTypeCheckTransform(TemplateModule):
+    """The ``json_loads_type_check`` op (`CC-LAB-0097`,
+    ``insecure_deserialization`` concern): flags the sink to parse the
+    tainted value with plain-data ``json.loads()`` instead of pickle --
+    no ``__reduce__`` hook is ever honored -- and additionally requires
+    the parsed result to be a ``dict``. Safety matrix:
+    ``effect=neutralises``, ``neutralizes: [insecure_deserialization]``."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "json_loads_type_check", "transform", _TRANSFORM_ENV, "json_loads_type_check.py.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        result = TemplateModule.render(self, ctx)
+        new_ctx = dict(ctx)
+        new_ctx["loader"] = "json"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
 class SqlStringLiteralLookupSink(TemplateModule):
     """A single-row lookup by a quoted-string-literal-position column, with
     a second, non-tainted, already-hashed condition (a login-style password
@@ -336,6 +458,65 @@ class HttpFetchJsonSink(TemplateModule):
         super().__init__("http_fetch_json_sink", "sink", _SINK_ENV, "http_fetch_json_sink.py.j2")
 
 
+class ProfileBulkUpdateSink(TemplateModule):
+    """Builds and executes a parameterized, multi-column ``UPDATE
+    profiles SET ...`` from whatever fields survived the transform stage
+    (`CC-LAB-0095`) -- the raw-``connection.cursor()`` analogue of a
+    ``ModelForm``/serializer bulk-assignment sink, matching this
+    emitter's own established "raw cursor, never the ORM" convention
+    (`CC-LAB-0090`'s own reasoning). Shared, byte-identical between
+    twins: the security boundary lives entirely in the **transform**
+    (which fields survive to reach this sink), never in the sink itself
+    -- the same "sink is neutral" shape `CC-LAB-0093`/`CC-LAB-0094`
+    already established for this emitter. Column *values* are always
+    parameterized (``%s`` placeholders); column *names* are always safe
+    because every transform in this shape's inventory filters to a fixed,
+    code-controlled set before the sink ever runs (never validated by
+    the sink itself, which stays sink-family-generic)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "profile_bulk_update_sink", "sink", _SINK_ENV, "profile_bulk_update_sink.py.j2"
+        )
+
+
+class ExploreOrderBySink(TemplateModule):
+    """Builds and executes a raw ``SELECT ... FROM posts ORDER BY
+    <value_expr>`` (`CC-LAB-0096`) -- the Django-idiomatic realistic
+    trigger for identifier/`ORDER BY`-position SQLi (a dev reaching for
+    ``.extra()``/``RawSQL()`` instead of the ORM's parameterized
+    ``.order_by()`` when a plain column name "isn't enough"), ported here
+    as this emitter's own established raw-``connection.cursor()``
+    convention. Shared, byte-identical between twins: the security
+    boundary lives entirely in the **transform** (``identifier_allowlist``
+    maps the sort key to a safe, hardcoded column name before this sink
+    ever runs) -- the same "sink is neutral" shape every sink in this
+    emitter since `CC-LAB-0093` has used."""
+
+    def __init__(self) -> None:
+        super().__init__("explore_order_by_sink", "sink", _SINK_ENV, "explore_order_by_sink.py.j2")
+
+
+class InboxDeserializeSink(TemplateModule):
+    """Deserializes a base64-encoded, attacker-supplied inbox/DM payload
+    (`CC-LAB-0097`) -- the Django-idiomatic realistic trigger for
+    `django.contrib.sessions.serializers.PickleSerializer`'s own real,
+    documented opt-in footgun (§4 row 5), modeled here as an inbox
+    message payload rather than a session cookie, since this emitter's
+    per-cell views have no session-middleware round trip to exercise.
+    Unlike every other sink in this emitter, this one is **not**
+    byte-identical between twins: the deserialize *mechanism itself*
+    (pickle vs. plain JSON) differs, so the transform stage flags which
+    branch to render via Jinja2-time interpolation (`{% if loader ==
+    "pickle" %}`) -- the same "flag-only transform, sink branches on it"
+    convention `ruby_rails`'s own `YamlUnsafeLoadTransform`/
+    `YamlSafeLoadTransform` pair already established for the identical
+    architectural reason (Psych's `unsafe_load`/`safe_load`)."""
+
+    def __init__(self) -> None:
+        super().__init__("inbox_deserialize_sink", "sink", _SINK_ENV, "inbox_deserialize_sink.py.j2")
+
+
 class SingleStatementComplexity(TemplateModule):
     """Wraps the composed source/transform/sink body as the entire body of
     one Django function-based view that responds with the looked-up row --
@@ -372,6 +553,7 @@ SOURCES: dict[str, Module] = {
     "get_param": GetParamSource(),
     "post_param": PostParamSource(),
     "read_stored_field": ReadStoredFieldSource(),
+    "post_body_dict": PostBodyDictSource(),
 }
 TRANSFORMS: dict[str, Module] = {
     "identity": IdentityTransform(),
@@ -380,6 +562,12 @@ TRANSFORMS: dict[str, Module] = {
     "mark_safe_wrap": MarkSafeWrapTransform(),
     "unchecked_url_fetch": UncheckedUrlFetchTransform(),
     "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistTransform(),
+    "unfiltered_body_update": UnfilteredBodyUpdateTransform(),
+    "runtime_field_allowlist": RuntimeFieldAllowlistTransform(),
+    "orm_order_by_unvalidated": OrmOrderByUnvalidatedTransform(),
+    "identifier_allowlist": IdentifierAllowlistTransform(),
+    "unrestricted_pickle_loads": UnrestrictedPickleLoadsTransform(),
+    "json_loads_type_check": JsonLoadsTypeCheckTransform(),
 }
 SINKS: dict[str, Module] = {
     "sql_numeric_lookup": SqlNumericLookupSink(),
@@ -387,6 +575,9 @@ SINKS: dict[str, Module] = {
     "html_body_echo": HtmlBodyEchoSink(),
     "django_template_render": DjangoTemplateRenderSink(),
     "http_fetch_json_sink": HttpFetchJsonSink(),
+    "profile_bulk_update_sink": ProfileBulkUpdateSink(),
+    "explore_order_by_sink": ExploreOrderBySink(),
+    "inbox_deserialize_sink": InboxDeserializeSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_statement": SingleStatementComplexity(),

@@ -1,0 +1,5 @@
+# json_loads_type_check: flags the sink to parse {{ var_name }} with
+# Python's plain-data json.loads() instead of pickle -- no __reduce__
+# hook is ever honored, and the parsed result must additionally be a
+# dict (not an arbitrary scalar/list) before the sink accepts it. Safety
+# matrix: effect=neutralises, neutralizes: [insecure_deserialization].

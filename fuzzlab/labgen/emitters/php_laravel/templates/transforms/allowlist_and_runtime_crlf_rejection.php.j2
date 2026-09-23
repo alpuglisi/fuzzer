@@ -1,0 +1,10 @@
+// allowlist_and_runtime_crlf_rejection: rejects (HTTP 400, at runtime) any
+// redirect target containing a raw control character (\x00-\x1F/\x7F,
+// which covers CR/LF) or that is not itself a same-origin relative path
+// -- an explicit application-level allowlist stacked on top of the
+// runtime CRLF check. Safety matrix: effect=neutralises, neutralizes:
+// [http_header_injection].
+if (preg_match('/[\x00-\x1F\x7F]/', (string) {{ value_expr }}) === 1
+    || ! preg_match('#^/[A-Za-z0-9/_\-\.]*$#', (string) {{ value_expr }})) {
+    abort(400, 'invalid redirect target');
+}

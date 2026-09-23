@@ -285,6 +285,46 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("price_integrity_bypass", "payment_charge_amount"): _ModuleSet(
         "post_param", "payment_charge_insert", "single_statement"
     ),
+    # CC-LAB-0216 (category 2, CircleFeed -- the Facebook pick, category 2's
+    # second app on this emitter after PicTrail/django): a photo/tag detail
+    # page, direct-primary-key access control (docs/research/category2-
+    # social-ugc-functionality-and-cwe-research.md sec 3 item 4 / sec 6 row
+    # 1). This stack's -- and this project's -- first implementation of
+    # `lab/safety_matrix.yaml`'s `access_control` family. Sink shared
+    # between twins; the vulnerable/secure distinction lives entirely in
+    # the transform (`no_ownership_check` vs. `identity_match_before_fetch`).
+    ("access_control", "db_row_by_id_lookup"): _ModuleSet(
+        "get_param", "db_row_by_id_lookup", "single_statement"
+    ),
+    # CC-LAB-0218 (category 2, CircleFeed): a comment "share" redirect built
+    # directly from an unvalidated `next` query parameter (docs/research/
+    # category2-social-ugc-functionality-and-cwe-research.md sec 5 row 3,
+    # sec 6 row 3). This project's first real implementation of
+    # `lab/safety_matrix.yaml`'s `http_response_header_value` sink family
+    # (both ops existed unimplemented since the family was added). Sink
+    # differs by twin (branched at generation time on the transform's own
+    # `header_delivery_mode` flag, see `RawRedirectDispatchSink`), not just
+    # `value_expr` -- and both twins' own rendered code is a terminal
+    # statement (`header()`+`exit` / `return redirect()->away(...)`), which
+    # is why this reuses `terminal_response` rather than `single_statement`.
+    ("http_header_injection", "http_response_header_value"): _ModuleSet(
+        "get_param", "raw_redirect_dispatch", "terminal_response"
+    ),
+    # CC-LAB-0220 (category 2, CircleFeed): CircleFeed's fourth and final
+    # designed cell -- an account-settings preference cookie holding a
+    # base64-encoded serialized PHP value (docs/research/category2-social-
+    # ugc-functionality-and-cwe-research.md sec 5 row 4, sec 6 row 4). This
+    # project's first real implementation of `lab/safety_matrix.yaml`'s
+    # `object_deserialization` sink family's PHP pair (both ops existed
+    # unimplemented since the family was added). Sink differs by twin
+    # (branched at generation time on the transform's own
+    # `deserialize_method` flag, see `AccountSettingsDeserializeSink`), not
+    # just `value_expr` -- and both twins' own rendered code is a terminal
+    # statement (several early `return response()->json(...)` calls), which
+    # is why this reuses `terminal_response` rather than `single_statement`.
+    ("insecure_deserialization", "object_deserialization"): _ModuleSet(
+        "get_cookie", "account_settings_deserialize_sink", "terminal_response"
+    ),
 }
 
 # ---------------------------------------------------------------------------
@@ -547,6 +587,49 @@ _PAGE_PROFILES: dict[str, dict[str, Any]] = {
     # served URL, same reasoning as `/webhooks/events`/`/messages/unfurl`
     # above.
     "/integrations/outgoing-webhook": {"var_name": "triggerWord", "param_name": "triggerWord"},
+    # CC-LAB-0216: CircleFeed's (category 2's Facebook pick) photo/tag-detail
+    # page -- a Facebook-style single-photo view, reachable by anyone logged
+    # in who knows/guesses the id (docs/research/category2-social-ugc-
+    # functionality-and-cwe-research.md sec 3 item 4). Illustrative served
+    # URL (`_served_route_for`'s no-`real_page` branch), same reasoning as
+    # Huddle Hub's own pages: CircleFeed, like Huddle Hub, has no migrated
+    # real puppy-fort-factory page to anchor a pinned URL to. No
+    # `table`/`column`: `DbRowByIdLookupSink` names the `Photo` model and
+    # its `id` column itself (an Eloquent fetch, not a raw `DB::select`).
+    "/photos/view": {"var_name": "id", "param_name": "id"},
+    # CC-LAB-0217: CircleFeed's (category 2's Facebook pick) second designed
+    # cell -- a Groups webhook receiver, modeling Meta's own publicly
+    # documented Messenger Platform `X-Hub-Signature`-style webhook contract
+    # (docs/research/category2-social-ugc-functionality-and-cwe-research.md
+    # sec 3 item 5, sec 5 row 2, sec 6 row 2). Reuses the exact
+    # `webhook_signature_bypass`/`webhook_signature_verification` module
+    # composition Huddle Hub's own `/webhooks/events` page already
+    # registers (`CC-LAB-0133`) -- pure page-profile wiring, no new
+    # transform/sink module. Illustrative served URL (`_served_route_for`'s
+    # no-`real_page` branch), same reasoning as every other CircleFeed/
+    # Huddle Hub page: CircleFeed has no migrated real puppy-fort-factory
+    # page to anchor a pinned URL to. `secret` is a lab-only shared secret,
+    # never a real credential, and deliberately distinct from Huddle Hub's
+    # own so the two apps' cells can never be confused by a shared value.
+    "/groups/webhook": {"var_name": "webhookRawBody", "secret": "lab-only-circlefeed-webhook-secret"},
+    # CC-LAB-0218: CircleFeed's (category 2's Facebook pick) third designed
+    # cell -- a comment "share" redirect, `get_param` reads the redirect
+    # target as `?next=`. Illustrative served URL (`_served_route_for`'s
+    # no-`real_page` branch), same reasoning as every other CircleFeed/
+    # Huddle Hub page: CircleFeed has no migrated real puppy-fort-factory
+    # page to anchor a pinned URL to.
+    "/comments/share": {"var_name": "next", "param_name": "next"},
+    # CC-LAB-0220: CircleFeed's (category 2's Facebook pick) fourth and
+    # final designed cell -- an account-settings page, `get_cookie` reads
+    # the preference cookie as `pref`. This cookie name must also be listed
+    # in the skeleton's `bootstrap/app.php`
+    # `$middleware->encryptCookies(except: ['pref'])` call, or Laravel's
+    # default `EncryptCookies` middleware would try to decrypt it like any
+    # other cookie and silently hand the controller `null` instead of the
+    # client's raw bytes. Illustrative served URL (`_served_route_for`'s
+    # no-`real_page` branch), same reasoning as every other CircleFeed/
+    # Huddle Hub page.
+    "/settings/preferences": {"var_name": "pref", "param_name": "pref"},
     # POST string-literal lookup. `password_var`/`password_param` are sink
     # boilerplate (an already-hashed secret), not a second injection point.
     "/login": {

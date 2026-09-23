@@ -1,0 +1,8 @@
+# identifier_allowlist transform (CC-LAB-0096): maps {{ value_expr }} (the
+# raw sort key) through a fixed, code-controlled dict of known-safe column
+# names, defaulting to "id" for any unrecognized key -- the resulting
+# value is always a hardcoded string from this dict, never user-controlled
+# content, closing both the ORDER-BY-position and identifier-substitution
+# concerns at once (lab/safety_matrix.yaml's own `identifier_allowlist`
+# row neutralises both).
+{{ value_expr }} = _ORDER_BY_ALLOWLIST.get({{ value_expr }}, "id")

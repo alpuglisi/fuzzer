@@ -1,0 +1,43 @@
+# Header-injection (response-header) sample manifest (`CC-LAB-0218`/
+# `FR-LAB-125`), `php_laravel`.
+#
+# CircleFeed's (category 2's Facebook pick) third designed cell -- see
+# docs/research/category2-social-ugc-functionality-and-cwe-research.md sec 3
+# item 1/2 (comment/post "share" flow) for the page/vulnerability-class
+# design, sec 5 row 3 for the PHP-specific CWE research, and sec 6 row 3 for
+# the page-set entry this manifest builds. This project's first real
+# implementation of `lab/safety_matrix.yaml`'s `http_response_header_value`
+# sink family (both ops existed, unimplemented, since the family was added).
+# The vulnerable twin (`raw_socket_response_write`) reaches the sink's raw
+# `header("Location: " . $value); exit;` call with no CR/LF stripping and no
+# allowlist -- the classic `header("Location: " . $_GET['next'])` footgun
+# (CWE-113); the secure twin (`allowlist_and_runtime_crlf_rejection`) rejects
+# (HTTP 400) any control character or non-same-origin-relative target before
+# the sink's Laravel `redirect()->away()` call ever runs. Both share the
+# same illustrative route (served at `/cell/<slug>`, per `php_laravel`'s own
+# convention for a non-migrated page, mirroring Huddle Hub's/CircleFeed's own
+# precedent) -- never live-booted together through this route, since a real
+# `header()`-mediated request cannot itself demonstrate genuine response
+# splitting on modern PHP (see CC-LAB-0218's change-control entry); the
+# genuine differential is proven separately, at the raw-socket layer, by
+# tests/test_labgen_header_injection_circlefeed_live_boot.py.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  - cell_id: LABGEN-CF-0005
+    class: http_header_injection
+    stack_profile: php_laravel
+    route: { method: GET, path: /comments/share }
+    sink_context:
+      family: http_response_header_value
+      required_neutralizations: [http_header_injection]
+    transform: [raw_socket_response_write]
+
+  - cell_id: LABGEN-CF-0006
+    class: http_header_injection
+    stack_profile: php_laravel
+    route: { method: GET, path: /comments/share }
+    sink_context:
+      family: http_response_header_value
+      required_neutralizations: [http_header_injection]
+    transform: [allowlist_and_runtime_crlf_rejection]
