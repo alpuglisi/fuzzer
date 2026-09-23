@@ -464,22 +464,47 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
   chain — narrower than a full exploit proof, but real detection where
   there was none, without the DNS-listener infrastructure expansion the
   URLDNS path would have required.
-- (`CC-LAB-0175`/`FR-LAB-98`, `CC-FUZZ-0028`, 2026-09-23) **No
-  webhook-signature timing oracle.** Both twins behave identically for any
-  single request (the divergence is comparison timing:
-  `naive_string_compare`'s `==` short-circuits on the first differing
-  byte, `hmac.Equal` does not), so this needs a genuinely new,
-  statistical, multi-request timing-differential mechanism — not a
-  two-sample rising-delay check like `ConfirmationStrategy._confirm_timing`
-  (built for a chosen SLEEP-style delay, not a sub-millisecond
-  byte-position side channel). A concrete sketch for future work: probe
-  pairs comparing response time for a candidate signature matching zero
-  leading bytes of a locally-known-correct one vs. matching many leading
-  bytes, aggregated over enough paired samples for a real statistical test
-  (e.g. Mann-Whitney U or Welch's t-test) rather than a fixed threshold —
-  the same class of judgment call `RegexDosStrategy` (`CC-FUZZ-0025`) already
-  needed its own, different-from-`_confirm_timing` mechanism for. Not
-  attempted here.
+- (`CC-LAB-0175`/`FR-LAB-98`, `CC-FUZZ-0028`, 2026-09-23; **empirically
+  re-examined** `CC-FUZZ-0031` follow-on, 2026-09-23) **No
+  webhook-signature timing oracle — now confirmed genuinely infeasible
+  with this project's current wall-clock-HTTP measurement, not just
+  theoretically hard.** Both twins behave identically for any single
+  request (the divergence is comparison timing: `naive_string_compare`'s
+  `==` short-circuits on the first differing byte, `hmac.Equal` does not),
+  so a real oracle needs a statistical, multi-request timing-differential
+  mechanism. A concrete sketch was recorded (probe pairs comparing
+  response time for a candidate signature matching zero leading bytes of
+  the locally-known correct one, against one matching many leading bytes,
+  aggregated over enough paired samples for a real statistical test) —
+  **this session actually measured it live, not just reasoned about it**:
+  booted `LABGEN-GO-0001` for real, computed the true HMAC-SHA256 for a
+  fixed request body against the stack's own fixed demo secret, and sent
+  400 real HTTP requests per prefix-match length (0/16/32/48/62 of 64 hex
+  chars), randomly interleaved (not batched by length, to rule out a
+  connection-warmup/scheduler-warmup confound — an un-interleaved first
+  pass showed a monotonic-looking trend that was purely this artifact,
+  caught before being mistaken for a real signal). Interleaved result: no
+  detectable relationship between prefix-match length and latency at all
+  — min/median/trimmed-mean all land within the same few-hundred-
+  microsecond noise band regardless of how many leading bytes matched
+  (e.g. min latency 178–190µs across every prefix length tested). Go's
+  `==` per-byte comparison time is real but nanosecond-scale; ordinary
+  HTTP-over-loopback jitter (goroutine scheduling, GC, socket syscalls) is
+  2–3 orders of magnitude larger and completely swamps it even in this
+  idealized same-machine environment with zero real network latency — a
+  real target reachable only over an actual network would be worse, not
+  better. Confirms this needs either (a) a fundamentally different
+  measurement channel than wall-clock HTTP round-trip time (e.g. a
+  grey-box timing source reading server-side instrumentation directly,
+  the same class of seam `fuzzlab.greybox` already establishes for
+  coverage/DB-fault signals — not attempted, would need new
+  infrastructure), or (b) many orders of magnitude more samples than this
+  session's own quick 400-per-arm probe with proper outlier-robust
+  statistics, likely impractical for a fast test suite. Not a "not
+  attempted yet" gap anymore — a "attempted, measured, confirmed
+  infeasible at this layer" one. Left open for a future session with a
+  genuinely different architecture, not a bigger sample size of the same
+  approach.
 - Oracle interface for pluggable vulnerability classes (register-oracle hook
   shape).
 - Timing-threshold calibration per target/network profile.

@@ -4,6 +4,26 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (FUZZ: empirically confirmed the webhook-signature timing oracle is genuinely infeasible at this layer)
+- Fuzzing harness: turned the standing `webhook_signature` open question
+  from a theoretical "hasn't been attempted" into an empirically measured
+  "attempted, confirmed infeasible with this architecture." Booted
+  Twitch's real vulnerable twin, computed the true HMAC-SHA256 against
+  its own fixed demo secret, and sent 400 real HTTP requests per
+  prefix-match length (0/16/32/48/62 of 64 hex chars), randomly
+  interleaved to rule out a connection/scheduler-warmup confound (an
+  un-interleaved first pass showed a misleading monotonic trend that was
+  purely this artifact — caught before being mistaken for a real signal).
+  Result: no detectable timing relationship at all — ordinary HTTP/
+  goroutine-scheduling jitter (hundreds of microseconds) completely
+  swamps Go's real but nanosecond-scale per-byte comparison timing, even
+  same-machine over loopback. Confirms this needs either a fundamentally
+  different measurement channel (grey-box, server-side instrumentation)
+  or an impractically large sample size with this project's current
+  wall-clock-HTTP approach — recorded as a closed, evidence-backed
+  finding in `docs/components/07-fuzzing-harness-and-oracle/
+  requirements.md` §8, not left as an unverified assumption.
+
 ## 2026-09-23 (FUZZ: Netflix's own multi-cell boot confirms both real positives together)
 - Fuzzing harness: closes the follow-on the previous entry's own test
   docstring flagged — Netflix's `NFLX-0002` (XXE) is now exercised in a
