@@ -12,6 +12,30 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (cross-branch bookkeeping fix, by the category 1 pilot session)
+- Docs/LAB: fixed seven real cross-branch `FR-LAB` ID collisions found
+  during a cross-branch review — this branch's own sequential numbering
+  after its earlier `FR-LAB-81/82/83`→`94/98/99` renumbering (see the
+  prior fix entries) continued straight through `100`-`103` without
+  rechecking global uniqueness, landing on numbers categories 4 and 5 had
+  independently claimed for unrelated work in the same window:
+  `FR-LAB-94` (webhook-signature cell) collided with category 5's
+  `spring_boot` port entry; `FR-LAB-98`/`99` (SSRF/header-injection
+  cells) collided with category 4's Phase D/E entries; `FR-LAB-100`/`101`
+  (TrackerNest/Huddle Hub Phase C ground truth) and `FR-LAB-102`/`103`
+  (Phase E wiring) collided with category 5's price-integrity/ground-
+  truth/Expedia entries and, for `102`, also with categories 1 and 2's
+  own independently-claimed `FR-LAB-102`. Renumbered this branch's entire
+  affected block in one pass (`94`→`105`, `98`→`106`, `99`→`107`,
+  `100`→`108`, `101`→`109`, `102`→`110`, `103`→`111`) via exact-token
+  replacement across `requirements.md`/`change-control.md`/
+  `CHANGELOG.md`/`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`/
+  `lab/safety_matrix.yaml`/`lab/ground-truth-huddlehub/labels.json`/the
+  three Huddle Hub sample manifests — `FR-LAB-104` (already collision-
+  free) was left as-is. Full non-slow test suite re-run confirms no
+  regression (1841 passed / 8 skipped, identical to this branch's own
+  pre-fix baseline).
+
 ## 2026-09-23 (Phase E — multitarget wiring)
 - `tests/test_labgen_spring_boot_trackernest_multitarget.py`,
   `tests/test_labgen_php_laravel_huddlehub_multitarget.py`,
@@ -31,8 +55,8 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   fixed): `fuzzlab.harness.auto.points_from_ground_truth` mislabels a
   `location="header"` point's skip reason as "needs a browser," first
   exercised by this project's own Huddle Hub ground truth. All 5 new
-  tests run for real and pass. See `CC-LAB-0138`/`FR-LAB-102`,
-  `CC-LAB-0139`/`FR-LAB-103`, `CC-LAB-0140`/`FR-LAB-104`.
+  tests run for real and pass. See `CC-LAB-0138`/`FR-LAB-110`,
+  `CC-LAB-0139`/`FR-LAB-111`, `CC-LAB-0140`/`FR-LAB-104`.
 
 ## 2026-09-23 (Phase C ground truth)
 - `lab/ground-truth-trackernest/`, `lab/ground-truth-huddlehub/`: authors
@@ -51,18 +75,18 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   `fuzzlab/labels/schemas/labels.schema.json`'s `vuln_class`/
   `sink_context` enums extended additively for this category's 6 new
   classes. Both directories verified to load and cross-check cleanly via
-  `fuzzlab.labels.contract.load()`. See `CC-LAB-0136`/`FR-LAB-100` and
-  `CC-LAB-0137`/`FR-LAB-101`.
+  `fuzzlab.labels.contract.load()`. See `CC-LAB-0136`/`FR-LAB-108` and
+  `CC-LAB-0137`/`FR-LAB-109`.
 
 ## 2026-09-23 (cross-branch bookkeeping fix, round 2 — merge conflict)
 - Docs/LAB: while merging this branch's own concurrently-pushed
   `CC-LAB-0135`/`FR-LAB-83` (Huddle Hub's third cell, header injection),
   found `FR-LAB-83` freshly collided with category 1's already-established
   `FR-LAB-83` (Phase E MeadowMart `TargetSpec` wiring, with many internal
-  cross-references) — renumbered this branch's `FR-LAB-83`→`FR-LAB-99`
+  cross-references) — renumbered this branch's `FR-LAB-83`→`FR-LAB-107`
   (exact-token replacement, including the CC-LAB-0135 entry's own old
   cross-references to the just-renumbered `FR-LAB-81`/`FR-LAB-82`, updated
-  to `FR-LAB-94`/`FR-LAB-98` throughout). Resolved the resulting
+  to `FR-LAB-105`/`FR-LAB-106` throughout). Resolved the resulting
   `change-control.md` merge conflict by keeping both `CC-LAB-0134` and
   `CC-LAB-0135` entries, newest (`0135`) first, per the log's own
   append-only/newest-first convention. Full non-slow suite re-run after
@@ -79,8 +103,8 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   cell) had been independently claimed by category 1 for its Phase D
   whole-app conformance entry. Since this branch's usages had fewer
   cross-file references to update than category 1's (the authoritative,
-  earlier claim on both), renumbered them: `FR-LAB-81`→`FR-LAB-94`,
-  `FR-LAB-82`→`FR-LAB-98`, via exact-token replacement across
+  earlier claim on both), renumbered them: `FR-LAB-81`→`FR-LAB-105`,
+  `FR-LAB-82`→`FR-LAB-106`, via exact-token replacement across
   `requirements.md`/`change-control.md`/`CHANGELOG.md`/
   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`. Full non-slow test
   suite re-run confirms no regression (1831 passed / 8 skipped, identical
@@ -105,7 +129,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   secure twin rejects it with a real HTTP 400 and never reaches the
   marker server. This closes Huddle Hub's full three-cell designed set
   (ground truth and `multitarget.py` wiring remain deferred for category
-  3 as a whole). See `CC-LAB-0135`/`FR-LAB-99`.
+  3 as a whole). See `CC-LAB-0135`/`FR-LAB-107`.
 - `fuzzlab/labgen/emitters/php_laravel/`: Huddle Hub's (category 3's Slack
   pick) second designed cell — SSRF via link unfurling (a Slack-style
   feature that fetches a user-pasted URL to generate a message preview).
@@ -123,7 +147,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   rejects both forms with a real HTTP 400 (confirmed via the marker
   server's own hit counter staying at zero) while still accepting a real
   public URL. 9 new tests, all passing; full non-slow suite re-run shows
-  no regression. `CC-LAB-0134`/`FR-LAB-98`.
+  no regression. `CC-LAB-0134`/`FR-LAB-106`.
 
 ## 2026-09-23 (cross-category doc sync, round 2)
 - Docs (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, all five second-target
@@ -163,7 +187,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   proving the actual "magic hash" comparison-operator differential — a
   live HTTP test cannot force a real SHA-256 HMAC output to itself be
   magic-hash-shaped. 9 new tests, all passing; full non-slow suite re-run
-  shows no regression. `CC-LAB-0133`/`FR-LAB-94`.
+  shows no regression. `CC-LAB-0133`/`FR-LAB-105`.
 
 ## 2026-09-23 (cross-branch review, by the category 1 pilot session)
 - Docs/LAB: reviewed this branch's code and tests — no code defects

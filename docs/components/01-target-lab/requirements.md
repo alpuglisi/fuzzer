@@ -1931,7 +1931,7 @@ lane) can submit a payload as
   (`labels.json`/`injection-points.json`); `multitarget.py` wiring; "Huddle
   Hub" (the Slack pick, reusing `php_laravel`, not yet started).
 
-- **FR-LAB-94** *(Huddle Hub: webhook-signature-verification cell on
+- **FR-LAB-105** *(Huddle Hub: webhook-signature-verification cell on
   `php_laravel`; `CC-LAB-0133`, 2026-09-23).* Category 3's Slack pick,
   "Huddle Hub," gets its first designed cell — built on the existing,
   shared `php_laravel` emitter, not a new one, per §9.2's ledger note.
@@ -1964,8 +1964,8 @@ lane) can submit a payload as
   Hub's other two designed cells (SSRF via link unfurling, header injection
   in outgoing-webhook delivery); ground truth; `multitarget.py` wiring.
 
-- **FR-LAB-98** *(Huddle Hub: SSRF-via-link-unfurling cell on `php_laravel`;
-  `CC-LAB-0134`, 2026-09-23).* Extends `FR-LAB-94`'s Huddle Hub app with a
+- **FR-LAB-106** *(Huddle Hub: SSRF-via-link-unfurling cell on `php_laravel`;
+  `CC-LAB-0134`, 2026-09-23).* Extends `FR-LAB-105`'s Huddle Hub app with a
   second designed cell, `(vuln_class="ssrf",
   sink_context.family="server_side_http_fetch")` — a Slack-style "link
   unfurling" feature (server fetches a user-pasted URL to generate a
@@ -1980,7 +1980,7 @@ lane) can submit a payload as
   spirit: a generated cell's own server-side fetch must never hang
   indefinitely, independent of which op is vulnerable). New module names
   registered in both `php_laravel`'s own registries and the shared
-  `fuzzlab.labgen.modules` registry, per `FR-LAB-94`'s own established
+  `fuzzlab.labgen.modules` registry, per `FR-LAB-105`'s own established
   precedent. Live-boot-proven against a real local marker HTTP server this
   test owns: the vulnerable twin reaches it via both an IP literal and a
   resolved hostname; the secure twin rejects both forms with a real HTTP
@@ -1989,9 +1989,9 @@ lane) can submit a payload as
   Hub's third designed cell (header injection in outgoing-webhook
   delivery); ground truth; `multitarget.py` wiring.
 
-- **FR-LAB-99** *(Huddle Hub: outbound-header-injection cell on
-  `php_laravel`; `CC-LAB-0135`, 2026-09-23).* Extends `FR-LAB-94`/
-  `FR-LAB-98`'s Huddle Hub app with its third and final designed cell,
+- **FR-LAB-107** *(Huddle Hub: outbound-header-injection cell on
+  `php_laravel`; `CC-LAB-0135`, 2026-09-23).* Extends `FR-LAB-105`/
+  `FR-LAB-106`'s Huddle Hub app with its third and final designed cell,
   `(vuln_class="outbound_header_injection",
   sink_context.family="outbound_http_request_header_value")`,
   `required_neutralizations: [outbound_header_injection]` — a Slack-style
@@ -2008,13 +2008,13 @@ lane) can submit a payload as
   Guzzle-backed — Guzzle's real PSR-7 `Request` constructor rejects any
   CRLF-bearing header value outright, caught and turned into an HTTP
   400). Both twins bound the outbound call with an explicit 5s timeout
-  (PA-0035 spirit, matching `FR-LAB-98`'s own precedent) and read the
+  (PA-0035 spirit, matching `FR-LAB-106`'s own precedent) and read the
   destination webhook URL from `env('HUDDLEHUB_WEBHOOK_URL', ...)` with
   an RFC-2606 `.invalid`-TLD fallback so an unset env var fails closed
   rather than reaching something real; the URL itself is not a tainted
   parameter (kept out of scope for this header-injection-only cell). New
   module names registered in both `php_laravel`'s own registries and the
-  shared `fuzzlab.labgen.modules` registry, per `FR-LAB-94`/`FR-LAB-98`'s
+  shared `fuzzlab.labgen.modules` registry, per `FR-LAB-105`/`FR-LAB-106`'s
   own established precedent. Live-boot-proven against a real local
   marker HTTP server: the vulnerable twin's crafted trigger word
   (`innocuous\r\nX-Injected: proof`) results in the marker server
@@ -2030,7 +2030,7 @@ lane) can submit a payload as
   remain deferred for both Huddle Hub and TrackerNest as a whole (see
   `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4/§9.6).
 
-- **FR-LAB-100** *(TrackerNest: Phase C ground truth; `CC-LAB-0136`,
+- **FR-LAB-108** *(TrackerNest: Phase C ground truth; `CC-LAB-0136`,
   2026-09-23).* TrackerNest's own `lab/ground-truth-trackernest/`
   (`labels.json`/`injection-points.json`/`expectedresults.csv`, target
   `spring_boot`, case prefix `TNEST`), per
@@ -2049,16 +2049,16 @@ lane) can submit a payload as
   `/integrations/webhook-payload`, POST, `body` — same whole-raw-body
   convention). `fuzzlab/labels/schemas/labels.schema.json`'s
   `vuln_class`/`sink_context` enums extended additively (no version
-  bump) for this category's 6 new classes, shared with `FR-LAB-101`
+  bump) for this category's 6 new classes, shared with `FR-LAB-109`
   below (landed once, in the same commit). Verified: `fuzzlab.labels.
   contract.load()` loads and cross-checks all 3 files without error;
   every case's exactly-one-tainted-param claim confirmed by reading each
   cell's actual rendered controller output directly.
 
-- **FR-LAB-101** *(Huddle Hub: Phase C ground truth; `CC-LAB-0137`,
+- **FR-LAB-109** *(Huddle Hub: Phase C ground truth; `CC-LAB-0137`,
   2026-09-23).* Huddle Hub's own `lab/ground-truth-huddlehub/`
   (target `php_laravel`, case prefix `HHUB`), same §4-step-2 contract as
-  `FR-LAB-100` above — never a `PFF-*` case. Each cell already has its
+  `FR-LAB-108` above — never a `PFF-*` case. Each cell already has its
   own unique `/cell/<slug>` URL (`served_url_for()`, keyed on `cell_id`),
   so no route-collision constraint applies here the way it does for
   TrackerNest, but this ground truth still records only the three
@@ -2070,13 +2070,13 @@ lane) can submit a payload as
   header value itself, not the body field the HMAC is computed over);
   `HHUB-0002` (SSRF, `/cell/labgen-hhb-0003`, GET, `url` query);
   `HHUB-0003` (outbound header injection, `/cell/labgen-hhb-0005`, GET,
-  `triggerWord` query). Verified the same way as `FR-LAB-100`. Cross-
+  `triggerWord` query). Verified the same way as `FR-LAB-108`. Cross-
   branch enum-naming drift flagged, not silently left: category 4
   independently named its own webhook class `webhook_signature` (this
   project's `webhook_signature_bypass` is a distinct string, no actual
   collision) — a merge-time reconciliation note, not a blocker.
 
-- **FR-LAB-102** *(TrackerNest: Phase E — wire into `multitarget.py`;
+- **FR-LAB-110** *(TrackerNest: Phase E — wire into `multitarget.py`;
   `CC-LAB-0138`, 2026-09-23).* TrackerNest's own `TargetSpec`
   (`spring_boot_trackernest`), a real boot of all 3 vulnerable cells
   together, run through `fuzzlab.harness.multitarget.run_targets` for
@@ -2085,20 +2085,20 @@ lane) can submit a payload as
   Recall is honestly 0 (`ssti`/`xxe`/`insecure_deserialization` unmapped
   in `_VULN_TO_CATEGORY`, real follow-on work, not attempted here).
 
-- **FR-LAB-103** *(Huddle Hub: Phase E — wire into `multitarget.py`;
+- **FR-LAB-111** *(Huddle Hub: Phase E — wire into `multitarget.py`;
   `CC-LAB-0139`, 2026-09-23).* Huddle Hub's own `TargetSpec`
   (`php_laravel_huddlehub`), a real boot of all 3 vulnerable cells
   together via the existing multi-cell-capable `LiveBootHarness`, run
   through `run_targets` for real.
   `tests/test_labgen_php_laravel_huddlehub_multitarget.py`. Two flagged,
   unfixed gaps: recall 0 (same unmapped-vuln-class reason as
-  `FR-LAB-102`), and `fuzzlab.harness.auto.points_from_ground_truth`
+  `FR-LAB-110`), and `fuzzlab.harness.auto.points_from_ground_truth`
   having no `location="header"` branch (a real, pre-existing latent gap
   first exercised by this project's own ground truth, flagged not fixed).
 
 - **FR-LAB-104** *(Category 3 §6 step 2: both apps run together;
   `CC-LAB-0140`, 2026-09-23).* `tests/test_multitarget_category3_combined.py`
-  runs both `TargetSpec`s from `FR-LAB-102`/`FR-LAB-103` through one
+  runs both `TargetSpec`s from `FR-LAB-110`/`FR-LAB-111` through one
   `run_targets` call for real — two independent real boots (Java/Spring
   Boot + PHP/Laravel), two distinct real `run_id`s, a real combined
   `transfer_summary` (`targets: 2`, `generalizes: False` — correctly, no

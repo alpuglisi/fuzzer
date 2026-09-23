@@ -16,7 +16,7 @@ Component code: **LAB**. Entry format and required fields: see
 - Effectiveness (assessed 2026-09-23): Met. The one test in this entry ran for real and passed (35.5s wall time — real `mvn package` warm-cache + real `composer install` + two real process boots + real HTTP). Confirms `run_targets`/`transfer_summary`/`format_transfer` all handle two simultaneous, independently-booted, cross-stack (Java/Spring Boot + PHP/Laravel) real targets correctly, closing the toolkit-side half of category 3's own Phase 10 `T10.6`-style proof (same standard category 1 already met for e-commerce).
 - Pre-change review gate: **acknowledged deviation, not an exemption.** `docs/components/README.md`'s gate is written for "a change to component code, schemas, or generator behavior," and this entry's own diff is genuinely none of those (test-only; confirmed by `git status` at implementation time showing no change to `multitarget.py`/`live_boot.py`/`live_boot_spring_boot.py`/any emitter) — but the README's carve-out list does not literally name "wiring/integration test with no source diff" as exempt, so treating it as exempt is this implementer's own reading, not an independently-reviewed one, and is recorded here as exactly that rather than as settled policy. Corrected after an initial draft of this note asserted the skip more confidently: a 2-reviewer accuracy+adequacy pass was run *after* implementation instead of before (this entry, `CC-LAB-0138`, and `CC-LAB-0139` together, as one batch) — reversing the gate's own required ordering, a real process deviation on this entry, not merely a proportionality judgment call. The adequacy review's own findings (missing `requirements.md`/`CHANGELOG.md` entries, a real coverage gap in `CC-LAB-0138`'s liveness test, this gap-tracking note) were incorporated below and into `CC-LAB-0138`; no finding required undoing the implementation itself. `docs/components/README.md` should gain an explicit rule for this class of change (test-only additions exercising already-landed production code) so a future implementer does not have to invent this same justification unreviewed — not added here, flagged as its own follow-on.
 
-### CC-LAB-0139 — Huddle Hub: Phase E — wire into `multitarget.py` (FR-LAB-103) (2026-09-23)
+### CC-LAB-0139 — Huddle Hub: Phase E — wire into `multitarget.py` (FR-LAB-111) (2026-09-23)
 - Change: Constructs Huddle Hub's own `TargetSpec` (`name="php_laravel_huddlehub"`, `base_url` from a real, locally-booted `LiveBootHarness` instance, `ground_truth` from `CC-LAB-0137`'s `lab/ground-truth-huddlehub/`) and runs it through `fuzzlab.harness.multitarget.run_targets`, per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6 steps 1-2 (this app's own half only — see `CC-LAB-0140` for both apps run together). `tests/test_labgen_php_laravel_huddlehub_multitarget.py`.
 
   Reuses `LiveBootHarness` directly, unlike `CC-LAB-0138`/TrackerNest's own Phase E test: this harness already accepts a **list** of cells with no single-cell restriction (confirmed by reading its `__init__` directly — it filters to `emitter.supports(...)` cells and assembles all of them), and Huddle Hub's three cells each already have their own unique `/cell/<slug>` URL via `served_url_for()` (no same-route collision risk the way `spring_boot`'s literal routes have), so no harness extension was needed. Boots the three vulnerable cells (`LABGEN-HHB-0001`/`0003`/`0005`) together — the same deployment `CC-LAB-0137`'s ground truth describes.
@@ -28,12 +28,12 @@ Component code: **LAB**. Entry format and required fields: see
 - Risk: Low. One real boot + real HTTP in a `@pytest.mark.slow` test, bounded by `LiveBootHarness`'s own existing timeouts.
 - Deliverables:
   - [x] `tests/test_labgen_php_laravel_huddlehub_multitarget.py` — done (2 tests: `TargetSpec` runs and scores for real; the three booted endpoints are genuinely live — both PASSED, 50.0s wall time)
-  - [x] `docs/components/01-target-lab/requirements.md` FR-LAB-103 entry — done
+  - [x] `docs/components/01-target-lab/requirements.md` FR-LAB-111 entry — done
   - [x] `CHANGELOG.md` line — done
 - Effectiveness (assessed 2026-09-23): Met. Both tests ran for real and passed: a real `composer install` + `artisan serve` boot of all 3 vulnerable cells together, a real `TargetSpec`/`run_targets`/`transfer_summary` call producing `scored=True`, `tp=0`, `fn=len(gt.positives())=3`, `recall=0.0` (expected, per gap 1 above, not a test failure), `generalizes=False` (correctly, for a single target); a second test independently confirms each of the three cells' own real, distinguishable HTTP response.
 - Pre-change review gate: same acknowledged deviation as `CC-LAB-0140`'s own note (see that entry) — implemented first, reviewed (accuracy + adequacy) as one batch with `CC-LAB-0138`/`CC-LAB-0140` afterward, reversing the gate's required ordering. No finding from either review required undoing this entry's implementation; the header-location gap this entry itself flags now has a tracked follow-on (`docs/components/01-target-lab/requirements.md` §8 Open Questions) per the adequacy review's own finding that a flag with no tracking reference risks being lost.
 
-### CC-LAB-0138 — TrackerNest: Phase E — wire into `multitarget.py` (FR-LAB-102) (2026-09-23)
+### CC-LAB-0138 — TrackerNest: Phase E — wire into `multitarget.py` (FR-LAB-110) (2026-09-23)
 - Change: Constructs TrackerNest's own `TargetSpec` (`name="spring_boot_trackernest"`, `base_url` from a real, locally-booted app instance, `ground_truth` from `CC-LAB-0136`'s `lab/ground-truth-trackernest/`) and runs it through `fuzzlab.harness.multitarget.run_targets`, per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §6 steps 1-2 (this app's own half only — see `CC-LAB-0140` for both apps run together). `tests/test_labgen_spring_boot_trackernest_multitarget.py`.
 
   Hand-rolls its own assembly/boot fixture (copies `SpringBootLiveBootHarness`'s own checked-in `SKELETON_DIR`, renders and writes all 3 vulnerable cells' controllers onto it, runs a real `mvn package`, boots a real `java -jar`) rather than reusing `SpringBootLiveBootHarness` itself, which deliberately takes exactly **one** cell — its own docstring: "a same-route twin pair would collide if booted together," a real, correct restriction for that harness's own job (proving one cell's vulnerable-vs-secure differential) but not one this Phase E deployment needs, since TrackerNest's three cells each live on a genuinely distinct route (`/wiki/pages/render`/`/issues/import`/`/integrations/webhook-payload`) and never collide with each other. Mirrors category 1's own Phase E precedent (`tests/test_labgen_node_bff_multitarget.py` on `origin/claude/second-target-cat1-ecommerce`, verified directly), which hand-rolled its own fixture for the identical reason rather than fighting a conformance harness's single-cell restriction. Boots only the three **vulnerable** cells (`LABGEN-SSTI-0001`/`LABGEN-XXE-0001`/`LABGEN-DESER-0001`) — the same deployment `CC-LAB-0136`'s ground truth describes, and the only combination of these three same-route twin pairs that is simultaneously real-bootable at all.
@@ -43,12 +43,12 @@ Component code: **LAB**. Entry format and required fields: see
 - Risk: Low. One real boot + real HTTP in `@pytest.mark.slow` tests, bounded by the same `mvn package`/`java -jar` timeouts `SpringBootLiveBootHarness` itself already uses (this fixture reuses those constants' values, not the harness class).
 - Deliverables:
   - [x] `tests/test_labgen_spring_boot_trackernest_multitarget.py` — done (2 tests: `TargetSpec` runs and scores for real; all three endpoints are genuinely live in this deployment — both PASSED, 8.6s wall time)
-  - [x] `docs/components/01-target-lab/requirements.md` FR-LAB-102 entry — done
+  - [x] `docs/components/01-target-lab/requirements.md` FR-LAB-110 entry — done
   - [x] `CHANGELOG.md` line — done
 - Effectiveness (assessed 2026-09-23): Met. Both tests ran for real and passed: a real `mvn package` + `java -jar` boot of all 3 vulnerable cells together, a real `TargetSpec`/`run_targets`/`transfer_summary` call producing `scored=True`, `tp=0`, `fn=len(gt.positives())=3`, `recall=0.0` (expected, per the gap above, not a test failure), `generalizes=False` (correctly, for a single target); a second test independently confirms all three cells' own controller is genuinely mounted and responding in this exact 3-cell-combined deployment: real, distinguishable HTTP responses for SSTI and XXE, and a real 400 from the deserialization endpoint on a non-exploit request (that cell's actual exploit differential needs a real Java-serialized fixture to demonstrate meaningfully, already proven separately in `CC-LAB-0132`'s own live-boot test, not repeated here — this test only confirms the route itself is live in this deployment).
 - Pre-change review gate: **acknowledged deviation, not an exemption** — see `CC-LAB-0140`'s own note for the full statement (implemented first, reviewed accuracy+adequacy as one batch with `CC-LAB-0139`/`CC-LAB-0140` afterward, reversing the gate's required ordering; `docs/components/README.md`'s carve-out does not literally name this class of change as exempt). The adequacy review found one real, concrete gap specific to this entry: the liveness test originally round-tripped only 2 of TrackerNest's 3 vulnerable endpoints (SSTI, XXE), leaving the deserialization controller's own boot-time registration in *this specific 3-cell-combined deployment* unverified ("already proven in `CC-LAB-0132`" proves the sink code works in an earlier, differently-composed boot, not that this controller mounts correctly alongside the other two) — fixed: the liveness test now also sends a non-exploit request to `/integrations/webhook-payload` and asserts a real 400 (`ObjectInputStream.readObject()` rejecting non-serialized bytes), proving the route is genuinely registered rather than 404/501-ing, re-run and passing.
 
-### CC-LAB-0137 — Huddle Hub: Phase C ground truth (`labels.json`/`injection-points.json`) (FR-LAB-101) (2026-09-23)
+### CC-LAB-0137 — Huddle Hub: Phase C ground truth (`labels.json`/`injection-points.json`) (FR-LAB-109) (2026-09-23)
 - Change: Authors Phase C ground truth for Huddle Hub (`lab/ground-truth-huddlehub/`, target `php_laravel`, case prefix `HHUB`, per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4 step 2) — its own opaque case-ID scheme, never `PFF-*`, matching `CC-LAB-0174`'s (category 4/Netflix) and `CC-LAB-0210`-`0212`'s (category 5/Booking.com) own established per-app-directory precedent. Split from this entry's own first draft, which had bundled TrackerNest and Huddle Hub's ground truth into one entry — the adequacy review correctly flagged that as the same over-scoping anti-pattern `CC-LAB-0090`'s draft was caught on (two apps' independent effectiveness/risk profiles do not become one unit of change-control just because they're sibling Phase C outputs); see `CC-LAB-0136` for TrackerNest's own separate entry.
 
   Huddle Hub's twin cells each get their own unique `/cell/<slug>` URL via `served_url_for()` (keyed on `cell_id`, independent of the shared, illustrative manifest `route.path` — confirmed by reading `served_url_for()`/`_url_path_for()` directly), so there is no real route-collision risk booting several cells together the way `spring_boot`'s literal-route twins have (see `CC-LAB-0136`). This ground truth nonetheless records only the three **vulnerable** cells' own URLs — never a paired "none" row for a secure twin — matching `CC-LAB-0210`-`0212`/Booking.com's own established convention (verified directly: `lab/ground-truth-booking-clone/labels.json` on that branch has exactly 3 cases, each `expected_vulnerable: true` at the vulnerable cell's own URL, no secure-twin rows) — this ground truth describes one specific deployed instance of the app (the deliberately-vulnerable one, matching this whole project's own lab-app convention), not every twin that could exist.
@@ -63,12 +63,12 @@ Component code: **LAB**. Entry format and required fields: see
 - Risk: Low. The cross-branch enum-naming-drift risk above is flagged, not silently left; reconciling it (if `webhook_signature`/`webhook_signature_bypass` should collapse to one spelling) is a merge-time decision, same class of risk as CC-LAB/FR-LAB numbering itself.
 - Deliverables:
   - [x] `lab/ground-truth-huddlehub/{labels.json,injection-points.json,expectedresults.csv}` — done
-  - [x] `docs/components/01-target-lab/requirements.md` FR-LAB-101 entry — done
+  - [x] `docs/components/01-target-lab/requirements.md` FR-LAB-109 entry — done
   - [x] `CHANGELOG.md` line — done
 - Effectiveness (assessed 2026-09-23): Met. `fuzzlab.labels.contract.load("lab/ground-truth-huddlehub")` loads and validates all 3 files without error (schema-valid, `labels.json`/`expectedresults.csv` cross-check passes, no duplicate case IDs) — verified directly, not merely asserted. Every case's exactly-one-tainted-param claim was verified by rendering each of the 3 cells' real controller output and reading it directly (`LaravelEmitter().render()`), not assumed.
 - Pre-change review gate: drafted (originally bundled with TrackerNest's own ground truth), reviewed by 2 independent agents (accuracy: no inaccuracies found in any of the 7 specific factual claims checked, including independent re-verification of `served_url_for()`'s per-cell-URL behavior, the `X-Signature`-not-body-field claim, and the Booking.com "vulnerable-cell-URL-only, no secure-twin row" convention against that branch's own real file; two minor notes relayed — a `param` naming mismatch on `CC-LAB-0136`'s side, and the `webhook_signature`/`webhook_signature_bypass` cross-branch drift folded in above; adequacy: 6 findings — missing injection-points.json scope justification, the two-apps-in-one-entry over-scoping this entry's own split now resolves, an unverified cross-branch enum-collision claim now backed by a concrete check, a restated point, and a missing `Effectiveness`/`Pre-change review gate` line pair, all incorporated). 3/3 agreement reached by incorporating every concrete finding from both reviews without contesting any of them; implementation proceeds on this revised, split entry.
 
-### CC-LAB-0136 — TrackerNest: Phase C ground truth (`labels.json`/`injection-points.json`) (FR-LAB-100) (2026-09-23)
+### CC-LAB-0136 — TrackerNest: Phase C ground truth (`labels.json`/`injection-points.json`) (FR-LAB-108) (2026-09-23)
 - Change: Authors Phase C ground truth for TrackerNest (`lab/ground-truth-trackernest/`, target `spring_boot`, case prefix `TNEST`, per `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4 step 2) — its own opaque case-ID scheme, never `PFF-*`, matching `CC-LAB-0174`'s (category 4/Netflix) and `CC-LAB-0210`-`0212`'s (category 5/Booking.com) own established per-app-directory precedent. See `CC-LAB-0137` for why this is a separate entry from Huddle Hub's own ground truth rather than one bundled entry (the adequacy review's over-scoping finding, incorporated by splitting).
 
   TrackerNest's three cells (SSTI, XXE, insecure deserialization) each share their literal route between vulnerable/secure twins (`spring_boot` has no per-cell illustrative-URL mechanism the way `php_laravel` does — confirmed by reading `fuzzlab/labgen/emitters/spring_boot/__init__.py` directly, and every one of this app's own manifests states in its own header comment "Same route, never live-booted together") — two `@RestController` classes declaring the identical `@GetMapping`/`@PostMapping` path on the classpath at once is a real Spring Boot boot-time "Ambiguous mapping" `IllegalStateException`, not a hypothetical conflict. So this ground truth, like `CC-LAB-0174`/Netflix's own, describes the app instantiated with its three **vulnerable** twins deployed (`LABGEN-SSTI-0001`/`LABGEN-XXE-0001`/`LABGEN-DESER-0001`) — the only combination of these three cells that is simultaneously real-bootable at all, and matches this whole project's own deliberately-vulnerable-lab convention (real, `expected_vulnerable: true` cases, not a hypothetical secure deployment).
@@ -84,12 +84,12 @@ Component code: **LAB**. Entry format and required fields: see
 - Deliverables:
   - [x] `fuzzlab/labels/schemas/labels.schema.json` enum extension — done
   - [x] `lab/ground-truth-trackernest/{labels.json,injection-points.json,expectedresults.csv}` — done
-  - [x] `docs/components/01-target-lab/requirements.md` FR-LAB-100 entry — done
+  - [x] `docs/components/01-target-lab/requirements.md` FR-LAB-108 entry — done
   - [x] `CHANGELOG.md` line — done
 - Effectiveness (assessed 2026-09-23): Met. `fuzzlab.labels.contract.load("lab/ground-truth-trackernest")` loads and validates all 3 files without error (schema-valid, `labels.json`/`expectedresults.csv` cross-check passes, no duplicate case IDs) — verified directly. Every case's exactly-one-tainted-param claim was verified by rendering each of the 3 cells' real controller output and reading it directly (`SpringBootEmitter().render()`), not assumed; the `rendering: server` (not `server-json`) correction was likewise verified by reading each sink template's actual `ResponseEntity` construction.
 - Pre-change review gate: drafted (originally bundled with Huddle Hub's own ground truth), reviewed by 2 independent agents (accuracy: no inaccuracies found in any of the 7 specific factual claims checked, including independent re-verification of every sink template's plain-text-vs-JSON return type, every `_PAGE_PARAMS` entry, and the real Spring Boot "Ambiguous mapping" characterization; one param-naming mismatch relayed — `payload` in the first draft vs. the code's own `request` variable name, resolved above by adopting the `body` convention instead of either; adequacy: 6 findings — missing injection-points.json scope justification, the two-apps-in-one-entry over-scoping this split now resolves, an unverified cross-branch enum-collision claim now backed by a concrete check, a restated point, and a missing `Effectiveness`/`Pre-change review gate` line pair, all incorporated). 3/3 agreement reached by incorporating every concrete finding from both reviews without contesting any of them; implementation proceeds on this revised, split entry.
 
-### CC-LAB-0135 — Huddle Hub: header-injection cell in outgoing-webhook delivery on `php_laravel` (FR-LAB-99) (2026-09-23)
+### CC-LAB-0135 — Huddle Hub: header-injection cell in outgoing-webhook delivery on `php_laravel` (FR-LAB-107) (2026-09-23)
 - Change: Adds Huddle Hub's third and final designed cell to the existing,
   shared `php_laravel` emitter. New shape:
   `(vuln_class="outbound_header_injection",
@@ -206,7 +206,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] `lab/manifests/header_injection_huddlehub_sample.yaml` — done
   - [x] Live-boot test (marker server real header inspection, `monkeypatch.setenv`) — done
   - [x] Tier 0/Tier 3 conformance for the new cell — done
-  - [x] `requirements.md` FR-LAB-99 entry — done
+  - [x] `requirements.md` FR-LAB-107 entry — done
   - [x] `CHANGELOG.md` line — done
 - Effectiveness (assessed 2026-09-23): Met. Both cells render (`php -l`
   clean) and pass Tier 3 (`regenerate_and_diff_emitter`, byte-identical on
@@ -250,7 +250,7 @@ Component code: **LAB**. Entry format and required fields: see
   reviews without contesting any of them; implementation proceeds on this
   revised entry.
 
-### CC-LAB-0134 — Huddle Hub: SSRF-via-link-unfurling cell on `php_laravel` (FR-LAB-98) (2026-09-23)
+### CC-LAB-0134 — Huddle Hub: SSRF-via-link-unfurling cell on `php_laravel` (FR-LAB-106) (2026-09-23)
 - Change: Adds Huddle Hub's second designed cell to the existing, shared
   `php_laravel` emitter. New shape: `(vuln_class="ssrf",
   sink_context.family="server_side_http_fetch")`,
@@ -348,7 +348,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] `lab/manifests/ssrf_huddlehub_sample.yaml` — done
   - [x] Live-boot test (local marker server, IP-literal + hostname forms) — done (`tests/test_labgen_ssrf_live_boot.py`, 3 tests, real `composer install`/`artisan serve` boot + a real local marker HTTP server, all PASSED: vulnerable twin reaches the marker both as an IP literal and as a resolved hostname; secure twin rejects both with a real HTTP 400 and the marker server's hit counter stays at zero; secure twin still accepts a real public URL)
   - [x] Tier 0/Tier 3 conformance for the new cell — done (`php -l` clean, `regenerate_and_diff_emitter` byte-identical); `tests/test_labgen_ssrf.py` unit coverage (verdict/determinism/both-twins-bounded-timeout/disjoint-paths) — 9 new tests, all passing
-  - [x] `requirements.md` FR-LAB-98 entry — done
+  - [x] `requirements.md` FR-LAB-106 entry — done
   - [x] `CHANGELOG.md` line — done
 - Effectiveness (assessed 2026-09-23): **met.** Every deliverable is real
   and executed: a real `composer install` builds the assembled skeleton+
@@ -376,7 +376,7 @@ Component code: **LAB**. Entry format and required fields: see
   without contesting any of them; implementation proceeds on this
   revised entry.
 
-### CC-LAB-0133 — Huddle Hub: webhook-signature-verification cell on `php_laravel` (FR-LAB-94) (2026-09-23)
+### CC-LAB-0133 — Huddle Hub: webhook-signature-verification cell on `php_laravel` (FR-LAB-105) (2026-09-23)
 - Change: Adds Huddle Hub's (category 3's Slack pick) first designed cell
   to the existing, shared `php_laravel` emitter — **not** a new emitter,
   per §9.2's ledger note that this pick reuses `php_laravel`'s paradigm
@@ -547,7 +547,7 @@ Component code: **LAB**. Entry format and required fields: see
   - [x] Live-boot test (functional correctness, both twins) — done (`tests/test_labgen_webhook_signature_live_boot.py`, 3 tests, real `composer install` + `artisan serve` boot + real HTTP, all PASSED)
   - [x] `php`-executed magic-hash comparison-semantics test (the actual security differential) — done (`tests/test_labgen_webhook_signature_magic_hash.py`, 6 tests, real `php -r` execution, all PASSED)
   - [x] Tier 0/Tier 3 conformance for the new cell — done (`php -l` clean, `regenerate_and_diff_emitter` byte-identical)
-  - [x] `requirements.md` FR-LAB-94 entry — done
+  - [x] `requirements.md` FR-LAB-105 entry — done
   - [x] `CHANGELOG.md` line — done
 - Effectiveness (assessed 2026-09-23): **met.** Every deliverable is real
   and executed: a real `composer install` builds the assembled skeleton+
