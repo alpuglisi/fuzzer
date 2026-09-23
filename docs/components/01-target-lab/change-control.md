@@ -3,6 +3,126 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0213 — category 5 pilot, `spring_boot` package ported onto this branch for Expedia (FR-LAB-94) (2026-09-23)
+- Change: mechanical port (not a new build) of the `spring_boot` emitter
+  package onto `claude/category-5-build-6boejs`, unblocking Expedia's
+  Java/Spring Boot half per §9.2a's cross-category consolidation decision
+  (reuse category 3's `spring_boot`/TrackerNest package rather than build a
+  from-scratch emitter — Maven Central was reconfirmed reachable
+  2026-09-23, removing the earlier environment blocker for a *from-scratch*
+  build, but the consolidation decision means that build is no longer
+  needed at all). This repository's multi-branch model keeps each
+  category's own new package private to its branch until a PR merge, so
+  the package did not exist on this branch or on `main` before this entry
+  — confirmed by `git ls-tree` on both.
+  1. **Source and pick**: fetched both `origin/claude/category-3-build-
+     iuu5k9` (the package's original build: `CC-LAB-0130` emitter+SSTI,
+     `CC-LAB-0131` XXE, `CC-LAB-0132` insecure deserialization) and
+     `origin/claude/category-4-build-t9uz3y` (the more current state,
+     since it already carries category 3's full package plus category 4's
+     own `CC-LAB-0173` Netflix-cell Jackson-deserialization port and the
+     retirement of the now-superseded standalone `java_spring_boot`
+     package). Ported from the category-4 branch as the more complete,
+     more current source.
+  2. **Wiring verified before porting, not assumed**: dispatched research
+     confirming (a) the package is genuinely self-contained — zero
+     references to `spring_boot` in any central file (`cli.py`'s
+     `EMITTER_REGISTRY`, `fuzzlab/labgen/conformance/static_precheck.py`,
+     `fuzzlab/labgen/emitters/__init__.py`, `fuzzlab/labgen/minimal_pair.py`
+     all have zero matches — confirmed by `git diff main FETCH_HEAD` on
+     each), matching the package's own docstring claim that Spring's
+     classpath component-scan replaces any accumulator/registry hookup,
+     the same shape `python_fastapi` already established; (b) every
+     non-package file that mentions `spring_boot` is a test file (9 total,
+     `git grep -l` on the source branch).
+  3. **Files ported** (`git checkout FETCH_HEAD --`, unmodified):
+     `fuzzlab/labgen/emitters/spring_boot/` (emitter `__init__.py`,
+     `modules.py`, `stack_env.py`, the checked-in Maven skeleton under
+     `stack/skeleton/`, Jinja templates under `templates/`),
+     `fuzzlab/labgen/conformance/live_boot_spring_boot.py`, three sample
+     manifests (`lab/manifests/{ssti,xxe,insecure_deserialization}_
+     spring_boot_sample.yaml`), and 8 of the 9 test files found in step 2b.
+     The 9th, `tests/test_labels_contract_category4.py`, was deliberately
+     excluded and not ported: it asserts against `lab/ground-truth-
+     netflix-clone/`/`-twitch-clone/`, category 4's own dedicated
+     ground-truth directories, which don't exist on this branch and are
+     not this category's own ground truth to carry — porting it would have
+     produced a permanently-failing test (missing directory) rather than
+     real coverage.
+  4. **Real gaps found by running the ported tests, not assumed clean**:
+     running the 4 non-live-boot ported test files immediately surfaced 2
+     `SafetyMatrixError`s (`fuzzlab.labgen.verdict.verdict()` raising on an
+     unregistered `(op, sink_family)` pair) — `lab/safety_matrix.yaml` is a
+     shared file each category branch has edited independently since the
+     last cross-branch sync, so two small, real rows present on the source
+     branches were missing here: (a) `xml_external_entities_disabled`/
+     `xml_parse_input` (`neutralises: [xxe_entity_resolution]`) —
+     originally category 3's `CC-LAB-0131`/`FR-LAB-75`, the secure
+     counterpart to a vulnerable-only row this file already had from
+     `CC-LAB-0063`; (b) `jackson_default_typing_deserialize`/
+     `jackson_typed_allowlist_deserialize` for `object_deserialization`
+     (`no_effect`/`neutralises: [insecure_deserialization]` respectively)
+     — originally category 4's `CC-LAB-0171`, carried through the
+     `CC-LAB-0173` Netflix-cell port. Both rows copied verbatim from the
+     source branches' diffs (`git diff HEAD FETCH_HEAD -- lab/
+     safety_matrix.yaml`) and added additively at the correct existing
+     section (no version bump — no existing pair's meaning changed).
+  5. **Verification**: all 33 non-live-boot ported tests pass after the
+     safety-matrix additions. All 8 live-boot tests
+     (`tests/test_labgen_spring_boot{,_deserialization,_xxe}_live_boot.py`,
+     `tests/test_labgen_spring_boot_deserialization_jackson_live_boot.py`)
+     pass — a real `mvn -q -B package -DskipTests` + `java -jar` boot +
+     real HTTP round trip for TrackerNest's SSTI/XXE/deserialization cells
+     and the ported Netflix Jackson-deserialization cell, all executed on
+     this sandbox (Maven Central reachable, per the session's earlier
+     reconfirmation). Whole-repo `pytest tests/` run after the port and
+     the two safety-matrix additions, per `PA-0036` — see Effectiveness
+     for the pass/skip/fail counts.
+  6. `docs/components/01-target-lab/requirements.md`: `FR-LAB-94`.
+- Impact (other components / project): additive-only to
+  `lab/safety_matrix.yaml` (2 new rows, no existing row changed). No other
+  of the 13 components touched. Unblocks Expedia's own shape work: CWE-502
+  Jackson polymorphic deserialization is now directly available (the
+  ported Netflix cell already models the exact real-world idiom Expedia's
+  own research doc shortlisted, `activateDefaultTyping()`) and needs only
+  a new page profile/manifest, not new safety-matrix rows or emitter code;
+  Spring Data SpEL/`@Query` injection remains fully greenfield (confirmed
+  by grep on this branch and all three source category branches: no
+  safety-matrix rows, emitter modules, or corpus precedent exist anywhere
+  in this repository for it) and is separate follow-on work.
+- Risk (level; mitigation or accepted-risk justification): low — every
+  file ported is either unmodified, already-reviewed code from another
+  category's own change-control-gated build (`CC-LAB-0130`-`0132`/`0171`/
+  `0173`, each independently reviewed and tested when first landed on its
+  own branch), or a small, verbatim-copied additive safety-matrix row from
+  the same source. The one genuinely new judgment call this entry made —
+  which of the two source branches to port from — was resolved by
+  evidence (category 4's branch strictly contains category 3's own work
+  plus more, confirmed by both branches' own file listings) rather than
+  guessed. Mitigated further by actually running the full ported test
+  suite (including real live-boot) rather than trusting the source
+  branches' own historical passing state, which is exactly what surfaced
+  the two missing safety-matrix rows before they could reach a later,
+  harder-to-diagnose failure in Expedia's own shape work.
+- Deliverables:
+  - [x] `fuzzlab/labgen/emitters/spring_boot/` (full package) — ported
+  - [x] `fuzzlab/labgen/conformance/live_boot_spring_boot.py` — ported
+  - [x] 3 sample manifests — ported
+  - [x] 8 test files (33 non-live-boot + 8 live-boot) — ported, all green
+  - [x] `lab/safety_matrix.yaml`: 2 additive rows (XXE secure counterpart,
+        Jackson deserialization pair) — done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-94` — done
+  - [x] `CHANGELOG.md` line — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done
+- Effectiveness (assessed 2026-09-23): achieved its intent, with evidence.
+  A port that could easily have silently carried an incomplete or stale
+  package instead surfaced two real, concrete gaps (the missing
+  safety-matrix rows) by actually executing the ported tests rather than
+  trusting the source branches' own passing history — both fixed before
+  this entry was considered complete. Full whole-repo `pytest tests/` run:
+  see the commit message / `CHANGELOG.md` line for the exact pass/skip/
+  fail counts.
+
 ### CC-LAB-0212 — category 5 pilot, third increment: `price_integrity_bypass` (client-trusted payment amount) shape on `php_laravel`, Booking.com's checkout (FR-LAB-92, FR-LAB-93) (2026-09-23)
 - Change: the third increment of category 5's Booking.com app (first two:
   `CC-LAB-0210` open_redirect, `CC-LAB-0211` csv_formula_injection).

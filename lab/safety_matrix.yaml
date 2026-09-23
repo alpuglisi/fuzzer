@@ -488,6 +488,15 @@ entries:
   - op: xml_external_entities_enabled
     sink_family: xml_parse_input
     effect: no_effect
+  # The secure counterpart to xml_parse_input's vulnerable-only coverage
+  # above (this row is category 3's `CC-LAB-0131`/`FR-LAB-75`, ported here
+  # by category 5's `spring_boot` reuse per §9.2a) -- the real, standard
+  # Java XXE fix (Xerces/JAXP's disallow-doctype-decl feature). Additive;
+  # no version bump.
+  - op: xml_external_entities_disabled
+    sink_family: xml_parse_input
+    effect: neutralises
+    neutralizes: [xxe_entity_resolution]
 
   # --- ugc-xss: sanitizer/autoescape alternatives at the existing
   # `html_body` family — new ops, no new sink family. From
@@ -610,6 +619,19 @@ entries:
     sink_family: object_deserialization
     effect: no_effect
   - op: json_loads_type_check
+    sink_family: object_deserialization
+    effect: neutralises
+    neutralizes: [insecure_deserialization]
+  # Java/Jackson idiom (category 4 pilot's Netflix pick, ported here by
+  # category 5's `spring_boot` reuse per §9.2a): activateDefaultTyping()
+  # lets an attacker-controlled type hint embedded in the JSON body itself
+  # pick the concrete class Jackson instantiates -- the canonical
+  # real-world Java CWE-502 gadget-chain vector, distinct in shape from
+  # every other op in this family (none of which is Java-specific).
+  - op: jackson_default_typing_deserialize
+    sink_family: object_deserialization
+    effect: no_effect
+  - op: jackson_typed_allowlist_deserialize
     sink_family: object_deserialization
     effect: neutralises
     neutralizes: [insecure_deserialization]

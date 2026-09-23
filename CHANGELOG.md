@@ -12,6 +12,26 @@ is the project-level history; the component logs are the lower-level controlled
 records (see `docs/components/README.md`). For the full change process — bookkeeping,
 bug protocol, and the preventive-action rules that must be followed — see `CLAUDE.md`.
 
+## 2026-09-23 (category 5: spring_boot package ported for Expedia)
+- LAB: ported the `spring_boot` emitter package (built by category 3 for
+  TrackerNest, `CC-LAB-0130`-`0132`, and already the host of category 4's
+  ported Netflix Jackson-deserialization cell, `CC-LAB-0173`) onto this
+  branch, per §9.2a's cross-category consolidation decision — Expedia
+  (Java/Spring Boot) reuses this package rather than a from-scratch build,
+  now unblocked since Maven Central was reconfirmed reachable this
+  session. Mechanical, unmodified port from `origin/claude/category-4-
+  build-t9uz3y` (package + harness + 3 sample manifests + 8 test files,
+  deliberately excluding a 9th, category-4-specific ground-truth test).
+  Running the ported tests (not just trusting them) surfaced two real,
+  small gaps in this branch's own `lab/safety_matrix.yaml` — an XXE
+  secure-counterpart row and the Jackson-deserialization op pair, both
+  present on the source branches but not yet synced here — fixed
+  additively. All 41 ported tests (33 non-live-boot + 8 real live-boot,
+  including a genuine `mvn package`/`java -jar` boot + HTTP round trip)
+  pass. Closes Expedia's CWE-502 Jackson-deserialization shape for free
+  (the ported cell already models the exact idiom); Spring Data SpEL
+  injection remains genuinely greenfield project-wide. See `CC-LAB-0213`.
+
 ## 2026-09-23 (cross-category doc sync, round 2)
 - Docs (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, all five second-target
   category branches): re-synced §9.2 (stack-reuse ledger), §9.2a (Java/Spring

@@ -2136,6 +2136,51 @@ lane) can submit a payload as
   SQL `INSERT`, and the adequacy review preferred reuse over an
   under-specified new token) — no `sink_context` schema change needed.
 
+- **FR-LAB-94** *(`spring_boot` emitter package ported onto this branch;
+  `CC-LAB-0213`, 2026-09-23).* Category 5's Expedia app (Java/Spring Boot)
+  needs the `spring_boot` stack per §9.2a's cross-category consolidation
+  decision: reuse category 3's `spring_boot` package (built for TrackerNest,
+  `CC-LAB-0130`/`0131`/`0132`, and already the host of category 4's ported
+  Netflix Jackson-deserialization cell, `CC-LAB-0173`) rather than building a
+  from-scratch Java/Spring Boot emitter for Expedia, since this repository's
+  multi-branch model keeps each category's own package private to its
+  branch until a PR merge. This requirement records the mechanical port: the
+  self-contained `fuzzlab/labgen/emitters/spring_boot/` package (emitter,
+  `modules.py`, Jinja templates, the checked-in Maven skeleton) and
+  `fuzzlab/labgen/conformance/live_boot_spring_boot.py` (real `mvn package`
+  + `java -jar` boot harness, no central-registry wiring needed — confirmed
+  by inspection that no CLI/`EMITTER_REGISTRY`/`static_precheck`/
+  `minimal_pair` file references `spring_boot` at all; the stack is
+  self-contained via Spring's own classpath component-scan, the same shape
+  `python_fastapi` already established) were copied unmodified from
+  `origin/claude/category-4-build-t9uz3y` (the more current of the two
+  source branches, since it already carries category 3's TrackerNest work
+  plus the Netflix port). The package's own 8 non-live-boot/live-boot test
+  files were ported alongside it (a 9th, category-4-specific
+  `tests/test_labels_contract_category4.py`, was excluded — it exercises
+  `lab/ground-truth-netflix-clone/`/`-twitch-clone/`, directories that don't
+  exist on this branch and aren't this category's to carry).
+  `lab/safety_matrix.yaml` gained two small, additive ports discovered
+  missing by running the ported tests rather than assumed present: the
+  `xml_external_entities_disabled`/`xml_parse_input` secure-counterpart row
+  (originally category 3's `CC-LAB-0131`/`FR-LAB-75`) and the
+  `jackson_default_typing_deserialize`/`jackson_typed_allowlist_deserialize`
+  rows for `object_deserialization` (originally category 4's `CC-LAB-0171`,
+  carried through the Netflix-cell port `CC-LAB-0173`) — both were present
+  on the source branches but not yet on this one, since `safety_matrix.yaml`
+  is a shared file each category branch edits independently until merge.
+  All 41 ported tests (33 non-live-boot + 8 real live-boot, the latter
+  proving a real Maven build/boot/HTTP round trip for TrackerNest's SSTI/
+  XXE/deserialization cells and the ported Netflix Jackson cell) pass
+  unmodified on this branch after the two safety-matrix additions. This
+  requirement is scoped to the port only — Expedia's own two shortlisted
+  shapes (CWE-502 Jackson deserialization, now already available via the
+  ported Netflix cell with no Expedia-specific work needed beyond a new
+  page profile/manifest reusing the existing ops; Spring Data SpEL/`@Query`
+  injection, confirmed genuinely new — no safety-matrix rows, emitter
+  modules, or corpus precedent exist anywhere in this repository for it)
+  are separate, later requirements.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

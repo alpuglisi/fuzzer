@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>4.1.1</version>
+  </parent>
+
+  <groupId>com.fuzzlab.trackernest</groupId>
+  <artifactId>trackernest</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+
+  <name>trackernest</name>
+  <description>
+    fuzzlab lab-generator target: TrackerNest (category 3, Atlassian/Jira-
+    Confluence-style pick). Deliberately vulnerable, lab-only, authorized-use
+    only -- see repo root CLAUDE.md "Safety (non-negotiable)".
+  </description>
+
+  <properties>
+    <java.version>21</java.version>
+    <!-- ognl.version pinned to the latest stable release on Maven Central as
+         of 2026-09-22 (3.4.13; the 3.5.0-BETAx line is a pre-release,
+         deliberately not used). Resolved live, not guessed; see
+         curl https://repo.maven.apache.org/maven2/ognl/ognl/maven-metadata.xml -->
+    <ognl.version>3.4.13</ognl.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <!-- The real OGNL library, the same library the real Confluence
+         CVE-2021-26084/CVE-2022-26134 OGNL-injection RCEs exploited. Used
+         here to build a realistic, stack-idiomatic SSTI cell (evaluating an
+         attacker-supplied string as an OGNL expression), not because this
+         library version itself carries a known CVE: the vulnerability this
+         cell demonstrates is an application-level one (compiling tainted
+         input as an expression at all), present regardless of library patch
+         level. See
+         docs/research/category3-saas-functionality-and-cwe-research.md, sec 4. -->
+    <dependency>
+      <groupId>ognl</groupId>
+      <artifactId>ognl</artifactId>
+      <version>${ognl.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>trackernest</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <!-- CC-LAB-0132: explicit, since a second main() now exists on the
+             classpath (com.fuzzlab.trackernest.tools.SerializeFixtureTool,
+             a test-only helper, never Spring-managed); without this, the
+             repackage goal's main-class autodetection is ambiguous. -->
+        <configuration>
+          <mainClass>com.fuzzlab.trackernest.TrackerNestApplication</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

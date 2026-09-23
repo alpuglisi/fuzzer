@@ -475,6 +475,32 @@ tracked in the requirements files, not here.
   the existing `products`/`posts`/`users` tables — the first schema
   addition any category-5 increment has needed.
 
+  **`spring_boot` package ported for Expedia's Java half** (`CC-LAB-0213`/
+  `FR-LAB-94`, 2026-09-23): per the plan doc's §9.2a cross-category
+  consolidation decision, category 5's Expedia app (Java/Spring Boot)
+  reuses category 3's `spring_boot` emitter package (built for TrackerNest;
+  already also the host of category 4's ported Netflix Jackson-
+  deserialization cell) rather than a from-scratch build. Since this
+  project's multi-branch model keeps each category's own new package
+  private to its branch until a PR merge, the package did not exist on
+  this branch before this entry — it was mechanically ported (`git
+  checkout <source-branch> --`, unmodified) from
+  `origin/claude/category-4-build-t9uz3y`, the more current of the two
+  possible sources. Running the ported test suite (rather than trusting
+  it clean) surfaced two small, real gaps: `lab/safety_matrix.yaml` was
+  missing two rows present on the source branches (the
+  `xml_external_entities_disabled`/`xml_parse_input` secure counterpart,
+  and the `jackson_default_typing_deserialize`/
+  `jackson_typed_allowlist_deserialize` pair for `object_deserialization`)
+  — `safety_matrix.yaml` being a shared file each category branch edits
+  independently between cross-branch syncs. Both added additively; all 41
+  ported tests (33 non-live-boot + 8 real live-boot, a genuine `mvn
+  package` + `java -jar` boot + HTTP round trip) then pass. This closes
+  the CWE-502 Jackson-deserialization half of Expedia's shortlist for
+  free (the ported Netflix cell already models the exact idiom Expedia's
+  own research shortlisted); Spring Data SpEL/`@Query` injection remains
+  fully greenfield project-wide and is separate follow-on work.
+
   **The parity/cutover coverage gate** (`CC-LAB-0053`/`FR-LAB-51`,
   `fuzzlab/labgen/cutover_gate.py`, plan §4.3.6.6 point 3) is the precondition
   `L-P3.3c-CUT` needs before it can run, built ahead of and independent from
