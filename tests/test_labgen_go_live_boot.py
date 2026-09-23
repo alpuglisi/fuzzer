@@ -187,3 +187,58 @@ def test_real_boot_proves_the_ssrf_ip_allowlist_specifically_not_just_the_scheme
                     https_server.shutdown()
     finally:
         plain_server.shutdown()
+
+
+# -- Phase B increment 2: access-control / IDOR (db_row_by_id_lookup) --------
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not go_boot_available(), reason="go toolchain/module-proxy not available (PA-0035 pattern)")
+def test_real_boot_proves_the_idor_differential_for_both_twins() -> None:
+    """Three cases, isolating exactly what the ownership check controls:
+
+    (a) the vulnerable twin leaks another channel's analytics when the
+        requested `channel_id` does not match `X-Broadcaster-Id`.
+    (b) the secure twin rejects that same mismatched request with a real
+        HTTP 403 and no data.
+    (c) the secure twin still serves analytics when `channel_id` *does*
+        match `X-Broadcaster-Id` -- proving the fix doesn't break the
+        legitimate case, not just that it blocks the attack one.
+    """
+    manifest = load_manifest("lab/manifests/access_control_go_sample.yaml")
+    emitter = GoEmitter()
+
+    with GoLiveBootHarness(emitter, manifest.cells) as harness:
+        # (a) vulnerable twin: mismatched IDs still leak the data.
+        vuln_resp = harness.request(
+            "GET", "/generated/labgen-go-0005?channel_id=victim-channel",
+            headers={"X-Broadcaster-Id": "attacker-channel"},
+        )
+        assert vuln_resp.status == 200, (
+            f"vulnerable twin rejected a mismatched channel_id (status {vuln_resp.status})"
+        )
+        assert "victim-channel" in vuln_resp.body and "subscriber_count" in vuln_resp.body, (
+            f"vulnerable twin did not leak the requested channel's analytics: {vuln_resp.body!r}"
+        )
+
+        # (b) secure twin: the same mismatched request is rejected outright.
+        secure_mismatch_resp = harness.request(
+            "GET", "/generated/labgen-go-0006?channel_id=victim-channel",
+            headers={"X-Broadcaster-Id": "attacker-channel"},
+        )
+        assert secure_mismatch_resp.status == 403, (
+            f"secure twin accepted a mismatched channel_id (status {secure_mismatch_resp.status}): "
+            f"{secure_mismatch_resp.body!r}"
+        )
+        assert "subscriber_count" not in secure_mismatch_resp.body
+
+        # (c) secure twin: the legitimate, matching-identity request still works.
+        secure_match_resp = harness.request(
+            "GET", "/generated/labgen-go-0006?channel_id=own-channel",
+            headers={"X-Broadcaster-Id": "own-channel"},
+        )
+        assert secure_match_resp.status == 200, (
+            f"secure twin rejected its own caller's legitimate request (status {secure_match_resp.status}): "
+            f"{secure_match_resp.body!r}"
+        )
+        assert "own-channel" in secure_match_resp.body and "subscriber_count" in secure_match_resp.body

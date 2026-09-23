@@ -30,6 +30,7 @@ from fuzzlab.labgen.schema import load_manifest
 _MANIFESTS = (
     "lab/manifests/webhook_signature_go_sample.yaml",
     "lab/manifests/ssrf_go_sample.yaml",
+    "lab/manifests/access_control_go_sample.yaml",
 )
 
 

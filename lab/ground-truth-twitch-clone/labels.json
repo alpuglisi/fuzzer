@@ -25,6 +25,18 @@
       "expected_vulnerable": true,
       "rendering": "server-json",
       "notes": "url query param fetched server-side with no scheme or resolved-IP allowlist check (CWE-918) -- modeled on Twitch's real clip-thumbnail-fetch proxy (docs/research/site-architecture-survey-functionality-twitch.md). `LABGEN-GO-0003` in lab/manifests/ssrf_go_sample.yaml, served at `/generated/labgen-go-0003` (same cell_id-derived-route convention as TWCH-0001) -- never a PFF-* case."
+    },
+    {
+      "case_id": "TWCH-0003",
+      "url": "/generated/labgen-go-0005",
+      "method": "GET",
+      "param": "channel_id",
+      "location": "query",
+      "vuln_class": "access_control",
+      "sink_context": "object_lookup",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "channel_id query param used to look up per-channel analytics with no check that it matches the caller's own X-Broadcaster-Id (CWE-639/862, broken object-level authorization / IDOR) -- modeled on Twitch's real per-channel analytics API, a textbook OWASP API1:2023 BOLA surface for a public API-edge service. Reuses lab/safety_matrix.yaml's existing db_row_by_id_lookup sink family and no_ownership_check/identity_match_before_fetch ops (added by CC-LAB-0063 for the corpus-examples/access-control research) -- the first lab-generator instance of this mechanism on any stack. `X-Broadcaster-Id` is a fixed demo header standing in for the caller's own identity (this stack has no session/auth system yet; the header models only the ownership-check-bypass mechanism in isolation, never a real session/auth system). `LABGEN-GO-0005` in lab/manifests/access_control_go_sample.yaml, served at `/generated/labgen-go-0005` (same cell_id-derived-route convention as TWCH-0001/0002) -- never a PFF-* case."
     }
   ]
 }

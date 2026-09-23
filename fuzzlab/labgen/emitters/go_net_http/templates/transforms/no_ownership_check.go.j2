@@ -1,0 +1,3 @@
+// no_ownership_check transform: {{ value_expr }} -- the caller's own
+// X-Broadcaster-Id is read but never compared to the requested channel_id
+// (CWE-639/862, broken object-level authorization / IDOR).

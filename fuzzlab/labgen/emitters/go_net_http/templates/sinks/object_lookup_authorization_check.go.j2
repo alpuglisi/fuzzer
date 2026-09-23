@@ -1,0 +1,9 @@
+_ = {{ broadcaster_var }} // always read by the source; used here so a
+// vulnerable twin whose transform ignores it still compiles.
+if {{ value_expr }} {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	io.WriteString(w, `{"channel_id":"`+{{ channel_id_var }}+`","subscriber_count":42,"revenue_estimate_usd":1234.56}`)
+} else {
+	w.WriteHeader(http.StatusForbidden)
+}

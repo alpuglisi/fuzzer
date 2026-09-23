@@ -15,6 +15,13 @@
       "param": "url",
       "location": "query",
       "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0005",
+      "method": "GET",
+      "param": "channel_id",
+      "location": "query",
+      "rendering": "server-json"
     }
   ]
 }

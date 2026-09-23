@@ -5,37 +5,39 @@ for real (`GoLiveBootHarness`, `SpringBootLiveBootHarness`) and run through
 `run_targets` in one call, using the real HTTP `RequestsProbeSender` this
 project already has (`fuzzlab.tools.probesender`) -- never a fake sender,
 matching category 1's own "genuinely testable in this sandbox" Phase E bar.
-A real, started `OobListener` is now also passed through (`CC-FUZZ-0027`
-closed the `run_targets()` passthrough gap and added the project's first
-`ssrf` audit rule + oracle strategies).
+A real, started `OobListener` is also passed through (`CC-FUZZ-0027` closed
+the `run_targets()` passthrough gap and added the project's first `ssrf`
+audit rule + oracle strategies).
 
 **What this now proves, and what remains honestly open (recorded here, not
-routed around).** The Twitch app's SSRF case (`TWCH-0002`) is now a real,
-confirmed finding: `SsrfInBandMarkerStrategy` sees the vulnerable twin
-(`LABGEN-GO-0003`) echo the OOB marker back in its own response body
-(`io.Copy(w, resp.Body)`), and correctly does not confirm the secure twin
-(`LABGEN-GO-0004`, blocked by its scheme/IP allowlist before any fetch).
-Two gaps remain, both already flagged by `CC-LAB-0176`/`FR-LAB-99` and not
-fixed here:
+routed around).** Twitch now has three real cells (webhook-signature, SSRF,
+and access-control/IDOR -- `CC-LAB-0178`, the "coherent page/route set"
+depth work). The SSRF case (`TWCH-0002`) is a real, confirmed finding:
+`SsrfInBandMarkerStrategy` sees the vulnerable twin (`LABGEN-GO-0003`) echo
+the OOB marker back in its own response body (`io.Copy(w, resp.Body)`), and
+correctly does not confirm the secure twin (`LABGEN-GO-0004`, blocked by
+its scheme/IP allowlist before any fetch). Two gaps remain open, both
+already flagged and not fixed here:
 
-1. **No audit `Rule` exists yet for `webhook_signature`/
-   `insecure_deserialization`** (only `ssrf` now has one, `CC-FUZZ-0027`) --
-   `fuzzlab.core.runmode._VULN_TO_CATEGORY` still only maps `sqli`/`xss-*`
-   beyond that, so these two vuln classes fall through to their own name
-   as the category and find no matching rule.
-2. **The other two of this category's three ground-truth points still
-   can't be meaningfully expressed by the generic pipeline's point
-   model.** The webhook-signature case (`location="header"`) is skipped by
-   `fuzzlab.harness.auto.points_from_ground_truth` (now with its own
-   honest reason, `CC-FUZZ-0026`, rather than a misleading DOM one). The
-   whole-body-JSON deserialization case (`param="body"`) *is* included as
-   a point, but `RequestsProbeSender`'s `location="body"` sends
-   `data={"body": value}` -- form-urlencoded -- which Jackson cannot parse
-   as JSON regardless of payload.
-
-Building a `webhook_signature`/`insecure_deserialization` audit rule, a
-header-location point type, or a whole-body-JSON sender convention are
-each real, sized follow-on work items -- not attempted in this increment.
+1. **No audit `Rule`/oracle strategy exists yet for `webhook_signature`/
+   `insecure_deserialization`/`access_control`** (only `ssrf` has one,
+   `CC-FUZZ-0027`) -- `fuzzlab.core.runmode._VULN_TO_CATEGORY` still only
+   maps `sqli`/`xss-*`/`ssti` beyond that, so these fall through to their
+   own name as the category and find no matching rule. `access_control`'s
+   own differential (an attacker-chosen `channel_id` vs. the caller's own
+   identity) is a real, buildable follow-on -- not attempted in this entry.
+2. **The whole-body-JSON deserialization case (`param="body"`) still can't
+   succeed through this generic sender.** `CC-FUZZ-0028` made the sender
+   content-type-aware (`RequestsProbeSender` now sends raw JSON for a point
+   the ground truth marks `rendering="server-json"`), but Spring Boot's
+   `JacksonBodySource` reads the raw request body directly
+   (`request.getInputStream().readAllBytes()`), bypassing Spring's own
+   `@RequestBody` binding -- this endpoint's real behavior has not yet been
+   independently re-verified end to end through the full generic pipeline
+   with the new sender, only via the dedicated Phase D Tier1/2 test.
+   Header points (`TWCH-0001`) are now real, audited points, not skipped
+   (`CC-FUZZ-0028`) -- that structural gap is closed, only the detection
+   *capability* remains open for that class.
 """
 
 from __future__ import annotations
@@ -68,7 +70,8 @@ pytestmark = [
 def _twitch_cells():
     webhook = load_manifest("lab/manifests/webhook_signature_go_sample.yaml").cells
     ssrf = load_manifest("lab/manifests/ssrf_go_sample.yaml").cells
-    return webhook + ssrf
+    access_control = load_manifest("lab/manifests/access_control_go_sample.yaml").cells
+    return webhook + ssrf + access_control
 
 
 def _netflix_cell():
@@ -111,11 +114,12 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     assert by_name["twitch-clone"].run_id != by_name["netflix-clone"].run_id
 
     # Twitch: SSRF (TWCH-0002) is now a real, confirmed finding; the
-    # webhook-signature case (TWCH-0001) still has no rule/point support
-    # (see module docstring) -- one of its two positives, not both.
+    # webhook-signature (TWCH-0001) and access-control/IDOR (TWCH-0003)
+    # cases still have no rule/point support (see module docstring) --
+    # one of its three positives, not all three.
     twitch_report = by_name["twitch-clone"].report
     assert twitch_report.tp == 1 and twitch_report.fp == 0
-    assert twitch_report.recall == 0.5
+    assert round(twitch_report.recall, 4) == round(1 / 3, 4)
 
     # Netflix: still a real, structural zero -- the whole-body-JSON case
     # can't be expressed by the generic sender yet (see module docstring).
@@ -124,7 +128,7 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
-    assert summary["macro_recall"] == 0.25
+    assert round(summary["macro_recall"], 4) == round((1 / 3) / 2, 4)
     # Only one of the two targets shows recall > 0 -- not yet "generalizes"
     # by this project's own >= 2 definition (transfer_summary's docstring).
     assert summary["generalizes"] is False

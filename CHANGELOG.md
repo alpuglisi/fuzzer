@@ -4,6 +4,22 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Twitch's third real page, access-control/IDOR)
+- Lab: category 4's own "coherent page/route set" depth work. Twitch's
+  research only shortlisted two CWEs (both already built), so this reuses
+  an already-designed cross-stack access-control/IDOR mechanism
+  (`no_ownership_check`/`identity_match_before_fetch`, `CC-LAB-0063`) —
+  the first lab-generator instantiation of it on any stack. A per-channel
+  analytics lookup (`GET /channels/analytics?channel_id=`) requires the
+  caller's own identity (a fixed demo header) to match the requested
+  channel; the vulnerable twin ignores it, the secure twin returns a real
+  403 on a mismatch. Real live-boot proof (3 assertions); found and fixed
+  a real Go compile gap (an unused variable) before landing. Ground truth
+  extended (`TWCH-0003`); cross-branch collision check performed, none
+  found. Detection capability (an audit rule/oracle strategy for this
+  class) is a separate, tracked follow-on, not built here.
+  `CC-LAB-0178`/`FR-LAB-118`.
+
 ## 2026-09-23 (FUZZ: URLDNS follow-on sketch corrected)
 - Docs: the `insecure_deserialization` follow-on sketch (`requirements.md`
   §8, `CC-FUZZ-0028`) proposed a URLDNS-style gadget-chain-free OOB proof

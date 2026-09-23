@@ -93,3 +93,40 @@ def test_scheme_and_resolved_ip_allowlist_sink_rejects_non_https_and_checks_reso
     assert "ip.IsPrivate()" in result.code
     assert "ip.IsLinkLocalUnicast()" in result.code
     assert "http.Client{Timeout:" in result.code
+
+
+# -- Phase B increment 2: access-control / IDOR (db_row_by_id_lookup) --------
+
+
+def test_read_channel_id_and_broadcaster_header_source_publishes_vulnerable_default() -> None:
+    result = SOURCES["read_channel_id_and_broadcaster_header"].render({"param_name": "channel_id"})
+    assert result.code.strip() == (
+        'channelID := r.URL.Query().Get("channel_id")\n'
+        'broadcasterID := r.Header.Get("X-Broadcaster-Id")'
+    )
+    assert result.context["channel_id_var"] == "channelID"
+    assert result.context["broadcaster_var"] == "broadcasterID"
+    assert result.context["value_expr"] == "true"   # vulnerable by default: no check at all
+
+
+def test_no_ownership_check_transform_leaves_the_always_true_default() -> None:
+    ctx = {"channel_id_var": "channelID", "broadcaster_var": "broadcasterID"}
+    result = TRANSFORMS["no_ownership_check"].render(ctx)
+    assert result.context["value_expr"] == "true"
+
+
+def test_identity_match_before_fetch_transform_requires_matching_ids() -> None:
+    ctx = {"channel_id_var": "channelID", "broadcaster_var": "broadcasterID"}
+    result = TRANSFORMS["identity_match_before_fetch"].render(ctx)
+    assert result.context["value_expr"] == "channelID == broadcasterID"
+
+
+def test_object_lookup_authorization_check_sink_branches_on_value_expr() -> None:
+    ctx = {"value_expr": "channelID == broadcasterID", "channel_id_var": "channelID",
+           "broadcaster_var": "broadcasterID"}
+    result = SINKS["object_lookup_authorization_check"].render(ctx)
+    assert "if channelID == broadcasterID {" in result.code
+    assert "http.StatusOK" in result.code
+    assert "http.StatusForbidden" in result.code
+    assert "subscriber_count" in result.code
+    assert "_ = broadcasterID" in result.code   # always used, even on the vulnerable path

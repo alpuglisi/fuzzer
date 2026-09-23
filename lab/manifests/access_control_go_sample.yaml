@@ -1,0 +1,49 @@
+# Access-control (IDOR/broken-object-level-authorization) sample manifest
+# (CC-LAB-0178), go_net_http.
+#
+# Third real page for this stack's Twitch pick (category 4 pilot,
+# Media/streaming -- docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md
+# §9.4/§9.5), moving this category's own "coherent page/route set" goal
+# forward: a per-channel analytics lookup keyed by an attacker-visible
+# `channel_id`, requiring the caller's own channel identity to match it --
+# a textbook IDOR/BOLA surface (OWASP API1:2023) for a public API-edge
+# service exactly like Twitch's. `X-Broadcaster-Id` is a fixed demo header
+# standing in for the caller's own authenticated identity (this stack has
+# no session/auth system yet, so this models only the ownership-check-
+# bypass mechanism in isolation, never a real session/auth system, the
+# same kind of declared simplification the webhook cell's own fixed demo
+# secret already is).
+#
+# Reuses `lab/safety_matrix.yaml`'s existing `db_row_by_id_lookup` sink
+# family and its existing `no_ownership_check`/`identity_match_before_fetch`
+# ops verbatim (added by CC-LAB-0063 for the corpus-examples/access-control/
+# {node,php,python} research, CWE-639/862) -- no new safety-matrix entry
+# needed; this is the first lab-generator instance of this mechanism on
+# *any* stack (checked for cross-branch collision before landing: no other
+# active category branch references this mechanism or these cell IDs).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: returns canned per-channel analytics for whatever channel_id
+  # is given, ignoring X-Broadcaster-Id entirely (CWE-639/862, IDOR).
+  - cell_id: LABGEN-GO-0005
+    class: access_control
+    stack_profile: go_net_http
+    route: { method: GET, path: /channels/analytics }
+    sink_context:
+      family: db_row_by_id_lookup
+      required_neutralizations: [ownership_check_bypass]
+    transform: [no_ownership_check]
+
+  # Secure twin: the only difference is the transform region
+  # (identity_match_before_fetch instead of no_ownership_check) -- the
+  # minimal-pair invariant. Requires channel_id to match X-Broadcaster-Id
+  # before returning any data; a mismatch is a real HTTP 403.
+  - cell_id: LABGEN-GO-0006
+    class: access_control
+    stack_profile: go_net_http
+    route: { method: GET, path: /channels/analytics }
+    sink_context:
+      family: db_row_by_id_lookup
+      required_neutralizations: [ownership_check_bypass]
+    transform: [identity_match_before_fetch]

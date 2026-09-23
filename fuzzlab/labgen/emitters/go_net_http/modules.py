@@ -222,6 +222,90 @@ class SchemeAndResolvedIpAllowlistSink(TemplateModule):
         )
 
 
+class ReadChannelIdAndBroadcasterHeaderSource(TemplateModule):
+    """Reads the attacker-visible ``channel_id`` query param and the fixed
+    demo ``X-Broadcaster-Id`` header standing in for the caller's own
+    authenticated identity -- this stack has no session/auth system yet, so
+    this header models only the ownership-check-bypass mechanism in
+    isolation, the same kind of declared simplification
+    ``ReadWebhookSignatureSource``'s fixed demo secret already is, never a
+    real session/auth system. Publishes ``channel_id_var``/``broadcaster_var``
+    (two Go identifiers, like ``ReadWebhookSignatureSource``'s ``computed_var``/
+    ``header_var``) plus a default ``value_expr="true"`` -- vulnerable by
+    default (no ownership check at all) until a transform overrides it,
+    matching this stack's own "vulnerable by default" convention."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "read_channel_id_and_broadcaster_header", "source", _SOURCE_ENV,
+            "read_channel_id_and_broadcaster_header.go.j2",
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        render_ctx = dict(ctx)
+        render_ctx.setdefault("channel_id_var", "channelID")
+        render_ctx.setdefault("broadcaster_var", "broadcasterID")
+        result = super().render(render_ctx)
+        new_ctx = dict(render_ctx)
+        new_ctx["value_expr"] = "true"
+        return RenderResult(code=result.code, context=new_ctx)
+
+
+class NoOwnershipCheckTransform(TemplateModule):
+    """The ``no_ownership_check`` op (``lab/safety_matrix.yaml``,
+    ``db_row_by_id_lookup`` family, ``no_effect`` -- added by ``CC-LAB-0063``,
+    never before instantiated by any stack's generator): renders a comment
+    only, since the source already publishes ``value_expr="true"`` (always
+    "authorized") by default -- this transform names the vulnerable path
+    explicitly, matching ``NaiveStringCompareTransform``'s own
+    never-rely-on-the-default convention."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "no_ownership_check", "transform", _TRANSFORM_ENV, "no_ownership_check.go.j2"
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        render_ctx = dict(ctx)
+        render_ctx["value_expr"] = "true"
+        result = super().render(render_ctx)
+        return RenderResult(code=result.code, context=render_ctx)
+
+
+class IdentityMatchBeforeFetchTransform(TemplateModule):
+    """The ``identity_match_before_fetch`` op (``lab/safety_matrix.yaml``,
+    ``db_row_by_id_lookup`` family, ``neutralises`` -- the secure twin):
+    rewrites ``value_expr`` to require ``channel_id_var == broadcaster_var``
+    before the sink treats the caller as authorized."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "identity_match_before_fetch", "transform", _TRANSFORM_ENV,
+            "identity_match_before_fetch.go.j2",
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        render_ctx = dict(ctx)
+        render_ctx["value_expr"] = f"{ctx['channel_id_var']} == {ctx['broadcaster_var']}"
+        result = super().render(render_ctx)
+        return RenderResult(code=result.code, context=render_ctx)
+
+
+class ObjectLookupAuthorizationCheckSink(TemplateModule):
+    """Branches on ``value_expr`` (the ownership decision a transform above
+    published) and either returns canned per-channel analytics or a real
+    HTTP 403 with no data -- does not itself know or care whether an
+    ownership check was actually performed, matching
+    ``WebhookSignatureVerificationSink``'s own sink-is-transform-agnostic
+    convention."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "object_lookup_authorization_check", "sink", _SINK_ENV,
+            "object_lookup_authorization_check.go.j2",
+        )
+
+
 class RenderOnlyComplexity(TemplateModule):
     """Wraps the composed source/transform/sink body as the entire body of
     one ``net/http.HandlerFunc`` -- the Go analogue of every other stack's
@@ -240,15 +324,19 @@ class RenderOnlyComplexity(TemplateModule):
 SOURCES: dict[str, Module] = {
     "read_webhook_signature": ReadWebhookSignatureSource(),
     "read_url_query_param": ReadUrlQueryParamSource(),
+    "read_channel_id_and_broadcaster_header": ReadChannelIdAndBroadcasterHeaderSource(),
 }
 TRANSFORMS: dict[str, Module] = {
     "naive_string_compare": NaiveStringCompareTransform(),
     "constant_time_compare": ConstantTimeCompareTransform(),
+    "no_ownership_check": NoOwnershipCheckTransform(),
+    "identity_match_before_fetch": IdentityMatchBeforeFetchTransform(),
 }
 SINKS: dict[str, Module] = {
     "webhook_signature_verification": WebhookSignatureVerificationSink(),
     "unchecked_url_fetch": UncheckedUrlFetchSink(),
     "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistSink(),
+    "object_lookup_authorization_check": ObjectLookupAuthorizationCheckSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "render_only": RenderOnlyComplexity(),

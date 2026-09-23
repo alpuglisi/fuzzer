@@ -7,3 +7,4 @@
 case_id,url,method,param,location,category,expected_vulnerable,primary_endpoint,primary_role,related_endpoints,flow_variant
 TWCH-0001,/generated/labgen-go-0001,POST,X-Signature-256,header,webhook_signature,true,/generated/labgen-go-0001,sink,,direct
 TWCH-0002,/generated/labgen-go-0003,GET,url,query,ssrf,true,/generated/labgen-go-0003,sink,,direct
+TWCH-0003,/generated/labgen-go-0005,GET,channel_id,query,access_control,true,/generated/labgen-go-0005,sink,,direct

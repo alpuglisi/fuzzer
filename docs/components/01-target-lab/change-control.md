@@ -3547,6 +3547,121 @@ implementation may begin.
   exclusion stated, Tier 1/2 status stated). 3/3 agreement reached by
   incorporating every concrete finding from both reviews without contesting
   any of them; implementation proceeds on this revised entry.
+### CC-LAB-0178 — Twitch's third real page: access-control/IDOR on a channel-analytics lookup, `go_net_http` (2026-09-23)
+
+- Change: category 4's own "coherent page/route set" depth work (per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4 step 1), following
+  the user's explicit "complete the depth work" instruction. Twitch's own
+  functionality/CWE research
+  (`docs/research/site-architecture-survey-functionality-twitch.md`) only
+  shortlisted two CWEs (347, 918), both already built, so a third page
+  needed either fresh CWE research or reusing an already-designed
+  cross-stack mechanism. This entry reuses the latter: the access-control/
+  IDOR (broken object-level authorization) mechanism `CC-LAB-0063` already
+  fully designed in `lab/safety_matrix.yaml` (ops `no_ownership_check`/
+  `identity_match_before_fetch`, sink family `db_row_by_id_lookup`,
+  concern `ownership_check_bypass`) and cataloged with real corpus
+  examples for node/php/python
+  (`docs/research/corpus-examples/access-control/`, CWE-639/862), but
+  **never instantiated as a working lab-generator module for any stack**
+  until this entry — no new safety-matrix entry needed at all.
+  Dispatched through this component's pre-change review gate (accuracy +
+  adequacy passes) before implementation; the adequacy pass's two
+  additions are incorporated: (1) an explicit statement that the fixed
+  demo `X-Broadcaster-Id` header models only the ownership-check-bypass
+  mechanism in isolation, never a real session/auth system; (2) a real
+  cross-branch collision check against every other active category
+  branch's `labels.schema.json`/cell IDs before landing (none found —
+  verified directly, `git show` against
+  `claude/category-{2,3,5}-build-*`/`second-target-cat1-ecommerce`, all
+  four already converged to a shared commit with no reference to
+  `access-control`/`object_lookup`/`LABGEN-GO-000[5-9]` anywhere).
+  - **Real Twitch functionality (grounded, not invented)**: a per-channel
+    analytics lookup (`GET /channels/analytics?channel_id=<id>`) requiring
+    the caller's own channel identity (a fixed demo `X-Broadcaster-Id`
+    header) to match the requested `channel_id` — a textbook OWASP
+    API1:2023 BOLA surface for a public API-edge service exactly like
+    Twitch's, and a believable third page alongside the already-built
+    webhook receiver and clip-thumbnail proxy (not a "loose bag of
+    unrelated cells" per §4 step 1's own bar).
+  - **Vulnerable** (`LABGEN-GO-0005`, `no_ownership_check`): returns canned
+    analytics for whatever `channel_id` is given, ignoring
+    `X-Broadcaster-Id` entirely. **Secure** (`LABGEN-GO-0006`,
+    `identity_match_before_fetch`): requires `channel_id ==
+    X-Broadcaster-Id`; a mismatch returns a real HTTP 403 with no data.
+  - **Module design**: a new source, `read_channel_id_and_broadcaster_header`,
+    mirrors `read_webhook_signature`'s own established two-value-publish
+    convention exactly (`channel_id_var`/`broadcaster_var`, vulnerable-by-
+    default `value_expr="true"`); two new transforms
+    (`no_ownership_check`/`identity_match_before_fetch`) override
+    `value_expr`; one new sink, `object_lookup_authorization_check`,
+    branches on it — following convention 1 (transform-modifies-a-value-
+    feeding-a-shared-sink), the same convention the webhook-signature shape
+    already uses, confirmed by the adequacy review as the right structural
+    fit over forcing a single-value source plus a bolted-on header read.
+  - **A real Go compile gap found and fixed before landing**: the
+    vulnerable twin's transform never references `broadcasterID`, so it
+    would have been a real `go build` "declared and not used" error;
+    fixed with an explicit `_ = broadcasterID` in the shared sink template
+    (used by both twins, harmless on the secure twin where it's already
+    used) — found by rendering and real-`go build`-ing the cell before
+    writing any test, not by a failing test.
+  - **Real, live-boot proof** (`tests/test_labgen_go_live_boot.py`): three
+    assertions against a real `go build`/boot — (a) the vulnerable twin
+    leaks another channel's analytics on a mismatched `channel_id`; (b) the
+    secure twin rejects the same mismatch with a real HTTP 403, no data;
+    (c) the secure twin still serves the legitimate, matching-identity
+    request (proving the fix doesn't break normal use, not just that it
+    blocks the attack).
+  - Ground truth: `TWCH-0003` added to `lab/ground-truth-twitch-clone/`
+    (`vuln_class="access_control"`, `sink_context="object_lookup"` —
+    additive widening of `fuzzlab/labels/schemas/labels.schema.json`,
+    same append-only mechanism used repeatedly this session).
+  - **Not attempted here, recorded not silently skipped**: a real audit
+    rule/oracle confirmation strategy for `access_control` (the differential
+    an attacker-chosen `channel_id` vs. the caller's own identity produces
+    is real and buildable, mirroring `SsrfInBandMarkerStrategy`'s own
+    "does the response differ" shape) — this entry lands the cell +
+    ground truth + live-boot proof, detection capability is separate,
+    sized follow-on work (`requirements.md` §8), matching how CWE-347/918
+    each landed their cells before any detection strategy existed for them.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py`, `__init__.py`, 4 new
+    templates (1 source, 2 transforms, 1 sink)
+  - `lab/manifests/access_control_go_sample.yaml` (new)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended)
+  - `fuzzlab/labels/schemas/labels.schema.json` (additive)
+  - `tests/test_labgen_go_net_http_modules.py`, `_conformance.py`,
+    `test_labgen_go_live_boot.py`, `test_labels_contract_category4.py`,
+    `test_multitarget_category4.py` (updated/new)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-118`, new)
+- Impact (other components / project): contained to `go_net_http` (new
+  source/transform/sink modules, no existing module changed) plus the
+  shared, append-only `labels.schema.json` widening (verified no
+  cross-branch collision). Category 4's own Phase E multitarget test
+  updated to reflect the new, real recall math (Twitch: `tp=1` of 3
+  positives now, not 2) — no other category's own tests reference this
+  stack.
+- Risk (level; mitigation or accepted-risk justification): **low-medium**
+  (new production code in a per-stack emitter, contained blast radius,
+  plus a well-precedented shared-schema widening) — verified by real
+  `go build`/boot/HTTP end to end, `gofmt -l` clean, and the full non-slow
+  suite re-run.
+- Deliverables:
+  - [x] New source + 2 transforms + 1 sink built, registered
+  - [x] Manifest + real live-boot proof (3 assertions)
+  - [x] A real Go compile gap found and fixed before landing
+  - [x] Ground truth extended (`TWCH-0003`) + schema widened
+  - [x] Cross-branch collision check performed and recorded
+  - [x] Category 4's own Phase D/E tests updated to include the new cell
+  - [x] Full non-slow suite + all category-4 real live-boot slow tests
+    re-verified green
+- Effectiveness (assessed 2026-09-23): met — Twitch now has three real,
+  live-boot-proven pages reading as one coherent API-edge app identity;
+  detection-capability depth (not page/route depth) is the honestly
+  recorded remaining gap for this class.
+
 ### CC-LAB-0177 — `run_targets()` gains `oob`/`coverage`/`dbfault` passthrough, closing a real Phase E gap (2026-09-23)
 
 - Change: `fuzzlab/harness/multitarget.py`'s `run_targets()` forwarded

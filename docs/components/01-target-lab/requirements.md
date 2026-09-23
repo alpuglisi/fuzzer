@@ -3807,6 +3807,38 @@ lane) can submit a payload as
   target in a batch is safe: `run_targets()` loops sequentially, never
   concurrently, over `specs`.
 
+- **FR-LAB-118** *(Twitch's third real page: access-control/IDOR;
+  `CC-LAB-0178`, 2026-09-23).* `go_net_http` gains a third shape,
+  `("access_control", "db_row_by_id_lookup")` — a per-channel analytics
+  lookup (`GET /channels/analytics?channel_id=<id>`) requiring the
+  caller's own identity (a fixed demo `X-Broadcaster-Id` header, modeling
+  only the ownership-check-bypass mechanism in isolation, never a real
+  session/auth system) to match the requested `channel_id`. Reuses
+  `lab/safety_matrix.yaml`'s existing `no_ownership_check`/
+  `identity_match_before_fetch` ops verbatim (added by `CC-LAB-0063`) — the
+  first lab-generator instantiation of this mechanism on any stack, a
+  cross-branch collision check performed and recorded finding none.
+  - `fuzzlab.labgen.emitters.go_net_http.GoEmitter` renders it via
+    convention 1 (the same transform-modifies-a-value-feeding-a-fixed-sink
+    shape the webhook-signature shape already uses): a new source
+    (`read_channel_id_and_broadcaster_header`, mirroring
+    `read_webhook_signature`'s two-value-publish convention), two new
+    transforms, one new sink.
+  - Cells `LABGEN-GO-0005` (vulnerable)/`LABGEN-GO-0006` (secure), served
+    at `/generated/labgen-go-0005`/`-0006` per this stack's own
+    cell-ID-derived route convention.
+  - Real live-boot proof (three assertions): the vulnerable twin leaks
+    another channel's analytics on a mismatched `channel_id`; the secure
+    twin rejects the same mismatch with a real HTTP 403; the secure twin
+    still serves the legitimate, matching-identity request.
+  - Ground truth: `TWCH-0003` in `lab/ground-truth-twitch-clone/`
+    (`vuln_class="access_control"`, `sink_context="object_lookup"`,
+    additive schema widening).
+  - **Not itself detection capability**: no audit rule or oracle strategy
+    is added for `access_control` — a real, buildable follow-on (the
+    differential an attacker-chosen `channel_id` vs. the caller's own
+    identity produces), tracked in §8, not attempted here.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.
@@ -3939,6 +3971,15 @@ None (it is the system under test).
   `tests/test_labgen_harder_shapes.py` and `tests/test_labgen_identifier_sqli_assertion.py`.
 
 ## 8. Open questions
+- (`CC-LAB-0178`, 2026-09-23) **No audit rule/oracle strategy exists for
+  `access_control`.** Twitch's `TWCH-0003` (an attacker-chosen `channel_id`
+  vs. the caller's own `X-Broadcaster-Id`) is a real, buildable follow-on:
+  a rule matching a `channel_id`/`resource_id`-shaped param name (mirroring
+  `R-SSRF`'s own `name_regex`-only shape) plus a strategy comparing the
+  response for the point's own identity value vs. a different, adjacent
+  one (a genuinely general differential, not hardcoded to this lab's own
+  response text — the same "does the response actually differ" shape
+  `SsrfInBandMarkerStrategy` already uses). Not attempted in this entry.
 - (`CC-LAB-0139`, 2026-09-23) **`fuzzlab.harness.auto.points_from_ground_truth` has no
   `location="header"` branch.** A ground-truth point with `location="header"` (Huddle
   Hub's `HHUB-0001`, the first such point in this project — see
