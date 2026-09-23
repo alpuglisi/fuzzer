@@ -159,7 +159,7 @@ tracked in the requirements files, not here.
   `generalizes` verdict — the generalization evidence. The live run against an external
   validation lab is on-host; the manifest-generated second target plugs in as a
   `TargetSpec`.
-- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- five emitters (php_current, python_fastapi, php_laravel, node_express, django) built to varying depth: node_express at Tier-A depth, django at Phase-A/foundation depth (category 2's PicTrail pick); ruby_rails (category 1's Shopify pick, docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md) now has its full Phase A-E built and proven for real: Phase A skeleton + live-boot harness (CC-LAB-0071/FR-LAB-65), Phase B's three vulnerability modules -- webhook-signature verification, CWE-915 mass assignment, CWE-502 insecure deserialization (CC-LAB-0072..0075/FR-LAB-66..68) -- Phase C's coherent "ForgeCart" app identity (5 real pages + 5 inert surrounding pages, its own lab/ground-truth-forgecart/ contract, CC-LAB-0080/FR-LAB-84), Phase D's whole-app (all 12 cells, one boot) live-boot conformance plus a real dependency-pinning defect found and fixed along the way (CC-LAB-0081/FR-LAB-85, BUG-0035/PA-0037), and Phase E's real fuzzlab.harness.multitarget.TargetSpec wiring with a real, scored ScoreReport genuinely confirming the app's real XSS page (CC-LAB-0082/FR-LAB-86); Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself done]` (D8, target shape pinned by **D20**/
+- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- seven emitters (php_current, python_fastapi, php_laravel, node_express, django, go_net_http, spring_boot) built to varying depth: node_express at Tier-A depth, django at Phase-A/foundation depth (category 2's PicTrail pick), go_net_http at Phase A + one Phase B increment (category 4's Twitch pick), spring_boot at TrackerNest's full three-cell depth (category 3's Atlassian pick) now also hosting category 4's one ported Netflix cell per the §9.2a consolidation (java_spring_boot itself retired); ruby_rails (category 1's Shopify pick, docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md) now has its full Phase A-E built and proven for real: Phase A skeleton + live-boot harness (CC-LAB-0071/FR-LAB-65), Phase B's three vulnerability modules -- webhook-signature verification, CWE-915 mass assignment, CWE-502 insecure deserialization (CC-LAB-0072..0075/FR-LAB-66..68) -- Phase C's coherent "ForgeCart" app identity (5 real pages + 5 inert surrounding pages, its own lab/ground-truth-forgecart/ contract, CC-LAB-0080/FR-LAB-84), Phase D's whole-app (all 12 cells, one boot) live-boot conformance plus a real dependency-pinning defect found and fixed along the way (CC-LAB-0081/FR-LAB-85, BUG-0035/PA-0037), and Phase E's real fuzzlab.harness.multitarget.TargetSpec wiring with a real, scored ScoreReport genuinely confirming the app's real XSS page (CC-LAB-0082/FR-LAB-86); Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself done]` (D8, target shape pinned by **D20**/
   `CR-LAB-0001`): the "lab as a compiler" — one manifest plus a safety matrix,
   seed, and env-profile generate the app, labels, docs, and oracle tests, with a
   **binary** verdict derived from `(transform, sink context)` (a partially
@@ -333,7 +333,59 @@ tracked in the requirements files, not here.
   app byte-identically (`LAB_PHASE_0_PLAN.md`'s original, literal wording of
   the Phase 0 exit criterion) remains planned in that literal sense — no tool
   in this repo diffs generated source against `puppy-fort-factory/`'s actual
-  file bytes, for either `php_current` or `php_laravel`. **Superseded for the
+  file bytes, for either `php_current` or `php_laravel`. A **fourth stack
+  emitter** (`fuzzlab/labgen/emitters/node_express/`, L-P3.1, Tier-A depth)
+  is built: Express + `mysql2`, the same three value-context shapes
+  `php_current`/`python_fastapi` prove, via its own fully independent
+  module-composition system; a `route`-category accumulator method
+  (`render_route_accumulator`, not part of the base `Emitter` ABC) builds
+  the shared `app.js` route-registration file, fed by one fragment per
+  supported cell sorted by cell ID. A **fifth stack emitter**
+  (`fuzzlab/labgen/emitters/go_net_http/`, category 4 second-target pilot's
+  `CC-LAB-0170`/`FR-LAB-76`, 2026-09-22) is this project's first Go stack —
+  standard-library `net/http` only, Phase A depth (one illustrative
+  shape: an HMAC-signature-verified webhook receiver, CWE-347, reusing
+  `lab/safety_matrix.yaml`'s existing `webhook_signature_verification`
+  family) with a real checked-in skeleton, a real `GoLiveBootHarness`
+  (`fuzzlab/labgen/conformance/go_live_boot.py`, no separate
+  install-dependencies step since `go build` resolves and compiles in one),
+  and Tier 0 (`go vet`/`gofmt -l`)/Tier 3 conformance passing — the Go
+  analogue of `ruby_rails`'s own Phase-A dispatch for category 1. Deferred
+  to Phase B for this stack: a per-run database (this Phase A's one shape
+  is stateless), CWE-918 (SSRF), and the richer Twitch EventSub message-ID/
+  timestamp/replay-window checks. **Phase B's first increment landed**
+  (`CC-LAB-0172`/`FR-LAB-92`): a second shape, `("ssrf",
+  "server_side_http_fetch")` — a clip-thumbnail-fetch proxy, vulnerable
+  (`unchecked_url_fetch`, no validation) vs. secure
+  (`scheme_and_resolved_ip_allowlist`, rejects non-`https` schemes and
+  loopback/private/link-local *resolved* IPs) — reusing the safety
+  matrix's existing family/ops, with a genuinely different module-
+  composition shape from the webhook-signature cell (the manifest op
+  selects a **sink** module directly, since the vulnerable/secure
+  difference is one inseparable validate-then-fetch operation, not a
+  value transform); both sinks use a bounded `http.Client` so neither
+  twin's generated code can hang. Still deferred: the per-run database
+  and the richer EventSub header checks. **The originally-planned sixth
+  stack emitter, `java_spring_boot` (category 4 second-target pilot's
+  `CC-LAB-0171`/`FR-LAB-77`, 2026-09-22), was retired 2026-09-23** per the
+  project owner's §9.2a Java/Spring Boot consolidation decision: rather
+  than maintaining a second, shallower Java/Spring Boot emitter alongside
+  category 3's more mature `spring_boot` package (TrackerNest — SSTI, XXE,
+  and its own insecure-deserialization cell, `CC-LAB-0130`-`0132`), the one
+  Netflix cell (`CC-LAB-0171`'s Jackson-polymorphic-deserialization
+  endpoint, CWE-502) was ported into `spring_boot` and `java_spring_boot`
+  was deleted entirely (`CC-LAB-0173`/`FR-LAB-93`). The port surfaced a
+  real Jackson major-version API break (Spring Boot 4.1.1, `spring_boot`'s
+  pin, resolves Jackson 3's `tools.jackson.databind.*`, not the Jackson 2
+  `com.fasterxml.jackson.databind.*` `java_spring_boot`'s code used) and
+  required extending `SpringBootEmitter`'s dispatch (a new
+  `_SOURCE_OVERRIDE_BY_OP` map, since the ported ops need a different
+  source module than TrackerNest's own ops for the same shape tuple) —
+  see `CC-LAB-0173`'s own change-control entry for the full technical
+  record. Category 3's `spring_boot` package remains this project's one
+  canonical Java/Spring Boot stack going forward; a future category
+  researching a Java/Spring Boot pick reuses it rather than building a
+  third. **Superseded for the
   Layer-A/cutover purpose by D-open-1** (`docs/LAB_IMPLEMENTATION_PLAN.md`
   §4.3.6.7, decided 2026-09-22): the operative exit bar for closing Phase 0 on
   the 16 `PFF-` real-page cases is functional **parity/coverage**, not a

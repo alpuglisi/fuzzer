@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "target": "go_net_http",
+  "points": [
+    {
+      "url": "/generated/labgen-go-0001",
+      "method": "POST",
+      "param": "X-Signature-256",
+      "location": "header",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0003",
+      "method": "GET",
+      "param": "url",
+      "location": "query",
+      "rendering": "server-json"
+    }
+  ]
+}

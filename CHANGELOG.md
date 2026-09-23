@@ -4,6 +4,252 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (cross-branch bookkeeping fix, by the category 1 pilot session)
+- Docs/FUZZ: fixed a real cross-branch ID collision found during a
+  cross-branch review — this branch's freshly-pushed `CC-FUZZ-0025`/
+  `FR-FUZZ-12` (the honest header-point skip-reason fix below) had been
+  independently claimed months earlier by category 1 for its own,
+  unrelated `RegexDosStrategy` M1 timing-differential ReDoS oracle work
+  — already baked into the shared cross-category tracker doc synced
+  across all five branches, making category 1's claim materially more
+  expensive to renumber. Renumbered this branch's usages to
+  `CC-FUZZ-0026`/`FR-FUZZ-13` via exact-token replacement across
+  `requirements.md`/`change-control.md`/`CHANGELOG.md`/
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`/
+  `fuzzlab/harness/auto.py`/`tests/test_auto.py`. Full non-slow test
+  suite re-run confirms no regression (1847 passed / 8 skipped, identical
+  to this branch's own pre-fix baseline).
+
+## 2026-09-23 (FUZZ: honest header-point skip reason, found via category 4)
+- Fuzzing harness: `fuzzlab.harness.auto.points_from_ground_truth` was
+  mislabeling a header-carried ground-truth point (`location="header"`) as
+  a client-only/DOM point needing a browser — factually wrong; the real gap
+  is that no header-injection point type or sender exists yet. Found while
+  wiring category 4's Twitch app (its webhook-signature case is the
+  project's first header-located ground-truth point) into Phase E. Fixed
+  with its own accurate skip reason; no audited-point behavior changed.
+  `CC-FUZZ-0026`/`FR-FUZZ-13`.
+
+## 2026-09-23 (category 4, Phase E multitarget wiring)
+- Lab: wired both of category 4's apps into `fuzzlab.harness.multitarget` for
+  real — `TargetSpec`s pointing at real live-booted instances (Go/Twitch,
+  Spring Boot/Netflix), run through `run_targets`/`transfer_summary` in one
+  call with the project's existing real HTTP `RequestsProbeSender`. Detection
+  is a documented, structural zero (no audit rule yet for
+  webhook_signature/ssrf/insecure_deserialization; the header-located and
+  whole-body-JSON ground-truth points don't fit the generic point/sender
+  model) — recorded as open follow-on work, not silently accepted, matching
+  category 1's own precedent for its own new vuln classes. Two additive
+  `base_url` accessors added to the Go/Spring Boot live-boot harnesses.
+  `CC-LAB-0176`/`FR-LAB-99`.
+
+## 2026-09-23 (category 4, Phase D Tier 1/2 conformance)
+- Lab: real, executed Tier 1/2 conformance proof (`fuzzlab.labgen.conformance.tier1`/
+  `tier2`, reused unchanged) for two of category 4's three cells — SSRF
+  (`LABGEN-GO-0003`/`0004`, `go_net_http`) and Jackson deserialization
+  (`LABGEN-JV-0001`/`0002`, `spring_boot`) — via small local adapter classes over
+  Phase A/B's own live-boot harnesses, no harness code changed. The
+  webhook-signature cell (CWE-347) is deliberately not wired in: both twins are
+  functionally identical for any single request (they diverge only in
+  comparison timing), so Tier 1/2's marker-differential model cannot confirm
+  it — recorded as an open question, not silently skipped. A real control-value
+  design mistake (a control that could itself produce the evidence marker) was
+  found and fixed before landing. `CC-LAB-0175`/`FR-LAB-98` (renumbered from
+  the dispatch's own `FR-LAB-81` after merging the cross-branch collision fix
+  below, which had already claimed up through `FR-LAB-97`).
+
+## 2026-09-23 (cross-branch bookkeeping fix, by the category 1 pilot session)
+- Docs/LAB: fixed two real cross-branch `FR-LAB` ID collisions found during
+  a cross-branch review — this branch's `FR-LAB-78`/`FR-LAB-79`
+  (`go_net_http` Phase B SSRF; §9.2a Java/Spring Boot consolidation) had
+  been independently claimed by category 5 for its own, unrelated
+  `open_redirect`/ground-truth entries; this branch's `FR-LAB-80` (Phase C
+  ground truth for Netflix/Twitch) had been independently claimed by
+  category 3 for its `spring_boot` insecure-deserialization cell. Since
+  this branch's usages had fewer cross-file references to update,
+  renumbered them: `FR-LAB-78`→`FR-LAB-92`, `FR-LAB-79`→`FR-LAB-93`,
+  `FR-LAB-80`→`FR-LAB-97`, via exact-token replacement across
+  `requirements.md`/`change-control.md`/`CHANGELOG.md`/
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`/`docs/ARCHITECTURE.md`.
+  Full non-slow test suite re-run confirms no regression (1846 passed / 8
+  skipped, identical to this branch's own pre-fix baseline).
+
+## 2026-09-23 (category 4, Phase C ground truth)
+- Lab: added real, out-of-band ground truth for category 4's Netflix and
+  Twitch apps (`lab/ground-truth-netflix-clone/`, `lab/ground-truth-twitch-clone/`,
+  3 cases total) and additively widened `fuzzlab/labels/schemas/labels.schema.json`
+  (`webhook_signature`/`ssrf`/`insecure_deserialization` vuln classes,
+  `webhook`/`network`/`deserialization` sink contexts) so those classes can be
+  recorded — mirroring category 5's own already-reviewed widening precedent.
+  Dispatched through the pre-change review gate (accuracy + adequacy passes)
+  before implementation. Two judgment calls recorded explicitly (a
+  whole-body-JSON `param` convention; a header-carried-value `param`
+  convention). Explicitly flags that Phase C's "coherent page/route set"
+  design step remains separate, larger, not-yet-started work for both apps.
+  `CC-LAB-0174`/`FR-LAB-97`. See `docs/components/01-target-lab/change-control.md`.
+
+## 2026-09-23 (cross-category doc sync, round 2)
+- Docs (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, all five second-target
+  category branches): re-synced §9.2 (stack-reuse ledger), §9.2a (Java/Spring
+  Boot consolidation), §9.3 (coordination contract), and §9.4 (category
+  tracker) to a single canonical, byte-identical block (SHA256-verified)
+  after reviewing and correcting category 4's Go/Twitch Phase B increment and
+  the completed Java/Spring Boot port, and category 5's CSV-formula-injection
+  shape (which had a fresh `FR-LAB-97`/`81` collision with category 3,
+  renumbered to `FR-LAB-90`/`91`). §9.2a's "Decided" text is updated from
+  pending/future tense to reflect the consolidation is now **done**:
+  category 4's `java_spring_boot` package is deleted, Netflix's cell is
+  ported into `spring_boot` as `CC-LAB-0173`, and category 5 does not build
+  a competing package. Documentation-only change; each branch's own full
+  test suite was re-run after the splice to confirm no regression (cat1:
+  1891 passed/8 skipped; cat2: 1783 passed/8 skipped; cat3: 1821 passed/8
+  skipped; cat4: 1843 passed/8 skipped; cat5: 1798 passed/8 skipped — all
+  identical to each branch's own pre-sync baseline).
+
+## 2026-09-23 (category 4 pilot, Phase B first increment — Go/SSRF)
+- LAB: `go_net_http` Phase B, first increment (`CC-LAB-0172`/`FR-LAB-92` —
+  numbered against this category's `0170`-`0209` block per the
+  cross-branch collision fix recorded immediately below; this increment
+  was built before that fix landed on this branch, so it originally used
+  now-superseded `CC-LAB-0092`/`FR-LAB-66`, corrected here on merge) — a
+  second illustrative shape, CWE-918/SSRF (a clip-thumbnail-fetch proxy:
+  `unchecked_url_fetch` vulnerable vs. `scheme_and_resolved_ip_allowlist`
+  secure), reusing `lab/safety_matrix.yaml`'s existing
+  `server_side_http_fetch` family/ops verbatim. Reviewed pre-implementation
+  by 2 independent agents; both rounds' findings — a corrected `FR-LAB-61`
+  precedent (mint a new FR number rather than widen the Phase A entry in
+  place), a corrected live-boot test plan (isolate the resolved-IP-
+  allowlist check from the scheme check using both a plain-HTTP and a
+  self-signed-TLS HTTPS loopback listener, since a single plain-HTTP
+  listener would only prove the scheme check fires), a bounded-
+  `http.Client` deliverable, and an explicit outbound-fetch-containment
+  risk note — are incorporated into the landed entry. A genuine
+  module-composition divergence from the webhook-signature shape: the
+  vulnerable/secure difference lives in which **sink** module renders
+  (validation-then-fetch is one inseparable operation), not a
+  transform-then-fixed-sink split — which in turn required moving
+  `go_net_http`'s import-list bookkeeping from per-shape to per-module
+  after a shape-wide list failed a real `go build` the moment this
+  shape's two sinks turned out to need different standard-library
+  packages (found and fixed during implementation). Tier 0 (`go vet`/
+  `gofmt -l`, now exercised over both shapes together) and Tier 3 both
+  pass; the real live-boot test proves three isolated cases against two
+  throwaway local listeners (never a real external host). Per-run
+  database and the richer Twitch EventSub header/replay-window checks
+  remain explicitly deferred, not added by this increment.
+
+## 2026-09-22 (cross-branch review, by the category 1 pilot session)
+- Docs/LAB: reviewed this branch's code and tests (no code defects found —
+  the Go webhook-signature and Java Jackson-deserialization vulnerable/
+  secure pairs are correct, and both real live-boot tests pass in this
+  sandbox). Found and fixed a real cross-branch bookkeeping-ID collision:
+  this branch's `go_net_http`/`java_spring_boot` Phase A work had claimed
+  `CC-LAB-0090`/`0091` and `FR-LAB-64`/`65`, the same IDs independently
+  claimed by categories 2, 3, and 5's own Phase A work on their own
+  branches (all four branches picked "next free after category 1's
+  0070-0089 block" without seeing each other). Renumbered this branch's
+  IDs to `CC-LAB-0170`/`0171` and `FR-LAB-76`/`77` (category 4's assigned
+  block, `0170`-`0209`) across every file referencing them (code
+  docstrings, tests, manifests, `lab/safety_matrix.yaml`, and this
+  branch's own bookkeeping docs) via exact-token replacement; full suite
+  reverified green (1808 passed, 8 skipped) after the rename. See
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s category-4 tracker
+  row and this component's `CC-LAB-0170`/`0171` entries for the corrected
+  IDs going forward.
+
+## 2026-09-22 (category 4 pilot, Phase A build — Netflix/Java)
+- LAB: `java_spring_boot` Phase A — this project's first JVM/Java
+  target-lab stack (`CC-LAB-0171`/`FR-LAB-77`). A real Maven/Spring Boot
+  3.4.1 skeleton (`spring-boot-starter-web` only, no GraphQL/DGS
+  dependency — see the entry's explicit scope call), a `JavaEmitter`
+  rendering one illustrative shape (a playback-resume endpoint, CWE-502:
+  Jackson's `activateDefaultTyping()` vs. a fixed DTO class), and
+  `JavaLiveBootHarness` (real `mvn package`, real boot, real HTTP) —
+  reviewed pre-implementation by 2 independent agents per the pre-change
+  review gate. Architecturally distinct from every other routed emitter:
+  Spring Boot's component scanning needs no route accumulator at all.
+  Adds two new ops (`jackson_default_typing_deserialize`/
+  `jackson_typed_allowlist_deserialize`) to `lab/safety_matrix.yaml`'s
+  existing `object_deserialization` family. One design bug caught and
+  fixed during implementation (both twins would have mapped to the same
+  literal route path, ambiguous at Spring Boot boot — fixed by deriving
+  the served path from `cell_id`, matching `go_net_http`'s own
+  convention). Tier 0 (`mvn -q compile`) and Tier 3 both pass; the real
+  live-boot test proves an observable deserialization code-path
+  differential end to end. `docs/ARCHITECTURE.md` and
+  `docs/components/01-target-lab/requirements.md` updated. Full non-slow
+  suite re-run: no regression (same 15 pre-existing `gitleaks`-related
+  failures as the prior entry). **Category 4 pilot's both Phase-A builds
+  (Twitch/Go, Netflix/Java) are now done**; Phase B (richer stack-idiomatic
+  modules, GraphQL/DGS federation, per-run databases) and Phases C-E
+  (corpus-grounded pages, conformance, `multitarget.py` wiring) remain, per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4/§9.5.
+
+## 2026-09-22 (category 4 pilot, Phase A build)
+- LAB: `go_net_http` Phase A — this project's first Go target-lab stack
+  (`CC-LAB-0170`/`FR-LAB-76`). A real, checked-in `net/http`-only skeleton,
+  a `GoEmitter` rendering one illustrative shape (an EventSub-webhook-
+  receiver-shaped handler, CWE-347: Go's `==` vs. `crypto/hmac.Equal`),
+  and `GoLiveBootHarness` (real `go build`, real boot, real HTTP) —
+  reviewed pre-implementation by 2 independent agents per the component's
+  pre-change review gate, both rounds' findings incorporated before code
+  landed. Passed the pre-change review with 3/3 agreement, then two real
+  defects were caught and fixed during implementation itself (a
+  capability-probe/boot-subprocess environment bug that made
+  `go_boot_available()` under-report, and a route-accumulator bug that
+  double-registered a vulnerable/secure twin pair at the same path) —
+  see `CC-LAB-0170`'s Effectiveness note. Reuses `lab/safety_matrix.yaml`'s
+  existing `webhook_signature_verification` family/ops verbatim (no new
+  entry needed — a scope reduction found and corrected during
+  implementation). Tier 0 (`go vet`/`gofmt -l`) and Tier 3
+  (regenerate-and-diff) both pass; the real live-boot test
+  (`tests/test_labgen_go_live_boot.py`) proves a real payload differential
+  end to end. `docs/ARCHITECTURE.md` and
+  `docs/components/01-target-lab/requirements.md` updated; also recorded
+  `node_express` in `docs/ARCHITECTURE.md`, found undocumented there
+  during this pass. Full non-slow test suite re-run: no regression (15
+  pre-existing failures, all a missing `gitleaks` executable on this
+  sandbox, unrelated to this change). Netflix/Java-Spring-Boot Phase A
+  (this category's other pick, CWE-502) is not yet built — tracked as
+  this pilot's next step in `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
+  §9.4.
+
+## 2026-09-22 (category 4 pilot)
+- Docs: Category 4 (Media/streaming/content platforms) of
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s 12-app expansion moved
+  from "Not started" to **Piloting** on `claude/category-4-build-t9uz3y`.
+  Applied §9.1's site-pair/stack-selection methodology in full (recorded in
+  §9.4's tracker row): excluded Amazon Prime Video (no confirmed single
+  app-language, AWS-service-oriented) and Disney+ (per the survey's own
+  "partially unconfirmed at the application-code level" note); grouped the
+  remaining three sites by (language, paradigm) — {Netflix, Spotify} both
+  Java/Spring-Boot microservices vs. {Twitch} Go — and picked the two most
+  architecturally distinct groups, then Netflix over Spotify within the
+  Java group for its documented Federated-GraphQL-gateway/DGS pattern.
+  Added `docs/research/site-architecture-survey-functionality-netflix.md`
+  and `-twitch.md`: real, cited functionality research (closing the same
+  per-site feature-research gap §0a item 2 found for category 1) plus
+  stack-specific CWE shortlists cross-checked against the existing
+  ~140-CWE corpus footprint and CWE Top 25. Picks for this pilot's Phase A:
+  **CWE-502** (Jackson polymorphic/default-typing deserialization in a
+  Netflix-DGS-style GraphQL mutation resolver, Java/Spring Boot — a new
+  stack instance of the existing `insecure-deserialization` corpus class)
+  and **CWE-347** (naive/skipped HMAC comparison in a Twitch-EventSub-style
+  webhook receiver, Go — a new stack instance of the existing
+  `webhook-signature` corpus class, grounded in Twitch's own documented
+  HMAC-SHA256 header/body signature scheme). Both classes are ones
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4 already names as
+  project-preferred for expanding real coverage; CWE-862 (GraphQL
+  field-authorization) and CWE-918 (SSRF) are recorded as Phase B
+  follow-ups for the respective stacks, not declined. Reserved
+  `CC-LAB-0170`-`0129` for this category's build (two brand-new emitters —
+  Java/Spring Boot and Go — a larger block than a single-stack category,
+  sized comparably to category 1's Ruby-on-Rails-only reservation). Updated
+  §9.2's stack-reuse ledger with the Ruby-on-Rails row category 1 had left
+  unrecorded there, plus new Java/Spring-Boot and Go rows for this
+  category, so a later category cannot silently duplicate either build.
+  Next: Phase A (skeleton + live-boot harness) for each stack.
+
 Format per entry: `- <area>: <what changed> — <why>` (commit `<hash>`).
 
 **Every change updates both logs:** this high-level CHANGELOG *and* the

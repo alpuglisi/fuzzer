@@ -1,7 +1,7 @@
 # Fuzzing Harness and Oracle — Requirement Specification
 
 Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5/M8; M10 grey-box wiring layer built, live sources on-host); harness generalization ongoing; greybox-run consumes mutation-engine variants (opt-in); coverage-frontier growth emitted to metric_series]`
-· Last updated: 2026-09-22 · see CC-FUZZ-0024
+· Last updated: 2026-09-23 · see CC-FUZZ-0026
 
 Related: `ARCHITECTURE.md` #7; `DECISIONS_AND_ROADMAP.md` (D1, D5, D7, Phase 2/3,
 Phase 8); `./change-control.md`.
@@ -203,6 +203,19 @@ rewards) derives from it.
     (`tests/test_labgen_redos.py`), not re-proven here. Not yet run against
     a live external target or wired into `fuzzlab/harness/multitarget.py`
     (both out of this requirement's scope).
+- **FR-FUZZ-13** *(`CC-FUZZ-0026`, 2026-09-23).* A ground-truth point whose
+  tainted value is carried in a request **header**
+  (`Case.location`/`InjectionPoint`'s `location="header"`) is honestly,
+  distinctly reported as not-yet-auditable — never conflated with the
+  client-only/DOM skip reason. `fuzzlab.harness.auto.points_from_ground_truth`
+  gives it its own skip reason naming the real gap (no header-injection
+  point type or header-capable probe sender exists yet), rather than the
+  factually wrong "needs browser execution" DOM reason. **Not itself a new
+  capability**: no header point is audited by this change, only correctly
+  labeled as unauditable. Building real header-injection support (a
+  header-aware `InjectionPoint` shape, plus a header-capable sender
+  alongside `RequestsProbeSender`/`SeamProbeSender`) is real, sized
+  follow-on work this requirement does not cover.
 
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "target": "go_net_http",
+  "cases": [
+    {
+      "case_id": "TWCH-0001",
+      "url": "/generated/labgen-go-0001",
+      "method": "POST",
+      "param": "X-Signature-256",
+      "location": "header",
+      "vuln_class": "webhook_signature",
+      "sink_context": "webhook",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "Inbound EventSub-style webhook signature compared with a naive, non-constant-time string comparison (CWE-347) -- modeled on Twitch's real EventSub webhook receiver (docs/research/site-architecture-survey-functionality-twitch.md). The tainted value is carried in a request header, not a query/body field, so `param` is set to the literal header name `X-Signature-256` -- the same convention a query-param case uses the literal query-string key, recorded here as a deliberate judgment call (CC-LAB-0174) since this is this project's first header-carried case. `LABGEN-GO-0001` in lab/manifests/webhook_signature_go_sample.yaml, served at `/generated/labgen-go-0001` (go_net_http derives the served route from cell_id, not the manifest's own `route:` field, to keep vulnerable/secure twins from colliding) -- never a PFF-* case."
+    },
+    {
+      "case_id": "TWCH-0002",
+      "url": "/generated/labgen-go-0003",
+      "method": "GET",
+      "param": "url",
+      "location": "query",
+      "vuln_class": "ssrf",
+      "sink_context": "network",
+      "expected_vulnerable": true,
+      "rendering": "server-json",
+      "notes": "url query param fetched server-side with no scheme or resolved-IP allowlist check (CWE-918) -- modeled on Twitch's real clip-thumbnail-fetch proxy (docs/research/site-architecture-survey-functionality-twitch.md). `LABGEN-GO-0003` in lab/manifests/ssrf_go_sample.yaml, served at `/generated/labgen-go-0003` (same cell_id-derived-route convention as TWCH-0001) -- never a PFF-* case."
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+        try {
+            tools.jackson.databind.json.JsonMapper mapper = tools.jackson.databind.json.JsonMapper.builder()
+                    .activateDefaultTyping(
+                        new tools.jackson.databind.jsontype.PolymorphicTypeValidator.Base() {
+                            @Override
+                            public tools.jackson.databind.jsontype.PolymorphicTypeValidator.Validity validateSubClassName(
+                                    tools.jackson.databind.DatabindContext ctxt,
+                                    tools.jackson.databind.JavaType baseType,
+                                    String subClassName) {
+                                return tools.jackson.databind.jsontype.PolymorphicTypeValidator.Validity.ALLOWED;
+                            }
+                        },
+                        tools.jackson.databind.DefaultTyping.NON_FINAL)
+                    .build();
+            Object event = mapper.readValue({{ value_expr }}, Object.class);
+            return org.springframework.http.ResponseEntity.ok("{\"status\":\"ok\"}");
+        } catch (Exception e) {
+            return org.springframework.http.ResponseEntity.status(400)
+                .body("Playback event error: " + e.getMessage());
+        }

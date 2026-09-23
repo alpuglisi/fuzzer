@@ -1,0 +1,9 @@
+client := &http.Client{Timeout: 5 * time.Second}
+resp, err := client.Get({{ var_name }})
+if err != nil {
+	w.WriteHeader(http.StatusBadGateway)
+	return
+}
+defer resp.Body.Close()
+w.WriteHeader(http.StatusOK)
+io.Copy(w, resp.Body)

@@ -1,7 +1,7 @@
 # Target Lab and Ground Truth — Requirement Specification
 
 Component code: **LAB** · Status: `[built; generator is the single source of the PHP lab since L-P3.3c-CUT (2026-09-22) -- the hand-built app is retired]`
-· Last updated: 2026-09-22
+· Last updated: 2026-09-23
 
 Related: `ARCHITECTURE.md` #1; `DECISIONS_AND_ROADMAP.md` (D7, D8, D9, D10);
 `./change-control.md`.
@@ -2991,6 +2991,393 @@ lane) can submit a payload as
   category 3's own Phase 10 `T10.6`-style proof, matching category 1's
   own established combined-run precedent.
 
+- **FR-LAB-76** *(`go_net_http` Phase A: this project's first Go target-lab
+  stack; `CC-LAB-0170`, 2026-09-22, category 4 pilot — Media/streaming,
+  Twitch pick, `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4/§9.5).*
+  The toolkit supports a Go/`net/http` target stack at Phase-A depth: one
+  real, live-bootable illustrative shape, matching every other stack's own
+  Phase-A bar (`ruby_rails`'s `FR-LAB-77` being the immediately preceding
+  precedent for this exact scope level).
+  - `fuzzlab.labgen.emitters.go_net_http.GoEmitter` renders exactly one
+    shape — `("webhook_signature", "webhook_signature_verification")`, an
+    EventSub-webhook-receiver-shaped handler comparing two HMAC-SHA256
+    digests either with Go's `==` (vulnerable — CWE-347, data-dependent-time
+    comparison) or `crypto/hmac.Equal` (secure — constant-time). Reuses
+    `lab/safety_matrix.yaml`'s existing `webhook_signature_verification`
+    sink family and its existing `naive_string_compare`/
+    `constant_time_compare` ops verbatim (added by `CC-LAB-0063` for the
+    corpus-examples research) — no new safety-matrix entry was needed.
+  - A real, checked-in skeleton (`fuzzlab/labgen/emitters/go_net_http/
+    stack/skeleton/`: a bare `go mod init` plus a hand-written `main.go`
+    wiring `net/http.NewServeMux()`) and a real live-boot harness
+    (`fuzzlab.labgen.conformance.go_live_boot.GoLiveBootHarness`) that
+    assembles, runs a real `go build`, boots the compiled binary, and
+    serves real HTTP requests — proven end to end by
+    `tests/test_labgen_go_live_boot.py` (real signature accepted/rejected
+    for both twins, `@pytest.mark.slow`, skip-guarded on
+    `go_boot_available()`).
+  - `go_boot_available()`'s network probe (`_go_module_proxy_probe`) runs a
+    real, bounded `go list -m -versions` against the real Go module proxy —
+    built correctly the first time per `PA-0035`, not a bare socket check
+    (`BUG-0033`'s exact mistake, avoided here for a new package manager).
+  - Tier 0 (`go vet`/`gofmt -l`, `tests/test_labgen_go_net_http.py`) and
+    Tier 3 (whole-manifest regenerate-and-diff,
+    `tests/test_labgen_go_net_http_conformance.py`) both pass for the one
+    illustrative cell pair (`lab/manifests/webhook_signature_go_sample.yaml`).
+  - **Explicit scope call: no per-run database in this Phase A.** The one
+    illustrative shape is stateless (no read/write to persisted data),
+    unlike every other stack's own Phase-A illustrative shape — deferred to
+    Phase B, when a data-touching shape (the CWE-918 SSRF pick recorded in
+    `docs/research/site-architecture-survey-functionality-twitch.md` §2) is
+    added for this stack.
+  - **Deliberately out of scope here** (Phase B, per the plan's own
+    "richer stack-idiomatic modules are a separate, later lane" split): the
+    real Twitch EventSub message-ID/timestamp concatenation and 10-minute
+    replay-window check, CWE-918 (SSRF), and any SQLi/XSS shape for this
+    stack (which would be the first shape needing the per-run database
+    above).
+
+- **FR-LAB-77** — **SUPERSEDED (2026-09-23, `CC-LAB-0173`, marked in
+  place per this project's living-doc convention — history stays below
+  for context, not deleted).** The `java_spring_boot` package this
+  requirement described is retired; its one capability (a JVM/Java target
+  stack supporting the Netflix CWE-502 Jackson-deserialization cell) is
+  now met by `spring_boot` — see `FR-LAB-93`. *(`java_spring_boot` Phase A:
+  this project's first JVM/Java
+  target-lab stack; `CC-LAB-0171`, 2026-09-22, category 4 pilot — Media/
+  streaming, Netflix pick, `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
+  §9.4/§9.5).* The toolkit supports a Spring Boot 3.4.1/Spring MVC target
+  stack at Phase-A depth: one real, live-bootable illustrative shape,
+  matching every other stack's own Phase-A bar (`go_net_http`'s
+  `FR-LAB-76` being the immediately preceding precedent for this exact
+  scope level, within the same category-4 pilot).
+  - `fuzzlab.labgen.emitters.java_spring_boot.JavaEmitter` renders exactly
+    one shape — `("insecure_deserialization", "object_deserialization")`,
+    a `/api/playback/resume`-shaped `@RestController`/`@PostMapping`
+    handler that Jackson-deserializes its request body either
+    polymorphically (vulnerable — CWE-502, `activateDefaultTyping()`
+    lets an attacker-supplied type hint in the JSON pick the concrete
+    class Jackson instantiates) or into a single, fixed, concrete DTO
+    class (secure — no polymorphism). Reuses `lab/safety_matrix.yaml`'s
+    existing `object_deserialization` sink family (added by `CC-LAB-0063`)
+    but adds two new ops to it — `jackson_default_typing_deserialize`/
+    `jackson_typed_allowlist_deserialize` — since none of that family's
+    existing node/php/python ops names this Java-specific idiom.
+  - **No route accumulator, a genuine architectural difference from every
+    other routed emitter (`node_express`/`ruby_rails`/`go_net_http`) —
+    Spring Boot's component scanning auto-discovers every generated
+    `@RestController` class on the classpath at boot**, rooted at
+    `Application.java`'s package (`com.fuzzlab.lab`); every generated cell
+    controller is hardcoded to the fixed subpackage
+    `com.fuzzlab.lab.cells`, guaranteed by construction, never derived
+    from anything manifest-supplied (`CC-LAB-0171`'s own adequacy-review
+    correction made this package/file-layout guarantee explicit).
+  - A real, checked-in skeleton (`fuzzlab/labgen/emitters/java_spring_boot/
+    stack/skeleton/`: a `pom.xml` inheriting `spring-boot-starter-parent`
+    3.4.1 with `spring-boot-starter-web`, resolved for real against Maven
+    Central) and a real live-boot harness
+    (`fuzzlab.labgen.conformance.java_live_boot.JavaLiveBootHarness`) that
+    assembles, runs a real `mvn package`, boots the packaged jar, and
+    serves real HTTP requests — proven end to end by
+    `tests/test_labgen_java_live_boot.py` (a real, observable
+    deserialization code-path differential: the vulnerable twin accepts a
+    caller-chosen type hint the secure twin rejects, `@pytest.mark.slow`,
+    skip-guarded on `java_boot_available()`). This is a **code-path**
+    proof, not a working `ysoserial`-style RCE gadget chain (neither twin
+    has one on its classpath) and not a timing-side-channel proof (CWE-502
+    has no timing property to prove) — stated explicitly per this
+    project's own honesty convention for non-exploit-chain illustrative
+    cells.
+  - `java_boot_available()`'s network probe (`_maven_central_probe`) runs
+    a real, bounded `mvn dependency:go-offline` against the checked-in
+    skeleton's own `pom.xml` — built correctly per `PA-0035` from the
+    first commit (a raw, unauthenticated `curl` against Maven Central
+    directly returned a real `429` during this dispatch's own research;
+    the probe never uses anything but the real `mvn` client, which
+    resolves the same dependency successfully), and every Maven/JVM
+    subprocess call inherits the full process environment rather than a
+    hand-picked subset (the exact bug `CC-LAB-0170`'s own `go` probe had
+    and fixed, applied correctly here from the start).
+  - Tier 0 (`mvn -q compile`, `tests/test_labgen_java_spring_boot.py` —
+    necessarily network-coupled for this stack, since compiling against
+    Spring Boot needs the same resolved dependencies the live-boot harness
+    needs; acknowledged, not silently assumed) and Tier 3 (whole-manifest
+    regenerate-and-diff, `tests/test_labgen_java_spring_boot_conformance.py`)
+    both pass for the one illustrative cell pair
+    (`lab/manifests/insecure_deserialization_java_sample.yaml`).
+  - **Explicit scope call: no per-run database in this Phase A.** Like
+    `go_net_http`'s Phase A, the one illustrative shape is stateless (no
+    read/write to persisted data) — deferred to Phase B, when a
+    data-touching shape (the CWE-862 GraphQL-field-authorization pick, or
+    the eventual DGS/GraphQL-federation layer itself) is added for this
+    stack.
+  - **Deliberately out of scope here** (Phase B): the GraphQL/DGS
+    federation layer (`spring-boot-starter-graphql`, `@DgsComponent`/
+    `@DgsData` resolvers, a federation directive set) and CWE-862
+    (GraphQL field authorization), per
+    `docs/research/site-architecture-survey-functionality-netflix.md` §2's
+    own Phase B note.
+
+- **FR-LAB-92** *(`go_net_http` Phase B, first increment: a second
+  illustrative shape, CWE-918/SSRF; `CC-LAB-0172`, 2026-09-23, category 4
+  pilot's Twitch pick).* Given its own new FR number rather than widening
+  `FR-LAB-76` in place — a distinct vuln class with a genuinely different
+  module-composition shape deserves independent discoverability, per this
+  entry's own change-control review (which also corrected a backwards
+  precedent citation for the opposite choice; see `CC-LAB-0172`).
+  - `fuzzlab.labgen.emitters.go_net_http.GoEmitter` renders a second
+    shape — `("ssrf", "server_side_http_fetch")`, a clip-thumbnail-fetch
+    proxy handler (`GET /api/clips/thumbnail?url=...`) that server-side-
+    fetches the caller-supplied URL either with no validation at all
+    (vulnerable — CWE-918, `unchecked_url_fetch`) or after rejecting any
+    scheme but `https` and rejecting a resolved IP that is loopback/
+    private/link-local/unspecified (secure —
+    `scheme_and_resolved_ip_allowlist`, checked against the *resolved*
+    address, closing the DNS-rebinding gap a hostname-string-only
+    allowlist would leave open). Reuses `lab/safety_matrix.yaml`'s
+    existing `server_side_http_fetch` family/ops verbatim (added by
+    `CC-LAB-0063`) — no new safety-matrix entry needed.
+  - **A deliberate module-composition divergence from the webhook-
+    signature shape:** the vulnerable/secure difference here lives
+    entirely in *which sink module renders* (the validation-then-fetch
+    logic is one inseparable operation, not a value transform composed
+    before a shared sink) — the manifest's one op names a **sink**
+    directly. `GoEmitter`'s per-module import table
+    (`_MODULE_IMPORTS`) is keyed per-module, not per-shape, for exactly
+    this reason: the two sinks this shape can render need different Go
+    standard-library packages (`unchecked_url_fetch` needs no `net`/
+    `net/url`; `scheme_and_resolved_ip_allowlist` needs both), found and
+    fixed during implementation after a shape-wide fixed import list
+    failed `go build`/`gofmt` with an "imported and not used" error.
+  - Both sinks use a bounded `http.Client{Timeout: 5 * time.Second}`,
+    never a bare `http.Get` — this shape's entire point is a real
+    outbound call, so an unbounded client would let either twin's
+    *generated code* hang against a slow/unresponsive target, not just
+    this dispatch's own test harness.
+  - Proven end to end by
+    `tests/test_labgen_go_live_boot.py`'s real live-boot test: two
+    throwaway loopback listeners this test process itself starts (a
+    plain-HTTP one and a self-signed-TLS HTTPS one) isolate the secure
+    twin's scheme-check rejection from its resolved-IP-allowlist
+    rejection specifically — a corrected test design after the first
+    draft's plan (a single plain-HTTP listener) would have proven only
+    the scheme check, not the IP-allowlist logic the shape's own name
+    promises (`CC-LAB-0172`'s own adequacy-review correction). Neither
+    listener is a real external or production host, per `CLAUDE.md`'s
+    lab-only/authorized-only discipline; a "secure twin successfully
+    fetches some real allowed external target" positive case is
+    explicitly deferred (no real target allowlist exists yet for this
+    stack), not silently omitted.
+  - Tier 0 (`go vet`/`gofmt -l`, now exercised over both shapes together)
+    and Tier 3 both pass for the combined cell set
+    (`lab/manifests/ssrf_go_sample.yaml`, alongside the existing
+    `webhook_signature_go_sample.yaml`).
+  - **Per-run database: still deferred, not added by this increment.**
+    This shape doesn't read/write persisted data either — `modernc.org/
+    sqlite` (a pure-Go, cgo-free driver) was verified to resolve cleanly
+    through this sandbox's proxy during this dispatch's own research, for
+    whichever future increment adds a data-touching shape.
+  - **Deliberately out of scope here:** the richer real Twitch EventSub
+    message-ID/timestamp-concatenation/replay-window check for the
+    existing webhook-signature cell (refines an already-proven shape
+    rather than adding vuln-class breadth, which this project ranks
+    lower) — deferred to a later increment, not dropped.
+
+- **FR-LAB-93** *(§9.2a Java/Spring Boot consolidation: Netflix's cell now
+  lives in `spring_boot`; `CC-LAB-0173`, 2026-09-23).* Supersedes
+  `FR-LAB-77`'s capability without restating it: the CWE-502 Jackson
+  polymorphic-deserialization cell (playback-resume shape) is ported out
+  of the now-retired `java_spring_boot` package into category 3's
+  `spring_boot` package (TrackerNest), as `(vuln_class=
+  "insecure_deserialization", sink_context.family="object_deserialization")`
+  with a new op pair (`jackson_default_typing_deserialize`/
+  `jackson_typed_allowlist_deserialize`) that already existed in
+  `lab/safety_matrix.yaml` from the original entry — no new safety-matrix
+  work needed.
+  - **Real Jackson major-version API break found and resolved.**
+    `spring_boot`'s skeleton pins `spring-boot-starter-parent` 4.1.1,
+    which resolves Jackson 3.1.5 (`tools.jackson.databind.*`), not the
+    Jackson 2 (`com.fasterxml.jackson.databind.*`) the original cell used
+    against Spring Boot 3.4.1. Verified directly via `javap` against the
+    real resolved jar before writing any port code: Jackson 3's
+    `ObjectMapper` has no instance `activateDefaultTyping` method (moved
+    to `JsonMapper.builder()...build()`), and `LaissezFaireSubTypeValidator`
+    is package-private in Jackson 3 (cannot be referenced from generated
+    code) — the ported vulnerable sink instead defines a small local
+    `PolymorphicTypeValidator.Base` subclass with the same "allow any
+    subtype" semantics. Confirmed working end to end in a real, isolated
+    Maven probe before any template code was written.
+  - **A real minimal-pair-vocabulary dispatch refactor.**
+    `SpringBootEmitter._MODULE_SET_BY_SHAPE` keys `(vuln_class,
+    sink_context.family) -> (source, complexity)`, with the sink selected
+    separately by `cell.transform.ops`. The pre-existing
+    `(insecure_deserialization, object_deserialization)` entry's default
+    source (`request_stream`, publishing the raw `HttpServletRequest`
+    itself) doesn't fit the ported Jackson ops, which need to read the
+    body into a `byte[]` instead. A new `_SOURCE_OVERRIDE_BY_OP` map lets
+    an op override the shape-level default source; only the two Jackson
+    ops are in it, every other op/shape keeps its existing dispatch
+    unchanged (re-verified: the pre-existing 32-test suite stays green
+    byte-for-byte). **Known, stated narrowing:** this overrides only the
+    source, not `_ModuleSet.complexity` — sufficient today (every op for
+    every shape uses `single_handler`) but would need widening for a
+    future op needing a different complexity module on an already-
+    supported shape.
+  - **Cell/page identity, addressed explicitly (not left as a bare
+    "cosmetic" note).** The ported class renders under
+    `com.fuzzlab.trackernest.generated` (the same package every other
+    `spring_boot` cell/DTO already lives in) — a **build/skeleton-level**
+    sharing decision only, the same shape `node_express` already has
+    precedent for (hosting Walmart's cells without merging app identity).
+    This does not make Netflix's cell "a TrackerNest page": no
+    TrackerNest ground truth or page/route design is touched, and the
+    ported cell keeps its own `LABGEN-JV-` cell-ID prefix (distinct from
+    TrackerNest's own `LABGEN-DESER-`/`LABGEN-SSTI-` prefixes) so
+    provenance stays distinguishable at the manifest/ground-truth level.
+    Category 4's own Phase C page design (not yet started for either
+    Netflix or Twitch) is unaffected.
+  - **Both twins share one literal route
+    (`POST /api/playback/resume`) safely**, matching TrackerNest's own
+    `LABGEN-DESER-0001`/`0002` twin-pair precedent: `spring_boot`'s own
+    live-boot harness (`SpringBootLiveBootHarness`) boots exactly one cell
+    per real Spring Boot instance, never both twins in one running app,
+    so an identical route across twins is not the ambiguous-mapping
+    hazard it would be under a multi-cell-per-boot harness (the shape
+    `go_net_http`/`java_spring_boot` both needed cell-ID-derived paths to
+    avoid) — confirmed by reading the harness's own constructor signature
+    and by a real boot hitting exactly this "Ambiguous mapping" Spring
+    Boot startup failure during this port's own initial manual
+    verification, before the correct single-cell convention was applied.
+  - Proven end to end by two real live-boot tests
+    (`tests/test_labgen_spring_boot_deserialization_jackson_live_boot.py`),
+    each its own separate `SpringBootLiveBootHarness` instance:
+    (a) the vulnerable twin accepts a type-hint-wrapped body naming an
+    arbitrary class; (b) the secure twin accepts its own well-formed
+    plain-JSON body and rejects the same type-hint-wrapped body — the
+    same three assertions the original, now-deleted
+    `tests/test_labgen_java_live_boot.py` made (a coverage-diff check
+    confirmed this before that file was deleted), adapted to
+    `spring_boot`'s real HTTP contract.
+  - **`java_spring_boot` retired in the same dispatch**: the package,
+    its conformance harness (`fuzzlab.labgen.conformance.java_live_boot`),
+    its manifest, and its 4 test files are deleted. `grep`-confirmed no
+    other file (including `fuzzlab/harness/multitarget.py`) referenced it
+    by name, so nothing else on this branch broke — the full non-slow
+    suite was re-run after the deletion to confirm (no regression, same
+    pre-existing `gitleaks`-related failures as before).
+
+- **FR-LAB-97** *(Phase C ground truth for category 4's Netflix and Twitch
+  apps, plus additive `labels.schema.json` widening; `CC-LAB-0174`,
+  2026-09-23).* Adds real, out-of-band ground truth (D9's contract) for
+  every vulnerable cell category 4 has built so far, each app in its own
+  directory with its own opaque case-ID prefix, mirroring category 5's own
+  already-reviewed precedent (`lab/ground-truth-booking-clone/`) for both
+  the per-app-directory layout and the schema-widening mechanism.
+  - `lab/ground-truth-netflix-clone/` (`target: "spring_boot"`, prefix
+    `NFLX-`): one case, `NFLX-0001`, for `LABGEN-JV-0001`
+    (`POST /api/playback/resume`, CWE-502 Jackson polymorphic
+    deserialization, `FR-LAB-93`). The tainted value is the entire raw
+    request body (Jackson deserializes it polymorphically), not one named
+    field, so `param` is the literal string `"body"` with
+    `location: "body"` — recorded explicitly as a judgment call, since the
+    schema has no "whole body, no field name" concept and no existing case
+    in this project's ground truth had this shape before.
+  - `lab/ground-truth-twitch-clone/` (`target: "go_net_http"`, prefix
+    `TWCH-`): two cases — `TWCH-0001` for `LABGEN-GO-0001`
+    (`POST /generated/labgen-go-0001`, CWE-347 webhook-signature,
+    `FR-LAB-76`), whose tainted value is a request **header**
+    (`X-Signature-256`); `param` is set to the literal header name, the
+    same convention a query-param case uses the literal query-string key
+    — this project's first header-carried ground-truth case, recorded as
+    a judgment call. `TWCH-0002` for `LABGEN-GO-0003`
+    (`GET /generated/labgen-go-0003`, CWE-918 SSRF, `FR-LAB-92`), an
+    ordinary query-param case (`param: "url"`, `location: "query"`).
+  - **Additive widening of `fuzzlab/labels/schemas/labels.schema.json`**:
+    append three `vuln_class` enum values (`webhook_signature`, `ssrf`,
+    `insecure_deserialization`, matching `Cell.vuln_class`'s real string
+    values verbatim) and three `sink_context` enum values (`webhook`,
+    `network`, `deserialization`, deliberately coarser than the internal
+    `SinkContext.family` strings, e.g.
+    `webhook_signature_verification`/`server_side_http_fetch`/
+    `object_deserialization`, matching this schema's own existing
+    convention of a coarser sink-context vocabulary). Purely additive: no
+    existing enum value changed or removed, so every already-valid
+    ground-truth directory (including the default `lab/ground-truth/`)
+    stays valid unchanged — re-verified directly
+    (`tests/test_labels_contract.py` stays green).
+  - New offline tests, `tests/test_labels_contract_category4.py`: asserts
+    concrete content (case counts, IDs, `vuln_class`/`sink_context`/
+    `url`/`method`/`param`/`location` per case, opaque-ID checks) for both
+    new directories, not just that `contract.load()` doesn't raise, plus
+    one test re-confirming the default `lab/ground-truth/`'s own contract
+    still loads/validates after the schema widening.
+  - **Deferred scope, explicitly**: this only completes §4 Phase C step 2
+    (author ground truth for cells as-built). Step 1 — designing a
+    coherent page/route set spanning each app's chosen vulnerability
+    classes, rather than ground truth over the single illustrative
+    route(s) Phase A/B happened to build — remains open, larger,
+    not-yet-started work for both apps, exactly as category 5's own
+    tracker entry records the same gap for Booking.com/Expedia ("Phase
+    C's 'coherent page/route set' bar... not yet begun"). Recorded here
+    rather than left to imply Phase C is now fully done for category 4.
+
+- **FR-LAB-98** *(Phase D: real Tier 1/2 conformance for two of category
+  4's three cells; `CC-LAB-0175`, 2026-09-23).* Real, executed Tier 1
+  (`fuzzlab.labgen.conformance.tier1.run_tier1_case`) and Tier 2
+  (`tier2.LiveBootTier2Oracle`/`run_tier2_case`) proof for the SSRF cell
+  (`LABGEN-GO-0003`/`0004`, `go_net_http`) and the Jackson-deserialization
+  cell (`LABGEN-JV-0001`/`0002`, `spring_boot`), reusing Phase A/B's own
+  live-boot harnesses through small local `Tier1Client`/`Tier2Client`
+  adapter classes — no change to either harness's existing, already-used
+  `request`/`post` methods. Both cells' verdicts confirmed for real (Tier
+  1 and Tier 2 alike) against a real `go build`/`mvn package` boot.
+  - **Open question, not a todo: the webhook-signature cell
+    (`LABGEN-GO-0001`/`0002`, CWE-347) is not Tier-1/2-confirmable as this
+    module is currently designed.** Tier 1/2's model is a single-request
+    marker/functional differential; both twins of this cell accept a
+    correct signature and reject an incorrect one identically for any one
+    request (`naive_string_compare` vs `hmac.Equal` diverge only in
+    comparison *timing*, which no single-request oracle can observe --
+    `tests/test_labgen_go_live_boot.py`'s own docstring already states
+    this same honesty rule for this cell's Tier 0/3 proof). Confirming it
+    would need a genuinely new timing-differential oracle (statistical,
+    multi-request timing measurement against a real boot) -- a different
+    kind of Tier-2 oracle than `LiveBootTier2Oracle`'s marker-differential
+    one, not built here. This mirrors the project's own existing
+    precedent for a class whose flaw is not a single-request functional
+    difference (the `identifier_charset_filter` open question above: an
+    *identifier-swap* differential mode, not yet built either).
+
+- **FR-LAB-99** *(Phase E: both apps wired into
+  `fuzzlab.harness.multitarget` for real; `CC-LAB-0176`, 2026-09-23).*
+  `TargetSpec`s for both apps, booted for real (`GoLiveBootHarness`,
+  `SpringBootLiveBootHarness` — each gained an additive `base_url`
+  property), run through `run_targets`/`transfer_summary` in one call with
+  the project's existing `RequestsProbeSender` (real HTTP, never a fake
+  sender) — satisfies §6's actual ask (construct the spec, run it, confirm
+  it produces metrics and a `generalizes` verdict).
+  - **Open, explicitly recorded (not a defect in this wiring): real
+    detection on these three vuln classes is a structural zero today, for
+    two independent reasons.** No audit `Rule` exists for
+    `webhook_signature`/`ssrf`/`insecure_deserialization`
+    (`fuzzlab.core.runmode._VULN_TO_CATEGORY` only maps `sqli`/`xss-*`) —
+    the same class of gap category 1's own Phase E entry flagged for its
+    own new vuln classes and left unattempted. And two of the three
+    ground-truth points don't fit the generic pipeline's point model: the
+    header-located webhook case is skipped by
+    `fuzzlab.harness.auto.points_from_ground_truth` (which has no
+    header-location case at all, not just no vulnerability-class rule —
+    it falls into the DOM/browser skip path, a small additional
+    mislabeling worth a future fix even though the point is correctly
+    excluded either way); the whole-body-JSON deserialization case is
+    included as a point, but `RequestsProbeSender`'s body-location
+    convention (`data={param: value}`, form-urlencoded) cannot send valid
+    JSON, so no payload could ever succeed through it. Only the SSRF
+    query-param case is genuinely probed as designed. Building a new
+    audit-rule category, a header-location point type, or a
+    whole-body-JSON sender convention are each real, sized follow-on work
+    — not attempted in this increment.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.
@@ -3138,6 +3525,33 @@ None (it is the system under test).
   Tracked here so this flagged gap is not lost; revisit when a header-location vuln
   class (webhook-signature-bypass or any future one) needs real automated detection
   coverage, not just wiring proof.
+- (`CC-LAB-0176`/`FR-LAB-99`, category 4) **Three real gaps between
+  category 4's cells and the generic detection pipeline, found while
+  wiring Phase E.** (1) No audit `Rule` category exists for
+  `webhook_signature`/`ssrf`/`insecure_deserialization` — same class of
+  gap category 1's own Phase E flagged for its own new vuln classes. (2)
+  `fuzzlab.harness.auto.points_from_ground_truth` has no header-location
+  case at all (only `query`/`body`/DOM); a header-carried ground-truth
+  point (e.g. `TWCH-0001`) is silently absorbed into the DOM/browser skip
+  path with a misleading reason string, rather than its own, honestly
+  labeled "header injection points aren't audited yet" skip reason. (3)
+  `fuzzlab.tools.probesender.RequestsProbeSender`'s `location="body"`
+  convention is single-form-field (`data={param: value}`); it has no way
+  to express "substitute the payload into a whole raw JSON body," so a
+  whole-body-JSON ground-truth point (e.g. `NFLX-0001`) can never be
+  meaningfully probed through it. None of the three are attempted here —
+  each is real, sized follow-on work.
+- (`CC-LAB-0175`/`FR-LAB-98`, category 4) **The webhook-signature cell
+  (`LABGEN-GO-0001`/`0002`, CWE-347) has no Tier 1/2 conformance path.**
+  `naive_string_compare` vs `hmac.Equal` are functionally identical for any
+  single request (both accept a correct signature, reject an incorrect
+  one) — they diverge only in comparison timing, which
+  `fuzzlab.labgen.conformance.tier1`/`tier2`'s marker/functional-
+  differential model cannot observe. Same shape as the
+  `identifier_charset_filter` open question below (a class whose flaw
+  isn't a single-request functional difference): needs a genuinely new,
+  statistical, multi-request timing-differential oracle, not attempted
+  here.
 - (L-P3.3b) **`fuzzlab.labgen.minimal_pair`'s module-category map is sourced from one
   emitter's registry.** It builds `_MODULE_CATEGORY` from `fuzzlab.labgen.modules`
   (`php_current`'s) alone, so *every* stack that wants the real (rather than the naive)
