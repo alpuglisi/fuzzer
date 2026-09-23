@@ -24,11 +24,24 @@ AUTOMATIC = "automatic"
 MANUAL = "manual"
 
 # Ground-truth vuln_class values normalized to reference-style category slugs.
+# `ssti` (CC-CORE-0020): the only one of category 3's 6 new classes mapped so
+# far -- it already has a real, independently-verified working rule+strategy
+# pairing (`R-SSTI` in fuzzlab/audit/rules_data/default_rules.json,
+# `SstiStrategy` in fuzzlab/oracle/strategies.py), verified live against both
+# of TrackerNest's real twins before landing. The other 5
+# (`xxe`/`insecure_deserialization`/`webhook_signature_bypass`/`ssrf`/
+# `outbound_header_injection`) have no confirmer built yet -- mapping them
+# now would only relabel an honest false negative as a false negative that
+# looks wired but never confirms (evaluate() would nominate a candidate with
+# no strategy to confirm it, `category_to_oracle_class()` returning None),
+# not a real improvement, so they stay unmapped until each has its own
+# verified confirmer.
 _VULN_TO_CATEGORY = {
     "sqli": "sql-injection",
     "xss-reflected": "xss",
     "xss-stored": "xss",
     "xss-dom": "xss",
+    "ssti": "server-side-template-injection",
 }
 
 

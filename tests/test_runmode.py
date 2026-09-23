@@ -15,6 +15,23 @@ def test_categories_from_vuln_classes_normalizes():
     assert cats == ["sql-injection", "xss"]        # normalized, deduped, no 'none'
 
 
+def test_categories_from_vuln_classes_maps_ssti():
+    # CC-CORE-0020: ssti has a real, verified working rule+strategy pairing
+    # (R-SSTI/SstiStrategy) -- unlike category 3's other 5 new classes,
+    # which stay unmapped (see _VULN_TO_CATEGORY's own comment).
+    cats = categories_from_vuln_classes(["ssti"])
+    assert cats == ["server-side-template-injection"]
+
+
+def test_categories_from_vuln_classes_leaves_unmapped_classes_unchanged():
+    # xxe/insecure_deserialization/etc. have no confirmer yet -- to_category()
+    # falls through to the raw class name (no audit rule matches it, so it
+    # never nominates a candidate, and stays an honest false negative rather
+    # than a mis-wired one).
+    cats = categories_from_vuln_classes(["xxe", "insecure_deserialization"])
+    assert cats == ["insecure_deserialization", "xxe"]
+
+
 # --- D14: automatic against our lab auto-derives from ground truth -----------
 def test_automatic_lab_auto_derives_and_is_scored():
     gt = contract.load("lab/ground-truth")
