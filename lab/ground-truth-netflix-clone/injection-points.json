@@ -57,6 +57,13 @@
       "param": "Authorization",
       "location": "header",
       "rendering": "server-json"
+    },
+    {
+      "url": "/api/content/thumbnail-import",
+      "method": "POST",
+      "param": "thumbnail_url",
+      "location": "query",
+      "rendering": "server-json"
     }
   ]
 }

@@ -113,6 +113,19 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("jwt_algorithm_confusion", "jwt_signature_verification"): _ModuleSet(
         "read_authorization_bearer_token", "single_handler"
     ),
+    # CC-LAB-0194: Netflix's ninth real page, this stack's first ssrf
+    # instance -- reuses lab/safety_matrix.yaml's existing
+    # server_side_http_fetch sink family and unchecked_url_fetch/
+    # scheme_and_resolved_ip_allowlist ops (CC-LAB-0063), already
+    # instantiated on go_net_http (CC-LAB-0172/CC-LAB-0185). No new
+    # safety-matrix entry needed. Reuses the pre-existing query_param
+    # source verbatim (already used by ssti/spel_injection) -- the same
+    # query-param-carried-URL contract go_net_http's own
+    # read_url_query_param source established, so a generic
+    # Candidate(location="query") probe drives this shape identically to
+    # go_net_http's SSRF cells (zero new sender/candidate plumbing needed
+    # for SsrfInBandMarkerStrategy/SsrfOobStrategy to generalize here).
+    ("ssrf", "server_side_http_fetch"): _ModuleSet("query_param", "single_handler"),
 }
 
 #: Per-route static render context, the same "render-only information, not
@@ -163,6 +176,15 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
     # the tainted material is the Authorization header itself, read
     # directly by ReadAuthorizationBearerTokenSource.
     "/api/account/preferences": {},
+    # CC-LAB-0194: Netflix's ninth real page, a partner-content thumbnail-
+    # import endpoint (importing a thumbnail image from a partner-supplied
+    # URL for newly-ingested partner content -- a real, plausible feature
+    # given Netflix's own confirmed B2B content-ingestion surface,
+    # /api/content/import, CC-LAB-0179) that server-side-fetches a
+    # caller-supplied thumbnail_url query parameter -- this stack's first
+    # ssrf page. Reuses query_param's own var_name/param_name contract
+    # verbatim (the same shape ssti/spel_injection already use).
+    "/api/content/thumbnail-import": {"var_name": "thumbnailUrl", "param_name": "thumbnail_url"},
 }
 
 #: Per-op source override (`CC-LAB-0173`) -- checked *after* the shape-level

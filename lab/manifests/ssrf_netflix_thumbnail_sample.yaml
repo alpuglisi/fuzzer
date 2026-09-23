@@ -1,0 +1,75 @@
+# SSRF sample manifest (CC-LAB-0194), spring_boot.
+#
+# Netflix's 9th real page (category 4, Media/streaming --
+# docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md sec 4/9.4/9.5, and this
+# session's own cross-stack-generalization campaign): a server-side
+# URL-fetch feature, `POST /api/content/thumbnail-import` -- importing a
+# thumbnail image from a partner-supplied URL for newly-ingested partner
+# content, a real, plausible feature given Netflix's own confirmed B2B
+# content-ingestion surface, `/api/content/import` (CC-LAB-0179) --
+# genuinely distinct from that endpoint's own XML-metadata-feed ingestion,
+# not a cosmetic rename of it.
+#
+# Reuses `lab/safety_matrix.yaml`'s existing `server_side_http_fetch` sink
+# family and its existing `unchecked_url_fetch`/
+# `scheme_and_resolved_ip_allowlist` ops verbatim (added by `CC-LAB-0063`;
+# already instantiated TWICE on `go_net_http` -- `CC-LAB-0172`'s
+# `/api/clips/thumbnail` and `CC-LAB-0185`'s `/clips/download`) -- no new
+# safety-matrix entry needed; this is `spring_boot`'s FIRST instance of
+# this mechanism.
+#
+# Module composition reuses the pre-existing `query_param` source verbatim
+# (already used by the ssti/spel_injection shapes) -- the tainted material
+# is a caller-supplied `thumbnail_url` query parameter, the same
+# query-param-carried-URL contract `go_net_http`'s own
+# `read_url_query_param` source established, so no new source module was
+# needed, and a generic `Candidate(location="query")` probe drives this
+# shape identically to `go_net_http`'s own SSRF cells (zero new
+# sender/candidate plumbing needed). Both sinks are ported
+# idiomatically from `go_net_http`'s own `UncheckedUrlFetchSink`/
+# `SchemeAndResolvedIpAllowlistSink` (`CC-LAB-0172`) to
+# `java.net.http.HttpClient`, with `java.net.InetAddress.getAllByName`
+# doing real DNS resolution before the fetch (the JDK's own
+# `net.LookupIP`-then-validate analog) -- the vulnerable twin
+# (`unchecked_url_fetch`) fetches whatever URL the caller supplies with no
+# validation at all (CWE-918); the secure twin
+# (`scheme_and_resolved_ip_allowlist`) rejects any scheme but `https` and
+# rejects a fetch whose hostname RESOLVES to a loopback/private/
+# link-local address, checked against the resolved address actually
+# dialed (closing the DNS-rebinding gap the safety matrix's own comment on
+# this family names), before ever attempting the fetch.
+#
+# Response-shape note: the vulnerable twin's response body is the fetched
+# resource's own body, byte-for-byte (mirroring go_net_http's own
+# `io.Copy(w, resp.Body)`) -- this is exactly the shape
+# `SsrfInBandMarkerStrategy`'s own `confirm()` (`fuzzlab/oracle/
+# strategies.py`, already built for Twitch's `go_net_http` cells) checks
+# for, letting that existing strategy (and its `SsrfOobStrategy` fallback)
+# generalize to this new stack with zero new detection code (verified live
+# in `tests/test_labgen_spring_boot_netflix_thumbnail_ssrf_live_boot.py`).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: fetches the caller-supplied thumbnail_url with no
+  # validation at all (CWE-918).
+  - cell_id: LABGEN-JV-0017
+    class: ssrf
+    stack_profile: spring_boot
+    route: { method: POST, path: /api/content/thumbnail-import }
+    sink_context:
+      family: server_side_http_fetch
+      required_neutralizations: [ssrf_request_forgery]
+    transform: [unchecked_url_fetch]
+
+  # Secure twin: the only difference is which sink module renders (the
+  # minimal-pair invariant) -- rejects any scheme but https and rejects a
+  # resolved IP that is loopback/private/link-local, checked against the
+  # resolved address, before fetching.
+  - cell_id: LABGEN-JV-0018
+    class: ssrf
+    stack_profile: spring_boot
+    route: { method: POST, path: /api/content/thumbnail-import }
+    sink_context:
+      family: server_side_http_fetch
+      required_neutralizations: [ssrf_request_forgery]
+    transform: [scheme_and_resolved_ip_allowlist]

@@ -221,6 +221,34 @@ parser is the vulnerability" framing rather than a real library's own
 CVE). Netflix's own real, scored recall in that multi-cell boot moves from
 7/7 to 8/8.
 
+`NFLX-0009` (`CC-LAB-0194`, `/api/content/thumbnail-import`) is Netflix's
+ninth real page: a partner-content thumbnail-import endpoint that
+server-side-fetches a caller-supplied `thumbnail_url` query parameter,
+`spring_boot`'s first `ssrf` instance (CWE-918) -- reuses
+`lab/safety_matrix.yaml`'s existing `server_side_http_fetch` sink family
+and `unchecked_url_fetch`/`scheme_and_resolved_ip_allowlist` ops
+(`CC-LAB-0063`, already instantiated TWICE on `go_net_http`:
+`CC-LAB-0172`'s `/api/clips/thumbnail` and `CC-LAB-0185`'s
+`/clips/download`). This one also needed zero new detection code:
+`SsrfInBandMarkerStrategy`/`SsrfOobStrategy` (already built for Twitch's
+`TWCH-0002`/`TWCH-0008`/`CC-FUZZ-0027`) confirmed the new vulnerable twin
+and correctly failed closed on its new secure twin, verified against a
+real booted app both by a dedicated live-boot test
+(`tests/test_labgen_spring_boot_netflix_thumbnail_ssrf_live_boot.py`) and
+by `test_netflix_multi_cell_boot_confirms_all_positives` below -- the
+fifth proof a Twitch-built strategy generalizes across stacks in the
+direction `go_net_http` -> `spring_boot` (after `AccessControlIdorStrategy`,
+`UnrestrictedFileUploadContentTypeTrustStrategy`,
+`MassAssignmentPrivilegedFieldStrategy`, and `JwtAlgNoneConfusionStrategy`),
+achieved by reusing this stack's own pre-existing `query_param` source
+(already used by `ssti`/`spel_injection`) rather than a JSON body field --
+the same query-param-carried-URL contract `go_net_http`'s own
+`read_url_query_param` source established, so the generic
+`Candidate(location="query")` probe this strategy pair already sends
+drives this new `spring_boot` cell identically to `go_net_http`'s own SSRF
+cells, with zero new sender/candidate plumbing needed either. Netflix's
+own real, scored recall in that multi-cell boot moves from 8/8 to 9/9.
+
 One gap remains open:
 
 1. **No audit `Rule`/oracle strategy exists yet for `webhook_signature`**
@@ -414,27 +442,27 @@ def test_both_apps_run_through_multitarget_for_real(tmp_path) -> None:
     # first access_control/IDOR instance (NFLX-0004, CC-LAB-0187), the
     # first price_integrity_bypass instance (NFLX-0005, CC-LAB-0188), the
     # first unrestricted_file_upload instance (NFLX-0006, CC-LAB-0191), the
-    # first mass_assignment instance (NFLX-0007, CC-LAB-0192), and the
-    # first jwt_algorithm_confusion instance (NFLX-0008, CC-LAB-0193) are
-    # simply not booted in this single-cell test -- one of its now-eight
-    # positives, not all (only NFLX-0001's own vulnerable twin,
-    # LABGEN-JV-0001, is booted here) -- see
-    # test_netflix_multi_cell_boot_confirms_all_positives below for the
-    # multi-cell boot that confirms all eight together. PA-0042: this
-    # hardcoded fraction was re-derived, not left stale, when NFLX-0008
-    # was added (ground-truth cardinality moved from 7 to 8; tp stays 1,
-    # so recall moves from 1/7 to 1/8).
+    # first mass_assignment instance (NFLX-0007, CC-LAB-0192), the first
+    # jwt_algorithm_confusion instance (NFLX-0008, CC-LAB-0193), and the
+    # first ssrf instance (NFLX-0009, CC-LAB-0194) are simply not booted
+    # in this single-cell test -- one of its now-nine positives, not all
+    # (only NFLX-0001's own vulnerable twin, LABGEN-JV-0001, is booted
+    # here) -- see test_netflix_multi_cell_boot_confirms_all_positives
+    # below for the multi-cell boot that confirms all nine together.
+    # PA-0042: this hardcoded fraction was re-derived, not left stale,
+    # when NFLX-0009 was added (ground-truth cardinality moved from 8 to
+    # 9; tp stays 1, so recall moves from 1/8 to 1/9).
     netflix_report = by_name["netflix-clone"].report
     assert netflix_report.tp == 1 and netflix_report.fp == 0
-    assert round(netflix_report.recall, 4) == round(1 / 8, 4)
+    assert round(netflix_report.recall, 4) == round(1 / 9, 4)
 
     summary = transfer_summary(outcomes)
     assert summary["targets"] == 2
     # PA-0042: re-derived, not left stale, from the ground-truth-cardinality
     # changes TWCH-0011/CC-LAB-0190 (Twitch's own recall moved from 9/10 to
-    # 9/11) and NFLX-0008/CC-LAB-0193 (Netflix's own recall in THIS
-    # single-cell test moved from 1/7 to 1/8) both made.
-    assert round(summary["macro_recall"], 4) == round(((9 / 11) + (1 / 8)) / 2, 4)
+    # 9/11) and NFLX-0009/CC-LAB-0194 (Netflix's own recall in THIS
+    # single-cell test moved from 1/8 to 1/9) both made.
+    assert round(summary["macro_recall"], 4) == round(((9 / 11) + (1 / 9)) / 2, 4)
     # Both targets now show recall > 0 -- this project's own >= 2 "generalizes"
     # definition (transfer_summary's docstring) is met for the first time.
     assert summary["generalizes"] is True
@@ -464,10 +492,15 @@ _NETFLIX_MULTI_MANIFESTS = (
     # CC-LAB-0193: eighth real page, first jwt_algorithm_confusion instance
     # (/api/account/preferences) -- an eighth, distinct route, no collision.
     "lab/manifests/jwt_alg_confusion_netflix_sample.yaml",
+    # CC-LAB-0194: ninth real page, first ssrf instance
+    # (/api/content/thumbnail-import) -- a ninth, distinct route, no
+    # collision.
+    "lab/manifests/ssrf_netflix_thumbnail_sample.yaml",
 )
 _NETFLIX_MULTI_CELL_IDS = {
     "LABGEN-JV-0001", "LABGEN-JV-0003", "LABGEN-JV-0005", "LABGEN-JV-0007",
     "LABGEN-JV-0009", "LABGEN-JV-0011", "LABGEN-JV-0013", "LABGEN-JV-0015",
+    "LABGEN-JV-0017",
 }
 _BUILD_TIMEOUT_S = 240.0
 _BOOT_TIMEOUT_S = 30.0
@@ -505,10 +538,11 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
     `/api/subscription/change-plan`, `CC-LAB-0188`), `LABGEN-JV-0011`
     (unrestricted_file_upload, `/api/profiles/avatar`, `CC-LAB-0191`), and
     `LABGEN-JV-0013` (mass_assignment, `/api/account/settings`,
-    `CC-LAB-0192`), and `LABGEN-JV-0015` (jwt_algorithm_confusion,
-    `/api/account/preferences`, `CC-LAB-0193`) -- into one real booted app
-    (eight distinct routes, no collision), then runs the real generic
-    `run_targets` pipeline against it. Originally
+    `CC-LAB-0192`), `LABGEN-JV-0015` (jwt_algorithm_confusion,
+    `/api/account/preferences`, `CC-LAB-0193`), and `LABGEN-JV-0017`
+    (ssrf, `/api/content/thumbnail-import`, `CC-LAB-0194`) -- into one
+    real booted app (nine distinct routes, no collision), then runs the
+    real generic `run_targets` pipeline against it. Originally
     closed the follow-on `CC-FUZZ-0032` flagged (both of Netflix's
     positives confirming together in one real boot); extended by
     `CC-LAB-0184` to prove the third positive confirms alongside the other
@@ -546,7 +580,13 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
     verified live in `tests/test_labgen_spring_boot_netflix_jwt_
     preferences_live_boot.py` first, then reproduced here in the shared
     multi-cell boot -- moving Netflix's own scored recall in this boot
-    from 7/7 to 8/8.
+    from 7/7 to 8/8. Extended again by `CC-LAB-0194` to add the ninth
+    positive, `NFLX-0009`: `SsrfInBandMarkerStrategy`/`SsrfOobStrategy`
+    (`CC-FUZZ-0027`, already built for Twitch's `go_net_http` SSRF cells)
+    needed zero new detection code to confirm it too -- verified live in
+    `tests/test_labgen_spring_boot_netflix_thumbnail_ssrf_live_boot.py`
+    first, then reproduced here in the shared multi-cell boot -- moving
+    Netflix's own scored recall in this boot from 8/8 to 9/9.
     """
     root = tmp_path_factory.mktemp("netflix_multitarget")
     shutil.copytree(SKELETON_DIR, root, dirs_exist_ok=True)
@@ -599,11 +639,14 @@ def test_netflix_multi_cell_boot_confirms_all_positives(tmp_path_factory, tmp_pa
         # for Twitch's go_net_http emote-upload cell), CC-LAB-0192 moved it
         # from 6/6 to 7/7 with zero new detection code again
         # (MassAssignmentPrivilegedFieldStrategy, already built for
-        # Twitch's go_net_http channel-profile cell), and CC-LAB-0193 moves
-        # it from 7/7 to 8/8 with zero new detection code again
+        # Twitch's go_net_http channel-profile cell), CC-LAB-0193 moved it
+        # from 7/7 to 8/8 with zero new detection code again
         # (JwtAlgNoneConfusionStrategy, already built for Twitch's
-        # go_net_http channel-settings cell).
-        assert outcome.report.tp == 8 and outcome.report.fp == 0
+        # go_net_http channel-settings cell), and CC-LAB-0194 moves it
+        # from 8/8 to 9/9 with zero new detection code again
+        # (SsrfInBandMarkerStrategy/SsrfOobStrategy, already built for
+        # Twitch's go_net_http SSRF cells).
+        assert outcome.report.tp == 9 and outcome.report.fp == 0
         assert outcome.report.recall == 1.0
     finally:
         listener.stop()

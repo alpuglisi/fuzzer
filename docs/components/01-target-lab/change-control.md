@@ -3,6 +3,289 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0194 — Netflix's 9th real page: first ssrf instance on `spring_boot`, `/api/content/thumbnail-import` (FR-LAB-134) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing
+  `server_side_http_fetch` sink family / `ssrf` concern
+  (`unchecked_url_fetch`/`scheme_and_resolved_ip_allowlist` ops,
+  `CC-LAB-0063`, already built on `go_net_http` TWICE -- `CC-LAB-0172`'s
+  own `/api/clips/thumbnail` and `CC-LAB-0185`'s own `/clips/download`,
+  a cheapest-first two-strategy detection pair,
+  `SsrfInBandMarkerStrategy`/`SsrfOobStrategy`, `CC-FUZZ-0027`) on
+  `spring_boot`, this stack's first instance: `POST /api/content/
+  thumbnail-import` (served by `LABGEN-JV-0017`/`0018`), a partner-content
+  thumbnail-import endpoint -- importing a thumbnail image from a
+  partner-supplied URL for newly-ingested partner content, a real,
+  plausible feature given Netflix's own confirmed B2B content-ingestion
+  surface, `/api/content/import` (`CC-LAB-0179`), genuinely distinct from
+  that endpoint's own XML-metadata-feed ingestion, not a cosmetic rename
+  of it -- and this session's own cross-stack-generalization campaign:
+  giving Netflix a mechanism Twitch's `go_net_http` pick already has
+  (this is the highest-value remaining generalization increment flagged
+  by the prior lane, since `ssrf` is a genuinely more complex two-strategy
+  in-band + OOB detection mechanism than the recent single-strategy
+  reuses).
+  **Design decision, checked directly against `SsrfInBandMarkerStrategy`/
+  `SsrfOobStrategy`'s own `confirm()` contract before building, not
+  assumed to "probably work":** the task's own suggested design modeled
+  this on a JSON POST body with a named `thumbnail_url` field (mirroring
+  `raw_body`'s reuse for XXE/mass-assignment). Read directly against
+  `fuzzlab/tools/probesender.py`'s own `send()` implementation before
+  committing to that shape: for `location="body"` **with** a
+  `content_type`, the sender writes the candidate's whole `value` as the
+  raw body bytes verbatim -- it has no notion of "substitute one named
+  JSON field inside a larger body." `SsrfInBandMarkerStrategy`/
+  `SsrfOobStrategy` send their canary URL directly as `value` with no
+  JSON-wrapping of their own (unlike `MassAssignmentPrivilegedFieldStrategy`,
+  which forges a complete JSON body string itself) -- so a JSON-body
+  design would have made the canary arrive as the ENTIRE raw body (not
+  valid JSON, no `thumbnail_url` field), which this shape's own JSON
+  parse would reject before ever reaching the fetch, breaking the generic
+  `run_targets` pipeline's own automatic detection entirely. **Adapted
+  the design accordingly** (the task's own explicit invitation to use
+  judgment and report the path taken): this cell reuses `spring_boot`'s
+  pre-existing `query_param` source verbatim (already used by
+  `ssti`/`spel_injection`) instead of a JSON body field -- the same
+  query-param-carried-URL contract `go_net_http`'s own
+  `read_url_query_param` source already established for this exact
+  mechanism, so a generic `Candidate(location="query")` probe drives this
+  new `spring_boot` cell identically to `go_net_http`'s own SSRF cells,
+  with zero new sender/candidate plumbing needed either. The route stays
+  a realistic `POST` (a thumbnail-import action triggered with a query
+  parameter, e.g. `POST /api/content/thumbnail-import?thumbnail_url=...`)
+  -- `_send`'s own method/location split (`fuzzlab/oracle/strategies.py`)
+  already sends a query-param value via `sender.send(..., method="POST",
+  location="query")` regardless of HTTP method, so this works with zero
+  adaptation there either.
+  Both sinks are ported idiomatically from `go_net_http`'s own
+  `UncheckedUrlFetchSink`/`SchemeAndResolvedIpAllowlistSink`
+  (`CC-LAB-0172`) to `java.net.http.HttpClient`, with
+  `java.net.InetAddress.getAllByName` doing real DNS resolution before
+  the fetch (the JDK's own `net.LookupIP`-then-validate analog), checked
+  against the RESOLVED address actually dialed, not just the hostname
+  string -- closing the DNS-rebinding gap `lab/safety_matrix.yaml`'s own
+  comment on this sink family names. The vulnerable twin
+  (`unchecked_url_fetch`) fetches whatever URL the caller supplies with
+  no validation at all (CWE-918); the secure twin
+  (`scheme_and_resolved_ip_allowlist`) rejects any scheme but `https`,
+  and separately rejects any resolved address that is loopback
+  (`isLoopbackAddress()`), private (`isSiteLocalAddress()`), link-local
+  (`isLinkLocalAddress()`), or unspecified (`isAnyLocalAddress()`) --
+  the JDK's own closest analog of Go's `IsLoopback()`/`IsPrivate()`/
+  `IsLinkLocalUnicast()`/`IsUnspecified()` (a documented, accepted
+  narrowing, not silently assumed identical: Java's `isSiteLocalAddress()`
+  covers RFC 1918 IPv4 and the deprecated IPv6 site-local range, not the
+  modern IPv6 ULA `fc00::/7` range Go's `IsPrivate()` also covers -- out
+  of scope for this lab-only IPv4-loopback-focused increment, the same
+  scoping call `CC-LAB-0172`'s own Go implementation made no equivalent
+  IPv6-ULA claim about either). Both sinks set an explicit, bounded
+  `connectTimeout`/request `timeout` (never a default-timeout client),
+  matching `CC-LAB-0172`'s own "bounded timeout on every real operation"
+  convention. The vulnerable twin's response body is the fetched
+  resource's own body verbatim (`ResponseEntity.ok().body(fetchResponse.
+  body())`), mirroring `go_net_http`'s own `io.Copy(w, resp.Body)` shape
+  -- exactly what `SsrfInBandMarkerStrategy.confirm()` checks for.
+  **Cross-branch collision check, performed and recorded**: `git fetch
+  origin claude/category-3-build-iuu5k9 claude/category-5-build-6boejs`
+  followed by a diff of every shared file this task named (`fuzzlab/
+  labgen/emitters/spring_boot/`, `fuzzlab/oracle/strategies.py`) against
+  both sibling branches: category 3's diff shows only deletions relative
+  to this branch (strictly behind on every one of those files); category
+  5's diff on `spring_boot/__init__.py` shows their branch is based on an
+  earlier commit (missing this branch's own `CC-LAB-0187`-`0193` Netflix
+  entries) plus their own one additive `_PAGE_PARAMS["/api/trips/
+  restore"]` entry -- a distinct key from this entry's own new
+  `_MODULE_SET_BY_SHAPE[("ssrf", "server_side_http_fetch")]`/
+  `_PAGE_PARAMS["/api/content/thumbnail-import"]` entries, so no
+  collision; category 5's `modules.py`/`strategies.py` diffs are also
+  pure deletions relative to this branch (their own SpEL/open-redirect
+  additions predate this branch's own `CC-LAB-0214` SpEL landing, already
+  present on this branch) -- this entry does not modify
+  `fuzzlab/oracle/strategies.py` at all (the detection strategy pair is
+  reused verbatim, zero new/changed lines there), so category 5's own new
+  strategy classes there pose no collision risk either. This is a pure,
+  non-colliding addition.
+  **Bookkeeping-ID discipline, checked directly, not assumed (the
+  recurring risk `CC-LAB-0191`'s own numbering-collision story flags):**
+  confirmed `CC-LAB-0194` against this branch's own reserved block
+  (`CC-LAB-0170`-`0209`) and the highest number actually used in this log
+  (`CC-LAB-0193`), not merely mentioned anywhere in this branch's merged
+  docs (category 5's own `CC-LAB-0210`-`0249` block is also present in
+  this branch's history and must not be mistaken for "next free").
+  Checked `tests/test_multitarget_category4.py`/`tests/test_auto.py`/
+  `tests/test_labels_contract_category4.py` for hardcoded fraction/count
+  assertions depending on Netflix's ground-truth cardinality (per
+  `BUG-0040`/`PA-0042`) and re-ran all three directly (not just the
+  non-slow suite) after updating them: `test_multitarget_category4.py`'s
+  Netflix recall assertions moved from `8/8` to `9/9` (multi-cell boot)
+  and `1/8` to `1/9` (single-cell wiring test), plus the macro-recall
+  average; `test_labels_contract_category4.py`'s case count moved from 8
+  to 9 with a new `NFLX-0009` cross-check; `test_auto.py`'s own
+  Netflix-cardinality-sensitive assertions (`test_points_from_ground_
+  truth_sets_body_content_type_only_for_json_cases`,
+  `test_points_from_ground_truth_carries_sink_context_from_the_matching_
+  case`) count/inspect only whole-body `param="body"` points, which this
+  new `location="query"` point is not part of -- confirmed unaffected by
+  direct inspection, not assumed, and re-run green.
+  - **Real Netflix functionality (grounded, not invented)**: a
+    partner-content thumbnail-import endpoint (fact: Netflix is a
+    confirmed EIDR participant with a real B2B content-ingestion surface,
+    already cited for `/api/content/import`, `CC-LAB-0179`; the specific
+    `POST /api/content/thumbnail-import` shape is this manifest's own
+    illustrative inference, not a confirmed Netflix-internal
+    implementation detail, labeled explicitly in the manifest's own
+    header, matching `CC-LAB-0179`'s own fact-vs-inference discipline).
+  - **Vulnerable** (`LABGEN-JV-0017`, `unchecked_url_fetch`): fetches the
+    caller-supplied `thumbnail_url` query parameter with no validation at
+    all. **Secure** (`LABGEN-JV-0018`, `scheme_and_resolved_ip_allowlist`):
+    rejects any scheme but `https` and rejects a resolved IP that is
+    loopback/private/link-local, checked against the resolved address,
+    before fetching.
+  - **Zero new generator code beyond two sink templates + a
+    `_PAGE_PARAMS` entry**: the `query_param` source, the
+    `single_handler` complexity, and the `_MODULE_SET_BY_SHAPE`/`SINKS`
+    dict-registration pattern are all pre-existing, unchanged
+    infrastructure -- only two new sink template files
+    (`unchecked_url_fetch.java.j2`/`scheme_and_resolved_ip_allowlist.
+    java.j2`) and their two `TemplateModule` subclasses are genuinely
+    new code; rendering both cells was run directly before writing any
+    test and confirmed clean, deterministic Java source.
+  - **Real, live-boot proof** (`tests/test_labgen_spring_boot_netflix_
+    thumbnail_ssrf_live_boot.py`, same three-case differential shape as
+    `CC-LAB-0172`'s own `go_net_http` test -- plain-HTTP loopback accepted
+    by the vulnerable twin; rejected by the secure twin on the scheme
+    check; an HTTPS loopback target ALSO rejected by the secure twin,
+    isolating the resolved-IP-allowlist check specifically): all three
+    assertions pass against a real `mvn package`/boot/HTTP round trip,
+    using throwaway loopback listeners this test process itself starts
+    and owns (never a real external/production host, per `CLAUDE.md`'s
+    lab-only/authorized-only safety discipline) -- 3 passed in ~28s.
+  - **Detection generalization, verified for real against a real booted
+    app, not asserted from theory**: `SsrfInBandMarkerStrategy`/
+    `SsrfOobStrategy` (`CC-FUZZ-0027`) confirm the real vulnerable twin
+    and correctly fail closed on the real secure twin, using a real,
+    started `OobListener`, with zero new detection code
+    (`TestSsrfStrategiesGeneralizeToSpringBoot`, same file). The real
+    `fuzzlab.harness.multitarget.run_targets` pipeline was then run end
+    to end against both a single-cell boot
+    (`test_both_apps_run_through_multitarget_for_real`, with a real
+    `OobListener` passed through) and the shared Netflix multi-cell boot
+    (`test_netflix_multi_cell_boot_confirms_all_positives`), both
+    re-verified green after the recall-math update: Netflix's own real,
+    scored recall moves from `8/8` to `9/9` in the multi-cell boot and
+    from `1/8` to `1/9` in the single-cell wiring test.
+  - Ground truth: `NFLX-0009` added to `lab/ground-truth-netflix-clone/`
+    (`vuln_class="ssrf"`, `sink_context="network"` -- both pre-existing
+    enum values from `TWCH-0002`; `param="thumbnail_url"`/
+    `location="query"`, the query-param-carried-value convention
+    `TWCH-0002`/`TWCH-0008` already establish, no schema widening
+    needed).
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0193`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded here rather than silently
+  skipping the gate: (1) **accuracy** -- confirmed by direct source
+  inspection, not assumed: `query_param`/`single_handler` module names
+  exist verbatim in `modules.py`; `SsrfInBandMarkerStrategy`/
+  `SsrfOobStrategy`'s exact `confirm()` contracts (`fuzzlab/oracle/
+  strategies.py`) were read before designing the source-module choice
+  (the JSON-body-field design flaw described above was caught this way,
+  BEFORE any template was written, not after a failed test run); cell IDs
+  `LABGEN-JV-0017`/`0018` were confirmed free (grepped `LABGEN-JV-` across
+  every manifest, highest existing was `LABGEN-JV-0016`, from
+  `CC-LAB-0193`); rendering both cells was run directly before writing
+  any test. (2) **adequacy** -- checked that this increment does not
+  silently duplicate an existing route (grepped `_PAGE_PARAMS` for
+  `/api/content/thumbnail-import`: absent), does not need a second,
+  redundant strategy (no new `Rule`/`ConfirmationStrategy` code was
+  written at all), and that the "detection already works automatically"
+  claim was actually run against a real booted instance rather than
+  asserted from theory (see above) -- both a dedicated live-boot
+  strategy test and the full `fuzzlab.harness.multitarget.run_targets`
+  pipeline (both the single-cell wiring test and the shared multi-cell
+  boot) were executed for real before this entry claims the recall move.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/modules.py`
+    (`UncheckedUrlFetchSink`, `SchemeAndResolvedIpAllowlistSink`)
+  - `fuzzlab/labgen/emitters/spring_boot/__init__.py` (new
+    `_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS` entries)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sinks/
+    unchecked_url_fetch.java.j2`, `scheme_and_resolved_ip_allowlist.
+    java.j2` (new)
+  - `lab/manifests/ssrf_netflix_thumbnail_sample.yaml` (new)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,
+    expectedresults.csv}`
+  - `tests/test_labgen_spring_boot_netflix_thumbnail_ssrf.py` (new)
+  - `tests/test_labgen_spring_boot_netflix_thumbnail_ssrf_live_boot.py`
+    (new)
+  - `tests/test_labels_contract_category4.py` (NFLX-0009 cross-check)
+  - `tests/test_multitarget_category4.py` (Netflix recall re-derived,
+    both single-cell and multi-cell boots; multi-cell manifest/cell-id
+    lists extended)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-134`, new)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category-4 tracker
+    row)
+  - `docs/ARCHITECTURE.md` (Netflix page/detection counts)
+  - `CHANGELOG.md`
+- Impact (other components / project): purely additive to `spring_boot`
+  and `lab/ground-truth-netflix-clone`; no other stack/app touched. No
+  audit-rule/oracle-strategy bookkeeping change was needed
+  (`SsrfInBandMarkerStrategy`/`SsrfOobStrategy`/`CC-FUZZ-0027`/
+  `CC-AUD-0016` already exist and needed zero code change) -- only their
+  own generalization to a third real page (after `TWCH-0002`/`TWCH-0008`)
+  and a second stack is newly proven and recorded, here and in
+  `tests/test_multitarget_category4.py`'s own docstring.
+- Risk (level; mitigation or accepted-risk justification): **low**. Reuses
+  fully-built, already-tested modules/strategies verbatim; the only
+  genuinely new artifacts are two sink templates, a manifest, and ground
+  truth. Verified end to end with a real `mvn package`/boot/HTTP round
+  trip and a real `run_targets` pipeline run (with a real `OobListener`),
+  not assumed from the shared-mechanism argument alone. The one real
+  design risk this entry accepts and states explicitly: this cell's fetch
+  capability is a real, live, outbound-fetch-capable code cell inside the
+  target lab (the same containment principle `CC-LAB-0172`'s own risk
+  section already established) -- never wired to any real external-target
+  list, credential, or production host anywhere in this dispatch; every
+  fetch target in every test this dispatch adds is a throwaway listener
+  the test process itself starts on loopback. The self-review
+  substitution above (in place of two independent reviewer agents) is the
+  other real process risk this entry accepts and states explicitly,
+  mitigated by the real `mvn package`/boot/HTTP verification actually
+  performed before landing (both the differential and the strategy
+  generalization).
+- Deliverables:
+  - [x] Two new sink templates + `_PAGE_PARAMS` entry, zero new source/
+        complexity code -- done
+  - [x] Real live-boot proof (3 assertions, mirroring `CC-LAB-0172`'s own
+        three-case shape) -- done
+  - [x] Ground truth extended (`NFLX-0009`) -- done
+  - [x] Detection generalization verified live (dedicated strategy
+        live-boot test with a real `OobListener` + real `run_targets`
+        pipeline runs, both single- and multi-cell) -- recall `8/8` ->
+        `9/9` (multi-cell), `1/8` -> `1/9` (single-cell) -- done
+  - [x] `tests/test_labels_contract_category4.py`/`tests/test_auto.py`
+        re-run and confirmed green/unaffected per `PA-0042` -- done
+  - [x] Full non-slow suite + every directly-affected slow test re-run
+        green at the stable baseline -- done
+  - [x] Pre-change review gate's `Agent`-tool absence flagged explicitly,
+        substituted with a documented self-review (accuracy + adequacy),
+        matching `CC-LAB-0182`-`0193`'s own precedent wording
+- Effectiveness (assessed 2026-09-23): achieved, both as a lab page and
+  for detection -- the real booted vulnerable twin fetches an unvalidated
+  loopback target successfully (CWE-918 demonstrated); the real booted
+  secure twin rejects it on the scheme check and separately rejects an
+  HTTPS loopback target on the resolved-IP-allowlist check specifically;
+  `SsrfInBandMarkerStrategy`/`SsrfOobStrategy` confirm the vulnerable twin
+  and correctly fail closed on the secure twin with zero new detection
+  code AND zero new sender/candidate plumbing -- the fifth proof this
+  session's own detection strategies generalize across stacks
+  (`go_net_http` -> `spring_boot`), and specifically the first proof of a
+  genuinely two-strategy (in-band + OOB) detection mechanism generalizing
+  this way, not just a single-strategy reuse. Netflix's own real, scored
+  `multitarget` recall is now `9/9` in the multi-cell boot.
+
 ### CC-LAB-0193 — Netflix's 8th real page: first jwt_algorithm_confusion instance on `spring_boot`, `/api/account/preferences` (FR-LAB-133) (2026-09-23)
 
 - Change: instantiates `lab/safety_matrix.yaml`'s existing

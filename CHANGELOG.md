@@ -4,6 +4,45 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Netflix's 9th real page, first ssrf instance on spring_boot, CC-LAB-0194/FR-LAB-134)
+- Target lab: `POST /api/content/thumbnail-import` (a partner-content
+  thumbnail-import endpoint — importing a thumbnail image from a
+  partner-supplied URL for newly-ingested partner content, a real,
+  plausible feature given Netflix's own confirmed B2B content-ingestion
+  surface, `/api/content/import`, `CC-LAB-0179`). `spring_boot`'s
+  **first** instantiation of `lab/safety_matrix.yaml`'s existing
+  `server_side_http_fetch` sink family / `ssrf` concern (`CC-LAB-0063`,
+  already instantiated TWICE on `go_net_http` — `CC-LAB-0172`'s
+  `/api/clips/thumbnail` and `CC-LAB-0185`'s `/clips/download`). Reuses
+  this stack's pre-existing `query_param` source verbatim (already used
+  by `ssti`/`spel_injection`) rather than a JSON body field — the same
+  query-param-carried-URL contract `go_net_http`'s own
+  `read_url_query_param` source established: the vulnerable twin
+  (`unchecked_url_fetch`) fetches whatever URL the caller supplies with
+  no validation at all; the secure twin
+  (`scheme_and_resolved_ip_allowlist`) rejects any scheme but `https` and
+  rejects a fetch whose hostname RESOLVES to a loopback/private/
+  link-local address (`java.net.InetAddress.getAllByName`, the JDK's own
+  real-DNS-resolution analog of Go's `net.LookupIP`), checked against the
+  actually-resolved address, closing the DNS-rebinding gap. Both ported
+  idiomatically to `java.net.http.HttpClient` with a bounded connect/
+  request timeout. Detection generalized with **zero new code AND zero
+  new sender/candidate plumbing**, verified live in the same commit:
+  `SsrfInBandMarkerStrategy`/`SsrfOobStrategy` (built for Twitch) confirm
+  the new vulnerable twin and correctly fail closed on the secure twin
+  against a real booted `spring_boot` app, with a real `OobListener`
+  passed through. Also proved a genuine, real-network differential
+  (plain-HTTP loopback accepted by the vulnerable twin; rejected by the
+  secure twin on the scheme check; an HTTPS loopback target ALSO rejected
+  by the secure twin, isolating the resolved-IP-allowlist check
+  specifically) against throwaway loopback listeners only, per
+  `CLAUDE.md`'s lab-only/authorized-only safety discipline. Ground truth
+  extended (`NFLX-0009`); Netflix's own real, scored `multitarget` recall
+  moves from `8/8` to `9/9` (multi-cell boot) and from `1/8` to `1/9`
+  (single-cell wiring test). Full bookkeeping in
+  `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0194`
+  entry.
+
 ## 2026-09-23 (LAB: Netflix's 8th real page, first jwt_algorithm_confusion instance on spring_boot, CC-LAB-0193/FR-LAB-133)
 - Target lab: `GET /api/account/preferences` (an account-level
   viewing-preferences lookup — maturity rating, autoplay, subtitle

@@ -646,6 +646,47 @@ class JwtNoneAlgOptInSink(TemplateModule):
         super().__init__("jwt_none_alg_opt_in", "sink", SINK_ENV, "jwt_none_alg_opt_in.java.j2")
 
 
+class UncheckedUrlFetchSink(TemplateModule):
+    """The vulnerable op (`lab/safety_matrix.yaml`'s existing
+    `unchecked_url_fetch` op, `server_side_http_fetch` sink family,
+    `no_effect` -- added by `CC-LAB-0063`, already instantiated on
+    `go_net_http` by `CC-LAB-0172`/`CC-LAB-0185`; `CC-LAB-0194` is its
+    first instantiation for `spring_boot`): fetches whatever URL the
+    caller-supplied `thumbnail_url` query parameter names, with no
+    validation at all -- CWE-918, SSRF. Reuses this stack's existing
+    `QueryParamSource` verbatim (the same `request.getParameter` source
+    already used by the ssti/spel_injection shapes), matching
+    `go_net_http`'s own `read_url_query_param` source contract exactly (a
+    query-param-carried URL, not a JSON body field -- chosen so a generic
+    `Candidate(location="query")` probe drives this shape identically to
+    `go_net_http`'s SSRF cells, letting `SsrfInBandMarkerStrategy`/
+    `SsrfOobStrategy` generalize with zero new detection code AND zero
+    new sender/candidate plumbing). Ported idiomatically from
+    `go_net_http`'s own `UncheckedUrlFetchSink` (`CC-LAB-0172`) to
+    `java.net.http.HttpClient`, with a bounded connect/request timeout
+    (never a default-timeout client)."""
+
+    def __init__(self) -> None:
+        super().__init__("unchecked_url_fetch", "sink", SINK_ENV, "unchecked_url_fetch.java.j2")
+
+
+class SchemeAndResolvedIpAllowlistSink(TemplateModule):
+    """The secure twin (`scheme_and_resolved_ip_allowlist`, `neutralises`
+    -- `CC-LAB-0194`): the identical query-param read, but rejects any
+    scheme but `https` and rejects a fetch whose hostname RESOLVES to a
+    loopback/private/link-local address, checked against the actually-
+    resolved address (`java.net.InetAddress.getAllByName`, the JDK's own
+    real-DNS-resolution analog of Go's `net.LookupIP`) -- closing the
+    DNS-rebinding gap `lab/safety_matrix.yaml`'s own comment on this sink
+    family names, matching `go_net_http`'s own
+    `SchemeAndResolvedIpAllowlistSink` (`CC-LAB-0172`) design exactly."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "scheme_and_resolved_ip_allowlist", "sink", SINK_ENV, "scheme_and_resolved_ip_allowlist.java.j2"
+        )
+
+
 SOURCES: dict[str, Module] = {
     "query_param": QueryParamSource(),
     "raw_body": RawBodySource(),
@@ -680,6 +721,8 @@ SINKS: dict[str, Module] = {
     "typed_schema_allowlist": TypedSchemaAllowlistSink(),
     "jwt_alg_none_default": JwtAlgNoneDefaultSink(),
     "jwt_none_alg_opt_in": JwtNoneAlgOptInSink(),
+    "unchecked_url_fetch": UncheckedUrlFetchSink(),
+    "scheme_and_resolved_ip_allowlist": SchemeAndResolvedIpAllowlistSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_handler": SingleHandlerComplexity(),

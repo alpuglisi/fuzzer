@@ -1,0 +1,23 @@
+        // unchecked_url_fetch: the caller-supplied thumbnail_url is fetched
+        // server-side with no validation at all (CWE-918, SSRF) -- ported
+        // idiomatically from go_net_http's own UncheckedUrlFetchSink
+        // (CC-LAB-0172) to java.net.http.HttpClient. A bounded connect/
+        // request timeout is set explicitly (never a default-timeout
+        // client) so a slow/unresponsive fetch target cannot hang this
+        // handler indefinitely, matching CC-LAB-0172's own "bounded
+        // timeout on every real operation" convention.
+        try {
+            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                .connectTimeout(java.time.Duration.ofSeconds(5))
+                .build();
+            java.net.http.HttpRequest fetchRequest = java.net.http.HttpRequest.newBuilder(
+                    java.net.URI.create({{ value_expr }}))
+                .timeout(java.time.Duration.ofSeconds(5))
+                .GET()
+                .build();
+            java.net.http.HttpResponse<String> fetchResponse = client.send(
+                fetchRequest, java.net.http.HttpResponse.BodyHandlers.ofString());
+            return org.springframework.http.ResponseEntity.ok().body(fetchResponse.body());
+        } catch (Exception e) {
+            return org.springframework.http.ResponseEntity.status(502).body("{\"error\":\"fetch_failed\"}");
+        }

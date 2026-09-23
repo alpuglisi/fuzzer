@@ -4673,6 +4673,77 @@ lane) can submit a payload as
   concluding this, not assumed absent) -- substituted with a documented,
   rigorous self-review performed and recorded in `CC-LAB-0193`.
 
+- **FR-LAB-134** *(Netflix's ninth real page: first `ssrf` instance on
+  `spring_boot`, `/api/content/thumbnail-import`; `CC-LAB-0194`,
+  2026-09-23).* Instantiates `lab/safety_matrix.yaml`'s existing
+  `server_side_http_fetch` sink family and its `unchecked_url_fetch`/
+  `scheme_and_resolved_ip_allowlist` ops (`CC-LAB-0063`, already on
+  `go_net_http` per `CC-LAB-0172`'s `/api/clips/thumbnail` and
+  `CC-LAB-0185`'s `/clips/download`) on `spring_boot` for the FIRST time
+  -- genuinely new breadth, not a depth reuse. A partner-content
+  thumbnail-import endpoint (importing a thumbnail image from a
+  partner-supplied URL for newly-ingested partner content -- a real,
+  plausible feature given Netflix's own confirmed B2B content-ingestion
+  surface, `/api/content/import`, `CC-LAB-0179`), genuinely distinct from
+  that endpoint's own XML-metadata-feed ingestion. Reuses this stack's
+  pre-existing `query_param` source verbatim (already used by
+  `ssti`/`spel_injection`) rather than adding a JSON-body source -- the
+  same query-param-carried-URL contract `go_net_http`'s own
+  `read_url_query_param` source established, deliberately chosen so a
+  generic `Candidate(location="query")` probe drives this shape
+  identically to `go_net_http`'s own SSRF cells. The vulnerable sink
+  (`unchecked_url_fetch`) fetches whatever URL the caller supplies with
+  no validation at all (CWE-918); the secure sink
+  (`scheme_and_resolved_ip_allowlist`) rejects any scheme but `https` and
+  rejects a fetch whose hostname RESOLVES to a loopback/private/
+  link-local address, checked against the address actually resolved
+  (`java.net.InetAddress.getAllByName`, the JDK's own real-DNS-resolution
+  analog of Go's `net.LookupIP`), before ever attempting the fetch --
+  closing the DNS-rebinding gap `lab/safety_matrix.yaml`'s own comment on
+  this sink family names. Both sinks use a bounded
+  `java.net.http.HttpClient` connect/request timeout (never a
+  default-timeout client), matching `CC-LAB-0172`'s own convention. Cells
+  `LABGEN-JV-0017`/`0018`; ground truth `NFLX-0009`
+  (`vuln_class="ssrf"`, `sink_context="network"`, both existing enum
+  values from `TWCH-0002`, no schema change; `param="thumbnail_url"`/
+  `location="query"`, the query-param-carried-value convention
+  `TWCH-0002`/`TWCH-0008` already establish; `rendering="server-json"`).
+  **Detection generalizes with zero new code AND zero new sender/
+  candidate plumbing, verified live**: `SsrfInBandMarkerStrategy`/
+  `SsrfOobStrategy` (`CC-FUZZ-0027`, built for Twitch's `TWCH-0002`/
+  `TWCH-0008`) send their canary directly as the candidate's query-param
+  value -- the vulnerable twin's response body is the fetched resource's
+  own body verbatim (mirroring `go_net_http`'s own `io.Copy(w,
+  resp.Body)` shape), exactly the shape `SsrfInBandMarkerStrategy.confirm()`
+  checks for -- so both strategies confirm this new `spring_boot`
+  vulnerable twin and correctly fail closed on its secure twin with zero
+  adaptation, confirmed against a real booted app, with a real
+  `OobListener` passed through
+  (`tests/test_labgen_spring_boot_netflix_thumbnail_ssrf_live_boot.py`),
+  landed in the SAME commit as the lab page (unlike `CC-LAB-0172`'s own
+  detection, deliberately deferred as a separate follow-on at the time
+  since this was the project's own first `ssrf` rule/strategy pair). Also
+  proves a genuine, real-network functional differential (plain-HTTP
+  loopback accepted by the vulnerable twin; rejected by the secure twin
+  on the scheme check alone; an HTTPS loopback target ALSO rejected by
+  the secure twin, isolating the resolved-IP-allowlist check
+  specifically) against throwaway loopback listeners this test process
+  itself starts and owns, never a real external/production host, per
+  `CLAUDE.md`'s lab-only/authorized-only safety discipline. Netflix's own
+  real, scored recall moves from `8/8` to `9/9` in the multi-cell boot
+  and from `1/8` to `1/9` in the single-cell wiring test
+  (`tests/test_multitarget_category4.py`, both re-derived per
+  `PA-0042`). `tests/test_auto.py` re-run and confirmed unaffected (the
+  only Netflix-cardinality-sensitive assertions there count whole-body
+  `param="body"` points, which this new query-param point is not part
+  of).
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0193`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded in `CC-LAB-0194`.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.
