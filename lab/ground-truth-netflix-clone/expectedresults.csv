@@ -11,3 +11,4 @@ NFLX-0004,/api/account/billing,GET,account_id,query,access_control,true,/api/acc
 NFLX-0005,/api/subscription/change-plan,POST,body,body,price_integrity_bypass,true,/api/subscription/change-plan,sink,,direct
 NFLX-0006,/api/profiles/avatar,POST,file,body,unrestricted_file_upload,true,/api/profiles/avatar,sink,,direct
 NFLX-0007,/api/account/settings,POST,body,body,mass_assignment,true,/api/account/settings,sink,,direct
+NFLX-0008,/api/account/preferences,GET,Authorization,header,jwt_algorithm_confusion,true,/api/account/preferences,sink,,direct

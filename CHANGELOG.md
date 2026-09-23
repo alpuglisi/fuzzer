@@ -4,6 +4,33 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (LAB: Netflix's 8th real page, first jwt_algorithm_confusion instance on spring_boot, CC-LAB-0193/FR-LAB-133)
+- Target lab: `GET /api/account/preferences` (an account-level
+  viewing-preferences lookup — maturity rating, autoplay, subtitle
+  language) gated by a Bearer JWT in the `Authorization` header.
+  `spring_boot`'s **first** instantiation of
+  `lab/safety_matrix.yaml`'s existing `jwt_signature_verification` sink
+  family / `jwt_algorithm_confusion` concern (`CC-LAB-0063`, already
+  instantiated on `go_net_http` — `CC-LAB-0180`'s own Twitch
+  channel-settings page is the direct precedent, modeled on) — this
+  session's own cross-stack-generalization campaign, giving Netflix a
+  mechanism Twitch already has. A hand-rolled JWT parser/verifier using
+  only JDK standard-library primitives (`java.util.Base64`,
+  `javax.crypto.Mac`, `java.security.MessageDigest` — no third-party JWT
+  dependency, matching `go_net_http`'s own "hand-rolled parser is the
+  vulnerability" framing rather than a real library's CVE): the
+  vulnerable twin honors an attacker-chosen `alg: none` header, skipping
+  signature verification entirely; the secure twin requires the token's
+  own header to explicitly claim `HS256` *and* a valid HMAC. Detection
+  generalized with **zero new code**, verified live in the same commit:
+  `JwtAlgNoneConfusionStrategy` (built for Twitch) confirms the new
+  vulnerable twin and correctly fails closed on the secure twin against a
+  real booted `spring_boot` app. Ground truth extended (`NFLX-0008`);
+  Netflix's own real, scored `multitarget` recall moves from `7/7` to
+  `8/8` (multi-cell boot). Full bookkeeping in
+  `docs/components/01-target-lab/change-control.md`'s `CC-LAB-0193`
+  entry.
+
 ## 2026-09-23 (LAB: Netflix's 7th real page, first mass_assignment instance on spring_boot, CC-LAB-0192/FR-LAB-132)
 - Target lab: `POST /api/account/settings` (an account-settings-update
   endpoint — a real, plausible Netflix feature, e.g. updating a display

@@ -4616,6 +4616,63 @@ lane) can submit a payload as
   concluding this, not assumed absent) -- substituted with a documented,
   rigorous self-review performed and recorded in `CC-LAB-0192`.
 
+- **FR-LAB-133** *(Netflix's eighth real page: first `jwt_algorithm_
+  confusion` instance on `spring_boot`, `/api/account/preferences`;
+  `CC-LAB-0193`, 2026-09-23).* Instantiates `lab/safety_matrix.yaml`'s
+  existing `jwt_signature_verification` sink family and its
+  `jwt_alg_none_default`/`jwt_none_alg_opt_in` ops (`CC-LAB-0063`,
+  already on `go_net_http` per `CC-LAB-0180`/`FR-LAB-120`) on
+  `spring_boot` for the FIRST time -- genuinely new breadth, not a depth
+  reuse. An account-level viewing-preferences lookup (maturity rating,
+  autoplay, subtitle language) gated by a Bearer JWT in the
+  `Authorization` header, distinct from this app's other 7 real pages
+  (none of which use header-carried auth). A hand-rolled JWT parser/
+  verifier using only JDK standard-library primitives
+  (`java.util.Base64`, `javax.crypto.Mac`, `java.security.MessageDigest`
+  -- no third-party JWT dependency), ported directly from `CC-LAB-0180`'s
+  own Go design: the vulnerable sink (`jwt_alg_none_default`) honors an
+  attacker-chosen `alg: none` header, skipping signature verification
+  entirely; the secure sink (`jwt_none_alg_opt_in`) requires the token's
+  own header to explicitly claim the one pinned algorithm (`HS256`) *and*
+  a valid HMAC before any claims are trusted. A new source module,
+  `ReadAuthorizationBearerTokenSource`, computes all three boolean
+  ingredients itself (this stack has no separate transform stage); each
+  op's own sink module reads them directly to decide its own
+  accepted-condition (Convention 2, the manifest's one op names a sink
+  directly, like SSTI/XXE/access-control/price-integrity/file-upload/
+  mass-assignment). Cells `LABGEN-JV-0015`/`0016`; ground truth
+  `NFLX-0008` (`vuln_class="jwt_algorithm_confusion"`,
+  `sink_context="jwt"`, both existing enum values from `TWCH-0004`, no
+  schema change; `param="Authorization"`/`location="header"`, the
+  header-carried-value convention `TWCH-0001`/`TWCH-0004` already
+  establish; `rendering="server-json"`).
+  **Detection generalizes with zero new code, verified live**:
+  `JwtAlgNoneConfusionStrategy` (`CC-FUZZ-0033`/`CC-AUD-0020`, built for
+  Twitch's `TWCH-0004`) forges its two probes' claims under fixed literal
+  keys (`channel_id`/`role`) it expects echoed back verbatim -- rather
+  than inventing differently-named preference claims, this entry
+  deliberately reuses the exact same claim names (this session's own
+  "fixed demo field name as declared simplification" convention),
+  alongside fixed Netflix-flavored preference fields
+  (`maturity_rating`/`autoplay`/`subtitle_language`), so the existing
+  strategy generalizes to this new stack with no adaptation needed;
+  confirmed against a real booted `spring_boot` app
+  (`tests/test_labgen_spring_boot_netflix_jwt_preferences_live_boot.py`),
+  landed in the SAME commit as the lab page (unlike `CC-LAB-0180`'s own
+  detection, deliberately deferred as a separate follow-on at the time
+  since no rule/strategy existed for this class at all). Netflix's own
+  real, scored recall moves from `7/7` to `8/8` in the multi-cell boot
+  and from `1/7` to `1/8` in the single-cell wiring test
+  (`tests/test_multitarget_category4.py`, both re-derived per
+  `PA-0042`). `tests/test_auto.py` re-run and confirmed unaffected
+  (this point is header-carried, not whole-body-JSON).
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0192`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded in `CC-LAB-0193`.
+
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at
   runtime.

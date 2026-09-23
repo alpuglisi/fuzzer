@@ -50,6 +50,13 @@
       "param": "body",
       "location": "body",
       "rendering": "server-json"
+    },
+    {
+      "url": "/api/account/preferences",
+      "method": "GET",
+      "param": "Authorization",
+      "location": "header",
+      "rendering": "server-json"
     }
   ]
 }

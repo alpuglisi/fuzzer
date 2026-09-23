@@ -104,6 +104,15 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     # publishes as a whole UTF-8 String, so no new source module is
     # needed.
     ("mass_assignment", "orm_entity_bulk_assign"): _ModuleSet("raw_body", "single_handler"),
+    # CC-LAB-0193: Netflix's eighth real page, this stack's first
+    # jwt_algorithm_confusion instance -- reuses lab/safety_matrix.yaml's
+    # existing jwt_signature_verification sink family and
+    # jwt_alg_none_default/jwt_none_alg_opt_in ops (CC-LAB-0063), already
+    # instantiated on go_net_http (CC-LAB-0180). No new safety-matrix
+    # entry needed.
+    ("jwt_algorithm_confusion", "jwt_signature_verification"): _ModuleSet(
+        "read_authorization_bearer_token", "single_handler"
+    ),
 }
 
 #: Per-route static render context, the same "render-only information, not
@@ -148,6 +157,12 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
     # request body String; no param_name needed, the tainted material is
     # the entire JSON body, not a single named field.
     "/api/account/settings": {"var_name": "accountSettingsBody"},
+    # CC-LAB-0193: Netflix's eighth real page, a viewing-preferences lookup
+    # gated by a Bearer JWT in the Authorization header -- this stack's
+    # first jwt_algorithm_confusion page. No var_name/param_name needed:
+    # the tainted material is the Authorization header itself, read
+    # directly by ReadAuthorizationBearerTokenSource.
+    "/api/account/preferences": {},
 }
 
 #: Per-op source override (`CC-LAB-0173`) -- checked *after* the shape-level

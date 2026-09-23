@@ -3,6 +3,248 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0193 — Netflix's 8th real page: first jwt_algorithm_confusion instance on `spring_boot`, `/api/account/preferences` (FR-LAB-133) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing
+  `jwt_alg_none_default`/`jwt_none_alg_opt_in` mechanism
+  (`jwt_signature_verification` sink family, `CC-LAB-0063`, already built
+  on `go_net_http` per `CC-LAB-0180` -- Twitch's own channel-settings
+  page, modeled on directly) on `spring_boot`, this stack's first
+  instance: `GET /api/account/preferences` (served by `LABGEN-JV-0015`/
+  `0016`), an account-level viewing-preferences lookup (maturity rating,
+  autoplay, subtitle language) gated by a Bearer JWT in the
+  `Authorization` header -- a realistic API-edge auth shape distinct from
+  every one of this app's other 7 real pages (none of which use
+  header-carried auth), and this session's own cross-stack-
+  generalization campaign: giving Netflix a mechanism Twitch's
+  `go_net_http` pick already has.
+  **A hand-rolled JWT parser/verifier, JDK standard library only**
+  (`java.util.Base64`, `javax.crypto.Mac`, `java.security.MessageDigest`
+  -- no third-party JWT dependency; `pom.xml` gets no new `<dependency>`),
+  modeling the same real `auth0/node-jsonwebtoken` vulnerability
+  (GHSA-8cf7-32gw-wr33, already cited in this project's own
+  `docs/research/corpus-examples/auth-session/node/vulnerable-1.js`) that
+  `CC-LAB-0180`'s own Go implementation models: the vulnerable twin
+  (`jwt_alg_none_default`) honors an attacker-chosen `alg: none` header,
+  skipping signature verification entirely
+  (`jwtAlgIsNone || jwtHmacValid`); the secure twin (`jwt_none_alg_opt_in`)
+  requires the token's own header to explicitly claim the one pinned
+  algorithm (`HS256`) *and* a valid HMAC before any claims are trusted
+  (`jwtAlgIsHs256 && jwtHmacValid`) -- an `alg:none` token never reaches
+  the accepted-condition at all. `java.security.MessageDigest.isEqual`
+  (constant-time, the JDK's own `hmac.Equal` analog) is used explicitly
+  for the HMAC comparison, and a malformed/empty base64url segment fails
+  closed by construction: `TrackerNestApplication.base64UrlDecode` (a new
+  static helper on the existing skeleton class, mirroring `go_net_http`'s
+  own package-level `jwtSecret`/decode convention) catches
+  `IllegalArgumentException` and returns an empty byte array rather than
+  throwing, so `MessageDigest.isEqual` safely reports "not equal" on any
+  length mismatch, never crashes the request.
+  **Module composition, checked before building, not assumed:** unlike
+  `go_net_http`'s own source+transform split (a `value_expr` a transform
+  computes), this stack's shape has no separate transform stage (see
+  `modules.py`'s own docstring) -- `ReadAuthorizationBearerTokenSource`
+  computes all three boolean ingredients itself
+  (`jwtAlgIsNone`/`jwtAlgIsHs256`/`jwtHmacValid`) and each op's own sink
+  module (`JwtAlgNoneDefaultSink`/`JwtNoneAlgOptInSink`) reads them
+  directly to decide its own accepted-condition, the same "op selects the
+  sink" convention this stack already uses for SSTI/XXE/access-control/
+  price-integrity/file-upload/mass-assignment. **A real Java concern Go's
+  own implementation had to guard against (`_, _ = algIsNone, algIsHS256`
+  in `CC-LAB-0180`, an unused-identifier compile error) does NOT apply
+  here**, checked directly rather than assumed: Java's `javac` does not
+  reject an unused local variable (only some external linters warn on
+  it), so each sink module deliberately reading only two of the three
+  published booleans compiles cleanly with no equivalent guard needed --
+  confirmed by the real `mvn package` below actually succeeding on the
+  first attempt with no discard-guard code, unlike Go's own history on
+  this exact mechanism.
+  **Response-shape design decision, checked directly against the existing
+  strategy's source before building, not assumed to "probably work":**
+  `JwtAlgNoneConfusionStrategy` (`fuzzlab/oracle/strategies.py`, built for
+  Twitch's `go_net_http` cell) forges its two probes' payload claims under
+  fixed literal keys, `channel_id`/`role` -- reading its `confirm()`
+  method directly (not just its docstring) confirmed the only real
+  contract is that the response text contains the `channel_id` claim
+  value verbatim somewhere (a substring check, `token not in
+  probe_a.text`), not a specific response schema. This entry's sink
+  templates echo the decoded token's own `channel_id`/`role` claims
+  verbatim (alongside fixed Netflix-flavored preference fields,
+  `maturity_rating`/`autoplay`/`subtitle_language`) -- the same "fixed
+  demo field name as declared simplification" convention
+  `CC-LAB-0182`/`CC-LAB-0192`'s own `mass_assignment` ground truth already
+  establish -- so the existing strategy generalizes to this new stack
+  with genuinely zero new or widened detection code, verified for real
+  rather than assumed (see below), landed in the SAME commit as the lab
+  page (unlike `CC-LAB-0180`'s own detection, which was deliberately
+  deferred as a separate follow-on at the time, per that entry's own
+  adequacy-pass recommendation to split the lab page from its detection).
+  Real live-boot proof
+  (`tests/test_labgen_spring_boot_netflix_jwt_preferences_live_boot.py`):
+  three cases mirroring `CC-LAB-0180`'s own Go proof exactly -- (a) the
+  vulnerable twin honors an `alg:none` token and returns its forged
+  `channel_id`/`role` claims (HTTP 200); (b) the vulnerable twin still
+  correctly rejects a garbage-but-`HS256`-claimed signature (HTTP 401),
+  proving it isn't simply "always 200"; (c) the secure twin rejects the
+  identical `alg:none` token outright (HTTP 401, no data) -- all three
+  passed on the first real `mvn package`/boot/HTTP round trip. A second
+  test class in the same file proves `JwtAlgNoneConfusionStrategy` needs
+  zero new detection code: it confirms the new vulnerable twin and
+  correctly fails closed on the secure twin, driven against the real
+  booted app (not a fake sender) -- the fourth proof this strategy class
+  of detection generalizes across stacks in the direction `go_net_http`
+  -> `spring_boot` (after `AccessControlIdorStrategy`'s own `CC-LAB-0187`
+  proof, `UnrestrictedFileUploadContentTypeTrustStrategy`'s own
+  `CC-LAB-0191` proof, and `MassAssignmentPrivilegedFieldStrategy`'s own
+  `CC-LAB-0192` proof), and specifically the first proof that
+  `JwtAlgNoneConfusionStrategy` itself (as opposed to a different
+  strategy class) generalizes beyond the one stack it was built for.
+  Ground truth extended (`NFLX-0008`, `param="Authorization"`/
+  `location="header"` -- the header-carried-value convention
+  `TWCH-0001`/`TWCH-0004` already establish, `CC-LAB-0174`). No schema
+  widening needed: `jwt_algorithm_confusion` (`vuln_class`) and `jwt`
+  (`sink_context`) were already valid enum values (from `go_net_http`'s
+  own `TWCH-0004`, `CC-LAB-0180`), and `header`/`GET` are both
+  pre-existing `location`/`param`/`method` shapes.
+  `tests/test_auto.py`'s own whole-body-JSON `body_content_type` count
+  (`test_points_from_ground_truth_sets_body_content_type_only_for_json_
+  cases`) is unaffected -- checked directly, not assumed: this new point
+  is header-carried (`param="Authorization"`, not `"body"`), so it never
+  enters that function's whole-body-point branch at all; re-ran the file
+  to confirm (16 passed, unchanged).
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0192`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` with a
+  direct query before concluding this, not assumed absent) -- substituted
+  with a documented, rigorous self-review performed and recorded here.
+  **(1) Accuracy** -- checked by direct source inspection, not assumed:
+  `jwt_signature_verification`/`jwt_alg_none_default`/
+  `jwt_none_alg_opt_in` exist verbatim in `lab/safety_matrix.yaml` with
+  the documented `no_effect`/`neutralises` ladder; `LABGEN-JV-0015`/`0016`
+  were confirmed free (highest existing `LABGEN-JV-` id across every
+  manifest was `LABGEN-JV-0014`, from `CC-LAB-0192`); `go_net_http`'s own
+  `read_authorization_bearer_token.go.j2`/`jwt_claims_response.go.j2` and
+  `JwtAlgNoneConfusionStrategy`'s own `confirm()` method (exact claim
+  field names, the two-probe differential, the `401`/`403`-required
+  rejection gate) were read directly from source before designing the
+  Java templates around them, not assumed from either docstring alone --
+  all differential and generalization assertions passed on the first
+  real live-boot run. **(2) Adequacy** -- checked that this increment
+  does not silently duplicate an existing route (grepped `_PAGE_PARAMS`
+  for `/api/account/preferences`: absent) and does not need a second,
+  redundant sink pair (the manifest's minimal-pair invariant: one
+  vulnerable, one secure op, both new for this stack). Checked the
+  bookkeeping-ID discipline this session's own dispatch flagged as a
+  recurring risk (`CC-LAB-0191`'s own numbering-collision story):
+  confirmed `CC-LAB-0193` against this branch's own reserved block
+  (`CC-LAB-0170`-`0209`) and the highest number actually used in this log
+  (`CC-LAB-0192`), not merely mentioned anywhere in this branch's merged
+  docs (category 5's `CC-LAB-0210`-`0249` block is also present in this
+  branch's history and must not be mistaken for "next free"). Checked
+  `tests/test_multitarget_category4.py`/`tests/test_auto.py`/
+  `tests/test_labels_contract_category4.py` for hardcoded fraction/count
+  assertions depending on Netflix's ground-truth cardinality (per
+  `BUG-0040`/`PA-0042`) and re-ran all three directly (not just the
+  non-slow suite) after updating them.
+  Cross-branch collision check done before starting: both category 3's
+  (`claude/category-3-build-iuu5k9`) and category 5's
+  (`claude/category-5-build-6boejs`) sibling branches were fetched and
+  diffed against every shared file this entry touches
+  (`fuzzlab/labgen/emitters/spring_boot/`,
+  `fuzzlab/labgen/emitters/spring_boot/stack/skeleton/...
+  TrackerNestApplication.java`) -- both are strictly behind this branch
+  on `spring_boot/__init__.py`/`modules.py` (their own diffs show only
+  removals of Netflix content this branch already has, an earlier base,
+  never a conflicting edit to the same lines/keys this entry touches),
+  and neither branch touches `TrackerNestApplication.java` at all -- this
+  entry does not modify `fuzzlab/oracle/strategies.py` at all (the
+  detection strategy is reused verbatim, zero new/changed lines), so
+  category 5's own new strategy classes there (`SpelInjectionStrategy`/
+  an `OpenRedirectStrategy`, purely additive appends on that branch) pose
+  no collision risk either. This is a pure, non-colliding addition.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/modules.py`
+    (`ReadAuthorizationBearerTokenSource`, `JwtAlgNoneDefaultSink`,
+    `JwtNoneAlgOptInSink`)
+  - `fuzzlab/labgen/emitters/spring_boot/__init__.py` (new
+    `_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS` entries)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sources/
+    read_authorization_bearer_token.java.j2` (new)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sinks/
+    jwt_alg_none_default.java.j2`, `jwt_none_alg_opt_in.java.j2` (new)
+  - `fuzzlab/labgen/emitters/spring_boot/stack/skeleton/src/main/java/
+    com/fuzzlab/trackernest/TrackerNestApplication.java` (`JWT_SECRET`,
+    `base64UrlDecode`)
+  - `lab/manifests/jwt_alg_confusion_netflix_sample.yaml` (new)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,
+    expectedresults.csv}`
+  - `tests/test_labgen_spring_boot_netflix_jwt_preferences.py` (new)
+  - `tests/test_labgen_spring_boot_netflix_jwt_preferences_live_boot.py`
+    (new)
+  - `tests/test_labels_contract_category4.py` (NFLX-0008 cross-check)
+  - `tests/test_multitarget_category4.py` (Netflix recall re-derived,
+    both single-cell and multi-cell boots; multi-cell manifest/cell-id
+    lists extended)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-133`, new)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category-4 tracker
+    row)
+  - `docs/ARCHITECTURE.md` (Netflix page/detection counts)
+- Impact (other components / project): purely additive to `spring_boot`
+  and `lab/ground-truth-netflix-clone`; no other stack/app touched. No
+  audit-rule/oracle-strategy bookkeeping change was needed
+  (`JwtAlgNoneConfusionStrategy`/`CC-FUZZ-0033`/`CC-AUD-0020` already
+  exist and needed zero code change) -- only their own generalization is
+  newly proven and recorded, here and in
+  `tests/test_multitarget_category4.py`'s own docstring.
+  `tests/test_multitarget_category4.py`'s Netflix recall assertions move
+  from `7/7` to `8/8` (multi-cell boot) and from `1/7` to `1/8`
+  (single-cell wiring test).
+- Risk (level; mitigation or accepted-risk justification): Low-medium,
+  the same level `CC-LAB-0180`'s own hand-rolled-JWT entry accepted. A
+  hand-rolled JWT parser is inherently more security-sensitive than
+  reusing an established library -- mitigated identically here: the
+  parsing logic stays minimal and entirely inside this lab-generator's
+  own controlled fixture code (never a real target), the fail-closed
+  `base64UrlDecode`/`MessageDigest.isEqual` behavior is named explicitly
+  in code comments, and a real, executed live-boot proof (not just unit
+  tests) covers both the intended bypass and a plausible secondary
+  bypass attempt (a garbage-but-claimed-HS256 signature, which the
+  vulnerable twin still correctly rejects). The self-review substitution
+  above (in place of two independent reviewer agents) is the one real
+  process risk this entry accepts and states explicitly, mitigated by
+  the real `mvn package`/boot/HTTP verification actually performed
+  before landing (both the differential and the strategy
+  generalization).
+- Deliverables:
+  - [x] `ReadAuthorizationBearerTokenSource`/`JwtAlgNoneDefaultSink`/
+        `JwtNoneAlgOptInSink` render correctly (unit tests in
+        `tests/test_labgen_spring_boot_netflix_jwt_preferences.py`) --
+        done
+  - [x] Real live-boot differential proof (3 assertions,
+        `tests/test_labgen_spring_boot_netflix_jwt_preferences_live_
+        boot.py`) -- done
+  - [x] Real live-boot detection-generalization proof (same file,
+        `TestJwtAlgNoneConfusionStrategyGeneralizesToSpringBoot`) -- done
+  - [x] Ground-truth contract cross-check
+        (`tests/test_labels_contract_category4.py`) -- done
+  - [x] `tests/test_multitarget_category4.py` updated for the new 8/8
+        (multi-cell)/1/8 (single-cell) recall math and re-run against a
+        real pipeline (both slow tests pass) -- done
+  - [x] `tests/test_auto.py` re-run, confirmed unaffected (header point,
+        not body) -- done
+  - [x] Full non-slow suite + every directly-affected slow test re-run
+        green at the stable baseline -- done
+- Effectiveness (assessed 2026-09-23): achieved, both as a lab page and
+  for detection -- the real booted vulnerable twin accepts an `alg:none`
+  token and returns its forged claims (HTTP 200), while still correctly
+  rejecting a garbage `HS256` signature (HTTP 401); the real booted
+  secure twin rejects the same `alg:none` token outright (HTTP 401, no
+  data); `JwtAlgNoneConfusionStrategy` confirms the vulnerable twin and
+  correctly fails closed on the secure twin with zero new detection
+  code. Netflix's own real, scored `multitarget` recall is now `8/8` in
+  the multi-cell boot.
+
 ### CC-LAB-0192 — Netflix's 7th real page: first mass_assignment instance on `spring_boot`, `/api/account/settings` (FR-LAB-132) (2026-09-23)
 
 - Change: instantiates `lab/safety_matrix.yaml`'s existing

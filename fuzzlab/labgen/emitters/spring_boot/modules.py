@@ -577,6 +577,75 @@ class TypedSchemaAllowlistSink(TemplateModule):
         )
 
 
+class ReadAuthorizationBearerTokenSource(TemplateModule):
+    """Reads and hand-parses a Bearer JWT off the `Authorization` header
+    (`CC-LAB-0193`) -- a hand-rolled parser/verifier using only JDK
+    standard-library primitives (`java.util.Base64`, `javax.crypto.Mac`,
+    `java.security.MessageDigest`) plus this stack's existing Jackson-3
+    JSON convention for the header/payload JSON, deliberately NOT a real
+    JWT library dependency, matching `go_net_http`'s own
+    `ReadAuthorizationBearerTokenSource` (`CC-LAB-0180`) "hand-rolled
+    parser is the vulnerability" framing rather than modeling a real
+    library's own CVE. Publishes five Java identifiers a sink reads
+    directly: `token_var` (the raw token string), `alg_none_var`/
+    `alg_hs256_var` (booleans, whether the token's own header claims
+    `alg: none`/`alg: HS256`), `hmac_valid_var` (boolean, whether the
+    token's HMAC-SHA256 signature verifies against this stack's own fixed
+    demo secret, `TrackerNestApplication.JWT_SECRET`, compared in constant
+    time via `MessageDigest.isEqual`), and `claims_var` (the decoded
+    payload segment as a raw JSON string, unparsed -- each sink decides
+    which claims to trust and echo). Unlike this stack's other shapes,
+    this source computes the accept/reject condition's own boolean
+    ingredients itself (mirroring `go_net_http`'s own source/transform
+    split, since the two twins' condition genuinely differs in which
+    booleans it combines and how) -- but per this package's own
+    op-selects-sink convention (no separate transform stage on this
+    stack), each sink module reads these booleans directly and decides
+    its own condition, rather than a transform module computing a single
+    shared `value_expr`."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "read_authorization_bearer_token", "source", SOURCE_ENV,
+            "read_authorization_bearer_token.java.j2",
+        )
+
+    def render(self, ctx: dict[str, Any]) -> RenderResult:
+        render_ctx = dict(ctx)
+        render_ctx.setdefault("token_var", "jwtToken")
+        render_ctx.setdefault("alg_none_var", "jwtAlgIsNone")
+        render_ctx.setdefault("alg_hs256_var", "jwtAlgIsHs256")
+        render_ctx.setdefault("hmac_valid_var", "jwtHmacValid")
+        render_ctx.setdefault("claims_var", "jwtClaimsJson")
+        result = super().render(render_ctx)
+        return RenderResult(code=result.code, context=render_ctx)
+
+
+class JwtAlgNoneDefaultSink(TemplateModule):
+    """The vulnerable op (`lab/safety_matrix.yaml`'s existing
+    `jwt_alg_none_default` op, `jwt_signature_verification` sink family,
+    `no_effect` -- added by `CC-LAB-0063`, already instantiated on
+    `go_net_http` by `CC-LAB-0180`; `CC-LAB-0193` is its first
+    instantiation for `spring_boot`): honors an attacker-chosen `alg:
+    none` header, skipping signature verification entirely
+    (`{jwtAlgIsNone} || {jwtHmacValid}`) -- CWE-347, the real
+    `auth0/node-jsonwebtoken` GHSA-8cf7-32gw-wr33 bug."""
+
+    def __init__(self) -> None:
+        super().__init__("jwt_alg_none_default", "sink", SINK_ENV, "jwt_alg_none_default.java.j2")
+
+
+class JwtNoneAlgOptInSink(TemplateModule):
+    """The secure twin (`jwt_none_alg_opt_in`, `neutralises` --
+    `CC-LAB-0193`): requires the token's own header to explicitly claim
+    the one pinned algorithm (HS256) *and* a valid HMAC before any claims
+    are trusted (`{jwtAlgIsHs256} && {jwtHmacValid}`) -- an `alg:none`
+    token never reaches the HMAC check's own accepted-condition at all."""
+
+    def __init__(self) -> None:
+        super().__init__("jwt_none_alg_opt_in", "sink", SINK_ENV, "jwt_none_alg_opt_in.java.j2")
+
+
 SOURCES: dict[str, Module] = {
     "query_param": QueryParamSource(),
     "raw_body": RawBodySource(),
@@ -585,6 +654,7 @@ SOURCES: dict[str, Module] = {
     "read_account_id_and_caller_header": ReadAccountIdAndCallerHeaderSource(),
     "read_plan_change_request": ReadPlanChangeRequestSource(),
     "read_uploaded_avatar_file": ReadUploadedAvatarFileSource(),
+    "read_authorization_bearer_token": ReadAuthorizationBearerTokenSource(),
 }
 #: Keyed by the op name that selects this sink (see this module's own
 #: docstring for why the op selects the sink here, not a pre-sink
@@ -608,6 +678,8 @@ SINKS: dict[str, Module] = {
     "extension_allowlist_mime_check": ExtensionAllowlistMagicByteCheckSink(),
     "unfiltered_object_assign": UnfilteredObjectAssignSink(),
     "typed_schema_allowlist": TypedSchemaAllowlistSink(),
+    "jwt_alg_none_default": JwtAlgNoneDefaultSink(),
+    "jwt_none_alg_opt_in": JwtNoneAlgOptInSink(),
 }
 COMPLEXITIES: dict[str, Module] = {
     "single_handler": SingleHandlerComplexity(),

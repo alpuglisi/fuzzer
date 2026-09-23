@@ -15,7 +15,7 @@ TWITCH_GT_DIR = "lab/ground-truth-twitch-clone"
 def test_netflix_ground_truth_loads_and_cross_checks():
     gt = contract.load(NETFLIX_GT_DIR)
     assert gt.target == "spring_boot"
-    assert len(gt.cases) == 7
+    assert len(gt.cases) == 8
     case = gt.case_by_id("NFLX-0001")
     assert case is not None
     assert case.expected_vulnerable
@@ -95,9 +95,22 @@ def test_netflix_ground_truth_loads_and_cross_checks():
     assert settings_case.param == "body"
     assert settings_case.location == "body"
 
+    # CC-LAB-0193: Netflix's eighth real page, first jwt_algorithm_confusion
+    # instance, /api/account/preferences.
+    jwt_case = gt.case_by_id("NFLX-0008")
+    assert jwt_case is not None
+    assert jwt_case.expected_vulnerable
+    assert jwt_case.vuln_class == "jwt_algorithm_confusion"
+    assert jwt_case.sink_context == "jwt"
+    assert jwt_case.url == "/api/account/preferences"
+    assert jwt_case.method == "GET"
+    assert jwt_case.param == "Authorization"
+    assert jwt_case.location == "header"
+
     # Opaque case IDs: no vuln class leaks into the identifier.
     for case in gt.cases:
-        for token in ("jackson", "deser", "vuln", "xxe", "idor", "access", "price", "charge"):
+        for token in ("jackson", "deser", "vuln", "xxe", "idor", "access", "price", "charge",
+                      "jwt", "confusion"):
             assert token not in case.case_id.lower()
 
 

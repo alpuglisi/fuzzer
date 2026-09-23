@@ -1,0 +1,59 @@
+        // read_authorization_bearer_token: a hand-rolled JWT parser/verifier,
+        // JDK standard library only (java.util.Base64, tools.jackson for the
+        // JSON already used elsewhere in this stack, javax.crypto/
+        // java.security for the HMAC) -- no third-party JWT dependency, the
+        // same "hand-rolled parser is the vulnerability" model
+        // go_net_http's own read_authorization_bearer_token.go.j2
+        // (CC-LAB-0180) established, ported idiomatically to Java rather
+        // than reused as a real library's own CVE.
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader == null) {
+            authHeader = "";
+        }
+        String {{ token_var }} = authHeader.startsWith("Bearer ")
+            ? authHeader.substring("Bearer ".length()) : authHeader;
+        String[] jwtParts = {{ token_var }}.split("\\.", -1);
+        String jwtHeaderB64 = jwtParts.length > 0 ? jwtParts[0] : "";
+        String jwtPayloadB64 = jwtParts.length > 1 ? jwtParts[1] : "";
+        String jwtSigB64 = jwtParts.length > 2 ? jwtParts[2] : "";
+
+        String jwtAlg = "";
+        try {
+            byte[] jwtHeaderBytes = com.fuzzlab.trackernest.TrackerNestApplication.base64UrlDecode(jwtHeaderB64);
+            tools.jackson.databind.json.JsonMapper jwtMapper =
+                tools.jackson.databind.json.JsonMapper.builder().build();
+            jwtAlg = jwtMapper.readTree(jwtHeaderBytes).path("alg").asText("");
+        } catch (RuntimeException ex) {
+            jwtAlg = "";
+        }
+        boolean {{ alg_none_var }} = jwtAlg.equalsIgnoreCase("none");
+        boolean {{ alg_hs256_var }} = jwtAlg.equals("HS256");
+
+        // HMAC-SHA256 over "<header>.<payload>", verified in constant time
+        // via MessageDigest.isEqual (the JDK's own hmac.Equal analog -- it
+        // never throws on a length mismatch, it just reports "not equal",
+        // so a missing/garbage/empty signature segment always fails this
+        // check closed regardless of which sink module composes it below).
+        boolean jwtHmacValidComputed;
+        try {
+            javax.crypto.Mac jwtMac = javax.crypto.Mac.getInstance("HmacSHA256");
+            jwtMac.init(new javax.crypto.spec.SecretKeySpec(
+                com.fuzzlab.trackernest.TrackerNestApplication.JWT_SECRET.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                "HmacSHA256"));
+            byte[] jwtExpectedSig = jwtMac.doFinal(
+                (jwtHeaderB64 + "." + jwtPayloadB64).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            byte[] jwtSigBytes = com.fuzzlab.trackernest.TrackerNestApplication.base64UrlDecode(jwtSigB64);
+            jwtHmacValidComputed = java.security.MessageDigest.isEqual(jwtExpectedSig, jwtSigBytes);
+        } catch (RuntimeException | java.security.GeneralSecurityException ex) {
+            jwtHmacValidComputed = false;
+        }
+        boolean {{ hmac_valid_var }} = jwtHmacValidComputed;
+
+        String jwtClaimsComputed;
+        try {
+            jwtClaimsComputed = new String(
+                com.fuzzlab.trackernest.TrackerNestApplication.base64UrlDecode(jwtPayloadB64), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (RuntimeException ex) {
+            jwtClaimsComputed = "{}";
+        }
+        String {{ claims_var }} = jwtClaimsComputed;
