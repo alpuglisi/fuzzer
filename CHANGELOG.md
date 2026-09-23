@@ -70,7 +70,7 @@ bug protocol, and the preventive-action rules that must be followed — see `CLA
   after reviewing and correcting category 4's Go/Twitch Phase B increment and
   the completed Java/Spring Boot port, and category 5's CSV-formula-injection
   shape (which had a fresh `FR-LAB-80`/`81` collision with category 3,
-  renumbered to `FR-LAB-95`/`91`). §9.2a's "Decided" text is updated from
+  renumbered to `FR-LAB-90`/`91`). §9.2a's "Decided" text is updated from
   pending/future tense to reflect the consolidation is now **done**:
   category 4's `java_spring_boot` package is deleted, Netflix's cell is
   ported into `spring_boot` as `CC-LAB-0173`, and category 5 does not build

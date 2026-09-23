@@ -228,7 +228,7 @@ Component code: **LAB**. Entry format and required fields: see
   landed in the research doc before this entry's code did; the
   `{"id","name"}` realism gap and the ground-truth-directory non-wiring
   are both named explicitly in this entry's own Risk section, not
-  silently absent; `FR-LAB-95`/`91`'s next-free check was verified against
+  silently absent; `FR-LAB-95`/`96`'s next-free check was verified against
   both this branch and a real fetch of `claude/second-target-cat1-
   ecommerce` before landing.
 
@@ -244,7 +244,7 @@ mismatched-method test added for the new URL-pinning mechanism; the
 `{"id","name"}` JSON-shape realism gap named and justified rather than
 left implicit; the second ground-truth directory's non-wiring into
 `fuzzlab.core.config`'s global consumers stated explicitly as an
-accepted, Phase-E-deferred limitation; `FR-LAB-95`/`91`'s next-free
+accepted, Phase-E-deferred limitation; `FR-LAB-95`/`96`'s next-free
 check stated), all incorporated. Neither reviewer found an issue with
 the increment's fundamental scope or phasing — reviewer #2 explicitly
 confirmed "one real page first" is a legitimately-scoped slice, matching
