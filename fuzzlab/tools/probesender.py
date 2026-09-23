@@ -21,11 +21,23 @@ class SeamProbeSender:
         self._identity = identity
 
     def send(self, url: str, param: str, value: str, timing: bool = False,
-             method: str = "GET", location: str = "query") -> Probe:
+             method: str = "GET", location: str = "query",
+             content_type: str | None = None) -> Probe:
         from urllib.parse import urlencode
 
         from fuzzlab.core.http import Request
-        if location == "body":
+        if location == "header":
+            req = Request(method.upper(), url, headers={param: value},
+                          identity=self._identity, timing=timing, component="oracle")
+        elif location == "body" and content_type:
+            # A whole-body point (`param="body"`, no single named field): send
+            # `value` as the raw body at the ground truth's own declared
+            # content type -- never assume JSON for every body point (some
+            # are XML/binary-serialized; CC-FUZZ-0028/FR-FUZZ-15).
+            req = Request(method.upper(), url, headers={"Content-Type": content_type},
+                          body=value.encode("utf-8"),
+                          identity=self._identity, timing=timing, component="oracle")
+        elif location == "body":
             req = Request(method.upper(), url,
                           headers={"Content-Type": "application/x-www-form-urlencoded"},
                           body=urlencode({param: value}).encode(),
@@ -47,10 +59,18 @@ class RequestsProbeSender:
         self._timeout = timeout
 
     def send(self, url: str, param: str, value: str, timing: bool = False,
-             method: str = "GET", location: str = "query") -> Probe:
+             method: str = "GET", location: str = "query",
+             content_type: str | None = None) -> Probe:
         import requests
         kwargs = {"timeout": self._timeout}
-        if location == "body":
+        if location == "header":
+            kwargs["headers"] = {param: value}
+        elif location == "body" and content_type:
+            # Whole-body point at its own declared content type -- never
+            # assume JSON for every body point (CC-FUZZ-0028/FR-FUZZ-15).
+            kwargs["data"] = value.encode("utf-8")
+            kwargs["headers"] = {"Content-Type": content_type}
+        elif location == "body":
             kwargs["data"] = {param: value}          # form-encoded body
         else:
             kwargs["params"] = {param: value}        # query string

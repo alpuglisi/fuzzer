@@ -139,6 +139,10 @@ class ConfirmationStrategy:
         """
         if candidate.method == "GET" and candidate.location == "query":
             return sender.send(candidate.url, candidate.param, value, timing=timing)
+        if candidate.content_type:
+            return sender.send(candidate.url, candidate.param, value, timing=timing,
+                               method=candidate.method, location=candidate.location,
+                               content_type=candidate.content_type)
         return sender.send(candidate.url, candidate.param, value, timing=timing,
                            method=candidate.method, location=candidate.location)
 

@@ -24,6 +24,12 @@ class InjectionPoint:
     # Stored-XSS: where the payload is planted before it renders on `url` (M6).
     store_url: str | None = None
     store_param: str | None = None
+    # A whole-body point's real content type (e.g. "application/json") -- set
+    # only when the ground truth says so (CC-FUZZ-0028/FR-FUZZ-15); a sender
+    # must never assume JSON for every `param="body"` point (some are XML/
+    # binary-serialized, e.g. TrackerNest's XXE/insecure-deserialization
+    # cases), so this is `None` unless the caller positively knows the format.
+    body_content_type: str | None = None
 
 
 def evaluate(points: list[InjectionPoint], store, run_id: int,
@@ -60,6 +66,8 @@ def evaluate(points: list[InjectionPoint], store, run_id: int,
                 if point.store_url:                      # stored-XSS store endpoint (M6)
                     evidence["store_url"] = point.store_url
                     evidence["store_param"] = point.store_param or point.param
+                if point.body_content_type:
+                    evidence["body_content_type"] = point.body_content_type
                 store.conn.execute(
                     "INSERT INTO candidate (run_id, rule, evidence, sink_context) "
                     "VALUES (?,?,?,?)",

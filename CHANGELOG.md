@@ -4,6 +4,23 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (FUZZ: header points become real; a content-type-aware whole-body sender)
+- Fuzzing harness/oracle: a `location="header"` ground-truth point (e.g.
+  Twitch's `TWCH-0001`) is now a real, audited point, not skipped —
+  `RequestsProbeSender`/`SeamProbeSender` send it as a request header named
+  the literal `param`. A `param="body"` point gets a declared raw
+  `content_type` only when its ground truth marks `rendering="server-json"`
+  (e.g. Netflix's `NFLX-0001`), never assumed for every body point —
+  TrackerNest's XML/binary-serialized body points are correctly unaffected,
+  the exact overfit risk the pre-change review's adequacy pass caught in
+  the first draft. Found and fixed a real bug before it could ever fire:
+  `_CountingSender` (every real run's sender wrapper) silently dropped
+  `content_type`, which would have defeated the whole feature in the real
+  pipeline despite passing sender-level unit tests. `CC-FUZZ-0028`/`FR-FUZZ-15`.
+  Two remaining detection gaps (insecure_deserialization, webhook_signature)
+  are tracked with corrected, concrete reasoning in `requirements.md` §8,
+  not silently left as "no signal exists."
+
 ## 2026-09-23 (AUD/FUZZ/LAB: real SSRF detection, found via category 4)
 - Auditor: new `R-SSRF` audit rule (`fuzzlab/audit/rules_data/default_rules.json`),
   the project's first candidate-generation rule for the `ssrf` category.

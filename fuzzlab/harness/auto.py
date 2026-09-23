@@ -21,17 +21,17 @@ from fuzzlab.harness.pipeline import PipelineResult, run_pipeline
 def points_from_ground_truth(ground_truth, base_url: str, browser_available: bool = False):
     """Injection points from the enumerated ground-truth contract (detection benchmark).
 
-    Returns ``(points, skipped)``. Server-rendered **GET query** and **POST body**
-    params are always audited. Client-only/DOM points (fragment, ``client_only``, or
-    ``rendering=js``) are audited only when a **browser** is available (M6); otherwise
-    they are returned as ``skipped`` (path, method, param, reason) so the gap is
-    explicit and they score as false negatives until a browser is provided.
-    **Header-carried points** (``location="header"``, e.g. a webhook-signature check
-    against a header value -- `CC-LAB-0174`'s `TWCH-0001`) are always ``skipped``
-    with their own reason: neither this function's point model nor
-    ``fuzzlab.tools.probesender``'s senders carry a header-injection convention yet
-    (`FR-FUZZ-13`), a real, distinct gap from the DOM/browser one -- never folded
-    into that reason string, which would misreport *why* the point can't be audited.
+    Returns ``(points, skipped)``. Server-rendered **GET query**, **POST body**,
+    and **header-carried** (``location="header"``, e.g. a webhook-signature check
+    against a header value -- `CC-LAB-0174`'s `TWCH-0001`) params are always
+    audited (`CC-FUZZ-0028`/`FR-FUZZ-15` closed the header gap `FR-FUZZ-13`
+    originally flagged: `fuzzlab.tools.probesender`'s senders now carry a
+    header-injection convention). Client-only/DOM points (fragment,
+    ``client_only``, or ``rendering=js``) are audited only when a **browser**
+    is available (M6); otherwise they are returned as ``skipped`` (path,
+    method, param, reason) so the gap is explicit and they score as false
+    negatives until a browser is provided -- the only remaining "skipped"
+    reason this function has.
     """
     base = base_url.rstrip("/")
     points: list[InjectionPoint] = []
@@ -40,19 +40,27 @@ def points_from_ground_truth(ground_truth, base_url: str, browser_available: boo
         path = gp.url if gp.url.startswith("/") else "/" + gp.url
         is_dom = (gp.client_only or (gp.rendering or "") == "js"
                   or gp.location == "fragment")
-        is_header = gp.location == "header"
-        if not is_dom and not is_header and gp.method.upper() in ("GET", "POST") \
-                and gp.location in ("query", "body"):
+        if not is_dom and gp.method.upper() in ("GET", "POST") \
+                and gp.location in ("query", "body", "header"):
+            # A whole-body point (`param="body"`) whose ground truth marks it
+            # `rendering="server-json"` declares its real content type, so the
+            # sender can send the raw body correctly instead of assuming JSON
+            # for every body point (CC-FUZZ-0028/FR-FUZZ-15: some are XML/
+            # binary-serialized, e.g. TrackerNest's XXE/insecure-deserialization
+            # cases, which stay form-encoded/unaffected -- `body_content_type`
+            # is `None` for those, same as before this change).
+            body_content_type = (
+                "application/json"
+                if gp.param == "body" and gp.location == "body" and gp.rendering == "server-json"
+                else None
+            )
             points.append(InjectionPoint(url=base + path, param=gp.param,
-                                         method=gp.method.upper(), location=gp.location))
+                                         method=gp.method.upper(), location=gp.location,
+                                         body_content_type=body_content_type))
         elif is_dom and browser_available:
             loc = gp.location if gp.location in ("query", "fragment") else "query"
             points.append(InjectionPoint(url=base + path, param=gp.param,
                                          method="GET", location=loc))
-        elif is_header:
-            skipped.append((path, gp.method, gp.param,
-                            "header-carried injection point (no header-capable "
-                            "point/sender wiring yet, FR-FUZZ-13)"))
         else:
             skipped.append((path, gp.method, gp.param,
                             "client-only/DOM (needs browser execution, M6)"))
@@ -108,10 +116,15 @@ class _CountingSender:
         self.count = 0
 
     def send(self, url, param, value, timing: bool = False,
-             method: str = "GET", location: str = "query"):
+             method: str = "GET", location: str = "query",
+             content_type: str | None = None):
         self.count += 1
         if method == "GET" and location == "query":
             return self._inner.send(url, param, value, timing=timing)
+        if content_type:
+            return self._inner.send(url, param, value, timing=timing,
+                                    method=method, location=location,
+                                    content_type=content_type)
         return self._inner.send(url, param, value, timing=timing,
                                 method=method, location=location)
 

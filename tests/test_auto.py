@@ -5,6 +5,7 @@ import pytest
 from fuzzlab.core.runmode import RunModeError
 from fuzzlab.core.store import Store
 from fuzzlab.harness.auto import (
+    _CountingSender,
     injection_points_from_store,
     points_from_ground_truth,
     run_auto,
@@ -98,23 +99,40 @@ def test_points_from_ground_truth_filters_to_testable():
     assert all(r.endswith("M6)") for _p, _m, _pm, r in skipped)   # only DOM gaps remain
 
 
-def test_points_from_ground_truth_gives_header_points_their_own_skip_reason():
-    # CC-LAB-0176/FR-FUZZ-13: a header-carried point (Twitch's webhook-signature
-    # case, location="header") must be skipped with an honest, distinct reason --
-    # never folded into the DOM/browser one, which would misreport why it can't
-    # be audited (no header-injection point/sender convention exists yet, not
-    # "needs a browser").
+def test_points_from_ground_truth_now_includes_header_points():
+    # CC-FUZZ-0028/FR-FUZZ-15: a header-carried point (Twitch's webhook-signature
+    # case, location="header") is now a real, audited point -- FR-FUZZ-13's own
+    # gap (no header-injection point/sender convention) is closed, so it no
+    # longer needs a distinct skip reason at all.
     gt = contract.load("lab/ground-truth-twitch-clone")
     points, skipped = points_from_ground_truth(gt, "http://127.0.0.1:8080")
 
-    tested = {(p.url, p.param, p.method) for p in points}
-    assert ("http://127.0.0.1:8080/generated/labgen-go-0003", "url", "GET") in tested
+    tested = {(p.url, p.param, p.method, p.location) for p in points}
+    assert ("http://127.0.0.1:8080/generated/labgen-go-0003", "url", "GET", "query") in tested
+    assert ("http://127.0.0.1:8080/generated/labgen-go-0001", "X-Signature-256",
+            "POST", "header") in tested
 
     skipped_by_param = {param: reason for _p, _m, param, reason in skipped}
-    assert "X-Signature-256" in skipped_by_param
-    reason = skipped_by_param["X-Signature-256"]
-    assert "header" in reason and "FR-FUZZ-13" in reason
-    assert "M6" not in reason and "browser" not in reason   # not the DOM reason
+    assert "X-Signature-256" not in skipped_by_param   # no longer skipped
+
+
+def test_points_from_ground_truth_sets_body_content_type_only_for_json_cases():
+    # CC-FUZZ-0028/FR-FUZZ-15: a whole-body point (`param="body"`) only gets a
+    # declared `body_content_type` when the ground truth marks it
+    # `rendering="server-json"` -- never assumed for a body point in general
+    # (e.g. TrackerNest's XXE/insecure-deserialization cases stay `None`,
+    # unaffected -- checked directly here since a wrong assumption would be a
+    # silent false-negative risk the moment those categories get a rule).
+    netflix_gt = contract.load("lab/ground-truth-netflix-clone")
+    points, _ = points_from_ground_truth(netflix_gt, "http://127.0.0.1:8080")
+    (body_point,) = [p for p in points if p.param == "body"]
+    assert body_point.body_content_type == "application/json"
+
+    trackernest_gt = contract.load("lab/ground-truth-trackernest")
+    points, _ = points_from_ground_truth(trackernest_gt, "http://127.0.0.1:8080")
+    body_points = [p for p in points if p.param == "body"]
+    assert len(body_points) == 2   # the XXE and insecure-deserialization cases
+    assert all(p.body_content_type is None for p in body_points)
 
 
 def test_run_auto_ground_truth_points_beats_crawl_coverage(tmp_path):
@@ -275,3 +293,25 @@ def test_run_auto_no_ground_truth_unscored_with_categories(tmp_path):
         assert result.report is None                      # D15: unscored
         assert result.plan.categories == ["sql-injection"]
         assert result.findings >= 1                       # SQLi still confirmed
+
+
+def test_counting_sender_forwards_content_type():
+    # CC-FUZZ-0028/FR-FUZZ-15: a real bug found while wiring this in --
+    # _CountingSender's own send() dropped `content_type` silently (it wasn't
+    # even in its signature), which would have made every whole-body-JSON
+    # point revert to form-encoding the moment it passed through run_auto's
+    # real pipeline (every sender is wrapped in this counter). Fixed before
+    # it could ever fire for real; this test pins the fix directly.
+    calls = []
+
+    class _Recorder:
+        def send(self, url, param, value, timing=False, method="GET",
+                 location="query", content_type=None):
+            calls.append({"method": method, "location": location, "content_type": content_type})
+            return Probe(200, "ok")
+
+    counting = _CountingSender(_Recorder())
+    counting.send("http://h/api/playback/resume", "body", '{"a":1}',
+                  method="POST", location="body", content_type="application/json")
+    assert calls == [{"method": "POST", "location": "body", "content_type": "application/json"}]
+    assert counting.count == 1

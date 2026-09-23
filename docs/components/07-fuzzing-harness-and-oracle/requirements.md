@@ -1,7 +1,7 @@
 # Fuzzing Harness and Oracle — Requirement Specification
 
 Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5/M8; M10 grey-box wiring layer built, live sources on-host); harness generalization ongoing; greybox-run consumes mutation-engine variants (opt-in); coverage-frontier growth emitted to metric_series]`
-· Last updated: 2026-09-23 · see CC-FUZZ-0027
+· Last updated: 2026-09-23 · see CC-FUZZ-0028
 
 Related: `ARCHITECTURE.md` #7; `DECISIONS_AND_ROADMAP.md` (D1, D5, D7, Phase 2/3,
 Phase 8); `./change-control.md`.
@@ -203,19 +203,49 @@ rewards) derives from it.
     (`tests/test_labgen_redos.py`), not re-proven here. Not yet run against
     a live external target or wired into `fuzzlab/harness/multitarget.py`
     (both out of this requirement's scope).
-- **FR-FUZZ-13** *(`CC-FUZZ-0026`, 2026-09-23).* A ground-truth point whose
-  tainted value is carried in a request **header**
-  (`Case.location`/`InjectionPoint`'s `location="header"`) is honestly,
-  distinctly reported as not-yet-auditable — never conflated with the
-  client-only/DOM skip reason. `fuzzlab.harness.auto.points_from_ground_truth`
-  gives it its own skip reason naming the real gap (no header-injection
-  point type or header-capable probe sender exists yet), rather than the
-  factually wrong "needs browser execution" DOM reason. **Not itself a new
-  capability**: no header point is audited by this change, only correctly
-  labeled as unauditable. Building real header-injection support (a
-  header-aware `InjectionPoint` shape, plus a header-capable sender
-  alongside `RequestsProbeSender`/`SeamProbeSender`) is real, sized
-  follow-on work this requirement does not cover.
+- **FR-FUZZ-13** *(`CC-FUZZ-0026`, 2026-09-23; superseded in part by
+  `FR-FUZZ-15` below).* A ground-truth point whose tainted value is
+  carried in a request **header** (`Case.location`/`InjectionPoint`'s
+  `location="header"`) was honestly, distinctly reported as
+  not-yet-auditable — never conflated with the client-only/DOM skip
+  reason. **Superseded**: `FR-FUZZ-15` closed the underlying gap (a real
+  header-injection point type and header-capable sender now exist), so a
+  header point is a real, audited point today, not a skip reason. This
+  entry is kept for history — it correctly named the gap at the time.
+
+- **FR-FUZZ-15** *(header points become real, audited points; a
+  content-type-aware whole-body sender; `CC-FUZZ-0028`, 2026-09-23).*
+  Closes `FR-FUZZ-13`'s own gap and one of `FR-LAB-99`'s three flagged
+  follow-on items:
+  - A `location="header"` point is now included by
+    `fuzzlab.harness.auto.points_from_ground_truth` and sent for real by
+    both `RequestsProbeSender`/`SeamProbeSender`: the value goes out as a
+    request header named the literal `param` (matching `CC-LAB-0174`'s own
+    established convention that `param` *is* the literal header name for a
+    header-carried case).
+  - A `param="body"`/`location="body"` point gets a declared
+    `body_content_type` **only** when its ground truth marks
+    `rendering="server-json"` (reusing the existing `rendering` field, no
+    new schema needed) — e.g. `NFLX-0001` (JSON), never TrackerNest's
+    `TNEST-0002`/`TNEST-0003` (XML / binary Java-serialized, `rendering=
+    "server"`, unaffected, still form-encoded exactly as before). This
+    field threads through `fuzzlab.audit.engine.InjectionPoint` →
+    `evaluate()`'s evidence → `fuzzlab.oracle.probe.Candidate` →
+    `ConfirmationStrategy._send()` → the sender's new `content_type`
+    keyword, which sends the raw body at that content type instead of
+    form-encoding `{param: value}`.
+  - **A real defect found and fixed before landing**:
+    `fuzzlab.harness.auto._CountingSender` (every real `run_auto` call
+    wraps its sender in this request-cost counter) did not accept or
+    forward `content_type` — it would have silently dropped it, reverting
+    every whole-body-JSON send back to form-encoding the moment it ran
+    through the real pipeline rather than a sender unit test. Fixed, with
+    a direct unit test pinning it
+    (`test_counting_sender_forwards_content_type`).
+  - **Not itself detection capability**: no new audit rule or oracle
+    strategy is added here. `webhook_signature`/`insecure_deserialization`
+    still have none (see §8's open questions for the concrete, corrected
+    reasoning on each, from the pre-change review's adequacy pass).
 
 - **FR-FUZZ-14** *(`CC-FUZZ-0027`, 2026-09-23).* The oracle supports real
   **SSRF confirmation**, cheapest-first, paired with `FR-AUD-7`'s
@@ -302,6 +332,47 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
 - `finding` rows are written only by the oracle and reproduce on re-run.
 
 ## 8. Open questions
+- (`CC-FUZZ-0028`, 2026-09-23) **`fuzzlab/greybox/run.py`'s
+  `RequestsCorrelatingSender` has the same `location="body"`
+  form-encode-only branch `RequestsProbeSender`/`SeamProbeSender` had
+  before `FR-FUZZ-15`, and was not given the same content-type
+  awareness.** Low risk today — `GreyboxConfirmationStrategy` only scopes
+  to `sql-injection`/`xss`, neither of which reaches a whole-body point —
+  but a real, latent gap the moment a future grey-box-confirmable category
+  does. Give it the same `content_type` handling when that happens, not
+  before (no consumer to test it against yet).
+- (`CC-FUZZ-0028`, 2026-09-23) **No `insecure_deserialization` audit
+  rule/oracle strategy exists, and the reason is narrower than "no
+  observable signal" — corrected here after the pre-change review's
+  adequacy pass caught the overstatement.** This lab's own cells have no
+  working `ysoserial`-style RCE gadget chain (`CC-LAB-0173`'s own declared
+  scope boundary), so an OOB *callback-from-code-execution* signal isn't
+  available — but a URLDNS-style gadget-chain-free proof is: a
+  `HashMap<java.net.URL,...>` (or the Jackson-default-typing equivalent)
+  whose `hashCode()` triggers real DNS resolution purely from
+  deserializing it, no RCE gadget required, mirroring
+  `SsrfOobStrategy`/`CommandInjectionOobStrategy`'s own `OobListener`
+  pattern exactly (mint a canary, wait for a hit). This is real,
+  buildable, general-purpose (not hardcoded to this lab's own response
+  text) follow-on work — genuinely new engineering (constructing a valid
+  Java-serialized byte stream, or a Jackson `@class`-hinted payload,
+  naming the canary host), not attempted in this entry.
+- (`CC-LAB-0175`/`FR-LAB-98`, `CC-FUZZ-0028`, 2026-09-23) **No
+  webhook-signature timing oracle.** Both twins behave identically for any
+  single request (the divergence is comparison timing:
+  `naive_string_compare`'s `==` short-circuits on the first differing
+  byte, `hmac.Equal` does not), so this needs a genuinely new,
+  statistical, multi-request timing-differential mechanism — not a
+  two-sample rising-delay check like `ConfirmationStrategy._confirm_timing`
+  (built for a chosen SLEEP-style delay, not a sub-millisecond
+  byte-position side channel). A concrete sketch for future work: probe
+  pairs comparing response time for a candidate signature matching zero
+  leading bytes of a locally-known-correct one vs. matching many leading
+  bytes, aggregated over enough paired samples for a real statistical test
+  (e.g. Mann-Whitney U or Welch's t-test) rather than a fixed threshold —
+  the same class of judgment call `RegexDosStrategy` (`CC-FUZZ-0025`) already
+  needed its own, different-from-`_confirm_timing` mechanism for. Not
+  attempted here.
 - Oracle interface for pluggable vulnerability classes (register-oracle hook
   shape).
 - Timing-threshold calibration per target/network profile.

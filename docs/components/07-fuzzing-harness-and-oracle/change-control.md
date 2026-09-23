@@ -3,6 +3,104 @@
 Component code: **FUZZ**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-FUZZ-0028 — Header-location points become real, audited points; a content-type-aware whole-body sender (2026-09-23)
+
+- Change: closes the two structural gaps `CC-LAB-0176`/`FR-LAB-99`
+  (category 4's Phase E) and `CC-FUZZ-0027` flagged as real follow-on work.
+  Dispatched through this component's pre-change review gate (accuracy +
+  adequacy passes) before implementation; the adequacy pass's finding — the
+  original draft's whole-body convention would have force-sent
+  `Content-Type: application/json` for *every* `param="body"` point,
+  silently wrong for TrackerNest's own XXE (`TNEST-0002`, XML) and
+  insecure-deserialization (`TNEST-0003`, binary Java-serialized) body
+  points — is incorporated below, not shipped as originally drafted.
+  1. **`fuzzlab/harness/auto.py::points_from_ground_truth`**: a
+     `location="header"` point (e.g. `TWCH-0001`'s `X-Signature-256`) is
+     now a real, audited `InjectionPoint`, not skipped — matches this
+     function's own existing convention that "skipped" is reserved for a
+     genuine structural gap (no point/sender support at all), never "no
+     audit rule currently matches this category" (true of every
+     `query`/`body` point with no matching rule already, silently
+     zero-candidate, never listed as skipped). `FR-FUZZ-13`'s own scope
+     statement is superseded by this entry.
+  2. **Content-type-aware whole-body points, not a hardcoded JSON
+     assumption.** A `param="body"`/`location="body"` point only gets
+     `body_content_type="application/json"` when the ground truth's own
+     `rendering` field says `"server-json"` (already the exact signal
+     `NFLX-0001` carries and `TNEST-0002`/`TNEST-0003` do not — no new
+     schema field needed, this reuses `rendering`, which
+     `points_from_ground_truth` already reads for its DOM-detection
+     logic). `fuzzlab.audit.engine.InjectionPoint` gained
+     `body_content_type: str | None = None` (additive); `evaluate()`
+     copies it into the candidate's evidence dict when set;
+     `fuzzlab.oracle.probe.Candidate` gained the matching `content_type`
+     field; `fuzzlab/harness/pipeline.py`'s Candidate-construction site
+     reads it back from evidence; `ConfirmationStrategy._send()` passes it
+     through when set.
+  3. **`fuzzlab/tools/probesender.py`** (`RequestsProbeSender`,
+     `SeamProbeSender`): `location="header"` sends `value` as a header
+     named the literal `param` (the convention `CC-LAB-0174` already
+     established: for a header case, `param` *is* the literal header
+     name). `location="body"` **with** a `content_type` sends `value` as
+     the raw body at that content type; **without** one, unchanged
+     form-encoded `{param: value}` behavior — every existing body point
+     (a real named field, or a whole-body point the ground truth doesn't
+     mark JSON) is completely unaffected.
+  4. **A real bug found and fixed before it could ever fire**:
+     `fuzzlab/harness/auto.py::_CountingSender.send()` (the request-cost
+     counter every sender is wrapped in inside `run_auto`'s real pipeline)
+     did not accept or forward `content_type` at all — the moment a real
+     run reached it, the new whole-body-JSON convention would have
+     silently reverted to form-encoding, defeating this entire change
+     without any test noticing (no existing test exercises
+     `_CountingSender` directly). Found by re-reading the full call chain
+     end to end, not by a failing test; fixed with a new, direct unit test
+     pinning the fix (`tests/test_auto.py::test_counting_sender_forwards_content_type`).
+  5. **Noted, not fixed**: `fuzzlab/greybox/run.py`'s
+     `RequestsCorrelatingSender` has the identical `location="body"`
+     form-encode-only branch and was not given the same content-type
+     awareness — low risk today (`GreyboxConfirmationStrategy` only scopes
+     to `sql-injection`/`xss`, which never reach a whole-body point), but a
+     latent gap if a future grey-box-confirmable category ever does.
+     Tracked as an open question (`requirements.md` §8), not silently
+     left unrecorded.
+  New/changed files:
+  - `fuzzlab/harness/auto.py` (`points_from_ground_truth`, `_CountingSender`)
+  - `fuzzlab/audit/engine.py` (`InjectionPoint.body_content_type`, `evaluate()`)
+  - `fuzzlab/oracle/probe.py` (`Candidate.content_type`, `Sender.send()` signature)
+  - `fuzzlab/harness/pipeline.py` (Candidate construction)
+  - `fuzzlab/oracle/strategies.py` (`ConfirmationStrategy._send()`)
+  - `fuzzlab/tools/probesender.py` (`RequestsProbeSender`, `SeamProbeSender`)
+  - `tests/test_auto.py`, `tests/test_probesender.py` (updated/new tests)
+  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    (`FR-FUZZ-13` updated in place; new `FR-FUZZ-15`; new §8 open questions)
+- Impact (other components / project): touches the shared
+  `InjectionPoint`/`Candidate`/`Sender` shapes used by every category's own
+  detection run. Additive/behavior-widening only for existing callers: a
+  new optional field with a `None` default on each dataclass, a new
+  optional keyword on `Sender.send()`; every existing `query`/ordinary-
+  named-field-`body` point's audit is byte-for-byte unchanged (verified:
+  `tests/test_probesender.py`'s pre-existing form-encoded-body tests still
+  pass unmodified). A header point moves from always-skipped to
+  always-included, a real behavior change, but the only ground truth
+  affected today is category 4's own `TWCH-0001`.
+- Risk (level; mitigation or accepted-risk justification): **low-medium**
+  (a multi-file, shared-dataclass thread-through, but each hop additive
+  and independently tested; the one real bug found — `_CountingSender`'s
+  missing passthrough — was caught before landing, not after).
+- Deliverables:
+  - [x] Header points included, not skipped
+  - [x] Content-type-aware whole-body sender support (both senders),
+    correctly distinguishing `NFLX-0001` (JSON) from TrackerNest's XML/
+    binary body points (unaffected)
+  - [x] `_CountingSender` passthrough bug found and fixed, with a direct
+    unit test
+  - [x] Tests updated/added; `FR-FUZZ-13` updated in place; new `FR-FUZZ-15`
+  - [x] Full non-slow suite + real live-boot slow tests re-verified green
+- Effectiveness (assessed 2026-09-23): met — a real, end-to-end raw-JSON
+  whole-body send now works through the full `run_auto` pipeline (not just
+  a sender unit test), and the header point is real and audited.
+
 ### CC-FUZZ-0027 — Real SSRF detection: `SsrfInBandMarkerStrategy` + `SsrfOobStrategy`, plus `run_targets()` OOB passthrough (2026-09-23)
 
 - Change: the project's first real, end-to-end detection path for the
