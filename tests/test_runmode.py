@@ -55,6 +55,17 @@ def test_categories_from_vuln_classes_maps_price_integrity_bypass():
     assert cats == ["price-integrity-bypass"]
 
 
+def test_categories_from_vuln_classes_maps_csv_formula_injection():
+    # CC-FUZZ-0030: csv_formula_injection needed a genuinely NEW rule+
+    # strategy pair (R-CSV-FORMULA-INJECTION/CsvFormulaInjectionStrategy) --
+    # tries all four OWASP trigger characters (=, +, -, @), not just one,
+    # per the pre-change adequacy review's own false-negative concern.
+    # Live-verified against both of Booking.com's real twins -- this is
+    # category 5's fourth and final real detection for this app.
+    cats = categories_from_vuln_classes(["csv_formula_injection"])
+    assert cats == ["csv-formula-injection"]
+
+
 def test_categories_from_vuln_classes_leaves_unmapped_classes_unchanged():
     # xxe/insecure_deserialization/etc. have no confirmer yet -- to_category()
     # falls through to the raw class name (no audit rule matches it, so it

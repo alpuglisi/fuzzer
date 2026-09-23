@@ -280,6 +280,28 @@ rewards) derives from it.
   live-boot test before this mapping landed. Category 5's third real
   detection.
 
+- **FR-FUZZ-17** *(`CC-FUZZ-0030`, 2026-09-23).* `CsvFormulaInjectionStrategy`
+  (`fuzzlab/oracle/strategies.py`) confirms `csv_formula_injection`
+  (CWE-1236) by sending a canary prefixed with each of OWASP's four
+  CSV-formula trigger characters (`=`, `+`, `-`, `@`) in turn and checking
+  whether the response echoes it back unescaped, anchored to the actual
+  CSV cell boundary (`f"{payload},"`, not merely "right after a
+  newline" — an unanchored match was rejected pre-implementation by the
+  adequacy review as a false-positive risk against any response that
+  merely echoes the payload after a newline for an unrelated reason).
+  Trying all four trigger characters, not just `=`, was also required by
+  the same review — a single-character canary risked a false negative
+  against a real neutralizer that only escapes a subset. New `Rule`
+  `R-CSV-FORMULA-INJECTION` (`name_regex:
+  "label|name|comment|note|description|title"`, `method_in: ["GET"]`,
+  grounded in Booking.com's real `label` export parameter), new
+  `_VULN_TO_CATEGORY["csv_formula_injection"]`/
+  `_CATEGORY_TO_CLASS["csv-formula-injection"]` entries. Live-verified end
+  to end: `tp=3, fn=0, fp=0` against Booking.com's real deployment — this
+  app's own full ground truth, zero false negatives. Category 5's fourth
+  real detection, closing Booking.com's own toolkit-side detection
+  coverage entirely.
+
 ## 4. Non-functional requirements
 - **NFR-FUZZ-precision** Oracle precision is measured and prioritized; a confirmed
   finding must reproduce.

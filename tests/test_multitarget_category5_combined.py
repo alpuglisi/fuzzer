@@ -18,19 +18,21 @@ managers.
 This closes the toolkit-side half of category 5's own Phase 10 `T10.6`-
 style proof: `fuzzlab/harness/multitarget.py` actually accepting two real,
 distinct, locally-booted second targets in one call and producing a real
-combined `transfer_summary`. **`generalizes` is `True`** -- `open_redirect`
-and `price_integrity_bypass` both genuinely detect on Booking.com
-(`CC-CORE-0021`/`FR-CORE-11` and `CC-FUZZ-0029` respectively, recall
-2/3) and `spel_injection` genuinely detects on Expedia (`CC-FUZZ-0028`,
-recall 1/2 -- Expedia's own ground truth grew to two cases with
-`CC-LAB-0220`'s `EXPD-0002`, whose `insecure_deserialization` class has
-no verified confirmer yet, an honest false negative); `transfer_summary`'s
-own `generalizes` rule (`>= 2` scored targets with `recall > 0`) is
-satisfied by three *independently* mapped classes across two different
-stacks (PHP/Laravel and Java/Spring Boot), a real cross-target result, not
-a coincidence of one class counted twice. `csv_formula_injection`
-(Booking.com) and `insecure_deserialization` (Expedia) remain honestly
-unmapped -- no verified confirmer exists for either yet.
+combined `transfer_summary`. **`generalizes` is `True`** -- `open_redirect`,
+`price_integrity_bypass`, and `csv_formula_injection` all genuinely detect
+on Booking.com (`CC-CORE-0021`/`FR-CORE-11`, `CC-FUZZ-0029`, and
+`CC-FUZZ-0030` respectively, recall 3/3 -- Booking.com's own full ground
+truth, zero false negatives) and `spel_injection` genuinely detects on
+Expedia (`CC-FUZZ-0028`, recall 1/2 -- Expedia's own ground truth grew to
+two cases with `CC-LAB-0220`'s `EXPD-0002`, whose
+`insecure_deserialization` class has no verified confirmer yet, an honest
+false negative); `transfer_summary`'s own `generalizes` rule (`>= 2`
+scored targets with `recall > 0`) is satisfied by four *independently*
+mapped classes across two different stacks (PHP/Laravel and Java/Spring
+Boot), a real cross-target result, not a coincidence of one class counted
+twice. `insecure_deserialization` (Expedia) remains the only honestly
+unmapped class left in this category -- no verified confirmer exists for
+it yet.
 
 Skip-guarded on both `spring_boot_boot_available()` and
 `live_boot_available()` (PA-0005/PA-0035). Marked `@pytest.mark.slow`.
@@ -119,15 +121,14 @@ def test_booking_and_expedia_run_together_in_one_call(tmp_path) -> None:
             # Per-target assertions, not a shared loop -- CC-CORE-0020's own
             # adequacy review caught exactly this pitfall (a shared loop would
             # silently apply one target's own numbers to the other). Booking.com
-            # genuinely detects open_redirect (CC-CORE-0021/FR-CORE-11) and
-            # price_integrity_bypass (CC-FUZZ-0029), but not
-            # csv_formula_injection (no verified confirmer yet -- an honest
-            # false negative); Expedia genuinely detects spel_injection
-            # (CC-FUZZ-0028) but not insecure_deserialization (CC-LAB-0220's
-            # EXPD-0002, no verified confirmer yet -- an honest false
-            # negative).
-            assert booking_outcome.report.tp == 2 and booking_outcome.report.fn == 1
-            assert booking_outcome.report.recall == 2 / 3
+            # genuinely detects all three of its own classes -- open_redirect
+            # (CC-CORE-0021/FR-CORE-11), price_integrity_bypass (CC-FUZZ-0029),
+            # and csv_formula_injection (CC-FUZZ-0030); Expedia genuinely
+            # detects spel_injection (CC-FUZZ-0028) but not
+            # insecure_deserialization (CC-LAB-0220's EXPD-0002, no verified
+            # confirmer yet -- an honest false negative).
+            assert booking_outcome.report.tp == 3 and booking_outcome.report.fn == 0
+            assert booking_outcome.report.recall == 1.0
             assert expedia_outcome.report.tp == 1 and expedia_outcome.report.fn == 1
             assert expedia_outcome.report.recall == 0.5
             # Two independent real run_ids, one per target, in the same call.

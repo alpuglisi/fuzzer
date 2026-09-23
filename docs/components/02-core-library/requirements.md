@@ -97,6 +97,21 @@ plugin registry. It is the layer that makes the store the integration bus.
   only — `csv_formula_injection` (Booking.com) and
   `insecure_deserialization` (Expedia) still have no verified confirmer.
 
+- **FR-CORE-13** *(`csv_formula_injection`→`csv-formula-injection`
+  mapping; `CC-CORE-0023`, 2026-09-23).* Extends `FR-CORE-10`'s map with
+  `csv_formula_injection`→`csv-formula-injection` (category 5,
+  Booking.com's real vulnerable cell `LABGEN-BC-0003`, `CC-LAB-0211`),
+  paired with a genuinely new rule+strategy (`R-CSV-FORMULA-INJECTION`/
+  `CsvFormulaInjectionStrategy`, `CC-FUZZ-0030`, this component's own FUZZ
+  counterpart — see `FR-FUZZ-17`). Verified live end to end through
+  `fuzzlab.harness.multitarget.run_targets`'s own real scoring (`PA-0042`).
+  Real, verified result: `tp=3, fn=0, fp=0` against Booking.com's real,
+  locally-booted deployment (recall `2/3 -> 1.0`) — this app's own full
+  ground truth, zero false negatives, closing Booking.com's toolkit-side
+  detection coverage entirely. This is category 5's fourth real detection
+  and the last of Booking.com's own classes; only Expedia's own
+  `insecure_deserialization` remains unmapped in this category.
+
 ## 4. Non-functional requirements
 - **NFR-CORE-single-writer** All store writes go through one writer path; readers
   never block the writer (WAL).

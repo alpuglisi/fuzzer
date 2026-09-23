@@ -8,6 +8,7 @@ from fuzzlab.oracle import Candidate, category_to_oracle_class
 from fuzzlab.oracle.probe import Probe
 from fuzzlab.oracle.strategies import (
     CommandInjectionStrategy,
+    CsvFormulaInjectionStrategy,
     OpenRedirectStrategy,
     PathTraversalStrategy,
     PriceIntegrityBypassStrategy,
@@ -157,6 +158,58 @@ def test_price_integrity_bypass_canary_cannot_collide_with_the_real_rate_table()
         assert sender.last_value not in PriceIntegrityBypassStrategy._RATE_TABLE_AMOUNTS
         whole, _, frac = sender.last_value.partition(".")
         assert len(frac) == 3, sender.last_value
+
+
+# --- CSV formula injection (CWE-1236) -----------------------------------------
+
+def test_csv_formula_injection_confirmed_when_trigger_echoed_unescaped():
+    class UnescapedCsvSender:
+        """Models the real vulnerable twin (`LABGEN-BC-0003`, empty
+        transform pipeline): the value is embedded verbatim as a CSV cell,
+        followed by the row's own trailing field."""
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            return Probe(200, f"label,amount\n{value},129.00\n", headers={})
+    v = CsvFormulaInjectionStrategy().confirm(_cand("csv-formula-injection"), UnescapedCsvSender())
+    assert v is not None and v.confirmed and v.mechanism == "unescaped-formula-trigger-echo"
+
+
+def test_csv_formula_injection_not_confirmed_when_neutralized():
+    class QuotePrefixingCsvSender:
+        """Models the real secure twin (`CsvFormulaNeutralizeTransform`):
+        a leading single quote is prepended before any trigger character."""
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            return Probe(200, f"label,amount\n'{value},129.00\n", headers={})
+    assert CsvFormulaInjectionStrategy().confirm(_cand("csv-formula-injection"), QuotePrefixingCsvSender()) is None
+
+
+def test_csv_formula_injection_match_is_anchored_to_the_cell_boundary():
+    """Documents the pitfall this component's own pre-change adequacy
+    review caught before implementation: an earlier design matched any
+    occurrence of the payload right after a newline, with no check that it
+    is actually followed by the row's own field separator -- a debug/error
+    page that happens to echo the raw payload on its own line (with no
+    trailing CSV cell) would have false-positive-confirmed. The real
+    strategy requires an immediate trailing "," after the payload, so a
+    sender that echoes the payload on its own line with nothing else after
+    it must not be confirmed."""
+    class BareEchoNoCsvRowSender:
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            return Probe(200, f"Received label: {value}\n(no CSV row follows)", headers={})
+    assert CsvFormulaInjectionStrategy().confirm(_cand("csv-formula-injection"), BareEchoNoCsvRowSender()) is None
+
+
+def test_csv_formula_injection_tries_every_owasp_trigger_character():
+    """A neutralizer that only escapes a subset of the OWASP trigger
+    characters (e.g. only "=") is still genuinely vulnerable via the
+    others -- the strategy must not stop after the first (=) canary alone,
+    per the adequacy review's own false-negative concern."""
+    class OnlyEqualsNeutralizedSender:
+        def send(self, url, param, value, timing=False, method="GET", location="query"):
+            if value.startswith("="):
+                return Probe(200, f"label,amount\n'{value},129.00\n", headers={})
+            return Probe(200, f"label,amount\n{value},129.00\n", headers={})
+    v = CsvFormulaInjectionStrategy().confirm(_cand("csv-formula-injection"), OnlyEqualsNeutralizedSender())
+    assert v is not None and v.evidence["trigger"] != "="
 
 
 # --- path traversal / LFI (M7) ----------------------------------------------

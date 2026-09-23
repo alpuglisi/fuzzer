@@ -77,6 +77,15 @@ _VULN_TO_CATEGORY = {
     # this mapping landed. Verified live against both of Booking.com's real
     # twins before landing.
     "price_integrity_bypass": "price-integrity-bypass",
+    # `csv_formula_injection` (category 5, Booking.com, `CC-LAB-0211`): a new
+    # rule (`R-CSV-FORMULA-INJECTION`) and confirmation strategy
+    # (`CsvFormulaInjectionStrategy` in fuzzlab/oracle/strategies.py) built
+    # specifically for this class -- tries all four OWASP trigger characters
+    # (=, +, -, @), not just one, per this component's own pre-change
+    # adequacy review (a single-character canary risked a false negative
+    # against a neutralizer that only escapes a subset). Verified live
+    # against both of Booking.com's real twins before landing.
+    "csv_formula_injection": "csv-formula-injection",
 }
 
 

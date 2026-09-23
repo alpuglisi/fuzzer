@@ -17,15 +17,13 @@ which explicitly cites this app's own established convention): this
 harness already accepts a **list** of cells with no single-cell
 restriction, so no extension was needed here.
 
-**Recall is 2/3, and the remaining 1/3 is an honest false negative, not a
-bug** -- `open_redirect` (`CC-CORE-0021`/`FR-CORE-11`) and
-`price_integrity_bypass` (`CC-FUZZ-0029`) both genuinely detect (each
-mapped into `fuzzlab.core.runmode._VULN_TO_CATEGORY` and verified live
-before this test was updated to expect it); `csv_formula_injection` has no
-verified confirmer yet (no `ConfirmationStrategy`/`Rule` pair exists for
-it), same documented gap as every other category's own Phase E test for
-its own unmapped classes. Wiring that one is real, sized follow-on work
-this test does not attempt.
+**Recall is 3/3 -- all of Booking.com's own ground truth genuinely
+detects.** `open_redirect` (`CC-CORE-0021`/`FR-CORE-11`),
+`price_integrity_bypass` (`CC-FUZZ-0029`), and `csv_formula_injection`
+(`CC-FUZZ-0030`) each have a genuinely new or reused, live-verified
+rule+strategy pair, mapped into `fuzzlab.core.runmode._VULN_TO_CATEGORY`.
+This closes Booking.com's own toolkit-side detection coverage for this
+pilot -- no honestly-unmapped class remains for this app.
 
 Skip-guarded on `live_boot_available()` (PA-0005). Marked
 `@pytest.mark.slow`.
@@ -90,17 +88,16 @@ def test_booking_target_spec_runs_for_real_and_scores(tmp_path) -> None:
             outcome = outcomes[0]
             # Real target, real ground truth -> a real, scored report (D14: automatic
             # mode + ground truth is always scored, regardless of tp count).
-            # `open_redirect` (`CC-CORE-0021`/`FR-CORE-11`, BKNG-0001) and
-            # `price_integrity_bypass` (`CC-FUZZ-0029`, BKNG-0003) both
-            # genuinely detect now; `csv_formula_injection` (BKNG-0002) has
-            # no verified confirmer yet, so it stays an honest false
-            # negative (fn=1), same documented gap as every other
-            # category's own Phase E test.
+            # `open_redirect` (`CC-CORE-0021`/`FR-CORE-11`, BKNG-0001),
+            # `price_integrity_bypass` (`CC-FUZZ-0029`, BKNG-0003), and
+            # `csv_formula_injection` (`CC-FUZZ-0030`, BKNG-0002) all
+            # genuinely detect now -- Booking.com's own full ground truth,
+            # zero false negatives.
             assert outcome.scored is True
             assert outcome.report is not None
-            assert outcome.report.tp == 2 and outcome.report.fn == 1
+            assert outcome.report.tp == 3 and outcome.report.fn == 0
             assert outcome.report.fp == 0
-            assert outcome.report.recall == 2 / 3
+            assert outcome.report.recall == 1.0
 
             summary = transfer_summary(outcomes)
             assert summary["targets"] == 1

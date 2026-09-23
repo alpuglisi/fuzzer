@@ -380,6 +380,49 @@ class PriceIntegrityBypassStrategy(ConfirmationStrategy):
         return None
 
 
+class CsvFormulaInjectionStrategy(ConfirmationStrategy):
+    """A value containing an OWASP CSV-formula trigger character is embedded
+    unescaped into an exported CSV cell (CWE-1236, category 5's
+    `csv_formula_injection`, Booking.com pilot).
+
+    **Tries all four OWASP trigger characters** (`=`, `+`, `-`, `@`), not
+    just `=` -- a real neutralizer could plausibly escape only a subset,
+    which a single-character canary would silently miss (a false negative
+    on a genuinely vulnerable target), caught by this component's own
+    pre-change adequacy review before implementation. (The real secure
+    twin this shape was modeled on, `CsvFormulaNeutralizeTransform`, also
+    neutralizes leading tab/CR, per that same review -- not exercised here,
+    matching the four-character scope this project's own OWASP-grounded
+    test payload set already established, not a new gap this strategy
+    introduces.)
+
+    **Match is anchored to the CSV cell boundary**, not merely "right after
+    a newline": both the unmodified-echo check and the not-secure check
+    require the payload to be immediately followed by the field separator
+    (`,`) -- `f"\\n{payload},"` / a leading `{payload},`. A bare
+    `f"\\n{payload}"` check (an earlier draft) would false-positive-confirm
+    on any response that merely echoes the raw payload right after a
+    newline for an unrelated reason (a debug/error page, a differently-
+    shaped reflection) -- rejected pre-implementation by the same review."""
+    vuln_class = "csv_formula_injection"
+    mechanism = "unescaped-formula-trigger-echo"
+    category = "csv-formula-injection"
+
+    #: OWASP's four named CSV-formula trigger characters.
+    _TRIGGER_CHARS = ("=", "+", "-", "@")
+
+    def confirm(self, candidate, sender):
+        for trigger in self._TRIGGER_CHARS:
+            n = secrets.randbelow(900) + 100
+            payload = f"{trigger}{n}+{n}"
+            text = self._send(sender, candidate, payload).text or ""
+            anchored = f"{payload},"
+            if text.startswith(anchored) or f"\n{anchored}" in text:
+                return Verdict(True, self.vuln_class, self.mechanism,
+                               {"payload": payload, "trigger": trigger})
+        return None
+
+
 class PathTraversalStrategy(ConfirmationStrategy):
     """M7: a file-content marker (/etc/passwd) appears in the response."""
     vuln_class = "file-inclusion"
@@ -683,7 +726,7 @@ def default_strategies(browser: BrowserExecutor | None = None,
     return [SqliErrorStrategy(), SqliBooleanStrategy(), SqliTimingStrategy(),
             ReflectedXssStrategy(), DomXssStrategy(browser), StoredXssStrategy(browser),
             OpenRedirectStrategy(), SstiStrategy(), SpelInjectionStrategy(),
-            PriceIntegrityBypassStrategy(),
+            PriceIntegrityBypassStrategy(), CsvFormulaInjectionStrategy(),
             PathTraversalStrategy(), CommandInjectionStrategy(),
             CommandInjectionOobStrategy(oob), RegexDosStrategy(),
             GreyboxConfirmationStrategy(coverage, dbfault)]
@@ -701,6 +744,7 @@ _CATEGORY_TO_CLASS = {
     "server-side-template-injection": "ssti",
     "spel-injection": "spel_injection",
     "price-integrity-bypass": "price_integrity_bypass",
+    "csv-formula-injection": "csv_formula_injection",
     "file-inclusion": "file-inclusion",
     "command-injection": "command-injection",
     "regular-expression": "redos",

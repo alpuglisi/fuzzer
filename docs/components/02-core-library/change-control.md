@@ -3,6 +3,24 @@
 Component code: **CORE**. Entry format and required fields: see `../README.md`.
 Newest first.
 
+### CC-CORE-0023 — Map `csv_formula_injection` to the new `csv-formula-injection` category in `_VULN_TO_CATEGORY` (FR-CORE-13) (2026-09-23)
+- Change: Adds one entry to `fuzzlab/core/runmode.py`'s `_VULN_TO_CATEGORY` dict: `"csv_formula_injection": "csv-formula-injection"`. Mirrors `CC-CORE-0022`'s own `price_integrity_bypass` precedent: a genuinely new rule+strategy pair (`R-CSV-FORMULA-INJECTION`/`CsvFormulaInjectionStrategy`, built in `CC-FUZZ-0030` — that entry's own record has the full review-gate history: three blocking adequacy-review findings, all fixed pre-implementation) was needed, not a reuse of an existing one. This entry is the CORE-owned half: the one dict-entry mapping that lets `fuzzlab.harness.pipeline`'s own `evaluate()`/`category_to_oracle_class()` dispatch reach the new strategy at all for ground-truth-sourced runs.
+
+  Live-verified end to end, mirroring `CC-CORE-0021`/`CC-CORE-0022`'s own discipline: `fuzzlab.harness.multitarget.run_targets` against a real, locally-booted Booking.com deployment scores `tp=3, fn=0, fp=0` — all three of this app's own ground-truth cases now match, closing its detection coverage entirely.
+
+  This is the last of category 5's four classes for Booking.com's own ground truth — no further mapping is scoped for this app (only Expedia's own `insecure_deserialization` remains unmapped in this category, and it has no verified confirmer yet, flagged as requiring larger cross-cutting infrastructure work per this category's own change-control history, not attempted here).
+
+  Updates category 5's own Phase E tests (`CC-LAB-0217`/`0219`) to the new, real scored numbers (Booking.com recall `2/3 -> 1.0`; the combined test's per-target assertions, not a shared loop, per `CC-CORE-0020`'s own adequacy-review-caught precedent for that exact pitfall).
+- Impact (other components / project): `fuzzlab/oracle/strategies.py`/`fuzzlab/audit/rules_data/default_rules.json` (FUZZ component owns the new strategy/rule — see `CC-FUZZ-0030` for that component's own entry), `tests/test_labgen_php_laravel_booking_multitarget.py`/`test_multitarget_category5_combined.py` (LAB component, updated scored-number assertions).
+- Risk (level; mitigation or accepted-risk justification): low. One dict entry, scoped and precedented by `CC-CORE-0020`/`0021`/`0022`. The real risk (a wrong or over-broad confirmer) was retired by `CC-FUZZ-0030`'s own pre-change review gate before this mapping was added; live end-to-end verification and the full whole-repo suite (see Effectiveness) confirm zero regressions.
+- Deliverables:
+  - [x] `fuzzlab/core/runmode.py`: `_VULN_TO_CATEGORY["csv_formula_injection"]` — done
+  - [x] `tests/test_labgen_php_laravel_booking_multitarget.py`/`test_multitarget_category5_combined.py`: real scored-number updates — done
+  - [x] `docs/components/02-core-library/requirements.md`: `FR-CORE-13` — done
+  - [x] `CHANGELOG.md` line — done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §9.4 row 5 updated — done
+- Effectiveness (assessed 2026-09-23): Met. Real, verified result: `tp=3, fn=0, fp=0` against Booking.com's real, locally-booted deployment, recall `2/3 -> 1.0`. Full whole-repo `pytest tests/` run: see the commit message / `CHANGELOG.md` line for the exact pass/skip/fail counts.
+
 ### CC-CORE-0022 — Map `price_integrity_bypass` to the new `price-integrity-bypass` category in `_VULN_TO_CATEGORY` (FR-CORE-12) (2026-09-23)
 - Change: Adds one entry to `fuzzlab/core/runmode.py`'s `_VULN_TO_CATEGORY` dict: `"price_integrity_bypass": "price-integrity-bypass"`. Unlike `CC-CORE-0021`'s own `open_redirect` mapping (which reused a pre-existing rule+strategy pair), this class needed a genuinely new one — `R-PRICE-INTEGRITY`/`PriceIntegrityBypassStrategy`, built in `CC-FUZZ-0029` (this component's own FUZZ counterpart entry has the full record: pre-change review findings, canary design, live verification). This entry is the CORE-owned half: the one dict-entry mapping that lets `fuzzlab.harness.pipeline`'s own `evaluate()`/`category_to_oracle_class()` dispatch reach the new strategy at all for ground-truth-sourced runs.
 

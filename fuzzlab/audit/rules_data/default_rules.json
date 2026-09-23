@@ -56,6 +56,13 @@
       "transaction_type": "Price Integrity Bypass",
       "when": { "name_regex": "amount|price|total|cost|charge", "method_in": ["POST"] },
       "reference": "price-integrity-bypass"
+    },
+    {
+      "id": "R-CSV-FORMULA-INJECTION",
+      "category": "csv-formula-injection",
+      "transaction_type": "CSV Formula Injection",
+      "when": { "name_regex": "label|name|comment|note|description|title", "method_in": ["GET"] },
+      "reference": "csv-formula-injection"
     }
   ]
 }

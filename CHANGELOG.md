@@ -4,6 +4,23 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-23 (category 5: CsvFormulaInjectionStrategy, fourth real detection -- Booking.com's ground truth now fully closed)
+- CORE/FUZZ: builds `CsvFormulaInjectionStrategy` + `R-CSV-FORMULA-INJECTION`
+  (`CC-FUZZ-0030`/`FR-FUZZ-17`) and maps `csv_formula_injection` into
+  `_VULN_TO_CATEGORY` (`CC-CORE-0023`/`FR-CORE-13`) — category 5's fourth
+  real detection, closing Booking.com's own toolkit-side detection
+  coverage entirely (all three of its ground-truth cases now match).
+  Pre-change review caught three blocking design flaws before any code
+  was written: an unanchored newline-only match (fixed by requiring an
+  immediate trailing `,` after the payload, anchoring to the real CSV cell
+  boundary); a single `=`-only trigger-character canary (fixed by trying
+  all four OWASP trigger characters — `=`, `+`, `-`, `@`); and a missing
+  `method_in` constraint (fixed with `method_in: ["GET"]`, mirroring
+  `R-PRICE-INTEGRITY`'s own precedent). Live-verified end to end against
+  Booking.com's real deployment: `tp=3, fn=0, fp=0`, recall `2/3 -> 1.0`.
+  Updates `tests/test_labgen_php_laravel_booking_multitarget.py`/
+  `test_multitarget_category5_combined.py` to the new real scored numbers.
+
 ## 2026-09-23 (category 5: PriceIntegrityBypassStrategy, third real detection)
 - CORE/FUZZ: builds `PriceIntegrityBypassStrategy` + `R-PRICE-INTEGRITY`
   (`CC-FUZZ-0029`/`FR-FUZZ-16`) and maps `price_integrity_bypass` into
