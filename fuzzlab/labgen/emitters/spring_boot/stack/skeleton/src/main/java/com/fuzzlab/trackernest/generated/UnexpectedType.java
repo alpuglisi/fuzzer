@@ -4,7 +4,7 @@ import java.io.Serializable;
 
 /**
  * A second, legitimately-{@link Serializable} but unexpected type
- * ({@code CC-LAB-0092}) -- stands in for whatever a real gadget-chain class
+ * ({@code CC-LAB-0132}) -- stands in for whatever a real gadget-chain class
  * would be in a real deserialization attack, without actually including one
  * (no dangerous method bodies; this class does nothing but hold a string).
  * The insecure-deserialization cell's vulnerable twin will happily

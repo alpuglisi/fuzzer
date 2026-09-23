@@ -7,7 +7,7 @@ import java.io.ObjectOutputStream;
 import java.io.Serializable;
 
 /**
- * Test-only helper ({@code CC-LAB-0092}): writes a real Java-serialization-
+ * Test-only helper ({@code CC-LAB-0132}): writes a real Java-serialization-
  * protocol byte stream for one of the two fixed support classes to stdout,
  * so the insecure-deserialization cell's live-boot test can produce real
  * fixture payloads without Python needing to emit Java's serialization wire

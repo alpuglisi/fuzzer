@@ -3,7 +3,7 @@ package com.fuzzlab.trackernest.generated;
 import java.io.Serializable;
 
 /**
- * TrackerNest's expected webhook-payload type ({@code CC-LAB-0092}) -- the
+ * TrackerNest's expected webhook-payload type ({@code CC-LAB-0132}) -- the
  * one class name the insecure-deserialization cell's secure twin allowlists
  * via a {@code resolveClass()} override. Checked into the skeleton (not
  * per-cell generated) since both twins reference the same fixed type.
