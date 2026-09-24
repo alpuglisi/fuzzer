@@ -1,0 +1,50 @@
+# SSRF sample manifest, second instance (CC-LAB-0185), go_net_http.
+#
+# Eighth real page for this stack's Twitch pick (category 4, Media/
+# streaming -- docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §9.4/§9.5),
+# the same cheap depth-increment pattern as CC-LAB-0183 (access_control's
+# second instance) and CC-LAB-0184 (Netflix's insecure_deserialization
+# second instance): a clip-import/download endpoint that server-side-
+# fetches an externally-hosted clip file from a caller-supplied
+# `source_url` -- a real, plausible Twitch-clip-editor feature ("import a
+# clip from an external source URL"), genuinely distinct from
+# `/api/clips/thumbnail` (CC-LAB-0172/`LABGEN-GO-0003`/`0004`, a
+# thumbnail-*fetch-and-render* proxy), not a cosmetic rename of it.
+#
+# **Zero new generator code.** Reuses CC-LAB-0172's already-built
+# `read_url_query_param` source and `unchecked_url_fetch`/
+# `scheme_and_resolved_ip_allowlist` sinks verbatim (`lab/safety_matrix.yaml`'s
+# existing `server_side_http_fetch` sink family) -- no new module, no new
+# safety-matrix entry, no new op. The only non-ground-truth code change
+# this entry needs is one new
+# `_ROUTE_PARAMS["/clips/download"]` entry in
+# `fuzzlab/labgen/emitters/go_net_http/__init__.py` (config, not a new
+# class/template), mirroring CC-LAB-0179/CC-LAB-0183's own "new manifest +
+# new route entry + ground truth, zero new generator code" precedent for
+# reusing an already-built shape at a new route.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: fetches the caller-supplied source_url with no validation
+  # at all (CWE-918).
+  - cell_id: LABGEN-GO-0015
+    class: ssrf
+    stack_profile: go_net_http
+    route: { method: GET, path: /clips/download }
+    sink_context:
+      family: server_side_http_fetch
+      required_neutralizations: [ssrf_request_forgery]
+    transform: [unchecked_url_fetch]
+
+  # Secure twin: the only difference is which sink module renders
+  # (the minimal-pair invariant) -- rejects any scheme but https and
+  # rejects a resolved IP that is loopback/private/link-local, checked
+  # against the resolved address, before fetching.
+  - cell_id: LABGEN-GO-0016
+    class: ssrf
+    stack_profile: go_net_http
+    route: { method: GET, path: /clips/download }
+    sink_context:
+      family: server_side_http_fetch
+      required_neutralizations: [ssrf_request_forgery]
+    transform: [scheme_and_resolved_ip_allowlist]

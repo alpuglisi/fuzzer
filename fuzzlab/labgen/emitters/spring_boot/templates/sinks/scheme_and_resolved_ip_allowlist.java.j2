@@ -1,0 +1,49 @@
+        // scheme_and_resolved_ip_allowlist: the secure twin. Same
+        // thumbnail_url query-parameter read, but the URL's scheme must be
+        // https AND its RESOLVED IP address(es) must not be loopback/
+        // private/link-local before any fetch is attempted -- ported
+        // idiomatically from go_net_http's own
+        // SchemeAndResolvedIpAllowlistSink (CC-LAB-0172) to
+        // java.net.InetAddress.getAllByName (the JDK's own real-DNS-
+        // resolution analog of Go's net.LookupIP), checked against the
+        // RESOLVED address actually dialed, not just the hostname string --
+        // closing the DNS-rebinding gap lab/safety_matrix.yaml's own
+        // comment on this sink family names.
+        java.net.URI parsedUri;
+        try {
+            parsedUri = java.net.URI.create({{ value_expr }});
+        } catch (Exception e) {
+            return org.springframework.http.ResponseEntity.status(403).body("{\"error\":\"invalid_url\"}");
+        }
+        if (parsedUri.getScheme() == null || !parsedUri.getScheme().equalsIgnoreCase("https")) {
+            return org.springframework.http.ResponseEntity.status(403).body("{\"error\":\"scheme_not_allowed\"}");
+        }
+        java.net.InetAddress[] resolvedAddresses;
+        try {
+            resolvedAddresses = java.net.InetAddress.getAllByName(parsedUri.getHost());
+        } catch (Exception e) {
+            return org.springframework.http.ResponseEntity.status(403).body("{\"error\":\"dns_resolution_failed\"}");
+        }
+        if (resolvedAddresses.length == 0) {
+            return org.springframework.http.ResponseEntity.status(403).body("{\"error\":\"dns_resolution_failed\"}");
+        }
+        for (java.net.InetAddress resolvedAddress : resolvedAddresses) {
+            if (resolvedAddress.isLoopbackAddress() || resolvedAddress.isSiteLocalAddress()
+                    || resolvedAddress.isLinkLocalAddress() || resolvedAddress.isAnyLocalAddress()) {
+                return org.springframework.http.ResponseEntity.status(403).body("{\"error\":\"ip_not_allowed\"}");
+            }
+        }
+        try {
+            java.net.http.HttpClient client = java.net.http.HttpClient.newBuilder()
+                .connectTimeout(java.time.Duration.ofSeconds(5))
+                .build();
+            java.net.http.HttpRequest fetchRequest = java.net.http.HttpRequest.newBuilder(parsedUri)
+                .timeout(java.time.Duration.ofSeconds(5))
+                .GET()
+                .build();
+            java.net.http.HttpResponse<String> fetchResponse = client.send(
+                fetchRequest, java.net.http.HttpResponse.BodyHandlers.ofString());
+            return org.springframework.http.ResponseEntity.ok().body(fetchResponse.body());
+        } catch (Exception e) {
+            return org.springframework.http.ResponseEntity.status(502).body("{\"error\":\"fetch_failed\"}");
+        }

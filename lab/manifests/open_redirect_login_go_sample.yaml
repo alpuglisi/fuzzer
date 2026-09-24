@@ -1,0 +1,65 @@
+# Open-redirect sample manifest (CC-LAB-0199), go_net_http.
+#
+# Fourteenth real page for this stack's Twitch pick (category 4, Media/
+# streaming -- docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §9.4/§9.5).
+# This stack's FIRST instantiation of `lab/safety_matrix.yaml`'s existing
+# `open_redirect` concern / `http_redirect_location` sink family (added by
+# CC-LAB-0210 for `php_laravel`'s Booking.com pilot, category 5 -- grepped
+# fuzzlab/labgen/emitters/go_net_http/ and lab/manifests/*.yaml before
+# starting and found no prior instance on this stack).
+#
+# A "return here after login" convenience endpoint (GET /auth/
+# login-redirect?next=... -- a genuinely common, real-world open-redirect
+# vector on many real sites, and a real, plausible Twitch feature),
+# CWE-601. The vulnerable twin sets the caller-supplied `next` value as
+# the Location header verbatim, through Go's ORDINARY
+# w.Header().Set()/w.WriteHeader() path (no CRLF-stripping bypass needed
+# here, unlike CC-LAB-0198's http_header_injection shape: a bare absolute
+# external URL needs no CR/LF at all to be a dangerous, well-formed
+# Location value). The secure twin rejects (HTTP 400) any `next` value
+# that is not a genuine site-relative path -- closing every bypass shape
+# `fuzzlab.oracle.strategies.OpenRedirectStrategy`'s own `confirm()`
+# exercises (a protocol-relative target, a backslash-prefixed target, a
+# scheme-qualified absolute URL/canary, a `javascript:`-shaped value) --
+# before ever setting the header.
+#
+# Module composition is this stack's Convention 2 (like SSRF/mass-
+# assignment/file-upload/price-integrity/path-traversal/ssti/http-header-
+# injection): the manifest's one op names a SINK module directly.
+#
+# Detection: `fuzzlab.oracle.strategies.OpenRedirectStrategy` (already
+# built for category 5's own pilot -- Booking.com's
+# `booking_open_redirect_sample.yaml`) confirms this shape with ZERO new
+# detection code -- verified live against a real booted instance
+# (tests/test_labgen_go_live_boot.py::
+# test_real_boot_proves_the_open_redirect_differential_for_both_twins),
+# which also doubles as a live regression check that `BUG-0044`'s
+# redirect-following fix (RequestsProbeSender now sets
+# allow_redirects=False) still holds: had that fix regressed, this exact
+# page would immediately re-expose it via a followed redirect chain
+# hiding the Location header the strategy needs to inspect.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: the caller-supplied `next` value is set as the Location
+  # header verbatim, with no check at all that it stays on this site.
+  - cell_id: LABGEN-GO-0027
+    class: open_redirect
+    stack_profile: go_net_http
+    route: { method: GET, path: /auth/login-redirect }
+    sink_context:
+      family: http_redirect_location
+      required_neutralizations: [open_redirect]
+    transform: [raw_concat]
+
+  # Secure twin: the only difference is which sink module renders (the
+  # minimal-pair invariant) -- `next` must be a genuine site-relative path
+  # before the Location header is ever set.
+  - cell_id: LABGEN-GO-0028
+    class: open_redirect
+    stack_profile: go_net_http
+    route: { method: GET, path: /auth/login-redirect }
+    sink_context:
+      family: http_redirect_location
+      required_neutralizations: [open_redirect]
+    transform: [redirect_target_allowlist]

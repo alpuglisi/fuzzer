@@ -1,0 +1,14 @@
+channel := struct {
+	DisplayName string `json:"display_name"`
+	Bio         string `json:"bio"`
+	IsPartner   bool   `json:"is_partner"`
+}{DisplayName: "twitch_lab_channel", Bio: "welcome to my channel", IsPartner: false}
+// Vulnerable: the raw request body is unmarshalled directly onto the live
+// channel record, so ANY field present in the JSON -- including
+// `is_partner`, never exposed by this endpoint's own intended form --
+// takes effect (CWE-915).
+_ = json.Unmarshal({{ body_var }}, &channel)
+respBody, _ := json.Marshal(channel)
+w.Header().Set("Content-Type", "application/json")
+w.WriteHeader(http.StatusOK)
+w.Write(respBody)

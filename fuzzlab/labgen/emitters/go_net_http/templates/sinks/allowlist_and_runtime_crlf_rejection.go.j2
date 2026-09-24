@@ -1,0 +1,18 @@
+// Secure: an explicit allowlist regex on {{ var_name }} (a bare site-
+// relative path -- letters, digits, "/", "_", "-" only; no "\r", "\n", or
+// any other byte able to terminate or extend a header line) rejects
+// anything unexpected up front (HTTP 400, fail closed), layered on top of
+// Go's own net/http response-header-writing path: even if a caller-
+// supplied CR/LF byte somehow reached w.Header().Set() (it cannot, once
+// the allowlist below rejects it), net/http's own transfer-writer
+// replaces any such byte with a space before the response ever reaches
+// the wire (verified empirically -- see this op's own change-control
+// entry) -- a second, independent layer of runtime rejection, never
+// relying on the allowlist alone.
+var allowedDestination = regexp.MustCompile(`^/[A-Za-z0-9/_-]*$`)
+if !allowedDestination.MatchString({{ var_name }}) {
+	http.Error(w, "invalid destination", http.StatusBadRequest)
+	return
+}
+w.Header().Set("Location", {{ var_name }})
+w.WriteHeader(http.StatusFound)

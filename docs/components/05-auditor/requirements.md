@@ -1,6 +1,6 @@
 # Auditor / Fetcher — Requirement Specification
 
-Component code: **AUD** · Status: `[built; to harden]` · Last updated: 2026-09-21
+Component code: **AUD** · Status: `[built; to harden]` · Last updated: 2026-09-23
 
 Related: `ARCHITECTURE.md` #5; `DECISIONS_AND_ROADMAP.md` (D5, D6, D9, Phase 2);
 `./change-control.md`.
@@ -30,6 +30,138 @@ budget where a vulnerability is plausible.
   versioned feature vector; never emit a vulnerability label.
 - **FR-AUD-6** Read discovered surface from the shared store and write candidates
   back to it (no direct tool-to-tool calls). (D5)
+- **FR-AUD-7** *(`CC-AUD-0016`, 2026-09-23).* A candidate is generated for the
+  `ssrf` category: `R-SSRF` (`fuzzlab/audit/rules_data/default_rules.json`)
+  matches a parameter name against a common SSRF-fetch vocabulary (`url`,
+  `src`, `target`, `webhook`, `thumbnail`, etc.), the same bare
+  `name_regex`-only shape `R-OPEN-REDIRECT`/`R-FILE-INCLUSION`/
+  `R-COMMAND-INJECTION` already use. Rule-generation only — confirmation is
+  `fuzzlab.oracle`'s job (`FR-FUZZ-18`).
+- **FR-AUD-8** *(`CC-AUD-0017`, 2026-09-23; regex widened by
+  `CC-AUD-0024`, 2026-09-23).* A candidate is generated for the
+  `access-control` category: `R-ACCESS-CONTROL`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a `GET`/`query`
+  parameter whose name looks like an object identifier (`channel_id`,
+  `resource_id`, `object_id`, `item_id`, `record_id`, `owner_id`,
+  `account_id` — the last added by `CC-AUD-0024` for Netflix's first
+  `access_control` page, `CC-LAB-0187`) —
+  narrower than `R-SSRF`'s bare-`name_regex` shape (adds `method_in`/
+  `location_in`) to bound the false-positive risk a broader match would
+  carry for this category (see `CC-AUD-0017`). Rule-generation only —
+  confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-20`).
+- **FR-AUD-9** *(`CC-AUD-0018`, 2026-09-23).* A candidate is generated for
+  the `insecure-deserialization` category: `R-INSECURE-DESERIALIZATION`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a `body`-location
+  point whose `sink_context` is `"deserialization"` — this project's first
+  use of the `sink_context_in` predicate, since this class has no
+  informative parameter name to key off (every whole-body point shares the
+  literal `param="body"`). **Scope limit, stated explicitly**:
+  `sink_context` is currently populated only from ground truth
+  (`fuzzlab.harness.auto.points_from_ground_truth` looks it up from the
+  matching scoring `Case`); the auditor does not yet infer `sink_context`
+  generically for an arbitrary crawled target, so this rule is reachable
+  only in the project's own ground-truth-scored detection-benchmark mode
+  today, not yet a general crawl-driven capability. Rule-generation only —
+  confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-21`).
+- **FR-AUD-10** *(`CC-AUD-0019`, 2026-09-23).* A candidate is generated for
+  the `xxe` category: `R-XXE` (`fuzzlab/audit/rules_data/
+  default_rules.json`) matches a `body`-location point whose `sink_context`
+  is `"xml"` — the second use of `sink_context_in` (after `R-INSECURE-
+  DESERIALIZATION`), same necessary shape and same scope limit (reachable
+  only from ground-truth-sourced points today). Rule-generation only —
+  confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-22`).
+- **FR-AUD-11** *(`CC-AUD-0020`, 2026-09-23).* A candidate is generated for
+  the `jwt-algorithm-confusion` category: `R-JWT-ALG-NONE`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a `header`-
+  location point whose name looks like a JWT-carrying header
+  (`authorization|jwt`) — scoped to header points only, mirroring
+  `R-ACCESS-CONTROL`'s own location-narrowed shape. Rule-generation only
+  — confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-23`).
+- **FR-AUD-12** *(`CC-AUD-0021`, 2026-09-23).* A candidate is generated for
+  the `weak-token-entropy` category: `R-WEAK-TOKEN-ENTROPY`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a `POST` point
+  whose `sink_context` is `"session_token"` — genuinely a new,
+  less-constrained rule shape (no `location_in`, since this class has no
+  real tainted location to key off at all; `method_in` substitutes as
+  the available constraint). Rule-generation only — confirmation is
+  `fuzzlab.oracle`'s job (`FR-FUZZ-24`).
+- **FR-AUD-13** *(`CC-AUD-0022`, 2026-09-23).* A candidate is generated for
+  the `mass-assignment` category: `R-MASS-ASSIGNMENT`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a body point
+  whose `sink_context` is `"mass_assignment"` — the same
+  `location_in`+`sink_context_in` shape as `R-INSECURE-DESERIALIZATION`/
+  `R-XXE`. The project's first-ever candidate-generation rule for this
+  vuln class (already built on three other stacks' lab pages, but with
+  no rule anywhere before this entry). Rule-generation only —
+  confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-25`).
+- **FR-AUD-14** *(`CC-AUD-0023`, 2026-09-23).* A candidate is generated for
+  the `unrestricted-file-upload` category: `R-UNRESTRICTED-FILE-UPLOAD`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a body point
+  whose `sink_context` is `"fs_web_root_write"` — the same
+  `location_in`+`sink_context_in` shape as `R-MASS-ASSIGNMENT`/
+  `R-INSECURE-DESERIALIZATION`/`R-XXE`. This project's first-ever
+  candidate-generation rule for this vuln class, closing `CC-LAB-0186`'s
+  own deliberately-deferred detection follow-on for Twitch's
+  unrestricted-file-upload cell (`TWCH-0009`). Rule-generation only —
+  confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-26`).
+- **FR-AUD-15** *(`CC-AUD-0025`, 2026-09-23).* A candidate is generated for
+  the `price-integrity-bypass` category: `R-PRICE-TRUST-DIFFERENTIAL`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a body point
+  whose `sink_context` is `"payment_charge"` — the same
+  `location_in`+`sink_context_in` shape as `R-MASS-ASSIGNMENT`/
+  `R-UNRESTRICTED-FILE-UPLOAD`. Deliberately scoped to `"payment_charge"`
+  only, not also `"sql"` (Booking.com's own `BKNG-0003` ground truth uses
+  `sink_context="sql"`, since its sink is a real DB insert): `"sql"` is
+  already used as the `sink_context` for a large number of unrelated
+  SQL-injection candidates project-wide, and widening this rule's own
+  `sink_context_in` to include it would have generated a
+  `price-integrity-bypass` candidate for essentially every SQL-sink point
+  in the project, a real false-candidate-explosion risk caught during
+  this rule's own pre-change review, not discovered after the fact. This
+  project's first-ever candidate-generation rule for this vuln class,
+  closing `CC-LAB-0188`'s own deliberately-deferred detection follow-on
+  for Netflix's price-integrity-bypass cell (`NFLX-0005`). Rule-generation
+  only — confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-27`).
+  **Cross-stack generalization, verified live (`CC-LAB-0189`,
+  2026-09-23, updated in place)**: this rule's own `location_in`/
+  `sink_context_in` gate was never stack-specific, so it needed **zero**
+  changes to also generate a candidate for `go_net_http`'s new
+  `price_integrity_bypass` cell (`TWCH-0010`, Twitch's channel-
+  subscription-purchase endpoint) — verified directly, not merely
+  assumed from the rule's shape.
+- **FR-AUD-16** *(`CC-AUD-0026`, 2026-09-23).* A candidate is generated
+  for the `http-header-injection` category: `R-HEADER-INJECTION`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a `query`/`body`
+  point whose `sink_context` is `"header"` — the same `location_in`+
+  `sink_context_in` shape as `R-INSECURE-DESERIALIZATION`/
+  `R-UNRESTRICTED-FILE-UPLOAD`/`R-PRICE-TRUST-DIFFERENTIAL`. Closes `CC-LAB-0198`'s
+  own deliberately-deferred detection follow-on for Twitch's
+  `http_header_injection` cell (`TWCH-0013`). Checked directly (not
+  assumed) that the one other real user of `sink_context="header"`
+  (php_laravel's HuddleHub `outbound_header_injection` case, a genuinely
+  distinct concern) cannot false-positive through this rule: the
+  companion oracle strategy fails closed on that page, and that app's own
+  `vuln_class` has no category mapping that would ever include this
+  category in a real automatic run's `plan.categories`. Rule-generation
+  only — confirmation is `fuzzlab.oracle`'s job (`FR-FUZZ-29`).
+- **FR-AUD-17** *(`CC-AUD-0027`, 2026-09-23).* A candidate is generated
+  for the `path-traversal` category: `R-PATH-TRAVERSAL`
+  (`fuzzlab/audit/rules_data/default_rules.json`) matches a `query`/`body`
+  point whose `sink_context` is `"fs_path_read"` — the same
+  `location_in`+`sink_context_in` shape as `R-HEADER-INJECTION`/
+  `R-INSECURE-DESERIALIZATION`/`R-UNRESTRICTED-FILE-UPLOAD`/
+  `R-PRICE-TRUST-DIFFERENTIAL`. Closes `CC-LAB-0190`'s own deliberately-deferred
+  detection follow-on for Twitch's `path_traversal` cell (`TWCH-0011`) —
+  this project's own last known real, TRACKED category-4 detection gap.
+  Checked directly (not assumed) that `sink_context="fs_path_read"` has
+  no other current user in any ground truth, so there is no cross-target
+  overlap to reason about. The pre-existing `R-FILE-INCLUSION` rule's
+  broader `name_regex` also matches `filename`, generating a second,
+  independent candidate under a genuinely distinct category
+  (`file-inclusion`, matching no current ground truth) — by design, not
+  a duplicate: that category has no confirming path in a scored
+  automatic run today. Rule-generation only — confirmation is
+  `fuzzlab.oracle`'s job (`FR-FUZZ-30`).
 
 ## 4. Non-functional requirements
 - **NFR-AUD-explainable** Every candidate is traceable to the rule evidence that

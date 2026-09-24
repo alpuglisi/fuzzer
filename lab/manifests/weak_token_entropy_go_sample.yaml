@@ -1,0 +1,47 @@
+# Predictable session-token sample manifest (CC-LAB-0181), go_net_http.
+#
+# Fifth real page for this stack's Twitch pick (category 4 pilot,
+# Media/streaming -- docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md
+# §9.4/§9.5), continuing this category's own "coherent page/route set"
+# goal: a session-token-refresh endpoint (CWE-330, predictable value).
+#
+# Reuses `lab/safety_matrix.yaml`'s existing `session_token_generation`
+# sink family and its existing `predictable_token_source`/`csprng_token`
+# ops verbatim (added by `CC-LAB-0063` for the corpus-examples/auth-session
+# research) -- no new safety-matrix entry needed; this is the first
+# lab-generator instance of this mechanism on *any* stack (checked for
+# cross-branch collision before landing: no other active category branch
+# references this mechanism or these cell IDs). **Genuinely no tainted
+# request input at all** -- unlike every other shape this stack has built,
+# the vulnerability is entirely in how the sink *generates* its own output
+# value, not in any attacker-controlled value reaching it, so the module
+# composition here is a new, third convention (see
+# `fuzzlab/labgen/emitters/go_net_http/modules.py`'s own
+# `NoOpTokenRequestSource` docstring for why this genuinely differs from
+# the SSRF shape's own Convention 2, which still has a real source).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: the session token is the current nanosecond timestamp as a
+  # decimal string -- trivially predictable (CWE-330).
+  - cell_id: LABGEN-GO-0009
+    class: weak_token_entropy
+    stack_profile: go_net_http
+    route: { method: POST, path: /sessions/refresh }
+    sink_context:
+      family: session_token_generation
+      required_neutralizations: [weak_token_entropy]
+    transform: [predictable_token_source]
+
+  # Secure twin: the only difference is which sink module renders
+  # (csprng_token instead of predictable_token_source) -- the minimal-pair
+  # invariant, this stack's own Convention 2 shape. 32 bytes from
+  # crypto/rand, hex-encoded.
+  - cell_id: LABGEN-GO-0010
+    class: weak_token_entropy
+    stack_profile: go_net_http
+    route: { method: POST, path: /sessions/refresh }
+    sink_context:
+      family: session_token_generation
+      required_neutralizations: [weak_token_entropy]
+    transform: [csprng_token]

@@ -1,0 +1,5 @@
+// jwt_alg_none_default transform: {{ value_expr }} -- an attacker-chosen
+// `alg: none` header is honored (the signature check is skipped entirely,
+// regardless of hmacValid), the real auth0/node-jsonwebtoken GHSA-8cf7-32gw-wr33
+// bug (CWE-347): no explicit accepted-algorithms allowlist, so an unsigned
+// token is accepted as long as its own header claims `alg: none`.

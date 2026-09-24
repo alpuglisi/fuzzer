@@ -159,7 +159,7 @@ tracked in the requirements files, not here.
   `generalizes` verdict — the generalization evidence. The live run against an external
   validation lab is on-host; the manifest-generated second target plugs in as a
   `TargetSpec`.
-- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- seven emitters (php_current, python_fastapi, php_laravel, node_express, django, go_net_http, spring_boot) built to varying depth: node_express at Tier-A depth, django at Phase-A/foundation depth (category 2's PicTrail pick), go_net_http at Phase A + one Phase B increment (category 4's Twitch pick), spring_boot at TrackerNest's full three-cell depth (category 3's Atlassian pick) now also hosting category 4's one ported Netflix cell per the §9.2a consolidation (java_spring_boot itself retired); ruby_rails (category 1's Shopify pick, docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md) now has its full Phase A-E built and proven for real: Phase A skeleton + live-boot harness (CC-LAB-0071/FR-LAB-65), Phase B's three vulnerability modules -- webhook-signature verification, CWE-915 mass assignment, CWE-502 insecure deserialization (CC-LAB-0072..0075/FR-LAB-66..68) -- Phase C's coherent "ForgeCart" app identity (5 real pages + 5 inert surrounding pages, its own lab/ground-truth-forgecart/ contract, CC-LAB-0080/FR-LAB-84), Phase D's whole-app (all 12 cells, one boot) live-boot conformance plus a real dependency-pinning defect found and fixed along the way (CC-LAB-0081/FR-LAB-85, BUG-0035/PA-0037), and Phase E's real fuzzlab.harness.multitarget.TargetSpec wiring with a real, scored ScoreReport genuinely confirming the app's real XSS page (CC-LAB-0082/FR-LAB-86); Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself done]` (D8, target shape pinned by **D20**/
+- **Manifest-driven generator** `[Phase 0 foundation built; Phase 3 multi-stack under way -- seven emitters (php_current, python_fastapi, php_laravel, node_express, django, go_net_http, spring_boot) built to varying depth: node_express at Tier-A depth, django at Phase-A/foundation depth (category 2's PicTrail pick), go_net_http now at 15 real pages/cases, 14/15 with live-boot-proven detection (category 4's Twitch pick, CC-LAB-0170-0199 + CC-FUZZ-0042/0039/0040/0041/0042 + CC-AUD-0026/0027, 2026-09-23 status -- only webhook-signature's CWE-347 timing side channel (confirmed genuinely infeasible for this project's wall-clock-HTTP measurement model) remains undetected; path_traversal (fs_path_read, TWCH-0011) is now also a real, confirmed finding -- PathTraversalFsPathReadStrategy/R-PATH-TRAVERSAL, a live-verified, purely-read /etc/passwd-content differential (no canary planted on the target's filesystem -- an earlier note in this project's own history had mischaracterized this as needing one, corrected by CC-FUZZ-0046), closing this project's own last known real, tracked category-4 detection gap; http_header_injection's own CWE-113 label (TWCH-0013) is also now a real, confirmed finding -- HttpHeaderInjectionCrlfStrategy/R-HEADER-INJECTION, a live-verified CRLF-response-header-injection differential; building the http_header_injection strategy also surfaced and fixed a second, independent points_from_ground_truth sink_context-collapse bug, BUG-0046/PA-0048; ssti/template_render's own real, verified generic-strategy-syntax mismatch with Go's text/template was closed by CC-FUZZ-0042's new GoTemplateSstiStrategy, a text/template-builtin-function marker; http_header_injection/http_response_header_value (CC-LAB-0198) is this project's first instance of that concern on any stack, its vulnerable twin using http.Hijacker to bypass Go's own net/http header-CRLF-sanitization -- verified empirically not otherwise constructible honestly -- and its own discovery surfaced and fixed a genuine oracle-sender redirect-following bug, BUG-0044/PA-0046/CC-FUZZ-0043; open_redirect/http_redirect_location (CC-LAB-0199) is this stack's first instance of that concern (reused verbatim from category 5's php_laravel Booking.com pilot), needing no http.Hijacker bypass since a bare external URL needs no CR/LF at all, confirmed live by the already-built OpenRedirectStrategy with zero new detection code -- wiring it into the runmode category plan for the first time surfaced and fixed two further genuine pipeline bugs (a missing category mapping, then a wrongly-hyphenated strategy vuln_class that silently broke exact-tuple scoring), BUG-0045/PA-0047/CC-FUZZ-0044, and honestly surfaced a second open_redirect label, TWCH-0015, on CC-LAB-0198's own existing sink), spring_boot at TrackerNest's full three-cell depth (category 3's Atlassian pick) now also hosting category 4's Netflix cell, grown to 11 real pages, 11/11 detected (CC-LAB-0173/0179/0187/0188/0191/0192/0193/0194/0195/0197) per the §9.2a consolidation (java_spring_boot itself retired) -- see the go_net_http/spring_boot narrative below for the full per-increment record; ruby_rails (category 1's Shopify pick, docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md) now has its full Phase A-E built and proven for real: Phase A skeleton + live-boot harness (CC-LAB-0071/FR-LAB-65), Phase B's three vulnerability modules -- webhook-signature verification, CWE-915 mass assignment, CWE-502 insecure deserialization (CC-LAB-0072..0075/FR-LAB-66..68) -- Phase C's coherent "ForgeCart" app identity (5 real pages + 5 inert surrounding pages, its own lab/ground-truth-forgecart/ contract, CC-LAB-0080/FR-LAB-84), Phase D's whole-app (all 12 cells, one boot) live-boot conformance plus a real dependency-pinning defect found and fixed along the way (CC-LAB-0081/FR-LAB-85, BUG-0035/PA-0037), and Phase E's real fuzzlab.harness.multitarget.TargetSpec wiring with a real, scored ScoreReport genuinely confirming the app's real XSS page (CC-LAB-0082/FR-LAB-86); Layer-A real-page parity/coverage closed (CC-LAB-0062), cutover itself done]` (D8, target shape pinned by **D20**/
   `CR-LAB-0001`): the "lab as a compiler" — one manifest plus a safety matrix,
   seed, and env-profile generate the app, labels, docs, and oracle tests, with a
   **binary** verdict derived from `(transform, sink context)` (a partially
@@ -391,6 +391,104 @@ tracked in the requirements files, not here.
   the 16 `PFF-` real-page cases is functional **parity/coverage**, not a
   literal source-text diff (impossible in any case once the reproduction
   target is a Laravel reimplementation rather than raw PHP) — verified below.
+  **Status update, 2026-09-23 (category 4's second-target pilot, both apps
+  now well past Phase B depth — see `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`
+  §4 for the full per-increment record; only the current shape/build status
+  is restated here, not the history above):** `go_net_http`/Twitch has grown
+  to **12 real pages** (`CC-LAB-0170`-`0196`) spanning webhook-signature
+  (CWE-347, undetectable by design — a real, measured timing-oracle
+  infeasibility finding, not an oversight), SSRF (2 instances),
+  access-control/IDOR (2 instances), JWT `alg:none` confusion, predictable
+  session tokens, channel-profile mass assignment, unrestricted file upload
+  (CWE-434, this stack's first multipart-form source),
+  price-integrity-bypass (CWE-807), path_traversal (CWE-22/23,
+  `CC-LAB-0190`), and SSTI (CWE-1336, `CC-LAB-0196` — this stack's first
+  instantiation of an already-multi-stack `template_render` mechanism,
+  genuine breadth not depth) — **11 of 12 real, live-boot-proven
+  detections** (`R-SSRF`/`R-ACCESS-CONTROL`/`R-JWT-ALG-NONE`/
+  `R-WEAK-TOKEN-ENTROPY`/`R-MASS-ASSIGNMENT`/`R-UNRESTRICTED-FILE-UPLOAD`/
+  `R-PRICE-TRUST-DIFFERENTIAL`/`R-SSTI`/`R-PATH-TRAVERSAL` audit rules,
+  `fuzzlab.oracle.strategies`' matching `ConfirmationStrategy` classes) —
+  only `webhook_signature` (structurally undetectable) remains the one
+  gap; `path_traversal` closed via `PathTraversalFsPathReadStrategy`
+  (`CC-FUZZ-0046`/`CC-AUD-0027`), a purely-read `/etc/passwd`-content
+  differential that plants nothing on the target's filesystem. `ssti` was itself a real, verified
+  syntax-level mismatch (the existing generic `SstiStrategy`'s
+  arithmetic-marker payloads do not parse or evaluate under Go's
+  `text/template` action grammar, confirmed by a real `go run` check and
+  a real live-boot run, not a missing-wiring gap) until `CC-FUZZ-0042`
+  closed it: a new `GoTemplateSstiStrategy`, registered alongside
+  `SstiStrategy` under the same category, uses `text/template`'s own
+  builtin `len` function (`{{ len "AAA...A" }}`) as its marker instead of
+  an arithmetic expression, confirmed via a two-probe differential
+  (independent random marker lengths, cross-contamination-checked) —
+  needing no `R-SSTI` rule change, since that rule already nominates on
+  `sink_context`/location, not per-mechanism.
+  `spring_boot`'s hosted Netflix cell has similarly grown to
+  **10 real pages** (`CC-LAB-0173`, `0179`, `0187`/`0188`/`0191`/`0192`/
+  `0193`/`0194`/`0195`) — insecure deserialization (2 instances), XXE,
+  access-control/IDOR, price-integrity-bypass, unrestricted file upload,
+  mass assignment, JWT `alg:none` confusion, SSRF, and predictable session
+  tokens — **all 10 real, live-boot-proven** (`10/10` detected; an
+  eleventh page, `ssti`/`template_render`, followed shortly after —
+  see below). Seven of
+  these strategies
+  (`AccessControlIdorStrategy`, `PriceTrustDifferentialStrategy`,
+  `UnrestrictedFileUploadContentTypeTrustStrategy`,
+  `MassAssignmentPrivilegedFieldStrategy`, `JwtAlgNoneConfusionStrategy`,
+  `SsrfInBandMarkerStrategy`/`SsrfOobStrategy`,
+  `PredictableTokenSourceStrategy`)
+  are now proven, live, to generalize
+  across stacks (`go_net_http` <-> `spring_boot`) with zero new detection
+  code in either direction — the oracle's own `ConfirmationStrategy`
+  abstraction working exactly as designed across two independently-built
+  emitters. With `weak_token_entropy` (`CC-LAB-0195`), every
+  realistically-portable-to-both-stacks vuln class this project's own
+  cross-stack-generalization campaign targeted (`access_control`,
+  `mass_assignment`, `unrestricted_file_upload`, `price_integrity_bypass`,
+  `jwt_algorithm_confusion`, `ssrf`, `weak_token_entropy`) now exists on
+  BOTH Twitch and Netflix, each with real, live-boot-proven,
+  cross-stack-generalized detection — that campaign has reached its
+  natural completion point for category 4 (the remaining stack-asymmetric
+  mechanisms — Netflix-only `insecure_deserialization`/`xxe`, which have
+  no genuine Go-stdlib equivalent, and Twitch-only `webhook_signature`
+  (structurally undetectable) — are not further candidates; Twitch-only
+  `path_traversal` was also flagged here at the time as "detection judged
+  unsafe/contrived to attempt" — that judgment was a mischaracterization,
+  corrected by `CC-FUZZ-0046`: the standard, purely-read
+  `/etc/passwd`-content black-box technique plants nothing and is neither
+  unsafe nor contrived, and `path_traversal` now also has real,
+  live-boot-proven detection). A
+  DIFFERENT kind of increment landed after that completion point
+  (`ssti`/`template_render`, `CC-LAB-0196`): not cross-stack
+  generalization (bringing a Go mechanism to Java or vice versa) but
+  cross-stack BREADTH within Twitch itself — reusing an existing,
+  already-multi-stack `lab/safety_matrix.yaml` mechanism
+  (`spring_boot`'s own TrackerNest `template_render` shape) on Go for the
+  first time. Its own detection generalization was checked empirically
+  and found NOT to hold (a genuine Go-`text/template`-syntax mismatch
+  with the generic `SstiStrategy`'s arithmetic-marker technique, not a
+  contrived design or an unbuilt-wiring gap) — documented as an honest
+  open question rather than forced or silently skipped. A follow-on
+  increment brought that same `ssti`/`template_render` mechanism to
+  Netflix itself (`CC-LAB-0197`/`FR-LAB-152`): an eleventh real page, a
+  customer-support-agent template-preview endpoint
+  (`GET /api/support/template-preview?expr=`), reusing TrackerNest's own
+  already-built OGNL-compile shape on this same shared `spring_boot`
+  package verbatim (`query_param` source,
+  `user_supplied_template_compile`/`file_loaded_template_name` sinks) at a
+  new, Netflix-specific route — zero new generator code, and (unlike
+  Go's `text/template`) the generic `SstiStrategy` genuinely does
+  generalize here (Java/OGNL supports its arithmetic-product marker
+  payloads), confirmed live rather than assumed from the shape match
+  alone. `spring_boot`'s hosted Netflix cell now stands at **11 real
+  pages, 11/11 detected**. Both apps
+  are wired into `fuzzlab.harness.multitarget` for
+  real; a real bug/preventive-action pair (`BUG-0042`/`PA-0044`) was found
+  and fixed along the way: a ground-truth-only change can silently break a
+  hardcoded recall assertion living in a `pytest.mark.slow`-marked test
+  file, invisible to the routine `pytest -m "not slow"` pre-push check —
+  now a named, swept-for check across every such file in the project.
   A **second, Laravel/Eloquent/Blade-idiom PHP emitter**
   (`fuzzlab/labgen/emitters/php_laravel/`, `CC-LAB-0029`, lane L-P3.3a) is now
   built as a **foundation only**: a `StackEnv` (`stack_env.py`) carrying a

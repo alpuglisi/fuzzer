@@ -12,26 +12,27 @@ own combined test (`tests/test_multitarget_category1_combined.py` on
 This closes the toolkit-side half of category 3's own Phase 10 `T10.6`-
 style proof: `fuzzlab/harness/multitarget.py` actually accepting two real,
 distinct, locally-booted second targets in one call and producing a real
-combined `transfer_summary`. It does **not** claim `generalizes=True`:
-`CC-CORE-0020` wired `ssti` into `fuzzlab.core.runmode._VULN_TO_CATEGORY`
-(a pre-existing, independently-verified working rule+strategy pairing),
-so TrackerNest's own recall is now 1/3 (its one `ssti` case, `TNEST-0001`,
-confirms for real) -- but Huddle Hub's own three classes
-(`webhook_signature_bypass`/`ssrf`/`outbound_header_injection`) and
-TrackerNest's other two (`xxe`/`insecure_deserialization`) all remain
-honestly unmapped (no verified confirmer built for any of them yet), so
-Huddle Hub's own recall is still 0 and `generalizes` is correctly `False`
-(`transfer_summary`'s own rule needs recall > 0 on **both** scored
-targets to report `True`; one of two is not enough) -- this is a weaker
-transfer result than category 1's own combined test (which had one real
-recall>0 case from ForgeCart, also on only one of its two targets), stated
-plainly rather than glossed over. Proving the harness can run and combine
-two independent real targets from two entirely different stacks (Java/
-Spring Boot and PHP/Laravel) in one pass, and correctly score each target
-independently (one now genuinely detecting something, one not), is the
-actual T10.6 toolkit-side deliverable here; a true `generalizes=True`
-demonstration needs the same follow-on audit-rule wiring for the
-remaining 5 classes, not a new gap introduced by this one.
+combined `transfer_summary`. **It now claims `generalizes=True` for the
+first time**: this test starts and passes a real `OobListener`
+(`oob=listener`) to `run_targets` -- without one, every SSRF/XXE strategy
+fails closed and never confirms, which is why an earlier version of this
+test showed `generalizes=False` despite `R-SSRF`/`SsrfInBandMarkerStrategy`
+(`CC-AUD-0016`/`CC-FUZZ-0031`) already existing at the time; that was this
+test's own missing wiring, not a real detection gap. TrackerNest's own
+recall is now 2/3 (`ssti`/`TNEST-0001` via `CC-CORE-0020`'s pre-existing
+`R-SSTI`/`SstiStrategy`, and `xxe`/`TNEST-0002` via `CC-FUZZ-0035`'s new
+`R-XXE`/`XxeInBandMarkerStrategy`); Huddle Hub's own recall is now 1/3
+(`ssrf`/`HHUB-0002` via `R-SSRF`/`SsrfInBandMarkerStrategy`).
+`webhook_signature_bypass`/`outbound_header_injection` (Huddle Hub) and
+`insecure_deserialization` (TrackerNest's own real Java `ObjectInputStream`/
+ysoserial-shaped binary case, a genuinely different mechanism from
+Netflix's Jackson-JSON one `InsecureDeserializationTypeConfusionStrategy`
+confirms) remain honestly unmapped/unconfirmed. Proving the harness can
+run and combine two independent real targets from two entirely different
+stacks (Java/Spring Boot and PHP/Laravel) in one pass, correctly score
+each target independently, and now genuinely demonstrate cross-target
+transfer (`generalizes=True`, recall > 0 on both) is the actual T10.6
+toolkit-side deliverable here.
 
 Skip-guarded on both `spring_boot_boot_available()` and
 `live_boot_available()` (PA-0005/PA-0035), matching each app's own
@@ -57,6 +58,7 @@ from fuzzlab.labgen.conformance.live_boot_spring_boot import SKELETON_DIR, sprin
 from fuzzlab.labgen.emitters.php_laravel import LaravelEmitter
 from fuzzlab.labgen.emitters.spring_boot import SpringBootEmitter
 from fuzzlab.labgen.schema import load_manifest
+from fuzzlab.oracle.oob import OobListener
 from fuzzlab.tools.probesender import RequestsProbeSender
 
 TRACKERNEST_GT_DIR = "lab/ground-truth-trackernest"
@@ -157,38 +159,53 @@ def test_trackernest_and_huddlehub_run_together_in_one_call(trackernest_base_url
     trackernest_gt = contract.load(TRACKERNEST_GT_DIR)
     huddlehub_gt = contract.load(HUDDLEHUB_GT_DIR)
 
-    with LiveBootHarness(huddlehub_emitter, huddlehub_cells) as huddlehub_harness:
-        specs = [
-            TargetSpec(name="spring_boot_trackernest", base_url=trackernest_base_url,
-                      ground_truth=trackernest_gt, points_source="ground-truth"),
-            TargetSpec(name="php_laravel_huddlehub", base_url=huddlehub_harness._base_url(),  # noqa: SLF001
-                      ground_truth=huddlehub_gt, points_source="ground-truth"),
-        ]
-        with Store(tmp_path / "u.db") as store:
-            outcomes = run_targets(specs, store, sender_for=lambda s: RequestsProbeSender(timeout=10.0))
-            assert [o.name for o in outcomes] == ["spring_boot_trackernest", "php_laravel_huddlehub"]
-            trackernest_outcome, huddlehub_outcome = outcomes
-            for outcome in outcomes:
-                assert outcome.scored is True
-                assert outcome.report is not None
-            # TrackerNest: ssti (TNEST-0001) confirms for real (CC-CORE-0020),
-            # xxe/insecure_deserialization stay unmapped -- 1 of 3 positives.
-            assert trackernest_outcome.report.tp == 1
-            assert trackernest_outcome.report.recall == pytest.approx(1 / 3)
-            # Huddle Hub: all 3 of its own classes remain unmapped -- 0 of 3.
-            assert huddlehub_outcome.report.tp == 0
-            assert huddlehub_outcome.report.recall == 0.0
-            # Two independent real run_ids, one per target, in the same call.
-            assert outcomes[0].run_id != outcomes[1].run_id
+    listener = OobListener()
+    listener.start()
+    try:
+        with LiveBootHarness(huddlehub_emitter, huddlehub_cells) as huddlehub_harness:
+            specs = [
+                TargetSpec(name="spring_boot_trackernest", base_url=trackernest_base_url,
+                          ground_truth=trackernest_gt, points_source="ground-truth"),
+                TargetSpec(name="php_laravel_huddlehub", base_url=huddlehub_harness._base_url(),  # noqa: SLF001
+                          ground_truth=huddlehub_gt, points_source="ground-truth"),
+            ]
+            with Store(tmp_path / "u.db") as store:
+                outcomes = run_targets(specs, store, sender_for=lambda s: RequestsProbeSender(timeout=10.0),
+                                       oob=listener)
+                assert [o.name for o in outcomes] == ["spring_boot_trackernest", "php_laravel_huddlehub"]
+                trackernest_outcome, huddlehub_outcome = outcomes
+                for outcome in outcomes:
+                    assert outcome.scored is True
+                    assert outcome.report is not None
+                # TrackerNest: ssti (TNEST-0001, CC-CORE-0020) and xxe
+                # (TNEST-0002, CC-FUZZ-0035 -- needs the real OobListener
+                # above) both confirm for real; insecure_deserialization
+                # (TNEST-0003, real ysoserial-shaped binary Java
+                # deserialization) is a different mechanism from Netflix's
+                # own confirmed Jackson-JSON case -- still unconfirmed, an
+                # honest false negative, not a wiring gap. 2 of 3 positives.
+                assert trackernest_outcome.report.tp == 2
+                assert trackernest_outcome.report.recall == pytest.approx(2 / 3)
+                # Huddle Hub: ssrf (HHUB-0002, CC-AUD-0016/CC-FUZZ-0031 --
+                # also needs the real OobListener above) confirms for real;
+                # webhook_signature_bypass/outbound_header_injection remain
+                # unmapped -- 1 of 3 positives, not 0 as before this test
+                # started passing a real listener.
+                assert huddlehub_outcome.report.tp == 1
+                assert huddlehub_outcome.report.recall == pytest.approx(1 / 3)
+                # Two independent real run_ids, one per target, in the same call.
+                assert outcomes[0].run_id != outcomes[1].run_id
 
-            summary = transfer_summary(outcomes)
-            assert summary["targets"] == 2
-            assert "macro_precision" in summary and "macro_recall" in summary
-            # Only one of the two scored targets has recall > 0 --
-            # transfer_summary's own rule needs both, so generalizes is
-            # still correctly False, not glossed over.
-            assert summary["generalizes"] is False
-            # format_transfer must not raise on a real two-target summary.
-            rendered = format_transfer(summary)
-            assert "spring_boot_trackernest" in rendered
-            assert "php_laravel_huddlehub" in rendered
+                summary = transfer_summary(outcomes)
+                assert summary["targets"] == 2
+                assert "macro_precision" in summary and "macro_recall" in summary
+                # Both scored targets now have recall > 0 -- transfer_summary's
+                # own >= 2 rule is met for the first time in this combined test.
+                assert summary["generalizes"] is True
+
+                # format_transfer must not raise on a real two-target summary.
+                rendered = format_transfer(summary)
+                assert "spring_boot_trackernest" in rendered
+                assert "php_laravel_huddlehub" in rendered
+    finally:
+        listener.stop()

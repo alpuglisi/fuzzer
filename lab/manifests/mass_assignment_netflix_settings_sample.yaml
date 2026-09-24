@@ -1,0 +1,72 @@
+# Mass-assignment sample manifest (CC-LAB-0192), spring_boot.
+#
+# Netflix's 7th real page (category 4, Media/streaming -- category 4's own
+# "coherent page/route set" depth work): an account-settings-update
+# endpoint (CWE-915), `POST /api/account/settings`, distinct from
+# `/api/profiles/switch` (insecure_deserialization) and `/api/account/
+# billing` (access_control).
+#
+# Reuses lab/safety_matrix.yaml's existing orm_entity_bulk_assign sink
+# family and its existing unfiltered_object_assign/typed_schema_allowlist
+# ops verbatim (added by CC-LAB-0063 for the corpus-examples/
+# mass-assignment research; already instantiated on php_current,
+# ruby_rails, php_laravel, go_net_http -- see
+# lab/manifests/mass_assignment_go_sample.yaml, CC-LAB-0182, for the
+# equivalent minimal pair on go_net_http) -- no new safety-matrix entry
+# needed; this is spring_boot's first instance of this mechanism.
+#
+# Module composition mirrors CC-LAB-0182's own Go design, ported
+# idiomatically to Java/Spring: the vulnerable sink parses the raw JSON
+# body with a plain Jackson 3 JsonMapper.readTree() and assigns every
+# field present onto the account record's in-memory representation
+# (display_name/bio/is_partner), including `is_partner` -- a field this
+# endpoint's own intended form never exposes (it only intends
+# display_name/bio, e.g. a display-name/bio-update settings form). The
+# secure sink parses the same body but only ever reads display_name/bio
+# out of it, leaving is_partner at its seeded value regardless of what
+# the request body contains.
+#
+# Convention 2 (like SSRF/access-control/price-integrity/file-upload on
+# this stack): the manifest's one op names a SINK module directly. The
+# source is the pre-existing raw_body module (reads the whole body as a
+# UTF-8 String) -- unlike every other spring_boot shape that needs a
+# single named field parsed out, this shape's own point is that the
+# *entire* body reaches the sink unfiltered, so no new source module is
+# needed (raw_body already publishes exactly that).
+#
+# Response-shape note, a deliberate reuse of an existing detection
+# convention, not a coincidence: both twins echo the resulting record as
+# `{"display_name":...,"bio":...,"is_partner":...}` -- the exact JSON
+# shape `MassAssignmentPrivilegedFieldStrategy` (fuzzlab/oracle/
+# strategies.py, built for Twitch's go_net_http cell) already hardcodes
+# (field name `is_partner`, intended fields `display_name`/`bio`) -- this
+# session's own "fixed demo field name as declared simplification"
+# convention, letting that existing strategy generalize across stacks
+# with zero new code, verified live in
+# tests/test_labgen_spring_boot_netflix_settings_mass_assignment_live_boot.py.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: the raw request body is parsed and every field present
+  # (including is_partner) is assigned onto the account record (CWE-915).
+  - cell_id: LABGEN-JV-0013
+    class: mass_assignment
+    stack_profile: spring_boot
+    route: { method: POST, path: /api/account/settings }
+    sink_context:
+      family: orm_entity_bulk_assign
+      required_neutralizations: [mass_assignment]
+    transform: [unfiltered_object_assign]
+
+  # Secure twin: only the difference is which sink module renders
+  # (typed_schema_allowlist instead of unfiltered_object_assign) -- the
+  # minimal-pair invariant. Only display_name/bio ever reach the record;
+  # an is_partner key the request carries is silently dropped.
+  - cell_id: LABGEN-JV-0014
+    class: mass_assignment
+    stack_profile: spring_boot
+    route: { method: POST, path: /api/account/settings }
+    sink_context:
+      family: orm_entity_bulk_assign
+      required_neutralizations: [mass_assignment]
+    transform: [typed_schema_allowlist]

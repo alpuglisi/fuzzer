@@ -1,0 +1,56 @@
+# Access-control (IDOR/broken-object-level-authorization) sample manifest,
+# second instance (CC-LAB-0183), go_net_http.
+#
+# Seventh real page for this stack's Twitch pick (category 4,
+# Media/streaming -- docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md
+# §9.4/§9.5), moving this category's own "coherent page/route set" goal
+# forward again: a per-channel subscriber-roster lookup keyed by an
+# attacker-visible `channel_id`, requiring the caller's own channel
+# identity to match it -- the same textbook IDOR/BOLA surface
+# (OWASP API1:2023) `CC-LAB-0178`'s `/channels/analytics` already models,
+# reused verbatim at a second, distinct real Twitch feature (a channel's
+# subscriber roster/count is a genuinely different, real page from
+# analytics, not a cosmetic rename of the same one).
+#
+# **Zero new generator code.** Reuses `CC-LAB-0178`'s already-built
+# `read_channel_id_and_broadcaster_header` source, `no_ownership_check`/
+# `identity_match_before_fetch` transforms, and
+# `object_lookup_authorization_check` sink verbatim -- no new module, no
+# new safety-matrix entry, no new op. The only non-ground-truth code
+# change this entry needs is one new `_ROUTE_PARAMS["/channels/subscribers"]`
+# entry in `fuzzlab/labgen/emitters/go_net_http/__init__.py` (config, not a
+# new class/template), mirroring `CC-LAB-0179`'s own "new manifest + new
+# route entry + ground truth, zero new generator code" precedent for
+# reusing an already-built shape at a new route.
+#
+# `X-Broadcaster-Id` is the same fixed demo header standing in for the
+# caller's own authenticated identity that `CC-LAB-0178` already documented
+# as modeling only the ownership-check-bypass mechanism in isolation, never
+# a real session/auth system.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: returns the requested channel's subscriber roster/count for
+  # whatever channel_id is given, ignoring X-Broadcaster-Id entirely
+  # (CWE-639/862, IDOR).
+  - cell_id: LABGEN-GO-0013
+    class: access_control
+    stack_profile: go_net_http
+    route: { method: GET, path: /channels/subscribers }
+    sink_context:
+      family: db_row_by_id_lookup
+      required_neutralizations: [ownership_check_bypass]
+    transform: [no_ownership_check]
+
+  # Secure twin: the only difference is the transform region
+  # (identity_match_before_fetch instead of no_ownership_check) -- the
+  # minimal-pair invariant. Requires channel_id to match X-Broadcaster-Id
+  # before returning any data; a mismatch is a real HTTP 403.
+  - cell_id: LABGEN-GO-0014
+    class: access_control
+    stack_profile: go_net_http
+    route: { method: GET, path: /channels/subscribers }
+    sink_context:
+      family: db_row_by_id_lookup
+      required_neutralizations: [ownership_check_bypass]
+    transform: [identity_match_before_fetch]

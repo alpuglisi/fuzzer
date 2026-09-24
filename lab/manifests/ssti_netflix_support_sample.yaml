@@ -1,0 +1,68 @@
+# Customer-support template-preview sample manifest (CC-LAB-0197/FR-LAB-152),
+# `spring_boot` (Netflix, category 4).
+#
+# Netflix's 11th real page -- reuses the `ssti`/`template_render` shape
+# TrackerNest (category 3, `CC-LAB-0130`/`FR-LAB-74`) already built and
+# live-boot-proved on this same shared `spring_boot` package (source
+# `query_param`, sinks `user_supplied_template_compile`/
+# `file_loaded_template_name`, sink family `template_render`, concern
+# `server_template_injection`) at a new, Netflix-specific route -- zero new
+# generator code, the same "new manifest + route entry" pattern
+# `CC-LAB-0179`'s XXE reuse and `CC-LAB-0184`'s insecure_deserialization
+# reuse already used.
+#
+# Real-world grounding: a customer-support-agent template-preview tool for
+# personalized notification messages (e.g. "Hi {{customerName}}, your show
+# {{showTitle}} is back!") is a real, plausible internal-tooling feature --
+# support/CRM tooling that lets an agent preview how a notification template
+# will render before it's sent is a common SaaS/support-desk pattern (the
+# same category of internal tool this project's own TrackerNest wiki-macro
+# page and Twitch chat-command page already model for their respective
+# apps). `GET /api/support/template-preview?expr=` -- the agent-supplied
+# `expr` query parameter is compiled directly as an OGNL expression by the
+# vulnerable twin (CWE-1336, the same mechanism TrackerNest's own
+# `/wiki/pages/render` uses), rather than only ever selecting among a fixed,
+# developer-defined preview-template map by name (the secure twin).
+#
+# Distinct from every one of Netflix's other 10 real pages (playback-resume,
+# content-import/XXE, profile-switch, account-billing/IDOR,
+# subscription-change-plan, profile-avatar-upload, account-settings/mass-
+# assignment, account-preferences/JWT, content-thumbnail-import/SSRF,
+# session-refresh/weak-token-entropy) -- this is Netflix's first
+# `ssti`/`template_render` page.
+#
+# Detection: the existing generic `SstiStrategy` (`fuzzlab/oracle/
+# strategies.py`, already confirmed live against TrackerNest's own
+# `/wiki/pages/render` cell, `TNEST-0001`) needs zero new detection code --
+# verified live in
+# tests/test_labgen_spring_boot_netflix_support_template_preview_live_boot.py:
+# confirms the vulnerable twin (LABGEN-JV-0021) and correctly does not
+# confirm the secure twin (LABGEN-JV-0022).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: the agent-supplied `expr` query parameter is evaluated
+  # directly as an OGNL expression via `Ognl.getValue()` -- CWE-1336, the
+  # same OGNL-compile-tainted-input mechanism TrackerNest's own
+  # LABGEN-SSTI-0001 uses.
+  - cell_id: LABGEN-JV-0021
+    class: ssti
+    stack_profile: spring_boot
+    route: { method: GET, path: /api/support/template-preview }
+    sink_context:
+      family: template_render
+      required_neutralizations: [server_template_injection]
+    transform: [user_supplied_template_compile]
+
+  # Secure twin: the only difference is the transform region -- the `expr`
+  # value only ever selects among a fixed, developer-defined preview-
+  # template map by name, never compiled/evaluated as an expression (the
+  # minimal-pair invariant).
+  - cell_id: LABGEN-JV-0022
+    class: ssti
+    stack_profile: spring_boot
+    route: { method: GET, path: /api/support/template-preview }
+    sink_context:
+      family: template_render
+      required_neutralizations: [server_template_injection]
+    transform: [file_loaded_template_name]

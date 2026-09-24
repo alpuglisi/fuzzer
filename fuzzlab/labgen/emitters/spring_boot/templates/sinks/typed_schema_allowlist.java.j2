@@ -1,0 +1,25 @@
+        // typed_schema_allowlist: the secure twin. The same raw body is
+        // parsed, but only display_name/bio are ever read out of it --
+        // is_partner is never read from client input at all, matching a
+        // narrow, typed allowlist DTO that simply has no field for it
+        // (CC-LAB-0182's own go_net_http design, ported here to Jackson's
+        // JsonNode API rather than a Go typed unmarshal target, since this
+        // stack's own JSON convention -- CC-LAB-0173 -- is JsonMapper.
+        // readTree(), not a bound POJO).
+        tools.jackson.databind.json.JsonMapper mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        tools.jackson.databind.JsonNode accountRoot = mapper.readTree({{ value_expr }});
+        String accountDisplayName = "netflix_lab_account";
+        String accountBio = "welcome to my account";
+        boolean accountIsPartner = false;
+        if (!accountRoot.path("display_name").isMissingNode()) {
+            accountDisplayName = accountRoot.path("display_name").asText();
+        }
+        if (!accountRoot.path("bio").isMissingNode()) {
+            accountBio = accountRoot.path("bio").asText();
+        }
+        // is_partner is deliberately never read here -- the allowlist has
+        // no field for it, so no JSON key can ever reach it.
+        return org.springframework.http.ResponseEntity.ok()
+            .header("Content-Type", "application/json")
+            .body("{\"display_name\":\"" + accountDisplayName + "\",\"bio\":\"" + accountBio
+                + "\",\"is_partner\":" + accountIsPartner + "}");

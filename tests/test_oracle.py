@@ -2,6 +2,7 @@
 
 import html as html_lib
 import re
+from pathlib import Path
 
 from fuzzlab.core.store import Store
 from fuzzlab.oracle import Candidate, Oracle
@@ -149,3 +150,102 @@ def test_oracle_only_runs_applicable_strategies():
     # An xss candidate must not be confirmed by a SQLi sender/strategy.
     cand = Candidate(url="http://localhost/x", param="q", vuln_class="xss-reflected")
     assert Oracle().confirm(cand, ErrorSender()) is None
+
+
+def test_every_ruled_strategy_category_is_reachable_from_its_vuln_class():
+    """PA-worthy guard (CC-FUZZ-0034): for every category that already has a
+    real audit `Rule` (i.e. is genuinely meant to be reachable from a
+    ground-truth-driven run right now, not just a strategy with no upstream
+    candidate-generation yet -- see `test_labgen_node_bff_multitarget.py`'s
+    own documented, deliberately-deferred `redos`/`prototype_pollution` gap,
+    which this guard must NOT flag), `fuzzlab.oracle.strategies.
+    _CATEGORY_TO_CLASS` and `fuzzlab.core.runmode._VULN_TO_CATEGORY` must
+    stay inverses whenever the category slug differs from its vuln_class
+    (e.g. `access-control`/`access_control`,
+    `insecure-deserialization`/`insecure_deserialization`) -- a mismatch
+    means a real rule+strategy pair is silently unreachable
+    (`plan.categories` never includes it). This exact gap was found twice
+    by a manual trace (`access_control`, then `insecure_deserialization`);
+    this test makes a third *ruled* instance fail loudly instead of
+    shipping unreachable.
+    """
+    from fuzzlab.audit.rules import load_rules
+    from fuzzlab.core.runmode import to_category
+    from fuzzlab.oracle.strategies import _CATEGORY_TO_CLASS
+
+    ruled_categories = {r.category for r in load_rules()}
+    for category, vuln_class in _CATEGORY_TO_CLASS.items():
+        if category not in ruled_categories:
+            continue    # no audit rule yet -- not meant to be reachable, same as redos/prototype_pollution
+        if vuln_class == category:
+            continue    # identical either way -- no _VULN_TO_CATEGORY entry needed
+        assert to_category(vuln_class) == category, (
+            f"category {category!r} has strategy vuln_class {vuln_class!r}, but "
+            f"runmode.to_category({vuln_class!r}) == {to_category(vuln_class)!r} "
+            f"-- add {vuln_class!r}: {category!r} to _VULN_TO_CATEGORY"
+        )
+
+
+def test_ground_truth_vuln_classes_with_a_ruled_hyphenated_twin_are_mapped():
+    """Strengthens the guard above (BUG-0045/PA-0047: `test_every_ruled_
+    strategy_category_is_reachable_from_its_vuln_class`, CC-FUZZ-0034, was
+    built specifically to catch this bug class, but stayed blind to a real
+    instance -- `open_redirect` (the string every `labels.json` ground-truth
+    file actually uses) vs `open-redirect` (both the `R-OPEN-REDIRECT`
+    rule's category AND `OpenRedirectStrategy`'s own internal `vuln_class`
+    label). That prior guard iterates `_CATEGORY_TO_CLASS.items()` -- the
+    ORACLE's own internal category<->vuln_class dict, where
+    `_CATEGORY_TO_CLASS["open-redirect"] == "open-redirect"` (identical
+    strings, since the strategy's own `vuln_class` attribute happens to
+    already be hyphenated) -- so it trivially skipped the exact
+    `vuln_class == category` early-continue meant only for classes that
+    genuinely need no `_VULN_TO_CATEGORY` entry. It never looked at what
+    ground-truth *labels.json files themselves* spell that class as
+    (`"open_redirect"`, underscored, this project's own labels-schema
+    convention), which is the string `runmode.to_category` is actually
+    called with at run time (`categories_from_vuln_classes` derives
+    `plan.categories` from `ground_truth.positives()`, not from
+    `_CATEGORY_TO_CLASS`'s own keys) -- so `_VULN_TO_CATEGORY` was missing
+    the `"open_redirect": "open-redirect"` entry, `open_redirect`'s own
+    ground-truth cases were silently unreachable in every real
+    `run_targets`/multitarget pipeline run (found empirically, not by any
+    guard, when Twitch's `TWCH-0014`/`CC-LAB-0199` page came up missed in
+    `test_both_apps_run_through_multitarget_for_real` despite
+    `OpenRedirectStrategy` confirming it directly, on category 5's own
+    Booking.com pilot too since `BKNG-0001` shares the identical root
+    cause). This test closes the actual hole (not just this one instance):
+    it scans every real `lab/ground-truth*/labels.json` file for the
+    vuln_class strings ground truth ACTUALLY uses, and for any whose naive
+    underscore-to-hyphen form names a real, ruled category, asserts
+    `to_category` really resolves to it -- the same invariant the prior
+    guard intended, checked against the real data layer where this bug
+    actually lived, not against the oracle's own already-self-consistent
+    internal dict."""
+    import glob
+    import json
+
+    from fuzzlab.audit.rules import load_rules
+    from fuzzlab.core.runmode import to_category
+
+    ruled_categories = {r.category for r in load_rules()}
+    vuln_classes: set[str] = set()
+    for path in glob.glob("lab/ground-truth*/labels.json"):
+        data = json.loads(Path(path).read_text("utf-8"))
+        vuln_classes.update(case["vuln_class"] for case in data["cases"])
+
+    assert vuln_classes, "no lab/ground-truth*/labels.json files found -- glob is broken"
+
+    for vuln_class in sorted(vuln_classes):
+        if vuln_class == "none":
+            continue
+        naive_category = vuln_class.replace("_", "-")
+        if naive_category not in ruled_categories:
+            continue    # no rule for this class at all -- not this guard's concern
+        assert to_category(vuln_class) == naive_category, (
+            f"ground truth uses vuln_class {vuln_class!r}, whose naive "
+            f"underscore->hyphen form {naive_category!r} names a real, ruled "
+            f"category, but runmode.to_category({vuln_class!r}) == "
+            f"{to_category(vuln_class)!r} -- add {vuln_class!r}: {naive_category!r} "
+            f"to _VULN_TO_CATEGORY (BUG-0045/PA-0047: this exact class of gap "
+            f"is otherwise silently unreachable in a real run_targets pipeline)"
+        )

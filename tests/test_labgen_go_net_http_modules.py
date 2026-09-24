@@ -93,3 +93,331 @@ def test_scheme_and_resolved_ip_allowlist_sink_rejects_non_https_and_checks_reso
     assert "ip.IsPrivate()" in result.code
     assert "ip.IsLinkLocalUnicast()" in result.code
     assert "http.Client{Timeout:" in result.code
+
+
+# -- Phase B increment 2: access-control / IDOR (db_row_by_id_lookup) --------
+
+
+def test_read_channel_id_and_broadcaster_header_source_publishes_vulnerable_default() -> None:
+    result = SOURCES["read_channel_id_and_broadcaster_header"].render({"param_name": "channel_id"})
+    assert result.code.strip() == (
+        'channelID := r.URL.Query().Get("channel_id")\n'
+        'broadcasterID := r.Header.Get("X-Broadcaster-Id")'
+    )
+    assert result.context["channel_id_var"] == "channelID"
+    assert result.context["broadcaster_var"] == "broadcasterID"
+    assert result.context["value_expr"] == "true"   # vulnerable by default: no check at all
+
+
+def test_no_ownership_check_transform_leaves_the_always_true_default() -> None:
+    ctx = {"channel_id_var": "channelID", "broadcaster_var": "broadcasterID"}
+    result = TRANSFORMS["no_ownership_check"].render(ctx)
+    assert result.context["value_expr"] == "true"
+
+
+def test_identity_match_before_fetch_transform_requires_matching_ids() -> None:
+    ctx = {"channel_id_var": "channelID", "broadcaster_var": "broadcasterID"}
+    result = TRANSFORMS["identity_match_before_fetch"].render(ctx)
+    assert result.context["value_expr"] == "channelID == broadcasterID"
+
+
+def test_object_lookup_authorization_check_sink_branches_on_value_expr() -> None:
+    ctx = {"value_expr": "channelID == broadcasterID", "channel_id_var": "channelID",
+           "broadcaster_var": "broadcasterID"}
+    result = SINKS["object_lookup_authorization_check"].render(ctx)
+    assert "if channelID == broadcasterID {" in result.code
+    assert "http.StatusOK" in result.code
+    assert "http.StatusForbidden" in result.code
+    assert "subscriber_count" in result.code
+    assert "_ = broadcasterID" in result.code   # always used, even on the vulnerable path
+
+
+# -- Phase B increment 3: JWT alg:none confusion (jwt_signature_verification) --
+
+
+def test_read_authorization_bearer_token_source_publishes_vulnerable_default() -> None:
+    result = SOURCES["read_authorization_bearer_token"].render({})
+    assert 'authHeader := r.Header.Get("Authorization")' in result.code
+    assert "hmac.Equal(expectedSig, sigBytes)" in result.code
+    assert result.context["alg_none_var"] == "algIsNone"
+    assert result.context["alg_hs256_var"] == "algIsHS256"
+    assert result.context["hmac_valid_var"] == "hmacValid"
+    assert result.context["claims_var"] == "claimsJSON"
+    # vulnerable by default: an alg:none token bypasses the HMAC check entirely
+    assert result.context["value_expr"] == "algIsNone || hmacValid"
+
+
+def test_jwt_alg_none_default_transform_leaves_the_bypass_default() -> None:
+    ctx = {"alg_none_var": "algIsNone", "alg_hs256_var": "algIsHS256", "hmac_valid_var": "hmacValid"}
+    result = TRANSFORMS["jwt_alg_none_default"].render(ctx)
+    assert result.context["value_expr"] == "algIsNone || hmacValid"
+
+
+def test_jwt_none_alg_opt_in_transform_requires_pinned_algorithm_and_valid_hmac() -> None:
+    ctx = {"alg_none_var": "algIsNone", "alg_hs256_var": "algIsHS256", "hmac_valid_var": "hmacValid"}
+    result = TRANSFORMS["jwt_none_alg_opt_in"].render(ctx)
+    assert result.context["value_expr"] == "algIsHS256 && hmacValid"
+
+
+def test_jwt_claims_response_sink_branches_on_value_expr() -> None:
+    ctx = {"value_expr": "algIsHS256 && hmacValid", "alg_none_var": "algIsNone",
+           "alg_hs256_var": "algIsHS256", "claims_var": "claimsJSON"}
+    result = SINKS["jwt_claims_response"].render(ctx)
+    assert "if algIsHS256 && hmacValid {" in result.code
+    assert "http.StatusOK" in result.code
+    assert "http.StatusUnauthorized" in result.code
+    assert "channel_id" in result.code
+    # both identifiers guarded, even though only one is referenced by value_expr
+    assert "_, _ = algIsNone, algIsHS256" in result.code
+
+
+# -- Phase B increment 4: predictable session token (session_token_generation) --
+
+
+def test_no_op_token_request_source_publishes_nothing() -> None:
+    result = SOURCES["no_op_token_request"].render({})
+    assert "tainted request input at all" in result.code
+    assert result.context == {}
+
+
+def test_predictable_token_source_sink_uses_unix_nano_timestamp() -> None:
+    result = SINKS["predictable_token_source"].render({})
+    assert "time.Now().UnixNano()" in result.code
+    assert "session_token" in result.code
+
+
+def test_csprng_token_sink_uses_crypto_rand() -> None:
+    result = SINKS["csprng_token"].render({})
+    assert "rand.Read(buf)" in result.code
+    assert "hex.EncodeToString(buf)" in result.code
+    assert "session_token" in result.code
+
+
+def test_read_channel_profile_body_source_publishes_default_body_var() -> None:
+    result = SOURCES["read_channel_profile_body"].render({})
+    assert "io.ReadAll(r.Body)" in result.code
+    assert result.context["body_var"] == "reqBody"
+
+
+def test_unfiltered_object_assign_sink_unmarshals_onto_the_full_record() -> None:
+    result = SINKS["unfiltered_object_assign"].render({"body_var": "reqBody"})
+    assert "json.Unmarshal(reqBody, &channel)" in result.code
+    assert "IsPartner   bool" in result.code
+    # No separate allowlisted DTO struct -- the whole record is the target.
+    assert "var update struct" not in result.code
+
+
+def test_typed_schema_allowlist_sink_only_copies_the_dto_fields() -> None:
+    result = SINKS["typed_schema_allowlist"].render({"body_var": "reqBody"})
+    assert "var update struct" in result.code
+    assert "json.Unmarshal(reqBody, &update)" in result.code
+    assert "channel.DisplayName = update.DisplayName" in result.code
+    assert "channel.Bio = update.Bio" in result.code
+    # The DTO struct itself never declares `is_partner` -- no field to
+    # unmarshal into even if the client sends the key.
+    assert "IsPartner" not in result.code.split("var update struct", 1)[1].split("}", 1)[0]
+
+
+def test_read_uploaded_file_source_publishes_default_identifiers() -> None:
+    result = SOURCES["read_uploaded_file"].render({})
+    assert "r.ParseMultipartForm(maxUploadBytes)" in result.code
+    assert 'r.FormFile("file")' in result.code
+    assert result.context["filename_var"] == "uploadFilename"
+    assert result.context["content_var"] == "uploadContent"
+    assert result.context["client_content_type_var"] == "clientContentType"
+    # A real size bound, not left unbounded.
+    assert "maxUploadBytes" in result.code
+    assert "io.LimitReader" in result.code
+
+
+def test_no_extension_check_sink_derives_content_type_from_the_filename() -> None:
+    result = SINKS["no_extension_check"].render(
+        {
+            "filename_var": "uploadFilename",
+            "content_var": "uploadContent",
+            "client_content_type_var": "clientContentType",
+        }
+    )
+    # Vulnerable: written under the caller's own filename, verbatim.
+    assert "filepath.Join(emoteUploadDir, uploadFilename)" in result.code
+    # Vulnerable: Content-Type comes from that same filename's extension,
+    # falling back to the caller-supplied header -- never sniffed bytes.
+    assert "mime.TypeByExtension(filepath.Ext(uploadFilename))" in result.code
+    assert "servedContentType = clientContentType" in result.code
+    assert "http.DetectContentType" not in result.code
+
+
+# -- Phase B tenth increment: price-integrity-bypass (payment_charge_amount) --
+
+
+def test_read_subscription_purchase_request_source_publishes_default_body_var() -> None:
+    result = SOURCES["read_subscription_purchase_request"].render({})
+    assert "io.ReadAll(r.Body)" in result.code
+    assert result.context["body_var"] == "reqBody"
+
+
+def test_client_trusted_amount_sink_echoes_the_client_supplied_charge_verbatim() -> None:
+    result = SINKS["client_trusted_amount"].render({"body_var": "reqBody"})
+    assert "json.Unmarshal(reqBody, &req)" in result.code
+    assert "MonthlyCharge: req.MonthlyCharge" in result.code
+    # No server-side price table at all -- the whole point of this twin.
+    assert "tierPrices" not in result.code
+    assert "http.StatusBadRequest" not in result.code
+
+
+def test_server_recomputed_amount_sink_looks_up_a_real_data_driven_price_table() -> None:
+    result = SINKS["server_recomputed_amount"].render({"body_var": "reqBody"})
+    assert "json.Unmarshal(reqBody, &req)" in result.code
+    # Genuinely data-driven: three distinct real prices, not a disguised
+    # single constant (CC-LAB-0188's own adequacy-review lesson).
+    assert '"tier1": 4.99' in result.code
+    assert '"tier2": 9.99' in result.code
+    assert '"tier3": 24.99' in result.code
+    # The client-supplied amount never reaches the response.
+    assert "req.MonthlyCharge" not in result.code
+    assert "MonthlyCharge: serverPrice" in result.code
+    # Fails closed on an unrecognized plan_tier.
+    assert "http.StatusBadRequest" in result.code
+
+
+def test_extension_allowlist_mime_check_sink_sniffs_real_bytes() -> None:
+    result = SINKS["extension_allowlist_mime_check"].render(
+        {
+            "filename_var": "uploadFilename",
+            "content_var": "uploadContent",
+            "client_content_type_var": "clientContentType",
+        }
+    )
+    # Secure: a real allowlist of image extensions.
+    assert '".svg"' not in result.code  # SVG is XML-renderable -- not an allowlisted image ext
+    assert '".png"' in result.code and '".webp"' in result.code
+    # Secure: the real bytes are sniffed, and the response is served with
+    # the sniffed type, never a filename-/header-derived one.
+    assert "http.DetectContentType(uploadContent)" in result.code
+    assert 'w.Header().Set("Content-Type", sniffedContentType)' in result.code
+    # Secure: the on-disk filename is fully server-chosen -- the caller's
+    # own filename is read only for its extension, never used as the
+    # destination path itself.
+    assert 'filepath.Join(emoteUploadDir, "emote"+ext)' in result.code
+    assert "filepath.Join(emoteUploadDir, uploadFilename)" not in result.code
+
+
+# -- Phase B eleventh increment: path traversal (fs_path_read, CC-LAB-0190) --
+
+
+def test_unconfined_path_sink_joins_and_reads_with_no_confinement_check() -> None:
+    result = SINKS["unconfined_path"].render({"var_name": "requestedFilename"})
+    # Vulnerable: the joined path is read with no check that it stays
+    # inside the export directory at all.
+    assert "filepath.Join(clipExportDir, requestedFilename)" in result.code
+    assert "os.ReadFile(requestedPath)" in result.code
+    # Never resolves symlinks or checks a real/absolute prefix -- that is
+    # exactly what the secure twin adds.
+    assert "EvalSymlinks" not in result.code
+    assert "filepath.Abs" not in result.code
+    # A real size bound, not left unbounded.
+    assert "maxExportBytes" in result.code
+
+
+def test_realpath_confine_sink_resolves_and_rejects_escapes() -> None:
+    result = SINKS["realpath_confine"].render({"var_name": "requestedFilename"})
+    # Secure: resolves both the base directory and the requested path to
+    # their real, symlink-resolved, absolute forms before comparing.
+    assert "filepath.Abs(clipExportDir)" in result.code
+    assert "filepath.EvalSymlinks(absBase)" in result.code
+    assert "filepath.EvalSymlinks(absRequested)" in result.code
+    # Rejects (403) anything that does not stay inside the real base dir.
+    assert "http.StatusForbidden" in result.code
+    assert "strings.HasPrefix(realRequested, realBase" in result.code
+    # Reads the RESOLVED path, never the unresolved caller-influenced one.
+    assert "os.ReadFile(realRequested)" in result.code
+    assert "os.ReadFile(requestedPath)" not in result.code
+    # A real size bound, not left unbounded.
+    assert "maxExportBytes" in result.code
+
+
+def test_path_traversal_shape_reuses_the_url_query_param_source() -> None:
+    # Convention 2 (like SSRF): no new source module needed -- the
+    # existing read_url_query_param source publishes whatever var_name the
+    # route profile names.
+    result = SOURCES["read_url_query_param"].render(
+        {"var_name": "requestedFilename", "param_name": "filename"}
+    )
+    assert 'requestedFilename := r.URL.Query().Get("filename")' in result.code
+
+
+# -- Phase B twelfth increment: SSTI (template_render, CC-LAB-0196) --
+
+
+def test_read_channel_command_request_source_publishes_default_body_var() -> None:
+    result = SOURCES["read_channel_command_request"].render({})
+    assert "reqBody, _ := io.ReadAll(r.Body)" in result.code
+    assert result.context["body_var"] == "reqBody"
+
+
+def test_user_supplied_template_compile_sink_compiles_and_executes_caller_template() -> None:
+    result = SINKS["user_supplied_template_compile"].render({"body_var": "reqBody"})
+    # Vulnerable: the caller-supplied template STRING is compiled via
+    # text/template.New(...).Parse(...) and then executed -- never treated
+    # as inert text.
+    assert "template.New(" in result.code
+    assert "tmpl, err := template.New(\"chatCommand\").Parse(req.Template)" in result.code
+    assert "tmpl.Execute(&buf, data)" in result.code
+    # The data passed to Execute exposes real exported fields the template
+    # language can access/branch on -- not just a single substituted value.
+    assert "Uptime" in result.code and "Viewers" in result.code and "Game" in result.code
+    # A parse/exec error is surfaced (HTTP 400), never silently swallowed.
+    assert "http.StatusBadRequest" in result.code
+
+
+def test_file_loaded_template_name_sink_never_compiles_the_tainted_value() -> None:
+    result = SINKS["file_loaded_template_name"].render({"body_var": "reqBody"})
+    # Secure: the caller-supplied string only ever selects a KEY in a
+    # fixed, developer-defined map -- never compiled/executed as a
+    # template.
+    assert "template.New(" not in result.code
+    assert "knownVars[req.Template]" in result.code
+    assert 'knownVars := map[string]string{' in result.code
+    assert '"uptime":  "3h27m"' in result.code
+
+
+# -- Phase B thirteenth increment: HTTP response header injection
+# (http_response_header_value, CC-LAB-0198) --
+
+
+def test_http_header_injection_shape_reuses_the_url_query_param_source() -> None:
+    # Convention 2 (like SSRF/path-traversal): no new source module
+    # needed -- the existing read_url_query_param source publishes
+    # whatever var_name the route profile names.
+    result = SOURCES["read_url_query_param"].render(
+        {"var_name": "destination", "param_name": "destination"}
+    )
+    assert 'destination := r.URL.Query().Get("destination")' in result.code
+
+
+def test_raw_socket_response_write_sink_hijacks_and_concatenates_with_no_crlf_stripping() -> None:
+    result = SINKS["raw_socket_response_write"].render({"var_name": "destination"})
+    # Vulnerable: bypasses net/http's own header-writing path entirely via
+    # Hijack(), then concatenates the caller-supplied value straight into
+    # the Location: line -- no strings.ReplaceAll/regexp/any CRLF-
+    # stripping call anywhere in this sink's own code.
+    assert "hj, ok := w.(http.Hijacker)" in result.code
+    assert "conn, bufrw, err := hj.Hijack()" in result.code
+    assert '"Location: " + destination + "\\r\\n"' in result.code
+    assert "strings.Replace" not in result.code
+    assert "regexp" not in result.code
+
+
+def test_allowlist_and_runtime_crlf_rejection_sink_rejects_before_using_the_ordinary_header_api() -> None:
+    result = SINKS["allowlist_and_runtime_crlf_rejection"].render({"var_name": "destination"})
+    # Secure: an explicit allowlist regex gates the value BEFORE it ever
+    # reaches Go's ordinary header-writing path -- never a raw hijacked
+    # write, never relying on the allowlist alone (the ordinary path's own
+    # ordinary net/http sanitization is this shape's second layer, per
+    # this sink's own template comment).
+    assert "regexp.MustCompile(`^/[A-Za-z0-9/_-]*$`)" in result.code
+    assert "allowedDestination.MatchString(destination)" in result.code
+    assert "http.StatusBadRequest" in result.code
+    assert 'w.Header().Set("Location", destination)' in result.code
+    assert "http.Hijacker" not in result.code
+    assert "Hijack()" not in result.code

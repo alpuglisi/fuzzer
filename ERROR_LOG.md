@@ -56,6 +56,212 @@ Format per entry:
 
 ---
 
+## 2026-09-23 — FUZZ: `points_from_ground_truth` collapsed two cases sharing a point's `sink_context` (fixed, BUG-0046/PA-0048)
+
+- **Symptom:** building `CC-FUZZ-0045`'s `R-HEADER-INJECTION`/
+  `HttpHeaderInjectionCrlfStrategy` (closing category 4's last known real
+  detection gap, `http_header_injection` at Twitch's `TWCH-0013`) showed
+  the case still scoring as a missed (false negative) finding in a real
+  `run_targets` pipeline run, despite the strategy confirming the
+  identical candidate directly via a hand-built `Candidate`.
+- **Root cause:** `fuzzlab/harness/auto.py::points_from_ground_truth`'s
+  `sink_context_by_point` dict comprehension kept only the LAST
+  ground-truth case's `sink_context` for a given `(url, method, param)`
+  key — `TWCH-0015` (`sink_context="redirect"`, added by `BUG-0045`'s own
+  fix) silently overwrote `TWCH-0013`'s own `sink_context="header"` at
+  their shared sink, so `R-HEADER-INJECTION`'s `sink_context_in:
+  ["header"]` gate never matched that point.
+- **Remediation:** `sink_context_by_point` now collects every DISTINCT
+  `sink_context` value per point (a `set`) and emits one audited
+  `InjectionPoint` per distinct value, verified harmless against
+  `fuzzlab.harness.scoring.score`'s own set-based, vuln_class-keyed
+  dedup. `tp` for Twitch's real, scored pipeline run moves from 12 to 13
+  (recall `12/15` -> `13/15`).
+- **Status:** Fixed.
+
+## 2026-09-23 — `open_redirect` silently unreachable in a scored pipeline: missing category mapping, then a wrongly-hyphenated strategy `vuln_class` (fixed, BUG-0045/PA-0047)
+
+- **Symptom:** wiring `CC-LAB-0199`'s new `open_redirect` Twitch cell
+  (`/auth/login-redirect?next=`) into `tests/test_multitarget_
+  category4.py`'s real, full `run_targets` pipeline showed the new case,
+  `TWCH-0014`, as a missed (false negative) finding, despite
+  `fuzzlab.oracle.strategies.OpenRedirectStrategy` (already built)
+  confirming the identical URL/param directly via a hand-built
+  `Candidate` moments earlier. After fixing the reachability gap, the
+  same case then scored as a false-positive/false-negative pair instead
+  of a true positive.
+- **Root cause:** two independent, pre-existing defects. (1)
+  `fuzzlab.core.runmode._VULN_TO_CATEGORY` had no `"open_redirect":
+  "open-redirect"` entry, so `to_category("open_redirect")` returned it
+  unchanged and the real `R-OPEN-REDIRECT` rule's category
+  (`"open-redirect"`) never entered `plan.categories` — the underscore/
+  hyphen category-mismatch class this project has hit repeatedly, this
+  time NOT caught by the existing generic guard test
+  (`test_every_ruled_strategy_category_is_reachable_from_its_vuln_class`),
+  because that guard only checks the oracle's own internal
+  `_CATEGORY_TO_CLASS` dict for self-consistency, not real ground truth.
+  (2) `OpenRedirectStrategy.vuln_class` was itself wrongly hyphenated
+  (`"open-redirect"`, copied from its own `category` field) instead of
+  underscored like every other strategy's `vuln_class` in the file —
+  `fuzzlab.harness.scoring.score`'s exact `(url, method, param,
+  vuln_class)` key match never matched ground truth's own underscored
+  `"open_redirect"`, even once (1) was fixed. Fixing (2) also surfaced a
+  third, genuine (not a bug) finding: `CC-LAB-0198`'s own existing page
+  is independently, honestly open-redirect-vulnerable too (verified
+  live), closed by adding a second, honest ground-truth case (`TWCH-0015`)
+  at that same url/param rather than routed around.
+- **Remediation:** added the missing `_VULN_TO_CATEGORY` entry; corrected
+  `OpenRedirectStrategy.vuln_class` to `"open_redirect"` (and
+  `_CATEGORY_TO_CLASS` to match); added a second, stronger guard test
+  (`tests/test_oracle.py::
+  test_ground_truth_vuln_classes_with_a_ruled_hyphenated_twin_are_mapped`)
+  that checks every real `lab/ground-truth*/labels.json` file directly
+  instead of the oracle's own internal dict; added `TWCH-0015`. Re-
+  verified against real booted apps: `test_both_apps_run_through_
+  multitarget_for_real` now scores Twitch `tp=12, fp=0` (was `tp=10` with
+  both new cases missed before either fix, then `tp=10, fp=2` after fix 1
+  alone).
+- **Status:** Fixed (BUG-0045/PA-0047 — see `docs/bugs/BUG-0045-open-
+  redirect-category-mapping-and-strategy-vuln-class-spelling.md`; this is
+  the same underscore/hyphen mismatch class `runmode.py`'s own comment
+  already documents finding repeatedly, but the FIRST instance the
+  existing generic guard test failed to catch, since it checks internal
+  consistency rather than real ground truth).
+
+## 2026-09-23 — the oracle's own `RequestsProbeSender`/`RequestsCorrelatingSender` silently followed HTTP redirects (fixed, BUG-0044/PA-0046)
+
+- **Symptom:** wiring `CC-LAB-0198`'s new `http_header_injection` Twitch
+  cell (`/channels/redirect`, echoes a caller-supplied `destination` query
+  param into a real `Location:` response header) into
+  `tests/test_multitarget_category4.py`'s real, full `run_targets`
+  pipeline crashed with `requests.exceptions.TooManyRedirects: Exceeded 30
+  redirects.` The generic `SstiStrategy`'s own `#{a*b}` payload, echoed
+  into `Location: #{a*b}`, resolves (as a URL *fragment*, never sent to
+  the server) to the SAME url on every redirect hop — an infinite
+  self-redirect loop `requests` followed by default.
+- **Root cause:** `fuzzlab.tools.probesender.RequestsProbeSender.send()`
+  (and, found by the same sweep, `fuzzlab.greybox.run.
+  RequestsCorrelatingSender.send_correlated()` and `fuzzlab.tools.
+  blind_sqli_fuzzer.RequestsSender.get()`) called `requests`' own
+  `.request()`/`.get()` with no `allow_redirects` override, so `requests`'
+  library default (`True`) silently applied — following any redirect
+  a real target issues and reporting the FOLLOWED chain's final response
+  to a `ConfirmationStrategy` that needs the ORIGINAL, un-followed
+  response (`OpenRedirectStrategy` reads `Location:` off exactly that
+  first response). `fuzzlab.core.http`'s own authenticated path already
+  set `allow_redirects=False` for this reason — the unauthenticated
+  senders never received the same fix.
+- **Remediation:** added `allow_redirects=False` to all three senders;
+  updated their fake-session test doubles
+  (`tests/test_probesender.py`/`tests/test_fuzzer_seam.py`) to accept and
+  record the kwarg, and added a regression test asserting it is actually
+  passed. Re-verified against a real booted app:
+  `test_both_apps_run_through_multitarget_for_real` reproducibly crashed
+  before the fix and reproducibly passes after it.
+- **Status:** Fixed (BUG-0044/PA-0046 — see `docs/bugs/BUG-0044-oracle-
+  probe-senders-silently-followed-redirects.md`; strengthens `PA-0030`
+  from `BUG-0028`, which named the same root-cause class but scoped it to
+  conformance harnesses only, not every sender feeding the oracle).
+
+---
+
+## 2026-09-23 — PA-0042's own fix missed a second hardcoded recall assertion in the same test file (fixed, BUG-0043/PA-0045)
+
+- **Symptom:** `CC-LAB-0197` (Netflix's 11th real page, an `ssti` instance)
+  added `NFLX-0011` to `lab/ground-truth-netflix-clone/` and, per `PA-0042`,
+  re-derived and re-ran `tests/test_multitarget_category4.py`'s hardcoded
+  recall assertions before committing and pushing. An independent
+  re-verification pass afterward found
+  `test_both_apps_run_through_multitarget_for_real`'s own hardcoded
+  `netflix_report.recall == round(1/10, 4)` assertion still stale
+  (`1/11` was correct) — a second, separate hardcoded fraction for the
+  same target in the *same file* `CC-LAB-0197`'s own PA-0042 pass had
+  just run, sitting in a different test function
+  (`test_netflix_multi_cell_boot_confirms_all_positives`'s own sibling
+  assertion, in the same file, was correctly updated).
+- **Root cause:** `PA-0042` instructs re-running every FILE a grep for
+  hardcoded fractions surfaces, but does not say a file can contain more
+  than one independent hardcoded fraction for the same target (a
+  single-cell test and a multi-cell test each keep their own separate
+  assertion) — an agent that finds and fixes one occurrence in a file,
+  then re-runs that file and sees it pass, can reasonably (but wrongly)
+  conclude the file is "handled," when a second occurrence elsewhere in
+  the same file was never located because the grep or manual scan
+  stopped at the first match rather than confirming every match.
+- **Remediation:** corrected the stale `1/10` -> `1/11` assertion (and
+  its own paired `macro_recall` assertion) in the same commit-adjacent
+  fix, re-verified by re-running `test_multitarget_category4.py`,
+  `test_auto.py`, and `test_labels_contract_category4.py` together (21
+  passed). See
+  `docs/bugs/BUG-0043-pa-0042-fix-missed-a-second-hardcoded-assertion-in-the-same-file.md`.
+- **Status:** Fixed.
+
+## 2026-09-23 — Adding a ground-truth case silently broke two already-pushed, slow-marked recall assertions (fixed, BUG-0040/PA-0042)
+
+- **Symptom:** `CC-LAB-0188` (Netflix's `price_integrity_bypass` lab page)
+  added `NFLX-0005` to `lab/ground-truth-netflix-clone/` and was committed
+  and pushed after a green `pytest -q -m "not slow"` run. Building that
+  page's detection follow-on (`CC-FUZZ-0041`) then found two pre-existing
+  tests in `tests/test_multitarget_category4.py` — both under a
+  module-level `pytestmark = [pytest.mark.slow, ...]`, so excluded from
+  every "not slow" run this whole session used as its own completion
+  bar — now failing: `test_both_apps_run_through_multitarget_for_real`'s
+  hardcoded `1/4` Netflix recall assertion and
+  `test_netflix_multi_cell_boot_confirms_all_positives`'s hardcoded `4/4`
+  assertion, both stale the moment Netflix's own total ground-truth case
+  count grew from 4 to 5.
+- **Root cause:** adding a ground-truth case changes the denominator/count
+  two pre-existing, unrelated-looking test files' hardcoded recall
+  assertions depend on, but those two tests live in a file marked
+  `pytest.mark.slow` at module level, so this session's routine
+  `pytest -q -m "not slow"` pre-push check — treated as sufficient
+  throughout this entire build — structurally cannot see them break.
+  `CC-LAB-0188`'s own commit touched only the lab page and ground truth,
+  never `test_multitarget_category4.py` itself, so nothing in that
+  commit's own diff would have prompted running it either.
+- **Remediation:** corrected `NFLX-0005`'s own ground-truth `param` to the
+  project's real whole-body-JSON convention (`"body"`, not the per-field
+  `"monthly_charge"` `CC-LAB-0188` originally shipped — itself found the
+  same way, via a real end-to-end `points_from_ground_truth` check) and
+  updated both stale assertions (`1/4`→`1/5`, `4/4`→`5/5` before the new
+  cell's own detection, then →`5/5` again including it) in the same
+  `CC-FUZZ-0041` commit that also closed the detection gap. See
+  `docs/bugs/BUG-0040-slow-marked-recall-assertions-silently-broken-by-a-ground-truth-only-change.md`.
+- **Status:** Fixed.
+
+## 2026-09-23 — `points_from_ground_truth` never propagated `sink_context`, silently defeating the first rule ever keyed on it (fixed, BUG-0039/PA-0041)
+
+- **Symptom:** building real detection for `insecure_deserialization`
+  (`R-INSECURE-DESERIALIZATION`, keyed on `sink_context_in=
+  ["deserialization"]` — the project's first rule to use that predicate),
+  `test_multitarget_category4.py`'s real, executed live-boot run against
+  Netflix kept showing `netflix_report.tp == 0` despite a real, unit-tested
+  working rule+strategy pair. Unit tests (which hand-construct a
+  `Candidate`/`InjectionPoint` with `sink_context` set directly) all
+  passed; only the real end-to-end run through
+  `fuzzlab.harness.auto.points_from_ground_truth` exposed the gap.
+- **Root cause:** `points_from_ground_truth` builds a
+  `fuzzlab.audit.InjectionPoint` from each of the ground truth's
+  enumerated *points* (`injection-points.json`,
+  `fuzzlab.labels.contract.InjectionPoint`) — a deliberately slim shape
+  that carries no `sink_context` field at all. `sink_context` instead
+  lives on the ground truth's scoring `Case` (`labels.json`), and nothing
+  in `points_from_ground_truth` ever bridged the two: the constructed
+  audit `InjectionPoint` simply never set `sink_context`, defaulting to
+  `None`, for every ground-truth-sourced point, project-wide, since this
+  function was first written. This caused no observed wrong behavior
+  until now because no rule had ever used the `sink_context_in` predicate
+  before `R-INSECURE-DESERIALIZATION` — a real, silent, already-shipped
+  gap that simply had no consumer to expose it.
+- **Remediation:** `points_from_ground_truth` now builds a
+  `(url, method, param) -> sink_context` lookup from `ground_truth.cases`
+  and threads the matching case's `sink_context` onto each constructed
+  `InjectionPoint`. Pinned by
+  `tests/test_auto.py::test_points_from_ground_truth_carries_sink_context_from_the_matching_case`.
+  Re-verified end to end: `test_multitarget_category4.py`'s real run now
+  shows `netflix_report.tp == 1`.
+- **Status:** Fixed.
+
 ## 2026-09-23 — `ruby_rails` skeleton's unpinned `json` gem 500'd every second request in a session (fixed, BUG-0035/PA-0037)
 
 - **Symptom:** building the Phase D whole-app conformance test and the Phase

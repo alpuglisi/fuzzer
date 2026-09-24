@@ -503,3 +503,160 @@ Format: `PA-NNNN — <rule>. (from BUG-NNNN)`
   positive if its `vuln_class` attribute's spelling doesn't match the
   ground-truth convention — a gap `confirm()`'s own return value alone can
   never surface. (from BUG-0040)
+- **PA-0043** — `fuzzlab.labels.contract`'s ground truth has two distinct
+  shapes per app: the *point* (`injection-points.json`, "where to probe" —
+  url/method/param/location/rendering) and the *case*
+  (`labels.json`, "the scored ground truth" — adds `vuln_class`,
+  `sink_context`, `expected_vulnerable`). They are not automatically kept
+  in sync, and a function building an audit `InjectionPoint`/`Candidate`
+  from ground truth (e.g. `fuzzlab.harness.auto.points_from_ground_truth`)
+  only has direct access to the *point* shape's own fields. Before adding a
+  new rule or strategy that keys on a ground-truth-sourced field (a new
+  `when` predicate, a new `Candidate` attribute), check which shape that
+  field actually lives on — if it's case-only (as `sink_context` was), the
+  construction site must explicitly cross-reference the matching case (by
+  `(url, method, param)` identity) and carry the value over; it will not
+  appear "for free." Then prove the real value flows through with an
+  end-to-end test exercising the actual construction function against a
+  real or realistic ground-truth fixture — never only a hand-built
+  `Candidate`/`InjectionPoint` fixture that pre-supplies the field directly,
+  which looks like coverage but cannot catch a missing propagation step
+  (the same masking failure mode `PA-0006` names for a different root
+  cause — see `BUG-0039`'s own recurrence-review section for why these two
+  bugs are siblings, not a recurrence of one another: `PA-0006` is about a
+  value that doesn't exist yet at a pipeline stage; this is about a value
+  that exists elsewhere but was never wired through). (from BUG-0039)
+- **PA-0044** — Before considering any change to a `lab/ground-truth-*/`
+  directory's case *or point* count (a `Case`/`InjectionPoint` added,
+  removed, or reshaped — e.g. a `param`/`location` correction that changes
+  which points a derived filter matches — not just an unrelated field
+  edited within an existing entry) complete, grep the **whole** test suite
+  (not only obviously-related files) for every hardcoded fraction/count
+  assertion that could depend on that directory's cardinality or shape
+  (target-app `recall`/`tp ==`/`N/M` assertions in `tests/*multitarget*.py`
+  and `tests/*labels_contract*.py`, but also point-count assertions
+  elsewhere, e.g. `tests/test_auto.py`'s own hardcoded whole-body-JSON
+  point count) and explicitly re-run every file such a grep surfaces —
+  **regardless of whether that file carries `pytest.mark.slow`** and is
+  therefore excluded from the routine `pytest -q -m "not slow"` pre-push
+  check. That check is the correct fast-iteration gate and stays
+  mandatory, but it is never sufficient on its own to certify a
+  ground-truth-cardinality-or-shape change complete: a hardcoded assertion
+  living in a `slow`-marked file is invisible to it by construction, and a
+  commit that only touches ground truth (not the test file whose assertion
+  depends on it) gets no other prompt to re-run that file either. A grep
+  finds all such files at once; a full, unfiltered suite re-run after the
+  fact (this bug's own third instance, `test_auto.py`, was found exactly
+  this way) is a valid but strictly weaker substitute — prefer the grep.
+  Sharpens `PA-0040`'s related but narrower "run the whole-repo suite, not
+  just relevant files" finding (scoped there to shared cross-stack module
+  registries) and `PA-0038`'s "run that shape's own test module" (scoped
+  there to the *new* ground truth's own dedicated tests) for the case
+  neither covers: a pre-existing, unrelated-looking, cross-cutting test
+  file whose hardcoded assertion merely happens to depend on a
+  ground-truth directory's total count or shape. (from BUG-0040)
+- **PA-0045** — Sharpens `PA-0044` from file-level to match-level
+  verification, after `PA-0044`'s own fix (`CC-LAB-0197`) missed a second,
+  independent hardcoded fraction in the same file it had just edited and
+  re-run: a file passing `pytest` after you fix ONE hardcoded ground-
+  truth-cardinality assertion does not prove there is no SECOND,
+  independent occurrence of the same pattern elsewhere in that file —
+  `pytest` re-running green only proves the assertions it collected are
+  internally consistent with each other and the code, not that you found
+  every assertion that needed changing. Before considering such a fix
+  complete, count how many times the target's own recall/`tp`/count
+  pattern actually matches across the whole file (e.g. `grep -c` it, or
+  visually confirm every occurrence), and confirm that exact number of
+  assertions was edited — not just that the file as a whole now passes.
+  Applies with specific, recurring force to
+  `tests/test_multitarget_category4.py`'s own single-cell-boot +
+  multi-cell-boot test-pairing convention (each target gets one assertion
+  in each), where a single ground-truth-cardinality change routinely
+  invalidates TWO independent assertions in that one file, not one — do
+  not stop at the first one found. (from BUG-0043)
+- **PA-0046** — Supersedes/strengthens `PA-0030`. `PA-0030`'s rule (a
+  component that claims to report "the real app's response" must not
+  silently apply a client default — redirect-following, retry-on-error,
+  automatic decompression, etc. — that transforms what the server
+  actually sent, unless that transformation is the literal thing under
+  test) is correct, but its own framing scoped it to conformance
+  harnesses (`*LiveBootHarness` classes) extending coverage to a new
+  behavior category. The rule's real scope is any component that builds a
+  `Probe` (or any object a `ConfirmationStrategy`/timing oracle treats as
+  "the real target's response") — this project had TWO more such
+  components (`fuzzlab.tools.probesender.RequestsProbeSender`,
+  `fuzzlab.greybox.run.RequestsCorrelatingSender`, plus a third,
+  lower-severity timing instance, `fuzzlab.tools.blind_sqli_fuzzer.
+  RequestsSender`) silently following `requests`' own default
+  redirect-following behavior, undetected because each was tested in
+  isolation against a fake session that never exercised a real redirect.
+  Before adding or extending ANY sender that feeds a `ConfirmationStrategy`
+  or timing oracle, explicitly set `allow_redirects=False` (mirroring
+  `fuzzlab.core.http`'s own authenticated path, which already got this
+  right) unless following a redirect is the literal thing that sender's
+  own strategy needs to observe, and add a fake-session test asserting the
+  kwarg was actually passed — not just that a fake response was returned
+  correctly. A component whose job genuinely IS to follow redirects (a
+  login-flow fetcher discovering an authenticated session, a crawler
+  discovering pages) is not an instance of this rule; the discriminator is
+  whether the caller is a `ConfirmationStrategy`/oracle that needs the
+  UN-followed response, not blanket avoidance of `allow_redirects=True`
+  everywhere. (from BUG-0044)
+- **PA-0047** — When adding a `ConfirmationStrategy` (or the first ground-truth
+  case for an existing one) whose category needs a `fuzzlab.core.
+  runmode._VULN_TO_CATEGORY` entry (its category's hyphenated slug differs
+  from ground truth's own underscored `vuln_class` spelling), do not trust
+  `test_every_ruled_strategy_category_is_reachable_from_its_vuln_class`
+  (`CC-FUZZ-0034`) alone to catch a missing entry: that guard only checks
+  the oracle's own internal `_CATEGORY_TO_CLASS` dict for self-consistency,
+  and stays silently blind whenever a strategy's own `vuln_class` field is
+  ITSELF mis-spelled to already match its `category` (as
+  `OpenRedirectStrategy.vuln_class` was, hyphenated instead of
+  underscored) — the guard's own early-continue ("identical either way, no
+  mapping needed") then fires on a value that was only "identical" because
+  it was wrong. Two things follow, both now enforced: (1) run
+  `tests/test_oracle.py::
+  test_ground_truth_vuln_classes_with_a_ruled_hyphenated_twin_are_mapped`
+  (or extend it), which checks the SAME invariant against every real
+  `lab/ground-truth*/labels.json` file's own `vuln_class` strings, not the
+  oracle's own internal dict — verify it live against a real, scored
+  `run_targets`/multitarget pipeline run (not just the unit-test fake
+  senders) before declaring the new class reachable, since a category gap
+  and a `vuln_class`-spelling gap are independent defects that can each
+  hide the other; (2) every new `ConfirmationStrategy.vuln_class` value
+  must be underscored to match ground truth's own `labels.json`
+  `vuln_class` enum spelling (never hyphenated to match its own
+  `category` field, which is a DIFFERENT, deliberately hyphenated slug) —
+  check this directly against the strategy's own field value, not by
+  pattern-matching a naming convention that could itself miss a variant.
+  Confirming a new page's detection with a hand-built `Candidate` alone is
+  not sufficient proof it works end to end; a live, scored multitarget
+  pipeline run is the only check that exercises category reachability AND
+  the scoring key's exact vuln_class match together. (from BUG-0045)
+- **PA-0048** — When adding a `sink_context_in`-gated audit rule (the
+  `R-INSECURE-DESERIALIZATION`/`R-HEADER-INJECTION` shape), do not assume
+  `fuzzlab.harness.auto.points_from_ground_truth` hands the audited
+  `InjectionPoint` the right `sink_context` just because the ground-truth
+  `Case` itself has the right one: that function's own `(url, method,
+  param) -> sink_context` lookup silently collapses to ONE value per key,
+  which is WRONG whenever more than one `Case` shares that key with a
+  DIFFERENT `sink_context` — a real, already-used pattern in this
+  project's own data model (`fuzzlab.labels.contract`'s
+  multi-vuln_class-per-endpoint support, e.g. `TWCH-0013`/`TWCH-0015`
+  sharing one sink with `sink_context` `"header"` vs `"redirect"`
+  respectively). Before declaring a new `sink_context_in`-gated rule
+  reachable, check directly whether its target url/param is one that
+  ground truth also labels with ANY other vuln_class, and if so, verify
+  the fix in `points_from_ground_truth` (or its future equivalent) emits
+  a point carrying every distinct `sink_context` at that key, not just
+  confirm the strategy against a hand-built `Candidate` and assume the
+  real pipeline agrees — the same "hand-built confirm succeeds but the
+  real pipeline still misses it" symptom `BUG-0045`'s own regression
+  discipline was built to catch, here from a different, independent root
+  cause (a collapsed one-to-many point-building lookup, not a category-
+  mapping/vuln_class-spelling mismatch). A duplicate `InjectionPoint`
+  differing only in `sink_context` is safe to emit (`fuzzlab.harness.
+  scoring.score`'s `detected_keys` is a set keyed on `(url, method,
+  param, vuln_class)`, never `sink_context`, so it cannot double-count a
+  TP/FP) — prefer emitting one point per distinct value over trying to
+  merge/prioritize them. (from BUG-0046)

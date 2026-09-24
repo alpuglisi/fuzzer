@@ -5,6 +5,7 @@ import pytest
 from fuzzlab.core.runmode import RunModeError
 from fuzzlab.core.store import Store
 from fuzzlab.harness.auto import (
+    _CountingSender,
     injection_points_from_store,
     points_from_ground_truth,
     run_auto,
@@ -98,23 +99,87 @@ def test_points_from_ground_truth_filters_to_testable():
     assert all(r.endswith("M6)") for _p, _m, _pm, r in skipped)   # only DOM gaps remain
 
 
-def test_points_from_ground_truth_gives_header_points_their_own_skip_reason():
-    # CC-LAB-0176/FR-FUZZ-13: a header-carried point (Twitch's webhook-signature
-    # case, location="header") must be skipped with an honest, distinct reason --
-    # never folded into the DOM/browser one, which would misreport why it can't
-    # be audited (no header-injection point/sender convention exists yet, not
-    # "needs a browser").
+def test_points_from_ground_truth_now_includes_header_points():
+    # CC-FUZZ-0032/FR-FUZZ-19: a header-carried point (Twitch's webhook-signature
+    # case, location="header") is now a real, audited point -- FR-FUZZ-13's own
+    # gap (no header-injection point/sender convention) is closed, so it no
+    # longer needs a distinct skip reason at all.
     gt = contract.load("lab/ground-truth-twitch-clone")
     points, skipped = points_from_ground_truth(gt, "http://127.0.0.1:8080")
 
-    tested = {(p.url, p.param, p.method) for p in points}
-    assert ("http://127.0.0.1:8080/generated/labgen-go-0003", "url", "GET") in tested
+    tested = {(p.url, p.param, p.method, p.location) for p in points}
+    assert ("http://127.0.0.1:8080/generated/labgen-go-0003", "url", "GET", "query") in tested
+    assert ("http://127.0.0.1:8080/generated/labgen-go-0001", "X-Signature-256",
+            "POST", "header") in tested
 
     skipped_by_param = {param: reason for _p, _m, param, reason in skipped}
-    assert "X-Signature-256" in skipped_by_param
-    reason = skipped_by_param["X-Signature-256"]
-    assert "header" in reason and "FR-FUZZ-13" in reason
-    assert "M6" not in reason and "browser" not in reason   # not the DOM reason
+    assert "X-Signature-256" not in skipped_by_param   # no longer skipped
+
+
+def test_points_from_ground_truth_sets_body_content_type_only_for_json_cases():
+    # CC-FUZZ-0032/FR-FUZZ-19: a whole-body point (`param="body"`) only gets a
+    # declared `body_content_type` when the ground truth marks it
+    # `rendering="server-json"` -- never assumed for a body point in general
+    # (e.g. TrackerNest's XXE/insecure-deserialization cases stay `None`,
+    # unaffected -- checked directly here since a wrong assumption would be a
+    # silent false-negative risk the moment those categories get a rule).
+    # CC-LAB-0179: Netflix now has two whole-body points -- NFLX-0001
+    # (JSON, rendering="server-json") and NFLX-0002 (XML/XXE,
+    # rendering="server") -- so this must distinguish them by URL, not just
+    # grab "the" body point. CC-LAB-0184 adds a third, NFLX-0003
+    # (JSON, rendering="server-json", /api/profiles/switch) -- the same
+    # whole-body-JSON shape as NFLX-0001, at a different URL. CC-FUZZ-0041
+    # adds a fourth, NFLX-0005 (JSON, rendering="server-json",
+    # /api/subscription/change-plan) -- corrected in place from a
+    # per-named-field `param` (`CC-LAB-0188`'s original, incorrect choice)
+    # to this same whole-body convention, since a per-field `param` for a
+    # body point never satisfies this function's own `param == "body"`
+    # gate below and would silently leave `body_content_type` at `None`.
+    # CC-LAB-0192 adds a fifth, NFLX-0007 (JSON, rendering="server-json",
+    # /api/account/settings) -- the same whole-body-JSON shape as
+    # NFLX-0001/NFLX-0003/NFLX-0005, at a different URL. CC-LAB-0195 adds
+    # a sixth, NFLX-0010 (JSON, rendering="server-json",
+    # /api/session/refresh) -- the same whole-body-JSON shape again, even
+    # though the request body itself is unused by that mechanism (the
+    # same "whole-body-point convention even with no real per-field
+    # param" choice TWCH-0005's own ground truth already makes).
+    netflix_gt = contract.load("lab/ground-truth-netflix-clone")
+    points, _ = points_from_ground_truth(netflix_gt, "http://127.0.0.1:8080")
+    body_points = {p.url: p for p in points if p.param == "body"}
+    assert len(body_points) == 6
+    assert body_points["http://127.0.0.1:8080/api/playback/resume"].body_content_type == "application/json"
+    assert body_points["http://127.0.0.1:8080/api/content/import"].body_content_type is None
+    assert body_points["http://127.0.0.1:8080/api/profiles/switch"].body_content_type == "application/json"
+    assert body_points["http://127.0.0.1:8080/api/subscription/change-plan"].body_content_type == "application/json"
+    assert body_points["http://127.0.0.1:8080/api/account/settings"].body_content_type == "application/json"
+    assert body_points["http://127.0.0.1:8080/api/session/refresh"].body_content_type == "application/json"
+
+    trackernest_gt = contract.load("lab/ground-truth-trackernest")
+    points, _ = points_from_ground_truth(trackernest_gt, "http://127.0.0.1:8080")
+    body_points = [p for p in points if p.param == "body"]
+    assert len(body_points) == 2   # the XXE and insecure-deserialization cases
+    assert all(p.body_content_type is None for p in body_points)
+
+
+def test_points_from_ground_truth_carries_sink_context_from_the_matching_case():
+    # CC-FUZZ-0034: `injection-points.json`'s own `InjectionPoint` (a point
+    # to probe) carries no `sink_context` at all -- it lives only on the
+    # scoring `Case` (`labels.json`). A real defect found while proving
+    # `R-INSECURE-DESERIALIZATION` (`sink_context_in=["deserialization"]`)
+    # end to end through the generic pipeline: without this lookup, every
+    # ground-truth-sourced `fuzzlab.audit.InjectionPoint.sink_context` was
+    # silently `None`, so a `sink_context_in` rule could never fire for any
+    # ground-truth point, ever -- caught by the real, executed
+    # `test_multitarget_category4.py` live-boot run (`netflix_report.tp`
+    # stayed 0 despite a real rule+strategy pair existing), not assumed.
+    netflix_gt = contract.load("lab/ground-truth-netflix-clone")
+    points, _ = points_from_ground_truth(netflix_gt, "http://127.0.0.1:8080")
+    by_url = {p.url: p for p in points}
+    assert by_url["http://127.0.0.1:8080/api/playback/resume"].sink_context == "deserialization"
+    assert by_url["http://127.0.0.1:8080/api/content/import"].sink_context == "xml"
+    # CC-LAB-0184: the new /api/profiles/switch point carries the same
+    # sink_context as NFLX-0001 (the identical shape, reused).
+    assert by_url["http://127.0.0.1:8080/api/profiles/switch"].sink_context == "deserialization"
 
 
 def test_run_auto_ground_truth_points_beats_crawl_coverage(tmp_path):
@@ -275,3 +340,25 @@ def test_run_auto_no_ground_truth_unscored_with_categories(tmp_path):
         assert result.report is None                      # D15: unscored
         assert result.plan.categories == ["sql-injection"]
         assert result.findings >= 1                       # SQLi still confirmed
+
+
+def test_counting_sender_forwards_content_type():
+    # CC-FUZZ-0032/FR-FUZZ-19: a real bug found while wiring this in --
+    # _CountingSender's own send() dropped `content_type` silently (it wasn't
+    # even in its signature), which would have made every whole-body-JSON
+    # point revert to form-encoding the moment it passed through run_auto's
+    # real pipeline (every sender is wrapped in this counter). Fixed before
+    # it could ever fire for real; this test pins the fix directly.
+    calls = []
+
+    class _Recorder:
+        def send(self, url, param, value, timing=False, method="GET",
+                 location="query", content_type=None):
+            calls.append({"method": method, "location": location, "content_type": content_type})
+            return Probe(200, "ok")
+
+    counting = _CountingSender(_Recorder())
+    counting.send("http://h/api/playback/resume", "body", '{"a":1}',
+                  method="POST", location="body", content_type="application/json")
+    assert calls == [{"method": "POST", "location": "body", "content_type": "application/json"}]
+    assert counting.count == 1

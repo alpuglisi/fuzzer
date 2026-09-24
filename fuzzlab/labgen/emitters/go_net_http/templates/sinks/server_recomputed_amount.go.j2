@@ -1,0 +1,28 @@
+var req struct {
+	PlanTier      string  `json:"plan_tier"`
+	MonthlyCharge float64 `json:"monthly_charge"`
+}
+_ = json.Unmarshal({{ body_var }}, &req)
+// Secure: the client-supplied monthly_charge is discarded entirely -- the
+// real charge is looked up server-side from a fixed, server-owned
+// subscription-tier price table (CWE-807 closed); an unrecognized
+// plan_tier fails closed rather than falling back to any client-influenced
+// value.
+tierPrices := map[string]float64{
+	"tier1": 4.99,
+	"tier2": 9.99,
+	"tier3": 24.99,
+}
+serverPrice, ok := tierPrices[req.PlanTier]
+if !ok {
+	w.WriteHeader(http.StatusBadRequest)
+	return
+}
+resp := struct {
+	PlanTier      string  `json:"plan_tier"`
+	MonthlyCharge float64 `json:"monthly_charge"`
+}{PlanTier: req.PlanTier, MonthlyCharge: serverPrice}
+respBody, _ := json.Marshal(resp)
+w.Header().Set("Content-Type", "application/json")
+w.WriteHeader(http.StatusOK)
+w.Write(respBody)

@@ -8,6 +8,76 @@
       "param": "body",
       "location": "body",
       "rendering": "server-json"
+    },
+    {
+      "url": "/api/content/import",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/api/profiles/switch",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/api/account/billing",
+      "method": "GET",
+      "param": "account_id",
+      "location": "query",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/api/subscription/change-plan",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/api/profiles/avatar",
+      "method": "POST",
+      "param": "file",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/api/account/settings",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/api/account/preferences",
+      "method": "GET",
+      "param": "Authorization",
+      "location": "header",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/api/content/thumbnail-import",
+      "method": "POST",
+      "param": "thumbnail_url",
+      "location": "query",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/api/session/refresh",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/api/support/template-preview",
+      "method": "GET",
+      "param": "expr",
+      "location": "query",
+      "rendering": "server"
     }
   ]
 }

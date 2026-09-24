@@ -1,0 +1,34 @@
+// Vulnerable (CWE-113, HTTP response splitting): the caller-supplied
+// destination is concatenated directly into a hand-rolled raw HTTP
+// response line, written over a HIJACKED connection -- bypassing Go's
+// normal net/http response-header-writing path entirely. Go's ordinary
+// w.Header().Set()+w.WriteHeader() path silently replaces any bare CR/LF
+// byte in a header value with a space before writing the response to the
+// wire (verified empirically -- see this op's own change-control entry --
+// a real defensive behavior of net/http's own transfer-writer code, not
+// something this app added), so an honest vulnerable instance of this
+// concern cannot be built through that ordinary path in Go. This handler
+// instead calls http.Hijacker.Hijack() -- a real, standard net/http
+// mechanism (used for WebSocket upgrades and other raw-protocol handling)
+// -- to obtain the raw net.Conn and write the response line-by-line
+// itself, with no CR/LF stripping and no validation of {{ var_name }} at
+// all: a caller-supplied value containing "\r\n" splices an arbitrary
+// extra header (or a second, fully attacker-controlled response) into
+// what the client receives.
+hj, ok := w.(http.Hijacker)
+if !ok {
+	http.Error(w, "hijack unsupported", http.StatusInternalServerError)
+	return
+}
+conn, bufrw, err := hj.Hijack()
+if err != nil {
+	http.Error(w, "hijack failed", http.StatusInternalServerError)
+	return
+}
+defer conn.Close()
+response := "HTTP/1.1 302 Found\r\n" +
+	"Location: " + {{ var_name }} + "\r\n" +
+	"Content-Length: 0\r\n" +
+	"\r\n"
+bufrw.WriteString(response)
+bufrw.Flush()

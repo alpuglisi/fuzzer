@@ -1,0 +1,77 @@
+# HTTP-response-header-injection sample manifest (CC-LAB-0198), go_net_http.
+#
+# Thirteenth real page for this stack's Twitch pick (category 4, Media/
+# streaming -- docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §9.4/§9.5).
+# This project's FIRST instantiation, on ANY stack, of
+# `lab/safety_matrix.yaml`'s existing `http_response_header_value` sink
+# family / `http_header_injection` concern (added by CC-LAB-0063 for the
+# `docs/research/corpus-examples/header-injection/{node,php}/` research;
+# never before instantiated in a generated lab app -- grepped
+# fuzzlab/labgen/emitters/*/modules.py and lab/manifests/*.yaml before
+# starting and found no prior instance anywhere in the project; the only
+# related concern already built is `outbound_header_injection`, a
+# genuinely distinct sink family for an OUTBOUND request header the app
+# itself sends, php_laravel's HuddleHub webhook-delivery page,
+# CC-LAB-0135 -- not this concern).
+#
+# A "redirect me here after subscribing/following" convenience endpoint
+# (GET /channels/redirect?destination=... -- a real pattern streaming
+# platforms use for post-action redirects, e.g. a `?next=`-style param),
+# CWE-113 (HTTP response splitting). The vulnerable twin hijacks the raw
+# connection (http.Hijacker.Hijack(), a real, standard net/http mechanism)
+# and hand-writes a 302 response, concatenating the caller-supplied
+# `destination` value straight into the Location: line with no CR/LF
+# stripping at all. The secure twin validates `destination` against a
+# strict site-relative-path allowlist regex before using Go's ordinary
+# w.Header().Set()/w.WriteHeader() path.
+#
+# Honest-vulnerable-instance judgment, checked empirically (see
+# CC-LAB-0198's own change-control entry for the full go run proof): Go's
+# ordinary net/http header-writing path already replaces a bare CR/LF byte
+# reaching w.Header().Set() with a space before writing the response to
+# the wire, so a genuinely vulnerable instance of this concern cannot be
+# built through that path in Go -- the vulnerable twin instead uses
+# http.Hijacker, mirroring this exact op's own
+# vulnerable-raw-socket-write-5.js/vulnerable-raw-socket-response-4.php
+# corpus precedent (Node/PHP both bypass their own frameworks' built-in
+# CRLF protection the same way, via a raw socket write).
+#
+# Module composition is this stack's Convention 2 (like SSRF/mass-
+# assignment/file-upload/price-integrity/path-traversal/ssti): the
+# manifest's one op names a SINK module directly -- the vulnerable/secure
+# difference is one inseparable hijack-and-hand-roll-vs-validate-and-use-
+# the-ordinary-header-API operation, not a value rewrite feeding a shared
+# sink.
+#
+# Detection: genuinely deferred, not silently claimed working. No audit
+# rule/oracle strategy exists yet for this concern (grepped
+# fuzzlab/oracle/strategies.py for "header" before starting) -- lands as
+# an explicit open follow-on question, same lab-then-detection split this
+# session already used for path_traversal (CC-LAB-0190) and (until
+# CC-FUZZ-0042 closed it) ssti (CC-LAB-0196).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: hijacks the connection and hand-writes the response,
+  # concatenating the caller-supplied destination with no CRLF stripping.
+  - cell_id: LABGEN-GO-0025
+    class: http_header_injection
+    stack_profile: go_net_http
+    route: { method: GET, path: /channels/redirect }
+    sink_context:
+      family: http_response_header_value
+      required_neutralizations: [http_header_injection]
+    transform: [raw_socket_response_write]
+
+  # Secure twin: the only difference is which sink module renders (the
+  # minimal-pair invariant) -- destination is validated against a strict
+  # site-relative-path allowlist before Go's ordinary header-writing path
+  # is used at all.
+  - cell_id: LABGEN-GO-0026
+    class: http_header_injection
+    stack_profile: go_net_http
+    route: { method: GET, path: /channels/redirect }
+    sink_context:
+      family: http_response_header_value
+      required_neutralizations: [http_header_injection]
+    transform: [allowlist_and_runtime_crlf_rejection]

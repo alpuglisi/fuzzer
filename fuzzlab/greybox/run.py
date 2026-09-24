@@ -122,7 +122,12 @@ class RequestsCorrelatingSender:
         headers = {self._header: cid}
         if self._cookie:
             headers["Cookie"] = self._cookie
-        kwargs = {"timeout": self._timeout, "headers": headers}
+        # allow_redirects=False (BUG-0044/PA-0046, same fix as
+        # fuzzlab.tools.probesender.RequestsProbeSender): this sender also
+        # builds a `Probe` a `ConfirmationStrategy` inspects directly --
+        # silently following a redirect would report the wrong response
+        # (and can crash outright on a self-referencing Location value).
+        kwargs = {"timeout": self._timeout, "headers": headers, "allow_redirects": False}
         if location == "body":
             kwargs["data"] = {param: value}
         else:

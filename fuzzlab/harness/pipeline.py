@@ -94,7 +94,8 @@ def run_pipeline(points: list[InjectionPoint], store, run_id: int, sender,
                                  location=ev.get("location", "query"),
                                  category=category,
                                  store_url=ev.get("store_url"),
-                                 store_param=ev.get("store_param")), sender)
+                                 store_param=ev.get("store_param"),
+                                 content_type=ev.get("body_content_type")), sender)
 
     findings = store.conn.execute(
         "SELECT COUNT(*) c FROM finding WHERE run_id=?", (run_id,)).fetchone()["c"]

@@ -1,0 +1,21 @@
+        // jwt_none_alg_opt_in: the secure twin. Requires the token's own
+        // header to explicitly claim the one pinned, allowed algorithm
+        // (HS256) *and* a valid HMAC ({{ alg_hs256_var }} && {{ hmac_valid_var }})
+        // before any claims are trusted -- an `alg: none` (or any other)
+        // token is rejected outright, never reaching {{ hmac_valid_var }}
+        // in the accepted-condition at all. Ported from go_net_http's own
+        // jwt_none_alg_opt_in.go.j2 (CC-LAB-0180); the identical minimal
+        // pair as jwt_alg_none_default.java.j2, differing only in which
+        // sink module this cell's op selects.
+        if ({{ alg_hs256_var }} && {{ hmac_valid_var }}) {
+            tools.jackson.databind.json.JsonMapper jwtMapper =
+                tools.jackson.databind.json.JsonMapper.builder().build();
+            tools.jackson.databind.JsonNode jwtClaims = jwtMapper.readTree({{ claims_var }});
+            String jwtChannelId = jwtClaims.path("channel_id").asText("");
+            String jwtRole = jwtClaims.path("role").asText("");
+            return org.springframework.http.ResponseEntity.ok()
+                .header("Content-Type", "application/json")
+                .body("{\"channel_id\":\"" + jwtChannelId + "\",\"role\":\"" + jwtRole
+                    + "\",\"maturity_rating\":\"R\",\"autoplay\":true,\"subtitle_language\":\"en\"}");
+        }
+        return org.springframework.http.ResponseEntity.status(401).body("{\"error\":\"invalid token\"}");

@@ -1,0 +1,64 @@
+# Price-integrity-bypass sample manifest (CC-LAB-0189), go_net_http.
+#
+# Tenth real page for this stack's Twitch pick (category 4, Media/
+# streaming -- docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §9.4/§9.5).
+# Genuinely new breadth, not a cheap "second instance" depth increment
+# like CC-LAB-0180..0186 -- this is this stack's FIRST instance of
+# `lab/safety_matrix.yaml`'s existing `payment_charge_amount` sink family
+# / `price_integrity_bypass` concern (added by CC-LAB-0063; the only
+# prior real implementations project-wide are `php_laravel`'s Booking.com
+# checkout charge, CC-LAB-0212, and `spring_boot`'s Netflix plan-change
+# endpoint, CC-LAB-0188 -- go_net_http never had one before this).
+#
+# A channel-subscription purchase endpoint (a real, core, documented
+# Twitch feature -- subscribing to a broadcaster's channel at a chosen
+# tier is Twitch's own signature monetization mechanism), CWE-807 (price/
+# amount integrity bypass). The vulnerable twin trusts the caller-supplied
+# `monthly_charge` field verbatim and reflects it straight back as the
+# amount charged for the requested `plan_tier`, performing no server-side
+# price lookup at all. The secure twin discards the client-supplied amount
+# entirely and looks the real price up in a fixed, server-owned
+# `plan_tier -> price` table (`tier1`/`tier2`/`tier3`), failing closed
+# (HTTP 400) on an unrecognized `plan_tier` rather than silently
+# defaulting.
+#
+# `plan_tier`/`monthly_charge` are this shape's own fixed field names, the
+# same "accept a fixed demo field/header name as a declared simplification"
+# convention this project already uses elsewhere (e.g. `X-Broadcaster-Id`,
+# CC-LAB-0178) -- chosen specifically so this stack's new vulnerable/
+# secure twin reuses `PriceTrustDifferentialStrategy` (built for
+# `spring_boot`'s Netflix cell, CC-FUZZ-0041) verbatim, with zero new
+# detection code, proving that strategy generalizes across stacks
+# (spring_boot -> go_net_http), not just across routes on the same stack.
+#
+# Module composition is this stack's Convention 2 (like SSRF/mass-
+# assignment/file-upload): the manifest's one op names a SINK module
+# directly -- the vulnerable/secure difference is one inseparable
+# trust-the-client-vs-recompute-server-side operation, not a value
+# rewrite feeding a shared sink.
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: echoes the client-supplied monthly_charge back verbatim,
+  # regardless of plan_tier.
+  - cell_id: LABGEN-GO-0019
+    class: price_integrity_bypass
+    stack_profile: go_net_http
+    route: { method: POST, path: /subscriptions/purchase }
+    sink_context:
+      family: payment_charge_amount
+      required_neutralizations: [price_integrity_bypass]
+    transform: [client_trusted_amount]
+
+  # Secure twin: the only difference is which sink module renders (the
+  # minimal-pair invariant) -- the real price is looked up server-side
+  # from a fixed plan_tier price table; an unrecognized plan_tier is
+  # rejected outright.
+  - cell_id: LABGEN-GO-0020
+    class: price_integrity_bypass
+    stack_profile: go_net_http
+    route: { method: POST, path: /subscriptions/purchase }
+    sink_context:
+      family: payment_charge_amount
+      required_neutralizations: [price_integrity_bypass]
+    transform: [server_recomputed_amount]

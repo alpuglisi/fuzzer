@@ -1,0 +1,39 @@
+const emoteUploadDir = "static/emotes"
+_ = {{ client_content_type_var }} // deliberately unused: the secure twin never trusts the caller-supplied Content-Type header at all
+ext := strings.ToLower(filepath.Ext({{ filename_var }}))
+allowedImageExtensions := map[string]bool{
+	".png":  true,
+	".jpg":  true,
+	".jpeg": true,
+	".gif":  true,
+	".webp": true,
+}
+if !allowedImageExtensions[ext] {
+	http.Error(w, "unsupported file extension", http.StatusUnsupportedMediaType)
+	return
+}
+sniffedContentType := http.DetectContentType({{ content_var }})
+if !strings.HasPrefix(sniffedContentType, "image/") {
+	http.Error(w, "uploaded content is not a real image", http.StatusUnsupportedMediaType)
+	return
+}
+if err := os.MkdirAll(emoteUploadDir, 0o755); err != nil {
+	http.Error(w, "storage error", http.StatusInternalServerError)
+	return
+}
+// Secure: the on-disk filename is fully server-chosen ("emote"+ext, the
+// allowlisted extension only) -- the caller-supplied filename never
+// reaches the filesystem at all -- and the served Content-Type is the
+// SNIFFED type (real bytes, via http.DetectContentType), never derived
+// from the caller-supplied filename extension or Content-Type header.
+// Even a perfectly spoofed extension/header cannot change what this
+// response is served as, and content that only claims to be an image
+// (wrong magic bytes) is rejected before anything is written.
+destPath := filepath.Join(emoteUploadDir, "emote"+ext)
+if err := os.WriteFile(destPath, {{ content_var }}, 0o644); err != nil {
+	http.Error(w, "write failed", http.StatusInternalServerError)
+	return
+}
+w.Header().Set("Content-Type", sniffedContentType)
+w.WriteHeader(http.StatusOK)
+w.Write({{ content_var }})

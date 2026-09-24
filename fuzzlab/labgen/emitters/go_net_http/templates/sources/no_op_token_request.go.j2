@@ -1,0 +1,7 @@
+// no_op_token_request source: this shape (session_token_generation) has no
+// tainted request input at all -- the vulnerability is entirely in how the
+// sink below *generates* its own output value, not in any attacker-
+// controlled value reaching it. A genuinely new module-composition shape
+// for this stack (neither Convention 1's transform-modifies-a-value nor
+// Convention 2's sink-selecting-with-a-real-source -- see this stack's own
+// package docstring), not a reuse of either existing one.

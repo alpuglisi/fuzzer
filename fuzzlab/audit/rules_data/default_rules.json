@@ -51,6 +51,62 @@
       "reference": "spel-injection"
     },
     {
+      "id": "R-SSRF",
+      "category": "ssrf",
+      "transaction_type": "Server-Side Request Forgery",
+      "when": { "name_regex": "url|uri|link|src|source|target|endpoint|fetch|proxy|webhook|image|thumbnail|avatar" },
+      "reference": "ssrf"
+    },
+    {
+      "id": "R-ACCESS-CONTROL",
+      "category": "access-control",
+      "transaction_type": "Broken Object-Level Authorization",
+      "when": { "method_in": ["GET"], "location_in": ["query"], "name_regex": "channel_id|resource_id|object_id|item_id|record_id|owner_id|account_id" },
+      "reference": "access-control"
+    },
+    {
+      "id": "R-INSECURE-DESERIALIZATION",
+      "category": "insecure-deserialization",
+      "transaction_type": "Insecure Deserialization",
+      "when": { "location_in": ["body"], "sink_context_in": ["deserialization"] },
+      "reference": "insecure-deserialization"
+    },
+    {
+      "id": "R-XXE",
+      "category": "xxe",
+      "transaction_type": "XML External Entity Injection",
+      "when": { "location_in": ["body"], "sink_context_in": ["xml"] },
+      "reference": "xxe"
+    },
+    {
+      "id": "R-JWT-ALG-NONE",
+      "category": "jwt-algorithm-confusion",
+      "transaction_type": "JWT Algorithm Confusion",
+      "when": { "location_in": ["header"], "name_regex": "authorization|jwt" },
+      "reference": "jwt-algorithm-confusion"
+    },
+    {
+      "id": "R-WEAK-TOKEN-ENTROPY",
+      "category": "weak-token-entropy",
+      "transaction_type": "Predictable Session Token",
+      "when": { "method_in": ["POST"], "sink_context_in": ["session_token"] },
+      "reference": "weak-token-entropy"
+    },
+    {
+      "id": "R-MASS-ASSIGNMENT",
+      "category": "mass-assignment",
+      "transaction_type": "Mass Assignment",
+      "when": { "location_in": ["body"], "sink_context_in": ["mass_assignment"] },
+      "reference": "mass-assignment"
+    },
+    {
+      "id": "R-UNRESTRICTED-FILE-UPLOAD",
+      "category": "unrestricted-file-upload",
+      "transaction_type": "Unrestricted File Upload",
+      "when": { "location_in": ["body"], "sink_context_in": ["fs_web_root_write"] },
+      "reference": "upload-insecure-files"
+    },
+    {
       "id": "R-PRICE-INTEGRITY",
       "category": "price-integrity-bypass",
       "transaction_type": "Price Integrity Bypass",
@@ -63,6 +119,27 @@
       "transaction_type": "CSV Formula Injection",
       "when": { "name_regex": "label|name|comment|note|description|title", "method_in": ["GET"] },
       "reference": "csv-formula-injection"
+    },
+    {
+      "id": "R-PRICE-TRUST-DIFFERENTIAL",
+      "category": "price-integrity-bypass",
+      "transaction_type": "Price/Amount Integrity Bypass",
+      "when": { "location_in": ["body"], "sink_context_in": ["payment_charge"] },
+      "reference": "business-logic-price-manipulation"
+    },
+    {
+      "id": "R-HEADER-INJECTION",
+      "category": "http-header-injection",
+      "transaction_type": "HTTP Response Header Injection",
+      "when": { "location_in": ["query", "body"], "sink_context_in": ["header"] },
+      "reference": "http-response-splitting"
+    },
+    {
+      "id": "R-PATH-TRAVERSAL",
+      "category": "path-traversal",
+      "transaction_type": "Path Traversal / Unconfined File Read",
+      "when": { "location_in": ["query", "body"], "sink_context_in": ["fs_path_read"] },
+      "reference": "directory-traversal"
     }
   ]
 }

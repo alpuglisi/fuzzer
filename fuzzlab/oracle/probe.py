@@ -30,6 +30,10 @@ class Candidate:
     store_param: str | None = None
     store_method: str = "POST"
     store_location: str = "body"
+    # A whole-body point's real content type (e.g. "application/json"), from
+    # `fuzzlab.audit.engine.InjectionPoint.body_content_type` -- `None` unless
+    # the ground truth positively declared the format (CC-FUZZ-0032/FR-FUZZ-19).
+    content_type: str | None = None
 
 
 @dataclass
@@ -45,11 +49,16 @@ class Sender:
 
     Implementations return a :class:`Probe`. ``timing=True`` marks a
     timing-sensitive send (the real seam serializes those per host). ``method`` and
-    ``location`` (``query``/``body``) place the payload; they default to GET/query so
-    a sender that only handles that case can omit them (the oracle passes them only
-    for non-default candidates, e.g. POST body).
+    ``location`` (``query``/``body``/``header``) place the payload; they default to
+    GET/query so a sender that only handles that case can omit them (the oracle
+    passes them only for non-default candidates, e.g. POST body). ``content_type``
+    is only meaningful for a whole-body point (``param="body"``, no single named
+    field, e.g. a JSON API): when set, the sender sends ``value`` as the raw body
+    with that content type instead of form-encoding ``{param: value}``; ``None``
+    keeps the existing form-encoded behavior (CC-FUZZ-0032/FR-FUZZ-19).
     """
 
     def send(self, url: str, param: str, value: str, timing: bool = False,
-             method: str = "GET", location: str = "query") -> Probe:  # pragma: no cover - interface
+             method: str = "GET", location: str = "query",
+             content_type: str | None = None) -> Probe:  # pragma: no cover - interface
         raise NotImplementedError

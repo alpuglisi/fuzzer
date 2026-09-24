@@ -1,0 +1,5 @@
+        byte[] requestBody = request.getInputStream().readAllBytes();
+        tools.jackson.databind.json.JsonMapper mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        tools.jackson.databind.JsonNode root = mapper.readTree(requestBody);
+        String {{ plan_tier_var }} = root.path("{{ plan_tier_field }}").asText();
+        String {{ client_price_var }} = root.path("{{ client_price_field }}").asText();

@@ -1,0 +1,15 @@
+_, _ = {{ alg_none_var }}, {{ alg_hs256_var }} // always read by the source; used here so a
+// twin whose transform doesn't reference one of them still compiles.
+if {{ value_expr }} {
+	var claims struct {
+		ChannelID string `json:"channel_id"`
+		Role      string `json:"role"`
+	}
+	_ = json.Unmarshal([]byte({{ claims_var }}), &claims)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	io.WriteString(w, `{"channel_id":"`+claims.ChannelID+`","role":"`+claims.Role+`","settings":"private"}`)
+} else {
+	w.WriteHeader(http.StatusUnauthorized)
+	w.Write([]byte(`{"error":"invalid token"}`))
+}

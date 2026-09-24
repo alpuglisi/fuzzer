@@ -1,0 +1,53 @@
+const clipExportDir = "static/clips_exports"
+const maxExportBytes int64 = 5 << 20 // 5 MiB cap -- bounds how much of any resolved file this handler ever reads
+// Secure: resolve the joined path to its REAL, canonical, symlink-resolved
+// absolute form (filepath.Abs + filepath.EvalSymlinks -- not just
+// filepath.Clean/a string-prefix check on the unresolved path, which a
+// symlink planted inside clipExportDir could still defeat) and reject
+// (403) anything whose resolved form does not stay inside clipExportDir's
+// own real, resolved absolute form. Any resolution failure (the requested
+// path, or the base directory itself, does not exist / cannot be
+// resolved) fails closed as "not found" or a storage error, never falls
+// through to a confinement check on an unresolved path.
+requestedPath := filepath.Join(clipExportDir, {{ var_name }})
+absBase, err := filepath.Abs(clipExportDir)
+if err != nil {
+	http.Error(w, "storage error", http.StatusInternalServerError)
+	return
+}
+realBase, err := filepath.EvalSymlinks(absBase)
+if err != nil {
+	http.Error(w, "storage error", http.StatusInternalServerError)
+	return
+}
+absRequested, err := filepath.Abs(requestedPath)
+if err != nil {
+	http.Error(w, "storage error", http.StatusInternalServerError)
+	return
+}
+realRequested, err := filepath.EvalSymlinks(absRequested)
+if err != nil {
+	http.Error(w, "not found", http.StatusNotFound)
+	return
+}
+if realRequested != realBase && !strings.HasPrefix(realRequested, realBase+string(os.PathSeparator)) {
+	http.Error(w, "forbidden", http.StatusForbidden)
+	return
+}
+info, err := os.Stat(realRequested)
+if err != nil || info.IsDir() {
+	http.Error(w, "not found", http.StatusNotFound)
+	return
+}
+if info.Size() > maxExportBytes {
+	http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+	return
+}
+data, err := os.ReadFile(realRequested)
+if err != nil {
+	http.Error(w, "read failed", http.StatusInternalServerError)
+	return
+}
+w.Header().Set("Content-Type", "application/octet-stream")
+w.WriteHeader(http.StatusOK)
+w.Write(data)

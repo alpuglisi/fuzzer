@@ -15,6 +15,90 @@
       "param": "url",
       "location": "query",
       "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0005",
+      "method": "GET",
+      "param": "channel_id",
+      "location": "query",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0007",
+      "method": "GET",
+      "param": "Authorization",
+      "location": "header",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0009",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0011",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0013",
+      "method": "GET",
+      "param": "channel_id",
+      "location": "query",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0015",
+      "method": "GET",
+      "param": "source_url",
+      "location": "query",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0017",
+      "method": "POST",
+      "param": "file",
+      "location": "body",
+      "rendering": "server"
+    },
+    {
+      "url": "/generated/labgen-go-0019",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0021",
+      "method": "GET",
+      "param": "filename",
+      "location": "query",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0023",
+      "method": "POST",
+      "param": "body",
+      "location": "body",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0025",
+      "method": "GET",
+      "param": "destination",
+      "location": "query",
+      "rendering": "server-json"
+    },
+    {
+      "url": "/generated/labgen-go-0027",
+      "method": "GET",
+      "param": "next",
+      "location": "query",
+      "rendering": "server-json"
     }
   ]
 }

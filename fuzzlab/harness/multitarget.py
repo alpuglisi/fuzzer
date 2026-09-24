@@ -55,8 +55,16 @@ SenderFor = Callable[[TargetSpec], object]
 
 
 def run_targets(specs: list[TargetSpec], store, sender_for: SenderFor, *,
-                browser=None, scheduler=None, plugins=None) -> list[TargetOutcome]:
-    """Run the pipeline against each target (one run per target) and collect outcomes."""
+                browser=None, scheduler=None, plugins=None,
+                oob=None, coverage=None, dbfault=None) -> list[TargetOutcome]:
+    """Run the pipeline against each target (one run per target) and collect outcomes.
+
+    ``oob``/``coverage``/``dbfault`` forward unchanged to `run_auto` (which already
+    accepts them) -- one shared instance across every target in this batch, same as
+    ``browser``/``scheduler``/``plugins`` already are. Safe: targets run sequentially
+    here (a plain loop, never concurrently), and `OobListener` correlates hits by a
+    fresh per-probe token, never by target, so nothing can cross-wire between them.
+    """
     outcomes: list[TargetOutcome] = []
     for spec in specs:
         host = urlparse(spec.base_url).netloc or spec.base_url
@@ -66,7 +74,8 @@ def run_targets(specs: list[TargetSpec], store, sender_for: SenderFor, *,
                           ground_truth=spec.ground_truth,
                           selected_categories=spec.selected_categories,
                           points_source=spec.points_source,
-                          browser=browser, scheduler=scheduler, plugins=plugins)
+                          browser=browser, scheduler=scheduler, plugins=plugins,
+                          oob=oob, coverage=coverage, dbfault=dbfault)
         outcomes.append(TargetOutcome(name=spec.name, run_id=run_id,
                                       findings=result.findings, report=result.report))
     return outcomes

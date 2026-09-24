@@ -1,0 +1,17 @@
+        jakarta.servlet.http.Part {{ part_var }} = request.getPart("file");
+        if ({{ part_var }} == null) {
+            return org.springframework.http.ResponseEntity.status(400)
+                .body("missing file field".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        String {{ filename_var }} = {{ part_var }}.getSubmittedFileName();
+        if ({{ filename_var }} == null) {
+            {{ filename_var }} = "";
+        }
+        String {{ client_content_type_var }} = {{ part_var }}.getContentType();
+        if ({{ client_content_type_var }} == null) {
+            {{ client_content_type_var }} = "application/octet-stream";
+        }
+        byte[] {{ content_var }};
+        try (java.io.InputStream {{ part_var }}Stream = {{ part_var }}.getInputStream()) {
+            {{ content_var }} = {{ part_var }}Stream.readAllBytes();
+        }

@@ -55,7 +55,7 @@ import subprocess
 import tempfile
 import time
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from fuzzlab.labgen.emitter import Emitter
@@ -163,6 +163,15 @@ def go_boot_available() -> bool:
 class HttpResponse:
     status: int
     body: str
+    #: Response headers, lower-case-insensitive lookup via the underlying
+    #: ``email.message.Message`` mapping (``http.client``'s own header
+    #: type) -- additive (defaults empty), found needed by
+    #: `CC-LAB-0186`'s unrestricted-file-upload differential, the first
+    #: shape on this stack whose vulnerable/secure difference is only
+    #: observable in a *response header* (`Content-Type`), not the body.
+    #: Every existing caller that constructs this with only
+    #: ``status``/``body`` is unaffected.
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 class _NoRedirectHttpErrorProcessor(urllib.request.HTTPErrorProcessor):
@@ -292,6 +301,20 @@ class GoLiveBootHarness:
         without going through this harness's own request methods."""
         return self._base_url()
 
+    @property
+    def app_dir(self) -> Path:
+        """The booted app's own process ``cwd`` -- always a path inside this
+        harness's own throwaway `tempfile.TemporaryDirectory`, never a real,
+        permanent, or shared path. Added for ``CC-LAB-0190``'s path-
+        traversal differential, the first shape on this stack whose secure-
+        twin proof needs a caller to plant a file (a canary, and a
+        legitimately-served file) directly on disk *before* issuing a
+        request, rather than only ever sending bytes over HTTP -- every
+        other caller of this harness is unaffected."""
+        if self._app_dir is None:
+            raise GoLiveBootError("app_dir is only available after build() -- use the harness as a context manager")
+        return self._app_dir
+
     def request(
         self,
         method: str,
@@ -311,7 +334,11 @@ class GoLiveBootHarness:
         url = self._base_url() + path
         req = urllib.request.Request(url, data=body, method=method.upper(), headers=headers or {})
         with _NO_REDIRECT_OPENER.open(req, timeout=REQUEST_TIMEOUT_S) as resp:
-            return HttpResponse(status=resp.status, body=resp.read().decode("utf-8", errors="replace"))
+            return HttpResponse(
+                status=resp.status,
+                body=resp.read().decode("utf-8", errors="replace"),
+                headers=dict(resp.headers),
+            )
 
     def post(self, path: str, *, body: bytes, headers: dict[str, str] | None = None) -> HttpResponse:
         return self.request("POST", path, body=body, headers=headers)

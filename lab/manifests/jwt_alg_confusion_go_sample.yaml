@@ -1,0 +1,55 @@
+# JWT `alg:none` signature-confusion sample manifest (CC-LAB-0180),
+# go_net_http.
+#
+# Fourth real page for this stack's Twitch pick (category 4 pilot,
+# Media/streaming -- docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md
+# §9.4/§9.5), continuing this category's own "coherent page/route set"
+# goal: a channel-owner-only settings endpoint, Bearer-JWT-protected --
+# a realistic API-edge auth shape for this app identity, distinct from
+# the 3 existing routes (webhook receiver, clip-thumbnail proxy,
+# channel-analytics lookup).
+#
+# Reuses `lab/safety_matrix.yaml`'s existing `jwt_signature_verification`
+# sink family and its existing `jwt_alg_none_default`/`jwt_none_alg_opt_in`
+# ops verbatim (added by CC-LAB-0063 for the corpus-examples/auth-session/
+# research) -- no new safety-matrix entry needed; this is the first
+# lab-generator instance of this mechanism on *any* stack (checked for
+# cross-branch collision before landing: no other active category branch
+# references this mechanism or these cell IDs). Grounded in a real,
+# already-checked-in corpus citation:
+# docs/research/corpus-examples/auth-session/node/vulnerable-1.js cites
+# the real auth0/node-jsonwebtoken vulnerability (GHSA-8cf7-32gw-wr33): an
+# unsigned `alg:none` token is accepted when the caller didn't pass an
+# explicit `algorithms` allow-list -- CWE-347's algorithm-confusion
+# variant, a pure logic bug (not `webhook_signature`'s own *timing*
+# variant, which this session separately empirically confirmed is not
+# detectable with this project's current wall-clock-HTTP measurement).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: an attacker-chosen `alg: none` header is honored -- the
+  # signature check is skipped entirely, so an unsigned token with
+  # forged claims (e.g. channel_id/role) is accepted (CWE-347).
+  - cell_id: LABGEN-GO-0007
+    class: jwt_algorithm_confusion
+    stack_profile: go_net_http
+    route: { method: GET, path: /channels/settings }
+    sink_context:
+      family: jwt_signature_verification
+      required_neutralizations: [jwt_algorithm_confusion]
+    transform: [jwt_alg_none_default]
+
+  # Secure twin: the only difference is the transform region
+  # (jwt_none_alg_opt_in instead of jwt_alg_none_default) -- the
+  # minimal-pair invariant. Requires the token's own header to explicitly
+  # claim the one pinned, allowed algorithm (HS256) *and* a valid HMAC
+  # before any claims are trusted; an `alg:none` token is rejected
+  # outright with a real HTTP 401.
+  - cell_id: LABGEN-GO-0008
+    class: jwt_algorithm_confusion
+    stack_profile: go_net_http
+    route: { method: GET, path: /channels/settings }
+    sink_context:
+      family: jwt_signature_verification
+      required_neutralizations: [jwt_algorithm_confusion]
+    transform: [jwt_none_alg_opt_in]

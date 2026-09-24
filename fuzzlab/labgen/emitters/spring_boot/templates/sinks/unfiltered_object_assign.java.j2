@@ -1,0 +1,26 @@
+        // unfiltered_object_assign: the raw request body is parsed and EVERY
+        // field present is assigned onto the account record's in-memory
+        // representation -- including `is_partner`, never exposed by this
+        // endpoint's own intended form (CWE-915, mass assignment). No
+        // database in this stack's own Phase A scope -- the record starts
+        // from a fixed seeded state each request, matching this session's
+        // own no-persisted-read-back convention for this shape
+        // (CC-LAB-0182's own go_net_http design).
+        tools.jackson.databind.json.JsonMapper mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        tools.jackson.databind.JsonNode accountRoot = mapper.readTree({{ value_expr }});
+        String accountDisplayName = "netflix_lab_account";
+        String accountBio = "welcome to my account";
+        boolean accountIsPartner = false;
+        if (!accountRoot.path("display_name").isMissingNode()) {
+            accountDisplayName = accountRoot.path("display_name").asText();
+        }
+        if (!accountRoot.path("bio").isMissingNode()) {
+            accountBio = accountRoot.path("bio").asText();
+        }
+        if (!accountRoot.path("is_partner").isMissingNode()) {
+            accountIsPartner = accountRoot.path("is_partner").asBoolean();
+        }
+        return org.springframework.http.ResponseEntity.ok()
+            .header("Content-Type", "application/json")
+            .body("{\"display_name\":\"" + accountDisplayName + "\",\"bio\":\"" + accountBio
+                + "\",\"is_partner\":" + accountIsPartner + "}");

@@ -1,0 +1,63 @@
+# Predictable session-token sample manifest (CC-LAB-0195), spring_boot.
+#
+# Netflix's 10th real page (category 4, Media/streaming --
+# docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md sec 4/9.4/9.5, and this
+# session's own cross-stack-generalization campaign): a session/token-
+# refresh endpoint, `POST /api/session/refresh` -- refreshing an
+# authenticated session token, a realistic API-edge auth shape for this
+# app identity, distinct from every one of this app's other 9 real pages.
+#
+# Reuses `lab/safety_matrix.yaml`'s existing `session_token_generation`
+# sink family and its existing `predictable_token_source`/`csprng_token`
+# ops verbatim (added by `CC-LAB-0063` for the corpus-examples/auth-session
+# research; already instantiated on `go_net_http`, `CC-LAB-0181`) -- no new
+# safety-matrix entry needed; this is `spring_boot`'s first instantiation
+# of this mechanism. **Genuinely no tainted request input at all** --
+# unlike every other shape this stack has built, the vulnerability is
+# entirely in how the sink *generates* its own output value, not in any
+# attacker-controlled value reaching it. Unlike `go_net_http` (where this
+# was a genuinely new, third module-composition convention, CC-LAB-0181),
+# `spring_boot` already uses a single, uniform "the manifest's one op
+# selects a sink module directly" convention for every shape it supports
+# (see `fuzzlab/labgen/emitters/spring_boot/modules.py`'s own docstring),
+# so this only needed a new, no-op *source* module
+# (`NoOpTokenRequestSource`) -- not a new composition shape.
+#
+# The vulnerable twin's session token literally is `System.nanoTime()`
+# rendered as a decimal string (CWE-330) -- the JDK's own nanosecond-
+# resolution monotonic counter, the direct analog of Go's
+# `time.Now().UnixNano()`. The secure twin's token is 32 bytes from
+# `java.security.SecureRandom`, hex-encoded -- genuinely unpredictable.
+#
+# Response-shape note: both twins respond with `{"session_token":"..."}`,
+# exactly the shape `PredictableTokenSourceStrategy`'s own `confirm()`
+# (`fuzzlab/oracle/strategies.py`, already built for Twitch's
+# `go_net_http` cell, `TWCH-0005`/`CC-LAB-0181`) parses -- letting that
+# existing strategy generalize to this new stack with zero new detection
+# code (verified live in
+# tests/test_labgen_spring_boot_netflix_session_refresh_live_boot.py).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: the session token is System.nanoTime() as a decimal
+  # string -- trivially predictable (CWE-330).
+  - cell_id: LABGEN-JV-0019
+    class: weak_token_entropy
+    stack_profile: spring_boot
+    route: { method: POST, path: /api/session/refresh }
+    sink_context:
+      family: session_token_generation
+      required_neutralizations: [weak_token_entropy]
+    transform: [predictable_token_source]
+
+  # Secure twin: the only difference is which sink module renders (the
+  # minimal-pair invariant) -- 32 bytes from java.security.SecureRandom,
+  # hex-encoded.
+  - cell_id: LABGEN-JV-0020
+    class: weak_token_entropy
+    stack_profile: spring_boot
+    route: { method: POST, path: /api/session/refresh }
+    sink_context:
+      family: session_token_generation
+      required_neutralizations: [weak_token_entropy]
+    transform: [csprng_token]

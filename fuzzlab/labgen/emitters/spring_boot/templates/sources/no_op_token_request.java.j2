@@ -1,0 +1,9 @@
+{# CC-LAB-0195: this shape (session_token_generation) has no tainted
+   request input at all -- the vulnerability is entirely in how the sink
+   below *generates* its own output value, not in any attacker-controlled
+   value reaching it. This source module intentionally renders no code;
+   it exists to keep this emitter's source/sink/complexity composition
+   contract uniform across shapes rather than special-casing this one
+   shape into skipping it (mirroring RequestStreamSource's own
+   CC-LAB-0132 precedent, and go_net_http's own NoOpTokenRequestSource,
+   CC-LAB-0181). #}

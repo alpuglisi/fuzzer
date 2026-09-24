@@ -1,7 +1,7 @@
 # Fuzzing Harness and Oracle — Requirement Specification
 
 Component code: **FUZZ** · Status: `[built fuzzer; oracle built (black-box M1/M2/M3/M5/M8; M10 grey-box wiring layer built, live sources on-host); harness generalization ongoing; greybox-run consumes mutation-engine variants (opt-in); coverage-frontier growth emitted to metric_series]`
-· Last updated: 2026-09-23 · see CC-FUZZ-0026
+· Last updated: 2026-09-23 · see CC-FUZZ-0046
 
 Related: `ARCHITECTURE.md` #7; `DECISIONS_AND_ROADMAP.md` (D1, D5, D7, Phase 2/3,
 Phase 8); `./change-control.md`.
@@ -203,19 +203,689 @@ rewards) derives from it.
     (`tests/test_labgen_redos.py`), not re-proven here. Not yet run against
     a live external target or wired into `fuzzlab/harness/multitarget.py`
     (both out of this requirement's scope).
-- **FR-FUZZ-13** *(`CC-FUZZ-0026`, 2026-09-23).* A ground-truth point whose
-  tainted value is carried in a request **header**
-  (`Case.location`/`InjectionPoint`'s `location="header"`) is honestly,
-  distinctly reported as not-yet-auditable — never conflated with the
-  client-only/DOM skip reason. `fuzzlab.harness.auto.points_from_ground_truth`
-  gives it its own skip reason naming the real gap (no header-injection
-  point type or header-capable probe sender exists yet), rather than the
-  factually wrong "needs browser execution" DOM reason. **Not itself a new
-  capability**: no header point is audited by this change, only correctly
-  labeled as unauditable. Building real header-injection support (a
-  header-aware `InjectionPoint` shape, plus a header-capable sender
-  alongside `RequestsProbeSender`/`SeamProbeSender`) is real, sized
-  follow-on work this requirement does not cover.
+- **FR-FUZZ-13** *(`CC-FUZZ-0026`, 2026-09-23; superseded in part by
+  `FR-FUZZ-19` below).* A ground-truth point whose tainted value is
+  carried in a request **header** (`Case.location`/`InjectionPoint`'s
+  `location="header"`) was honestly, distinctly reported as
+  not-yet-auditable — never conflated with the client-only/DOM skip
+  reason. **Superseded**: `FR-FUZZ-19` closed the underlying gap (a real
+  header-injection point type and header-capable sender now exist), so a
+  header point is a real, audited point today, not a skip reason. This
+  entry is kept for history — it correctly named the gap at the time.
+
+- **FR-FUZZ-24** *(`PredictableTokenSourceStrategy`; `CC-FUZZ-0038`,
+  2026-09-23).* The oracle supports real **predictable session-token
+  (CWE-330) confirmation**, paired with `FR-AUD-12`'s candidate-
+  generation rule, closing Twitch's `TWCH-0005` structural detection
+  zero (`CC-LAB-0181`'s own deliberately-separated follow-on):
+  - `PredictableTokenSourceStrategy` (`vuln_class=
+    "weak_token_entropy"`, `mechanism="timestamp-derived-token"`): two
+    ordinary probes; parses each response's `session_token` field;
+    confirms iff both parse as base-10 integers with a non-negative
+    delta under a fixed 10-second-in-nanoseconds ceiling (a generous,
+    jitter-immune backstop, not a precise measured-elapsed-time bound).
+  - **Primary false-positive defense named explicitly**: the hex-vs-
+    decimal parse gate, not delta-window tightness — a real
+    `crypto/rand`-sourced 64-character hex token essentially never
+    parses as an all-decimal integer (`(10/16)^64 ≈ 8.6e-14`).
+  - `Verdict.evidence` never records a full raw token value — only an
+    8-character prefix of each plus the computed delta, since these are
+    the target's own issued session-token-shaped values.
+  - `fuzzlab.core.runmode._VULN_TO_CATEGORY` gained
+    `"weak_token_entropy": "weak-token-entropy"` — the fifth instance of
+    the recurring underscore/hyphen gap, caught automatically by the
+    structural guard test.
+  - Verified live against Twitch's real booted twins; through the real
+    `fuzzlab.harness.multitarget` Phase E wiring, Twitch's real, scored
+    recall moves from 3/5 to 4/5.
+
+- **FR-FUZZ-25** *(`MassAssignmentPrivilegedFieldStrategy`; `CC-FUZZ-0039`,
+  2026-09-23).* The oracle supports real **mass-assignment (CWE-915)
+  confirmation**, paired with `FR-AUD-13`'s candidate-generation rule,
+  closing Twitch's `TWCH-0006` structural detection zero (`CC-LAB-0182`'s
+  own deliberately-separated follow-on) — this project's first-ever
+  detection capability for the `mass_assignment` class at all:
+  - `MassAssignmentPrivilegedFieldStrategy` (`vuln_class=
+    "mass_assignment"`, `mechanism="privileged-field-injection"`): two
+    probes over a hardcoded, known JSON body field (`is_partner`);
+    confirms only on a `false`-to-`true` transition of that field
+    between probe A (intended fields only) and probe B (intended fields
+    plus the privileged field) — never a bare "does it ever read true"
+    check.
+  - `fuzzlab.core.runmode._VULN_TO_CATEGORY` gained
+    `"mass_assignment": "mass-assignment"` — the sixth instance of the
+    recurring underscore/hyphen gap, caught automatically by the
+    structural guard test.
+  - A real ground-truth defect (`param="is_partner"` instead of the
+    whole-body-point `param="body"` convention, which starved the
+    strategy of the `content_type="application/json"` it needs) was
+    found and fixed before landing, by actually running the real
+    `run_targets()` pipeline rather than trusting fake-sender unit tests
+    alone.
+  - Verified live against Twitch's real booted twins; through the real
+    `fuzzlab.harness.multitarget` Phase E wiring, Twitch's real, scored
+    recall moves from 4/6 to 5/6.
+
+- **FR-FUZZ-26** *(`UnrestrictedFileUploadContentTypeTrustStrategy`;
+  `CC-FUZZ-0040`, 2026-09-23).* The oracle supports real **unrestricted
+  file upload (CWE-434) confirmation**, paired with `FR-AUD-14`'s
+  candidate-generation rule, closing `CC-LAB-0186`'s own deliberately-
+  separated follow-on for Twitch's `TWCH-0009` structural detection zero
+  — this project's first-ever detection capability for the
+  `unrestricted_file_upload` class, and its first real
+  `multipart/form-data` probe of any kind:
+  - `UnrestrictedFileUploadContentTypeTrustStrategy` (`vuln_class=
+    "unrestricted_file_upload"`, `mechanism=
+    "extension-content-type-trust-differential"`): a real, hand-encoded
+    `multipart/form-data` two-probe differential. Probe A uploads a file
+    named `probe.svg` (a plausible image extension) whose actual bytes
+    are an inert marker (`<!DOCTYPE html><p>FUZZLAB-MARKER-...</p>`, per
+    `NFR-AUD-safe` — never an executing `<script>` tag) that is NOT valid
+    image content of any kind; confirms only if the upload is accepted
+    (2xx), the marker is echoed back verbatim, and the response's own
+    `Content-Type` header is in a named, bounded script-executable set
+    (`text/html`/`image/svg+xml`/etc — never a bare "isn't a safe raster
+    type" heuristic, which would over-claim on a harmless-but-unusual
+    type like `application/octet-stream`). Probe B (the false-positive
+    defense) independently uploads a file named `control.png` whose
+    bytes are a real, minimal, valid PNG; confirms only if that upload is
+    *also* accepted and its own `Content-Type` is a genuine safe raster
+    type — ruling out both a legitimate SVG-accepting endpoint (which
+    would also serve `image/svg+xml` for a *real* SVG, correctly) and a
+    generically-permissive/broken target that serves every upload with
+    the same dangerous type regardless of content.
+  - Both twins' real response shape was verified directly against the
+    real Go templates before designing this (`fuzzlab/labgen/emitters/
+    go_net_http/templates/sinks/no_extension_check.go.j2`/
+    `extension_allowlist_mime_check.go.j2`): the vulnerable/secure
+    difference is observable directly in the upload's own POST response
+    (no separate GET-the-served-file round trip is needed), so this
+    strategy never chases a redirect or a second request.
+  - `fuzzlab.core.runmode._VULN_TO_CATEGORY` gained
+    `"unrestricted_file_upload": "unrestricted-file-upload"` — the
+    seventh instance of the recurring underscore/hyphen gap, checked and
+    fixed proactively this time (the structural guard test,
+    `test_every_ruled_strategy_category_is_reachable_from_its_vuln_class`,
+    was also re-run and stays green).
+  - A real, additive `Sender` extension was needed and made narrowly:
+    `RequestsProbeSender`/`SeamProbeSender` (`fuzzlab/tools/
+    probesender.py`) now encode a `location="body"` value as latin-1
+    (a lossless 1:1 byte<->codepoint mapping, the same convention
+    `fuzzlab.proxy`/`fuzzlab.web` already use for raw bytes) instead of
+    utf-8 whenever `content_type` starts with `"multipart/"` — the
+    project's existing whole-body sender path only ever carried text
+    (JSON/XML), and utf-8 would corrupt any byte >= 0x80 in this
+    strategy's own real binary PNG control probe. Scoped to the
+    multipart branch only; every existing JSON/XML whole-body sender
+    path is unaffected (re-verified: `test_probesender.py` and the
+    mass-assignment/insecure-deserialization/XXE strategy suites all
+    still pass unmodified).
+  - Verified live against Twitch's real booted twins
+    (`LABGEN-GO-0017`/`0018`) via a dedicated live-boot strategy test;
+    through the real `fuzzlab.harness.multitarget` Phase E wiring,
+    Twitch's real, scored recall moves from 7/9 to 8/9 (only
+    `webhook_signature`'s own permanently-infeasible timing side channel
+    remains undetected).
+
+- **FR-FUZZ-27** *(`PriceTrustDifferentialStrategy`; `CC-FUZZ-0041`,
+  2026-09-23).* The oracle supports real **price/amount integrity
+  bypass (CWE-807) confirmation**, paired with `FR-AUD-15`'s candidate-
+  generation rule, closing `CC-LAB-0188`'s own deliberately-separated
+  follow-on for Netflix's `NFLX-0005` structural detection zero — this
+  project's first-ever detection capability for the
+  `price_integrity_bypass` class (a real implementation already exists
+  on two stacks, `php_laravel`'s Booking.com checkout, `CC-LAB-0212`, and
+  `spring_boot`'s Netflix plan-change endpoint, `CC-LAB-0188`, but
+  neither had any detection before this entry):
+  - `PriceTrustDifferentialStrategy` (`vuln_class=
+    "price_integrity_bypass"`, `mechanism=
+    "client-price-trust-differential"`): a two-probe differential over
+    the JSON body's own `monthly_charge` field, needing no prior
+    knowledge of the target's real price (which a genuine black-box
+    fuzzer never has) — it sends the same `plan_tier` twice with two
+    deliberately different, implausible amounts (`0.01`, then
+    `999999.99`) and confirms only if the server's own reported charge
+    tracks *both* submitted amounts exactly; a target whose reported
+    charge stays identical across both probes (the secure,
+    server-recomputed shape) fails closed, correctly, rather than being
+    treated as ambiguous evidence. The same "does the sink's own output
+    move with this specific input" reasoning `MassAssignmentPrivileged
+    FieldStrategy`'s own two-probe differential already uses for a
+    boolean field, generalized here to a numeric one.
+  - **Design checked against `MassAssignmentPrivilegedFieldStrategy`'s
+    own docstring/pattern before designing from scratch**, per this
+    task's own explicit instruction: both hardcode the sink's own known
+    field name(s) directly in the strategy (`is_partner` there,
+    `monthly_charge`/`plan_tier` here), both gate on
+    `content_type == "application/json"` and fail closed otherwise, and
+    both require a matching-but-distinct two-probe result rather than a
+    bare single-probe 200 as evidence.
+  - `R-PRICE-TRUST-DIFFERENTIAL`'s own `sink_context_in` is deliberately scoped
+    to `["payment_charge"]` only, not also `"sql"` — see `FR-AUD-15` for
+    the false-candidate-explosion risk this avoided.
+  - **A real, pre-existing ground-truth defect found and fixed during
+    this entry's own real end-to-end pipeline verification, not
+    silently left for a later discovery**: `NFLX-0005`'s ground truth
+    (`CC-LAB-0188`) originally used `param="monthly_charge"` (a
+    per-named-field convention modeled on `NFLX-0004`'s own query-param
+    case), but `fuzzlab.harness.auto.points_from_ground_truth` only
+    marks a `location="body"` point's Content-Type as
+    `application/json` when `param == "body"` exactly (the same gate
+    `CC-LAB-0182`'s own `mass_assignment` ground truth already had to
+    satisfy) — a per-field `param` name for a body point silently
+    starves this strategy of the JSON point it needs when driven through
+    the real harness, even though the strategy's own dedicated unit/
+    live-boot tests (which construct a `Candidate` directly) never hit
+    this gate and so never revealed it. Corrected in place in
+    `lab/ground-truth-netflix-clone/` (living-doc discipline) to
+    `param="body"`, the same whole-body convention `NFLX-0001`-`0003`
+    use — verified directly: `points_from_ground_truth` now reports
+    `body_content_type="application/json"` for this point. This same
+    correction also fixed a **real regression this task's own first
+    (lab) commit had silently introduced** into `tests/
+    test_multitarget_category4.py`'s `@pytest.mark.slow` tests (not
+    caught by the non-slow suite run before that commit, since both
+    affected tests are slow-marked): adding `NFLX-0005` to the ground
+    truth changed the Netflix app's own total positive count from 4 to
+    5, which on its own (before this entry's cell/strategy were added to
+    that test) dropped `test_both_apps_run_through_multitarget_for_real`'s
+    and `test_netflix_multi_cell_boot_confirms_all_positives`'s own
+    recall assertions from correct to failing (`1/4`/`4/4` no longer
+    matched reality) — found by actually re-running the slow suite
+    during this entry's own work, not assumed clean from the non-slow
+    run alone, and fixed here by updating both tests' own assertions and
+    extending the multi-cell boot to include `LABGEN-JV-0009`. A second,
+    structurally identical regression was then found the same way, by a
+    full non-slow-suite re-run after that fix (not assumed sufficient on
+    its own): `tests/test_auto.py::test_points_from_ground_truth_sets_
+    body_content_type_only_for_json_cases` hardcoded Netflix's own
+    whole-body-JSON point count at 3; updated to 4, with the new point's
+    own `body_content_type` asserted explicitly.
+  - Unit tests (`tests/test_oracle_strategies_price_integrity.py`, 10
+    tests, fake-sender based, mirroring `test_oracle_strategies_mass_
+    assignment.py`'s own vulnerable/secure-twin pattern): the vulnerable
+    `client_trusted_amount` twin confirms; the secure
+    `server_recomputed_amount` twin fails closed; a false-positive-
+    avoidance case (a target that always returns the same fixed low
+    amount) fails closed; a non-JSON candidate, a missing-field
+    response, and a rejected probe B each fail closed; the rule matches/
+    doesn't-match/doesn't-match-an-unrelated-sink-context cases; and the
+    registration check.
+  - Real, executed live-boot proof
+    (`tests/test_oracle_strategies_price_integrity_live_boot.py`, driven
+    through the real `RequestsProbeSender` against a real booted
+    `LABGEN-JV-0009`/`0010` cell pair, never a fake sender): the
+    strategy confirms the vulnerable twin and correctly fails closed on
+    the secure twin.
+  - Verified live through the real `fuzzlab.harness.multitarget` Phase E
+    wiring (`test_netflix_multi_cell_boot_confirms_all_positives`,
+    extended): Netflix's real, scored recall in that multi-cell boot
+    moves from 4/4 to 5/5.
+  - **Cross-stack generalization, verified live (`CC-LAB-0189`,
+    2026-09-23, updated in place)**: `go_net_http` gained its own first
+    `price_integrity_bypass` instance (`TWCH-0010`, Twitch's channel-
+    subscription-purchase endpoint) using the same fixed `plan_tier`/
+    `monthly_charge` field names this strategy already hardcodes, as a
+    deliberate design choice made specifically to prove reuse. This
+    strategy needed **zero** new code to confirm the new `go_net_http`
+    vulnerable twin and correctly fail closed on its new secure twin --
+    the first proof this strategy generalizes across stacks in the
+    direction `spring_boot` -> `go_net_http` (this entry's own original
+    proof, above, was single-stack; `FR-LAB-142`'s `AccessControlIdor
+    Strategy` proof went the other direction, `go_net_http` ->
+    `spring_boot`). Verified through the real `fuzzlab.harness.
+    multitarget` pipeline (`tests/test_multitarget_category4.py::
+    test_both_apps_run_through_multitarget_for_real`, extended): Twitch's
+    real, scored recall in that boot moves from 8/9 to 9/10.
+
+- **FR-FUZZ-28** *(`GoTemplateSstiStrategy`; `CC-FUZZ-0042`,
+  2026-09-23).* The oracle supports real **SSTI confirmation on Go's
+  `text/template` syntax** — closing `CC-LAB-0196`'s own honestly-
+  documented detection gap for Twitch's `TWCH-0012` (`/channels/
+  commands`, `go_net_http`'s first `ssti`/`template_render` instance),
+  reusing `R-SSTI`'s existing candidate-generation rule as-is (it
+  already nominates on `sink_context`/location, not per-mechanism, so no
+  audit-side change was needed):
+  - **The gap this closes.** The existing `SstiStrategy`'s
+    `_ssti_payloads()` wraps an infix arithmetic expression (`a*b`) in
+    five template-engine delimiter styles. That marker technique is
+    structurally incompatible with Go's `text/template`: its action
+    grammar has NO infix arithmetic operators at all (verified via a
+    real `go run` check and a real booted target,
+    `tests/test_labgen_go_live_boot.py::test_ssti_go_text_template_
+    syntax_mismatch`/`test_ssti_strategy_does_not_generalize_to_go_
+    text_template`), so two of the five payloads fail to parse outright
+    and the other three are echoed back as inert literal text.
+  - `GoTemplateSstiStrategy` (`vuln_class="ssti"`, `mechanism=
+    "go-template-len-marker"`) uses a different marker technique
+    entirely, built on `text/template`'s own builtin functions (`len`,
+    `index`, `printf`/`print`, the comparison functions), none of which
+    need an infix arithmetic operator: `{{ len "AAA...A" }}` (a literal
+    string of `N` `A` characters) evaluates to the decimal integer `N`
+    only if the engine genuinely parses the action and invokes the
+    builtin. `N` is randomized fresh per probe (3-digit range,
+    `secrets.randbelow(900) + 100`, matching `SstiStrategy`'s own `a`/
+    `b` range).
+  - **False-positive defense, a differential over a single-probe
+    heuristic** (this project's own established preference, per
+    `InsecureDeserializationTypeConfusionStrategy`'s own docstring): a
+    single probe's random 3-digit `N` coincidentally already appearing
+    somewhere in an unrelated normal response is a real, if small, risk.
+    So this strategy sends TWO independent probes with two distinct
+    random lengths `N1 != N2` and confirms only when ALL hold: neither
+    probe's own literal payload is echoed back verbatim (rules out dumb
+    reflection); probe 1's response contains `N1` as a whole decimal
+    token (word-boundary matched); probe 2's response contains `N2`
+    likewise; and NEITHER response also contains the OTHER probe's
+    length as a whole token (a cross-contamination guard against a
+    cached/stale/echo-everything response that would otherwise pass the
+    first three checks without actually computing a fresh,
+    request-specific `len()` each time).
+  - **Design decision: a new strategy under the same category, not a
+    widened `SstiStrategy`** — checked against this project's own
+    established architecture (`default_strategies()`'s own registration
+    order, `Oracle.confirm()`'s multi-strategy-per-category dispatch)
+    before deciding, not assumed. `Oracle.confirm()` already tries every
+    strategy whose `category` matches a candidate in order, stopping at
+    the first confirming verdict, with no code change needed to add a
+    second strategy under the same `category` — the same
+    "cheaper/broader mechanism first, specialized fallback for a syntax
+    family the first one structurally cannot reach next" layering
+    `SsrfInBandMarkerStrategy`/`SsrfOobStrategy` and M1 timing/
+    `CommandInjectionOobStrategy` already establish. Folding this into
+    `SstiStrategy.confirm()` itself would make every non-Go target pay
+    for two additional wasted requests on top of its own five, and would
+    conflate two structurally different marker techniques in one method,
+    against this project's one-mechanism-per-strategy convention.
+    Registered directly after `SstiStrategy` in `default_strategies()`
+    (category `server-side-template-injection`): `SstiStrategy` is tried
+    first (broader existing coverage across the arithmetic-evaluating
+    engines this lab already has), and this strategy is the fallback
+    specifically for the syntax family `SstiStrategy` cannot parse into
+    evaluation at all.
+  - **JSON whole-body-point support, gated and hardcoded like this
+    project's own established convention** (`PriceIntegrityBypass
+    Strategy`'s `monthly_charge`/`plan_tier`, `MassAssignmentPrivileged
+    FieldStrategy`'s `is_partner`): for a `content_type ==
+    "application/json"` candidate, the marker expression is wrapped as
+    `{"template": "<expr>"}` — this lab's own `user_supplied_template_
+    compile` sink shape. A non-whole-body candidate (a plain named
+    query/form param) sends the marker expression directly, unwrapped.
+    A differently-shaped JSON whole-body SSTI sink (a different field
+    name) has nothing for this strategy to build and correctly fails
+    closed rather than misfiring.
+  - Unit tests (`tests/test_oracle_vectors.py`, fake-sender based,
+    mirroring `SstiStrategy`'s own test structure in the same file): the
+    vulnerable case (a fake sender that genuinely evaluates `len`)
+    confirms; a mere-reflection sender, a static/fixed-response sender
+    (including one containing unrelated decimal digits, the false-
+    positive class this strategy's own docstring names explicitly), and
+    a stale/cross-contaminated sender (one that always echoes back the
+    first probe's own result) each fail closed.
+  - Real, executed live-boot proof
+    (`tests/test_labgen_go_live_boot.py::test_go_template_ssti_
+    strategy_closes_the_generalization_gap`, driven through a real
+    `GoLiveBootHarness` boot of `LABGEN-GO-0023`/`0024`, never a fake
+    sender): the strategy confirms the real vulnerable twin and
+    correctly fails closed on the real secure twin (which only ever
+    does a fixed-map lookup and never evaluates `len` on caller input).
+  - **Existing coverage re-verified unmodified, not assumed unaffected**:
+    `spring_boot`'s TrackerNest SSTI live-boot tests
+    (`tests/test_labgen_spring_boot_live_boot.py::
+    test_ssti_vulnerable_twin_evaluates_ognl_expression_for_real`/
+    `test_ssti_secure_twin_never_evaluates_the_tainted_value`) and its
+    real-pipeline SSTI coverage
+    (`tests/test_labgen_spring_boot_trackernest_multitarget.py`, which
+    drives `TNEST-0001` through `SstiStrategy` via the real
+    `fuzzlab.harness.multitarget` pipeline) were re-run directly against
+    a real boot and stay green — `GoTemplateSstiStrategy` is additive
+    only (a new, separately-scoped strategy tried after `SstiStrategy`
+    in the same category), never touching `SstiStrategy`'s own code.
+  - Verified through the real `fuzzlab.harness.multitarget` pipeline
+    (`tests/test_multitarget_category4.py::
+    test_both_apps_run_through_multitarget_for_real`, extended): Twitch's
+    `TWCH-0012` is now a real, confirmed finding; ground-truth
+    cardinality stays 12 positives (a pure detection increment, not a
+    lab-side change), `tp` moves from 9 to 10, and Twitch's own real,
+    scored recall moves from `9/12` to `10/12` (only `webhook_signature`
+    and `path_traversal` remain undetected, each for its own distinct,
+    tracked reason).
+
+- **FR-FUZZ-29** *(`HttpHeaderInjectionCrlfStrategy`; `CC-FUZZ-0045`,
+  2026-09-23).* The oracle supports real **CRLF response-header-injection
+  (CWE-113) confirmation** for `http_header_injection`, paired with
+  `FR-AUD-16`'s candidate-generation rule, closing `CC-LAB-0198`'s own
+  deliberately-deferred detection follow-on for Twitch's `TWCH-0013`
+  (`/channels/redirect?destination=`) — this project's own last known
+  real category-4 detection gap:
+  - `HttpHeaderInjectionCrlfStrategy` (`vuln_class=
+    "http_header_injection"`, `mechanism=
+    "crlf-response-header-injection-differential"`): a two-probe
+    differential over a per-call random header name/token. Probe A
+    (malicious) sends `f"fuzzlab-ok\r\n{header_name}: {token}"`;
+    confirms only if the response genuinely carries a header named
+    `header_name` (case-insensitive lookup, matching
+    `OpenRedirectStrategy`'s own `_header` convention) whose value is
+    `token`. Probe B (control) sends the identical text with the `\r\n`
+    replaced by a single space; requires the same header to be ABSENT —
+    ruling out a target that turns an arbitrary input substring into a
+    response header for some unrelated reason, not specifically CRLF
+    splitting.
+  - **Verified empirically before design, not assumed** (read
+    `fuzzlab/labgen/emitters/go_net_http/templates/sinks/
+    raw_socket_response_write.go.j2`, the vulnerable twin's own
+    `http.Hijacker` mechanism, first): booted the real app and sent a
+    real `RequestsProbeSender` probe directly — `requests` (via
+    `urllib3` -> `http.client`'s own header parser) parses a genuinely
+    spliced-in extra header line exactly like any other real header, with
+    no merging/normalization defeating observation for this payload shape
+    (one injected header, no second blank-line-terminated fake response).
+    A raw-socket/`http.client`-level probe, the alternative this task's
+    own instructions asked to consider, turned out unnecessary in
+    practice.
+  - Known limitation, not silently swept under the rug: detects CRLF
+    injection observable as an extra header on the SAME response the
+    probe's own request received — a full response-SPLITTING attack (a
+    second `\r\n\r\n` terminating the current response and smuggling an
+    entirely separate fake response to a downstream cache/proxy) is a
+    related but stronger primitive this strategy does not separately
+    verify, since this project's own lab shape only instantiates the
+    single-extra-header variant.
+  - Real, executed live-boot proof (`tests/test_labgen_go_live_boot.py::
+    test_http_header_injection_strategy_closes_the_crlf_detection_gap`,
+    driven through a real `GoLiveBootHarness` boot, never a fake sender):
+    confirms the real vulnerable twin (`LABGEN-GO-0025`) and correctly
+    fails closed on the real secure twin (`LABGEN-GO-0026`, which rejects
+    the identical payload with HTTP 400).
+  - Verified through the real `fuzzlab.harness.multitarget` pipeline
+    (`tests/test_multitarget_category4.py::
+    test_both_apps_run_through_multitarget_for_real`, extended): Twitch's
+    `TWCH-0013` is now a real, confirmed finding; ground-truth cardinality
+    stays 15 (a pure detection increment), `tp` moves from 12 to 13, and
+    Twitch's own real, scored recall moves from `12/15` to `13/15` (only
+    `webhook_signature` and `path_traversal` remain undetected, each for
+    its own distinct, already-tracked reason).
+  - Wiring this into the real pipeline surfaced and fixed a second,
+    independent defect (`BUG-0046`/`PA-0048`): `fuzzlab/harness/auto.py::
+    points_from_ground_truth`'s `sink_context_by_point` lookup silently
+    collapsed `TWCH-0013`/`TWCH-0015`'s shared `destination` sink's two
+    distinct `sink_context` values down to one, discarding `"header"` —
+    fixed by keeping every distinct value per point and emitting one
+    audited point per value, verified harmless against `fuzzlab.harness.
+    scoring.score`'s own set-based, vuln_class-keyed dedup and against a
+    full non-slow-suite + multitarget/live-boot re-run (no new
+    regressions).
+
+- **FR-FUZZ-30** *(`PathTraversalFsPathReadStrategy`; `CC-FUZZ-0046`,
+  2026-09-23).* The oracle supports real **path-traversal (CWE-22,
+  `fs_path_read` sink context) confirmation** for `path_traversal`,
+  paired with `FR-AUD-17`'s candidate-generation rule, closing
+  `CC-LAB-0190`'s own deliberately-deferred detection follow-on for
+  Twitch's `TWCH-0011` (`GET /clips/export?filename=`) — this project's
+  own last known real, TRACKED category-4 detection gap (only
+  `webhook_signature`'s own confirmed-infeasible CWE-347 timing side
+  channel remains):
+  - `PathTraversalFsPathReadStrategy` (`vuln_class="path_traversal"`,
+    `mechanism="passwd-file-content-marker-differential"`): a `../`-
+    traversal payload must make the response body contain the target's
+    own real, PRE-EXISTING `/etc/passwd` content (`root:.*:0:0:`); a
+    control probe with no traversal separators at all (`"passwd"`) must
+    NOT show that marker. Nothing is planted on the target's filesystem
+    — this only reads a file that already exists there, the same
+    standard, safe, purely-read black-box technique this project's own
+    `fuzzlab/labgen/nuclei_oracle.py` already bundles for a different
+    sub-purpose (`lab/nuclei-templates/path-traversal-etc-passwd.yaml`).
+  - **Corrects a mischaracterization made when detection was originally
+    deferred** (`FR-LAB-145`, `CC-LAB-0190`): that deferral reasoned "a
+    path-traversal strategy cannot plant its own canary on the target's
+    filesystem... probing well-known OS paths is not a safe/realistic
+    black-box signal," conflating this concern with a canary-PLANTING
+    design (the SSRF/XXE pattern via an `OobListener`). That reasoning
+    never applied to the read-a-pre-existing-file technique actually
+    used — `path_traversal` was tracked as "genuinely unbuilt, an open
+    follow-on," not confirmed infeasible the way `webhook_signature` is
+    for its own distinct, unrelated reason.
+  - **Verified empirically against the real, live-booted vulnerable/
+    secure twins before design, not assumed**: the vulnerable twin
+    (`LABGEN-GO-0021`) returns real `/etc/passwd` content (HTTP 200) for
+    `filename=../../../../../../../../etc/passwd`; the secure twin
+    (`LABGEN-GO-0022`, `realpath_confine`) rejects the identical payload
+    outright (HTTP 403) — the existing, already-escalating
+    `_TRAVERSAL_PAYLOADS` list (shared with the pre-existing,
+    differently-named `PathTraversalStrategy`/`"file-inclusion"` class,
+    which matches no current ground truth and is left untouched) already
+    reaches real OS-file content at this lab's confinement depth, with
+    no new traversal-depth tuning needed.
+  - Real, executed live-boot proof (`tests/test_labgen_go_live_boot.py::
+    test_path_traversal_strategy_closes_the_fs_path_read_detection_gap`,
+    driven through a real `GoLiveBootHarness` boot and a real
+    `RequestsProbeSender`, never a fake sender): confirms the real
+    vulnerable twin and correctly fails closed on the real secure twin.
+  - Verified through the real `fuzzlab.harness.multitarget` pipeline
+    (`tests/test_multitarget_category4.py::
+    test_both_apps_run_through_multitarget_for_real`, extended): Twitch's
+    `TWCH-0011` is now a real, confirmed finding; ground-truth
+    cardinality stays 15 (a pure detection increment), `tp` moves from
+    13 to 14, and Twitch's own real, scored recall moves from `13/15` to
+    `14/15`.
+
+- **FR-FUZZ-23** *(`JwtAlgNoneConfusionStrategy`; `CC-FUZZ-0037`,
+  2026-09-23).* The oracle supports real **JWT algorithm-confusion
+  (CWE-347) confirmation**, paired with `FR-AUD-11`'s candidate-
+  generation rule, closing Twitch's `TWCH-0004` structural detection
+  zero (`CC-LAB-0180`'s own deliberately-separated follow-on):
+  - `JwtAlgNoneConfusionStrategy` (`vuln_class=
+    "jwt_algorithm_confusion"`, `mechanism="alg-none-bypass"`): a
+    two-probe differential over a header-carried Bearer token. Probe A
+    (an unsigned `alg:none` token, a freshly-minted marker carried in
+    its `channel_id` claim — the literal field the real sink echoes)
+    must return 200 with the marker echoed back; probe B (the same
+    marker, claiming `HS256` with a garbage signature) must return a
+    real auth-rejection status (401/403 specifically, not merely
+    "not 200") — ruling out both a generically-permissive endpoint and
+    an unrelated parsing-crash false positive.
+  - **A real defect found by the accuracy-review pass before
+    implementation**: an earlier draft carried the marker in an
+    arbitrary `{"marker": ...}` JSON field, which the real sink
+    template silently drops (only `channel_id`/`role` are unmarshaled)
+    — would have made the strategy permanently return `None` against a
+    real boot despite passing every unit test with a hand-built fake
+    sender. Corrected before any code was written.
+  - `fuzzlab.core.runmode._VULN_TO_CATEGORY` gained
+    `"jwt_algorithm_confusion": "jwt-algorithm-confusion"` — the fourth
+    instance of the recurring underscore/hyphen gap, caught automatically
+    this time by the structural guard test added for the second instance.
+  - Verified live against Twitch's real booted twins; through the real
+    `fuzzlab.harness.multitarget` Phase E wiring, Twitch's real, scored
+    recall moves from 2/4 to 3/4.
+
+- **FR-FUZZ-22** *(`XxeInBandMarkerStrategy`/`XxeOobStrategy`;
+  `CC-FUZZ-0035`, 2026-09-23).* The oracle supports real **XXE (CWE-611)
+  confirmation**, paired with `FR-AUD-10`'s candidate-generation rule,
+  closing TrackerNest's and Netflix's shared structural detection zero:
+  - `XxeInBandMarkerStrategy` (`mechanism="in-band-external-entity-
+    marker"`) and `XxeOobStrategy` (`mechanism="oob-external-entity-
+    fetch"`), directly modeled on the SSRF pair. A `SYSTEM` external
+    entity is pointed at the injected `OobListener`'s own loopback
+    callback URL; the in-band layer confirms when the immediate response
+    echoes the minted token, the OOB layer falls back to a real callback
+    hit for blind XXE (entity resolved but not reflected). Two documented
+    wrapper XML shapes tried in-band before the OOB fallback.
+  - **Explicit, docstring-stated safety scope**: the entity value is
+    always `OobListener`'s own minted callback URL, never a real
+    filesystem URI or other host — required because XXE's `SYSTEM`
+    mechanism is trivially adaptable to a genuine local-file-read
+    primitive, unlike SSRF's URL-only shape this pattern is otherwise
+    modeled on.
+  - Calls `sender.send()` directly rather than extending the shared
+    `_send()` helper with an unexercised override parameter (an adequacy-
+    pass correction, YAGNI) — XXE's own ground truth is `rendering=
+    "server"` (not `server-json`), so each strategy declares its own
+    fixed `content_type="application/xml"` at the call site.
+  - **Surfaced two pre-existing multitarget tests that never actually
+    exercised SSRF detection** (`tests/test_labgen_php_laravel_huddlehub_
+    multitarget.py`, `tests/test_multitarget_category3_combined.py`
+    both never passed `oob=` to `run_targets`, so every OOB-dependent
+    strategy had been failing closed there since `FR-FUZZ-18` landed) —
+    fixed and re-verified against real boots, not a production defect.
+  - Verified live against TrackerNest's real booted twins, both directly
+    and through the real `fuzzlab.harness.multitarget` pipeline:
+    TrackerNest's real, scored recall moves from 1/3 to 2/3.
+
+- **FR-FUZZ-21** *(`InsecureDeserializationTypeConfusionStrategy`;
+  `CC-FUZZ-0034`, 2026-09-23).* The oracle supports real
+  **insecure-deserialization (CWE-502) confirmation**, paired with
+  `FR-AUD-9`'s candidate-generation rule, closing one of Netflix's two
+  remaining structural detection zeros:
+  - `InsecureDeserializationTypeConfusionStrategy` (`vuln_class=
+    "insecure_deserialization"`, `mechanism="polymorphic-type-
+    confusion"`): a two-probe differential over Jackson's `WRAPPER_ARRAY`
+    polymorphic-type format. Probe A names a real, always-present JDK
+    class (`java.util.HashMap`) and must succeed (200); probe B names a
+    freshly-minted, guaranteed-nonexistent class and must fail
+    *specifically* by echoing that exact class name back — proof of
+    genuine attacker-controlled class resolution, ruling out an endpoint
+    that simply validates nothing. Deliberately no real gadget-chain/RCE
+    payload sent, ever (this project's own no-new-dual-use-infra
+    posture, the same reasoning §8 records for why the URLDNS follow-on
+    was shelved for this same class).
+  - **A real, previously dormant defect found and fixed**:
+    `fuzzlab.harness.auto.points_from_ground_truth` never propagated
+    `sink_context` from the ground truth's scoring `Case` onto the
+    audited point at all — harmless until this was the first rule ever
+    keyed on `sink_context_in`, at which point it silently zeroed out
+    every such candidate. Fixed by looking up the matching `Case` by
+    `(url, method, param)` identity.
+  - `fuzzlab.core.runmode._VULN_TO_CATEGORY` gained
+    `"insecure_deserialization": "insecure-deserialization"` — the
+    second instance of the exact gap `FR-FUZZ-20` found for
+    `access_control`. A structural guard
+    (`test_every_ruled_strategy_category_is_reachable_from_its_vuln_class`)
+    now catches a third instance automatically, scoped to only
+    categories with a real audit rule (so it does not flag the
+    MeadowMart app's own deliberately-deferred `redos`/
+    `prototype_pollution` gap).
+  - Verified live against Netflix's real booted twins; through the real
+    `fuzzlab.harness.multitarget` Phase E wiring, Netflix's real, scored
+    recall moves from 0 to 1/2, and the project's own cross-target
+    `generalizes` definition (recall > 0 on ≥ 2 scored targets) is met
+    for the first time.
+
+- **FR-FUZZ-20** *(`AccessControlIdorStrategy`; `CC-FUZZ-0033`, 2026-09-23).*
+  The oracle supports real **access-control (IDOR/BOLA) confirmation**,
+  paired with `FR-AUD-8`'s candidate-generation rule, closing `CC-LAB-0178`'s
+  open question:
+  - `AccessControlIdorStrategy` (`vuln_class="access_control"`,
+    `mechanism="identity-differential"`): sends two unrelated id values;
+    confirms only when both return HTTP 200, echo the requested id back in
+    a non-empty body, contain no generic denial phrase (`\b`-anchored,
+    PA-0022), and the two bodies differ — else fails closed. A generic
+    differential in the same family as `SqliBooleanStrategy`/
+    `SsrfInBandMarkerStrategy`, not a lab-specific hardcode.
+  - `fuzzlab.core.runmode._VULN_TO_CATEGORY` gained
+    `"access_control": "access-control"` — required for the rule/strategy
+    to actually be selected by a ground-truth-driven run (the vuln_class
+    and category slugs genuinely differ here, unlike `ssrf`).
+  - **Documented, not eliminated, false-positive class**: a legitimate
+    endpoint that echoes an arbitrary id back without gating anything
+    sensitive by ownership will still confirm (pinned by
+    `test_documented_false_positive_class_a_public_echo_endpoint_does_
+    confirm`) — stated in the strategy's own docstring per the pre-change
+    review's adequacy pass, mitigated only by `R-ACCESS-CONTROL`'s
+    narrowed rule scope (`FR-AUD-8`), not by the strategy itself. This is
+    the project's first strategy for this class; broader validation
+    against a second, differently-shaped target is expected before it is
+    trusted beyond this lab.
+  - Verified live against Twitch's real booted twins
+    (`test_real_boot_proves_the_access_control_idor_strategy_end_to_end`);
+    Twitch's real, scored `multitarget` recall moves from 1/3 to 2/3.
+  - **Cross-stack generalization now verified** (`CC-LAB-0187`,
+    2026-09-23): the "broader validation against a second,
+    differently-shaped target" this requirement's own note called for
+    has now happened — driven with zero new code against Netflix's first
+    `access_control` page (`spring_boot`, `LABGEN-JV-0007`/`0008`,
+    `/api/account/billing`), confirming the vulnerable twin and
+    correctly failing closed on the secure twin
+    (`tests/test_labgen_spring_boot_account_billing_live_boot.py::
+    test_real_boot_proves_the_access_control_idor_strategy_generalizes_to_spring_boot`).
+    Netflix's own real, scored recall moves from 3/3 to 4/4 in the
+    multi-cell live-boot test. This is the first time this strategy has
+    been proven to generalize across two genuinely different stacks
+    (`go_net_http` and `spring_boot`), not just across routes on the
+    same stack (`CC-LAB-0183`'s own `channel_id`/`/channels/subscribers`
+    proof).
+
+- **FR-FUZZ-19** *(header points become real, audited points; a
+  content-type-aware whole-body sender; `CC-FUZZ-0032`, 2026-09-23).*
+  Closes `FR-FUZZ-13`'s own gap and one of `FR-LAB-99`'s three flagged
+  follow-on items:
+  - A `location="header"` point is now included by
+    `fuzzlab.harness.auto.points_from_ground_truth` and sent for real by
+    both `RequestsProbeSender`/`SeamProbeSender`: the value goes out as a
+    request header named the literal `param` (matching `CC-LAB-0174`'s own
+    established convention that `param` *is* the literal header name for a
+    header-carried case).
+  - A `param="body"`/`location="body"` point gets a declared
+    `body_content_type` **only** when its ground truth marks
+    `rendering="server-json"` (reusing the existing `rendering` field, no
+    new schema needed) — e.g. `NFLX-0001` (JSON), never TrackerNest's
+    `TNEST-0002`/`TNEST-0003` (XML / binary Java-serialized, `rendering=
+    "server"`, unaffected, still form-encoded exactly as before). This
+    field threads through `fuzzlab.audit.engine.InjectionPoint` →
+    `evaluate()`'s evidence → `fuzzlab.oracle.probe.Candidate` →
+    `ConfirmationStrategy._send()` → the sender's new `content_type`
+    keyword, which sends the raw body at that content type instead of
+    form-encoding `{param: value}`.
+  - **A real defect found and fixed before landing**:
+    `fuzzlab.harness.auto._CountingSender` (every real `run_auto` call
+    wraps its sender in this request-cost counter) did not accept or
+    forward `content_type` — it would have silently dropped it, reverting
+    every whole-body-JSON send back to form-encoding the moment it ran
+    through the real pipeline rather than a sender unit test. Fixed, with
+    a direct unit test pinning it
+    (`test_counting_sender_forwards_content_type`).
+  - **Not itself detection capability**: no new audit rule or oracle
+    strategy is added here. `webhook_signature`/`insecure_deserialization`
+    still have none (see §8's open questions for the concrete, corrected
+    reasoning on each, from the pre-change review's adequacy pass).
+
+- **FR-FUZZ-18** *(`CC-FUZZ-0031`, 2026-09-23).* The oracle supports real
+  **SSRF confirmation**, cheapest-first, paired with `FR-AUD-7`'s
+  candidate-generation rule:
+  - `SsrfInBandMarkerStrategy` (`vuln_class="ssrf"`, `mechanism=
+    "in-band-fetch-marker"`): a single request, no wait. Points the
+    candidate at an injected `OobListener`'s callback URL (reused as a
+    marker responder) and confirms iff the *same* response echoes the
+    minted token back — the shape this project's own SSRF lab cells
+    actually have (`go_net_http`'s `unchecked_url_fetch`:
+    `io.Copy(w, resp.Body)`).
+  - `SsrfOobStrategy` (`mechanism="oob-fetch-callback"`): the fallback for
+    a target that fetches but never echoes the body. Same `OobListener`
+    seam as `FR-FUZZ-10`'s `CommandInjectionOobStrategy` (optional
+    constructor injection, fail-closed no-op without one), but the
+    injected value is the callback URL sent directly — an SSRF sink's own
+    HTTP client fetches whatever URL it's given, no shell wrapping
+    needed. Default timeout 3.0s (vs. `CommandInjectionOobStrategy`'s
+    1.5s): a real fetch round trip can plausibly take longer than a local
+    shell `curl` even when genuinely vulnerable.
+  - `OobListener` (`fuzzlab/oracle/oob.py`) now echoes the minted token as
+    its response body on a matching `GET`/`POST` (previously always
+    empty) — additive; `record()`/`hits()`/`wait_for()` never read this
+    body, so `CommandInjectionOobStrategy`'s existing OOB-only usage is
+    unaffected. `do_HEAD` still sends no body (correct HTTP semantics).
+  - `default_strategies()` registers both, in-band before OOB
+    (cheapest-first, matching every other category's own stacking); adds
+    `_CATEGORY_TO_CLASS["ssrf"] = "ssrf"`.
+  - `fuzzlab.harness.multitarget.run_targets()` gained `oob`/`coverage`/
+    `dbfault` keyword passthrough to `run_auto()` (previously silently
+    dropped, though `run_auto()` already accepted them) — needed so a
+    `TargetSpec`-driven multitarget run can actually use this new
+    capability. Additive: all three default `None`, no existing caller
+    affected.
+  - **Proven against a real target, not just unit tests**: category 4's
+    own `tests/test_multitarget_category4.py` confirms the real SSRF cell
+    (`LABGEN-GO-0003`) end to end via a real, started `OobListener`
+    threaded through `run_targets()` against the real live-booted Go app.
 
 - **FR-FUZZ-14** *(`CC-FUZZ-0027`, 2026-09-23).* `RequestsProbeSender.send()`
   disables redirect-following (`allow_redirects=False`), matching
@@ -323,6 +993,30 @@ rewards) derives from it.
   `--max-mutation-variants`/`--allow-destructive` flags `CC-FUZZ-0019` (Lane
   C1/M8-wiring) added — was added by `CC-FUZZ-0022` (lane D0b), sequenced after
   C1 since both touch `fuzzlab/greybox/greybox_cli.py`.
+- **NFR-FUZZ-response-fidelity** *(`CC-FUZZ-0043`, `BUG-0044`/`PA-0046`)*
+  Every sender that builds a `Probe` (or a timing measurement) a
+  `ConfirmationStrategy`/timing oracle inspects as "the real target's
+  response" must report that response as the target actually sent it for
+  the specific request the strategy issued — never a client library
+  default's silent transformation of it (redirect-following in
+  particular, mirroring `PA-0030`'s harness-level rule, now widened to
+  cover senders too) — unless following that transformation is the
+  literal thing the strategy needs to observe. `RequestsProbeSender`
+  (`fuzzlab/tools/probesender.py`), `RequestsCorrelatingSender`
+  (`fuzzlab/greybox/run.py`), and `RequestsSender`
+  (`fuzzlab/tools/blind_sqli_fuzzer.py`) all now pass
+  `allow_redirects=False` explicitly, matching `fuzzlab.core.http`'s own
+  authenticated (`SeamProbeSender`) path, which already did. Found the
+  hard way: `OpenRedirectStrategy` needs the FIRST, un-followed response's
+  own `Location:` header, and a caller-controlled value echoed into a
+  real `Location:` header can resolve to a self-referencing redirect
+  (e.g. a bare `#...`-fragment value), which a redirect-following sender
+  chases forever until `requests.exceptions.TooManyRedirects` crashes the
+  whole run. A component whose job genuinely is to follow redirects (a
+  login-flow fetcher discovering an authenticated session, a crawler
+  discovering pages) is explicitly NOT covered by this requirement —
+  the discriminator is whether the caller is a confirmation/timing
+  oracle that needs the un-followed response.
 
 ## 5. Interfaces and data contracts
 Reads `candidate` rows (and scheduler choices); writes `attempt` rows (features,
@@ -349,6 +1043,78 @@ and `log_scalar`/`MetricLogger` writer API (FR-FUZZ-9).
 - `finding` rows are written only by the oracle and reproduce on re-run.
 
 ## 8. Open questions
+- (`CC-FUZZ-0032`, 2026-09-23) **`fuzzlab/greybox/run.py`'s
+  `RequestsCorrelatingSender` has the same `location="body"`
+  form-encode-only branch `RequestsProbeSender`/`SeamProbeSender` had
+  before `FR-FUZZ-15`, and was not given the same content-type
+  awareness.** Low risk today — `GreyboxConfirmationStrategy` only scopes
+  to `sql-injection`/`xss`, neither of which reaches a whole-body point —
+  but a real, latent gap the moment a future grey-box-confirmable category
+  does. Give it the same `content_type` handling when that happens, not
+  before (no consumer to test it against yet).
+- (`CC-FUZZ-0032`, 2026-09-23; re-examined and corrected 2026-09-23;
+  **resolved** `CC-FUZZ-0034`/`CC-AUD-0018`, 2026-09-23, by a different,
+  non-DNS mechanism) **No `insecure_deserialization` audit rule/oracle
+  strategy exists.** ~~This lab's own cells have no working
+  `ysoserial`-style RCE gadget chain ... a URLDNS-style gadget-chain-free
+  proof ... checked directly against this project's own `OobListener` and
+  found not to fit it as sketched ... Left open~~. The URLDNS OOB/DNS-
+  listener path recorded above remains genuinely not viable without new
+  infrastructure and was never built — but a materially simpler,
+  single-request, no-new-infra mechanism was found instead: Jackson's
+  `WRAPPER_ARRAY` polymorphic-type format lets a black-box probe observe
+  *class-resolution* itself (not code execution) as a two-probe
+  differential (a real benign class succeeds; a freshly-minted
+  nonexistent one fails with an attributable, class-name-echoing
+  rejection) — `R-INSECURE-DESERIALIZATION`/
+  `InsecureDeserializationTypeConfusionStrategy` (`FR-AUD-9`/`FR-FUZZ-17`),
+  verified live against Netflix's real booted twins. This proves the
+  CWE-502 mechanism (attacker-controlled type id reaches class
+  resolution/instantiation), deliberately not a demonstrated RCE gadget
+  chain — narrower than a full exploit proof, but real detection where
+  there was none, without the DNS-listener infrastructure expansion the
+  URLDNS path would have required.
+- (`CC-LAB-0175`/`FR-LAB-98`, `CC-FUZZ-0032`, 2026-09-23; **empirically
+  re-examined** `CC-FUZZ-0035` follow-on, 2026-09-23) **No
+  webhook-signature timing oracle — now confirmed genuinely infeasible
+  with this project's current wall-clock-HTTP measurement, not just
+  theoretically hard.** Both twins behave identically for any single
+  request (the divergence is comparison timing: `naive_string_compare`'s
+  `==` short-circuits on the first differing byte, `hmac.Equal` does not),
+  so a real oracle needs a statistical, multi-request timing-differential
+  mechanism. A concrete sketch was recorded (probe pairs comparing
+  response time for a candidate signature matching zero leading bytes of
+  the locally-known correct one, against one matching many leading bytes,
+  aggregated over enough paired samples for a real statistical test) —
+  **this session actually measured it live, not just reasoned about it**:
+  booted `LABGEN-GO-0001` for real, computed the true HMAC-SHA256 for a
+  fixed request body against the stack's own fixed demo secret, and sent
+  400 real HTTP requests per prefix-match length (0/16/32/48/62 of 64 hex
+  chars), randomly interleaved (not batched by length, to rule out a
+  connection-warmup/scheduler-warmup confound — an un-interleaved first
+  pass showed a monotonic-looking trend that was purely this artifact,
+  caught before being mistaken for a real signal). Interleaved result: no
+  detectable relationship between prefix-match length and latency at all
+  — min/median/trimmed-mean all land within the same few-hundred-
+  microsecond noise band regardless of how many leading bytes matched
+  (e.g. min latency 178–190µs across every prefix length tested). Go's
+  `==` per-byte comparison time is real but nanosecond-scale; ordinary
+  HTTP-over-loopback jitter (goroutine scheduling, GC, socket syscalls) is
+  2–3 orders of magnitude larger and completely swamps it even in this
+  idealized same-machine environment with zero real network latency — a
+  real target reachable only over an actual network would be worse, not
+  better. Confirms this needs either (a) a fundamentally different
+  measurement channel than wall-clock HTTP round-trip time (e.g. a
+  grey-box timing source reading server-side instrumentation directly,
+  the same class of seam `fuzzlab.greybox` already establishes for
+  coverage/DB-fault signals — not attempted, would need new
+  infrastructure), or (b) many orders of magnitude more samples than this
+  session's own quick 400-per-arm probe with proper outlier-robust
+  statistics, likely impractical for a fast test suite. Not a "not
+  attempted yet" gap anymore — a "attempted, measured, confirmed
+  infeasible at this layer" one. Left open for a future session with a
+  genuinely different architecture, not a bigger sample size of the same
+  approach.
 - Oracle interface for pluggable vulnerability classes (register-oracle hook
   shape).
 - Timing-threshold calibration per target/network profile.

@@ -24,24 +24,48 @@ AUTOMATIC = "automatic"
 MANUAL = "manual"
 
 # Ground-truth vuln_class values normalized to reference-style category slugs.
-# `ssti` (CC-CORE-0020): the only one of category 3's 6 new classes mapped so
-# far -- it already has a real, independently-verified working rule+strategy
-# pairing (`R-SSTI` in fuzzlab/audit/rules_data/default_rules.json,
-# `SstiStrategy` in fuzzlab/oracle/strategies.py), verified live against both
-# of TrackerNest's real twins before landing. The other 5
-# (`xxe`/`insecure_deserialization`/`webhook_signature_bypass`/`ssrf`/
-# `outbound_header_injection`) have no confirmer built yet -- mapping them
-# now would only relabel an honest false negative as a false negative that
-# looks wired but never confirms (evaluate() would nominate a candidate with
-# no strategy to confirm it, `category_to_oracle_class()` returning None),
-# not a real improvement, so they stay unmapped until each has its own
-# verified confirmer.
+# A class is added here once it has a real, independently-verified working
+# rule+strategy pairing -- mapping one before that would only relabel an
+# honest false negative as a false negative that looks wired but never
+# confirms (evaluate() would nominate a candidate with no strategy to confirm
+# it, `category_to_oracle_class()` returning None), not a real improvement.
+# `ssti` (CC-CORE-0020): `R-SSTI`/`SstiStrategy`, verified live against both
+# of TrackerNest's real twins. `access_control` (CC-FUZZ-0033): its
+# vuln_class ("access_control", underscore -- ground truth's own convention)
+# and its category ("access-control", hyphen -- this project's reference-slug
+# convention, matching every other multi-word category here) genuinely
+# differ, unlike e.g. `ssrf` (identical either way, so it needs no entry);
+# `R-ACCESS-CONTROL`/`AccessControlIdorStrategy`, verified live against
+# Twitch's real IDOR twins (`test_real_boot_proves_the_access_control_idor_
+# strategy_end_to_end`). `insecure_deserialization` (CC-FUZZ-0034): same
+# underscore/hyphen mismatch, `R-INSECURE-DESERIALIZATION`/
+# `InsecureDeserializationTypeConfusionStrategy`, verified live against
+# Netflix's real Jackson-deserialization twins. `xxe` (CC-FUZZ-0035) and
+# `jwt_algorithm_confusion` (CC-FUZZ-0037) followed the same pattern.
+# `tests/test_oracle.py::test_every_ruled_strategy_category_is_reachable_
+# from_its_vuln_class` now guards the whole dict pairing generically (for
+# every *ruled* category) so a missed entry fails loudly at test time
+# instead of silently shipping an unreachable strategy.
+# `webhook_signature` (and `outbound_header_injection`) still have no
+# confirmer built -- stay unmapped until each does. `unrestricted_file_
+# upload` (CC-LAB-0186's deferred follow-on) is the seventh instance of this
+# same underscore/hyphen mismatch found in this session -- checked
+# proactively before landing, not found by the guard test after the fact
+# this time: `R-UNRESTRICTED-FILE-UPLOAD`/`UnrestrictedFileUploadContent
+# TypeTrustStrategy`, verified live against Twitch's real
+# LABGEN-GO-0017/0018 twins.
 _VULN_TO_CATEGORY = {
     "sqli": "sql-injection",
     "xss-reflected": "xss",
     "xss-stored": "xss",
     "xss-dom": "xss",
     "ssti": "server-side-template-injection",
+    "access_control": "access-control",
+    "insecure_deserialization": "insecure-deserialization",
+    "jwt_algorithm_confusion": "jwt-algorithm-confusion",
+    "weak_token_entropy": "weak-token-entropy",
+    "mass_assignment": "mass-assignment",
+    "unrestricted_file_upload": "unrestricted-file-upload",
     # `open_redirect` (category 5, Booking.com, `CC-LAB-0210`): a real rule
     # (`R-OPEN-REDIRECT`, `name_regex` matching "return_to" via its "return"
     # alternative) and confirmation strategy (`OpenRedirectStrategy` in
@@ -52,6 +76,20 @@ _VULN_TO_CATEGORY = {
     # doing so surfaced and fixed a real, separate defect in
     # `RequestsProbeSender` (`BUG-0039`) that would otherwise have made this
     # mapping look wired but silently fail (or crash) against a real target.
+    # Independently rediscovered (`BUG-0045`/`PA-0047`) as the first
+    # instance the guard test (`test_every_ruled_strategy_category_is_
+    # reachable_from_its_vuln_class`, `CC-FUZZ-0034`) failed to catch --
+    # that guard iterates `fuzzlab.oracle.strategies._CATEGORY_TO_CLASS`'s
+    # own keys, where `_CATEGORY_TO_CLASS["open-redirect"] ==
+    # "open-redirect"` (identical, since `OpenRedirectStrategy.vuln_class`
+    # happens to already be hyphenated) trivially skipped its own
+    # `vuln_class == category` early-continue, never checking against what
+    # ground-truth `labels.json` files actually spell the class as
+    # (`"open_redirect"`, underscored, this project's labels-schema
+    # convention). `R-OPEN-REDIRECT`/`OpenRedirectStrategy` (verified live
+    # for category 5's Booking.com pilot and this stack's own Twitch page,
+    # `CC-LAB-0199`) were both genuinely reachable all along -- only this
+    # mapping entry was missing.
     "open_redirect": "open-redirect",
     # `spel_injection` (category 5, Expedia, `CC-LAB-0214`): a new rule
     # (`R-SPEL-INJECTION`) and confirmation strategy (`SpelInjectionStrategy`
@@ -75,7 +113,11 @@ _VULN_TO_CATEGORY = {
     # recomputation, which the vulnerable twin never performs, proven live
     # in `tests/test_labgen_price_integrity.py`'s own live-boot test before
     # this mapping landed. Verified live against both of Booking.com's real
-    # twins before landing.
+    # twins before landing. (Category 4's own Netflix/Twitch instances of
+    # this same class, `CC-LAB-0188`/`CC-LAB-0189`, reuse this identical
+    # mapping entry -- see `PriceTrustDifferentialStrategy` in
+    # `fuzzlab/oracle/strategies.py` for their own, differently-shaped
+    # confirmation strategy.)
     "price_integrity_bypass": "price-integrity-bypass",
     # `csv_formula_injection` (category 5, Booking.com, `CC-LAB-0211`): a new
     # rule (`R-CSV-FORMULA-INJECTION`) and confirmation strategy
@@ -86,6 +128,21 @@ _VULN_TO_CATEGORY = {
     # against a neutralizer that only escapes a subset). Verified live
     # against both of Booking.com's real twins before landing.
     "csv_formula_injection": "csv-formula-injection",
+    # `http_header_injection` (CC-FUZZ-0045): the same underscore/hyphen
+    # mismatch class again, added proactively alongside `HttpHeaderInjection
+    # CrlfStrategy`/`R-HEADER-INJECTION` rather than being found empirically
+    # after the fact -- checked both this dict and `_CATEGORY_TO_CLASS`
+    # (`fuzzlab/oracle/strategies.py`) before assuming either already had
+    # an entry, per this change's own task instructions.
+    "http_header_injection": "http-header-injection",
+    # `path_traversal` (CC-FUZZ-0046): the same underscore/hyphen mismatch
+    # class again (`PathTraversalFsPathReadStrategy.vuln_class ==
+    # "path_traversal"`, category `"path-traversal"`), added proactively
+    # alongside `R-PATH-TRAVERSAL` rather than found empirically after the
+    # fact -- checked both this dict and `_CATEGORY_TO_CLASS`
+    # (`fuzzlab/oracle/strategies.py`) before assuming either already had
+    # an entry, per `BUG-0045`'s own lesson.
+    "path_traversal": "path-traversal",
 }
 
 

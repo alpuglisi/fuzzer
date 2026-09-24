@@ -1,0 +1,64 @@
+# Partner content-metadata ingestion, XXE sample manifest (CC-LAB-0179),
+# `spring_boot` (Netflix, category 4 pilot).
+#
+# Netflix's second real page -- category 4's own "coherent page/route set"
+# depth work, per docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md §4 step 1.
+# Reuses the XXE shape TrackerNest (category 3) already built and
+# live-boot-proved on this same shared `spring_boot` package (`CC-LAB-0131`:
+# source `raw_body`, sinks `xml_external_entities_enabled`/`_disabled`,
+# sink family `xml_parse_input`, concern `xxe_entity_resolution`) at a new,
+# Netflix-specific route -- zero new generator code.
+#
+# Real-world grounding (fact vs. inference labeled, per this project's own
+# sourcing discipline -- see docs/research/site-architecture-survey-
+# functionality-netflix.md §3's own confidence notes):
+#   FACT: DDEX's ERN (Electronic Release Notification) messages -- the
+#     industry-standard format for B2B media-content-metadata exchange --
+#     are XSD-validated XML documents (ddex.net's own knowledge base,
+#     "Preambles for XML-based DDEX messages"; real schemas published at
+#     ddex.net/xml/ern/.../release-notification.xsd).
+#   FACT: Netflix is a confirmed EIDR (Entertainment Identifier Registry)
+#     participant, alongside the major Hollywood studios, MovieLabs,
+#     CableLabs, Comcast, and others, for shared content-identifier/
+#     metadata coordination (industry reporting, 2020; EIDR/DDEX
+#     partnership, ddex.net).
+#   INFERENCE (this manifest's own illustrative choice, not a confirmed
+#     Netflix-internal implementation detail): a partner content-metadata
+#     ingestion endpoint accepting an XML feed is a plausible illustrative
+#     surface for this real B2B integration pattern -- distinct from
+#     `/api/playback/resume`'s consumer-facing mutation, and distinct from
+#     TrackerNest's own `/issues/import` (a different app, different real
+#     content, same underlying CWE-611 mechanism).
+#
+# Accepted risk, stated explicitly (not left implicit): the `raw_body`/
+# `xml_external_entities_enabled`/`_disabled` modules are shared code with
+# TrackerNest's own XXE cell, not forked -- a future TrackerNest-motivated
+# change to those templates could silently affect this cell too. Mitigated
+# by `tests/test_labgen_spring_boot_xxe.py`'s own joint regression coverage
+# (both apps' XXE manifests rendered and diffed in the same test run).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: resolves a DOCTYPE-declared external entity referenced from
+  # inside the ingested content feed into the echoed response (CWE-611).
+  - cell_id: LABGEN-JV-0003
+    class: xxe
+    stack_profile: spring_boot
+    route: { method: POST, path: /api/content/import }
+    sink_context:
+      family: xml_parse_input
+      required_neutralizations: [xxe_entity_resolution]
+    transform: [xml_external_entities_enabled]
+
+  # Secure twin: the only difference is the transform region
+  # (xml_external_entities_disabled instead of xml_external_entities_enabled)
+  # -- the minimal-pair invariant. Rejects any document containing a
+  # DOCTYPE outright with a real HTTP 400.
+  - cell_id: LABGEN-JV-0004
+    class: xxe
+    stack_profile: spring_boot
+    route: { method: POST, path: /api/content/import }
+    sink_context:
+      family: xml_parse_input
+      required_neutralizations: [xxe_entity_resolution]
+    transform: [xml_external_entities_disabled]

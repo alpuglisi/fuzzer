@@ -30,6 +30,34 @@ from fuzzlab.labgen.schema import load_manifest
 _MANIFESTS = (
     "lab/manifests/webhook_signature_go_sample.yaml",
     "lab/manifests/ssrf_go_sample.yaml",
+    "lab/manifests/access_control_go_sample.yaml",
+    "lab/manifests/jwt_alg_confusion_go_sample.yaml",
+    "lab/manifests/weak_token_entropy_go_sample.yaml",
+    "lab/manifests/mass_assignment_go_sample.yaml",
+    # CC-LAB-0183: second access_control/db_row_by_id_lookup instance,
+    # reusing CC-LAB-0178's modules verbatim at a new route.
+    "lab/manifests/access_control_subscribers_go_sample.yaml",
+    # CC-LAB-0185: second ssrf/server_side_http_fetch instance, reusing
+    # CC-LAB-0172's modules verbatim at a new route.
+    "lab/manifests/ssrf_clips_download_go_sample.yaml",
+    # CC-LAB-0186: this stack's first unrestricted_file_upload/
+    # fs_web_root_write instance (a genuinely new mechanism, not a reuse).
+    "lab/manifests/unrestricted_file_upload_go_sample.yaml",
+    # CC-LAB-0189: this stack's first price_integrity_bypass/
+    # payment_charge_amount instance (a genuinely new mechanism, not a reuse).
+    "lab/manifests/price_integrity_twitch_subscription_sample.yaml",
+    # CC-LAB-0190: this project's first path_traversal/fs_path_read
+    # instance on any stack (a genuinely new mechanism, not a reuse).
+    "lab/manifests/path_traversal_go_sample.yaml",
+    # CC-LAB-0196: this stack's first ssti/template_render instance
+    # (reuses an existing, multi-stack concern -- genuinely new breadth,
+    # not a genuinely new mechanism).
+    "lab/manifests/ssti_channel_commands_go_sample.yaml",
+    # CC-LAB-0198: this project's first http_header_injection/
+    # http_response_header_value instance on any stack (reuses an
+    # existing, never-before-instantiated safety-matrix concern --
+    # genuinely new breadth, not a new safety-matrix entry).
+    "lab/manifests/http_header_injection_redirect_go_sample.yaml",
 )
 
 

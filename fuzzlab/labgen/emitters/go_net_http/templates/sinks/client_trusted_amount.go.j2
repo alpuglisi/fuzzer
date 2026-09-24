@@ -1,0 +1,17 @@
+var req struct {
+	PlanTier      string  `json:"plan_tier"`
+	MonthlyCharge float64 `json:"monthly_charge"`
+}
+_ = json.Unmarshal({{ body_var }}, &req)
+// Vulnerable: the caller-supplied monthly_charge is trusted verbatim and
+// echoed straight back as the amount charged for the requested plan_tier,
+// with no server-side price lookup at all (CWE-807) -- a real subscription-
+// tier price the server never independently recomputes.
+resp := struct {
+	PlanTier      string  `json:"plan_tier"`
+	MonthlyCharge float64 `json:"monthly_charge"`
+}{PlanTier: req.PlanTier, MonthlyCharge: req.MonthlyCharge}
+respBody, _ := json.Marshal(resp)
+w.Header().Set("Content-Type", "application/json")
+w.WriteHeader(http.StatusOK)
+w.Write(respBody)

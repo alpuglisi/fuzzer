@@ -1,0 +1,66 @@
+# Account-billing-details lookup sample manifest (`CC-LAB-0187`),
+# `spring_boot` (Netflix, category 4).
+#
+# Netflix's fourth real page -- category 4's continued "coherent page/route
+# set" depth work (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4),
+# and genuinely new breadth for Netflix, not a depth increment: Netflix has
+# never had an `access_control`/IDOR (broken object-level authorization)
+# page before, even though this project's Go stack (Twitch) already has a
+# real, detected instance of the exact same mechanism
+# (`CC-LAB-0178`/`CC-LAB-0183`, `AccessControlIdorStrategy`/
+# `R-ACCESS-CONTROL`). Reuses `lab/safety_matrix.yaml`'s existing
+# `db_row_by_id_lookup` sink family and `no_ownership_check`/
+# `identity_match_before_fetch` ops (added by `CC-LAB-0063` for the
+# corpus-examples/access-control research) -- no new safety-matrix entry
+# needed. This is, however, this mechanism's **first** instantiation for
+# `spring_boot` (a new source module,
+# `read_account_id_and_caller_header`, and two new sink modules,
+# `NoOwnershipCheckObjectLookupSink`/`IdentityMatchBeforeFetchObjectLookup
+# Sink`, since this stack's shape has no separate transform stage -- see
+# `fuzzlab/labgen/emitters/spring_boot/modules.py`'s own docstring for why
+# the op selects the sink directly here).
+#
+# Real-world grounding: a `GET /api/account/billing?account_id=<id>`
+# lookup, returning the caller's own account's billing history/payment
+# method -- a real, plausible, core Netflix account-management feature
+# (viewing your own billing/payment info is a standard SaaS/streaming
+# account-settings page), genuinely distinct from `/api/playback/resume`
+# (playback-position mutation), `/api/content/import` (B2B partner content
+# ingestion), and `/api/profiles/switch` (profile-switching mutation).
+#
+# `X-Account-Id` is a fixed demo header standing in for the caller's own
+# authenticated identity -- this stack has no real session/auth system yet
+# (the identical declared simplification `CC-LAB-0178` already documented
+# for `go_net_http`'s own fixed demo `X-Broadcaster-Id` header: it models
+# only the ownership-check-bypass mechanism in isolation, never a real
+# session/auth system). This is this project's own design call (no
+# existing spring_boot convention for "the caller's own identity" was
+# found -- TrackerNest's and Netflix's other spring_boot pages are all
+# whole-body-JSON mutations with no caller-identity concept at all).
+manifest_version: 1
+safety_matrix_version: 1
+cells:
+  # Vulnerable: returns the requested account's billing details for
+  # whatever account_id is given, ignoring X-Account-Id entirely
+  # (CWE-639/862, IDOR).
+  - cell_id: LABGEN-JV-0007
+    class: access_control
+    stack_profile: spring_boot
+    route: { method: GET, path: /api/account/billing }
+    sink_context:
+      family: db_row_by_id_lookup
+      required_neutralizations: [ownership_check_bypass]
+    transform: [no_ownership_check]
+
+  # Secure twin: the only difference is the transform region
+  # (identity_match_before_fetch instead of no_ownership_check) -- the
+  # minimal-pair invariant. Requires account_id to match X-Account-Id
+  # before returning any data; a mismatch is a real HTTP 403.
+  - cell_id: LABGEN-JV-0008
+    class: access_control
+    stack_profile: spring_boot
+    route: { method: GET, path: /api/account/billing }
+    sink_context:
+      family: db_row_by_id_lookup
+      required_neutralizations: [ownership_check_bypass]
+    transform: [identity_match_before_fetch]

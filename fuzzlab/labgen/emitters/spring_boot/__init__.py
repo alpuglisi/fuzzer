@@ -66,6 +66,82 @@ _MODULE_SET_BY_SHAPE: dict[tuple[str, str], _ModuleSet] = {
     ("xxe", "xml_parse_input"): _ModuleSet("raw_body", "single_handler"),
     ("insecure_deserialization", "object_deserialization"): _ModuleSet("request_stream", "single_handler"),
     ("spel_injection", "spel_expression_evaluate"): _ModuleSet("query_param", "single_handler"),
+    # CC-LAB-0187: Netflix's fourth real page, this stack's first
+    # access_control/IDOR instance -- reuses lab/safety_matrix.yaml's
+    # existing db_row_by_id_lookup sink family and no_ownership_check/
+    # identity_match_before_fetch ops (CC-LAB-0063), already instantiated on
+    # go_net_http (CC-LAB-0178). No new safety-matrix entry needed.
+    ("access_control", "db_row_by_id_lookup"): _ModuleSet(
+        "read_account_id_and_caller_header", "single_handler"
+    ),
+    # CC-LAB-0188: Netflix's fifth real page, this stack's first
+    # price_integrity_bypass instance -- reuses lab/safety_matrix.yaml's
+    # existing payment_charge_amount sink family and client_trusted_amount/
+    # server_recomputed_amount ops (CC-LAB-0063), already instantiated on
+    # php_laravel (CC-LAB-0212). No new safety-matrix entry needed.
+    ("price_integrity_bypass", "payment_charge_amount"): _ModuleSet(
+        "read_plan_change_request", "single_handler"
+    ),
+    # CC-LAB-0191: Netflix's sixth real page, this stack's first
+    # unrestricted_file_upload instance -- reuses lab/safety_matrix.yaml's
+    # existing fs_web_root_write sink family and no_extension_check/
+    # extension_allowlist_mime_check ops (CC-LAB-0063), already
+    # instantiated on go_net_http (CC-LAB-0186). No new safety-matrix
+    # entry needed. Uses "single_handler_binary", not "single_handler" --
+    # this shape's own sink must serve the uploaded file's real bytes back
+    # byte-for-byte (see SingleHandlerBinaryComplexity's own docstring).
+    ("unrestricted_file_upload", "fs_web_root_write"): _ModuleSet(
+        "read_uploaded_avatar_file", "single_handler_binary"
+    ),
+    # CC-LAB-0192: Netflix's seventh real page, this stack's first
+    # mass_assignment instance -- reuses lab/safety_matrix.yaml's existing
+    # orm_entity_bulk_assign sink family and unfiltered_object_assign/
+    # typed_schema_allowlist ops (CC-LAB-0063), already instantiated on
+    # php_current/ruby_rails/php_laravel/go_net_http (CC-LAB-0182). No new
+    # safety-matrix entry needed. Reuses the pre-existing raw_body source
+    # verbatim (like the XXE shape) -- this shape's own point is that the
+    # ENTIRE body reaches the sink unfiltered, which raw_body already
+    # publishes as a whole UTF-8 String, so no new source module is
+    # needed.
+    ("mass_assignment", "orm_entity_bulk_assign"): _ModuleSet("raw_body", "single_handler"),
+    # CC-LAB-0193: Netflix's eighth real page, this stack's first
+    # jwt_algorithm_confusion instance -- reuses lab/safety_matrix.yaml's
+    # existing jwt_signature_verification sink family and
+    # jwt_alg_none_default/jwt_none_alg_opt_in ops (CC-LAB-0063), already
+    # instantiated on go_net_http (CC-LAB-0180). No new safety-matrix
+    # entry needed.
+    ("jwt_algorithm_confusion", "jwt_signature_verification"): _ModuleSet(
+        "read_authorization_bearer_token", "single_handler"
+    ),
+    # CC-LAB-0194: Netflix's ninth real page, this stack's first ssrf
+    # instance -- reuses lab/safety_matrix.yaml's existing
+    # server_side_http_fetch sink family and unchecked_url_fetch/
+    # scheme_and_resolved_ip_allowlist ops (CC-LAB-0063), already
+    # instantiated on go_net_http (CC-LAB-0172/CC-LAB-0185). No new
+    # safety-matrix entry needed. Reuses the pre-existing query_param
+    # source verbatim (already used by ssti/spel_injection) -- the same
+    # query-param-carried-URL contract go_net_http's own
+    # read_url_query_param source established, so a generic
+    # Candidate(location="query") probe drives this shape identically to
+    # go_net_http's SSRF cells (zero new sender/candidate plumbing needed
+    # for SsrfInBandMarkerStrategy/SsrfOobStrategy to generalize here).
+    ("ssrf", "server_side_http_fetch"): _ModuleSet("query_param", "single_handler"),
+    # CC-LAB-0195: Netflix's tenth real page, this stack's first
+    # weak_token_entropy instance -- reuses lab/safety_matrix.yaml's
+    # existing session_token_generation sink family and
+    # predictable_token_source/csprng_token ops (CC-LAB-0063), already
+    # instantiated on go_net_http (CC-LAB-0181). No new safety-matrix
+    # entry needed. Genuinely no tainted request input at all (like
+    # go_net_http's own port of this shape) -- the vulnerability is
+    # entirely in how the sink generates its own output, so this uses a
+    # new, no-op source (NoOpTokenRequestSource) rather than any
+    # pre-existing one; the manifest's one op still selects the sink
+    # directly, this package's own single, uniform convention (unlike
+    # go_net_http, this is not a "new, third convention" for this stack --
+    # see NoOpTokenRequestSource's own docstring).
+    ("weak_token_entropy", "session_token_generation"): _ModuleSet(
+        "no_op_token_request", "single_handler"
+    ),
 }
 
 #: Per-route static render context, the same "render-only information, not
@@ -77,6 +153,70 @@ _PAGE_PARAMS: dict[str, dict[str, Any]] = {
     "/api/playback/resume": {},
     "/api/hotels/search-sort": {"var_name": "sortExpr", "param_name": "sortBy"},
     "/api/trips/restore": {},
+    "/api/content/import": {"var_name": "contentFeedXml"},
+    # CC-LAB-0184: Netflix's third real page, a second insecure_deserialization
+    # instance reusing LABGEN-JV-0001/0002's own jackson_body/jackson_default_
+    # typing_deserialize/jackson_typed_allowlist_deserialize modules verbatim
+    # (via `_SOURCE_OVERRIDE_BY_OP`, unchanged) -- no var_name/param_name
+    # needed, matching "/api/playback/resume"'s own whole-body-JSON `{}`.
+    "/api/profiles/switch": {},
+    # CC-LAB-0187: Netflix's fourth real page, an account-billing-details
+    # lookup keyed by an attacker-visible account_id query param -- this
+    # stack's first access_control/IDOR page.
+    "/api/account/billing": {"param_name": "account_id"},
+    # CC-LAB-0188: Netflix's fifth real page, a subscription plan-upgrade/
+    # downgrade endpoint -- this stack's first price_integrity_bypass page.
+    # `plan_prices` is the secure twin's own fixed, server-owned rate table
+    # (the vulnerable twin never reads it, its op is client_trusted_amount).
+    "/api/subscription/change-plan": {
+        "plan_prices": (
+            ("basic", "6.99"),
+            ("standard", "15.49"),
+            ("premium", "22.99"),
+        ),
+    },
+    # CC-LAB-0191: Netflix's sixth real page, a per-profile avatar-image
+    # upload endpoint -- this stack's first unrestricted_file_upload page.
+    # No var_name/param_name needed: the tainted material is the multipart
+    # "file" part itself, read directly off the raw request by
+    # ReadUploadedAvatarFileSource, not a query param/header/JSON field.
+    "/api/profiles/avatar": {},
+    # CC-LAB-0192: Netflix's seventh real page, an account-settings-update
+    # endpoint -- this stack's first mass_assignment page. `var_name` is
+    # the raw_body source's own Java local variable name for the whole
+    # request body String; no param_name needed, the tainted material is
+    # the entire JSON body, not a single named field.
+    "/api/account/settings": {"var_name": "accountSettingsBody"},
+    # CC-LAB-0193: Netflix's eighth real page, a viewing-preferences lookup
+    # gated by a Bearer JWT in the Authorization header -- this stack's
+    # first jwt_algorithm_confusion page. No var_name/param_name needed:
+    # the tainted material is the Authorization header itself, read
+    # directly by ReadAuthorizationBearerTokenSource.
+    "/api/account/preferences": {},
+    # CC-LAB-0194: Netflix's ninth real page, a partner-content thumbnail-
+    # import endpoint (importing a thumbnail image from a partner-supplied
+    # URL for newly-ingested partner content -- a real, plausible feature
+    # given Netflix's own confirmed B2B content-ingestion surface,
+    # /api/content/import, CC-LAB-0179) that server-side-fetches a
+    # caller-supplied thumbnail_url query parameter -- this stack's first
+    # ssrf page. Reuses query_param's own var_name/param_name contract
+    # verbatim (the same shape ssti/spel_injection already use).
+    "/api/content/thumbnail-import": {"var_name": "thumbnailUrl", "param_name": "thumbnail_url"},
+    # CC-LAB-0195: Netflix's tenth real page, a session-refresh endpoint --
+    # this stack's first weak_token_entropy page. No var_name/param_name
+    # needed: there is no tainted request material at all
+    # (NoOpTokenRequestSource publishes nothing), matching
+    # "/api/profiles/avatar"'s own empty-dict shape for a different
+    # reason.
+    "/api/session/refresh": {},
+    # CC-LAB-0197: Netflix's eleventh real page, a customer-support-agent
+    # template-preview endpoint for personalized notification messages --
+    # this stack's first ssti/template_render instance on THIS app identity
+    # (TrackerNest, category 3, already has this shape at
+    # /wiki/pages/render, CC-LAB-0130). Reuses query_param's own var_name/
+    # param_name contract verbatim (the same shape ssrf/spel_injection
+    # already use on this stack).
+    "/api/support/template-preview": {"var_name": "previewExpr", "param_name": "expr"},
 }
 
 #: Per-op source override (`CC-LAB-0173`) -- checked *after* the shape-level

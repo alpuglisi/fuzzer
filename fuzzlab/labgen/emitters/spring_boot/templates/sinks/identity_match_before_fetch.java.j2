@@ -1,0 +1,10 @@
+        // identity_match_before_fetch: requires the requested account_id to
+        // match the caller's own X-Account-Id before any billing lookup
+        // happens.
+        if ({{ account_id_var }}.equals({{ caller_id_var }})) {
+            return org.springframework.http.ResponseEntity.ok()
+                .header("Content-Type", "application/json")
+                .body("{\"account_id\":\"" + {{ account_id_var }} + "\",\"payment_method\":\"visa-ending-4242\","
+                    + "\"last_invoice_amount_usd\":15.49,\"billing_cycle\":\"monthly\"}");
+        }
+        return org.springframework.http.ResponseEntity.status(403).body("Forbidden");

@@ -1,0 +1,33 @@
+var req struct {
+	Trigger  string `json:"trigger"`
+	Template string `json:"template"`
+}
+_ = json.Unmarshal({{ body_var }}, &req)
+// Vulnerable: the caller-supplied `template` string is compiled and
+// executed directly via Go's text/template package (CWE-1336). Unlike
+// html/template this performs no output escaping, and its template
+// *language* can invoke exported fields/methods and its own conditional/
+// range constructs on the data below -- so a malicious template can prove
+// real evaluation (branching, builtin calls) rather than dumb string
+// substitution.
+type commandData struct {
+	Uptime  string
+	Viewers string
+	Game    string
+}
+data := commandData{Uptime: "3h27m", Viewers: "1,204", Game: "Just Chatting"}
+tmpl, err := template.New("chatCommand").Parse(req.Template)
+if err != nil {
+	w.WriteHeader(http.StatusBadRequest)
+	w.Write([]byte("template error: " + err.Error()))
+	return
+}
+var buf bytes.Buffer
+if err := tmpl.Execute(&buf, data); err != nil {
+	w.WriteHeader(http.StatusBadRequest)
+	w.Write([]byte("template error: " + err.Error()))
+	return
+}
+w.Header().Set("Content-Type", "text/plain")
+w.WriteHeader(http.StatusOK)
+w.Write(buf.Bytes())

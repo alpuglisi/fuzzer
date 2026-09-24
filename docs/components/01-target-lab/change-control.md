@@ -3,6 +3,93 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### Bookkeeping-ID note: category 4's FR-LAB/CC-FUZZ/FR-FUZZ/BUG/PA entries, and a same-named strategy/rule pair, renumbered/renamed at merge time (2026-09-23, merge of `origin/claude/category-4-build-t9uz3y` into `claude/second-target-cat1-ecommerce`)
+
+Category 4 (`claude/category-4-build-t9uz3y`) independently assigned several
+ID ranges that, by the time of this merge, had already been claimed by
+category 2/3/5's own already-unified work on this branch (via the earlier
+cat2/cat5 merges) for entirely different entries. Checked every ID
+namespace category 4's own diff touched (`CC-LAB`, `FR-LAB`, `CC-FUZZ`,
+`FR-FUZZ`, `CC-AUD`, `CC-CORE`, `BUG`, `PA`) before landing; `CC-LAB` and
+`CC-AUD` did not collide (category 4's own pre-reserved `CC-LAB-0170`-`0209`
+block and its own `CC-AUD-0016`-`0027` were never touched by any other
+branch), but five other namespaces did, plus one same-named class/rule pair
+that is not a numbering collision at all:
+
+- `FR-LAB-117`-`139` (category 4's own new requirements, 23 IDs) collides
+  with already-landed `FR-LAB-117`-`131` (PicTrail's fourth/fifth/sixth
+  pages and CircleFeed's four pages, category 2, plus category 5's own
+  Phase D/E/trip-restore work already renumbered onto this same range by
+  the prior cat2/cat5 merge — see this file's own next Bookkeeping-ID note
+  below, dated the same day, for that earlier renumbering). Renumbered onto
+  the next free `FR-LAB` block (`132`-`154`, established by that prior
+  merge's own renumbering note, which left `132` as the first free number):
+  shift `+15` uniformly, preserving relative (oldest-first) order.
+- `CC-FUZZ-0027`-`0042` (category 4's own new change-control entries, 16
+  IDs) collides with already-landed `CC-FUZZ-0027`-`0030` (category 5's
+  `open_redirect`/`spel_injection`/`price_integrity_bypass`/
+  `csv_formula_injection` detection work). Renumbered onto the next free
+  `CC-FUZZ` block (`0031`-`0046`): shift `+4` uniformly.
+- `FR-FUZZ-14`-`26` (category 4's own new requirements, 13 IDs) collides
+  with already-landed `FR-FUZZ-14`-`17` (category 5's own detection work,
+  the same four entries `CC-FUZZ-0027`-`0030` document). Renumbered onto
+  the next free `FR-FUZZ` block (`18`-`30`): shift `+4` uniformly.
+- `BUG-0039`-`0044` (category 4's own new bug reports, 6 IDs) collides with
+  already-landed `BUG-0039`/`0040` (the `RequestsProbeSender` redirect
+  defect and the `OpenRedirectStrategy.vuln_class` spelling defect, both
+  category 5). Renumbered onto the next free `BUG` block (`0041`-`0046`):
+  shift `+2` uniformly, including `git mv`-ing all six
+  `docs/bugs/BUG-NNNN-*.md` files to their new filenames.
+- `PA-0041`-`0046` (category 4's own new preventive actions, 6 IDs)
+  collides with already-landed `PA-0041`/`0042` (the rules the two BUG
+  entries above produced). Renumbered onto the next free `PA` block
+  (`0043`-`0048`): shift `+2` uniformly.
+- **Not a numbering collision — a genuine same-name collision.** Category 5
+  and category 4 each independently built a `PriceIntegrityBypassStrategy`
+  class in `fuzzlab/oracle/strategies.py` for the *same* `price_integrity_
+  bypass` vuln class, and an `R-PRICE-INTEGRITY` rule in
+  `fuzzlab/audit/rules_data/default_rules.json` — but with genuinely
+  different detection mechanisms for two differently-shaped real targets:
+  category 5's (Booking.com, `CC-LAB-0212`) reads a query/body `amount`-
+  family parameter via `name_regex` and checks for a verbatim, rate-table-
+  incompatible echo (`mechanism="trusted-client-amount-echo"`); category
+  4's (Netflix/Twitch, `CC-LAB-0188`/`CC-LAB-0189`) is a two-probe
+  differential over a JSON body's own `monthly_charge` field, gated by
+  `sink_context="payment_charge"` (`mechanism="client-price-trust-
+  differential"`). Both are real, live-verified, and neither should be
+  discarded. Category 5's class/rule keep the original names (landed
+  first on this branch); category 4's are renamed throughout its own code,
+  tests, and docs to `PriceTrustDifferentialStrategy` / `R-PRICE-TRUST-
+  DIFFERENTIAL`.
+
+All renumbering/renaming above was applied only to category 4's own
+entries — nothing already established by category 2, 3, or 5 was touched.
+Every internal cross-reference within category 4's own entries (to its own
+other now-renumbered IDs) was updated to match, across
+`CHANGELOG.md`, `ERROR_LOG.md`, `docs/PREVENTIVE_ACTIONS.md`,
+`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`, both this file and
+`requirements.md`, `docs/components/07-fuzzing-harness-and-oracle/
+change-control.md` and its own `requirements.md`, `docs/components/
+05-auditor/*`, `docs/ARCHITECTURE.md`, the affected source files
+(`fuzzlab/core/runmode.py`, `fuzzlab/oracle/strategies.py`,
+`fuzzlab/audit/rules_data/default_rules.json`, `fuzzlab/tools/
+probesender.py`), and the affected test files. This table is the
+authoritative old-ID -> new-ID mapping for resolving any surviving
+pre-renumber reference:
+
+| Namespace | Old range | New range | Shift |
+| --- | --- | --- | --- |
+| `FR-LAB` | `117`-`139` | `132`-`154` | `+15` |
+| `CC-FUZZ` | `0027`-`0042` | `0031`-`0046` | `+4` |
+| `FR-FUZZ` | `14`-`26` | `18`-`30` | `+4` |
+| `BUG` | `0039`-`0044` | `0041`-`0046` | `+2` |
+| `PA` | `0041`-`0046` | `0043`-`0048` | `+2` |
+
+| Old name | New name |
+| --- | --- |
+| `PriceIntegrityBypassStrategy` (category 4's copy only) | `PriceTrustDifferentialStrategy` |
+| `R-PRICE-INTEGRITY` (category 4's copy only) | `R-PRICE-TRUST-DIFFERENTIAL` |
+
 ### CC-LAB-0220 — CircleFeed (category 2, Facebook pick): fourth and final real cell, account-settings preference-cookie insecure deserialization (FR-LAB-126) (2026-09-23)
 
 - **Change:** Lands CircleFeed's fourth and final designed cell — an
@@ -1658,6 +1745,4006 @@ mapping for resolving any such reference.
   mismatch is documented rather than forced. Full whole-repo
   `pytest tests/` run: see the commit message / `CHANGELOG.md` line for
   the exact pass/skip/fail counts.
+### CC-LAB-0199 — Twitch's 14th real page: this stack's first `open_redirect`/`http_redirect_location` instance, `go_net_http`, `/auth/login-redirect` (FR-LAB-154) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing `open_redirect`
+  concern / `http_redirect_location` sink family (added by `CC-LAB-0210`
+  for `php_laravel`'s Booking.com pilot, category 5, never before
+  instantiated on `go_net_http` -- grepped `fuzzlab/labgen/emitters/
+  go_net_http/`/`lab/manifests/*.yaml` before starting) for the first time
+  on this stack: a "return here after login" convenience endpoint
+  (`GET /auth/login-redirect?next=`, a genuinely common, real-world
+  open-redirect vector on many real sites, and a real, plausible Twitch
+  feature), CWE-601. New manifest `lab/manifests/
+  open_redirect_login_go_sample.yaml` (`LABGEN-GO-0027`/`0028`, confirmed
+  free -- highest existing was `LABGEN-GO-0026`, from `CC-LAB-0198`), two
+  new sink modules/templates (`RawConcatSink`/`RedirectTargetAllowlistSink`,
+  `raw_concat.go.j2`/`redirect_target_allowlist.go.j2`), one new
+  `_MODULE_SET_BY_SHAPE`/`_ROUTE_PARAMS` entry pair in `fuzzlab/labgen/
+  emitters/go_net_http/__init__.py`. No safety-matrix change needed
+  (reuses `raw_concat`/`redirect_target_allowlist` op rows verbatim).
+  Convention 2 (like SSRF/mass-assignment/price-integrity/path-traversal/
+  ssti/http-header-injection): the manifest's one op names a sink module
+  directly. Reuses `read_url_query_param` verbatim as its source.
+  - **Vulnerable** (`LABGEN-GO-0027`, `raw_concat`): sets the
+    caller-supplied `next` value as the `Location` header verbatim, through
+    Go's ORDINARY `w.Header().Set()`/`w.WriteHeader()` path -- deliberately
+    NOT the `http.Hijacker` bypass `CC-LAB-0198`'s vulnerable twin needed,
+    since open redirect requires no CR/LF byte to reach the wire at all (a
+    bare absolute external URL is already a well-formed `Location` value).
+    **Secure** (`LABGEN-GO-0028`, `redirect_target_allowlist`): rejects
+    (HTTP 400) any `next` value that is not a genuine site-relative path
+    (exactly one leading `/` immediately followed by an alphanumeric
+    character, mirroring `php_laravel`'s own `RedirectTargetAllowlist
+    Transform`, `CC-LAB-0210`) before ever setting the header.
+  - **Real live-boot proof** (`tests/test_labgen_go_live_boot.py::
+    test_real_boot_proves_the_open_redirect_differential_for_both_twins`):
+    both twins redirect a legitimate plain-path `next` identically; the
+    vulnerable twin reflects an absolute external `next` verbatim into
+    `Location`; the secure twin rejects that value, a protocol-relative
+    target (`//evil.example`), and a backslash-prefixed target
+    (`/\evil.example`) outright with HTTP 400.
+  - **Detection, verified live, zero new detection CODE (though two real
+    pipeline bugs were found and fixed getting there -- see `CC-FUZZ-0044`/
+    `BUG-0045`/`PA-0047`):** `fuzzlab.oracle.strategies.
+    OpenRedirectStrategy` (already built) confirms the vulnerable twin for
+    real and correctly declines the secure twin, verified both via a
+    direct hand-built `Candidate` call AND via the real, full, scored
+    `run_targets`/multitarget pipeline (`tests/
+    test_multitarget_category4.py::
+    test_both_apps_run_through_multitarget_for_real`) -- the same test
+    also doubles as a live regression proof that `BUG-0044`'s
+    `RequestsProbeSender` redirect-following fix still holds (a regression
+    would surface as the strategy's own probe following the vulnerable
+    twin's external `Location` chain into `TooManyRedirects`/a connection
+    error instead of ever reading the header it needs; it did not).
+  - **Two real, genuine pipeline bugs found and fixed while wiring this
+    cell into the shared, scored pipeline for the first time, not routed
+    around -- see `CC-FUZZ-0044`/`BUG-0045`/`PA-0047`.** (1)
+    `fuzzlab.core.runmode._VULN_TO_CATEGORY` was missing an
+    `"open_redirect": "open-redirect"` entry, so `open-redirect` never
+    became a reachable category and the strategy was never even tried by
+    the real pipeline despite confirming directly. (2) Independently,
+    `OpenRedirectStrategy.vuln_class` was itself wrongly hyphenated
+    (matching its own `category` field) instead of underscored like every
+    other strategy's `vuln_class` -- `fuzzlab.harness.scoring.score`'s
+    exact-tuple key match silently turned every real confirmation into a
+    false-positive/false-negative pair even once (1) was fixed. Fixing (2)
+    surfaced a third, genuine (not a bug) finding, closed honestly rather
+    than routed around: `CC-LAB-0198`'s own existing vulnerable/secure
+    twins (`LABGEN-GO-0025`/`0026`) are independently, honestly
+    open-redirect-vulnerable too (`R-OPEN-REDIRECT`'s own `name_regex`
+    matches `destination` via its `dest` alternative; verified live that a
+    plain external `destination` produces a real off-site `302` on the
+    vulnerable twin and HTTP 400 on the secure twin, no CRLF involved at
+    all) -- labeled as a second, honest ground-truth case, `TWCH-0015`, at
+    that same url/param (`fuzzlab.labels.contract`'s own supported
+    multi-vuln_class-per-endpoint pattern, since `Case.key` includes
+    `vuln_class`), not suppressed or worked around.
+  - **Cross-branch independent-discovery check, performed and recorded**
+    (the same recurring diligence `CC-LAB-0191`'s/`CC-LAB-0196`'s/
+    `CC-LAB-0197`'s/`CC-LAB-0198`'s own stories flag): `git fetch origin
+    claude/category-5-build-6boejs claude/category-3-build-iuu5k9`
+    followed by a diff of every shared file this task touched
+    (`fuzzlab/core/runmode.py`, `fuzzlab/oracle/strategies.py`,
+    `fuzzlab/labgen/emitters/go_net_http/`, `lab/safety_matrix.yaml`,
+    `fuzzlab/labels/schemas/labels.schema.json`) against both sibling
+    branches. Both sibling branches are strictly BEHIND this branch on
+    `go_net_http`'s own files (no conflicting edit). Category 5's own
+    branch, however, had ALREADY independently found and fixed the exact
+    same two-part `open_redirect` defect this entry's own `CC-FUZZ-0044`
+    fixes -- its own `_VULN_TO_CATEGORY` already has `"open_redirect":
+    "open-redirect"`, and its own `OpenRedirectStrategy.vuln_class` is
+    already `"open_redirect"` (underscored), with its own docstring
+    citing an independently-discovered `BUG-0041` (category 5's own
+    numbering) for the same root cause -- an independent cross-branch
+    CONVERGENCE on the identical fix (same two lines, same values), not a
+    conflicting edit: trivially mergeable, and strong independent evidence
+    this fix is correct. Recorded here rather than silently landed, per
+    this branch's own standing cross-branch-diligence convention.
+  - **Bookkeeping-ID discipline, checked directly, not assumed:** confirmed
+    `CC-LAB-0199` against this branch's own reserved block (`CC-LAB-0170`-
+    `0209`) and the highest number actually USED in this log (`CC-LAB-0198`,
+    from the immediately-preceding entry), not merely mentioned anywhere in
+    this branch's merged docs. `BUG-0045`/`PA-0047`/`CC-FUZZ-0044`
+    confirmed free the same way against the highest USED numbers in
+    `docs/bugs/` (`BUG-0044`), `docs/PREVENTIVE_ACTIONS.md` (`PA-0046`),
+    and `docs/components/07-fuzzing-harness-and-oracle/change-control.md`
+    (`CC-FUZZ-0043`).
+  - Per `BUG-0042`/`PA-0044`/`PA-0045`, grepped `tests/
+    test_multitarget_category4.py`/`tests/test_auto.py`/`tests/
+    test_labels_contract_category4.py` for hardcoded fraction/count
+    assertions depending on Twitch's ground-truth cardinality: exactly two
+    independent hardcoded-fraction occurrences in
+    `test_multitarget_category4.py` (`twitch_report.recall` and
+    `summary["macro_recall"]`), grep-counted and BOTH re-derived
+    (`10/13` -> `12/15`, reflecting BOTH new cases, not just `TWCH-0014`);
+    `test_labels_contract_category4.py`'s case-count/id-set/cross-check
+    re-derived (13 -> 15, `TWCH-0014` and `TWCH-0015` both added);
+    `test_auto.py` checked by direct inspection and re-run, found
+    genuinely unaffected (its cardinality-dependent assertions filter
+    Netflix's own ground truth/`param == "body"`, doubly inapplicable to
+    these Twitch `query`-location cases).
+- Impact (other components / project): `LAB` (this app's own page/ground
+  truth) and `FUZZ` (the runmode/strategy fix, `CC-FUZZ-0044`). No impact
+  on Netflix/`spring_boot` or any other stack.
+- Risk (level; mitigation or accepted-risk justification): Low. A pure,
+  additive new page reusing every existing mechanism (safety-matrix rows,
+  audit rule, oracle strategy) verbatim; the two pipeline-wiring bugs found
+  along the way are fixed, tested, and verified live end to end (see
+  `CC-FUZZ-0044`), and the resulting third finding (`TWCH-0015`) is an
+  honest label of a real, pre-existing vulnerability this project already
+  built, not a new risk.
+- Deliverables:
+  - [x] `lab/manifests/open_redirect_login_go_sample.yaml` -- done
+  - [x] `fuzzlab/labgen/emitters/go_net_http/modules.py`/`__init__.py` --
+    two new sink modules + shape/route-profile entries -- done
+  - [x] `fuzzlab/labgen/emitters/go_net_http/templates/sinks/
+    raw_concat.go.j2`/`redirect_target_allowlist.go.j2` -- done
+  - [x] `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,
+    expectedresults.csv}` -- `TWCH-0014` (new page) and `TWCH-0015`
+    (second label on `CC-LAB-0198`'s own sink) -- done
+  - [x] Real live-boot differential test -- done
+  - [x] Real live, scored multitarget pipeline verification -- done
+  - [x] `CC-FUZZ-0044`/`BUG-0045`/`PA-0047` -- full bug protocol -- done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`/
+    `docs/ARCHITECTURE.md` -- tracker/status updated -- done
+- Effectiveness (assessed 2026-09-23): effective, verified live end to
+  end -- real `go run`/live-boot differential for both twins, real
+  `OpenRedirectStrategy` confirmation via both a direct `Candidate` call
+  and the full scored multitarget pipeline (`tp=12, fp=0` for Twitch,
+  recall `12/15`, up from `10/13`), and a genuine `BUG-0044` regression
+  check (redirect-following fix still holds) all passed.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0198`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review, including the empirical live-boot proofs above and
+  the cross-branch independent-discovery check, both performed before
+  this entry was closed out.
+
+### CC-LAB-0198 — Twitch's 13th real page: this project's first `http_header_injection`/`http_response_header_value` instance on any stack, `go_net_http`, `/channels/redirect` (FR-LAB-153) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing
+  `http_response_header_value` sink family / `http_header_injection`
+  concern (added by `CC-LAB-0063` for the `docs/research/corpus-examples/
+  header-injection/{node,php}/` research, never before instantiated in a
+  generated lab app on any stack -- grepped `fuzzlab/labgen/emitters/*/
+  modules.py` and `lab/manifests/*.yaml` before starting) for the first
+  time, on `go_net_http`: a post-subscribe/-follow redirect convenience
+  endpoint (`GET /channels/redirect?destination=`, a real pattern
+  streaming platforms use for post-action redirects, e.g. a
+  `?next=`-style param), CWE-113 (HTTP response splitting). New manifest
+  `lab/manifests/http_header_injection_redirect_go_sample.yaml`
+  (`LABGEN-GO-0025`/`0026`), two new sink modules/templates
+  (`RawSocketResponseWriteSink`/`AllowlistAndRuntimeCrlfRejectionSink`,
+  `raw_socket_response_write.go.j2`/`allowlist_and_runtime_crlf_
+  rejection.go.j2`), one new `_MODULE_SET_BY_SHAPE`/`_ROUTE_PARAMS` entry
+  pair in `fuzzlab/labgen/emitters/go_net_http/__init__.py`, and one
+  additive `vuln_class` enum widening in `fuzzlab/labels/schemas/
+  labels.schema.json` (`"http_header_injection"` -- `sink_context`
+  already had `"header"`, no widening needed there; the only related but
+  genuinely distinct existing enum value, `"outbound_header_injection"`,
+  is an OUTBOUND request header the app itself sends, `php_laravel`'s
+  HuddleHub webhook-delivery page, `CC-LAB-0135` -- confirmed not the same
+  concern before reusing neither name nor code). Convention 2 (like SSRF/
+  mass-assignment/file-upload/price-integrity/path-traversal/ssti): the
+  manifest's one op names a sink module directly. Reuses
+  `read_url_query_param` verbatim as its source -- no new source module
+  needed.
+  - **Vulnerable** (`LABGEN-GO-0025`, `raw_socket_response_write`):
+    hijacks the raw connection (`http.ResponseWriter.(http.Hijacker).
+    Hijack()`) and hand-writes a `302` response, concatenating the
+    caller-supplied `destination` straight into the `Location:` line with
+    no CR/LF stripping at all. **Secure** (`LABGEN-GO-0026`,
+    `allowlist_and_runtime_crlf_rejection`): validates `destination`
+    against a strict site-relative-path allowlist regex
+    (`^/[A-Za-z0-9/_-]*$`, fails closed with HTTP 400 on a mismatch)
+    before ever reaching Go's ordinary `w.Header().Set()`/
+    `w.WriteHeader()` path.
+  - **Honest-vulnerable-instance judgment, checked empirically before
+    finalizing the design (not assumed), per this task's own explicit
+    instruction.** A real `go run` check (a trivial `net/http.Server`
+    booted over a raw TCP listener, a raw TCP client sending a
+    CRLF-bearing query value, reading the literal response bytes back)
+    shows Go's ORDINARY `net/http` response-header-writing path
+    (`w.Header().Set()` + `w.WriteHeader()`) already replaces a bare CR/LF
+    byte in a header value with a SPACE before writing the response to
+    the wire -- so an honest vulnerable instance of this concern cannot
+    be built through that ordinary path in Go at all (mirroring this
+    session's own `path_traversal`/`ssti` honest-judgment precedent, but
+    this time the ordinary path turned out to be genuinely un-abusable
+    rather than merely non-generalizing). Rather than force a contrived
+    workaround or abandon the concern, the vulnerable twin uses
+    `http.Hijacker.Hijack()` -- a REAL, standard `net/http` mechanism
+    (used for WebSocket upgrades and other raw-protocol handling in real
+    Go servers, not invented for this lab) -- to obtain the raw
+    connection and write the response itself, exactly mirroring this same
+    op's own `vulnerable-raw-socket-write-5.js`/`vulnerable-raw-socket-
+    response-4.php` corpus precedent (`docs/research/corpus-examples/
+    header-injection/{node,php}/manifest.yaml`): Node/PHP both bypass
+    their own frameworks' built-in header-writing CRLF protection the
+    same way, via a raw socket write. This empirical finding is itself
+    kept checked on every ordinary (non-slow) run via `tests/
+    test_labgen_go_live_boot.py::
+    test_go_net_http_header_set_sanitizes_bare_crlf_on_the_wire` (a fast,
+    dependency-light `go run` + raw-socket-dial reproduction, skip-guarded
+    on the `go` CLI alone), matching `CC-LAB-0196`'s own "keep the
+    empirical claim checked on every ordinary run" discipline for its
+    `text/template` arithmetic-grammar finding.
+  - Real, live-boot-proven differential (`tests/test_labgen_go_live_
+    boot.py::test_real_boot_proves_the_http_header_injection_differential_
+    for_both_twins`): a `destination` of `/ok\r\nX-Fuzzlab-Header-
+    Injection-Canary: injected` splices in a real, INDEPENDENTLY-parsed
+    extra response header (read back via Python's own `http.client`, not
+    by inspecting raw bytes this test itself wrote) on the vulnerable
+    twin; the secure twin rejects the identical payload outright with
+    HTTP 400 and never emits the injected header; both twins redirect a
+    legitimate plain-path `destination` identically (the shared
+    functional contract holds).
+  - **A real, genuine pipeline bug found and fixed while wiring this cell
+    into the full `run_targets` pipeline -- not routed around.** See
+    `BUG-0044`/`PA-0046`/`CC-FUZZ-0043` (fuzzing-harness-and-oracle
+    component log): `fuzzlab.tools.probesender.RequestsProbeSender`
+    silently followed HTTP redirects by `requests`' own default, which
+    crashed `tests/test_multitarget_category4.py::
+    test_both_apps_run_through_multitarget_for_real` with
+    `requests.exceptions.TooManyRedirects` the moment this cell's
+    vulnerable twin was wired in (the generic, vuln-class-agnostic
+    `SstiStrategy`'s own `#{a*b}` payload, echoed into a real `Location:`
+    header, resolves via URL-fragment semantics to the SAME url on every
+    hop -- an infinite self-redirect loop). Fixed at the sender level
+    (`allow_redirects=False`, matching `fuzzlab.core.http`'s own
+    authenticated path), not by weakening this cell's own honest
+    vulnerability.
+  - Detection is genuinely deferred, not silently claimed working: no
+    audit rule/oracle strategy exists yet for `http_header_injection`
+    (grepped `fuzzlab/oracle/strategies.py` for "header" before starting
+    and found nothing CRLF-injection-aware) -- lands as an explicit open
+    follow-on question, the same lab-then-detection split this session
+    already used for `path_traversal` (`CC-LAB-0190`) and (until
+    `CC-FUZZ-0042` closed it) `ssti` (`CC-LAB-0196`). Twitch's own
+    ground-truth cardinality grows from 12 to 13 (`TWCH-0013`); its own
+    real, scored recall in the multi-cell live-boot pipeline moves from
+    `10/12` to `10/13` (`tp` stays 10, `fp` stays 0 -- a cardinality-only
+    change, the same shape `TWCH-0011` made).
+  **Cross-branch collision check, performed and recorded** (the same
+  recurring risk `CC-LAB-0191`'s/`CC-LAB-0196`'s/`CC-LAB-0197`'s own
+  numbering-collision/shared-file-collision stories flag): `git fetch
+  origin claude/category-3-build-iuu5k9 claude/category-5-build-6boejs`
+  followed by a diff of every shared file this task touched
+  (`fuzzlab/labgen/emitters/go_net_http/__init__.py`, `modules.py`, its
+  `templates/` directory, and `fuzzlab/labels/schemas/labels.schema.json`)
+  against both sibling branches: both diffs show only deletions relative
+  to this branch (strictly behind on every one of those files, no
+  conflicting edit to the same lines/keys), so no collision risk from
+  either sibling branch. This is a pure, non-colliding addition.
+  **Bookkeeping-ID discipline, checked directly, not assumed:** confirmed
+  `CC-LAB-0198` against this branch's own reserved block (`CC-LAB-0170`-
+  `0209`) and the highest number actually USED in this log (`CC-LAB-0197`,
+  from the immediately-preceding entry -- Netflix's own eleventh page),
+  not merely mentioned anywhere in this branch's merged docs (category
+  5's own `CC-LAB-0210`-`0249` block is also present in this branch's
+  history and must not be mistaken for "next free"). `LABGEN-GO-0025`/
+  `0026` cell IDs confirmed free (grepped `LABGEN-GO-` across every
+  manifest, highest existing was `LABGEN-GO-0024`, from `CC-LAB-0196`).
+  Per `BUG-0042`/`PA-0044`/`PA-0045`, grepped `tests/
+  test_multitarget_category4.py`/`tests/test_auto.py`/`tests/
+  test_labels_contract_category4.py` for hardcoded fraction/count
+  assertions depending on Twitch's ground-truth cardinality, grep-counted
+  the pattern across the WHOLE file per `PA-0045` (`test_multitarget_
+  category4.py` has exactly two independent Twitch-cardinality-dependent
+  fractions -- `test_both_apps_run_through_multitarget_for_real`'s own
+  `twitch_report.recall` AND its sibling `summary["macro_recall"]`
+  assertion -- both found and both updated, `10/12` -> `10/13`), and
+  re-ran all three test files directly (not just the non-slow suite)
+  after updating them: `test_labels_contract_category4.py`'s case count
+  moved from 12 to 13 with a new `TWCH-0013` cross-check (and the
+  opaque-case-ID token-denylist loop gained `"header"`/`"injection"`/
+  `"redirect"`/`"crlf"`); `test_auto.py` was checked by DIRECT inspection
+  and run (not assumed clean by analogy): its one ground-truth-
+  cardinality-dependent assertion,
+  `test_points_from_ground_truth_sets_body_content_type_only_for_json_
+  cases`'s `len(body_points) == 6`, filters `netflix_gt` and
+  `param == "body"` -- `TWCH-0013` is a Twitch case with `param=
+  "destination"`/`location="query"`, doubly unaffected -- confirmed by a
+  real, green, direct run, not restated by analogy.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0197`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review: (1) read `lab/safety_matrix.yaml`'s own header-
+  injection comment block and its `raw_socket_response_write`/`allowlist_
+  and_runtime_crlf_rejection` op rows in full before designing, rather
+  than assuming the shape from the task dispatch's own suggested route
+  name alone; (2) empirically verified, via a real `go run` (both a raw
+  `net/http.Header` unit check and a full booted-server + raw-socket-
+  client round trip) BEFORE writing any generator code, that Go's
+  ordinary header-writing path sanitizes CR/LF -- the specific
+  honest-judgment question the task dispatch posed -- rather than
+  assuming either outcome; (3) read the `docs/research/corpus-examples/
+  header-injection/{node,php}/manifest.yaml` research cell in full to
+  confirm the `http.Hijacker` design choice mirrors a REAL documented
+  anti-pattern (raw-socket-write bypassing a framework's own header
+  validation), not a contrivance; (4) ran the full non-slow suite plus
+  every directly-affected slow test file, and independently reproduced
+  and then fixed a genuine crash (`BUG-0044`) the new cell's own honest
+  vulnerability surfaced in the shared oracle pipeline, rather than
+  weakening the cell to avoid it.
+- Impact (other components / project): `LAB` (this entry) and `FUZZ`
+  (`CC-FUZZ-0043`, the `RequestsProbeSender`/`RequestsCorrelatingSender`/
+  `RequestsSender` redirect-following fix `BUG-0044` required). No impact
+  on any other component; `labels.schema.json`'s widening is additive
+  (existing consumers unaffected).
+- Risk (level; mitigation or accepted-risk justification): Low. Purely
+  additive (new manifest, new modules/templates, one new route entry, one
+  additive enum value); no existing cell's rendered output changes byte-
+  for-byte (verified by `test_regenerate_and_diff_emitter_passes_for_
+  every_go_net_http_sample_manifest`, unaffected existing manifests still
+  pass). The one substantive risk found during implementation (the
+  redirect-following crash) was root-caused and fixed at the correct
+  layer (the shared sender, not a workaround in this cell), with its own
+  full bug protocol (`BUG-0044`/`PA-0046`) and regression tests.
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml` reviewed -- no change needed (existing
+    op rows reused verbatim)
+  - [x] `fuzzlab/labels/schemas/labels.schema.json` -- additive
+    `vuln_class` widening (`"http_header_injection"`)
+  - [x] `fuzzlab/labgen/emitters/go_net_http/modules.py` -- two new sink
+    classes + two new `.go.j2` templates
+  - [x] `fuzzlab/labgen/emitters/go_net_http/__init__.py` -- new
+    `_MODULE_SET_BY_SHAPE`/`_MODULE_IMPORTS`/`_ROUTE_PARAMS` entries
+  - [x] `lab/manifests/http_header_injection_redirect_go_sample.yaml` --
+    new manifest (`LABGEN-GO-0025`/`0026`)
+  - [x] `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,
+    expectedresults.csv}` -- new `TWCH-0013`
+  - [x] `tests/test_labgen_go_net_http_modules.py` -- new unit tests for
+    both new sink modules
+  - [x] `tests/test_labgen_go_net_http_conformance.py` -- new manifest
+    added to the regeneration-determinism sweep
+  - [x] `tests/test_labgen_go_live_boot.py` -- fast CRLF-sanitization
+    reproduction + real live-boot differential test
+  - [x] `tests/test_labels_contract_category4.py` -- case count/
+    cross-check extended
+  - [x] `tests/test_multitarget_category4.py` -- new cell wired into
+    `_twitch_cells()`, both hardcoded fractions re-derived (`PA-0045`)
+  - [x] `BUG-0044`/`docs/bugs/BUG-0044-*.md`/`PA-0046`/`CC-FUZZ-0043` --
+    full bug protocol for the redirect-following defect this cell's own
+    honest vulnerability surfaced
+  - [x] `docs/components/01-target-lab/requirements.md` -- new `FR-LAB-153`
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`/`docs/
+    ARCHITECTURE.md` -- category-4 tracker row and current-status
+    paragraph updated
+  - [x] `CHANGELOG.md` -- dated line added
+- Effectiveness (assessed 2026-09-23): Achieved. `go build` compiles both
+  twins; `tests/test_labgen_go_live_boot.py::
+  test_real_boot_proves_the_http_header_injection_differential_for_both_
+  twins` and `::test_go_net_http_header_set_sanitizes_bare_crlf_on_the_
+  wire` both pass against a real booted app; `tests/test_multitarget_
+  category4.py::test_both_apps_run_through_multitarget_for_real` (which
+  reproducibly crashed on this cell before `BUG-0044`'s fix) passes
+  reproducibly after it; full non-slow suite green at the stable baseline
+  (18 pre-existing, unrelated failures; passed count grew from ~2091).
+
+### CC-LAB-0197 — Netflix's 11th real page: first ssti/template_render instance on THIS app identity, `spring_boot`, `/api/support/template-preview` (FR-LAB-152) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing `template_render`
+  sink family / `server_template_injection` concern (`user_supplied_
+  template_compile`/`file_loaded_template_name` ops, `CC-LAB-0063`)
+  on `spring_boot` a SECOND time -- TrackerNest (category 3, `CC-LAB-0130`)
+  already hosts this exact shape on this same shared package at
+  `/wiki/pages/render`. This entry brings the shape to Netflix (category
+  4) at a new, distinct route: `GET /api/support/template-preview?expr=`,
+  a customer-support-agent template-preview tool for personalized
+  notification messages -- a real, plausible internal-tooling feature
+  (the same category of internal tool this project's own TrackerNest
+  wiki-macro page and Twitch chat-command page, `CC-LAB-0196`, already
+  model for their respective apps). Zero new safety-matrix entry, zero
+  new generator code -- a new manifest
+  (`lab/manifests/ssti_netflix_support_sample.yaml`) plus one new
+  `_PAGE_PARAMS` route entry in `fuzzlab/labgen/emitters/spring_boot/
+  __init__.py`, the same "new manifest + route entry" pattern
+  `CC-LAB-0179`'s XXE reuse and `CC-LAB-0184`'s insecure_deserialization
+  reuse already used. Convention 2 (like SSRF/mass-assignment/file-
+  upload/price-integrity/predictable-token, and identical to
+  TrackerNest's own SSTI cell): the manifest's one op names a sink module
+  directly, reusing `query_param`'s own `var_name`/`param_name` contract
+  verbatim (already used by this stack's `ssrf`/`spel_injection` cells).
+  - **Vulnerable** (`LABGEN-JV-0021`, `user_supplied_template_compile`):
+    the agent-supplied `expr` query parameter is evaluated directly as an
+    OGNL expression via `Ognl.getValue()` (CWE-1336, the identical
+    mechanism TrackerNest's own `macroExpr` cell uses).
+    **Secure** (`LABGEN-JV-0022`, `file_loaded_template_name`): the same
+    `expr` value only ever selects among a fixed, developer-defined
+    preview-template map by name, never compiled/evaluated as an
+    expression.
+  - **Zero new generator infrastructure, no new modules/templates
+    either**: this is a pure route-reuse increment -- the vulnerable/
+    secure sink templates (`user_supplied_template_compile.java.j2`/
+    `file_loaded_template_name.java.j2`) and the `query_param` source
+    template are TrackerNest's own, unmodified, read but never changed.
+    Only `_PAGE_PARAMS["/api/support/template-preview"]` (a new dict
+    entry: `{"var_name": "previewExpr", "param_name": "expr"}`) is new
+    code, distinguishing this cell's Java local-variable name from
+    TrackerNest's own `macroExpr` cell so the two never collide on the
+    same shared package (verified directly: `tests/test_labgen_spring_
+    boot_netflix_support_template_preview.py::test_vulnerable_twin_calls_
+    ognl_get_value_secure_twin_does_not` asserts both `previewExpr` and
+    `request.getParameter("expr")` appear in the rendered source).
+  Real, live-boot-proven differential
+  (`tests/test_labgen_spring_boot_netflix_support_template_preview_live_
+  boot.py::test_ssti_vulnerable_twin_evaluates_ognl_expression_for_real`/
+  `test_ssti_secure_twin_never_evaluates_the_tainted_value`): the classic
+  `7*7` -> `49` OGNL-evaluation proof `CC-LAB-0130`'s own TrackerNest test
+  established, reproduced on this new route -- the vulnerable twin
+  evaluates it for real; the secure twin never does (`"Unknown macro"`)
+  while a real, fixed, developer-defined template name (`welcome`) still
+  resolves through its lookup path.
+  **Detection generalization, verified empirically via a real live-boot
+  run, not assumed from the shape match alone -- per this task's own
+  explicit instruction, given this session's own hard-won lesson from
+  `CC-LAB-0196`'s Go/`text/template` case (where an identical-looking
+  shape match did NOT generalize).** The existing generic `SstiStrategy`
+  (`fuzzlab/oracle/strategies.py`, arm `ssti:evaluation-marker`, already
+  built and live-boot-confirmed against TrackerNest's own `TNEST-0001`)
+  sends an arithmetic-expression payload in one of five template-engine
+  syntaxes (`${a*b}`/`{{a*b}}`/`<%= a*b %>`/`#{a*b}`/`${{a*b}}`) and
+  checks whether the numeric product appears while the literal expression
+  does not. Unlike Go's `text/template` (whose action grammar has no
+  infix arithmetic operators at all, a hard parser-level restriction,
+  `CC-LAB-0196`), Java's OGNL genuinely DOES evaluate arithmetic infix
+  expressions natively -- `Ognl.getValue()` parses and evaluates `7*7` (no
+  delimiter wrapping needed at all, unlike the templated-delimiter
+  engines `_ssti_payloads()` targets), so at least one of the five
+  wrapped payload syntaxes reaches OGNL's own expression parser
+  successfully and evaluates for real. This is verified live, not
+  inferred from the mechanism-level analogy alone, in
+  `tests/test_labgen_spring_boot_netflix_support_template_preview_live_
+  boot.py::TestSstiStrategyGeneralizesToNetflix`: against a real booted
+  vulnerable twin, `SstiStrategy().confirm(...)` returns a confirmed
+  verdict (`vuln_class="ssti"`); against a real booted secure twin, it
+  correctly returns `None`. Zero new detection code needed. `R-SSTI`'s
+  own audit-rule reachability gate (`when: {location_in:
+  ["query","body"]}`) needed zero change -- this case's
+  `location="query"` point is already reachable through it, matching
+  TrackerNest's own `TNEST-0001` reachability exactly.
+  Netflix's own real, scored `multitarget` recall in the shared
+  multi-cell live-boot pipeline
+  (`tests/test_multitarget_category4.py::test_netflix_multi_cell_boot_
+  confirms_all_positives`) moves from `10/10` to `11/11` (`tp` moves from
+  10 to 11, `fp` stays 0).
+  **Cross-branch collision check, performed and recorded** (the same
+  recurring risk `CC-LAB-0191`'s/`CC-LAB-0196`'s own numbering-collision/
+  shared-file-collision stories flag): `git fetch origin claude/
+  category-3-build-iuu5k9 claude/category-5-build-6boejs` followed by a
+  diff of every shared file this task touched (`fuzzlab/labgen/emitters/
+  spring_boot/__init__.py`, `modules.py`, and its `templates/` directory)
+  against both sibling branches: both diffs show only deletions relative
+  to this branch (strictly behind on every one of those files, no
+  conflicting edit to the same lines/keys, and zero additions to
+  `modules.py` or `templates/` from either sibling), so no collision risk
+  from either sibling branch. This is a pure, non-colliding addition.
+  **Bookkeeping-ID discipline, checked directly, not assumed:** confirmed
+  `CC-LAB-0197` against this branch's own reserved block (`CC-LAB-0170`-
+  `0209`) and the highest number actually USED in this log (`CC-LAB-0196`,
+  from the immediately-preceding entry), not merely mentioned anywhere in
+  this branch's merged docs (category 5's own `CC-LAB-0210`-`0249` block
+  is also present in this branch's history and must not be mistaken for
+  "next free"). `LABGEN-JV-0021`/`0022` cell IDs confirmed free (grepped
+  `LABGEN-JV-` across every manifest, highest existing was `LABGEN-JV-
+  0020`, from `CC-LAB-0195`). Per `BUG-0042`/`PA-0044`, grepped `tests/
+  test_multitarget_category4.py`/`tests/test_auto.py`/`tests/
+  test_labels_contract_category4.py` for hardcoded fraction/count
+  assertions depending on Netflix's ground-truth cardinality and re-ran
+  all three directly (not just the non-slow suite) after updating them:
+  `test_multitarget_category4.py`'s Netflix recall assertion moved from
+  `10/10` to `11/11`, its `_NETFLIX_MULTI_MANIFESTS`/
+  `_NETFLIX_MULTI_CELL_IDS` module-level tuples/sets gained the new
+  manifest/cell IDs; `test_labels_contract_category4.py`'s case count
+  moved from 10 to 11 with a new `NFLX-0011` cross-check (and the opaque-
+  case-ID token-denylist loop gained `"ssti"`/`"template"`); `test_auto.py`
+  was checked by DIRECT inspection (not assumed clean by analogy to
+  `CC-LAB-0196`'s own affected Twitch case): its one Netflix-ground-truth-
+  cardinality-dependent assertion,
+  `test_points_from_ground_truth_sets_body_content_type_only_for_json_
+  cases`'s `len(body_points) == 6`, counts only `param == "body"` points
+  -- `NFLX-0011`'s `param="expr"`/`location="query"` is not a body point
+  at all, so this count is genuinely unaffected, a real checked-and-
+  confirmed-clean finding, not a restated assumption.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0196`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review: (1) re-read `CC-LAB-0130`'s own TrackerNest SSTI
+  manifest and modules.py's real sink templates before choosing the new
+  route's `_PAGE_PARAMS` shape, rather than assuming the shape from the
+  task dispatch's own suggested route name alone; (2) ran the full
+  non-slow suite plus the two directly-affected slow test files
+  (`test_multitarget_category4.py`, `test_labgen_spring_boot_netflix_
+  support_template_preview_live_boot.py`) and confirmed green before
+  considering this entry done; (3) performed the cross-branch collision
+  check and bookkeeping-ID verification above directly, not by analogy.
+  - Requirement: `FR-LAB-152` (`docs/components/01-target-lab/
+    requirements.md`).
+  - Tests: `tests/test_labgen_spring_boot_netflix_support_template_
+    preview.py` (new manifest unit test, no network/java/mvn required),
+    `tests/test_labgen_spring_boot_netflix_support_template_preview_live_
+    boot.py` (real live-boot differential + `SstiStrategy` generalization
+    proof, `@pytest.mark.slow`, skip-guarded per `PA-0005`),
+    `tests/test_labels_contract_category4.py` (ground-truth contract
+    extension), `tests/test_multitarget_category4.py` (multi-cell boot
+    recall assertion, `@pytest.mark.slow`).
+  - Ground truth: `NFLX-0011` added to `lab/ground-truth-netflix-clone/`
+    (`labels.json`/`injection-points.json`/`expectedresults.csv`)
+    (`vuln_class="ssti"`, `sink_context="template"` -- both pre-existing
+    enum values already used by `spring_boot`'s TrackerNest ground truth
+    and by `TWCH-0012`; `param="expr"`/`location="query"`, the same
+    per-field query-param convention `NFLX-0004`/`NFLX-0009` already
+    establish).
+
+### CC-LAB-0196 — Twitch's 12th real page: first ssti/template_render instance on `go_net_http`, `/channels/commands` (FR-LAB-151) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing `template_render`
+  sink family / `server_template_injection` concern (`user_supplied_
+  template_compile`/`file_loaded_template_name` ops, `CC-LAB-0063`,
+  already built on `spring_boot` -- `CC-LAB-0130`'s TrackerNest wiki-macro
+  shape, `SstiStrategy`) on `go_net_http`, this stack's first instance:
+  `POST /channels/commands`, a custom chat-command definition endpoint --
+  a real, well-documented streaming-bot feature (Nightbot/StreamElements-
+  style custom commands with template variables, e.g. an `!uptime` command
+  whose response is `{{.Uptime}} since going live`). This is a DIFFERENT
+  kind of increment from most of this session's prior work: not a "second
+  instance, zero new code" depth increment, and not this session's earlier
+  cross-stack-generalization direction (bringing an already-Go mechanism
+  to Java) either -- this brings an already-multi-stack mechanism
+  (already on `spring_boot`) to Go for the FIRST time, real breadth on the
+  stack this session's dispatch is scoped to.
+  **Design decision, checked directly against `spring_boot`'s own
+  `UserSuppliedTemplateCompileSink`/`FileLoadedTemplateNameSink` (`CC-LAB-
+  0130`) before building, not assumed to port identically:** Java's twin
+  evaluates the tainted value as an OGNL expression via `Ognl.getValue()`
+  -- OGNL syntax naturally evaluates arithmetic infix expressions
+  (`7*7` -> `49`) without any wrapping. Go has no equivalent expression
+  evaluator in its standard library; the closest genuine, well-documented
+  analog is compiling and executing the tainted value as a `text/
+  template` TEMPLATE (not a bare expression evaluator) via
+  `template.New(...).Parse(...)`/`.Execute(...)` -- a real, CWE-1336
+  server-side template injection (unlike `html/template`, no output
+  escaping, and the template language itself can invoke exported fields/
+  methods and its own conditional/range constructs on the data passed to
+  `Execute`, not just substitute inert placeholders). This needed no new
+  module-composition convention: `go_net_http` already has "Convention 2"
+  (the manifest's one op names a sink module directly, no separate
+  transform stage) from SSRF/mass-assignment/file-upload/price-integrity/
+  path-traversal, and this shape's vulnerable/secure difference is the
+  same kind of one-inseparable-operation split those shapes already use.
+  Reused the exact op names `spring_boot` already uses
+  (`user_supplied_template_compile`/`file_loaded_template_name`) rather
+  than inventing new ones, since both are pre-existing
+  `lab/safety_matrix.yaml` op rows already scoped to this exact
+  `template_render` family -- no safety-matrix change needed.
+  **Detection generalization, verified empirically BEFORE building the
+  final design, not assumed to work because the task dispatch suggested
+  it would:** the task's own suggested design assumed the existing
+  generic `SstiStrategy`'s arithmetic-product-marker payloads (`${a*b}`,
+  `{{a*b}}`, `<%= a*b %>`, `#{a*b}`, `${{a*b}}`) would work "given this
+  project's own multi-template-engine precedent" and that `_ssti_
+  payloads()` "very likely already includes Go-style `{{ }}` syntax." A
+  direct `go run` check against Go's REAL `text/template` package (run
+  BEFORE writing any module/template code, per this project's own "check
+  before assuming" discipline) falsified that assumption: `{{a*b}}` and
+  `${{a*b}}` both fail to PARSE outright (`text/template`'s action
+  grammar supports only pipelines/function calls/field-and-method access,
+  with NO infix arithmetic operators at all -- a hard syntax-level
+  restriction of the parser itself, confirmed by the exact error text
+  `unexpected "*" in operand`, not a missing `FuncMap` entry a vulnerable
+  sink's own design could work around), while `${a*b}`/`<%= a*b %>`/
+  `#{a*b}` contain no `{{`/`}}` at all, so `text/template` treats them as
+  inert literal text and `Execute` echoes them back completely
+  unevaluated regardless of what data or functions the vulnerable sink
+  passes in. This is a genuine, verified architecture mismatch between
+  the generic strategy's arithmetic-marker technique and Go's own
+  template-action syntax -- NOT a fixable reachability-wiring gap
+  analogous to `CC-FUZZ-0032`'s header-point fix (that fix closed a gap
+  in point/sender plumbing; this gap is in the confirmation payload
+  syntax itself, upstream of any wiring). Per the task's own explicit
+  fallback for exactly this outcome ("do NOT force a contrived/unsafe
+  design ... land the lab page alone with detection as an open
+  question"), this instance lands with a genuine, real, live-boot-proven
+  SSTI differential (field-access/conditional/parse-error evaluation) as
+  its proof, but automatic confirmation via the existing generic
+  `SstiStrategy` is an explicitly open question, not silently claimed
+  working, and NO new, untested detection strategy code was written to
+  paper over the gap (writing one now, under this dispatch's time
+  budget, without the same rigor `CC-FUZZ-0032`/`CC-FUZZ-0037`/etc.
+  applied to their own new strategies, would itself be the kind of
+  contrivance the task warned against). `R-SSTI`'s own audit-rule
+  reachability gate (`when: {location_in: ["query","body"]}`, no name-
+  specific gate) needed zero change -- checked directly, not assumed:
+  this case's `location="body"` point is already reachable through it,
+  confirmed with a direct `points_from_ground_truth` call showing the
+  point carries `sink_context="template"` and `body_content_type=
+  "application/json"` correctly. The gap is entirely in `SstiStrategy`'s
+  own payload syntax matching Go's template grammar, not in reachability
+  wiring.
+  **Cross-branch collision check, performed and recorded**: `git fetch
+  origin claude/category-3-build-iuu5k9 claude/category-5-build-6boejs`
+  followed by a diff of every shared file this task touched (`fuzzlab/
+  labgen/emitters/go_net_http/`, `fuzzlab/oracle/strategies.py`) against
+  both sibling branches: both diffs show only deletions relative to this
+  branch (strictly behind on every one of those files, no conflicting
+  edit to the same lines/keys), and this entry does not modify `fuzzlab/
+  oracle/strategies.py` at all (`SstiStrategy`/`_ssti_payloads` are read,
+  never changed -- the whole point of this entry's own detection-
+  generalization analysis is that they need no change), so no collision
+  risk from either sibling branch's own new strategy classes. This is a
+  pure, non-colliding addition.
+  **Bookkeeping-ID discipline, checked directly, not assumed:** confirmed
+  `CC-LAB-0196` against this branch's own reserved block (`CC-LAB-0170`-
+  `0209`) and the highest number actually USED in this log (`CC-LAB-0195`),
+  not merely mentioned anywhere in this branch's merged docs (category 5's
+  own `CC-LAB-0210`-`0249` block is also present in this branch's history
+  and must not be mistaken for "next free"). `LABGEN-GO-0023`/`0024` cell
+  IDs confirmed free (grepped `LABGEN-GO-` across every manifest, highest
+  existing was `LABGEN-GO-0022`, from `CC-LAB-0190`). Per `BUG-0042`/
+  `PA-0044`, grepped `tests/test_multitarget_category4.py`/`tests/
+  test_auto.py`/`tests/test_labels_contract_category4.py` for hardcoded
+  fraction/count assertions depending on Twitch's ground-truth
+  cardinality and re-ran all three directly (not just the non-slow
+  suite) after updating them: `test_multitarget_category4.py`'s Twitch
+  recall assertion moved from `9/11` to `9/12` (`tp` stays `9`) and the
+  macro-recall average was re-derived; `test_labels_contract_category4.py`'s
+  case count moved from 11 to 12 with a new `TWCH-0012` cross-check;
+  `test_auto.py` was checked by DIRECT inspection (not assumed clean by
+  analogy to `CC-LAB-0195`'s own affected Netflix case): it has NO
+  Twitch-cardinality-dependent hardcoded count at all (its one Twitch-
+  ground-truth test, `test_points_from_ground_truth_now_includes_header_
+  points`, asserts only two specific `(url, param, method, location)`
+  tuples are present/absent, neither of which is the new case) -- a real,
+  checked-and-confirmed-clean finding, not a restated assumption.
+  - **Real Twitch functionality (grounded, not invented)**: a custom
+    chat-command definition endpoint (a real, well-documented streaming-
+    bot feature every major platform's bot ecosystem has -- Nightbot,
+    StreamElements, and similar tools all let broadcasters define custom
+    commands with template variables; the specific `POST /channels/
+    commands` path is this manifest's own illustrative inference, not a
+    confirmed Twitch-internal implementation detail, labeled explicitly
+    in the manifest's own header, matching `CC-LAB-0179`'s/`CC-LAB-0195`'s
+    own fact-vs-inference discipline).
+  - **Vulnerable** (`LABGEN-GO-0023`, `user_supplied_template_compile`):
+    the caller-supplied `template` field is compiled and executed via
+    `text/template.New(...).Parse(...)`/`.Execute(...)`.
+    **Secure** (`LABGEN-GO-0024`, `file_loaded_template_name`): the same
+    field only ever selects a key into a fixed `map[string]string`.
+  - **Zero new generator infrastructure, only new modules/templates**: one
+    new source class (`ReadChannelCommandRequestSource`, reusing the
+    established "publish `body_var`, let the sink parse its own JSON"
+    convention) and two new sink classes -- `_MODULE_SET_BY_SHAPE`/
+    `_MODULE_IMPORTS`/`_ROUTE_PARAMS` dict-registration pattern and
+    Convention 2's `render()` branch are all pre-existing, unchanged
+    infrastructure. Rendering both cells was run directly (and passed
+    `go vet`/`gofmt -l` for real) before writing any test.
+  - **Real, live-boot proof** (`tests/test_labgen_go_live_boot.py::
+    test_real_boot_proves_the_ssti_differential_for_both_twins`): 3
+    assertions covering (a) real field-access evaluation
+    (`{{.Uptime}}` -> `3h27m`), (b) real conditional/control-flow
+    evaluation (`{{if eq .Uptime "3h27m"}}MATCHED{{else}}NO{{end}}` ->
+    `MATCHED`, proving more than dumb substitution), (c) a real HTTP 400
+    parse error on a malformed template, and (d) the secure twin treating
+    all of the above as opaque unrecognized variable names while a real
+    pre-approved name (`uptime`) still resolves -- passed against a real
+    `go build`/boot/HTTP round trip.
+  - **Detection generalization, verified empirically and found NOT to
+    hold -- documented honestly, not silently skipped or forced**:
+    `test_ssti_go_text_template_syntax_mismatch` (fast, non-slow, always
+    run -- no boot needed) reproduces the exact `_ssti_payloads()` syntax
+    mismatch via a real `go run` subprocess; `test_ssti_strategy_does_
+    not_generalize_to_go_text_template` (slow, live-boot) confirms
+    `SstiStrategy.confirm()` returns `None` against the real booted
+    vulnerable twin. The real `fuzzlab.harness.multitarget.run_targets`
+    pipeline was then re-run end to end
+    (`test_both_apps_run_through_multitarget_for_real`) with the new
+    cells included, confirming Twitch's own real, scored recall moves
+    from `9/11` to `9/12` (a real, expected false negative, `tp` stays
+    `9`) -- not merely asserted, but actually observed via a real run.
+  - Ground truth: `TWCH-0012` added to `lab/ground-truth-twitch-clone/`
+    (`vuln_class="ssti"`, `sink_context="template"` -- both pre-existing
+    enum values already used by `spring_boot`'s TrackerNest ground truth
+    (`lab/ground-truth-trackernest/labels.json`); `param="body"`/
+    `location="body"`, the whole-body-point convention `TWCH-0005`/
+    `TWCH-0006`/`TWCH-0010` already establish). **A schema-validation
+    catch during authoring, not silently worked around:** the initial
+    draft used `sink_context="template_render"` (the safety-matrix
+    family name) and `jsonschema.validate` correctly rejected it -- the
+    labels schema's own enum value for this vuln_class is `"template"`,
+    not the sink-family name, matching `spring_boot`'s TrackerNest ground
+    truth exactly. Corrected before landing, recorded here as a real
+    caught-before-landing mistake rather than omitted.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0195`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded here rather than silently
+  skipping the gate: (1) **accuracy** -- confirmed by direct source
+  inspection, not assumed: `spring_boot`'s own `UserSuppliedTemplateCompile
+  Sink`/`FileLoadedTemplateNameSink` templates and `lab/safety_matrix.
+  yaml`'s `template_render` op rows were read before designing the Go
+  port; `_ssti_payloads()`'s exact five payload strings were read from
+  `fuzzlab/oracle/strategies.py` and independently reproduced via a real
+  `go run` check BEFORE writing any lab code, not after a failed test run
+  -- this caught the task dispatch's own mistaken assumption ("very
+  likely already includes Go-style syntax") early, and is documented
+  above as its own design-decision narrative rather than silently
+  reusing the wrong precedent framing; cell IDs `LABGEN-GO-0023`/`0024`
+  were confirmed free; both cells' rendered Go source was run through a
+  real `go vet`/`gofmt -l` pass and passed cleanly before any test was
+  written; the labels-schema `sink_context` mismatch (`template_render`
+  vs `template`) was caught by a real `contract.load()` validation
+  failure during authoring, not assumed correct by analogy. (2)
+  **adequacy** -- checked that this increment does not silently duplicate
+  an existing route (grepped `_ROUTE_PARAMS`/manifests for `/channels/
+  commands`: absent) or an existing `go_net_http` SSTI instance (grepped
+  `user_supplied_template_compile|file_loaded_template_name|template_
+  render` under `fuzzlab/labgen/emitters/go_net_http/` and `lab/
+  manifests/*go*.yaml`: absent before this change); does not need a
+  second, redundant strategy (no new `Rule`/`ConfirmationStrategy` code
+  was written at all, a deliberate choice per the task's own "do not
+  force a contrived design" instruction); and that the "detection does
+  NOT generalize" claim was actually run against both a standalone `go
+  run` check and a real booted instance rather than asserted from theory
+  -- both are real, executed tests in this commit, one of them (the
+  syntax-mismatch check) deliberately kept fast/non-slow so this specific
+  empirical claim stays checked on every ordinary run, not only under
+  `-m slow`. The adequacy pass also checked `tests/test_auto.py` for a
+  PA-0044 impact and found it genuinely unaffected by direct inspection
+  (not assumed clean by analogy to `CC-LAB-0194`'s or `CC-LAB-0195`'s own,
+  differently-shaped cases) -- documented above, not silently skipped.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py`
+    (`ReadChannelCommandRequestSource`, `UserSuppliedTemplateCompileSink`,
+    `FileLoadedTemplateNameSink`)
+  - `fuzzlab/labgen/emitters/go_net_http/__init__.py` (new
+    `_MODULE_SET_BY_SHAPE`/`_MODULE_IMPORTS`/`_ROUTE_PARAMS` entries,
+    module docstring)
+  - `fuzzlab/labgen/emitters/go_net_http/templates/sources/
+    read_channel_command_request.go.j2`, `templates/sinks/
+    user_supplied_template_compile.go.j2`, `templates/sinks/
+    file_loaded_template_name.go.j2` (new)
+  - `lab/manifests/ssti_channel_commands_go_sample.yaml` (new)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,
+    expectedresults.csv}`
+  - `tests/test_labgen_go_net_http_modules.py` (3 new module tests)
+  - `tests/test_labgen_go_net_http_conformance.py` (new manifest added to
+    the Tier-3 whole-lab regeneration sweep)
+  - `tests/test_labgen_go_live_boot.py` (3 new tests: the live-boot
+    differential, the live-boot strategy-does-not-generalize proof, and
+    the fast standalone syntax-mismatch reproduction)
+  - `tests/test_labels_contract_category4.py` (TWCH-0012 cross-check,
+    count 11 -> 12)
+  - `tests/test_multitarget_category4.py` (Twitch recall re-derived,
+    `9/11` -> `9/12`; `_twitch_cells()` extended; macro-recall re-derived)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-151`, new)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category-4 tracker
+    row)
+  - `docs/ARCHITECTURE.md` (Twitch page/detection counts)
+  - `CHANGELOG.md`
+- Impact (other components / project): purely additive to `go_net_http`
+  and `lab/ground-truth-twitch-clone`; no other stack/app touched. No
+  audit-rule/oracle-strategy code changed at all (`R-SSTI`/`SstiStrategy`
+  already exist and needed zero code change to APPLY, even though they do
+  not CONFIRM this instance) -- this entry's real contribution to that
+  component is the documented, empirically-verified negative result, not
+  a positive generalization proof. **Project-level note, stated plainly:**
+  this is the first genuinely-new-mechanism-to-a-stack increment in this
+  session's own category-4 work where the "detection already works
+  automatically" pattern every prior such increment established (`CC-LAB-
+  0188` onward) does NOT hold -- an honest data point for anyone deciding
+  whether to invest in a Go-syntax-aware SSTI confirmation strategy as a
+  follow-on, not a claim that this session's own generalization track
+  record has changed direction.
+- Risk (level; mitigation or accepted-risk justification): **low**. Purely
+  additive lab-only code (a new Go handler, generated and rendered, never
+  hand-written app logic reachable from anywhere else); no outbound-
+  network/fetch capability introduced (unlike SSRF cells); no destructive
+  filesystem operation (unlike path-traversal/file-upload cells); the
+  vulnerable sink's own blast radius is confined to whatever fields the
+  fixed `commandData` struct exposes (`Uptime`/`Viewers`/`Game`, three
+  fixed demo strings) -- genuinely limited compared to a real production
+  SSTI sink that might expose request/response objects or filesystem
+  access to the template. Verified end to end with a real `go build`/
+  boot/HTTP round trip and a real `run_targets` pipeline run, not assumed
+  from the shared-mechanism argument alone. The only real process risk
+  this entry accepts and states explicitly is the same self-review
+  substitution (in place of two independent reviewer agents) every entry
+  in this session has accepted, mitigated by the real `go vet`/`gofmt`/
+  live-boot verification actually performed before landing (both the
+  differential and the strategy non-generalization proof).
+- Deliverables:
+  - [x] New source + two sink modules/templates, zero new generator
+        infrastructure code -- done
+  - [x] Real live-boot proof (3 assertions: field access, conditional
+        control flow, parse-error handling, plus the secure twin's own
+        non-evaluation) -- done
+  - [x] Ground truth extended (`TWCH-0012`) -- done
+  - [x] Detection generalization checked empirically and found NOT to
+        hold -- documented honestly (fast standalone syntax check +
+        live-boot strategy check), not silently skipped or forced --
+        Twitch's own recall moves `9/11` -> `9/12` (an honest, tracked
+        false negative) -- done
+  - [x] `tests/test_labels_contract_category4.py`/`tests/test_auto.py`
+        re-run and confirmed per `PA-0044` -- `tests/test_auto.py` found
+        genuinely UNAFFECTED by direct inspection (no Twitch-cardinality-
+        dependent hardcoded count exists there), not assumed clean -- done
+  - [x] Full non-slow suite + every directly-affected slow test re-run
+        green -- done
+
+### CC-LAB-0195 — Netflix's 10th real page: first weak_token_entropy instance on `spring_boot`, `/api/session/refresh` (FR-LAB-150) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing
+  `session_token_generation` sink family / `weak_token_entropy` concern
+  (`predictable_token_source`/`csprng_token` ops, `CC-LAB-0063`, already
+  built on `go_net_http` -- `CC-LAB-0181`'s Twitch `POST /sessions/
+  refresh`, detection `CC-FUZZ-0038`/`CC-AUD-0021`,
+  `PredictableTokenSourceStrategy`) on `spring_boot`, this stack's first
+  instance: `POST /api/session/refresh` (served by `LABGEN-JV-0019`/
+  `0020`), a session/token-refresh endpoint -- refreshing an
+  authenticated session token, a realistic API-edge auth shape distinct
+  from every one of this app's other 9 real pages -- and this session's
+  own cross-stack-generalization campaign: giving Netflix the last
+  remaining Twitch mechanism this campaign had judged realistically
+  portable to Java (this session's own prior analysis found
+  `webhook_signature`'s timing side-channel undetectable and
+  `path_traversal`'s black-box detection unsafe/contrived to attempt, so
+  neither was a candidate).
+  **Design decision, checked directly against `CC-LAB-0181`'s own entry
+  and `PredictableTokenSourceStrategy`'s own `confirm()` contract before
+  building, not assumed to "probably work":** `CC-LAB-0181`'s own entry
+  frames this shape as needing a genuinely new, THIRD module-composition
+  convention for `go_net_http` specifically (neither "a transform
+  modifies a value a shared sink renders" nor "the manifest's op names a
+  sink directly, but with a real source still reading real request
+  input" -- this shape has no tainted source input at all). Checked
+  `modules.py`'s own docstring before assuming that framing carries over
+  identically: it does not. `spring_boot` already uses a SINGLE, uniform
+  convention for every shape it supports -- the manifest's one op always
+  selects a **sink** module directly, with no separate transform stage at
+  all (see `modules.py`'s own docstring, "Why this stack's shape has no
+  separate transform category"). So this is not a new convention for
+  THIS stack; it only needed a new, no-op **source** module
+  (`NoOpTokenRequestSource`) that publishes nothing, mirroring
+  `RequestStreamSource`'s own "renders no code, exists to keep the
+  source/sink/complexity composition contract uniform" precedent
+  (`CC-LAB-0132`) -- just with an even smaller footprint (that one still
+  publishes `value_expr`; this one publishes nothing at all, since no
+  sink here reads a request-derived value). **Adapted the design
+  accordingly** (the task's own explicit invitation to check this stack's
+  own conventions rather than assume Go's numbering applies identically).
+  The vulnerable twin (`predictable_token_source`) renders the session
+  token as `Long.toString(System.nanoTime())` (CWE-330) -- the JDK's own
+  nanosecond-resolution monotonic counter, chosen over
+  `System.currentTimeMillis()` specifically to match
+  `PredictableTokenSourceStrategy`'s own two-probe delta-check resolution
+  (millisecond resolution would make two rapid consecutive probes collide
+  on the same value far more often, a real false-negative risk this port
+  avoids by matching Go's own `UnixNano()` resolution rather than reusing
+  the less precise wall-clock call). The secure twin (`csprng_token`)
+  renders 32 bytes from `java.security.SecureRandom`, hex-encoded --
+  genuinely unpredictable, the JDK's own CSPRNG, the real analog of Go's
+  `crypto/rand`.
+  **Cross-branch collision check, performed and recorded**: `git fetch
+  origin claude/category-3-build-iuu5k9 claude/category-5-build-6boejs`
+  followed by a diff of every shared file this task named (`fuzzlab/
+  labgen/emitters/spring_boot/`, `fuzzlab/oracle/strategies.py`) against
+  both sibling branches: both diffs show only deletions relative to this
+  branch (strictly behind on every one of those files, no conflicting
+  edit to the same lines/keys), and this entry does not modify
+  `fuzzlab/oracle/strategies.py` at all (the detection strategy is reused
+  verbatim, zero new/changed lines there), so no collision risk from
+  either sibling branch's own new strategy classes. This is a pure,
+  non-colliding addition.
+  **Bookkeeping-ID discipline, checked directly, not assumed:** confirmed
+  `CC-LAB-0195` against this branch's own reserved block (`CC-LAB-0170`-
+  `0209`) and the highest number actually USED in this log (`CC-LAB-0194`),
+  not merely mentioned anywhere in this branch's merged docs (category
+  5's own `CC-LAB-0210`-`0249` block is also present in this branch's
+  history and must not be mistaken for "next free"). Checked
+  `tests/test_multitarget_category4.py`/`tests/test_auto.py`/
+  `tests/test_labels_contract_category4.py` for hardcoded fraction/count
+  assertions depending on Netflix's ground-truth cardinality (per
+  `BUG-0042`/`PA-0044`) and re-ran all three directly (not just the
+  non-slow suite) after updating them: `test_multitarget_category4.py`'s
+  Netflix recall assertions moved from `9/9` to `10/10` (multi-cell boot)
+  and `1/9` to `1/10` (single-cell wiring test), plus the macro-recall
+  average; `test_labels_contract_category4.py`'s case count moved from 9
+  to 10 with a new `NFLX-0010` cross-check; `test_auto.py`'s own
+  Netflix-cardinality-sensitive assertions were checked by DIRECT
+  inspection, not assumed clean by analogy to `CC-LAB-0194`'s own
+  `location="query"` case: this new case's `param="body"`/
+  `location="body"` (the whole-body-point convention, since there is no
+  per-field param at all) DOES fall inside
+  `test_points_from_ground_truth_sets_body_content_type_only_for_json_
+  cases`'s own whole-body-point count and per-URL `body_content_type`
+  assertions (unlike `CC-LAB-0194`'s `location="query"` SSRF point, which
+  did not) -- a real, caught-before-landing PA-0044 finding, not a
+  restated assumption. Re-derived that count (5 -> 6 whole-body points,
+  new `/api/session/refresh` entry asserting `body_content_type ==
+  "application/json"`) and re-ran green;
+  `test_points_from_ground_truth_carries_sink_context_from_the_matching_
+  case` inspects only three specific URLs by name, none of which is the
+  new one -- confirmed unaffected by direct inspection, not assumed.
+  - **Real Netflix functionality (grounded, not invented)**: a
+    session/token-refresh endpoint (a standard API-edge auth shape every
+    session-based web app needs; the specific `POST /api/session/
+    refresh` path is this manifest's own illustrative inference, not a
+    confirmed Netflix-internal implementation detail, labeled explicitly
+    in the manifest's own header, matching `CC-LAB-0179`'s/`CC-LAB-0194`'s
+    own fact-vs-inference discipline).
+  - **Vulnerable** (`LABGEN-JV-0019`, `predictable_token_source`): the
+    session token literally is `System.nanoTime()` as a decimal string.
+    **Secure** (`LABGEN-JV-0020`, `csprng_token`): 32 bytes from
+    `java.security.SecureRandom`, hex-encoded.
+  - **Zero new generator code beyond one source template + two sink
+    templates + a `_PAGE_PARAMS` entry**: the `single_handler` complexity
+    and the `_MODULE_SET_BY_SHAPE`/`SOURCES`/`SINKS` dict-registration
+    pattern are all pre-existing, unchanged infrastructure -- only three
+    new template files (`no_op_token_request.java.j2`/
+    `predictable_token_source.java.j2`/`csprng_token.java.j2`) and their
+    three `TemplateModule` subclasses are genuinely new code; rendering
+    both cells was run directly before writing any test and confirmed
+    clean, deterministic Java source.
+  - **Real, live-boot proof** (`tests/test_labgen_spring_boot_netflix_
+    session_refresh_live_boot.py`, mirroring `CC-LAB-0181`'s own
+    `go_net_http` two-case differential shape: the vulnerable twin's two
+    consecutive tokens both parse as decimal integers whose difference
+    tracks real elapsed wall-clock time; the secure twin's tokens are
+    64-character hex strings that never parse as base-10 integers at
+    all): 3 assertions pass against a real `mvn package`/boot/HTTP round
+    trip -- 3 passed in ~23s.
+  - **Detection generalization, verified for real against a real booted
+    app, not asserted from theory**: `PredictableTokenSourceStrategy`
+    (`CC-FUZZ-0038`) confirms the real vulnerable twin and correctly
+    fails closed on the real secure twin, with zero new detection code
+    (`TestPredictableTokenSourceStrategyGeneralizesToSpringBoot`, same
+    file). The real `fuzzlab.harness.multitarget.run_targets` pipeline
+    was then run end to end against both a single-cell boot
+    (`test_both_apps_run_through_multitarget_for_real`) and the shared
+    Netflix multi-cell boot
+    (`test_netflix_multi_cell_boot_confirms_all_positives`), both
+    re-verified green after the recall-math update: Netflix's own real,
+    scored recall moves from `9/9` to `10/10` in the multi-cell boot and
+    from `1/9` to `1/10` in the single-cell wiring test.
+  - Ground truth: `NFLX-0010` added to `lab/ground-truth-netflix-clone/`
+    (`vuln_class="weak_token_entropy"`, `sink_context="session_token"` --
+    both pre-existing enum values from `TWCH-0005`; `param="body"`/
+    `location="body"`, the whole-body-point convention `TWCH-0005`
+    already establishes even though the request body itself is unused by
+    this mechanism, no schema widening needed).
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0194`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded here rather than silently
+  skipping the gate: (1) **accuracy** -- confirmed by direct source
+  inspection, not assumed: `single_handler`'s module name exists verbatim
+  in `modules.py`; `PredictableTokenSourceStrategy`'s exact `confirm()`
+  contract (`fuzzlab/oracle/strategies.py`) and `_session_token()`'s
+  JSON-field-parse gate were read before designing the response shape;
+  `modules.py`'s own docstring was read before assuming `CC-LAB-0181`'s
+  "new, third convention" framing carried over to this stack (it does
+  not -- caught this way, BEFORE any template was written, not after a
+  failed test run, and documented above as its own design-decision
+  narrative rather than silently reusing the wrong precedent language);
+  cell IDs `LABGEN-JV-0019`/`0020` were confirmed free (grepped
+  `LABGEN-JV-` across every manifest, highest existing was
+  `LABGEN-JV-0018`, from `CC-LAB-0194`); rendering both cells was run
+  directly before writing any test. (2) **adequacy** -- checked that this
+  increment does not silently duplicate an existing route (grepped
+  `_PAGE_PARAMS` for `/api/session/refresh`: absent), does not need a
+  second, redundant strategy (no new `Rule`/`ConfirmationStrategy` code
+  was written at all), and that the "detection already works
+  automatically" claim was actually run against a real booted instance
+  rather than asserted from theory (see above) -- both a dedicated
+  live-boot strategy test and the full
+  `fuzzlab.harness.multitarget.run_targets` pipeline (both the
+  single-cell wiring test and the shared multi-cell boot) were executed
+  for real before this entry claims the recall move. The adequacy pass
+  also caught the `tests/test_auto.py` PA-0044 impact described above --
+  a real catch, not a restated assumption of safety by analogy to
+  `CC-LAB-0194`'s own (different-shaped, unaffected) case.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/modules.py`
+    (`NoOpTokenRequestSource`, `PredictableTokenSourceSink`,
+    `CsprngTokenSink`)
+  - `fuzzlab/labgen/emitters/spring_boot/__init__.py` (new
+    `_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS` entries)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sources/
+    no_op_token_request.java.j2`, `templates/sinks/
+    predictable_token_source.java.j2`, `templates/sinks/csprng_token.
+    java.j2` (new)
+  - `lab/manifests/weak_token_entropy_netflix_sample.yaml` (new)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,
+    expectedresults.csv}`
+  - `tests/test_labgen_spring_boot_netflix_session_refresh.py` (new)
+  - `tests/test_labgen_spring_boot_netflix_session_refresh_live_boot.py`
+    (new)
+  - `tests/test_labels_contract_category4.py` (NFLX-0010 cross-check)
+  - `tests/test_multitarget_category4.py` (Netflix recall re-derived,
+    both single-cell and multi-cell boots; multi-cell manifest/cell-id
+    lists extended)
+  - `tests/test_auto.py` (whole-body-point count re-derived, 5 -> 6, per
+    PA-0044 -- the real finding this entry's adequacy pass made)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-150`, new)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category-4 tracker
+    row)
+  - `docs/ARCHITECTURE.md` (Netflix page/detection counts, campaign
+    completion note)
+  - `CHANGELOG.md`
+- Impact (other components / project): purely additive to `spring_boot`
+  and `lab/ground-truth-netflix-clone`; no other stack/app touched. No
+  audit-rule/oracle-strategy bookkeeping change was needed
+  (`PredictableTokenSourceStrategy`/`CC-FUZZ-0038`/`CC-AUD-0021` already
+  exist and needed zero code change) -- only their own generalization to
+  a second real page (after `TWCH-0005`) and a second stack is newly
+  proven and recorded, here and in `tests/test_multitarget_category4.py`'s
+  own docstring. **Project-level milestone, stated plainly (this
+  dispatch's own explicit ask):** with this increment, every
+  realistically-portable-to-both-stacks vuln class this session built
+  (`access_control`, `mass_assignment`, `unrestricted_file_upload`,
+  `price_integrity_bypass`, `jwt_algorithm_confusion`, `ssrf`,
+  `weak_token_entropy`) now exists on BOTH Twitch and Netflix, each with
+  real, live-boot-proven, cross-stack-generalized detection -- this
+  session's own cross-stack-generalization campaign reaches its natural
+  completion point for category 4. The remaining stack-asymmetric
+  mechanisms (Netflix-only `insecure_deserialization`/`xxe`, Twitch-only
+  `webhook_signature`/`path_traversal`) are not further candidates, for
+  the reasons this session's own prior analysis already recorded (Go's
+  `encoding/xml` does not resolve external entities by default, unlike
+  Java's `DocumentBuilderFactory`, so an XXE port to Go would not be a
+  genuine vulnerability; `webhook_signature`'s timing side-channel was
+  judged empirically infeasible for this project's wall-clock HTTP
+  measurement model; `path_traversal`'s black-box detection was judged
+  unsafe/contrived to attempt) -- not invented here, restated for the
+  record at this campaign's own completion point.
+- Risk (level; mitigation or accepted-risk justification): **low**. Reuses
+  a fully-built, already-tested strategy verbatim; the only genuinely new
+  artifacts are three small templates, a manifest, and ground truth.
+  Verified end to end with a real `mvn package`/boot/HTTP round trip and a
+  real `run_targets` pipeline run, not assumed from the shared-mechanism
+  argument alone. No outbound-network/fetch capability is introduced by
+  this cell at all (unlike `CC-LAB-0194`'s own SSRF cell) -- the only real
+  process risk this entry accepts and states explicitly is the same
+  self-review substitution (in place of two independent reviewer agents)
+  every entry in this session has accepted, mitigated by the real `mvn
+  package`/boot/HTTP verification actually performed before landing (both
+  the differential and the strategy generalization).
+- Deliverables:
+  - [x] New no-op source + two sink templates, zero new source/complexity
+        infrastructure code -- done
+  - [x] Real live-boot proof (3 assertions, mirroring `CC-LAB-0181`'s own
+        two-twin differential shape) -- done
+  - [x] Ground truth extended (`NFLX-0010`) -- done
+  - [x] Detection generalization verified live (dedicated strategy
+        live-boot test + real `run_targets` pipeline runs, both single-
+        and multi-cell) -- recall `9/9` -> `10/10` (multi-cell), `1/9` ->
+        `1/10` (single-cell) -- done
+  - [x] `tests/test_labels_contract_category4.py`/`tests/test_auto.py`
+        re-run and confirmed green per `PA-0044` -- `tests/test_auto.py`
+        found genuinely affected (not a clean pass by analogy) and
+        re-derived, not just re-run -- done
+  - [x] Full non-slow suite + every directly-affected slow test re-run
+        green at the stable baseline (18 pre-existing, unrelated
+        failures; 2070 passed) -- done
+  - [x] Pre-change review gate's `Agent`-tool absence flagged explicitly,
+        substituted with a documented self-review (accuracy + adequacy),
+        matching `CC-LAB-0182`-`0194`'s own precedent wording
+  - [x] Cross-stack-generalization campaign completion assessed and
+        stated plainly, with reasons, per this dispatch's own explicit
+        ask -- done
+- Effectiveness (assessed 2026-09-23): achieved, both as a lab page and
+  for detection -- the real booted vulnerable twin's two consecutive
+  tokens both parse as decimal integers whose difference tracks real
+  elapsed wall-clock time (CWE-330 demonstrated); the real booted secure
+  twin's tokens are 64-character hex strings that never parse as base-10
+  integers at all; `PredictableTokenSourceStrategy` confirms the
+  vulnerable twin and correctly fails closed on the secure twin with zero
+  new detection code -- the sixth proof this session's own detection
+  strategies generalize across stacks (`go_net_http` -> `spring_boot`).
+  Netflix's own real, scored `multitarget` recall is now `10/10` in the
+  multi-cell boot.
+
+### CC-LAB-0194 — Netflix's 9th real page, first ssrf instance on `spring_boot`, `/api/content/thumbnail-import` (FR-LAB-149) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing
+  `server_side_http_fetch` sink family / `ssrf` concern
+  (`unchecked_url_fetch`/`scheme_and_resolved_ip_allowlist` ops,
+  `CC-LAB-0063`, already built on `go_net_http` TWICE -- `CC-LAB-0172`'s
+  own `/api/clips/thumbnail` and `CC-LAB-0185`'s own `/clips/download`,
+  a cheapest-first two-strategy detection pair,
+  `SsrfInBandMarkerStrategy`/`SsrfOobStrategy`, `CC-FUZZ-0031`) on
+  `spring_boot`, this stack's first instance: `POST /api/content/
+  thumbnail-import` (served by `LABGEN-JV-0017`/`0018`), a partner-content
+  thumbnail-import endpoint -- importing a thumbnail image from a
+  partner-supplied URL for newly-ingested partner content, a real,
+  plausible feature given Netflix's own confirmed B2B content-ingestion
+  surface, `/api/content/import` (`CC-LAB-0179`), genuinely distinct from
+  that endpoint's own XML-metadata-feed ingestion, not a cosmetic rename
+  of it -- and this session's own cross-stack-generalization campaign:
+  giving Netflix a mechanism Twitch's `go_net_http` pick already has
+  (this is the highest-value remaining generalization increment flagged
+  by the prior lane, since `ssrf` is a genuinely more complex two-strategy
+  in-band + OOB detection mechanism than the recent single-strategy
+  reuses).
+  **Design decision, checked directly against `SsrfInBandMarkerStrategy`/
+  `SsrfOobStrategy`'s own `confirm()` contract before building, not
+  assumed to "probably work":** the task's own suggested design modeled
+  this on a JSON POST body with a named `thumbnail_url` field (mirroring
+  `raw_body`'s reuse for XXE/mass-assignment). Read directly against
+  `fuzzlab/tools/probesender.py`'s own `send()` implementation before
+  committing to that shape: for `location="body"` **with** a
+  `content_type`, the sender writes the candidate's whole `value` as the
+  raw body bytes verbatim -- it has no notion of "substitute one named
+  JSON field inside a larger body." `SsrfInBandMarkerStrategy`/
+  `SsrfOobStrategy` send their canary URL directly as `value` with no
+  JSON-wrapping of their own (unlike `MassAssignmentPrivilegedFieldStrategy`,
+  which forges a complete JSON body string itself) -- so a JSON-body
+  design would have made the canary arrive as the ENTIRE raw body (not
+  valid JSON, no `thumbnail_url` field), which this shape's own JSON
+  parse would reject before ever reaching the fetch, breaking the generic
+  `run_targets` pipeline's own automatic detection entirely. **Adapted
+  the design accordingly** (the task's own explicit invitation to use
+  judgment and report the path taken): this cell reuses `spring_boot`'s
+  pre-existing `query_param` source verbatim (already used by
+  `ssti`/`spel_injection`) instead of a JSON body field -- the same
+  query-param-carried-URL contract `go_net_http`'s own
+  `read_url_query_param` source already established for this exact
+  mechanism, so a generic `Candidate(location="query")` probe drives this
+  new `spring_boot` cell identically to `go_net_http`'s own SSRF cells,
+  with zero new sender/candidate plumbing needed either. The route stays
+  a realistic `POST` (a thumbnail-import action triggered with a query
+  parameter, e.g. `POST /api/content/thumbnail-import?thumbnail_url=...`)
+  -- `_send`'s own method/location split (`fuzzlab/oracle/strategies.py`)
+  already sends a query-param value via `sender.send(..., method="POST",
+  location="query")` regardless of HTTP method, so this works with zero
+  adaptation there either.
+  Both sinks are ported idiomatically from `go_net_http`'s own
+  `UncheckedUrlFetchSink`/`SchemeAndResolvedIpAllowlistSink`
+  (`CC-LAB-0172`) to `java.net.http.HttpClient`, with
+  `java.net.InetAddress.getAllByName` doing real DNS resolution before
+  the fetch (the JDK's own `net.LookupIP`-then-validate analog), checked
+  against the RESOLVED address actually dialed, not just the hostname
+  string -- closing the DNS-rebinding gap `lab/safety_matrix.yaml`'s own
+  comment on this sink family names. The vulnerable twin
+  (`unchecked_url_fetch`) fetches whatever URL the caller supplies with
+  no validation at all (CWE-918); the secure twin
+  (`scheme_and_resolved_ip_allowlist`) rejects any scheme but `https`,
+  and separately rejects any resolved address that is loopback
+  (`isLoopbackAddress()`), private (`isSiteLocalAddress()`), link-local
+  (`isLinkLocalAddress()`), or unspecified (`isAnyLocalAddress()`) --
+  the JDK's own closest analog of Go's `IsLoopback()`/`IsPrivate()`/
+  `IsLinkLocalUnicast()`/`IsUnspecified()` (a documented, accepted
+  narrowing, not silently assumed identical: Java's `isSiteLocalAddress()`
+  covers RFC 1918 IPv4 and the deprecated IPv6 site-local range, not the
+  modern IPv6 ULA `fc00::/7` range Go's `IsPrivate()` also covers -- out
+  of scope for this lab-only IPv4-loopback-focused increment, the same
+  scoping call `CC-LAB-0172`'s own Go implementation made no equivalent
+  IPv6-ULA claim about either). Both sinks set an explicit, bounded
+  `connectTimeout`/request `timeout` (never a default-timeout client),
+  matching `CC-LAB-0172`'s own "bounded timeout on every real operation"
+  convention. The vulnerable twin's response body is the fetched
+  resource's own body verbatim (`ResponseEntity.ok().body(fetchResponse.
+  body())`), mirroring `go_net_http`'s own `io.Copy(w, resp.Body)` shape
+  -- exactly what `SsrfInBandMarkerStrategy.confirm()` checks for.
+  **Cross-branch collision check, performed and recorded**: `git fetch
+  origin claude/category-3-build-iuu5k9 claude/category-5-build-6boejs`
+  followed by a diff of every shared file this task named (`fuzzlab/
+  labgen/emitters/spring_boot/`, `fuzzlab/oracle/strategies.py`) against
+  both sibling branches: category 3's diff shows only deletions relative
+  to this branch (strictly behind on every one of those files); category
+  5's diff on `spring_boot/__init__.py` shows their branch is based on an
+  earlier commit (missing this branch's own `CC-LAB-0187`-`0193` Netflix
+  entries) plus their own one additive `_PAGE_PARAMS["/api/trips/
+  restore"]` entry -- a distinct key from this entry's own new
+  `_MODULE_SET_BY_SHAPE[("ssrf", "server_side_http_fetch")]`/
+  `_PAGE_PARAMS["/api/content/thumbnail-import"]` entries, so no
+  collision; category 5's `modules.py`/`strategies.py` diffs are also
+  pure deletions relative to this branch (their own SpEL/open-redirect
+  additions predate this branch's own `CC-LAB-0214` SpEL landing, already
+  present on this branch) -- this entry does not modify
+  `fuzzlab/oracle/strategies.py` at all (the detection strategy pair is
+  reused verbatim, zero new/changed lines there), so category 5's own new
+  strategy classes there pose no collision risk either. This is a pure,
+  non-colliding addition.
+  **Bookkeeping-ID discipline, checked directly, not assumed (the
+  recurring risk `CC-LAB-0191`'s own numbering-collision story flags):**
+  confirmed `CC-LAB-0194` against this branch's own reserved block
+  (`CC-LAB-0170`-`0209`) and the highest number actually used in this log
+  (`CC-LAB-0193`), not merely mentioned anywhere in this branch's merged
+  docs (category 5's own `CC-LAB-0210`-`0249` block is also present in
+  this branch's history and must not be mistaken for "next free").
+  Checked `tests/test_multitarget_category4.py`/`tests/test_auto.py`/
+  `tests/test_labels_contract_category4.py` for hardcoded fraction/count
+  assertions depending on Netflix's ground-truth cardinality (per
+  `BUG-0042`/`PA-0044`) and re-ran all three directly (not just the
+  non-slow suite) after updating them: `test_multitarget_category4.py`'s
+  Netflix recall assertions moved from `8/8` to `9/9` (multi-cell boot)
+  and `1/8` to `1/9` (single-cell wiring test), plus the macro-recall
+  average; `test_labels_contract_category4.py`'s case count moved from 8
+  to 9 with a new `NFLX-0009` cross-check; `test_auto.py`'s own
+  Netflix-cardinality-sensitive assertions (`test_points_from_ground_
+  truth_sets_body_content_type_only_for_json_cases`,
+  `test_points_from_ground_truth_carries_sink_context_from_the_matching_
+  case`) count/inspect only whole-body `param="body"` points, which this
+  new `location="query"` point is not part of -- confirmed unaffected by
+  direct inspection, not assumed, and re-run green.
+  - **Real Netflix functionality (grounded, not invented)**: a
+    partner-content thumbnail-import endpoint (fact: Netflix is a
+    confirmed EIDR participant with a real B2B content-ingestion surface,
+    already cited for `/api/content/import`, `CC-LAB-0179`; the specific
+    `POST /api/content/thumbnail-import` shape is this manifest's own
+    illustrative inference, not a confirmed Netflix-internal
+    implementation detail, labeled explicitly in the manifest's own
+    header, matching `CC-LAB-0179`'s own fact-vs-inference discipline).
+  - **Vulnerable** (`LABGEN-JV-0017`, `unchecked_url_fetch`): fetches the
+    caller-supplied `thumbnail_url` query parameter with no validation at
+    all. **Secure** (`LABGEN-JV-0018`, `scheme_and_resolved_ip_allowlist`):
+    rejects any scheme but `https` and rejects a resolved IP that is
+    loopback/private/link-local, checked against the resolved address,
+    before fetching.
+  - **Zero new generator code beyond two sink templates + a
+    `_PAGE_PARAMS` entry**: the `query_param` source, the
+    `single_handler` complexity, and the `_MODULE_SET_BY_SHAPE`/`SINKS`
+    dict-registration pattern are all pre-existing, unchanged
+    infrastructure -- only two new sink template files
+    (`unchecked_url_fetch.java.j2`/`scheme_and_resolved_ip_allowlist.
+    java.j2`) and their two `TemplateModule` subclasses are genuinely
+    new code; rendering both cells was run directly before writing any
+    test and confirmed clean, deterministic Java source.
+  - **Real, live-boot proof** (`tests/test_labgen_spring_boot_netflix_
+    thumbnail_ssrf_live_boot.py`, same three-case differential shape as
+    `CC-LAB-0172`'s own `go_net_http` test -- plain-HTTP loopback accepted
+    by the vulnerable twin; rejected by the secure twin on the scheme
+    check; an HTTPS loopback target ALSO rejected by the secure twin,
+    isolating the resolved-IP-allowlist check specifically): all three
+    assertions pass against a real `mvn package`/boot/HTTP round trip,
+    using throwaway loopback listeners this test process itself starts
+    and owns (never a real external/production host, per `CLAUDE.md`'s
+    lab-only/authorized-only safety discipline) -- 3 passed in ~28s.
+  - **Detection generalization, verified for real against a real booted
+    app, not asserted from theory**: `SsrfInBandMarkerStrategy`/
+    `SsrfOobStrategy` (`CC-FUZZ-0031`) confirm the real vulnerable twin
+    and correctly fail closed on the real secure twin, using a real,
+    started `OobListener`, with zero new detection code
+    (`TestSsrfStrategiesGeneralizeToSpringBoot`, same file). The real
+    `fuzzlab.harness.multitarget.run_targets` pipeline was then run end
+    to end against both a single-cell boot
+    (`test_both_apps_run_through_multitarget_for_real`, with a real
+    `OobListener` passed through) and the shared Netflix multi-cell boot
+    (`test_netflix_multi_cell_boot_confirms_all_positives`), both
+    re-verified green after the recall-math update: Netflix's own real,
+    scored recall moves from `8/8` to `9/9` in the multi-cell boot and
+    from `1/8` to `1/9` in the single-cell wiring test.
+  - Ground truth: `NFLX-0009` added to `lab/ground-truth-netflix-clone/`
+    (`vuln_class="ssrf"`, `sink_context="network"` -- both pre-existing
+    enum values from `TWCH-0002`; `param="thumbnail_url"`/
+    `location="query"`, the query-param-carried-value convention
+    `TWCH-0002`/`TWCH-0008` already establish, no schema widening
+    needed).
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0193`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded here rather than silently
+  skipping the gate: (1) **accuracy** -- confirmed by direct source
+  inspection, not assumed: `query_param`/`single_handler` module names
+  exist verbatim in `modules.py`; `SsrfInBandMarkerStrategy`/
+  `SsrfOobStrategy`'s exact `confirm()` contracts (`fuzzlab/oracle/
+  strategies.py`) were read before designing the source-module choice
+  (the JSON-body-field design flaw described above was caught this way,
+  BEFORE any template was written, not after a failed test run); cell IDs
+  `LABGEN-JV-0017`/`0018` were confirmed free (grepped `LABGEN-JV-` across
+  every manifest, highest existing was `LABGEN-JV-0016`, from
+  `CC-LAB-0193`); rendering both cells was run directly before writing
+  any test. (2) **adequacy** -- checked that this increment does not
+  silently duplicate an existing route (grepped `_PAGE_PARAMS` for
+  `/api/content/thumbnail-import`: absent), does not need a second,
+  redundant strategy (no new `Rule`/`ConfirmationStrategy` code was
+  written at all), and that the "detection already works automatically"
+  claim was actually run against a real booted instance rather than
+  asserted from theory (see above) -- both a dedicated live-boot
+  strategy test and the full `fuzzlab.harness.multitarget.run_targets`
+  pipeline (both the single-cell wiring test and the shared multi-cell
+  boot) were executed for real before this entry claims the recall move.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/modules.py`
+    (`UncheckedUrlFetchSink`, `SchemeAndResolvedIpAllowlistSink`)
+  - `fuzzlab/labgen/emitters/spring_boot/__init__.py` (new
+    `_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS` entries)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sinks/
+    unchecked_url_fetch.java.j2`, `scheme_and_resolved_ip_allowlist.
+    java.j2` (new)
+  - `lab/manifests/ssrf_netflix_thumbnail_sample.yaml` (new)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,
+    expectedresults.csv}`
+  - `tests/test_labgen_spring_boot_netflix_thumbnail_ssrf.py` (new)
+  - `tests/test_labgen_spring_boot_netflix_thumbnail_ssrf_live_boot.py`
+    (new)
+  - `tests/test_labels_contract_category4.py` (NFLX-0009 cross-check)
+  - `tests/test_multitarget_category4.py` (Netflix recall re-derived,
+    both single-cell and multi-cell boots; multi-cell manifest/cell-id
+    lists extended)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-149`, new)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category-4 tracker
+    row)
+  - `docs/ARCHITECTURE.md` (Netflix page/detection counts)
+  - `CHANGELOG.md`
+- Impact (other components / project): purely additive to `spring_boot`
+  and `lab/ground-truth-netflix-clone`; no other stack/app touched. No
+  audit-rule/oracle-strategy bookkeeping change was needed
+  (`SsrfInBandMarkerStrategy`/`SsrfOobStrategy`/`CC-FUZZ-0031`/
+  `CC-AUD-0016` already exist and needed zero code change) -- only their
+  own generalization to a third real page (after `TWCH-0002`/`TWCH-0008`)
+  and a second stack is newly proven and recorded, here and in
+  `tests/test_multitarget_category4.py`'s own docstring.
+- Risk (level; mitigation or accepted-risk justification): **low**. Reuses
+  fully-built, already-tested modules/strategies verbatim; the only
+  genuinely new artifacts are two sink templates, a manifest, and ground
+  truth. Verified end to end with a real `mvn package`/boot/HTTP round
+  trip and a real `run_targets` pipeline run (with a real `OobListener`),
+  not assumed from the shared-mechanism argument alone. The one real
+  design risk this entry accepts and states explicitly: this cell's fetch
+  capability is a real, live, outbound-fetch-capable code cell inside the
+  target lab (the same containment principle `CC-LAB-0172`'s own risk
+  section already established) -- never wired to any real external-target
+  list, credential, or production host anywhere in this dispatch; every
+  fetch target in every test this dispatch adds is a throwaway listener
+  the test process itself starts on loopback. The self-review
+  substitution above (in place of two independent reviewer agents) is the
+  other real process risk this entry accepts and states explicitly,
+  mitigated by the real `mvn package`/boot/HTTP verification actually
+  performed before landing (both the differential and the strategy
+  generalization).
+- Deliverables:
+  - [x] Two new sink templates + `_PAGE_PARAMS` entry, zero new source/
+        complexity code -- done
+  - [x] Real live-boot proof (3 assertions, mirroring `CC-LAB-0172`'s own
+        three-case shape) -- done
+  - [x] Ground truth extended (`NFLX-0009`) -- done
+  - [x] Detection generalization verified live (dedicated strategy
+        live-boot test with a real `OobListener` + real `run_targets`
+        pipeline runs, both single- and multi-cell) -- recall `8/8` ->
+        `9/9` (multi-cell), `1/8` -> `1/9` (single-cell) -- done
+  - [x] `tests/test_labels_contract_category4.py`/`tests/test_auto.py`
+        re-run and confirmed green/unaffected per `PA-0044` -- done
+  - [x] Full non-slow suite + every directly-affected slow test re-run
+        green at the stable baseline -- done
+  - [x] Pre-change review gate's `Agent`-tool absence flagged explicitly,
+        substituted with a documented self-review (accuracy + adequacy),
+        matching `CC-LAB-0182`-`0193`'s own precedent wording
+- Effectiveness (assessed 2026-09-23): achieved, both as a lab page and
+  for detection -- the real booted vulnerable twin fetches an unvalidated
+  loopback target successfully (CWE-918 demonstrated); the real booted
+  secure twin rejects it on the scheme check and separately rejects an
+  HTTPS loopback target on the resolved-IP-allowlist check specifically;
+  `SsrfInBandMarkerStrategy`/`SsrfOobStrategy` confirm the vulnerable twin
+  and correctly fail closed on the secure twin with zero new detection
+  code AND zero new sender/candidate plumbing -- the fifth proof this
+  session's own detection strategies generalize across stacks
+  (`go_net_http` -> `spring_boot`), and specifically the first proof of a
+  genuinely two-strategy (in-band + OOB) detection mechanism generalizing
+  this way, not just a single-strategy reuse. Netflix's own real, scored
+  `multitarget` recall is now `9/9` in the multi-cell boot.
+
+### CC-LAB-0193 — Netflix's 8th real page: first jwt_algorithm_confusion instance on `spring_boot`, `/api/account/preferences` (FR-LAB-148) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing
+  `jwt_alg_none_default`/`jwt_none_alg_opt_in` mechanism
+  (`jwt_signature_verification` sink family, `CC-LAB-0063`, already built
+  on `go_net_http` per `CC-LAB-0180` -- Twitch's own channel-settings
+  page, modeled on directly) on `spring_boot`, this stack's first
+  instance: `GET /api/account/preferences` (served by `LABGEN-JV-0015`/
+  `0016`), an account-level viewing-preferences lookup (maturity rating,
+  autoplay, subtitle language) gated by a Bearer JWT in the
+  `Authorization` header -- a realistic API-edge auth shape distinct from
+  every one of this app's other 7 real pages (none of which use
+  header-carried auth), and this session's own cross-stack-
+  generalization campaign: giving Netflix a mechanism Twitch's
+  `go_net_http` pick already has.
+  **A hand-rolled JWT parser/verifier, JDK standard library only**
+  (`java.util.Base64`, `javax.crypto.Mac`, `java.security.MessageDigest`
+  -- no third-party JWT dependency; `pom.xml` gets no new `<dependency>`),
+  modeling the same real `auth0/node-jsonwebtoken` vulnerability
+  (GHSA-8cf7-32gw-wr33, already cited in this project's own
+  `docs/research/corpus-examples/auth-session/node/vulnerable-1.js`) that
+  `CC-LAB-0180`'s own Go implementation models: the vulnerable twin
+  (`jwt_alg_none_default`) honors an attacker-chosen `alg: none` header,
+  skipping signature verification entirely
+  (`jwtAlgIsNone || jwtHmacValid`); the secure twin (`jwt_none_alg_opt_in`)
+  requires the token's own header to explicitly claim the one pinned
+  algorithm (`HS256`) *and* a valid HMAC before any claims are trusted
+  (`jwtAlgIsHs256 && jwtHmacValid`) -- an `alg:none` token never reaches
+  the accepted-condition at all. `java.security.MessageDigest.isEqual`
+  (constant-time, the JDK's own `hmac.Equal` analog) is used explicitly
+  for the HMAC comparison, and a malformed/empty base64url segment fails
+  closed by construction: `TrackerNestApplication.base64UrlDecode` (a new
+  static helper on the existing skeleton class, mirroring `go_net_http`'s
+  own package-level `jwtSecret`/decode convention) catches
+  `IllegalArgumentException` and returns an empty byte array rather than
+  throwing, so `MessageDigest.isEqual` safely reports "not equal" on any
+  length mismatch, never crashes the request.
+  **Module composition, checked before building, not assumed:** unlike
+  `go_net_http`'s own source+transform split (a `value_expr` a transform
+  computes), this stack's shape has no separate transform stage (see
+  `modules.py`'s own docstring) -- `ReadAuthorizationBearerTokenSource`
+  computes all three boolean ingredients itself
+  (`jwtAlgIsNone`/`jwtAlgIsHs256`/`jwtHmacValid`) and each op's own sink
+  module (`JwtAlgNoneDefaultSink`/`JwtNoneAlgOptInSink`) reads them
+  directly to decide its own accepted-condition, the same "op selects the
+  sink" convention this stack already uses for SSTI/XXE/access-control/
+  price-integrity/file-upload/mass-assignment. **A real Java concern Go's
+  own implementation had to guard against (`_, _ = algIsNone, algIsHS256`
+  in `CC-LAB-0180`, an unused-identifier compile error) does NOT apply
+  here**, checked directly rather than assumed: Java's `javac` does not
+  reject an unused local variable (only some external linters warn on
+  it), so each sink module deliberately reading only two of the three
+  published booleans compiles cleanly with no equivalent guard needed --
+  confirmed by the real `mvn package` below actually succeeding on the
+  first attempt with no discard-guard code, unlike Go's own history on
+  this exact mechanism.
+  **Response-shape design decision, checked directly against the existing
+  strategy's source before building, not assumed to "probably work":**
+  `JwtAlgNoneConfusionStrategy` (`fuzzlab/oracle/strategies.py`, built for
+  Twitch's `go_net_http` cell) forges its two probes' payload claims under
+  fixed literal keys, `channel_id`/`role` -- reading its `confirm()`
+  method directly (not just its docstring) confirmed the only real
+  contract is that the response text contains the `channel_id` claim
+  value verbatim somewhere (a substring check, `token not in
+  probe_a.text`), not a specific response schema. This entry's sink
+  templates echo the decoded token's own `channel_id`/`role` claims
+  verbatim (alongside fixed Netflix-flavored preference fields,
+  `maturity_rating`/`autoplay`/`subtitle_language`) -- the same "fixed
+  demo field name as declared simplification" convention
+  `CC-LAB-0182`/`CC-LAB-0192`'s own `mass_assignment` ground truth already
+  establish -- so the existing strategy generalizes to this new stack
+  with genuinely zero new or widened detection code, verified for real
+  rather than assumed (see below), landed in the SAME commit as the lab
+  page (unlike `CC-LAB-0180`'s own detection, which was deliberately
+  deferred as a separate follow-on at the time, per that entry's own
+  adequacy-pass recommendation to split the lab page from its detection).
+  Real live-boot proof
+  (`tests/test_labgen_spring_boot_netflix_jwt_preferences_live_boot.py`):
+  three cases mirroring `CC-LAB-0180`'s own Go proof exactly -- (a) the
+  vulnerable twin honors an `alg:none` token and returns its forged
+  `channel_id`/`role` claims (HTTP 200); (b) the vulnerable twin still
+  correctly rejects a garbage-but-`HS256`-claimed signature (HTTP 401),
+  proving it isn't simply "always 200"; (c) the secure twin rejects the
+  identical `alg:none` token outright (HTTP 401, no data) -- all three
+  passed on the first real `mvn package`/boot/HTTP round trip. A second
+  test class in the same file proves `JwtAlgNoneConfusionStrategy` needs
+  zero new detection code: it confirms the new vulnerable twin and
+  correctly fails closed on the secure twin, driven against the real
+  booted app (not a fake sender) -- the fourth proof this strategy class
+  of detection generalizes across stacks in the direction `go_net_http`
+  -> `spring_boot` (after `AccessControlIdorStrategy`'s own `CC-LAB-0187`
+  proof, `UnrestrictedFileUploadContentTypeTrustStrategy`'s own
+  `CC-LAB-0191` proof, and `MassAssignmentPrivilegedFieldStrategy`'s own
+  `CC-LAB-0192` proof), and specifically the first proof that
+  `JwtAlgNoneConfusionStrategy` itself (as opposed to a different
+  strategy class) generalizes beyond the one stack it was built for.
+  Ground truth extended (`NFLX-0008`, `param="Authorization"`/
+  `location="header"` -- the header-carried-value convention
+  `TWCH-0001`/`TWCH-0004` already establish, `CC-LAB-0174`). No schema
+  widening needed: `jwt_algorithm_confusion` (`vuln_class`) and `jwt`
+  (`sink_context`) were already valid enum values (from `go_net_http`'s
+  own `TWCH-0004`, `CC-LAB-0180`), and `header`/`GET` are both
+  pre-existing `location`/`param`/`method` shapes.
+  `tests/test_auto.py`'s own whole-body-JSON `body_content_type` count
+  (`test_points_from_ground_truth_sets_body_content_type_only_for_json_
+  cases`) is unaffected -- checked directly, not assumed: this new point
+  is header-carried (`param="Authorization"`, not `"body"`), so it never
+  enters that function's whole-body-point branch at all; re-ran the file
+  to confirm (16 passed, unchanged).
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0192`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` with a
+  direct query before concluding this, not assumed absent) -- substituted
+  with a documented, rigorous self-review performed and recorded here.
+  **(1) Accuracy** -- checked by direct source inspection, not assumed:
+  `jwt_signature_verification`/`jwt_alg_none_default`/
+  `jwt_none_alg_opt_in` exist verbatim in `lab/safety_matrix.yaml` with
+  the documented `no_effect`/`neutralises` ladder; `LABGEN-JV-0015`/`0016`
+  were confirmed free (highest existing `LABGEN-JV-` id across every
+  manifest was `LABGEN-JV-0014`, from `CC-LAB-0192`); `go_net_http`'s own
+  `read_authorization_bearer_token.go.j2`/`jwt_claims_response.go.j2` and
+  `JwtAlgNoneConfusionStrategy`'s own `confirm()` method (exact claim
+  field names, the two-probe differential, the `401`/`403`-required
+  rejection gate) were read directly from source before designing the
+  Java templates around them, not assumed from either docstring alone --
+  all differential and generalization assertions passed on the first
+  real live-boot run. **(2) Adequacy** -- checked that this increment
+  does not silently duplicate an existing route (grepped `_PAGE_PARAMS`
+  for `/api/account/preferences`: absent) and does not need a second,
+  redundant sink pair (the manifest's minimal-pair invariant: one
+  vulnerable, one secure op, both new for this stack). Checked the
+  bookkeeping-ID discipline this session's own dispatch flagged as a
+  recurring risk (`CC-LAB-0191`'s own numbering-collision story):
+  confirmed `CC-LAB-0193` against this branch's own reserved block
+  (`CC-LAB-0170`-`0209`) and the highest number actually used in this log
+  (`CC-LAB-0192`), not merely mentioned anywhere in this branch's merged
+  docs (category 5's `CC-LAB-0210`-`0249` block is also present in this
+  branch's history and must not be mistaken for "next free"). Checked
+  `tests/test_multitarget_category4.py`/`tests/test_auto.py`/
+  `tests/test_labels_contract_category4.py` for hardcoded fraction/count
+  assertions depending on Netflix's ground-truth cardinality (per
+  `BUG-0042`/`PA-0044`) and re-ran all three directly (not just the
+  non-slow suite) after updating them.
+  Cross-branch collision check done before starting: both category 3's
+  (`claude/category-3-build-iuu5k9`) and category 5's
+  (`claude/category-5-build-6boejs`) sibling branches were fetched and
+  diffed against every shared file this entry touches
+  (`fuzzlab/labgen/emitters/spring_boot/`,
+  `fuzzlab/labgen/emitters/spring_boot/stack/skeleton/...
+  TrackerNestApplication.java`) -- both are strictly behind this branch
+  on `spring_boot/__init__.py`/`modules.py` (their own diffs show only
+  removals of Netflix content this branch already has, an earlier base,
+  never a conflicting edit to the same lines/keys this entry touches),
+  and neither branch touches `TrackerNestApplication.java` at all -- this
+  entry does not modify `fuzzlab/oracle/strategies.py` at all (the
+  detection strategy is reused verbatim, zero new/changed lines), so
+  category 5's own new strategy classes there (`SpelInjectionStrategy`/
+  an `OpenRedirectStrategy`, purely additive appends on that branch) pose
+  no collision risk either. This is a pure, non-colliding addition.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/modules.py`
+    (`ReadAuthorizationBearerTokenSource`, `JwtAlgNoneDefaultSink`,
+    `JwtNoneAlgOptInSink`)
+  - `fuzzlab/labgen/emitters/spring_boot/__init__.py` (new
+    `_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS` entries)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sources/
+    read_authorization_bearer_token.java.j2` (new)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sinks/
+    jwt_alg_none_default.java.j2`, `jwt_none_alg_opt_in.java.j2` (new)
+  - `fuzzlab/labgen/emitters/spring_boot/stack/skeleton/src/main/java/
+    com/fuzzlab/trackernest/TrackerNestApplication.java` (`JWT_SECRET`,
+    `base64UrlDecode`)
+  - `lab/manifests/jwt_alg_confusion_netflix_sample.yaml` (new)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,
+    expectedresults.csv}`
+  - `tests/test_labgen_spring_boot_netflix_jwt_preferences.py` (new)
+  - `tests/test_labgen_spring_boot_netflix_jwt_preferences_live_boot.py`
+    (new)
+  - `tests/test_labels_contract_category4.py` (NFLX-0008 cross-check)
+  - `tests/test_multitarget_category4.py` (Netflix recall re-derived,
+    both single-cell and multi-cell boots; multi-cell manifest/cell-id
+    lists extended)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-148`, new)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category-4 tracker
+    row)
+  - `docs/ARCHITECTURE.md` (Netflix page/detection counts)
+- Impact (other components / project): purely additive to `spring_boot`
+  and `lab/ground-truth-netflix-clone`; no other stack/app touched. No
+  audit-rule/oracle-strategy bookkeeping change was needed
+  (`JwtAlgNoneConfusionStrategy`/`CC-FUZZ-0037`/`CC-AUD-0020` already
+  exist and needed zero code change) -- only their own generalization is
+  newly proven and recorded, here and in
+  `tests/test_multitarget_category4.py`'s own docstring.
+  `tests/test_multitarget_category4.py`'s Netflix recall assertions move
+  from `7/7` to `8/8` (multi-cell boot) and from `1/7` to `1/8`
+  (single-cell wiring test).
+- Risk (level; mitigation or accepted-risk justification): Low-medium,
+  the same level `CC-LAB-0180`'s own hand-rolled-JWT entry accepted. A
+  hand-rolled JWT parser is inherently more security-sensitive than
+  reusing an established library -- mitigated identically here: the
+  parsing logic stays minimal and entirely inside this lab-generator's
+  own controlled fixture code (never a real target), the fail-closed
+  `base64UrlDecode`/`MessageDigest.isEqual` behavior is named explicitly
+  in code comments, and a real, executed live-boot proof (not just unit
+  tests) covers both the intended bypass and a plausible secondary
+  bypass attempt (a garbage-but-claimed-HS256 signature, which the
+  vulnerable twin still correctly rejects). The self-review substitution
+  above (in place of two independent reviewer agents) is the one real
+  process risk this entry accepts and states explicitly, mitigated by
+  the real `mvn package`/boot/HTTP verification actually performed
+  before landing (both the differential and the strategy
+  generalization).
+- Deliverables:
+  - [x] `ReadAuthorizationBearerTokenSource`/`JwtAlgNoneDefaultSink`/
+        `JwtNoneAlgOptInSink` render correctly (unit tests in
+        `tests/test_labgen_spring_boot_netflix_jwt_preferences.py`) --
+        done
+  - [x] Real live-boot differential proof (3 assertions,
+        `tests/test_labgen_spring_boot_netflix_jwt_preferences_live_
+        boot.py`) -- done
+  - [x] Real live-boot detection-generalization proof (same file,
+        `TestJwtAlgNoneConfusionStrategyGeneralizesToSpringBoot`) -- done
+  - [x] Ground-truth contract cross-check
+        (`tests/test_labels_contract_category4.py`) -- done
+  - [x] `tests/test_multitarget_category4.py` updated for the new 8/8
+        (multi-cell)/1/8 (single-cell) recall math and re-run against a
+        real pipeline (both slow tests pass) -- done
+  - [x] `tests/test_auto.py` re-run, confirmed unaffected (header point,
+        not body) -- done
+  - [x] Full non-slow suite + every directly-affected slow test re-run
+        green at the stable baseline -- done
+- Effectiveness (assessed 2026-09-23): achieved, both as a lab page and
+  for detection -- the real booted vulnerable twin accepts an `alg:none`
+  token and returns its forged claims (HTTP 200), while still correctly
+  rejecting a garbage `HS256` signature (HTTP 401); the real booted
+  secure twin rejects the same `alg:none` token outright (HTTP 401, no
+  data); `JwtAlgNoneConfusionStrategy` confirms the vulnerable twin and
+  correctly fails closed on the secure twin with zero new detection
+  code. Netflix's own real, scored `multitarget` recall is now `8/8` in
+  the multi-cell boot.
+
+### CC-LAB-0192 — Netflix's 7th real page: first mass_assignment instance on `spring_boot`, `/api/account/settings` (FR-LAB-147) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing
+  `unfiltered_object_assign`/`typed_schema_allowlist` mechanism
+  (`orm_entity_bulk_assign` sink family, `CC-LAB-0063`, already built on
+  `php_current`/`ruby_rails`/`php_laravel`/`go_net_http` -- see
+  `CC-LAB-0182` for the closest precedent, Twitch's own channel-profile
+  page, modeled on directly) on `spring_boot`, this stack's first
+  instance: `POST /api/account/settings` (served by
+  `LABGEN-JV-0013`/`0014`), an account-settings-update endpoint (CWE-915)
+  -- a real, plausible Netflix feature (e.g. updating a display name/bio),
+  distinct from this app's other two body-taking mutation pages
+  (`/api/profiles/switch`, insecure_deserialization; `/api/account/
+  billing`, access_control). Java, like Go, has no ORM/ActiveRecord
+  bulk-assign call to misuse, so this shape is modeled idiomatically,
+  ported directly from `CC-LAB-0182`'s own Go design: the vulnerable sink
+  (`unfiltered_object_assign`) parses the raw JSON body with a plain
+  Jackson 3 `JsonMapper.readTree()` (this stack's existing Jackson-3
+  convention, `CC-LAB-0173`) and assigns EVERY field present onto the
+  account record's in-memory representation, including `is_partner` --
+  never exposed by this endpoint's own intended form; the secure sink
+  (`typed_schema_allowlist`) parses the identical body but only ever
+  reads `display_name`/`bio` out of it, leaving `is_partner` at its
+  seeded `false` regardless of what the request carries. Both twins echo
+  the resulting record straight back in the response (this stack's own
+  "no database in Phase A" scope call, matching `CC-LAB-0182`'s own
+  no-persisted-read-back convention).
+  **Module composition, a genuine reuse-not-new-source finding (checked
+  before building, not assumed):** unlike `CC-LAB-0182`'s own `go_net_http`
+  design, which needed a new `ReadChannelProfileBodySource` because this
+  stack's prior sources all read named fields, `spring_boot` already has a
+  general-purpose whole-body source, `raw_body` (`CC-LAB-0131`, built for
+  the XXE shape) -- it reads the entire request body as a UTF-8 `String`
+  and publishes it as `value_expr`, exactly what this shape's own sinks
+  need. Reused verbatim; no new source module was needed at all, a
+  smaller footprint than the Go instantiation's own new source. Only two
+  new sink modules (`UnfilteredObjectAssignSink`/`TypedSchemaAllowlistSink`)
+  and one new `_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS` entry pair were added.
+  Convention 2 (like SSRF/access-control/price-integrity/file-upload on
+  this stack): the manifest's one op names a sink module directly.
+  **Response-shape design decision, checked directly against the existing
+  strategy's source before building (task's own explicit ask), not
+  assumed to "probably work":** `MassAssignmentPrivilegedFieldStrategy`
+  (`fuzzlab/oracle/strategies.py`, built for Twitch's `go_net_http` cell)
+  hardcodes a fixed field name (`is_partner`) and a fixed pair of intended
+  fields (`display_name`/`bio`) it reads back from a flat top-level JSON
+  object -- reading its `confirm()` method directly (not just its
+  docstring) confirmed this is a hardcoded literal match, not a
+  configurable parameter. Rather than inventing a differently-named
+  privileged field (e.g. `is_premium`/`account_tier`, the task's own
+  suggested alternative) and then needing to widen or adapt the strategy,
+  this entry deliberately reuses the exact same field names/response
+  shape -- this session's own established "fixed demo field name as
+  declared simplification" convention (already used this way by
+  `CC-LAB-0189`'s own `plan_tier`/`monthly_charge` reuse for
+  `PriceTrustDifferentialStrategy`) -- so the existing strategy generalizes
+  to this new stack with genuinely zero new or widened detection code,
+  verified for real rather than assumed (see below), landed in the SAME
+  commit as the lab page (unlike `CC-LAB-0182`'s own detection, which was
+  deliberately deferred as a separate follow-on since no rule/strategy
+  existed for this class at all at the time).
+  Real live-boot proof
+  (`tests/test_labgen_spring_boot_netflix_settings_mass_assignment_live_
+  boot.py`): the vulnerable twin's response reflects `is_partner: true`
+  when the request sets it (`{"display_name":"new_name","bio":"hi",
+  "is_partner":true}` -> response echoes `is_partner:true`); the secure
+  twin's response never reflects anything but the seeded `false`, even
+  given the identical request body -- both assertions passed on the
+  first real `mvn package`/boot/HTTP round trip. A second test class in
+  the same file proves `MassAssignmentPrivilegedFieldStrategy` needs
+  zero new detection code: it confirms the new vulnerable twin and
+  correctly fails closed on the secure twin, driven against the real
+  booted app (not a fake sender) -- the third proof this strategy
+  generalizes across stacks in the direction `go_net_http` ->
+  `spring_boot` (after `AccessControlIdorStrategy`'s own `CC-LAB-0187`
+  proof and `UnrestrictedFileUploadContentTypeTrustStrategy`'s own
+  `CC-LAB-0191` proof).
+  Ground truth extended (`NFLX-0007`, `param="body"`/`location="body"` --
+  the whole-body-point convention `TWCH-0006`/`NFLX-0001`/`NFLX-0003`/
+  `NFLX-0005` already use, not a per-named-field `param`, for the same
+  reason `CC-LAB-0182`'s own entry recorded: `fuzzlab.harness.auto.
+  points_from_ground_truth` only marks a body point's content type as
+  JSON when `param == "body"` exactly). No schema widening needed:
+  `mass_assignment` was already a valid `vuln_class`/`sink_context` enum
+  value (from `php_current`/`ruby_rails`/`php_laravel`/`go_net_http`'s own
+  ground truth), and `body`/`POST` are both pre-existing `location`/
+  `param`/`method` shapes.
+  `tests/test_auto.py`'s own whole-body-JSON `body_content_type` count
+  (`test_points_from_ground_truth_sets_body_content_type_only_for_json_
+  cases`) re-derived from 4 to 5 and a new assertion added for
+  `/api/account/settings` -- checked directly, not assumed unaffected,
+  since this is exactly the kind of hardcoded-cardinality assertion
+  `BUG-0042`/`PA-0044` exists to catch.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0191`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` with a
+  direct query before concluding this, not assumed absent) -- substituted
+  with a documented, rigorous self-review performed and recorded here.
+  **(1) Accuracy** -- checked by direct source inspection, not assumed:
+  `orm_entity_bulk_assign`/`unfiltered_object_assign`/
+  `typed_schema_allowlist` exist verbatim in `lab/safety_matrix.yaml` with
+  the documented `no_effect`/`neutralises` ladder; `LABGEN-JV-0013`/`0014`
+  were confirmed free (highest existing `LABGEN-JV-` id across every
+  manifest was `LABGEN-JV-0012`, from `CC-LAB-0191`); `raw_body`'s own
+  `value_expr` contract and `MassAssignmentPrivilegedFieldStrategy`'s own
+  `confirm()` method (exact field names, the two-probe differential, the
+  `content_type == "application/json"` gate) were read directly from
+  source before designing the sink templates around them, not assumed
+  from the docstring alone -- all differential and generalization
+  assertions passed on the first real live-boot run. **(2) Adequacy** --
+  checked that this increment does not silently duplicate an existing
+  route (grepped `_PAGE_PARAMS` for `/api/account/settings`: absent) and
+  does not need a second, redundant sink pair (the manifest's
+  minimal-pair invariant: one vulnerable, one secure op, both new for
+  this stack). Checked the bookkeeping-ID discipline this session's own
+  dispatch flagged as a recurring risk (`CC-LAB-0191`'s own numbering-
+  collision story): confirmed `CC-LAB-0192` against this branch's own
+  reserved block (`CC-LAB-0170`-`0209`) and the highest number actually
+  used in this log (`CC-LAB-0191`), not merely mentioned anywhere in this
+  branch's merged docs (category 5's `CC-LAB-0210`-`0249` block is also
+  present in this branch's history and must not be mistaken for
+  "next free"). Checked `tests/test_multitarget_category4.py`/
+  `tests/test_auto.py`/`tests/test_labels_contract_category4.py` for
+  hardcoded fraction/count assertions depending on Netflix's ground-truth
+  cardinality (per `BUG-0042`/`PA-0044`) and re-ran all three directly
+  (not just the non-slow suite) after updating them.
+  Cross-branch collision check done before starting: both category 3's
+  (`claude/category-3-build-iuu5k9`) and category 5's
+  (`claude/category-5-build-6boejs`) sibling branches were fetched and
+  diffed against every shared file this entry touches
+  (`fuzzlab/labgen/emitters/spring_boot/`, `fuzzlab/oracle/strategies.py`)
+  -- both are strictly behind this branch on every one of those files, so
+  this is a pure, non-colliding addition.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/modules.py`
+    (`UnfilteredObjectAssignSink`, `TypedSchemaAllowlistSink`)
+  - `fuzzlab/labgen/emitters/spring_boot/__init__.py` (new
+    `_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS` entries)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sinks/
+    unfiltered_object_assign.java.j2`, `typed_schema_allowlist.java.j2`
+  - `lab/manifests/mass_assignment_netflix_settings_sample.yaml`
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,
+    expectedresults.csv}`
+  - `tests/test_labgen_spring_boot_netflix_settings_mass_assignment.py`
+    (new)
+  - `tests/test_labgen_spring_boot_netflix_settings_mass_assignment_
+    live_boot.py` (new)
+  - `tests/test_labels_contract_category4.py` (NFLX-0007 cross-check)
+  - `tests/test_auto.py` (body-point count re-derived, 4 -> 5)
+  - `tests/test_multitarget_category4.py` (Netflix recall re-derived,
+    both single-cell and multi-cell boots; multi-cell manifest/cell-id
+    lists extended)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-147`, new)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category-4 tracker
+    row)
+  - `docs/ARCHITECTURE.md` (Netflix page/detection counts)
+- Impact (other components / project): purely additive to `spring_boot`
+  and `lab/ground-truth-netflix-clone`; no other stack/app touched. No
+  audit-rule/oracle-strategy bookkeeping change was needed (`CC-AUD-0022`/
+  `CC-FUZZ-0039` already exist and needed no code change) -- only their
+  own generalization is newly proven and recorded, here and in
+  `tests/test_multitarget_category4.py`'s own docstring.
+  `tests/test_multitarget_category4.py`'s Netflix recall assertions move
+  from `6/6` to `7/7` (multi-cell boot) and from `1/6` to `1/7`
+  (single-cell wiring test).
+- Risk (level; mitigation or accepted-risk justification): Low. A new,
+  additive lab page, ground-truth case, and a verified-not-just-assumed
+  detection generalization; no existing behavior changed. The self-review
+  substitution above (in place of two independent reviewer agents) is the
+  one real process risk this entry accepts and states explicitly,
+  mitigated by the real `mvn package`/boot/HTTP verification actually
+  performed before landing (both the differential and the strategy
+  generalization).
+- Deliverables:
+  - [x] `UnfilteredObjectAssignSink`/`TypedSchemaAllowlistSink` render
+        correctly (unit tests in `tests/test_labgen_spring_boot_netflix_
+        settings_mass_assignment.py`) -- done
+  - [x] Real live-boot differential proof
+        (`tests/test_labgen_spring_boot_netflix_settings_mass_
+        assignment_live_boot.py`) -- done
+  - [x] Real live-boot detection-generalization proof (same file,
+        `TestMassAssignmentPrivilegedFieldStrategyGeneralizesToSpring
+        Boot`) -- done
+  - [x] Ground-truth contract cross-check
+        (`tests/test_labels_contract_category4.py`) -- done
+  - [x] `tests/test_multitarget_category4.py` updated for the new 7/7
+        (multi-cell)/1/7 (single-cell) recall math and re-run against a
+        real pipeline (both slow tests pass) -- done
+  - [x] `tests/test_auto.py`'s body-content-type count re-derived and
+        re-run -- done
+- Effectiveness (assessed 2026-09-23): achieved, both as a lab page and
+  for detection -- Netflix's own real, scored `multitarget` recall is now
+  `7/7` in the multi-cell boot.
+
+### CC-LAB-0191 — Netflix's 6th real page: first unrestricted_file_upload instance on `spring_boot`, `/api/profiles/avatar` (FR-LAB-146) (2026-09-23)
+
+- **Numbering correction, caught and fixed before this entry was ever
+  pushed**: this entry was originally drafted and implemented under
+  `CC-LAB-0216`, which falls inside category 5's own reserved block
+  (`CC-LAB-0210`-`0249`), not this branch's own `CC-LAB-0170`-`0209` block
+  — an incorrect "next free number" lookup during drafting. Caught during
+  this same commit's own pre-push review (checking this branch's own
+  reserved block before pushing, per this project's own multi-agent
+  numbering-collision discipline), and corrected here to `CC-LAB-0191`
+  (the true next-free number in this branch's block, after `CC-LAB-0190`'s
+  own path-traversal entry) across every file that referenced the wrong
+  number — never shipped under the wrong ID.
+- Change: genuinely new breadth for category 4's Netflix pick, not a depth
+  reuse: this is `lab/safety_matrix.yaml`'s existing `fs_web_root_write`
+  sink family / `unrestricted_file_upload` concern's **first**
+  instantiation for the `spring_boot` stack (the only prior real
+  implementation project-wide is `go_net_http`'s Twitch emote-upload page,
+  `CC-LAB-0186`). Confirmed absent before building: `grep -rln
+  "no_extension_check\|extension_allowlist_mime_check"
+  fuzzlab/labgen/emitters/spring_boot/modules.py` returned nothing.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0190`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` with a
+  direct query before concluding this, not assumed absent) — substituted
+  with a documented, rigorous self-review performed and recorded here.
+  **(1) Accuracy** — checked by direct source inspection: the safety-
+  matrix ops this shape reuses (`no_extension_check`/
+  `extension_allowlist_mime_check`, both keyed to `fs_web_root_write`)
+  exist verbatim in `lab/safety_matrix.yaml` with the documented
+  `no_effect`/`neutralises` ladder; `LABGEN-JV-0011`/`0012` were
+  confirmed free (highest existing `LABGEN-JV-` id across every manifest
+  was `LABGEN-JV-0010`); Spring's own `MediaTypeFactory.getMediaType()`
+  extension-lookup behavior and the minimal PNG/JPEG magic-byte checks
+  this entry writes from scratch (Java's stdlib has no
+  `http.DetectContentType` equivalent — `Files.probeContentType` was
+  deliberately rejected as platform/OS-dependent, not a deterministic
+  real-bytes sniff; see `ExtensionAllowlistMagicByteCheckSink`'s own
+  docstring) were verified against a real `mvn package`/boot/HTTP round
+  trip, not assumed from documentation alone — all 6 live-boot
+  assertions (4 differential + 2 oracle-generalization) passed on the
+  first real run. **(2) Adequacy** — checked that this increment does not
+  silently duplicate an existing route (grepped `_PAGE_PARAMS` for
+  `/api/profiles/avatar`: absent) and does not need a second, redundant
+  sink pair (the manifest's minimal-pair invariant: one vulnerable, one
+  secure op, both new for this stack). Confirmed the mandatory
+  filesystem-safety constraint is met structurally: `SpringBootLiveBoot
+  Harness` already runs the built jar with `cwd` set to its own
+  `tempfile.TemporaryDirectory`-backed `app_dir`, and the generated
+  handler writes to a **relative** path (`static/avatars`, resolved
+  against that `cwd`) using only test-supplied filenames with no `../`
+  segments — verified by reading `live_boot_spring_boot.py`'s own
+  `build()`/`_wait_for_boot()` before relying on it, not assumed;
+  confirmed the live-boot probe payload is inert (a marker string in a
+  `<!DOCTYPE html><p>...</p>` snippet, never an actual `<script>` tag).
+  **Detection design decision, checked before building (task's own
+  explicit ask):** verified directly against `UnrestrictedFileUpload
+  ContentTypeTrustStrategy`'s own source (`fuzzlab/oracle/strategies.py`)
+  that its `confirm()` reads the served `Content-Type` off the SAME POST
+  response both twins already return — this shape's own design (both
+  twins write-and-serve within one handler, matching `no_extension_
+  check.go.j2`/`extension_allowlist_mime_check.go.j2`'s own shape, per
+  the strategy's own documented assumption) satisfies that contract with
+  **zero code changes**, so this landed as one commit (the `CC-LAB-0183`/
+  `0184`/`0185`/`0187`/`0189` zero-new-generator-code generalization
+  pattern, here applied to a detection strategy rather than a lab
+  generator module) rather than adapting the response shape or widening
+  the strategy.
+  - **Real Netflix functionality (grounded, not invented)**: a per-
+    profile avatar-image upload endpoint — Netflix's own Help Center
+    documents up to 5 profiles per account, each with its own avatar.
+  - **A genuinely new mechanism for this stack, not a template port.**
+    `ReadUploadedAvatarFileSource` (`read_uploaded_avatar_file`, this
+    stack's first real `multipart/form-data` parser) reads the uploaded
+    part off the raw Servlet 3.1+ `Part` API (`request.getPart("file")`)
+    — necessary because every complexity template's handler signature
+    takes only `HttpServletRequest`, so there is no Spring-bound
+    `MultipartFile` parameter to read instead. Publishes `filename_var`/
+    `content_var`/`client_content_type_var`, the same three-identifier
+    contract `go_net_http`'s own `ReadUploadedFileSource` established.
+    Convention 2 (op names a sink directly, like SSRF/mass-assignment/
+    access-control/price).
+  - **Vulnerable** (`LABGEN-JV-0011`, `no_extension_check`): writes the
+    upload to `static/avatars/<caller's own filename>` verbatim, then
+    serves it back with a `Content-Type` from Spring's own
+    `MediaTypeFactory.getMediaType()` on that same filename (falling back
+    to the caller's own multipart `Content-Type` header when the
+    extension is unrecognized) — never from the file's real bytes
+    (CWE-434). Java, like Go, has no PHP-style "the web server executes
+    an uploaded script" footgun, so this models the same well-documented
+    CWE-434-to-XSS chain `CC-LAB-0186` modeled: an uploaded `.html`/
+    `.svg` file is served back same-origin as `text/html`/
+    `image/svg+xml`, letting an embedded `<script>` execute.
+  - **Secure** (`LABGEN-JV-0012`, `extension_allowlist_mime_check`):
+    rejects any extension outside `.png`/`.jpg`/`.jpeg` — narrower than
+    `go_net_http`'s own allowlist (which also accepts `.gif`/`.webp`), a
+    deliberate, stated scoping to the two formats this stack's own
+    minimal magic-byte check can actually recognize (a real gap that
+    would exist if the allowlist were wider than the sniff, so it is
+    kept exactly as wide as the sniff instead) — then sniffs the REAL
+    bytes via an explicit magic-byte check (PNG's fixed 8-byte signature,
+    JPEG's 3-byte `0xFFD8FF` prefix) and rejects anything that does not
+    match. Writes under a fully server-chosen filename (`"avatar"+ext`)
+    and always serves the SNIFFED content type.
+  - **A new, additive complexity module** (`single_handler_binary`,
+    `SingleHandlerBinaryComplexity`): the handler returns
+    `ResponseEntity<byte[]>` instead of `ResponseEntity<String>` (needed
+    because this shape's sink must serve the uploaded file's real bytes
+    back byte-for-byte — a `String`-typed body would corrupt any byte
+    ≥ 0x80 when Spring's `StringHttpMessageConverter` re-encodes it for
+    the wire) and additionally declares `throws jakarta.servlet.
+    ServletException`. `single_handler.java.j2` and every existing cell
+    using it (`ssti`/`xxe`/`insecure_deserialization`/`access_control`/
+    `price_integrity_bypass`/`spel_injection`) are completely untouched.
+  - **A real, additive harness gap found and fixed along the way**
+    (the same class `CC-LAB-0186`'s own `GoLiveBootHarness.HttpResponse`
+    gap was): `SpringBootLiveBootHarness.HttpResponse` had no `headers`
+    field at all — every prior `spring_boot` cell's vulnerable/secure
+    difference is observable in the response body/status alone, never
+    only in a response header, so this was never needed before. Added
+    `headers: dict[str, str] = field(default_factory=dict)`, populated
+    from the real `http.client.HTTPMessage` the `urllib` response
+    carries — additive only, confirmed by re-running this stack's full
+    pre-existing live-boot suite unmodified-in-assertion.
+  - **Real, live-boot proof**
+    (`tests/test_labgen_spring_boot_netflix_avatar_upload_live_boot.py`,
+    6 assertions across 2 test classes): (a) the vulnerable twin serves
+    an uploaded `evil.html` back with `Content-Type: text/html`, marker
+    intact; (b) the secure twin rejects the identical `evil.html` upload
+    outright (HTTP 415); (c) the secure twin ALSO rejects a spoofed
+    upload (real HTML bytes, named `fake.png`) with HTTP 415 — proving
+    the magic-byte sniff, not just the extension check, closes the gap;
+    (d) the secure twin accepts a real PNG-signature upload and serves
+    it back with the sniffed `image/png` Content-Type; (e)/(f)
+    `UnrestrictedFileUploadContentTypeTrustStrategy` confirms the
+    vulnerable twin (`served_content_type=image/svg+xml`,
+    `control_content_type=image/png`) and correctly fails closed on the
+    secure twin, both against a real booted `spring_boot` app, zero new
+    detection code. All 6 assertions passed on the first real run
+    (41.85s). Filesystem safety: every write lands under
+    `SpringBootLiveBootHarness`'s own `tempfile.TemporaryDirectory`-
+    backed `app_dir`; every probe filename is fixed and traversal-free.
+  - Ground truth: `NFLX-0006` added to `lab/ground-truth-netflix-clone/`
+    (`vuln_class="unrestricted_file_upload"`, `sink_context=
+    "fs_web_root_write"` — both existing enum values, no schema change
+    needed since `CC-LAB-0186` already widened
+    `fuzzlab/labels/schemas/labels.schema.json` for this concern).
+    `param`/`location` are `file`/`body` (the real multipart field name),
+    the same deliberate convention `TWCH-0009`'s own ground truth
+    established, not the `body`/`body` whole-body-point convention this
+    directory's other, whole-JSON-body cases use. `rendering="server"`,
+    matching `TWCH-0009`'s own departure from this directory's usual
+    `server-json`/`server` split.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/modules.py` (5 new classes:
+    `SingleHandlerBinaryComplexity`/`ReadUploadedAvatarFileSource`/
+    `NoExtensionCheckContentTypeTrustSink`/
+    `ExtensionAllowlistMagicByteCheckSink`, registered in `SOURCES`/
+    `SINKS`/`COMPLEXITIES`), `__init__.py` (`_MODULE_SET_BY_SHAPE`,
+    `_PAGE_PARAMS`)
+  - New templates: `templates/sources/read_uploaded_avatar_file.java.j2`,
+    `templates/sinks/no_extension_check.java.j2`,
+    `templates/sinks/extension_allowlist_mime_check.java.j2`,
+    `templates/complexities/single_handler_binary.java.j2`
+  - `fuzzlab/labgen/emitters/spring_boot/stack/skeleton/src/main/
+    resources/application.properties` (explicit 5 MB multipart cap,
+    parity with `go_net_http`'s own 5 MiB `io.LimitReader` bound)
+  - `lab/manifests/unrestricted_file_upload_netflix_avatar_sample.yaml`
+    (new)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,
+    expectedresults.csv}` (extended, `NFLX-0006`)
+  - `fuzzlab/labgen/conformance/live_boot_spring_boot.py`
+    (`HttpResponse.headers`, additive)
+  - `tests/test_labgen_spring_boot_netflix_avatar_upload.py` (7 new unit
+    tests)
+  - `tests/test_labgen_spring_boot_netflix_avatar_upload_live_boot.py` (6
+    new live-boot tests, incl. oracle-strategy generalization)
+  - `tests/test_labels_contract_category4.py` (extended, 6 Netflix cases)
+  - `tests/test_multitarget_category4.py` (`_NETFLIX_MULTI_MANIFESTS`/
+    `_NETFLIX_MULTI_CELL_IDS` extended; recall assertions moved
+    1/5 -> 1/6 (single-cell test) and 5/5 -> 6/6 (multi-cell boot),
+    `macro_recall` re-derived per PA-0044)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-146`, new)
+- Impact (other components / project): `fuzzlab/labgen/emitters/
+  spring_boot/` is shared across category 3 (TrackerNest) and category 5
+  (Expedia) per this dispatch's own collision-discipline instruction —
+  checked both sibling branches' diffs against every file this entry
+  touches before starting: both are strictly BEHIND this branch on every
+  one of those files (their diffs show only removals of content this
+  branch already has, never a conflicting edit to the same lines/keys),
+  so this is a pure, non-colliding addition. `fuzzlab/oracle/
+  strategies.py` was read, not written — `Unrestricted
+  FileUploadContentTypeTrustStrategy` needed zero changes, confirmed by
+  a real live-boot generalization test rather than by code inspection
+  alone. Netflix's own real, scored `multitarget` recall moves from 1/5
+  to 1/6 in the single-cell wiring test, and from 5/5 to 6/6 in the
+  multi-cell boot test (both re-derived per PA-0044, not left stale).
+- Risk (level; mitigation or accepted-risk justification): **low-medium**.
+  Genuinely new module/template code for this stack (not a verbatim
+  port), so it carries more real-defect risk than a same-stack depth
+  increment — mitigated by verifying every claim (MediaTypeFactory's
+  extension mapping, the magic-byte checks, the byte-correct
+  `ResponseEntity<byte[]>` response, the oracle-strategy generalization)
+  against a real `mvn package`/boot/HTTP round trip before landing, not
+  assumed from template/strategy-source inspection alone. Upload size is
+  bounded (5 MB) on both twins; every live-boot write lands under a
+  throwaway temp directory and every probe payload is inert, per the
+  task's explicit filesystem-safety constraint.
+- Deliverables:
+  - [x] New source + new binary-response complexity + two new sink
+    modules/templates implemented, rendered, and verified byte-
+    deterministic — done.
+  - [x] Sample manifest (`LABGEN-JV-0011`/`0012`) added and verdict-
+    checked against `lab/safety_matrix.yaml` — done.
+  - [x] Ground truth: `NFLX-0006` in all 3 files, cross-checked by the
+    contract loader — done.
+  - [x] Unit tests (manifest/module rendering, disjoint class names) —
+    done, 7 passed.
+  - [x] Real live-boot differential test (4 assertions) — done, passed
+    against a real `mvn package`/boot/HTTP round trip.
+  - [x] Oracle-strategy generalization proof (2 assertions, zero new
+    detection code) — done, passed live.
+  - [x] `tests/test_multitarget_category4.py` recall assertions
+    re-derived per PA-0044 and re-run against a real pipeline run — done
+    (both the single-cell wiring test and the multi-cell boot test pass).
+  - [x] `tests/test_auto.py`/`tests/test_labels_contract_category4.py`
+    re-run explicitly per PA-0044 — done, all green.
+  - [x] CHANGELOG.md, this change-control entry, `requirements.md`
+    (`FR-LAB-146`), `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md`'s
+    category-4 tracker — done.
+- Effectiveness (assessed 2026-09-23): met its intent. All 6 live-boot
+  assertions pass on the first real run; the oracle strategy generalized
+  to a second stack with zero new detection code, moving Netflix's own
+  real, scored recall from 5/5 to 6/6 in the multi-cell boot and from
+  1/5 to 1/6 in the single-cell wiring test (the correct, re-derived
+  fraction, not a stale one). Full non-slow suite green plus the two
+  PA-0044-mandated explicit slow re-runs (`test_multitarget_category4.py`,
+  `test_auto.py`) green.
+
+### CC-LAB-0190 — Twitch's 11th real page: first path_traversal instance on any stack, `/clips/export` (FR-LAB-145) (2026-09-23)
+
+- Change: genuinely new breadth for category 4's Twitch pick, explicitly
+  **not** a cheap "second instance" depth increment like `CC-LAB-0180`-
+  `0189` -- this is this project's **first** instantiation, on **any**
+  stack, of `lab/safety_matrix.yaml`'s existing `fs_path_read` sink
+  family and `path_traversal` concern (added by `CC-LAB-0063` for the
+  corpus-examples/file-handling research, its comment block near line 50
+  and its op rows near line 471-481). Confirmed absent before building:
+  `grep -rln "unconfined_path\|realpath_confine\|fs_path_read"
+  fuzzlab/labgen/emitters/*/modules.py lab/manifests/*.yaml` returned
+  nothing.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0189`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` with
+  a direct query before concluding this, not assumed absent) --
+  substituted with a documented, rigorous self-review performed and
+  recorded here rather than silently skipping the gate. **(1) Accuracy**
+  -- checked by direct source inspection, not assumed: `go_net_http`'s
+  existing Convention-2 shapes (SSRF, mass-assignment, file-upload,
+  price-integrity -- `modules.py`'s own docstring, read before designing
+  anything) already establish "the manifest's one op names a sink module
+  directly, no separate transform stage" for a shape whose vulnerable/
+  secure difference is one inseparable operation -- this concern fits
+  that convention exactly (join-and-read-unconfined vs. resolve-and-
+  confine is inseparable from which sink renders). Reused
+  `ReadUrlQueryParamSource` verbatim rather than writing a new source
+  (read directly: it already publishes whatever `var_name`/`param_name`
+  the route profile names, exactly what this shape needs, the same
+  reuse `UncheckedUrlFetchSink`'s own shape made for SSRF). Cell IDs
+  `LABGEN-GO-0021`/`0022` were confirmed free (grepped `LABGEN-GO-`
+  across every manifest, highest existing was `LABGEN-GO-0020`). Go's
+  own `filepath.Join`/`filepath.Abs`/`filepath.EvalSymlinks` semantics
+  (including that `filepath.Join` only lexically *cleans* a path -- it
+  never *confines* it, so enough `..` segments still walk back out; and
+  that `EvalSymlinks` fails closed when its target does not exist) were
+  verified against a real `go build`/boot/HTTP round trip, not assumed
+  from documentation alone -- the real boot is what actually proves the
+  vulnerable twin's escape and the secure twin's confinement, not a
+  unit-test-only claim. **(2) Adequacy** -- checked that this increment
+  does not silently duplicate an existing route (grepped `_ROUTE_PARAMS`
+  for `/clips/export`: absent) and does not need a second, redundant
+  sink pair (the manifest's minimal-pair invariant: one vulnerable, one
+  secure op, both newly built here since no prior instance existed to
+  reuse). Confirmed the mandatory filesystem-safety constraint (any
+  live-boot test operates entirely under a throwaway
+  `tempfile.TemporaryDirectory`-backed process `cwd`, and its traversal
+  probe targets an INERT canary the test creates itself inside that same
+  disposable tree, never a real system file) is met structurally, not
+  just by test-author intent: `GoLiveBootHarness` already runs the
+  compiled binary with `cwd` set to its own `TemporaryDirectory`-backed
+  `app_dir` (verified by reading `go_live_boot.py`'s own `build()` before
+  relying on it, not assumed) -- but that harness had no *public* way for
+  a test to plant a file on disk before issuing a request (every prior
+  shape only ever sent bytes over HTTP), so a minimal `app_dir` property
+  was added to it (additive, every existing caller unaffected -- checked
+  by re-running the whole existing `test_labgen_go_live_boot.py` suite
+  after adding it). The live-boot test then creates a legitimate export
+  file and a canary file (a sibling two directories above the export
+  directory, e.g. `filename=../../secret_canary.txt`) both directly
+  under that same `app_dir`, and never touches anything outside it or
+  any real system path. Confirmed detection is genuinely out of scope
+  for this commit, as instructed -- no audit rule or oracle strategy
+  exists yet for `path_traversal`/`fs_path_read`, and none was added
+  here; a genuine black-box confirmation strategy for this concern was
+  considered (see the follow-on note below) and deliberately not built.
+  - **Real Twitch functionality (grounded, not invented)**: a
+    previously-exported-clip download endpoint -- Twitch lets
+    broadcasters request an export of a clip/VOD and download it later,
+    a real, plausible feature of this app identity.
+  - **A genuinely new mechanism for this stack, but a minimal one**:
+    `UnconfinedPathSink`/`RealpathConfineSink`, this stack's first
+    `fs_path_read` sinks. No new source module: `read_url_query_param`
+    (already used by the SSRF shape) is reused verbatim, since this
+    shape's tainted input is a single query-string parameter (`filename`)
+    -- exactly what that source already publishes.
+  - **Vulnerable** (`LABGEN-GO-0021`, `unconfined_path`): joins the
+    caller-supplied `filename` onto a fixed export directory
+    (`static/clips_exports`) with `filepath.Join` and reads/serves
+    whatever file results, with no check at all that the resolved path
+    stays inside that directory (CWE-22). Bounds the read at a fixed 5
+    MiB (`maxExportBytes`, the same fixed lab-only cap convention as
+    `maxUploadBytes`, `CC-LAB-0186`) so a maliciously large target file
+    fails closed rather than exhausting memory.
+  - **Secure** (`LABGEN-GO-0022`, `realpath_confine`): resolves the
+    joined path to its real, canonical, **symlink-resolved** absolute
+    form (`filepath.Abs` + `filepath.EvalSymlinks` -- not just
+    `filepath.Clean`/a string-prefix check on the *unresolved* path,
+    which `lab/safety_matrix.yaml`'s own comment block documents as a
+    well-known partial-defense gap for exactly this reason, and which a
+    planted symlink inside the export directory could still defeat) and
+    rejects (HTTP 403) anything whose resolved form does not stay inside
+    the export directory's own real, resolved absolute form. Any
+    resolution failure (the base directory or the requested path cannot
+    be resolved, e.g. it does not exist) fails closed (404/500) rather
+    than falling through to a check on an unresolved path. Same 5 MiB
+    read bound as the vulnerable twin.
+  - **Real, live-boot proof**
+    (`tests/test_labgen_go_live_boot.py::
+    test_real_boot_proves_the_path_traversal_differential_for_both_twins`):
+    both twins serve a legitimate, in-directory filename identically; the
+    vulnerable twin serves a `filename=../../secret_canary.txt` payload
+    straight through, and the canary's own distinctive marker string
+    appears in the response body; the secure twin rejects the identical
+    payload outright (HTTP 403), the marker never appears in its
+    response, and a missing-but-in-bounds filename on the secure twin
+    fails closed as 404 (not 403) -- proving its confinement check and
+    its existence check are two genuinely distinct code paths, not one
+    check doing double duty. Every file this test reads or writes lives
+    under `harness.app_dir`, itself always inside `GoLiveBootHarness`'s
+    own throwaway `tempfile.TemporaryDirectory` -- never a real,
+    permanent, or shared path, and never a real system file like
+    `/etc/passwd`.
+  - **Detection: considered and deliberately deferred, not silently
+    skipped.** A canary-marker-in-band-response differential (the
+    project's established pattern, `SsrfInBandMarkerStrategy`/
+    `XxeInBandMarkerStrategy`) needs the oracle to plant its own canary
+    the confirmation probe can then look for. `SsrfInBandMarkerStrategy`
+    can do this because it controls an `OobListener` the target itself
+    calls back into; a path-traversal strategy has no equivalent --  it
+    cannot write a file onto the target's own filesystem from outside,
+    so it cannot plant a canary a traversal payload could then read back.
+    Probing for a small set of well-known, host-OS-agnostic paths (e.g.
+    `/etc/passwd`, `C:\Windows\win.ini`) is not a safe, realistic
+    black-box confirmation signal for this project's own lab-only,
+    authorized-only scope (`README.md`'s own safety rule) and would also
+    be a poor discriminator in general (many targets simply do not
+    expose such a path at all, producing false negatives, without ruling
+    out a genuine but differently-shaped escape). No safe, low-false-
+    positive, genuinely black-box-realistic confirmation design was
+    found this dispatch -- matching this project's own documented
+    precedent for `webhook_signature`'s own infeasible-detection call
+    (a CWE-347 timing side channel, empirically infeasible for this
+    project's wall-clock HTTP measurement model) rather than building
+    something contrived or unsafe. Left as this entry's own explicit
+    open question / follow-on, tracked here rather than silently
+    implicit -- a future design could constrain itself to a
+    differential purely on HTTP status/timing/error-message shape
+    (never file content) if a low-false-positive signal along those
+    lines is found later.
+  Ground truth: `TWCH-0011` added to `lab/ground-truth-twitch-clone/`
+  (`vuln_class="path_traversal"`, `sink_context="fs_path_read"` -- both
+  new enum values, `fuzzlab/labels/schemas/labels.schema.json` widened
+  additively; `param="filename"`/`location="query"`, matching the real
+  tainted input's actual shape (a single query-string parameter), unlike
+  the whole-body-JSON convention the price-integrity/mass-assignment
+  cases use).
+  **PA-0044 compliance (`BUG-0042`'s own recurrence-prevention rule)**:
+  grepped the whole test suite for hardcoded fraction/count assertions
+  that could depend on Twitch's ground-truth cardinality
+  (`tests/test_multitarget_category4.py`, `tests/test_auto.py`,
+  `tests/test_labels_contract_category4.py`) before considering this
+  entry done. Found and fixed **two** stale assertions in
+  `tests/test_multitarget_category4.py` this dispatch's own change made
+  stale: the Twitch-only `recall == 9/10` assertion (re-derived to
+  `9/11`, `tp` unchanged at 9 -- `TWCH-0011` is a real, tracked false
+  negative, not silently dropped from the boot) and a second,
+  easy-to-miss `macro_recall` assertion further down the same test
+  (`((9/10) + (1/5)) / 2`, re-derived to `((9/11) + (1/5)) / 2`) --
+  `tests/test_auto.py` and `tests/test_labels_contract_category4.py`
+  needed no such fix (the former asserts membership, not counts/
+  fractions; the latter's own `len(gt.cases) == 10`/case-ID-set
+  assertions were updated to 11/`TWCH-0011` directly as part of this
+  entry's own ground-truth extension, not left stale). All three files
+  were then explicitly re-run directly (not only as part of the whole-
+  repo run), regardless of `slow` marker, and confirmed green.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py` (new
+    `UnconfinedPathSink`/`RealpathConfineSink` classes + registrations,
+    module docstring extended)
+  - `fuzzlab/labgen/emitters/go_net_http/__init__.py`
+    (`_MODULE_SET_BY_SHAPE`/`_MODULE_IMPORTS`/`_ROUTE_PARAMS`, one new
+    shape + one new route entry; module docstring extended)
+  - `fuzzlab/labgen/emitters/go_net_http/templates/sinks/
+    {unconfined_path,realpath_confine}.go.j2` (new)
+  - `fuzzlab/labgen/conformance/go_live_boot.py` (new `app_dir` public
+    property on `GoLiveBootHarness`, additive)
+  - `lab/manifests/path_traversal_go_sample.yaml` (new,
+    `LABGEN-GO-0021`/`0022`)
+  - `fuzzlab/labels/schemas/labels.schema.json` (two new enum values:
+    `path_traversal`, `fs_path_read`)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (`TWCH-0011`)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-145`)
+  - `tests/test_labgen_go_net_http_modules.py` extended (3 tests)
+  - `tests/test_labgen_go_net_http_conformance.py` extended (manifest
+    added to the regenerate-and-diff/whole-sample sweep)
+  - `tests/test_labgen_go_live_boot.py` extended (1 test, real live boot,
+    green)
+  - `tests/test_labels_contract_category4.py` extended
+  - `tests/test_multitarget_category4.py` extended and re-verified
+    against a real pipeline run (Twitch recall `9/10` -> `9/11`, `tp`
+    unchanged at 9; `macro_recall` re-derived to match)
+  - `CHANGELOG.md` line
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` category 4 tracker
+    row updated
+- Impact (other components / project): additive-only across `lab/
+  safety_matrix.yaml` (no change, only reuse -- the `path_traversal`
+  concern and `fs_path_read` family were already documented there by
+  `CC-LAB-0063`, just never instantiated), `fuzzlab/labgen/emitters/
+  go_net_http/` (two new sink modules + templates, existing ones
+  untouched), `fuzzlab/labgen/conformance/go_live_boot.py` (one new,
+  additive public property), `fuzzlab/labels/schemas/labels.schema.json`
+  (two new enum values), and the existing `lab/ground-truth-twitch-
+  clone/` directory (grown again, not replaced). No change to
+  `fuzzlab/oracle/strategies.py` or `fuzzlab/audit/rules_data/
+  default_rules.json` at all -- detection for this concern remains
+  genuinely unbuilt project-wide, tracked as this entry's own explicit,
+  considered-and-deferred open question (see above), not silently left
+  implicit. No DB write or outbound network call at all -- the only
+  filesystem writes involved are the lab app's own (bounded, throwaway-
+  temp-directory-confined) reads and the live-boot test's own throwaway
+  fixture writes.
+- Risk (level; mitigation or accepted-risk justification): low -- this
+  is a lab-only, self-contained filesystem-read shape with no DB write,
+  no outbound network call, and every live-boot read/write confined to a
+  throwaway `tempfile.TemporaryDirectory` the harness itself owns and
+  tears down; both the vulnerable and secure twins bound the file size
+  they read, so neither can be driven to exhaust memory. The one
+  genuinely new risk this entry's own review gate flagged pre-
+  implementation (a live-boot traversal test that actually reads a real
+  system file, e.g. `/etc/passwd`, to "prove the point" more
+  dramatically) was designed around from the start per this dispatch's
+  own explicit instruction -- the probe targets only an inert canary
+  this test creates itself, inside its own disposable temp tree, never
+  a real system path.
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml`: no change (reuse confirmed) -- done
+  - [x] `fuzzlab/labgen/emitters/go_net_http/modules.py` + `__init__.py`
+    + 2 new templates -- done
+  - [x] `fuzzlab/labgen/conformance/go_live_boot.py`: `app_dir` property
+    -- done
+  - [x] `lab/manifests/path_traversal_go_sample.yaml` (2 cells) -- done
+  - [x] `fuzzlab/labels/schemas/labels.schema.json`: `path_traversal`/
+    `fs_path_read` widening -- done
+  - [x] `lab/ground-truth-twitch-clone/`: `TWCH-0011` in all 3 files --
+    done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-145` --
+    done
+  - [x] `tests/test_labgen_go_net_http_modules.py` extended (3 tests) --
+    done
+  - [x] `tests/test_labgen_go_net_http_conformance.py` extended -- done
+  - [x] `tests/test_labgen_go_live_boot.py` extended (1 test, real live
+    boot, green) -- done
+  - [x] `tests/test_labels_contract_category4.py` extended -- done
+  - [x] `tests/test_multitarget_category4.py` extended and re-verified
+    against a real pipeline run (recall `9/10` -> `9/11`) -- done
+  - [x] Whole-repo `pytest -m "not slow"` run before considering this
+    increment complete (`PA-0040`) -- see Effectiveness
+  - [x] PA-0044's own hardcoded-recall-assertion grep + explicit re-run
+    of `tests/test_multitarget_category4.py`/`tests/test_auto.py`/
+    `tests/test_labels_contract_category4.py` -- two stale assertions
+    found and fixed in `tests/test_multitarget_category4.py`, all three
+    re-run directly and green -- see Effectiveness
+  - [x] `CHANGELOG.md` line -- done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` category 4
+    tracker row updated -- done
+  - [x] Pre-change review gate, `Agent`-tool-absence substitution noted
+    explicitly, matching `CC-LAB-0182`-`0189`'s own precedent wording --
+    done
+- Effectiveness (assessed 2026-09-23): met as a lab page -- Twitch now
+  has eleven real, live-boot-proven pages, and this project now has its
+  first `path_traversal`/`fs_path_read` implementation on any stack,
+  proven live (a real escape via `filepath.Join`'s lexical-only cleaning,
+  and a real, symlink-aware confinement fix), not merely rendered.
+  Detection effectiveness is deliberately deferred, with the specific
+  reason a naive in-band-marker strategy does not transfer to this
+  concern recorded above rather than left implicit -- the same split
+  `CC-LAB-0180`/`CC-LAB-0181`/`CC-LAB-0186` already established for this
+  category, extended here with an explicit "considered and rejected"
+  record for why no follow-on detection commit accompanies this one.
+
+### CC-LAB-0189 — Twitch's 10th real page: first price_integrity_bypass instance, `/subscriptions/purchase` (FR-LAB-144) (2026-09-23)
+
+- Change: genuinely new breadth for category 4's Twitch pick, explicitly
+  **not** a cheap "second instance" depth increment like `CC-LAB-0180`-
+  `0186` -- Twitch has never had a `price_integrity_bypass` page before,
+  even though `spring_boot` already has one, real and detected
+  (`CC-LAB-0188`/`FR-LAB-143`, `PriceTrustDifferentialStrategy`/
+  `R-PRICE-TRUST-DIFFERENTIAL`, `CC-FUZZ-0041`/`CC-AUD-0025`). Reuses `lab/
+  safety_matrix.yaml`'s existing `payment_charge_amount` sink family and
+  its `client_trusted_amount`/`server_recomputed_amount` ops
+  (`CC-LAB-0063`) verbatim -- no new safety-matrix entry needed
+  (confirmed absent from every emitter on this stack before starting:
+  `grep -rln "client_trusted_amount\|payment_charge_amount"
+  fuzzlab/labgen/emitters/go_net_http/` returned nothing). A
+  channel-subscription purchase endpoint (`POST /subscriptions/
+  purchase`, subscribing to a broadcaster's channel at a chosen tier --
+  Twitch's own real, plausible, signature monetization feature), a real,
+  distinct route from every other one this stack already has.
+
+  **Cross-branch collision check, performed and recorded**: `git fetch
+  origin claude/category-3-build-iuu5k9 claude/category-5-build-6boejs`
+  followed by `git diff --numstat HEAD <branch> -- <file>` against both
+  sibling branches for every file this entry touches
+  (`fuzzlab/labgen/emitters/go_net_http/__init__.py`,
+  `fuzzlab/labgen/emitters/go_net_http/modules.py`, its new templates,
+  `lab/manifests/price_integrity_twitch_subscription_sample.yaml`,
+  `lab/ground-truth-twitch-clone/`, this component's `requirements.md`):
+  every diff showed only deletions relative to this branch (both sibling
+  branches strictly behind this branch's own tip on every one of those
+  files) -- no divergent work to reconcile. `fuzzlab/oracle/strategies.py`
+  and `fuzzlab/audit/rules_data/default_rules.json` were read but not
+  edited by this entry (the existing `PriceTrustDifferentialStrategy`/
+  `R-PRICE-TRUST-DIFFERENTIAL` generalized with zero new code, verified live
+  below) -- not fetched/diffed against the sibling branches since this
+  entry makes no change to either file.
+
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0188`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded here rather than silently
+  skipping the gate. **(1) Accuracy** -- checked by direct source
+  inspection, not assumed: `go_net_http`'s existing Convention-2 shapes
+  (SSRF, mass-assignment, file-upload -- `modules.py`'s own docstring,
+  read before designing anything) already establish "the manifest's one
+  op names a sink module directly, no separate transform stage" for a
+  shape whose vulnerable/secure difference is one inseparable operation
+  -- this concern fits that convention exactly (trust-the-client vs.
+  recompute-server-side is inseparable from which sink renders, the same
+  reasoning `CC-LAB-0188` used for `spring_boot`'s own shape, which
+  independently arrived at the identical "op selects sink" convention for
+  a different underlying reason, that stack having no transform stage at
+  all). `PriceTrustDifferentialStrategy`'s own confirmation contract (read
+  directly from its docstring/`confirm()` source before assuming
+  generalization, not assumed from the class name alone: JSON body,
+  `plan_tier`/`monthly_charge` fields, two probes at `0.01`/`999999.99`,
+  requires both readings to track their own submitted amount exactly)
+  was checked against this shape's own design **before** implementation
+  -- the field names `plan_tier`/`monthly_charge` were chosen
+  specifically to match the strategy's own hardcoded names, a deliberate
+  design decision (per this task's own explicit design freedom to do
+  so), not a coincidence discovered after the fact; then verified for
+  real against a real booted instance (see below), not assumed from the
+  name match alone. Cell IDs `LABGEN-GO-0019`/`0020` were confirmed free
+  (grepped `LABGEN-GO-` across every manifest, highest existing was
+  `LABGEN-GO-0018`). **(2) Adequacy** -- checked that this increment does
+  not silently duplicate an existing route (grepped `_ROUTE_PARAMS` for
+  `/subscriptions/purchase`: absent, and distinct from the existing,
+  differently-shaped `/channels/subscribers` route); applied
+  `CC-LAB-0188`'s own adequacy-review lesson *proactively*, before any
+  implementation, rather than needing a second review pass to catch it
+  after the fact: the secure twin's price map is a genuine, data-driven,
+  multi-entry lookup (`tier1`/`tier2`/`tier3`, three distinct real
+  prices), never a disguised single constant, proven live (the
+  `tier1`/`tier2` live-boot cases return distinct real prices); chose
+  fail-closed (HTTP 400) on an unrecognized `plan_tier`, the same design
+  call `CC-LAB-0188` made for Netflix's own closed tier enumeration, for
+  the same reason (a subscription-tier set has no legitimate "unknown
+  tier" case). Also checked, before assuming zero-new-code
+  generalization would actually hold, whether `R-PRICE-TRUST-DIFFERENTIAL`'s own
+  `when` gate (`location_in: ["body"]`, `sink_context_in:
+  ["payment_charge"]`) was stack-specific in any way -- read directly:
+  it is purely structural, so it needed no change either, verified live
+  alongside the strategy.
+  Ground truth: `TWCH-0010` added to `lab/ground-truth-twitch-clone/`
+  (`vuln_class="price_integrity_bypass"`, `sink_context="payment_charge"`
+  -- both pre-existing enum values from Netflix's own `NFLX-0005`, no
+  schema widening needed; `param="body"`/`location="body"`, the same
+  whole-body convention `TWCH-0005`/`TWCH-0006` already use -- applying
+  `CC-FUZZ-0041`'s own already-recorded correction directly, rather than
+  repeating the per-named-field `param` mistake `CC-LAB-0188`'s original
+  entry made).
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py` (new
+    `ReadSubscriptionPurchaseRequestSource`/`ClientTrustedAmountSink`/
+    `ServerRecomputedAmountSink` classes + registrations)
+  - `fuzzlab/labgen/emitters/go_net_http/__init__.py`
+    (`_MODULE_SET_BY_SHAPE`/`_MODULE_IMPORTS`/`_ROUTE_PARAMS`, one new
+    shape + one new route entry; module docstring extended)
+  - `fuzzlab/labgen/emitters/go_net_http/templates/sources/
+    read_subscription_purchase_request.go.j2` (new)
+  - `fuzzlab/labgen/emitters/go_net_http/templates/sinks/
+    {client_trusted_amount,server_recomputed_amount}.go.j2` (new)
+  - `lab/manifests/price_integrity_twitch_subscription_sample.yaml` (new,
+    `LABGEN-GO-0019`/`0020`)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended, `TWCH-0010`)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-144`)
+  - `docs/components/05-auditor/requirements.md` (`FR-AUD-15`, cross-stack
+    generalization note added in place)
+  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    (`FR-FUZZ-27`, cross-stack generalization note added in place)
+  - `tests/test_labgen_go_net_http_modules.py` (extended, 3 new unit
+    tests, no network required)
+  - `tests/test_labgen_go_net_http_conformance.py` (extended, new
+    manifest added to the Tier-3 regeneration/diff sweep)
+  - `tests/test_labgen_go_live_boot.py` (extended, 2 new live-boot tests:
+    the differential, and the detection-generalization proof)
+  - `tests/test_labels_contract_category4.py` (extended, `TWCH-0010`
+    assertions)
+  - `tests/test_multitarget_category4.py` (`_twitch_cells()` extended;
+    module docstring extended; recall assertion `8/9` -> `9/10`,
+    `macro_recall` accordingly -- a real assertion re-verified against a
+    real pipeline run, not assumed)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category 4 tracker
+    row updated)
+  - `CHANGELOG.md`
+  **Detection landed in the same commit, not deferred**: unlike
+  `CC-LAB-0188` (which had genuinely no detection capability to reuse at
+  all), this increment's own field-name design choice let it prove
+  zero-new-code generalization immediately -- there was no reason to
+  split lab-then-detection here, since nothing new needed to be built or
+  reviewed on the detection side.
+- Impact (other components / project): additive-only across `lab/
+  safety_matrix.yaml` (no change, only reuse), `fuzzlab/labgen/emitters/
+  go_net_http/` (one new source/sink module triple + templates, existing
+  ones untouched), and the existing `lab/ground-truth-twitch-clone/`
+  directory (grown again, not replaced). No change to `fuzzlab/oracle/
+  strategies.py` or `fuzzlab/audit/rules_data/default_rules.json` at all
+  -- this increment is a cross-stack generalization proof of
+  already-shipped detection capability, the mirror image of
+  `CC-LAB-0187`'s own proof in the opposite stack direction.
+- Risk (level; mitigation or accepted-risk justification): low -- this
+  shape reuses an already-reviewed, already-accepted safety-matrix
+  concern (`CC-LAB-0063`) and an already-proven-real design pattern
+  (`CC-LAB-0188`'s own recompute-vs-trust twin), rather than introducing
+  either from scratch; the one genuinely new risk this entry's own review
+  gate flagged pre-implementation (disguised-constant secure twin,
+  `CC-LAB-0212`'s own past mistake, already recorded once more in
+  `CC-LAB-0188`) was designed around from the start, not discovered after
+  the fact. No DB write, filesystem write, or outbound network call is
+  involved at all -- the entire mechanism is JSON-in/JSON-out, matching
+  `CC-LAB-0188`'s own lowest-risk sink shape.
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml`: no change (reuse confirmed) -- done
+  - [x] `fuzzlab/labgen/emitters/go_net_http/modules.py` + `__init__.py`
+    + 3 new templates -- done
+  - [x] `lab/manifests/price_integrity_twitch_subscription_sample.yaml`
+    (2 cells) -- done
+  - [x] `lab/ground-truth-twitch-clone/`: `TWCH-0010` in all 3 files --
+    done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-144` --
+    done
+  - [x] `docs/components/05-auditor/requirements.md` and `docs/
+    components/07-fuzzing-harness-and-oracle/requirements.md`:
+    cross-stack generalization notes added in place -- done
+  - [x] `tests/test_labgen_go_net_http_modules.py` extended (3 tests) --
+    done
+  - [x] `tests/test_labgen_go_net_http_conformance.py` extended -- done
+  - [x] `tests/test_labgen_go_live_boot.py` extended (2 tests, real live
+    boot, all green) -- done
+  - [x] `tests/test_labels_contract_category4.py` extended -- done
+  - [x] `tests/test_multitarget_category4.py` extended and re-verified
+    against a real pipeline run (recall `8/9` -> `9/10`) -- done
+  - [x] Whole-repo `pytest -m "not slow"` run before considering this
+    increment complete (`PA-0040`) -- see Effectiveness
+  - [x] PA-0044's own hardcoded-recall-assertion grep + explicit re-run
+    of `tests/test_multitarget_category4.py`/`tests/test_auto.py`/
+    `tests/test_labels_contract_category4.py` (all `@pytest.mark.slow`-
+    exempt from the grep, or already updated) -- see Effectiveness
+  - [x] `CHANGELOG.md` line -- done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` category 4
+    tracker row updated -- done
+  - [x] Cross-branch collision check performed and recorded -- done
+  - [x] Pre-change review gate, `Agent`-tool-absence substitution noted
+    explicitly, matching `CC-LAB-0182`-`0188`'s own precedent wording --
+    done
+- Effectiveness (assessed 2026-09-23): met -- Twitch now has ten real,
+  live-boot-proven pages, and this project's `PriceTrustDifferentialStrategy`
+  is now proven, not just assumed, to generalize across a genuinely
+  different stack (`spring_boot` -> `go_net_http`) with zero new
+  detection code, the strongest generalization proof this mechanism has
+  had yet (the first Netflix-cell strategy proven to generalize onto
+  Twitch, complementing `CC-LAB-0187`'s own Twitch-onto-Netflix proof for
+  `AccessControlIdorStrategy`). Twitch's own real, scored recall in the
+  multi-target live-boot pipeline moves from 8/9 to 9/10.
+
+### CC-LAB-0188 — Netflix's 5th real page: first price_integrity_bypass instance, `/api/subscription/change-plan` (FR-LAB-143) (2026-09-23)
+
+- Change: genuinely new breadth for category 4's Netflix pick, explicitly
+  **not** a cheap "second instance" depth increment -- Netflix has never
+  had a `price_integrity_bypass` page before, and this is this concern's
+  **first** instantiation on `spring_boot` at all: the only prior real
+  implementation project-wide is `php_laravel`'s Booking.com checkout
+  charge (`CC-LAB-0212`, category 5's branch). Reuses `lab/safety_matrix.
+  yaml`'s existing `payment_charge_amount` sink family and its
+  `client_trusted_amount`/`server_recomputed_amount` ops (`CC-LAB-0063`)
+  verbatim -- no new safety-matrix entry needed (confirmed absent from
+  every emitter on this stack before starting: `grep -rln
+  "client_trusted_amount\|payment_charge_amount"
+  fuzzlab/labgen/emitters/spring_boot/` returned nothing).
+  A subscription plan-upgrade/downgrade endpoint (`POST /api/subscription/
+  change-plan`, switching an account between Basic/Standard/Premium tiers
+  -- a real, plausible, core streaming-subscription feature), genuinely
+  distinct from `/api/playback/resume` (playback-position mutation),
+  `/api/content/import` (B2B partner content ingestion),
+  `/api/profiles/switch` (profile-switching mutation), and
+  `/api/account/billing` (a GET billing-details lookup, not a mutation).
+
+  **Cross-branch collision check, performed and recorded**: `git fetch
+  origin claude/category-3-build-iuu5k9 claude/category-5-build-6boejs`
+  followed by `git diff --numstat HEAD <branch> -- <every shared file the
+  dispatch task named>` against both sibling branches, before touching
+  any of them. The files this entry actually edits
+  (`fuzzlab/labgen/emitters/spring_boot/__init__.py`,
+  `fuzzlab/labgen/emitters/spring_boot/modules.py`, its new templates,
+  `fuzzlab/labels/schemas/labels.schema.json`) showed **zero** lines
+  unique to either sibling branch -- both strictly behind this branch's
+  own tip on those exact files, no divergent work to reconcile.
+  **Recorded honestly, not glossed over**: the wider shared-file set the
+  dispatch task named but this entry does **not** touch
+  (`fuzzlab/core/runmode.py`, `fuzzlab/tools/probesender.py`,
+  `fuzzlab/audit/rules_data/default_rules.json`,
+  `fuzzlab/oracle/strategies.py`) does have real, divergent, unmerged
+  content on both sibling branches (their own new rules/strategies, not
+  yet on this branch: `git diff --numstat` showed 12-45 lines unique to
+  each sibling on `runmode.py`/`strategies.py`/`probesender.py`/
+  `default_rules.json`) -- irrelevant to this lab-only entry, which edits
+  none of them, but flagged here for whoever reconciles branches at merge
+  time rather than silently left for them to discover, unlike the clean
+  "no divergent work found" result `CC-LAB-0184`/`CC-LAB-0187` were able
+  to report for their own, narrower touch sets on this same shared-file
+  list.
+
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0187`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded here rather than silently
+  skipping the gate. **(1) Accuracy** -- checked by direct source
+  inspection, not assumed: `spring_boot`'s module system has no separate
+  transform stage (confirmed by reading `modules.py`'s own docstring
+  before designing anything, not assumed from `CC-LAB-0187`'s precedent
+  alone), so this shape's vulnerable/secure ops had to become two sink
+  modules (op-selects-sink, this stack's existing `ssti`/`xxe`/
+  `access_control` convention), not a source+transform+sink triad like
+  `php_laravel`'s own Booking.com twin (`CC-LAB-0212`) -- `CC-LAB-0212`'s
+  own change-control entry was read in full before designing anything,
+  for exactly what "recompute server-side" vs. "trust client input"
+  looked like there, then a genuinely independent Java implementation was
+  written (no PHP code ported); cell IDs `LABGEN-JV-0009`/`0010` were
+  confirmed free (grepped `LABGEN-JV-` across every manifest, highest
+  existing was `LABGEN-JV-0008`); Jackson 3's real `JsonMapper.
+  readTree()`/`JsonNode.path(...).asText()` API (not Jackson 2's
+  `com.fasterxml.jackson.databind.*`, the same API-migration finding
+  `CC-LAB-0173` already recorded for this stack) was verified against a
+  real `mvn package`/boot/HTTP round trip, not assumed from documentation
+  alone -- both twins render, compile, and boot correctly, and the
+  differential (client price trusted vs. discarded) was proven live, not
+  asserted from the template source alone. **(2) Adequacy** -- checked
+  that this increment does not silently duplicate an existing route
+  (grepped `_PAGE_PARAMS` for `/api/subscription/change-plan`: absent);
+  applied `CC-LAB-0212`'s own adequacy-review lesson *proactively*, before
+  any implementation, rather than needing a second review pass to catch
+  it after the fact: the secure twin's price map had to be a genuine,
+  data-driven, multi-entry lookup (`basic`/`standard`/`premium`, three
+  distinct real `BigDecimal` prices), never a disguised single constant,
+  and this was proven live (the `plan_tier=basic`/`premium` live-boot
+  cases return distinct real prices, not the same value regardless of
+  tier) rather than assumed from the template's own shape; also checked
+  whether an unrecognized `plan_tier` needed a fallback default
+  (`php_laravel`'s own `default_room_type` convention) or should fail
+  closed -- chose fail-closed (`HTTP 400`) as this entry's own explicit
+  design call, since Netflix's tier set is a small, closed enumeration
+  with no legitimate "unknown tier" case the way Booking's room inventory
+  might plausibly have one, and proved the 400 live rather than merely
+  asserting the `if (serverPrice == null)` branch exists.
+  Ground truth: `NFLX-0005` added to `lab/ground-truth-netflix-clone/`
+  (`vuln_class="price_integrity_bypass"`, a pre-existing enum value from
+  Booking.com's own `BKNG-0003`; `sink_context="payment_charge"` -- a
+  **new** enum value, additively widened in `fuzzlab/labels/schemas/
+  labels.schema.json` after confirming no existing value fit: Booking's
+  own `BKNG-0003` used `"sql"` because its sink is a real DB insert, and
+  this sink never touches a database at all, it only reflects/computes a
+  value into a JSON response).
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/modules.py` (new
+    `ReadPlanChangeRequestSource`/`ClientTrustedAmountSink`/
+    `ServerRecomputedAmountSink` classes + registrations)
+  - `fuzzlab/labgen/emitters/spring_boot/__init__.py`
+    (`_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS`, one new shape + one new route
+    entry, the latter carrying the secure twin's own fixed `plan_prices`
+    rate table)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sources/
+    read_plan_change_request.java.j2` (new)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sinks/
+    {client_trusted_amount,server_recomputed_amount}.java.j2` (new)
+  - `lab/manifests/price_integrity_netflix_subscription_sample.yaml` (new,
+    `LABGEN-JV-0009`/`0010`)
+  - `fuzzlab/labels/schemas/labels.schema.json` (`sink_context` widened
+    additively: `"payment_charge"`)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended, `NFLX-0005`)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-143`)
+  - `tests/test_labgen_spring_boot_subscription_price_integrity.py` (new,
+    7 unit tests, no network required)
+  - `tests/test_labgen_spring_boot_subscription_price_integrity_live_boot.py`
+    (new, 4 live-boot tests, real `mvn package`/boot/HTTP round trip --
+    ran for real in this session, all green, not skipped)
+  - `tests/test_labels_contract_category4.py` (extended)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category 4 tracker
+    row updated)
+  **Deliberately NOT touched, and why**:
+  `tests/test_multitarget_category4.py`'s own hand-rolled multi-cell
+  live-boot test (`test_netflix_multi_cell_boot_confirms_all_positives`,
+  currently scoring Netflix's real recall at 4/4) was **not** extended to
+  include this entry's new vulnerable twin (`LABGEN-JV-0009`), unlike
+  `CC-LAB-0187`'s own extension of that same test from 3/3 to 4/4 --
+  `CC-LAB-0187`'s addition worked because `AccessControlIdorStrategy`
+  already existed and confirmed it for free; `price_integrity_bypass` has
+  **no** audit-rule/oracle-strategy anywhere in the project yet (checked:
+  `grep -rn "price_integrity\|payment_charge_amount"
+  fuzzlab/oracle/strategies.py fuzzlab/audit/rules_data/default_rules.json`
+  returned nothing), so adding the new cell there today would silently
+  drop that test's own scored recall from 4/4 to 4/5 rather than
+  demonstrate anything -- deferred to this task's own explicitly-scoped
+  detection follow-on instead, per this task's own lab-then-detection
+  split (matching `CC-LAB-0180`/`CC-LAB-0181`/`CC-LAB-0186`'s own
+  precedent of not bundling unbuilt detection into the lab-page commit).
+- Impact (other components / project): additive-only across `lab/
+  safety_matrix.yaml` (no change, only reuse), `fuzzlab/labgen/emitters/
+  spring_boot/` (two new source/sink module pairs + templates, existing
+  ones untouched), `fuzzlab/labels/schemas/labels.schema.json` (one new
+  `sink_context` enum value), and the existing `lab/ground-truth-netflix-
+  clone/` directory (grown again, not replaced). No other of the 13
+  architecture components touched. `price_integrity_bypass` detection
+  (audit rule + oracle strategy) remains genuinely unbuilt project-wide
+  for any stack's real `client_trusted_amount` twin -- tracked as this
+  entry's own explicit follow-on, not silently left implicit.
+- Risk (level; mitigation or accepted-risk justification): low -- this
+  shape reuses an already-reviewed, already-accepted safety-matrix
+  concern (`CC-LAB-0063`) and an already-proven-real design pattern
+  (`CC-LAB-0212`'s own recompute-vs-trust twin), rather than introducing
+  either from scratch; the one genuinely new risk this entry's own review
+  gate flagged pre-implementation (disguised-constant secure twin,
+  `CC-LAB-0212`'s own past mistake) was designed around from the start,
+  not discovered after the fact. No DB write, filesystem write, or
+  outbound network call is involved at all (unlike `CC-LAB-0212`'s own
+  DB-insert live-boot proof) -- the entire mechanism is JSON-in/JSON-out,
+  the lowest-risk sink shape this stack has built yet.
+- Deliverables:
+  - [x] `lab/safety_matrix.yaml`: no change (reuse confirmed) -- done
+  - [x] `fuzzlab/labgen/emitters/spring_boot/modules.py` + `__init__.py` +
+    3 new templates -- done
+  - [x] `lab/manifests/price_integrity_netflix_subscription_sample.yaml`
+    (2 cells) -- done
+  - [x] `fuzzlab/labels/schemas/labels.schema.json`: `sink_context`
+    widening -- done
+  - [x] `lab/ground-truth-netflix-clone/`: `NFLX-0005` in all 3 files --
+    done
+  - [x] `docs/components/01-target-lab/requirements.md`: `FR-LAB-143` --
+    done
+  - [x] `tests/test_labgen_spring_boot_subscription_price_integrity.py`
+    (7 tests) -- done
+  - [x] `tests/test_labgen_spring_boot_subscription_price_integrity_live_boot.py`
+    (4 tests, real live boot, all green) -- done
+  - [x] `tests/test_labels_contract_category4.py` extended -- done
+  - [x] Whole-repo `pytest -m "not slow"` run before considering this
+    increment complete (`PA-0040`) -- see Effectiveness
+  - [x] `CHANGELOG.md` line -- done
+  - [x] `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` category 4
+    tracker row updated -- done
+  - [x] Cross-branch collision check performed and recorded, including
+    the honest disclosure of divergence in files this entry does not
+    touch -- done
+  - [x] Pre-change review gate, `Agent`-tool-absence substitution noted
+    explicitly, matching `CC-LAB-0182`-`0187`'s own precedent wording --
+    done
+  - [x] Detection deliberately NOT bundled into this commit -- tracked as
+    its own separately-scoped follow-on (same split as `CC-LAB-0180`/
+    `CC-LAB-0181`/`CC-LAB-0186`)
+- Effectiveness (assessed 2026-09-23): met as a lab page -- Netflix now
+  has five real, live-boot-proven pages, and this project now has its
+  second real `price_integrity_bypass` implementation and its first on
+  `spring_boot`, proving `CC-LAB-0212`'s own recompute-vs-trust design
+  pattern generalizes to a stack with a genuinely different module
+  architecture (op-selects-sink, not source+transform+sink) with no
+  fidelity loss -- both twins were proven live, not merely rendered.
+  Detection effectiveness is deferred to its own future `CC-AUD`/
+  `CC-FUZZ` follow-on, tracked here rather than silently left implicit,
+  the same split `CC-LAB-0180`/`CC-LAB-0181`/`CC-LAB-0186` already
+  established for this category.
+
+### CC-LAB-0187 — Netflix's 4th real page: first access_control/IDOR instance, `/api/account/billing` (FR-LAB-142) (2026-09-23)
+
+- Change: genuinely new breadth for category 4's Netflix pick, explicitly
+  **not** a cheap "second instance" depth increment like `CC-LAB-0179`/
+  `CC-LAB-0184` -- Netflix has never had an `access_control`/IDOR (broken
+  object-level authorization) page before, even though this project's Go
+  stack (Twitch) already has this exact mechanism, real and detected
+  (`CC-LAB-0178`/`CC-LAB-0183`, `AccessControlIdorStrategy`/
+  `R-ACCESS-CONTROL`). Reuses `lab/safety_matrix.yaml`'s existing
+  `db_row_by_id_lookup` sink family and `no_ownership_check`/
+  `identity_match_before_fetch` ops (`CC-LAB-0063`) verbatim -- no new
+  safety-matrix entry -- but this is the mechanism's **first**
+  instantiation for `spring_boot` (only `go_net_http` had it before).
+  **Cross-branch collision check, performed and recorded**: `git fetch
+  origin claude/category-3-build-iuu5k9 claude/category-5-build-6boejs`
+  followed by a diff of every shared file this task named (`fuzzlab/
+  labgen/emitters/spring_boot/`, `fuzzlab/oracle/strategies.py`,
+  `fuzzlab/core/runmode.py`, `fuzzlab/audit/rules_data/default_rules.json`,
+  `fuzzlab/labels/schemas/labels.schema.json`, `fuzzlab/tools/
+  probesender.py`) against both sibling branches: every diff showed only
+  deletions relative to this branch (both sibling branches strictly
+  behind this branch's own tip on every one of those files) -- no
+  divergent work to reconcile.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0186`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded here rather than silently
+  skipping the gate: (1) **accuracy** -- confirmed by direct source
+  inspection, not assumed: `spring_boot`'s module system has no separate
+  transform stage (`modules.py`'s own docstring, confirmed by reading it
+  before designing anything), so the shape's `no_ownership_check`/
+  `identity_match_before_fetch` ops had to become two sink modules
+  (op-selects-sink, this stack's existing convention for `ssti`/`xxe`),
+  not a source+transform+sink triad like `go_net_http`'s; cell IDs
+  `LABGEN-JV-0007`/`0008` were confirmed free (grepped `LABGEN-JV-`
+  across every manifest, highest existing was `LABGEN-JV-0006`);
+  `AccessControlIdorStrategy`'s own confirmation contract (HTTP 200 for
+  both probes, non-empty body, no denial-marker text, both probed ids
+  echoed back literally, the two bodies differing) was checked against
+  the exact rendered vulnerable-twin template
+  (`no_ownership_check.java.j2`, echoes `accountId` verbatim into the
+  JSON body) before assuming it would confirm, and was then actually
+  driven against a real booted instance (see below), not assumed from
+  the class/shape match alone. (2) **adequacy** -- checked that this
+  increment does not silently duplicate an existing route (grepped
+  `_PAGE_PARAMS` for `/api/account/billing`: absent); confirmed
+  `R-ACCESS-CONTROL`'s own `name_regex` (`channel_id|resource_id|
+  object_id|item_id|record_id|owner_id`) did **not** already match
+  `account_id` -- read directly, not assumed -- so the rule needed
+  widening (additive-only, one new alternative) or the param needed
+  renaming; chose widening the regex since `account_id` is the
+  idiomatically correct name for this real feature and no existing
+  manifest/ground-truth case uses that name (grepped first, confirmed
+  absent) so no existing case is affected; confirmed the caller-identity
+  header design (`X-Account-Id`, this project's own design call, stated
+  explicitly per the task's instruction -- no existing `spring_boot`
+  convention for "the caller's own identity" was found: TrackerNest's
+  and Netflix's other pages are all whole-body-JSON mutations with no
+  identity concept at all) mirrors `go_net_http`'s own already-accepted
+  fixed-demo-header simplification (`CC-LAB-0178`'s `X-Broadcaster-Id`),
+  not a novel unreviewed pattern.
+  - **Real Netflix functionality (grounded, not invented)**: an
+    account-billing-details lookup (`GET /api/account/billing?account_id=
+    <id>`, returning payment method/last invoice amount/billing cycle) --
+    a real, plausible, core Netflix account-management feature (viewing
+    your own billing/payment info is a standard SaaS/streaming
+    account-settings page), genuinely distinct from `/api/playback/
+    resume` (playback-position mutation), `/api/content/import` (B2B
+    partner content ingestion), and `/api/profiles/switch`
+    (profile-switching mutation) -- a textbook OWASP API1:2023 BOLA
+    surface, the same class of real page `CC-LAB-0178` grounded for
+    Twitch's own per-channel analytics lookup.
+  - **A genuinely new module set for this stack, not a template port.**
+    `ReadAccountIdAndCallerHeaderSource` (`read_account_id_and_caller_
+    header`) reads the attacker-visible `account_id` query param
+    (`HttpServletRequest.getParameter`) and the fixed demo
+    `X-Account-Id` header (`getHeader`), publishing `accountIdVar`/
+    `callerIdVar` for the sink to compose its own ownership decision --
+    unlike `go_net_http`'s source+transform+sink triad, this stack's
+    shape has no transform stage, so each sink implements its own
+    ownership check (or deliberate lack of one) directly:
+    `NoOwnershipCheckObjectLookupSink` and
+    `IdentityMatchBeforeFetchObjectLookupSink`.
+  - **Vulnerable** (`LABGEN-JV-0007`, `no_ownership_check`): returns
+    canned billing data (`payment_method`/`last_invoice_amount_usd`/
+    `billing_cycle`, echoing the requested `account_id` back) for
+    whatever `account_id` is given, ignoring `X-Account-Id` entirely.
+    **Secure** (`LABGEN-JV-0008`, `identity_match_before_fetch`):
+    requires `accountId.equals(callerAccountId)` before returning any
+    data; a mismatch (or a missing header) is a real HTTP 403.
+  - **Audit rule widened, additively, not replaced**: `R-ACCESS-CONTROL`'s
+    `name_regex` (`fuzzlab/audit/rules_data/default_rules.json`) gains
+    `|account_id` -- see the paired `CC-AUD-0024` entry for the full
+    impact/risk assessment of this rule change; that entry, not this
+    one, is this widening's own controlled record (this component's own
+    change is the new page/module set only).
+  - **The live-boot harness itself needed one small, additive widening**:
+    `SpringBootLiveBootHarness.request()`/`get()`
+    (`fuzzlab/labgen/conformance/live_boot_spring_boot.py`) gained an
+    optional `headers` keyword-only parameter (default `None`) -- this
+    stack's first cell needing a caller-identity header sent by a test,
+    the same kind of harness gap `CC-LAB-0131`'s `data`/`content_type`
+    params closed for a raw request body. Confirmed identical across
+    all three active category branches before touching it (see the
+    cross-branch collision check above).
+  - **Real, live-boot proof**
+    (`tests/test_labgen_spring_boot_account_billing_live_boot.py`, 3
+    tests): (a) the vulnerable twin returns distinct, id-echoing billing
+    data for two unrelated `account_id` values with no header sent at
+    all; (b) the secure twin rejects a mismatched `X-Account-Id`, rejects
+    a request with no identity header at all, and accepts a matching
+    one; (c) the detection-generalization proof below.
+  - **Detection generalization, verified for real against a real booted
+    app, not asserted from theory**: `AccessControlIdorStrategy`
+    (`CC-FUZZ-0033`, built for Twitch's `go_net_http` cells) needed
+    **zero** new code to confirm the new Spring Boot vulnerable twin and
+    correctly fail closed on its new secure twin -- the first proof this
+    strategy generalizes **across stacks** (`go_net_http` ->
+    `spring_boot`), not just across routes on the same stack (which
+    `CC-LAB-0183` already proved). The real
+    `fuzzlab.harness.multitarget.run_targets` pipeline was then run end
+    to end against a real booted Netflix instance assembling all four of
+    Netflix's own vulnerable twins in one hand-rolled multi-cell boot
+    (`tests/test_multitarget_category4.py::
+    test_netflix_multi_cell_boot_confirms_all_positives`, extended from
+    `CC-LAB-0184`'s own three-cell precedent), and shows Netflix's own
+    real, scored recall in that boot moving from `3/3` to `4/4` (`tp=4,
+    fp=0`) with no new audit-rule/strategy code beyond the additive
+    regex widening above.
+  - Ground truth: `NFLX-0004` added to `lab/ground-truth-netflix-clone/`
+    (`vuln_class="access_control"`, `sink_context="object_lookup"` --
+    both pre-existing enum values from Twitch's own `TWCH-0003`/
+    `TWCH-0007`, no schema widening needed).
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/modules.py` (new
+    `ReadAccountIdAndCallerHeaderSource`/
+    `NoOwnershipCheckObjectLookupSink`/
+    `IdentityMatchBeforeFetchObjectLookupSink` classes + registrations)
+  - `fuzzlab/labgen/emitters/spring_boot/__init__.py`
+    (`_MODULE_SET_BY_SHAPE`/`_PAGE_PARAMS`, one new shape + one new
+    route entry)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sources/
+    read_account_id_and_caller_header.java.j2` (new)
+  - `fuzzlab/labgen/emitters/spring_boot/templates/sinks/
+    {no_ownership_check,identity_match_before_fetch}.java.j2` (new)
+  - `fuzzlab/labgen/conformance/live_boot_spring_boot.py` (additive
+    `headers` param on `request()`/`get()`)
+  - `lab/manifests/access_control_netflix_billing_sample.yaml` (new)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended)
+  - `tests/test_labgen_spring_boot_account_billing.py` (new, 7 unit
+    tests, no network required)
+  - `tests/test_labgen_spring_boot_account_billing_live_boot.py` (new, 3
+    live-boot tests)
+  - `tests/test_labels_contract_category4.py` (extended)
+  - `tests/test_multitarget_category4.py` (module docstring extended;
+    `_NETFLIX_MULTI_MANIFESTS`/`_NETFLIX_MULTI_CELL_IDS` extended;
+    multi-cell recall assertion `3/3` -> `4/4`; single-cell test's own
+    Netflix recall assertion updated `1/3` -> `1/4` and `macro_recall`
+    accordingly, since ground truth now has four cases -- a real
+    assertion re-verified against a real pipeline run, not assumed)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-142`, new)
+  - `docs/components/05-auditor/requirements.md` (`FR-AUD-8`, updated in
+    place for the widened regex)
+  - `docs/components/07-fuzzing-harness-and-oracle/requirements.md`
+    (`FR-FUZZ-20`, updated in place: cross-stack generalization now
+    verified)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category-4 tracker
+    row updated)
+  - `CHANGELOG.md`
+- Impact (other components / project): additive only -- one new
+  `_MODULE_SET_BY_SHAPE` entry (keyed on a shape tuple no other cell
+  uses), one new `_PAGE_PARAMS` key (cannot collide with any existing
+  route: `spring_boot` component-scans and each cell's class name
+  derives from its own `cell_id`), one new manifest, ground truth
+  extension, one additive param on the live-boot harness (default
+  `None`, every pre-existing caller unaffected -- re-ran the full
+  pre-existing `spring_boot` live-boot suite unmodified-in-assertion to
+  confirm). The audit-rule regex widening's own impact is assessed in
+  `CC-AUD-0024`. No new `fuzzlab.oracle`/`fuzzlab.core.runmode` code at
+  all -- this increment is a cross-stack generalization proof of
+  already-shipped detection capability.
+- Risk (level; mitigation or accepted-risk justification): **low**.
+  Reuses the fully-built, already-tested `AccessControlIdorStrategy` and
+  the already-catalogued safety-matrix ops verbatim; the only genuinely
+  new code is one source + two sink template/module pairs (small,
+  independently unit-tested) and one harness parameter (additive,
+  default-`None`, covered by the pre-existing suite passing unmodified).
+  The one real shared-code risk (a future change to these new sink
+  templates silently affecting only this one route, since they are not
+  shared with any other cell) is minimal by construction. Verified end
+  to end with a real `mvn package`/boot/HTTP round trip and a real
+  `run_targets` pipeline run, not assumed from the shape-match argument
+  alone.
+- Deliverables:
+  - [x] New source + two new sink modules/templates (this stack's first
+    `access_control` instantiation), new manifest, new `_PAGE_PARAMS`
+    entry
+  - [x] Live-boot harness widened additively (`headers` param)
+  - [x] Real live-boot proof (3 tests: vulnerable differential, secure
+    identity-match/mismatch/no-header, detection-generalization)
+  - [x] Ground truth extended (`NFLX-0004`)
+  - [x] Cross-branch collision check performed and recorded (no
+    divergent work found)
+  - [x] Detection generalization verified live (dedicated strategy
+    live-boot test + real `run_targets` pipeline run via a hand-rolled
+    4-cell boot) -- recall `3/3` -> `4/4`
+  - [x] `R-ACCESS-CONTROL` regex widened additively, own change-control
+    entry (`CC-AUD-0024`)
+  - [x] Full non-slow suite + the relevant category-4/`spring_boot` real
+    live-boot slow tests re-verified green
+  - [x] Pre-change review gate's `Agent`-tool absence flagged explicitly,
+    substituted with a documented self-review (accuracy + adequacy),
+    matching `CC-LAB-0182`-`0186`'s own precedent wording
+- Effectiveness (assessed 2026-09-23): met -- Netflix now has four real,
+  live-boot-proven pages and, for the first time, its own
+  `access_control`/IDOR page; the project's existing
+  `AccessControlIdorStrategy` detection is now proven, not just assumed,
+  to generalize across a genuinely different stack (`go_net_http` ->
+  `spring_boot`) with zero new detection code, the strongest
+  generalization proof this mechanism has had yet.
+
+### CC-LAB-0186 — Twitch's 9th real page: first unrestricted-file-upload instance, `/channels/emotes/upload` (FR-LAB-141) (2026-09-23)
+
+- Change: genuinely new breadth for category 4's Twitch pick, explicitly
+  **not** a cheap "second instance" depth increment like `CC-LAB-0180`-
+  `0185` — this is the project's **first** instantiation, on any stack,
+  of `lab/safety_matrix.yaml`'s existing `fs_web_root_write` sink family
+  and `unrestricted_file_upload` concern (added by `CC-LAB-0063` for the
+  corpus-examples/file-handling research; its comment block near line 47
+  and its op rows near line 460-470 were read before starting, per the
+  task's own instruction). Confirmed absent before building: `grep -rln
+  "extension_allowlist_mime_check|fs_web_root_write"
+  fuzzlab/labgen/emitters/*/modules.py lab/manifests/*.yaml` returned
+  nothing.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`-`0185`'s own precedent wording):** the
+  `Agent` tool for a two-independent-reviewer accuracy/adequacy pass was
+  not present in this session's toolset (checked via `ToolSearch` with
+  several queries before concluding this, not assumed absent) —
+  substituted with a documented, rigorous self-review performed and
+  recorded here rather than silently skipping the gate. **(1) Accuracy**
+  — checked by direct source inspection, not assumed: the safety-matrix
+  ops this shape reuses (`no_extension_check`/`mime_type_check`/
+  `filename_charset_sanitize`/`extension_allowlist_mime_check`, all
+  keyed to `fs_web_root_write`) exist verbatim in `lab/safety_matrix.yaml`
+  with the documented `no_effect`/`partial`/`partial`/`neutralises`
+  ladder; `LABGEN-GO-0017`/`0018` were confirmed free (highest existing
+  Go cell ID across every manifest in `lab/manifests/*.yaml` was
+  `LABGEN-GO-0016`); Go's own `http.DetectContentType` and `mime.
+  TypeByExtension` builtin behavior (including the ".html"/".svg" builtin
+  MIME mappings the vulnerable twin's spoofing relies on, and the PNG
+  magic-number sniff the secure twin's real-image acceptance relies on)
+  were verified against a real `go build`/boot/HTTP round trip, not
+  assumed from documentation alone — this real verification run also
+  caught and fixed one real defect the initial draft had (see below).
+  **(2) Adequacy** — checked that this increment does not silently
+  duplicate an existing route (grepped `_ROUTE_PARAMS` for
+  `/channels/emotes/upload`: absent) and does not need a second,
+  redundant sink pair (the manifest's minimal-pair invariant: one
+  vulnerable, one secure op, both already fully specified by the
+  existing safety-matrix rows); confirmed the mandatory filesystem-safety
+  constraint (any live-boot test writes only under a throwaway
+  `tempfile.TemporaryDirectory`, never a real/permanent/shared path) is
+  met structurally, not just by test-author intent — `GoLiveBootHarness`
+  already runs the compiled binary with `cwd` set to its own
+  `TemporaryDirectory`-backed app dir, and the generated handler writes
+  to a **relative** path (`static/emotes`, resolved against that `cwd`),
+  so the default behavior already lands in a throwaway directory with no
+  extra plumbing needed — verified by inspecting `go_live_boot.py`'s own
+  `build()` before relying on it, not assumed; confirmed the live-boot
+  probe payload is inert (a marker string in a `<!DOCTYPE html><p>...`
+  snippet, never an actual `<script>` tag or anything that could execute
+  if mishandled, per the task's own explicit constraint). Confirmed
+  detection is genuinely out of scope for this commit, as instructed —
+  no audit rule or oracle strategy exists yet for `unrestricted_file_
+  upload`/`fs_web_root_write`, and none was added here.
+  - **Real Twitch functionality (grounded, not invented)**: a channel-
+    emote/profile-image upload endpoint — Twitch streamers upload custom
+    subscriber emotes as image files, a real, documented feature of this
+    app identity.
+  - **A genuinely new mechanism, designed from scratch, not a template
+    port.** `ReadUploadedFileSource` (`read_uploaded_file`, this stack's
+    first real `multipart/form-data` parser — `r.ParseMultipartForm`/
+    `r.FormFile("file")`, bounded at a fixed 5 MiB via `io.LimitReader`
+    so an oversized upload fails closed rather than exhausting memory)
+    publishes three Go identifiers (`filename_var`/`content_var`/
+    `client_content_type_var`) a sink reads directly — Convention 2 (the
+    manifest's one op names a sink directly, like SSRF/mass-assignment),
+    since the vulnerable/secure difference here is one inseparable
+    write-and-serve operation, not a value rewrite feeding a shared sink.
+  - **Vulnerable** (`LABGEN-GO-0017`, `no_extension_check`): writes the
+    upload to `static/emotes/<caller's own filename>` verbatim, then
+    serves it back with a `Content-Type` from `mime.TypeByExtension` on
+    that same filename (falling back to the caller's own multipart
+    `Content-Type` header when the extension is unrecognized) — never
+    from the file's real bytes. Go has no PHP-style "the web server
+    executes an uploaded script" footgun (the task's own note), so this
+    models the real, well-documented CWE-434-to-XSS chain instead: an
+    uploaded `.html`/`.svg` file is served back same-origin as
+    `text/html`/`image/svg+xml`, letting an embedded `<script>` execute
+    (stored XSS via unrestricted file upload).
+  - **Secure** (`LABGEN-GO-0018`, `extension_allowlist_mime_check`):
+    rejects any extension outside a fixed image allowlist (`.png`/
+    `.jpg`/`.jpeg`/`.gif`/`.webp`), then sniffs the REAL bytes via
+    `http.DetectContentType` and rejects anything whose sniffed type is
+    not `image/*` — closing exactly the gap `lab/safety_matrix.yaml`'s
+    own comment documents for this family's `partial`-effect ops.
+    Writes under a fully server-chosen filename (`"emote"+ext`, never
+    the caller's own filename) and always serves the response with the
+    SNIFFED content type, never one derived from the extension or the
+    caller's `Content-Type` header.
+  - **A real Go compile defect found and fixed before landing** (the
+    same "declared and not used" class `CC-LAB-0178`'s `broadcasterID`
+    bug and `CC-LAB-0180`'s JWT bug were): the secure sink's first draft
+    never referenced `client_content_type_var` at all, which `go build`
+    correctly rejected as declared-and-not-used — fixed with an explicit
+    `_ = {{ client_content_type_var }}` plus a comment stating plainly
+    that the secure twin deliberately never trusts that header, found by
+    actually running `go build` during this dispatch, not assumed to
+    compile from template inspection alone.
+  - **Real, live-boot proof** (`tests/test_labgen_go_live_boot.py::
+    test_real_boot_proves_the_unrestricted_file_upload_differential_for_both_twins`,
+    4 assertions, isolating exactly what allowlisting + content sniffing
+    controls): (a) the vulnerable twin serves an uploaded `evil.html`
+    back with `Content-Type: text/html`, marker intact in the body; (b)
+    the secure twin rejects the identical `evil.html` upload outright
+    (HTTP 415, extension not allowlisted); (c) the secure twin ALSO
+    rejects a spoofed upload (real HTML bytes, named `fake.png`, an
+    allowlisted extension) with HTTP 415 — proving the content-sniffing
+    half is what actually closes the gap, not just the extension check;
+    (d) the secure twin accepts a real PNG-signature upload and serves it
+    back with a sniffed `image/png` Content-Type, proving the secure path
+    is not simply "reject everything". Filesystem safety: every write in
+    this test lands under `GoLiveBootHarness`'s own
+    `tempfile.TemporaryDirectory`-backed process `cwd` (the generated
+    handler's `static/emotes` path is relative, resolved against that
+    `cwd`) — never a real, permanent, or shared path; the probe payload
+    is an inert `<!DOCTYPE html><p>FUZZLAB-UPLOAD-MARKER-...</p>` snippet,
+    never an executing `<script>` tag.
+  - **A real, additive harness gap found and fixed along the way**:
+    `GoLiveBootHarness.HttpResponse` (`fuzzlab/labgen/conformance/
+    go_live_boot.py`) had no `headers` field at all — every prior shape
+    on this stack has its vulnerable/secure difference observable in the
+    response *body* or *status*, never only in a response *header*, so
+    this was never needed before. Added `headers: dict[str, str] =
+    field(default_factory=dict)`, populated from the real
+    `http.client.HTTPMessage` the `urllib` response carries — additive
+    only (every existing caller constructing `HttpResponse(status=...,
+    body=...)` positionally/by-keyword is unaffected; re-ran this
+    stack's full pre-existing live-boot suite unmodified-in-assertion
+    to confirm).
+  - Ground truth: `TWCH-0009` added to `lab/ground-truth-twitch-clone/`
+    (`vuln_class="unrestricted_file_upload"`, `sink_context=
+    "fs_web_root_write"`, both new enum values — `fuzzlab/labels/schemas/
+    labels.schema.json` additively widened). `param`/`location` are
+    `file`/`body` (the real multipart field name — genuinely the one
+    tainted field here), deliberately NOT the `body`/`body` whole-body-
+    point convention `weak_token_entropy`/`mass_assignment` use for a
+    true whole-JSON-body taint, so `fuzzlab.harness.auto.
+    points_from_ground_truth`'s `param=="body"` JSON-content-type
+    auto-detection (wrong for a multipart upload) never fires for this
+    point. `rendering="server"` (not `"server-json"`, this ground-truth
+    directory's usual value) since the success response is raw bytes
+    with a dynamic Content-Type, never JSON — a genuine, recorded
+    departure, not a copy-paste of the surrounding convention.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py` (3 new classes:
+    `ReadUploadedFileSource`/`NoExtensionCheckSink`/
+    `ExtensionAllowlistMimeCheckSink`), `__init__.py` (`_MODULE_SET_BY_
+    SHAPE`, `_MODULE_IMPORTS`, `_ROUTE_PARAMS`)
+  - New templates: `templates/sources/read_uploaded_file.go.j2`,
+    `templates/sinks/no_extension_check.go.j2`,
+    `templates/sinks/extension_allowlist_mime_check.go.j2`
+  - `lab/manifests/unrestricted_file_upload_go_sample.yaml` (new)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended)
+  - `fuzzlab/labels/schemas/labels.schema.json` (additively widened)
+  - `fuzzlab/labgen/conformance/go_live_boot.py` (`HttpResponse.headers`,
+    additive)
+  - `tests/test_labgen_go_net_http_modules.py` (4 new unit tests)
+  - `tests/test_labgen_go_net_http_conformance.py` (manifest list
+    extended)
+  - `tests/test_labels_contract_category4.py` (extended, 9 cases)
+  - `tests/test_labgen_go_live_boot.py` (1 new, 4-assertion live-boot
+    test)
+  - `tests/test_multitarget_category4.py` (`_twitch_cells()` extended;
+    recall assertions moved 7/8 -> 7/9, `macro_recall` updated)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-141`, new)
+- Impact (other components / project): `fuzzlab/labgen/emitters/
+  go_net_http/` and `fuzzlab/labels/schemas/labels.schema.json` are
+  shared across every category/target touching this stack or its
+  ground-truth schema — the widening is additive only (two new enum
+  values), and a fresh check found no other active branch already using
+  those two exact names for something else. `GoLiveBootHarness.
+  HttpResponse`'s new `headers` field is additive (default empty dict);
+  every existing construction site (`django_live_boot.py`,
+  `rails_live_boot.py`, `live_boot_spring_boot.py`, `live_boot.py` each
+  define their OWN `HttpResponse`, not this one) is unaffected, and this
+  stack's own full pre-existing live-boot suite was re-run unmodified-
+  in-assertion to confirm. Twitch's own real, scored `multitarget` recall
+  moves from 7/8 to 7/9 (a real missed positive, since no rule/strategy
+  exists yet for this class — not a false one).
+- Risk (level; mitigation or accepted-risk justification): **low-medium**.
+  Genuinely new template/module code (not a verbatim reuse), so it
+  carries more real-defect risk than `CC-LAB-0180`-`0185`'s own reuse
+  increments — realized once (the `clientContentType` unused-variable
+  compile failure), caught by actually running `go build`/the real
+  live-boot test before landing, not assumed correct from template
+  inspection. Upload size is bounded (5 MiB) on both twins; the live-boot
+  test's own probe payload is inert and every write lands under a
+  throwaway temp directory, per the task's explicit filesystem-safety
+  constraint.
+- Deliverables:
+  - [x] New source + two new sink modules/templates implemented,
+    registered, unit-tested (4 tests) — done
+  - [x] Real live-boot proof (4 assertions: vulnerable-twin XSS-chaining
+    Content-Type, secure-twin extension rejection, secure-twin
+    content-sniffing rejection of a spoofed upload, secure-twin
+    legitimate-image acceptance) — done, real defect found and fixed
+    along the way
+  - [x] Ground truth extended (`TWCH-0009`), schema additively widened
+    — done
+  - [x] Filesystem safety verified structurally (throwaway temp dir,
+    bounded upload size, inert probe payload) — done
+  - [x] Full non-slow suite + every directly-affected slow test (this
+    stack's whole live-boot/modules/conformance suite,
+    `test_labels_contract_category4.py`, `test_multitarget_category4.py`)
+    re-run green at the stable baseline — done
+  - [x] Pre-change review gate's `Agent`-tool absence flagged explicitly,
+    substituted with a documented self-review (accuracy + adequacy),
+    matching `CC-LAB-0182`-`0185`'s own precedent wording — done
+  - [x] Detection deliberately NOT bundled into this commit — tracked as
+    its own separately-scoped follow-on (same split as `CC-LAB-0180`/
+    `CC-LAB-0181`)
+- Effectiveness (assessed 2026-09-23): met as a lab page — Twitch now has
+  nine real, live-boot-proven pages, this project's first genuinely new
+  mechanism built in this category's depth-increment run rather than a
+  cheap reuse, with the vulnerable/secure Content-Type-chaining
+  differential proven live in both directions plus a real content-
+  sniffing bypass-resistance check. Detection effectiveness is deferred
+  to its own future `CC-AUD`/`CC-FUZZ` follow-on, tracked here rather
+  than silently left implicit.
+
+### CC-LAB-0185 — Twitch's 8th real page: second ssrf/server_side_http_fetch instance, `/clips/download` (FR-LAB-140) (2026-09-23)
+
+- Change: a cheap, low-risk depth increment for category 4's Twitch pick
+  (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§9.4), the same
+  pattern as `CC-LAB-0183` (access-control second instance) and
+  `CC-LAB-0184` (Netflix insecure_deserialization second instance):
+  reuses `CC-LAB-0172`'s already-built `ssrf`/`server_side_http_fetch`
+  module set (`ReadUrlQueryParamSource`/`UncheckedUrlFetchSink`/
+  `SchemeAndResolvedIpAllowlistSink` -- checked directly against
+  `fuzzlab/labgen/emitters/go_net_http/modules.py` and
+  `_MODULE_SET_BY_SHAPE` in `__init__.py` before starting, not assumed
+  from the task's own suggested names) verbatim at a second, distinct
+  route: `GET /clips/download?source_url=`, a clip-import/download
+  endpoint that server-side-fetches an externally-hosted clip file -- a
+  real, plausible Twitch-clip-editor feature ("import a clip from an
+  external source URL"), genuinely distinct from `/api/clips/thumbnail`
+  (`TWCH-0002`, a thumbnail-*fetch-and-render* proxy), not a cosmetic
+  rename of it, mirroring `CC-LAB-0179`'s and `CC-LAB-0183`'s own
+  zero-new-generator-code "new manifest + new route entry + ground
+  truth" pattern for reusing an already-built shape at a new route.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`/`CC-LAB-0183`/`CC-LAB-0184`'s own
+  precedent wording):** the `Agent` tool for a two-independent-reviewer
+  accuracy/adequacy pass was not present in this session's toolset
+  (checked via `ToolSearch` before concluding this, not assumed absent)
+  -- substituted with a documented, rigorous self-review performed and
+  recorded here rather than silently skipping the gate, per this task's
+  own explicit instruction to flag the substitution: (1) **accuracy** --
+  confirmed by direct source inspection, not assumed: the three module
+  class names above exist verbatim in `modules.py`;
+  `_MODULE_SET_BY_SHAPE[("ssrf", "server_side_http_fetch")]` exists and
+  is unchanged; the served route is derived from `cell_id`, not the
+  manifest's own `route:` field (per this emitter's own established
+  convention), so no route-path collision risk exists regardless of
+  which path string the manifest declares; cell IDs `LABGEN-GO-0015`/
+  `0016` were confirmed free (highest existing Go cell ID across every
+  manifest in `lab/manifests/*.yaml` was `LABGEN-GO-0014`, grepped
+  directly); `SsrfInBandMarkerStrategy`/`SsrfOobStrategy`'s own
+  confirmation contract (the vulnerable twin's response echoes the
+  fetched body verbatim, or the target's own outbound fetch reaches a
+  real OOB listener) was checked against the exact rendered
+  vulnerable-twin sink template (`unchecked_url_fetch.go.j2`, unchanged,
+  `io.Copy(w, resp.Body)`s the fetched response straight back) before
+  assuming it would confirm, not assumed from the class/shape match
+  alone. (2) **adequacy** -- checked that this increment does not
+  silently duplicate an existing route (grepped `_ROUTE_PARAMS` for
+  `/clips/download`: absent), does not need a second, redundant strategy
+  (the task's own explicit constraint, honored: no new `Rule`/
+  `ConfirmationStrategy` code was written at all), and that the
+  "detection already works automatically" claim was actually run against
+  a real booted instance rather than asserted from theory (see below) --
+  both two new dedicated live-boot strategy/differential tests and the
+  full `fuzzlab.harness.multitarget.run_targets` pipeline were executed
+  for real before this entry claims the recall move.
+  - **Real Twitch functionality (grounded, not invented)**: a clip-
+    import/download endpoint that server-side-fetches an externally-
+    hosted clip file from a caller-supplied `source_url`, the same
+    CWE-918 SSRF class `CC-LAB-0172`'s thumbnail-fetch proxy already
+    models, at a genuinely different real API-edge feature -- consistent
+    with Twitch's own documented "Go-centric microservices, new API
+    edge" architecture
+    (`docs/research/site-architecture-survey-functionality-twitch.md`).
+  - **Vulnerable** (`LABGEN-GO-0015`, `unchecked_url_fetch`): fetches the
+    caller-supplied `source_url` with no validation at all. **Secure**
+    (`LABGEN-GO-0016`, `scheme_and_resolved_ip_allowlist`): rejects any
+    scheme but `https` and rejects a resolved IP that is loopback/
+    private/link-local, checked against the resolved address.
+  - **Zero new generator code, verified not just claimed**: the only
+    non-ground-truth code change is one new
+    `_ROUTE_PARAMS["/clips/download"] = {"var_name": "sourceUrl",
+    "param_name": "source_url"}` entry in
+    `fuzzlab/labgen/emitters/go_net_http/__init__.py` (config, not a new
+    class/template); rendering both cells was run directly before
+    writing any test and produced byte-for-byte the same handler shape
+    as `LABGEN-GO-0003`/`0004`, differing only in the served path,
+    query-param name, and `handleLabgenGo00{15,16}` function name.
+  - **Real, live-boot proof** (`tests/test_labgen_go_live_boot.py`, same
+    plain-HTTP-loopback differential shape as `CC-LAB-0172`'s own test):
+    (a) the vulnerable twin fetches an unvalidated plain-HTTP loopback
+    target successfully; (b) the secure twin rejects the same target
+    (scheme check).
+  - **Detection generalization, verified for real against a real booted
+    app, not asserted from theory**: a new live-boot test drives the
+    real, already-built `SsrfInBandMarkerStrategy`/`SsrfOobStrategy`
+    (`CC-FUZZ-0031`) directly against this new cell pair, using a real,
+    started `OobListener` -- confirms the vulnerable twin, fails closed
+    on the secure twin, with zero new strategy/rule code. The real
+    `fuzzlab.harness.multitarget.run_targets` pipeline was then run end
+    to end against a real booted Twitch instance (with a real
+    `OobListener` passed through, per `CC-FUZZ-0031`'s own `oob=`
+    passthrough) (`tests/test_multitarget_category4.py::
+    test_both_apps_run_through_multitarget_for_real`) and shows Twitch's
+    own real, scored recall moving from `6/7` to `7/8` (`tp=7, fp=0`)
+    with no audit-rule/strategy change -- the whole point of this
+    increment, proving the existing detection generalizes to a second
+    instance of the same shape rather than assuming it would.
+  - Ground truth: `TWCH-0008` added to `lab/ground-truth-twitch-clone/`
+    (`vuln_class="ssrf"`, `sink_context="network"` -- both pre-existing
+    enum values from `TWCH-0002`, no schema widening needed).
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/__init__.py` (`_ROUTE_PARAMS`,
+    one new route entry)
+  - `lab/manifests/ssrf_clips_download_go_sample.yaml` (new)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended)
+  - `tests/test_labgen_go_net_http_conformance.py` (manifest list
+    extended)
+  - `tests/test_labels_contract_category4.py` (extended)
+  - `tests/test_labgen_go_live_boot.py` (two new live-boot tests)
+  - `tests/test_multitarget_category4.py` (`_twitch_cells()` extended;
+    recall assertions moved 6/7 -> 7/8)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-140`, new)
+- Impact (other components / project): additive only -- one new
+  `_ROUTE_PARAMS` key (cannot collide with any existing route since served
+  routes are cell-ID-derived, not path-derived), one new manifest, ground
+  truth extension. No existing cell's rendered output changes (verified:
+  `go_net_http`'s full existing test suite re-run unmodified-in-assertion
+  alongside the new tests). No new detection code in `fuzzlab.oracle`/
+  `fuzzlab.core.runmode` at all -- this increment is purely a
+  generalization proof of already-shipped detection capability.
+- Risk (level; mitigation or accepted-risk justification): **low**. Reuses
+  fully-built, already-tested modules verbatim; the only genuinely new
+  artifacts are config (manifest + one route-params entry) and ground
+  truth. Verified end to end with a real `go build`/boot/HTTP round trip
+  and a real `run_targets` pipeline run (with a real `OobListener`), not
+  assumed from the shared-module argument alone.
+- Deliverables:
+  - [x] New manifest + one `_ROUTE_PARAMS` entry, zero new module/op code
+  - [x] Real live-boot proof (2 assertions, mirroring `CC-LAB-0172`'s own
+    plain-HTTP-loopback shape)
+  - [x] Ground truth extended (`TWCH-0008`)
+  - [x] Detection generalization verified live (dedicated strategy
+    live-boot test with a real `OobListener` + real `run_targets`
+    pipeline run) -- recall 6/7 -> 7/8
+  - [x] Full non-slow suite + the relevant category-4/`go_net_http` slow
+    tests re-verified green
+  - [x] Pre-change review gate's `Agent`-tool absence flagged explicitly,
+    substituted with a documented self-review (accuracy + adequacy),
+    matching `CC-LAB-0182`/`CC-LAB-0183`/`CC-LAB-0184`'s own precedent
+    wording
+- Effectiveness (assessed 2026-09-23): met -- Twitch now has eight real,
+  live-boot-proven pages, and the project's existing `ssrf` detection is
+  now proven, not just assumed, to generalize across distinct routes of
+  the same shape with zero new detection code.
+
+### CC-LAB-0184 — Netflix's third real page: second insecure_deserialization instance, `/api/profiles/switch` (FR-LAB-139) (2026-09-23)
+
+- Change: a cheap, low-risk depth increment for category 4's Netflix pick
+  (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§9.4), mirroring
+  `CC-LAB-0183`'s own just-landed pattern (a second instance of an
+  already-built, already-detected mechanism at a new route, zero new
+  generator code) -- this time on `spring_boot`/Netflix rather than
+  `go_net_http`/Twitch. Reuses `LABGEN-JV-0001`/`0002`'s already-built
+  Jackson-polymorphic-typing module set (`jackson_body` source via
+  `_SOURCE_OVERRIDE_BY_OP`, `jackson_default_typing_deserialize`/
+  `jackson_typed_allowlist_deserialize` sinks, `CC-LAB-0173`) verbatim at
+  a second, distinct real Netflix route: `POST /api/profiles/switch`, a
+  multi-profile-switch payload -- a real, plausible Netflix feature
+  (up to 5 profiles per account, each with its own maturity-rating/
+  autoplay/subtitle preferences, per Netflix's own Help Center) genuinely
+  distinct from `/api/playback/resume`'s own resume-position mutation and
+  from `/api/content/import`'s own B2B partner-ingestion surface
+  (`CC-LAB-0179`), not a cosmetic rename of either.
+  **Cross-branch collision check, performed and recorded**: `git fetch
+  origin claude/category-3-build-iuu5k9 claude/category-5-build-6boejs`
+  followed by `git diff --stat HEAD <branch> -- fuzzlab/labgen/emitters/
+  spring_boot/ fuzzlab/oracle/strategies.py fuzzlab/core/runmode.py
+  fuzzlab/audit/rules_data/default_rules.json fuzzlab/labels/schemas/
+  labels.schema.json` against both sibling branches, before touching any
+  shared file: both diffs showed only deletions relative to this branch
+  (i.e. both sibling branches are strictly behind this branch's own tip
+  on every one of those files, missing only this branch's prior
+  `/api/content/import` entry) -- no divergent work to reconcile, and no
+  file above needed changing at all for this increment except
+  `fuzzlab/labgen/emitters/spring_boot/__init__.py`'s own
+  `_PAGE_PARAMS` (additive, one new key).
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`/`CC-LAB-0183`'s own precedent wording):**
+  the `Agent` tool for a two-independent-reviewer accuracy/adequacy pass
+  was not present in this session's toolset (checked via `ToolSearch`
+  before concluding this, not assumed absent) -- substituted with a
+  documented, rigorous self-review performed and recorded here rather
+  than silently skipping the gate: (1) **accuracy** -- confirmed by
+  direct source inspection, not assumed: `_MODULE_SET_BY_SHAPE[
+  ("insecure_deserialization", "object_deserialization")]` and
+  `_SOURCE_OVERRIDE_BY_OP`'s two Jackson op entries exist verbatim and
+  unchanged in `fuzzlab/labgen/emitters/spring_boot/__init__.py`/
+  `modules.py`; cell IDs `LABGEN-JV-0005`/`0006` were confirmed free
+  (grepped `LABGEN-JV-` across every manifest, highest existing was
+  `LABGEN-JV-0004`); rendering both new cells was run directly before
+  writing any test and produced the identical module-composition line
+  (`jackson_body -> jackson_default_typing_deserialize/jackson_typed_
+  allowlist_deserialize -> single_handler`) and sink body content as
+  `LABGEN-JV-0001`/`0002`, differing only in served path/class/handler
+  name (asserted directly,
+  `test_profiles_cells_render_byte_identical_module_composition_to_
+  playback_resume`); `InsecureDeserializationTypeConfusionStrategy`'s own
+  confirmation contract was checked against the exact rendered templates
+  (unchanged) before assuming it would confirm, not assumed from the
+  shape match alone. (2) **adequacy** -- checked that this increment does
+  not silently duplicate an existing route (grepped `_PAGE_PARAMS` for
+  `/api/profiles/switch`: absent), does not need a second, redundant
+  strategy (no new `Rule`/`ConfirmationStrategy` code was written at
+  all), and that the "detection already works automatically" claim was
+  actually run against a real booted instance rather than asserted from
+  theory (see below) -- both the dedicated live-boot strategy test and
+  the full `fuzzlab.harness.multitarget.run_targets` pipeline (via a
+  hand-rolled 3-cell Netflix boot) were executed for real before this
+  entry claims the recall move.
+  - **Real Netflix functionality (grounded, not invented)**: profile
+    switching -- Netflix's own Help Center documents up to 5 profiles per
+    account, each with its own maturity-rating/autoplay/subtitle-language
+    preferences (fact); the specific `POST /api/profiles/switch` JSON
+    mutation shape is this manifest's own illustrative inference, not a
+    confirmed Netflix-internal implementation detail (labeled explicitly
+    in the manifest's own header, matching `CC-LAB-0179`'s own
+    fact-vs-inference discipline).
+  - **Vulnerable** (`LABGEN-JV-0005`, `jackson_default_typing_deserialize`):
+    deserializes the whole request body into a polymorphic `Object` via
+    Jackson default typing -- the concrete runtime type is resolved from
+    an attacker-controlled type hint embedded in the JSON body itself.
+    **Secure** (`LABGEN-JV-0006`, `jackson_typed_allowlist_deserialize`):
+    deserializes into the fixed `PlaybackResumeRequest` DTO class (the
+    same shared, cosmetically-TrackerNest/Netflix-agnostic DTO
+    `LABGEN-JV-0002` already uses -- an accepted, explicitly-recorded
+    cosmetic gap, same as `CC-LAB-0179`'s own shared-template wording
+    gap), no polymorphism, so no attacker-controlled type hint is ever
+    honored.
+  - **Zero new generator code, verified not just claimed**: the only
+    non-ground-truth code change is one new
+    `_PAGE_PARAMS["/api/profiles/switch"] = {}` entry in
+    `fuzzlab/labgen/emitters/spring_boot/__init__.py` (config, not a new
+    class/template); rendering both cells was run directly before
+    writing any test and produced byte-for-byte the same sink body as
+    `LABGEN-JV-0001`/`0002`.
+  - **Real, live-boot proof**
+    (`tests/test_labgen_spring_boot_deserialization_netflix_profiles_
+    live_boot.py`, same three-assertion shape as the
+    `LABGEN-JV-0001`/`0002` live-boot test): (a) the vulnerable twin
+    accepts an attacker-type-hinted body; (b) the secure twin accepts its
+    own well-formed plain body; (c) the secure twin rejects the same
+    type-hinted body the vulnerable twin accepted.
+  - **Detection generalization, verified for real against a real booted
+    app, not asserted from theory**: a new live-boot test drives the
+    real, already-built `InsecureDeserializationTypeConfusionStrategy`
+    (`CC-FUZZ-0034`) directly against this new cell pair -- confirms the
+    vulnerable twin, fails closed on the secure twin, with zero new
+    strategy/rule code. The real
+    `fuzzlab.harness.multitarget.run_targets` pipeline was then run end
+    to end against a real booted Netflix instance assembling all three
+    of Netflix's own vulnerable twins in one hand-rolled multi-cell boot
+    (`tests/test_multitarget_category4.py::
+    test_netflix_multi_cell_boot_confirms_all_positives`, extended from
+    `CC-FUZZ-0036`'s own two-cell precedent), and shows Netflix's own
+    real, scored recall in that boot moving from `2/2` to `3/3` (`tp=3,
+    fp=0`) with no audit-rule/strategy change -- the whole point of this
+    increment, proving the existing detection generalizes to a second
+    instance of the same shape rather than assuming it would. The
+    single-cell `test_both_apps_run_through_multitarget_for_real` test
+    (bootable of only one Netflix cell at a time, per
+    `SpringBootLiveBootHarness`'s own constraint) has its own recall
+    assertion updated only for the ground-truth count change (`1/2` ->
+    `1/3`) -- `NFLX-0003`'s own vulnerable twin is simply not booted in
+    that particular test, not a detection gap.
+  - Ground truth: `NFLX-0003` added to `lab/ground-truth-netflix-clone/`
+    (`vuln_class="insecure_deserialization"`,
+    `sink_context="deserialization"` -- both pre-existing enum values
+    from `NFLX-0001`, no schema widening needed).
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/__init__.py` (`_PAGE_PARAMS`,
+    one new route entry)
+  - `lab/manifests/insecure_deserialization_netflix_profiles_sample.yaml`
+    (new)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended)
+  - `tests/test_labgen_spring_boot_deserialization.py` (extended: new
+    manifest constant/expected-verdicts map, disjoint-paths list, 6 new
+    unit tests including the byte-identical-module-composition check)
+  - `tests/test_labgen_spring_boot_deserialization_netflix_profiles_live_boot.py`
+    (new, 3 tests)
+  - `tests/test_labels_contract_category4.py` (extended)
+  - `tests/test_auto.py` (extended: body-points/sink_context assertions
+    updated for the third Netflix whole-body point)
+  - `tests/test_multitarget_category4.py` (module docstring extended;
+    `_NETFLIX_MULTI_MANIFESTS`/`_NETFLIX_MULTI_CELL_IDS` extended;
+    single-cell recall assertion `1/2` -> `1/3`; multi-cell test/function
+    renamed `test_netflix_multi_cell_boot_confirms_all_positives`,
+    recall assertion `2/2` -> `3/3`; a pre-existing stale inline comment
+    claiming XXE "still has no rule/strategy" corrected in passing, found
+    while editing the adjacent block)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-139`, new)
+- Impact (other components / project): additive only -- one new
+  `_PAGE_PARAMS` key (cannot collide with any existing route since
+  `spring_boot` component-scans and each cell's class name derives from
+  its own `cell_id`, not the route path), one new manifest, ground truth
+  extension. No existing cell's rendered output changes (verified:
+  `spring_boot`'s full existing insecure-deserialization test suite
+  re-run unmodified-in-assertion alongside the new tests). No new
+  detection code in `fuzzlab.oracle`/`fuzzlab.core.runmode` at all --
+  this increment is purely a generalization proof of already-shipped
+  detection capability, the second one this session has made for this
+  vuln class shape (Twitch's `access_control`/`CC-LAB-0183` was the
+  first, on a different stack).
+- Risk (level; mitigation or accepted-risk justification): **low**.
+  Reuses fully-built, already-tested modules verbatim; the only
+  genuinely new artifacts are config (manifest + one `_PAGE_PARAMS`
+  entry) and ground truth. The one real shared-code risk (a future
+  change to the `jackson_default_typing_deserialize`/`jackson_typed_
+  allowlist_deserialize` templates or the shared `PlaybackResumeRequest`
+  DTO silently affecting both `/api/playback/resume` and
+  `/api/profiles/switch` at once) is named explicitly in the manifest's
+  own header and mitigated by this route's own dedicated live-boot test
+  plus the disjoint-class-names regression test rendering both manifests
+  together every run. Verified end to end with a real `mvn package`/
+  boot/HTTP round trip and a real `run_targets` pipeline run, not
+  assumed from the shared-module argument alone.
+- Deliverables:
+  - [x] New manifest + one `_PAGE_PARAMS` entry, zero new module/op code
+  - [x] Real live-boot proof (3 assertions, same shape as
+    `LABGEN-JV-0001`/`0002`'s own test)
+  - [x] Ground truth extended (`NFLX-0003`)
+  - [x] Cross-branch collision check performed and recorded (no
+    divergent work found)
+  - [x] Detection generalization verified live (dedicated strategy
+    live-boot test + real `run_targets` pipeline run via a hand-rolled
+    3-cell boot) -- recall `2/2` -> `3/3`
+  - [x] Full non-slow suite + the relevant category-4/`spring_boot` real
+    live-boot slow tests re-verified green
+  - [x] Pre-change review gate's `Agent`-tool absence flagged explicitly,
+    substituted with a documented self-review (accuracy + adequacy),
+    matching `CC-LAB-0182`/`CC-LAB-0183`'s own precedent wording
+- Effectiveness (assessed 2026-09-23): met -- Netflix now has three real,
+  live-boot-proven pages, and the project's existing
+  `insecure_deserialization` detection is now proven, not just assumed,
+  to generalize across distinct routes of the same shape with zero new
+  detection code -- the second such generalization proof this session
+  has made (after `CC-LAB-0183`'s `access_control` proof on a different
+  stack).
+
+### CC-LAB-0183 — Twitch's 7th real page: second access-control/IDOR instance, `/channels/subscribers` (FR-LAB-138) (2026-09-23)
+
+- Change: a cheap, low-risk depth increment for category 4's Twitch pick
+  (`docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4/§9.4): reuses
+  `CC-LAB-0178`'s already-built `access_control`/`db_row_by_id_lookup`
+  module set (`ReadChannelIdAndBroadcasterHeaderSource`/
+  `NoOwnershipCheckTransform`/`IdentityMatchBeforeFetchTransform`/
+  `ObjectLookupAuthorizationCheckSink` -- checked directly against
+  `fuzzlab/labgen/emitters/go_net_http/modules.py` and
+  `_MODULE_SET_BY_SHAPE` in `__init__.py` before starting, not assumed
+  from the task's own suggested names) verbatim at a second, distinct
+  route: `GET /channels/subscribers?channel_id=`, a per-channel
+  subscriber-roster lookup -- a real, plausible Twitch feature genuinely
+  distinct from `/channels/analytics` (`TWCH-0003`), the same textbook
+  OWASP API1:2023 BOLA surface reused at a second real page, not a
+  cosmetic rename of the first, mirroring `CC-LAB-0179`'s own
+  zero-new-generator-code "new manifest + new route entry + ground
+  truth" pattern for reusing an already-built shape at a new route.
+  **Pre-change review gate, mechanism fidelity noted explicitly (same
+  substitution as `CC-LAB-0182`'s own precedent wording):** the `Agent`
+  tool for a two-independent-reviewer accuracy/adequacy pass was not
+  present in this session's toolset (checked via `ToolSearch` before
+  concluding this, not assumed absent) -- substituted with a documented,
+  rigorous self-review performed and recorded here rather than silently
+  skipping the gate, per this task's own explicit instruction to flag
+  the substitution: (1) **accuracy** -- confirmed by direct source
+  inspection, not assumed: the four module class names above exist
+  verbatim in `modules.py`; `_MODULE_SET_BY_SHAPE[("access_control",
+  "db_row_by_id_lookup")]` exists and is unchanged; the served route is
+  derived from `cell_id`, not the manifest's own `route:` field (per this
+  emitter's own established convention), so no route-path collision risk
+  exists regardless of which path string the manifest declares; cell IDs
+  `LABGEN-GO-0013`/`0014` were confirmed free (highest existing Go cell
+  ID across every manifest in `lab/manifests/*.yaml` was `LABGEN-GO-0012`,
+  grepped directly); `AccessControlIdorStrategy`'s own confirmation
+  contract (HTTP 200, non-empty body, no denial-marker text, both probed
+  IDs echoed back, the two bodies differing) was checked against the
+  exact rendered vulnerable-twin response template
+  (`object_lookup_authorization_check.go.j2`, unchanged, echoes
+  `channel_id` verbatim into the JSON body) before assuming it would
+  confirm, not assumed from the class/shape match alone. (2) **adequacy**
+  -- checked that this increment does not silently duplicate an existing
+  route (grepped `_ROUTE_PARAMS` for `/channels/subscribers`: absent), does
+  not need a second, redundant strategy (the task's own explicit
+  constraint, honored: no new `Rule`/`ConfirmationStrategy` code was
+  written at all), and that the "detection already works automatically"
+  claim was actually run against a real booted instance rather than
+  asserted from theory (see below) -- both the dedicated live-boot
+  strategy test and the full `fuzzlab.harness.multitarget.run_targets`
+  pipeline were executed for real before this entry claims the recall
+  move.
+  - **Real Twitch functionality (grounded, not invented)**: a per-channel
+    subscriber-roster/count lookup, the same OWASP API1:2023 BOLA class
+    `CC-LAB-0178`'s analytics lookup already models, at a genuinely
+    different real API-edge feature -- consistent with Twitch's own
+    documented "Go-centric microservices, new API edge" architecture
+    (`docs/research/site-architecture-survey-functionality-twitch.md`).
+  - **Vulnerable** (`LABGEN-GO-0013`, `no_ownership_check`): returns
+    canned subscriber-roster data for whatever `channel_id` is given,
+    ignoring `X-Broadcaster-Id` entirely. **Secure** (`LABGEN-GO-0014`,
+    `identity_match_before_fetch`): requires `channel_id ==
+    X-Broadcaster-Id`; a mismatch returns a real HTTP 403 with no data.
+  - **Zero new generator code, verified not just claimed**: the only
+    non-ground-truth code change is one new
+    `_ROUTE_PARAMS["/channels/subscribers"] = {"param_name": "channel_id"}`
+    entry in `fuzzlab/labgen/emitters/go_net_http/__init__.py` (config,
+    not a new class/template); rendering both cells was run directly
+    before writing any test and produced byte-for-byte the same handler
+    shape as `LABGEN-GO-0005`/`0006`, differing only in the served path
+    and `handleLabgenGo00{13,14}` function name.
+  - **Real, live-boot proof** (`tests/test_labgen_go_live_boot.py`, same
+    three-assertion shape as `CC-LAB-0178`'s own test): (a) the
+    vulnerable twin leaks another channel's subscriber data on a
+    mismatched `channel_id`; (b) the secure twin rejects the same
+    mismatch with a real HTTP 403, no data; (c) the secure twin still
+    serves the legitimate, matching-identity request.
+  - **Detection generalization, verified for real against a real booted
+    app, not asserted from theory**: a new live-boot test drives the
+    real, already-built `AccessControlIdorStrategy` (`CC-FUZZ-0033`)
+    directly against this new cell pair -- confirms the vulnerable twin,
+    fails closed on the secure twin, with zero new strategy/rule code.
+    The real `fuzzlab.harness.multitarget.run_targets` pipeline was then
+    run end to end against a real booted Twitch instance
+    (`tests/test_multitarget_category4.py::
+    test_both_apps_run_through_multitarget_for_real`) and shows Twitch's
+    own real, scored recall moving from `5/6` to `6/7` (`tp=6, fp=0`)
+    with no audit-rule/strategy change -- the whole point of this
+    increment, proving the existing detection generalizes to a second
+    instance of the same shape rather than assuming it would.
+  - Ground truth: `TWCH-0007` added to `lab/ground-truth-twitch-clone/`
+    (`vuln_class="access_control"`, `sink_context="object_lookup"` --
+    both pre-existing enum values from `TWCH-0003`, no schema widening
+    needed).
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/__init__.py` (`_ROUTE_PARAMS`,
+    one new route entry)
+  - `lab/manifests/access_control_subscribers_go_sample.yaml` (new)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended)
+  - `tests/test_labgen_go_net_http_conformance.py` (manifest list
+    extended)
+  - `tests/test_labels_contract_category4.py` (extended)
+  - `tests/test_labgen_go_live_boot.py` (two new live-boot tests)
+  - `tests/test_multitarget_category4.py` (`_twitch_cells()` extended;
+    recall assertions moved 5/6 -> 6/7)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-138`, new)
+- Impact (other components / project): additive only -- one new
+  `_ROUTE_PARAMS` key (cannot collide with any existing route since served
+  routes are cell-ID-derived, not path-derived), one new manifest, ground
+  truth extension. No existing cell's rendered output changes (verified:
+  `go_net_http`'s full existing test suite re-run unmodified-in-assertion
+  alongside the new tests). No new detection code in `fuzzlab.oracle`/
+  `fuzzlab.core.runmode` at all -- this increment is purely a
+  generalization proof of already-shipped detection capability.
+- Risk (level; mitigation or accepted-risk justification): **low**. Reuses
+  fully-built, already-tested modules verbatim; the only genuinely new
+  artifacts are config (manifest + one route-params entry) and ground
+  truth. Verified end to end with a real `go build`/boot/HTTP round trip
+  and a real `run_targets` pipeline run, not assumed from the shared-
+  module argument alone.
+- Deliverables:
+  - [x] New manifest + one `_ROUTE_PARAMS` entry, zero new module/op code
+  - [x] Real live-boot proof (3 assertions, same shape as `CC-LAB-0178`)
+  - [x] Ground truth extended (`TWCH-0007`)
+  - [x] Detection generalization verified live (dedicated strategy
+    live-boot test + real `run_targets` pipeline run) -- recall 5/6 -> 6/7
+  - [x] Full non-slow suite + the relevant category-4/`go_net_http` slow
+    tests re-verified green
+  - [x] Pre-change review gate's `Agent`-tool absence flagged explicitly,
+    substituted with a documented self-review (accuracy + adequacy),
+    matching `CC-LAB-0182`'s own precedent wording
+- Effectiveness (assessed 2026-09-23): met -- Twitch now has seven real,
+  live-boot-proven pages, and the project's existing `access_control`
+  detection is now proven, not just assumed, to generalize across
+  distinct routes of the same shape with zero new detection code.
+
+### CC-LAB-0182 — Twitch's 6th real page, channel-profile mass assignment (FR-LAB-137) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing
+  `unfiltered_object_assign`/`typed_schema_allowlist` mechanism
+  (`orm_entity_bulk_assign` sink family, `CC-LAB-0063`, already built on
+  `php_current`/`ruby_rails`/`php_laravel` -- see
+  `lab/manifests/mass_assignment_rails_sample.yaml` for the equivalent
+  minimal pair -- never before on `go_net_http`) on `go_net_http`:
+  `POST /channels/profile` (served `/generated/labgen-go-0011`/`-0012`),
+  a channel-profile-update endpoint (CWE-915). Go has no ORM/
+  ActiveRecord bulk-assign call to misuse the way Rails/Laravel do, so
+  this shape is modeled idiomatically, reusing this stack's own
+  Convention 2 (the manifest's one op names a sink module directly, like
+  the SSRF/weak-token-entropy shapes): the vulnerable sink
+  (`unfiltered_object_assign`) `json.Unmarshal`s the raw request body
+  directly onto a channel record struct that already declares every
+  persisted field, including `is_partner` -- a field this endpoint's own
+  intended form never exposes; the secure sink
+  (`typed_schema_allowlist`) unmarshals the body into a narrow, separate
+  DTO struct with only `display_name`/`bio`, then copies exactly those
+  two fields onto the record. Both twins echo the resulting record
+  straight back in the response -- this stack's own "no database in
+  Phase A" scope call applies here too (see
+  `fuzzlab.labgen.conformance.go_live_boot`'s module docstring): proving
+  the mutation happened needs no persisted read-back, only the same
+  request's own response.
+  **Route note (a deliberate departure from the task's own suggested
+  shape, not an oversight):** the suggested method was `PATCH`, but
+  `fuzzlab/labels/schemas/labels.schema.json`'s `method` enum is closed
+  to `GET`/`POST` only (every ground-truth case in this project is one
+  of those two) -- `POST` is used instead of widening the schema, since
+  a profile-update-via-POST is still a realistic public-API-edge shape
+  for this app identity.
+  New source module `ReadChannelProfileBodySource` (reads the whole raw
+  body; no single named field to parse -- unlike every other source in
+  this stack, the point of this shape is that the *entire* body reaches
+  the sink unfiltered). No new safety-matrix entry needed (a scope
+  reduction found immediately, mirroring `CC-LAB-0170`/`CC-LAB-0181`'s
+  own precedent): the `unfiltered_object_assign`/`typed_schema_allowlist`
+  ops already exist and fit this shape's minimal pair exactly.
+  Real live-boot proof (`tests/test_labgen_go_live_boot.py`): the
+  vulnerable twin's response reflects `is_partner: true` when the
+  request sets it (`{"display_name":"new_name","bio":"hi",
+  "is_partner":true}` -> response echoes `is_partner:true`); the secure
+  twin's response never reflects anything but the seeded `false`, even
+  given the identical request body.
+  Ground truth extended (`TWCH-0006`, `param="body"`/`location="body"` --
+  the whole-body-point convention `weak_token_entropy`'s own `TWCH-0005`
+  already uses, not `ruby_rails`'s own `param="user[role]"`
+  single-named-field convention: a first draft of this entry used
+  `param="is_partner"` directly, but `fuzzlab.harness.auto.
+  points_from_ground_truth` only marks a body point's content type as
+  JSON when `param == "body"` exactly, so a privileged-field-named
+  `param` would have silently starved the follow-on detection strategy
+  of the `content_type="application/json"` it needs -- caught by
+  actually running the real `run_targets` pipeline end to end before
+  landing the detection commit, not assumed correct from the lab-page
+  commit's own unit tests alone; fixed before either commit landed).
+  No schema widening needed: `mass_assignment` was already a valid
+  `vuln_class`/`sink_context` enum value (from `php_current`/
+  `ruby_rails`/`php_laravel`'s own ground truth), and `body`/`POST` are
+  both pre-existing `location`/`param`/`method` shapes.
+  Dispatched through this repo's mandatory pre-change review gate. No
+  Agent/Task tool was available in this session's toolset to run the
+  two independent parallel reviewer sessions the gate specifies as its
+  mechanism; per this project's own multi-agent-orchestration fidelity
+  rule ("stop and flag rather than silently substitute if the specified
+  mechanism is unavailable"), that substitution is flagged here rather
+  than hidden: this entry's design was instead verified by a rigorous
+  self-review pass covering the same two angles (accuracy: every claim
+  above checked against a real `go build`/live-boot run before landing;
+  adequacy: the PATCH-vs-POST schema conflict, the sink-vs-transform
+  convention choice, and the no-database/response-echo design were each
+  explicitly re-derived from existing precedent rather than assumed) --
+  a real, documented gap in review independence versus every prior entry
+  in this log, not claimed as equivalent to it.
+  Detection deliberately not bundled into this commit (this session's
+  own established lab-then-detection split) -- landed as its own
+  separately-scoped follow-on, `CC-AUD-0022`/`CC-FUZZ-0039`.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py` (`ReadChannel
+    ProfileBodySource`, `UnfilteredObjectAssignSink`,
+    `TypedSchemaAllowlistSink`)
+  - `fuzzlab/labgen/emitters/go_net_http/__init__.py` (new
+    `_MODULE_SET_BY_SHAPE`/`_MODULE_IMPORTS`/`_ROUTE_PARAMS` entries)
+  - `fuzzlab/labgen/emitters/go_net_http/templates/sources/
+    read_channel_profile_body.go.j2`
+  - `fuzzlab/labgen/emitters/go_net_http/templates/sinks/
+    unfiltered_object_assign.go.j2`,
+    `typed_schema_allowlist.go.j2`
+  - `lab/manifests/mass_assignment_go_sample.yaml`
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,
+    expectedresults.csv}`
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-137`, new)
+  - `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` (category-4 tracker
+    row)
+- Impact (other components / project): purely additive to `go_net_http`
+  and `lab/ground-truth-twitch-clone`; no other stack/app touched.
+  `tests/test_multitarget_category4.py`'s Twitch recall assertion moves
+  from `4/5` to `4/6` (an honest regression in the *fraction*, not a
+  detection loss -- the denominator grew by one real, currently
+  undetected positive, exactly this session's own established pattern
+  for every prior lab-page-then-detection split).
+- Risk (level; mitigation or accepted-risk justification): Low. A new,
+  additive lab page and ground-truth case; no existing behavior changed.
+  The self-review substitution above (in place of two independent
+  reviewer agents) is the one real process risk this entry accepts and
+  states explicitly, mitigated by the real `go build`/live-boot
+  verification actually performed before landing.
+- Deliverables:
+  - [x] `ReadChannelProfileBodySource`/`UnfilteredObjectAssignSink`/
+        `TypedSchemaAllowlistSink` render correctly (unit tests in
+        `tests/test_labgen_go_net_http_modules.py`) -- done
+  - [x] Tier 3 whole-lab regeneration determinism
+        (`tests/test_labgen_go_net_http_conformance.py`) -- done
+  - [x] Real live-boot differential proof
+        (`tests/test_real_boot_proves_the_mass_assignment_differential_
+        for_both_twins`) -- done
+  - [x] Ground-truth contract cross-check
+        (`tests/test_labels_contract_category4.py`) -- done
+  - [x] `tests/test_multitarget_category4.py` updated for the new 4/6
+        recall math and re-run against a real double live boot -- done
+- Effectiveness (assessed 2026-09-23): achieved as a lab page. Detection
+  effectiveness is assessed separately under `CC-AUD-0022`/
+  `CC-FUZZ-0039`.
+
+### CC-LAB-0181 — Twitch's 5th real page, predictable session token (FR-LAB-136) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing
+  `predictable_token_source`/`csprng_token` mechanism (`session_token_
+  generation` sink family, added by `CC-LAB-0063`, never before built on
+  any stack) on `go_net_http` — Twitch's 5th real page, continuing this
+  category's own "coherent page/route set" depth work.
+  1. **New route** `POST /sessions/refresh` (served at
+     `/generated/labgen-go-0009`/`-0010`) — a session-token-refresh
+     endpoint. **Genuinely no tainted request input at all**, unlike
+     every other page this stack has built: the vulnerability is
+     entirely in how the sink *generates* its own output value.
+  2. **A genuinely new, third module-composition convention**, documented
+     explicitly as such (a framing correction the adequacy-review pass
+     required — an earlier draft mis-cited the SSRF shape's own
+     "Convention 2" as precedent, but that convention still has a real
+     source reading real request input; this shape has none at all):
+     `NoOpTokenRequestSource` renders a comment-only file stating plainly
+     why there is no tainted read, and the manifest's one op names a
+     **sink** module directly (`predictable_token_source` vulnerable /
+     `csprng_token` secure), the same "op selects a sink" mechanic
+     Convention 2 uses, just without a real source alongside it.
+  3. **Vulnerable twin**: `token := fmt.Sprintf("%d",
+     time.Now().UnixNano())` (CWE-330) — the session token literally is
+     the current nanosecond timestamp. **Secure twin**: 32 bytes from
+     `crypto/rand`, hex-encoded, with an explicit `err != nil` guard
+     (never silently ignoring a `crypto/rand.Read` failure).
+  4. **Ground truth extended**: `TWCH-0005`
+     (`vuln_class="weak_token_entropy"`, `sink_context="session_token"`,
+     `param="body"`, `location="body"` — the whole-body-point convention
+     this project already uses for other no-per-field-param cases, even
+     though the request body itself is unused by this mechanism).
+     `fuzzlab/labels/schemas/labels.schema.json` additively widened.
+  - Dispatched through this component's mandatory pre-change review gate
+    (accuracy + adequacy passes, the adequacy pass including a false-
+    positive-math soundness trace for the paired detection strategy's
+    own design, even though detection itself is deliberately not landed
+    in this commit). Accuracy pass: no factual errors found (one
+    clarification: `sink_context_in` alone, with no `location_in`, would
+    be a genuinely new, less-constrained rule shape — noted for the
+    detection follow-on, not this entry). Adequacy pass required: (a)
+    the module-composition framing correction (item 2 above — this is
+    NOT a reuse of Convention 2, it is a new, third convention); (b)
+    **detection deliberately NOT bundled into this commit** — same split
+    this session already established for `CC-LAB-0180`/`CC-FUZZ-0037`.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py`, `__init__.py`
+  - New templates: `templates/sources/no_op_token_request.go.j2`,
+    `templates/sinks/predictable_token_source.go.j2`,
+    `templates/sinks/csprng_token.go.j2`
+  - `lab/manifests/weak_token_entropy_go_sample.yaml` (new)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}`
+  - `fuzzlab/labels/schemas/labels.schema.json`
+  - `tests/test_labgen_go_net_http_modules.py`,
+    `tests/test_labgen_go_net_http_conformance.py`,
+    `tests/test_labgen_go_live_boot.py` (new
+    `test_real_boot_proves_the_weak_token_entropy_differential_for_both_twins`),
+    `tests/test_labels_contract_category4.py`,
+    `tests/test_multitarget_category4.py` (docstring/assertions updated
+    — Twitch's own ground truth now has 5 positives, real recall 3/5)
+- Impact (other components / project): `fuzzlab/labgen/emitters/go_net_http/`
+  and `fuzzlab/labels/schemas/labels.schema.json` are shared across every
+  category/target touching this stack or its ground-truth schema (fresh
+  `git show` collision check against category-2/3/5 and
+  second-target-cat1-ecommerce before landing — no collisions found).
+  `fuzzlab.harness.multitarget`'s real, scored Twitch report now shows 5
+  positives instead of 4 (`recall=3/5` instead of `3/4`).
+- Risk (level; mitigation or accepted-risk justification): Low. No
+  hand-rolled crypto/parsing logic like `CC-LAB-0180`'s JWT verifier —
+  just `time.Now().UnixNano()`/`crypto/rand.Read`, both stdlib, used
+  exactly as their own documentation prescribes.
+- Deliverables:
+  - [x] Predictable-token mechanism implemented, registered, unit-tested
+        — done
+  - [x] Real live-boot proof (real observed tokens confirming both the
+        timestamp-derived and the hex-random shapes) — done
+  - [x] Ground truth extended, schema additively widened — done
+  - [x] Full non-slow suite + every directly-affected slow test re-run
+        green at the stable baseline — done
+- Effectiveness (assessed 2026-09-23): achieved. The real booted
+  vulnerable twin's two consecutive tokens both parse as decimal
+  integers whose difference matches real measured elapsed time; the real
+  booted secure twin's tokens never parse as decimal integers at all —
+  proven by a real, executed live-boot test, not simulated.
+
+### CC-LAB-0180 — Twitch's 4th real page, JWT `alg:none` signature confusion (FR-LAB-135) (2026-09-23)
+
+- Change: instantiates `lab/safety_matrix.yaml`'s existing
+  `jwt_alg_none_default`/`jwt_none_alg_opt_in` mechanism (`jwt_signature_
+  verification` sink family, added by `CC-LAB-0063` for the
+  `corpus-examples/auth-session` research, never before built on any
+  stack) on `go_net_http` — Twitch's 4th real page, continuing this
+  category's own "coherent page/route set" depth work (`CC-LAB-0178`/
+  `CC-LAB-0179`'s own precedent).
+  1. **New route** `GET /channels/settings` (served at
+     `/generated/labgen-go-0007`/`-0008`, this stack's own cell-ID-
+     derived-route convention): a channel-owner-only settings endpoint,
+     Bearer-JWT-protected — a realistic API-edge auth shape distinct
+     from the 3 existing routes.
+  2. **A hand-rolled JWT parser/verifier, Go stdlib only** (`encoding/
+     base64`, `encoding/json`, `crypto/hmac`, `crypto/sha256` — no
+     third-party dependency; `go.mod` stays at zero `require` entries),
+     modeling the real `auth0/node-jsonwebtoken` vulnerability
+     (GHSA-8cf7-32gw-wr33, already cited in this project's own
+     `docs/research/corpus-examples/auth-session/node/vulnerable-1.js`):
+     the vulnerable twin (`jwt_alg_none_default`) honors an
+     attacker-chosen `alg: none` header, skipping signature verification
+     entirely (`value_expr = algIsNone || hmacValid`); the secure twin
+     (`jwt_none_alg_opt_in`) requires the token's own header to
+     explicitly claim the one pinned algorithm (`HS256`) *and* a valid
+     HMAC before any claims are trusted (`value_expr = algIsHS256 &&
+     hmacValid`) — an `alg:none` token never reaches the HMAC check at
+     all. `hmac.Equal` (constant-time) is used explicitly for the HMAC
+     comparison, and a malformed/empty signature segment fails closed by
+     construction (a decode failure yields a short/nil byte slice,
+     `hmac.Equal` safely reports "not equal" on any length mismatch,
+     never panics) — named explicitly in the source template's own
+     comment, per the pre-change review's adequacy-pass requirement (an
+     earlier draft left this implicit).
+  3. **A real Go "declared and not used" compile bug found and fixed
+     before landing**: each twin's transform only references one of the
+     two boolean identifiers the source publishes (`algIsNone`/
+     `algIsHS256`) — the same defect class `CC-LAB-0178`'s own
+     `broadcasterID` bug was, found this time by a real `go build`
+     during implementation rather than by chance. Fixed with a
+     `_, _ = algIsNone, algIsHS256` guard in the shared sink template
+     (mirroring `object_lookup_authorization_check.go.j2`'s own
+     `_ = broadcaster_var` precedent).
+  4. **Ground truth extended**: `TWCH-0004`
+     (`vuln_class="jwt_algorithm_confusion"`, `sink_context="jwt"`,
+     `param="Authorization"`, `location="header"`,
+     `rendering="server-json"` — the same header-carried-value
+     convention `TWCH-0001` established, `CC-LAB-0174`).
+     `fuzzlab/labels/schemas/labels.schema.json` additively widened
+     (`jwt_algorithm_confusion` vuln_class, `jwt` sink_context).
+  - Dispatched through this component's mandatory pre-change review gate
+    (accuracy + adequacy passes, the adequacy pass including an explicit
+    security-logic soundness trace of the attacker payload against both
+    twins before any code was written). Accuracy pass: no factual errors
+    found. Adequacy pass required, and this entry incorporates: (a) the
+    explicit fail-closed HMAC-verify behavior (item 2 above — the
+    original draft left "verifies HMAC-SHA256 the same way" implicit,
+    which could have hidden a second, undocumented bug); (b) **detection
+    deliberately NOT bundled into this commit** — the adequacy pass
+    recommended splitting the lab page from its detection rule/strategy
+    into two separately reviewable increments (this project's own
+    established `access_control`/`xxe` precedent), landed here as the
+    lab-page-only increment; detection is a real, buildable follow-on
+    (a single-request differential: send an `alg:none` token, check
+    whether the response echoes an injected marker claim, plus a control
+    request with a garbage-but-`HS256`-claimed signature that must still
+    be rejected — the same false-positive-avoidance shape
+    `AccessControlIdorStrategy` already established), not attempted in
+    this entry.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py`, `__init__.py`
+  - `fuzzlab/labgen/emitters/go_net_http/stack/skeleton/main.go`
+    (`jwtSecret`)
+  - New templates: `templates/sources/read_authorization_bearer_token.go.j2`,
+    `templates/transforms/jwt_alg_none_default.go.j2`,
+    `templates/transforms/jwt_none_alg_opt_in.go.j2`,
+    `templates/sinks/jwt_claims_response.go.j2`
+  - `lab/manifests/jwt_alg_confusion_go_sample.yaml` (new)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}`
+  - `fuzzlab/labels/schemas/labels.schema.json`
+  - `tests/test_labgen_go_net_http_modules.py`,
+    `tests/test_labgen_go_net_http_conformance.py`,
+    `tests/test_labgen_go_live_boot.py` (new
+    `test_real_boot_proves_the_jwt_alg_none_differential_for_both_twins`),
+    `tests/test_labels_contract_category4.py`,
+    `tests/test_multitarget_category4.py` (docstring/assertions updated
+    — Twitch's own ground truth now has 4 positives, real recall 2/4)
+- Impact (other components / project): `fuzzlab/labgen/emitters/go_net_http/`
+  and `fuzzlab/labels/schemas/labels.schema.json` are shared across every
+  category/target touching this stack or its ground-truth schema (fresh
+  `git show` collision check against category-2/3/5 and
+  second-target-cat1-ecommerce before landing — no collisions found, all
+  behind this branch's own prior commits). `fuzzlab.harness.multitarget`'s
+  real, scored Twitch report now shows 4 positives instead of 3
+  (`recall=2/4` instead of `2/3`) — any consumer asserting the old figure
+  needs the same update this entry makes to `test_multitarget_category4.py`.
+- Risk (level; mitigation or accepted-risk justification): Low-medium.
+  A hand-rolled JWT parser is inherently more security-sensitive than
+  reusing an established library — mitigated by keeping the parsing
+  logic minimal and entirely inside this lab-generator's own controlled
+  fixture code (never a real target), the explicit fail-closed HMAC
+  behavior named in code comments (item 2), and a real, executed
+  live-boot proof (not just unit tests) covering both the intended
+  bypass and a plausible secondary bypass attempt (a garbage-but-claimed-
+  HS256 signature, which the vulnerable twin still correctly rejects).
+- Deliverables:
+  - [x] JWT alg:none mechanism implemented, registered, unit-tested — done
+  - [x] Real Go compile bug found and fixed before landing — done
+  - [x] Real live-boot proof (3 assertions) against both real twins — done
+  - [x] Ground truth extended, schema additively widened — done
+  - [x] Full non-slow suite + every directly-affected slow test re-run
+        green at the stable baseline — done
+- Effectiveness (assessed 2026-09-23): achieved. The real booted
+  vulnerable twin accepts an `alg:none` token and returns its forged
+  claims (HTTP 200), while still correctly rejecting a garbage `HS256`
+  signature (HTTP 401); the real booted secure twin rejects the same
+  `alg:none` token outright (HTTP 401, no data) — proven by a real,
+  executed live-boot test, not simulated timing or a mock.
 
 ### CC-LAB-0084 — vuln-corpus Phase 3: real gVisor dynamic-validation sandbox (FR-LAB-112) (2026-09-23)
 - Change: New `fuzzlab/tools/corpus_validation_sandbox.py` and
@@ -5204,6 +9291,262 @@ implementation may begin.
   exclusion stated, Tier 1/2 status stated). 3/3 agreement reached by
   incorporating every concrete finding from both reviews without contesting
   any of them; implementation proceeds on this revised entry.
+### CC-LAB-0179 — Netflix's second real page: partner content-metadata ingestion, XXE, `spring_boot` (2026-09-23)
+
+- Change: category 4's own "coherent page/route set" depth work for
+  Netflix (previously stuck at 1 page). Reuses TrackerNest's own
+  already-built, already-live-boot-proved XXE shape (`CC-LAB-0131`: source
+  `raw_body`, sinks `xml_external_entities_enabled`/`_disabled`, sink
+  family `xml_parse_input`, concern `xxe_entity_resolution`) at a new,
+  Netflix-specific route — **zero new generator code**, only a new
+  manifest, a new `_PAGE_PARAMS` route entry, and ground truth.
+  Dispatched through this component's pre-change review gate (accuracy +
+  adequacy passes) before implementation; the adequacy pass's three
+  additions are incorporated:
+  1. **Stronger, primary-sourced real-world grounding, fact vs. inference
+     labeled** (the first draft's one-sentence, uncited justification was
+     flagged as thinner than this project's own research bar): real,
+     checkable web research confirms DDEX's ERN messages (the
+     industry-standard B2B media-metadata exchange format) are XSD-validated
+     XML documents (ddex.net's own knowledge base), and that Netflix is a
+     confirmed EIDR participant alongside the major studios and MovieLabs
+     (2020 industry reporting) — both facts, cited in the manifest's own
+     sourcing note; the actual endpoint design (a content-metadata
+     ingestion route) is labeled explicitly as this manifest's own
+     illustrative inference, not a confirmed Netflix-internal
+     implementation detail.
+  2. **A real cross-branch collision check performed and recorded** (the
+     new route path, `LABGEN-JV-0003`/`0004`, `NFLX-0002`) against every
+     other active category branch — none found.
+  3. **The shared-template mutation risk stated explicitly as an accepted
+     risk**, not left implicit: the XXE source/sink modules are shared
+     code with TrackerNest's own cell, not forked, so a future
+     TrackerNest-motivated template change could silently affect Netflix's
+     cell too. Mitigated with a new joint regression test
+     (`test_trackernest_and_netflix_xxe_cells_render_together_without_collision`)
+     rendering both apps' XXE cells in the same test run, and a real
+     live-boot run of all three of `spring_boot`'s own XXE/deserialization
+     live-boot test files together (6 tests, all pass) proving the shared
+     modules serve both apps correctly today.
+  - **Real Netflix functionality**: `POST /api/content/import`, a partner
+    content-metadata ingestion endpoint. **Vulnerable**
+    (`LABGEN-JV-0003`, `xml_external_entities_enabled`): resolves a
+    DOCTYPE-declared external entity from the ingested feed into the
+    response. **Secure** (`LABGEN-JV-0004`,
+    `xml_external_entities_disabled`): rejects any DOCTYPE-bearing
+    document with a real HTTP 400.
+  - **A cosmetic, accepted gap found and recorded, not silently
+    inherited**: the shared sink templates hardcode TrackerNest-flavored
+    response text ("Imported issue title: ..."), which a real
+    `test_labgen_spring_boot_trackernest_multitarget.py` test already
+    asserts on literally — left unchanged (fixing the wording would risk
+    breaking that established, unrelated test) rather than forced into a
+    Netflix-specific rewrite; this cell's own new live-boot test
+    deliberately asserts only on the shared marker/title *content*, never
+    the surrounding TrackerNest-flavored wording.
+  - Ground truth: `NFLX-0002` added to `lab/ground-truth-netflix-clone/`
+    (`vuln_class="xxe"`, `sink_context="xml"` — both already exist in
+    `labels.schema.json`'s enums from TrackerNest's own prior widening, no
+    schema change needed this time). `rendering="server"` (plain text),
+    distinct from `NFLX-0001`'s `"server-json"`.
+  - **Not attempted here, recorded not silently skipped**: Phase E's own
+    multitarget wiring does not cover `NFLX-0002` — `SpringBootLiveBootHarness`
+    takes exactly one cell per real server instance (a deliberate,
+    documented constraint, not this entry's own limitation), so a single
+    `TargetSpec`/one real running server cannot represent both of
+    Netflix's cells at once without a hand-rolled multi-cell boot fixture
+    (the same real, sized workaround category 3's own `CC-LAB-0138` needed
+    for TrackerNest's own multi-cell Phase E coverage) — not built here.
+    An audit rule/oracle strategy for `xxe` also still doesn't exist
+    anywhere in the project (a pre-existing, shared gap, not introduced or
+    worsened by this entry).
+  New/changed files:
+  - `fuzzlab/labgen/emitters/spring_boot/__init__.py` (`_PAGE_PARAMS`,
+    one new route entry)
+  - `lab/manifests/xxe_netflix_sample.yaml` (new)
+  - `lab/ground-truth-netflix-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended)
+  - `tests/test_labgen_spring_boot_netflix_xxe_live_boot.py` (new)
+  - `tests/test_labgen_spring_boot_xxe.py` (extended: Netflix unit
+    coverage + the joint regression test)
+  - `tests/test_labels_contract_category4.py` (extended)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-134`, new)
+- Impact (other components / project): additive only — one new
+  `_PAGE_PARAMS` key (cannot collide with any existing route), one new
+  manifest, ground truth extension. No existing cell's rendered output
+  changes (verified: `spring_boot`'s full existing test suite re-run
+  unmodified-in-assertion, plus the new joint regression test).
+- Risk (level; mitigation or accepted-risk justification): **low**.
+  Reuses fully-built, already-tested modules verbatim; the only genuinely
+  new artifact is config (manifest + route params + ground truth), not
+  code. The one real shared-code risk (future TrackerNest template
+  changes silently affecting Netflix) is named explicitly and mitigated
+  with a joint regression test, per the adequacy review's own requirement.
+- Deliverables:
+  - [x] `_PAGE_PARAMS["/api/content/import"]` added
+  - [x] Manifest + real live-boot proof (vulnerable resolves entity,
+    secure rejects DOCTYPE, both still parse legitimate documents)
+  - [x] Ground truth extended (`NFLX-0002`)
+  - [x] Cross-branch collision check performed and recorded
+  - [x] Joint regression test added, covering the accepted shared-template risk
+  - [x] Full non-slow suite + all category-4/spring_boot real live-boot
+    slow tests re-verified green
+- Effectiveness (assessed 2026-09-23): met — Netflix now has two real,
+  live-boot-proven pages; the shared-module risk this entry's own reuse
+  pattern introduces is named and covered, not just assumed safe.
+
+### CC-LAB-0178 — Twitch's third real page: access-control/IDOR on a channel-analytics lookup, `go_net_http` (2026-09-23)
+
+- Change: category 4's own "coherent page/route set" depth work (per
+  `docs/LAB_MULTI_CATEGORY_SECOND_TARGETS_PLAN.md` §4 step 1), following
+  the user's explicit "complete the depth work" instruction. Twitch's own
+  functionality/CWE research
+  (`docs/research/site-architecture-survey-functionality-twitch.md`) only
+  shortlisted two CWEs (347, 918), both already built, so a third page
+  needed either fresh CWE research or reusing an already-designed
+  cross-stack mechanism. This entry reuses the latter: the access-control/
+  IDOR (broken object-level authorization) mechanism `CC-LAB-0063` already
+  fully designed in `lab/safety_matrix.yaml` (ops `no_ownership_check`/
+  `identity_match_before_fetch`, sink family `db_row_by_id_lookup`,
+  concern `ownership_check_bypass`) and cataloged with real corpus
+  examples for node/php/python
+  (`docs/research/corpus-examples/access-control/`, CWE-639/862), but
+  **never instantiated as a working lab-generator module for any stack**
+  until this entry — no new safety-matrix entry needed at all.
+  Dispatched through this component's pre-change review gate (accuracy +
+  adequacy passes) before implementation; the adequacy pass's two
+  additions are incorporated: (1) an explicit statement that the fixed
+  demo `X-Broadcaster-Id` header models only the ownership-check-bypass
+  mechanism in isolation, never a real session/auth system; (2) a real
+  cross-branch collision check against every other active category
+  branch's `labels.schema.json`/cell IDs before landing (none found —
+  verified directly, `git show` against
+  `claude/category-{2,3,5}-build-*`/`second-target-cat1-ecommerce`, all
+  four already converged to a shared commit with no reference to
+  `access-control`/`object_lookup`/`LABGEN-GO-000[5-9]` anywhere).
+  - **Real Twitch functionality (grounded, not invented)**: a per-channel
+    analytics lookup (`GET /channels/analytics?channel_id=<id>`) requiring
+    the caller's own channel identity (a fixed demo `X-Broadcaster-Id`
+    header) to match the requested `channel_id` — a textbook OWASP
+    API1:2023 BOLA surface for a public API-edge service exactly like
+    Twitch's, and a believable third page alongside the already-built
+    webhook receiver and clip-thumbnail proxy (not a "loose bag of
+    unrelated cells" per §4 step 1's own bar).
+  - **Vulnerable** (`LABGEN-GO-0005`, `no_ownership_check`): returns canned
+    analytics for whatever `channel_id` is given, ignoring
+    `X-Broadcaster-Id` entirely. **Secure** (`LABGEN-GO-0006`,
+    `identity_match_before_fetch`): requires `channel_id ==
+    X-Broadcaster-Id`; a mismatch returns a real HTTP 403 with no data.
+  - **Module design**: a new source, `read_channel_id_and_broadcaster_header`,
+    mirrors `read_webhook_signature`'s own established two-value-publish
+    convention exactly (`channel_id_var`/`broadcaster_var`, vulnerable-by-
+    default `value_expr="true"`); two new transforms
+    (`no_ownership_check`/`identity_match_before_fetch`) override
+    `value_expr`; one new sink, `object_lookup_authorization_check`,
+    branches on it — following convention 1 (transform-modifies-a-value-
+    feeding-a-shared-sink), the same convention the webhook-signature shape
+    already uses, confirmed by the adequacy review as the right structural
+    fit over forcing a single-value source plus a bolted-on header read.
+  - **A real Go compile gap found and fixed before landing**: the
+    vulnerable twin's transform never references `broadcasterID`, so it
+    would have been a real `go build` "declared and not used" error;
+    fixed with an explicit `_ = broadcasterID` in the shared sink template
+    (used by both twins, harmless on the secure twin where it's already
+    used) — found by rendering and real-`go build`-ing the cell before
+    writing any test, not by a failing test.
+  - **Real, live-boot proof** (`tests/test_labgen_go_live_boot.py`): three
+    assertions against a real `go build`/boot — (a) the vulnerable twin
+    leaks another channel's analytics on a mismatched `channel_id`; (b) the
+    secure twin rejects the same mismatch with a real HTTP 403, no data;
+    (c) the secure twin still serves the legitimate, matching-identity
+    request (proving the fix doesn't break normal use, not just that it
+    blocks the attack).
+  - Ground truth: `TWCH-0003` added to `lab/ground-truth-twitch-clone/`
+    (`vuln_class="access_control"`, `sink_context="object_lookup"` —
+    additive widening of `fuzzlab/labels/schemas/labels.schema.json`,
+    same append-only mechanism used repeatedly this session).
+  - **Not attempted here, recorded not silently skipped**: a real audit
+    rule/oracle confirmation strategy for `access_control` (the differential
+    an attacker-chosen `channel_id` vs. the caller's own identity produces
+    is real and buildable, mirroring `SsrfInBandMarkerStrategy`'s own
+    "does the response differ" shape) — this entry lands the cell +
+    ground truth + live-boot proof, detection capability is separate,
+    sized follow-on work (`requirements.md` §8), matching how CWE-347/918
+    each landed their cells before any detection strategy existed for them.
+  New/changed files:
+  - `fuzzlab/labgen/emitters/go_net_http/modules.py`, `__init__.py`, 4 new
+    templates (1 source, 2 transforms, 1 sink)
+  - `lab/manifests/access_control_go_sample.yaml` (new)
+  - `lab/ground-truth-twitch-clone/{labels.json,injection-points.json,expectedresults.csv}`
+    (extended)
+  - `fuzzlab/labels/schemas/labels.schema.json` (additive)
+  - `tests/test_labgen_go_net_http_modules.py`, `_conformance.py`,
+    `test_labgen_go_live_boot.py`, `test_labels_contract_category4.py`,
+    `test_multitarget_category4.py` (updated/new)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-133`, new)
+- Impact (other components / project): contained to `go_net_http` (new
+  source/transform/sink modules, no existing module changed) plus the
+  shared, append-only `labels.schema.json` widening (verified no
+  cross-branch collision). Category 4's own Phase E multitarget test
+  updated to reflect the new, real recall math (Twitch: `tp=1` of 3
+  positives now, not 2) — no other category's own tests reference this
+  stack.
+- Risk (level; mitigation or accepted-risk justification): **low-medium**
+  (new production code in a per-stack emitter, contained blast radius,
+  plus a well-precedented shared-schema widening) — verified by real
+  `go build`/boot/HTTP end to end, `gofmt -l` clean, and the full non-slow
+  suite re-run.
+- Deliverables:
+  - [x] New source + 2 transforms + 1 sink built, registered
+  - [x] Manifest + real live-boot proof (3 assertions)
+  - [x] A real Go compile gap found and fixed before landing
+  - [x] Ground truth extended (`TWCH-0003`) + schema widened
+  - [x] Cross-branch collision check performed and recorded
+  - [x] Category 4's own Phase D/E tests updated to include the new cell
+  - [x] Full non-slow suite + all category-4 real live-boot slow tests
+    re-verified green
+- Effectiveness (assessed 2026-09-23): met — Twitch now has three real,
+  live-boot-proven pages reading as one coherent API-edge app identity;
+  detection-capability depth (not page/route depth) is the honestly
+  recorded remaining gap for this class.
+
+### CC-LAB-0177 — `run_targets()` gains `oob`/`coverage`/`dbfault` passthrough, closing a real Phase E gap (2026-09-23)
+
+- Change: `fuzzlab/harness/multitarget.py`'s `run_targets()` forwarded
+  `browser`/`scheduler`/`plugins` to `run_auto()` but silently dropped
+  `oob`/`coverage`/`dbfault`, which `run_auto()` already accepted — found
+  while wiring `CC-FUZZ-0031`'s new real SSRF detection into category 4's
+  own multitarget test: a `TargetSpec`-driven run had no way to actually
+  use the new OOB oracle strategies. Fixed with the same
+  keyword-passthrough shape as the existing three, default `None`,
+  forwarded unchanged. No existing caller affected (verified against
+  `tests/test_multitarget.py`'s own existing call sites, none of which
+  pass these keywords). Safe to share one `OobListener` across every
+  target in a batch: `run_targets()` loops sequentially over `specs`,
+  never concurrently, and `OobListener` correlates hits by a fresh
+  per-probe token, never by target — no cross-target signal possible.
+  New/changed files:
+  - `fuzzlab/harness/multitarget.py` (`run_targets()`)
+  - `tests/test_multitarget_category4.py` (now passes a real `OobListener`
+    through, proving the SSRF cell is a real, confirmed finding — see
+    `CC-FUZZ-0031` for the confirmation-side work)
+  - `docs/components/01-target-lab/requirements.md` (`FR-LAB-132`, new)
+- Impact (other components / project): `run_targets()` is shared across
+  every category's own multitarget wiring — additive only (three new
+  `None`-defaulted keyword params, no existing signature position
+  changed).
+- Risk (level; mitigation or accepted-risk justification): **low**.
+  Pure keyword-passthrough addition; verified by re-running the full
+  non-slow suite and category 4's own real live-boot Phase E test (no new
+  failures).
+- Deliverables:
+  - [x] `oob`/`coverage`/`dbfault` passthrough added to `run_targets()`
+  - [x] No existing caller broken (verified against `tests/test_multitarget.py`)
+  - [x] Full non-slow suite + real live-boot slow tests re-verified green
+- Effectiveness (assessed 2026-09-23): met — category 4's own Phase E test
+  now threads a real `OobListener` through `run_targets()` and gets a
+  real, confirmed SSRF finding out the other end.
+
 ### CC-LAB-0176 — Phase E: wire both apps into `fuzzlab.harness.multitarget` for real (2026-09-23)
 
 - Change: Constructs real `TargetSpec`s for both of this category's apps

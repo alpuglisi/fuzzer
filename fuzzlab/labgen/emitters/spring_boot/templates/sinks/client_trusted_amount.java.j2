@@ -1,0 +1,7 @@
+        // client_trusted_amount: the client-supplied {{ client_price_field }}
+        // is trusted verbatim and recorded/reflected as the new plan's
+        // monthly charge -- CWE-807, price_integrity_bypass. Never
+        // recomputed server-side, unlike server_recomputed_amount below.
+        return org.springframework.http.ResponseEntity.ok()
+            .header("Content-Type", "application/json")
+            .body("{\"plan_tier\":\"" + {{ plan_tier_var }} + "\",\"monthly_charge\":" + {{ client_price_var }} + "}");
