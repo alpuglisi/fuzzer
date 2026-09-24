@@ -124,13 +124,22 @@ each in an isolated worktree. Lane 7 integrates.
 
 | Lane | Scope | CC-LAB | FR-LAB | CC-FUZZ / FR-FUZZ (if needed) | BUG / PA (if a defect is found) |
 |---|---|---|---|---|---|
-| 1 | php_laravel pilot: PFF conversion + split CircleFeed, Huddle Hub, Booking into separate apps | 0237 | 155–156 | 0047 / 31 | 0051 / 0053 |
-| 2 | django: PicTrail | 0238 | 157–158 | 0048 / 32 | 0052 / 0054 |
-| 3 | go_net_http: Twitch clone | 0239 | 159–160 | 0049 / 33 | 0053 / 0055 |
-| 4 | spring_boot: TrackerNest, Netflix, Expedia | 0240 | 161–162 | 0050 / 34 | 0054 / 0056 |
-| 5 | ruby_rails: ForgeCart | 0241 | 163–164 | 0051 / 35 | 0055 / 0057 |
-| 6 | node_express (MeadowMart) + python_fastapi sample | 0242 | 165–166 | 0052 / 36 | 0056 / 0058 |
-| 7 | Integration: compose services + ports + `labctl` profile, runbook, cross-app navigability run, ARCHITECTURE/requirements | 0243 | 167–168 | — | 0057 / 0059 |
+| 1 | php_laravel pilot: PFF conversion + split CircleFeed, Huddle Hub, Booking into separate apps (3 steps, one CC-LAB each: 0237 presentation-only PFF homepage/nav/forms — done; 0238 `--app` split for CircleFeed/Huddle Hub/Booking — done; 0239 reserved for the remaining JSON→HTML conversion step) | 0237–0239 | 155–156 | 0047 / 31 | 0051 / 0053 |
+| 2 | django: PicTrail | 0240 | 157–158 | 0048 / 32 | 0052 / 0054 |
+| 3 | go_net_http: Twitch clone | 0241 | 159–160 | 0049 / 33 | 0053 / 0055 |
+| 4 | spring_boot: TrackerNest, Netflix, Expedia | 0242 | 161–162 | 0050 / 34 | 0054 / 0056 |
+| 5 | ruby_rails: ForgeCart | 0243 | 163–164 | 0051 / 35 | 0055 / 0057 |
+| 6 | node_express (MeadowMart) + python_fastapi sample | 0244 | 165–166 | 0052 / 36 | 0056 / 0058 |
+| 7 | Integration: compose services + ports + `labctl` profile, runbook, cross-app navigability run, ARCHITECTURE/requirements | 0245 | 167–168 | — | 0057 / 0059 |
+
+Lane 1 turned out to need 3 sequential CC-LAB entries instead of the 1
+originally reserved (each of its 3 narrowed steps is its own change,
+verified and committed separately) -- Lanes 2-7's CC-LAB numbers are bumped
+by +2 from the original reservation to keep every number unique. Their
+FR-LAB/CC-FUZZ/FR-FUZZ/BUG/PA numbers are unchanged (not yet consumed by
+anything). Re-derive this table's "next free" numbers from the component
+logs' actual current top before dispatching a lane if more of Lane 1's own
+work lands first.
 
 Use these numbers exactly. If one is already taken, stop and flag it; do not
 pick a different number.

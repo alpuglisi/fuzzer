@@ -3,6 +3,54 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0238 — Browsable labs Lane 1 step 2: `--app` split gives CircleFeed, Huddle Hub, and Booking their own standalone apps (2026-09-24, FR-LAB-156, `docs/LAB_BROWSABLE_APPS_PLAN.md`)
+- Change: `fuzzlab.labgen.assemble.collect_cells` gained an optional
+  `cell_id_prefix` filter; `assemble_lab` gained `app: str | None`, which
+  (a) filters cells to just one app's own (`LABGEN-CF-`/`LABGEN-HHB-`/
+  `LABGEN-BC-` for `"circlefeed"`/`"huddlehub"`/`"booking"`) and (b)
+  overwrites `resources/views/layouts/site.blade.php`,
+  `resources/views/site/home.blade.php`, and `routes/site.php` with that
+  app's own branding (new module
+  `fuzzlab.labgen.emitters.php_laravel.app_site`, `APP_REGISTRY` +
+  `site_layer_files`) instead of Puppy Fort Factory's step-1 site layer. A
+  split app's `routes/site.php` registers only `GET /` and `GET /catalog`
+  (no login/register/contact/newsletter/edit-profile routes — those are
+  PFF's own real-page cells, absent from these apps' manifests, so a form
+  page for them would be a dead end). `assemble.py`'s CLI gained a matching
+  `--app` argument (`choices=sorted(APP_REGISTRY)`, default `None`). `app=None`
+  (the default, and every existing caller: `web.Dockerfile`, `deploy.sh`,
+  every test) is untouched -- same cells, same site layer, byte-for-byte.
+- Why: `docs/LAB_BROWSABLE_APPS_PLAN.md` decision 3 ("CircleFeed, Huddle Hub
+  and Booking become separate apps"), step 2 of Lane 1's narrowed 3-step
+  breakdown. Deliberately scoped to just standing the apps up as their own
+  browsable builds: renaming their cells off `/cell/labgen-<slug>-NNNN` onto
+  realistic per-page URLs, and removing them from the default merged PFF
+  build, are called out in `app_site.py`'s own module docstring as
+  follow-ups needing their own reviewed ground-truth/regression-gate
+  baseline update, not bundled in here.
+- Verification: `php -l` clean on all 3 apps' generated `routes/site.php`
+  and every rendered controller (`app/**/*.php`, spot-checked directly, no
+  errors). New `tests/test_labgen_assemble_app_split.py` (7 tests, all
+  passing): default build still contains every app's cells and PFF's own
+  site layer; each of the 3 `--app` values keeps only that app's own cells
+  and no other split app's; a real `assemble_lab(..., app="circlefeed")`
+  call was inspected on disk (`home.blade.php`/`site.blade.php` contain
+  "CircleFeed", `routes/site.php` has no `loginForm`, `routes/web.php` has
+  `LABGEN-CF-` cells and none of `LABGEN-HHB-`/`LABGEN-BC-`); an unknown
+  `app` value raises `ValueError` rather than silently building the default
+  set. `assemble_lab` was also run for real for all 3 apps
+  (`/tmp/cf-app`/`/tmp/hhb-app`/`/tmp/bc-app`, 8/6/6 cells respectively,
+  matching each app's known manifest count) and every generated PHP file
+  linted clean; a full `composer install`/`artisan serve` boot (as done for
+  step 1) was not repeated here since the routing mechanism it would
+  exercise (`require __DIR__.'/site.php'` from `routes/web.php`'s header)
+  is unchanged from step 1, already proven live there, and disk space in
+  this sandbox was tight after step 1's boot -- flagged here rather than
+  silently skipped.
+- Scope: `fuzzlab/labgen/assemble.py`,
+  `fuzzlab/labgen/emitters/php_laravel/app_site.py` (new),
+  `tests/test_labgen_assemble_app_split.py` (new).
+
 ### CC-LAB-0237 — Browsable labs Lane 1 step 1: Puppy Fort Factory homepage, shared nav, and GET form pages (2026-09-24, FR-LAB-155, `docs/LAB_BROWSABLE_APPS_PLAN.md`)
 - Change: added a hand-authored presentational layer to the `php_laravel`
   skeleton, entirely additive and never touching a generated cell controller:

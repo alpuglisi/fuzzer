@@ -5626,6 +5626,23 @@ lane) can submit a payload as
   split CircleFeed/Huddle Hub/Booking into their own apps, and converting
   the JSON-responding browser endpoints to real HTML with ground-truth
   updates) is not yet done.
+- **FR-LAB-156** *(`--app` split: CircleFeed, Huddle Hub, and Booking become
+  standalone, independently browsable apps; `php_laravel`; `CC-LAB-0238`,
+  2026-09-24).* `fuzzlab.labgen.assemble.assemble_lab` takes an `app`
+  parameter (`assemble.py`'s CLI: `--app {circlefeed,huddlehub,booking}`)
+  that builds one of these three apps standalone: only its own cells
+  (matched by `cell_id` prefix), with its own branded homepage/layout
+  (`fuzzlab.labgen.emitters.php_laravel.app_site`) in place of Puppy Fort
+  Factory's `FR-LAB-155` site layer, and a `routes/site.php` registering
+  only `GET /`/`GET /catalog` (no PFF-specific form routes, since this
+  app's manifest carries none of those cells). `app=None` (every existing
+  caller) is unchanged. Second step of Lane 1
+  (`docs/LAB_BROWSABLE_APPS_PLAN.md`); explicitly deferred, not done here:
+  giving these apps' cells realistic (non-`/cell/...`) URLs, and removing
+  them from the default merged PFF build -- both are relocations that need
+  their own reviewed ground-truth/regression-gate baseline update. Lane 1's
+  remaining scope (that URL/ground-truth work, i.e. converting the
+  JSON-responding browser endpoints to real HTML) is not yet done.
 
 ## 4. Non-functional requirements
 - **NFR-LAB-reproducible** Byte-identical regeneration; pinned env asserted at

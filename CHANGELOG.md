@@ -4,6 +4,25 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-24 (Lane 1 step 2 — `--app` split: CircleFeed/Huddle Hub/Booking become standalone apps, CC-LAB-0238/FR-LAB-156)
+- Added `fuzzlab.labgen.assemble.assemble_lab`'s `--app {circlefeed,huddlehub,booking}`
+  flag: filters `collect_cells` to just that app's own cells (by `cell_id`
+  prefix — `LABGEN-CF-`/`LABGEN-HHB-`/`LABGEN-BC-`) and overwrites the site
+  layer with that app's own branded homepage/layout (new
+  `fuzzlab.labgen.emitters.php_laravel.app_site` module), instead of Puppy
+  Fort Factory's. Each of the 3 apps is now an independently buildable,
+  bootable, browsable Laravel app. The default (no `--app`) build is
+  unchanged byte-for-byte — still every cell merged into one app with PFF's
+  own site layer — so `web.Dockerfile`/`deploy.sh` are unaffected; the plan
+  doc records that removing these apps' cells from the default merged build,
+  and giving them realistic (non-`/cell/...`) URLs, are explicitly deferred
+  follow-ups, not silently bundled in here (a moved ground-truth URL needs
+  its own reviewed baseline update, not one folded into a browsability
+  pass). Second of Lane 1's 3 narrowed steps; also bumped Lanes 2-7's
+  pre-assigned `CC-LAB` numbers by +2 in `docs/LAB_BROWSABLE_APPS_PLAN.md`
+  since Lane 1 needed 3 change-control entries instead of the 1 originally
+  reserved.
+
 ## 2026-09-24 (Lane 1 step 1 — Puppy Fort Factory homepage, nav, and GET form pages, CC-LAB-0237/FR-LAB-155)
 - Added a hand-authored, purely presentational site layer to the `php_laravel`
   skeleton so PFF is navigable in a browser: a shared Blade layout with a

@@ -32,6 +32,7 @@ from pathlib import Path
 
 from fuzzlab.labgen.emitter import Emitter
 from fuzzlab.labgen.emitters.php_laravel import LaravelEmitter
+from fuzzlab.labgen.emitters.php_laravel.app_site import APP_REGISTRY, site_layer_files
 from fuzzlab.labgen.schema import Cell, load_manifest
 
 __all__ = ["DEFAULT_MANIFESTS_GLOB", "SKELETON_DIR", "collect_cells", "assemble_lab", "main"]
@@ -64,10 +65,16 @@ def collect_cells(
     manifest_paths: list[str] | None = None,
     *,
     emitter: Emitter | None = None,
+    cell_id_prefix: str | None = None,
 ) -> list[Cell]:
     """Every ``php_laravel``-supported cell across every manifest,
     deduplicated by ``cell_id`` (first occurrence wins), in manifest-then-
     cell order -- the deterministic input :func:`assemble_lab` renders from.
+
+    ``cell_id_prefix``, when given, additionally keeps only cells whose
+    ``cell_id`` starts with it (e.g. ``"LABGEN-CF-"`` for CircleFeed) -- how
+    ``assemble_lab``'s ``app=`` selects one split-out app's own cells. `None`
+    (the default) keeps every cell, exactly the pre-existing behavior.
     """
     emitter = emitter if emitter is not None else LaravelEmitter()
     if manifest_paths is None:
@@ -80,6 +87,8 @@ def collect_cells(
                 continue
             if not emitter.supports(cell.vuln_class, cell.sink_context):
                 continue
+            if cell_id_prefix is not None and not cell.cell_id.startswith(cell_id_prefix):
+                continue
             seen.setdefault(cell.cell_id, cell)
     return list(seen.values())
 
@@ -89,6 +98,7 @@ def assemble_lab(
     *,
     manifest_paths: list[str] | None = None,
     emitter: Emitter | None = None,
+    app: str | None = None,
 ) -> list[Cell]:
     """Write the full generated lab app to ``out_dir``: the skeleton, every
     supported cell's rendered files, the accumulated ``routes/web.php``, and
@@ -101,13 +111,27 @@ def assemble_lab(
     directory (the normal Docker-build case) or, deliberately, on top of an
     existing checkout for local iteration; a caller wanting a clean rebuild
     removes ``out_dir`` itself first.
+
+    ``app``, when given, must be a key of
+    :data:`fuzzlab.labgen.emitters.php_laravel.app_site.APP_REGISTRY`
+    (``"circlefeed"``, ``"huddlehub"``, ``"booking"``). It builds a
+    standalone app containing only that app's own cells (matched by
+    ``cell_id`` prefix) with its own branded homepage/layout, instead of the
+    default merged build's every cell and Puppy Fort Factory's own site
+    layer. ``None`` (the default) is byte-for-byte the pre-existing
+    behavior -- every ``--out``-only build (``web.Dockerfile``,
+    ``deploy.sh``) is unaffected.
     """
+    if app is not None and app not in APP_REGISTRY:
+        raise ValueError(f"unknown app {app!r} -- known apps: {sorted(APP_REGISTRY)}")
+
     emitter = emitter if emitter is not None else LaravelEmitter()
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     shutil.copytree(SKELETON_DIR, out_dir, dirs_exist_ok=True)
 
-    cells = collect_cells(manifest_paths, emitter=emitter)
+    cell_id_prefix = APP_REGISTRY[app]["prefix"] if app is not None else None
+    cells = collect_cells(manifest_paths, emitter=emitter, cell_id_prefix=cell_id_prefix)
     fragments: dict[str, str] = {}
     for cell in cells:
         for emitted in emitter.render(cell):
@@ -131,6 +155,12 @@ def assemble_lab(
         waf_dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(WAF_RULES_SRC, waf_dest)
 
+    if app is not None:
+        for rel_path, content in site_layer_files(app).items():
+            dest = out_dir / rel_path
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(content)
+
     return cells
 
 
@@ -140,12 +170,22 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         description="Assemble the full generated php_laravel lab into --out.",
     )
     parser.add_argument("--out", required=True, help="destination directory (e.g. /var/www/html)")
+    parser.add_argument(
+        "--app",
+        choices=sorted(APP_REGISTRY),
+        default=None,
+        help=(
+            "build a standalone split-out app (only its own cells, its own "
+            "branded homepage) instead of the default merged build with "
+            "every cell and Puppy Fort Factory's own site layer"
+        ),
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_arg_parser().parse_args(argv)
-    cells = assemble_lab(Path(args.out))
+    cells = assemble_lab(Path(args.out), app=args.app)
     print(f"assembled {len(cells)} php_laravel cell(s) into {args.out}")
     return 0
 
