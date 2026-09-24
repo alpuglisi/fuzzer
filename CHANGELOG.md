@@ -4,6 +4,30 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-24 (Lane 1 step 3 planning — JSON→HTML conversion detailed plan, no code change)
+- Added `docs/LAB_BROWSABLE_APPS_STEP3_PLAN.md`: a from-the-repo inventory
+  (not a from-the-plan assumption) of every CircleFeed/Huddle Hub/Booking
+  cell, its real current response shape read out of a live `assemble_lab()`
+  build, and its `page`/`api` classification justified against
+  `LAB_BROWSABLE_APPS_PLAN.md`'s own examples. Narrows the remaining work to
+  2 cells that genuinely need a body-format change
+  (`LABGEN-CF-0001`/`0002` photo view, `LABGEN-BC-0005`/`0006` checkout) —
+  everything else already returns a realistic non-JSON response (redirects,
+  CSV) or is a genuine API by the parent plan's own test. Documents two
+  concrete, code-verified risks: `PriceIntegrityBypassStrategy`
+  (`fuzzlab/oracle/strategies.py`) is anchored to the literal
+  `"charged_amount":"<value>"` JSON substring and will silently stop
+  detecting the vulnerability if the checkout response becomes HTML without
+  an equivalent update in the same commit; and
+  `tests/test_labgen_php_laravel_access_control_live_boot.py` asserts
+  literal JSON substrings that must be translated to the new HTML body's
+  shape. Also confirms (by reading its own test suite) that
+  `AccessControlIdorStrategy` needs no change — a documented negative
+  control, not an assumption. Sequencing, a verification checklist, a
+  per-commit rollback plan, and bookkeeping (`CC-LAB-0239`/`FR-LAB-156`,
+  `CC-FUZZ-0047`/`FR-FUZZ-31`) are in the plan doc. Planning only; no code
+  changed in this entry.
+
 ## 2026-09-24 (Lane 1 step 2 — `--app` split: CircleFeed/Huddle Hub/Booking become standalone apps, CC-LAB-0238/FR-LAB-156)
 - Added `fuzzlab.labgen.assemble.assemble_lab`'s `--app {circlefeed,huddlehub,booking}`
   flag: filters `collect_cells` to just that app's own cells (by `cell_id`
