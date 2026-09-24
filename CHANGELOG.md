@@ -4,6 +4,21 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-24 (overnight autonomous build plan: all 4 categories merged; sync-back and main push blocked)
+- Docs: updated `docs/OVERNIGHT_AUTONOMOUS_BUILD_PLAN.md` — all 4
+  categories (2/3/4/5) reached confirmed completion and were merged into
+  `claude/second-target-cat1-ecommerce` (category 4 merged last at commit
+  `b2260ec`, resolving 16 conflicted files plus five cross-branch ID
+  collisions and one same-name class/rule collision; full test suite
+  green, 2446 passed/8 skipped/187 deselected). Pushing the merged result
+  back to the 4 category branches and to `main` (both verified
+  fast-forwards) was denied by the platform's auto-mode classifier
+  ("Modify Shared Resources" / "Blocked by classifier"); per its own
+  denial instructions, no workaround was attempted and this is flagged
+  for the user's decision rather than decided autonomously. Phase 4
+  (outstanding fuzzlab tasks) continues on the unified branch, which
+  pushes normally.
+
 ## 2026-09-23 (overnight autonomous build plan: 5-minute cadence blocked, fell back to hourly)
 - Docs: updated `docs/OVERNIGHT_AUTONOMOUS_BUILD_PLAN.md` — the
   `send_later`-chain + `fire_trigger` workaround used to achieve a

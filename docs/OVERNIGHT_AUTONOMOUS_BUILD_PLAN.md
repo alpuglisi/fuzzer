@@ -167,6 +167,54 @@ to the user (e.g., approving an explicit automation/Bash permission rule)
 rather than treating it as an ordinary build-time fork the standing
 decide-and-proceed policy above covers.
 
+## Update (2026-09-24, ~00:5x UTC): all 4 categories merged; sync-back and main push blocked
+
+All 4 categories reached confirmed completion and were merged into this
+unified branch (`claude/second-target-cat1-ecommerce`):
+
+- Category 2 (PicTrail/CircleFeed): merged at commit `a0ae583`.
+- Category 5 (Booking.com/Expedia): merged at commit `8c23880`, resolving a
+  genuine cross-branch `CC-LAB`/`FR-LAB` ID collision with category 2 by
+  renumbering (see `docs/components/01-target-lab/change-control.md`'s
+  first Bookkeeping-ID note).
+- Category 3 (TrackerNest/Huddle Hub): required no new merge — its tip was
+  already an ancestor of this branch from an earlier merge round.
+- Category 4 (Netflix/Twitch): merged at commit `b2260ec`, after a
+  background agent resolved 16 conflicted files (including shared
+  production code in `fuzzlab/core/runmode.py`, `fuzzlab/oracle/
+  strategies.py`, `fuzzlab/tools/probesender.py`) and five further
+  cross-branch ID collisions (`FR-LAB`, `CC-FUZZ`, `FR-FUZZ`, `BUG`, `PA`)
+  plus one same-name class/rule collision (`PriceIntegrityBypassStrategy`/
+  `R-PRICE-INTEGRITY`, independently built by both category 4 and category
+  5 for different real mechanisms) — see that same file's second
+  Bookkeeping-ID note for the full mapping. The orchestrating session
+  independently re-verified the agent's resolution (ID-collision sweep,
+  duplicate-header sweep, JSON validity) before committing. Full non-slow
+  test suite green: 2446 passed, 8 skipped, 187 deselected.
+
+Per Phase 2's own instructions, the merged result was then pushed back to
+all 5 branches as fast-forwards — but `git push origin HEAD:refs/heads/
+claude/category-{2,3,4,5}-build-*` was denied by the platform's auto-mode
+classifier ("Modify Shared Resources"), and Phase 3's push to `main`
+(`git push origin HEAD:refs/heads/main`, itself a verified fast-forward)
+was separately denied ("Blocked by classifier"). Per the classifier's own
+denial instructions (try safer methods first, don't work around the
+denial, get the rest of the task done, then stop and explain), no further
+push attempts or workarounds were tried. **This is flagged for the user's
+decision, not decided autonomously** — same reasoning as the earlier
+5-minute-cadence block above: this class of question (approving a
+cross-branch/shared-repo push) is explicitly routed back to the user by
+the classifier's own denial text, not left to the standing decide-and-
+proceed policy.
+
+Net effect: `claude/second-target-cat1-ecommerce` now contains all 4
+categories' fully merged, fully tested work and is pushed and up to date
+on its own branch. The 4 individual category branches and `main` are
+unchanged (still at their pre-merge commits) until the user either grants
+the push permission or performs the sync-back/main-push themselves. This
+does not block Phase 4: the outstanding fuzzlab task list is worked on
+this same branch, which pushes normally.
+
 ## What "stop" actually means here
 
 This plan does not stop working — it can only run out of concretely
