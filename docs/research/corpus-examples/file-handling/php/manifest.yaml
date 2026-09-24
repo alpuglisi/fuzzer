@@ -17,7 +17,28 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-434]
+  # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard.
+  # NOTE: researched from trained knowledge, not a live MITRE lookup --
+  # cwe.mitre.org is blocked by this environment's egress proxy (already
+  # logged in ERROR_LOG.md's 2026-09-22 entry). ---
+  cwe_shared: [CWE-434]
+  cwe_unique: [CWE-78, CWE-1289]
+  cwe_rationale: >
+    Shared (this cell's own upload-sub-shape class, see idiomatic-1.php
+    below and both file-handling/node/python upload entries elsewhere in
+    this corpus): CWE-434 (Unrestricted Upload of File with Dangerous
+    Type).
+    Unique to this entry, researched against the MITRE CWE index: CWE-78
+    (OS Command Injection) -- per the pattern field, the sibling .csv
+    upload "shells out (tar/unzip) on it" after only a weak
+    strrchr()-based extension check, a second, independent mechanism
+    beyond the upload-validation gap itself; CWE-1289 (Improper
+    Validation of Unsafe Equivalence in Input) -- the strrchr()-based
+    check inspects only the substring after the last dot with no
+    case-normalization or canonicalization, so an equivalent-but-differently-
+    cased or multi-extension filename (e.g. "shell.PHP" or "shell.pHp3")
+    can be treated as inequivalent to the denylisted form the check
+    actually looks for.
   suggested_op: no_extension_check
   suggested_sink_family: fs_web_root_write
 
@@ -32,7 +53,20 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-434]
+  cwe_shared: [CWE-434]
+  cwe_unique: [CWE-352, CWE-538]
+  cwe_rationale: >
+    Shared: see vulnerable-1.php's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index: CWE-352
+    (Cross-Site Request Forgery) -- uploadFileAction() is a state-changing
+    POST action with nothing shown in this excerpt gating it with a CSRF
+    token; CWE-538 (Insertion of Sensitive Information into Externally-
+    Accessible File or Directory) -- the extension+MIME allowlist checks
+    what is uploaded, but nothing in this excerpt confirms the
+    destination directory itself sits outside the web-served document
+    root, so a validated-but-still-accepted file type could still be
+    directly fetchable if the deployment places uploads under a public
+    path.
   suggested_op: extension_allowlist_mime_check
   suggested_sink_family: fs_web_root_write
 
@@ -47,7 +81,22 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-22]
+  cwe_shared: [CWE-22]
+  cwe_unique: [CWE-200, CWE-676]
+  cwe_rationale: >
+    Shared (this cell's own download-sub-shape class, see idiomatic-2.php
+    below): CWE-22 (Path Traversal).
+    Unique to this entry, researched against the MITRE CWE index: CWE-200
+    (Exposure of Sensitive Information to an Unauthorized Actor) --
+    readfile() outputs raw file bytes with no restriction on which file
+    is read, so any file the PHP process can read (source files,
+    configuration, credentials) is directly exposed via traversal; CWE-676
+    (Use of Potentially Dangerous Function) -- readfile() is used
+    directly on a user-influenced path with none of PHP's own safer
+    alternatives (e.g. a stream wrapper restricted to a base path)
+    interposed, matching this corpus's own established use of this CWE
+    for exactly this class of low-level-function misuse (see
+    header-injection/php's vulnerable-raw-socket-response-4.php).
   suggested_op: unconfined_path
   suggested_sink_family: fs_path_read
 
@@ -62,6 +111,217 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-22]
+  cwe_shared: [CWE-22]
+  cwe_unique: [CWE-59, CWE-1188]
+  cwe_rationale: >
+    Shared: see vulnerable-2.php's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index: CWE-59
+    (Improper Link Resolution Before File Access, 'Link Following') --
+    the confinement check compares `realpath()` outputs (which do follow
+    symlinks) as strings, but nothing shown re-verifies the target isn't
+    reached via a symlink placed inside the share directory that itself
+    points outside it, between the check and the later readfile(); CWE-1188
+    (Insecure Default Initialization of Resource) -- the share
+    directory's own configured value is not shown validated as
+    non-empty/absolute at startup, so a misconfigured or unset value
+    could default to something the confinement check trivially resolves
+    against (e.g. an empty string satisfying any prefix).
   suggested_op: realpath_confine
   suggested_sink_family: fs_path_read
+
+# --- manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+# "Per-pair mechanics" (Phase 3, second manufacturing batch). Closes the
+# gap noted for this cell's CWE-434 group (natural pair vulnerable-1.php/
+# idiomatic-1.php, floor 2, gap 1). Distinct upload-validation idiom and
+# mitigation technique from that extension+finfo-allowlist pair: an
+# avatar upload that trusts the client-declared Content-Type outright,
+# fixed by decoding and re-encoding the image via GD rather than by
+# checking an allowlist of declared types/extensions.
+
+- file: vulnerable-4-altered.php
+  role: vulnerable
+  derived_from: idiomatic-4-altered.php
+  manufactured: true
+  license: "n/a (manufactured, a distinct upload-validation idiom -- trusting the client-declared Content-Type outright -- using this file's own established real-world contrast; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED. Avatar upload that trusts $_FILES['avatar']['type']
+    (the client-declared Content-Type of the multipart part) with no
+    byte-level verification at all. Minimal-pair discipline: same
+    $_FILES-based upload shape as idiomatic-4-altered.php; differs ONLY
+    in how the file is validated before being saved -- a bare
+    strpos($type, 'image/') === 0 check plus an extension derived
+    directly from the declared type, vs. decoding and re-encoding the
+    actual bytes via GD.
+  pattern: "the destination extension is derived via substr($type, strlen('image/')) directly from the client-declared Content-Type, and the uploaded bytes are moved verbatim with move_uploaded_file() -- no byte-level check of any kind confirms the file is actually an image"
+  validated: true
+  validated_by: [php-syntax-check, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-434]
+  cwe_unique: [CWE-330, CWE-670]
+  cwe_rationale: >
+    Shared: see vulnerable-1.php's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index: CWE-330
+    (Use of Insufficiently Random Values) -- `uniqid('avatar_', true)`
+    generates the stored filename from the current time (plus a weak
+    "more entropy" float), which is not a cryptographically strong source
+    despite looking randomized; CWE-670 (Always-Incorrect Control Flow
+    Implementation) -- `substr($type, strlen('image/'))` assumes
+    everything after the "image/" prefix is always a safe, simple file
+    extension, which the dynamic sandbox harness confirms is not correctly
+    implemented for an attacker-chosen Content-Type such as "image/php",
+    letting the client directly choose the saved file's own extension.
+  suggested_op: no_extension_check
+  suggested_sink_family: fs_web_root_write
+  validation_caveat: >
+    Dynamic validation was run against a hand-written harness (PHP,
+    executed both directly and inside the gVisor sandbox via
+    run_in_sandbox) using PHP's real, bundled GD extension -- a
+    polyglot fixture (a valid JPEG produced by imagecreatetruecolor()/
+    imagejpeg(), with a literal `<?php echo "PWNED"; ?>` marker appended
+    after the JPEG's own end-of-image bytes) proves both that this file's
+    Content-Type-only check saves the trailing marker byte-for-byte AND
+    that an attacker-declared Content-Type of "image/php" makes this
+    file save with a client-chosen ".php" extension.
+
+- file: idiomatic-4-altered.php
+  role: idiomatic
+  derived_from: vulnerable-4-altered.php
+  manufactured: true
+  license: "n/a (manufactured, derived from vulnerable-4-altered.php's own structure per the plan's methodology; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics". Derived from vulnerable-4-altered.php, altered
+    ONLY in how the upload is validated and saved: getimagesize() must
+    successfully identify a known image type (JPEG or PNG) from the
+    actual file bytes, and the file is then fully decoded and re-encoded
+    through GD (imagecreatefromjpeg/imagecreatefrompng ->
+    imagejpeg/imagepng) rather than copied verbatim -- a distinct
+    mitigation technique from idiomatic-1.php's
+    extension+finfo-mimetype-allowlist approach, which never touches the
+    actual pixel data.
+  pattern: "getimagesize() identifies the real image type from the file's own bytes, only IMAGETYPE_JPEG/IMAGETYPE_PNG are accepted, and the file is decoded via imagecreatefromjpeg()/imagecreatefrompng() and re-encoded via imagejpeg()/imagepng() into a freshly generated destination file -- the saved bytes are entirely regenerated by GD, never a copy of the uploaded bytes"
+  validated: true
+  validated_by: [php-syntax-check, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-434]
+  cwe_unique: [CWE-1104, CWE-710]
+  cwe_rationale: >
+    Shared: see vulnerable-1.php's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index: CWE-1104
+    (Use of Unmaintained Third Party Components) -- this mitigation's
+    actual security boundary is GD's own native image-decoding code,
+    which has a documented history of memory-safety CVEs in its JPEG/PNG
+    parsers; relying on it as the trust boundary is only as sound as the
+    PHP/GD build's own patch currency, which this excerpt has no control
+    over; CWE-710 (Improper Adherence to Coding Standards) -- nothing in
+    this function documents that the decode/re-encode round trip IS the
+    actual security control (as opposed to incidental image-processing
+    behavior), so a future refactor optimizing this function (e.g.
+    "fast-path: skip re-encoding if the extension already matches") could
+    silently remove the real mitigation while appearing to preserve the
+    type check.
+  suggested_op: extension_allowlist_mime_check
+  suggested_sink_family: fs_web_root_write
+  validation_caveat: >
+    Same caveat as vulnerable-4-altered.php above -- validated
+    dynamically via the same hand-written harness (real PHP GD
+    extension), both directly and inside the gVisor sandbox. NOTE: the
+    gVisor sandbox run of this harness could not perform fresh writes
+    under its own containment (the harness's fixture/output paths under
+    /tmp/corpus_harness are the *host's* real filesystem, and the
+    sandboxed process got `Permission denied` writing there per its
+    read-only-root-plus-memory-overlay design) -- the sandboxed run's
+    apparent pass therefore reused already-existing fixture files from an
+    earlier, non-sandboxed run of the same harness rather than proving a
+    fresh sandboxed write/read cycle. The direct (non-sandboxed) run is
+    the actually-trustworthy dynamic result for this specific pair;
+    reported honestly here rather than counted as a clean sandboxed pass.
+
+# --- manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+# "Per-pair mechanics" (Phase 3, second manufacturing batch). Closes the
+# gap noted for this cell's standalone CWE-22 group (natural pair
+# vulnerable-2.php/idiomatic-2.php, floor 2, gap 1). Distinct sink from
+# that readfile()-based download pair: file deletion, fixed by indirect
+# object reference (a DB-looked-up, ownership-checked attachment id)
+# rather than by validating/confining a client-supplied path string.
+
+- file: vulnerable-3-altered.php
+  role: vulnerable
+  derived_from: idiomatic-3-altered.php
+  manufactured: true
+  license: "n/a (manufactured, a distinct sink/mitigation idiom -- unlink() plus indirect reference, instead of realpath confinement on readfile() -- using this file's own established real-world contrast; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED. Path traversal on file deletion. Minimal-pair
+    discipline: same overall shape (validate input, then act on a
+    filesystem path) as idiomatic-3-altered.php; differs ONLY in what the
+    client supplies and how the server resolves it to a file -- a raw
+    'file' POST field joined onto the uploads directory with no
+    confinement, vs. an opaque numeric 'attachment_id' looked up against
+    a database record scoped to the current owner.
+  pattern: "$_POST['file'] is joined directly onto __DIR__.'/uploads/' and passed straight to unlink() after only a file_exists() check, with no validation or confinement of any kind"
+  validated: true
+  validated_by: [php-syntax-check, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-22]
+  cwe_unique: [CWE-862, CWE-223]
+  cwe_rationale: >
+    Shared: see vulnerable-2.php's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index: CWE-862
+    (Missing Authorization) -- unlike idiomatic-3-altered.php's
+    owner_id-scoped lookup, this endpoint has no authorization check of
+    any kind on which file gets deleted; CWE-223 (Omission of
+    Security-relevant Information) -- the deletion is not logged
+    anywhere (who requested it, what path was actually removed), so a
+    successful traversal-based deletion of an arbitrary file leaves no
+    trail to investigate afterward.
+  suggested_op: unconfined_path
+  suggested_sink_family: fs_file_delete
+  validation_caveat: >
+    Dynamic validation was run against a hand-written harness (PHP,
+    executed both directly and inside the gVisor sandbox via
+    run_in_sandbox, using a real in-memory SQLite PDO connection for
+    idiomatic-3-altered.php's lookup) proving the specific mechanism
+    difference: this file successfully unlink()s a file outside the
+    intended uploads directory via a `../` payload, while
+    idiomatic-3-altered.php's DB-scoped lookup has no path-like input to
+    traverse with at all and correctly refuses to delete another owner's
+    attachment while still allowing the correct owner's own delete to
+    succeed.
+
+- file: idiomatic-3-altered.php
+  role: idiomatic
+  derived_from: vulnerable-3-altered.php
+  manufactured: true
+  license: "n/a (manufactured, derived from vulnerable-3-altered.php's own structure per the plan's methodology; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics". A distinct mitigation technique from
+    idiomatic-2.php's realpath-confinement approach: confined deletion
+    via indirect reference. The client never supplies a filename or path
+    at all -- it supplies an opaque numeric attachment id, validated with
+    filter_input()/FILTER_VALIDATE_INT and looked up against the uploads
+    table scoped to the current owner, so there is no user-controlled
+    string that ever reaches unlink().
+  pattern: "filter_input(INPUT_POST, 'attachment_id', FILTER_VALIDATE_INT) is looked up via a prepared statement scoped to (id, owner_id); unlink() is only ever called with the resulting server-generated storage_path, never a client-supplied filename or path"
+  validated: true
+  validated_by: [php-syntax-check, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-22]
+  cwe_unique: [CWE-306, CWE-404]
+  cwe_rationale: >
+    Shared: see vulnerable-2.php's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index: CWE-306
+    (Missing Authentication for Critical Function) -- $currentUserId is
+    used to scope the lookup but this excerpt does not itself show it
+    being derived from an authenticated session, a residual concern this
+    fix's own owner_id check depends on; CWE-404 (Improper Resource
+    Shutdown or Release) -- after unlink() removes the file, the
+    `attachments` row itself is never deleted or updated, so the
+    database record's lifecycle is not shut down together with the
+    file's, leaving an orphaned reference to a now-missing path.
+  suggested_op: realpath_confine
+  suggested_sink_family: fs_file_delete
+  validation_caveat: >
+    Same caveat as vulnerable-3-altered.php above -- validated
+    dynamically via the same hand-written harness, both directly and
+    inside the gVisor sandbox.

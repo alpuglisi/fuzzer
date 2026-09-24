@@ -84,15 +84,23 @@
   validated_by: []
   redacted: false
   cwe_shared: [CWE-362, CWE-367]
-  cwe_unique: [CWE-841, CWE-664]
+  cwe_unique: [CWE-662, CWE-664]
   cwe_rationale: >
-    CWE-841 (Improper Enforcement of Behavioral Workflow): the intended
-    workflow (validate the coupon -> apply it once -> increment its usage
-    counter) is not synchronized as a single unit, so under concurrency
-    the steps can interleave across requests in a way the intended
-    workflow forbids (e.g. two requests both passing the "not already
-    applied" check on the same cart before either commits). CWE-664
-    (Improper Control of a Resource Through its Lifetime): the in-memory
+    NOTE: this entry's cwe_unique was originally drafted with CWE-841,
+    which a cross-file run of check-corpus-cwe-coverage.sh (this batch
+    also touched ecommerce-logic/php, which already claims CWE-841 unique
+    for vulnerable-qloapps-booking-1.php) correctly flagged as a
+    collision -- replaced below with a narrower ID grounded in this
+    entry's own code, per the hook's own guidance that a collision is
+    expected/fine and the fix is a fresh, well-grounded replacement, not a
+    restatement.
+    CWE-662 (Improper Synchronization): the read-is_valid()-then-increment
+    sequence across `coupon.usage_count` has no synchronization primitive
+    of any kind coordinating concurrent access to that shared counter --
+    no lock, no atomic transaction, no select_for_update() -- distinct
+    from the shared CWE-362/CWE-367 TOCTOU class in naming the *absence of
+    a coordination mechanism itself*, not just the resulting race window.
+    CWE-664 (Improper Control of a Resource Through its Lifetime): the in-memory
     `coupon` ORM object is read once at the top of the view, then mutated
     and `.save()`-d multiple times (usage_count, then possibly
     is_active) later in the same function without ever being re-read,
@@ -123,14 +131,23 @@
   validated_by: []
   redacted: false
   cwe_shared: [CWE-840, CWE-20]
-  cwe_unique: [CWE-1339, CWE-696]
+  cwe_unique: [CWE-681, CWE-696]
   cwe_rationale: >
-    CWE-1339 (Insufficient Precision or Accuracy of a Real Number):
+    NOTE: this entry's cwe_unique was originally drafted with CWE-1339,
+    which a cross-file run of check-corpus-cwe-coverage.sh (this batch
+    also touched ecommerce-logic/php, which already claims CWE-1339
+    unique for idiomatic-1.php) correctly flagged as a collision --
+    replaced below with a narrower, more precise ID for this entry's own
+    code, per the hook's own guidance that a collision is expected/fine
+    and the fix is a fresh, well-grounded replacement, not a restatement.
+    CWE-681 (Incorrect Conversion between Numeric Types):
     process_payment() charges exactly `int(order.total * 100)` -- if
-    `order.total` is a float rather than a Decimal, this float-to-cents
-    conversion can produce classic floating-point rounding errors (e.g.
-    19.99 * 100 evaluating to 1998.9999999999998, truncated to 1998
-    instead of 1999 cents). CWE-696 (Incorrect Behavior Order):
+    `order.total` is a float rather than a Decimal, this int() truncation
+    of a floating-point cents value can produce classic conversion errors
+    (e.g. 19.99 * 100 evaluating to 1998.9999999999998, truncated to 1998
+    instead of 1999 cents) -- a data-loss defect in the *conversion
+    between numeric representations* specifically, not merely an
+    imprecise real-number computation in the abstract. CWE-696 (Incorrect Behavior Order):
     process_order() computes and commits `order.total` inside its own
     `transaction.atomic()` block, and the actual charge happens in a
     separate, later call to process_payment() -- a crash or retry between
@@ -139,6 +156,82 @@
     charge are not one atomic unit together.
   suggested_op: server_recomputed_amount
   suggested_sink_family: payment_charge_amount
+
+# --- manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+# "Per-pair mechanics" (Phase 3, second manufacturing batch). Closes the
+# gap noted for this cell's CWE-20/CWE-840 group specifically (natural
+# pair vulnerable-1.py/idiomatic-1.py, floor 2, gap 1) -- NOT the
+# CWE-362/CWE-367 TOCTOU group above (vulnerable-2.py/
+# idiomatic-2-altered.py), which is a different (cell, CWE) group already
+# manufactured in an earlier batch. Distinct sub-scenario from
+# vulnerable-1.py/idiomatic-1.py's Stripe-charge-amount shape: referral-
+# credit redemption at checkout, where the trust boundary is how much of
+# a stored ReferralCredit balance gets applied, not the charge amount
+# itself.
+
+- file: idiomatic-3-altered.py
+  role: idiomatic
+  derived_from: vulnerable-3-altered.py
+  manufactured: true
+  license: "n/a (manufactured, a distinct sub-scenario using this file's own established real-world idiom -- server-side recomputation from a DB-backed record rather than a client-supplied number; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED. Referral-credit redemption at checkout. Minimal-pair
+    discipline: same function signature, same models, same response
+    shape as vulnerable-3-altered.py; differs ONLY in how applied_cents
+    is computed (min(credit.remaining_cents, subtotal_cents), clamped to
+    both the record's own stored balance and the order's own computed
+    subtotal, vs. trusted directly from request.POST['credit_cents']).
+  pattern: "apply_referral_credit() computes applied_cents as min(credit.remaining_cents, subtotal_cents) inside a transaction.atomic() block -- the credit actually applied is always clamped to both the ReferralCredit's own stored balance and the order's own server-computed subtotal, never taken from the request"
+  validated: true
+  validated_by: [py_compile, manual-review]
+  redacted: false
+  cwe_shared: [CWE-840, CWE-20]
+  cwe_unique: [CWE-706, CWE-1050]
+  cwe_rationale: >
+    Shared: see vulnerable-1.py's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index: CWE-706
+    (Use of Incorrectly-Resolved Name or Reference) -- `.filter(customer=
+    request.user, active=True).first()` has no explicit `.order_by()`, so
+    on a backend without a guaranteed default ordering the "first" credit
+    record returned for a customer with more than one active credit is
+    nondeterministic, potentially resolving to an unintended record; CWE-1050
+    (Excessive Platform Resource Consumption within a Loop) -- `subtotal_cents`
+    is computed via `sum(... for item in order.items.all())` with no limit
+    on the number of order items iterated, a per-request cost that scales
+    with an attacker-influenced order size.
+  suggested_op: server_recomputed_amount
+  suggested_sink_family: store_credit_redemption
+
+- file: vulnerable-3-altered.py
+  role: vulnerable
+  derived_from: idiomatic-3-altered.py
+  manufactured: true
+  license: "n/a (manufactured, derived from idiomatic-3-altered.py's own structure per the plan's methodology; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics". Derived from idiomatic-3-altered.py, altered
+    ONLY in how the applied credit amount is decided: the client's own
+    posted credit_cents field is trusted outright instead of recomputing
+    it from the ReferralCredit record's stored balance. A negative
+    credit_cents even flips the subtraction into an increase of the
+    credit's own remaining balance.
+  pattern: "applied_cents is read directly via int(request.POST.get('credit_cents', 0)) with no bound against the ReferralCredit's own stored balance, no bound against the order's own computed subtotal, and no handling of a non-numeric value"
+  validated: true
+  validated_by: [py_compile, manual-review]
+  redacted: false
+  cwe_shared: [CWE-840, CWE-20]
+  cwe_unique: [CWE-248, CWE-693]
+  cwe_rationale: >
+    Shared: see vulnerable-1.py's cwe_rationale above.
+    Unique to this entry: CWE-248 (Uncaught Exception) -- `int(request.
+    POST.get('credit_cents', 0))` raises an uncaught ValueError for any
+    non-numeric value, crashing the view with an unhandled 500 rather
+    than a controlled rejection; CWE-693 (Protection Mechanism Failure)
+    -- no protection mechanism of any kind (bounds check, allowlist, sign
+    check) exists for credit_cents before it is applied to the credit's
+    own persisted balance.
+  suggested_op: client_trusted_amount
+  suggested_sink_family: store_credit_redemption
 
 # Skipped for no license (cited/described in prose only, per this
 # corpus's license-handling rule -- no source text copied from any of

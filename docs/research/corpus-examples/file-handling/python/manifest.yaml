@@ -19,7 +19,26 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-434]
+  # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard.
+  # NOTE: researched from trained knowledge, not a live MITRE lookup --
+  # cwe.mitre.org is blocked by this environment's egress proxy (already
+  # logged in ERROR_LOG.md's 2026-09-22 entry). ---
+  cwe_shared: [CWE-434]
+  cwe_unique: [CWE-1164, CWE-561]
+  cwe_rationale: >
+    Shared (this cell's own upload-sub-shape class, see idiomatic-1.py
+    below and both file-handling/node/php upload entries elsewhere in
+    this corpus): CWE-434 (Unrestricted Upload of File with Dangerous
+    Type).
+    Unique to this entry, researched against the MITRE CWE index: CWE-1164
+    (Irrelevant Code) -- the commented-out `secure_filename()` call left
+    in place, per this entry's own pattern field, is exactly this
+    weakness: code that reads as if a security control is present but no
+    longer executes, misleading a reviewer; CWE-561 (Dead Code) -- the
+    module-scope `ALLOWED_EXTENSIONS` allowlist is defined but never
+    referenced by this route at all, a distinct defect from the disabled
+    secure_filename() call (unused-but-present validation data vs.
+    disabled-but-present validation logic).
   suggested_op: no_extension_check
   suggested_sink_family: fs_web_root_write
 
@@ -34,8 +53,95 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-434]
+  cwe_shared: [CWE-434]
+  cwe_unique: [CWE-732, CWE-284]
+  cwe_rationale: >
+    Shared: see vulnerable-1.py's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index: CWE-732
+    (Incorrect Permission Assignment for Critical Resource) -- nothing in
+    this excerpt shows the saved file's permissions being restricted
+    (e.g. non-executable) after `file.save()`, relying entirely on the
+    OS/webserver's own default umask; CWE-284 (Improper Access Control)
+    -- neither the `/upload` nor the `/uploads/<name>` route shown here
+    has any visible authentication/authorization dependency, so any
+    caller regardless of identity may upload or retrieve files.
   suggested_op: filename_charset_sanitize
+  suggested_sink_family: fs_web_root_write
+
+# --- manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+# "Per-pair mechanics" (Phase 3, second manufacturing batch). Closes the
+# gap noted for this cell's CWE-434 group (natural pair vulnerable-1.py/
+# idiomatic-1.py, floor 2, gap 1). Distinct upload idiom from that
+# Flask/werkzeug pair: a FastAPI route, with the actual byte content
+# sniffed via python-magic rather than relying on secure_filename()
+# alone.
+
+- file: vulnerable-4-altered.py
+  role: vulnerable
+  derived_from: idiomatic-4-altered.py
+  manufactured: true
+  license: "n/a (manufactured, a distinct upload-framework idiom -- FastAPI's UploadFile instead of Flask's request.files -- using this file's own established real-world contrast; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED. Unrestricted upload via FastAPI's UploadFile. Minimal-
+    pair discipline: same route signature and overall shape as
+    idiomatic-4-altered.py; differs ONLY in what is checked before the
+    file is written -- nothing at all here, vs. a content_type allowlist
+    plus a python-magic byte-sniff there.
+  pattern: "the uploaded file's declared content_type is never checked, and the file is written to disk at f'{UPLOAD_DIR}/{file.filename}' using the client-supplied original filename verbatim"
+  validated: true
+  validated_by: [py_compile, manual-review]
+  redacted: false
+  cwe_shared: [CWE-434]
+  cwe_unique: [CWE-789, CWE-22]
+  cwe_rationale: >
+    Shared: see vulnerable-1.py's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index: CWE-789
+    (Memory Allocation with Excessive Size Value) -- `await file.read()`
+    reads the entire upload into memory with no size cap of any kind
+    before anything else runs; CWE-22 (Path Traversal) -- distinct from
+    this cell's own standalone CWE-22 download entries below (a second,
+    independent mechanism in THIS entry, not shared with them): the
+    destination is built as `f"{UPLOAD_DIR}/{file.filename}"` with no
+    sanitization at all, so a filename such as `../../etc/cron.d/x`
+    escapes UPLOAD_DIR entirely, exactly the same combined-shape
+    mechanism this corpus already documents for file-handling/node's
+    peertube-upload pair.
+  suggested_op: no_extension_check
+  suggested_sink_family: fs_web_root_write
+
+- file: idiomatic-4-altered.py
+  role: idiomatic
+  derived_from: vulnerable-4-altered.py
+  manufactured: true
+  license: "n/a (manufactured, derived from vulnerable-4-altered.py's own structure per the plan's methodology; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics". Derived from vulnerable-4-altered.py, altered
+    ONLY in what is checked before the file is written: file.content_type
+    must be in an explicit ALLOWED_TYPES allowlist, the actual bytes are
+    then sniffed via python-magic and must agree with the declared type,
+    and the stored filename is generated from uuid4() plus the
+    allowlisted extension -- never derived from the client-supplied
+    original name at all.
+  pattern: "file.content_type is checked against ALLOWED_TYPES, magic.from_buffer() sniffs the actual bytes and must match the declared content_type, and the stored filename is uuid.uuid4().hex plus the allowlisted extension -- the client-supplied original filename is never used to build a path"
+  validated: true
+  validated_by: [py_compile, manual-review]
+  redacted: false
+  cwe_shared: [CWE-434]
+  cwe_unique: [CWE-99, CWE-863]
+  cwe_rationale: >
+    Shared: see vulnerable-1.py's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index: CWE-99
+    (Improper Control of Resource Identifiers, 'Resource Injection') --
+    the destination path is still built via plain f-string concatenation
+    (`f"{UPLOAD_DIR}/{safe_name}"`) rather than a path-joining API that
+    validates its components, relying entirely on `safe_name` itself
+    being well-formed rather than on the join operation enforcing it;
+    CWE-863 (Incorrect Authorization) -- like idiomatic-1.py, this route
+    has no visible authentication/authorization dependency, so the
+    content-type/byte-sniff hardening this entry adds says nothing about
+    who may call it.
+  suggested_op: mime_type_check
   suggested_sink_family: fs_web_root_write
 
 - file: vulnerable-2.py
@@ -49,7 +155,23 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-22]
+  cwe_shared: [CWE-22]
+  cwe_unique: [CWE-88, CWE-435]
+  cwe_rationale: >
+    Shared (this cell's own download-sub-shape class, see idiomatic-2.py
+    below): CWE-22 (Path Traversal).
+    Unique to this entry, researched against the MITRE CWE index: CWE-88
+    (Argument Injection) -- the attacker-influenced directory string
+    reaches `send_from_directory()`'s *directory* parameter, a
+    security-relevant positional argument to a framework function, with
+    no validation of what that argument itself may contain -- a broad
+    but genuine instance of untrusted data steering a sensitive function
+    argument; CWE-435 (Improper Interaction Between Multiple Correctly-
+    Behaving Entities) -- werkzeug's own filename-argument traversal
+    guard inside send_from_directory() behaves exactly as documented, but
+    this application's own misuse of the *directory* argument means the
+    two individually-correct pieces (werkzeug's guard, this app's
+    intent) interact insecurely overall.
   suggested_op: unconfined_path
   suggested_sink_family: fs_path_read
 
@@ -64,6 +186,107 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-22]
+  cwe_shared: [CWE-22]
+  cwe_unique: [CWE-172, CWE-15]
+  cwe_rationale: >
+    Shared: see vulnerable-2.py's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index: CWE-172
+    (Encoding Error) -- the confinement check compares raw string paths
+    with no Unicode normalization step, a residual concern if the
+    filesystem or an upstream proxy ever treats two differently-encoded
+    representations of the same traversal sequence as equivalent when
+    this string-level check would not; CWE-15 (External Control of
+    System or Configuration Setting) -- `demos_base` itself is not shown
+    validated at startup, so if it is sourced from an environment
+    variable or config file, a misconfigured value could silently change
+    what "confined" means for every request without this route's own
+    code changing at all.
   suggested_op: path_prefix_check
   suggested_sink_family: fs_path_read
+
+# --- manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+# "Per-pair mechanics" (Phase 3, second manufacturing batch). Closes the
+# gap noted for this cell's standalone CWE-22 group (natural pair
+# vulnerable-2.py/idiomatic-2.py, floor 2, gap 1). Distinct download
+# idiom and mitigation technique from that send_from_directory-misuse
+# pair: pathlib-based path construction, confined via
+# Path.is_relative_to() (Python 3.9+) rather than a manual
+# normpath()+startswith(os.sep) string comparison.
+
+- file: vulnerable-5-altered.py
+  role: vulnerable
+  derived_from: idiomatic-5-altered.py
+  manufactured: true
+  license: "n/a (manufactured, a distinct download-library idiom -- pathlib plus send_file, instead of send_from_directory -- using this file's own established real-world contrast; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED. Path traversal via pathlib. Minimal-pair discipline:
+    same route and overall shape as idiomatic-5-altered.py; differs ONLY
+    in whether the resolved candidate path is confirmed to stay inside
+    REPORTS_DIR before being served -- no check at all here, vs.
+    Path.is_relative_to() there.
+  pattern: "REPORTS_DIR / filename is passed directly to send_file() with no confinement check of any kind -- a filename such as '../../etc/passwd' resolves outside REPORTS_DIR and is served as-is"
+  validated: true
+  validated_by: [py_compile, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-22]
+  cwe_unique: [CWE-287, CWE-552]
+  cwe_rationale: >
+    Shared: see vulnerable-2.py's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index: CWE-287
+    (Improper Authentication) -- unlike a typical download route in this
+    corpus's own other entries, nothing here checks for an authenticated
+    session at all before serving arbitrary files under (or, via
+    traversal, beyond) REPORTS_DIR; CWE-552 (Files or Directories
+    Accessible to External Parties) -- the unconfined join lets any file
+    the process can read become externally fetchable through this route,
+    not just the intended report files.
+  suggested_op: unconfined_path
+  suggested_sink_family: fs_path_read
+  validation_caveat: >
+    Dynamic validation was run against a hand-written harness (Python,
+    executed both directly and inside the gVisor sandbox via
+    run_in_sandbox, using Flask's real test client and a fresh
+    tempfile.mkdtemp() fixture tree per run) proving the specific
+    mechanism difference: a '../secret.txt' filename leaks the sandboxed
+    fixture's secret file's contents through this route, while
+    idiomatic-5-altered.py's is_relative_to() check returns 403 for the
+    identical payload and still correctly serves a legitimate file.
+
+- file: idiomatic-5-altered.py
+  role: idiomatic
+  derived_from: vulnerable-5-altered.py
+  manufactured: true
+  license: "n/a (manufactured, derived from vulnerable-5-altered.py's own structure per the plan's methodology; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics". Derived from vulnerable-5-altered.py, altered
+    ONLY in adding a confinement check: the requested path is resolved
+    with Path.resolve() and confirmed to be relative to REPORTS_DIR
+    (itself resolved once) via Path.is_relative_to() before send_file()
+    is ever called -- a different confinement technique from
+    idiomatic-2.py's manual normpath()+startswith(os.sep) check, using
+    the stdlib's own purpose-built path-containment API instead of a
+    hand-rolled string comparison.
+  pattern: "(REPORTS_DIR / filename).resolve() is checked against REPORTS_DIR.is_relative_to() before send_file() is called; a non-relative candidate is rejected with abort(403)"
+  validated: true
+  validated_by: [py_compile, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-22]
+  cwe_unique: [CWE-346, CWE-666]
+  cwe_rationale: >
+    Shared: see vulnerable-2.py's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index: CWE-346
+    (Origin Validation Error) -- no check of the request's Origin/Referer
+    gates this route, so the confinement fix here says nothing about
+    whether the request itself should have been allowed to ask for a
+    given report at all; CWE-666 (Operation on Resource in Wrong Phase of
+    Lifetime) -- `REPORTS_DIR` is resolved once at module-import time and
+    then reused as the confinement anchor for every request afterward,
+    mixing a startup-phase configuration value with a per-request
+    security decision with no re-validation between the two phases.
+  suggested_op: path_prefix_check
+  suggested_sink_family: fs_path_read
+  validation_caveat: >
+    Same caveat as vulnerable-5-altered.py above -- validated dynamically
+    via the same hand-written harness, both directly and inside the
+    gVisor sandbox.

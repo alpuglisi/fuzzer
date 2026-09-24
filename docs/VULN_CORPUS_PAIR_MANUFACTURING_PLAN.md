@@ -113,9 +113,32 @@ required it). `auth-session`'s combined vulnerable/idiomatic floor
 (aggregated across node+php+python) was already at 7/7 before this pass
 and is now 14/14 — well clear of the >= 5 floor.
 
-The remaining ~21 (cell, CWE) groups elsewhere in the gap-analysis table
-above (the smaller, gap=1 groups outside `auth-session`) are separate
-follow-up work, not touched by this pass.
+10 more groups (`ecommerce-logic/node` CWE-20/CWE-840; `ecommerce-logic/php`
+CWE-840; `ecommerce-logic/python` CWE-20/CWE-840, the price-tampering
+group, distinct from the CWE-362/CWE-367 group already closed by
+`CC-LAB-0226`; `file-handling/node` CWE-20/CWE-434 and, separately,
+standalone CWE-22; `file-handling/php` CWE-434 and standalone CWE-22;
+`file-handling/python` CWE-434 and standalone CWE-22; `header-injection/
+python` CWE-20/CWE-93) are now done — see `CC-LAB-0228` in
+`docs/components/01-target-lab/change-control.md` for the full record (10
+manufactured pairs / 20 files, each a genuinely distinct third sub-variant
+of its group's mechanism -- a different framework/library idiom or
+sub-scenario, not a near-duplicate of the existing natural pair; static +
+dynamic (gVisor sandbox, for the file-handling/header-injection groups
+where a real harness could be built without a live external service) or
+static-only (for the ecommerce-logic groups, which need a live Mongoose/
+Django ORM connection this session's sandbox cannot provide) validation
+results, reported honestly per "N of M"; and the full `cwe_shared`/
+`cwe_unique` migration of the 13 pre-existing node/php/python entries
+across these manifests that were still on the legacy flat `cwe:` field,
+plus a same-batch fix of two pre-existing cross-file `cwe_unique`
+collisions (`CWE-841`, `CWE-1339`) between `ecommerce-logic/php` and
+`ecommerce-logic/python` that this pass's own cross-file run of
+`check-corpus-cwe-coverage.sh` surfaced).
+
+The remaining ~11 (cell, CWE) groups elsewhere in the gap-analysis table
+above (the smaller, gap=1 groups outside `auth-session` and this batch's
+10 groups) are separate follow-up work, not touched by this pass.
 
 ## Execution options (pick one when scheduling this work)
 

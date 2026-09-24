@@ -4,6 +4,49 @@ A running record of notable changes to this project and **why** each was made.
 Newest entries at the top. When you make a change, add a dated bullet: what
 changed, and the reason. Reference the commit hash where useful.
 
+## 2026-09-24 (vuln-corpus manufactured pairs, 10 ecommerce-logic/file-handling/header-injection groups + php/python CWE-schema migration + cross-file collision fix)
+- Docs (research corpus): manufactured one additional pair per 10 more
+  (cell, CWE) groups from `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s
+  gap table — `ecommerce-logic/node` CWE-20/CWE-840 (gift-card redemption),
+  `ecommerce-logic/php` CWE-840 (VIP/loyalty discount tier),
+  `ecommerce-logic/python` CWE-20/CWE-840 (referral-credit redemption, the
+  price-tampering group, distinct from the CWE-362/CWE-367 group already
+  closed by `CC-LAB-0226`), `file-handling/node` CWE-20/CWE-434 (busboy
+  upload) and standalone CWE-22 (indirect-reference download),
+  `file-handling/php` CWE-434 (GD decode/re-encode) and standalone CWE-22
+  (indirect-reference deletion), `file-handling/python` CWE-434 (FastAPI +
+  python-magic upload) and standalone CWE-22 (pathlib
+  `Path.is_relative_to()` download), `header-injection/python`
+  CWE-20/CWE-93 (raw WSGI response-header CRLF injection) — 10 pairs / 20
+  new files, each a genuinely distinct third sub-variant (different
+  framework/library idiom or sub-scenario) of its group's existing natural
+  pair, not a near-duplicate. Static (syntax check: `node --check`,
+  `php -l`, `py_compile`) validation on all 20 files; dynamic (gVisor
+  sandbox, `fuzzlab/tools/corpus_validation_sandbox.py`, `authorized=True`)
+  differential validation on 4 of 10 groups where a self-contained harness
+  was buildable without a live external service (`file-handling/node`
+  CWE-22, `file-handling/php` CWE-22, `file-handling/python` CWE-22,
+  `header-injection/python`), plus one group (`file-handling/php` CWE-434)
+  validated dynamically only outside the sandbox after the sandboxed run's
+  writes were found to reuse pre-existing host fixture files rather than
+  writing fresh ones under containment (its own read-only-root-plus-
+  memory-overlay design rejected the harness's writes to a host-disk
+  scratch path with `Permission denied`) — reported honestly rather than
+  counted as a clean sandboxed pass. The remaining 5 groups (all
+  `ecommerce-logic`, which need a live Mongoose/Django ORM connection this
+  session's sandbox cannot provide) were validated at the static tier
+  only. Also migrated 13 pre-existing entries across
+  `ecommerce-logic/node` (5), `file-handling/php` (4), and
+  `file-handling/python` (4) from the legacy flat `cwe:` field to
+  `cwe_shared:`/`cwe_unique:`/`cwe_rationale:` per PA-0033's tightened
+  standard, and fixed two pre-existing cross-file `cwe_unique` collisions
+  (`CWE-841` and `CWE-1339`, both between `ecommerce-logic/php` and
+  `ecommerce-logic/python`) that this pass's own cross-file run of
+  `.claude/hooks/check-corpus-cwe-coverage.sh` surfaced once both files
+  were touched in the same run. `check-corpus-cwe-coverage.sh` exits 0
+  against the full staged diff. See `CC-LAB-0228` in
+  `docs/components/01-target-lab/change-control.md` for the full record.
+
 ## 2026-09-24 (vuln-corpus manufactured pairs, 7 auth-session groups + node/python CWE-schema migration)
 - Docs (research corpus): manufactured one additional pair per `auth-session`
   (cell, CWE) group per `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s gap

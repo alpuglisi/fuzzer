@@ -34,7 +34,25 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-840, CWE-20]
+  # --- migrated to cwe_shared/cwe_unique per PA-0033's tightened standard.
+  # NOTE: researched from trained knowledge, not a live MITRE lookup --
+  # cwe.mitre.org is blocked by this environment's egress proxy (already
+  # logged in ERROR_LOG.md's 2026-09-22 entry). ---
+  cwe_shared: [CWE-840, CWE-20]
+  cwe_unique: [CWE-642, CWE-602]
+  cwe_rationale: >
+    Shared (this cell's own price-tampering-shape class, see
+    idiomatic-1.js/idiomatic-2.js below and vulnerable-2.js/vulnerable-3.js,
+    same shape): CWE-840 (Business Logic Errors), CWE-20 (Improper Input
+    Validation).
+    Unique to this entry, researched against the MITRE CWE index: CWE-642
+    (External Control of Critical State Data) -- the charge amount is
+    exactly the kind of critical application state this weakness
+    describes, and here it is read directly out of req.body.price with no
+    intervening state of its own; CWE-602 (Client-Side Enforcement of
+    Server-Side Security) -- MITRE's own canonical example for this ID is
+    an e-commerce application that computes a price client-side and trusts
+    the value posted back, which is precisely this route's shape.
   suggested_op: client_trusted_amount
   suggested_sink_family: payment_charge_amount
 
@@ -59,7 +77,18 @@
   validated: false
   validated_by: []
   redacted: true
-  cwe: [CWE-840, CWE-20]
+  cwe_shared: [CWE-840, CWE-20]
+  cwe_unique: [CWE-798, CWE-522]
+  cwe_rationale: >
+    Shared: see vulnerable-1.js's cwe_rationale above.
+    Unique to this entry: CWE-798 (Use of Hard-coded Credentials) -- the
+    original source had a hardcoded Stripe test-mode secret key
+    (sk_test_...), which this corpus's own secrets-scrubbing rule required
+    redacting (see the note above); CWE-522 (Insufficiently Protected
+    Credentials) -- the key was stored in plaintext application source
+    rather than a credential store, distinct from the fact of it being
+    hardcoded at all (CWE-798) in naming that it also carried no
+    protection at rest.
   suggested_op: client_trusted_amount
   suggested_sink_family: payment_charge_amount
 
@@ -86,7 +115,19 @@
   validated: false
   validated_by: []
   redacted: true
-  cwe: [CWE-840, CWE-20]
+  cwe_shared: [CWE-840, CWE-20]
+  cwe_unique: [CWE-190, CWE-1173]
+  cwe_rationale: >
+    Shared: see vulnerable-1.js's cwe_rationale above.
+    Unique to this entry: CWE-190 (Integer Overflow or Wraparound) --
+    unlike vulnerable-1.js/-2.js, this entry's own distinguishing detail
+    is the surrounding order-creation code that threads
+    req.body.productIds into OrderProduct.setQuantity with no bound shown
+    on the resulting quantity/count arithmetic; CWE-1173 (Improper Use of
+    Validation Framework) -- productIds/quantities flow into
+    setQuantity() with no validation-framework layer (schema, allowlist)
+    shown gating them at all, distinct from the charge-amount trust issue
+    captured by the shared CWEs.
   suggested_op: client_trusted_amount
   suggested_sink_family: payment_charge_amount
 
@@ -107,7 +148,20 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-840, CWE-20]
+  cwe_shared: [CWE-840, CWE-20]
+  cwe_unique: [CWE-703, CWE-704]
+  cwe_rationale: >
+    Shared: see vulnerable-1.js's cwe_rationale above.
+    Unique to this entry: CWE-703 (Improper Check or Handling of
+    Exceptional Conditions) -- the function "validates stock" per its own
+    pattern field, but nothing shown here confirms an insufficient-stock
+    condition is handled any differently across concurrent requests than
+    the success path; CWE-704 (Incorrect Type Conversion or Cast) --
+    `salePrice ?? price` mixes two DB-sourced numeric fields with the
+    nullish-coalescing operator with no explicit type normalization, a
+    real MongoDB/Mongoose gotcha where a schema field typed as
+    Decimal128 does not arithmetic-compose with a plain Number the way
+    this line assumes.
   suggested_op: server_recomputed_amount
   suggested_sink_family: payment_charge_amount
 
@@ -131,9 +185,108 @@
   validated: false
   validated_by: []
   redacted: false
-  cwe: [CWE-840, CWE-20]
+  cwe_shared: [CWE-840, CWE-20]
+  cwe_unique: [CWE-476, CWE-390]
+  cwe_rationale: >
+    Shared: see vulnerable-1.js's cwe_rationale above.
+    Unique to this entry: CWE-476 (NULL Pointer Dereference) -- nothing
+    shown checks that Product.findById() actually returned a document
+    (e.g. a deleted product) before this handler reads product.price off
+    it, which would throw on the null/undefined case rather than fail
+    gracefully; CWE-390 (Detection of Error Condition Without Action) --
+    the accumulation into cart.totalCost has no error-handling path shown
+    at all around the DB lookup or the .save() call, so a failure
+    partway through is not detected or acted on by this code.
   suggested_op: server_recomputed_amount
   suggested_sink_family: payment_charge_amount
+
+# --- manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+# "Per-pair mechanics" (Phase 3, second manufacturing batch). Closes the
+# gap noted for this cell's CWE-20/CWE-840 group (2 natural pairs against
+# a floor of 3). Distinct sub-scenario from this file's Stripe-charge-
+# amount pairs above: gift-card redemption at checkout, where the trust
+# boundary is how much of a stored GiftCard balance gets applied as store
+# credit, not the charge amount itself.
+
+- file: idiomatic-4-altered.js
+  role: idiomatic
+  derived_from: vulnerable-4-altered.js
+  manufactured: true
+  license: "n/a (manufactured, a distinct sub-scenario using this file's own established real-world idiom -- server-side recomputation from a DB-backed record rather than a client-supplied number; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED. Gift-card redemption at checkout -- a distinct
+    sub-scenario from this file's Stripe-charge-amount pairs
+    (vulnerable-1/2/3.js, idiomatic-1/2.js). Minimal-pair discipline: same
+    route, same models, same response shape as vulnerable-4-altered.js;
+    differs ONLY in how redeemAmount is computed (Math.min() against the
+    GiftCard's own stored balanceCents and the cart's own computed total,
+    vs. trusting a client-posted amountCents field outright).
+  pattern: "redeemAmount is computed as Math.min(giftCard.balanceCents, Math.round(cartTotal * 100)) -- the amount actually redeemed is always clamped to both the card's own stored balance and the cart's own server-computed total, never taken from the request"
+  validated: true
+  validated_by: [node-syntax-check, manual-review]
+  redacted: false
+  cwe_shared: [CWE-840, CWE-20]
+  cwe_unique: [CWE-459, CWE-372]
+  cwe_rationale: >
+    Shared: see vulnerable-1.js's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index: CWE-459
+    (Incomplete Cleanup) -- giftCard.save() and cart.save() are two
+    separate awaited calls with no transaction wrapping them; if the
+    second fails after the first succeeds, the card's balance has already
+    been decremented with no compensating cleanup of that partial state;
+    CWE-372 (Incomplete Internal State Distinction) -- the GiftCard's
+    `active` flag is a single boolean that does not distinguish "still
+    has balance" from "explicitly deactivated by an admin", so a
+    concurrent redemption racing the balance down to exactly 0 and this
+    handler's own re-save of `active` can observe/overwrite each other's
+    state transition ambiguously.
+  suggested_op: server_recomputed_amount
+  suggested_sink_family: store_credit_redemption
+  validation_caveat: >
+    Dynamic (gVisor-sandbox) execution was not run for this pair: doing so
+    would require a real Mongoose/MongoDB connection this session's
+    sandbox (zero network, ephemeral filesystem) cannot provide. Validated
+    at the static tier only: node --check syntax validation on both files
+    plus manual review confirming the minimal-pair discipline (the two
+    files differ only in the redeemAmount computation). Reported honestly
+    per the plan's "N of M, never rounded up" instruction rather than
+    padded with a fabricated dynamic result.
+
+- file: vulnerable-4-altered.js
+  role: vulnerable
+  derived_from: idiomatic-4-altered.js
+  manufactured: true
+  license: "n/a (manufactured, derived from idiomatic-4-altered.js's own structure per the plan's methodology; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics". Derived from idiomatic-4-altered.js, altered
+    ONLY in how the redeemed amount is decided: the client's own posted
+    amountCents field is trusted outright instead of recomputing it from
+    the GiftCard record's stored balance. A negative amountCents even
+    flips the subtraction into an increase of the card's own balance.
+  pattern: "redeemAmount is read directly from req.body.amountCents with no bound against the GiftCard's own stored balance, no bound against the cart's own computed total, and no check that it is even a non-negative number"
+  validated: true
+  validated_by: [node-syntax-check, manual-review]
+  redacted: false
+  cwe_shared: [CWE-840, CWE-20]
+  cwe_unique: [CWE-778, CWE-799]
+  cwe_rationale: >
+    Shared: see vulnerable-1.js's cwe_rationale above.
+    Unique to this entry: CWE-778 (Insufficient Logging) -- neither a
+    negative amountCents nor an amountCents wildly exceeding the card's
+    own balance is logged anywhere before being applied, so an abuse
+    pattern that repeatedly tops up a balance via negative values leaves
+    no trail; CWE-799 (Improper Control of Interaction Frequency) --
+    nothing shown rate-limits repeated calls to this endpoint, and since
+    each call independently trusts its own amountCents, an attacker can
+    repeat the request as many times as desired before the abuse is
+    noticed.
+  suggested_op: client_trusted_amount
+  suggested_sink_family: store_credit_redemption
+  validation_caveat: >
+    Same caveat as idiomatic-4-altered.js above -- static tier only
+    (node --check plus manual review); no live Mongoose/MongoDB
+    connection available in this session's sandbox.
 
 # Gap note: no real, acceptably-licensed Node example of the *race-
 # condition* shape (single-use coupon/resource redeemed via a non-atomic

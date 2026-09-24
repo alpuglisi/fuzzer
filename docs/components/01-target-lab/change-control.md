@@ -3,6 +3,163 @@
 Component code: **LAB**. Entry format and required fields: see
 `../README.md`. Newest first.
 
+### CC-LAB-0228 — Manufacture 10 ecommerce-logic/file-handling/header-injection corpus pairs + migrate php/python manifests to cwe_shared/cwe_unique + fix pre-existing cross-file CWE collision (2026-09-24)
+- Change: per `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s gap-analysis
+  table, manufactured one additional pair for each of 10 (cell, CWE)
+  groups that had a natural pair but were still below the floor:
+  `ecommerce-logic/node` CWE-20/CWE-840 (`vulnerable-4-altered.js`/
+  `idiomatic-4-altered.js` — gift-card redemption clamped to a stored
+  balance vs. a client-posted `amountCents`, distinct from the file's
+  Stripe-charge-amount natural pair); `ecommerce-logic/php` CWE-840
+  (`vulnerable-2-altered.php`/`idiomatic-2-altered.php` — VIP/loyalty
+  discount-tier lookup vs. a client-posted `vip_discount_percent`);
+  `ecommerce-logic/python` CWE-20/CWE-840 (`vulnerable-3-altered.py`/
+  `idiomatic-3-altered.py` — referral-credit redemption, the
+  price-tampering group this file's `vulnerable-1.py`/`idiomatic-1.py`
+  pair anchors, distinct from the CWE-362/CWE-367 coupon-race group
+  `CC-LAB-0226` already closed in this same file); `file-handling/node`
+  CWE-20/CWE-434 (`vulnerable-3-altered.js`/`idiomatic-3-altered.js` — a
+  hand-rolled busboy upload handler, a distinct library idiom from the
+  file's multer-based and peertube-upload pairs) and, separately,
+  standalone CWE-22 (`vulnerable-4-altered.js`/`idiomatic-4-altered.js` —
+  a plain `res.download()` fixed via indirect object reference to a
+  DB-looked-up attachment id, distinct mitigation technique from the
+  file's realpath-confinement pair); `file-handling/php` CWE-434
+  (`vulnerable-4-altered.php`/`idiomatic-4-altered.php` — a
+  Content-Type-trusting avatar upload fixed by decoding/re-encoding the
+  image through GD, distinct mitigation technique from the file's
+  extension+finfo-allowlist pair) and standalone CWE-22
+  (`vulnerable-3-altered.php`/`idiomatic-3-altered.php` — file deletion
+  fixed via an owner-scoped, DB-looked-up attachment id, distinct sink and
+  mitigation from the file's readfile()-based download pair);
+  `file-handling/python` CWE-434 (`vulnerable-4-altered.py`/
+  `idiomatic-4-altered.py` — a FastAPI `UploadFile` route hardened with a
+  content-type allowlist plus a `python-magic` byte-sniff, distinct
+  framework from the file's Flask/werkzeug pair) and standalone CWE-22
+  (`vulnerable-5-altered.py`/`idiomatic-5-altered.py` — `pathlib`-based
+  path construction confined via `Path.is_relative_to()`, distinct
+  confinement technique from the file's manual
+  `normpath()`+`startswith(os.sep)` pair); `header-injection/python`
+  CWE-20/CWE-93 (`vulnerable-6-altered.py`/`idiomatic-6-altered.py` — a
+  raw WSGI response-header list bypassing Flask/werkzeug's own
+  CRLF-rejecting `Headers` API, the HTTP-response-header architecture
+  variant of this cell's SMTP/email-header natural pair, mirroring the
+  cell's own existing PHP `http-response-header` architecture). All 10
+  are genuinely distinct third sub-variants of their group's mechanism
+  (different framework/library idiom or sub-scenario), not
+  near-duplicates of the existing natural pair, per direct instruction.
+  20 new files total (4 Node/JS, 8 PHP, 8 Python). Also, since adding
+  entries to the php and python file-handling manifests and the node
+  ecommerce-logic manifest required `.claude/hooks/check-corpus-cwe-
+  coverage.sh` to re-check every entry in those files, migrated 13
+  pre-existing entries (5 in `ecommerce-logic/node`, 4 in
+  `file-handling/php`, 4 in `file-handling/python`) from the legacy flat
+  `cwe:` field to `cwe_shared:`/`cwe_unique:`/`cwe_rationale:`. Touching
+  both `ecommerce-logic/php` and `ecommerce-logic/python` in the same run
+  also surfaced two pre-existing cross-file `cwe_unique` collisions the
+  hook had never previously checked together (`CWE-841`, claimed unique by
+  both `ecommerce-logic/php`'s `vulnerable-qloapps-booking-1.php` and
+  `ecommerce-logic/python`'s `vulnerable-2.py`; `CWE-1339`, claimed unique
+  by both `ecommerce-logic/php`'s `idiomatic-1.php` and
+  `ecommerce-logic/python`'s `idiomatic-1.py`) — fixed by replacing the
+  python-side IDs with narrower, code-grounded alternatives (`CWE-662`
+  Improper Synchronization in place of `CWE-841`; `CWE-681` Incorrect
+  Conversion between Numeric Types in place of `CWE-1339`), keeping the
+  php-side entries unchanged, with the substitution reasoning recorded
+  inline in each entry's own `cwe_rationale`. Across all touched entries
+  in the 7 manifests this batch modifies, every `cwe_unique` assignment
+  (103 total across the batch's new/migrated entries) was checked by hand
+  for cross-file duplication before running the hook, then confirmed by
+  actually running it.
+- Impact (other components / project): corpus-research reference material
+  only (`docs/research/corpus-examples/ecommerce-logic/`,
+  `file-handling/`, `header-injection/python/`) — read by future
+  generator/labgen work as illustrative pairs, never served by the lab
+  app itself and not wired into `lab/safety_matrix.yaml` by this change
+  (that hookup is its own future FUZZ/LAB change per the site-architecture
+  plan's "Step 8 handoff", unchanged here). No impact on any other
+  component.
+- Risk (level; mitigation or accepted-risk justification): low. The new
+  files are inert reference text, not executed by any pipeline outside
+  corpus-validation tooling. Two accepted-risk notes stated plainly: (1)
+  the CWE-migration/assignment research (both the 13 migrated legacy
+  entries and all `cwe_unique`/`cwe_shared` choices on the 20 new
+  entries) was done from trained knowledge, not a live `cwe.mitre.org`
+  lookup, since this environment's egress proxy blocks that domain (see
+  `ERROR_LOG.md`, 2026-09-22 entry — a prior batch already confirmed and
+  logged the block; not re-logged here) — every rationale in this pass
+  should be spot-checked against MITRE by a session with that access
+  before being treated as authoritative; (2) the 5 `ecommerce-logic`
+  groups in this batch were validated at the static tier only (syntax
+  check + manual review), since a genuine dynamic proof of their
+  mechanism would require a live Mongoose/Django ORM connection this
+  session's sandbox (zero network) cannot provide — reported as such in
+  each entry's own `validation_caveat`, not silently omitted.
+- Deliverables:
+  - [x] 20 manufactured files (4 Node/JS, 8 PHP, 8 Python) across 10 pairs
+        — done.
+  - [x] Static validation: `node --check` / `php -l` / `python3 -m
+        py_compile` on every new file (20 of 20 clean) — done.
+  - [x] Dynamic-execution differential validation via
+        `fuzzlab/tools/corpus_validation_sandbox.py` (`run_in_sandbox`,
+        `authorized=True`, gVisor confirmed available via
+        `sandbox_available()` returning `True`) for the 4 groups where a
+        self-contained harness was buildable without a live external
+        service: `file-handling/node` CWE-22 (indirect-reference download
+        harness stubbing `express`/an in-memory `Attachment` model),
+        `file-handling/php` CWE-22 (`unlink()` harness using a real
+        in-memory SQLite `PDO` connection), `file-handling/python` CWE-22
+        (`pathlib` traversal harness using Flask's real test client and a
+        fresh `tempfile.mkdtemp()` fixture per run), and
+        `header-injection/python` (raw-WSGI-vs-Flask-`Headers` CRLF
+        harness) — **4 of 4 confirmed** (forged/traversal input accepted
+        by the vulnerable side and rejected by the idiomatic side in
+        every case). One additional group, `file-handling/php` CWE-434,
+        was validated dynamically via a real-GD-extension polyglot
+        harness (JPEG bytes with a trailing `<?php ...?>` marker) run
+        both directly and inside the sandbox; the *direct* run confirmed
+        the mechanism difference (payload survives verbatim in the
+        vulnerable copy, stripped by the idiomatic decode/re-encode
+        round trip; an attacker-declared Content-Type of `image/php` also
+        drives the vulnerable side's own file extension), but the
+        *sandboxed* run's writes to the harness's host-disk scratch
+        directory failed with `Permission denied` under the sandbox's
+        read-only-root-plus-memory-overlay design, so that run's apparent
+        pass reused pre-existing fixture files from the earlier direct
+        run rather than proving a fresh sandboxed write/read cycle — this
+        is called out explicitly in the entry's `validation_caveat`
+        rather than counted as a clean sandboxed pass. Net: **5 of 10
+        groups have a genuine dynamic differential proof** (4 sandboxed +
+        1 direct-only); the remaining 5 (`ecommerce-logic`'s node/php/
+        python groups) are static-tier only per the accepted-risk note
+        above — reported as "5 of 10", not rounded up.
+  - [x] `.claude/hooks/check-corpus-cwe-coverage.sh` run against the
+        staged changes: exits 0 (verified after the full cross-file
+        collision check was done by hand first — including catching and
+        fixing the two pre-existing `CWE-841`/`CWE-1339` collisions
+        described above — then confirmed live) — done.
+  - [x] `>= 5 vulnerable`/`>= 5 idiomatic` per-cell floor (aggregated
+        across each cell's node+php+python subdirectories): checked
+        actual current counts before assuming more pairs were needed —
+        `ecommerce-logic` was already at 8 vulnerable/7 idiomatic before
+        this pass and is now 11/10; `file-handling` was already at 7/8
+        and is now 13/14; `header-injection` was already at 5/5 (all 3
+        languages combined) and is now 6/6 — all three cells were already
+        clear of the floor and remain clear, no additional pairs needed
+        beyond the 10 assigned groups.
+  - [x] `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md` "Not yet done"
+        section updated to record these 10 groups as done — done.
+- Effectiveness (assessed 2026-09-24): all 10 groups pass static
+  validation and the mechanical CWE-coverage hook; 5 of 10 groups also
+  pass dynamic differential validation (4 sandboxed, 1 direct-only per the
+  caveat above); full non-slow test suite stays green (see this change's
+  commit for the exact pass/skip counts). Not yet independently
+  re-verified by a session with live `cwe.mitre.org` access, per the
+  accepted-risk note above; the `file-handling/php` CWE-434 pair's
+  sandboxed-write limitation should be revisited by a future session that
+  can adjust the sandbox harness to write under a path the sandbox's own
+  overlay actually covers, rather than a host-disk scratch directory.
+
 ### CC-LAB-0227 — Manufacture 7 auth-session corpus pairs + migrate node/python manifests to cwe_shared/cwe_unique (2026-09-24)
 - Change: per `docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md`'s gap-analysis
   table, manufactured one additional pair for each of the 7 `auth-session`

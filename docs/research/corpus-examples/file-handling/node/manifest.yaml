@@ -141,6 +141,166 @@
   suggested_op: realpath_confine
   suggested_sink_family: fs_path_read
 
+# --- manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+# "Per-pair mechanics" (Phase 3, second manufacturing batch). Closes the
+# gap noted for this cell's CWE-20/CWE-434 group (natural pair
+# vulnerable-1.js/idiomatic-1.js, floor 2, gap 1). Distinct upload-handler
+# idiom from that multer-based pair AND from the peertube-upload pair
+# below: a hand-rolled busboy handler (no multer at all).
+
+- file: vulnerable-3-altered.js
+  role: vulnerable
+  derived_from: idiomatic-3-altered.js
+  manufactured: true
+  license: "n/a (manufactured, a distinct upload-library idiom -- busboy instead of multer -- using this file's own established real-world contrast; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED. Unrestricted upload via a hand-rolled busboy handler.
+    Minimal-pair discipline: same route path, same busboy wiring as
+    idiomatic-3-altered.js; differs ONLY in the file event handler --
+    saves the upload verbatim under the client-supplied original
+    filename with no mimetype check at all, vs. checking info.mimeType
+    against an allowlist and generating the stored filename server-side.
+  pattern: "the 'file' event handler pipes the upload straight to fs.createWriteStream() under path.join(UPLOAD_DIR, info.filename) with no mimetype allowlist and no filename sanitization of any kind"
+  validated: true
+  validated_by: [node-syntax-check, manual-review]
+  redacted: false
+  cwe_shared: [CWE-434, CWE-20]
+  cwe_unique: [CWE-73, CWE-400]
+  cwe_rationale: >
+    Shared: see vulnerable-1.js's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index: CWE-73
+    (External Control of File Name or Path) -- the destination path is
+    built directly from `info.filename`, a client-controlled multipart
+    field, with zero restriction (no basename(), no character allowlist,
+    no length limit); CWE-400 (Uncontrolled Resource Consumption) -- no
+    `limits: { fileSize }` option is passed to `Busboy()`, so a single
+    request can stream an unbounded amount of data to disk.
+  suggested_op: no_extension_check
+  suggested_sink_family: fs_web_root_write
+
+- file: idiomatic-3-altered.js
+  role: idiomatic
+  derived_from: vulnerable-3-altered.js
+  manufactured: true
+  license: "n/a (manufactured, derived from vulnerable-3-altered.js's own structure per the plan's methodology; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics". Derived from vulnerable-3-altered.js, altered
+    ONLY in the file event handler: info.mimeType is checked against an
+    explicit ALLOWED_MIME_EXT allowlist, unrecognized uploads are
+    rejected (415) and their stream drained rather than written, and the
+    stored filename is generated via crypto.randomBytes() plus the
+    allowlisted extension -- never derived from the client-supplied
+    original name at all.
+  pattern: "the 'file' event handler looks up info.mimeType in a fixed ALLOWED_MIME_EXT map, rejects (415) and drains anything not found, and otherwise writes to a server-generated crypto.randomBytes(16)-based filename with the allowlisted extension"
+  validated: true
+  validated_by: [node-syntax-check, manual-review]
+  redacted: false
+  cwe_shared: [CWE-434, CWE-20]
+  cwe_unique: [CWE-654, CWE-252]
+  cwe_rationale: >
+    Shared: see vulnerable-1.js's cwe_rationale above.
+    Unique to this entry: CWE-654 (Reliance on a Single Factor in a
+    Security Decision) -- the ONLY check gating what gets saved is the
+    declared `info.mimeType` string (busboy's own parse of the
+    Content-Type header of that multipart part); nothing cross-checks the
+    actual byte content, so a single factor is this handler's entire
+    protection; CWE-252 (Unchecked Return Value) -- `file.pipe(fs.
+    createWriteStream(savePath))` does not attach an 'error' handler or
+    otherwise check for a failed write (e.g. disk full, permission
+    denied) before the 'finish' handler unconditionally reports success.
+  suggested_op: mime_type_check
+  suggested_sink_family: fs_web_root_write
+
+# --- manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+# "Per-pair mechanics" (Phase 3, second manufacturing batch). Closes the
+# gap noted for this cell's standalone CWE-22 group (natural pair
+# vulnerable-2.js/idiomatic-2.js, floor 2, gap 1). Distinct download-sink
+# and mitigation technique from that realpath-confinement pair: a plain
+# res.download() call, fixed by indirect object reference (a DB-looked-up
+# attachment id) rather than by validating/confining a client-supplied
+# path string at all.
+
+- file: vulnerable-4-altered.js
+  role: vulnerable
+  derived_from: idiomatic-4-altered.js
+  manufactured: true
+  license: "n/a (manufactured, a distinct download-sink/mitigation idiom -- res.download() plus indirect reference, instead of realpath confinement -- using this file's own established real-world contrast; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED. Path traversal on a plain res.download() call.
+    Minimal-pair discipline: same route shape as idiomatic-4-altered.js's
+    download endpoint; differs ONLY in what the client supplies and how
+    the server resolves it to a file -- a raw `name` query parameter
+    joined onto ATTACH_DIR with no confinement, vs. an opaque `:id` path
+    parameter looked up against a database record.
+  pattern: "req.query.name is joined directly onto ATTACH_DIR via path.join() and passed straight to res.download(), including as the suggested download filename in the second argument, with no confinement check of any kind"
+  validated: true
+  validated_by: [node-syntax-check, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-22]
+  cwe_unique: [CWE-93, CWE-116]
+  cwe_rationale: >
+    Shared: see vulnerable-2.js's cwe_rationale above.
+    Unique to this entry, researched against the MITRE CWE index: CWE-93
+    (Improper Neutralization of CRLF Sequences) -- `req.query.name` is
+    also passed as `res.download()`'s second argument (the suggested
+    download filename), which becomes part of the Content-Disposition
+    header value with no CRLF stripping; CWE-116 (Improper Encoding or
+    Escaping of Output) -- neither the path-join use nor the
+    Content-Disposition use of `req.query.name` is encoded/escaped for
+    its respective output context before use.
+  suggested_op: unconfined_path
+  suggested_sink_family: fs_path_read
+  validation_caveat: >
+    Dynamic validation was run against a hand-written harness (Node,
+    executed both directly and inside the gVisor sandbox via
+    run_in_sandbox) that stubs `express`'s Router() and an in-memory
+    Attachment "model" and feeds a traversal-shaped `name`/`id` value to
+    both this file and idiomatic-4-altered.js -- the harness proves the
+    specific mechanism difference (the resolved download path escapes
+    ATTACH_DIR for this file; the traversal-shaped input simply fails to
+    match any record for idiomatic-4-altered.js, so nothing is served),
+    not against a real running application (out of scope to boot here).
+
+- file: idiomatic-4-altered.js
+  role: idiomatic
+  derived_from: vulnerable-4-altered.js
+  manufactured: true
+  license: "n/a (manufactured, derived from vulnerable-4-altered.js's own structure per the plan's methodology; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics". A distinct mitigation technique from
+    idiomatic-2.js's realpath-confinement approach: confined download via
+    indirect reference. The client never supplies a path or filename at
+    all -- it supplies an opaque attachment id, looked up against a
+    database record for the real on-disk path, so there is no
+    user-controlled string that ever reaches the filesystem layer.
+  pattern: "Attachment.findById(req.params.id) resolves an opaque client-supplied id to a server-generated storagePath recorded at upload time; res.download() is only ever called with that server-generated value, never a client-supplied path or filename"
+  validated: true
+  validated_by: [node-syntax-check, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-22]
+  cwe_unique: [CWE-639, CWE-113]
+  cwe_rationale: >
+    Shared: see vulnerable-2.js's cwe_rationale above.
+    Unique to this entry: CWE-639 (Authorization Bypass Through
+    User-Controlled Key) -- `Attachment.findById(req.params.id)` performs
+    no ownership/authorization check at all before serving the matched
+    record, so any caller who can enumerate or guess an id can download
+    any attachment regardless of who owns it; CWE-113 (Improper
+    Neutralization of CRLF Sequences in HTTP Headers) -- `attachment.
+    originalName` (a value recorded from a client-supplied name at
+    upload time, per this cell's own upload-sub-shape entries) is passed
+    as `res.download()`'s suggested filename with no CRLF/format
+    validation, a residual gap this indirect-reference fix does not
+    itself address.
+  suggested_op: realpath_confine
+  suggested_sink_family: fs_path_read
+  validation_caveat: >
+    Same caveat as vulnerable-4-altered.js above -- validated dynamically
+    via the same hand-written harness, both directly and inside the
+    gVisor sandbox.
+
 # --- added by docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md wave 2,
 # category 4 (media/streaming/content platforms), architecture:
 # peertube-video-upload. The idiomatic side is verbatim PeerTube core

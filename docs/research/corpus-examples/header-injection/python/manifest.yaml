@@ -54,3 +54,104 @@
     call this function makes with no timeout shown.
   suggested_op: raw_header_concat
   suggested_sink_family: email_header_value
+
+# --- manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+# "Per-pair mechanics" (Phase 3, second manufacturing batch). Closes the
+# gap noted for this cell's CWE-20/CWE-93 group in this language
+# (natural pair idiomatic-emailmessage-structured-3.py/
+# vulnerable-raw-header-string-3.py, floor 2, gap 1). Distinct
+# sub-scenario/architecture from that SMTP/email-header pair -- the same
+# CRLF-injection class applied to an HTTP response header instead, the
+# Python-language counterpart to this cell's own
+# idiomatic-http-header-filtered-4.php/vulnerable-raw-socket-response-4.php
+# (PHP) pair, using Flask/werkzeug's own header-writing API as the
+# framework-level enforcement point instead of PHP's built-in header()
+# CRLF rejection.
+
+- file: idiomatic-6-altered.py
+  role: idiomatic
+  architecture: http-response-header-flask
+  derived_from: vulnerable-6-altered.py
+  manufactured: true
+  license: "n/a (manufactured, representing the real, common safe Flask/werkzeug response-header-construction shape)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "resp.headers[...] = value (Flask/werkzeug's Headers.__setitem__) is used for each response header -- werkzeug validates and rejects any value containing a newline before it ever reaches the wire"
+  notes: >
+    MANUFACTURED. HTTP response header variant of this cell's
+    CRLF-injection class, distinct from
+    idiomatic-emailmessage-structured-3.py's SMTP/email headers.
+    Minimal-pair discipline: same route, same two headers set, same
+    render_receipt() helper as vulnerable-6-altered.py; differs ONLY in
+    how the headers are written -- through Flask's Headers API (which
+    validates), vs. a raw WSGI header list handed straight to
+    start_response() (which does not).
+  validated: true
+  validated_by: [py_compile, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-93, CWE-20]
+  cwe_unique: [CWE-758, CWE-179]
+  cwe_rationale: >
+    Shared (this cell's core class, see idiomatic-emailmessage-structured-3.py
+    above): CWE-93, CWE-20.
+    Unique to this entry, researched against the MITRE CWE index: CWE-758
+    (Reliance on Undefined, Unspecified, or Implementation-Defined
+    Behavior) -- this fix's entire protection is werkzeug's own Headers
+    class raising on embedded newlines, a specific library's
+    implementation choice rather than a documented guarantee of the HTTP
+    specification itself or of this application's own code; CWE-179
+    (Incorrect Behavior Order: Early Validation) -- `booking_id` is
+    already used once (passed into `render_receipt()`) before it is used
+    again in the header assignments below, so any transformation applied
+    between the two uses could invalidate whatever implicit assumption
+    the first use relied on.
+  suggested_op: structured_mail_headers
+  suggested_sink_family: http_response_header_value
+  validation_caveat: >
+    Dynamic validation was run against a hand-written harness (Python,
+    executed both directly and inside the gVisor sandbox via
+    run_in_sandbox) using Flask's real test client -- a CRLF-bearing
+    booking_id proves the specific mechanism difference: this file's
+    Headers.__setitem__ raises ValueError and rejects the request outright,
+    while vulnerable-6-altered.py's raw WSGI header list carries the
+    injected header straight through untouched.
+
+- file: vulnerable-6-altered.py
+  role: vulnerable
+  architecture: http-response-header-flask
+  derived_from: idiomatic-6-altered.py
+  manufactured: true
+  license: "n/a (manufactured -- represents the real raw-WSGI-header-list anti-pattern Flask's own Headers API exists to prevent)"
+  tutorial_or_course_project: false
+  synthetic: true
+  pattern: "manufactured: a raw WSGI application function builds its own header list and hands booking_id straight into it, then calls start_response() directly -- bypassing werkzeug's Headers class (and its CRLF rejection) entirely"
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics". Derived from idiomatic-6-altered.py, altered
+    ONLY in how the response headers are written.
+  validated: true
+  validated_by: [py_compile, gvisor-sandbox-dynamic, manual-review]
+  redacted: false
+  cwe_shared: [CWE-93, CWE-20]
+  cwe_unique: [CWE-176, CWE-707]
+  cwe_rationale: >
+    Shared: see idiomatic-emailmessage-structured-3.py's cwe_rationale
+    above.
+    Unique to this entry, distinct from vulnerable-raw-header-string-3.py's
+    unique CWEs (that entry bypasses smtplib's header handling; this one
+    bypasses werkzeug's, a different library and mechanism): CWE-176
+    (Improper Handling of Unicode Encoding) -- HTTP header values are
+    conventionally Latin-1/ASCII, but `booking_id` is interpolated with
+    no encoding check at all, so a non-ASCII value creates additional
+    encoding ambiguity beyond the plain-CRLF case this pair otherwise
+    demonstrates; CWE-707 (Improper Neutralization) -- the raw header
+    list mixes trusted literal header names/values with the untrusted
+    `booking_id` with no neutralization function of any kind applied to
+    the interpolated value before it becomes part of the response's wire
+    format.
+  suggested_op: raw_header_concat
+  suggested_sink_family: http_response_header_value
+  validation_caveat: >
+    Same caveat as idiomatic-6-altered.py above -- validated dynamically
+    via the same hand-written harness, both directly and inside the
+    gVisor sandbox.

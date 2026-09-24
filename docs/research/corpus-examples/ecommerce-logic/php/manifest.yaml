@@ -111,6 +111,84 @@
   suggested_op: server_recomputed_amount
   suggested_sink_family: payment_charge_amount
 
+# --- manufactured per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+# "Per-pair mechanics" (Phase 3, second manufacturing batch). Closes the
+# gap noted for this cell's CWE-840 group (vulnerable-1.php/idiomatic-1.php
+# is the natural pair, but it is a not-same-shape pairing per this file's
+# own header note -- floor 2, natural 1). Distinct sub-scenario from both
+# vulnerable-1.php/idiomatic-1.php (coupon-race / price-recompute) and the
+# woocommerce-cart-hook/qloapps-booking pairs below (price override): VIP/
+# loyalty discount-tier application, where the trust boundary is which
+# discount percentage gets applied, not the underlying price itself.
+
+- file: idiomatic-2-altered.php
+  role: idiomatic
+  derived_from: vulnerable-2-altered.php
+  manufactured: true
+  license: "n/a (manufactured, a distinct sub-scenario using this file's own established real-world idiom -- server-side lookup from a DB-backed record rather than a client-supplied number; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED. VIP/loyalty discount-tier application at checkout.
+    Minimal-pair discipline: same function signature and control flow as
+    vulnerable-2-altered.php; differs ONLY in how $discountPercent is
+    decided (looked up from the customer's own stored loyalty_tier column
+    via a fixed $tierDiscounts map, vs. trusted directly from
+    $_POST['vip_discount_percent']).
+  pattern: "applyLoyaltyDiscount() looks up the customer's own loyalty_tier column via a prepared statement and maps it through a fixed $tierDiscounts array -- the discount percentage actually applied is never read from the request"
+  validated: true
+  validated_by: [php-syntax-check, manual-review]
+  redacted: false
+  cwe_shared: [CWE-840]
+  cwe_unique: [CWE-697, CWE-1023]
+  cwe_rationale: >
+    Shared: see vulnerable-1.php's cwe_rationale above -- this cell's
+    broader business-logic-error class (not a matched-shape pair with any
+    other entry in this file; each has its own distinct unique mechanism).
+    Unique to this entry, researched against the MITRE CWE index: CWE-697
+    (Incorrect Comparison) -- the `$tierDiscounts[$tier] ?? 0.0` lookup
+    relies on PHP array-key lookup semantics for a value read straight out
+    of the database column with no explicit type/format check first,
+    which is exactly the class of PHP loose-comparison/coercion pitfall
+    CWE-697 describes if `$tier` is ever a non-string type from the DB
+    driver; CWE-1023 (Incomplete Comparison with Missing Factors) -- the
+    fixed $tierDiscounts map does not account for every tier value the
+    `loyalty_tier` column could actually hold (e.g. NULL for a brand-new
+    customer, or a future tier added to the enum but not yet to this map),
+    silently defaulting to 0.0 rather than surfacing the gap.
+  suggested_op: server_recomputed_amount
+  suggested_sink_family: discount_percent_lookup
+
+- file: vulnerable-2-altered.php
+  role: vulnerable
+  derived_from: idiomatic-2-altered.php
+  manufactured: true
+  license: "n/a (manufactured, derived from idiomatic-2-altered.php's own structure per the plan's methodology; no additional upstream source copied)"
+  notes: >
+    MANUFACTURED per docs/VULN_CORPUS_PAIR_MANUFACTURING_PLAN.md's
+    "Per-pair mechanics". Derived from idiomatic-2-altered.php, altered
+    ONLY in how the discount percentage is decided: the client's own
+    posted vip_discount_percent field is trusted outright instead of
+    looking it up from the customer's own stored loyalty_tier column. A
+    percent over 100 drives the discounted total negative; a negative
+    percent inflates it above the original total.
+  pattern: "discountPercent is read directly from $_POST['vip_discount_percent'] with no lookup against the customer's own tier, no upper bound, and no allowlist of the tiers' own known valid percentages"
+  validated: true
+  validated_by: [php-syntax-check, manual-review]
+  redacted: false
+  cwe_shared: [CWE-840]
+  cwe_unique: [CWE-183, CWE-20]
+  cwe_rationale: >
+    Shared: see vulnerable-1.php's cwe_rationale above.
+    Unique to this entry: CWE-183 (Permissive List of Allowed Inputs) --
+    no allowlist of valid discount percentages (e.g. the tiers' own known
+    {0, 5, 10, 15}) constrains vip_discount_percent at all -- literally any
+    numeric string is accepted; CWE-20 (Improper Input Validation) -- the
+    `(float) ($_POST['vip_discount_percent'] ?? 0)` cast performs a type
+    coercion but no actual validation (range, sign, or membership in a
+    known set) of the resulting value before it drives a monetary
+    calculation.
+  suggested_op: client_trusted_amount
+  suggested_sink_family: discount_percent_lookup
+
 # --- added by docs/VULN_CORPUS_SITE_ARCHITECTURE_EXPANSION_PLAN.md wave 1,
 # category 1 (e-commerce/marketplaces), architecture: woocommerce-cart-hook.
 # The idiomatic side is verbatim WooCommerce core (GPL-3.0-only -- kept to
